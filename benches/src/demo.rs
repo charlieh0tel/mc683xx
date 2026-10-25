@@ -1,8 +1,8 @@
 //! The example demo board (`examples/boards/demo.toml`) and its C
 //! firmware: a console command typed at its prompt and run to the next
 //! prompt, from a snapshot taken at the first.  Compiled code, not a
-//! kernel: the command's own work and its waits for the SCI's
-//! transmitter (`put_char` polls TDRE, at 37449 baud).
+//! kernel: nearly all the command's own work, the SCI at its fastest
+//! rate leaving `put_char` little to wait for TDRE.
 
 use std::path::Path;
 

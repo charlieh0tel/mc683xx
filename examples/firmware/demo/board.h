@@ -26,9 +26,9 @@
 #define PIT_MODULUS 8
 #define PIT_HZ (REFERENCE_HZ / 4 / PIT_MODULUS)
 
-/* SCI: 38400 nominal; SCBR = fsys / (32 * baud) rounded, 14, gives
- * 37449 baud (MC68331UM 6.4.3.3). */
-#define SCI_SCBR 14
+/* SCI: the fastest rate, SCBR = 1: fsys / (32 * SCBR) = 524288 baud
+ * (QSMRM 5.2.1, Equation 5-1). */
+#define SCI_SCBR 1
 
 /* Interrupt levels, and IARB values distinct per module (SIM's resets
  * to $F; MC68331UM 4.2.2). */

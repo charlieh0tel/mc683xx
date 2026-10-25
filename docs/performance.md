@@ -66,10 +66,14 @@ working fails `make ci`.
   (`examples/boards/demo.toml`) and its C firmware, from a snapshot
   at its first prompt: `m` typed, a byte a 1 ms turn as `mc683xx-run`
   types piped input, and run to the next prompt.  An iteration
-  restores the snapshot, then runs 0.49 s of board time, 955,663
+  restores the snapshot, then runs 0.273 s of board time, 483,040
   instructions: the 64 by 24 Mandelbrot set in Q12 fixed point, and
-  its about 1,590 characters to the SCI at 37449 baud, `put_char`
-  polling TDRE: about 0.42 s of the 0.49 a loop reading SCSR.
+  its about 1,590 characters to the SCI at its fastest rate, SCBR 1,
+  524288 baud.  Counted with the runner's `--watch-code` on the SCSR
+  reads, `put_char` finds TDRE clear 259 times, 777 instructions and
+  0.36 ms of the board time, and the PIT's 279 interrupts run about
+  2,500 instructions: over 99% of the instructions are the command's
+  computation and its writes to SCDR.
 - `*/short_runs`: 1000 runs of one clock each, the cost of a run call:
   `Cpu::run_for` alone, and `Mc68331::run_for` with its syncing.
 - `tables/*` (`benches/tables.rs`): building the 64K-entry instruction
@@ -614,13 +618,12 @@ that shrinks with a run's length.  Boot smoke, which steps one clock
 at a time to catch milestones by PC, is the `chip/short_runs` case,
 not this one.
 
-The demo board's C firmware (`demo/mandelbrot`, above) runs at about the
-same rate, with the release profile on the machine above (load average 5 to
-6):
+The demo board's C firmware (`demo/mandelbrot`, above), with the release
+profile on the machine above (load average 3 to 5):
 
 | Benchmark | Time per run | MIPS | vs real time |
 | --- | --- | --- | --- |
-| `demo/mandelbrot` | 21.2 ms | 45.1 | 23x |
+| `demo/mandelbrot` | 7.29 ms | 66.3 | 37x |
 
-Real time is its 0.49 s of board time at 16.78 MHz; the run includes
+Real time is its 0.273 s of board time at 16.78 MHz; the run includes
 the snapshot's restore.

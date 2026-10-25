@@ -68,9 +68,9 @@ Breakpoint 1, pit_isr () at main.c:81
 (gdb) bt
 #0  pit_isr () at main.c:81
 #1  <signal handler called>
-#2  0x000004ea in put_char (c=54 '6') at main.c:126
-#3  put_string (s=<optimized out>) at main.c:136
-#4  0x00001094 in main () at main.c:472
+#2  0x00000502 in put_char (c=<optimized out>) at main.c:126
+#3  put_string (s=0x1202 "\n") at main.c:135
+#4  0x000010fe in main () at main.c:476
 (gdb) up 2
 (gdb) info registers system
 ```
