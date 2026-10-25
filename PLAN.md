@@ -1411,7 +1411,9 @@ hand.  The keys are in `docs/board-files.md`.
   a thin command on
   the run loop with the built-in types only: it runs in turns of
   board time, between which input goes in and output comes out, and
-  ends with a `stopped` record.  With `--cycles` the last turn ends at
+  ends with a `stopped` record.  Without `--seconds` (or with
+  `--seconds inf`) or `--cycles` it runs until Ctrl-C, gdb, a halt
+  or a stop ends it.  With `--cycles` the last turn ends at
   that cycle's board time, so the run ends within an instruction of
   it.  `--save` saves the board once before the run and creates a
   temporary file beside its target (`.NAME.PID.partial`), so a

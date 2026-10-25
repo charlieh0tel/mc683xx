@@ -216,6 +216,17 @@ fn a_halt_and_a_wrong_command_have_their_status() {
             .unwrap()
             .contains("reason=halted")
     );
+    // Without an end, or with inf, the run goes on to the halt.
+    for arguments in [
+        &[file.to_str().unwrap()][..],
+        &[file.to_str().unwrap(), "--seconds", "inf"],
+    ] {
+        assert_eq!(
+            runner(arguments, b"").status.code(),
+            Some(3),
+            "{arguments:?}"
+        );
+    }
     let unbound = runner(&[file.to_str().unwrap(), "--bind", "nowhere=stdio"], b"");
     assert_eq!(unbound.status.code(), Some(1));
     let usage = runner(&[file.to_str().unwrap(), "--bind", "console=telnet"], b"");
@@ -224,7 +235,7 @@ fn a_halt_and_a_wrong_command_have_their_status() {
         ["--turn-us", "18446744073709551615"],
         ["--turn-us", "0"],
         ["--seconds", "nan"],
-        ["--seconds", "inf"],
+        ["--seconds", "-inf"],
         ["--seconds", "-1"],
         ["--position", "nan"],
         ["--input-after", "-0.5"],

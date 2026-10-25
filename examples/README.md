@@ -12,9 +12,9 @@ run as tests (`mc683xx-examples`, not published).
 
 ## Boards
 
-Run from the repository's root.  `--seconds` is board time (1 by
-default), `--pace realtime` keeps it to wall time, and Ctrl-C ends
-the run; `--help` gives the rest.
+Run from the repository's root.  The run goes on until Ctrl-C
+(`--seconds` limits its board time), `--pace realtime` keeps board
+time to wall time, and `--help` gives the rest.
 
 ### echo
 
@@ -24,7 +24,7 @@ firmware echoes each frame the SCI receives.
 
 ```text
 cargo run --release -p mc683xx-run -- examples/boards/echo.toml \
-    --bind console=stdio --seconds 3600 --pace realtime
+    --bind console=stdio --pace realtime
 ```
 
 `echo.bin` is hand-assembled by `src/echo.rs`; `make echo-image`
@@ -47,7 +47,7 @@ Its firmware, in C, is a console over the SCI:
 
 ```text
 cargo run --release -p mc683xx-run -- examples/boards/demo.toml \
-    --bind console=stdio --seconds 3600 --pace realtime
+    --bind console=stdio --pace realtime
 ```
 
 `demo.bin` and `demo.elf` (with symbols and line info) are committed;

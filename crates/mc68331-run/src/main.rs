@@ -7,7 +7,7 @@
 //! says why it stopped.  With `--gdb` it waits at reset for gdb,
 //! which runs the board until it detaches ([docs/gdb.md](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md)).
 //!
-//! Exit status: 0 the run spent its time; 1 the board or a file could
+//! Exit status: 0 the run spent its --seconds or --cycles; 1 the board or a file could
 //! not be used; 2 the command line is wrong; 3 the CPU halted; 4 a
 //! hook or a peripheral stopped the run, gdb killed it, or Ctrl-C
 //! (SIGINT) did; 130 a second Ctrl-C ended the process at once.
@@ -69,8 +69,6 @@ use crate::error::RunError;
 
 /// The chip the runner runs, which names its trace's lines.
 const CHIP: &str = <Mc68331 as Chip>::TYPE;
-/// Board seconds a run takes unless told otherwise.
-const DEFAULT_SECONDS: f64 = 1.0;
 /// Picoseconds in a microsecond, `--turn-us`'s unit.
 const PICOSECONDS_PER_MICROSECOND: u64 = PICOSECONDS_PER_SECOND / 1_000_000;
 /// The longest turn, in microseconds, whose picoseconds a `u64` holds.
@@ -116,8 +114,9 @@ struct Arguments {
     /// Run until the chip has run this many system clocks.
     #[arg(long, conflicts_with = "seconds")]
     cycles: Option<u64>,
-    /// Run this many seconds of board time (1 by default).
-    #[arg(long, value_parser = seconds)]
+    /// Run this many seconds of board time; inf, the default, runs
+    /// until Ctrl-C, gdb, a halt or a stop ends it.
+    #[arg(long, value_parser = run_seconds)]
     seconds: Option<f64>,
     /// The firmware image: replaces each memory image that is one of
     /// the file's `[board] images`.
@@ -224,6 +223,15 @@ fn seconds(text: &str) -> Result<f64, String> {
         Err(format!(
             "{text:?}: give a finite number of seconds, 0 or more"
         ))
+    }
+}
+
+/// `--seconds`: as `seconds`, or inf, a run without end.
+fn run_seconds(text: &str) -> Result<f64, String> {
+    if text == "inf" {
+        Ok(f64::INFINITY)
+    } else {
+        seconds(text)
     }
 }
 
@@ -343,9 +351,9 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
     if tracing {
         eprintln!("{}", header(CHIP));
     }
-    let end = match arguments.cycles {
-        Some(_) => Time::MAX,
-        None => board.now() + picoseconds(arguments.seconds.unwrap_or(DEFAULT_SECONDS)),
+    let end = match (arguments.cycles, arguments.seconds) {
+        (None, Some(seconds)) if seconds.is_finite() => board.now() + picoseconds(seconds),
+        _ => Time::MAX,
     };
     let turn = arguments.turn_us * PICOSECONDS_PER_MICROSECOND;
     let every = arguments

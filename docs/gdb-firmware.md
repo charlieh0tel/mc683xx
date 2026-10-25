@@ -31,12 +31,12 @@ itself (`mc683xx_gdb::stub`, or `serve_gdb` in Python).
 
 ```text
 mc683xx-run examples/boards/demo.toml --bind console=stdio \
-    --seconds 60 --gdb 127.0.0.1:1234
+    --gdb 127.0.0.1:1234
 ```
 
 The runner runs the power-on reset and waits, the PC at `reset`,
-until gdb connects; gdb then runs the board.  `--seconds` counts the
-time gdb runs it too.  On `detach` the run goes on to its end; on
+until gdb connects; gdb then runs the board.  A `--seconds` counts
+the time gdb runs it too.  On `detach` the run goes on; on
 `kill` it ends with exit status 4.  The console and gdb must not share
 a terminal: bind the console to a pty (`--bind console=pty`, which
 standard error names; `picocom` or `screen` on it), or feed
