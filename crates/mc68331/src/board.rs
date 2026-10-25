@@ -1007,11 +1007,21 @@ impl Board {
     /// source may have changed.
     pub(crate) fn level(&mut self) -> InterruptLevel {
         if self.level_stale {
-            self.level = self.requested_level();
-            self.level_stale = false;
+            self.refresh_level();
         }
         debug_assert_eq!(self.level, self.requested_level(), "a stale level");
         self.level
+    }
+
+    /// Recomputes the level after a change.  Out of line: the CPU asks
+    /// for the level before every instruction, and with this inlined
+    /// the cached path paid the recompute's register saves each time
+    /// (docs/performance.md).
+    #[cold]
+    #[inline(never)]
+    fn refresh_level(&mut self) {
+        self.level = self.requested_level();
+        self.level_stale = false;
     }
 
     /// The highest level the sources request now.  In low-power stop

@@ -568,3 +568,39 @@ three-instruction function to its return (`test_cpu.py`'s
 `test_thousands_of_short_calls_a_second`, a release build; 180,000 in
 the debug build `make python` makes), and makes 15,000 CPUs a second
 with 64 Kbytes mapped.
+
+## Real firmware in long quanta
+
+The benchmarks are kernels; the Z3805A 3543B and 58503A 3704 images
+run from power-on in 100,000-clock quanta, as a host runs, are the
+workload they stand for.  `perf` (`perf_event_paranoid` 1 on the
+measuring machine, the i9-13900H above, pinned to one performance core) on 10
+seconds of each at 16.78 MHz: 11.8 and 10.1 million instructions in
+280 and 240 ms, about 36 and 42 times real time and 42 MIPS.
+
+| Where | Share |
+| --- | --- |
+| Instruction handlers and the run loop (`run_instructions`, `branch`, `quick`, `movem`) | about 41% |
+| Bus cycles through the page tables (`cycle_read`, `cycle_write`, `access_*`, `fetch_long`) | about 31% |
+| `Interrupts::level`, once an instruction | 7.2% |
+| Page-table rebuilds (`Memory::map`, `memory_alone`, `ChipSelects::matching`) | about 7%, all at boot |
+
+The level's 7% was nearly all its cached path's prologue and
+epilogue: the recompute, inlined beside it, made every call save and
+restore four registers to return a cached byte.  Moved out of line
+(`#[cold]`, `#[inline(never)]`):
+
+| Run | Before | After |
+| --- | --- | --- |
+| Z3805A, 10 s | 279.8 ms | 271.9 ms (-2.8%) |
+| 58503A, 10 s | 239.6 ms | 233.5 ms (-2.5%) |
+| `chip/flash_nop` | | -5.9% |
+| `chip/ram_move` | | -3.2% |
+| `chip/peripheral_move` | | -6.6% |
+
+(three runs each, the same to within 0.5%; the benchmarks against the
+`v020` baseline.)  The rebuilds, about 32 an image as the firmware
+programs its selects at boot at about 0.6 ms each, are a fixed cost
+that shrinks with a run's length.  Boot smoke, which steps one clock
+at a time to catch milestones by PC, is the `chip/short_runs` case,
+not this one.
