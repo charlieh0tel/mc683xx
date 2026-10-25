@@ -130,6 +130,11 @@ listens or to leave standard input to another binding.
 `mc683xx-run --help` gives the rest.  The example's firmware,
 `echo.bin`, is committed, and `make echo-image` rebuilds it from
 `examples/src/echo.rs`; give a board its own with `--firmware`.
+`examples/boards/demo.toml` runs a C firmware (`examples/firmware/demo`):
+a console over the SCI (`h` lists its commands), the PIT's ticks and a
+1 PPS timed on the GPT.  `demo.bin` and `demo.elf`, with its symbols,
+are committed; `make demo-image` rebuilds them (`m68k-linux-gnu-gcc`),
+and docs/gdb-firmware.md debugs it under gdb.
 
 ## Documentation
 
@@ -147,7 +152,7 @@ listens or to leave standard input to another binding.
 - [gdb](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md):
   debugging firmware with gdb.
 - [Firmware under gdb](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb-firmware.md):
-  a recipe: a real ROM image on a board, under gdb.
+  a recipe: the demo board's C firmware under gdb, source level.
 - [Tracing](https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md):
   the run trace's format.
 - [Performance](https://github.com/charlieh0tel/mc683xx/blob/main/docs/performance.md):
@@ -182,6 +187,7 @@ make hooks   # once per clone
 make ci      # fmt check, license copies, commit-msg hook, clippy, tests, rustdoc
 make python      # the Python module in .venv, with its tests
 make echo-image  # examples/boards/echo.bin
+make demo-image  # examples/boards/demo.bin and demo.elf (m68k-linux-gnu-gcc)
 make singlestep  # SingleStepTests m68000 (fetches about 140 MB once)
 make oracle      # differential runs against Musashi (fetches it once)
 make corpus SMARTCLOCK_FIRMWARE=...  # smartclock firmware functions
@@ -194,7 +200,7 @@ make corpus-musashi SMARTCLOCK_FIRMWARE=...  # their results against Musashi
 make corpus-unicorn SMARTCLOCK_FIRMWARE=...  # against Unicorn
 make corpus-oracles SMARTCLOCK_FIRMWARE=...  # against both
 make unicorn     # the Unicorn oracle's own tests and clippy
-make gdb         # gdb-multiarch against the runner's --gdb
+make gdb         # gdb-multiarch against the runner's --gdb, the demo board too
 ```
 
 `make python` creates `.venv` with maturin, pytest and mypy the first

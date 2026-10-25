@@ -199,6 +199,9 @@ smartclock-boards:
 		cargo test -p mc683xx-peripherals --test smartclock_boards -- --ignored --nocapture
 
 # A real gdb against the runner's --gdb (docs/gdb.md): gdb-multiarch, or
-# GDB=path to an m68k gdb.  Not part of `ci`, which needs no gdb.
+# GDB=path to an m68k gdb.  The smoke on a raw image, then a source-level
+# session on the demo board (docs/gdb-firmware.md).  Not part of `ci`,
+# which needs no gdb.
 gdb:
 	sh scripts/gdb-smoke.sh
+	sh scripts/gdb-demo.sh

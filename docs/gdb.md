@@ -8,7 +8,8 @@ CPU (`mc683xx_cpu32::flat::Machine`), the chip
 reads and writes registers and memory, sets breakpoints and
 watchpoints, steps, continues and interrupts.  `PLAN.md` (Debugger)
 records why it is built this way; this says how to use it.
-`docs/gdb-firmware.md` is the short recipe for a real image.
+`docs/gdb-firmware.md` is the short recipe for a real image, worked
+on the demo board's C firmware.
 
 The crate's API is documented on docs.rs; this guide's Rust block is
 compiled by `cargo test` (the `examples` crate runs it).

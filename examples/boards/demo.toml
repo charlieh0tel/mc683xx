@@ -5,7 +5,8 @@
 #
 #   mc683xx-run examples/boards/demo.toml --bind console=stdio
 #
-# and type `h`.  (docs/board-files.md has the keys.)
+# and type `h`.  (docs/board-files.md has the keys; docs/gdb-firmware.md
+# debugs it under gdb.)
 
 version = 1
 
