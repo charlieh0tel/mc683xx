@@ -203,11 +203,12 @@ def test_a_second_thread_stops_an_unpaced_run(tmp_path: Path) -> None:
 
     thread = threading.Thread(target=front_end)
     thread.start()
-    # seconds of wall time unpaced: the thread gets the GIL between quanta
-    run = loaded.run_for(seconds=5.0)
+    # far more board time than any host runs unpaced before the stop:
+    # the thread gets the GIL between quanta
+    run = loaded.run_for(seconds=1000.0)
     thread.join()
     assert run.stop == mc683xx.Stop.Requested()
-    assert loaded.now < 5 * 10**12
+    assert loaded.now < 1000 * 10**12
 
 
 def test_short_paced_runs_in_a_loop_are_paced(tmp_path: Path) -> None:
