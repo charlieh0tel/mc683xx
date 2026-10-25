@@ -12,7 +12,9 @@ run as tests (`mc683xx-examples`, not published).
 
 ## Boards
 
-Run from the repository's root; `mc683xx-run --help` gives the options.
+Run from the repository's root.  `--seconds` is board time (1 by
+default), `--pace realtime` keeps it to wall time, and Ctrl-C ends
+the run; `--help` gives the rest.
 
 ### echo
 
@@ -21,7 +23,8 @@ MHz clock divided to 1 PPS on IC1, and the SCI on a console.  Its
 firmware echoes each frame the SCI receives.
 
 ```text
-mc683xx-run examples/boards/echo.toml --bind console=stdio
+cargo run --release -p mc683xx-run -- examples/boards/echo.toml \
+    --bind console=stdio --seconds 3600 --pace realtime
 ```
 
 `echo.bin` is hand-assembled by `src/echo.rs`; `make echo-image`
@@ -43,7 +46,8 @@ Its firmware, in C, is a console over the SCI:
 | `h`, `?` | Help |
 
 ```text
-mc683xx-run examples/boards/demo.toml --bind console=stdio
+cargo run --release -p mc683xx-run -- examples/boards/demo.toml \
+    --bind console=stdio --seconds 3600 --pace realtime
 ```
 
 `demo.bin` and `demo.elf` (with symbols and line info) are committed;

@@ -42,6 +42,9 @@ architecture, so `x/4i $pc` then disassembles a raw image.
 
 ## From the runner
 
+`mc683xx-run` is `cargo install mc683xx-run`, or `cargo run
+--release -p mc683xx-run --` from a clone.
+
 ```text
 mc683xx-run examples/boards/echo.toml --bind console=stdio --gdb 127.0.0.1:1234
 ```

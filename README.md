@@ -115,7 +115,7 @@ print(run.stop, [frame for _, frame in board.take_received("console")])
 ## The runner (`mc683xx-run`)
 
 ```
-cargo run -p mc683xx-run -- examples/boards/echo.toml --bind console=stdio --seconds 5
+cargo run --release -p mc683xx-run -- examples/boards/echo.toml --bind console=stdio --seconds 5
 ```
 
 runs the board the file describes for five seconds of board time, its

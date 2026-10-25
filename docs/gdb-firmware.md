@@ -26,6 +26,9 @@ itself (`mc683xx_gdb::stub`, or `serve_gdb` in Python).
 
 ## Run
 
+`mc683xx-run` is `cargo install mc683xx-run`, or `cargo run
+--release -p mc683xx-run --` from a clone.
+
 ```text
 mc683xx-run examples/boards/demo.toml --bind console=stdio \
     --seconds 60 --gdb 127.0.0.1:1234

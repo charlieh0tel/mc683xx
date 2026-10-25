@@ -3,7 +3,8 @@
 # `echo.bin` is firmware that echoes the SCI, built by `make
 # echo-image` from examples/src/echo.rs; run it with
 #
-#   mc683xx-run examples/boards/echo.toml --bind console=stdio
+#   cargo run --release -p mc683xx-run -- examples/boards/echo.toml \
+#       --bind console=stdio --seconds 3600 --pace realtime
 #
 # (docs/board-files.md has the keys.)
 

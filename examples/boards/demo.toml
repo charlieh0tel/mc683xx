@@ -3,7 +3,8 @@
 # `demo.bin` (with `demo.elf`, its symbols) is built by `make
 # demo-image` from examples/firmware/demo; run it with
 #
-#   mc683xx-run examples/boards/demo.toml --bind console=stdio
+#   cargo run --release -p mc683xx-run -- examples/boards/demo.toml \
+#       --bind console=stdio --seconds 3600 --pace realtime
 #
 # and type `h`.  (docs/board-files.md has the keys; docs/gdb-firmware.md
 # debugs it under gdb.)
