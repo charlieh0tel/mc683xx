@@ -19,7 +19,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 # The toolchain rust-toolchain.toml pins, the one CI builds and tests
 # with; no older compiler is checked, so none is claimed.
@@ -36,12 +36,12 @@ categories = ["emulators", "embedded"]
 # host never mixes two releases' crates.  The version follows
 # [workspace.package]'s.
 [workspace.dependencies]
-mc683xx-board = { path = "crates/mc68331-board", version = "=0.1.0" }
-mc683xx-cpu32 = { path = "crates/cpu32", version = "=0.1.0" }
-mc683xx-gdb = { path = "crates/gdb", version = "=0.1.0" }
-mc683xx-mc68331 = { path = "crates/mc68331", version = "=0.1.0" }
-mc683xx-modules = { path = "crates/mc683xx", version = "=0.1.0" }
-mc683xx-peripherals = { path = "crates/peripherals", version = "=0.1.0" }
+mc683xx-board = { path = "crates/mc68331-board", version = "=0.2.0" }
+mc683xx-cpu32 = { path = "crates/cpu32", version = "=0.2.0" }
+mc683xx-gdb = { path = "crates/gdb", version = "=0.2.0" }
+mc683xx-mc68331 = { path = "crates/mc68331", version = "=0.2.0" }
+mc683xx-modules = { path = "crates/mc683xx", version = "=0.2.0" }
+mc683xx-peripherals = { path = "crates/peripherals", version = "=0.2.0" }
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"
