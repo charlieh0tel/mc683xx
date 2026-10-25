@@ -1,6 +1,6 @@
 .PHONY: hooks ci fmt-check licenses hook-test clippy features test docs deny bench singlestep-data singlestep musashi oracle python corpus \
 	firmware-path corpus-musashi unicorn corpus-unicorn corpus-oracles boot-smoke \
-	boot-diff reference-path smartclock-boards gdb echo-image
+	boot-diff reference-path smartclock-boards gdb echo-image demo-image
 
 # Once per clone: the commit-msg hook refuses AI attribution (AGENTS.md)
 # and pre-push uploads the Git LFS objects (.gitattributes).
@@ -44,6 +44,12 @@ test:
 # examples/src/echo.rs.  `make test` checks the committed file matches.
 echo-image:
 	cargo run -p mc683xx-examples --bin echo-image
+
+# examples/boards/demo.elf and demo.bin, the demo board's firmware, from
+# the C in examples/firmware/demo.  Not part of `ci`: it needs
+# m68k-linux-gnu-gcc.
+demo-image:
+	$(MAKE) -B -C examples/firmware/demo
 
 # The gdb stub's features: it builds for the bare CPU alone and for the
 # chip without the board, and the bare build pulls in neither.  The board
