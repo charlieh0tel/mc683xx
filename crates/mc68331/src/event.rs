@@ -5,6 +5,7 @@ use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::function_code::FunctionCode;
 use mc683xx_cpu32::interrupt::InterruptLevel;
+use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::size::Size;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::sim::ResetCause;
@@ -52,6 +53,12 @@ pub enum DsackFault {
     Unassigned {
         /// The select whose cycle it was.
         select: ChipSelect,
+    },
+    /// The same for a peripheral on no select
+    /// ([`Builder::bus_peripheral`](crate::chip::Builder::bus_peripheral)).
+    BusUnassigned {
+        /// The peripheral.
+        peripheral: PeripheralId,
     },
 }
 

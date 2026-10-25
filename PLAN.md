@@ -1039,6 +1039,28 @@ hand.  The keys are in `docs/board-files.md`.
   earlier `DsackFault::PortSize`, which told the mismatch while the
   field still sized the cycle, went with it; `Event` and `DsackFault`
   are `#[non_exhaustive]`.
+- **Bus peripherals (on no chip select):** `Builder::bus_peripheral`
+  puts a peripheral on the external bus with its own decode, for board
+  logic that decodes addresses the selects do not.  Its decode is data
+  (`BusDecode`): byte-granular address windows over program and data
+  space, and interrupt acknowledges by level.  It drives DSACK itself,
+  so it states its pins, checked against PEPAR as an externally
+  terminated select's peripheral's are; a fault is told as
+  `DsackFault::BusUnassigned`, a new variant, since its cycles have no
+  select.  It takes a cycle beside a matching select, as two devices on
+  one bus do, the first DSACK ending it; before a fixed memory, which is
+  emulator-only and so yields to real decode; after the internal
+  modules, as everything external does (MC68331UM 4.8).  A page a
+  window touches is never served in the core, since page serving
+  decides per page and a window decides per byte.  What it costs: a
+  scan of the bus peripherals on each cycle the core does not serve,
+  none when there are none.  What it forecloses: a decode that is not
+  a fixed window, such as one a peripheral's own register moves, or
+  one on FC lines; a later `BusDecode` variant can add either, as the
+  enum is `#[non_exhaustive]`.  `MappedPeripheral::dsack_port` lets a
+  peripheral size each cycle (DSACK1 16 bits, DSACK0 alone 8), for one
+  that answers some cycles on each pin; `Builder::dsack` stays the
+  default (decided 2026-10-25).
 - **Address decoders, as data:** a decoder on one select (a 74AC138)
   splits its window by its inputs into outputs, each attached to a
   peripheral as a select is: `{ decoder = "u31", output = 2 }`.  Its
@@ -2581,9 +2603,7 @@ checks move onto real code hooks.
   choices.
 - Whether `smartclock-emu` moves off its feature gate once it uses this
   core.
-- After 0.1.0, as additive API (the user's choice, 2026-10-24):
-  - a bus peripheral on no chip select: external decode with its own
-    DSACK and IACK vector, for a board whose logic decodes addresses
-    the selects do not;
-  - DSACK port size per cycle, not per peripheral (`Builder::dsack`): a
-    peripheral that answers some cycles on DSACK0 and others on DSACK1.
+- After 0.1.0, as additive API (the user's choice, 2026-10-24): a bus
+  peripheral on no chip select and DSACK port size per cycle, in the
+  chip (`Builder::bus_peripheral`, `MappedPeripheral::dsack_port`; see
+  Bus peripherals); board files and Python to follow.

@@ -27,11 +27,14 @@ use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
+use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::size::Size;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::module;
 use mc683xx_modules::module::Module;
+use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_modules::peripheral::iack_address;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::sim::BLOCK;
@@ -67,11 +70,7 @@ const LOWER_LANE: u32 = Size::Byte.mask();
 const UPPER_LANE: u32 = LOWER_LANE << u8::BITS;
 /// The LPSTOP broadcast's interrupt mask bits (MC68331UM Figure 4-13).
 const LPSTOP_MASK: u32 = 0b111;
-/// An interrupt acknowledge's CPU-space address but the level in
-/// ADDR\[3:1\]: every other line set (MC68331UM 4.7.4, Figure 4-19).
-const IACK_ADDRESS: u32 = 0xff_fff1;
-/// The level's shift in an interrupt acknowledge's address.
-const IACK_LEVEL_SHIFT: u32 = 1;
+
 /// PEPAR's PEPA0: PE0 is DSACK0 (SIMRM 9.1, Table 9-1).
 const PEPA_DSACK0: u8 = 1 << 0;
 /// PEPA1: PE1 is DSACK1.
@@ -156,6 +155,16 @@ pub(crate) struct Reload {
     pub(crate) scope: ResetScope,
 }
 
+/// A peripheral on no chip select and the cycles its own decode takes
+/// ([`Builder::bus_peripheral`](crate::chip::Builder::bus_peripheral)).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct BusWiring {
+    /// Its index in [`Board::peripherals`].
+    pub(crate) peripheral: usize,
+    /// The cycles it takes.
+    pub(crate) decodes: Vec<BusDecode>,
+}
+
 /// What the board wires to a chip-select pin.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Wire {
@@ -215,6 +224,8 @@ pub(crate) struct Board {
     /// cycles no chip select matches: emulator-only, with no decode on
     /// the chip.  None overlaps another.
     pub(crate) fixed: Vec<FixedMemory>,
+    /// The peripherals on no select, in the order added.
+    pub(crate) bus: Vec<BusWiring>,
     /// The memories reloaded at resets.
     pub(crate) reloads: Vec<Reload>,
     /// Whether a `reset` instruction's reload awaits the end of its
@@ -488,6 +499,44 @@ impl Board {
             .find(|fixed| fixed.memory.holds(address))
     }
 
+    /// The peripherals on no select whose decode takes a cycle at
+    /// `address` in `function_code`'s space, by index.
+    fn bus_takers(&self, address: u32, function_code: FunctionCode) -> Vec<usize> {
+        self.bus
+            .iter()
+            .filter(|wiring| {
+                wiring
+                    .decodes
+                    .iter()
+                    .any(|decode| decode.takes(address, function_code))
+            })
+            .map(|wiring| wiring.peripheral)
+            .collect()
+    }
+
+    /// Whether a bus peripheral's window touches the page at `address`:
+    /// its decode is by the byte, so the core serves no byte there.
+    fn bus_window_on(&self, address: u32) -> bool {
+        self.bus
+            .iter()
+            .flat_map(|wiring| &wiring.decodes)
+            .any(|decode| {
+                matches!(*decode, BusDecode::Window { base, length }
+                if base.0 < address + PAGE_BYTES && address < base.0 + length)
+            })
+    }
+
+    /// Whether a peripheral on no select takes a cycle at `address` in
+    /// `function_code`'s space.
+    pub(crate) fn bus_takes(&self, address: u32, function_code: FunctionCode) -> bool {
+        self.bus.iter().any(|wiring| {
+            wiring
+                .decodes
+                .iter()
+                .any(|decode| decode.takes(address, function_code))
+        })
+    }
+
     /// Each fixed memory's base and length, in the order added.
     pub(crate) fn fixed_layout(&self) -> Vec<(u32, u32)> {
         self.fixed
@@ -700,36 +749,58 @@ impl Board {
         }
         match self.wiring[found.select.index()]? {
             Wire::Peripheral(peripheral) => {
-                let port = self.dsack_port(peripheral, found, cycle.now)?;
-                self.peripherals[peripheral]
-                    .wait_states(cycle)
-                    .map(|wait| (Termination::external_clocks(wait), port))
+                self.peripheral_dsack(peripheral, cycle, Some(found.port))
             }
             Wire::Memory(_) => Some((Termination::external_clocks(0), found.port)),
         }
     }
 
-    /// The port size `peripheral`'s DSACK gives `found`'s cycle at `now`, if
-    /// it can end it: the size its pins encode (SIMRM 5.3.2, Table 5-2),
-    /// the select's port field if the board gave none, and none if
-    /// PEPAR assigns none of them as DSACK (SIMRM 9.1), a fault told
-    /// once for each peripheral ([`Event::Dsack`]).
-    fn dsack_port(&mut self, peripheral: usize, found: Match, now: Cycles) -> Option<PortSize> {
-        let Some(pins) = self.dsack_pins[peripheral] else {
-            return Some(found.port);
+    /// The clocks after which `peripheral`'s own DSACK ends `cycle`, and
+    /// the port size it gives, if it does: its wait states, at
+    /// [`Self::dsack_port`]'s size.
+    fn peripheral_dsack(
+        &mut self,
+        peripheral: usize,
+        cycle: BusCycle,
+        field: Option<PortSize>,
+    ) -> Option<(u8, PortSize)> {
+        let port = self.dsack_port(peripheral, cycle, field)?;
+        self.peripherals[peripheral]
+            .wait_states(cycle)
+            .map(|wait| (Termination::external_clocks(wait), port))
+    }
+
+    /// The port size `peripheral`'s DSACK gives `cycle`, if it can end
+    /// it: the size its pins encode (SIMRM 5.3.2, Table 5-2), its
+    /// `dsack_port` for this cycle or the pins the board gave, else the
+    /// select's port `field`; none if PEPAR assigns none of them as
+    /// DSACK (SIMRM 9.1), a fault told once for each peripheral
+    /// ([`Event::Dsack`]).
+    fn dsack_port(
+        &mut self,
+        peripheral: usize,
+        cycle: BusCycle,
+        field: Option<PortSize>,
+    ) -> Option<PortSize> {
+        let pins = match self.peripherals[peripheral].dsack_port(cycle) {
+            Some(PortSize::Bits16) => Dsack::Dsack1,
+            Some(PortSize::Bits8) => Dsack::Dsack0,
+            None => match self.dsack_pins[peripheral] {
+                Some(pins) => pins,
+                None => return field,
+            },
         };
         let assigned = self.sim.port_e_assignment();
         let dsack0 = pins.drives_dsack0() && assigned & PEPA_DSACK0 != 0;
         let dsack1 = pins.drives_dsack1() && assigned & PEPA_DSACK1 != 0;
         if !dsack0 && !dsack1 {
-            self.tell_dsack(
-                peripheral,
-                TOLD_UNASSIGNED,
-                now,
-                DsackFault::Unassigned {
-                    select: found.select,
+            let fault = match cycle.select.and_then(ChipSelect::from_select) {
+                Some(select) => DsackFault::Unassigned { select },
+                None => DsackFault::BusUnassigned {
+                    peripheral: PeripheralId::from(peripheral as u64),
                 },
-            );
+            };
+            self.tell_dsack(peripheral, TOLD_UNASSIGNED, cycle.now, fault);
             return None;
         }
         // DSACK1, alone or with DSACK0, is a 16-bit port (SIMRM Table 5-2)
@@ -790,7 +861,13 @@ impl Board {
                 .eq(found.iter().flatten().copied()),
             "a stale page decode"
         );
+        let bus = if self.bus.is_empty() {
+            Vec::new()
+        } else {
+            self.bus_takers(address, function_code)
+        };
         if found[0].is_none()
+            && bus.is_empty()
             && let Some(fixed) = self.fixed_at(address, function_code)
         {
             let (port, clocks) = fixed.timing;
@@ -817,6 +894,14 @@ impl Board {
             let cycle =
                 BusCycle::new(address, size, function_code, now).through(candidate.select.into());
             if let Some((clocks, port)) = self.dsack(candidate, cycle)
+                && first.is_none_or(|(earliest, _)| clocks < earliest)
+            {
+                first = Some((clocks, port));
+            }
+        }
+        let bus_cycle = BusCycle::new(address, size, function_code, now);
+        for &peripheral in &bus {
+            if let Some((clocks, port)) = self.peripheral_dsack(peripheral, bus_cycle, None)
                 && first.is_none_or(|(earliest, _)| clocks < earliest)
             {
                 first = Some((clocks, port));
@@ -886,6 +971,15 @@ impl Board {
                         let read = load(memory, wired, address, size);
                         value = merge(value, read, size, lanes, &mut driven);
                     }
+                }
+            }
+        }
+        for peripheral in bus {
+            match write {
+                Some(data) => self.peripherals[peripheral].write(bus_cycle, data)?,
+                None => {
+                    let read = self.peripherals[peripheral].read(bus_cycle)?;
+                    value = merge(value, read, size, Lanes::BOTH, &mut driven);
                 }
             }
         }
@@ -1015,7 +1109,7 @@ impl Board {
     /// its period; an autovector costs none beyond the interrupt's
     /// (PLAN.md).
     fn external_acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged {
-        let address = IACK_ADDRESS | u32::from(level.get()) << IACK_LEVEL_SHIFT;
+        let address = iack_address(level);
         let request = DecodeRequest {
             address,
             function_code: FunctionCode::CPU_SPACE,
@@ -1078,7 +1172,9 @@ impl Board {
         let modules = self.sim.module_base();
         for page in (0..PAGES).filter(|&page| covered[page]) {
             let address = page as u32 * PAGE_BYTES;
-            if (modules..modules + MODULE_SPACE_BYTES).contains(&address) {
+            if (modules..modules + MODULE_SPACE_BYTES).contains(&address)
+                || self.bus_window_on(address)
+            {
                 continue;
             }
             for (space, function_code) in [
@@ -1157,6 +1253,9 @@ impl Board {
         &self,
         request: DecodeRequest,
     ) -> Option<(HostMemory, (PortSize, u8))> {
+        if self.bus_takes(request.address, request.function_code) {
+            return None;
+        }
         if self.sim.chip_selects().matches(request).next().is_none() {
             return self
                 .fixed_at(request.address, request.function_code)

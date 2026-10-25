@@ -6,6 +6,7 @@
 //! [`Machine::add_peripheral`]: crate::flat::Machine::add_peripheral
 
 use crate::bus::BusError;
+use crate::bus::PortSize;
 use crate::cpu::state::Save;
 use crate::cycles::Cycles;
 use crate::function_code::FunctionCode;
@@ -131,6 +132,16 @@ pub trait MappedPeripheral: Save {
     fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
         let _ = cycle;
         Some(0)
+    }
+
+    /// With an external DSACK, the port this cycle's DSACK gives, for a
+    /// peripheral whose pins differ from cycle to cycle: 16 bits on
+    /// DSACK1, 8 on DSACK0 alone (SIMRM Table 5-2).  Asked with
+    /// `wait_states`.  By default `None`: the pins the board gives the
+    /// peripheral (`mc683xx-mc68331`'s `Builder::dsack`) say.
+    fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
+        let _ = cycle;
+        None
     }
 
     /// Whether its interrupt output is asserted now; the board wires

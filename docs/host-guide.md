@@ -349,6 +349,11 @@ refuses.
   (SIMRM Table 5-2, 5.3.3): a word to a DSACK0 peripheral is two byte
   cycles whatever the select's port field.  Without it the field
   sizes the cycle, as it does any the select ends itself (SIMRM 7.6).
+- `dsack_port(cycle) -> Option<PortSize>`: for a peripheral whose DSACK
+  pins differ from cycle to cycle, the port this cycle's gives,
+  `Bits16` on DSACK1 and `Bits8` on DSACK0 alone, checked against
+  PEPAR as the stated pins are.  By default `None`: the pins
+  `Builder::dsack` states say.
 - `interrupt_request() -> bool`: its interrupt output, level-sensitive,
   on the IRQ pin `Builder::interrupt` wired.  It may change only at a
   board event: a bus cycle to the board, an acknowledge, `advance`, a
@@ -373,6 +378,35 @@ refuses.
 Neither has a default: a peripheral gives both, is `Stateless`, or is
 `mc683xx_cpu32::unsavable!(X, "its role")`, whose both refuse with
 `StateError::unsupported("its role")`.
+
+### Bus peripherals: on no chip select
+
+Board logic often decodes addresses the selects do not: a PAL on the
+address lines, an I/O device with its own decode.
+`Builder::bus_peripheral(peripheral, decodes, pins)` puts a peripheral
+on no select, taking the cycles `decodes` give
+(`mc683xx_modules::peripheral::BusDecode`):
+
+- `BusDecode::Window { base, length }`: program and data cycles, user
+  or supervisor, at `base` up to `base + length`, on ADDR[23:0]
+  (`BuildError::Window` if it is empty or runs past).
+- `BusDecode::Acknowledge(IrqPin)`: interrupt acknowledge cycles at the
+  pin's level; its read gives the vector.  Wire its output with
+  `Builder::interrupt` as for any peripheral.
+
+It drives DSACK itself: `pins` are the DSACK pins it drives, as
+`Builder::dsack` states them for a peripheral on an externally
+terminated select.  Its `wait_states` time each cycle, the pins (or
+`dsack_port`) size it, a cycle longer than the bus monitor's period is
+a bus error, and with PEPAR assigning none of its pins as DSACK the bus
+monitor ends the cycle, told as `DsackFault::BusUnassigned`.  Its
+cycles carry no select (`BusCycle::select` is `None`).
+
+It takes a cycle beside any select that matches it, as on the board:
+both drive the data bus, the first DSACK ends the cycle.  A fixed
+memory takes only the cycles nothing on the bus decodes, so a window
+inside one takes those bytes from it.  The core serves no memory on a
+page a window touches: every cycle there reaches the bus.
 
 ### Interrupt acknowledge through a select
 

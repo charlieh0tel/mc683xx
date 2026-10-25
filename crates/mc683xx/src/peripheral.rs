@@ -1,9 +1,60 @@
 //! What the host supplies around the chip beside its mapped
 //! peripherals (`mc683xx_cpu32::peripheral`): the time a peripheral or a
-//! module keeps, and the QSPI's peripherals.
+//! module keeps, the cycles a peripheral on no select decodes, and the
+//! QSPI's peripherals.
 
+use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::function_code::FunctionCode;
+use mc683xx_cpu32::interrupt::InterruptLevel;
+use mc683xx_cpu32::interrupt::IrqPin;
+
+/// An interrupt acknowledge's CPU-space address but the level in
+/// ADDR\[3:1\]: every other line set (MC68331UM 4.7.4, Figure 4-19).
+const IACK_ADDRESS: u32 = 0xff_fff1;
+/// The level's shift in an interrupt acknowledge's address.
+const IACK_LEVEL_SHIFT: u32 = 1;
+
+/// The address of an interrupt acknowledge cycle at `level`.
+#[must_use]
+pub fn iack_address(level: InterruptLevel) -> u32 {
+    IACK_ADDRESS | u32::from(level.get()) << IACK_LEVEL_SHIFT
+}
+
+/// The cycles a peripheral on no chip select takes by its own decode of
+/// the address bus (`mc683xx-mc68331`'s `Builder::bus_peripheral`): board logic doing what
+/// the selects do not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum BusDecode {
+    /// Program and data cycles, user or supervisor, at `base` and the
+    /// bytes up to `base + length`.
+    Window {
+        /// Its first address, on ADDR\[23:0\].
+        base: Address,
+        /// Its bytes.
+        length: u32,
+    },
+    /// Interrupt acknowledge cycles for this pin's level (SIMRM 6.4.1):
+    /// the peripheral's read gives the vector.
+    Acknowledge(IrqPin),
+}
+
+impl BusDecode {
+    /// Whether it takes a cycle at `address` in `function_code`'s space.
+    #[must_use]
+    pub fn takes(self, address: u32, function_code: FunctionCode) -> bool {
+        match self {
+            Self::Window { base, length } => {
+                function_code.is_memory_space() && address.wrapping_sub(base.0) < length
+            }
+            Self::Acknowledge(pin) => {
+                function_code.is_cpu_space() && address == iack_address(pin.level())
+            }
+        }
+    }
+}
 
 /// Anything with its own time: a host peripheral, a module, a model that
 /// runs beside the CPU.

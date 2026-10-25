@@ -278,7 +278,9 @@ impl Board {
         };
         match self.memory_alone(request) {
             Some((wired, _)) => Ok(load(memory, wired, address, Size::Byte)),
-            None if self.sim.chip_selects().matches(request).next().is_none() => {
+            None if self.sim.chip_selects().matches(request).next().is_none()
+                && !self.bus_takes(address, function_code) =>
+            {
                 Err(AccessError::Unmapped)
             }
             None => Err(AccessError::Unpeekable),

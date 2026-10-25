@@ -37,6 +37,7 @@ use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::pins::PortLevels;
@@ -54,6 +55,7 @@ use mc683xx_modules::sim::ports::PortName;
 
 use crate::board::ADDRESS_LINES;
 use crate::board::Board;
+use crate::board::BusWiring;
 use crate::board::FIXED_TIMING;
 use crate::board::FixedMemory;
 use crate::board::GPT;
@@ -208,6 +210,14 @@ pub enum BuildError {
         /// The other's.
         other: Address,
     },
+    /// A bus peripheral's window that is empty or runs past ADDR\[23:0\].
+    #[error("{base}: a bus window of {length:#x} bytes does not fit ADDR[23:0]")]
+    Window {
+        /// Its base.
+        base: Address,
+        /// Its bytes.
+        length: u32,
+    },
     /// Timing for a memory that is not a fixed memory.
     #[error("not a fixed memory")]
     NotFixed,
@@ -270,6 +280,7 @@ impl Builder {
                 diversion: Diversion::default(),
                 wiring: [None; ChipSelect::COUNT],
                 fixed: Vec::new(),
+                bus: Vec::new(),
                 reloads: Vec::new(),
                 system_reload: false,
                 interrupt_wires: Vec::new(),
@@ -519,6 +530,51 @@ impl Builder {
         let id = self.board.peripherals.len();
         self.wire(Wire::Peripheral(id), pins)?;
         Ok(self.add(peripheral))
+    }
+
+    /// A peripheral on no chip select that takes the cycles `decodes`
+    /// give by its own decode of the address bus, as board logic does:
+    /// an address window, an interrupt acknowledge, or both.  It drives
+    /// DSACK `pins` itself, as a peripheral on an externally terminated
+    /// select does ([`Builder::dsack`]): its `wait_states` time each
+    /// cycle, the pins' port sizes it (or its `dsack_port`, cycle by
+    /// cycle), and with none of them assigned as DSACK by PEPAR the bus
+    /// monitor ends it ([`DsackFault::BusUnassigned`](crate::event::DsackFault::BusUnassigned)).  It takes a cycle
+    /// beside any select that matches, the first DSACK ending it, and
+    /// before a fixed memory, which takes only the cycles nothing on the
+    /// bus decodes.  Memory it overlaps is not served in the core: every
+    /// cycle there reaches it.
+    ///
+    /// # Errors
+    ///
+    /// [`BuildError::Window`] for a window that is empty or runs past
+    /// ADDR\[23:0\].
+    pub fn bus_peripheral<D: MappedPeripheral + Timed + Save + Any>(
+        &mut self,
+        peripheral: D,
+        decodes: &[BusDecode],
+        pins: Dsack,
+    ) -> Result<PeripheralId, BuildError> {
+        for &decode in decodes {
+            if let BusDecode::Window { base, length } = decode
+                && (length == 0
+                    || base
+                        .0
+                        .checked_add(length)
+                        .is_none_or(|end| end > 1 << ADDRESS_LINES))
+            {
+                return Err(BuildError::Window { base, length });
+            }
+        }
+        let id = self.add(peripheral);
+        let peripheral = index(id);
+        self.board.dsack_pins[peripheral] = Some(pins);
+        self.board.bus.push(BusWiring {
+            peripheral,
+            decodes: decodes.to_vec(),
+        });
+        self.board.decode_changed = true;
+        Ok(id)
     }
 
     /// A peripheral on no pin: a model beside the CPU that only keeps time,
