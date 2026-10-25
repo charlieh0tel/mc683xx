@@ -156,15 +156,15 @@ static void put_decimal(uint32_t value)
 		put_char(digits[--count]);
 }
 
-/* Right-aligned in `width` columns. */
-static void put_decimal_width(uint32_t value, int width)
+/* Right-aligned in `width` columns, `pad` before it. */
+static void put_decimal_width(uint32_t value, int width, char pad)
 {
 	uint32_t limit = 1;
 
 	while (--width > 0) {
 		limit *= 10;
 		if (value < limit)
-			put_char(' ');
+			put_char(pad);
 	}
 	put_decimal(value);
 }
@@ -255,7 +255,7 @@ COMMAND void primes(void)
 			continue;
 		for (int multiple = n * n; multiple < PRIME_LIMIT; multiple += n)
 			composite[multiple] = 1;
-		put_decimal_width(n, 4);
+		put_decimal_width(n, 4, ' ');
 		if (++count % PRIMES_PER_LINE == 0)
 			put_string("\n");
 	}
@@ -274,7 +274,7 @@ COMMAND void uptime(void)
 	put_string("uptime ");
 	put_decimal(now / PIT_HZ);
 	put_char('.');
-	put_decimal_width(milliseconds, 3);
+	put_decimal_width(milliseconds, 3, '0');
 	put_string(" s (");
 	put_decimal(now);
 	put_string(" ticks at ");
