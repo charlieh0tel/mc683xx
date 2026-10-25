@@ -1,9 +1,11 @@
 //! Shared setup for the benchmarks (docs/performance.md): kernels of
-//! instructions, a bare core on RAM to run them, and an MC68331 board
-//! wired as the Z3805A is.
+//! instructions, a bare core on RAM to run them, an MC68331 board
+//! wired as the Z3805A is, and the example demo board with its C
+//! firmware.
 
 pub mod bare;
 pub mod board;
+pub mod demo;
 pub mod kernel;
 
 #[cfg(test)]
@@ -13,6 +15,8 @@ mod tests {
     use crate::board::Board;
     use crate::board::KERNELS;
     use crate::board::Load;
+    use crate::demo::Demo;
+    use crate::demo::MANDELBROT;
     use crate::kernel;
     use crate::kernel::Skip;
 
@@ -60,5 +64,21 @@ mod tests {
             // 83 or 51 clocks an entry
             assert!(board.transfers() - before > 200, "{load:?}");
         }
+    }
+
+    /// The Mandelbrot set's columns, a row a line ending CR LF.
+    const MANDELBROT_COLUMNS: usize = 64;
+
+    #[test]
+    fn the_demo_draws_the_mandelbrot_set_to_its_prompt_from_a_snapshot() {
+        let mut demo = Demo::new(MANDELBROT);
+        let rows = demo
+            .output
+            .split(|&byte| byte == b'\n')
+            .filter(|row| row.len() == MANDELBROT_COLUMNS + 1)
+            .count();
+        assert_eq!(rows, 24, "{}", String::from_utf8_lossy(&demo.output));
+        assert_eq!(demo.iteration(), demo.output);
+        assert_eq!(demo.iteration(), demo.output);
     }
 }
