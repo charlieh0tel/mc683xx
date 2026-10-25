@@ -1,10 +1,10 @@
 #!/bin/sh
 # A source-level gdb session against the runner on the demo board
 # (docs/gdb-firmware.md): `make gdb`.  gdb loads demo.elf, breaks in an
-# ISR, unwinds through its exception frame, watches `ticks`, steps C,
-# catches the `f` command's address error at fault_entry, then
-# detaches and the run finishes; its output and the console's are
-# checked.  Needs gdb with the m68k target: gdb-multiarch, or set GDB.
+# ISR, unwinds through its exception frame into the interrupted code,
+# watches `ticks`, steps C, catches the `f` command's address error at
+# fault_entry and unwinds into `fault`, then detaches and the run
+# finishes; its output and the console's are checked.  Needs gdb with the m68k target: gdb-multiarch, or set GDB.
 #
 # usage: gdb-demo.sh
 set -eu
@@ -45,15 +45,15 @@ until grep -q 'waiting for gdb on' "$work/runner.err"; do
 done
 address=$(sed -n 's/^mc683xx-run: waiting for gdb on //p' "$work/runner.err")
 
-# At an exception handler's first instruction the frame is at SP: SR,
-# then the PC (CPU32RM 6.4).  bt cannot unwind it: GCC describes an
-# interrupt_handler's frame as a call's.
+# crt0.S's entry stubs describe the exception frame (CPU32RM 6.4), so
+# bt unwinds from an ISR into the code it interrupted.
 timeout "$limit" "$gdb" -batch -nx examples/boards/demo.elf \
 	-ex 'directory examples/firmware/demo' \
 	-ex "target remote $address" \
 	-ex 'break pit_isr' \
 	-ex 'continue' \
-	-ex 'x/a $sp+2' \
+	-ex 'bt' \
+	-ex 'up 2' \
 	-ex 'print ticks' \
 	-ex 'info registers system' \
 	-ex 'delete' \
@@ -71,8 +71,9 @@ timeout "$limit" "$gdb" -batch -nx examples/boards/demo.elf \
 	-ex 'delete' \
 	-ex 'break fault_entry' \
 	-ex 'continue' \
+	-ex 'info symbol $pc' \
 	-ex 'x/6hx $sp' \
-	-ex 'x/a $sp+2' \
+	-ex 'bt' \
 	-ex 'delete' \
 	-ex 'detach' \
 	>"$work/gdb.out" 2>&1 || status=$?
@@ -95,7 +96,8 @@ fi
 # 6.4, Figure 6-6), its fault address $100001.
 for expected in \
 	'Breakpoint 1, pit_isr () at main.c' \
-	'^0x10[0-9a-f]*:	0x[0-9a-f]* <[a-z_]*+[0-9]*>$' \
+	'^#1  <signal handler called>$' \
+	'^#2  0x[0-9a-f]* in [a-z_]* (.*) at main.c:[0-9]*$' \
 	'\$1 = 0' \
 	'vbr  *0x0' \
 	'Old value = 0' \
@@ -104,9 +106,9 @@ for expected in \
 	'#1 .* in command_loop () at main.c' \
 	'for (int n = 0; n < PRIME_LIMIT; n++)' \
 	'^command_loop () at main.c' \
-	'fault_entry () at ./crt0.S' \
+	'^fault_entry in section .text' \
 	'0xc00c	0x0010	0x0001' \
-	'<fault+' \
+	'^#1  fault () at main.c' \
 	'detached'; do
 	if ! grep -q "$expected" "$work/gdb.out"; then
 		echo "gdb-demo: no '$expected' in gdb's output" >&2

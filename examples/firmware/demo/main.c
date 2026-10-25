@@ -43,12 +43,6 @@
 /* TIC1 below this with TOF pending was captured after the wrap. */
 #define TCNT_HALF 0x8000
 
-/* Format and vector offset in a frame's fourth word (CPU32RM 6.1.4). */
-#define FRAME_FORMAT_SHIFT 12
-#define FRAME_VECTOR_OFFSET_MASK 0x0fff
-#define FORMAT_SIX_WORD 0x2
-#define FORMAT_BERR 0xc
-
 /* PIT ticks since reset, PIT_HZ a second. */
 volatile uint32_t ticks;
 
@@ -76,13 +70,19 @@ static const char shades[] = " .:-=+*#%";
 void command_loop(void) __attribute__((noreturn));
 void fault_report(const uint16_t *frame);
 
-void __attribute__((interrupt_handler)) pit_isr(void)
+/* The ISRs: plain C functions, each called by its stub in crt0.S. */
+void pit_isr(void);
+void sci_isr(void);
+void gpt_overflow_isr(void);
+void gpt_ic1_isr(void);
+
+void pit_isr(void)
 {
 	ticks++;
 }
 
 /* Reading SCSR then SCDR clears RDRF and OR (MC68331UM D.4.6). */
-void __attribute__((interrupt_handler)) sci_isr(void)
+void sci_isr(void)
 {
 	uint16_t status = SCSR;
 	uint8_t byte = SCDR;
@@ -94,7 +94,7 @@ void __attribute__((interrupt_handler)) sci_isr(void)
 	}
 }
 
-void __attribute__((interrupt_handler)) gpt_overflow_isr(void)
+void gpt_overflow_isr(void)
 {
 	if (TFLG2 & TFLG2_TOF) {
 		TFLG2 = (uint8_t)~TFLG2_TOF;
@@ -102,7 +102,7 @@ void __attribute__((interrupt_handler)) gpt_overflow_isr(void)
 	}
 }
 
-void __attribute__((interrupt_handler)) gpt_ic1_isr(void)
+void gpt_ic1_isr(void)
 {
 	if (!(TFLG1 & TFLG1_IC1F))
 		return;
@@ -366,8 +366,8 @@ static uint32_t frame_long(const uint16_t *frame, int offset)
 /* Prints an exception's frame, which `frame` points at (CPU32RM 6.4). */
 void fault_report(const uint16_t *frame)
 {
-	uint16_t format = frame[3] >> FRAME_FORMAT_SHIFT;
-	uint16_t vector = (frame[3] & FRAME_VECTOR_OFFSET_MASK) / 4;
+	uint16_t format = frame[FRAME_FORMAT_OFFSET / 2] >> FRAME_FORMAT_SHIFT;
+	uint16_t vector = (frame[FRAME_FORMAT_OFFSET / 2] & FRAME_VECTOR_OFFSET_MASK) / 4;
 
 	put_string("\nexception: vector ");
 	put_decimal(vector);
@@ -376,7 +376,7 @@ void fault_report(const uint16_t *frame)
 	put_string(", sr $");
 	put_hex(frame[0], 4);
 	put_string(", pc $");
-	put_hex(frame_long(frame, 2), 8);
+	put_hex(frame_long(frame, FRAME_PC_OFFSET), 8);
 	put_string("\n");
 	if (format == FORMAT_SIX_WORD) {
 		/* Figure 6-4. */

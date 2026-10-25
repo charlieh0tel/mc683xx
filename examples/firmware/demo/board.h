@@ -52,4 +52,17 @@
 #define SR_SUPERVISOR 0x2000
 #define SR_MASK_ALL 0x0700
 
+/* Exception stack frames (CPU32RM 6.4): SR at the frame's start, the PC
+ * at + 2, the format and vector offset word at + 6.  Formats $0, four
+ * words; $2, six; $C, the BERR frame, twelve (Figures 6-3, 6-4, 6-6). */
+#define FRAME_PC_OFFSET 2
+#define FRAME_FORMAT_OFFSET 6
+#define FRAME_FORMAT_SHIFT 12
+#define FRAME_VECTOR_OFFSET_MASK 0x0fff
+#define FORMAT_SIX_WORD 0x2
+#define FORMAT_BERR 0xc
+#define FRAME_FOUR_WORD_BYTES 8
+#define FRAME_SIX_WORD_BYTES 12
+#define FRAME_BERR_BYTES 24
+
 #endif

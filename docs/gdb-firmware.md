@@ -46,7 +46,7 @@ up).
 $ gdb-multiarch examples/boards/demo.elf
 (gdb) directory examples/firmware/demo
 (gdb) target remote 127.0.0.1:1234
-reset () at ./crt0.S:40
+reset () at ./crt0.S:70
 ```
 
 With the ELF gdb takes its byte order from it: no `set endian`.  The
@@ -54,18 +54,28 @@ build maps its directory to `.`, hence `directory`.
 
 ## Moves
 
-Break in an ISR.  At its first instruction SP points at the exception
-frame, SR then PC (CPU32RM 6.4); `bt` cannot unwind it (below), so
-read the interrupted PC from the frame:
+Break in an ISR.  Each interrupt enters through a stub in `crt0.S`
+that calls the C function and returns with RTE; the stub's call frame
+information describes the exception frame (CPU32RM 6.4), so `bt`
+unwinds into the interrupted code, the stub shown as gdb shows a
+signal frame:
 
 ```text
 (gdb) break pit_isr
 (gdb) continue
-Breakpoint 1, pit_isr () at main.c:80
-(gdb) x/a $sp+2
-0x10ffe6:       0x4aa <put_string+26>
+Breakpoint 1, pit_isr () at main.c:81
+(gdb) bt
+#0  pit_isr () at main.c:81
+#1  <signal handler called>
+#2  0x000004ea in put_char (c=54 '6') at main.c:126
+#3  put_string (s=<optimized out>) at main.c:136
+#4  0x00001094 in main () at main.c:472
+(gdb) up 2
 (gdb) info registers system
 ```
+
+SR has no DWARF number: in the interrupted frame gdb shows the
+handler's, its mask raised.
 
 Watch the tick count.  The stop is after the instruction that wrote
 it:
@@ -76,7 +86,7 @@ it:
 (gdb) continue
 Old value = 0
 New value = 1
-0x00000a8c in pit_isr () at main.c:82
+0x00000aca in pit_isr () at main.c:82
 ```
 
 Step C.  A command breaks once a byte arrives (`p` here); `next` and
@@ -87,8 +97,8 @@ Step C.  A command breaks once a byte arrives (`p` here); `next` and
 (gdb) continue
 (gdb) bt
 #0  primes () at main.c:248
-#1  0x00000f78 in command_loop () at main.c:412
-#2  0x000010dc in main () at main.c:478
+#1  0x00000fa6 in command_loop () at main.c:412
+#2  0x0000110a in main () at main.c:478
 (gdb) next
 (gdb) finish
 ```
@@ -96,16 +106,20 @@ Step C.  A command breaks once a byte arrives (`p` here); `next` and
 Catch a fault.  Every unexpected vector is `fault_entry`; the `f`
 command reads a word at an odd address.  The frame is format $C
 (CPU32RM 6.4, Figure 6-6): SR, PC, format and vector offset, fault
-address:
+address.  `fault_entry`'s call frame information takes the frame's
+size from its format, so `bt` unwinds into the faulted function:
 
 ```text
 (gdb) break fault_entry
 (gdb) continue
-Breakpoint 4, fault_entry () at ./crt0.S:77
+Breakpoint 4, <signal handler called>
 (gdb) x/6hx $sp
-0x10ff7c:       0x2014  0x0000  0x08d4  0xc00c  0x0010  0x0001
-(gdb) x/a $sp+2
-0x10ff7e:       0x8d4 <fault+98>
+0x10ff7c:       0x2014  0x0000  0x0914  0xc00c  0x0010  0x0001
+(gdb) bt
+#0  <signal handler called>
+#1  fault () at main.c:357
+#2  0x00000ffe in command_loop () at main.c:424
+#3  0x0000110a in main () at main.c:478
 ```
 
 Reset: `monitor reset`, then `maintenance flush register-cache`.
@@ -120,9 +134,9 @@ $ gdb-multiarch -nx
 (gdb) set endian big
 (gdb) target remote 127.0.0.1:1234
 (gdb) display/i $pc
-(gdb) break *0xa7c
+(gdb) break *0x478
 (gdb) continue
-=> 0xa7c:       movel %d0,%sp@-
+=> 0x478:       moveml %d0-%d1/%a0-%a1,%sp@-
 ```
 
 ## Attach later
@@ -142,13 +156,6 @@ gdb then attaches with the demo waiting for input, `ticks` 511:
 #1  read_line (line=0x10ffbc "") at main.c:191
 #2  command_loop () at main.c:404
 ```
-
-## Unwinding an exception
-
-GCC's call frame information for an `interrupt_handler` describes a
-call's frame, the return address the long at SP, so `bt` in an ISR
-takes SR and the PC's high word for it (`#1 0x20040000 in ?? ()`).  This is the
-compiler's, not the stub's; the frame is at SP as the CPU wrote it.
 
 ## Things that differ from a BDM pod
 

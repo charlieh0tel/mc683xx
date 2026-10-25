@@ -58,19 +58,19 @@ h, ?    this help
 
 168 primes below 1000
 > t
-uptime 0.820 s (840 ticks at 1024 Hz)
+uptime 0.821 s (841 ticks at 1024 Hz)
 > c
 1 PPS period 4194304 TCNT counts (2 captures): system clock 16777216 Hz
 > x 0
-000000  00 11 00 00 00 00 04 00 00 00 04 78 00 00 04 78  ...........x...x
-000010  00 00 04 78 00 00 04 78 00 00 04 78 00 00 04 78  ...x...x...x...x
-000020  00 00 04 78 00 00 04 78 00 00 04 78 00 00 04 78  ...x...x...x...x
-000030  00 00 04 78 00 00 04 78 00 00 04 78 00 00 04 78  ...x...x...x...x
+000000  00 11 00 00 00 00 04 00 00 00 04 b8 00 00 04 b8  ................
+000010  00 00 04 b8 00 00 04 b8 00 00 04 b8 00 00 04 b8  ................
+000020  00 00 04 b8 00 00 04 b8 00 00 04 b8 00 00 04 b8  ................
+000030  00 00 04 b8 00 00 04 b8 00 00 04 b8 00 00 04 b8  ................
 > f
 reading a word at 100001
 
-exception: vector 3, format $c, sr $2014, pc $000008d4
-  fault address $00100001, current instruction $000008d4, ssw $0055
+exception: vector 3, format $c, sr $2014, pc $00000914
+  fault address $00100001, current instruction $00000914, ssw $0055
 > t
 uptime 2.143 s (2195 ticks at 1024 Hz)
 > 
