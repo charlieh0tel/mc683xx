@@ -1,0 +1,60 @@
+# Do not add default-members: CI runs a bare `cargo test`, which covers
+# every member only while this is absent.
+[workspace]
+members = [
+    "benches",
+    "examples",
+    "crates/cpu32",
+    "crates/cpu32-harness",
+    "crates/cpu32-oracle",
+    "crates/cpu32-py",
+    "crates/gdb",
+    "crates/mc683xx",
+    "crates/mc68331",
+    "crates/mc68331-board",
+    "crates/mc68331-run",
+    "crates/peripherals",
+    "crates/snapshot-golden",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# The toolchain rust-toolchain.toml pins, the one CI builds and tests
+# with; no older compiler is checked, so none is claimed.
+rust-version = "1.98.1"
+authors = ["Christopher Hoover <ch@murgatroid.com>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/charlieh0tel/mc683xx"
+readme = "README.md"
+keywords = ["emulator", "m68k", "cpu32", "mc68331", "motorola"]
+categories = ["emulators", "embedded"]
+
+# The published crates, as every member depends on them: a path for the
+# workspace, an exact version for crates.io (docs/releasing.md), so a
+# host never mixes two releases' crates.  The version follows
+# [workspace.package]'s.
+[workspace.dependencies]
+mc683xx-board = { path = "crates/mc68331-board", version = "=0.1.0" }
+mc683xx-cpu32 = { path = "crates/cpu32", version = "=0.1.0" }
+mc683xx-gdb = { path = "crates/gdb", version = "=0.1.0" }
+mc683xx-mc68331 = { path = "crates/mc68331", version = "=0.1.0" }
+mc683xx-modules = { path = "crates/mc683xx", version = "=0.1.0" }
+mc683xx-peripherals = { path = "crates/peripherals", version = "=0.1.0" }
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+cast_lossless = "warn"
+doc_markdown = "warn"
+enum_glob_use = "deny"
+mod_module_files = "warn"
+must_use_candidate = "warn"
+todo = "warn"
+wildcard_imports = "deny"

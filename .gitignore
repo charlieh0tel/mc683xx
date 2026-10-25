@@ -1,0 +1,19 @@
+/target
+**/*.rs.bk
+
+# Release notes in progress, kept locally (AGENTS.md).
+/CHANGELOG.md
+
+# Claude Code's local state and worktrees.
+/.claude/
+
+# Test data and oracles `make singlestep-data` and `make musashi` fetch.
+/external
+
+# The virtual environment `make python` builds the bindings in, the
+# compiled module its editable install puts in the package, and what
+# its tests leave.
+/.venv
+/crates/cpu32-py/python/mc683xx/*.so
+/crates/cpu32-py/python/mc683xx/*.pyd
+__pycache__/

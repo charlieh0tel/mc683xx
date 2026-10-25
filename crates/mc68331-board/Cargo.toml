@@ -1,0 +1,36 @@
+[package]
+name = "mc683xx-board"
+description = "Board files for 683xx chips, the MC68331 among them: memories, peripherals from a registry, decoders and nets around the chip"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+# The library and the license texts: the tests and their goldens need
+# the path-only snapshot-golden, which a package drops
+# (docs/releasing.md).
+include = ["/src", "/LICENSE-MIT", "/LICENSE-APACHE"]
+
+[lints]
+workspace = true
+
+[dependencies]
+mc683xx-cpu32.workspace = true
+mc683xx-mc68331 = { workspace = true, optional = true }
+mc683xx-modules.workspace = true
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+toml = "1.1.8"
+
+[features]
+default = ["mc68331"]
+# The MC68331 as a board's chip (`mc683xx_board::mc68331`).
+mc68331 = ["dep:mc683xx-mc68331"]
+
+[dev-dependencies]
+snapshot-golden = { path = "../snapshot-golden" }
+toml = "1.1.8"

@@ -1,0 +1,21 @@
+[package]
+name = "mc683xx-examples"
+description = "The host guide's examples (docs/host-guide.md), compiled and run by cargo test"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+mc683xx-cpu32.workspace = true
+mc683xx-gdb.workspace = true
+mc683xx-mc68331.workspace = true
+mc683xx-modules.workspace = true
+mc683xx-board.workspace = true
+mc683xx-peripherals.workspace = true

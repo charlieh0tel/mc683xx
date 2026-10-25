@@ -1,0 +1,12 @@
+# Pinned so a lint that fires in CI fires locally too.  This file, not
+# the CI workflow's inputs, is what decides: rustup honors it for every
+# cargo invocation in the repo, overriding whatever the workflow
+# installed.
+#
+# The components are load-bearing.  CI installs with --profile minimal,
+# so a toolchain auto-installed on this file's say-so arrives without
+# them, and the jobs would fail on a missing binary rather than on the
+# code.
+[toolchain]
+channel = "1.98.1"
+components = ["clippy", "rustfmt"]

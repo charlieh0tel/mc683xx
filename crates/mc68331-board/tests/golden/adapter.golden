@@ -1,0 +1,5 @@
+# A snapshot golden (PLAN.md, State); generated, not edited.
+# A format change bumps its VERSION, then UPDATE_GOLDEN=1 cargo test.
+versions adapter=1
+length 8
+fnv1a64 611a85421ae9eb4b

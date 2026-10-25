@@ -1,0 +1,32 @@
+[package]
+name = "cpu32-py"
+description = "Python bindings for the MC68331 emulator"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+# The bindings build only with `python`, which maturin enables
+# (pyproject.toml); without it the crate is its Python-free parts, so
+# `cargo test` and `make ci` need no Python (PLAN.md, Python).
+[features]
+python = ["dep:pyo3", "dep:mc683xx-gdb"]
+
+[dependencies]
+mc683xx-board.workspace = true
+mc683xx-cpu32.workspace = true
+mc683xx-gdb = { workspace = true, optional = true, features = ["board"] }
+mc683xx-mc68331.workspace = true
+mc683xx-modules.workspace = true
+mc683xx-peripherals.workspace = true
+pyo3 = { version = "0.30.1", optional = true }
+thiserror = "2.0.21"

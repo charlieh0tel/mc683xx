@@ -1,0 +1,258 @@
+Third-party material
+====================
+
+The manuals in `motorola/` and the datasheets in `datasheets/` are
+not part of this project, and the project's license does not apply to
+them.  Each is the property of its
+copyright holder.  They are included for reference because they are
+the specification this software is written against: the code and
+`PLAN.md` cite them by document and section.
+
+
+No license to any of this material is granted or implied by its
+presence here.
+
+Motorola
+--------
+
+In `motorola/`.  Motorola's semiconductor manuals, later published by
+Freescale and then NXP.  NXP no longer serves them at the addresses
+below.  The reference manuals are NXP's own files as archived by the
+Internet Archive (web.archive.org) on 2019-08-21; the user's manual
+was copied from the smartclock project's `third_party/`
+(github.com/charlieh0tel/smartclock).
+
+  CPU32RM.pdf      "CPU32 Central Processor Unit Reference Manual",
+                   (c) Motorola 1990, 1996.  nxp.com/docs/en/
+                   reference-manual/CPU32RM.pdf.  Authoritative for the
+                   instruction set, condition codes, exception
+                   processing and stack frames (section 6) and
+                   instruction timing (section 8).
+                   SHA-256 4a096e7edfbc01086dff56ca76677e8c
+                           c4281ec53d7e86bfc2a3c98df9505916
+  M68000PRM.pdf    "M68000 Family Programmer's Reference Manual
+                   (Includes CPU32 Instructions)", (c) Motorola 1992.
+                   nxp.com/docs/en/reference-manual/M68000PRM.pdf.
+                   Instruction encodings across the family; CPU32RM
+                   governs where they differ.
+                   SHA-256 06e4864b78da0e815054cead9326b7ec
+                           9914661f240fd39a455f2061ff47c4e8
+  MC68331UM.pdf    "MC68331 User's Manual", (c) Motorola 1996;
+                   (c) Freescale Semiconductor, Inc., 2004.
+                   nxp.com/docs/en/data-sheet/MC68331UM.pdf.  The chip:
+                   its memory map, the SIM (section 4), the CPU32
+                   summary and exception overview (section 5), the QSM
+                   and GPT as built into the 68331.
+                   SHA-256 d5d71f87309b4d8d5a5af76b9bff79ed
+                           82b3a58dd697f513ebeedca9f1ec17eb
+  SIMRM.pdf        "System Integration Module Reference Manual",
+                   Motorola.  The file prints no copyright notice or
+                   year; its PDF metadata gives it to Freescale
+                   Semiconductor, Inc., made 1997-08-14 and last
+                   changed 2004-05-04.
+                   nxp.com/docs/en/reference-manual/SIMRM.pdf.  The SIM
+                   in full: clock and SYNCR, reset, chip selects, bus
+                   monitor, watchdog, PIT, interrupt arbitration.
+                   SHA-256 bf8ed68d5e07e8e4f0972d1c3e175fdf
+                           43e837f99264bf4e524616c3edb0ef70
+  QSMRM.pdf        "Queued Serial Module Reference Manual",
+                   (c) Motorola 1991, 1996.  nxp.com/docs/en/
+                   reference-manual/QSMRM.pdf.  The QSPI and SCI in
+                   full.
+                   SHA-256 6f8d1cae54c321fc5d3a8ff64fc9ff6d
+                           a0311cf90299327d4a4aace8c526b3d5
+  GPTRM.pdf        "General-Purpose Timer Reference Manual",
+                   (c) Motorola 1995.  nxp.com/docs/en/
+                   reference-manual/GPTRM.pdf.  The GPT in full.
+                   SHA-256 7c26ebad70233468ec09de91b4a434a5
+                           449b406f94d3360bd40e37abe675fbda
+
+Datasheets
+----------
+
+In `datasheets/`.  Makers' datasheets for the stock parts in
+`mc683xx-peripherals`, each its maker's file as served on 2026-10-24 unless its entry
+says otherwise.
+
+  AD569.pdf        "AD569 16-Bit Monotonic Voltage Output D/A
+                   Converter", Rev. A, Analog Devices, Inc.
+                   analog.com/media/en/technical-documentation/
+                   data-sheets/AD569.pdf, as archived by the Internet
+                   Archive (web.archive.org) on 2024-09-08.  The
+                   `ad569` part: its latches and their controls
+                   (Table I), transfer function and reference inputs.
+                   SHA-256 d2b5057ce7fed25f58b58b7777cc20dd
+                           a826bf00f5a113196d4cdaa5e5136ad7
+  ADC0838.pdf      "ADC0831-N/ADC0832-N/ADC0834-N/ADC0838-N 8-Bit
+                   Serial I/O A/D Converters with Multiplexer Options",
+                   SNAS531B, (c) Texas Instruments Incorporated
+                   1999-2013 (first published by National
+                   Semiconductor).  ti.com/lit/pdf/snas531, fetched
+                   2026-10-24.  The ADC0838: its multiplexer
+                   addressing, serial interface and timing (Figure 21),
+                   reference and transfer function.
+                   SHA-256 5304f87643a1c709fab86392d8282ca1
+                           0ffd405dfe7db938e14c9776dcda75a5
+  AT28C64B.pdf     "AT28C64B 64-Kbit (8K x 8) Industrial Parallel
+                   EEPROM with Page Write and Software Data
+                   Protection", Microchip DS20006432B, revision B,
+                   (c) 2020-2023 Microchip Technology Inc.
+                   ww1.microchip.com/downloads/aemDocuments/documents/
+                   MPD/ProductDocuments/DataSheets/AT28C64B-64-Kbit-
+                   8Kx8-Parallel-EEPROM-with-Page-Write-and-Software-
+                   Data-Protection-DS20006432.pdf.  The `at28c64b`
+                   part: its reads, byte and page writes, write cycle,
+                   DATA polling, toggle bit and software data
+                   protection (section 6).
+                   SHA-256 ddbbd18a10a13a0144c2d6a3f75e85e5
+                           bfcb87cb07029e1fb1c141a0bd878fcc
+  MC144110.pdf     "MC144110 and MC144111 Digital-to-Analog Converters
+                   with Serial Interface", MC144110/D, Rev. 2,
+                   (c) Freescale Semiconductor, Inc., 2005.
+                   nxp.com/docs/en/data-sheet/MC144110.pdf, as
+                   archived by the Internet Archive on 2026-02-10.
+                   The `mc144110` part: its 36-bit shift, channel
+                   order, ENB latch and output scale.
+                   SHA-256 797dcb9d152061ef76c92ae1a4501d62
+                           93b70742a08df58fe287e253ba41c702
+  MC68681.pdf      "MC68681 Dual Asynchronous Receiver/Transmitter
+                   (DUART)", Motorola, Advance Information, ADI988R1,
+                   September 1985, (c) Motorola Inc. 1985, as scanned
+                   by bitsavers.org (components/motorola/68000/).  The
+                   `mc68681` part in full: operation (section 3), the
+                   register map and bits (section 4).
+                   SHA-256 4e8fa3642dddfaa19ab81d31ef522923
+                           45e007b3cb3bd3797694106be6683d24
+  SC68C92-1990.pdf "SC68C92 Dual asynchronous receiver/transmitter
+                   (DUART)", Philips Components-Signetics, preliminary
+                   specification, November 12, 1990: pages 199 to 220
+                   of "Data Communication Products", IC19, Philips
+                   Components-Signetics, 1991, extracted here as PDF
+                   pages 206 to 227 of the handbook as scanned by
+                   bitsavers.org (components/signetics/_dataBooks/
+                   1991_Signetics_IC019_Data_Communication_Products.pdf,
+                   SHA-256 a3db1b7ceddb24ce0203920a6fbff8af
+                           83db0ae64882c8a5c646db0d7f7712f1).
+                   A CMOS SCC68692 replacement; corroborates the
+                   input port's bit 6 (IACKN).
+                   SHA-256 3c7bcda40b03b8c0b73c69bce19c7b6d
+                           ca3528d105c7799b910131793214f8fa
+  SCC68681.pdf     "SCC68681 Dual asynchronous receiver/transmitter
+                   (DUART)", Philips Semiconductors, product data,
+                   2004 Apr 06, (c) Koninklijke Philips Electronics
+                   N.V. 2004.  nyang-tech.com/datasheet/2024919089/
+                   NXP-USA-Inc./SCC68681C1A44-518.pdf, a distributor's
+                   copy of Philips's file.  The MC68681's Philips
+                   second source: its input port (Input Port).
+                   SHA-256 a6295c9f1a0783a17e99762e5a63eaef
+                           51cfdc6d80d0bbc2ae617c0b70b4cfc6
+  SCC68692-1990.pdf
+                   "SCC68692 Dual asynchronous receiver/transmitter
+                   (DUART)", Philips Components-Signetics, product
+                   specification, document 853-0977, ECN 00928,
+                   November 5, 1990: pages 178 to 198 of "Data
+                   Communication Products", IC19, Philips
+                   Components-Signetics, 1991, extracted here as PDF
+                   pages 185 to 205 of the handbook as scanned by
+                   bitsavers.org (components/signetics/_dataBooks/
+                   1991_Signetics_IC019_Data_Communication_Products.pdf,
+                   SHA-256 a3db1b7ceddb24ce0203920a6fbff8af
+                           83db0ae64882c8a5c646db0d7f7712f1).
+                   The `scc68692` part's input port (Input Port).
+                   SHA-256 9d7dcb35fd9796660256cb8fbf195fa2
+                           820765b2637c305f8019b12bf9836616
+  SCC68692-2004.pdf
+                   "SCC68692 Dual asynchronous receiver/transmitter
+                   (DUART)", Philips Semiconductors, product data,
+                   2004 Mar 03, superseding 1998 Sep 04, (c) Koninklijke
+                   Philips Electronics N.V. 2004.  nxp.com/docs/en/
+                   data-sheet/SCC68692.pdf, which NXP no longer serves,
+                   as archived by the Internet Archive on 2025-03-18.
+                   The `scc68692` part: where it differs from the
+                   MC68681 (its commands, timeout mode, RESET).
+                   SHA-256 74399d5d2777b6d2b05a599f8860bbd5
+                           40653eb117c4e6cbf0974f3692c522f4
+  SCN68681.pdf     "SCN68681 Dual asynchronous receiver/transmitter
+                   (DUART)", Philips Semiconductors, product
+                   specification, 1998 Sep 04, superseding 1995 May 01,
+                   IC19 Data Handbook, (c) Philips Electronics North
+                   America Corporation 1998.  xdevs.com/doc/Fluke/
+                   5700a/pdf/68C681.pdf.  The MC68681's Philips second
+                   source: its input port (Input Port).
+                   SHA-256 9ff826d65bb73939503b97434b38465a
+                           985e2d7cf4d4b49a6f0734f44f44c93d
+  SN74HC164.pdf    "SNx4HC164 8-Bit Parallel-Out Serial Shift
+                   Registers", SCLS115G, (c) Texas Instruments
+                   Incorporated 1982-2015.  ti.com/lit/ds/symlink/
+                   sn74hc164.pdf.  The 74x164 shift register.
+                   SHA-256 9fb5ac3094f33119f44552cabb5ef3a1
+                           bba4ff86556f1602ea02301b8db79a2c
+  SN74HC244.pdf    "SNx4HC244 Octal Buffers and Line Drivers With
+                   3-State Outputs", SCLS130I, (c) Texas Instruments
+                   Incorporated 2026.  ti.com/lit/ds/symlink/
+                   sn74hc244.pdf.  The 74x244 buffer.
+                   SHA-256 96fab8d66e73471202eddee965c22a78
+                           430f330c328a901cc6d78094915f49e9
+  SN74HC373.pdf    "SNx4HC373 Octal Transparent D-Type Latches With
+                   3-State Outputs", SCLS140G, (c) Texas Instruments
+                   Incorporated 2025.  ti.com/lit/ds/symlink/
+                   sn74hc373.pdf.  The 74x373 latch.
+                   SHA-256 14e811d116887347b4b0c4f25d044839
+                           ff296d7d5080c2eae242ce6ea3830ee4
+  SN74HC374.pdf    "SNx4HC374 Octal Edge-Triggered D-Type Flip-Flops
+                   With 3-State Outputs", SCLS141G, (c) Texas
+                   Instruments Incorporated 2022.  ti.com/lit/ds/
+                   symlink/sn74hc374.pdf.  The 74x374 latch.
+                   SHA-256 960d99f599b84f4ca44247a3f1035ab4
+                           9cd7605dac878c8967558f82d71f2193
+  XR68C681.pdf     "XR68C681 CMOS Dual Channel UART (DUART)", Exar
+                   Corporation, datasheet Rev. 2.10, September 1999,
+                   (c) 1999 Exar Corporation.  xdevs.com/doc/Keithley/
+                   182-M/pdf/xr68c681.pdf.  Exar's part compatible with
+                   the MC68681 and SCC68692: its register map (Table 1)
+                   and input port (E. Input Port).
+                   SHA-256 fa0225b64deeabeac17ed696ef62316b
+                           ca72bee43213f259a4ade8a6db8def22
+
+Test oracles
+------------
+
+Not in the repository: `make` fetches each at the pinned commit into
+`external/`, which Git ignores, or Cargo fetches it at the version
+`Cargo.lock` pins, for tests only.  Nothing of them is
+built into, linked with or distributed with the project's crates; the
+`cpu32-oracle` and `cpu32-harness` crates that use them are
+`publish = false`.
+
+  Musashi          github.com/kstenerud/Musashi, commit
+                   313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd
+                   (2026-03-08), Musashi 3.32.  MIT License,
+                   Copyright Karl Stenerud (readme.txt, m68kconf.h).
+                   A black-box differential oracle in 68020 mode
+                   (`make oracle`, the `musashi` feature): built by
+                   crates/cpu32-oracle/build.rs and driven through its
+                   public API (m68k.h) only.  Its implementation is
+                   not read to write the core, and none of its code is
+                   in the core.  Its bundled SoftFloat (softfloat/,
+                   SoftFloat Release 2b, John R. Hauser's license, not
+                   MIT) is compiled with it because Musashi's headers
+                   require it; the FPU is never used.
+  Unicorn          github.com/unicorn-engine/unicorn, through the
+                   unicorn-engine crate 2.1.5 (crates.io; it bundles
+                   Unicorn 2.1.4 and QEMU's m68k), m68k only.  GPL-2.0.
+                   A black-box oracle for the firmware corpus in 68020
+                   mode (`make corpus-unicorn`, the `unicorn` feature of
+                   cpu32-oracle and cpu32-harness, off by default and
+                   not in `make ci`): fetched by Cargo, built from C,
+                   driven through the crate's API only, in test binaries
+                   that are never distributed and never linked into the
+                   shipped crates.  The core is written from the
+                   Motorola manuals, not from Unicorn or QEMU, and
+                   none of their code or structure is here; Unicorn's
+                   faults are known by behavior (crates/cpu32-oracle/src/
+                   unicorn.rs, crates/cpu32/tests/unicorn_faults.rs).
+  SingleStepTests  github.com/SingleStepTests/m68000, commit
+  m68000           64b253116a3de04aaac4346c43680960dc9b67e5.  MIT
+                   License, Copyright (c) 2024 SingleStepTests.  Test
+                   cases generated from MAME's 68000 core
+                   (`make singlestep`); read as data only.

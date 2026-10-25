@@ -1,0 +1,48 @@
+#!/bin/sh
+# Refuse a commit that credits an AI assistant: this project's commits
+# carry no such trailer or footer, and no such author or committer
+# (AGENTS.md).
+#
+# As the hook, Git passes the message file as $1; the commit's author
+# and committer come from `git var`.  CI checks the whole history with
+# `--messages FILE`, every commit's message, and `--identities FILE`,
+# every commit's author and committer, one `Name <address>` a line as
+# `git var` gives them.  scripts/test-commit-msg.sh tests both.
+#
+# In a message, lines starting with # are the editor's comments, not
+# the message.  A trailer line, an address, or the footer, rather than
+# any mention of them, so a message may describe this check.
+MESSAGE_PATTERN='^[[:space:]]*(co-authored-by|claude-session):|@anthropic\.com|claude\.ai/code|generated with \[?claude'
+# A bot's identity, not a person's: an address at anthropic.com or a
+# subdomain of it; a name that is Claude alone, Claude and a product
+# word (Claude Code, Claude Bot) or claude[bot]; a name naming
+# Anthropic.  A person named Claude passes.
+IDENTITY_PATTERN='<[^>]*@([^>@]*\.)?anthropic\.com>|^[[:space:]]*claude([[:space:]]+(code|bot|assistant|agent|ai)([[:space:]][^<]*)?|\[bot\])?[[:space:]]*<|^[^<]*anthropic[^<]*<'
+
+check_message() {
+    if grep -v '^#' "$1" | grep -qiE "$MESSAGE_PATTERN"; then
+        echo "commit refused: the message credits an AI assistant, which this project's commits never do (AGENTS.md)" >&2
+        exit 1
+    fi
+}
+
+check_identities() {
+    if printf '%s\n' "$1" | grep -qiE "$IDENTITY_PATTERN"; then
+        echo "commit refused: its author or committer is an AI assistant, which this project's commits never are (AGENTS.md)" >&2
+        exit 1
+    fi
+}
+
+case "$1" in
+--messages)
+    check_message "$2"
+    ;;
+--identities)
+    check_identities "$(cat "$2")"
+    ;;
+*)
+    check_message "$1"
+    identities=$(git var GIT_AUTHOR_IDENT && git var GIT_COMMITTER_IDENT) || exit 1
+    check_identities "$identities"
+    ;;
+esac

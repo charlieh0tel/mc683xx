@@ -1,0 +1,38 @@
+[package]
+name = "mc683xx-run"
+description = "Runs an MC68331 board file: the board crate's run loop as a command"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+# The command and the license texts: the tests take their firmware
+# from the path-only mc683xx-examples, which a package drops
+# (docs/releasing.md).
+include = ["/src", "/LICENSE-MIT", "/LICENSE-APACHE"]
+
+[lints]
+workspace = true
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+ctrlc = "3.5.2"
+mc683xx-board.workspace = true
+mc683xx-cpu32.workspace = true
+mc683xx-gdb = { workspace = true, features = ["board"] }
+mc683xx-mc68331.workspace = true
+mc683xx-modules.workspace = true
+mc683xx-peripherals.workspace = true
+thiserror = "2.0.21"
+
+# Pseudo-terminals (`--bind NAME=pty`) are Unix's; elsewhere that
+# binding is refused and the rest of the runner works.
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.31.3", features = ["term", "fs"] }
+
+[dev-dependencies]
+mc683xx-examples = { path = "../../examples" }

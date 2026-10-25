@@ -1,0 +1,96 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only by default; no job here needs more.
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    # The shared definition, as smartclock's CI uses it.
+    # rust-toolchain.toml pins the compiler; an empty fmt-toolchain
+    # makes the fmt job read it too.  Pinned to the commit tag v1 named
+    # when pinned, as the actions are.
+    uses: charlieh0tel/deb-workflows/.github/workflows/rust-ci.yml@4d97a66433801d0d096926cecdc34e561fa99429 # v1
+    with:
+      fmt-toolchain: ""
+      audit: false
+      check-args: "--workspace --all-targets"
+
+  oracle:
+    # The Musashi differential runs (`make oracle`).  The fetch is one
+    # pinned commit, shallow, so it is not cached.  The compiler is the
+    # one rust-toolchain.toml names, which rustup installs on first use.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: make oracle
+
+  package:
+    # The published crates package and build from their packages alone,
+    # in dependency order, as `cargo publish --workspace` would upload
+    # them (docs/releasing.md).  Members with `publish = false` are
+    # skipped.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: cargo publish --workspace --dry-run
+
+  licenses:
+    # The license texts in the published crates and the Python package
+    # are byte-for-byte copies of the root's (`make licenses`).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: make licenses
+
+  features:
+    # The gdb stub builds for the bare CPU alone and for the chip
+    # without the board (`make features`).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: make features
+
+  docs:
+    # The published crates' rustdoc with no warnings (`make docs`).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: make docs
+
+  deny:
+    # The dependencies' licenses and advisories against deny.toml, the
+    # checks `make deny` makes locally, with the cargo-deny the action
+    # pins rather than one built here.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check licenses advisories
+          # The default features only, as deny.toml's [graph] says (the
+          # action's default is --all-features, which takes in the
+          # test-only unicorn feature), on rust-toolchain.toml's Rust.
+          arguments: --workspace
+          rust-version: "1.98.1"
+
+  attribution:
+    # No commit credits an AI assistant (AGENTS.md).  The checks the
+    # commit-msg hook makes, of the messages and of the authors and
+    # committers, over the whole history, for a commit made in a clone
+    # without the hook; and the hook's own tests (`make hook-test`).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: git log --format=%B HEAD | sh .githooks/commit-msg --messages /dev/stdin
+      - run: >-
+          git log --format='%an <%ae>%n%cn <%ce>' HEAD
+          | sh .githooks/commit-msg --identities /dev/stdin
+      - run: make hook-test

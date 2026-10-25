@@ -1,0 +1,26 @@
+[package]
+name = "cpu32-oracle"
+description = "Test oracles for the cpu32 core: Musashi and Unicorn in 68020 mode, as black boxes"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+# Builds and links Musashi from MUSASHI_DIR (`make musashi` fetches it).
+musashi = ["dep:cc"]
+# Unicorn (GPL, test-only; third_party/NOTICE), its m68k only: builds
+# QEMU from C with cmake the first time.
+unicorn = ["dep:unicorn-engine"]
+
+[build-dependencies]
+cc = { version = "1.10.0", optional = true }
+
+[dependencies]
+unicorn-engine = { version = "2.1.5", default-features = false, features = ["arch_m68k"], optional = true }

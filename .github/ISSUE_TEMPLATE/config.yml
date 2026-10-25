@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation
+    url: https://github.com/charlieh0tel/mc683xx/tree/main/docs
+    about: The host guide, board files, peripherals, Python and gdb.

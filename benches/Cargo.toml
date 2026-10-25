@@ -1,0 +1,55 @@
+[package]
+name = "mc683xx-bench"
+description = "Benchmarks of the cpu32 core and the MC68331 (docs/performance.md)"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+autobenches = false
+
+[lints]
+workspace = true
+
+# The shared setup; its tests run with `cargo test`.  Not a benchmark
+# itself, so `cargo bench` passes criterion's options to criterion only.
+[lib]
+bench = false
+
+[dependencies]
+mc683xx-board.workspace = true
+mc683xx-cpu32.workspace = true
+mc683xx-mc68331.workspace = true
+mc683xx-modules.workspace = true
+
+[dev-dependencies]
+# Only what `cargo bench` needs: no plots, no rayon.
+criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
+mc683xx-peripherals.workspace = true
+
+[[bench]]
+name = "core"
+path = "core.rs"
+harness = false
+
+[[bench]]
+name = "tables"
+path = "tables.rs"
+harness = false
+
+[[bench]]
+name = "chip"
+path = "chip.rs"
+harness = false
+
+[[bench]]
+name = "spi"
+path = "spi.rs"
+harness = false
+
+[[bench]]
+name = "peripherals"
+path = "peripherals.rs"
+harness = false

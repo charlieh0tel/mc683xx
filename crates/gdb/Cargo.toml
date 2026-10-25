@@ -1,0 +1,43 @@
+[package]
+name = "mc683xx-gdb"
+description = "A GDB remote stub for the CPU32: the bare CPU, the MC68331 and its boards"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+# The library and the license texts (docs/releasing.md).
+include = ["/src", "/LICENSE-MIT", "/LICENSE-APACHE"]
+
+[lints]
+workspace = true
+
+# The targets past the bare CPU, each with the crates it needs, so a
+# bare-CPU host builds without the chip or the board stack.
+[features]
+default = ["mc68331", "board"]
+# The chip, `Mc68331`, as a target.
+mc68331 = ["dep:mc683xx-mc68331"]
+# A board, `mc683xx_board::board::Board`, as a target; the chip with it.
+board = ["mc68331", "dep:mc683xx-board"]
+
+[dependencies]
+gdbstub = "0.7.10"
+mc683xx-board = { workspace = true, optional = true }
+mc683xx-cpu32.workspace = true
+mc683xx-mc68331 = { workspace = true, optional = true }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+mc683xx-board.workspace = true
+mc683xx-mc68331.workspace = true
+mc683xx-modules.workspace = true
+
+# The chip and a board under the stub, as well as the bare CPU.
+[[test]]
+name = "rsp"
+required-features = ["board"]

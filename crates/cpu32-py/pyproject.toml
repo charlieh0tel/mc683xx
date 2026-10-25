@@ -1,0 +1,43 @@
+[build-system]
+requires = ["maturin>=1.15,<2"]
+build-backend = "maturin"
+
+[project]
+name = "mc683xx"
+description = "The Motorola MC68331 (CPU32) emulator, for Python hosts"
+requires-python = ">=3.10"
+license = "MIT OR Apache-2.0"
+# Copies of the root's, so the wheel and sdist carry them.
+license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
+authors = [{ name = "Christopher Hoover", email = "ch@murgatroid.com" }]
+readme = "../../README.md"
+keywords = ["emulator", "m68k", "cpu32", "mc68331", "motorola"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: System :: Emulators",
+    "Typing :: Typed",
+]
+# The version is the workspace's (Cargo.toml), one for the crates and
+# the wheel (docs/releasing.md).
+dynamic = ["version"]
+
+[project.urls]
+Repository = "https://github.com/charlieh0tel/mc683xx"
+Changelog = "https://github.com/charlieh0tel/mc683xx/releases"
+Documentation = "https://github.com/charlieh0tel/mc683xx/blob/main/docs/python.md"
+
+[tool.maturin]
+# The package is python/mc683xx: the stubs, `py.typed` and an
+# `__init__.py` that takes the compiled module's names, which maturin
+# puts beside them as `mc683xx.mc683xx`.  A wheel built from the sdist
+# carries them only in this layout (docs/releasing.md).
+python-source = "python"
+module-name = "mc683xx.mc683xx"
+# `python` builds the bindings (Cargo.toml); abi3 makes one module for
+# every Python from 3.10.
+features = ["python", "pyo3/extension-module", "pyo3/abi3-py310"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

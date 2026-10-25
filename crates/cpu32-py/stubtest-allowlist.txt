@@ -1,0 +1,3 @@
+# The compiled extension inside the package maturin builds; its
+# names are the package's, which the stub covers.
+mc683xx.mc683xx

@@ -1,0 +1,28 @@
+[package]
+name = "mc683xx-mc68331"
+description = "The Motorola MC68331: the CPU32 core, SIM, QSM and GPT composed into the chip"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+# The library and the license texts: the tests and their goldens need
+# the path-only snapshot-golden, which a package drops
+# (docs/releasing.md).
+include = ["/src", "/LICENSE-MIT", "/LICENSE-APACHE"]
+
+[lints]
+workspace = true
+
+[dependencies]
+mc683xx-cpu32.workspace = true
+mc683xx-modules.workspace = true
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+snapshot-golden = { path = "../snapshot-golden" }

@@ -1,0 +1,23 @@
+name: Feature request
+description: A part, an interface or a behavior the emulator does not have
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What you need
+      description: What you are trying to do, and what is missing.
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: Hardware
+      description: |
+        For a new peripheral or chip behavior: the part number, its
+        maker and a link to its datasheet or manual section.
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How you would like it to work, if you have an idea.

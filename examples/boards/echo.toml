@@ -1,0 +1,72 @@
+# A small generic board: a boot ROM, RAM, a recording stub on CS1, a
+# 10 MHz clock divided to 1 PPS on IC1, and the SCI on a console.
+# `echo.bin` is firmware that echoes the SCI, built by `make
+# echo-image` from examples/src/echo.rs; run it with
+#
+#   mc683xx-run examples/boards/echo.toml --bind console=stdio
+#
+# (docs/board-files.md has the keys.)
+
+version = 1
+
+[board]
+name = "echo"
+title = "A generic MC68331 board: ROM, RAM, a stub and the SCI"
+images = ["echo.bin"]
+
+[chip]
+type = "mc68331"
+reference_hz = 32768
+
+[[memory]]
+name = "rom"
+image = "echo.bin"
+size = 0x10000
+fill = 0xff
+attach = [{ select = "CSBOOT", role = "read" }]
+
+[[memory]]
+name = "ram"
+size = 0x10000
+writable = true
+attach = [{ select = "CS0" }]
+
+[[peripheral]]
+name = "stub"
+type = "recorder"
+attach = [{ select = "CS1" }]
+parameters = { value = 0xff }
+
+[[peripheral]]
+name = "reference"
+type = "clock"
+parameters = { hz = 10_000_000 }
+
+[[peripheral]]
+name = "pps"
+type = "divider"
+parameters = { divide = 10_000_000 }
+
+[[net]]
+name = "ten-megahertz"
+type = "clock"
+from = "reference.out"
+to = ["pps.in"]
+
+[[net]]
+name = "one-pps"
+type = "edge"
+from = "pps.out"
+to = ["chip.PGP0"]
+
+[[net]]
+name = "console-out"
+type = "serial"
+from = "chip.TXD"
+to = ["external.console"]
+
+[[net]]
+name = "console-in"
+type = "serial"
+from = "external.console"
+to = ["chip.RXD"]

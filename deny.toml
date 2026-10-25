@@ -1,0 +1,31 @@
+# cargo-deny's checks (`make deny`, and CI): the dependencies'
+# licenses and the RustSec advisories against them.
+#
+# The graph is the workspace's default features on every target.  The
+# `unicorn` feature's unicorn-engine is GPL-2.0 and test-only, off by
+# default and never in a shipped crate (third_party/NOTICE), so it is
+# not in it; neither is Musashi, which no crate depends on.
+
+[graph]
+all-features = false
+
+[licenses]
+version = 2
+# Every license some dependency is under, alone or as one choice of
+# several: each permits use in an `MIT OR Apache-2.0` project.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "MIT",
+    "Unicode-3.0",
+    "Unlicense",
+]
+confidence-threshold = 0.93
+
+[licenses.private]
+# The unpublished members (cpu32-py, the harness, the oracles, the
+# benches and examples) are the project's own.
+ignore = true
+
+[advisories]
+version = 2

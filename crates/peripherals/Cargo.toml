@@ -1,0 +1,29 @@
+[package]
+name = "mc683xx-peripherals"
+description = "Stock chips for MC68331 boards: memories, converters and UARTs as board-file peripherals"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+# The library and the license texts (docs/releasing.md).
+include = ["/src", "/LICENSE-MIT", "/LICENSE-APACHE"]
+
+[lints]
+workspace = true
+
+[dependencies]
+mc683xx-board.workspace = true
+mc683xx-cpu32.workspace = true
+mc683xx-modules.workspace = true
+serde = { version = "1.0.229", features = ["derive"] }
+thiserror = "2.0.21"
+
+[dev-dependencies]
+mc683xx-mc68331.workspace = true
+snapshot-golden = { path = "../snapshot-golden" }
+toml = "1.1.8"
