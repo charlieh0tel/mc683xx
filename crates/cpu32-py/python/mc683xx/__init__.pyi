@@ -678,6 +678,14 @@ class Builder:
     def fixed_timing(self, memory: int, *, port: int = 16, wait_states: int | None = None) -> None: ...
     def reload_scope(self, memory: int, scope: Sequence[ResetCause]) -> None: ...
     def peripheral(self, peripheral: _MappedPeripheral, pins: Sequence[str]) -> int: ...
+    def bus_peripheral(
+        self,
+        peripheral: _MappedPeripheral,
+        *,
+        windows: Sequence[tuple[int, int]] = ...,
+        acknowledges: Sequence[int] = ...,
+        dsack: Dsack,
+    ) -> int: ...
     def unwired_peripheral(self, peripheral: object) -> int: ...
     def qspi(self, peripheral: _SpiPeripheral) -> None: ...
     def dsack(self, peripheral: int, pins: Dsack) -> None: ...
@@ -920,6 +928,15 @@ class DsackFault:
         @property
         def select(self) -> str: ...
 
+    @final
+    class BusUnassigned(DsackFault):
+        """The same for a peripheral on no select (`bus_peripheral`)."""
+
+        __match_args__ = ("peripheral",)
+        def __new__(cls, peripheral: int) -> DsackFault.BusUnassigned: ...
+        @property
+        def peripheral(self) -> int: ...
+
 @final
 class Machine:
     """A bare CPU32 on flat memory."""
@@ -1001,8 +1018,9 @@ class PeripheralAccess:
     def attachment(self) -> int:
         """The attachment it came through: its index in `attach`."""
     @property
-    def select(self) -> str:
-        """The chip select that carried it: `CSBOOT`, `CS0` to `CS10`."""
+    def select(self) -> str | None:
+        """The chip select that carried it: `CSBOOT`, `CS0` to `CS10`;
+        `None` on no select, the peripheral's own decode taking it."""
     @property
     def role(self) -> Role: ...
     @property

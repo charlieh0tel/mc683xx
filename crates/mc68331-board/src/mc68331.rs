@@ -35,6 +35,7 @@ use mc683xx_mc68331::gpt::OutputChange;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm::Channel;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::chip_selects::Dsack;
@@ -398,6 +399,18 @@ impl ChipBuilder for Mc68331Builder {
             self.builder.dsack(id, pins);
         }
         Ok(())
+    }
+
+    fn bus_peripheral<R: BoardMapped>(
+        &mut self,
+        router: R,
+        decodes: &[BusDecode],
+        pins: Dsack,
+    ) -> Result<(), LoadError> {
+        self.builder
+            .bus_peripheral(router, decodes, pins)
+            .map(|_| ())
+            .map_err(built)
     }
 
     fn unwired<R: BoardMapped>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>) {

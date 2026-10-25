@@ -1301,3 +1301,37 @@ def test_a_host_with_no_board_takes_port_qs_changes() -> None:
     changes = chip.take_qsm_changes()
     assert [levels & 0x02 for (_, driven, levels) in changes if driven & 0x02][-2:] == [0, 2]
     assert chip.take_qsm_changes() == []
+
+
+class Narrow(Recorder):
+    """A Recorder whose DSACK is 8 bits at even words, 16 at odd ones."""
+
+    def read(self, cycle):
+        super().read(cycle)
+        return self.value & (0xFF if cycle.size == 1 else 0xFFFF)
+
+    def dsack_port(self, cycle):
+        return 8 if cycle.address & 2 == 0 else 16
+
+
+def test_a_bus_peripheral_decodes_its_own_window():
+    window = 0x800000
+    builder = mc683xx.Builder()
+    builder.memory(rom([0x60FE]), ["CSBOOT"], writable=False)
+    peripheral = Narrow(0x1234)
+    number = builder.bus_peripheral(
+        peripheral, windows=[(window, 0x100)], acknowledges=[4], dsack=mc683xx.Dsack.DSACK1
+    )
+    with pytest.raises(ValueError):
+        builder.bus_peripheral(Recorder(), windows=[(0xFFFF00, 0x200)], dsack=mc683xx.Dsack.DSACK1)
+    with pytest.raises(ValueError):
+        builder.bus_peripheral(Recorder(), acknowledges=[0], dsack=mc683xx.Dsack.DSACK1)
+    chip = builder.build()
+    assert chip.peripheral(number) is peripheral
+    chip.bus_read(window, 2)
+    chip.bus_read(window + 2, 2)
+    assert peripheral.reads == [
+        (None, window, 1),
+        (None, window + 1, 1),
+        (None, window + 2, 2),
+    ], "no select; DSACK0 splits the even word"

@@ -186,6 +186,13 @@ pub(crate) struct Attachment {
     pub(crate) lines: Option<Lines>,
     /// Added to the address.
     pub(crate) offset: Option<u32>,
+    /// On no select: the first address of the window its own decode
+    /// takes.
+    pub(crate) base: Option<u32>,
+    /// The window's bytes.
+    pub(crate) size: Option<u32>,
+    /// On no select: the interrupt level whose acknowledges it takes.
+    pub(crate) iack: Option<u8>,
 }
 
 /// What a decoder does with a code nothing is attached to.

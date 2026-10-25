@@ -72,7 +72,7 @@ class Latch:
     def __init__(self, width: int) -> None:
         self.width = width
         self.written: list[int] = []
-        self.accesses: list[tuple[str, mc683xx.Role, mc683xx.Lane]] = []
+        self.accesses: list[tuple[str | None, mc683xx.Role, mc683xx.Lane]] = []
 
     def write(self, access: mc683xx.PeripheralAccess, value: int, drive: mc683xx.Drive) -> None:
         self.written.append(value)

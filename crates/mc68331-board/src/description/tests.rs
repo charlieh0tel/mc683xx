@@ -1,4 +1,7 @@
+use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::bus::PortSize;
+use mc683xx_cpu32::interrupt::IrqPin;
+use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::chip_selects::Termination;
 use std::env;
 use std::fs;
@@ -563,5 +566,62 @@ fn a_fixed_memory_takes_a_base_in_place_of_a_select() {
     ];
     for (extra, expected) in cases {
         assert_eq!(error(extra), expected, "{extra}");
+    }
+}
+
+#[test]
+fn a_peripheral_on_no_select_takes_a_window_or_an_acknowledge() {
+    let on_bus = "[[peripheral]]\nname = \"io\"\ntype = \"registers\"\ndsack = \"DSACK1\"\nattach = [{ base = 0x800000, size = 0x100, role = \"read\" }, { iack = 4 }]\n";
+    let description = parse(&with(on_bus)).unwrap();
+    let io = &description.peripherals[0];
+    assert_eq!(
+        io.attachments[0].target,
+        Target::Bus(BusDecode::Window {
+            base: Address(0x80_0000),
+            length: 0x100
+        })
+    );
+    assert_eq!(io.attachments[0].role, Role::Read);
+    assert_eq!(
+        io.attachments[1].target,
+        Target::Bus(BusDecode::Acknowledge(IrqPin::new(4).unwrap()))
+    );
+    assert_eq!(io.attachments[1].role, Role::Iack, "an acknowledge's role");
+    let peripheral = |dsack: &str, attach: &str| {
+        format!("[[peripheral]]\nname = \"io\"\ntype = \"registers\"\n{dsack}attach = [{attach}]\n")
+    };
+    let dsack = "dsack = \"DSACK1\"\n";
+    let cases = [
+        (
+            peripheral("", "{ base = 0x800000, size = 0x100 }"),
+            "io: attachment 0: a peripheral on no select drives DSACK itself: give dsack",
+        ),
+        (
+            peripheral(dsack, "{ base = 0x800000, size = 0x100, select = \"CS1\" }"),
+            "io: attachment 0: base and size, or iack, put it on no select: give no select, decoder or qspi",
+        ),
+        (
+            peripheral(dsack, "{ base = 0x800000 }"),
+            "io: attachment 0: give base and size, or iack, not both",
+        ),
+        (
+            peripheral(dsack, "{ base = 0xffff00, size = 0x200 }"),
+            "io: attachment 0: its window must be inside ADDR[23:0] and not empty",
+        ),
+        (
+            peripheral(dsack, "{ iack = 0 }"),
+            "io: attachment 0: iack is a level, 1 to 7",
+        ),
+        (
+            peripheral(dsack, "{ iack = 3, role = \"read\" }"),
+            "io: attachment 0: an iack attachment's role is iack",
+        ),
+        (
+            peripheral(dsack, "{ base = 0x800000, size = 0x100, role = \"iack\" }"),
+            "io: attachment 0: a window takes no iack role: give iack = <level>",
+        ),
+    ];
+    for (extra, expected) in cases {
+        assert_eq!(error(&extra), expected, "{extra}");
     }
 }

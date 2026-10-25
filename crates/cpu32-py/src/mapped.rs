@@ -11,6 +11,7 @@ use std::rc::Rc;
 
 use mc683xx_board::board;
 use mc683xx_cpu32::bus::BusError;
+use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
@@ -257,6 +258,18 @@ impl BusCycleView {
     }
 }
 
+/// A `dsack_port` answer: 8 or 16 bits, or `None`.
+pub(crate) fn port_size(result: &Bound<'_, PyAny>) -> PyResult<Option<PortSize>> {
+    match result.extract::<Option<u8>>()? {
+        None => Ok(None),
+        Some(8) => Ok(Some(PortSize::Bits8)),
+        Some(16) => Ok(Some(PortSize::Bits16)),
+        Some(other) => Err(PyValueError::new_err(format!(
+            "no {other}-bit port: give 8, 16 or None"
+        ))),
+    }
+}
+
 /// A peripheral's methods, looked up once when it is wired.  Any may be
 /// missing: a model on no pin needs neither `read` nor `write`.
 #[derive(Debug)]
@@ -267,6 +280,8 @@ struct Methods {
     write: Option<Held>,
     /// `wait_states(cycle) -> int | None`.
     wait_states: Option<Held>,
+    /// `dsack_port(cycle) -> int | None`: 8 or 16.
+    dsack_port: Option<Held>,
     /// `interrupt_request() -> bool`.
     interrupt_request: Option<Held>,
     /// `reset(now)`.
@@ -314,6 +329,7 @@ impl PythonMapped {
                 read: method("read")?,
                 write: method("write")?,
                 wait_states: method("wait_states")?,
+                dsack_port: method("dsack_port")?,
                 interrupt_request: method("interrupt_request")?,
                 reset: method("reset")?,
                 next_event: method("next_event")?,
@@ -456,6 +472,18 @@ impl MappedPeripheral for PythonMapped {
             Some(Ok(wait_states)) => wait_states,
             Some(Err(BusError)) => None,
             None => Some(0),
+        }
+    }
+
+    fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
+        match self.call(
+            self.methods.dsack_port.as_ref(),
+            (BusCycleView(cycle),),
+            port_size,
+            None,
+        ) {
+            Some(Ok(port)) => port,
+            Some(Err(BusError)) | None => None,
         }
     }
 

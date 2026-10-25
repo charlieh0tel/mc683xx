@@ -221,7 +221,14 @@ assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
   against PEPAR at each such cycle (a disagreement is an
   `Event.Dsack(now, DsackFault.Unassigned(select))`, once for each
   peripheral) and sizing the cycle (SIMRM Table 5-2); unstated by
-  default.  `qspi_reset_scope(scope)`: the resets that reach the QSPI's
+  default.
+- `bus_peripheral(object, windows=[(base, length)], acknowledges=[level],
+  dsack=Dsack...)`: a peripheral on no select, taking the cycles its own
+  decode does, and driving `dsack`'s pins; its number.  Rust's
+  `bus_peripheral` takes `BusDecode`s, which Python has not: each
+  window is a `BusDecode::Window`, each level a
+  `BusDecode::Acknowledge`.  Its cycles' `select` is `None`; a PEPAR
+  disagreement is `DsackFault.BusUnassigned(peripheral)`.  `qspi_reset_scope(scope)`: the resets that reach the QSPI's
   peripheral, every one by default.
 - `stop_request()`, `sync_request()` and `diversion()` are the handles a
   peripheral holds, as in Rust: a `StopRequest` whose `request()` ends
@@ -289,6 +296,10 @@ value)`, and optionally:
 - `wait_states(cycle) -> int | None`: on a select with an external
   DSACK, the wait states before the peripheral asserts DSACK, or `None`
   for none at all (the bus monitor ends the cycle).
+- `dsack_port(cycle) -> int | None`: the port this cycle's DSACK gives,
+  `16` (DSACK1) or `8` (DSACK0 alone), for a peripheral whose pins
+  differ cycle by cycle; `None`, or no such method, leaves it to
+  `dsack`.
 - `interrupt_request() -> bool`: its interrupt output.  It may change
   only in one of the peripheral's own calls or between runs; the chip
   caches the level between them.
@@ -868,7 +879,8 @@ are the built-in ones and `types`' classes, by the name the file's
 `parameters` as keyword arguments.
 Its object has any of the peripheral's methods, each optional:
 `read(access, drive) -> int`, `write(access, value, drive)`,
-`wait_states(access) -> int | None`, `interrupt_request() -> bool`,
+`wait_states(access) -> int | None`, `dsack_port(access) -> int | None`,
+`interrupt_request() -> bool`,
 `power_on(drive)`, `reset(now, drive)`, `transfer(transfer, drive) ->
 int` (an `mc683xx.Transfer`: `attachment`, `entry`, `chip_selects`,
 `out`, `bits`, `clock`, the `QspiClock` it is shifted with, its mode,

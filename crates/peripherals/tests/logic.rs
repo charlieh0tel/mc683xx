@@ -45,6 +45,9 @@ const MOVE_BYTE_TO_D0: u16 = 0x1039;
 const BRA_SELF: u16 = 0x60fe;
 /// NOP.
 const NOP: u16 = 0x4e71;
+/// Where the latch and buffer answer on no select, with their own
+/// decode: above CSBOOT's reset block (MC68331UM Table 4-24).
+const BUS_BASE: u32 = 0x80_0000;
 /// What the program writes to the latch.
 const WRITTEN: u8 = 0xa5;
 
@@ -72,19 +75,21 @@ fn image(program: &[u16]) -> Vec<u8> {
 /// to Q7 to externals `q0` to `q7`, the buffer's A0 from `switch0` and
 /// all its inputs from `switches`.
 fn board() -> Board<Mc68331> {
+    board_on(false)
+}
+
+/// The board, the latch and buffer on CS1, or `on_bus`, on no select at
+/// `BUS_BASE` by their own decode, driving DSACK1.
+fn board_on(on_bus: bool) -> Board<Mc68331> {
+    let base = if on_bus { BUS_BASE } else { CS1_BASE };
     let program: Vec<u16> = [
         store(MOVE_WORD_TO_ABSOLUTE, CSBAR1, CS1_BAR),
         store(MOVE_WORD_TO_ABSOLUTE, CSOR1, CS1_OPTIONS),
-        store(MOVE_BYTE_TO_ABSOLUTE, CS1_BASE, u16::from(WRITTEN)),
+        store(MOVE_BYTE_TO_ABSOLUTE, base, u16::from(WRITTEN)),
     ]
     .concat()
     .into_iter()
-    .chain([
-        MOVE_BYTE_TO_D0,
-        (CS1_BASE >> 16) as u16,
-        CS1_BASE as u16,
-        BRA_SELF,
-    ])
+    .chain([MOVE_BYTE_TO_D0, (base >> 16) as u16, base as u16, BRA_SELF])
     .collect();
     let unique = DIRECTORIES.fetch_add(1, Ordering::Relaxed);
     let directory = env::temp_dir().join(format!(
@@ -125,6 +130,18 @@ from = "external.switches"
 to = ["u2.A"]
 "#,
     );
+    if on_bus {
+        let window = format!("base = {BUS_BASE:#x}, size = 0x100");
+        text = text
+            .replace(
+                "attach = [{ select = \"CS1\", role = \"write\" }]",
+                &format!("attach = [{{ {window}, role = \"write\" }}]\ndsack = \"DSACK1\""),
+            )
+            .replace(
+                "attach = [{ select = \"CS1\", role = \"read\" }]",
+                &format!("attach = [{{ {window}, role = \"read\" }}]\ndsack = \"DSACK1\""),
+            );
+    }
     for bit in 0..8 {
         text.push_str(&format!(
             "[[net]]\nname = \"q{bit}\"\ntype = \"logic\"\nfrom = \"u1.Q{bit}\"\nto = [\"external.q{bit}\"]\n"
@@ -172,6 +189,20 @@ fn the_cpu_writes_the_latch_onto_nets_and_reads_the_buffer() {
     let mut restored = self::board();
     restored.restore(&snapshot).unwrap();
     assert_eq!(restored.save().unwrap(), snapshot);
+}
+
+#[test]
+fn a_latch_and_buffer_on_no_select_decode_the_bus_themselves() {
+    let mut board = board_on(true);
+    board.send("switch0", Signal::Level(true)).unwrap();
+    board.run_until(Time(100_000_000)).unwrap();
+    let q0 = board.take_received("q0").unwrap();
+    assert_eq!(
+        q0.iter().map(|(_, signal)| *signal).collect::<Vec<_>>(),
+        [Signal::Level(false), Signal::Level(true)],
+        "the byte written reaches Q"
+    );
+    assert_eq!(board.chip().cpu().registers.data[0] & 0xff, 0xf1);
 }
 
 #[test]

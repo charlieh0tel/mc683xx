@@ -14,6 +14,7 @@ use std::mem;
 use std::rc::Rc;
 
 use mc683xx_cpu32::bus::BusError;
+use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::state::Stateless;
 use mc683xx_cpu32::cycles::Cycles;
@@ -280,13 +281,12 @@ impl Routes {
 
     /// `route`'s access for a piece of `cycle`.
     fn access(shared: &Shared, route: &Route, cycle: BusCycle, size: Size) -> PeripheralAccess {
-        PeripheralAccess::new(
-            select_of(cycle),
-            route.address(cycle.address),
-            size,
-            cycle.function_code,
-            shared.time(cycle.now),
-        )
+        let address = route.address(cycle.address);
+        let now = shared.time(cycle.now);
+        match cycle.select.and_then(ChipSelect::from_select) {
+            Some(select) => PeripheralAccess::new(select, address, size, cycle.function_code, now),
+            None => PeripheralAccess::on_no_select(address, size, cycle.function_code, now),
+        }
         .through(route.attachment, route.role, route.lane)
     }
 
@@ -350,6 +350,16 @@ impl Routes {
         Ok(())
     }
 
+    /// The port the first peripheral to take the cycle gives it, if it
+    /// says cycle by cycle.
+    pub(crate) fn dsack_port(&self, shared: &Shared, cycle: BusCycle) -> Option<PortSize> {
+        let &(route, size, _) = self.pieces(cycle, false).first()?;
+        let access = Self::access(shared, route, cycle, size);
+        shared.peripherals[route.peripheral]
+            .borrow_mut()
+            .dsack_port(access)
+    }
+
     /// The wait states of the first peripheral to take the cycle.
     pub(crate) fn wait_states(&self, shared: &Shared, cycle: BusCycle, write: bool) -> Option<u8> {
         let Some(&(route, size, _)) = self.pieces(cycle, write).first() else {
@@ -383,6 +393,10 @@ impl MappedPeripheral for SelectRouter {
         // The chip asks before the cycle, not saying its direction; a
         // read's peripherals answer.
         self.routes.wait_states(&self.shared, cycle, false)
+    }
+
+    fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
+        self.routes.dsack_port(&self.shared, cycle)
     }
 }
 
@@ -454,11 +468,47 @@ impl MappedPeripheral for DecoderRouter {
             routes.wait_states(&self.shared, cycle, false)
         })
     }
+
+    fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
+        self.routes(cycle.address)
+            .and_then(|routes| routes.dsack_port(&self.shared, cycle))
+    }
 }
 
 impl Timed for DecoderRouter {}
 
 impl Stateless for DecoderRouter {}
+
+/// The peripherals one decode on no select reaches, split by role and
+/// lane as a select's are.
+pub(crate) struct BusRouter {
+    /// The board's shared state.
+    pub(crate) shared: Rc<Shared>,
+    /// The peripherals on it.
+    pub(crate) routes: Routes,
+}
+
+impl MappedPeripheral for BusRouter {
+    fn read(&mut self, cycle: BusCycle) -> Result<u32, BusError> {
+        self.routes.read(&self.shared, cycle)
+    }
+
+    fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
+        self.routes.write(&self.shared, cycle, value)
+    }
+
+    fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
+        self.routes.wait_states(&self.shared, cycle, false)
+    }
+
+    fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
+        self.routes.dsack_port(&self.shared, cycle)
+    }
+}
+
+impl Timed for BusRouter {}
+
+impl Stateless for BusRouter {}
 
 /// A board memory's cycles while a peripheral has taken it: the chip diverts
 /// them here, and this passes them to the peripheral.

@@ -314,8 +314,21 @@ One of:
 | `{ select = "CS0" }` | A chip-select pin: `CSBOOT`, `CS0`-`CS10`. |
 | `{ decoder = "u31", output = 2 }` | A decoder's output. |
 | `{ qspi = 0b1110, mask = 0xf }` | The QSPI, while PCS[3:0] under `mask` (default `0xf`) equal the code (QSMRM 4.3.6.3).  Several attachments may match the same levels (`mask = 0` matches every transfer): each gets the transfer. |
+| `{ base = 0x800000, size = 0x100 }` | No select: the peripheral's own decode takes program and data cycles, user or supervisor, at `base` up to `base + size`, inside ADDR[23:0].  Board logic doing what the selects do not (a PAL on the address lines). |
+| `{ iack = 4 }` | No select: the peripheral's own decode takes the interrupt acknowledges of IRQ level 1 to 7, its read giving the vector; the attachment's role is `iack`. |
 
-and, for a select or a decoder output:
+A peripheral on no select drives DSACK itself, so it states `dsack`
+(not `open`): its wait states time the cycle, the pins size it, and
+PEPAR assigning none of them as DSACK leaves the cycle to the bus
+monitor, as on an externally terminated select.  Its accesses carry no
+select (`PeripheralAccess::select` is `None`).  It takes a cycle beside
+a select that matches it, the first DSACK ending it, and before a
+fixed memory.  Peripherals with the same `base` and `size`, or the same
+`iack`, share it as peripherals share a select, split by role and
+lane, and drive the same pins; a window that only overlaps another
+contends for the bus, as two devices decoding one address do.
+
+and, for a select, a decoder output or a window:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -458,13 +471,19 @@ The contract a host's peripheral models target (rustdoc in
   `inspect::Inspection` of named fields (empty by default;
   `Board::inspect(name)`).
   - Bus: `read(access, drive)`, `write(access, value, drive)`,
-    `wait_states(access)` for an external DSACK.  A `peripheral::PeripheralAccess`
+    `wait_states(access)` for an external DSACK, and `dsack_port(access)`
+    for a peripheral whose DSACK pins differ cycle by cycle (`Some(PortSize)`,
+    16 bits on DSACK1, 8 on DSACK0 alone; `None` by default, its `dsack`
+    saying).  A `peripheral::PeripheralAccess`
     carries `attachment` (the index in the peripheral's `attach`), its
     `role` and `lane`, `address` (`offset` plus ADDR on its `lines`),
     `size`, `function_code`, `now` in board time, and `select`, the
-    chip select that carried it (the decoder's, through a decoder).
+    chip select that carried it (the decoder's, through a decoder;
+    `None` on no select).
     `PeripheralAccess` is `#[non_exhaustive]`: a host's test builds one with
-    `PeripheralAccess::new(select, address, size, function_code, now)` and
+    `PeripheralAccess::new(select, address, size, function_code, now)`
+    (`PeripheralAccess::on_no_select(address, size, function_code, now)`
+    for a peripheral on no select) and
     `.through(attachment, role, lane)`.  The board layer turns each
     chip `mc683xx_cpu32::peripheral::BusCycle` into a `PeripheralAccess`.  An 8-bit
     peripheral takes its byte of a write with `access.written_byte(value)`

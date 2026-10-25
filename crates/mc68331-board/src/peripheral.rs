@@ -13,6 +13,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use mc683xx_cpu32::bus::BusError;
+use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::function_code::FunctionCode;
 use mc683xx_cpu32::size::Size;
@@ -150,8 +151,9 @@ pub struct PeripheralAccess {
     /// `attach` list.
     pub attachment: usize,
     /// The chip select that carried it: the attachment's, or its
-    /// decoder's.
-    pub select: ChipSelect,
+    /// decoder's; [`None`] for a peripheral on no select, which took it
+    /// by its own decode.
+    pub select: Option<ChipSelect>,
     /// That attachment's role.
     pub role: Role,
     /// Its lane: a peripheral on one lane sees byte accesses only, at the
@@ -182,13 +184,29 @@ impl PeripheralAccess {
     ) -> Self {
         Self {
             attachment: 0,
-            select,
+            select: Some(select),
             role: Role::ReadWrite,
             lane: Lane::Both,
             address,
             size,
             function_code,
             now,
+        }
+    }
+
+    /// A cycle a peripheral on no select took by its own decode, at
+    /// `address`, of `size` and `function_code`, at `now`, through
+    /// attachment 0, read-write, on both lanes.
+    #[must_use]
+    pub const fn on_no_select(
+        address: u32,
+        size: Size,
+        function_code: FunctionCode,
+        now: Time,
+    ) -> Self {
+        Self {
+            select: None,
+            ..Self::new(ChipSelect::Boot, address, size, function_code, now)
         }
     }
 
@@ -595,6 +613,15 @@ pub trait Peripheral: Any {
     /// `write`.  By default it answers at once.
     fn wait_states(&mut self, access: PeripheralAccess) -> Option<u8> {
         Some(0)
+    }
+
+    /// With an external DSACK, the port this cycle's DSACK gives, for a
+    /// peripheral whose pins differ from cycle to cycle: 16 bits on
+    /// DSACK1, 8 on DSACK0 alone (SIMRM Table 5-2).  Asked with
+    /// `wait_states`.  By default [`None`]: its `dsack` in the board
+    /// file says.
+    fn dsack_port(&mut self, access: PeripheralAccess) -> Option<PortSize> {
+        None
     }
 
     /// Whether its interrupt output, which the board file wires to an

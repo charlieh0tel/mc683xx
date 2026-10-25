@@ -13,6 +13,7 @@ use std::hash::Hasher;
 use std::num::NonZeroU64;
 use std::path::PathBuf;
 
+use crate::mapped::port_size;
 use mc683xx_board::board::Board;
 use mc683xx_board::board::BoardStopRequest;
 use mc683xx_board::board::BoardTracing;
@@ -48,6 +49,7 @@ use mc683xx_board::time::Phase;
 use mc683xx_board::time::Time;
 use mc683xx_board::trace::Line;
 use mc683xx_cpu32::bus::BusError;
+use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_mc68331::chip::Mc68331;
@@ -187,10 +189,11 @@ impl AccessView {
         self.0.attachment
     }
 
-    /// The chip select that carried it: `CSBOOT`, `CS0` to `CS10`.
+    /// The chip select that carried it: `CSBOOT`, `CS0` to `CS10`;
+    /// `None` on no select, the peripheral's own decode taking it.
     #[getter]
-    fn select(&self) -> String {
-        self.0.select.to_string()
+    fn select(&self) -> Option<String> {
+        self.0.select.map(|select| select.to_string())
     }
 
     /// What the peripheral does with the attachment's cycles.
@@ -234,7 +237,7 @@ impl AccessView {
             "PeripheralAccess(attachment={}, select={}, role={:?}, lane={:?}, address={:#x}, \
              size={}, now={})",
             self.attachment(),
-            self.select(),
+            self.select().as_deref().unwrap_or("None"),
             self.role(),
             self.lane(),
             self.address(),
@@ -938,6 +941,15 @@ impl Peripheral for PythonPeripheral {
             |py| Ok(vec![access_argument(py, access)?]),
             |value| value.extract::<Option<u8>>(),
             Some(0),
+        )
+    }
+
+    fn dsack_port(&mut self, access: PeripheralAccess) -> Option<PortSize> {
+        self.ask(
+            "dsack_port",
+            |py| Ok(vec![access_argument(py, access)?]),
+            port_size,
+            None,
         )
     }
 

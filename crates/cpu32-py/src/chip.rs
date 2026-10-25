@@ -22,6 +22,7 @@ use mc683xx_mc68331::event;
 use mc683xx_mc68331::event::ChipTracing;
 use mc683xx_mc68331::event::DsackFault;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::qsm::qspi::MOST_BITS;
 use mc683xx_modules::sim;
@@ -278,6 +279,38 @@ impl ChipBuilder {
         let pins = self::pins(&pins)?;
         let peripheral = PythonMapped::mapped(peripheral, self.pending.clone())?;
         Ok(self.wire(peripheral, &pins)?)
+    }
+
+    /// `peripheral`, which has `read(cycle)` and `write(cycle, value)`,
+    /// on no select, taking the cycles its own decode does: each
+    /// `(base, length)` of `windows` and the acknowledges of each IRQ
+    /// level of `acknowledges`, driving the DSACK pins `dsack`; its
+    /// number (Rust's `bus_peripheral`, whose `BusDecode`s these are).
+    #[pyo3(signature = (peripheral, *, windows = Vec::new(), acknowledges = Vec::new(), dsack))]
+    fn bus_peripheral(
+        &mut self,
+        peripheral: &Bound<'_, PyAny>,
+        windows: Vec<(u32, u32)>,
+        acknowledges: Vec<u8>,
+        dsack: DsackView,
+    ) -> PyResult<usize> {
+        let mut decodes: Vec<BusDecode> = windows
+            .into_iter()
+            .map(|(base, length)| BusDecode::Window {
+                base: Address(base),
+                length,
+            })
+            .collect();
+        for level in acknowledges {
+            let pin = IrqPin::try_from(level).map_err(Error::from)?;
+            decodes.push(BusDecode::Acknowledge(pin));
+        }
+        let peripheral = PythonMapped::mapped(peripheral, self.pending.clone())?;
+        let id = self
+            .builder()?
+            .bus_peripheral(peripheral, &decodes, dsack.into())
+            .map_err(Error::from)?;
+        Ok(self.wiring.borrow_mut().add_peripheral(id))
     }
 
     /// `peripheral` on no pin: it keeps time or drives an interrupt; its
@@ -598,6 +631,11 @@ pub(crate) enum DsackFaultView {
         /// The select whose cycle it was: `CSBOOT`, `CS0` to `CS10`.
         select: String,
     },
+    /// The same for a peripheral on no select (`bus_peripheral`).
+    BusUnassigned {
+        /// The peripheral's number.
+        peripheral: u64,
+    },
 }
 
 impl DsackFaultView {
@@ -606,6 +644,10 @@ impl DsackFaultView {
         match fault {
             DsackFault::Unassigned { select } => Some(Self::Unassigned {
                 select: select.to_string(),
+            }),
+            // Python numbers the chip's peripherals as it adds them
+            DsackFault::BusUnassigned { peripheral } => Some(Self::BusUnassigned {
+                peripheral: peripheral.into(),
             }),
             _ => None,
         }

@@ -31,6 +31,7 @@ use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::sim::chip_selects::Dsack;
@@ -179,6 +180,19 @@ pub trait ChipBuilder {
         router: R,
         select: ChipSelect,
         dsack: Option<Dsack>,
+    ) -> Result<(), LoadError>;
+
+    /// `router` on no select, taking the cycles `decodes` give, its
+    /// peripherals driving DSACK `pins`.
+    ///
+    /// # Errors
+    ///
+    /// Wiring the chip refuses ([`LoadError::Build`]).
+    fn bus_peripheral<R: BoardMapped>(
+        &mut self,
+        router: R,
+        decodes: &[BusDecode],
+        pins: Dsack,
     ) -> Result<(), LoadError>;
 
     /// A peripheral's interrupt output and reset input, on no pin: the

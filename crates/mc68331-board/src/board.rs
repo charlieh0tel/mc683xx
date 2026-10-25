@@ -34,6 +34,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::size::Size;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::peripheral::BusDecode;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -76,6 +77,7 @@ use crate::time::TimeBase;
 use crate::trace;
 use crate::trace::NetRecord;
 use crate::trace::Record;
+use crate::wiring::BusRouter;
 use crate::wiring::DecoderRouter;
 use crate::wiring::MemoryRouter;
 use crate::wiring::PeripheralCell;
@@ -632,6 +634,9 @@ impl<C: Chip> Board<C> {
             .map(|decoder| vec![Routes::default(); decoder.outputs.len()])
             .collect();
         let mut targets = Vec::new();
+        // each decode on no select and the peripherals it reaches, as a
+        // select's: by role and lane
+        let mut on_bus: Vec<(BusDecode, Routes)> = Vec::new();
         for (peripheral, entry) in description.peripherals.iter().enumerate() {
             builder.unwired(
                 PeripheralPins {
@@ -661,6 +666,12 @@ impl<C: Chip> Board<C> {
                         code,
                         mask,
                     }),
+                    Target::Bus(decode) => {
+                        match on_bus.iter_mut().find(|(other, _)| *other == decode) {
+                            Some((_, routes)) => routes.0.push(route),
+                            None => on_bus.push((decode, Routes(vec![route]))),
+                        }
+                    }
                 }
             }
         }
@@ -693,6 +704,23 @@ impl<C: Chip> Board<C> {
                     bus_error: decoder.undecoded == Undecoded::BusError,
                 },
                 decoder.select,
+                pins,
+            )?;
+        }
+        for (decode, routes) in on_bus {
+            // each peripheral on no select states its pins (Description)
+            let pins = dsack(&mut routes.0.iter()).ok_or_else(|| LoadError::Attachment {
+                owner: description.peripherals[routes.0[0].peripheral].name.clone(),
+                index: routes.0[0].attachment,
+                reason: "peripherals sharing a decode on no select drive the same DSACK pins"
+                    .to_owned(),
+            })?;
+            builder.bus_peripheral(
+                BusRouter {
+                    shared: Rc::clone(shared),
+                    routes,
+                },
+                &[decode],
                 pins,
             )?;
         }

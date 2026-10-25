@@ -15,10 +15,12 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
+use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::reset::ResetScope;
@@ -188,6 +190,8 @@ pub(crate) enum Target {
         /// The pins compared.
         mask: u8,
     },
+    /// No select: the cycles the peripheral's own decode takes.
+    Bus(BusDecode),
 }
 
 /// A peripheral's attachment.
@@ -948,12 +952,22 @@ fn read_attachment(
         }
     };
     let offset = attachment.offset.unwrap_or(0);
+    let on_bus =
+        attachment.base.is_some() || attachment.size.is_some() || attachment.iack.is_some();
     let target = match (
         &attachment.select,
         &attachment.decoder,
         attachment.output,
         attachment.qspi,
     ) {
+        (None, None, None, None) if on_bus && attachment.mask.is_none() => {
+            bus_decode(attachment, role).map_err(&error)?
+        }
+        _ if on_bus => {
+            return Err(error(
+                "base and size, or iack, put it on no select: give no select, decoder or qspi",
+            ));
+        }
         (Some(pin), None, None, None) if attachment.mask.is_none() => {
             Target::Select(select(owner, pin)?)
         }
@@ -993,10 +1007,16 @@ fn read_attachment(
             ));
         }
     };
+    // an acknowledge's attachment answers acknowledges alone
+    let role = if matches!(target, Target::Bus(BusDecode::Acknowledge(_))) {
+        Role::Iack
+    } else {
+        role
+    };
     let point = match target {
         Target::Select(select) => Some(Point::Select(select)),
         Target::Decoder { decoder, output } => Some(Point::Output(decoder, output)),
-        Target::Qspi { .. } => None,
+        Target::Qspi { .. } | Target::Bus(_) => None,
     };
     if let Some(point) = point {
         users.add(point, owner.to_owned(), Some((role, lane)))?;
@@ -1010,13 +1030,43 @@ fn read_attachment(
     })
 }
 
+/// The cycles a no-select attachment of `role` takes: a window of
+/// `base` and `size`, or the acknowledges of `iack`'s level.
+fn bus_decode(attachment: &Attachment, role: Role) -> Result<Target, &'static str> {
+    let decode = match (attachment.base, attachment.size, attachment.iack) {
+        (Some(base), Some(size), None) => {
+            if role == Role::Iack {
+                return Err("a window takes no iack role: give iack = <level>");
+            }
+            if size == 0 || u64::from(base) + u64::from(size) > 1 << ADDRESS_LINES {
+                return Err("its window must be inside ADDR[23:0] and not empty");
+            }
+            BusDecode::Window {
+                base: Address(base),
+                length: size,
+            }
+        }
+        (None, None, Some(level)) => {
+            if attachment
+                .role
+                .is_some_and(|role| role.split().0 != Role::Iack)
+            {
+                return Err("an iack attachment's role is iack");
+            }
+            BusDecode::Acknowledge(IrqPin::new(level).ok_or("iack is a level, 1 to 7")?)
+        }
+        _ => return Err("give base and size, or iack, not both"),
+    };
+    Ok(Target::Bus(decode))
+}
+
 /// A peripheral.
 fn read_peripheral(
     entry: schema::Peripheral,
     decoders: &[DecoderSpec],
     users: &mut Users,
 ) -> Result<PeripheralSpec, LoadError> {
-    let attachments = entry
+    let attachments: Vec<AttachmentSpec> = entry
         .attach
         .iter()
         .enumerate()
@@ -1033,6 +1083,17 @@ fn read_peripheral(
         Dsack::Both => Some(mc683xx_modules::sim::chip_selects::Dsack::Both),
         Dsack::Open => None,
     });
+    if dsack.is_none()
+        && attachments
+            .iter()
+            .any(|attachment| matches!(attachment.target, Target::Bus(_)))
+    {
+        return Err(attachment_error(
+            &entry.name,
+            0,
+            "a peripheral on no select drives DSACK itself: give dsack",
+        ));
+    }
     let mut parameters = entry.parameters;
     if parameters.get(NOTE).is_some_and(toml::Value::is_str) {
         parameters.remove(NOTE);

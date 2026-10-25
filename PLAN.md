@@ -1060,7 +1060,12 @@ hand.  The keys are in `docs/board-files.md`.
   enum is `#[non_exhaustive]`.  `MappedPeripheral::dsack_port` lets a
   peripheral size each cycle (DSACK1 16 bits, DSACK0 alone 8), for one
   that answers some cycles on each pin; `Builder::dsack` stays the
-  default (decided 2026-10-25).
+  default.  In a board file, an attachment of `base` and `size`, or
+  `iack`, is on no select; one router takes each such decode, its
+  peripherals split by role and lane as a select's are, so a read-only
+  and a write-only peripheral can share a window.  `PeripheralAccess`'s
+  `select` became an `Option`, breaking, for the no-select access
+  (decided 2026-10-25).
 - **Address decoders, as data:** a decoder on one select (a 74AC138)
   splits its window by its inputs into outputs, each attached to a
   peripheral as a select is: `{ decoder = "u31", output = 2 }`.  Its
@@ -2603,7 +2608,3 @@ checks move onto real code hooks.
   choices.
 - Whether `smartclock-emu` moves off its feature gate once it uses this
   core.
-- After 0.1.0, as additive API (the user's choice, 2026-10-24): a bus
-  peripheral on no chip select and DSACK port size per cycle, in the
-  chip (`Builder::bus_peripheral`, `MappedPeripheral::dsack_port`; see
-  Bus peripherals); board files and Python to follow.

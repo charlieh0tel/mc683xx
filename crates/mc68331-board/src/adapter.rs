@@ -21,6 +21,7 @@
 //! [`Peripheral`].
 
 use mc683xx_cpu32::bus::BusError;
+use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
@@ -151,13 +152,17 @@ impl<D> MappedAdapter<D> {
     /// The cycle the model sees for `access`.
     fn cycle(&mut self, access: PeripheralAccess, drive: &Drive<'_>) -> BusCycle {
         let base = self.clock.update(drive);
-        BusCycle::new(
-            access.address,
-            access.size,
-            access.function_code,
-            base.cycles(access.now),
-        )
-        .through(access.select.into())
+        carried(access, base.cycles(access.now))
+    }
+}
+
+/// The cycle a model sees for `access` at `now`, through its select if
+/// one carried it.
+fn carried(access: PeripheralAccess, now: Cycles) -> BusCycle {
+    let cycle = BusCycle::new(access.address, access.size, access.function_code, now);
+    match access.select {
+        Some(select) => cycle.through(select.into()),
+        None => cycle,
     }
 }
 
@@ -178,15 +183,13 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
     }
 
     fn wait_states(&mut self, access: PeripheralAccess) -> Option<u8> {
-        let base = self.clock.base();
-        let cycle = BusCycle::new(
-            access.address,
-            access.size,
-            access.function_code,
-            base.cycles(access.now),
-        )
-        .through(access.select.into());
+        let cycle = carried(access, self.clock.base().cycles(access.now));
         self.peripheral.wait_states(cycle)
+    }
+
+    fn dsack_port(&mut self, access: PeripheralAccess) -> Option<PortSize> {
+        let cycle = carried(access, self.clock.base().cycles(access.now));
+        self.peripheral.dsack_port(cycle)
     }
 
     fn interrupt_request(&self) -> bool {
