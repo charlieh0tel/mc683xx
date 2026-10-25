@@ -146,6 +146,8 @@ listens or to leave standard input to another binding.
   the same from Python.
 - [gdb](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md):
   debugging firmware with gdb.
+- [Firmware under gdb](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb-firmware.md):
+  a recipe: a real ROM image on a board, under gdb.
 - [Tracing](https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md):
   the run trace's format.
 - [Performance](https://github.com/charlieh0tel/mc683xx/blob/main/docs/performance.md):
