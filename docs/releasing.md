@@ -2,7 +2,8 @@
 
 How a version reaches crates.io and PyPI.  One version covers the
 workspace: every published crate and the `mc683xx` Python package.
-The maintainer pushes the tags and approves each upload.
+The maintainer pushes the tags; a `v*` tag publishes, with no
+approval step.
 
 ## What is published
 
@@ -59,8 +60,7 @@ Once, before the first release.
    environment `pypi`.  Until it exists, the `pypi` job fails and
    nothing is published.
 2. GitHub (Settings, Environments): create the environments `pypi`
-   and `crates-io`.  For each, add the maintainer as a required
-   reviewer, so each upload waits for an approval, and under
+   and `crates-io`, with no required reviewers.  For each, under
    deployment branches and tags choose selected branches and tags and
    add a tag rule `v*`, so only a `v` tag's run can deploy to it.
 3. crates.io: trusted publishing can only be set up for a crate that
@@ -92,15 +92,15 @@ Once, before the first release.
 6. Tag the merged commit `vX.Y.Z`, annotated, and push the tag.
 7. The tag runs `release`: the wheels, the sdist and its wheel's stub
    check, then the `pypi` job, which checks that the tag names
-   `Cargo.toml`'s version and waits for the environment's approval.
-   Look over the artifacts, then approve.  A manual run of `release`
+   `Cargo.toml`'s version and uploads.  To look over the artifacts
+   first, make a manual run of `release` before tagging.  A manual run of `release`
    (Actions, Run workflow) builds the same artifacts without
    publishing, to check a branch.
-8. The `crates` job, after `pypi`, checks the tag the same way, waits
-   for the `crates-io` environment's approval, and runs `cargo publish
-   --workspace` with a trusted-publishing token.  The first release
-   only: reject that job and publish by hand from a clean checkout of
-   the tag.  Cargo verifies each package by building it against the
+8. The `crates` job, after `pypi`, checks the tag the same way and
+   runs `cargo publish --workspace` with a trusted-publishing token.
+   The first release only: that job fails, crates.io trusting no
+   workflow for a crate that does not exist yet, so publish by hand
+   from a clean checkout of the tag.  Cargo verifies each package by building it against the
    registry's copies of the crates before it, and a copy left unpacked
    in `~/.cargo/registry/src` by an earlier attempt is taken as it is,
    so start from none: remove `~/.cargo/registry/src/*/mc683xx-*`, or
