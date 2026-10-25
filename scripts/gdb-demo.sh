@@ -48,7 +48,6 @@ address=$(sed -n 's/^mc683xx-run: waiting for gdb on //p' "$work/runner.err")
 # crt0.S's entry stubs describe the exception frame (CPU32RM 6.4), so
 # bt unwinds from an ISR into the code it interrupted.
 timeout "$limit" "$gdb" -batch -nx examples/boards/demo.elf \
-	-ex 'directory examples/firmware/demo' \
 	-ex "target remote $address" \
 	-ex 'break pit_isr' \
 	-ex 'continue' \

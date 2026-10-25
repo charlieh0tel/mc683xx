@@ -8,13 +8,17 @@
 CC := m68k-linux-gnu-gcc
 OBJCOPY := m68k-linux-gnu-objcopy
 OUT ?= ../../boards
+# This directory, from the repository's top.
+SOURCE_DIRECTORY := examples/firmware/demo
 
 # -fno-tree-loop-distribute-patterns: no memset or memcpy calls for
-# loops, there being no library.  The prefix map keeps the build
-# directory out of the debug information.
+# loops, there being no library.  The prefix map writes the build
+# directory as its path from the repository's top, so the debug
+# information holds no host path and gdb run from the top finds the
+# sources.
 CFLAGS := -mcpu=cpu32 -ffreestanding -nostdlib -fno-pic -static -O2 -g \
 	-Wall -Wextra -fno-tree-loop-distribute-patterns \
-	-fno-asynchronous-unwind-tables -fdebug-prefix-map=$(CURDIR)=. \
+	-fno-asynchronous-unwind-tables -fdebug-prefix-map=$(CURDIR)=$(SOURCE_DIRECTORY) \
 	-Wl,--build-id=none
 
 SOURCES := crt0.S main.c

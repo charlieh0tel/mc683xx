@@ -8,9 +8,10 @@ firmware in `examples/firmware/demo`.  `docs/gdb.md` is the reference
 
 ## Build
 
-`demo.bin` and `demo.elf` (DWARF, its sources mapped to `.`) are
-committed in `examples/boards`.  To rebuild them (needs
-`m68k-linux-gnu-gcc`; the build is reproducible):
+`demo.bin` and `demo.elf` (DWARF, its sources named from the
+repository's top, `examples/firmware/demo`) are committed in
+`examples/boards`.  To rebuild them (needs `m68k-linux-gnu-gcc`; the
+build is reproducible):
 
 ```text
 make demo-image
@@ -44,13 +45,13 @@ up).
 
 ```text
 $ gdb-multiarch examples/boards/demo.elf
-(gdb) directory examples/firmware/demo
 (gdb) target remote 127.0.0.1:1234
-reset () at ./crt0.S:70
+reset () at examples/firmware/demo/crt0.S:70
 ```
 
-With the ELF gdb takes its byte order from it: no `set endian`.  The
-build maps its directory to `.`, hence `directory`.
+With the ELF gdb takes its byte order from it: no `set endian`.  Run
+gdb from the repository's top, where the ELF's source paths start, or
+add `directory` with the path to `examples/firmware/demo`.
 
 ## Moves
 
