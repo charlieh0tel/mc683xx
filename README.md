@@ -127,14 +127,9 @@ first goes in and fed a byte a turn, so the run is the same each time;
 a terminal's is live.  `--bind NAME=stdout` writes an endpoint's
 output as `stdio` does and reads nothing, for an endpoint that only
 listens or to leave standard input to another binding.
-`mc683xx-run --help` gives the rest.  The example's firmware,
-`echo.bin`, is committed, and `make echo-image` rebuilds it from
-`examples/src/echo.rs`; give a board its own with `--firmware`.
-`examples/boards/demo.toml` runs a C firmware (`examples/firmware/demo`):
-a console over the SCI (`h` lists its commands), the PIT's ticks and a
-1 PPS timed on the GPT.  `demo.bin` and `demo.elf`, with its symbols,
-are committed; `make demo-image` rebuilds them (`m68k-linux-gnu-gcc`),
-and docs/gdb-firmware.md debugs it under gdb.
+`mc683xx-run --help` gives the rest; `--firmware` gives a board
+another image.  [examples/README.md](https://github.com/charlieh0tel/mc683xx/blob/main/examples/README.md) describes the example
+boards and their firmware.
 
 ## Documentation
 
@@ -171,8 +166,8 @@ The crates above are in `crates/`: `cpu32` (`mc683xx-cpu32`),
 (`mc683xx-run`).  The other members are not on crates.io:
 
 - `cpu32-py` (`crates/cpu32-py`): the Python package `mc683xx`, on PyPI.
-- `examples`: the host guide's examples, run as doctests, this
-  README's, run as a test, and the example boards (`examples/boards`) with their firmware.
+- `examples`: the example boards and their firmware, and the
+  documentation's examples run as tests ([examples/README.md](https://github.com/charlieh0tel/mc683xx/blob/main/examples/README.md)).
 - `benches`: the criterion benchmarks.
 - `cpu32-harness`, `cpu32-oracle`: test-only checks of the core
   against SingleStepTests' 68000 cases, Musashi, Unicorn and the
@@ -186,8 +181,6 @@ The crates above are in `crates/`: `cpu32` (`mc683xx-cpu32`),
 make hooks   # once per clone
 make ci      # fmt check, license copies, commit-msg hook, clippy, tests, rustdoc
 make python      # the Python module in .venv, with its tests
-make echo-image  # examples/boards/echo.bin
-make demo-image  # examples/boards/demo.bin and demo.elf (m68k-linux-gnu-gcc)
 make singlestep  # SingleStepTests m68000 (fetches about 140 MB once)
 make oracle      # differential runs against Musashi (fetches it once)
 make corpus SMARTCLOCK_FIRMWARE=...  # smartclock firmware functions
