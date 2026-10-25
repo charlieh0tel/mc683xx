@@ -205,7 +205,7 @@ review.
 | Leaner `step`: fewer per-instruction resets, no `OnceLock` loads in the loop, the common no-fault path first | Estimated from counts: about 100 of a NOP's 240, up to 1.5x on simple instructions.  Done in two passes, 29 and then 41 (below); about 9 more are the `dyn Interrupts` call and handler results in memory. |
 | Fetch through a cached code page (PLAN.md, Memory) | Estimated from counts: about half of the 80 fetch instructions.  A naive shortcut through `Memory::read` measures slower (1.05-1.2x the time), so this needs the real cache, not a bypass.  Done (below). |
 | Chip-select decode cached per page for peripheral pages, no `Vec` | Estimated from counts: about 30% of a peripheral cycle.  Removing the `Vec` alone measured 0.94x on `peripheral_move`, within noise of the level cache's share.  Done (below). |
-| Fat LTO and one codegen unit | Measured with criterion: 5-20% on most benchmarks.  A host's profile, not ours: a library's profile settings do not reach its users. |
+| Fat LTO and one codegen unit | Measured with criterion: 5-20% on most benchmarks.  A host's profile, not ours: a library's profile settings do not reach its users.  Measured again at 0.2.0, for the wheels we build ourselves: mixed, `chip/flash_nop` -16% and `chip/short_runs` -10% but `core/move_register` +44%, `core/add_register` +40% and `core/move_indirect` +22%, inlining moving across the whole build; not adopted. |
 | Instruction table registration by enumerating only a pattern's free bits | Measured: `tables/instructions` 5.7 ms to 0.97 ms (done). |
 | Timing table built at compile time (its decoder is `const fn`) | Estimated: its 5.2 ms to zero, at some compile time. |
 
