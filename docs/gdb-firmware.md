@@ -52,18 +52,18 @@ $ gdb-multiarch build/rom.elf
 (gdb) target remote 127.0.0.1:1234
 ```
 
-With a raw image only:
+With a raw image only (gdb otherwise takes the host's byte order):
 
 ```text
 $ gdb-multiarch -nx
-(gdb) set architecture m68k:cpu32
+(gdb) set endian big
 (gdb) target remote 127.0.0.1:1234
 (gdb) display/i $pc
 ```
 
 Then as usual: `break *0x1234`, `watch *(short *)0xffe00`, `stepi`,
 `continue`, Ctrl-C, `info registers system` (`vbr`, `usp`, `ssp`,
-`sfc`, `dfc`), `monitor reset` then `flushregs`, `detach`.
+`sfc`, `dfc`), `monitor reset` then `maintenance flush register-cache`, `detach`.
 
 ## Things that differ from a BDM pod
 

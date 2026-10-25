@@ -29,12 +29,15 @@ $ gdb-multiarch firmware.elf
 (gdb) stepi
 (gdb) x/8xh $pc
 (gdb) monitor reset
-(gdb) flushregs
+(gdb) maintenance flush register-cache
 (gdb) detach
 ```
 
-Without an ELF, `set architecture m68k:cpu32` before `target
-remote` lets gdb disassemble (`x/4i $pc`) a raw image.
+Without an ELF, gdb takes its byte order from the host, and the
+target description cannot name one: `set endian big` before `target
+remote`, or every register and word reads byte-swapped (a PC of
+`0x400` shows as `0x40000`).  The description names the
+architecture, so `x/4i $pc` then disassembles a raw image.
 
 ## From the runner
 
@@ -204,7 +207,8 @@ CPU has none.
 - `monitor reset`: the bare CPU's reset exception (SSP and PC from
   the vectors at zero), the chip's or board's external reset (the
   modules, the peripherals it reaches, the board's RESET net).  gdb's
-  register cache is then stale: `flushregs`.
+  register cache is then stale: `maintenance flush register-cache`
+  (`flushregs` in older gdbs).
 - `monitor help`.
 
 ## Determinism and cost

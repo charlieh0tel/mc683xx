@@ -52,6 +52,7 @@ done
 address=$(sed -n 's/^mc683xx-run: waiting for gdb on //p' "$work/runner.err")
 
 "$gdb" -batch -nx \
+	-ex 'set endian big' \
 	-ex "target remote $address" \
 	-ex 'info registers pc' \
 	-ex 'stepi' \
@@ -62,7 +63,7 @@ address=$(sed -n 's/^mc683xx-run: waiting for gdb on //p' "$work/runner.err")
 	-ex 'info registers d0' \
 	-ex 'delete' \
 	-ex 'monitor reset' \
-	-ex 'flushregs' \
+	-ex 'maintenance flush register-cache' \
 	-ex 'info registers pc' \
 	-ex 'detach' \
 	>"$work/gdb.out" 2>&1 || status=$?

@@ -794,7 +794,10 @@ impl<T: Target> MonitorCmd for Session<'_, T> {
     ) -> Result<(), T::Error> {
         match command {
             b"reset" if self.target.reset() => {
-                outputln!(out, "reset; `flushregs` to see the registers");
+                outputln!(
+                    out,
+                    "reset; `maintenance flush register-cache` to see the registers"
+                );
             }
             b"reset" => outputln!(out, "this target cannot reset"),
             b"help" => outputln!(out, "reset: reset the target"),
