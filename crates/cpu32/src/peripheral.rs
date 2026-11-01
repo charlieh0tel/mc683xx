@@ -50,6 +50,10 @@ pub struct BusCycle {
     pub size: Size,
     /// The cycle's function code.
     pub function_code: FunctionCode,
+    /// Whether it is a write: R/W low (SIMRM 5.1.5).  Set before the
+    /// chip asks `wait_states` and `dsack_port`, so a peripheral that
+    /// times or sizes its writes apart from its reads sees which.
+    pub write: bool,
     /// When it starts (on the bare machine, when its instruction
     /// started), on the system clock.
     pub now: Cycles,
@@ -64,14 +68,15 @@ pub struct BusCycle {
 }
 
 impl BusCycle {
-    /// A cycle at `address`, of `size` and `function_code`, starting at
-    /// `now`, on no select and not stacking.
+    /// A read cycle at `address`, of `size` and `function_code`,
+    /// starting at `now`, on no select and not stacking.
     #[must_use]
     pub const fn new(address: u32, size: Size, function_code: FunctionCode, now: Cycles) -> Self {
         Self {
             address,
             size,
             function_code,
+            write: false,
             now,
             select: None,
             stacking: false,
@@ -85,6 +90,12 @@ impl BusCycle {
             select: Some(select),
             ..self
         }
+    }
+
+    /// This cycle, a write or a read.
+    #[must_use]
+    pub const fn writing(self, write: bool) -> Self {
+        Self { write, ..self }
     }
 
     /// This cycle, stacking a frame or not.

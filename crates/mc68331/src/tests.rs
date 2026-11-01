@@ -701,6 +701,34 @@ fn overlapping_selects_end_at_the_first_dsack() {
 }
 
 #[test]
+fn overlapping_selects_dsack_at_once_on_both_pins() {
+    let mut builder = Builder::default();
+    builder
+        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .unwrap();
+    builder
+        .peripheral(Recorder::answering(0x1234), &[cs(0)])
+        .unwrap();
+    builder
+        .peripheral(Recorder::answering(0x1234), &[cs(1)])
+        .unwrap();
+    let mut chip = builder.build();
+    // CS0 an 8-bit port, asserting DSACK0, and CS1 a 16-bit one,
+    // asserting DSACK1 (SIMRM 7.6), both at $500000 with no wait
+    // states: the two at once are a 16-bit port (SIMRM Table 5-2), so a
+    // word is one cycle though CS0 decodes first
+    write_register(&mut chip, CSPAR0, CSPAR0_CS0_8_BIT);
+    for select in [SIM + 0x4c, SIM + 0x50] {
+        write_register(&mut chip, select, 0x5000);
+        write_register(&mut chip, select + 2, CS2_INTERNAL);
+    }
+    assert_eq!(
+        cycle(&mut chip, 0x50_0000, Size::Word, None),
+        Ok((0x1234, 3))
+    );
+}
+
+#[test]
 fn an_external_dsack_waits_on_the_peripheral_and_the_bus_monitor() {
     let mut builder = Builder::default();
     builder
@@ -737,6 +765,8 @@ const CSPAR0: u32 = SIM + 0x44;
 /// CSPAR0 out of reset but CS2 an 8-bit port, %10 in bits 7:6 (SIMRM
 /// 7.3.1, Table 7-4).
 const CSPAR0_CS2_8_BIT: u16 = 0x3fbf;
+/// CSPAR0 out of reset but CS0 an 8-bit port, %10 in bits 3:2.
+const CSPAR0_CS0_8_BIT: u16 = 0x3ffb;
 /// CS2's option as [`externally_terminated`]'s but DSACK zero wait states
 /// (SIMRM 7.10.3).
 const CS2_INTERNAL: u16 = 0x7830;

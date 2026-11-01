@@ -889,13 +889,12 @@ impl Board {
             };
             return Ok((value, cycles * u16::from(clocks)));
         }
+        let bus_cycle = BusCycle::new(address, size, function_code, now).writing(write.is_some());
         let mut first: Option<(u8, PortSize)> = None;
         for &candidate in found.iter().flatten() {
-            let cycle =
-                BusCycle::new(address, size, function_code, now).through(candidate.select.into());
+            let cycle = bus_cycle.through(candidate.select.into());
             first = first_dsack(first, self.dsack(candidate, cycle));
         }
-        let bus_cycle = BusCycle::new(address, size, function_code, now);
         for &peripheral in &bus {
             first = first_dsack(first, self.peripheral_dsack(peripheral, bus_cycle, None));
         }
@@ -934,8 +933,7 @@ impl Board {
             let Some(wire) = self.wiring[candidate.select.index()] else {
                 continue;
             };
-            let cycle =
-                BusCycle::new(address, size, function_code, now).through(candidate.select.into());
+            let cycle = bus_cycle.through(candidate.select.into());
             let lanes = candidate.lanes;
             let wire = match wire {
                 Wire::Memory(wired) => self
@@ -1289,11 +1287,7 @@ impl Board {
                 (None, Some(Wire::Peripheral(_))) => return None,
                 (None, None) => None,
             };
-            if let Some(clocks) = clocks
-                && first.is_none_or(|(earliest, _)| clocks < earliest)
-            {
-                first = Some((clocks, found.port));
-            }
+            first = first_dsack(first, clocks.map(|clocks| (clocks, found.port)));
             match wire {
                 Some(Wire::Memory(memory)) if self.diverted_to(memory.region).is_some() => {
                     return None;
@@ -1327,6 +1321,7 @@ impl Board {
         wired.map(|memory| (memory, (port, clocks)))
     }
 }
+
 /// The core's memory on the chip's address lines.  It cannot fail: the
 /// core's memory takes more lines than a page's and at most 32, as the
 /// assertion holds [`ADDRESS_LINES`] to.
@@ -1355,12 +1350,24 @@ const fn is_sim(source: Source) -> bool {
 
 /// Of DSACK `first` and `response`, each the clocks after which it ends
 /// a cycle and the port size it gives, the one that ends the cycle: the
-/// first (SIMRM 7.5.1).
+/// first (SIMRM 7.5.1).  Two at once are the pins both assert: DSACK1
+/// from either, alone or with DSACK0, a 16-bit port, DSACK0 alone an
+/// 8-bit one (SIMRM 5.3.2, Table 5-2), so the order they are asked in
+/// does not matter.  A select's own DSACK is the pin its port field
+/// names (SIMRM 7.6).
 fn first_dsack(
     first: Option<(u8, PortSize)>,
     response: Option<(u8, PortSize)>,
 ) -> Option<(u8, PortSize)> {
     match (first, response) {
+        (Some((earliest, port)), Some((clocks, other))) if clocks == earliest => {
+            let wired = if port == PortSize::Bits16 || other == PortSize::Bits16 {
+                PortSize::Bits16
+            } else {
+                PortSize::Bits8
+            };
+            Some((clocks, wired))
+        }
         (Some((earliest, _)), Some((clocks, _))) if clocks < earliest => response,
         (Some(_), _) => first,
         (None, _) => response,

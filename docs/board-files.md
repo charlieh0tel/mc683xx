@@ -322,7 +322,9 @@ A peripheral on no select drives DSACK itself, so it states `dsack`
 PEPAR assigning none of them as DSACK leaves the cycle to the bus
 monitor, as on an externally terminated select.  Its accesses carry no
 select (`PeripheralAccess::select` is `None`).  It takes a cycle beside
-a select that matches it, the first DSACK ending it, and before a
+a select that matches it, the first DSACK ending it (two at once
+their pins together, DSACK1 from either a 16-bit port: SIMRM Table
+5-2), and before a
 fixed memory.  Peripherals with the same `base` and `size`, or the same
 `iack`, share it as peripherals share a select, split by role and
 lane, and drive the same pins; a window that only overlaps another
@@ -474,17 +476,21 @@ The contract a host's peripheral models target (rustdoc in
     `wait_states(access)` for an external DSACK, and `dsack_port(access)`
     for a peripheral whose DSACK pins differ cycle by cycle (`Some(PortSize)`,
     16 bits on DSACK1, 8 on DSACK0 alone; `None` by default, its `dsack`
-    saying).  A `peripheral::PeripheralAccess`
+    saying), both asked of the peripheral that takes the cycle's
+    direction, so on a select a read-only and a write-only peripheral
+    share, a write's DSACK is the write-only one's.  A
+    `peripheral::PeripheralAccess`
     carries `attachment` (the index in the peripheral's `attach`), its
     `role` and `lane`, `address` (`offset` plus ADDR on its `lines`),
-    `size`, `function_code`, `now` in board time, and `select`, the
+    `size`, `function_code`, `write` (R/W low, set for `wait_states` and
+    `dsack_port` too), `now` in board time, and `select`, the
     chip select that carried it (the decoder's, through a decoder;
     `None` on no select).
     `PeripheralAccess` is `#[non_exhaustive]`: a host's test builds one with
     `PeripheralAccess::new(select, address, size, function_code, now)`
     (`PeripheralAccess::on_no_select(address, size, function_code, now)`
-    for a peripheral on no select) and
-    `.through(attachment, role, lane)`.  The board layer turns each
+    for a peripheral on no select), a read, and
+    `.through(attachment, role, lane)` and `.writing(true)`.  The board layer turns each
     chip `mc683xx_cpu32::peripheral::BusCycle` into a `PeripheralAccess`.  An 8-bit
     peripheral takes its byte of a write with `access.written_byte(value)`
     and gives a read's with `access.read_byte(byte)`, the rule above

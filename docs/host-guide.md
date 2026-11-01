@@ -332,16 +332,21 @@ refuses.
   `BusCycle` carries the select that asserted, the address on ADDR (board
   decode within a select's window is the peripheral's: it reads these),
   the size (byte or word: a long is two word cycles, high word first,
-  and a word on an 8-bit port two byte cycles), the function code and
-  the cycle's start time.  `BusCycle` is `#[non_exhaustive]`: a host
-  that builds one (a test) calls `BusCycle::new(select, address, size,
-  function_code, now)`, so a field added later gets a default.  Values are right-aligned; a read must fit
+  and a word on an 8-bit port two byte cycles), the function code,
+  whether it is a write (`write`, R/W low, SIMRM 5.1.5) and the cycle's
+  start time.  `BusCycle` is `#[non_exhaustive]`: a host that builds
+  one (a test) calls `BusCycle::new(address, size, function_code, now)`,
+  a read, then `.through(select)` and `.writing(true)` as it needs, so a
+  field added later gets a default.  Values are right-aligned; a read must fit
   the cycle.  `Err(BusError)` asserts BERR: the CPU takes a bus error.
 - `wait_states(cycle) -> Option<u8>`: on a select whose DSACK field is
   external (%1111, SIMRM 7.10.3), the wait states before the peripheral
   asserts DSACK, or `None` if it never does, so the bus monitor ends
   the cycle in a bus error.  On other selects the option register
-  times the cycle and this is not asked.  Each wait state costs the
+  times the cycle and this is not asked.  The cycle's `write` is set
+  when it is asked, so a peripheral that answers its writes apart from
+  its reads, or a select shared by a read-only and a write-only one,
+  times each direction by its own.  Each wait state costs the
   CPU a clock, so slow peripherals cost what they do on the board.
   `Builder::dsack(peripheral, Dsack)` states which DSACK pins it drives:
   the chip then checks PEPAR at each such cycle (a pin assigned as
@@ -404,7 +409,11 @@ monitor ends the cycle, told as `DsackFault::BusUnassigned`.  Its
 cycles carry no select (`BusCycle::select` is `None`).
 
 It takes a cycle beside any select that matches it, as on the board:
-both drive the data bus, the first DSACK ends the cycle.  A fixed
+both drive the data bus, the first DSACK ends the cycle.  Two DSACKs
+on the same clock are the pins both assert: DSACK1 from either, alone
+or with DSACK0, is a 16-bit port, DSACK0 from both an 8-bit one (SIMRM
+5.3.2, Table 5-2), whatever order the peripherals were added in; a
+select's own DSACK is the pin its port field names (SIMRM 7.6).  A fixed
 memory takes only the cycles nothing on the bus decodes, so a window
 inside one takes those bytes from it.  The core serves no memory on a
 page a window touches: every cycle there reaches the bus.

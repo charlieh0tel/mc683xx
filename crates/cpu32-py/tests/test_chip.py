@@ -1314,6 +1314,30 @@ class Narrow(Recorder):
         return 8 if cycle.address & 2 == 0 else 16
 
 
+class Directions(Recorder):
+    """A Recorder that notes each cycle's direction as its DSACK is asked."""
+
+    def __init__(self):
+        super().__init__()
+        self.asked = []
+
+    def wait_states(self, cycle):
+        self.asked.append(cycle.write)
+        return 0
+
+
+def test_a_peripheral_sees_the_direction_before_its_dsack():
+    window = 0x800000
+    builder = mc683xx.Builder()
+    builder.memory(rom([0x60FE]), ["CSBOOT"], writable=False)
+    peripheral = Directions()
+    builder.bus_peripheral(peripheral, windows=[(window, 0x100)], dsack=mc683xx.Dsack.DSACK1)
+    chip = builder.build()
+    chip.bus_read(window, 2)
+    chip.bus_write(window, 2, 0xABCD)
+    assert peripheral.asked == [False, True]
+
+
 def test_a_bus_peripheral_decodes_its_own_window():
     window = 0x800000
     builder = mc683xx.Builder()

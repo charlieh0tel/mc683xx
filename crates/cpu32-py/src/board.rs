@@ -226,6 +226,13 @@ impl AccessView {
         self.0.function_code.bits()
     }
 
+    /// Whether it is a write, R/W low; set for `wait_states` and
+    /// `dsack_port` too.
+    #[getter]
+    const fn write(&self) -> bool {
+        self.0.write
+    }
+
     /// When its instruction started, in picoseconds.
     #[getter]
     const fn now(&self) -> u64 {
@@ -235,13 +242,14 @@ impl AccessView {
     fn __repr__(&self) -> String {
         format!(
             "PeripheralAccess(attachment={}, select={}, role={:?}, lane={:?}, address={:#x}, \
-             size={}, now={})",
+             size={}, write={}, now={})",
             self.attachment(),
             self.select().as_deref().unwrap_or("None"),
             self.role(),
             self.lane(),
             self.address(),
             self.size(),
+            if self.write() { "True" } else { "False" },
             self.now()
         )
     }

@@ -212,7 +212,7 @@ impl Bus for FlatBus {
             return Ok(Cycles::ZERO);
         }
         let (peripheral, cycle) = self.peripheral(&access).ok_or(BusError)?;
-        peripheral.write(cycle, value)?;
+        peripheral.write(cycle.writing(true), value)?;
         Ok(Cycles::ZERO)
     }
 

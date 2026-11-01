@@ -159,7 +159,8 @@ impl<D> MappedAdapter<D> {
 /// The cycle a model sees for `access` at `now`, through its select if
 /// one carried it.
 fn carried(access: PeripheralAccess, now: Cycles) -> BusCycle {
-    let cycle = BusCycle::new(access.address, access.size, access.function_code, now);
+    let cycle =
+        BusCycle::new(access.address, access.size, access.function_code, now).writing(access.write);
     match access.select {
         Some(select) => cycle.through(select.into()),
         None => cycle,
