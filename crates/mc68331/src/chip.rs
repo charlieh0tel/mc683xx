@@ -19,6 +19,8 @@ use mc683xx_cpu32::cpu::Cpu;
 use mc683xx_cpu32::cpu::Halt;
 use mc683xx_cpu32::cpu::Run;
 use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::cpu::bare::End;
+use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
 use mc683xx_cpu32::cpu::state::Save;
@@ -685,6 +687,13 @@ impl Mc68331 {
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
     pub fn run_for(&mut self, budget: Cycles) -> Run {
+        self.run(budget, None)
+    }
+
+    /// [`run_for`](Self::run_for), the CPU's quanta limited by `limits`
+    /// too, their cycles each quantum's: the run ends where a limit
+    /// ends the CPU's, with [`Stop::Requested`].
+    pub(crate) fn run(&mut self, budget: Cycles, limits: Option<Limits>) -> Run {
         let start = self.now;
         let end = start + budget;
         let mut stop = Stop::Budget;
@@ -729,12 +738,28 @@ impl Mc68331 {
             }
             self.board.quantum_end = self.now + quantum;
             self.board.sync = false;
-            let run = {
+            // and whether a limit ended it
+            let (run, limited) = {
                 let board = RefCell::new(&mut self.board);
                 let mut bus = Connection(&board);
                 let mut interrupts = Connection(&board);
-                self.cpu
-                    .run_for(&mut bus, &mut interrupts, self.now, quantum)
+                match limits {
+                    None => (
+                        self.cpu
+                            .run_for(&mut bus, &mut interrupts, self.now, quantum),
+                        false,
+                    ),
+                    Some(mut limits) => {
+                        limits.cycles = Some(quantum);
+                        let run = self
+                            .cpu
+                            .run_limited(&mut bus, &mut interrupts, self.now, limits);
+                        match run.end {
+                            End::Stop(stop) => (Run::new(run.cycles, stop), false),
+                            _ => (Run::new(run.cycles, Stop::Requested), true),
+                        }
+                    }
+                }
             };
             self.now += run.cycles;
             if mem::take(&mut self.board.system_reload) {
@@ -756,6 +781,10 @@ impl Mc68331 {
                 Stop::Requested if !mem::take(&mut self.board.stop_taken) && synced => Stop::Budget,
                 other => other,
             };
+            if limited {
+                stop = Stop::Requested;
+                break;
+            }
             match stop {
                 Stop::Halted(halt) => {
                     if halt == Halt::DoubleBusFault && self.board.sim.halt_monitor() {
