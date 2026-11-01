@@ -236,6 +236,11 @@ Crates:
 - **Adversarial review**: when a new idea/direction lands, run an
   adversarial review pass on it (what breaks, what it costs, what it
   forecloses) before/while implementing, and say so plainly.
-- **Refactor first**: when working on anything significant, make a
-  refactor pass first and commit that first.  If in doubt if a
-  refactor is required, ask.
+- **Refactor first**: before writing any feature or fix, look at the
+  code it touches for a refactor that would make the change smaller or
+  clearer (a function to split, a helper or type to extract,
+  duplication to remove), and say what you found, even "none needed".
+  Make the refactor with no change in behavior, tests passing, and
+  commit it before any commit of the change itself.  One found midway
+  is still committed first: reorder the branch before it is pushed.
+  If in doubt whether one is needed, ask.
