@@ -360,9 +360,10 @@ pub(crate) struct Server {
     /// A connection waiting for the client's end of file, and when it
     /// is refused.  Polls go on meanwhile; others wait their turn.
     waiting: Option<(Stream, Instant)>,
-    /// Whether the CPU was in background mode when the server started,
-    /// an entry it did not see: its ATEMP is stale until it resumes.
-    stale: bool,
+    /// ATEMP as the server started, if the CPU was in background mode
+    /// then: an entry it did not see, reported stale with this value
+    /// until a GO, CALL or reset.
+    stale: Option<u32>,
 }
 
 impl Server {
@@ -376,7 +377,10 @@ impl Server {
             pending: Vec::new(),
             outgoing: Vec::new(),
             waiting: None,
-            stale: Cpu32Target::halted(chip).ok().flatten().is_some(),
+            stale: Cpu32Target::halted(chip)
+                .ok()
+                .flatten()
+                .map(|_| chip.cpu().atemp()),
         })
     }
 
@@ -531,11 +535,12 @@ impl Server {
     fn atemp(&mut self, chip: &mut Mc68331) -> Vec<u8> {
         let (kind, atemp) = match Cpu32Target::halted(chip).ok().flatten() {
             None => {
-                self.stale = false;
+                self.stale = None;
                 (Kind::Running, 0)
             }
-            Some(_) if self.stale => (Kind::Stale, chip.cpu().atemp()),
-            Some(entry) => (Kind::Fresh, entry.atemp()),
+            Some(entry) => self
+                .stale
+                .map_or((Kind::Fresh, entry.atemp()), |atemp| (Kind::Stale, atemp)),
         };
         let mut field = vec![kind as u8];
         field.extend_from_slice(&atemp.to_le_bytes());
@@ -561,13 +566,13 @@ impl Server {
                 Ok(body)
             }
             Request::ResetHalt => {
-                self.stale = false;
+                self.stale = None;
                 chip.reset_halted().map(|_| self.atemp(chip))
             }
             Request::Halt => chip.halt().map(|_| self.atemp(chip)),
             _ if !frozen => return reply(Status::NoFreeze, &[]),
             Request::Go => chip.go().map(|()| {
-                self.stale = false;
+                self.stale = None;
                 Vec::new()
             }),
             Request::ReadRegister(register) => chip
@@ -592,7 +597,7 @@ impl Server {
                 .and_then(|space| chip.write_memory(address, space, size, &data))
                 .map(|()| Vec::new()),
             Request::Call(address) => call(chip, address).map(|()| {
-                self.stale = false;
+                self.stale = None;
                 Vec::new()
             }),
         };
@@ -656,7 +661,7 @@ mod tests {
     const STALE: u8 = 2;
 
     #[test]
-    fn an_entry_after_go_is_fresh_though_the_first_was_stale() {
+    fn an_entry_after_go_is_fresh_though_the_first_was_stale_and_kept() {
         let mut rom = vec![0; 0x1000];
         rom[4..8].copy_from_slice(&(START as u32).to_be_bytes());
         // BGND; BRA.B *
@@ -665,8 +670,17 @@ mod tests {
         builder.memory(rom, false, &[ChipSelect::Boot]).unwrap();
         let mut chip = builder.build();
         chip.reset_halted().unwrap();
+        chip.write_system_register(SystemRegister::Atemp, 7)
+            .unwrap();
         let mut server = Server::bind("127.0.0.1:0", &mut chip).unwrap();
-        assert_eq!(server.answer(&mut chip, &[code::PINS])[PINS_KIND], STALE);
+        let pins = server.answer(&mut chip, &[code::PINS]);
+        assert_eq!(pins[PINS_KIND], STALE);
+        assert_eq!(pins[PINS_KIND + 1..], 7u32.to_le_bytes());
+        let atemp = SystemRegister::Atemp.code() as u8;
+        let write = [code::WRITE_SYSTEM_REGISTER, atemp, 9, 0, 0, 0];
+        assert_eq!(server.answer(&mut chip, &write), [0]);
+        let pins = server.answer(&mut chip, &[code::PINS]);
+        assert_eq!(pins[PINS_KIND + 1..], 7u32.to_le_bytes(), "kept");
         assert_eq!(server.answer(&mut chip, &[code::GO]), [0]);
         chip.run_for(Cycles(1000));
         assert!(Cpu32Target::halted(&mut chip).unwrap().is_some(), "BGND");
