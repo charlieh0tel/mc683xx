@@ -893,19 +893,11 @@ impl Board {
         for &candidate in found.iter().flatten() {
             let cycle =
                 BusCycle::new(address, size, function_code, now).through(candidate.select.into());
-            if let Some((clocks, port)) = self.dsack(candidate, cycle)
-                && first.is_none_or(|(earliest, _)| clocks < earliest)
-            {
-                first = Some((clocks, port));
-            }
+            first = first_dsack(first, self.dsack(candidate, cycle));
         }
         let bus_cycle = BusCycle::new(address, size, function_code, now);
         for &peripheral in &bus {
-            if let Some((clocks, port)) = self.peripheral_dsack(peripheral, bus_cycle, None)
-                && first.is_none_or(|(earliest, _)| clocks < earliest)
-            {
-                first = Some((clocks, port));
-            }
+            first = first_dsack(first, self.peripheral_dsack(peripheral, bus_cycle, None));
         }
         let (clocks, port) = first.ok_or(BusError)?;
         if self.sim.bus_monitor().is_some_and(|limit| clocks > limit) {
@@ -1359,6 +1351,20 @@ pub(crate) fn stall(clocks: u16) -> Cycles {
 /// Whether `source` arbitrates with the SIM's IARB.
 const fn is_sim(source: Source) -> bool {
     matches!(source, Source::Timer | Source::External)
+}
+
+/// Of DSACK `first` and `response`, each the clocks after which it ends
+/// a cycle and the port size it gives, the one that ends the cycle: the
+/// first (SIMRM 7.5.1).
+fn first_dsack(
+    first: Option<(u8, PortSize)>,
+    response: Option<(u8, PortSize)>,
+) -> Option<(u8, PortSize)> {
+    match (first, response) {
+        (Some((earliest, _)), Some((clocks, _))) if clocks < earliest => response,
+        (Some(_), _) => first,
+        (None, _) => response,
+    }
 }
 
 /// `read`, a driver's value for a cycle of `size`, merged into `value`
