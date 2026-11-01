@@ -300,6 +300,7 @@ impl Builder {
                 output_stop: OutputStop::default(),
                 output_seen: Seen::default(),
                 output_moved: false,
+                frozen: false,
                 tracing: ChipTracing::default(),
                 page_selects: Vec::new(),
                 level: InterruptLevel::NONE,
@@ -773,6 +774,8 @@ impl Mc68331 {
                 self.board.rebuild(&mut self.cpu.memory);
             }
             self.board.advance(self.now);
+            // a BGND or a double bus fault entered background mode
+            self.sync_freeze();
             self.board.output_moved |= self.board.outputs_moved();
             if self.board.take_diversions() {
                 self.board.rebuild(&mut self.cpu.memory);
@@ -872,6 +875,8 @@ impl Mc68331 {
         self.board.reset_others(now, cause);
         self.board.reload(&mut self.cpu.memory, cause);
         self.board.events.push(Event::Reset(now, cause));
+        // the modules reset unfrozen
+        self.board.frozen = false;
         self.board.rebuild(&mut self.cpu.memory);
         let board = RefCell::new(&mut self.board);
         self.cpu.set_bdm_enabled(breakpoint);
@@ -883,6 +888,17 @@ impl Mc68331 {
             // where it would have begun (PLAN.md, Background debug mode)
             let pc = Address(self.cpu.registers.pc);
             self.cpu.set_pcc(pc);
+        }
+        self.sync_freeze();
+    }
+
+    /// FREEZE follows the CPU into and out of background mode
+    /// (MC68331UM 4.2.13): the modules told of a change, the decode
+    /// rebuilt for the bus monitor it may stop.
+    pub(crate) fn sync_freeze(&mut self) {
+        let frozen = self.cpu.background().is_some();
+        if self.board.set_freeze(frozen, self.now) {
+            self.board.rebuild(&mut self.cpu.memory);
         }
     }
 

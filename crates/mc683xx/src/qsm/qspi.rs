@@ -205,7 +205,7 @@ enum Queue {
         /// Where it is.
         phase: Phase,
     },
-    /// Halted at a queue boundary by HALT, before this entry.
+    /// Halted at a queue boundary by HALT or FREEZE, before this entry.
     Halted(u8),
 }
 
@@ -244,6 +244,9 @@ pub(super) struct Qspi {
     pub(super) ram: [u8; RAM_BYTES],
     /// The queue.
     queue: Queue,
+    /// Whether FREEZE, with QSMCR FRZ1, halts the queue at the next
+    /// entry's end (MC68331UM 6.2.1.2).
+    frozen: bool,
     /// The PCS code the QSPI drives, during an entry or after one with
     /// CONT.
     drive: Option<u8>,
@@ -320,6 +323,7 @@ impl Qspi {
             spcr2: 0,
             buffered: None,
             spcr3: 0,
+            frozen: false,
             flags: 0,
             armed: 0,
             completed: 0,
@@ -563,9 +567,17 @@ impl Qspi {
     }
 
     /// Whether the queue halts at the next entry's end: HALT (QSMRM
-    /// 4.3.4).
+    /// 4.3.4), or FREEZE with FRZ1 (MC68331UM 6.2.1.2).
     const fn halting(&self) -> bool {
-        self.spcr3 & SPCR3_HALT != 0
+        self.spcr3 & SPCR3_HALT != 0 || self.frozen
+    }
+
+    /// FREEZE with FRZ1 begins or ends at `now`: the queue halts at the
+    /// next entry's end, as HALT halts it, and goes on when FREEZE ends,
+    /// unless HALT holds it (QSMRM 3.2.1, FRZ1).
+    pub(super) fn set_frozen(&mut self, frozen: bool, port: PortQs, now: Cycles) {
+        self.frozen = frozen;
+        self.resume(port, now);
     }
 
     /// A halted queue goes on at `now` if nothing halts it now.
@@ -961,12 +973,14 @@ impl Qspi {
     }
 
     /// Entry `pointer` ends at `now`: at ENDQP SPIF sets and the queue
-    /// stops or wraps; a buffered SPCR2 takes effect; HALT halts it
-    /// (QSMRM Figures 4-4 and 4-5, 4.3.3, 4.3.4).
+    /// stops or wraps; a buffered SPCR2 takes effect; HALT or FREEZE
+    /// halts it, HALTA set (QSMRM Figures 4-4 and 4-5, 4.3.3, 4.3.4,
+    /// 3.2.1 FRZ1).  At ENDQP HALT stops it; FREEZE halts it before the
+    /// wrap, to go on when FREEZE ends.
     fn finish(&mut self, pointer: u8, port: PortQs, now: Cycles) {
         let last = u16::from(pointer) == self.spcr2 >> SPCR2_ENDQP_SHIFT & POINTER_MASK;
         let moved = self.apply_buffered();
-        let halt = self.halting();
+        let halt = self.spcr3 & SPCR3_HALT != 0;
         if last {
             self.flags |= SPSR_SPIF;
             if self.spcr2 & SPCR2_WREN == 0 || halt {
@@ -985,7 +999,7 @@ impl Qspi {
         } else {
             (pointer + 1) % ENTRIES
         };
-        if halt {
+        if self.halting() {
             self.flags |= SPSR_HALTA;
             self.queue = Queue::Halted(next);
         } else {

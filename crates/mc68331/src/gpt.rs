@@ -95,6 +95,8 @@ const GPTMCR_STOP: u16 = 1 << 15;
 /// GPTMCR STOPP: the prescaler and pulse accumulator stop, the input
 /// pins are ignored (GPTRM 9.4).
 const GPTMCR_STOPP: u16 = 1 << 12;
+/// GPTMCR FRZ0: FREEZE freezes the GPT (MC68331UM D.6.1, 7.3.2).
+const GPTMCR_FRZ0: u16 = 1 << 13;
 /// GPTMCR INCP: one prescaler count while STOPP; self-negating.
 const GPTMCR_INCP: u16 = 1 << 11;
 /// GPTMCR SUPV.
@@ -124,7 +126,7 @@ const IC4_PIN: u8 = 7;
 /// Input captures 1 to 3 on PGP0 to PGP2.
 const CAPTURES: u8 = 3;
 /// The format of the GPT's snapshot ([`Module::save`]).
-const STATE_VERSION: u32 = 4;
+const STATE_VERSION: u32 = 5;
 /// Output compares 1 to 4, TOC1 to TOC4; OC5 is TI4/O5.
 const COMPARES: usize = 4;
 /// PACTL PAIS, the PAI pin (GPTRM 4.1.1).
@@ -409,6 +411,9 @@ pub struct Gpt {
     /// Whether LPSTOP has turned its clock off (MC68331UM 4.3.4): it
     /// stops as STOP stops it.
     low_power: bool,
+    /// Whether FREEZE is asserted: with FRZ0 it stops as STOPP stops
+    /// it (MC68331UM 7.3.2).
+    frozen: bool,
     /// ICR.
     icr: u16,
     /// DDRGP.
@@ -493,6 +498,7 @@ impl Gpt {
         Self {
             mcr: GPTMCR_RESET,
             low_power: false,
+            frozen: false,
             icr: 0,
             direction: 0,
             latch: 0,
@@ -778,19 +784,33 @@ impl Gpt {
         pins
     }
 
-    /// Whether STOP, STOPP or LPSTOP stops the prescaler and the input
-    /// pins.
+    /// Whether STOP, STOPP, LPSTOP or FREEZE with FRZ0 stops the
+    /// prescaler and the input pins.
     const fn stopped(&self) -> bool {
-        self.mcr & (GPTMCR_STOP | GPTMCR_STOPP) != 0 || self.low_power
+        self.mcr & (GPTMCR_STOP | GPTMCR_STOPP) != 0
+            || self.low_power
+            || self.frozen && self.mcr & GPTMCR_FRZ0 != 0
     }
 
     /// LPSTOP turns its clock off at `now`, or a wake turns it on: TCNT,
     /// the prescaler and the inputs stop as STOP stops them, and run on
     /// from where they stopped (MC68331UM 4.3.4; PLAN.md, LPSTOP).
     pub(crate) fn set_low_power(&mut self, low_power: bool, now: Cycles) {
+        self.stop_cause_changed(now, |gpt| gpt.low_power = low_power);
+    }
+
+    /// FREEZE asserted or negated at `now`: with FRZ0 the prescaler,
+    /// the pulse accumulator and the inputs stop, and run on from where
+    /// they stopped (MC68331UM 7.3.2).
+    pub(crate) fn set_freeze(&mut self, frozen: bool, now: Cycles) {
+        self.stop_cause_changed(now, |gpt| gpt.frozen = frozen);
+    }
+
+    /// `change` at `now` to what stops the prescaler and the inputs.
+    fn stop_cause_changed(&mut self, now: Cycles, change: impl FnOnce(&mut Self)) {
         self.advance(now);
         let was = self.stopped();
-        self.low_power = low_power;
+        change(self);
         self.stop_changed(was, now);
         self.find_fast_edges(now);
         self.refresh();

@@ -68,6 +68,7 @@ impl Mc68331 {
         let entered = self.cpu.breakpoint();
         if entered {
             self.board.wake(self.now);
+            self.sync_freeze();
         }
         entered
     }
@@ -119,6 +120,7 @@ impl Cpu32Target for Mc68331 {
     fn go(&mut self) -> Result<(), TargetError> {
         self.in_background()?;
         self.cpu.resume();
+        self.sync_freeze();
         Ok(())
     }
 
@@ -130,6 +132,7 @@ impl Cpu32Target for Mc68331 {
     fn step(&mut self) -> Result<Entry, TargetError> {
         self.in_background()?;
         self.cpu.resume();
+        self.sync_freeze();
         let mut limits = Limits::default();
         limits.steps = Some(1);
         let start = self.now;

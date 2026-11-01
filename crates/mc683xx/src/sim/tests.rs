@@ -293,6 +293,57 @@ fn lpstop_stops_the_watchdog() {
 }
 
 #[test]
+fn freeze_stops_the_watchdog_and_the_timer_with_frzsw_and_the_bus_monitor_with_frzbm() {
+    // MC68331UM 4.2.13
+    let mut sim = sim();
+    let tick = |n: u64| Cycles(n * RESET_CLOCKS_PER_TICK);
+    sim.set_freeze(true, tick(100));
+    assert_eq!(sim.next_event(), Some(tick(512)), "FRZSW clear: it runs");
+    assert!(!sim.freezes_bus_monitor());
+    // SIMCR FRZSW and FRZBM, MM as it was
+    write(&mut sim, 0x00, Size::Word, 0x60cf, tick(100));
+    assert_eq!(sim.next_event(), None);
+    assert!(sim.freezes_bus_monitor());
+    sim.advance(tick(1 << 18));
+    assert_eq!(sim.take_reset(), None);
+    sim.set_freeze(false, tick(1000));
+    assert_eq!(sim.next_event(), Some(tick(1000 + 412)));
+    assert!(!sim.freezes_bus_monitor());
+}
+
+#[test]
+fn a_service_while_frozen_reloads_the_watchdog_s_count() {
+    // MC68331UM 4.2.10: a debugger services it in background mode
+    let mut sim = sim();
+    let tick = |n: u64| Cycles(n * RESET_CLOCKS_PER_TICK);
+    write(&mut sim, 0x00, Size::Word, 0x40cf, tick(0));
+    sim.set_freeze(true, tick(500));
+    write(&mut sim, 0x27, Size::Byte, 0x55, tick(600));
+    write(&mut sim, 0x27, Size::Byte, 0xaa, tick(600));
+    sim.set_freeze(false, tick(1000));
+    assert_eq!(sim.next_event(), Some(tick(1000 + 512)));
+}
+
+#[test]
+fn freeze_with_frzsw_holds_the_timer_s_count() {
+    let mut sim = sim();
+    write(&mut sim, 0x00, Size::Word, 0x40cf, Cycles::ZERO);
+    write(&mut sim, 0x04, Size::Word, 0xcf00, Cycles::ZERO);
+    write(&mut sim, 0x22, Size::Word, 0x0542, Cycles::ZERO);
+    write(&mut sim, 0x24, Size::Word, 0x0008, Cycles::ZERO);
+    let period = Cycles(16_777_216 / 1024);
+    let half = Cycles(period.0 / 2);
+    sim.set_freeze(true, half);
+    sim.advance(Cycles(10 * period.0));
+    assert_eq!(sim.timer_request(), None, "no count while frozen");
+    sim.set_freeze(false, Cycles(10 * period.0));
+    sim.advance(Cycles(10 * period.0 + half.0 - 1));
+    assert_eq!(sim.timer_request(), None);
+    sim.advance(Cycles(10 * period.0 + half.0));
+    assert_eq!(sim.timer_request(), InterruptLevel::new(5), "the half left");
+}
+
+#[test]
 fn a_reset_keeps_the_port_latches_and_the_reset_instruction_all() {
     let mut sim = sim();
     write(&mut sim, 0x11, Size::Byte, 0x81, Cycles::ZERO);
