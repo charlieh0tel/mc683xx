@@ -31,6 +31,8 @@ use nix::sys::signal::Signal;
 use nix::sys::signal::kill;
 #[cfg(unix)]
 use nix::unistd::Pid;
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
 
 /// TRAP #0 (CPU32RM 4, TRAP).
 const TRAP: u16 = 0x4e40;
@@ -729,4 +731,100 @@ fn ctrl_c_while_waiting_for_gdb_stops_the_run_cleanly() {
     assert!(rest.ends_with("reason=requested\n"), "{rest}");
     assert!(!fs::read(&saved).unwrap().is_empty(), "saved");
     fs::remove_dir_all(directory).unwrap();
+}
+
+/// One request to the virtual BDM cable and its reply, framed as the
+/// pod protocol's stream framing: a length byte, then the packet.
+#[cfg(unix)]
+fn bdm(cable: &mut UnixStream, request: &[u8]) -> Vec<u8> {
+    let mut message = vec![u8::try_from(request.len()).unwrap()];
+    message.extend_from_slice(request);
+    cable.write_all(&message).unwrap();
+    let mut length = [0];
+    cable.read_exact(&mut length).unwrap();
+    let mut reply = vec![0; usize::from(length[0])];
+    cable.read_exact(&mut reply).unwrap();
+    reply
+}
+
+/// The runner with `--bdm` on a Unix socket in `directory`, and a
+/// connection to it.
+#[cfg(unix)]
+fn bdm_session(file: &Path, directory: &Path) -> (Child, UnixStream) {
+    let socket = directory.join("bdm.sock");
+    let _ = fs::remove_file(&socket);
+    let address = format!("unix:{}", socket.display());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mc683xx-run"))
+        .args([file.to_str().unwrap(), "--bdm", &address])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let (sender, receiver) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        let mut line = String::new();
+        stderr.read_line(&mut line).unwrap();
+        sender.send(line).unwrap();
+        stderr
+    });
+    let Ok(line) = receiver.recv_timeout(WAITING) else {
+        child.kill().unwrap();
+        panic!("the runner did not say where it answers BDM");
+    };
+    child.stderr = Some(reader.join().unwrap().into_inner());
+    assert_eq!(line.trim(), format!("mc683xx-run: BDM on {address}"));
+    (child, UnixStream::connect(&socket).unwrap())
+}
+
+#[cfg(unix)]
+#[test]
+fn a_bdm_debugger_drives_the_board_over_the_virtual_cable() {
+    let image = echo::image();
+    let directory = board("bdm", &image);
+    let (child, mut cable) = bdm_session(&directory.join("echo.toml"), &directory);
+    // Hello: version 2
+    assert_eq!(bdm(&mut cable, &[0x0e]), [0, 2, 0, 0, 0]);
+    // Pins: running, FREEZE low, RESET and DS high, 5000 mV, kind 0
+    assert_eq!(
+        bdm(&mut cable, &[0x02]),
+        [0, 0b110, 0x88, 0x13, 0, 0, 0, 0, 0]
+    );
+    // a register needs FREEZE
+    assert_eq!(bdm(&mut cable, &[0x07, 0]), [3]);
+    // ResetHalt: a fresh breakpoint entry, ATEMP 0
+    assert_eq!(bdm(&mut cable, &[0x03]), [0, 1, 0, 0, 0, 0]);
+    assert_eq!(bdm(&mut cable, &[0x02])[1] & 1, 1, "FREEZE high");
+    let start = START.to_le_bytes();
+    assert_eq!(
+        bdm(&mut cable, &[0x09, 0x00]),
+        [0, start[0], start[1], start[2], start[3]],
+        "RPC at the reset PC"
+    );
+    // read the first word of the program through SFC = supervisor program
+    assert_eq!(bdm(&mut cable, &[0x0a, 0x0e, 6, 0, 0, 0]), [0]);
+    let at = START as usize;
+    assert_eq!(
+        bdm(
+            &mut cable,
+            &[0x0b, start[0], start[1], start[2], start[3], 1, 2]
+        ),
+        [0, image[at], image[at + 1]]
+    );
+    // a word at an odd address is the target's address error
+    assert_eq!(bdm(&mut cable, &[0x0b, 1, 4, 0, 0, 1, 2]), [4]);
+    assert_eq!(bdm(&mut cable, &[0x07, 16]), [1], "no register 16");
+    assert_eq!(bdm(&mut cable, &[0x01, 0, 0]), [1], "no raw exchange yet");
+    // a second client is closed at once
+    let mut second = UnixStream::connect(directory.join("bdm.sock")).unwrap();
+    assert_eq!(bdm(&mut cable, &[0x0e]), [0, 2, 0, 0, 0]);
+    assert_eq!(second.read(&mut [0]).unwrap(), 0);
+    // Go, then Halt
+    assert_eq!(bdm(&mut cable, &[0x05]), [0]);
+    assert_eq!(bdm(&mut cable, &[0x02])[1] & 1, 0, "running");
+    assert_eq!(bdm(&mut cable, &[0x04]), [0, 1, 0, 0, 0, 0]);
+    assert_eq!(bdm(&mut cable, &[0x04]), [0, 1, 0, 0, 0, 0], "and again");
+    let (status, _) = interrupted(child);
+    assert!(status.is_some());
 }

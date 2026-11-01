@@ -19,6 +19,7 @@
     clippy::missing_panics_doc
 )]
 
+mod bdm;
 mod binding;
 mod error;
 mod gdb;
@@ -63,6 +64,7 @@ use mc683xx_gdb::stub::Ending;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
 
+use crate::bdm::Server;
 use crate::binding::Binding;
 use crate::binding::How;
 use crate::error::RunError;
@@ -191,6 +193,14 @@ struct Arguments {
     /// gdb detaches the run goes on to its end.
     #[arg(long, value_name = "HOST:PORT")]
     gdb: Option<String>,
+    /// Answer a BDM debugger at this address, unix:PATH or HOST:PORT,
+    /// as the m683xx BDM pod answers on USB (its protocol, version 2):
+    /// a virtual BDM cable.  It gives full control of the CPU, so expose
+    /// it on trusted networks only.  While the CPU is in background
+    /// mode an unpaced run waits for requests, board time standing
+    /// still; a paced one keeps time going.
+    #[arg(long, value_name = "ADDRESS", conflicts_with = "gdb")]
+    bdm: Option<String>,
     /// How fast board time goes against wall time: unpaced (as fast as
     /// the host runs it), realtime, or a factor, board seconds a wall
     /// second (2 twice real time, 0.5 half).  The run is the same
@@ -399,8 +409,26 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
             return Ok(outcome);
         }
     }
+    let mut server = arguments
+        .bdm
+        .as_ref()
+        .map(|address| Server::bind(address, board.chip_mut()))
+        .transpose()
+        .map_err(RunError::Bdm)?;
+    let unpaced = arguments.pace == Pacing::Unpaced;
     let mut pacer = Pacer::new();
     let outcome = loop {
+        if let Some(server) = &mut server {
+            server.poll(board.chip_mut());
+            if unpaced && board.chip().cpu().background().is_some() {
+                // board time stands still between a debugger's requests
+                server.wait(board.chip_mut(), &interrupted);
+                if interrupted.load(Ordering::SeqCst) {
+                    break BoardRun::new(Stop::Requested, board.now());
+                }
+                continue;
+            }
+        }
         pacer.wait(board.now(), &control);
         turns.before(&mut board)?;
         let until = (board.now() + turn).min(end);
@@ -417,7 +445,9 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
             || arguments
                 .cycles
                 .is_some_and(|cycles| board.chip().now() >= Cycles(cycles));
-        if outcome.stop != Stop::Budget || done {
+        // background mode ends a run only with no debugger to resume it
+        let resumable = server.is_some() && matches!(outcome.stop, Stop::Background(_));
+        if outcome.stop != Stop::Budget && !resumable || done {
             break outcome;
         }
     };

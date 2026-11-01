@@ -122,7 +122,10 @@ cargo run --release -p mc683xx-run -- examples/boards/echo.toml --bind console=s
 runs the board the file describes for five seconds of board time, its
 `external.console` on standard input and output, and says on standard
 error why it stopped.  `--trace bus-cycles,exceptions,pins,qspi` traces
-the run; `--gdb 127.0.0.1:1234` waits at reset for gdb to run it.
+the run; `--gdb 127.0.0.1:1234` waits at reset for gdb to run it, and
+`--bdm unix:/tmp/bdm.sock` answers a BDM debugger as the m683xx BDM
+pod answers on USB, a virtual BDM cable (PLAN.md, Background debug
+mode).
 Standard input that is a file or a pipe is read to its end when input
 first goes in and fed a byte a turn, so the run is the same each time;
 a terminal's is live.  `--bind NAME=stdout` writes an endpoint's
