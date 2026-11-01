@@ -3,7 +3,8 @@
 How a version reaches crates.io and PyPI.  One version covers the
 workspace: every published crate and the `mc683xx` Python package.
 The maintainer pushes the tags; a `v*` tag publishes, with no
-approval step.
+approval step, once the `release` workflow's gate passes (Cutting a
+release, step 7).
 
 ## What is published
 
@@ -93,15 +94,24 @@ Once, before the first release.
    `smartclock-boards`, and `cargo publish --workspace --dry-run`.
 5. Commit `Cargo.toml` and `Cargo.lock` as "Release X.Y.Z", and merge
    it to `main`.
-6. Tag the merged commit `vX.Y.Z`, annotated, and push the tag.
-7. The tag runs `release`: the wheels, the sdist and its wheel's stub
-   check, then the `pypi` job, which checks that the tag names
-   `Cargo.toml`'s version and uploads.  To look over the artifacts
-   first, make a manual run of `release` before tagging.  A manual run of `release`
-   (Actions, Run workflow) builds the same artifacts without
-   publishing, to check a branch.
-8. The `crates` job, after `pypi`, checks the tag the same way and
-   runs `cargo publish --workspace` with a trusted-publishing token.
+6. Wait for `ci` to pass on the merged commit, then tag it `vX.Y.Z`,
+   annotated, and push the tag.
+7. The tag runs `release`.  Its `gate` job checks that the tagged
+   commit is on `main` (an ancestor of `origin/main`), that the tag
+   names `Cargo.toml`'s version, and, through the GitHub API with the
+   workflow's token (`actions: read`), that the latest `ci` run of
+   that commit's push to `main` completed with success; no run, a run
+   still going, or a failed or cancelled one fails it, and a re-run
+   that passes clears it.  Alongside, the wheels, the sdist
+   and its wheel's stub check build.  The `pypi` job uploads only once
+   `gate` and the builds have passed.  A tag whose `gate` failed for a
+   `ci` run still going is re-run (Actions, Re-run jobs) once `ci`
+   has passed.  To look over the artifacts first, make a manual run
+   of `release` before tagging: a manual run (Actions, Run workflow)
+   skips `gate` and builds the same artifacts without publishing, to
+   check a branch.
+8. The `crates` job, after `gate` and `pypi`, runs `cargo publish
+   --workspace` with a trusted-publishing token.
    The first release only: that job fails, crates.io trusting no
    workflow for a crate that does not exist yet, so publish by hand
    from a clean checkout of the tag.  Cargo verifies each package by building it against the
