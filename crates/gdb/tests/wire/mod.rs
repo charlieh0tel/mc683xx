@@ -85,8 +85,13 @@ impl ConnectionExt for Wire {
             .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))
     }
 
+    /// The next byte, if one has come; end of file once the script is
+    /// spent, as gdb gone.
     fn peek(&mut self) -> io::Result<Option<u8>> {
         self.refill();
+        if self.input.is_empty() && self.script.is_empty() {
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+        }
         Ok(self.input.front().copied())
     }
 }

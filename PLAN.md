@@ -1581,6 +1581,18 @@ checks the bare build.
 - **Stops gdb did not ask for:** the host's own hook stops are
   `SIGTRAP`, a halt and a bare host's fault stop `SIGBUS`, a stop
   request `SIGINT`.
+- **Over BDM** (`bdm::serve`, 2026-11-01): a second session over any
+  `Cpu32Target`, so a host driving silicon through a BDM pod has gdb.
+  It shares the register description (`GdbRegisters`, read and
+  written by location, a BDM register or system register), the target
+  description and the session errors with the first.  Breakpoints are
+  BGND planted in memory and read back, refused in ROM; hardware
+  breakpoints and watchpoints wait for a capability trait beside
+  `Cpu32Target` that the emulator would implement with its hooks.
+  Continue is GO and a poll of `halted` and the connection; steps are
+  `Cpu32Target::step`, which reports where it stopped, not always one
+  instruction later.  The emulator's own `--gdb` stays on the hook
+  session for now.
 
 Adversarial review (2026-10-24):
 

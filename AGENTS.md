@@ -26,7 +26,7 @@ Crates:
 - `mc683xx-run` (`crates/mc68331-run`): the runner, a thin command on
   `mc683xx-board`; the one binary.
 - `mc683xx-gdb` (`crates/gdb`): the GDB remote stub, over the bare
-  CPU, the chip and a board.
+  CPU, the chip and a board, and over any `Cpu32Target` (`bdm`).
 - `mc683xx-peripherals` (`crates/peripherals`): stock chips as board-file peripherals.
 - `cpu32-harness`: test-only: SingleStepTests, the differential runs,
   the firmware function corpus, boot smoke and boot diff.

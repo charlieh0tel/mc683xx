@@ -1,6 +1,6 @@
 [package]
 name = "mc683xx-gdb"
-description = "A GDB remote stub for the CPU32: the bare CPU, the MC68331 and its boards"
+description = "A GDB remote stub for the CPU32: the bare CPU, the MC68331 and its boards, or a CPU32 over BDM"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -42,3 +42,8 @@ mc683xx-modules.workspace = true
 [[test]]
 name = "rsp"
 required-features = ["board"]
+
+# The BDM stub over the chip.
+[[test]]
+name = "bdm"
+required-features = ["mc68331"]
