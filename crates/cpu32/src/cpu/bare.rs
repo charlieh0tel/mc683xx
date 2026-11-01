@@ -12,6 +12,7 @@ use std::mem;
 
 use super::Cpu;
 use super::Halt;
+use super::Idle;
 use super::Stop;
 use super::hooks::Invalid;
 use super::hooks::Resume;
@@ -26,6 +27,7 @@ use crate::interrupt::Interrupts;
 use crate::registers::Registers;
 use crate::registers::status;
 use mc683xx_target::address::Address;
+use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
@@ -249,6 +251,29 @@ impl Cpu {
             Some(idle) => idle.halt(),
             None => None,
         }
+    }
+
+    /// The entry source while the CPU is in background mode (CPU32RM
+    /// 7.2.3).
+    #[must_use]
+    pub const fn background(&self) -> Option<Entry> {
+        match self.idle {
+            Some(Idle::Background(entry)) => Some(entry),
+            _ => None,
+        }
+    }
+
+    /// Whether background mode is enabled.
+    #[must_use]
+    pub const fn bdm_enabled(&self) -> bool {
+        self.bdm_enabled
+    }
+
+    /// Enables or disables background mode, as BKPT's level at RESET's
+    /// rising edge does (CPU32RM 7.2.1); the chip sets it at each reset
+    /// from its BKPT input.  A bare CPU's host sets it before running.
+    pub const fn set_bdm_enabled(&mut self, enabled: bool) {
+        self.bdm_enabled = enabled;
     }
 
     /// The stop a run ends in at once while the CPU executes nothing,

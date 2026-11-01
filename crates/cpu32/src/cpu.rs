@@ -11,6 +11,7 @@ use crate::bus::BusAccess;
 use crate::bus::BusError;
 use crate::cycles::Cycles;
 use crate::effective_address::Altered;
+use crate::exception;
 use crate::exception::CycleKind;
 use crate::exception::Exception;
 use crate::exception::Fault;
@@ -34,6 +35,7 @@ use crate::registers::Registers;
 use crate::registers::status;
 use crate::timing;
 use mc683xx_target::address::Address;
+use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
@@ -65,6 +67,10 @@ pub enum Stop {
     /// The bus asked it to stop ([`Bus::stop_requested`]), once the
     /// instruction whose cycle asked ended.
     Requested,
+    /// The CPU is in background mode, for the entry ATEMP reports
+    /// (CPU32RM 7.2.3); only a debugger's GO, CALL or a reset resumes
+    /// it.
+    Background(Entry),
 }
 
 /// Why the CPU halted.
@@ -77,11 +83,17 @@ pub enum Halt {
     DoubleBusFault,
 }
 
+/// PCC after a double bus fault out of reset (CPU32RM 7.2.5.3; 7.2.3
+/// gives $FFFFFFFF instead: PLAN.md, Background debug mode).
+const PCC_RESET_DOUBLE_FAULT: u32 = 0x0000_0001;
+
 /// Why the CPU executes nothing, until what ends it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Idle {
     /// Halted, until reset.
     Halted(Halt),
+    /// In background mode (CPU32RM 7.2).
+    Background(Entry),
 }
 
 impl Idle {
@@ -89,6 +101,7 @@ impl Idle {
     const fn stop(self) -> Stop {
         match self {
             Self::Halted(halt) => Stop::Halted(halt),
+            Self::Background(entry) => Stop::Background(entry),
         }
     }
 
@@ -96,6 +109,7 @@ impl Idle {
     const fn halt(self) -> Option<Halt> {
         match self {
             Self::Halted(halt) => Some(halt),
+            Self::Background(_) => None,
         }
     }
 }
@@ -148,6 +162,19 @@ pub struct Cpu {
     stopped: bool,
     /// Why it executes nothing, while it does not.
     pub(crate) idle: Option<Idle>,
+    /// Whether background mode is enabled: BKPT low at RESET's rising
+    /// edge latches it (CPU32RM 7.2.1).
+    pub(crate) bdm_enabled: bool,
+    /// ATEMP: the entry source on entering background mode, then BDM's
+    /// temporary (CPU32RM 7.2.3).
+    pub(crate) atemp: u32,
+    /// PCC: the first word of the last instruction executed before
+    /// background mode (CPU32RM 7.2.5.3).
+    pub(crate) pcc: Address,
+    /// FAR: the address of the last bus or address error's cycle
+    /// (CPU32RM 7.2.5.1).  Unlike the chip's, not moved by cycles that
+    /// end normally (PLAN.md, Background debug mode).
+    pub(crate) far: Address,
     /// Set from taking a bus or address error, or reset, until the
     /// handler's first opcode is fetched: a bus or address error then
     /// is a double bus fault (CPU32RM 6.2.2; MC68331UM 4.5.5.2).
@@ -312,6 +339,10 @@ impl Cpu {
             refund: Cycles::ZERO,
             stopped: false,
             idle: None,
+            bdm_enabled: false,
+            atemp: 0,
+            pcc: Address(0),
+            far: Address(0),
             fault_window: false,
             released: None,
             altered: Altered::default(),
@@ -356,7 +387,8 @@ impl Cpu {
     /// # Errors
     ///
     /// [`Halt::DoubleBusFault`] if fetching the vectors ends in a bus or
-    /// address error.
+    /// address error, with background mode disabled; enabled, the CPU
+    /// enters it instead ([`Cpu::background`]).
     pub fn reset(&mut self, bus: &mut dyn Bus, now: Cycles) -> Result<(), Halt> {
         self.registers
             .set_sr(status::S | status::INTERRUPT_MASK | (self.registers.sr() & status::CCR));
@@ -393,9 +425,13 @@ impl Cpu {
                 self.left_pc = Address(pc);
                 Ok(())
             }
-            _ => {
-                self.idle = Some(Idle::Halted(Halt::DoubleBusFault));
-                Err(Halt::DoubleBusFault)
+            (ssp, pc) => {
+                let fault = [ssp, pc].into_iter().find_map(|read| match read {
+                    Err(Exception::Fault(fault)) => Some(fault),
+                    _ => None,
+                });
+                self.double_fault(fault.as_ref(), Address(PCC_RESET_DOUBLE_FAULT));
+                self.halted().map_or(Ok(()), Err)
             }
         }
     }
@@ -581,6 +617,33 @@ impl Cpu {
     fn leave_loop_mode(&mut self) {
         self.loop_mode = None;
         self.loopable = None;
+    }
+
+    /// Enters background mode for `entry`, the instruction at `pcc` the
+    /// last executed: ATEMP takes the entry source (CPU32RM 7.2.3,
+    /// 7.2.5.3).
+    pub(crate) fn enter_background(&mut self, entry: Entry, pcc: Address) {
+        self.idle = Some(Idle::Background(entry));
+        self.atemp = entry.atemp();
+        self.pcc = pcc;
+        self.stopped = false;
+        self.block_start = true;
+        self.leave_loop_mode();
+    }
+
+    /// A double bus fault, the second fault `fault` if known: background
+    /// mode if it is enabled, with its SSW in ATEMP, else halted
+    /// (CPU32RM Table 7-1, Table 7-2).
+    pub(crate) fn double_fault(&mut self, fault: Option<&Fault>, pcc: Address) {
+        if let Some(fault) = fault {
+            self.far = fault.address;
+        }
+        if self.bdm_enabled {
+            let ssw = fault.map_or(0, exception::double_fault_ssw);
+            self.enter_background(Entry::DoubleBusFault { ssw }, pcc);
+        } else {
+            self.idle = Some(Idle::Halted(Halt::DoubleBusFault));
+        }
     }
 
     /// Charges `cost` after the last instruction, less their overlap
@@ -1622,8 +1685,10 @@ mod tests {
     use crate::interrupt::Acknowledged;
     use crate::interrupt::InterruptLevel;
     use crate::interrupt::Interrupts;
+    use crate::memory::Memory;
     use crate::registers::status;
     use mc683xx_target::address::Address;
+    use mc683xx_target::entry::Entry;
     use mc683xx_target::function_code::FunctionCode;
     use mc683xx_target::size::Size;
     use std::cell::Cell;
@@ -2020,6 +2085,31 @@ mod tests {
         assert_eq!(peek_long(&cpu, 0x300c), 0xd3);
         assert_eq!(cpu.registers.ssp, STACK);
         assert_eq!(cpu.movem_resume, None);
+    }
+
+    #[test]
+    fn a_double_bus_fault_fetching_the_vectors_enters_background_mode_if_enabled() {
+        // nothing mapped: both vector fetches end in BERR
+        let mut cpu = Cpu::new(Memory::new(24).unwrap());
+        assert_eq!(
+            cpu.reset(&mut NoBus, Cycles::ZERO),
+            Err(Halt::DoubleBusFault)
+        );
+        assert_eq!(cpu.background(), None);
+        cpu.set_bdm_enabled(true);
+        assert_eq!(cpu.reset(&mut NoBus, Cycles::ZERO), Ok(()));
+        assert_eq!(cpu.halted(), None);
+        let Some(Entry::DoubleBusFault { ssw }) = cpu.background() else {
+            panic!("{:?}", cpu.background());
+        };
+        // a read of a long in supervisor program space (CPU32RM 6.3.1.2)
+        assert_eq!(ssw & 0b111, 6);
+        assert_eq!(cpu.pcc, Address(1), "CPU32RM 7.2.5.3");
+        assert_eq!(cpu.atemp, Entry::DoubleBusFault { ssw }.atemp());
+        assert_eq!(
+            step(&mut cpu, &mut NoInterrupts),
+            Stop::Background(Entry::DoubleBusFault { ssw })
+        );
     }
 
     #[test]

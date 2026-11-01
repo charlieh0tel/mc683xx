@@ -28,6 +28,7 @@ use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::clock::ClockSource;
 use mc683xx_target::address::Address;
+use mc683xx_target::entry;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
@@ -425,6 +426,40 @@ pub(crate) enum Stop {
     /// whose cycle asked ended: a stop request, or a peripheral's
     /// exception, which the run raises.
     Requested(),
+    /// The CPU is in background mode, for its entry source.
+    Background(Entry),
+}
+
+/// Why the CPU entered background mode (Rust's
+/// `mc683xx_target::entry::Entry`; CPU32RM Table 7-2).
+#[pyclass(module = "mc683xx", frozen, eq, hash, from_py_object)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Entry {
+    /// BKPT asserted.
+    Breakpoint(),
+    /// A BGND instruction.
+    Background(),
+    /// A double bus fault, with the second fault's SSW.
+    DoubleBusFault {
+        /// The special status word.
+        ssw: u16,
+    },
+    /// An ATEMP Table 7-2 does not list.
+    Unknown {
+        /// ATEMP as read.
+        atemp: u32,
+    },
+}
+
+impl From<entry::Entry> for Entry {
+    fn from(entry: entry::Entry) -> Self {
+        match entry {
+            entry::Entry::Breakpoint => Self::Breakpoint(),
+            entry::Entry::Background => Self::Background(),
+            entry::Entry::DoubleBusFault { ssw } => Self::DoubleBusFault { ssw },
+            entry::Entry::Unknown { atemp } => Self::Unknown { atemp },
+        }
+    }
 }
 
 impl From<cpu::Stop> for Stop {
@@ -434,6 +469,7 @@ impl From<cpu::Stop> for Stop {
             cpu::Stop::Stopped => Self::Stopped(),
             cpu::Stop::Halted(halt) => Self::Halted(halt.into()),
             cpu::Stop::Hook(id) => Self::Hook(HookIdView(id)),
+            cpu::Stop::Background(entry) => Self::Background(entry.into()),
             _ => Self::Requested(),
         }
     }

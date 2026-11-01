@@ -58,7 +58,8 @@ pub enum TargetRun {
     Quantum,
     /// A hook stopped it: the stub's, or the host's own.
     Hook,
-    /// The CPU halted (a double bus fault); only a reset restarts it.
+    /// The CPU halted (a double bus fault), or is in background mode
+    /// with no BDM debugger to resume it; only a reset restarts it.
     Halted,
     /// The host or a peripheral asked it to stop.
     Requested,
@@ -75,7 +76,7 @@ impl From<Stop> for TargetRun {
     fn from(stop: Stop) -> Self {
         match stop {
             Stop::Budget | Stop::Stopped => Self::Quantum,
-            Stop::Halted(_) => Self::Halted,
+            Stop::Halted(_) | Stop::Background(_) => Self::Halted,
             Stop::Hook(_) => Self::Hook,
             _ => Self::Requested,
         }

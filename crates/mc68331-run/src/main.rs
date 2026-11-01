@@ -255,7 +255,8 @@ fn main() -> ExitCode {
     match run(&arguments) {
         Ok(outcome) => match outcome.stop {
             Stop::Budget | Stop::Stopped => ExitCode::SUCCESS,
-            Stop::Halted(_) => ExitCode::from(EXIT_HALTED),
+            // background mode with no debugger: nothing resumes it
+            Stop::Halted(_) | Stop::Background(_) => ExitCode::from(EXIT_HALTED),
             _ => ExitCode::from(EXIT_STOPPED),
         },
         Err(error) => {
