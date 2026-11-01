@@ -416,20 +416,22 @@ impl Cpu {
                 FunctionCode::SUPERVISOR_PROGRAM,
             )
         };
-        let ssp = vector(&mut core, Vector::RESET_STACK_POINTER);
-        let pc = vector(&mut core, Vector::RESET_PROGRAM_COUNTER);
-        match (ssp, pc) {
-            (Ok(ssp), Ok(pc)) => {
-                self.registers.ssp = ssp;
+        // SSP is loaded before PC is fetched, and the first fault ends
+        // the sequence (CPU32RM 6.2.1, Figure 6-2)
+        let loaded = vector(&mut core, Vector::RESET_STACK_POINTER)
+            .map(|ssp| core.cpu.registers.ssp = ssp)
+            .and_then(|()| vector(&mut core, Vector::RESET_PROGRAM_COUNTER));
+        match loaded {
+            Ok(pc) => {
                 self.registers.pc = pc;
                 self.left_pc = Address(pc);
                 Ok(())
             }
-            (ssp, pc) => {
-                let fault = [ssp, pc].into_iter().find_map(|read| match read {
-                    Err(Exception::Fault(fault)) => Some(fault),
+            Err(exception) => {
+                let fault = match exception {
+                    Exception::Fault(fault) => Some(fault),
                     _ => None,
-                });
+                };
                 self.double_fault(fault.as_ref(), Address(PCC_RESET_DOUBLE_FAULT));
                 self.halted().map_or(Ok(()), Err)
             }
@@ -2110,6 +2112,53 @@ mod tests {
             step(&mut cpu, &mut NoInterrupts),
             Stop::Background(Entry::DoubleBusFault { ssw })
         );
+    }
+
+    /// A bus answering the reset vectors' words below `answered`, each
+    /// address read recorded, and faulting the rest.
+    struct VectorBus {
+        /// The first address that faults.
+        answered: u32,
+        /// The addresses read.
+        reads: Vec<u32>,
+    }
+
+    impl Bus for VectorBus {
+        fn read(&mut self, access: BusAccess) -> Result<Read, BusError> {
+            self.reads.push(access.address.0);
+            if access.address.0 >= self.answered {
+                return Err(BusError);
+            }
+            Ok(Read {
+                value: 0x1234,
+                stall: Cycles::ZERO,
+            })
+        }
+
+        fn write(&mut self, _access: BusAccess, _value: u32) -> Result<Cycles, BusError> {
+            Err(BusError)
+        }
+    }
+
+    #[test]
+    fn reset_loads_ssp_before_fetching_pc_and_stops_at_the_first_fault() {
+        // CPU32RM 6.2.1, Figure 6-2
+        let mut cpu = Cpu::new(Memory::new(24).unwrap());
+        cpu.set_bdm_enabled(true);
+        let mut bus = VectorBus {
+            answered: 4,
+            reads: Vec::new(),
+        };
+        assert_eq!(cpu.reset(&mut bus, Cycles::ZERO), Ok(()));
+        assert!(cpu.background().is_some());
+        assert_eq!(cpu.registers.ssp, 0x1234_1234, "SSP loaded");
+        assert_eq!(bus.reads, [0, 2, 4]);
+        let mut bus = VectorBus {
+            answered: 0,
+            reads: Vec::new(),
+        };
+        assert_eq!(cpu.reset(&mut bus, Cycles::ZERO), Ok(()));
+        assert_eq!(bus.reads, [0], "PC not fetched");
     }
 
     #[test]
