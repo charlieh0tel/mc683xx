@@ -52,6 +52,9 @@ pub(crate) enum RunError {
     /// gdb's address: no listening there, or no connection taken.
     #[error("gdb: {0}")]
     Gdb(io::Error),
+    /// `--bdm`'s address: no listening there.
+    #[error("bdm: {0}")]
+    Bdm(io::Error),
     /// `--pace`'s factor, refused.
     #[error(transparent)]
     Pacing(#[from] mc683xx_board::pacing::PacingError),

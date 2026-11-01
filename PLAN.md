@@ -1943,6 +1943,19 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   disables background mode, as a pod that has let BKPT go sees on
   silicon.  `halt` acknowledges a breakpoint at once.  Memory is real
   bus cycles (`bus_read`, `bus_write`), as READ and WRITE make them.
+- `mc683xx-run --bdm unix:PATH|HOST:PORT` is a virtual BDM cable: it
+  answers the m683xx BDM pod's host-pod protocol, version 2, written
+  from its `docs/usb-protocol.md` alone, over the chip's
+  `Cpu32Target`.  One client at a time; another is closed at once.
+  The server is polled between turns; while the CPU is in background
+  mode an unpaced run waits on it, board time standing still between
+  requests, and a paced one keeps time going.  FREEZE does not reach
+  the SIM, QSM and GPT yet, so their freeze bits do nothing: they run
+  on while the CPU is in background mode.  ATEMP is always fresh: the server sees every entry,
+  but one a restored snapshot started in, which is stale until the CPU
+  resumes.  Transfer, the raw 17-bit exchange, answers BadRequest until
+  the serial interface is modeled.  CALL stacks RPC at the active SP
+  in its data space (7.2.8.13).
 - With background mode disabled, BKPT should run a breakpoint
   acknowledge cycle and take vector 12 on its bus error (6.2.6); not
   modeled yet, so `halt` then fails and nothing happens to the CPU.
