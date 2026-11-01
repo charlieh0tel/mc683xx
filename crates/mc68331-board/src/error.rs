@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_modules::sim::clock::ClockSourceError;
 
+use crate::condition::ArmError;
 use crate::registry::ParameterError;
 use crate::signal::Kind;
 use crate::time::Time;
@@ -299,4 +300,34 @@ pub enum NetError {
     /// The board has no net of that name.
     #[error("no net {0:?}")]
     Unknown(String),
+}
+
+/// Why a board would not arm a condition ([`Conditions::arm`]).
+///
+/// [`Conditions::arm`]: crate::condition::Conditions::arm
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ConditionError {
+    /// The board has no such net.
+    #[error(transparent)]
+    Net(#[from] NetError),
+    /// A level's change on a net that carries no levels.
+    #[error("net {net:?} is a {kind} net: only `change` watches it")]
+    Kind {
+        /// The net.
+        net: String,
+        /// Its type.
+        kind: Kind,
+    },
+    /// The board has no peripheral of that name.
+    #[error("no peripheral {0:?}")]
+    Peripheral(String),
+    /// The peripheral would not arm it.
+    #[error("peripheral {peripheral:?}: {error}")]
+    Arm {
+        /// The peripheral.
+        peripheral: String,
+        /// Why.
+        error: ArmError,
+    },
 }

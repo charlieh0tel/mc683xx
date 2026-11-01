@@ -24,6 +24,7 @@ use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::Registry;
+use mc683xx_board::signal::Signal;
 use mc683xx_cpu32::cpu::bare::End;
 use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
@@ -395,9 +396,10 @@ fn the_chip_peeks_and_pokes_without_cycles() {
     assert_eq!(chip.cpu().registers.pc, START);
 }
 
-#[test]
-fn a_board_runs_under_the_stub() {
-    let directory = env::temp_dir().join(format!("mc683xx-gdb-{}", process::id()));
+/// A board with the program in a boot ROM on CSBOOT, and `more` in its
+/// file; `name` names its directory.
+fn board(name: &str, more: &str) -> Board<Mc68331> {
+    let directory = env::temp_dir().join(format!("mc683xx-gdb-{name}-{}", process::id()));
     fs::create_dir_all(&directory).unwrap();
     let mut rom = vec![0; 0x1_0000];
     rom[..4].copy_from_slice(&STACK.to_be_bytes());
@@ -405,7 +407,8 @@ fn a_board_runs_under_the_stub() {
     let program = bytes(&PROGRAM);
     rom[START as usize..START as usize + program.len()].copy_from_slice(&program);
     fs::write(directory.join("rom.bin"), rom).unwrap();
-    let text = r#"
+    let text = format!(
+        r#"
         version = 1
 
         [chip]
@@ -415,15 +418,25 @@ fn a_board_runs_under_the_stub() {
         name = "rom"
         image = "rom.bin"
         size = 0x10000
-        attach = [{ select = "CSBOOT", role = "read" }]
-    "#;
-    let description = Description::parse(text, Path::new(&directory), &Options::default()).unwrap();
-    let mut board = Board::<Mc68331>::load(
+        attach = [{{ select = "CSBOOT", role = "read" }}]
+        {more}
+    "#
+    );
+    let description =
+        Description::parse(&text, Path::new(&directory), &Options::default()).unwrap();
+    let board = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
         Environment::default(),
     )
     .unwrap();
+    fs::remove_dir_all(&directory).unwrap();
+    board
+}
+
+#[test]
+fn a_board_runs_under_the_stub() {
+    let mut board = board("runs", "");
     let (ending, replies) = session(
         &mut board,
         vec![
@@ -443,7 +456,98 @@ fn a_board_runs_under_the_stub() {
     assert!(replies[3].contains("swbreak"));
     assert_eq!(replies[5], "S02");
     assert!(board.now().0 > 0);
-    fs::remove_dir_all(&directory).unwrap();
+}
+
+/// What the stub said on gdb's console: the `O` packets' text.
+fn console(replies: &[String]) -> String {
+    replies
+        .iter()
+        .filter(|reply| reply.starts_with('O') && *reply != "OK")
+        .map(|reply| {
+            let hex = &reply[1..];
+            let bytes: Vec<u8> = (0..hex.len() / 2)
+                .map(|index| u8::from_str_radix(&hex[2 * index..2 * index + 2], 16).unwrap())
+                .collect();
+            String::from_utf8(bytes).unwrap()
+        })
+        .collect()
+}
+
+/// `monitor` `command`'s packet.
+fn monitor(command: &str) -> Send {
+    packet(&format!("qRcmd,{}", hex(command)))
+}
+
+#[test]
+fn a_stop_condition_stops_a_board_with_a_trap_and_is_named() {
+    let mut board = board(
+        "conditions",
+        r#"
+        [[peripheral]]
+        name = "reference"
+        type = "clock"
+        parameters = { hz = 10_000_000 }
+        [[peripheral]]
+        name = "divider"
+        type = "divider"
+        parameters = { divide = 1000 }
+        [[peripheral]]
+        name = "counter"
+        type = "edge-counter"
+        [[net]]
+        name = "ten-megahertz"
+        type = "clock"
+        from = "reference.out"
+        to = ["divider.in"]
+        [[net]]
+        name = "pps"
+        type = "edge"
+        from = "divider.out"
+        to = ["counter.in"]
+        "#,
+    );
+    let (ending, replies) = session(
+        &mut board,
+        vec![
+            monitor("stop"),
+            monitor("stop conditions"),
+            monitor("stop net pps up"),
+            monitor("stop net ten-megahertz rise"),
+            monitor("stop net pps rise"),
+            packet("c"),
+            monitor("stop"),
+            monitor("stop delete 1"),
+            monitor("stop delete 1"),
+            monitor("stop"),
+            monitor("help"),
+            packet("D"),
+        ],
+    );
+    ending.unwrap();
+    assert!(replies.contains(&"S05".to_owned()), "{replies:?}");
+    assert_eq!(board.net_value("pps").unwrap(), Some(Signal::Level(true)));
+    let console = console(&replies);
+    for line in [
+        "no stop conditions armed\n",
+        "net NET rise|fall|change|high|low: ",
+        "no net change \"up\"",
+        "net \"ten-megahertz\" is a clock net: only `change` watches it\n",
+        "1: net pps rise\n",
+        "1: net pps rise (fired)\n",
+        "deleted 1\n",
+        "no condition 1\n",
+        "stop conditions [PERIPHERAL]: ",
+    ] {
+        assert!(console.contains(line), "{line:?} in {console:?}");
+    }
+}
+
+#[test]
+fn a_target_with_no_conditions_says_so() {
+    let mut machine = machine();
+    let (ending, replies) = session(&mut machine, vec![monitor("stop"), packet("D")]);
+    ending.unwrap();
+    assert_eq!(console(&replies), "this target has no stop conditions\n");
 }
 
 #[test]

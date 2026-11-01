@@ -775,6 +775,9 @@ read it), takes one gdb, and lets it read and write
 registers and memory, set breakpoints and watchpoints, step, continue
 and interrupt, until it detaches (`Ending.DETACHED`) or kills the target
 (`Ending.KILLED`), an enum.  Then the harness has the target back, as gdb left it.
+`monitor stop` arms a board's stop conditions (`docs/gdb.md`, Stop
+conditions); a Python peripheral offers none yet, and the bindings have
+no API of their own for them.
 Peripherals and hooks run under gdb as in `run_for`; an exception one
 raises, or Ctrl-C in Python (`KeyboardInterrupt`, while gdb is
 connected or not, idle or running the target), ends the session, the

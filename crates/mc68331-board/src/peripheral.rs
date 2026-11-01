@@ -23,6 +23,9 @@ use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::condition::ArmError;
+use crate::condition::ConditionInfo;
+use crate::condition::ConditionToken;
 use crate::inspect::Inspection;
 use crate::signal::Signal;
 use crate::time::Time;
@@ -385,6 +388,8 @@ pub struct Drive<'a> {
     writes: Vec<MemoryWrite>,
     /// Whether the peripheral asked the run to stop.
     stop: bool,
+    /// The conditions that held, by the peripheral's tokens.
+    fired: Vec<ConditionToken>,
     /// The peripheral's analog inputs, if the board gives them.
     sampler: Option<Sampler<'a>>,
     /// The chip's system clock on board time, if the board gives it.
@@ -417,6 +422,8 @@ pub struct Driving {
     pub stop: bool,
     /// The memories taken (`true`) or released, in order.
     pub memories: Vec<(String, bool)>,
+    /// The conditions that held, by the peripheral's tokens, in order.
+    pub fired: Vec<ConditionToken>,
 }
 
 impl<'a> Drive<'a> {
@@ -428,6 +435,7 @@ impl<'a> Drive<'a> {
             driven: Vec::new(),
             writes: Vec::new(),
             stop: false,
+            fired: Vec::new(),
             sampler: None,
             system_clock: None,
             memories: Vec::new(),
@@ -442,6 +450,7 @@ impl<'a> Drive<'a> {
             driven: Vec::new(),
             writes: Vec::new(),
             stop: false,
+            fired: Vec::new(),
             sampler: Some(sampler),
             system_clock: None,
             memories: Vec::new(),
@@ -538,6 +547,16 @@ impl<'a> Drive<'a> {
         self.stop = true;
     }
 
+    /// Says that the condition the peripheral armed as `token`
+    /// ([`Peripheral::arm`]) holds, and asks the run to stop as `stop`
+    /// does: the board names the condition ([`Conditions::fired`]).
+    ///
+    /// [`Conditions::fired`]: crate::condition::Conditions::fired
+    pub fn fire(&mut self, token: ConditionToken) {
+        self.fired.push(token);
+        self.stop();
+    }
+
     /// What the call did.
     #[must_use]
     pub fn finish(self) -> Driving {
@@ -546,6 +565,7 @@ impl<'a> Drive<'a> {
             writes: self.writes,
             stop: self.stop,
             memories: self.memories,
+            fired: self.fired,
         }
     }
 }
@@ -777,6 +797,31 @@ pub trait Peripheral: Any {
     fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
         Err(StateError::unsupported("the peripheral"))
     }
+
+    /// The conditions a debugger may stop the run on
+    /// ([`condition`](crate::condition)), an emulator's alone: by
+    /// default none.
+    fn conditions(&self) -> &'static [ConditionInfo] {
+        &[]
+    }
+
+    /// Arms its condition `condition` with `arguments`: its own token
+    /// for it, which it gives [`Drive::fire`] each time the condition
+    /// holds, and which [`disarm`](Self::disarm) gives back.  It stays
+    /// armed until disarmed.  Armed conditions are outside the
+    /// snapshot: `save` leaves them out, and `restore` keeps them.
+    ///
+    /// # Errors
+    ///
+    /// [`ArmError`] for a condition it does not offer or arguments it
+    /// does not take: by default every condition is unknown.
+    fn arm(&mut self, condition: &str, arguments: &[String]) -> Result<ConditionToken, ArmError> {
+        Err(ArmError::Unknown(condition.to_owned()))
+    }
+
+    /// Disarms the condition it armed as `token`.  By default it is
+    /// ignored.
+    fn disarm(&mut self, token: ConditionToken) {}
 }
 
 #[cfg(test)]

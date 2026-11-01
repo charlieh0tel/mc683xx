@@ -728,6 +728,14 @@ By the MC68681 datasheet's section, the SCC68692's by heading:
   FIFO has room, a count past a full turn, timeout mode on the MC68681
   or a third channel, input bits past IP5, a change of state pending
   on a pin that has none, levels past IRQ.
+- **Stop conditions** (emulator only; [docs/gdb.md](gdb.md), Stop
+  conditions).  `tx CHANNEL [BYTE]`: the transmitter starts sending a
+  character, as it moves from the holding register to the shift
+  register (3.1), local loopback included.  `rx CHANNEL [BYTE]`: the
+  receiver assembles a character at its stop bit's center (3.2), into
+  the FIFO or the shift register, a break not.  `CHANNEL` is `a` or
+  `b`, `BYTE` hexadecimal with `0x` or decimal, any character without
+  it.  Armed conditions are outside the snapshot.
 
 Where the datasheets are silent, the model chooses:
 

@@ -2,8 +2,9 @@
 //! and nets.
 
 use mc683xx_board::board::Board;
-
+use mc683xx_board::condition::Conditions;
 use mc683xx_board::error::RunError;
+use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_mc68331::chip::Mc68331;
@@ -34,12 +35,20 @@ impl Target for Board<Mc68331> {
     fn run_for(&mut self, cycles: Cycles, _hit: &dyn Fn() -> bool) -> Result<TargetRun, RunError> {
         let chip = self.chip().now() + cycles;
         let until = self.system_clock().time(chip).max(self.now() + 1);
-        Ok(Self::run_until(self, until)?.stop.into())
+        let stop = Self::run_until(self, until)?.stop;
+        Ok(match stop {
+            Stop::Requested if !self.fired().is_empty() => TargetRun::Condition,
+            other => other.into(),
+        })
     }
 
     /// An external reset of the chip; the board drives RESET on its
     /// nets as it does for any reset the chip reports.
     fn reset(&mut self) -> bool {
         Target::reset(self.chip_mut())
+    }
+
+    fn conditions(&mut self) -> Option<&mut dyn Conditions> {
+        Some(self)
     }
 }

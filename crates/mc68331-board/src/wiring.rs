@@ -33,6 +33,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 use crate::chip::Requests;
+use crate::condition::Firing;
 use crate::description::DecoderInput;
 use crate::description::PCS_MASK;
 use crate::peripheral::Drive;
@@ -74,6 +75,8 @@ pub(crate) struct Shared {
     pub(crate) diverted: Cell<bool>,
     /// Whether a peripheral asked the run to stop.
     pub(crate) stop: Cell<bool>,
+    /// The conditions that held since the board's run began, in order.
+    pub(crate) fired: RefCell<Vec<Firing>>,
     /// The chip's stop request, for a peripheral that asks during a cycle.
     pub(crate) chip_stop: StopRequest,
     /// The chip's handles, to end its run early for a peripheral that
@@ -161,6 +164,12 @@ impl Shared {
         for (name, take) in driving.memories {
             self.take_memory(peripheral, &name, take);
         }
+        self.fired.borrow_mut().extend(
+            driving
+                .fired
+                .into_iter()
+                .map(|token| Firing::Peripheral(peripheral, token)),
+        );
         if driving.stop {
             self.request_stop();
         }

@@ -1593,6 +1593,36 @@ checks the bare build.
   `Cpu32Target::step`, which reports where it stopped, not always one
   instruction later.  The emulator's own `--gdb` stays on the hook
   session for now.
+- **Stop conditions** (`monitor stop`, 2026-11-01): a board's nets and
+  peripherals stop the run where something outside the CPU happens,
+  which no breakpoint or watchpoint reaches (a DUART's character, a
+  net's edge).  `mc683xx_board::condition` holds the protocol, gdb's
+  only through `target::Target::conditions` (the `board` feature): a
+  `Condition` parsed from `monitor stop`'s words (`net NET CHANGE`,
+  `peripheral NAME CONDITION [ARGUMENTS]`), armed on the board
+  (`Conditions`, which `Board` implements) until disarmed.  A net's is
+  an observer and the board's stop request, so peripherals need
+  nothing; a peripheral's is three defaulted `Peripheral` methods
+  (`conditions`, `arm`, `disarm`) and `Drive::fire(token)`, which
+  stops the run as `Drive::stop` does and records which condition held,
+  for `Conditions::fired` and the stub's `TargetRun::Condition`,
+  `SIGTRAP`.  The first peripheral conditions are the MC68681's `tx`
+  and `rx`.  Emulator only: a session over BDM has none, and neither
+  have the bare CPU and the chip (the chip's own modules' conditions,
+  the SCI's say, would be a third source word).  Adversarial review:
+  *cost* nothing without an armed condition (no observer, no check
+  in any peripheral's path but a DUART's empty list); *determinism*
+  a stop splits the run as a breakpoint's does, so a peripheral
+  sensitive to where runs split could differ from the unstopped run;
+  *state* armed conditions are outside the snapshot, as hooks and
+  observers are, so no snapshot format changed, and a peripheral must
+  keep its armed tokens out of `save` (the trait says so);
+  *reporting* gdbstub cannot write to the console while the target
+  runs, so the stop is a bare `SIGTRAP` and `monitor stop` (or a gdb
+  `hook-stop` running it) says which fired; *forecloses* nothing:
+  conditions persist and number like breakpoints, and the source
+  word leaves room for module conditions.  Python peripherals offer
+  none yet.
 
 Adversarial review (2026-10-24):
 

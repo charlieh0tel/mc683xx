@@ -23,6 +23,8 @@
 
 use std::convert::Infallible;
 
+#[cfg(feature = "board")]
+use mc683xx_board::condition::Conditions;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::bare::End;
 use mc683xx_cpu32::cpu::bare::Limits;
@@ -47,6 +49,7 @@ mod chip;
 ///     match ran {
 ///         TargetRun::Quantum | TargetRun::Hook => true,
 ///         TargetRun::Halted | TargetRun::Requested | TargetRun::Fault => false,
+///         TargetRun::Condition => false,
 ///     }
 /// }
 /// ```
@@ -70,6 +73,8 @@ pub enum TargetRun {
     /// [`Cpu::set_stop_on_fault`]: mc683xx_cpu32::cpu::Cpu::set_stop_on_fault
     /// [`Cpu::set_intercepted`]: mc683xx_cpu32::cpu::Cpu::set_intercepted
     Fault,
+    /// A stop condition fired ([`Target::conditions`]).
+    Condition,
 }
 
 impl From<Stop> for TargetRun {
@@ -133,6 +138,17 @@ pub trait Target {
     /// default cannot.
     fn reset(&mut self) -> bool {
         false
+    }
+
+    /// The target's stop conditions, for `monitor stop`
+    /// ([docs/gdb.md, Stop conditions][conditions]): a board's.  A run
+    /// that stops for one ends [`TargetRun::Condition`].  The default
+    /// has none.
+    ///
+    /// [conditions]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md#stop-conditions
+    #[cfg(feature = "board")]
+    fn conditions(&mut self) -> Option<&mut dyn Conditions> {
+        None
     }
 }
 

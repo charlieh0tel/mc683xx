@@ -136,7 +136,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   a run loop of its own implements, delegating to one of them:
   `with_cpu` (a `CpuControl`: registers and hooks), `peek` and `poke` (memory at an `Address`, with no
   bus cycle), `run_for(cycles, hit)` (a quantum, its end a `target::TargetRun`)
-  and `reset`.  `mc683xx-run` and the Python bindings do.
+  and `reset`.  `mc683xx-run` and the Python bindings do.  With the
+  `board` feature, `conditions` gives the target's stop conditions
+  (`mc683xx_board::condition::Conditions`, a board's; none by
+  default), for `monitor stop`.
 
 ## Registers
 
@@ -201,6 +204,7 @@ Rust or Python host uses `Mc68331::bus_read` and `bus_write` itself.
 | A step | `SIGTRAP` |
 | Ctrl-C | `SIGINT` |
 | The host's own hook (a Rust closure, a Python callable) | `SIGTRAP` |
+| A stop condition (`monitor stop`) | `SIGTRAP`; `monitor stop` names it |
 | A peripheral's or the host's stop request | `SIGINT` |
 | A double bus fault halt | `SIGBUS`; it stays halted until a reset: `monitor reset`, or the watchdog's as time passes |
 | A bare CPU's fault or intercept stop (`set_stop_on_fault`, `set_intercepted`) | `SIGBUS` |
@@ -215,7 +219,76 @@ CPU has none.
   modules, the peripherals it reaches, the board's RESET net).  gdb's
   register cache is then stale: `maintenance flush register-cache`
   (`flushregs` in older gdbs).
+- `monitor stop ...`: stop conditions, a board's (below).
 - `monitor help`.
+
+## Stop conditions
+
+A board's nets and peripherals can stop the run where something
+happens outside the CPU: a net's edge, a character a DUART receives.
+It is the emulator's alone, as silicon has no such watch: the bare
+CPU and the chip have none (`this target has no stop conditions`),
+and neither does a session over BDM.
+
+```text
+(gdb) monitor stop conditions
+net NET rise|fall|change|high|low: rise, fall, high and low on logic and edge nets
+peripheral duart tx CHANNEL [BYTE]: channel a or b starts sending a character, BYTE or any
+peripheral duart rx CHANNEL [BYTE]: channel a or b receives a character, BYTE or any
+(gdb) monitor stop net RESET fall
+1: net RESET fall
+(gdb) monitor stop peripheral duart rx a 0x0d
+2: peripheral duart rx a 0x0d
+(gdb) continue
+Program received signal SIGTRAP, Trace/breakpoint trap.
+(gdb) monitor stop
+1: net RESET fall
+2: peripheral duart rx a 0x0d (fired)
+```
+
+- `monitor stop`: the armed conditions, those that fired in the last
+  run marked `(fired)`.
+- `monitor stop conditions [PERIPHERAL]`: what may be armed: a net's
+  changes, and each peripheral's own conditions with their arguments,
+  or only `PERIPHERAL`'s.
+- `monitor stop net NET CHANGE`: a net's change.  `rise` and `fall`
+  are a level's change (from no value yet too); `high` and `low` its
+  every drive to that level, whatever it was; `change` a level that
+  differs from the last, or any other net's every change.  Only
+  `change` watches a net that carries no levels (a clock, serial, a
+  value, a bus).
+- `monitor stop peripheral NAME CONDITION [ARGUMENTS]`: one of a
+  peripheral's own conditions.  The MC68681 and SCC68692 DUARTs offer
+  `tx` and `rx`, a channel (`a` or `b`) and optionally a byte (`0x0d`
+  or `13`): a character the transmitter starts sending, or one the
+  receiver assembles ([docs/peripherals.md](peripherals.md)).
+- `monitor stop delete N`, `monitor stop clear`: disarm one, or all.
+
+A condition stays armed until disarmed, as a breakpoint does, and the
+session's end leaves it armed on the board.  It stops the run after the
+instruction running when it holds: a net's once the net's peripherals
+have seen the change, a peripheral's when the peripheral sees it.  gdb
+sees `SIGTRAP`, where Ctrl-C is `SIGINT`.  The stub cannot write to
+gdb's console while the target runs, so the stop does not say which
+condition fired; `monitor stop` does.  gdb can run it at every stop:
+
+```text
+(gdb) define hook-stop
+> monitor stop
+> end
+```
+
+Conditions are outside the board's snapshot: a restore keeps them
+armed.  A run that stops for one is split there, as a breakpoint
+splits it; a peripheral whose behavior depends on where runs are split
+would differ from the same run without the stop.
+
+From Rust, a board is `mc683xx_board::condition::Conditions`: `arm`
+(a `Condition`, parsed from the words above), `disarm`, `armed`,
+`fired` and `offered`.  A peripheral offers conditions through
+`Peripheral::conditions`, `arm` and `disarm`, and fires one with
+`Drive::fire` ([docs/board-files.md](board-files.md), Rust
+peripherals).
 
 ## Over BDM
 
@@ -268,8 +341,8 @@ it, kill leaves it halted.
 
 `cargo test -p mc683xx-gdb` drives the stub with raw packets over an
 in-memory connection: registers, the target description, memory,
-steps, breakpoints, watchpoints, Ctrl-C, `monitor reset`, detach and
-kill, on the bare CPU, the chip and a board; and the BDM stub over the
+steps, breakpoints, watchpoints, Ctrl-C, `monitor reset`, `monitor
+stop`, detach and kill, on the bare CPU, the chip and a board; and the BDM stub over the
 chip, which runs a little each time the stub looks, as silicon would
 run on its own.  `make gdb`, opt-in and
 not in `make ci`, runs `gdb-multiarch` against the runner's example
