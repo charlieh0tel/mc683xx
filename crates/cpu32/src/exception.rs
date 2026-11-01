@@ -4,6 +4,7 @@
 
 use crate::cpu::Core;
 use crate::cpu::Halt;
+use crate::cpu::Idle;
 use crate::cycles::Cycles;
 use crate::interrupt::InterruptLevel;
 use crate::registers::status;
@@ -631,7 +632,7 @@ impl Core<'_> {
 
     /// Halts the CPU in a double bus fault (CPU32RM 6.2.2).
     pub(crate) const fn double_fault(&mut self) {
-        self.cpu.halt = Some(Halt::DoubleBusFault);
+        self.cpu.idle = Some(Idle::Halted(Halt::DoubleBusFault));
     }
 }
 

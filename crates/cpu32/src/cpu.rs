@@ -77,6 +77,29 @@ pub enum Halt {
     DoubleBusFault,
 }
 
+/// Why the CPU executes nothing, until what ends it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Idle {
+    /// Halted, until reset.
+    Halted(Halt),
+}
+
+impl Idle {
+    /// The stop a run ends in at once.
+    const fn stop(self) -> Stop {
+        match self {
+            Self::Halted(halt) => Stop::Halted(halt),
+        }
+    }
+
+    /// Why it halted, if halted.
+    const fn halt(self) -> Option<Halt> {
+        match self {
+            Self::Halted(halt) => Some(halt),
+        }
+    }
+}
+
 /// A run's outcome.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -123,8 +146,8 @@ pub struct Cpu {
     refund: Cycles,
     /// Whether `stop` or `lpstop` stopped it.
     stopped: bool,
-    /// Why it halted, until reset.
-    pub(crate) halt: Option<Halt>,
+    /// Why it executes nothing, while it does not.
+    pub(crate) idle: Option<Idle>,
     /// Set from taking a bus or address error, or reset, until the
     /// handler's first opcode is fetched: a bus or address error then
     /// is a double bus fault (CPU32RM 6.2.2; MC68331UM 4.5.5.2).
@@ -288,7 +311,7 @@ impl Cpu {
             extra: Cycles::ZERO,
             refund: Cycles::ZERO,
             stopped: false,
-            halt: None,
+            idle: None,
             fault_window: false,
             released: None,
             altered: Altered::default(),
@@ -340,7 +363,7 @@ impl Cpu {
         self.registers.vbr = 0;
         self.stopped = false;
         self.last_tail = 0;
-        self.halt = None;
+        self.idle = None;
         self.fault_window = true;
         self.released = None;
         self.movem_resume = None;
@@ -371,7 +394,7 @@ impl Cpu {
                 Ok(())
             }
             _ => {
-                self.halt = Some(Halt::DoubleBusFault);
+                self.idle = Some(Idle::Halted(Halt::DoubleBusFault));
                 Err(Halt::DoubleBusFault)
             }
         }
@@ -438,10 +461,10 @@ impl Cpu {
         let mut elapsed = Cycles::ZERO;
         while elapsed < budget {
             let cpu = &mut *core.cpu;
-            if let Some(halt) = cpu.halt {
+            if let Some(idle) = cpu.idle {
                 return Run {
                     cycles: elapsed,
-                    stop: Stop::Halted(halt),
+                    stop: idle.stop(),
                 };
             }
             if let Some(limits) = &limits
@@ -503,7 +526,7 @@ impl Cpu {
         }
         Run {
             cycles: elapsed,
-            stop: core.cpu.halt.map_or(Stop::Budget, Stop::Halted),
+            stop: core.cpu.idle.map_or(Stop::Budget, Idle::stop),
         }
     }
 

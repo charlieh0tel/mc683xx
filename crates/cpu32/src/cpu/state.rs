@@ -16,6 +16,7 @@ use serde::de::DeserializeOwned;
 
 use super::Cpu;
 use super::Halt;
+use super::Idle;
 use super::hooks::Resume;
 use crate::cycles::Cycles;
 use crate::effective_address::Altered;
@@ -351,7 +352,7 @@ struct CpuState {
     refund: Cycles,
     /// [`Cpu::stopped`].
     stopped: bool,
-    /// [`Cpu::halt`].
+    /// [`Cpu::halted`].
     halt: Option<Halt>,
     /// [`Cpu::fault_window`].
     fault_window: bool,
@@ -420,7 +421,7 @@ impl Cpu {
             extra: self.extra,
             refund: self.refund,
             stopped: self.stopped,
-            halt: self.halt,
+            halt: self.halted(),
             fault_window: self.fault_window,
             released: self.released,
             altered: self.altered,
@@ -468,7 +469,7 @@ impl Cpu {
         self.extra = state.extra;
         self.refund = state.refund;
         self.stopped = state.stopped;
-        self.halt = state.halt;
+        self.idle = state.halt.map(Idle::Halted);
         self.fault_window = state.fault_window;
         self.released = state.released;
         self.altered = state.altered;

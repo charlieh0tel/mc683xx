@@ -245,7 +245,20 @@ impl Cpu {
     /// Why the CPU halted, while it stays halted.
     #[must_use]
     pub const fn halted(&self) -> Option<Halt> {
-        self.halt
+        match self.idle {
+            Some(idle) => idle.halt(),
+            None => None,
+        }
+    }
+
+    /// The stop a run ends in at once while the CPU executes nothing,
+    /// or [`None`] while it runs.
+    #[must_use]
+    pub const fn idle(&self) -> Option<Stop> {
+        match self.idle {
+            Some(idle) => Some(idle.stop()),
+            None => None,
+        }
     }
 
     /// Whether any vector is intercepted.
