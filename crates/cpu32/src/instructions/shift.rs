@@ -97,7 +97,7 @@ pub(super) fn register(table: &mut Table) {
     table.set_by(
         LINE_MASK,
         LINE,
-        |opcode| Size::from_field(opcode >> SIZE_SHIFT).is_some(),
+        |opcode| Size::from_field(opcode >> SIZE_SHIFT & Size::FIELD_MASK).is_some(),
         shift_register_handler,
     );
 }
@@ -105,7 +105,7 @@ pub(super) fn register(table: &mut Table) {
 /// [`shift_register`]'s handler for `opcode`, specialized by size,
 /// type, direction and where the count is.
 fn shift_register_handler(opcode: u16) -> Handler {
-    specialize_size!(Size::from_field(opcode >> SIZE_SHIFT), SIZE =>
+    specialize_size!(Size::from_field(opcode >> SIZE_SHIFT & Size::FIELD_MASK), SIZE =>
         specialize_two_bits!(opcode >> REGISTER_TYPE_SHIFT, TYPE =>
             specialize_flag!(opcode & LEFT != 0, LEFTWARD =>
                 specialize_flag!(opcode & COUNT_IN_REGISTER != 0, IN_REGISTER =>

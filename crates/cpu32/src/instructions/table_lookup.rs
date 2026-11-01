@@ -121,7 +121,7 @@ fn table_lookup(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
         return system::lpstop(core);
     }
     let register_form = kind::of(opcode) == kind::DATA_REGISTER;
-    let Some(size) = Size::from_field(extension >> extension::SIZE_SHIFT) else {
+    let Some(size) = Size::from_field(extension >> extension::SIZE_SHIFT & Size::FIELD_MASK) else {
         return Err(line_f(core));
     };
     if extension & extension::RESERVED != 0

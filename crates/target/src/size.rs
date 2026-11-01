@@ -13,12 +13,16 @@ pub enum Size {
 }
 
 impl Size {
+    /// The bits of the common two-bit size field, for extracting it
+    /// from an instruction word before [`Size::from_field`].
+    pub const FIELD_MASK: u16 = 0b11;
+
     /// The size from the common two-bit size field: 00 byte, 01 word,
-    /// 10 long; 11 is no size (CPU32RM section 4, as in ADD's Size
-    /// field).
+    /// 10 long; 11, and any value wider than the field, is no size
+    /// (CPU32RM section 4, as in ADD's Size field; 7.2.8.1).
     #[must_use]
     pub const fn from_field(bits: u16) -> Option<Self> {
-        match bits & 0b11 {
+        match bits {
             0b00 => Some(Self::Byte),
             0b01 => Some(Self::Word),
             0b10 => Some(Self::Long),
@@ -93,6 +97,7 @@ mod tests {
     fn the_size_field() {
         assert_eq!(Size::from_field(0b10), Some(Size::Long));
         assert_eq!(Size::from_field(0b11), None);
+        assert_eq!(Size::from_field(0b100), None);
         for size in [Size::Byte, Size::Word, Size::Long] {
             assert_eq!(Size::from_field(size.field()), Some(size));
         }

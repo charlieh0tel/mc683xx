@@ -350,7 +350,7 @@ pub(crate) const fn table_lookup(opcode: u16, extension: u16) -> Cycles {
     } else {
         rows::arithmetic::TABLE
     };
-    let row = match Size::from_field(extension >> extension::TABLE_SIZE_SHIFT) {
+    let row = match Size::from_field(extension >> extension::TABLE_SIZE_SHIFT & Size::FIELD_MASK) {
         Some(size) if !register => row.sized(size),
         _ => row,
     };
