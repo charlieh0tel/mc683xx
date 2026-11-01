@@ -42,9 +42,9 @@ pub(crate) mod tests {
     use mc683xx_board::peripheral::PeripheralAccess;
     use mc683xx_board::signal::Signal;
     use mc683xx_board::time::Time;
-    use mc683xx_cpu32::function_code::FunctionCode;
-    use mc683xx_cpu32::size::Size;
     use mc683xx_modules::chip_select::ChipSelect;
+    use mc683xx_target::function_code::FunctionCode;
+    use mc683xx_target::size::Size;
 
     /// A data cycle of `size` at `now`.
     pub(crate) const fn access(size: Size, now: Time) -> PeripheralAccess {

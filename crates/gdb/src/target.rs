@@ -23,13 +23,13 @@
 
 use std::convert::Infallible;
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::bare::End;
 use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::flat::Machine;
+use mc683xx_target::address::Address;
 
 #[cfg(feature = "board")]
 mod board;

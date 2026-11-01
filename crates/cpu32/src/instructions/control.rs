@@ -1,7 +1,6 @@
 //! Program control instructions (CPU32RM 4.3.8): NOP, and the jumps,
 //! calls and returns.  The branches are in `branch`.
 
-use crate::address::Address;
 use crate::cpu::Core;
 use crate::effective_address::Category;
 use crate::effective_address::Operand;
@@ -10,7 +9,8 @@ use crate::instructions::Flow;
 use crate::instructions::Table;
 use crate::instructions::branch::STACK_POINTER;
 use crate::instructions::branch::push_return;
-use crate::size::Size;
+use mc683xx_target::address::Address;
+use mc683xx_target::size::Size;
 
 /// NOP's opcode (CPU32RM 4.4, NOP).
 const NOP: u16 = 0x4e71;

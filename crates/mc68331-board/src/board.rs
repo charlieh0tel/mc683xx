@@ -22,7 +22,6 @@ use std::path::Path;
 use std::rc::Rc;
 use std::rc::Weak;
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
 use mc683xx_cpu32::cpu::hooks::HookId;
@@ -32,9 +31,10 @@ use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cpu::state::restore_each;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::memory::Space;
-use mc683xx_cpu32::size::Size;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
+use mc683xx_target::address::Address;
+use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
 

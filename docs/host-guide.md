@@ -17,8 +17,8 @@ vectors and a program at `START`, `select` programs a chip select,
 `booting` is the first example's board as a function.  A real host
 loads a real image instead.
 
-Crates: `mc683xx-cpu32` (the core: `Cpu`, `Bus`, `Memory`, hooks,
-`Cycles`), `mc683xx-modules` (SIM, QSM, the `MappedPeripheral`, `Timed` and
+Crates: `mc683xx-target` (`Address`, `Size`, `FunctionCode`),
+`mc683xx-cpu32` (the core: `Cpu`, `Bus`, `Memory`, hooks, `Cycles`), `mc683xx-modules` (SIM, QSM, the `MappedPeripheral`, `Timed` and
 `SpiPeripheral` traits), `mc683xx-mc68331` (GPT, and the chip: `Builder`,
 `Mc68331`), `mc683xx-board` (board files, the `Registry` of peripheral
 types, nets, board time and `Board`), `mc683xx-peripherals` (the stock
@@ -160,7 +160,7 @@ instruction, before the next.  `reload_scope` takes any memory, one on
 pins too; reloading is emulator-only as well.
 
 ```rust
-use mc683xx_cpu32::address::Address;
+use mc683xx_target::address::Address;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_examples::firmware;
 use mc683xx_modules::sim::reset::ResetScope;
@@ -771,10 +771,10 @@ assert!(sent[0].start < sent[0].end);
   SCI's TXD at the entry's or frame's own time.
 
 ```rust
-use mc683xx_cpu32::address::Address;
+use mc683xx_target::address::Address;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::function_code::FunctionCode;
-use mc683xx_cpu32::size::Size;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::sim::ports::PortName;
 use mc683xx_examples::firmware;
@@ -844,10 +844,10 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
   pin low.
 
 ```rust
-use mc683xx_cpu32::address::Address;
+use mc683xx_target::address::Address;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::function_code::FunctionCode;
-use mc683xx_cpu32::size::Size;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::GPT;
 use mc683xx_mc68331::gpt::Input;
@@ -925,11 +925,11 @@ and then the queue runs on without a sync, its calls coming in a batch, in
 order and each with its own `now`, where the CPU next sees the QSPI.
 
 ```rust
-use mc683xx_cpu32::address::Address;
+use mc683xx_target::address::Address;
 use mc683xx_cpu32::cpu::state::Stateless;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::function_code::FunctionCode;
-use mc683xx_cpu32::size::Size;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_examples::firmware;
@@ -987,10 +987,10 @@ SCK `period` of system clocks, running the chip between them, and
 returns what the QSPI drove on MISO (`Shifted { miso, driven }`).
 
 ```rust
-use mc683xx_cpu32::address::Address;
+use mc683xx_target::address::Address;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::function_code::FunctionCode;
-use mc683xx_cpu32::size::Size;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::QSM;
 
@@ -1059,7 +1059,7 @@ use std::cell::RefCell;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
-use mc683xx_cpu32::address::Address;
+use mc683xx_target::address::Address;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::hooks::Invalid;
 use mc683xx_cpu32::cycles::Cycles;
@@ -1189,10 +1189,10 @@ first.  None moves the chip's time or shows in the trace.
   `Module::peek`.
 
 ```rust
-use mc683xx_cpu32::address::Address;
+use mc683xx_target::address::Address;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::function_code::FunctionCode;
-use mc683xx_cpu32::size::Size;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
 use mc683xx_mc68331::host::AccessError;

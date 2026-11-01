@@ -759,14 +759,14 @@ pub fn observed_verdict(
 #[cfg(test)]
 mod tests {
     use cpu32_oracle::state::State;
-    use mc683xx_cpu32::address::Address;
     use mc683xx_cpu32::exception::CycleKind;
     use mc683xx_cpu32::exception::Exception;
     use mc683xx_cpu32::exception::Fault;
     use mc683xx_cpu32::exception::Vector;
-    use mc683xx_cpu32::function_code::FunctionCode;
     use mc683xx_cpu32::registers::Registers;
-    use mc683xx_cpu32::size::Size;
+    use mc683xx_target::address::Address;
+    use mc683xx_target::function_code::FunctionCode;
+    use mc683xx_target::size::Size;
 
     use super::Corpus;
     use super::Outcome;

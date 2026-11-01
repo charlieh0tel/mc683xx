@@ -4,7 +4,7 @@
 
 use crate::registers::Registers;
 use crate::registers::status;
-use crate::size::Size;
+use mc683xx_target::size::Size;
 
 /// The most significant bit of `value` taken as `size`.
 const fn msb(value: u32, size: Size) -> bool {
@@ -107,7 +107,7 @@ mod tests {
     use super::test;
     use crate::registers::Registers;
     use crate::registers::status;
-    use crate::size::Size;
+    use mc683xx_target::size::Size;
 
     fn ccr(registers: &Registers) -> u16 {
         registers.sr() & status::CCR

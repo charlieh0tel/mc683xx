@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 mc683xx-cpu32.workspace = true
+mc683xx-target.workspace = true
 mc683xx-gdb.workspace = true
 mc683xx-mc68331.workspace = true
 mc683xx-modules.workspace = true

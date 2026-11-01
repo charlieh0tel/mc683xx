@@ -9,8 +9,8 @@ use crate::bus::BusError;
 use crate::bus::PortSize;
 use crate::cpu::state::Save;
 use crate::cycles::Cycles;
-use crate::function_code::FunctionCode;
-use crate::size::Size;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 /// A chip-select pin by the chip's own number for it: which select
 /// carried a cycle.  The chip names its pins

@@ -8,7 +8,6 @@ use crate::effective_address::Category;
 use crate::effective_address::MODE_SHIFT;
 use crate::effective_address::THREE_BITS;
 use crate::effective_address::mode_of;
-use crate::size::Size;
 use crate::timing::Cost;
 use crate::timing::Row;
 use crate::timing::Sequence;
@@ -24,6 +23,7 @@ use crate::timing::rows::move_;
 use crate::timing::rows::shift;
 use crate::timing::rows::single;
 use crate::timing::rows::special;
+use mc683xx_target::size::Size;
 
 /// Bits 15:12, the line (CPU32RM Table 4-11).
 const LINE_SHIFT: u16 = 12;

@@ -2,7 +2,7 @@
 //! SR forms of ANDI, EORI and ORI are the system control
 //! instructions'.
 
-use crate::address::Address;
+use super::size_of_index;
 use crate::cpu::Core;
 use crate::effective_address::Category;
 use crate::effective_address::Operand;
@@ -29,8 +29,9 @@ use crate::instructions::arithmetic::single_handler;
 use crate::instructions::arithmetic::size;
 use crate::instructions::data_movement::FIELD_MASK;
 use crate::registers::Registers;
-use crate::size::Size;
 use crate::timing::AddressTable;
+use mc683xx_target::address::Address;
+use mc683xx_target::size::Size;
 
 /// OR: line 1000 (CPU32RM 4.4, OR).
 const OR_LINE: u16 = 0x8000;
@@ -174,7 +175,7 @@ fn tst<const SIZE: u8, const OPERAND: u8>(
     core: &mut Core<'_>,
     opcode: u16,
 ) -> Result<Flow, Exception> {
-    let size = Size::of_index(SIZE);
+    let size = size_of_index(SIZE);
     let operand =
         core.effective_address_of(OPERAND, opcode & FIELD_MASK, size, AddressTable::Fetch)?;
     let value = core.read_operand(operand, size)?;

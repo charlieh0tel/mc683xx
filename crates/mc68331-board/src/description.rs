@@ -15,7 +15,6 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
@@ -24,6 +23,7 @@ use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_target::address::Address;
 
 use crate::endpoint::Endpoint;
 use crate::error::LoadError;

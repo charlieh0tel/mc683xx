@@ -6,7 +6,6 @@
 //!
 //! [PLAN.md, Where the manuals are silent]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#where-the-manuals-are-silent
 
-use crate::address::Address;
 use crate::cpu::Core;
 use crate::effective_address::Category;
 use crate::effective_address::Operand;
@@ -17,7 +16,8 @@ use crate::instructions::Flow;
 use crate::instructions::Table;
 use crate::instructions::data_movement::register_field;
 use crate::registers::status;
-use crate::size::Size;
+use mc683xx_target::address::Address;
+use mc683xx_target::size::Size;
 
 /// CHK: 0100 rrr1 s0 <ea>, size 11 word, 10 long (CPU32RM 4.4, CHK).
 const CHK_MASK: u16 = 0xf1c0;
@@ -156,7 +156,6 @@ fn compare_bounds(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
 
 #[cfg(test)]
 mod tests {
-    use crate::address::Address;
     use crate::cpu::Cpu;
     use crate::exception::Exception;
     use crate::exception::Vector;
@@ -165,6 +164,7 @@ mod tests {
     use crate::instructions::tests::poke_long;
     use crate::instructions::tests::step;
     use crate::registers::status;
+    use mc683xx_target::address::Address;
 
     /// Where the tests' supervisor stack starts, inside RAM.
     const STACK: u32 = 0x8000;

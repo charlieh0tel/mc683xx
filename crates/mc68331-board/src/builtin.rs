@@ -9,7 +9,7 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::size::Size;
+use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -653,9 +653,9 @@ impl Peripheral for EdgeCounter {
 #[cfg(test)]
 mod tests {
     use mc683xx_cpu32::cpu::state::StateError;
-    use mc683xx_cpu32::function_code::FunctionCode;
-    use mc683xx_cpu32::size::Size;
     use mc683xx_modules::chip_select::ChipSelect;
+    use mc683xx_target::function_code::FunctionCode;
+    use mc683xx_target::size::Size;
 
     use super::Divider;
     use super::EdgeCounter;

@@ -1,23 +1,12 @@
 //! Addresses on the CPU's bus.
 
-use std::fmt;
+use core::fmt;
 
 /// A byte address on the CPU32's 32-bit address bus (CPU32RM 5.3).  A
-/// chip with fewer address lines masks it (see
-/// [`Memory`](crate::memory::Memory)).
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    serde::Serialize,
-    serde::Deserialize,
-)]
+/// chip with fewer address lines masks it; BDM takes all 32 bits
+/// (CPU32RM 7.2.8.8).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Address(pub u32);
 
 impl Address {
@@ -63,6 +52,9 @@ impl From<Address> for u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::format;
+    use std::string::ToString;
+
     use super::Address;
 
     #[test]

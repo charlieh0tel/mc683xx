@@ -1,7 +1,8 @@
 //! Operand sizes.
 
 /// The size of an operand or a bus cycle (CPU32RM 2.3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Size {
     /// 8 bits.
     Byte,
@@ -22,27 +23,6 @@ impl Size {
             0b01 => Some(Self::Word),
             0b10 => Some(Self::Long),
             _ => None,
-        }
-    }
-
-    /// The size as a number, for a handler specialized by size with a
-    /// const generic: 0 byte, 1 word, 2 long.
-    #[must_use]
-    pub(crate) const fn index(self) -> u8 {
-        match self {
-            Self::Byte => 0,
-            Self::Word => 1,
-            Self::Long => 2,
-        }
-    }
-
-    /// The size of `index`, as `index` gives it; anything else is long.
-    #[must_use]
-    pub(crate) const fn of_index(index: u8) -> Self {
-        match index {
-            0 => Self::Byte,
-            1 => Self::Word,
-            _ => Self::Long,
         }
     }
 

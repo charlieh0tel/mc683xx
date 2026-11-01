@@ -1,7 +1,7 @@
 //! Data movement instructions (CPU32RM 4.3.2, Table 4-2), and SWAP
 //! (Table 4-5).
 
-use crate::address::Address;
+use super::size_of_index;
 use crate::cpu::Core;
 use crate::effective_address::Category;
 use crate::effective_address::MODE_SHIFT;
@@ -11,14 +11,15 @@ use crate::effective_address::kind;
 use crate::effective_address::mode_of;
 use crate::exception::Exception;
 use crate::flags;
-use crate::function_code::FunctionCode;
 use crate::instructions::Flow;
 use crate::instructions::Handler;
 use crate::instructions::Table;
 use crate::registers::Registers;
-use crate::size::Size;
 use crate::timing;
 use crate::timing::AddressTable;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 /// MOVEQ: 0111 rrr0 dddddddd (CPU32RM 4.4, MOVEQ).
 const MOVEQ_MASK: u16 = 0xf100;
@@ -230,7 +231,7 @@ fn move_<const SIZE: u8, const SOURCE: u8, const DESTINATION: u8>(
     core: &mut Core<'_>,
     opcode: u16,
 ) -> Result<Flow, Exception> {
-    let size = Size::of_index(SIZE);
+    let size = size_of_index(SIZE);
     let (source_table, destination_table) = const { timing::move_tables(SOURCE, DESTINATION) };
     let source = core.effective_address_of(SOURCE, opcode & FIELD_MASK, size, source_table)?;
     let value = core.read_operand(source, size)?;
@@ -264,7 +265,7 @@ fn movea<const SIZE: u8, const SOURCE: u8>(
     core: &mut Core<'_>,
     opcode: u16,
 ) -> Result<Flow, Exception> {
-    let size = Size::of_index(SIZE);
+    let size = size_of_index(SIZE);
     let source =
         core.effective_address_of(SOURCE, opcode & FIELD_MASK, size, AddressTable::Fetch)?;
     let value = size.sign_extend(core.read_operand(source, size)?);
@@ -558,7 +559,6 @@ fn movep(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
 
 #[cfg(test)]
 pub(super) mod tests {
-    use crate::address::Address;
     use crate::cpu::Cpu;
     use crate::exception::Exception;
     use crate::exception::Vector;
@@ -569,8 +569,9 @@ pub(super) mod tests {
     use crate::instructions::tests::step;
     use crate::memory::Space;
     use crate::registers::status;
-    use crate::size::Size;
     use crate::timing;
+    use mc683xx_target::address::Address;
+    use mc683xx_target::size::Size;
 
     /// The supervisor stack's top in [`prepared`] machines.
     pub(crate) const STACK: u32 = 0x6000;

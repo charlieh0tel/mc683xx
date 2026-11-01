@@ -8,7 +8,6 @@ use std::sync::atomic::Ordering;
 
 use mc683xx_board::board::Board;
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_gdb::stub;
@@ -19,6 +18,7 @@ use mc683xx_gdb::target::Target;
 use mc683xx_gdb::target::TargetRun;
 use mc683xx_gdb::target::Unwritable;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_target::address::Address;
 
 use crate::Turns;
 use crate::error::RunError;

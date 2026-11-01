@@ -1,13 +1,13 @@
 //! Effective addresses (CPU32RM 3.4): decoding the six-bit field, its
 //! extension words, and reading and writing the operand it names.
 
-use crate::address::Address;
 use crate::cpu::Core;
 use crate::exception::Exception;
 use crate::registers::Registers;
-use crate::size::Size;
 use crate::timing;
 use crate::timing::AddressTable;
+use mc683xx_target::address::Address;
+use mc683xx_target::size::Size;
 
 /// A7, the stack pointer.
 const STACK_POINTER: usize = 7;

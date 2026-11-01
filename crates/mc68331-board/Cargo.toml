@@ -20,6 +20,7 @@ workspace = true
 
 [dependencies]
 mc683xx-cpu32.workspace = true
+mc683xx-target.workspace = true
 mc683xx-mc68331 = { workspace = true, optional = true }
 mc683xx-modules.workspace = true
 serde = { version = "1.0.229", features = ["derive"] }

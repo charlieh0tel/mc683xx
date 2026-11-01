@@ -9,7 +9,6 @@ use std::fmt;
 use std::mem;
 use std::rc::Rc;
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
 use mc683xx_cpu32::bus::BusError;
@@ -52,6 +51,7 @@ use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::Sim;
 use mc683xx_modules::sim::ports::Change;
 use mc683xx_modules::sim::ports::PortName;
+use mc683xx_target::address::Address;
 
 use crate::board::ADDRESS_LINES;
 use crate::board::Board;

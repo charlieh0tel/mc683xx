@@ -2,12 +2,12 @@
 
 use std::convert::Infallible;
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::function_code::FunctionCode;
-use mc683xx_cpu32::size::Size;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 use super::Target;
 use super::TargetRun;

@@ -18,7 +18,7 @@ use crate::instructions::Flow;
 use crate::instructions::Table;
 use crate::registers::Registers;
 use crate::registers::status;
-use crate::size::Size;
+use mc683xx_target::size::Size;
 
 /// ABCD: 1100 xxx1 0000 myyy (CPU32RM 4.4, ABCD).
 const EXTENDED_MASK: u16 = 0xf1f0;

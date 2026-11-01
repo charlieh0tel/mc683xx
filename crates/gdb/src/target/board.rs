@@ -4,10 +4,10 @@
 use mc683xx_board::board::Board;
 
 use mc683xx_board::error::RunError;
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_target::address::Address;
 
 use super::Target;
 use super::TargetRun;

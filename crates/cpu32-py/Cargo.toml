@@ -24,6 +24,7 @@ python = ["dep:pyo3", "dep:mc683xx-gdb"]
 [dependencies]
 mc683xx-board.workspace = true
 mc683xx-cpu32.workspace = true
+mc683xx-target.workspace = true
 mc683xx-gdb = { workspace = true, optional = true, features = ["board"] }
 mc683xx-mc68331.workspace = true
 mc683xx-modules.workspace = true

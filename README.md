@@ -15,6 +15,7 @@ crates.io.
 
 | Crate | What it is |
 | --- | --- |
+| `mc683xx-target` | A CPU32 under debug control: its addresses, operand sizes and function codes, `no_std`, shared with a BDM pod on silicon. |
 | `mc683xx-cpu32` | The CPU32 core, and a bare CPU on flat memory (`flat`). |
 | `mc683xx-modules` | The SIM and the QSM, and the interfaces host peripherals plug into. |
 | `mc683xx-mc68331` | The GPT, and the MC68331 chip built from the core and the modules. |
@@ -159,7 +160,8 @@ boards and their firmware.
 
 ## Workspace
 
-The crates above are in `crates/`: `cpu32` (`mc683xx-cpu32`),
+The crates above are in `crates/`: `target` (`mc683xx-target`),
+`cpu32` (`mc683xx-cpu32`),
 `mc683xx` (`mc683xx-modules`), `mc68331` (`mc683xx-mc68331`),
 `mc68331-board` (`mc683xx-board`), `peripherals`
 (`mc683xx-peripherals`), `gdb` (`mc683xx-gdb`) and `mc68331-run`

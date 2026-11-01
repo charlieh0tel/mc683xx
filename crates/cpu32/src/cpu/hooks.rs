@@ -16,17 +16,17 @@ use std::ops::RangeInclusive;
 use super::Core;
 use super::Cpu;
 use super::Stop;
-use crate::address::Address;
 use crate::exception::CycleKind;
 use crate::exception::Frame;
 use crate::exception::Vector;
-use crate::function_code::FunctionCode;
 use crate::interrupt::InterruptLevel;
 use crate::memory::Permissions;
 use crate::memory::Space;
 use crate::memory::watch;
 use crate::registers::Registers;
-use crate::size::Size;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 #[cfg(test)]
 mod tests;

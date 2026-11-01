@@ -15,7 +15,6 @@ use cpu32_oracle::memory::Polled;
 use cpu32_oracle::memory::Region;
 use cpu32_oracle::memory::RegionMemory;
 use cpu32_oracle::state::State;
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
 use mc683xx_cpu32::bus::BusError;
@@ -32,6 +31,7 @@ use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_cpu32::registers::status;
+use mc683xx_target::address::Address;
 
 use crate::machine;
 use crate::machine::ADDRESS_BITS;

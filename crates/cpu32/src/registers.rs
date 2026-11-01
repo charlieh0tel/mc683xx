@@ -1,6 +1,6 @@
 //! The CPU32 programming model (CPU32RM 2.1, 2.3.1).
 
-use crate::function_code::FunctionCode;
+use mc683xx_target::function_code::FunctionCode;
 
 /// Status register bits (CPU32RM 2.3.1.3, Figure 2-3).
 pub mod status {

@@ -3,11 +3,11 @@ use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::interrupt::InterruptLevel;
-use mc683xx_cpu32::size::Size;
 use mc683xx_modules::module::Module;
 use mc683xx_modules::module::RegisterAccess;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::pins::PortLevels;
+use mc683xx_target::size::Size;
 
 use super::Gpt;
 use super::Input;

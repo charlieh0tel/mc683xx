@@ -6,18 +6,18 @@
 //! cycle is real, with its side effects, at the chip's time; a peek is
 //! a look without them, where one can be had.
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::function_code::FunctionCode;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Space;
-use mc683xx_cpu32::size::Size;
 use mc683xx_modules::module;
 use mc683xx_modules::module::Peek;
 use mc683xx_modules::sim::BLOCK;
 use mc683xx_modules::sim::MODULE_SPACE_BYTES;
 use mc683xx_modules::sim::chip_selects::DecodeRequest;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 use crate::board::Board;
 use crate::board::load;

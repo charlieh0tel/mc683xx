@@ -12,7 +12,6 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::RangeInclusive;
 
-use crate::address::Address;
 use crate::bus::Bus;
 use crate::bus::BusAccess;
 use crate::bus::BusError;
@@ -45,7 +44,8 @@ use crate::memory::Space;
 use crate::peripheral::BusCycle;
 use crate::peripheral::MappedPeripheral;
 use crate::peripheral::PeripheralId;
-use crate::size::Size;
+use mc683xx_target::address::Address;
+use mc683xx_target::size::Size;
 
 #[cfg(test)]
 mod tests;
@@ -293,7 +293,7 @@ struct MachineState {
 /// it, PC and SP set, and the run limited to the function's return.
 ///
 /// ```
-/// use mc683xx_cpu32::address::Address;
+/// use mc683xx_target::address::Address;
 /// use mc683xx_cpu32::cpu::bare::End;
 /// use mc683xx_cpu32::cpu::bare::Limits;
 /// use mc683xx_cpu32::flat::ADDRESS_BITS;

@@ -10,12 +10,12 @@ use std::mem;
 use std::ops::Range;
 use std::ops::RangeInclusive;
 
-use crate::address::Address;
 use crate::bus::PortSize;
 use crate::bus::stall;
 use crate::cycles::Cycles;
-use crate::function_code::FunctionCode;
-use crate::size::Size;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 /// Bytes in a page: the smallest chip-select block, 2K (SIMRM 7.3,
 /// Table 7-2), so a page never straddles two blocks.
@@ -914,10 +914,10 @@ mod tests {
     use super::PAGE_BYTES;
     use super::Page;
     use super::Space;
-    use crate::address::Address;
     use crate::bus::PortSize;
     use crate::cycles::Cycles;
-    use crate::size::Size;
+    use mc683xx_target::address::Address;
+    use mc683xx_target::size::Size;
 
     fn ram(memory: &mut Memory, at: u32, bytes: u32) {
         let region = memory.add_region(vec![0; bytes as usize]);
