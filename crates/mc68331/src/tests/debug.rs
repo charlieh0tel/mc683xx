@@ -2,11 +2,13 @@
 
 use std::ops::ControlFlow;
 
+use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
@@ -378,5 +380,130 @@ fn without_a_bkpt_reset_the_cpu_cannot_be_halted() {
         chip.halt(),
         Err(TargetError::NotEnabled),
         "BKPT high at reset"
+    );
+}
+
+/// Slow memory at a fixed address, on no select: one page.
+const SLOW: u32 = 0x30_0000;
+/// What the slow memory holds, in every byte.
+const SLOW_BYTE: u8 = 0x5a;
+/// SYPCR (MC68331UM D.3.12), the low byte of its word.
+const SYPCR: u32 = SIM + 0x20;
+/// SYPCR BME, BMT 8 clocks, the watchdog off (MC68331UM D.3.12).
+const SYPCR_BUS_MONITOR_8: u16 = 0x0007;
+/// SIMCR out of reset (MC68331UM D.3.1), FRZBM clear.
+const SIMCR_RESET: u16 = 0x00cf;
+/// SIMCR out of reset but FRZBM, bit 13: FREEZE stops the bus monitor
+/// (MC68331UM D.3.1, 4.2.13).
+const SIMCR_FRZBM: u16 = 0x20cf;
+/// MOVE.W (xxx).L,D0 (CPU32RM 4, MOVE), its address next.
+const MOVE_W_ABSOLUTE_D0: u16 = 0x3039;
+
+/// Whether a BDM read of the word at `SLOW` ends well, and whether the
+/// core's page tables serve it (a debugger's write that needs no
+/// cycle).
+fn slow_access(chip: &mut Mc68331) -> (bool, bool) {
+    let mut word = [0; 2];
+    let read = chip.read_memory(
+        Address(SLOW),
+        FunctionCode::SUPERVISOR_DATA,
+        Size::Word,
+        &mut word,
+    );
+    assert!(
+        matches!(read, Ok(()) | Err(TargetError::Access { .. })),
+        "{read:?}"
+    );
+    if read.is_ok() {
+        assert_eq!(word, [SLOW_BYTE; 2]);
+    }
+    let served = chip.poke(Address(SLOW), &[SLOW_BYTE]).is_ok();
+    (read.is_ok(), served)
+}
+
+#[test]
+fn freeze_stops_the_bus_monitor_with_frzbm() {
+    // MC68331UM 4.2.13, D.3.1: 16 clocks of slow memory against the
+    // monitor's 8 (SIMRM 3.2)
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(&[BRANCH_TO_SELF], ROM_BYTES),
+            false,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    builder
+        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], true)
+        .unwrap();
+    let slow = builder
+        .fixed_memory(Address(SLOW), vec![SLOW_BYTE; RAM_BYTES], true)
+        .unwrap();
+    builder
+        .fixed_timing(
+            slow,
+            PortSize::Bits16,
+            Termination::WaitStates(Termination::MOST_WAIT_STATES),
+        )
+        .unwrap();
+    let mut chip = builder.build();
+    chip.reset_halted().unwrap();
+    assert_eq!(slow_access(&mut chip), (true, true), "no monitor");
+    store(&mut chip, SYPCR, SYPCR_BUS_MONITOR_8);
+    assert_eq!(
+        slow_access(&mut chip),
+        (false, false),
+        "frozen, FRZBM clear"
+    );
+    store(&mut chip, SIM, SIMCR_FRZBM);
+    assert_eq!(
+        slow_access(&mut chip),
+        (true, true),
+        "FRZBM written while frozen"
+    );
+    // the program, from RAM, reads the slow word; a bus error goes to
+    // a BGND of its own
+    let program = RAM + 0x200;
+    let handler = RAM + 0x300;
+    let space = FunctionCode::SUPERVISOR_DATA;
+    let code: Vec<u8> = [MOVE_W_ABSOLUTE_D0, (SLOW >> 16) as u16, SLOW as u16, BGND]
+        .iter()
+        .flat_map(|word| word.to_be_bytes())
+        .collect();
+    chip.write_memory(Address(program), space, Size::Word, &code)
+        .unwrap();
+    chip.write_memory(Address(handler), space, Size::Word, &BGND.to_be_bytes())
+        .unwrap();
+    chip.write_memory(
+        Address(RAM + Vector::BUS_ERROR.offset()),
+        space,
+        Size::Long,
+        &handler.to_be_bytes(),
+    )
+    .unwrap();
+    chip.write_system_register(SystemRegister::Vbr, RAM)
+        .unwrap();
+    chip.write_system_register(SystemRegister::Ssp, RAM + 0x400)
+        .unwrap();
+    chip.write_system_register(SystemRegister::Rpc, program)
+        .unwrap();
+    chip.go().unwrap();
+    chip.run_for(Cycles(1000));
+    assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Background)));
+    assert_eq!(
+        chip.read_system_register(SystemRegister::Pcc),
+        Ok(handler),
+        "the monitor watches the CPU's cycle once FREEZE ends"
+    );
+    assert_eq!(
+        slow_access(&mut chip),
+        (true, true),
+        "frozen again by BGND, FRZBM set"
+    );
+    store(&mut chip, SIM, SIMCR_RESET);
+    assert_eq!(
+        slow_access(&mut chip),
+        (false, false),
+        "FRZBM cleared while frozen"
     );
 }
