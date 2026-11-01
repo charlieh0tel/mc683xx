@@ -559,8 +559,19 @@ impl Qspi {
     /// (QSMRM 4.3.4).
     pub(super) fn write_spcr3(&mut self, value: u8, port: PortQs, now: Cycles) {
         self.spcr3 = value & SPCR3_WRITABLE;
+        self.resume(port, now);
+    }
+
+    /// Whether the queue halts at the next entry's end: HALT (QSMRM
+    /// 4.3.4).
+    const fn halting(&self) -> bool {
+        self.spcr3 & SPCR3_HALT != 0
+    }
+
+    /// A halted queue goes on at `now` if nothing halts it now.
+    fn resume(&mut self, port: PortQs, now: Cycles) {
         if let Queue::Halted(pointer) = self.queue
-            && self.spcr3 & SPCR3_HALT == 0
+            && !self.halting()
         {
             self.start(pointer, port, now);
         }
@@ -761,7 +772,7 @@ impl Qspi {
         // nothing else unseen, so past two passes nothing new shows.
         for _ in 0..=2 * ENTRIES {
             // `finish` at `end`, then `start` of the next entry
-            if self.buffered.is_some() || self.spcr3 & SPCR3_HALT != 0 {
+            if self.buffered.is_some() || self.halting() {
                 return Some(end);
             }
             let last = u16::from(pointer) == self.spcr2 >> SPCR2_ENDQP_SHIFT & POINTER_MASK;
@@ -955,7 +966,7 @@ impl Qspi {
     fn finish(&mut self, pointer: u8, port: PortQs, now: Cycles) {
         let last = u16::from(pointer) == self.spcr2 >> SPCR2_ENDQP_SHIFT & POINTER_MASK;
         let moved = self.apply_buffered();
-        let halt = self.spcr3 & SPCR3_HALT != 0;
+        let halt = self.halting();
         if last {
             self.flags |= SPSR_SPIF;
             if self.spcr2 & SPCR2_WREN == 0 || halt {
