@@ -167,7 +167,7 @@ impl Target for Machine {
         let run = Self::run_limited(self, limits);
         Ok(match run.end {
             End::Stop(stop) => stop.into(),
-            End::Until | End::Instructions => TargetRun::Quantum,
+            End::Until | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
             _ => TargetRun::Requested,
         })

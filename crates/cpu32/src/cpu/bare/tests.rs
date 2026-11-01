@@ -7,10 +7,15 @@ use super::End;
 use super::FaultCause;
 use super::Intercepted;
 use super::Limits;
+use crate::cpu::Stop;
 use crate::cpu::hooks::MemoryAccess;
+use crate::cycles::Cycles;
 use crate::exception::CycleKind;
+use crate::exception::Exception;
 use crate::exception::Vector;
 use crate::flat::Machine;
+use crate::interrupt::InterruptLevel;
+use crate::interrupt::IrqPin;
 use crate::memory::PAGE_BYTES;
 use crate::memory::Permissions;
 use crate::registers::Registers;
@@ -205,4 +210,138 @@ fn a_memory_hook_has_the_registers_as_the_instruction_began() {
     assert_eq!(*seen.borrow(), [CODE + 2]);
     assert_eq!(machine.cpu.instruction_registers().data[1], 1);
     assert_eq!(machine.cpu.instruction_registers().pc, CODE + 2);
+}
+
+/// One step, or whatever ends it sooner.
+fn step(machine: &mut Machine) -> End {
+    machine
+        .run_limited(Limits {
+            steps: Some(1),
+            ..Limits::default()
+        })
+        .end
+}
+
+/// MOVE #$2000,SR: the mask down (CPU32RM 4, MOVE to SR).
+const MOVE_TO_SR_UNMASKED: [u16; 2] = [0x46fc, 0x2000];
+
+/// Points `vector` at `handler` and returns `handler`.
+fn handle(machine: &mut Machine, vector: Vector, handler: u32) -> u32 {
+    machine
+        .write(Address(vector.offset()), &handler.to_be_bytes())
+        .unwrap();
+    handler
+}
+
+/// The word and long of the four-word frame at SP: its SR, its PC, and
+/// its format and vector offset (CPU32RM 6.4).
+fn frame(machine: &Machine) -> (u16, u32, u16) {
+    let mut bytes = [0; 8];
+    machine
+        .read(Address(machine.cpu.registers.ssp), &mut bytes)
+        .unwrap();
+    let word = |at: usize| u16::from_be_bytes([bytes[at], bytes[at + 1]]);
+    (
+        word(0),
+        u32::from(word(2)) << 16 | u32::from(word(4)),
+        word(6),
+    )
+}
+
+#[test]
+fn a_step_is_an_instruction_or_an_exception_up_to_its_handler() {
+    let mut machine = machine(&[MOVEQ_1_D1, TRAP_0]);
+    let trap = handle(&mut machine, Vector::trap(0), 0x4100);
+    assert_eq!(step(&mut machine), End::Steps);
+    assert_eq!(machine.cpu.registers.data[1], 1);
+    assert_eq!(machine.cpu.registers.pc, CODE + 2);
+    // the TRAP and its exception, not the handler's first instruction
+    let run = machine.run_limited(Limits {
+        steps: Some(1),
+        ..Limits::default()
+    });
+    assert_eq!((run.end, run.steps), (End::Steps, 1));
+    assert_eq!(machine.cpu.registers.pc, trap);
+    assert_eq!(frame(&machine).1, CODE + 4, "the TRAP's frame");
+    assert_eq!(frame(&machine).2, Vector::trap(0).offset() as u16);
+    assert_eq!(machine.cpu.instructions(), 2);
+}
+
+#[test]
+fn a_step_takes_an_interrupt_pending_at_its_start_or_its_end() {
+    // pending at the start: taken, its handler not entered
+    let mut first = machine(&[NOP]);
+    let level_7 = handle(
+        &mut first,
+        Vector::autovector(InterruptLevel::new(7).unwrap()),
+        0x4300,
+    );
+    first.request_interrupt(IrqPin::new(7).unwrap(), None);
+    assert_eq!(step(&mut first), End::Steps);
+    assert_eq!(first.cpu.registers.pc, level_7);
+    assert_eq!(frame(&first).1, CODE, "the NOP not executed");
+    assert_eq!(first.cpu.instructions(), 0);
+    // pending at the end: the instruction unmasks it, it is taken, as
+    // the trace before it (CPU32RM 6.2.10)
+    let mut machine = machine(&MOVE_TO_SR_UNMASKED);
+    machine
+        .cpu
+        .registers
+        .set_sr(status::S | status::INTERRUPT_MASK);
+    let level_3 = handle(
+        &mut machine,
+        Vector::autovector(InterruptLevel::new(3).unwrap()),
+        0x4200,
+    );
+    machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+    let run = machine.run_limited(Limits {
+        steps: Some(1),
+        ..Limits::default()
+    });
+    assert_eq!((run.end, run.steps), (End::Steps, 2));
+    assert_eq!(machine.cpu.registers.pc, level_3);
+    assert_eq!(frame(&machine).1, CODE + 4, "after the MOVE");
+    assert_eq!(machine.cpu.instructions(), 1);
+}
+
+#[test]
+fn a_step_of_stop_ends_with_the_cpu_stopped_not_waiting() {
+    // STOP #$2000
+    let mut machine = machine(&[0x4e72, 0x2000]);
+    assert_eq!(step(&mut machine), End::Steps);
+    assert_eq!(machine.cpu.registers.pc, CODE + 4);
+}
+
+#[test]
+fn a_step_cut_by_the_budget_is_finished_by_a_run_of_zero_steps() {
+    // what the chip does when a quantum ends after the step's
+    // instruction: the steps left, none, take only interrupts pending
+    let mut machine = machine(&[MOVEQ_1_D1, NOP]);
+    let run = machine.run_limited(Limits {
+        steps: Some(1),
+        cycles: Some(Cycles(1)),
+        ..Limits::default()
+    });
+    assert_eq!((run.end, run.steps), (End::Stop(Stop::Budget), 1));
+    let run = machine.run_limited(Limits {
+        steps: Some(0),
+        ..Limits::default()
+    });
+    assert_eq!((run.end, run.steps), (End::Steps, 0));
+    assert_eq!(machine.cpu.registers.pc, CODE + 2, "the NOP not run");
+}
+
+#[test]
+fn a_step_keeps_what_its_instruction_left_for_the_host() {
+    // the look for an interrupt at the step's end, finding none,
+    // leaves the instruction's registers as it began and its exception
+    let mut machine = machine(&[MOVEQ_1_D1, TRAP_0]);
+    machine.cpu.set_stop_on_fault(true);
+    assert_eq!(step(&mut machine), End::Steps);
+    assert_eq!(machine.cpu.instruction_registers().data[1], 0);
+    assert_eq!(machine.cpu.instruction_registers().pc, CODE);
+    assert_eq!(step(&mut machine), End::Steps);
+    assert!(
+        matches!(machine.cpu.exception_taken(), Some(Exception::Short { vector, .. }) if vector == Vector::trap(0))
+    );
 }

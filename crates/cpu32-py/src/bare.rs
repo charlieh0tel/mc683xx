@@ -1029,7 +1029,7 @@ impl Target for Debugged<'_, '_> {
         }
         Ok(match end {
             End::Stop(stop) => stop.into(),
-            End::Until | End::Instructions => TargetRun::Quantum,
+            End::Until | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
             _ => TargetRun::Requested,
         })

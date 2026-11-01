@@ -45,6 +45,15 @@ pub struct Limits {
     pub cycles: Option<Cycles>,
     /// The most instructions to run.
     pub instructions: Option<u64>,
+    /// The most steps to take: instructions run, each with the
+    /// exceptions it raised, and interrupts taken.  The run ends before
+    /// the next instruction once it has taken them, interrupts pending
+    /// there taken first, as T1 tracing stops (CPU32RM 6.2.10: the
+    /// trace before a pending interrupt): one step is an interrupt
+    /// pending at the start, or an instruction and then any interrupt
+    /// pending at its end, either way before the handler's first
+    /// instruction.  Zero takes only the interrupts pending.
+    pub steps: Option<u64>,
     /// An address: the run ends when PC reaches it at an instruction
     /// boundary, before an interrupt is taken or a hook called there.
     pub until: Option<Address>,
@@ -106,6 +115,8 @@ pub enum End {
     Until,
     /// It ran [`Limits::instructions`].
     Instructions,
+    /// It took [`Limits::steps`].
+    Steps,
     /// A fault, with [`Cpu::set_stop_on_fault`].
     Fault(FaultStop),
     /// An intercepted exception.
@@ -121,6 +132,8 @@ pub struct LimitedRun {
     pub cycles: Cycles,
     /// Why it ended.
     pub end: End,
+    /// The steps it took, as [`Limits::steps`] counts them.
+    pub steps: u64,
 }
 
 /// Deviations from the CPU32, for parity runs against an emulator that
@@ -177,6 +190,8 @@ pub(crate) struct Bare {
     pub(crate) end: Option<End>,
     /// The last invalid access's reason, for a fault's cause.
     pub(crate) last_invalid: Option<Invalid>,
+    /// The interrupts taken since the last limited run began.
+    pub(crate) interrupts_taken: u64,
 }
 
 impl Cpu {
@@ -197,12 +212,15 @@ impl Cpu {
         }
         self.bare.end = None;
         let budget = limits.cycles.unwrap_or(Cycles(u64::MAX - now.0));
+        let first = self.instructions;
+        self.bare.interrupts_taken = 0;
         let run = self.run_instructions(bus, interrupts, now, budget, Some(limits));
         self.left_pc = Address(self.registers.pc);
         let end = self.bare.end.take().unwrap_or(End::Stop(run.stop));
         LimitedRun {
             cycles: run.cycles,
             end,
+            steps: self.instructions - first + self.bare.interrupts_taken,
         }
     }
 

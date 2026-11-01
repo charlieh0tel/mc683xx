@@ -505,14 +505,31 @@ impl Cpu {
                     stop: idle.stop(),
                 };
             }
-            if let Some(limits) = &limits
-                && let Some(end) = cpu.limit_reached(limits, first)
-            {
-                cpu.bare.end = Some(end);
-                return Run {
-                    cycles: elapsed,
-                    stop: Stop::Requested,
-                };
+            if let Some(limits) = &limits {
+                if let Some(end) = cpu.limit_reached(limits, first) {
+                    cpu.bare.end = Some(end);
+                    return Run {
+                        cycles: elapsed,
+                        stop: Stop::Requested,
+                    };
+                }
+                // the steps taken: interrupts pending, then the end
+                if limits.steps.is_some_and(|count| {
+                    cpu.instructions - first + cpu.bare.interrupts_taken >= count
+                }) {
+                    if let Some(cycles) = core.step_boundary(interrupts, now + elapsed) {
+                        elapsed += cycles;
+                        if let Some(run) = requested(core.cpu, elapsed) {
+                            return run;
+                        }
+                        continue;
+                    }
+                    core.cpu.bare.end = Some(bare::End::Steps);
+                    return Run {
+                        cycles: elapsed,
+                        stop: Stop::Requested,
+                    };
+                }
             }
             if let Some(cycles) = core.boundary(interrupts, now + elapsed) {
                 elapsed += cycles;
@@ -878,9 +895,32 @@ impl Core<'_> {
             return None;
         }
         let cpu = &mut *self.cpu;
+        cpu.bare.interrupts_taken += 1;
         cpu.stopped = false;
         cpu.leave_loop_mode();
         Some(cpu.spend(timing::exception::INTERRUPT) + cpu.stall + cpu.extra)
+    }
+
+    /// [`boundary`](Self::boundary) where a step ends: out of line, so
+    /// the run loop's frame and code are as without it.  With no
+    /// interrupt taken, what the last instruction left (its registers
+    /// as it began, its exception, its clocks) is as it was, so the run
+    /// ends as if this look had not been made.
+    #[cold]
+    #[inline(never)]
+    fn step_boundary(&mut self, interrupts: &mut dyn Interrupts, now: Cycles) -> Option<Cycles> {
+        let cpu = &*self.cpu;
+        let began = cpu.capture.then(|| cpu.began.clone());
+        let left = (cpu.stall, cpu.extra, cpu.refund, cpu.taken);
+        let taken = self.boundary(interrupts, now);
+        if taken.is_none() {
+            let cpu = &mut *self.cpu;
+            (cpu.stall, cpu.extra, cpu.refund, cpu.taken) = left;
+            if let Some(began) = began {
+                cpu.began = began;
+            }
+        }
+        taken
     }
 
     /// One instruction and the exceptions it raises: its cycles.  The
