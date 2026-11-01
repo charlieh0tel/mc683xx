@@ -34,6 +34,9 @@ type = "plain"
 [[peripheral]]
 name = "huge"
 type = "huge"
+[[peripheral]]
+name = "looped"
+type = "looped"
 """
 
 
@@ -62,11 +65,20 @@ class Huge:
         return {"wide": 1 << 64}
 
 
+class Looped:
+    """An `inspect()` whose dict holds itself."""
+
+    def inspect(self) -> dict[str, object]:
+        shown: dict[str, object] = {}
+        shown["self"] = shown
+        return shown
+
+
 def board(directory: Path) -> mc683xx.Board:
     (directory / "board.toml").write_text(BOARD)
     return mc683xx.Board(
         str(directory / "board.toml"),
-        types={"panel": Panel, "broken": Broken, "plain": Plain, "huge": Huge},
+        types={"panel": Panel, "broken": Broken, "plain": Plain, "huge": Huge, "looped": Looped},
     )
 
 
@@ -96,3 +108,8 @@ def test_an_inspect_s_exception_is_raised(tmp_path: Path) -> None:
 def test_an_int_too_wide_for_64_bits_raises(tmp_path: Path) -> None:
     with pytest.raises(OverflowError, match="wide"):
         board(tmp_path).inspect("huge")
+
+
+def test_a_dict_that_holds_itself_raises(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="nest deeper than 32"):
+        board(tmp_path).inspect("looped")

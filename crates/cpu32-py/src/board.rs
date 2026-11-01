@@ -756,8 +756,17 @@ fn inspection_dict<'py>(py: Python<'py>, inspection: &Inspection) -> PyResult<Bo
     Ok(dict)
 }
 
+/// How deep a Python inspection's groups may nest: past it, a mapping
+/// that holds itself would recurse without end.
+const INSPECTION_DEPTH: usize = 32;
+
 /// A Python mapping as an inspection, as `inspection_dict` gives one.
 fn python_inspection(mapping: &Bound<'_, PyMapping>) -> PyResult<Inspection> {
+    nested_inspection(mapping, 0)
+}
+
+/// `mapping` as an inspection, a group `depth` groups down.
+fn nested_inspection(mapping: &Bound<'_, PyMapping>, depth: usize) -> PyResult<Inspection> {
     entries(mapping)?
         .into_iter()
         .try_fold(Inspection::default(), |inspection, (key, value)| {
@@ -767,7 +776,12 @@ fn python_inspection(mapping: &Bound<'_, PyMapping>) -> PyResult<Inspection> {
             } else if let Ok(bytes) = value.cast::<PyBytes>() {
                 inspection.bytes(name, bytes.as_bytes())
             } else if let Ok(mapping) = value.cast::<PyMapping>() {
-                inspection.group(name, python_inspection(mapping)?)
+                if depth + 1 == INSPECTION_DEPTH {
+                    return Err(PyValueError::new_err(format!(
+                        "{name}: inspected groups nest deeper than {INSPECTION_DEPTH}"
+                    )));
+                }
+                inspection.group(name, nested_inspection(mapping, depth + 1)?)
             } else if value.cast::<PyString>().is_ok() {
                 inspection.text(name, value.extract::<String>()?)
             } else if value.cast::<PyInt>().is_ok() {
