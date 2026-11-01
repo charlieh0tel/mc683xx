@@ -60,6 +60,16 @@ const WAIT_TICK: Duration = Duration::from_millis(10);
 const CLOSE_GRACE: Duration = Duration::from_millis(100);
 /// How often that wait looks.
 const CLOSE_TICK: Duration = Duration::from_millis(5);
+/// The most bytes read and not yet answered: two whole messages.  The
+/// server reads no more until it answers, so a client that floods it
+/// waits on its own socket.
+const MAX_PENDING: usize = 2 * (1 + MAX_PACKET);
+/// The most bytes of replies the client has not yet taken before the
+/// server answers no more: a client that does not read waits.
+const MAX_OUTGOING: usize = 4 * (1 + MAX_PACKET);
+/// The most requests one poll answers, so a client cannot keep the
+/// runner from its turn.
+const MAX_ANSWERS: usize = 32;
 
 /// A request's code (the protocol's request table).
 mod code {
@@ -345,8 +355,10 @@ pub(crate) struct Server {
     listener: Listener,
     /// The client, while one is connected.
     client: Option<Stream>,
-    /// Bytes read and not yet a whole message.
+    /// Bytes read and not yet answered, at most [`MAX_PENDING`].
     pending: Vec<u8>,
+    /// Replies the client has not yet taken.
+    outgoing: Vec<u8>,
     /// Whether the CPU was in background mode when the server started,
     /// an entry it did not see: its ATEMP is stale until it resumes.
     stale: bool,
@@ -361,43 +373,48 @@ impl Server {
             listener,
             client: None,
             pending: Vec::new(),
+            outgoing: Vec::new(),
             stale: Cpu32Target::halted(chip).ok().flatten().is_some(),
         })
     }
 
     /// Takes a new connection, closing any beyond the first, and
-    /// answers every whole request the client has sent, not blocking.
-    /// Whether it answered one.
+    /// answers up to [`MAX_ANSWERS`] whole requests the client has sent,
+    /// not blocking.  Whether it answered one.
     pub(crate) fn poll(&mut self, chip: &mut Mc68331) -> bool {
+        let mut waited = false;
         while let Ok(Some(stream)) = self.listener.accept() {
-            if self.client.is_some() {
+            if self.client.is_some() && !waited {
+                waited = true;
                 self.await_close();
             }
             if self.client.is_none() {
                 self.client = Some(stream);
-                self.pending.clear();
             }
             // another is dropped, closing it
         }
-        self.receive();
-        let mut answered = false;
-        loop {
+        let mut answers = 0;
+        while answers < MAX_ANSWERS && self.flush() {
             match self.message() {
                 Ok(Some(packet)) => {
                     let answer = self.answer(chip, &packet);
-                    if !self.send(&answer) {
-                        return answered;
-                    }
-                    answered = true;
+                    self.send(&answer);
+                    answers += 1;
                 }
-                Ok(None) => return answered,
+                Ok(None) => {
+                    if !self.receive() {
+                        break;
+                    }
+                }
                 Err(()) => {
                     // a broken stream
                     self.drop_client();
-                    return answered;
+                    break;
                 }
             }
         }
+        self.flush();
+        answers > 0
     }
 
     /// The first whole message pending, taken, if there is one; an
@@ -416,17 +433,33 @@ impl Server {
         Ok(Some(self.pending.drain(..=length).skip(1).collect()))
     }
 
-    /// Reads all the client has sent; the client is dropped if it
-    /// ended.
-    fn receive(&mut self) {
-        let mut buffer = [0; 256];
-        while let Some(client) = &mut self.client {
-            match client.read(&mut buffer) {
-                Ok(0) => self.drop_client(),
-                Ok(read) => self.pending.extend_from_slice(&buffer[..read]),
-                Err(error) if error.kind() == ErrorKind::WouldBlock => return,
+    /// Reads what the client has sent, up to [`MAX_PENDING`] pending.
+    /// Whether it read anything; the client is dropped if it ended.
+    fn receive(&mut self) -> bool {
+        let mut buffer = [0; MAX_PENDING];
+        loop {
+            let room = MAX_PENDING - self.pending.len();
+            let Some(client) = &mut self.client else {
+                return false;
+            };
+            if room == 0 {
+                return false;
+            }
+            match client.read(&mut buffer[..room]) {
+                Ok(0) => {
+                    self.drop_client();
+                    return false;
+                }
+                Ok(read) => {
+                    self.pending.extend_from_slice(&buffer[..read]);
+                    return true;
+                }
+                Err(error) if error.kind() == ErrorKind::WouldBlock => return false,
                 Err(error) if error.kind() == ErrorKind::Interrupted => {}
-                Err(_) => self.drop_client(),
+                Err(_) => {
+                    self.drop_client();
+                    return false;
+                }
             }
         }
     }
@@ -442,22 +475,16 @@ impl Server {
     }
 
     /// Waits up to [`CLOSE_GRACE`] for the client's end of file, keeping
-    /// what it sends meanwhile; the client is dropped if it ends.
+    /// what it sends meanwhile; the client is dropped if it ends.  One
+    /// that fills [`MAX_PENDING`] meanwhile is taken as staying.
     fn await_close(&mut self) {
         let deadline = Instant::now() + CLOSE_GRACE;
-        let mut buffer = [0; 256];
-        while let Some(client) = &mut self.client {
-            match client.read(&mut buffer) {
-                Ok(0) => self.drop_client(),
-                Ok(read) => self.pending.extend_from_slice(&buffer[..read]),
-                Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                    if Instant::now() >= deadline {
-                        return;
-                    }
-                    thread::sleep(CLOSE_TICK);
+        while self.client.is_some() && Instant::now() < deadline {
+            if !self.receive() && self.client.is_some() {
+                if self.pending.len() == MAX_PENDING {
+                    return;
                 }
-                Err(error) if error.kind() == ErrorKind::Interrupted => {}
-                Err(_) => self.drop_client(),
+                thread::sleep(CLOSE_TICK);
             }
         }
     }
@@ -466,25 +493,38 @@ impl Server {
     fn drop_client(&mut self) {
         self.client = None;
         self.pending.clear();
+        self.outgoing.clear();
     }
 
-    /// Sends `packet` with its length byte; false, the client dropped,
-    /// if it could not.
-    fn send(&mut self, packet: &[u8]) -> bool {
-        let Some(client) = &mut self.client else {
-            return false;
-        };
-        let mut message = vec![packet.len() as u8];
-        message.extend_from_slice(packet);
-        let sent = client
-            .set_nonblocking(false)
-            .and_then(|()| client.write_all(&message))
-            .and_then(|()| client.set_nonblocking(true));
-        if sent.is_err() {
-            self.drop_client();
-            return false;
+    /// Queues `packet` with its length byte for the client.
+    fn send(&mut self, packet: &[u8]) {
+        if self.client.is_some() {
+            self.outgoing.push(packet.len() as u8);
+            self.outgoing.extend_from_slice(packet);
         }
-        true
+    }
+
+    /// Writes what replies the client will take, not blocking.  Whether
+    /// there is room for another, under [`MAX_OUTGOING`] still queued;
+    /// false, too, with no client.
+    fn flush(&mut self) -> bool {
+        while let Some(client) = &mut self.client {
+            if self.outgoing.is_empty() {
+                return true;
+            }
+            match client.write(&self.outgoing) {
+                Ok(0) => self.drop_client(),
+                Ok(written) => {
+                    self.outgoing.drain(..written);
+                }
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    return self.outgoing.len() < MAX_OUTGOING;
+                }
+                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                Err(_) => self.drop_client(),
+            }
+        }
+        false
     }
 
     /// The ATEMP field: its kind, then ATEMP.

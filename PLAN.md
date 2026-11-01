@@ -1947,6 +1947,10 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   answers the m683xx BDM pod's host-pod protocol, version 2, written
   from its `docs/usb-protocol.md` alone, over the chip's
   `Cpu32Target`.  One client at a time; another is closed at once.
+  The server holds at most two requests unanswered and a few replies
+  untaken, reading no more until it answers and answering no more
+  until the client reads, at most 32 requests a poll, so a client that
+  floods it or never reads waits on its own socket, not the runner.
   The server is polled between turns; while the CPU is in background
   mode an unpaced run waits on it, board time standing still between
   requests, and a paced one keeps time going.  FREEZE does not reach
