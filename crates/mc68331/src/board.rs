@@ -1093,7 +1093,7 @@ impl Board {
     /// (MC68331UM 4.2.12, 4.3.4), their next events found anew, before
     /// the sync point ending the quantum.  A reset ends it by resetting
     /// them.
-    fn wake(&mut self, now: Cycles) {
+    pub(crate) fn wake(&mut self, now: Cycles) {
         if self.sim.low_power().is_some() {
             self.sim.wake(now);
             self.module_mut::<Gpt>(GPT).set_low_power(false, now);

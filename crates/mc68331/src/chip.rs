@@ -687,13 +687,16 @@ impl Mc68331 {
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
     pub fn run_for(&mut self, budget: Cycles) -> Run {
-        self.run(budget, None)
+        self.run(budget, None).0
     }
 
     /// [`run_for`](Self::run_for), the CPU's quanta limited by `limits`
-    /// too, their cycles each quantum's: the run ends where a limit
-    /// ends the CPU's, with [`Stop::Requested`].
-    pub(crate) fn run(&mut self, budget: Cycles, limits: Option<Limits>) -> Run {
+    /// too, their cycles each quantum's, and the steps the CPU takes
+    /// taken off theirs: the run ends where a limit ends the CPU's,
+    /// with [`Stop::Requested`] and true.
+    pub(crate) fn run(&mut self, budget: Cycles, limits: Option<&mut Limits>) -> (Run, bool) {
+        let mut limits = limits;
+        let mut limited_end = false;
         let start = self.now;
         let end = start + budget;
         let mut stop = Stop::Budget;
@@ -743,17 +746,18 @@ impl Mc68331 {
                 let board = RefCell::new(&mut self.board);
                 let mut bus = Connection(&board);
                 let mut interrupts = Connection(&board);
-                match limits {
+                match &mut limits {
                     None => (
                         self.cpu
                             .run_for(&mut bus, &mut interrupts, self.now, quantum),
                         false,
                     ),
-                    Some(mut limits) => {
+                    Some(limits) => {
                         limits.cycles = Some(quantum);
-                        let run = self
-                            .cpu
-                            .run_limited(&mut bus, &mut interrupts, self.now, limits);
+                        let run =
+                            self.cpu
+                                .run_limited(&mut bus, &mut interrupts, self.now, **limits);
+                        limits.steps = limits.steps.map(|steps| steps.saturating_sub(run.steps));
                         match run.end {
                             End::Stop(stop) => (Run::new(run.cycles, stop), false),
                             _ => (Run::new(run.cycles, Stop::Requested), true),
@@ -783,6 +787,7 @@ impl Mc68331 {
             };
             if limited {
                 stop = Stop::Requested;
+                limited_end = true;
                 break;
             }
             match stop {
@@ -824,7 +829,7 @@ impl Mc68331 {
         }
         // asked in the run's last instruction: the run ends anyway
         self.board.sync_request.take();
-        Run::new(self.now - start, stop)
+        (Run::new(self.now - start, stop), limited_end)
     }
 
     /// Runs whole instructions until now is `target` or past it, as
