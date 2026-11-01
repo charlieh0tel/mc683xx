@@ -405,7 +405,7 @@ impl Qsm {
             SCCR0 => self.sci.write_sccr0(word, now),
             SCCR1 => self.sci.write_sccr1(word, now),
             SCDR if access.lower() => self.sci.write_data(word, now),
-            PORTQS => {
+            PORTQS if access.lower() => {
                 self.port.latch = lower;
                 self.pins_changed(now);
             }
