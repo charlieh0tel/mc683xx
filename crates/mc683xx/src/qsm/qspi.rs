@@ -849,6 +849,11 @@ impl Qspi {
     /// Entry `pointer`'s serial transfer ends at `now`: the peripheral
     /// shifts, the received bits go to receive RAM right-aligned, CPTQP
     /// moves, and without CONT PCS returns to PORTQS (QSMRM 4.4.1.1).
+    /// The pins are DDRQS's and PQSPAR's (MC68331UM Table 6-1): with
+    /// SCK an input no clock reaches the peripheral, which shifts
+    /// nothing; it sees MOSI's level as [`PortQs::mosi`] gives it; and
+    /// unless MISO is the QSPI's input, or with no clock, zeros are
+    /// received, as with no peripheral (PLAN.md).
     fn transfer(
         &mut self,
         pointer: u8,
@@ -858,17 +863,28 @@ impl Qspi {
         port: PortQs,
         now: Cycles,
     ) {
-        let out = out & u16::MAX >> (MOST_BITS - bits);
+        let mask = u16::MAX >> (MOST_BITS - bits);
+        let out = out & mask;
         // told at the entry's start; a peripheral attached since, the
         // clock SPCR0 gives now
         let clock = self
             .told
             .unwrap_or_else(|| self.clock(u64::from(self.spcr0 & SPCR0_SPBR_MASK)));
-        let transfer = QspiTransfer::new(pointer, self.selects, out, bits, clock, now);
-        let received = self
-            .peripheral
-            .as_mut()
-            .map_or(0, |peripheral| peripheral.transfer(transfer));
+        let received = match &mut self.peripheral {
+            Some(peripheral) if port.sck_output() => {
+                let transfer = QspiTransfer::new(
+                    pointer,
+                    self.selects,
+                    port.mosi(out, mask),
+                    bits,
+                    clock,
+                    now,
+                );
+                let answer = peripheral.transfer(transfer);
+                if port.miso_input() { answer } else { 0 }
+            }
+            _ => 0,
+        };
         self.store_received(pointer, received, out, bits);
         if command & COMMAND_CONT == 0 {
             self.drive = None;

@@ -345,11 +345,12 @@ def store_byte(address: int, value: int) -> list[int]:
     return [MOVE_BYTE_IMMEDIATE_TO_ABSOLUTE, value, address >> 16, address & 0xFFFF]
 
 
-# PCS[3:0] outputs, high; entry 3 to PCS 0101, 8 bits, at SPBR 2; then
+# PCS[3:0], MOSI and MISO the QSPI's, PCS[3:0], SCK and MOSI outputs, PCS
+# high; entry 3 to PCS 0101, 8 bits, at SPBR 2; then
 # SPE (QSMRM 4.3).
 QSPI_PROGRAM = (
     store_byte(PORTQS, 0x78)
-    + store_word(PQSPAR, 0x7878)
+    + store_word(PQSPAR, 0x7b7e)
     + store_word(TRANSMIT_RAM + 2 * ENTRY, 0x1234)
     + store_byte(COMMAND_RAM + ENTRY, 0b0101)
     + store_word(SPCR2, ENTRY << 8 | ENTRY)

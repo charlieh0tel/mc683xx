@@ -139,7 +139,9 @@ pub struct QspiTransfer {
     /// The levels on PCS\[3:0\], the entry's code on the pins the QSPI
     /// drives (QSMRM 4.3.6.3).
     pub chip_selects: u8,
-    /// The bits shifted out, right-aligned.
+    /// The bits on MOSI, right-aligned: those shifted out, or the pin's
+    /// level throughout where MOSI is not the QSPI's output (MC68331UM
+    /// Table 6-1).
     pub out: u16,
     /// How many: 8 to 16 (QSMRM Table 4-2).
     pub bits: u8,
@@ -188,7 +190,8 @@ pub trait SpiPeripheral {
     /// Shifts the transfer's `bits` of `out` to the peripheral its
     /// `chip_selects` select, most significant bit first, in its clock's
     /// mode, and returns the bits shifted back, right-aligned (QSMRM
-    /// 4.3.6).
+    /// 4.3.6).  Called only with SCK an output, and its answer received
+    /// only with MISO the QSPI's input (MC68331UM Table 6-1).
     fn transfer(&mut self, transfer: QspiTransfer) -> u16;
 
     /// RESET reaches it at `now`, as the chip's QSPI reset scope says

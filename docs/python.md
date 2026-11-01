@@ -597,10 +597,11 @@ class Peripheral:
         self.clocks.append(clock)
 
 
-# Master: PCS[3:0] outputs, one 8-bit entry to PCS 0101 at SPBR 2.
+# Master: PCS[3:0], MOSI and MISO the QSPI's, PCS[3:0], SCK and MOSI
+# outputs (QSMRM 4.4.1); one 8-bit entry to PCS 0101 at SPBR 2.
 master = (
     store_byte(PORTQS, 0x78)
-    + store_word(PQSPAR, 0x7878)
+    + store_word(PQSPAR, 0x7b7e)
     + store_word(TRANSMIT_RAM, 0x1234)
     + store_byte(COMMAND_RAM, 0b0101)
     + store_word(SPCR0, 0x8002)
