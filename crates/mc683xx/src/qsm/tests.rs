@@ -167,6 +167,17 @@ fn byte_writes_reach_their_register() {
 }
 
 #[test]
+fn a_write_to_portqs_reserved_byte_keeps_the_latch() {
+    let mut qsm = qsm();
+    write(&mut qsm, PORTQS + 1, Size::Byte, 0x00, 0);
+    // the upper byte is reserved (QSMRM 3.3.1); the merged word's
+    // lower byte would be the pins, which read high as inputs
+    write(&mut qsm, PORTQS, Size::Byte, 0xff, 0);
+    write(&mut qsm, PQSPAR_DDRQS + 1, Size::Byte, 0x7f, 0);
+    assert_eq!(read(&mut qsm, PORTQS + 1, Size::Byte, 0) & 0x7f, 0);
+}
+
+#[test]
 fn supv_moves_the_registers_to_supervisor_space() {
     let mut qsm = qsm();
     let user = |offset| RegisterAccess {
