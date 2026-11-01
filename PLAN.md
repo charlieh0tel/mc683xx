@@ -1941,7 +1941,23 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   BKPT is relatched at every reset (7.2.1) and the chip models no BKPT
   input between resets, so an internal reset (watchdog, halt monitor)
   disables background mode, as a pod that has let BKPT go sees on
-  silicon.  `halt` acknowledges a breakpoint at once.  Memory is real
+  silicon.  `halt` acknowledges a breakpoint at once, out of STOP or
+  LPSTOP too, which wakes the modules LPSTOP stopped (an inference: the
+  manuals say BKPT is acknowledged between instructions, not what it
+  does to LPSTOP; a real 68331 will settle it).  `step` runs the chip
+  one step of the core's `Limits::steps`, the steps left carried
+  across quanta, board time moving with it, then acknowledges a
+  breakpoint: an interrupt pending at the start, or an instruction
+  with its exceptions and then an interrupt pending at its end, the
+  order T1 traps in (CPU32RM 6.2.10), before the handler's first
+  instruction.  A stepped STOP or LPSTOP does not stop the CPU or the
+  modules, as under T1; after LPSTOP the modules wake before the
+  interrupts pending are looked at, so one it unmasks is taken.  A
+  hook or a stop the host asks for fails the step (`Stopped`), the CPU
+  in background mode where it stopped; a sync, which ends a run early
+  for the host, does not: the step goes on.
+  A reset that falls due in the step's last quantum is taken on the
+  next run, as one due while the CPU is in background mode is.  Memory is real
   bus cycles (`bus_read`, `bus_write`), as READ and WRITE make them.
 - `mc683xx-run --bdm unix:PATH|HOST:PORT` is a virtual BDM cable: it
   answers the m683xx BDM pod's host-pod protocol, version 2, written
@@ -2705,7 +2721,7 @@ checks move onto real code hooks.
 | Pacing host-side, a front end's control taken at sync points | A GUI wants board time at wall speed and a stop and keys from its own thread; sleeping between quanta against the wall clock, outside the board's model, and taking a thread-safe handle's stop and inputs at sync points on the board's thread, keeps the core single-threaded, host time out of the model and the run the same whatever the pacing (decided 2026-10-24). |
 | Front ends outside the repository and the board file; they observe nets and inspect peripherals | Board files describe hardware, which a UI is not; a front end's needs are the host API's: read-only observers on nets, peripherals' state by type, inputs through externals.  Read-only keeps every run deterministic whatever watches it (decided 2026-10-24). |
 | Board nets with their own picosecond time | Peripheral-to-peripheral edges need sub-cycle time (an FPGA interpolator resolves about 0.5 ns against 59.6 ns cycles); integer time keeps it deterministic, and only chip inputs round to a clock (decided 2026-10-23). |
-| `Cpu32Target`: a memory call names its function code; halting reports the entry source; `halted` polls; no single step | Decided 2026-10-31 with the BDM pod.  A named space leaves no hidden SFC/DFC state between calls for a debugger to forget, and an implementation over READ and WRITE restores the program's SFC and DFC before GO.  ATEMP holds the entry source only until the next command (CPU32RM 7.2.3), so halting returns it.  A poll, not a blocking wait, as `no_std` firmware has no clock to wait on.  Single step is left out until a user needs it.  `Error: core::error::Error`, so a host carries either target's errors as its own. |
+| `Cpu32Target`: a memory call names its function code; halting reports the entry source; `halted` polls; `step` stops at the next boundary | Decided 2026-10-31 with the BDM pod; `step` 2026-11-01.  A named space leaves no hidden SFC/DFC state between calls for a debugger to forget, and an implementation over READ and WRITE restores the program's SFC and DFC before GO.  ATEMP holds the entry source only until the next command (CPU32RM 7.2.3), so halting returns it.  A poll, not a blocking wait, as `no_std` firmware has no clock to wait on.  `step` runs one instruction, or takes one exception, and stops before any handler's first instruction, so a debugger over it reads RPC rather than assuming one instruction; the pod meets that on silicon by stepping with T1 and pointing VBR, for the step, at a RAM table whose every vector is a BGND stub.  `Error: core::error::Error`, so a host carries either target's errors as its own. |
 | `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels) stay exhaustive, so a match on one needs no wildcard; the bindings' matches on the others end in a panic naming what they do not know (decided 2026-10-24). |
 
 ## Open

@@ -78,6 +78,34 @@ pub trait Cpu32Target {
     /// The command did not complete.
     fn go(&mut self) -> Result<(), Self::Error>;
 
+    /// Executes from RPC and stops in background mode again where T1
+    /// tracing would trap (CPU32RM 6.2.10), before any handler's first
+    /// instruction: an interrupt pending at the start, taken; or one
+    /// instruction, with the exceptions it raised (the program's own
+    /// trace among them), then an interrupt pending at its end, taken,
+    /// as the trace comes before it.  Either way, one of a higher level
+    /// pending after an interrupt is taken too.  So a step is not always one
+    /// instruction: a caller reads RPC to see where it stopped.  A
+    /// stepped STOP or LPSTOP does not stop the CPU.  PCC is
+    /// unspecified after it.
+    ///
+    /// The entry is [`Entry::Breakpoint`] for an ordinary stop,
+    /// [`Entry::Background`] if the instruction was BGND, and
+    /// [`Entry::DoubleBusFault`] for a double bus fault.  An
+    /// implementation may need configuration first (a pod's scratch
+    /// RAM for its exception table and stub).
+    ///
+    /// Implementation-defined, as a pod stepping by T1 through an
+    /// exception table of its own cannot match them: an RTE of a
+    /// format $C frame, which is not traced; a read or write of VBR;
+    /// MOVE from SR; a vector fetch that faults; SSW TR in a fault's
+    /// frame.
+    ///
+    /// # Errors
+    /// The target is not halted, cannot step as configured, or did not
+    /// stop where a step ends.
+    fn step(&mut self) -> Result<Entry, Self::Error>;
+
     /// Reads a data or address register.
     ///
     /// # Errors

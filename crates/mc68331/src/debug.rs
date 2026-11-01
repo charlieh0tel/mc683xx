@@ -14,13 +14,26 @@ use mc683xx_target::register::Register;
 use mc683xx_target::register::SystemRegister;
 use mc683xx_target::size::Size;
 
+use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::cpu::bare::Limits;
+use mc683xx_cpu32::cycles::Cycles;
+
 use crate::chip::Mc68331;
 use crate::host::AccessError;
+
+/// The most system clocks a step runs: far more than any instruction
+/// with its exceptions takes, so a step that ends without stopping (a
+/// reset in it, which disables background mode) ends.
+const STEP_BUDGET: Cycles = Cycles(1 << 20);
 
 /// Why a debugger's call on the chip failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum TargetError {
+    /// The host stopped a step before it completed (a hook, or its stop
+    /// request): the CPU is in background mode where it stopped.
+    #[error("the host stopped the step before it completed")]
+    Stopped,
     /// The call needs background mode, and the CPU is not in it.
     #[error("the CPU is not in background mode")]
     NotHalted,
@@ -47,6 +60,18 @@ pub enum TargetError {
 }
 
 impl Mc68331 {
+    /// BKPT acknowledged between instructions, as
+    /// [`Cpu::breakpoint`](mc683xx_cpu32::cpu::Cpu::breakpoint): out of
+    /// STOP or LPSTOP too, which wakes the modules LPSTOP stopped.
+    /// Whether the CPU is in background mode.
+    fn breakpoint(&mut self) -> bool {
+        let entered = self.cpu.breakpoint();
+        if entered {
+            self.board.wake(self.now);
+        }
+        entered
+    }
+
     /// An error unless the CPU is in background mode.
     fn in_background(&self) -> Result<(), TargetError> {
         self.cpu
@@ -81,7 +106,7 @@ impl Cpu32Target for Mc68331 {
     }
 
     fn halt(&mut self) -> Result<Entry, TargetError> {
-        if !self.cpu.breakpoint() {
+        if !self.breakpoint() {
             return Err(TargetError::NotEnabled);
         }
         self.cpu.background().ok_or(TargetError::NotEnabled)
@@ -95,6 +120,50 @@ impl Cpu32Target for Mc68331 {
         self.in_background()?;
         self.cpu.resume();
         Ok(())
+    }
+
+    /// One step of [`Limits::steps`], the board's time moving with it,
+    /// then a breakpoint, as BKPT asserted at the next boundary would
+    /// make (CPU32RM 7.2.2.1): PCC the instruction executed, if one was.
+    /// A stepped STOP or LPSTOP leaves the CPU running, as T1 does
+    /// (CPU32RM 6.2.10).
+    fn step(&mut self) -> Result<Entry, TargetError> {
+        self.in_background()?;
+        self.cpu.resume();
+        let mut limits = Limits::default();
+        limits.steps = Some(1);
+        let start = self.now;
+        let completed = loop {
+            let (run, limited) = self.run(STEP_BUDGET, Some(&mut limits));
+            if limited {
+                break true;
+            }
+            // a sync ends a run early, the step not done: it goes on
+            if run.stop != Stop::Budget || start.until(self.now) >= STEP_BUDGET {
+                break false;
+            }
+        };
+        // a stop the host asked for in the step's last quantum
+        let stopped = self.board.take_stop();
+        if completed && self.board.sim.low_power().is_some() {
+            // a stepped LPSTOP: the modules awake, then the interrupts
+            // pending at its end
+            self.board.wake(self.now);
+            limits.steps = Some(0);
+            self.run(STEP_BUDGET, Some(&mut limits));
+        }
+        // a BGND or a double bus fault entered background mode itself
+        let entered = self.cpu.background();
+        self.breakpoint();
+        match (
+            self.cpu.background(),
+            (entered.is_some() || completed) && !stopped,
+        ) {
+            (Some(entry), true) => Ok(entry),
+            (Some(_), false) => Err(TargetError::Stopped),
+            // a reset in the step
+            (None, _) => Err(TargetError::NotEnabled),
+        }
     }
 
     fn read_register(&mut self, register: Register) -> Result<u32, TargetError> {
