@@ -7,7 +7,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use mc683xx_board::board::Board;
-
+use mc683xx_board::condition::Conditions;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_gdb::stub;
@@ -55,6 +55,10 @@ impl Target for Debugged<'_> {
 
     fn reset(&mut self) -> bool {
         Target::reset(self.board)
+    }
+
+    fn conditions(&mut self) -> Option<&mut dyn Conditions> {
+        Some(self.board)
     }
 }
 

@@ -23,12 +23,16 @@
 //! "Input port").
 
 mod channel;
+mod condition;
 mod counter;
 mod registers;
 #[cfg(test)]
 mod tests;
 mod timing;
 
+use mc683xx_board::condition::ArmError;
+use mc683xx_board::condition::ConditionInfo;
+use mc683xx_board::condition::ConditionToken;
 use mc683xx_board::inspect::Inspection;
 use mc683xx_board::inspect::Radix;
 use mc683xx_board::peripheral::Drive;
@@ -53,6 +57,9 @@ use serde::Serialize;
 
 use self::channel::Channel;
 use self::channel::Clocks;
+use self::condition::CONDITIONS;
+use self::condition::Direction;
+use self::condition::Watches;
 use self::counter::Counter;
 use self::counter::Source;
 use self::registers::ACR_BRG_SET_2;
@@ -297,6 +304,8 @@ struct Duart {
     state: State,
     /// Frames to drive on `TxDA` and `TxDB`: their start, port and frame.
     transmitted: Vec<(Time, usize, Serial)>,
+    /// The stop conditions armed: outside its state.
+    watches: Watches,
 }
 
 impl Duart {
@@ -316,6 +325,7 @@ impl Duart {
             crystal: Crystal { hz },
             state: State::default(),
             transmitted: Vec::new(),
+            watches: Watches::default(),
         }
     }
 
@@ -468,6 +478,9 @@ impl Duart {
     /// Takes what channel `index` did that reaches outside it.
     fn collect(&mut self, index: usize) {
         let effects = self.state.channels[index].take_effects();
+        self.watches.saw(Direction::Transmit, index, &effects.sent);
+        self.watches
+            .saw(Direction::Receive, index, &effects.received);
         let port = [TXDA, TXDB][index];
         self.transmitted.extend(
             effects
@@ -685,6 +698,9 @@ impl Duart {
         for (at, port, serial) in self.transmitted.drain(..) {
             drive.drive_at(at, port, Signal::Serial(serial));
         }
+        for token in self.watches.take() {
+            drive.fire(token);
+        }
         let driven = self.state.driven;
         let mut levels = driven.unwrap_or(0);
         for (pin, level) in self.output_levels().into_iter().enumerate() {
@@ -859,6 +875,19 @@ impl Peripheral for Duart {
         state.check(variant)?;
         self.state = state;
         self.transmitted.clear();
+        self.watches.forget();
         Ok(())
+    }
+
+    fn conditions(&self) -> &'static [ConditionInfo] {
+        CONDITIONS
+    }
+
+    fn arm(&mut self, condition: &str, arguments: &[String]) -> Result<ConditionToken, ArmError> {
+        self.watches.arm(condition, arguments)
+    }
+
+    fn disarm(&mut self, token: ConditionToken) {
+        self.watches.disarm(token);
     }
 }

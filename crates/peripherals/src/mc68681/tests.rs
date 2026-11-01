@@ -1135,3 +1135,47 @@ fn reset_runs_the_mc68681s_timer_and_stops_the_scc68692s() {
         );
     }
 }
+
+#[test]
+fn a_stop_condition_fires_for_its_character_and_survives_a_restore() {
+    let mut bench = Bench::new();
+    bench.channel(MRB);
+    let names: Vec<&str> = bench
+        .duart
+        .conditions()
+        .iter()
+        .map(|condition| condition.name)
+        .collect();
+    assert_eq!(names, ["tx", "rx"]);
+    let words =
+        |words: &[&str]| -> Vec<String> { words.iter().map(|&word| word.to_owned()).collect() };
+    let received = bench.duart.arm("rx", &words(&["b", "0x78"])).unwrap();
+    let sent = bench.duart.arm("tx", &words(&["b"])).unwrap();
+    let snapshot = bench.duart.save().unwrap();
+    let start = Time(5000);
+    let fired = |bench: &mut Bench, at: Time| {
+        let mut drive = Drive::new(at);
+        bench.duart.advance(at, &mut drive);
+        drive.finish().fired
+    };
+    let written = |bench: &mut Bench, byte: u8, at: Time| {
+        let mut drive = Drive::new(at);
+        let access = Bench::access(RBB, Role::ReadWrite, at);
+        bench
+            .duart
+            .write(access, u32::from(byte), &mut drive)
+            .unwrap();
+        drive.finish().fired
+    };
+    bench.input(RXDB, character(b'y'), start);
+    assert!(
+        fired(&mut bench, start + TO_STOP_CENTER).is_empty(),
+        "not x"
+    );
+    bench.duart.restore(&snapshot).unwrap();
+    bench.input(RXDB, character(b'x'), start);
+    assert_eq!(fired(&mut bench, start + TO_STOP_CENTER), [received]);
+    assert_eq!(written(&mut bench, b'p', start + CHARACTER), [sent]);
+    bench.duart.disarm(sent);
+    assert!(written(&mut bench, b'q', start + 3 * CHARACTER).is_empty());
+}

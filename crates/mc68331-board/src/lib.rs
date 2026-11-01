@@ -138,6 +138,7 @@ pub mod adapter;
 pub mod board;
 pub mod builtin;
 pub mod chip;
+pub mod condition;
 pub mod control;
 pub mod description;
 pub mod endpoint;

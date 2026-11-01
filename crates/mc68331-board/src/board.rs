@@ -44,6 +44,14 @@ use crate::chip::ChipPin;
 use crate::chip::MemoryPlace;
 use crate::chip::MemoryPlan;
 use crate::chip::takes;
+use crate::condition::Condition;
+use crate::condition::ConditionId;
+use crate::condition::ConditionInfo;
+use crate::condition::ConditionToken;
+use crate::condition::Conditions;
+use crate::condition::Firing;
+use crate::condition::NetWatch;
+use crate::condition::level;
 use crate::control::BoardControl;
 use crate::control::Endpoints;
 use crate::description::Description;
@@ -51,6 +59,7 @@ use crate::description::NetSpec;
 use crate::description::Options;
 use crate::description::Target;
 use crate::endpoint::Endpoint;
+use crate::error::ConditionError;
 use crate::error::LoadError;
 use crate::error::NetError;
 use crate::error::ReceiveError;
@@ -352,6 +361,10 @@ pub struct Board<C: Chip> {
     observers: Vec<Vec<Attached>>,
     /// The next observer's id.
     next_observer: u64,
+    /// The armed conditions, in the order armed: outside the snapshot.
+    conditions: Vec<Armed>,
+    /// The last condition's number.
+    last_condition: u64,
     /// The control handle's shared state: outside the snapshot.
     control: BoardControl,
 }
@@ -364,6 +377,133 @@ impl<C: Chip + fmt::Debug> fmt::Debug for Board<C> {
             .field("peripherals", &self.peripherals)
             .field("now", &self.now)
             .finish_non_exhaustive()
+    }
+}
+
+/// An armed condition.
+#[derive(Debug)]
+struct Armed {
+    /// Its number.
+    id: ConditionId,
+    /// What it stops for.
+    condition: Condition,
+    /// What watches for it.
+    arming: Arming,
+}
+
+/// What watches for an armed condition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Arming {
+    /// An observer on its net.
+    Net(ObserverId),
+    /// The peripheral, by its index, and its token.
+    Peripheral(usize, ConditionToken),
+}
+
+impl<C: Chip> Conditions for Board<C> {
+    fn arm(&mut self, condition: Condition) -> Result<ConditionId, ConditionError> {
+        let id = ConditionId(self.last_condition + 1);
+        let arming = match &condition {
+            Condition::Net { net, change } => {
+                let index = self.net_index(net)?;
+                let kind = self.nets[index].kind;
+                if change.levels_only() && !matches!(kind, Kind::Logic | Kind::Edge) {
+                    return Err(ConditionError::Kind {
+                        net: net.clone(),
+                        kind,
+                    });
+                }
+                let watch = NetWatch {
+                    id,
+                    change: *change,
+                    last: level(self.shared.last.borrow()[index]),
+                    shared: Rc::downgrade(&self.shared),
+                };
+                Arming::Net(self.observe(net, watch)?)
+            }
+            Condition::Peripheral {
+                peripheral,
+                condition,
+                arguments,
+            } => {
+                let index = self
+                    .peripheral_index(peripheral)
+                    .ok_or_else(|| ConditionError::Peripheral(peripheral.clone()))?;
+                let token = self.shared.peripherals[index]
+                    .borrow_mut()
+                    .arm(condition, arguments)
+                    .map_err(|error| ConditionError::Arm {
+                        peripheral: peripheral.clone(),
+                        error,
+                    })?;
+                Arming::Peripheral(index, token)
+            }
+        };
+        self.last_condition = id.0;
+        self.conditions.push(Armed {
+            id,
+            condition,
+            arming,
+        });
+        Ok(id)
+    }
+
+    fn disarm(&mut self, id: ConditionId) -> bool {
+        let Some(index) = self.conditions.iter().position(|armed| armed.id == id) else {
+            return false;
+        };
+        match self.conditions.remove(index).arming {
+            Arming::Net(observer) => {
+                self.unobserve(observer);
+            }
+            Arming::Peripheral(peripheral, token) => {
+                self.shared.peripherals[peripheral]
+                    .borrow_mut()
+                    .disarm(token);
+                for firing in self.shared.fired.borrow_mut().iter_mut() {
+                    if *firing == Firing::Peripheral(peripheral, token) {
+                        *firing = Firing::Named(id);
+                    }
+                }
+            }
+        }
+        true
+    }
+
+    fn armed(&self) -> Vec<(ConditionId, Condition)> {
+        self.conditions
+            .iter()
+            .map(|armed| (armed.id, armed.condition.clone()))
+            .collect()
+    }
+
+    fn fired(&self) -> Vec<ConditionId> {
+        let mut fired = Vec::new();
+        for &firing in self.shared.fired.borrow().iter() {
+            let id = match firing {
+                Firing::Named(id) => Some(id),
+                Firing::Peripheral(peripheral, token) => self
+                    .conditions
+                    .iter()
+                    .find(|armed| armed.arming == Arming::Peripheral(peripheral, token))
+                    .map(|armed| armed.id),
+            };
+            if let Some(id) = id
+                && !fired.contains(&id)
+            {
+                fired.push(id);
+            }
+        }
+        fired
+    }
+
+    fn offered(&self) -> Vec<(String, &'static [ConditionInfo])> {
+        self.peripherals
+            .iter()
+            .zip(&self.shared.peripherals)
+            .map(|(info, cell)| (info.name.clone(), cell.borrow().conditions()))
+            .filter(|(_, conditions)| !conditions.is_empty())
+            .collect()
     }
 }
 
@@ -506,6 +646,7 @@ impl<C: Chip> Board<C> {
             writes: RefCell::default(),
             diverted: Cell::new(false),
             stop: Cell::new(false),
+            fired: RefCell::default(),
             chip_stop: builder.stop_request(),
             requests: builder.requests(),
             quantum_end: Cell::new(None),
@@ -612,6 +753,8 @@ impl<C: Chip> Board<C> {
             hooks: Hooks::default(),
             observers,
             next_observer: 0,
+            conditions: Vec::new(),
+            last_condition: 0,
             control: BoardControl::new(endpoints),
         };
         board.stop_at_outputs();
@@ -772,6 +915,10 @@ impl<C: Chip> Board<C> {
     ///
     /// A peripheral that stalls the board ([`RunError::Stalled`]).
     pub fn run_until(&mut self, until: Time) -> Result<BoardRun, RunError> {
+        // a condition that held between runs is the stop still asked
+        if !self.shared.stop.get() {
+            self.shared.fired.borrow_mut().clear();
+        }
         loop {
             self.take_control();
             self.settle()?;

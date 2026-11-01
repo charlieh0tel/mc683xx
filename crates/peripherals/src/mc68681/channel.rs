@@ -146,6 +146,10 @@ pub(super) struct Effects {
     /// When the receiver last moved a character into the FIFO, for the
     /// SCC68692's timeout mode.
     pub(super) transferred: Option<Time>,
+    /// The characters the transmitter started sending (3.1), in order.
+    pub(super) sent: Vec<u8>,
+    /// The characters the receiver assembled (3.2), in order.
+    pub(super) received: Vec<u8>,
 }
 
 /// A channel's state.
@@ -523,7 +527,10 @@ impl Channel {
         let baud = crystal.baud(divisor);
         let length = crystal.span(format.length() * divisor);
         let frame = match self.holding.take() {
-            Some(data) => Frame::Data(format.encode(data)),
+            Some(data) => {
+                self.effects.sent.push(data);
+                Frame::Data(format.encode(data))
+            }
             None => Frame::Break,
         };
         self.shifting = Some(Shifting {
@@ -734,6 +741,7 @@ impl Channel {
                 if format.multidrop() && !self.receiving && !decoded.address {
                     return;
                 }
+                self.effects.received.push(decoded.data);
                 Received {
                     data: decoded.data,
                     status: if decoded.parity_bit_set {

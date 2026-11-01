@@ -7,6 +7,7 @@
 
 use std::fmt::Display;
 
+use mc683xx_board::condition::Conditions;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_gdb::stub;
@@ -86,6 +87,10 @@ where
 
     fn reset(&mut self) -> bool {
         self.target.reset()
+    }
+
+    fn conditions(&mut self) -> Option<&mut dyn Conditions> {
+        self.target.conditions()
     }
 }
 

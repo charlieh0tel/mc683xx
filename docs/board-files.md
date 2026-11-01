@@ -472,6 +472,16 @@ The contract a host's peripheral models target (rustdoc in
   `inspect()` gives what a front end shows of it, an
   `inspect::Inspection` of named fields (empty by default;
   `Board::inspect(name)`).
+  - Stop conditions, for a debugger and the emulator's alone
+    ([docs/gdb.md](gdb.md), Stop conditions): `conditions()` lists
+    what it offers (`condition::ConditionInfo`: name, arguments, help;
+    none by default), `arm(condition, arguments)` arms one and gives
+    its own `condition::ConditionToken` (or a `condition::ArmError`),
+    and `disarm(token)` disarms it.  Each time an armed condition
+    holds the peripheral calls `drive.fire(token)`, which stops the run
+    as `drive.stop()` does and names the condition to the board.  It
+    keeps its armed conditions out of `save`, and `restore` leaves them
+    armed.
   - Bus: `read(access, drive)`, `write(access, value, drive)`,
     `wait_states(access)` for an external DSACK, and `dsack_port(access)`
     for a peripheral whose DSACK pins differ cycle by cycle (`Some(PortSize)`,

@@ -73,6 +73,9 @@ use crate::arch::GdbRegisters;
 use crate::target::Target;
 use crate::target::TargetRun;
 
+#[cfg(feature = "board")]
+mod conditions;
+
 /// System clocks the target runs between looks for gdb's Ctrl-C: about
 /// 6 ms of a 16.78 MHz chip.
 const QUANTUM: Cycles = Cycles(100_000);
@@ -619,11 +622,11 @@ const fn stop_reason(hit: Hit) -> SingleThreadStopReason<u32> {
 }
 
 /// The signal gdb is told for a stop that was none of the stub's
-/// ([docs/gdb.md, Stops](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md#stops)): the host's hook a trap, a halt or a fault a
-/// bus error, a request an interrupt.
+/// ([docs/gdb.md, Stops](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md#stops)): the host's hook or a stop condition a
+/// trap, a halt or a fault a bus error, a request an interrupt.
 const fn signaled(ran: TargetRun) -> SingleThreadStopReason<u32> {
     SingleThreadStopReason::Signal(match ran {
-        TargetRun::Quantum | TargetRun::Hook => Signal::SIGTRAP,
+        TargetRun::Quantum | TargetRun::Hook | TargetRun::Condition => Signal::SIGTRAP,
         TargetRun::Halted | TargetRun::Fault => Signal::SIGBUS,
         TargetRun::Requested => Signal::SIGINT,
     })
@@ -812,7 +815,8 @@ impl<T: Target> MonitorCmd for Session<'_, T> {
 
 impl<T: Target> Session<'_, T> {
     /// gdb's `monitor` command, in words: `reset` resets the target;
-    /// `help` lists the commands.
+    /// `stop` lists, arms and disarms stop conditions; `help` lists the
+    /// commands.
     fn monitor(&mut self, words: &[&str], out: &mut ConsoleOutput<'_>) {
         match words {
             ["reset"] if self.target.reset() => {
@@ -822,7 +826,16 @@ impl<T: Target> Session<'_, T> {
                 );
             }
             ["reset"] => outputln!(out, "this target cannot reset"),
-            ["help"] => outputln!(out, "reset: reset the target"),
+            #[cfg(feature = "board")]
+            ["stop", words @ ..] => match self.target.conditions() {
+                Some(conditions) => conditions::monitor(conditions, words, out),
+                None => outputln!(out, "this target has no stop conditions"),
+            },
+            ["help"] => {
+                outputln!(out, "reset: reset the target");
+                #[cfg(feature = "board")]
+                conditions::help(out);
+            }
             _ => outputln!(out, "unknown command; `monitor help` lists them"),
         }
     }
