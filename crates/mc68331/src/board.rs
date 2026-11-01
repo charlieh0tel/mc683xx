@@ -871,7 +871,7 @@ impl Board {
             && let Some(fixed) = self.fixed_at(address, function_code)
         {
             let (port, clocks) = fixed.timing;
-            if self.sim.bus_monitor().is_some_and(|limit| clocks > limit) {
+            if self.bus_monitor().is_some_and(|limit| clocks > limit) {
                 return Err(BusError);
             }
             let cycles: u16 = if size == Size::Word && port == PortSize::Bits8 {
@@ -899,7 +899,7 @@ impl Board {
             first = first_dsack(first, self.peripheral_dsack(peripheral, bus_cycle, None));
         }
         let (clocks, port) = first.ok_or(BusError)?;
-        if self.sim.bus_monitor().is_some_and(|limit| clocks > limit) {
+        if self.bus_monitor().is_some_and(|limit| clocks > limit) {
             return Err(BusError);
         }
         if size == Size::Word && port == PortSize::Bits8 {
@@ -1088,6 +1088,12 @@ impl Board {
         }
     }
 
+    /// The bus monitor's period in clocks, if it watches cycles now
+    /// (SIMRM 3.2, 6.4.3).
+    fn bus_monitor(&self) -> Option<u8> {
+        self.sim.bus_monitor()
+    }
+
     /// An interrupt ends low-power stop at `now`, if the MCU is in it:
     /// the SIM's watchdog and the other modules' clocks run again
     /// (MC68331UM 4.2.12, 4.3.4), their next events found anew, before
@@ -1143,7 +1149,6 @@ impl Board {
             Err(BusError) => Acknowledged {
                 answer: Acknowledge::Spurious,
                 stall: self
-                    .sim
                     .bus_monitor()
                     .map_or(Cycles::ZERO, |limit| stall(limit.into())),
             },
@@ -1262,7 +1267,6 @@ impl Board {
                 .filter(|fixed| {
                     (!request.write || fixed.memory.writable)
                         && self
-                            .sim
                             .bus_monitor()
                             .is_none_or(|limit| fixed.timing.1 <= limit)
                 })
@@ -1315,7 +1319,7 @@ impl Board {
             },
             _ => Lanes::BOTH,
         };
-        if self.sim.bus_monitor().is_some_and(|limit| clocks > limit) || !lanes.covers(needed) {
+        if self.bus_monitor().is_some_and(|limit| clocks > limit) || !lanes.covers(needed) {
             return None;
         }
         wired.map(|memory| (memory, (port, clocks)))
