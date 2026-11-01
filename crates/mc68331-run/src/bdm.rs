@@ -23,6 +23,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::debug::TargetError;
@@ -53,6 +54,12 @@ const PIN_RESET: u8 = 1 << 1;
 const PIN_DS: u8 = 1 << 2;
 /// How long a wait sleeps between looks at the socket and Ctrl-C.
 const WAIT_TICK: Duration = Duration::from_millis(10);
+/// How long a new connection waits for the current client's end of
+/// file before it is refused: a client that has just closed is not yet
+/// seen gone (the protocol's Transport).
+const CLOSE_GRACE: Duration = Duration::from_millis(100);
+/// How often that wait looks.
+const CLOSE_TICK: Duration = Duration::from_millis(5);
 
 /// A request's code (the protocol's request table).
 mod code {
@@ -363,6 +370,9 @@ impl Server {
     /// Whether it answered one.
     pub(crate) fn poll(&mut self, chip: &mut Mc68331) -> bool {
         while let Ok(Some(stream)) = self.listener.accept() {
+            if self.client.is_some() {
+                self.await_close();
+            }
             if self.client.is_none() {
                 self.client = Some(stream);
                 self.pending.clear();
@@ -410,6 +420,27 @@ impl Server {
                 return;
             }
             thread::sleep(WAIT_TICK);
+        }
+    }
+
+    /// Waits up to [`CLOSE_GRACE`] for the client's end of file, keeping
+    /// what it sends meanwhile; the client is dropped if it ends.
+    fn await_close(&mut self) {
+        let deadline = Instant::now() + CLOSE_GRACE;
+        let mut buffer = [0; 256];
+        while let Some(client) = &mut self.client {
+            match client.read(&mut buffer) {
+                Ok(0) => self.drop_client(),
+                Ok(read) => self.pending.extend_from_slice(&buffer[..read]),
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    if Instant::now() >= deadline {
+                        return;
+                    }
+                    thread::sleep(CLOSE_TICK);
+                }
+                Err(error) if error.kind() == ErrorKind::Interrupted => {}
+                Err(_) => self.drop_client(),
+            }
         }
     }
 

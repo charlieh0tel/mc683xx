@@ -816,10 +816,16 @@ fn a_bdm_debugger_drives_the_board_over_the_virtual_cable() {
     assert_eq!(bdm(&mut cable, &[0x0b, 1, 4, 0, 0, 1, 2]), [4]);
     assert_eq!(bdm(&mut cable, &[0x07, 16]), [1], "no register 16");
     assert_eq!(bdm(&mut cable, &[0x01, 0, 0]), [1], "no raw exchange yet");
-    // a second client is closed at once
+    // a second client is closed, once the first has had its grace
     let mut second = UnixStream::connect(directory.join("bdm.sock")).unwrap();
     assert_eq!(bdm(&mut cable, &[0x0e]), [0, 2, 0, 0, 0]);
     assert_eq!(second.read(&mut [0]).unwrap(), 0);
+    // a client that has just closed gives way to the next at once: the
+    // next connects before the old one closes
+    for _ in 0..3 {
+        cable = UnixStream::connect(directory.join("bdm.sock")).unwrap();
+        assert_eq!(bdm(&mut cable, &[0x0e]), [0, 2, 0, 0, 0]);
+    }
     // Go, then Halt
     assert_eq!(bdm(&mut cable, &[0x05]), [0]);
     assert_eq!(bdm(&mut cable, &[0x02])[1] & 1, 0, "running");
