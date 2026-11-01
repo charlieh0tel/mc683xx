@@ -69,6 +69,7 @@ use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::reset::ResetScope;
 
 mod bus;
+mod debug;
 mod fixed;
 
 /// The NOP instruction (CPU32RM 4, NOP).
