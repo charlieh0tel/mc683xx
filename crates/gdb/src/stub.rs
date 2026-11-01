@@ -797,25 +797,34 @@ impl<T: Target> HwWatchpoint for Session<'_, T> {
 }
 
 impl<T: Target> MonitorCmd for Session<'_, T> {
-    /// `monitor reset` resets the target; `monitor help` lists the
-    /// commands.
     fn handle_monitor_cmd(
         &mut self,
         command: &[u8],
         mut out: ConsoleOutput<'_>,
     ) -> Result<(), T::Error> {
-        match command {
-            b"reset" if self.target.reset() => {
+        let words: Vec<&str> = str::from_utf8(command)
+            .map(|command| command.split_whitespace().collect())
+            .unwrap_or_default();
+        self.monitor(&words, &mut out);
+        Ok(())
+    }
+}
+
+impl<T: Target> Session<'_, T> {
+    /// gdb's `monitor` command, in words: `reset` resets the target;
+    /// `help` lists the commands.
+    fn monitor(&mut self, words: &[&str], out: &mut ConsoleOutput<'_>) {
+        match words {
+            ["reset"] if self.target.reset() => {
                 outputln!(
                     out,
                     "reset; `maintenance flush register-cache` to see the registers"
                 );
             }
-            b"reset" => outputln!(out, "this target cannot reset"),
-            b"help" => outputln!(out, "reset: reset the target"),
+            ["reset"] => outputln!(out, "this target cannot reset"),
+            ["help"] => outputln!(out, "reset: reset the target"),
             _ => outputln!(out, "unknown command; `monitor help` lists them"),
         }
-        Ok(())
     }
 }
 
