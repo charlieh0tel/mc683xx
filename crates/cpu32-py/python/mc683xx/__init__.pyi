@@ -41,6 +41,7 @@ __all__ = [
     "End",
     "Stop",
     "Halt",
+    "Entry",
     "ResetCause",
     "Event",
     "Ending",
@@ -145,6 +146,59 @@ class Stop:
         def __new__(cls) -> Stop.Requested: ...
         def __len__(self) -> int: ...
         def __getitem__(self, key: int, /) -> object: ...
+
+    @final
+    class Background(Stop):
+        """The CPU is in background mode, for its entry source."""
+
+        __match_args__ = ("_0",)
+        def __new__(cls, _0: Entry) -> Stop.Background: ...
+        def __len__(self) -> int: ...
+        def __getitem__(self, key: int, /) -> Entry: ...
+        @property
+        def _0(self) -> Entry: ...
+
+@disjoint_base
+class Entry:
+    """Why the CPU entered background mode (CPU32RM Table 7-2)."""
+
+    def __hash__(self) -> int: ...
+
+    @final
+    class Breakpoint(Entry):
+        """BKPT asserted."""
+
+        __match_args__ = ()
+        def __new__(cls) -> Entry.Breakpoint: ...
+        def __len__(self) -> int: ...
+        def __getitem__(self, key: int, /) -> object: ...
+
+    @final
+    class Background(Entry):
+        """A BGND instruction."""
+
+        __match_args__ = ()
+        def __new__(cls) -> Entry.Background: ...
+        def __len__(self) -> int: ...
+        def __getitem__(self, key: int, /) -> object: ...
+
+    @final
+    class DoubleBusFault(Entry):
+        """A double bus fault, with the second fault's SSW."""
+
+        __match_args__ = ("ssw",)
+        def __new__(cls, ssw: int) -> Entry.DoubleBusFault: ...
+        @property
+        def ssw(self) -> int: ...
+
+    @final
+    class Unknown(Entry):
+        """An ATEMP Table 7-2 does not list."""
+
+        __match_args__ = ("atemp",)
+        def __new__(cls, atemp: int) -> Entry.Unknown: ...
+        @property
+        def atemp(self) -> int: ...
 
 @final
 class Halt:

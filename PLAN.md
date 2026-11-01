@@ -1909,6 +1909,35 @@ and `mc683xx.Machine` in Python (see Python).
   each peripheral's snapshot (`MappedPeripheral: Save`), in the order added, to
   the core's (State).
 
+### Background debug mode
+
+The CPU32's background debug mode (CPU32RM 7.2) lives in the core: the
+enable BKPT latches at reset (`Cpu::set_bdm_enabled`; the chip sets it
+from its BKPT input), the entry (`Cpu::background`, `Stop::Background`)
+and ATEMP, PCC and FAR.  Background mode is an idle state beside a
+halt: the run loop tests one field an instruction for both, and the
+chip lets time pass without the CPU in either (PLAN.md, Determinism).
+
+- BGND with background mode enabled enters it (CPU32RM 4.4, BGND):
+  PCC is the BGND and GO resumes after it, as "the instruction pointed
+  to by the program counter" reads once the BGND is fetched; a trace
+  pending on it is not taken; its cycles are the decode table's, as
+  section 8 gives none for an entry.  Disabled, it is an illegal
+  instruction, as before.
+- A double bus fault with background mode enabled enters it, not a
+  halt (Table 7-1), ATEMP holding the second fault's SSW (Table 7-2).
+  The manual gives no SSW pattern for a double fault: the core gives
+  the second fault's restart pattern (6.3.1.2), IN, RW, RM, LG, SIZ
+  and FUNC.  Out of reset PCC is $00000001, as 7.2.5.3 gives it;
+  7.2.3 says $FFFFFFFF, and a real 68331 over BDM will settle it.
+  The SIM's halt monitor resets only on a halt, so not on this entry:
+  HALT driven would make the bypass of 7.2.2.3 pointless, an inference
+  the manuals do not state.
+- FAR is the address of the last bus or address error's cycle.  The
+  chip's moves with every bus cycle (7.2.5.1); tracking that would
+  cost every cycle a store for a register only BDM reads, so the
+  core's moves only on a fault.
+
 ### Where the manuals are silent
 
 Our choices, not the CPU's.  Those marked provisional could only be

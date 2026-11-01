@@ -332,8 +332,8 @@ fn rte_bus_error(
     match restore_bus_error(core, sp, sr, return_pc, layout) {
         Ok(None) => Ok(Flow::Next),
         Ok(Some(trace)) => Err(trace),
-        Err(_) => {
-            core.double_fault();
+        Err(fault) => {
+            core.double_fault(&fault);
             Ok(Flow::Next)
         }
     }
@@ -470,6 +470,7 @@ mod tests {
     use crate::registers::status;
     use crate::timing;
     use mc683xx_target::address::Address;
+    use mc683xx_target::entry::Entry;
     use mc683xx_target::function_code::FunctionCode;
     use mc683xx_target::size::Size;
 
@@ -906,6 +907,25 @@ mod tests {
         cpu.registers.set_address(0, 0x0001_0000);
         cpu.registers.ssp = RAM_END + 0x100;
         assert_eq!(step(&mut cpu).stop, Stop::Halted(Halt::DoubleBusFault));
+    }
+
+    #[test]
+    fn a_double_bus_fault_with_bdm_enabled_enters_background_mode() {
+        let mut cpu = prepared(&[MOVE_POSTINCREMENT_TO_D0]);
+        cpu.set_bdm_enabled(true);
+        cpu.registers.set_address(0, 0x0001_0000);
+        cpu.registers.ssp = RAM_END + 0x100;
+        let pc = cpu.registers.pc;
+        let stop = step(&mut cpu).stop;
+        let Stop::Background(Entry::DoubleBusFault { ssw }) = stop else {
+            panic!("{stop:?}");
+        };
+        assert_eq!(cpu.halted(), None);
+        // the second fault: a stacking write in supervisor data space
+        assert_eq!(ssw & (1 << 6), 0, "RW clear: a write");
+        assert_eq!(ssw & 0b111, 5);
+        assert_eq!(cpu.pcc, Address(pc));
+        assert!(cpu.far.0 > RAM_END, "{}", cpu.far);
     }
 
     #[test]

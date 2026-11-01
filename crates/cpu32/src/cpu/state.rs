@@ -29,13 +29,14 @@ use crate::memory::MemoryState;
 use crate::registers::Registers;
 use crate::registers::status;
 use mc683xx_target::address::Address;
+use mc683xx_target::entry::Entry;
 
 #[cfg(test)]
 mod tests;
 
 /// The format of [`Cpu::save`]'s bytes.  A change to what it saves
 /// changes it.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 
 /// Bytes of the version that starts every snapshot, little-endian.
 const VERSION_BYTES: usize = size_of::<u32>();
@@ -354,6 +355,16 @@ struct CpuState {
     stopped: bool,
     /// [`Cpu::halted`].
     halt: Option<Halt>,
+    /// [`Cpu::background`]'s entry, as ATEMP gives it.
+    background: Option<u32>,
+    /// [`Cpu::bdm_enabled`].
+    bdm_enabled: bool,
+    /// [`Cpu::atemp`].
+    atemp: u32,
+    /// [`Cpu::pcc`].
+    pcc: Address,
+    /// [`Cpu::far`].
+    far: Address,
     /// [`Cpu::fault_window`].
     fault_window: bool,
     /// [`Cpu::released`].
@@ -422,6 +433,11 @@ impl Cpu {
             refund: self.refund,
             stopped: self.stopped,
             halt: self.halted(),
+            background: self.background().map(Entry::atemp),
+            bdm_enabled: self.bdm_enabled,
+            atemp: self.atemp,
+            pcc: self.pcc,
+            far: self.far,
             fault_window: self.fault_window,
             released: self.released,
             altered: self.altered,
@@ -469,7 +485,15 @@ impl Cpu {
         self.extra = state.extra;
         self.refund = state.refund;
         self.stopped = state.stopped;
-        self.idle = state.halt.map(Idle::Halted);
+        self.idle = state.halt.map(Idle::Halted).or_else(|| {
+            state
+                .background
+                .map(|atemp| Idle::Background(Entry::from_atemp(atemp)))
+        });
+        self.bdm_enabled = state.bdm_enabled;
+        self.atemp = state.atemp;
+        self.pcc = state.pcc;
+        self.far = state.far;
         self.fault_window = state.fault_window;
         self.released = state.released;
         self.altered = state.altered;

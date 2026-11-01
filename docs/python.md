@@ -250,11 +250,14 @@ Registers are by name: `"D0"`-`"D7"`, `"A0"`-`"A7"`, `"PC"`, `"SR"`,
 Rust's `cpu::Run`: `cycles` and `stop`, a `Stop`, whose variants are
 classes as Rust's are (`Stop.Budget()`, `Stop.Stopped()`,
 `Stop.Halted(halt)`, `Stop.Hook(hook)` with the `HookId` that stopped
-it, `Stop.Requested()`), equal by value and matched by pattern (`case
-mc683xx.Stop.Hook(hook):`).  A run ends at a halt; one that starts
-halted spends its budget as time passes for the SIM, the modules and
-the peripherals without the CPU, so the watchdog can reset the chip,
-and ends `Stop.Halted` if nothing did.  `now` is the chip's time in system clocks.  Inside a run
+it, `Stop.Requested()`, `Stop.Background(entry)` with the `Entry`
+ATEMP reports: `Entry.Breakpoint()`, `Entry.Background()`,
+`Entry.DoubleBusFault(ssw)`, `Entry.Unknown(atemp)`), equal by value
+and matched by pattern (`case mc683xx.Stop.Hook(hook):`).  A run ends
+at a halt or on entering background mode; one that starts so spends
+its budget as time passes for the SIM, the modules and the peripherals
+without the CPU, so the watchdog can reset the chip, and ends
+`Stop.Halted` or `Stop.Background` if nothing did.  `now` is the chip's time in system clocks.  Inside a run
 the chip syncs at the next event of the SIM, the modules and every
 peripheral's `next_event`, as in Rust, and the same inputs at the same chip
 times give the same run.  A run ends at the first instruction boundary

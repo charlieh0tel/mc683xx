@@ -19,6 +19,7 @@ use crate::instructions::Table;
 use crate::instructions::data_movement::low_register;
 use crate::registers::status;
 use crate::timing;
+use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
@@ -190,10 +191,16 @@ pub(super) fn lpstop(core: &mut Core<'_>) -> Result<Flow, Exception> {
 }
 
 /// BGND: background mode when enabled, else an illegal instruction
-/// (CPU32RM 4.4, BGND; 7.2.1).  The core has no background mode, so
-/// it is never enabled.
+/// (CPU32RM 4.4, BGND; 7.2.1).  PCC is the BGND, and GO resumes after
+/// it; a pending trace is not taken (PLAN.md, Background debug mode).
 fn bgnd(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
-    Err(core.illegal())
+    if !core.cpu.bdm_enabled {
+        return Err(core.illegal());
+    }
+    core.cpu.untraced = true;
+    let pcc = core.instruction_pc();
+    core.cpu.enter_background(Entry::Background, pcc);
+    Ok(Flow::Changed)
 }
 
 /// The operation of an immediate-to-status opcode, by bits 11:9: OR,
@@ -385,6 +392,7 @@ mod tests {
     use crate::instructions::tests::step;
     use crate::registers::status;
     use mc683xx_target::address::Address;
+    use mc683xx_target::entry::Entry;
     use mc683xx_target::function_code::FunctionCode;
     use mc683xx_target::size::Size;
 
@@ -766,5 +774,21 @@ mod tests {
         let mut cpu = supervisor(&[0x4afa]);
         step(&mut cpu, 1);
         assert_eq!(cpu.exception_taken(), own(Vector::ILLEGAL_INSTRUCTION));
+    }
+
+    #[test]
+    fn bgnd_enters_background_mode_when_enabled() {
+        let mut cpu = supervisor(&[0x4afa, 0x7001]);
+        cpu.set_bdm_enabled(true);
+        cpu.registers.set_sr(cpu.registers.sr() | status::T1);
+        let pc = cpu.registers.pc;
+        step(&mut cpu, 1);
+        assert_eq!(cpu.background(), Some(Entry::Background));
+        assert_eq!(cpu.exception_taken(), None, "the trace is not taken");
+        assert_eq!(cpu.registers.pc, pc + 2, "GO resumes after the BGND");
+        assert_eq!(cpu.pcc, Address(pc));
+        assert_eq!(cpu.atemp, 1, "CPU32RM Table 7-2");
+        assert_eq!(step(&mut cpu, 1).stop, Stop::Background(Entry::Background));
+        assert_eq!(cpu.registers.data[0], 0, "and nothing more runs");
     }
 }

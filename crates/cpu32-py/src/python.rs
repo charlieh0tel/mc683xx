@@ -38,6 +38,7 @@ use crate::chip::Chip;
 use crate::chip::ChipBuilder;
 use crate::chip::DsackFaultView;
 use crate::chip::DsackView;
+use crate::chip::Entry;
 use crate::chip::Event;
 use crate::chip::Halt;
 use crate::chip::ResetCause;
@@ -129,6 +130,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<BoardRunView>()?;
     module.add_class::<Stop>()?;
     module.add_class::<Halt>()?;
+    module.add_class::<Entry>()?;
     module.add_class::<ResetCause>()?;
     module.add_class::<Event>()?;
     module.add_class::<Ending>()?;

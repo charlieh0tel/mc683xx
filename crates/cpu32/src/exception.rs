@@ -3,8 +3,6 @@
 //! twelve-word stack frames (6.4) and the special status word (6.3).
 
 use crate::cpu::Core;
-use crate::cpu::Halt;
-use crate::cpu::Idle;
 use crate::cycles::Cycles;
 use crate::interrupt::InterruptLevel;
 use crate::registers::status;
@@ -433,6 +431,24 @@ const fn operand_bits(fault: &Fault) -> u16 {
     long | size << ssw::SIZ_SHIFT | fault.function_code.bits() as u16 & ssw::FUNC
 }
 
+/// The SSW of a double bus fault's second fault, for ATEMP: its
+/// restart pattern (CPU32RM 6.3.1.2), as the manual gives none for a
+/// double fault (PLAN.md, Background debug mode).
+pub(crate) const fn double_fault_ssw(fault: &Fault) -> u16 {
+    restart_bits(fault) | operand_bits(fault)
+}
+
+/// The SSW's IN, RW and RM for `fault` (CPU32RM 6.3.1.2).
+const fn restart_bits(fault: &Fault) -> u16 {
+    let read = match fault.cycle {
+        CycleKind::Fetch => ssw::IN | ssw::RW,
+        CycleKind::Read => ssw::RW,
+        CycleKind::Write => 0,
+    };
+    let read_modify_write = if fault.read_modify_write { ssw::RM } else { 0 };
+    read | read_modify_write
+}
+
 /// SSW TR, if `trace_pending`.
 const fn trace_bit(trace_pending: bool) -> u16 {
     if trace_pending { ssw::TR } else { 0 }
@@ -501,22 +517,18 @@ impl Core<'_> {
         trace_pending: bool,
     ) {
         if self.cpu.fault_window {
-            return self.double_fault();
+            return self.double_fault(&fault);
         }
+        self.cpu.far = fault.address;
         let sr = self.cpu.registers.sr();
         self.cpu
             .registers
             .set_sr((sr | status::S) & !(status::T1 | status::T0));
-        let read = match fault.cycle {
-            CycleKind::Fetch => ssw::IN | ssw::RW,
-            CycleKind::Read => ssw::RW,
-            CycleKind::Write => 0,
-        };
-        let read_modify_write = if fault.read_modify_write { ssw::RM } else { 0 };
+        let read = restart_bits(&fault) & !ssw::RM;
         // The SSW patterns of 6.3.1.1 to 6.3.1.3.
         let (bits, address, count) = match recovery {
             Recovery::Released => (ssw::RR | trace_bit(trace_pending), fault.address, 0),
-            Recovery::Restart => (read_modify_write | read, fault.address, 0),
+            Recovery::Restart => (restart_bits(&fault), fault.address, 0),
             Recovery::Movem(movem) => {
                 let rerun = if fault.cycle == CycleKind::Write {
                     ssw::RR
@@ -552,8 +564,9 @@ impl Core<'_> {
     /// rewrites it.
     fn exception_fault(&mut self, fault: Fault, top: u32, faulted: &Frame, trace_pending: bool) {
         if self.cpu.fault_window {
-            return self.double_fault();
+            return self.double_fault(&fault);
         }
+        self.cpu.far = fault.address;
         self.charge(Cycles(u64::from(
             timing::exception::BUS_ERROR_IN_EXCEPTION.cycles,
         )));
@@ -590,7 +603,7 @@ impl Core<'_> {
                 self.entered(vector, frame, bottom, handler, None);
                 self.cpu.fault_window = true;
             }
-            Err(_) => self.double_fault(),
+            Err(fault) => self.double_fault(&fault),
         }
     }
 
@@ -630,9 +643,11 @@ impl Core<'_> {
         .map(Address)
     }
 
-    /// Halts the CPU in a double bus fault (CPU32RM 6.2.2).
-    pub(crate) const fn double_fault(&mut self) {
-        self.cpu.idle = Some(Idle::Halted(Halt::DoubleBusFault));
+    /// A double bus fault on `fault` (CPU32RM 6.2.2), in the instruction
+    /// at hand.
+    pub(crate) fn double_fault(&mut self, fault: &Fault) {
+        let pcc = self.instruction_pc();
+        self.cpu.double_fault(Some(fault), pcc);
     }
 }
 

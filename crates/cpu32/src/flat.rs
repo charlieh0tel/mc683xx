@@ -51,7 +51,7 @@ use mc683xx_target::size::Size;
 mod tests;
 
 /// The format of [`Machine::save`]'s bytes.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 /// The address lines a machine has unless the host says otherwise:
 /// all of the CPU32's (CPU32RM 5.3), so no address aliases.
 pub const ADDRESS_BITS: u32 = 32;
