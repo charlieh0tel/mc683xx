@@ -446,17 +446,24 @@ struct Saving {
 /// old snapshot there.
 fn saveable(board: &Board<Mc68331>, path: &Path) -> Result<Saving, RunError> {
     board.save()?;
-    let name = path.file_name().unwrap_or_default().to_string_lossy();
-    let temporary = path.with_file_name(format!(".{name}.{}.partial", process::id()));
-    let file = File::create(&temporary).map_err(|error| RunError::Io {
-        path: path.to_owned(),
-        error,
-    })?;
+    let (temporary, file) = temporary_file(path)?;
     Ok(Saving {
         target: path.to_owned(),
         temporary,
         file,
     })
+}
+
+/// Creates the temporary file beside `path` that a snapshot is written
+/// to: a new file, never one already there, nor what a link there names.
+fn temporary_file(path: &Path) -> Result<(PathBuf, File), RunError> {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    let temporary = path.with_file_name(format!(".{name}.{}.partial", process::id()));
+    let file = File::create_new(&temporary).map_err(|error| RunError::Io {
+        path: path.to_owned(),
+        error,
+    })?;
+    Ok((temporary, file))
 }
 
 impl Saving {
@@ -535,5 +542,29 @@ impl Turns {
             self.next_position = Some((at + every, every));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+
+    use super::temporary_file;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_at_the_temporary_path_is_not_followed() {
+        let directory = std::env::temp_dir().join(format!("mc683xx-run-{}", std::process::id()));
+        fs::create_dir_all(&directory).unwrap();
+        let victim = directory.join("victim");
+        fs::write(&victim, b"keep").unwrap();
+        let target = directory.join("board.snapshot");
+        let link = directory.join(format!(".board.snapshot.{}.partial", std::process::id()));
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+        let result = temporary_file(&target);
+        let kept = fs::read(&victim).unwrap();
+        fs::remove_dir_all(&directory).unwrap();
+        assert!(result.is_err());
+        assert_eq!(kept, b"keep");
     }
 }
