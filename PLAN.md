@@ -1959,7 +1959,8 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   the SIM, QSM and GPT yet, so their freeze bits do nothing: they run
   on while the CPU is in background mode.  ATEMP is always fresh: the
   server sees every entry, but one a restored snapshot started in,
-  which is stale until a GO or CALL.  Transfer, the raw 17-bit exchange, answers BadRequest until
+  which is stale, its ATEMP as the server started kept, until a GO,
+  CALL or reset.  Transfer, the raw 17-bit exchange, answers BadRequest until
   the serial interface is modeled.  CALL stacks RPC at the active SP
   in its data space (7.2.8.13).
 - GO and CALL end whatever exception processing preceded the entry:
