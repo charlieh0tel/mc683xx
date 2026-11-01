@@ -663,19 +663,31 @@ impl<T: Target> TargetDescriptionXmlOverride for Session<'_, T> {
         length: usize,
         buf: &mut [u8],
     ) -> TargetResult<usize, Self> {
-        if annex != TARGET_XML {
-            return Err(TargetError::Errno(INVALID_ANNEX));
-        }
-        let xml = Cpu32::target_description_xml()
-            .unwrap_or_default()
-            .trim()
-            .as_bytes();
-        let start = usize::try_from(offset).map_or(xml.len(), |offset| offset.min(xml.len()));
-        let end = start.saturating_add(length.min(buf.len())).min(xml.len());
-        let data = &xml[start..end];
-        buf[..data.len()].copy_from_slice(data);
-        Ok(data.len())
+        description(annex, offset, length, buf).map_err(TargetError::Errno)
     }
+}
+
+/// `length` bytes of the architecture's description at `offset`, into
+/// `buf`, for a read of `annex`: the bytes read, or the errno for an
+/// annex other than `target.xml`.
+fn description(
+    annex: &[u8],
+    offset: u64,
+    length: usize,
+    buf: &mut [u8],
+) -> Result<usize, u8> {
+    if annex != TARGET_XML {
+        return Err(INVALID_ANNEX);
+    }
+    let xml = Cpu32::target_description_xml()
+        .unwrap_or_default()
+        .trim()
+        .as_bytes();
+    let start = usize::try_from(offset).map_or(xml.len(), |offset| offset.min(xml.len()));
+    let end = start.saturating_add(length.min(buf.len())).min(xml.len());
+    let data = &xml[start..end];
+    buf[..data.len()].copy_from_slice(data);
+    Ok(data.len())
 }
 
 impl<T: Target> SingleThreadBase for Session<'_, T> {
