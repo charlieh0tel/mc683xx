@@ -8,6 +8,7 @@ use std::fs;
 use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
 use std::net::TcpStream;
@@ -776,6 +777,64 @@ fn bdm_session(file: &Path, directory: &Path) -> (Child, UnixStream) {
     child.stderr = Some(reader.join().unwrap().into_inner());
     assert_eq!(line.trim(), format!("mc683xx-run: BDM on {address}"));
     (child, UnixStream::connect(&socket).unwrap())
+}
+
+/// `interrupted`, failing if the runner has not ended within
+/// [`WAITING`].
+#[cfg(unix)]
+fn interrupted_promptly(child: Child) -> Option<i32> {
+    let pid = Pid::from_raw(i32::try_from(child.id()).unwrap());
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || sender.send(interrupted(child).0).unwrap());
+    let Ok(status) = receiver.recv_timeout(WAITING) else {
+        kill(pid, Signal::SIGKILL).unwrap();
+        panic!("the runner did not end on Ctrl-C");
+    };
+    status
+}
+
+#[cfg(unix)]
+#[test]
+fn a_bdm_client_that_does_not_read_its_replies_cannot_wedge_the_runner() {
+    let directory = board("bdm-flood", &echo::image());
+    let (child, mut cable) = bdm_session(&directory.join("echo.toml"), &directory);
+    // ResetHalt, so the unpaced runner waits on the cable
+    assert_eq!(bdm(&mut cable, &[0x03]), [0, 1, 0, 0, 0, 0]);
+    cable.set_nonblocking(true).unwrap();
+    // Hellos until the socket stays full: the runner reads no more
+    let mut sent = 0;
+    let mut full = 0;
+    while full < 50 {
+        match cable.write(&[1, 0x0e]) {
+            Ok(2) => {
+                sent += 1;
+                full = 0;
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                full += 1;
+                thread::sleep(Duration::from_millis(10));
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+    assert!(sent > 100, "{sent} Hellos");
+    assert!(interrupted_promptly(child).is_some());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_bdm_message_s_length_out_of_range_closes_the_connection() {
+    let directory = board("bdm-length", &echo::image());
+    let (child, mut cable) = bdm_session(&directory.join("echo.toml"), &directory);
+    for length in [0, 65] {
+        cable.write_all(&[length, 0x0e]).unwrap();
+        assert_eq!(cable.read(&mut [0]).unwrap(), 0, "length {length}");
+        cable = UnixStream::connect(directory.join("bdm.sock")).unwrap();
+    }
+    assert_eq!(bdm(&mut cable, &[0x0e]), [0, 2, 0, 0, 0]);
+    assert!(interrupted_promptly(child).is_some());
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[cfg(unix)]
