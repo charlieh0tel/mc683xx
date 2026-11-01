@@ -232,7 +232,7 @@ pub(super) fn register(table: &mut Table) {
 
 /// The size field, bits 7:6.
 pub(super) const fn size(opcode: u16) -> Option<Size> {
-    Size::from_field(opcode >> SIZE_SHIFT)
+    Size::from_field(opcode >> SIZE_SHIFT & Size::FIELD_MASK)
 }
 
 /// Whether the size field is a size.

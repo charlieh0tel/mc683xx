@@ -419,7 +419,7 @@ const fn field(opcode: u16) -> u16 {
 
 /// The common size field, bits 7:6.
 const fn size(opcode: u16) -> Option<Size> {
-    Size::from_field(opcode >> SIZE_SHIFT)
+    Size::from_field(opcode >> SIZE_SHIFT & Size::FIELD_MASK)
 }
 
 /// The mode of the field, if `category` admits it.
@@ -590,7 +590,7 @@ const fn moves(opcode: u16) -> Option<Sequence> {
 /// CMP2 and CHK2 (CPU32RM 8.3.5, 8.3.12): save, fetch, operation.
 /// Their size is in bits 10:9.
 const fn compare_bounds(opcode: u16) -> Option<Sequence> {
-    let Some(size) = Size::from_field(opcode >> REGISTER_SHIFT) else {
+    let Some(size) = Size::from_field(opcode >> REGISTER_SHIFT & Size::FIELD_MASK) else {
         return None;
     };
     let Some(mode) = mode_in(opcode, Category::CONTROL) else {

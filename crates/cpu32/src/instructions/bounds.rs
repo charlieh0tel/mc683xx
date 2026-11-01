@@ -56,7 +56,7 @@ pub(super) fn register(table: &mut Table) {
         BOUNDS_MASK,
         BOUNDS,
         |opcode| {
-            Size::from_field(opcode >> BOUNDS_SIZE_SHIFT).is_some()
+            Size::from_field(opcode >> BOUNDS_SIZE_SHIFT & Size::FIELD_MASK).is_some()
                 && Category::CONTROL.admits(opcode & FIELD_MASK)
         },
         compare_bounds,
@@ -120,7 +120,7 @@ fn chk(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
 /// sign-extended bounds.  The comparisons are unsigned: Table 4-1's C,
 /// with its UB < LB term, then gives the bounds a signed reading too.
 fn compare_bounds(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
-    let Some(size) = Size::from_field(opcode >> BOUNDS_SIZE_SHIFT) else {
+    let Some(size) = Size::from_field(opcode >> BOUNDS_SIZE_SHIFT & Size::FIELD_MASK) else {
         return Err(core.illegal());
     };
     let extension = core.fetch_word()?;

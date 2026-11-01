@@ -134,7 +134,7 @@ pub(super) fn register(table: &mut Table) {
         MOVES_MASK,
         MOVES,
         |opcode| {
-            Size::from_field(opcode >> MOVES_SIZE_SHIFT).is_some()
+            Size::from_field(opcode >> MOVES_SIZE_SHIFT & Size::FIELD_MASK).is_some()
                 && Category::MEMORY
                     .and(Category::ALTERABLE)
                     .admits(opcode & FIELD_MASK)
@@ -336,7 +336,7 @@ fn movec(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
 /// the CPU32 does (CPU32RM 4.4, MOVES, note).
 fn moves(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
     supervisor(core)?;
-    let Some(size) = Size::from_field(opcode >> MOVES_SIZE_SHIFT) else {
+    let Some(size) = Size::from_field(opcode >> MOVES_SIZE_SHIFT & Size::FIELD_MASK) else {
         return Err(core.illegal());
     };
     let extension = core.fetch_word()?;
