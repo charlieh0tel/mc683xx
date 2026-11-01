@@ -5,6 +5,7 @@
 
 use std::env;
 use std::fs;
+use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Read;
@@ -53,7 +54,12 @@ fn runner(arguments: &[&str], input: &[u8]) -> Output {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    child.stdin.take().unwrap().write_all(input).unwrap();
+    // a runner that refuses its command line exits without reading;
+    // what it reads, the tests check through its output
+    match child.stdin.take().unwrap().write_all(input) {
+        Err(error) if error.kind() == io::ErrorKind::BrokenPipe => {}
+        written => written.unwrap(),
+    }
     child.wait_with_output().unwrap()
 }
 
