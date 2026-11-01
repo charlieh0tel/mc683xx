@@ -16,6 +16,8 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 
+use cpu32_harness::layout;
+use cpu32_harness::layout::FIRMWARE;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cycles::Cycles;
@@ -27,7 +29,6 @@ use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::qsm::sci::Frame;
 
-use common::FIRMWARE;
 use common::board;
 
 mod common;
@@ -488,13 +489,17 @@ fn images_boot_from_power_on() {
         .ok()
         .and_then(|seconds| seconds.parse().ok())
         .unwrap_or(DEFAULT_SECONDS);
+    let images = layout::images(&directory);
+    let mut booted = 0;
     for image in &IMAGES {
-        let Ok(bytes) = fs::read(directory.join(format!("{}.bin", image.name))) else {
+        let Ok(bytes) = fs::read(images.join(format!("{}.bin", image.name))) else {
             println!("{}: no image, skipped", image.name);
             continue;
         };
+        booted += 1;
         let trace = boot(image, bytes, seconds);
         let reached: Vec<_> = trace.reached.iter().map(|&(name, _)| name).collect();
         println!("{}: milestones reached: {reached:?}", image.name);
     }
+    assert!(booted > 0, "no image in {}", images.display());
 }

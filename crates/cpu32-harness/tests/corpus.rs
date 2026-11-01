@@ -2,9 +2,9 @@
 //! library on known inputs (`libc`), and every C function of each image
 //! the harness can call, on generated arguments (`functions`).  The
 //! images are HP's and not in this repository: `SMARTCLOCK_FIRMWARE`
-//! names the directory holding `<image>.bin` and
-//! `<image>/decompiled/<image>.c` and `.conventions.jsonl`
-//! (smartclock's `third_party/firmware`).  Without it the tests are
+//! names smartclock's `third_party/firmware`, holding
+//! `images/<image>.bin` and `decompiled/<image>/<image>.c` and
+//! `.conventions.jsonl` (`cpu32_harness::layout`).  Without it the tests are
 //! skipped.  `make corpus` runs them.
 //!
 //! A function that stops at an instruction the core does not implement
@@ -32,6 +32,8 @@ use cpu32_harness::functions::Corpus;
 use cpu32_harness::functions::IMAGES;
 use cpu32_harness::functions::Verdict;
 use cpu32_harness::functions::verdict;
+use cpu32_harness::layout;
+use cpu32_harness::layout::FIRMWARE;
 use cpu32_harness::libc;
 use cpu32_harness::libc::Outcome;
 use cpu32_harness::oracles::Comparison;
@@ -45,7 +47,6 @@ use mc683xx_cpu32::exception::Exception;
 use mc683xx_cpu32::exception::Vector;
 
 /// The variable naming the firmware directory.
-const FIRMWARE: &str = "SMARTCLOCK_FIRMWARE";
 /// The variable naming the functions to run, comma separated.
 const FILTER: &str = "CORPUS_FILTER";
 /// Instructions shown in the report's breakdown.
@@ -65,7 +66,7 @@ fn firmware_directory() -> Option<PathBuf> {
 }
 
 fn image(directory: &Path, name: &str) -> Option<Vec<u8>> {
-    fs::read(directory.join(format!("{name}.bin"))).ok()
+    fs::read(layout::images(directory).join(format!("{name}.bin"))).ok()
 }
 
 /// The functions `CORPUS_FILTER` names, if it is set.
@@ -87,7 +88,7 @@ fn load(directory: &Path, name: &str) -> Option<(Corpus, Firmware)> {
         println!("{name}: no image, skipped");
         return None;
     };
-    let decompiled = directory.join(name).join("decompiled");
+    let decompiled = layout::decompiled(directory, name);
     let read = |suffix: &str| {
         let path = decompiled.join(format!("{name}{suffix}"));
         fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))

@@ -16,9 +16,6 @@ use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::peripheral::Timed;
 
-/// The variable naming the firmware directory, smartclock's
-/// `third_party/firmware`.
-pub(crate) const FIRMWARE: &str = "SMARTCLOCK_FIRMWARE";
 /// Bytes of flash: four 128 K x 8 parts (restart.md).
 const FLASH_BYTES: usize = 0x8_0000;
 /// Bytes of RAM the selects reach (restart.md, "The RAM").
