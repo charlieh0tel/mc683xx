@@ -51,6 +51,16 @@ impl Prescaler {
         }
     }
 
+    /// Whether a snapshot's prescaler is one a run brought to `now`: it
+    /// started no later, and counted no more than the system clocks
+    /// since, INCP's steps among them.
+    pub(super) const fn is_valid(&self, now: Cycles) -> bool {
+        match self.since {
+            Some(since) => since.0 <= now.0 && self.base <= since.0,
+            None => self.base <= now.0,
+        }
+    }
+
     /// When its count reaches `count`, if it runs.
     pub(super) const fn when(&self, count: u64) -> Option<Cycles> {
         match self.since {
@@ -90,6 +100,13 @@ impl Counter {
             Some(divisor) => self.ticks + count / divisor - self.at / divisor,
             None => self.ticks,
         }
+    }
+
+    /// Whether a snapshot's counter is one a run brought to the
+    /// prescaler's `count` at `now`: synchronized no later, and counted
+    /// no more than the system clocks to `now`.
+    pub(super) const fn is_valid(&self, count: u64, now: Cycles) -> bool {
+        self.at <= count && self.ticks <= now.0 && self.ticks(count) <= now.0
     }
 
     /// A new tap from the prescaler's `count`.

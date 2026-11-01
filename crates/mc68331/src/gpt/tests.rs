@@ -16,6 +16,7 @@ use super::PortGpPin;
 use super::STATE_VERSION;
 use super::pwm::Channel;
 use super::pwm::Output;
+use super::timer::Counter;
 
 fn access(offset: u32, size: Size, now: u64) -> RegisterAccess {
     RegisterAccess {
@@ -128,7 +129,7 @@ fn a_state_no_run_could_save_is_refused() {
         change(&mut saved);
         encode(STATE_VERSION, &saved)
     };
-    let invalid: [(Vec<u8>, &str); 4] = [
+    let invalid: [(Vec<u8>, &str); 9] = [
         (edited(|saved| saved.icr = 0xffff), "GPT registers"),
         // CPR 1 with TCNT still on the reset tap
         (edited(|saved| saved.tmsk = 1), "GPT prescaler taps"),
@@ -143,6 +144,18 @@ fn a_state_no_run_could_save_is_refused() {
                 saved.scheduled.push_back((Cycles(10), Input::Pai, false));
             }),
             "GPT scheduled inputs",
+        ),
+        (edited(|saved| saved.tick = u64::MAX), "GPT counts"),
+        (edited(|saved| saved.time = Cycles(u64::MAX)), "GPT counts"),
+        // TCNT synchronized at a prescaler count still to come
+        (
+            edited(|saved| saved.counter = Counter::new(saved.counter.divisor(), 1 << 40)),
+            "GPT counts",
+        ),
+        (edited(|saved| saved.gated = u64::MAX), "GPT counts"),
+        (
+            edited(|saved| saved.pclk_rise = Some(Cycles(1 << 40))),
+            "GPT counts",
         ),
     ];
     let mut other = self::gpt();

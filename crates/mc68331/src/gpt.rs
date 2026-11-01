@@ -204,6 +204,9 @@ const CFORC_FPWM: u8 = 0b11;
 const PWMC_F1: u8 = 0b11;
 /// PRESCL's bits (MC68331UM D.2.18).
 const PRESCL_MASK: u64 = 0x1ff;
+/// The latest time a snapshot's GPT may have reached, 2^62 system
+/// clocks (some 8,700 years at 16.78 MHz): no count from it overflows.
+const LATEST_TIME: u64 = 1 << 62;
 /// The span of TCNT, 16 bits.
 const TCNT_SPAN: u64 = 1 << 16;
 /// The span of PACNT, 8 bits.
@@ -1295,6 +1298,9 @@ impl Gpt {
         if self.counter.divisor() != cpr_divisor(tmsk2) || !self.pwm.is_valid() {
             return Err(StateError::invalid("GPT prescaler taps"));
         }
+        if !self.timing_is_valid() {
+            return Err(StateError::invalid("GPT counts"));
+        }
         if !self
             .scheduled
             .iter()
@@ -1304,6 +1310,27 @@ impl Gpt {
             return Err(StateError::invalid("GPT scheduled inputs"));
         }
         Ok(())
+    }
+
+    /// Whether its counts are ones a run brought to its time: the
+    /// prescaler, TCNT, PWMCNT and the gated accumulator's clock no
+    /// further, the compares taken no further than TCNT, and the edges
+    /// found no later.  Past [`LATEST_TIME`] a count may overflow.
+    fn timing_is_valid(&self) -> bool {
+        let now = self.time;
+        if now.0 > LATEST_TIME || !self.prescaler.is_valid(now) {
+            return false;
+        }
+        let count = self.prescaler.count(now);
+        let found = |found: Found| found.count <= count && found.time <= now;
+        self.counter.is_valid(count, now)
+            && self.pwm.counter().is_valid(count, now)
+            && self.tick <= self.counter.ticks(count)
+            && self.pclk_edges <= now.0
+            && self.gated <= self.gated_count(count)
+            && self.pclk_rise.is_none_or(|rise| rise <= now)
+            && found(self.edges.pwm_found)
+            && found(self.edges.oc1_found)
     }
 
     /// The next event, found anew after a change that may move it: a
@@ -1467,10 +1494,10 @@ impl Module for Gpt {
     }
 
     fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
-        let saved: Self = decode(STATE_VERSION, snapshot)?;
+        let mut saved: Self = decode(STATE_VERSION, snapshot)?;
         saved.validate()?;
+        saved.refresh();
         *self = saved;
-        self.refresh();
         Ok(())
     }
 }
