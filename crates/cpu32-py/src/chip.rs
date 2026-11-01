@@ -5,16 +5,13 @@ use std::cell::RefCell;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
-use mc683xx_cpu32::function_code::FunctionCode;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory;
 use mc683xx_cpu32::peripheral::PeripheralId;
-use mc683xx_cpu32::size::Size;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::chip::MemoryId;
@@ -30,6 +27,9 @@ use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::clock::ClockSource;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 use mc683xx_modules::sim::reset::ResetScope;
 use pyo3::Bound;

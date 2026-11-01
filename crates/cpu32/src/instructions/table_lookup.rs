@@ -22,8 +22,8 @@ use crate::instructions::bounds::read_at;
 use crate::instructions::data_movement::low_register;
 use crate::instructions::system;
 use crate::registers::status;
-use crate::size::Size;
 use crate::timing;
+use mc683xx_target::size::Size;
 
 /// TBL: 1111 1000 00 <ea>, mode 000 the register form (CPU32RM 4.4,
 /// TBLS).
@@ -180,7 +180,6 @@ fn table_lookup(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
 #[cfg(test)]
 mod tests {
     use super::rounded;
-    use crate::address::Address;
     use crate::cpu::Cpu;
     use crate::exception::Exception;
     use crate::exception::Vector;
@@ -189,6 +188,7 @@ mod tests {
     use crate::instructions::tests::poke_long;
     use crate::instructions::tests::step;
     use crate::registers::status;
+    use mc683xx_target::address::Address;
 
     /// Where the tests' tables are.
     const TABLE: u32 = 0x2000;

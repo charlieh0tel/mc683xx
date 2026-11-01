@@ -16,7 +16,6 @@ use std::ops::ControlFlow;
 
 use std::rc::Rc;
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::cpu;
 use mc683xx_cpu32::cpu::bare::Deviations;
 use mc683xx_cpu32::cpu::bare::End;
@@ -41,6 +40,7 @@ use mc683xx_cpu32::registers::Registers;
 use mc683xx_gdb::target::Target;
 use mc683xx_gdb::target::TargetRun;
 use mc683xx_gdb::target::Unwritable;
+use mc683xx_target::address::Address;
 use pyo3::Bound;
 use pyo3::Py;
 use pyo3::PyAny;

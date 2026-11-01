@@ -27,7 +27,6 @@ use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::Registry;
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::cpu::bare::End;
 use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
@@ -43,6 +42,7 @@ use mc683xx_gdb::target::Target;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_target::address::Address;
 
 /// The initial SSP.
 const STACK: u32 = 0x8000;

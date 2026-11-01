@@ -6,7 +6,6 @@
 
 use std::mem;
 
-use crate::address::Address;
 use crate::bus::Bus;
 use crate::bus::BusAccess;
 use crate::bus::BusError;
@@ -20,7 +19,6 @@ use crate::exception::MovemResume;
 use crate::exception::Processed;
 use crate::exception::Recovery;
 use crate::exception::Vector;
-use crate::function_code::FunctionCode;
 use crate::instructions;
 use crate::instructions::Flow;
 use crate::instructions::Handler;
@@ -34,8 +32,10 @@ use crate::memory::Space;
 use crate::memory::watch;
 use crate::registers::Registers;
 use crate::registers::status;
-use crate::size::Size;
 use crate::timing;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 pub mod bare;
 pub mod control;
@@ -213,7 +213,7 @@ impl Cpu {
     /// MOVEQ #42,D0 from where the host puts PC:
     ///
     /// ```
-    /// use mc683xx_cpu32::address::Address;
+    /// use mc683xx_target::address::Address;
     /// use mc683xx_cpu32::bus::Bus;
     /// use mc683xx_cpu32::bus::BusAccess;
     /// use mc683xx_cpu32::bus::BusError;
@@ -1579,7 +1579,6 @@ mod tests {
     use super::Cpu;
     use super::Halt;
     use super::Stop;
-    use crate::address::Address;
     use crate::bus::Bus;
     use crate::bus::BusAccess;
     use crate::bus::BusError;
@@ -1589,7 +1588,6 @@ mod tests {
     use crate::exception::Movem;
     use crate::exception::MovemResume;
     use crate::exception::Vector;
-    use crate::function_code::FunctionCode;
     use crate::instructions::tests::CODE;
     use crate::instructions::tests::NoBus;
     use crate::instructions::tests::NoInterrupts;
@@ -1602,7 +1600,9 @@ mod tests {
     use crate::interrupt::InterruptLevel;
     use crate::interrupt::Interrupts;
     use crate::registers::status;
-    use crate::size::Size;
+    use mc683xx_target::address::Address;
+    use mc683xx_target::function_code::FunctionCode;
+    use mc683xx_target::size::Size;
     use std::cell::Cell;
     use std::rc::Rc;
 
@@ -2025,7 +2025,6 @@ mod tests {
         use super::Source;
         use super::handler;
         use super::step;
-        use crate::address::Address;
         use crate::cpu::Cpu;
         use crate::cycles::Cycles;
         use crate::exception::Vector;
@@ -2038,6 +2037,7 @@ mod tests {
         use crate::interrupt::Acknowledge;
         use crate::interrupt::InterruptLevel;
         use crate::registers::status;
+        use mc683xx_target::address::Address;
 
         /// ADDQ.L #1, D0.
         const ADDQ: u16 = 0x5280;

@@ -3,8 +3,8 @@
 //! CSORBT and CSOR0-10, and how each would end the cycle.
 
 use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::function_code::FunctionCode;
-use mc683xx_cpu32::size::Size;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 use crate::chip_select::ChipSelect;
 
@@ -577,8 +577,8 @@ mod tests {
     use crate::chip_select::ChipSelect;
     use crate::chip_select::Number;
     use mc683xx_cpu32::bus::PortSize;
-    use mc683xx_cpu32::function_code::FunctionCode;
-    use mc683xx_cpu32::size::Size;
+    use mc683xx_target::function_code::FunctionCode;
+    use mc683xx_target::size::Size;
 
     /// DATA\[15:0\] left high by the pull-ups.
     const PULLED_UP: u16 = 0xffff;

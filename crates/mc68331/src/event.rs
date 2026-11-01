@@ -1,14 +1,14 @@
 //! What the chip tells the host of as it runs.
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::function_code::FunctionCode;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::peripheral::PeripheralId;
-use mc683xx_cpu32::size::Size;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::sim::ResetCause;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 /// Something the chip did that the host may want to know of.  More
 /// kinds may come: a host's match needs a wildcard arm.

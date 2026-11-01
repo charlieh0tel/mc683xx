@@ -17,7 +17,6 @@ use serde::de::DeserializeOwned;
 use super::Cpu;
 use super::Halt;
 use super::hooks::Resume;
-use crate::address::Address;
 use crate::cycles::Cycles;
 use crate::effective_address::Altered;
 use crate::exception::Exception;
@@ -28,6 +27,7 @@ use crate::interrupt::InterruptLevel;
 use crate::memory::MemoryState;
 use crate::registers::Registers;
 use crate::registers::status;
+use mc683xx_target::address::Address;
 
 #[cfg(test)]
 mod tests;

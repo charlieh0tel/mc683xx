@@ -22,7 +22,7 @@ use super::trap_taken;
 use crate::cycles::Cycles;
 use crate::instructions::tests::machine;
 use crate::instructions::tests::step;
-use crate::size::Size;
+use mc683xx_target::size::Size;
 
 /// The table's cost of `opcode`.
 fn cost(opcode: u16) -> Cost {

@@ -19,7 +19,7 @@ use std::sync::OnceLock;
 use crate::cycles::Cycles;
 use crate::effective_address::kind;
 use crate::instructions::OPCODES;
-use crate::size::Size;
+use mc683xx_target::size::Size;
 
 /// One opcode's timing (CPU32RM 8.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -12,7 +12,6 @@ use std::fmt;
 use std::rc::Rc;
 use std::str::FromStr;
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::Cpu;
 use mc683xx_cpu32::cpu::Halt;
@@ -42,6 +41,7 @@ use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::clock::ClockSource;
 use mc683xx_modules::sim::ports::PortName;
 use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_target::address::Address;
 use serde::Deserialize;
 use serde::Serialize;
 

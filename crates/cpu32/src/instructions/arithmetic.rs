@@ -2,6 +2,7 @@
 //! multiply, divide, CMP2 and TBL; and the two-operand and
 //! single-operand forms the logic instructions share.
 
+use super::size_of_index;
 use crate::cpu::Core;
 use crate::effective_address::Category;
 use crate::effective_address::Operand;
@@ -20,8 +21,8 @@ use crate::instructions::data_movement::low_register;
 use crate::instructions::data_movement::register_field;
 use crate::registers::Registers;
 use crate::registers::status;
-use crate::size::Size;
 use crate::timing::AddressTable;
+use mc683xx_target::size::Size;
 
 /// The opcode bits of a line, 15:12 (CPU32RM Table 4-11).
 pub(super) const LINE_MASK: u16 = 0xf000;
@@ -340,7 +341,7 @@ fn register_destination<O: Operation, const SIZE: u8, const SOURCE: u8>(
     core: &mut Core<'_>,
     opcode: u16,
 ) -> Result<Flow, Exception> {
-    let size = Size::of_index(SIZE);
+    let size = size_of_index(SIZE);
     let source =
         core.effective_address_of(SOURCE, opcode & FIELD_MASK, size, AddressTable::Fetch)?;
     let source = core.read_operand(source, size)?;
@@ -368,7 +369,7 @@ fn memory_destination<O: Operation, const SIZE: u8, const DESTINATION: u8>(
     core: &mut Core<'_>,
     opcode: u16,
 ) -> Result<Flow, Exception> {
-    let size = Size::of_index(SIZE);
+    let size = size_of_index(SIZE);
     let source = core.cpu.registers.data[register_field(opcode)] & size.mask();
     let operand =
         core.effective_address_of(DESTINATION, opcode & FIELD_MASK, size, AddressTable::Fetch)?;
@@ -418,7 +419,7 @@ fn immediate<O: Operation, const SIZE: u8, const DESTINATION: u8>(
     core: &mut Core<'_>,
     opcode: u16,
 ) -> Result<Flow, Exception> {
-    let size = Size::of_index(SIZE);
+    let size = size_of_index(SIZE);
     let source =
         core.effective_address_of(kind::IMMEDIATE, IMMEDIATE_FIELD, size, AddressTable::Fetch)?;
     let source = core.read_operand(source, size)?;
@@ -444,7 +445,7 @@ fn quick<O: Operation, const SIZE: u8, const DESTINATION: u8>(
     core: &mut Core<'_>,
     opcode: u16,
 ) -> Result<Flow, Exception> {
-    let size = Size::of_index(SIZE);
+    let size = size_of_index(SIZE);
     let data = match u32::from(opcode >> REGISTER_SHIFT & THREE_BITS) {
         0 => QUICK_EIGHT,
         data => data,
@@ -483,7 +484,7 @@ fn address_arithmetic<O: Operation, const SIZE: u8, const SOURCE: u8>(
     core: &mut Core<'_>,
     opcode: u16,
 ) -> Result<Flow, Exception> {
-    let size = Size::of_index(SIZE);
+    let size = size_of_index(SIZE);
     let source =
         core.effective_address_of(SOURCE, opcode & FIELD_MASK, size, AddressTable::Fetch)?;
     let source = size.sign_extend(core.read_operand(source, size)?);
@@ -602,7 +603,7 @@ fn single<U: Unary, const SIZE: u8, const OPERAND: u8>(
     core: &mut Core<'_>,
     opcode: u16,
 ) -> Result<Flow, Exception> {
-    let size = Size::of_index(SIZE);
+    let size = size_of_index(SIZE);
     let operand =
         core.effective_address_of(OPERAND, opcode & FIELD_MASK, size, AddressTable::Fetch)?;
     let value = core.read_operand(operand, size)?;
@@ -628,7 +629,7 @@ fn clr<const SIZE: u8, const OPERAND: u8>(
     core: &mut Core<'_>,
     opcode: u16,
 ) -> Result<Flow, Exception> {
-    let size = Size::of_index(SIZE);
+    let size = size_of_index(SIZE);
     let operand =
         core.effective_address_of(OPERAND, opcode & FIELD_MASK, size, AddressTable::Calculate)?;
     core.write_operand(operand, size, 0)?;

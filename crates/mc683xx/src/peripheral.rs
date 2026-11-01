@@ -3,12 +3,12 @@
 //! module keeps, the cycles a peripheral on no select decodes, and the
 //! QSPI's peripherals.
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
-use mc683xx_cpu32::function_code::FunctionCode;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
 
 /// An interrupt acknowledge's CPU-space address but the level in
 /// ADDR\[3:1\]: every other line set (MC68331UM 4.7.4, Figure 4-19).

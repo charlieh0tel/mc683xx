@@ -20,7 +20,6 @@ use mc683xx_cpu32::cpu::state::Stateless;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
-use mc683xx_cpu32::size::Size;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::ClockPhase;
 use mc683xx_modules::peripheral::ClockPolarity;
@@ -29,6 +28,7 @@ use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::peripheral::floating_miso;
+use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
 

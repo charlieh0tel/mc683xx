@@ -7,7 +7,6 @@
 //!
 //! [PLAN.md, Where the manuals are silent]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#where-the-manuals-are-silent
 
-use crate::address::Address;
 use crate::cpu::Core;
 use crate::effective_address::Category;
 use crate::effective_address::THREE_BITS;
@@ -18,8 +17,9 @@ use crate::instructions::Table;
 use crate::instructions::data_movement::register_field;
 use crate::registers::Registers;
 use crate::registers::status;
-use crate::size::Size;
 use crate::timing;
+use mc683xx_target::address::Address;
+use mc683xx_target::size::Size;
 
 /// The word forms: 1x00 rrr s11 <ea> (CPU32RM 4.4, MULU, MULS, DIVU,
 /// DIVS word forms).
@@ -264,7 +264,6 @@ fn divide_long(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
 
 #[cfg(test)]
 mod tests {
-    use crate::address::Address;
     use crate::cpu::Cpu;
     use crate::exception::Exception;
     use crate::exception::Vector;
@@ -272,6 +271,7 @@ mod tests {
     use crate::instructions::tests::machine;
     use crate::instructions::tests::step;
     use crate::registers::status;
+    use mc683xx_target::address::Address;
 
     /// Where the tests' supervisor stack starts, inside RAM.
     const STACK: u32 = 0x8000;

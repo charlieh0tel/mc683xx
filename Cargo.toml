@@ -15,6 +15,7 @@ members = [
     "crates/mc68331-run",
     "crates/peripherals",
     "crates/snapshot-golden",
+    "crates/target",
 ]
 resolver = "3"
 
@@ -42,6 +43,7 @@ mc683xx-gdb = { path = "crates/gdb", version = "=0.2.0" }
 mc683xx-mc68331 = { path = "crates/mc68331", version = "=0.2.0" }
 mc683xx-modules = { path = "crates/mc683xx", version = "=0.2.0" }
 mc683xx-peripherals = { path = "crates/peripherals", version = "=0.2.0" }
+mc683xx-target = { path = "crates/target", version = "=0.2.0" }
 
 [workspace.lints.rust]
 missing_debug_implementations = "warn"

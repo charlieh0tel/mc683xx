@@ -23,11 +23,11 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::frequency::Frequency;
-use mc683xx_cpu32::function_code::FunctionCode;
-use mc683xx_cpu32::size::Size;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::qsm::sci::Frame;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 use super::Duart;
 use super::IP0;

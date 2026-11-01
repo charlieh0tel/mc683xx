@@ -63,10 +63,10 @@ use gdbstub::target::ext::monitor_cmd::MonitorCmdOps;
 use gdbstub::target::ext::monitor_cmd::outputln;
 use gdbstub::target::ext::target_description_xml_override::TargetDescriptionXmlOverride;
 use gdbstub::target::ext::target_description_xml_override::TargetDescriptionXmlOverrideOps;
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::cpu::hooks::HookId;
 use mc683xx_cpu32::cpu::hooks::MemoryAccess;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_target::address::Address;
 
 use crate::arch::Cpu32;
 use crate::arch::GdbRegisters;

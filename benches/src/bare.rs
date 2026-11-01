@@ -1,7 +1,6 @@
 //! The core alone: a CPU32 on 256 Kbytes of zero-wait RAM in both
 //! spaces, nothing on the bus and no interrupts.
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
 use mc683xx_cpu32::bus::BusError;
@@ -18,6 +17,7 @@ use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::Page;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::registers::status;
+use mc683xx_target::address::Address;
 
 use crate::kernel::Calibration;
 use crate::kernel::Kernel;

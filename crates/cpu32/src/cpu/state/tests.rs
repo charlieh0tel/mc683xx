@@ -8,7 +8,6 @@ use super::VERSION;
 use super::decode;
 use super::encode;
 use super::restore_each;
-use crate::address::Address;
 use crate::cpu::Cpu;
 use crate::cycles::Cycles;
 use crate::effective_address::Altered;
@@ -21,7 +20,8 @@ use crate::memory::PAGE_BYTES;
 use crate::memory::Permissions;
 use crate::memory::Space;
 use crate::registers::status;
-use crate::size::Size;
+use mc683xx_target::address::Address;
+use mc683xx_target::size::Size;
 
 /// Where the loop stores.
 const DATA: u32 = 0x3000;

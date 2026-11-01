@@ -1,17 +1,14 @@
 //! The host's cycles and peeks, and runs to a target time.
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::function_code::FunctionCode;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::Select;
 use mc683xx_cpu32::registers::Registers;
-use mc683xx_cpu32::size::Size;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::module;
@@ -20,6 +17,9 @@ use mc683xx_modules::module::Module;
 use mc683xx_modules::module::Peek;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::qsm::sci::Frame;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 use super::AccessError;
 use crate::chip::Builder;

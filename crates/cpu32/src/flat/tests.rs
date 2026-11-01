@@ -6,7 +6,6 @@ use std::rc::Rc;
 use super::Machine;
 use super::MapError;
 use super::Unmapped;
-use crate::address::Address;
 use crate::bus::BusError;
 use crate::cpu::Stop;
 use crate::cpu::bare::End;
@@ -21,7 +20,6 @@ use crate::cpu::state::decode;
 use crate::cpu::state::encode;
 use crate::cycles::Cycles;
 use crate::exception::Vector;
-use crate::function_code::FunctionCode;
 use crate::interrupt::IrqPin;
 use crate::memory::Backing;
 use crate::memory::PAGE_BYTES;
@@ -31,7 +29,9 @@ use crate::memory::Space;
 use crate::peripheral::BusCycle;
 use crate::peripheral::MappedPeripheral;
 use crate::registers::status;
-use crate::size::Size;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 /// RAM from zero.
 const RAM: u32 = 0x1_0000;

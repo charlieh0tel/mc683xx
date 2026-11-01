@@ -1,26 +1,24 @@
 //! Function codes: the address space of each bus cycle.
 
-use serde::Deserialize;
-use serde::Deserializer;
-use serde::de::Error;
-use serde::de::Unexpected;
-use std::fmt;
+use core::fmt;
 
 /// The function code FC\[2:0\] a bus cycle carries, naming its address
 /// space (CPU32RM 5.3, Table 5-1).  Codes 0, 3 and 4 are reserved;
 /// `moves` can still produce them through SFC and DFC.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, serde::Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize))]
 pub struct FunctionCode(u8);
 
 /// A snapshot's function code, refused beyond FC\[2:0\].
-impl<'de> Deserialize<'de> for FunctionCode {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for FunctionCode {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let bits = u8::deserialize(deserializer)?;
         if bits & !Self::MASK == 0 {
             Ok(Self(bits))
         } else {
-            Err(D::Error::invalid_value(
-                Unexpected::Unsigned(bits.into()),
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Unsigned(bits.into()),
                 &"a function code, 0 to 7",
             ))
         }
@@ -70,8 +68,8 @@ impl FunctionCode {
         self.0 == Self::CPU_SPACE.0
     }
 
-    /// Whether this is one of the four memory spaces the core's page
-    /// tables serve: user and supervisor, data and program.  CPU space,
+    /// Whether this is one of the four memory spaces: user and
+    /// supervisor, data and program.  CPU space,
     /// and the reserved codes 0, 3 and 4 only `moves` produces, are
     /// not (CPU32RM Table 5-1; [PLAN.md, CPU space]).
     ///
@@ -100,6 +98,8 @@ impl From<FunctionCode> for u8 {
 
 #[cfg(test)]
 mod tests {
+    use std::string::ToString;
+
     use super::FunctionCode;
 
     #[test]
@@ -110,6 +110,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "serde")]
     #[test]
     fn a_snapshot_code_has_only_three_bits() {
         assert_eq!(
@@ -134,6 +135,5 @@ mod tests {
     fn a_function_code_shows_as_its_number() {
         assert_eq!(FunctionCode::SUPERVISOR_DATA.to_string(), "5");
         assert_eq!(u8::from(FunctionCode::CPU_SPACE), 7);
-        assert_eq!(super::super::exception::Vector(24).to_string(), "24");
     }
 }

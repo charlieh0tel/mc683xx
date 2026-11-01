@@ -9,7 +9,7 @@ approval step.
 
 | Package | Where | Built by |
 | --- | --- | --- |
-| `mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`, `mc683xx-board`, `mc683xx-gdb`, `mc683xx-peripherals`, `mc683xx-run` | crates.io | `cargo publish --workspace`: the first release by hand, then the `release` workflow |
+| `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`, `mc683xx-board`, `mc683xx-gdb`, `mc683xx-peripherals`, `mc683xx-run` | crates.io | `cargo publish --workspace`: the first release by hand, then the `release` workflow |
 | `mc683xx` (the Python package, from `crates/cpu32-py`) | PyPI | `.github/workflows/release.yml`, from a `v*` tag |
 
 Every other member has `publish = false`: `cpu32-py` (its wheel is its
@@ -69,7 +69,11 @@ Once, before the first release.
    `cargo login`, revoked after.  Then, for each published crate, add
    a trusted publisher on crates.io: owner `charlieh0tel`, repository
    `mc683xx`, workflow `release.yml`, environment `crates-io`.  Every
-   later release is published by the workflow only.
+   later release is published by the workflow only.  A crate new to
+   the workspace is the same: the first release that has it is
+   published by hand, the workspace as at the first release (Cutting
+   a release, step 8), and the new crate's trusted publisher added
+   after.
 
 ## Cutting a release
 
@@ -113,7 +117,7 @@ Once, before the first release.
    ```
 
    Cargo uploads in dependency order, waiting for each crate to reach
-   the index: `mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`,
+   the index: `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`,
    `mc683xx-board`, `mc683xx-gdb`, `mc683xx-peripherals`,
    `mc683xx-run`.  If it stops partway, publish the rest one at a time
    in that order with `cargo publish -p <crate>`.  Then revoke the

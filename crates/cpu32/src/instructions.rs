@@ -21,22 +21,25 @@ macro_rules! specialize {
     };
 }
 
-/// `$body` with `$name` a const of the `Size::index` of `$value`, an
+/// `$body` with `$name` a const of the [`size_index`] of `$value`, an
 /// `Option<Size>`: a handler specialized by size.  No size gives the
 /// illegal instruction handler.
 macro_rules! specialize_size {
     ($value:expr, $name:ident => $body:expr) => {
         match $value {
-            Some($crate::size::Size::Byte) => {
-                const $name: u8 = $crate::size::Size::Byte.index();
+            Some(::mc683xx_target::size::Size::Byte) => {
+                const $name: u8 =
+                    $crate::instructions::size_index(::mc683xx_target::size::Size::Byte);
                 $body
             }
-            Some($crate::size::Size::Word) => {
-                const $name: u8 = $crate::size::Size::Word.index();
+            Some(::mc683xx_target::size::Size::Word) => {
+                const $name: u8 =
+                    $crate::instructions::size_index(::mc683xx_target::size::Size::Word);
                 $body
             }
-            Some($crate::size::Size::Long) => {
-                const $name: u8 = $crate::size::Size::Long.index();
+            Some(::mc683xx_target::size::Size::Long) => {
+                const $name: u8 =
+                    $crate::instructions::size_index(::mc683xx_target::size::Size::Long);
                 $body
             }
             None => $crate::instructions::illegal,
@@ -163,6 +166,27 @@ use std::sync::OnceLock;
 use crate::cpu::Core;
 use crate::exception::Exception;
 use crate::exception::Vector;
+use mc683xx_target::size::Size;
+
+/// The size as a number, for a handler specialized by size with a
+/// const generic: 0 byte, 1 word, 2 long.
+pub(crate) const fn size_index(size: Size) -> u8 {
+    match size {
+        Size::Byte => 0,
+        Size::Word => 1,
+        Size::Long => 2,
+    }
+}
+
+/// The size of `index`, as [`size_index`] gives it; anything else is
+/// long.
+pub(crate) const fn size_of_index(index: u8) -> Size {
+    match index {
+        0 => Size::Byte,
+        1 => Size::Word,
+        _ => Size::Long,
+    }
+}
 
 /// What an instruction leaves the CPU to do next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -327,7 +351,6 @@ fn line_f(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
 pub(crate) mod tests {
     use super::build;
     use super::table;
-    use crate::address::Address;
     use crate::bus::Bus;
     use crate::bus::BusAccess;
     use crate::bus::BusError;
@@ -346,8 +369,9 @@ pub(crate) mod tests {
     use crate::memory::Page;
     use crate::memory::Space;
     use crate::registers::status;
-    use crate::size::Size;
     use crate::timing;
+    use mc683xx_target::address::Address;
+    use mc683xx_target::size::Size;
 
     /// Where [`Machine`] loads code.
     pub(crate) const CODE: u32 = 0x1000;

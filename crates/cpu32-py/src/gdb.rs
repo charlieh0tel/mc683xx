@@ -7,7 +7,6 @@
 
 use std::fmt::Display;
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_gdb::stub;
@@ -17,6 +16,7 @@ use mc683xx_gdb::stub::Waiter;
 use mc683xx_gdb::target::Target;
 use mc683xx_gdb::target::TargetRun;
 use mc683xx_gdb::target::Unwritable;
+use mc683xx_target::address::Address;
 use pyo3::Bound;
 use pyo3::PyAny;
 use pyo3::PyErr;

@@ -2,15 +2,15 @@
 //! vectors they go through, and their processing: the four-, six- and
 //! twelve-word stack frames (6.4) and the special status word (6.3).
 
-use crate::address::Address;
 use crate::cpu::Core;
 use crate::cpu::Halt;
 use crate::cycles::Cycles;
-use crate::function_code::FunctionCode;
 use crate::interrupt::InterruptLevel;
 use crate::registers::status;
-use crate::size::Size;
 use crate::timing;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 use std::fmt;
 
 /// An exception vector number (CPU32RM 6.1.1, Table 6-1).
@@ -640,8 +640,8 @@ mod tests {
     use super::Exception;
     use super::Vector;
     use super::format;
-    use crate::address::Address;
     use crate::interrupt::InterruptLevel;
+    use mc683xx_target::address::Address;
 
     #[test]
     fn vectors_by_number() {
@@ -670,5 +670,10 @@ mod tests {
             pc: Address(0),
         };
         assert_eq!(short.in_read_modify_write(), short);
+    }
+
+    #[test]
+    fn a_vector_shows_as_its_number() {
+        assert_eq!(Vector(24).to_string(), "24");
     }
 }

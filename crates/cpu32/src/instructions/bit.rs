@@ -11,8 +11,8 @@ use crate::instructions::Handler;
 use crate::instructions::Table;
 use crate::instructions::data_movement::register_field;
 use crate::registers::status;
-use crate::size::Size;
 use crate::timing::AddressTable;
+use mc683xx_target::size::Size;
 
 /// The dynamic forms: 0000 rrr1 tt <ea> (CPU32RM 4.4, BTST and the
 /// rest).  Mode 001, An, is MOVEP's.

@@ -4,12 +4,12 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::address::Address;
 use crate::cpu::hooks::ExceptionEntry;
 use crate::cycles::Cycles;
-use crate::function_code::FunctionCode;
 use crate::memory::Memory;
-use crate::size::Size;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 /// Clocks in the bus cycle the timing tables assume: two clocks, no
 /// wait states, a 16-bit port (CPU32RM 8.1.5, 8.3).
@@ -210,7 +210,7 @@ mod tests {
     use super::PortSize;
     use super::stall;
     use crate::cycles::Cycles;
-    use crate::size::Size;
+    use mc683xx_target::size::Size;
 
     #[test]
     fn a_two_clock_word_costs_what_the_tables_say() {

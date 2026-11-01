@@ -9,13 +9,11 @@ use super::ExceptionEntry;
 use super::Invalid;
 use super::InvalidAccess;
 use super::MemoryAccess;
-use crate::address::Address;
 use crate::cpu::Cpu;
 use crate::cpu::Stop;
 use crate::cycles::Cycles;
 use crate::exception::CycleKind;
 use crate::exception::Vector;
-use crate::function_code::FunctionCode;
 use crate::instructions::tests::CODE;
 use crate::instructions::tests::NoBus;
 use crate::instructions::tests::NoInterrupts;
@@ -25,7 +23,9 @@ use crate::instructions::tests::step;
 use crate::memory::PAGE_BYTES;
 use crate::memory::Permissions;
 use crate::memory::Space;
-use crate::size::Size;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 /// NOP.
 const NOP: u16 = 0x4e71;

@@ -1,6 +1,7 @@
 //! Shift and rotate instructions (CPU32RM 4.3.5): ASL, ASR, LSL, LSR,
 //! ROL, ROR, ROXL and ROXR, on a data register or a word in memory.
 
+use super::size_of_index;
 use crate::cpu::Core;
 use crate::effective_address::Category;
 use crate::effective_address::THREE_BITS;
@@ -12,9 +13,9 @@ use crate::instructions::Table;
 use crate::instructions::data_movement::low_register;
 use crate::registers::Registers;
 use crate::registers::status;
-use crate::size::Size;
 use crate::timing;
 use crate::timing::AddressTable;
+use mc683xx_target::size::Size;
 
 /// Line E: 1110 (CPU32RM 4.4, ASL, ASR and the rest).
 const LINE_MASK: u16 = 0xf000;
@@ -224,7 +225,7 @@ fn shift_register<
     core: &mut Core<'_>,
     opcode: u16,
 ) -> Result<Flow, Exception> {
-    let size = Size::of_index(SIZE);
+    let size = size_of_index(SIZE);
     let kind = const { Kind::of(TYPE) };
     let field = u32::from(opcode >> COUNT_SHIFT & THREE_BITS);
     let count = if IN_REGISTER {
@@ -286,7 +287,7 @@ mod tests {
     use crate::instructions::tests::machine;
     use crate::instructions::tests::step;
     use crate::registers::status;
-    use crate::size::Size;
+    use mc683xx_target::size::Size;
 
     fn ccr(cpu: &crate::cpu::Cpu) -> u16 {
         cpu.registers.sr() & status::CCR

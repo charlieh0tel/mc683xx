@@ -29,6 +29,7 @@ board = ["mc68331", "dep:mc683xx-board"]
 gdbstub = "0.7.10"
 mc683xx-board = { workspace = true, optional = true }
 mc683xx-cpu32.workspace = true
+mc683xx-target.workspace = true
 mc683xx-mc68331 = { workspace = true, optional = true }
 thiserror = "2.0.21"
 

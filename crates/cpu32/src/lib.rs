@@ -9,7 +9,7 @@
 //! exception and runs MOVEQ #42,D0:
 //!
 //! ```
-//! use mc683xx_cpu32::address::Address;
+//! use mc683xx_target::address::Address;
 //! use mc683xx_cpu32::cpu::bare::Limits;
 //! use mc683xx_cpu32::flat::ADDRESS_BITS;
 //! use mc683xx_cpu32::flat::Machine;
@@ -39,7 +39,6 @@
     clippy::missing_panics_doc
 )]
 
-pub mod address;
 pub mod bus;
 pub mod cpu;
 pub mod cycles;
@@ -48,11 +47,9 @@ pub mod exception;
 mod flags;
 pub mod flat;
 pub mod frequency;
-pub mod function_code;
 mod instructions;
 pub mod interrupt;
 pub mod memory;
 pub mod peripheral;
 pub mod registers;
-pub mod size;
 mod timing;

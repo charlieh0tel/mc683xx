@@ -10,7 +10,7 @@ use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
-use mc683xx_cpu32::size::Size;
+use mc683xx_target::size::Size;
 
 use super::PORTQS;
 use super::PQSPAR_DDRQS;

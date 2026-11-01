@@ -8,8 +8,8 @@
 use std::array;
 
 use gdbstub::arch::Arch;
-use mc683xx_cpu32::function_code::FunctionCode;
 use mc683xx_cpu32::registers::Registers;
+use mc683xx_target::function_code::FunctionCode;
 
 #[cfg(test)]
 mod tests;

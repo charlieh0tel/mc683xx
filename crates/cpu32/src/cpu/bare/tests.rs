@@ -7,7 +7,6 @@ use super::End;
 use super::FaultCause;
 use super::Intercepted;
 use super::Limits;
-use crate::address::Address;
 use crate::cpu::hooks::MemoryAccess;
 use crate::exception::CycleKind;
 use crate::exception::Vector;
@@ -16,7 +15,8 @@ use crate::memory::PAGE_BYTES;
 use crate::memory::Permissions;
 use crate::registers::Registers;
 use crate::registers::status;
-use crate::size::Size;
+use mc683xx_target::address::Address;
+use mc683xx_target::size::Size;
 
 /// RAM from zero.
 const RAM: u32 = 0x1_0000;

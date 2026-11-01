@@ -15,19 +15,19 @@ use super::Halt;
 use super::Stop;
 use super::hooks::Invalid;
 use super::hooks::Resume;
-use crate::address::Address;
 use crate::bus::Bus;
 use crate::cycles::Cycles;
 use crate::exception::CycleKind;
 use crate::exception::Exception;
 use crate::exception::Fault;
 use crate::exception::Vector;
-use crate::function_code::FunctionCode;
 use crate::instructions::Flow;
 use crate::interrupt::Interrupts;
 use crate::registers::Registers;
 use crate::registers::status;
-use crate::size::Size;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 #[cfg(test)]
 mod tests;

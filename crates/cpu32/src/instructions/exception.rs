@@ -1,7 +1,6 @@
 //! Exception-related instructions (CPU32RM 4.4; 6.2.4, 6.2.5, 6.2.8,
 //! 6.2.12): RTE, TRAP, TRAPV, TRAPcc, ILLEGAL and BKPT.
 
-use crate::address::Address;
 use crate::cpu::Core;
 use crate::cycles::Cycles;
 use crate::exception::CycleKind;
@@ -17,12 +16,13 @@ use crate::exception::frame;
 use crate::exception::short_frame;
 use crate::exception::ssw;
 use crate::flags;
-use crate::function_code::FunctionCode;
 use crate::instructions::Flow;
 use crate::instructions::Table;
 use crate::instructions::table;
-use crate::size::Size;
 use crate::timing;
+use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::size::Size;
 
 /// RTE (CPU32RM 4.4, RTE).
 const RTE: u16 = 0x4e73;
@@ -451,7 +451,6 @@ mod tests {
     use super::RTE;
     use super::TRAP;
     use super::TRAPV;
-    use crate::address::Address;
     use crate::bus::Bus;
     use crate::bus::BusAccess;
     use crate::bus::BusError;
@@ -463,15 +462,16 @@ mod tests {
     use crate::cycles::Cycles;
     use crate::exception::MICROCODE_REVISION;
     use crate::exception::Vector;
-    use crate::function_code::FunctionCode;
     use crate::instructions::tests::CODE;
     use crate::instructions::tests::NoInterrupts;
     use crate::instructions::tests::machine;
     use crate::instructions::tests::poke_long;
     use crate::memory::Space;
     use crate::registers::status;
-    use crate::size::Size;
     use crate::timing;
+    use mc683xx_target::address::Address;
+    use mc683xx_target::function_code::FunctionCode;
+    use mc683xx_target::size::Size;
 
     /// The supervisor stack's top in the tests.
     const STACK: u32 = 0x4000;

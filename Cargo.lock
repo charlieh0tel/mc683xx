@@ -264,6 +264,7 @@ dependencies = [
  "mc683xx-cpu32",
  "mc683xx-mc68331",
  "mc683xx-modules",
+ "mc683xx-target",
  "regex",
  "serde_json",
  "thiserror",
@@ -287,6 +288,7 @@ dependencies = [
  "mc683xx-mc68331",
  "mc683xx-modules",
  "mc683xx-peripherals",
+ "mc683xx-target",
  "pyo3",
  "thiserror",
 ]
@@ -495,6 +497,7 @@ dependencies = [
  "mc683xx-mc68331",
  "mc683xx-modules",
  "mc683xx-peripherals",
+ "mc683xx-target",
 ]
 
 [[package]]
@@ -504,6 +507,7 @@ dependencies = [
  "mc683xx-cpu32",
  "mc683xx-mc68331",
  "mc683xx-modules",
+ "mc683xx-target",
  "serde",
  "snapshot-golden",
  "thiserror",
@@ -514,6 +518,7 @@ dependencies = [
 name = "mc683xx-cpu32"
 version = "0.2.0"
 dependencies = [
+ "mc683xx-target",
  "postcard",
  "serde",
  "snapshot-golden",
@@ -530,6 +535,7 @@ dependencies = [
  "mc683xx-mc68331",
  "mc683xx-modules",
  "mc683xx-peripherals",
+ "mc683xx-target",
 ]
 
 [[package]]
@@ -541,6 +547,7 @@ dependencies = [
  "mc683xx-cpu32",
  "mc683xx-mc68331",
  "mc683xx-modules",
+ "mc683xx-target",
  "thiserror",
 ]
 
@@ -550,6 +557,7 @@ version = "0.2.0"
 dependencies = [
  "mc683xx-cpu32",
  "mc683xx-modules",
+ "mc683xx-target",
  "serde",
  "snapshot-golden",
  "thiserror",
@@ -560,6 +568,7 @@ name = "mc683xx-modules"
 version = "0.2.0"
 dependencies = [
  "mc683xx-cpu32",
+ "mc683xx-target",
  "serde",
  "snapshot-golden",
  "thiserror",
@@ -573,6 +582,7 @@ dependencies = [
  "mc683xx-cpu32",
  "mc683xx-mc68331",
  "mc683xx-modules",
+ "mc683xx-target",
  "serde",
  "snapshot-golden",
  "thiserror",
@@ -592,8 +602,17 @@ dependencies = [
  "mc683xx-mc68331",
  "mc683xx-modules",
  "mc683xx-peripherals",
+ "mc683xx-target",
  "nix",
  "thiserror",
+]
+
+[[package]]
+name = "mc683xx-target"
+version = "0.2.0"
+dependencies = [
+ "postcard",
+ "serde",
 ]
 
 [[package]]

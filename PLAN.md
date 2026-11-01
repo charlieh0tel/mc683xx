@@ -72,6 +72,10 @@ Out:
 
 ## Crates
 
+- `mc683xx-target` (`crates/target`): a CPU32 under debug control,
+  `no_std`: `Address`, `Size` and `FunctionCode`, which the core uses,
+  serde behind its `serde` feature.  A BDM pod's host crate shares it
+  with the emulator, so one debugger runs on silicon or the emulator.
 - `mc683xx-cpu32` (`crates/cpu32`): the core.  Depends on nothing
   board- or chip-specific.
 - `mc683xx-modules` (`crates/mc683xx`): SIM (with board time, which
@@ -98,9 +102,9 @@ Out:
 - `snapshot-golden`: the snapshot formats' golden-file checks (see
   State); test-only, `publish = false`.
 
-`mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`,
-`mc683xx-board`, `mc683xx-gdb`, `mc683xx-peripherals` and
-`mc683xx-run` are published to crates.io, depended on through the root
+`mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`,
+`mc683xx-mc68331`, `mc683xx-board`, `mc683xx-gdb`,
+`mc683xx-peripherals` and `mc683xx-run` are published to crates.io, depended on through the root
 `[workspace.dependencies]` with a path and a version
 (`docs/releasing.md`).  The published crates share the `mc683xx-`
 prefix; their directories keep the short names.

@@ -2,8 +2,8 @@
 //! 2.3): `D0`-`D7`, `A0`-`A7`, `PC`, `SR`, `CCR`, `USP`, `SSP`, `VBR`,
 //! `SFC`, `DFC`.
 
-use mc683xx_cpu32::function_code::FunctionCode;
 use mc683xx_cpu32::registers::Registers;
+use mc683xx_target::function_code::FunctionCode;
 
 use crate::error::Error;
 

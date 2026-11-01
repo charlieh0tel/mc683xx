@@ -56,7 +56,6 @@ use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::registers::Registers;
-use mc683xx_cpu32::size::Size;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::event::DsackFault;
@@ -73,6 +72,7 @@ use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_modules::sim::ResetCause;
+use mc683xx_target::size::Size;
 use snapshot_golden::version_of;
 
 /// The initial stack pointer and program counter in the images.

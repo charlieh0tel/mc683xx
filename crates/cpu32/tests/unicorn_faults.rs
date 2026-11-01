@@ -37,7 +37,6 @@ use std::ops::ControlFlow;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
 
-use mc683xx_cpu32::address::Address;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
 use mc683xx_cpu32::bus::BusError;
@@ -60,6 +59,7 @@ use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_cpu32::registers::status;
+use mc683xx_target::address::Address;
 
 /// The address lines of the 68331, ADDR[23:0] (MC68331UM 4.4.1.1).
 const ADDRESS_BITS: u32 = 24;

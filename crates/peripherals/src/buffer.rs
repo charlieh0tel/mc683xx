@@ -126,7 +126,7 @@ mod tests {
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::signal::Signal;
     use mc683xx_board::time::Time;
-    use mc683xx_cpu32::size::Size;
+    use mc683xx_target::size::Size;
 
     use super::BUS;
     use super::Buffer;

@@ -1,7 +1,6 @@
 //! Conditional and unconditional branches (CPU32RM 4.3.8): Bcc, BRA,
 //! BSR, DBcc and Scc.
 
-use crate::address::Address;
 use crate::cpu::Core;
 use crate::effective_address::Category;
 use crate::exception::Exception;
@@ -9,9 +8,10 @@ use crate::flags;
 use crate::instructions::Flow;
 use crate::instructions::Table;
 use crate::instructions::data_movement::low_register;
-use crate::size::Size;
 use crate::timing;
 use crate::timing::Decrement;
+use mc683xx_target::address::Address;
+use mc683xx_target::size::Size;
 
 /// Bcc, BRA and BSR: 0110 cccc dddddddd (CPU32RM 4.4, Bcc, BRA, BSR).
 const BRANCH_MASK: u16 = 0xf000;
