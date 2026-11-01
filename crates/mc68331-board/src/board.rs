@@ -385,8 +385,7 @@ impl BoardStopRequest {
     /// Asks the run to stop.
     pub fn request(&self) {
         if let Some(shared) = self.0.upgrade() {
-            shared.stop.set(true);
-            shared.chip_stop.request();
+            shared.request_stop();
         }
     }
 }

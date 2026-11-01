@@ -162,10 +162,15 @@ impl Shared {
             self.take_memory(peripheral, &name, take);
         }
         if driving.stop {
-            self.stop.set(true);
-            self.chip_stop.request();
+            self.request_stop();
         }
         result
+    }
+
+    /// Asks the board's run to stop, and the chip's within it.
+    pub(crate) fn request_stop(&self) {
+        self.stop.set(true);
+        self.chip_stop.request();
     }
 
     /// `peripheral` takes the memory `name`, or releases it.
