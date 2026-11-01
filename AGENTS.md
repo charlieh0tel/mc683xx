@@ -11,8 +11,8 @@ architecture, decisions and open work.
 Crates:
 
 - `mc683xx-target` (`crates/target`): a CPU32 under debug control,
-  `no_std`: `Address`, `Size`, `FunctionCode`; shared with the BDM
-  pod.
+  `no_std`: the `Cpu32Target` trait, `Register`, `SystemRegister`,
+  `Entry`, `Address`, `Size`, `FunctionCode`; shared with the BDM pod.
 - `mc683xx-cpu32` (`crates/cpu32`): the core.  Depends on nothing
   board- or chip-specific.
 - `mc683xx-modules` (`crates/mc683xx`): SIM (with board time) and QSM,

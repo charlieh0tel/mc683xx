@@ -73,8 +73,10 @@ Out:
 ## Crates
 
 - `mc683xx-target` (`crates/target`): a CPU32 under debug control,
-  `no_std`: `Address`, `Size` and `FunctionCode`, which the core uses,
-  serde behind its `serde` feature.  A BDM pod's host crate shares it
+  `no_std`: the `Cpu32Target` trait, BDM's `Register`,
+  `SystemRegister` and entry sources (`Entry`), and `Address`, `Size`
+  and `FunctionCode`, which the core uses, serde behind its `serde`
+  feature.  A BDM pod's host crate shares it
   with the emulator, so one debugger runs on silicon or the emulator.
 - `mc683xx-cpu32` (`crates/cpu32`): the core.  Depends on nothing
   board- or chip-specific.
@@ -2599,6 +2601,7 @@ checks move onto real code hooks.
 | Pacing host-side, a front end's control taken at sync points | A GUI wants board time at wall speed and a stop and keys from its own thread; sleeping between quanta against the wall clock, outside the board's model, and taking a thread-safe handle's stop and inputs at sync points on the board's thread, keeps the core single-threaded, host time out of the model and the run the same whatever the pacing (decided 2026-10-24). |
 | Front ends outside the repository and the board file; they observe nets and inspect peripherals | Board files describe hardware, which a UI is not; a front end's needs are the host API's: read-only observers on nets, peripherals' state by type, inputs through externals.  Read-only keeps every run deterministic whatever watches it (decided 2026-10-24). |
 | Board nets with their own picosecond time | Peripheral-to-peripheral edges need sub-cycle time (an FPGA interpolator resolves about 0.5 ns against 59.6 ns cycles); integer time keeps it deterministic, and only chip inputs round to a clock (decided 2026-10-23). |
+| `Cpu32Target`: a memory call names its function code; halting reports the entry source; `halted` polls; no single step | Decided 2026-10-31 with the BDM pod.  A named space leaves no hidden SFC/DFC state between calls for a debugger to forget, and an implementation over READ and WRITE restores the program's SFC and DFC before GO.  ATEMP holds the entry source only until the next command (CPU32RM 7.2.3), so halting returns it.  A poll, not a blocking wait, as `no_std` firmware has no clock to wait on.  Single step is left out until a user needs it.  `Error: core::error::Error`, so a host carries either target's errors as its own. |
 | `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels) stay exhaustive, so a match on one needs no wildcard; the bindings' matches on the others end in a panic naming what they do not know (decided 2026-10-24). |
 
 ## Open

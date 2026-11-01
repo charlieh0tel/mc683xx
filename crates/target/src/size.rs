@@ -26,6 +26,17 @@ impl Size {
         }
     }
 
+    /// The two-bit size field, as [`Size::from_field`] and BDM's
+    /// commands take it (CPU32RM 7.2.8.1).
+    #[must_use]
+    pub const fn field(self) -> u16 {
+        match self {
+            Self::Byte => 0b00,
+            Self::Word => 0b01,
+            Self::Long => 0b10,
+        }
+    }
+
     /// Bytes in an operand of this size.
     #[must_use]
     pub const fn bytes(self) -> u32 {
@@ -82,5 +93,8 @@ mod tests {
     fn the_size_field() {
         assert_eq!(Size::from_field(0b10), Some(Size::Long));
         assert_eq!(Size::from_field(0b11), None);
+        for size in [Size::Byte, Size::Word, Size::Long] {
+            assert_eq!(Size::from_field(size.field()), Some(size));
+        }
     }
 }

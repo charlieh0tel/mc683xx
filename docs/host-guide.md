@@ -17,7 +17,8 @@ vectors and a program at `START`, `select` programs a chip select,
 `booting` is the first example's board as a function.  A real host
 loads a real image instead.
 
-Crates: `mc683xx-target` (`Address`, `Size`, `FunctionCode`),
+Crates: `mc683xx-target` (`Address`, `Size`, `FunctionCode`, and the
+`Cpu32Target` debug trait),
 `mc683xx-cpu32` (the core: `Cpu`, `Bus`, `Memory`, hooks, `Cycles`), `mc683xx-modules` (SIM, QSM, the `MappedPeripheral`, `Timed` and
 `SpiPeripheral` traits), `mc683xx-mc68331` (GPT, and the chip: `Builder`,
 `Mc68331`), `mc683xx-board` (board files, the `Registry` of peripheral
