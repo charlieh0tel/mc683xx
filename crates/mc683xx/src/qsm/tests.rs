@@ -762,6 +762,62 @@ fn halt_stops_at_a_queue_boundary_and_resumes() {
 }
 
 #[test]
+fn freeze_with_frz1_halts_at_a_transfer_boundary_as_halt_does() {
+    // QSMRM 3.2.1 FRZ1, Figure 4-4; MC68331UM 6.2.1.2
+    let mut qsm = qsm();
+    let seen = qspi(&mut qsm);
+    let transfers = |seen: &RefCell<Vec<Seen>>| {
+        seen.borrow()
+            .iter()
+            .filter(|seen| matches!(seen, Seen::Transfer(..)))
+            .count()
+    };
+    write_word(&mut qsm, 0x00, 0x4080, 0);
+    // ENDQP 3; FREEZE during the first entry
+    write_word(&mut qsm, 0x18, 0x8002, 0);
+    write_word(&mut qsm, 0x1c, 0x0300, 0);
+    write_word(&mut qsm, 0x1a, 0x8000, 0);
+    qsm.set_freeze(true, Cycles(1));
+    qsm.advance(Cycles(10 * ENTRY_2));
+    assert_eq!(
+        read(&mut qsm, 0x1f, Size::Byte, 10 * ENTRY_2),
+        0x20,
+        "HALTA"
+    );
+    assert_eq!(qsm.next_event(), None);
+    assert_eq!(transfers(&seen), 1, "the first entry, and no more");
+    write(&mut qsm, 0x1f, Size::Byte, 0x00, 10 * ENTRY_2);
+    // FREEZE ends: entries 1 to 3 follow
+    qsm.set_freeze(false, Cycles(10 * ENTRY_2));
+    qsm.advance(Cycles(20 * ENTRY_2));
+    assert_eq!(read(&mut qsm, 0x1f, Size::Byte, 20 * ENTRY_2), 0x83);
+    assert_eq!(transfers(&seen), 4);
+}
+
+#[test]
+fn freeze_ends_with_a_reset_and_comes_back_with_a_snapshot() {
+    // a queue started after each, FRZ1 set: it halts only if FREEZE is
+    let halts = |qsm: &mut Qsm| {
+        write_word(qsm, 0x00, 0x4080, 0);
+        write_word(qsm, 0x18, 0x8002, 0);
+        write_word(qsm, 0x1c, 0x0300, 0);
+        write_word(qsm, 0x1a, 0x8000, 0);
+        qsm.advance(Cycles(10 * ENTRY_2));
+        read(qsm, 0x1f, Size::Byte, 10 * ENTRY_2) & 0x20 != 0
+    };
+    let mut frozen = qsm();
+    qspi(&mut frozen);
+    frozen.set_freeze(true, Cycles::ZERO);
+    let snapshot = frozen.save().unwrap();
+    frozen.reset(Cycles::ZERO);
+    assert!(!halts(&mut frozen), "the reset ended it");
+    let mut restored = qsm();
+    qspi(&mut restored);
+    restored.restore(&snapshot).unwrap();
+    assert!(halts(&mut restored), "the snapshot had it");
+}
+
+#[test]
 fn newqp_waits_for_the_entry_in_progress() {
     let mut qsm = qsm();
     let seen = qspi(&mut qsm);

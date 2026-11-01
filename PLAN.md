@@ -1983,9 +1983,8 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   floods it or never reads waits on its own socket, not the runner.
   The server is polled between turns; while the CPU is in background
   mode an unpaced run waits on it, board time standing still between
-  requests, and a paced one keeps time going.  FREEZE does not reach
-  the SIM, QSM and GPT yet, so their freeze bits do nothing: they run
-  on while the CPU is in background mode.  ATEMP is always fresh: the
+  requests, and a paced one keeps time going, the modules doing what
+  FREEZE has them do.  ATEMP is always fresh: the
   server sees every entry, but one a restored snapshot started in,
   which is stale, its ATEMP as the server started kept, until a GO,
   CALL or reset.  Transfer, the raw 17-bit exchange, answers BadRequest until
@@ -1996,6 +1995,17 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   (7.2.8.12), though reset or a fault's stacking entered background
   mode before the handler's first fetch, where a fault is a double bus
   fault (MC68331UM 4.5.5.2).
+- FREEZE is asserted while the CPU is in background mode (MC68331UM
+  4.2.13): the chip tells the SIM, the GPT and the QSM as the CPU
+  enters background mode (a BGND or a double bus fault in a run, a
+  breakpoint, a reset with BKPT) and as it leaves (GO, a step).  FRZSW
+  stops the watchdog and the PIT, each keeping the count it had left
+  (a watchdog service meanwhile reloads the watchdog's);
+  FRZBM stops the bus monitor, so a cycle with no DSACK in time is a
+  bus error at once, as with BME clear (silicon would wait, and no
+  emulated cycle can); the halt and spurious interrupt monitors run
+  on.  FRZ0 freezes the GPT and FRZ1 halts the QSPI, above; the SCI
+  runs on.  Each module's snapshot keeps what FREEZE did to it.
 - With background mode disabled, BKPT should run a breakpoint
   acknowledge cycle and take vector 12 on its bus error (6.2.6); not
   modeled yet, so `halt` then fails and nothing happens to the CPU.
@@ -2215,8 +2225,9 @@ then they stay our choices.
 - **QSM** (QSMRM; MC68331UM 6, D.4):
   - QSMCR resets to $0080, as QSMRM 3.2.1's and MC68331UM D.4.1's
     figures give; D.4.1's text "STOP is set during reset" is not
-    followed.  STOP and FRZ[1:0] read back but stop nothing: there is
-    no BDM to assert FREEZE, and firmware stops the submodules first.
+    followed.  STOP reads back but stops nothing: firmware stops the
+    submodules first.  FRZ1 halts the QSPI under FREEZE (below); FRZ0
+    does nothing, as 6.2.1.2 says.
   - The QSPI RAM, undefined at power-up, starts at 0 and survives
     resets.  No wait states for CPU cycles to it while the QSPI runs
     (QSMRM 4.3.6 allows one to four).
@@ -2265,7 +2276,11 @@ then they stay our choices.
     4.3 says may disrupt operation) takes effect at the next entry, or
     at once for a slave between words.  CPOL and CPHA choose edges,
     which the bit-level host interface has none of: a bit is one
-    exchange.  FREEZE is not modeled (no BDM).
+    exchange.  FREEZE with FRZ1 halts the queue at the next entry's end
+    "as if HALT had been asserted" (QSMRM 3.2.1, FRZ1; Figures 4-4 and
+    4-5), HALTA and HMIE as for HALT, but with WREN at ENDQP before the
+    wrap, not ending it, since it "restarts automatically" when FREEZE
+    ends, unless HALT holds it.
   - WOMQ: a QSPI pin (PQS0 to PQS6) that an output would drive high
     floats instead, to the board's level, whether the QSPI or PORTQS
     drives it (QSMRM 4.3.1); TXD is not affected.  WOMS does the same
@@ -2289,8 +2304,9 @@ then they stay our choices.
     edge captures TCNT at the clock it comes in.  PCLK counts on its
     rising edges.
   - CPR's one write (GPTRM 5.1) is the first write to TMSK2's byte.
-    STOP stops what STOPP stops; FREEZE is never asserted; test-mode
-    writes are not modeled.
+    STOP stops what STOPP stops, and so does FREEZE with FRZ0 (7.3.2).
+    Freeze mode's writes to registers otherwise read-only or write-once
+    (GPTRM 9.3) are not modeled, nor test mode's.
   - The PWM buffers start at 0, so the first period after reset is low.
 - **SIM reset values where the manuals differ**: SIMCR $00CF
   (MC68331UM D.3.1) over SIMRM Table 8-4's FRZSW and FRZBM set;

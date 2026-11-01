@@ -270,6 +270,9 @@ pub(crate) struct Board {
     pub(crate) output_seen: Seen,
     /// Whether one changed in the quantum in progress.
     pub(crate) output_moved: bool,
+    /// Whether FREEZE is asserted, the CPU in background mode, as the
+    /// modules were last told (MC68331UM 4.2.13).
+    pub(crate) frozen: bool,
     /// The selects whose blocks hold each page, by page number, as the
     /// last `rebuild` found them: the decode an external cycle need
     /// try, while no decode change awaits a rebuild.
@@ -1091,7 +1094,26 @@ impl Board {
     /// The bus monitor's period in clocks, if it watches cycles now
     /// (SIMRM 3.2, 6.4.3).
     fn bus_monitor(&self) -> Option<u8> {
-        self.sim.bus_monitor()
+        self.sim
+            .bus_monitor()
+            .filter(|_| !self.sim.freezes_bus_monitor())
+    }
+
+    /// FREEZE at `now`, asserted while the CPU is in background mode:
+    /// the SIM, the GPT and the QSM told, their next events found anew.
+    /// Whether it changed, so the decode, which the bus monitor's
+    /// period shapes, wants a rebuild.
+    pub(crate) fn set_freeze(&mut self, frozen: bool, now: Cycles) -> bool {
+        if self.frozen == frozen {
+            return false;
+        }
+        self.frozen = frozen;
+        self.modules_changed();
+        self.sim.set_freeze(frozen, now);
+        self.module_mut::<Gpt>(GPT).set_freeze(frozen, now);
+        self.module_mut::<Qsm>(QSM).set_freeze(frozen, now);
+        self.sync_at(self.modules_next_event());
+        true
     }
 
     /// An interrupt ends low-power stop at `now`, if the MCU is in it:

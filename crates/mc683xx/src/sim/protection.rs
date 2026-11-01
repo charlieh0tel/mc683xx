@@ -184,9 +184,15 @@ impl Watchdog {
     }
 
     /// `value` written to SWSR at `tick`.
+    /// While its clock is stopped, a service reloads the count it
+    /// will run from.
     pub(crate) fn service(&mut self, value: u8, control: ProtectionControl, tick: u64) {
-        if value == SWSR_SECOND && self.armed && self.deadline.is_some() {
-            self.restart(control, tick);
+        if value == SWSR_SECOND && self.armed {
+            if self.deadline.is_some() {
+                self.restart(control, tick);
+            } else if self.stopped.is_some() {
+                self.stopped = control.watchdog_period();
+            }
         }
         self.armed = value == SWSR_FIRST;
     }
@@ -223,8 +229,14 @@ pub(crate) struct PeriodicTimer {
     pub(crate) control: u16,
     /// PITR.
     pub(crate) timing: u16,
-    /// The EXTAL period the count running reaches zero at.
+    /// The EXTAL period the count running reaches zero at, while its
+    /// clock runs.
     end: Option<u64>,
+    /// Whether FREEZE stops its clock (MC68331UM 4.2.13).
+    stopped: bool,
+    /// While its clock is stopped, the periods left of the count
+    /// running.
+    left: Option<u64>,
     /// Whether an interrupt is requested and not yet acknowledged.
     pending: bool,
 }
@@ -236,6 +248,8 @@ impl PeriodicTimer {
             control: PICR_RESET,
             timing: pitr_reset(modclk),
             end: None,
+            stopped: false,
+            left: None,
             pending: false,
         }
     }
@@ -269,10 +283,34 @@ impl PeriodicTimer {
     /// finishes before a new modulus loads (MC68331UM 4.2.11).
     pub(crate) fn write_timing(&mut self, value: u16, tick: u64) {
         self.timing = value & PITR_IMPLEMENTED;
-        match self.period() {
-            None => self.end = None,
-            Some(period) if self.end.is_none() => self.end = Some(tick + period),
+        let period = self.period();
+        let count = if self.stopped {
+            &mut self.left
+        } else {
+            &mut self.end
+        };
+        match period {
+            None => *count = None,
+            Some(period) if count.is_none() => {
+                *count = Some(if self.stopped { period } else { tick + period });
+            }
             Some(_) => {}
+        }
+    }
+
+    /// FREEZE stops its clock at `tick`.
+    pub(crate) fn stop(&mut self, tick: u64) {
+        if !self.stopped {
+            self.stopped = true;
+            self.left = self.end.take().map(|end| end.saturating_sub(tick));
+        }
+    }
+
+    /// Its clock runs again at `tick`.
+    pub(crate) fn start(&mut self, tick: u64) {
+        if self.stopped {
+            self.stopped = false;
+            self.end = self.left.take().map(|left| tick + left);
         }
     }
 

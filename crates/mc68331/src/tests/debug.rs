@@ -297,6 +297,49 @@ fn a_stop_the_host_asks_for_in_a_step_fails_it() {
     );
 }
 
+/// The SIM's base (MC68331UM Table D-1).
+const SIM: u32 = 0xff_fa00;
+/// The GPT's base (MC68331UM Table D-1).
+const GPT: u32 = 0xff_f900;
+/// GPT TCNT (MC68331UM D.6.9).
+const TCNT: u32 = GPT + 0x0a;
+
+/// The word at `address` in supervisor data space.
+fn load(chip: &mut Mc68331, address: u32) -> u16 {
+    let mut word = [0; 2];
+    chip.read_memory(
+        Address(address),
+        FunctionCode::SUPERVISOR_DATA,
+        Size::Word,
+        &mut word,
+    )
+    .unwrap();
+    u16::from_be_bytes(word)
+}
+
+#[test]
+fn freeze_holds_the_watchdog_with_frzsw_and_the_gpt_with_frz0() {
+    // MC68331UM 4.2.13, 7.3.2
+    let mut chip = chip(&[BRANCH_TO_SELF]);
+    chip.reset_halted().unwrap();
+    // FRZSW clear: the watchdog, on out of reset, resets the frozen
+    // CPU, which comes out of it running
+    chip.run_for(Cycles(1 << 20));
+    assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
+    chip.reset_halted().unwrap();
+    // FRZSW, MM as it was; GPTMCR FRZ0 and SUPV
+    store(&mut chip, SIM, 0x40cf);
+    store(&mut chip, GPT, 0x2080);
+    let counted = load(&mut chip, TCNT);
+    chip.run_for(Cycles(1 << 20));
+    assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Breakpoint)));
+    assert_eq!(load(&mut chip, TCNT), counted, "TCNT held");
+    chip.go().unwrap();
+    chip.run_for(Cycles(10_000));
+    chip.halt().unwrap();
+    assert_ne!(load(&mut chip, TCNT), counted, "counting once FREEZE ends");
+}
+
 #[test]
 fn a_halt_in_lpstop_wakes_the_chip() {
     let mut chip = chip(&[LPSTOP[0], LPSTOP[1], LPSTOP[2], BRANCH_TO_SELF]);

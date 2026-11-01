@@ -26,7 +26,7 @@ use crate::chip::Mc68331;
 /// The format of [`Mc68331::save`]'s bytes.  The core's, the modules',
 /// the peripherals' and the QSPI peripheral's snapshots inside carry their
 /// own.
-pub const VERSION: u32 = 11;
+pub const VERSION: u32 = 12;
 
 /// What the QSPI's peripheral's save and restore errors name.
 const QSPI_PERIPHERAL: &str = "the QSPI peripheral";
@@ -240,6 +240,8 @@ impl Mc68331 {
         board.stop_request.withdraw();
         board.stop_taken = false;
         board.output_seen = board.seen();
+        // the modules' snapshots hold what FREEZE did to them
+        board.frozen = self.cpu.background().is_some();
         self.now = state.now;
         Ok(())
     }

@@ -79,6 +79,9 @@ const SUPERVISOR_ONLY_END: u32 = 0x06;
 /// QSMCR STOP, FRZ1, FRZ0, SUPV and IARB, which a write sets (QSMRM
 /// 3.2.1).
 const QSMCR_WRITABLE: u16 = 0xe08f;
+/// QSMCR FRZ1: FREEZE halts the QSPI at a transfer boundary (QSMRM
+/// 3.2.1; MC68331UM 6.2.1.2).
+const QSMCR_FRZ1: u16 = 1 << 14;
 /// QSMCR SUPV: the assignable registers are supervisor-only.
 const QSMCR_SUPV: u16 = 1 << 7;
 /// QSMCR IARB, bits 3:0.
@@ -97,7 +100,7 @@ const INTV0: u8 = 1;
 /// QIVR out of reset: $0F, the uninitialized interrupt vector.
 const QIVR_RESET: u8 = 0x0f;
 /// The format of the QSM's snapshot ([`Module::save`]).
-const STATE_VERSION: u32 = 4;
+const STATE_VERSION: u32 = 5;
 
 /// The QSM's state.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -117,6 +120,9 @@ pub struct Qsm {
     /// When LPSTOP turned its clock off, while it is off (MC68331UM
     /// 4.3.4): the SCI and the QSPI make no progress.
     low_power: Option<Cycles>,
+    /// Whether FREEZE is asserted: the CPU in background mode
+    /// (MC68331UM 6.2.1.2).
+    frozen: bool,
     /// What port QS drives, each change with its time, until the host
     /// takes them.
     output_changes: Vec<(Cycles, PortLevels)>,
@@ -136,6 +142,7 @@ impl Qsm {
             sci: Sci::new(),
             qspi: Qspi::new(port.chip_selects(None), system_clock),
             low_power: None,
+            frozen: false,
             output_changes: Vec::new(),
         }
     }
@@ -148,6 +155,28 @@ impl Qsm {
     pub fn stop_clock(&mut self, now: Cycles) {
         self.advance(now);
         self.low_power.get_or_insert(now);
+    }
+
+    /// FREEZE asserted or negated at `now`: with FRZ1 the QSPI halts at
+    /// the next transfer boundary, and goes on when it ends; the SCI
+    /// runs on (MC68331UM 6.2.1.2).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
+    pub fn set_freeze(&mut self, frozen: bool, now: Cycles) {
+        self.advance(now);
+        self.frozen = frozen;
+        // a queue that goes on drives its selects, as the host is told;
+        // a register write records its own
+        let before = self.port_outputs();
+        self.freeze_changed(now);
+        self.record_outputs(before, now);
+    }
+
+    /// FREEZE or FRZ1 changed at `now`.
+    fn freeze_changed(&mut self, now: Cycles) {
+        let frozen = self.frozen && self.qsmcr & QSMCR_FRZ1 != 0;
+        self.qspi.set_frozen(frozen, self.port, now);
     }
 
     /// A wake turns its clock on at `now`: the SCI and the QSPI go on
@@ -397,7 +426,10 @@ impl Qsm {
         let offset = access.word();
         let [upper, lower] = word.to_be_bytes();
         match offset {
-            QSMCR => self.qsmcr = word & QSMCR_WRITABLE,
+            QSMCR => {
+                self.qsmcr = word & QSMCR_WRITABLE;
+                self.freeze_changed(now);
+            }
             QILR_QIVR => {
                 self.qilr = upper & QILR_WRITABLE;
                 self.qivr = lower & !INTV0;
@@ -546,6 +578,8 @@ impl Module for Qsm {
         self.advance(now);
         let before = self.port_outputs();
         self.low_power = None;
+        // the chip tells it of FREEZE anew
+        self.frozen = false;
         let pins = self.port.pins;
         self.qsmcr = QSMCR_RESET;
         self.qilr = 0;
@@ -585,6 +619,7 @@ impl Module for Qsm {
         self.sci = saved.sci;
         self.qspi.restore(saved.qspi);
         self.low_power = saved.low_power;
+        self.frozen = saved.frozen;
         self.output_changes = saved.output_changes;
         Ok(())
     }

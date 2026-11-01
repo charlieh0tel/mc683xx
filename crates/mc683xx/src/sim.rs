@@ -101,6 +101,11 @@ const UNRESTRICTED: [u32; 8] = [PORTE0, PORTE1, DDRE, PORTF0, PORTF1, DDRF, DREG
 /// SIMCR (MC68331UM D.3.1): EXOFF, FRZSW, FRZBM, SHEN, SUPV and IARB,
 /// which a write sets.
 const SIMCR_WRITABLE: u16 = 0xe38f;
+/// SIMCR FRZSW: FREEZE stops the watchdog and the PIT (MC68331UM
+/// D.3.1, 4.2.13).
+const SIMCR_FRZSW: u16 = 1 << 14;
+/// SIMCR FRZBM: FREEZE stops the bus monitor (MC68331UM D.3.1, 4.2.13).
+const SIMCR_FRZBM: u16 = 1 << 13;
 /// SIMCR SLVEN: factory test mode, DATA11 held low at reset.
 const SIMCR_SLVEN: u16 = 1 << 11;
 /// SIMCR SUPV: the "S/U" registers are supervisor-only.
@@ -234,6 +239,9 @@ pub struct Sim {
     /// The interrupt mask LPSTOP stored, while the MCU is stopped
     /// (MC68331UM 4.3.4).
     low_power: Option<u8>,
+    /// Whether FREEZE is asserted: the CPU in background mode
+    /// (MC68331UM 4.2.13).
+    frozen: bool,
     /// What ports C, E and F drive, each change with its time, until
     /// the host takes them.
     output_changes: Vec<(Cycles, Change)>,
@@ -262,6 +270,7 @@ impl Sim {
             chip_selects: ChipSelects::new(configuration.data),
             reset_request: None,
             low_power: None,
+            frozen: false,
             output_changes: Vec::new(),
         }
     }
@@ -532,19 +541,47 @@ impl Sim {
         }
     }
 
+    /// FREEZE asserted or negated at `now` (MC68331UM 4.2.13).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
+    pub fn set_freeze(&mut self, frozen: bool, now: Cycles) {
+        self.frozen = frozen;
+        self.counters_changed(self.clock.tick(now));
+    }
+
+    /// Whether FREEZE stops the bus monitor now: asserted, with FRZBM
+    /// (MC68331UM 4.2.13).
+    #[must_use]
+    pub const fn freezes_bus_monitor(&self) -> bool {
+        self.frozen && self.simcr & SIMCR_FRZBM != 0
+    }
+
+    /// Whether FREEZE stops the watchdog and the PIT now: asserted,
+    /// with FRZSW (MC68331UM 4.2.13).
+    const fn freezes_counters(&self) -> bool {
+        self.frozen && self.simcr & SIMCR_FRZSW != 0
+    }
+
     /// Whether the watchdog's clock runs: not in low-power stop
-    /// (MC68331UM 4.2.12).
+    /// (MC68331UM 4.2.12), nor frozen.
     const fn watchdog_runs(&self) -> bool {
-        self.low_power.is_none()
+        self.low_power.is_none() && !self.freezes_counters()
     }
 
     /// The counters stop or run on at EXTAL period `tick`, as their
-    /// clocks now do.
+    /// clocks now do.  The PIT runs in low-power stop, to wake the CPU
+    /// (MC68331UM 4.2.12).
     fn counters_changed(&mut self, tick: u64) {
         if self.watchdog_runs() {
             self.watchdog.start(tick);
         } else {
             self.watchdog.stop(tick);
+        }
+        if self.freezes_counters() {
+            self.timer.stop(tick);
+        } else {
+            self.timer.start(tick);
         }
     }
 
@@ -609,8 +646,10 @@ impl Sim {
                     self.mm_written = true;
                     value & SIMCR_MM
                 };
-                written.decode = mm != self.simcr & SIMCR_MM;
+                written.decode = mm != self.simcr & SIMCR_MM
+                    || (value ^ self.simcr) & SIMCR_FRZBM != 0 && self.frozen;
                 self.simcr = value & SIMCR_WRITABLE | mm | self.simcr & SIMCR_SLVEN;
+                self.counters_changed(self.clock.tick(now));
             }
             SYNCR => {
                 // EDIV sets ECLK cycles' clocks
