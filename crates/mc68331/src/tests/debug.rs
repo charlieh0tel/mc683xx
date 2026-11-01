@@ -1,6 +1,7 @@
 //! The chip under a debugger's control: `Cpu32Target`.
 
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
@@ -136,6 +137,35 @@ fn go_runs_to_a_bgnd_and_halt_stops_a_running_cpu() {
         Ok(START + 4)
     );
     assert_eq!(chip.halt(), Ok(Entry::Breakpoint), "a halted CPU stays so");
+}
+
+#[test]
+fn a_fault_on_go_s_first_fetch_is_its_own_exception() {
+    // the reset's vector fetches are behind it: an odd RPC is an
+    // address error, not a double bus fault (CPU32RM 7.2.8.12, 6.2.3)
+    let handler = RAM + 0x100;
+    let mut chip = chip(&[BRANCH_TO_SELF]);
+    chip.reset_halted().unwrap();
+    let space = FunctionCode::SUPERVISOR_DATA;
+    chip.write_system_register(SystemRegister::Vbr, RAM)
+        .unwrap();
+    chip.write_memory(
+        Address(RAM + Vector::ADDRESS_ERROR.offset()),
+        space,
+        Size::Long,
+        &handler.to_be_bytes(),
+    )
+    .unwrap();
+    chip.write_memory(Address(handler), space, Size::Word, &BGND.to_be_bytes())
+        .unwrap();
+    chip.write_system_register(SystemRegister::Ssp, RAM + 0x400)
+        .unwrap();
+    chip.write_system_register(SystemRegister::Rpc, START + 1)
+        .unwrap();
+    chip.go().unwrap();
+    chip.run_for(Cycles(1000));
+    assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Background)));
+    assert_eq!(chip.read_system_register(SystemRegister::Pcc), Ok(handler));
 }
 
 #[test]

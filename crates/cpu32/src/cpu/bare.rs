@@ -283,11 +283,15 @@ impl Cpu {
     }
 
     /// Leaves background mode to execute from RPC, the PC, as GO does:
-    /// the pipeline flushed (CPU32RM 7.2.6).  Nothing out of it.
+    /// the pipeline flushed (CPU32RM 7.2.6, 7.2.8.12).  Nothing out of
+    /// it.  Whatever exception processing preceded the entry is over: a
+    /// fault on the first fetch is an exception of its own, not a
+    /// double bus fault.
     pub fn resume(&mut self) {
         if self.background().is_some() {
             self.idle = None;
             self.block_start = true;
+            self.fault_window = false;
         }
     }
 

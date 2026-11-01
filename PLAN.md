@@ -1956,6 +1956,11 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   resumes.  Transfer, the raw 17-bit exchange, answers BadRequest until
   the serial interface is modeled.  CALL stacks RPC at the active SP
   in its data space (7.2.8.13).
+- GO and CALL end whatever exception processing preceded the entry:
+  a fault on the first fetch after them is an exception of its own
+  (7.2.8.12), though reset or a fault's stacking entered background
+  mode before the handler's first fetch, where a fault is a double bus
+  fault (MC68331UM 4.5.5.2).
 - With background mode disabled, BKPT should run a breakpoint
   acknowledge cycle and take vector 12 on its bus error (6.2.6); not
   modeled yet, so `halt` then fails and nothing happens to the CPU.
