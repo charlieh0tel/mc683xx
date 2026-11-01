@@ -514,20 +514,9 @@ impl Cpu {
                     stop: Stop::Requested,
                 };
             }
-            if cpu.capture {
-                cpu.began.clone_from(&cpu.registers);
-            }
-            cpu.stall = Cycles::ZERO;
-            cpu.extra = Cycles::ZERO;
-            cpu.refund = Cycles::ZERO;
-            cpu.taken = None;
-            core.now = now + elapsed;
-            if core.interrupt(interrupts) {
-                let cpu = &mut *core.cpu;
-                cpu.stopped = false;
-                cpu.leave_loop_mode();
-                elapsed += cpu.spend(timing::exception::INTERRUPT) + cpu.stall + cpu.extra;
-                if let Some(run) = requested(cpu, elapsed) {
+            if let Some(cycles) = core.boundary(interrupts, now + elapsed) {
+                elapsed += cycles;
+                if let Some(run) = requested(core.cpu, elapsed) {
                     return run;
                 }
                 continue;
@@ -868,6 +857,30 @@ impl Core<'_> {
             .movem_resume
             .take_if(|resume| resume.pc == pc)
             .map(|resume| resume.progress)
+    }
+
+    /// The boundary before an instruction, at `now`: the registers
+    /// captured if asked, the stall, the extra and refunded clocks and
+    /// the exception taken cleared, then an interrupt taken if one is
+    /// due: its cycles, if one was.  Always inlined, as `step` is.
+    #[inline(always)]
+    fn boundary(&mut self, interrupts: &mut dyn Interrupts, now: Cycles) -> Option<Cycles> {
+        let cpu = &mut *self.cpu;
+        if cpu.capture {
+            cpu.began.clone_from(&cpu.registers);
+        }
+        cpu.stall = Cycles::ZERO;
+        cpu.extra = Cycles::ZERO;
+        cpu.refund = Cycles::ZERO;
+        cpu.taken = None;
+        self.now = now;
+        if !self.interrupt(interrupts) {
+            return None;
+        }
+        let cpu = &mut *self.cpu;
+        cpu.stopped = false;
+        cpu.leave_loop_mode();
+        Some(cpu.spend(timing::exception::INTERRUPT) + cpu.stall + cpu.extra)
     }
 
     /// One instruction and the exceptions it raises: its cycles.  The
