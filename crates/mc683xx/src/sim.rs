@@ -519,7 +519,7 @@ impl Sim {
     #[doc(hidden)]
     pub fn low_power_stop(&mut self, mask: u8, now: Cycles) {
         self.low_power = Some(mask);
-        self.watchdog.stop(self.clock.tick(now));
+        self.counters_changed(self.clock.tick(now));
     }
 
     /// An interrupt or a reset ends low-power stop at `now`.
@@ -528,7 +528,23 @@ impl Sim {
     #[doc(hidden)]
     pub fn wake(&mut self, now: Cycles) {
         if self.low_power.take().is_some() {
-            self.watchdog.start(self.clock.tick(now));
+            self.counters_changed(self.clock.tick(now));
+        }
+    }
+
+    /// Whether the watchdog's clock runs: not in low-power stop
+    /// (MC68331UM 4.2.12).
+    const fn watchdog_runs(&self) -> bool {
+        self.low_power.is_none()
+    }
+
+    /// The counters stop or run on at EXTAL period `tick`, as their
+    /// clocks now do.
+    fn counters_changed(&mut self, tick: u64) {
+        if self.watchdog_runs() {
+            self.watchdog.start(tick);
+        } else {
+            self.watchdog.stop(tick);
         }
     }
 
