@@ -6,10 +6,13 @@
 //! floating-point feature and gdb shows no FP registers.
 
 use std::array;
+use std::convert::Infallible;
 
 use gdbstub::arch::Arch;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::register::Register;
+use mc683xx_target::register::SystemRegister;
 
 #[cfg(test)]
 mod tests;
@@ -76,6 +79,96 @@ const SFC: usize = 3;
 /// The system feature's DFC.
 const DFC: usize = 4;
 
+/// Where a register of the description lives: a data or address
+/// register, or a system register, as BDM names them (CPU32RM 7.2.8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Location {
+    /// D0-D7, A0-A7; A7 the active stack pointer.
+    Register(Register),
+    /// SR, the PC (RPC), USP, SSP, VBR, SFC, DFC.
+    System(SystemRegister),
+}
+
+/// The core feature's registers' locations, in its order.
+const CORE_LOCATIONS: [Location; CORE_REGISTERS] = [
+    Location::Register(Register::D0),
+    Location::Register(Register::D1),
+    Location::Register(Register::D2),
+    Location::Register(Register::D3),
+    Location::Register(Register::D4),
+    Location::Register(Register::D5),
+    Location::Register(Register::D6),
+    Location::Register(Register::D7),
+    Location::Register(Register::A0),
+    Location::Register(Register::A1),
+    Location::Register(Register::A2),
+    Location::Register(Register::A3),
+    Location::Register(Register::A4),
+    Location::Register(Register::A5),
+    Location::Register(Register::A6),
+    Location::Register(Register::A7),
+    Location::System(SystemRegister::Sr),
+    Location::System(SystemRegister::Rpc),
+];
+
+/// The system feature's registers' locations, in its order.
+const SYSTEM_LOCATIONS: [Location; SYSTEM_REGISTERS] = [
+    Location::System(SystemRegister::Usp),
+    Location::System(SystemRegister::Ssp),
+    Location::System(SystemRegister::Vbr),
+    Location::System(SystemRegister::Sfc),
+    Location::System(SystemRegister::Dfc),
+];
+
+/// The register at `location` in `registers`; PCC, ATEMP and FAR,
+/// which the description lacks, read zero.
+fn get(registers: &Registers, location: Location) -> u32 {
+    match location {
+        Location::Register(register) => {
+            let number = usize::from(register.code());
+            match number {
+                0..8 => registers.data[number],
+                _ => registers.address(number - A0),
+            }
+        }
+        Location::System(register) => match register {
+            SystemRegister::Sr => registers.sr().into(),
+            SystemRegister::Rpc => registers.pc,
+            SystemRegister::Usp => registers.usp,
+            SystemRegister::Ssp => registers.ssp,
+            SystemRegister::Vbr => registers.vbr,
+            SystemRegister::Sfc => registers.sfc.bits().into(),
+            SystemRegister::Dfc => registers.dfc.bits().into(),
+            SystemRegister::Pcc | SystemRegister::Atemp | SystemRegister::Far => 0,
+        },
+    }
+}
+
+/// Writes `value` to the register at `location` in `registers`: SR's
+/// low word, SFC's and DFC's low three bits; PCC, ATEMP and FAR not at
+/// all.
+fn set(registers: &mut Registers, location: Location, value: u32) {
+    match location {
+        Location::Register(register) => {
+            let number = usize::from(register.code());
+            match number {
+                0..8 => registers.data[number] = value,
+                _ => registers.set_address(number - A0, value),
+            }
+        }
+        Location::System(register) => match register {
+            SystemRegister::Sr => registers.set_sr(value as u16),
+            SystemRegister::Rpc => registers.pc = value,
+            SystemRegister::Usp => registers.usp = value,
+            SystemRegister::Ssp => registers.ssp = value,
+            SystemRegister::Vbr => registers.vbr = value,
+            SystemRegister::Sfc => registers.sfc = FunctionCode::new(value),
+            SystemRegister::Dfc => registers.dfc = FunctionCode::new(value),
+            SystemRegister::Pcc | SystemRegister::Atemp | SystemRegister::Far => {}
+        },
+    }
+}
+
 /// The CPU32 for gdbstub.
 #[derive(Debug)]
 pub(crate) enum Cpu32 {}
@@ -108,27 +201,31 @@ pub(crate) struct GdbRegisters {
 }
 
 impl GdbRegisters {
-    /// The CPU's registers as gdb sees them.
-    pub(crate) fn of(registers: &Registers) -> Self {
+    /// The registers as gdb sees them, each read from its location by
+    /// `read`, in the description's order; the first error ends it.
+    pub(crate) fn read<E>(mut read: impl FnMut(Location) -> Result<u32, E>) -> Result<Self, E> {
         let mut core = [0; CORE_REGISTERS];
-        core[..A0].copy_from_slice(&registers.data);
-        for (number, value) in core[A0..=SP].iter_mut().enumerate() {
-            *value = registers.address(number);
+        for (value, &location) in core.iter_mut().zip(&CORE_LOCATIONS) {
+            *value = read(location)?;
         }
-        core[PS] = registers.sr().into();
-        core[PC] = registers.pc;
-        let system = [
-            registers.usp,
-            registers.ssp,
-            registers.vbr,
-            registers.sfc.bits().into(),
-            registers.dfc.bits().into(),
-        ];
-        Self {
+        let mut system = [0; SYSTEM_REGISTERS];
+        for (value, &location) in system.iter_mut().zip(&SYSTEM_LOCATIONS) {
+            *value = read(location)?;
+        }
+        Ok(Self {
             core,
             given: CORE_REGISTERS,
             ragged: false,
             system: Some(system),
+        })
+    }
+
+    /// The CPU's registers as gdb sees them.
+    pub(crate) fn of(registers: &Registers) -> Self {
+        let read: Result<Self, Infallible> = Self::read(|location| Ok(get(registers, location)));
+        match read {
+            Ok(read) => read,
+            Err(never) => match never {},
         }
     }
 
@@ -138,13 +235,12 @@ impl GdbRegisters {
         self.ragged
     }
 
-    /// Writes them to the CPU's registers: those given, the rest as
-    /// they are.  SR goes first, so SP is the stack pointer the new S
-    /// selects; SP, USP and SSP are written only if gdb changed them, so
-    /// a change to one is not undone by the other's old value.  SR's
-    /// unimplemented bits stay clear.
-    pub(crate) fn store(&self, registers: &mut Registers) {
-        let before = Self::of(registers);
+    /// The writes that make registers `before` these, in order: those
+    /// given, the rest as they are.  SR goes first of all but the data
+    /// registers, so SP is the stack pointer the new S selects; SP, USP
+    /// and SSP are written only if gdb changed them, so a change to one
+    /// is not undone by the other's old value.
+    pub(crate) fn writes(&self, before: &Self) -> Vec<(Location, u32)> {
         let core: [u32; CORE_REGISTERS] = array::from_fn(|index| {
             if index < self.given {
                 self.core[index]
@@ -152,25 +248,33 @@ impl GdbRegisters {
                 before.core[index]
             }
         });
-        registers.data.copy_from_slice(&core[..A0]);
-        registers.set_sr(core[PS] as u16);
-        for (number, &value) in core[A0..SP].iter().enumerate() {
-            registers.set_address(number, value);
-        }
-        registers.pc = core[PC];
+        let mut writes: Vec<(Location, u32)> = (0..A0)
+            .chain([PS])
+            .chain(A0..SP)
+            .chain([PC])
+            .map(|index| (CORE_LOCATIONS[index], core[index]))
+            .collect();
         if let (Some(system), Some(old)) = (self.system, before.system) {
-            if system[USP] != old[USP] {
-                registers.usp = system[USP];
+            for index in [USP, SSP] {
+                if system[index] != old[index] {
+                    writes.push((SYSTEM_LOCATIONS[index], system[index]));
+                }
             }
-            if system[SSP] != old[SSP] {
-                registers.ssp = system[SSP];
+            for index in [VBR, SFC, DFC] {
+                writes.push((SYSTEM_LOCATIONS[index], system[index]));
             }
-            registers.vbr = system[VBR];
-            registers.sfc = FunctionCode::new(system[SFC]);
-            registers.dfc = FunctionCode::new(system[DFC]);
         }
         if core[SP] != before.core[SP] {
-            registers.set_address(SP - A0, core[SP]);
+            writes.push((CORE_LOCATIONS[SP], core[SP]));
+        }
+        writes
+    }
+
+    /// Writes them to the CPU's registers, as [`writes`](Self::writes)
+    /// orders them.  SR's unimplemented bits stay clear.
+    pub(crate) fn store(&self, registers: &mut Registers) {
+        for (location, value) in self.writes(&Self::of(registers)) {
+            set(registers, location, value);
         }
     }
 }
