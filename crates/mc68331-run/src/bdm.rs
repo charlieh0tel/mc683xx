@@ -379,38 +379,56 @@ impl Server {
             }
             // another is dropped, closing it
         }
+        self.receive();
         let mut answered = false;
-        let mut buffer = [0; 256];
         loop {
-            let Some(client) = &mut self.client else {
-                return answered;
-            };
+            match self.message() {
+                Ok(Some(packet)) => {
+                    let answer = self.answer(chip, &packet);
+                    if !self.send(&answer) {
+                        return answered;
+                    }
+                    answered = true;
+                }
+                Ok(None) => return answered,
+                Err(()) => {
+                    // a broken stream
+                    self.drop_client();
+                    return answered;
+                }
+            }
+        }
+    }
+
+    /// The first whole message pending, taken, if there is one; an
+    /// error if its length byte is out of range.
+    fn message(&mut self) -> Result<Option<Vec<u8>>, ()> {
+        let Some(&length) = self.pending.first() else {
+            return Ok(None);
+        };
+        let length = usize::from(length);
+        if length == 0 || length > MAX_PACKET {
+            return Err(());
+        }
+        if self.pending.len() <= length {
+            return Ok(None);
+        }
+        Ok(Some(self.pending.drain(..=length).skip(1).collect()))
+    }
+
+    /// Reads all the client has sent; the client is dropped if it
+    /// ended.
+    fn receive(&mut self) {
+        let mut buffer = [0; 256];
+        while let Some(client) = &mut self.client {
             match client.read(&mut buffer) {
                 Ok(0) => self.drop_client(),
                 Ok(read) => self.pending.extend_from_slice(&buffer[..read]),
-                Err(error) if error.kind() == ErrorKind::WouldBlock => break,
+                Err(error) if error.kind() == ErrorKind::WouldBlock => return,
                 Err(error) if error.kind() == ErrorKind::Interrupted => {}
                 Err(_) => self.drop_client(),
             }
         }
-        while let Some(&length) = self.pending.first() {
-            let length = usize::from(length);
-            if length == 0 || length > MAX_PACKET {
-                // a broken stream
-                self.drop_client();
-                return answered;
-            }
-            if self.pending.len() <= length {
-                break;
-            }
-            let packet: Vec<u8> = self.pending.drain(..=length).skip(1).collect();
-            let answer = self.answer(chip, &packet);
-            if !self.send(&answer) {
-                return answered;
-            }
-            answered = true;
-        }
-        answered
     }
 
     /// Waits for a request and answers it, or until `interrupted`.
