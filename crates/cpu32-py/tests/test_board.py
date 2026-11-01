@@ -2,6 +2,7 @@
 by name, a peripheral on a select driving a net into another, and the run's
 trace."""
 
+from collections.abc import Callable
 import struct
 from pathlib import Path
 from types import MappingProxyType
@@ -308,6 +309,25 @@ def test_a_keyboard_interrupt_in_a_restore_is_raised_and_changes_nothing(
     with pytest.raises(KeyboardInterrupt):
         board.restore(snapshot)
     assert board.save() == before
+
+
+
+class LookupInterruptedProbe(Probe):
+    """A probe whose `save` lookup is interrupted."""
+
+    @property
+    def save(self) -> Callable[[], bytes]:
+        raise KeyboardInterrupt
+
+
+def test_a_keyboard_interrupt_looking_up_save_is_raised(tmp_path: Path) -> None:
+    (tmp_path / "rom.bin").write_bytes(rom([]))
+    (tmp_path / "board.toml").write_text(ANALOG_BOARD)
+    board = mc683xx.Board(
+        str(tmp_path / "board.toml"), types={"oven": Oven, "probe": LookupInterruptedProbe}
+    )
+    with pytest.raises(KeyboardInterrupt):
+        board.save()
 
 
 # The QSM's registers with MM set (MC68331UM Table D-1): PORTQS, PQSPAR,
@@ -704,6 +724,34 @@ def test_a_keyboard_interrupt_in_a_read_stops_the_run_without_a_bus_error(tmp_pa
     with pytest.raises(KeyboardInterrupt):
         board.run_for(seconds=1.0)
     # the read answered undriven, 0
+    assert board.chip.read_register("D0") & 0xFFFF == 0
+    assert board.chip.halted is None
+    assert board.run_for(seconds=0.001).stop == mc683xx.Stop.Budget()
+    assert board.chip.read_register("D0") & 0xFFFF == 0x1234
+
+
+
+class LookupInterrupted(Interrupted):
+    """Reads 0x1234, but looking up its first read is interrupted."""
+
+    @property
+    def read(self) -> Callable[[mc683xx.PeripheralAccess, mc683xx.Drive], int]:
+        self.reads += 1
+        if self.reads == 1:
+            raise KeyboardInterrupt
+        return lambda access, drive: 0x1234
+
+
+def test_a_keyboard_interrupt_looking_up_read_stops_the_run_without_a_bus_error(
+    tmp_path: Path,
+) -> None:
+    program = store_word(CSBAR1, CS1_BAR) + store_word(CSOR1, CSOR_FAST)
+    program += [MOVE_WORD_ABSOLUTE_TO_D0, LATCH >> 16, LATCH & 0xFFFF, BRA_BACK_8]
+    (tmp_path / "rom.bin").write_bytes(rom(program))
+    (tmp_path / "board.toml").write_text(INTERRUPTED_BOARD)
+    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"interrupted": LookupInterrupted})
+    with pytest.raises(KeyboardInterrupt):
+        board.run_for(seconds=1.0)
     assert board.chip.read_register("D0") & 0xFFFF == 0
     assert board.chip.halted is None
     assert board.run_for(seconds=0.001).stop == mc683xx.Stop.Budget()

@@ -520,30 +520,46 @@ impl Timed for PythonMapped {
 pub(crate) const PYTHON_PERIPHERAL: &str = "a Python peripheral";
 
 /// `object`'s `name`, if it has one and the collector has not cleared
-/// it.
+/// it.  An exception the lookup raises (from a property or
+/// `__getattr__`, a `KeyboardInterrupt` too) is the error.
 pub(crate) fn python_method<'py>(
     py: Python<'py>,
     object: &Held,
     name: &str,
-) -> Option<Bound<'py, PyAny>> {
-    object.bind(py).ok()?.getattr_opt(name).ok().flatten()
+) -> PyResult<Option<Bound<'py, PyAny>>> {
+    let Ok(object) = object.bind(py) else {
+        return Ok(None);
+    };
+    object.getattr_opt(name)
 }
 
 /// `object`'s `name`d snapshot method, if it has both `save` and
 /// `restore`: one with only one of them cannot save
 /// ([`StateError::Unsupported`], naming it `what`), so that it never
-/// gives a snapshot it cannot take back.
+/// gives a snapshot it cannot take back.  An exception a lookup raises
+/// waits in `pending`, and the object cannot save.
 fn snapshot_method<'py>(
     py: Python<'py>,
     object: &Held,
+    pending: &Pending,
     name: &str,
     what: &'static str,
 ) -> Result<Bound<'py, PyAny>, StateError> {
-    let both = python_method(py, object, "save").is_some()
-        && python_method(py, object, "restore").is_some();
-    both.then(|| python_method(py, object, name))
-        .flatten()
-        .ok_or(StateError::unsupported(what))
+    let lookup = || -> PyResult<Option<Bound<'py, PyAny>>> {
+        let both = python_method(py, object, "save")?.is_some()
+            && python_method(py, object, "restore")?.is_some();
+        if !both {
+            return Ok(None);
+        }
+        python_method(py, object, name)
+    };
+    match lookup() {
+        Ok(method) => method.ok_or(StateError::unsupported(what)),
+        Err(error) => {
+            pending.hold(error);
+            Err(StateError::unsupported(what))
+        }
+    }
 }
 
 /// A Python object's state, by its `save() -> bytes`: one without both
@@ -556,7 +572,7 @@ pub(crate) fn python_save(
     what: &'static str,
 ) -> Result<Vec<u8>, StateError> {
     Python::attach(|py| {
-        snapshot_method(py, object, "save", what)?
+        snapshot_method(py, object, pending, "save", what)?
             .call0()
             .and_then(|value| value.extract::<Vec<u8>>())
             .map_err(|error| {
@@ -577,7 +593,7 @@ pub(crate) fn python_restore(
     snapshot: &[u8],
 ) -> Result<(), StateError> {
     Python::attach(|py| {
-        snapshot_method(py, object, "restore", what)?
+        snapshot_method(py, object, pending, "restore", what)?
             .call1((PyBytes::new(py, snapshot),))
             .map(|_| ())
             .map_err(|error| {
