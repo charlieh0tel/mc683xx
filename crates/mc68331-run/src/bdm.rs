@@ -566,7 +566,10 @@ impl Server {
             }
             Request::Halt => chip.halt().map(|_| self.atemp(chip)),
             _ if !frozen => return reply(Status::NoFreeze, &[]),
-            Request::Go => chip.go().map(|()| Vec::new()),
+            Request::Go => chip.go().map(|()| {
+                self.stale = false;
+                Vec::new()
+            }),
             Request::ReadRegister(register) => chip
                 .read_register(register)
                 .map(|value| value.to_le_bytes().to_vec()),
@@ -588,7 +591,10 @@ impl Server {
             Request::WriteMemory(address, size, data) => function_code(chip, SystemRegister::Dfc)
                 .and_then(|space| chip.write_memory(address, space, size, &data))
                 .map(|()| Vec::new()),
-            Request::Call(address) => call(chip, address).map(|()| Vec::new()),
+            Request::Call(address) => call(chip, address).map(|()| {
+                self.stale = false;
+                Vec::new()
+            }),
         };
         match result {
             Ok(body) => reply(Status::Ok, &body),
@@ -629,10 +635,43 @@ const SR_S: u16 = 1 << 13;
 #[cfg(test)]
 mod tests {
     use super::Request;
+    use super::Server;
     use super::Size;
+    use super::code;
+    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_mc68331::chip::Builder;
+    use mc683xx_modules::chip_select::ChipSelect;
+    use mc683xx_target::Cpu32Target;
     use mc683xx_target::address::Address;
     use mc683xx_target::register::Register;
     use mc683xx_target::register::SystemRegister;
+
+    /// Where the boot ROM's program starts.
+    const START: usize = 0x400;
+    /// The ATEMP field's kind in a Pins reply.
+    const PINS_KIND: usize = 4;
+    /// The kind of an entry the server saw.
+    const FRESH: u8 = 1;
+    /// The kind of an entry it did not.
+    const STALE: u8 = 2;
+
+    #[test]
+    fn an_entry_after_go_is_fresh_though_the_first_was_stale() {
+        let mut rom = vec![0; 0x1000];
+        rom[4..8].copy_from_slice(&(START as u32).to_be_bytes());
+        // BGND; BRA.B *
+        rom[START..START + 4].copy_from_slice(&[0x4a, 0xfa, 0x60, 0xfe]);
+        let mut builder = Builder::default();
+        builder.memory(rom, false, &[ChipSelect::Boot]).unwrap();
+        let mut chip = builder.build();
+        chip.reset_halted().unwrap();
+        let mut server = Server::bind("127.0.0.1:0", &mut chip).unwrap();
+        assert_eq!(server.answer(&mut chip, &[code::PINS])[PINS_KIND], STALE);
+        assert_eq!(server.answer(&mut chip, &[code::GO]), [0]);
+        chip.run_for(Cycles(1000));
+        assert!(Cpu32Target::halted(&mut chip).unwrap().is_some(), "BGND");
+        assert_eq!(server.answer(&mut chip, &[code::PINS])[PINS_KIND], FRESH);
+    }
 
     #[test]
     fn requests_parse_by_the_protocols_exact_lengths_and_ranges() {
