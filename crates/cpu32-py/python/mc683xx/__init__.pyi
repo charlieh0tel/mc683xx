@@ -402,7 +402,8 @@ class QspiTransfer:
         """The levels on PCS[3:0]."""
     @property
     def out(self) -> int:
-        """The bits shifted out, right-aligned."""
+        """The bits on MOSI, right-aligned: those shifted out, or the
+        pin's level where MOSI is not the QSPI's output."""
     @property
     def bits(self) -> int: ...
     @property

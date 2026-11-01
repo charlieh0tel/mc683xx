@@ -409,11 +409,12 @@ class Peripheral:
 
 
 def test_a_qspi_transfer_reaches_the_peripheral():
-    # PCS[3:0] outputs, high, the QSPI's; one entry to PCS 0101, BITSE clear: 8 bits
+    # PCS[3:0], MOSI and MISO the QSPI's, PCS[3:0], SCK and MOSI outputs,
+    # PCS high; one entry to PCS 0101, BITSE clear: 8 bits
     # at SPBR 2; then a wait and RR[0] to D2 (QSMRM 4.3)
     program = (
         store_byte(PORTQS, 0x78)
-        + store_word(PQSPAR, 0x7878)
+        + store_word(PQSPAR, 0x7b7e)
         + store_word(TRANSMIT_RAM, 0x1234)
         + store_byte(COMMAND_RAM, 0b0101)
         + store_word(SPCR0, 0x8002)
@@ -466,7 +467,7 @@ def test_a_qspi_peripheral_is_told_the_entry():
     spcr2, entry = QSM + 0x1C, 3
     program = (
         store_byte(PORTQS, 0x78)
-        + store_word(PQSPAR, 0x7878)
+        + store_word(PQSPAR, 0x7b7e)
         + store_word(TRANSMIT_RAM + 2 * entry, 0x1234)
         + store_byte(COMMAND_RAM + entry, 0b0101)
         + store_word(spcr2, entry << 8 | entry)

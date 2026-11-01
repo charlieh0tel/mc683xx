@@ -45,9 +45,10 @@ const COMMAND_RAM: u32 = QSM + 0x140;
 /// The GPT's PDDR and PDR, one word (GPTRM 8.1, Figure 8-1).
 const PDDR: u32 = 0xff_f906;
 
-/// PCS[3:0] high when idle, PCS0-PCS3 the QSPI's outputs (QSMRM 3.3).
+/// PCS[3:0] high when idle; PCS[3:0], MOSI and MISO the QSPI's, PCS[3:0],
+/// SCK and MOSI outputs (QSMRM 3.3, 4.4.1).
 const PCS_IDLE: u16 = 0x0078;
-const PCS_OUTPUTS: u16 = 0x7878;
+const QSPI_PINS: u16 = 0x7b7e;
 /// A command: CONT, BITSE, and the PCS levels (QSMRM 4.3.6.3).
 const CONT: u8 = 0x80;
 const BITSE: u8 = 0x40;
@@ -119,7 +120,7 @@ fn program() -> Vec<u16> {
     let mut program = Vec::new();
     program.extend(store(PDDR, PGP0_HIGH));
     program.extend(store(PORTQS_WORD, PCS_IDLE));
-    program.extend(store(PQSPAR, PCS_OUTPUTS));
+    program.extend(store(PQSPAR, QSPI_PINS));
     for (entry, word) in [
         pair(CODES[5], CODES[4]),
         pair(CODES[3], CODES[2]),
@@ -320,7 +321,7 @@ const PATTERN: u16 = 0x555;
 fn self_test_program() -> Vec<u16> {
     let mut program = Vec::new();
     program.extend(store(PORTQS_WORD, PCS_IDLE));
-    program.extend(store(PQSPAR, PCS_OUTPUTS));
+    program.extend(store(PQSPAR, QSPI_PINS));
     for entry in 0..6 {
         program.extend(store(TRANSMIT_RAM + 2 * entry, PATTERN));
     }

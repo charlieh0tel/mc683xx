@@ -343,7 +343,8 @@ surrounds the SoC with its board peripherals through:
   peripheral's wait states on an external DSACK.  A bus error, or a DSACK
   later than the bus monitor allows, is the spurious vector.
 - **QSPI:** the host's `SpiPeripheral` (`Builder::qspi`) sees each
-  transfer (`QspiTransfer`: the queue entry, the levels on PCS[3:0],
+  transfer that DDRQS gives SCK for (QSM, below; `QspiTransfer`: the
+  queue entry, the levels on PCS[3:0],
   the word and its bits, and the serial clock it is shifted with, its
   mode), one method for every peripheral, and `chip_selects` whenever
   those levels change, so a peripheral framed by its select (CONT)
@@ -2135,7 +2136,18 @@ then they stay our choices.
     end-of-queue check; one that wrote NEWQP moves the queue there.
     MODF needs PCS0/SS given to the QSPI as an input, and clears SPE
     as 4.3.5 says, though 4.4 says only software does.  SCK, MOSI and
-    MISO show PORTQS when read, not their serial levels.  A run syncs
+    MISO show PORTQS when read, not their serial levels.  The pins are
+    DDRQS's and PQSPAR's (QSMRM 3.3.2, 3.3.3, 4.4.1; MC68331UM Table
+    6-1), read at the entry's serial transfer end: with SCK an input
+    ("disables clock output") the peripheral is not called, though the
+    queue runs and times as before; with MOSI not the QSPI's output
+    the peripheral sees the pin's level throughout, PORTQS's on a
+    general-purpose output, the board's on an input; with WOMQ MOSI's
+    high bits float to the board's level.  What the serializer takes
+    with MISO not its input ("disables data input"), or with no clock
+    out, the manuals do not say: zeros, as with no peripheral.  LOOPQ
+    still receives the word sent (4.3.4: it does not affect the pins).
+    A run syncs
     at an entry's end only when the CPU or a peripheral that is not
     deferrable could see it (Peripherals, QSPI); a randomized test
     holds the batched queue to the entry-by-entry one in every

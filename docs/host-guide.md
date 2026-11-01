@@ -969,12 +969,13 @@ const RECEIVE_RAM: u32 = QSM + 0x100;
 const TRANSMIT_RAM: u32 = QSM + 0x120;
 const COMMAND_RAM: u32 = QSM + 0x140;
 
-// PCS[3:0] the QSPI's outputs, idle high; one 8-bit entry to PCS
+// PCS[3:0], MOSI and MISO the QSPI's, PCS[3:0], SCK and MOSI outputs
+// (QSMRM 4.4.1), PCS idle high; one 8-bit entry to PCS
 // 0101 at SPBR 2.
 let program = [
     firmware::prologue(),
     firmware::store_byte(PORTQS, 0x78).to_vec(),
-    firmware::store_word(PQSPAR, 0x7878).to_vec(),
+    firmware::store_word(PQSPAR, 0x7b7e).to_vec(),
     firmware::store_word(TRANSMIT_RAM, 0x1234).to_vec(),
     firmware::store_byte(COMMAND_RAM, 0b0101).to_vec(),
     firmware::store_word(SPCR0, 0x8002).to_vec(),

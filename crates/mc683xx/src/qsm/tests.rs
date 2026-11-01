@@ -1145,6 +1145,62 @@ fn the_slaves_pins_follow_ddrqs_and_womq() {
     assert_eq!(shift(&mut qsm, 0xff, 8, 0), Shifted::default());
 }
 
+/// One master entry of $C3 at SPBR 2 with SPCR0 `spcr0`, PQSPAR:DDRQS
+/// `pins`, PORTQS `latch` and the board's levels `board`: the words the
+/// peripheral saw and the word received.
+fn master_entry(spcr0: u32, pins: u32, latch: u32, board: u8) -> (Vec<u16>, u32) {
+    let mut qsm = qsm();
+    let seen = qspi(&mut qsm);
+    write_word(&mut qsm, 0x16, pins, 0);
+    write(&mut qsm, 0x15, Size::Byte, latch, 0);
+    qsm.set_port_pins(board, Cycles(0));
+    write_word(&mut qsm, 0x120, 0x00c3, 0);
+    write_word(&mut qsm, 0x18, spcr0, 0);
+    write_word(&mut qsm, 0x1a, 0x8000, 0);
+    qsm.advance(Cycles(ENTRY_2));
+    let words = seen
+        .borrow()
+        .iter()
+        .filter_map(|seen| match *seen {
+            Seen::Transfer(_, _, out, _) => Some(out),
+            Seen::Selects(..) | Seen::Clock(..) => None,
+        })
+        .collect();
+    (words, read_word(&mut qsm, 0x100, ENTRY_2))
+}
+
+#[test]
+fn the_masters_pins_follow_pqspar_ddrqs_and_womq() {
+    // PCS[3:0], MOSI and MISO the QSPI's; PCS[3:0], SCK and MOSI
+    // outputs (QSMRM 4.4.1)
+    assert_eq!(master_entry(0x8002, 0x7b7e, 0x78, 0xff), (vec![0xc3], 0x3c));
+    // SCK an input: no clock out, the peripheral shifts nothing
+    // (MC68331UM Table 6-1)
+    assert_eq!(master_entry(0x8002, 0x7b7a, 0x78, 0xff), (vec![], 0));
+    // MISO general-purpose, or an output: no data in
+    assert_eq!(master_entry(0x8002, 0x7a7e, 0x78, 0xff), (vec![0xc3], 0));
+    assert_eq!(master_entry(0x8002, 0x7b7f, 0x78, 0xff), (vec![0xc3], 0));
+    // MOSI an input: no data out, the board's level on it
+    assert_eq!(master_entry(0x8002, 0x7b7c, 0x78, 0xff), (vec![0xff], 0));
+    assert_eq!(master_entry(0x8002, 0x7b7c, 0x78, 0xfd), (vec![0x00], 0xff));
+    // MOSI a general-purpose output: PORTQS's level on it (QSMRM 3.3.2)
+    assert_eq!(master_entry(0x8002, 0x797e, 0x78, 0xff), (vec![0x00], 0xff));
+    assert_eq!(master_entry(0x8002, 0x797e, 0x7a, 0xff), (vec![0xff], 0));
+    // WOMQ: MOSI's high bits float to the board's level (QSMRM 4.3.1)
+    assert_eq!(master_entry(0xc002, 0x7b7e, 0x78, 0xff), (vec![0xc3], 0x3c));
+    assert_eq!(master_entry(0xc002, 0x7b7e, 0x78, 0xfd), (vec![0x00], 0xff));
+    // LOOPQ's feedback is inside the serializer, past the pins (4.3.4)
+    let mut qsm = qsm();
+    qspi(&mut qsm);
+    write_word(&mut qsm, 0x16, 0x7a7a, 0);
+    write_word(&mut qsm, 0x120, 0x00c3, 0);
+    write(&mut qsm, 0x1e, Size::Byte, 0x04, 0);
+    write_word(&mut qsm, 0x18, 0x8002, 0);
+    write_word(&mut qsm, 0x1a, 0x8000, 0);
+    qsm.advance(Cycles(ENTRY_2));
+    assert_eq!(read_word(&mut qsm, 0x100, ENTRY_2), 0xc3);
+}
+
 /// A generator for the randomized tests: xorshift64*, seeded, so a run
 /// is the same every time.
 struct Random(u64);

@@ -111,7 +111,8 @@ pub(crate) struct QspiTransfer {
     entry: u8,
     /// The levels on PCS[3:0].
     chip_selects: u8,
-    /// The bits shifted out, right-aligned.
+    /// The bits on MOSI, right-aligned: those shifted out, or the pin's
+    /// level where MOSI is not the QSPI's output.
     out: u16,
     /// How many.
     bits: u8,

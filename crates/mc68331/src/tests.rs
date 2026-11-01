@@ -1447,7 +1447,7 @@ impl SpiPeripheral for Framed {
 fn two_entries(scope: ResetScope) -> Mc68331 {
     let mut program: Vec<u16> = Vec::new();
     program.extend(store_byte(QSM + 0x15, 0x78));
-    program.extend(store_word(QSM + 0x16, 0x7878));
+    program.extend(store_word(QSM + 0x16, 0x7b7e));
     program.extend(store_byte(QSM + 0x140, 0x05));
     program.extend(store_byte(QSM + 0x141, 0x0a));
     // ENDQP 1 (QSMRM 4.3.3)
@@ -1488,10 +1488,11 @@ fn the_firmware_talks_on_the_sci_and_the_qspi() {
     program.extend(store_word(QSM + 0x0a, 0x000c));
     program.extend(load_word(QSM + 0x0c, 0));
     program.extend(store_byte(QSM + 0x0f, b'H'));
-    // PCS[3:0] outputs with PORTQS high, the QSPI's; one entry to
+    // PCS[3:0], MOSI and MISO the QSPI's, PCS[3:0], SCK and MOSI
+    // outputs, PORTQS high; one entry to
     // PCS 0101 at SPBR 2
     program.extend(store_byte(QSM + 0x15, 0x78));
-    program.extend(store_word(QSM + 0x16, 0x7878));
+    program.extend(store_word(QSM + 0x16, 0x7b7e));
     program.extend(store_byte(QSM + 0x140, 0x05));
     program.extend(store_word(QSM + 0x18, 0x8002));
     program.extend(store_word(QSM + 0x1a, 0x8000));
@@ -1559,6 +1560,8 @@ fn the_qspi_peripheral_sees_syncr_in_the_baud() {
     let mut chip = builder.build();
     // SYNCR $CF00: 16.78 MHz; SPBR 84: 100 kHz (QSMRM Table 4-3)
     write_register(&mut chip, SIM + 0x04, 0xcf00);
+    // SCK an output, else no clock reaches it (MC68331UM Table 6-1)
+    write_register(&mut chip, QSM + 0x16, 0x0004);
     write_register(&mut chip, QSM + 0x18, 0x8054);
     write_register(&mut chip, QSM + 0x1a, 0x8000);
     let clocks = &chip.qspi_peripheral::<Clocked>().unwrap().told;

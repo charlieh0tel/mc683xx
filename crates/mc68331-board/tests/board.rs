@@ -1088,10 +1088,11 @@ impl Peripheral for Framed {
 #[test]
 fn a_qspi_peripheral_sees_its_own_select_and_its_entries() {
     let mut program: Vec<u16> = Vec::new();
-    // PORTQS high, PCS[3:0] the QSPI's outputs; entries to PCS 0101 and
+    // PORTQS high; PCS[3:0], MOSI and MISO the QSPI's, PCS[3:0], SCK
+    // and MOSI outputs; entries to PCS 0101 and
     // 1010 without CONT, ENDQP 1, SPBR 2 (QSMRM 4.3)
     program.extend(store(QSM + 0x14, 0x0078));
-    program.extend(store(QSM + 0x16, 0x7878));
+    program.extend(store(QSM + 0x16, 0x7b7e));
     program.extend(store(QSM + 0x140, 0x050a));
     program.extend(store(QSM + 0x1c, 0x0100));
     program.extend(store(QSM + 0x18, 0x8002));
@@ -1169,10 +1170,11 @@ impl Peripheral for Clocked {
 /// entries to it, the first two with CONT, at CPOL 1 and CPHA 1.
 fn clocked_board(name: &str) -> Board<Mc68331> {
     let mut program: Vec<u16> = Vec::new();
-    // PORTQS high, PCS[3:0] the QSPI's outputs; entries 0 and 1 with
+    // PORTQS high; PCS[3:0], MOSI and MISO the QSPI's, PCS[3:0], SCK
+    // and MOSI outputs; entries 0 and 1 with
     // CONT, 2 without; ENDQP 2; MSTR, CPOL, CPHA, SPBR 2 (QSMRM 4.3)
     program.extend(store(QSM + 0x14, 0x0078));
-    program.extend(store(QSM + 0x16, 0x7878));
+    program.extend(store(QSM + 0x16, 0x7b7e));
     program.extend(store(QSM + 0x140, 0x8585));
     program.extend(store(QSM + 0x142, 0x0500));
     program.extend(store(QSM + 0x1c, 0x0200));
@@ -1422,7 +1424,7 @@ impl SpiPeripheral for Dac {
 fn a_qspi_peripheral_runs_as_a_peripheral_through_the_adapter() {
     let mut program: Vec<u16> = Vec::new();
     program.extend(store(QSM + 0x14, 0x0078));
-    program.extend(store(QSM + 0x16, 0x7878));
+    program.extend(store(QSM + 0x16, 0x7b7e));
     program.extend(store(QSM + 0x140, 0x050a));
     program.extend(store(QSM + 0x1c, 0x0100));
     program.extend(store(QSM + 0x18, 0x8002));
@@ -2459,7 +2461,7 @@ const BRA_SELF: u16 = 0x60fe;
 fn queue_program(spcr2: u16) -> Vec<u16> {
     let mut program: Vec<u16> = Vec::new();
     program.extend(store(QSM + 0x14, 0x0078));
-    program.extend(store(QSM + 0x16, 0x7878));
+    program.extend(store(QSM + 0x16, 0x7b7e));
     for offset in (0..16).step_by(2) {
         program.extend(store(QSM + 0x140 + offset, 0x0a05));
     }

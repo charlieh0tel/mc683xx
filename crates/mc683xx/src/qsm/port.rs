@@ -32,6 +32,14 @@ pub(super) struct Txd {
     pub(super) open_drain: bool,
 }
 
+impl Txd {
+    /// TXD the port's, push-pull: for the other pins' levels.
+    const PORT: Self = Self {
+        transmitter: false,
+        open_drain: false,
+    };
+}
+
 /// Port QS: its data latch, data direction and pin assignment
 /// registers, and the levels the board drives on its input pins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -67,10 +75,21 @@ impl PortQs {
         self.assignment & pin != 0 && self.direction & pin == 0
     }
 
+    /// Whether `pin` is the QSPI's, by PQSPAR, and an output.
+    const fn qspi_output(self, pin: u8) -> bool {
+        self.assignment & self.direction & pin != 0
+    }
+
     /// Whether a slave takes data from MOSI: the QSPI's, an input
     /// (MC68331UM Table 6-1).
     pub(super) const fn mosi_input(self) -> bool {
         self.qspi_input(MOSI_PIN)
+    }
+
+    /// Whether a master takes data from MISO: the QSPI's, an input
+    /// (MC68331UM Table 6-1).
+    pub(super) const fn miso_input(self) -> bool {
+        self.qspi_input(MISO_PIN)
     }
 
     /// Whether a slave takes SCK: an input.  SCK has no PQSPAR bit; it
@@ -79,12 +98,34 @@ impl PortQs {
         self.direction & SCK_PIN == 0
     }
 
+    /// Whether a master drives SCK: an output, else its clock output is
+    /// disabled (MC68331UM Table 6-1).
+    pub(super) const fn sck_output(self) -> bool {
+        !self.sck_input()
+    }
+
+    /// What a master shifting `out` puts on MOSI, `mask` its bits: `out`
+    /// if MOSI is the QSPI's and an output, its high bits floating to
+    /// the board's level with WOMQ (QSMRM 4.3.1); else the pin's level
+    /// throughout, PORTQS's on a general-purpose output, the board's on
+    /// an input (QSMRM 3.3.2; MC68331UM Table 6-1).
+    pub(super) const fn mosi(self, out: u16, mask: u16) -> u16 {
+        let board_high = self.pins & MOSI_PIN != 0;
+        let level = if self.qspi_output(MOSI_PIN) {
+            if self.wired_or && !board_high { 0 } else { out }
+        } else if self.levels(None, Txd::PORT) & MOSI_PIN != 0 {
+            u16::MAX
+        } else {
+            0
+        };
+        level & mask
+    }
+
     /// What a slave drives on MISO for a bit at `level`: nothing unless
     /// MISO is the QSPI's and an output (MC68331UM Table 6-1), and
     /// nothing for a high bit with WOMQ (QSMRM 4.3.1).
     pub(super) const fn miso(self, level: bool) -> Option<bool> {
-        let output = self.assignment & MISO_PIN != 0 && self.direction & MISO_PIN != 0;
-        if output && !(self.wired_or && level) {
+        if self.qspi_output(MISO_PIN) && !(self.wired_or && level) {
             Some(level)
         } else {
             None
@@ -151,11 +192,7 @@ impl PortQs {
 
     /// The levels on PCS\[3:0\].
     pub(super) const fn chip_selects(self, code: Option<u8>) -> u8 {
-        let txd = Txd {
-            transmitter: false,
-            open_drain: false,
-        };
-        (self.levels(code, txd) & PCS_PINS) >> PCS0_PIN
+        (self.levels(code, Txd::PORT) & PCS_PINS) >> PCS0_PIN
     }
 }
 
@@ -167,10 +204,7 @@ mod tests {
     use super::Txd;
 
     /// TXD the port's, push-pull.
-    const PORT_TXD: Txd = Txd {
-        transmitter: false,
-        open_drain: false,
-    };
+    const PORT_TXD: Txd = Txd::PORT;
 
     #[test]
     fn the_qspi_drives_only_its_assigned_outputs() {
