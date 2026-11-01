@@ -4,8 +4,8 @@
 //! debugger that drives a 68331 through the pod drives the board the
 //! same way, through the chip's [`Cpu32Target`].
 //!
-//! One client at a time; another connection is closed at once.  The
-//! server is polled between the runner's turns and, while the CPU is in
+//! One client at a time; another connection is closed once the client
+//! has had 100 ms to go, polls going on meanwhile.  The server is polled between the runner's turns and, while the CPU is in
 //! background mode on an unpaced run, waited on, so board time stands
 //! still between requests (PLAN.md, Background debug mode).
 
@@ -58,8 +58,6 @@ const WAIT_TICK: Duration = Duration::from_millis(10);
 /// file before it is refused: a client that has just closed is not yet
 /// seen gone (the protocol's Transport).
 const CLOSE_GRACE: Duration = Duration::from_millis(100);
-/// How often that wait looks.
-const CLOSE_TICK: Duration = Duration::from_millis(5);
 /// The most bytes read and not yet answered: two whole messages.  The
 /// server reads no more until it answers, so a client that floods it
 /// waits on its own socket.
@@ -359,6 +357,9 @@ pub(crate) struct Server {
     pending: Vec<u8>,
     /// Replies the client has not yet taken.
     outgoing: Vec<u8>,
+    /// A connection waiting for the client's end of file, and when it
+    /// is refused.  Polls go on meanwhile; others wait their turn.
+    waiting: Option<(Stream, Instant)>,
     /// Whether the CPU was in background mode when the server started,
     /// an entry it did not see: its ATEMP is stale until it resumes.
     stale: bool,
@@ -374,25 +375,16 @@ impl Server {
             client: None,
             pending: Vec::new(),
             outgoing: Vec::new(),
+            waiting: None,
             stale: Cpu32Target::halted(chip).ok().flatten().is_some(),
         })
     }
 
-    /// Takes a new connection, closing any beyond the first, and
+    /// Hands the cable to a new connection if the client has gone, and
     /// answers up to [`MAX_ANSWERS`] whole requests the client has sent,
     /// not blocking.  Whether it answered one.
     pub(crate) fn poll(&mut self, chip: &mut Mc68331) -> bool {
-        let mut waited = false;
-        while let Ok(Some(stream)) = self.listener.accept() {
-            if self.client.is_some() && !waited {
-                waited = true;
-                self.await_close();
-            }
-            if self.client.is_none() {
-                self.client = Some(stream);
-            }
-            // another is dropped, closing it
-        }
+        self.hand_off();
         let mut answers = 0;
         while answers < MAX_ANSWERS && self.flush() {
             match self.message() {
@@ -474,18 +466,26 @@ impl Server {
         }
     }
 
-    /// Waits up to [`CLOSE_GRACE`] for the client's end of file, keeping
-    /// what it sends meanwhile; the client is dropped if it ends.  One
-    /// that fills [`MAX_PENDING`] meanwhile is taken as staying.
-    fn await_close(&mut self) {
-        let deadline = Instant::now() + CLOSE_GRACE;
-        while self.client.is_some() && Instant::now() < deadline {
-            if !self.receive() && self.client.is_some() {
-                if self.pending.len() == MAX_PENDING {
-                    return;
-                }
-                thread::sleep(CLOSE_TICK);
-            }
+    /// Takes one connection waiting, if none is waiting already, and
+    /// gives it the cable once the client has gone; it is refused,
+    /// closed, if the client is still there [`CLOSE_GRACE`] after it
+    /// came.  What the client sends meanwhile is kept and answered.
+    fn hand_off(&mut self) {
+        if self.waiting.is_none()
+            && let Ok(Some(stream)) = self.listener.accept()
+        {
+            self.waiting = Some((stream, Instant::now() + CLOSE_GRACE));
+        }
+        let Some((_, refused)) = &self.waiting else {
+            return;
+        };
+        let refused = *refused;
+        // its end of file, if it has closed
+        self.receive();
+        if self.client.is_none() {
+            self.client = self.waiting.take().map(|(stream, _)| stream);
+        } else if Instant::now() >= refused {
+            self.waiting = None;
         }
     }
 

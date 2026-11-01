@@ -885,6 +885,12 @@ fn a_bdm_debugger_drives_the_board_over_the_virtual_cable() {
         cable = UnixStream::connect(directory.join("bdm.sock")).unwrap();
         assert_eq!(bdm(&mut cable, &[0x0e]), [0, 2, 0, 0, 0]);
     }
+    // clients that come and go before the server looks: each that has
+    // closed gives way to the next
+    drop(cable);
+    drop(UnixStream::connect(directory.join("bdm.sock")).unwrap());
+    cable = UnixStream::connect(directory.join("bdm.sock")).unwrap();
+    assert_eq!(bdm(&mut cable, &[0x0e]), [0, 2, 0, 0, 0]);
     // Go, then Halt
     assert_eq!(bdm(&mut cable, &[0x05]), [0]);
     assert_eq!(bdm(&mut cable, &[0x02])[1] & 1, 0, "running");

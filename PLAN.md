@@ -1946,7 +1946,9 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
 - `mc683xx-run --bdm unix:PATH|HOST:PORT` is a virtual BDM cable: it
   answers the m683xx BDM pod's host-pod protocol, version 2, written
   from its `docs/usb-protocol.md` alone, over the chip's
-  `Cpu32Target`.  One client at a time; another is closed at once.
+  `Cpu32Target`.  One client at a time; another waits up to 100 ms
+  for the client to go, polls and the run going on meanwhile, then is
+  closed, and connections are taken one a poll.
   The server holds at most two requests unanswered and a few replies
   untaken, reading no more until it answers and answering no more
   until the client reads, at most 32 requests a poll, so a client that
