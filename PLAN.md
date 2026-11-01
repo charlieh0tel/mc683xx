@@ -1971,7 +1971,8 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
 - FAR is the address of the last bus or address error's cycle.  The
   chip's moves with every bus cycle (7.2.5.1); tracking that would
   cost every cycle a store for a register only BDM reads, so the
-  core's moves only on a fault.
+  core's moves only on a fault, and only the CPU's: a debugger's READ
+  or WRITE that faults leaves it, as one that completes does.
 
 ### Where the manuals are silent
 

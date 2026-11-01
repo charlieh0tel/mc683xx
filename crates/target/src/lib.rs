@@ -112,7 +112,9 @@ pub trait Cpu32Target {
     ///
     /// # Errors
     /// A bus or address error, or a length that is not a multiple of
-    /// `size`.
+    /// `size`.  After an error `data`'s contents are unspecified: some,
+    /// none or all of the accesses before the failing one may have
+    /// filled their bytes.
     fn read_memory(
         &mut self,
         address: Address,
@@ -126,7 +128,8 @@ pub trait Cpu32Target {
     ///
     /// # Errors
     /// A bus or address error, or a length that is not a multiple of
-    /// `size`.
+    /// `size`.  After a bus or address error, the accesses before the
+    /// failing one may have been made.
     fn write_memory(
         &mut self,
         address: Address,
