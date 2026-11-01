@@ -54,6 +54,19 @@ pub enum LoadError {
         /// The other.
         second: String,
     },
+    /// Two peripherals on one select's or decoder output's two lanes
+    /// whose DSACK pins encode different ports.
+    #[error(
+        "{point}: {first} and {second} share its lanes but their DSACK pins give different ports"
+    )]
+    LanePorts {
+        /// The select or decoder output.
+        point: String,
+        /// One peripheral.
+        first: String,
+        /// The other.
+        second: String,
+    },
     /// A memory's image that could not be read.
     #[error("{memory}: image {}: {error}", path.display())]
     Image {

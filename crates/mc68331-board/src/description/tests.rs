@@ -452,6 +452,32 @@ attach = [{ select = "CS4", role = "write", lane = "lower" }]
 }
 
 #[test]
+fn a_ports_lanes_state_one_width() {
+    let lanes = |upper: &str, lower: &str, roles: (&str, &str)| {
+        format!(
+            "{BASE}[[peripheral]]\nname = \"high\"\ntype = \"fixed\"\n{upper}attach = [{{ select = \"CS4\", role = \"{}\" }}]\n\n[[peripheral]]\nname = \"low\"\ntype = \"fixed\"\n{lower}attach = [{{ select = \"CS4\", role = \"{}\" }}]\n",
+            roles.0, roles.1
+        )
+    };
+    let dsack0 = "dsack = \"DSACK0\"\n";
+    let dsack1 = "dsack = \"DSACK1\"\n";
+    let both = "dsack = \"both\"\n";
+    let open = "dsack = \"open\"\n";
+    let message = parse(&lanes(dsack1, dsack0, ("upper", "lower")))
+        .unwrap_err()
+        .to_string();
+    assert_eq!(
+        message,
+        "CS4: high and low share its lanes but their DSACK pins give different ports"
+    );
+    for (upper, lower) in [(dsack1, both), (dsack1, open), (open, dsack0), ("", dsack0)] {
+        assert!(parse(&lanes(upper, lower, ("upper", "lower"))).is_ok());
+    }
+    // a read and a write peripheral may answer with different pins
+    assert!(parse(&lanes(dsack1, dsack0, ("read", "write"))).is_ok());
+}
+
+#[test]
 fn an_image_is_read_at_its_offset_and_padded() {
     let directory = env::temp_dir().join(format!("mc683xx-board-{}", process::id()));
     fs::create_dir_all(&directory).unwrap();

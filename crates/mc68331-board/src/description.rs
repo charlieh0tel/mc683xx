@@ -580,24 +580,36 @@ enum Point {
     Output(usize, u32),
 }
 
-/// Who uses each point: a name, and a peripheral's role and lane, or
-/// [`None`] for a user that takes the point whole.
+/// Who uses each point: a name, and a peripheral's split, or [`None`]
+/// for a user that takes the point whole.
 #[derive(Debug, Default)]
 struct Users(BTreeMap<Point, Vec<User>>);
 
-/// A user of a point: its name, and a peripheral's role and lane.
-type User = (String, Option<(Role, Lane)>);
+/// A user of a point: its name, and a peripheral's split.
+type User = (String, Option<Split>);
+
+/// How a peripheral shares a point.
+#[derive(Debug, Clone, Copy)]
+struct Split {
+    /// The cycles it takes.
+    role: Role,
+    /// The data lanes it takes.
+    lane: Lane,
+    /// The port its DSACK pins encode, if it states them.
+    port: Option<PortSize>,
+}
 
 impl Users {
     /// `owner` uses `point`, with a peripheral's `split`, if it shares it
-    /// with no one who takes the same cycles.
-    fn add(
-        &mut self,
-        point: Point,
-        owner: String,
-        split: Option<(Role, Lane)>,
-    ) -> Result<(), LoadError> {
+    /// with no one who takes the same cycles, nor with a peripheral on
+    /// its other lane whose DSACK pins encode another port: the halves
+    /// of one port are one width (SIMRM Table 5-2).
+    fn add(&mut self, point: Point, owner: String, split: Option<Split>) -> Result<(), LoadError> {
         let users = self.0.entry(point).or_default();
+        let name = || match point {
+            Point::Select(select) => select.to_string(),
+            Point::Output(_, output) => format!("decoder output {output}"),
+        };
         if let Some((first, _)) = users.iter().find(|(name, other)| {
             *name != owner
                 && match (split, other) {
@@ -606,10 +618,20 @@ impl Users {
                 }
         }) {
             return Err(LoadError::Shared {
-                point: match point {
-                    Point::Select(select) => select.to_string(),
-                    Point::Output(_, output) => format!("decoder output {output}"),
-                },
+                point: name(),
+                first: first.clone(),
+                second: owner,
+            });
+        }
+        if let Some((first, _)) = users.iter().find(|(name, other)| {
+            *name != owner
+                && match (split, other) {
+                    (Some(mine), Some(theirs)) => lanes_disagree(mine, *theirs),
+                    _ => false,
+                }
+        }) {
+            return Err(LoadError::LanePorts {
+                point: name(),
                 first: first.clone(),
                 second: owner,
             });
@@ -619,8 +641,38 @@ impl Users {
     }
 }
 
+/// Whether two peripherals on a point's two lanes state DSACK pins
+/// encoding different ports.  `open` disagrees with nothing.
+fn lanes_disagree(split: Split, other: Split) -> bool {
+    let lanes = matches!(
+        (split.lane, other.lane),
+        (Lane::Upper, Lane::Lower) | (Lane::Lower, Lane::Upper)
+    );
+    match (split.port, other.port) {
+        (Some(port), Some(other_port)) => lanes && port != other_port,
+        _ => false,
+    }
+}
+
+/// The port DSACK pins encode: 16 bits with DSACK1, 8 with DSACK0 alone
+/// (SIMRM Table 5-2).
+const fn dsack_port(dsack: mc683xx_modules::sim::chip_selects::Dsack) -> PortSize {
+    if dsack.drives_dsack1() {
+        PortSize::Bits16
+    } else {
+        PortSize::Bits8
+    }
+}
+
 /// Whether two attachments on one point take some cycle on one lane.
-fn overlaps((role, lane): (Role, Lane), (other_role, other_lane): (Role, Lane)) -> bool {
+fn overlaps(
+    Split { role, lane, .. }: Split,
+    Split {
+        role: other_role,
+        lane: other_lane,
+        ..
+    }: Split,
+) -> bool {
     let roles = match (role, other_role) {
         (Role::Read, Role::Write) | (Role::Write, Role::Read) => false,
         (Role::Iack, other) | (other, Role::Iack) => other == Role::Iack,
@@ -927,6 +979,7 @@ fn read_attachment(
     index: usize,
     attachment: &Attachment,
     decoders: &[DecoderSpec],
+    port: Option<PortSize>,
     users: &mut Users,
 ) -> Result<AttachmentSpec, LoadError> {
     let error = |reason: &str| attachment_error(owner, index, reason);
@@ -1019,7 +1072,7 @@ fn read_attachment(
         Target::Qspi { .. } | Target::Bus(_) => None,
     };
     if let Some(point) = point {
-        users.add(point, owner.to_owned(), Some((role, lane)))?;
+        users.add(point, owner.to_owned(), Some(Split { role, lane, port }))?;
     }
     Ok(AttachmentSpec {
         target,
@@ -1066,23 +1119,26 @@ fn read_peripheral(
     decoders: &[DecoderSpec],
     users: &mut Users,
 ) -> Result<PeripheralSpec, LoadError> {
-    let attachments: Vec<AttachmentSpec> = entry
-        .attach
-        .iter()
-        .enumerate()
-        .map(|(index, attachment)| read_attachment(&entry.name, index, attachment, decoders, users))
-        .collect::<Result<_, _>>()?;
-    let irq = entry
-        .irq
-        .map(|level| irq_pin(&entry.name, level))
-        .transpose()?;
-    let reset = entry.reset.as_deref().map_or(ResetScope::ALL, scope);
     let dsack = entry.dsack.and_then(|dsack| match dsack {
         Dsack::Dsack0 => Some(mc683xx_modules::sim::chip_selects::Dsack::Dsack0),
         Dsack::Dsack1 => Some(mc683xx_modules::sim::chip_selects::Dsack::Dsack1),
         Dsack::Both => Some(mc683xx_modules::sim::chip_selects::Dsack::Both),
         Dsack::Open => None,
     });
+    let port = dsack.map(dsack_port);
+    let attachments: Vec<AttachmentSpec> = entry
+        .attach
+        .iter()
+        .enumerate()
+        .map(|(index, attachment)| {
+            read_attachment(&entry.name, index, attachment, decoders, port, users)
+        })
+        .collect::<Result<_, _>>()?;
+    let irq = entry
+        .irq
+        .map(|level| irq_pin(&entry.name, level))
+        .transpose()?;
+    let reset = entry.reset.as_deref().map_or(ResetScope::ALL, scope);
     if dsack.is_none()
         && attachments
             .iter()
