@@ -818,7 +818,14 @@ impl PythonPeripheral {
     ) -> Option<Result<T, BusError>> {
         Python::attach(|py| {
             let object = self.object.bind(py).ok()?;
-            let method = object.getattr_opt(name).ok().flatten()?;
+            let method = match object.getattr_opt(name) {
+                Ok(method) => method?,
+                Err(error) => {
+                    self.pending.hold(error);
+                    drive.stop();
+                    return Some(Ok(undriven));
+                }
+            };
             let view = Py::new(
                 py,
                 DriveView {
@@ -871,7 +878,7 @@ impl PythonPeripheral {
     }
 
     /// The object's `name`, if it has one.
-    fn method<'py>(&self, py: Python<'py>, name: &str) -> Option<Bound<'py, PyAny>> {
+    fn method<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyAny>>> {
         python_method(py, &self.object, name)
     }
 
@@ -885,8 +892,13 @@ impl PythonPeripheral {
         default: T,
     ) -> T {
         Python::attach(|py| {
-            let Some(method) = self.method(py, name) else {
-                return default;
+            let method = match self.method(py, name) {
+                Ok(Some(method)) => method,
+                Ok(None) => return default,
+                Err(error) => {
+                    self.pending.record(error);
+                    return default;
+                }
             };
             match arguments(py)
                 .and_then(|arguments| method.call1(PyTuple::new(py, arguments)?))
@@ -1116,8 +1128,13 @@ impl Peripheral for PythonPeripheral {
     /// `inspect` to raise it.
     fn inspect(&self) -> Inspection {
         Python::attach(|py| {
-            let Some(method) = self.method(py, "inspect") else {
-                return Inspection::default();
+            let method = match self.method(py, "inspect") {
+                Ok(Some(method)) => method,
+                Ok(None) => return Inspection::default(),
+                Err(error) => {
+                    self.pending.hold(error);
+                    return Inspection::default();
+                }
             };
             method
                 .call0()
