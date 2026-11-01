@@ -1933,6 +1933,19 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   The SIM's halt monitor resets only on a halt, so not on this entry:
   HALT driven would make the bypass of 7.2.2.3 pointless, an inference
   the manuals do not state.
+- The chip implements `Cpu32Target` (`mc683xx_mc68331::debug`), its
+  calls between runs, so between instructions.  `reset_halted` is
+  `Mc68331::reset_with_breakpoint`: RESET with BKPT low through its
+  rising edge enables background mode and enters it before the first
+  instruction, PCC the reset PC, which the manual does not give.
+  BKPT is relatched at every reset (7.2.1) and the chip models no BKPT
+  input between resets, so an internal reset (watchdog, halt monitor)
+  disables background mode, as a pod that has let BKPT go sees on
+  silicon.  `halt` acknowledges a breakpoint at once.  Memory is real
+  bus cycles (`bus_read`, `bus_write`), as READ and WRITE make them.
+- With background mode disabled, BKPT should run a breakpoint
+  acknowledge cycle and take vector 12 on its bus error (6.2.6); not
+  modeled yet, so `halt` then fails and nothing happens to the CPU.
 - FAR is the address of the last bus or address error's cycle.  The
   chip's moves with every bus cycle (7.2.5.1); tracking that would
   cost every cycle a store for a register only BDM reads, so the

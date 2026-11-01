@@ -51,6 +51,7 @@
 
 mod board;
 pub mod chip;
+pub mod debug;
 pub mod event;
 pub mod gpt;
 pub mod host;

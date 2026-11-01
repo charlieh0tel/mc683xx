@@ -643,7 +643,7 @@ impl Builder {
             board: self.board,
             now: Cycles::ZERO,
         };
-        chip.reset_for(ResetCause::PowerOn);
+        chip.reset_for(ResetCause::PowerOn, false);
         chip
     }
 }
@@ -698,7 +698,7 @@ impl Mc68331 {
         while self.now < end {
             if let Some(cause) = self.board.sim.take_reset() {
                 let frequency = self.board.sim.clock().frequency();
-                self.reset_for(cause);
+                self.reset_for(cause, false);
                 stop = self.cpu.idle().unwrap_or(Stop::Budget);
                 // or a peripheral the reset reached asks, or the reset
                 // reaches a watched output
@@ -760,7 +760,7 @@ impl Mc68331 {
                 Stop::Halted(halt) => {
                     if halt == Halt::DoubleBusFault && self.board.sim.halt_monitor() {
                         let frequency = self.board.sim.clock().frequency();
-                        self.reset_for(ResetCause::HaltMonitor);
+                        self.reset_for(ResetCause::HaltMonitor, false);
                         stop = self.cpu.idle().unwrap_or(Stop::Budget);
                         // as the SIM's own resets: a clock the reset
                         // changes ends the run there
@@ -809,15 +809,28 @@ impl Mc68331 {
         self.run_for(self.now.until(target))
     }
 
-    /// RESET driven by the board: an external reset.
+    /// RESET driven by the board: an external reset, BKPT high as it
+    /// rises, so background mode is disabled (CPU32RM 7.2.1).
     pub fn reset(&mut self) {
-        self.reset_for(ResetCause::External);
+        self.reset_for(ResetCause::External, false);
     }
 
-    /// A reset for `cause`: the SIM, the modules and the peripherals it
-    /// reaches reset, the decode back to CSBOOT alone, then the CPU's
-    /// reset exception (SIMRM 8; MC68331UM 4.6.8).
-    fn reset_for(&mut self, cause: ResetCause) {
+    /// RESET driven by the board with BKPT held low through its rising
+    /// edge, as a BDM debugger's reset: background mode enabled, and the
+    /// CPU in it, for a breakpoint, before its first instruction
+    /// (CPU32RM 7.2.1), unless fetching the vectors faulted, which
+    /// enters it for the double bus fault.
+    pub fn reset_with_breakpoint(&mut self) {
+        self.reset_for(ResetCause::External, true);
+    }
+
+    /// A reset for `cause`, BKPT low as RESET rises if `breakpoint`: the
+    /// SIM, the modules and the peripherals it reaches reset, the decode
+    /// back to CSBOOT alone, then the CPU's reset exception (SIMRM 8;
+    /// MC68331UM 4.6.8).  BKPT is relatched at every reset (CPU32RM
+    /// 7.2.1); the chip models no BKPT input between resets, so internal
+    /// resets see it high.
+    fn reset_for(&mut self, cause: ResetCause, breakpoint: bool) {
         let now = self.now;
         self.board.modules_changed();
         self.board.sim.reset(cause, now);
@@ -827,8 +840,16 @@ impl Mc68331 {
         self.board.events.push(Event::Reset(now, cause));
         self.board.rebuild(&mut self.cpu.memory);
         let board = RefCell::new(&mut self.board);
-        // a double bus fault fetching the vectors leaves the CPU halted
+        self.cpu.set_bdm_enabled(breakpoint);
+        // a double bus fault fetching the vectors leaves the CPU halted,
+        // or in background mode
         let _ = self.cpu.reset(&mut Connection(&board), now);
+        if breakpoint && self.cpu.background().is_none() && self.cpu.breakpoint() {
+            // BKPT tags the first fetch: acknowledged before it, PCC
+            // where it would have begun (PLAN.md, Background debug mode)
+            let pc = Address(self.cpu.registers.pc);
+            self.cpu.set_pcc(pc);
+        }
     }
 
     /// Now, on the system clock.

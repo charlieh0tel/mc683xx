@@ -263,6 +263,65 @@ impl Cpu {
         }
     }
 
+    /// BKPT acknowledged between instructions: with background mode
+    /// enabled the CPU enters it for a breakpoint, PCC the last
+    /// instruction executed, and this is true (CPU32RM 7.2.2.1).
+    /// Disabled, nothing happens and this is false: the breakpoint
+    /// acknowledge cycle and its exception are not modeled yet
+    /// (PLAN.md, Background debug mode).  In background mode already,
+    /// true with nothing changed.
+    pub fn breakpoint(&mut self) -> bool {
+        if self.background().is_some() {
+            return true;
+        }
+        if !self.bdm_enabled || self.idle.is_some() {
+            return false;
+        }
+        let pcc = self.instruction_pc;
+        self.enter_background(Entry::Breakpoint, pcc);
+        true
+    }
+
+    /// Leaves background mode to execute from RPC, the PC, as GO does:
+    /// the pipeline flushed (CPU32RM 7.2.6).  Nothing out of it.
+    pub fn resume(&mut self) {
+        if self.background().is_some() {
+            self.idle = None;
+            self.block_start = true;
+        }
+    }
+
+    /// PCC: the first word of the last instruction executed before
+    /// background mode (CPU32RM 7.2.5.3).
+    #[must_use]
+    pub const fn pcc(&self) -> Address {
+        self.pcc
+    }
+
+    /// Writes PCC, as WSREG can (CPU32RM 7.2.8.7).
+    pub const fn set_pcc(&mut self, pcc: Address) {
+        self.pcc = pcc;
+    }
+
+    /// ATEMP: the entry source on entering background mode, then BDM's
+    /// temporary (CPU32RM 7.2.3).
+    #[must_use]
+    pub const fn atemp(&self) -> u32 {
+        self.atemp
+    }
+
+    /// Writes ATEMP, as WSREG can.
+    pub const fn set_atemp(&mut self, atemp: u32) {
+        self.atemp = atemp;
+    }
+
+    /// FAR: the address of the last bus or address error's cycle
+    /// (CPU32RM 7.2.5.1; PLAN.md, Background debug mode).  Read only.
+    #[must_use]
+    pub const fn far(&self) -> Address {
+        self.far
+    }
+
     /// Whether background mode is enabled.
     #[must_use]
     pub const fn bdm_enabled(&self) -> bool {

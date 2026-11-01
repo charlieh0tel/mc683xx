@@ -1,0 +1,199 @@
+//! The chip under debug control, as a BDM debugger drives silicon:
+//! [`Cpu32Target`] (CPU32RM 7.2.8).
+//!
+//! Every call but [`Cpu32Target::halted`] runs between the chip's runs,
+//! so between instructions.  Memory goes through [`Mc68331::bus_read`]
+//! and [`Mc68331::bus_write`]: real cycles, with their side effects, as
+//! BDM's READ and WRITE make them.
+
+use mc683xx_target::Cpu32Target;
+use mc683xx_target::address::Address;
+use mc683xx_target::entry::Entry;
+use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::register::Register;
+use mc683xx_target::register::SystemRegister;
+use mc683xx_target::size::Size;
+
+use crate::chip::Mc68331;
+use crate::host::AccessError;
+
+/// Why a debugger's call on the chip failed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum TargetError {
+    /// The call needs background mode, and the CPU is not in it.
+    #[error("the CPU is not in background mode")]
+    NotHalted,
+    /// Background mode was not enabled at the last reset, so the CPU
+    /// cannot enter it (CPU32RM 7.2.1).
+    #[error("background mode is not enabled")]
+    NotEnabled,
+    /// A memory access at `address` failed.
+    #[error("{address}: {error}")]
+    Access {
+        /// The access's address.
+        address: Address,
+        /// Why.
+        error: AccessError,
+    },
+    /// A memory call's length is not a whole number of its size.
+    #[error("{length} bytes are not a whole number of {}-byte accesses", size.bytes())]
+    Length {
+        /// The bytes asked for.
+        length: usize,
+        /// The access size.
+        size: Size,
+    },
+}
+
+impl Mc68331 {
+    /// An error unless the CPU is in background mode.
+    fn in_background(&self) -> Result<(), TargetError> {
+        self.cpu
+            .background()
+            .map(|_| ())
+            .ok_or(TargetError::NotHalted)
+    }
+
+    /// `data`'s accesses of `size` from `address`: each one's address
+    /// and bytes, or an error if `data` is not whole accesses.
+    fn accesses(
+        address: Address,
+        size: Size,
+        length: usize,
+    ) -> Result<impl Iterator<Item = (Address, usize)>, TargetError> {
+        let bytes = size.bytes() as usize;
+        if !length.is_multiple_of(bytes) {
+            return Err(TargetError::Length { length, size });
+        }
+        Ok((0..length)
+            .step_by(bytes)
+            .map(move |offset| (address.offset(offset as u32), offset)))
+    }
+}
+
+impl Cpu32Target for Mc68331 {
+    type Error = TargetError;
+
+    fn reset_halted(&mut self) -> Result<Entry, TargetError> {
+        self.reset_with_breakpoint();
+        self.cpu.background().ok_or(TargetError::NotEnabled)
+    }
+
+    fn halt(&mut self) -> Result<Entry, TargetError> {
+        if !self.cpu.breakpoint() {
+            return Err(TargetError::NotEnabled);
+        }
+        self.cpu.background().ok_or(TargetError::NotEnabled)
+    }
+
+    fn halted(&mut self) -> Result<Option<Entry>, TargetError> {
+        Ok(self.cpu.background())
+    }
+
+    fn go(&mut self) -> Result<(), TargetError> {
+        self.in_background()?;
+        self.cpu.resume();
+        Ok(())
+    }
+
+    fn read_register(&mut self, register: Register) -> Result<u32, TargetError> {
+        self.in_background()?;
+        let number = usize::from(register.code());
+        let registers = &self.cpu.registers;
+        Ok(match number {
+            0..8 => registers.data[number],
+            _ => registers.address(number - 8),
+        })
+    }
+
+    fn write_register(&mut self, register: Register, value: u32) -> Result<(), TargetError> {
+        self.in_background()?;
+        let number = usize::from(register.code());
+        let registers = &mut self.cpu.registers;
+        match number {
+            0..8 => registers.data[number] = value,
+            _ => registers.set_address(number - 8, value),
+        }
+        Ok(())
+    }
+
+    fn read_system_register(&mut self, register: SystemRegister) -> Result<u32, TargetError> {
+        self.in_background()?;
+        let cpu = &self.cpu;
+        let registers = &cpu.registers;
+        Ok(match register {
+            SystemRegister::Rpc => registers.pc,
+            SystemRegister::Pcc => cpu.pcc().0,
+            SystemRegister::Atemp => cpu.atemp(),
+            SystemRegister::Far => cpu.far().0,
+            SystemRegister::Vbr => registers.vbr,
+            SystemRegister::Sr => u32::from(registers.sr()),
+            SystemRegister::Usp => registers.usp,
+            SystemRegister::Ssp => registers.ssp,
+            SystemRegister::Sfc => u32::from(registers.sfc.bits()),
+            SystemRegister::Dfc => u32::from(registers.dfc.bits()),
+        })
+    }
+
+    /// As WSREG: a register narrower than 32 bits takes the low bits,
+    /// and a write to FAR is ignored (CPU32RM 7.2.8.7).
+    fn write_system_register(
+        &mut self,
+        register: SystemRegister,
+        value: u32,
+    ) -> Result<(), TargetError> {
+        self.in_background()?;
+        let cpu = &mut self.cpu;
+        match register {
+            SystemRegister::Rpc => cpu.registers.pc = value,
+            SystemRegister::Pcc => cpu.set_pcc(Address(value)),
+            SystemRegister::Atemp => cpu.set_atemp(value),
+            SystemRegister::Far => {}
+            SystemRegister::Vbr => cpu.registers.vbr = value,
+            SystemRegister::Sr => cpu.registers.set_sr(value as u16),
+            SystemRegister::Usp => cpu.registers.usp = value,
+            SystemRegister::Ssp => cpu.registers.ssp = value,
+            SystemRegister::Sfc => cpu.registers.sfc = FunctionCode::new(value),
+            SystemRegister::Dfc => cpu.registers.dfc = FunctionCode::new(value),
+        }
+        Ok(())
+    }
+
+    fn read_memory(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        size: Size,
+        data: &mut [u8],
+    ) -> Result<(), TargetError> {
+        self.in_background()?;
+        let bytes = size.bytes() as usize;
+        for (at, offset) in Self::accesses(address, size, data.len())? {
+            let value = self
+                .bus_read(at, size, function_code)
+                .map_err(|error| TargetError::Access { address: at, error })?;
+            data[offset..offset + bytes].copy_from_slice(&value.to_be_bytes()[4 - bytes..]);
+        }
+        Ok(())
+    }
+
+    fn write_memory(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        size: Size,
+        data: &[u8],
+    ) -> Result<(), TargetError> {
+        self.in_background()?;
+        let bytes = size.bytes() as usize;
+        for (at, offset) in Self::accesses(address, size, data.len())? {
+            let value = data[offset..offset + bytes]
+                .iter()
+                .fold(0, |value, &byte| value << 8 | u32::from(byte));
+            self.bus_write(at, size, function_code, value)
+                .map_err(|error| TargetError::Access { address: at, error })?;
+        }
+        Ok(())
+    }
+}
