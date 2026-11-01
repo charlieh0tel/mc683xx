@@ -21,7 +21,7 @@ crates.io.
 | `mc683xx-mc68331` | The GPT, and the MC68331 chip built from the core and the modules. |
 | `mc683xx-board` | Board files: memories, peripherals from a registry, decoders and nets around the chip, on board time. |
 | `mc683xx-peripherals` | Stock peripherals for board files, each from its datasheet. |
-| `mc683xx-gdb` | A GDB remote stub over the bare CPU, the chip or a board. |
+| `mc683xx-gdb` | A GDB remote stub over the bare CPU, the chip or a board, and over any `Cpu32Target`, a BDM pod's among them. |
 | `mc683xx-run` | The runner: runs a board file from the command line. |
 | `mc683xx` (PyPI) | The Python package. |
 

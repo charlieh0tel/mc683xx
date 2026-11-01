@@ -9,7 +9,9 @@ reads and writes registers and memory, sets breakpoints and
 watchpoints, steps, continues and interrupts.  `PLAN.md` (Debugger)
 records why it is built this way; this says how to use it.
 `docs/gdb-firmware.md` is the short recipe for a real image, worked
-on the demo board's C firmware.
+on the demo board's C firmware.  A second stub, `mc683xx_gdb::bdm`,
+serves gdb over any `Cpu32Target`, a BDM pod on silicon as well as the
+emulated chip (Over BDM, below).
 
 The crate's API is documented on docs.rs; this guide's Rust block is
 compiled by `cargo test` (the `examples` crate runs it).
@@ -215,6 +217,40 @@ CPU has none.
   (`flushregs` in older gdbs).
 - `monitor help`.
 
+## Over BDM
+
+`mc683xx_gdb::bdm::serve(target, connection)` serves gdb over a
+`mc683xx_target::Cpu32Target`: what a debugger has of a CPU32 through
+its background debug mode.  A host that drives a 68331 through a BDM
+pod implements the trait and serves gdb this way; the emulated chip
+implements it too.  The session halts the target first; detach resumes
+it, kill leaves it halted.
+
+- **Registers** are the same description's, read and written through
+  BDM; PC is RPC.
+- **Memory** is real bus cycles in one address space, supervisor data
+  (5) unless `monitor fc N` names another (0 to 7); `monitor fc` shows
+  it.  Words when the address and length are even, else bytes.  A
+  planted breakpoint reads as the word it replaced, and a write over
+  it changes that word, put back when the breakpoint comes out.
+- **Breakpoints** are software only: BGND written over the instruction
+  and read back, so one in ROM is refused (`E16`).  A stop at one
+  reports `swbreak` with PC on it.  Each comes out of the address space
+  it went into, and only if BGND is still there.  However the session
+  ends, a running target is halted and every breakpoint removed.
+- **Steps** are `Cpu32Target::step`: one instruction, or into an
+  exception's handler, stopping where T1 tracing would.
+- **Continue** is GO, then a look at the target and at gdb every
+  millisecond or so; Ctrl-C halts the target (`S02`).  A BGND of the
+  program's own is `SIGTRAP`, a double bus fault `SIGBUS`.
+- `monitor reset` resets the target halted before its first
+  instruction.
+- A register or memory call the target fails is an error reply
+  (`E05`, `E0e`), not the session's end.
+- The target must run on its own once resumed: silicon does; an
+  emulated chip, only if its host runs it.  gdbstub answers `?` with
+  `SIGTRAP` whatever stopped the target before gdb attached.
+
 ## Determinism and cost
 
 - A session is deterministic but for Ctrl-C: breakpoints, watchpoints
@@ -233,6 +269,8 @@ CPU has none.
 `cargo test -p mc683xx-gdb` drives the stub with raw packets over an
 in-memory connection: registers, the target description, memory,
 steps, breakpoints, watchpoints, Ctrl-C, `monitor reset`, detach and
-kill, on the bare CPU, the chip and a board.  `make gdb`, opt-in and
+kill, on the bare CPU, the chip and a board; and the BDM stub over the
+chip, which runs a little each time the stub looks, as silicon would
+run on its own.  `make gdb`, opt-in and
 not in `make ci`, runs `gdb-multiarch` against the runner's example
 board (`scripts/gdb-smoke.sh`).

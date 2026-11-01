@@ -83,9 +83,9 @@ const STEP_RUNS: usize = 2;
 /// it: a long's.
 const ACCESS_REACH: u32 = 3;
 /// gdb's error for memory it cannot read or write: EFAULT.
-const EFAULT: u8 = 14;
+pub(crate) const EFAULT: u8 = 14;
 /// gdb's error for a packet the stub refuses: EINVAL.
-const EINVAL: u8 = 22;
+pub(crate) const EINVAL: u8 = 22;
 /// The error a `qXfer` read answers for an annex there is none of
 /// (the gdb manual, General Query Packets, `qXfer`).
 const INVALID_ANNEX: u8 = 0;
@@ -345,7 +345,7 @@ where
 }
 
 /// gdbstub's error as ours.
-fn failure<E: Display, C: Display>(error: GdbStubError<E, C>) -> SessionError<E, C> {
+pub(crate) fn failure<E: Display, C: Display>(error: GdbStubError<E, C>) -> SessionError<E, C> {
     let text = error.to_string();
     if error.is_connection_error() {
         return error
@@ -670,7 +670,7 @@ impl<T: Target> TargetDescriptionXmlOverride for Session<'_, T> {
 /// `length` bytes of the architecture's description at `offset`, into
 /// `buf`, for a read of `annex`: the bytes read, or the errno for an
 /// annex other than `target.xml`.
-fn description(
+pub(crate) fn description(
     annex: &[u8],
     offset: u64,
     length: usize,
