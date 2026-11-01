@@ -46,7 +46,8 @@ struct ChipState {
     qspi: Option<Vec<u8>>,
     /// Now, on the system clock.
     now: Cycles,
-    /// Why the CPU halted, while it stays halted.
+    /// Why the CPU halted, while it stays halted: the core's state's,
+    /// kept for the format; restore takes the core's.
     halt: Option<Halt>,
     /// The IRQ pins the host asserts.
     interrupt_pins: u8,
@@ -138,7 +139,7 @@ impl Mc68331 {
             peripherals: board.save_peripherals()?,
             qspi: board.save_qspi()?,
             now: self.now,
-            halt: self.halt,
+            halt: self.cpu.halted(),
             interrupt_pins: board.interrupt_pins,
             decode_changed: board.decode_changed,
             diverted: board.diverted.clone(),
@@ -240,7 +241,6 @@ impl Mc68331 {
         board.stop_taken = false;
         board.output_seen = board.seen();
         self.now = state.now;
-        self.halt = state.halt;
         Ok(())
     }
 }

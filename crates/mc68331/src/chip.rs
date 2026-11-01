@@ -642,7 +642,6 @@ impl Builder {
             cpu: Cpu::new(self.memory),
             board: self.board,
             now: Cycles::ZERO,
-            halt: None,
         };
         chip.reset_for(ResetCause::PowerOn);
         chip
@@ -667,8 +666,6 @@ pub struct Mc68331 {
     pub(crate) board: Board,
     /// Now, on the system clock.
     pub(crate) now: Cycles,
-    /// Why the CPU halted, while it stays halted.
-    pub(crate) halt: Option<Halt>,
 }
 
 impl Mc68331 {
@@ -702,7 +699,7 @@ impl Mc68331 {
             if let Some(cause) = self.board.sim.take_reset() {
                 let frequency = self.board.sim.clock().frequency();
                 self.reset_for(cause);
-                stop = self.halt.map_or(Stop::Budget, Stop::Halted);
+                stop = self.cpu.idle().unwrap_or(Stop::Budget);
                 // or a peripheral the reset reached asks, or the reset
                 // reaches a watched output
                 let moved = self.board.outputs_moved() | self.board.output_stop.reset;
@@ -716,9 +713,9 @@ impl Mc68331 {
             }
             let next = self.board.next_event().map_or(end, |next| next.min(end));
             let quantum = self.now.until(next).max(Cycles(1));
-            if let Some(halt) = self.halt {
+            if let Some(idle) = self.cpu.idle() {
                 // time passes without the CPU
-                stop = Stop::Halted(halt);
+                stop = idle;
                 self.now += quantum;
                 self.board.advance(self.now);
                 if self.board.take_stop() {
@@ -764,7 +761,7 @@ impl Mc68331 {
                     if halt == Halt::DoubleBusFault && self.board.sim.halt_monitor() {
                         let frequency = self.board.sim.clock().frequency();
                         self.reset_for(ResetCause::HaltMonitor);
-                        stop = self.halt.map_or(Stop::Budget, Stop::Halted);
+                        stop = self.cpu.idle().unwrap_or(Stop::Budget);
                         // as the SIM's own resets: a clock the reset
                         // changes ends the run there
                         let moved = self.board.outputs_moved() | self.board.output_stop.reset;
@@ -776,7 +773,6 @@ impl Mc68331 {
                         }
                     } else {
                         // the host sees the halt as it comes
-                        self.halt = Some(halt);
                         break;
                     }
                 }
@@ -831,7 +827,8 @@ impl Mc68331 {
         self.board.events.push(Event::Reset(now, cause));
         self.board.rebuild(&mut self.cpu.memory);
         let board = RefCell::new(&mut self.board);
-        self.halt = self.cpu.reset(&mut Connection(&board), now).err();
+        // a double bus fault fetching the vectors leaves the CPU halted
+        let _ = self.cpu.reset(&mut Connection(&board), now);
     }
 
     /// Now, on the system clock.
@@ -861,7 +858,7 @@ impl Mc68331 {
     /// Why the CPU halted, while it stays halted.
     #[must_use]
     pub const fn halted(&self) -> Option<Halt> {
-        self.halt
+        self.cpu.halted()
     }
 
     /// The SIM: its registers, ports, clock and chip selects.
