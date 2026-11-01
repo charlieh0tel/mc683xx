@@ -1000,7 +1000,8 @@ Front ends):
   dropped.  A Python peripheral shows its own by defining `inspect()`,
   returning such a mapping (an empty one without it); an exception it
   raises, or a value of another type, raises from `inspect`, and an
-  `int` outside 64 bits signed raises `OverflowError`.  It is
+  `int` outside 64 bits signed raises `OverflowError` and groups
+  nested 32 deep (a dict that holds itself) `ValueError`.  It is
   read-only and outside the snapshot.
 - A front end's own peripheral is a Python peripheral class of its
   own, named in the board file; `peripheral(name)` gives its object.
