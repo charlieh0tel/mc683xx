@@ -314,7 +314,8 @@ The methods but `save` and `restore` are looked up once, when the
 object is wired; a missing one takes the trait's default.  `save` and
 `restore` are looked up at each snapshot, as a board peripheral's are.  A `BusCycle` carries `select` (the pin's
 name), `address`, `size` (1 or 2 bytes), `function_code` (7 for CPU
-space) and `now`.  A read's value must fit the cycle.  `raise
+space), `write` (a write, R/W low; set for `wait_states` and
+`dsack_port` too) and `now`.  A read's value must fit the cycle.  `raise
 mc683xx.BusError()` in `read` or `write` asserts BERR.  Any other
 exception (a `KeyboardInterrupt` too) does not fault the bus: the read
 answers as undriven data lanes read, 0, the write goes nowhere, the run
@@ -901,7 +902,8 @@ access, drive) -> int` and
 `save() -> bytes` and `restore(snapshot)`.  Times are
 board time in picoseconds; a `PeripheralAccess` carries `attachment`,
 `select` (the chip select's name), `role` (a `Role`), `lane` (a
-`Lane`), `address`, `size`, `function_code` and `now`.  A `Drive`
+`Lane`), `address`, `size`, `function_code`, `write` (as a
+`BusCycle`'s) and `now`.  A `Drive`
 drives outputs by port index (`drive(port, value)`, `drive_at(at,
 port, value)`), reads an analog input (`sample(port)`, its value as
 the call began, `None` if nothing drove it), writes a board memory

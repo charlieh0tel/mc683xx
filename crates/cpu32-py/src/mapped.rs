@@ -238,6 +238,13 @@ impl BusCycleView {
         self.0.function_code.bits()
     }
 
+    /// Whether it is a write, R/W low; set for `wait_states` and
+    /// `dsack_port` too.
+    #[getter]
+    const fn write(&self) -> bool {
+        self.0.write
+    }
+
     /// When it starts, in system clocks.
     #[getter]
     const fn now(&self) -> u64 {
@@ -246,12 +253,13 @@ impl BusCycleView {
 
     fn __repr__(&self) -> String {
         format!(
-            "BusCycle(select={}, address={:#010x}, size={}, function_code={}, now={}, stacking={})",
+            "BusCycle(select={}, address={:#010x}, size={}, function_code={}, write={}, now={}, stacking={})",
             self.select()
                 .map_or_else(|| "None".to_owned(), |select| format!("{select:?}")),
             self.address(),
             self.size(),
             self.function_code(),
+            if self.write() { "True" } else { "False" },
             self.now(),
             self.stacking()
         )

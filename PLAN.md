@@ -293,7 +293,8 @@ surrounds the SoC with its board peripherals through:
   claims follows the SIM bus monitor.  Internal modules win over a
   chip select at the same address (MC68331UM 4.8).  Overlapping
   selects both assert, as on the chip (SIMRM 7.5); the first DSACK
-  ends the cycle.  Board decode logic within a
+  ends the cycle, and two on the same clock are their pins together
+  (below, Peripherals).  Board decode logic within a
   select's window (the Z3805A's 74AC138s) is part of the host's
   peripheral: it gets the address and decodes it, as the board does.  A
   peripheral on an externally terminated select (DSACK %1111, SIMRM
@@ -1072,6 +1073,29 @@ hand.  The keys are in `docs/board-files.md`.
   and a write-only peripheral can share a window.  `PeripheralAccess`'s
   `select` became an `Option`, breaking, for the no-select access
   (decided 2026-10-25).
+- **A cycle's direction, and DSACKs at once:** `BusCycle` and
+  `PeripheralAccess` carry `write` (R/W, SIMRM 5.1.5), set before the
+  chip asks `wait_states` and `dsack_port`, and a router asks them of
+  the peripheral that takes the cycle's direction.  Before, the chip
+  asked without the direction and a router answered as for a read, so
+  a write-only peripheral sharing an externally terminated select with
+  a read-only one that never asserted DSACK never saw a write, the bus
+  monitor ending it.  A field with a builder (`writing`), not a new
+  `new` argument, as both are `#[non_exhaustive]` so that a field
+  added later breaks no host; `new` builds a read, R/W's high level.
+  Responders whose DSACK comes on the same clock no longer go by the
+  order they were added in (the first won): the pins both assert are
+  what the EBI samples, DSACK1 from either, alone or with DSACK0, a
+  16-bit port, DSACK0 from both 8 bits (SIMRM 5.3.2, Table 5-2).  The
+  manuals are silent on two things here, and this is the choice, not
+  the chip's documented behavior: that a select's internally generated
+  DSACK and an external one, or two selects' internal ones, wired
+  together the same way (SIMRM 7.6 says only which signal a select
+  asserts, by its port field), and what a cycle does when overlapping
+  selects' internal DSACKs differ in wait states (SIMRM 7.5.1 says
+  only that they conflict on the shared DSACK counter and should not
+  differ): the first still ends it.  Both are what a board that obeys
+  7.5.1 never sees (decided 2026-10-31).
 - **Address decoders, as data:** a decoder on one select (a 74AC138)
   splits its window by its inputs into outputs, each attached to a
   peripheral as a select is: `{ decoder = "u31", output = 2 }`.  Its

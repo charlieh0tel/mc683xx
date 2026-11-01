@@ -167,13 +167,18 @@ pub struct PeripheralAccess {
     pub size: Size,
     /// The cycle's function code.
     pub function_code: FunctionCode,
+    /// Whether it is a write: R/W low (SIMRM 5.1.5).  Set for
+    /// `wait_states` and `dsack_port` too, which a peripheral that
+    /// times or sizes its writes apart from its reads reads.
+    pub write: bool,
     /// When its instruction started, on board time.
     pub now: Time,
 }
 
 impl PeripheralAccess {
-    /// A cycle on `select` at `address`, of `size` and `function_code`,
-    /// at `now`, through attachment 0, read-write, on both lanes.
+    /// A read cycle on `select` at `address`, of `size` and
+    /// `function_code`, at `now`, through attachment 0, read-write, on
+    /// both lanes.
     #[must_use]
     pub const fn new(
         select: ChipSelect,
@@ -190,11 +195,12 @@ impl PeripheralAccess {
             address,
             size,
             function_code,
+            write: false,
             now,
         }
     }
 
-    /// A cycle a peripheral on no select took by its own decode, at
+    /// A read cycle a peripheral on no select took by its own decode, at
     /// `address`, of `size` and `function_code`, at `now`, through
     /// attachment 0, read-write, on both lanes.
     #[must_use]
@@ -219,6 +225,12 @@ impl PeripheralAccess {
             lane,
             ..self
         }
+    }
+
+    /// This access, a write or a read.
+    #[must_use]
+    pub const fn writing(self, write: bool) -> Self {
+        Self { write, ..self }
     }
 
     /// The byte an 8-bit peripheral takes of a write's `value`.  An 8-bit

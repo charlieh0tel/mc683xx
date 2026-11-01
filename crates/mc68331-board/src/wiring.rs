@@ -252,14 +252,15 @@ pub(crate) struct Routes(pub(crate) Vec<Route>);
 type Piece<'a> = (&'a Route, Size, Lane);
 
 impl Routes {
-    /// The pieces of `cycle` and who takes each: the peripheral on both
-    /// lanes, or a byte to the peripheral on each lane the cycle drives.
-    fn pieces(&self, cycle: BusCycle, write: bool) -> Vec<Piece<'_>> {
+    /// The pieces of `cycle` and who takes each, by its space and
+    /// direction: the peripheral on both lanes, or a byte to the
+    /// peripheral on each lane the cycle drives.
+    fn pieces(&self, cycle: BusCycle) -> Vec<Piece<'_>> {
         let cpu_space = cycle.function_code.is_cpu_space();
         let taking = || {
             self.0
                 .iter()
-                .filter(move |route| route.takes(cpu_space, write))
+                .filter(move |route| route.takes(cpu_space, cycle.write))
         };
         if let Some(route) = taking().find(|route| route.lane == Lane::Both) {
             return vec![(route, cycle.size, Lane::Both)];
@@ -288,10 +289,11 @@ impl Routes {
             None => PeripheralAccess::on_no_select(address, size, cycle.function_code, now),
         }
         .through(route.attachment, route.role, route.lane)
+        .writing(cycle.write)
     }
 
     /// Notes a cycle in the trace, if it is on and a peripheral took it.
-    fn traced(shared: &Shared, cycle: BusCycle, write: bool, value: Option<u32>, answered: bool) {
+    fn traced(shared: &Shared, cycle: BusCycle, value: Option<u32>, answered: bool) {
         if answered && shared.trace_bus_cycles.get() {
             shared
                 .records
@@ -299,7 +301,7 @@ impl Routes {
                 .push(Record::BusCycle(trace::BusCycleRecord {
                     cycle: cycle.now,
                     pc: shared.pc.get(),
-                    write,
+                    write: cycle.write,
                     address: cycle.address,
                     size: cycle.size.bytes(),
                     value,
@@ -310,7 +312,8 @@ impl Routes {
     /// A read: each piece's peripheral's value on its lane, 0 where no
     /// peripheral drives.
     pub(crate) fn read(&self, shared: &Shared, cycle: BusCycle) -> Result<u32, BusError> {
-        let pieces = self.pieces(cycle, false);
+        let cycle = cycle.writing(false);
+        let pieces = self.pieces(cycle);
         let read = pieces.iter().try_fold(0, |value, &(route, size, lane)| {
             let access = Self::access(shared, route, cycle, size);
             let read = shared.call(route.peripheral, access.now, |peripheral, drive| {
@@ -323,7 +326,7 @@ impl Routes {
                     _ => read & 0xff,
                 })
         });
-        Self::traced(shared, cycle, false, read.ok(), !pieces.is_empty());
+        Self::traced(shared, cycle, read.ok(), !pieces.is_empty());
         read
     }
 
@@ -334,8 +337,9 @@ impl Routes {
         cycle: BusCycle,
         value: u32,
     ) -> Result<(), BusError> {
-        let pieces = self.pieces(cycle, true);
-        Self::traced(shared, cycle, true, Some(value), !pieces.is_empty());
+        let cycle = cycle.writing(true);
+        let pieces = self.pieces(cycle);
+        Self::traced(shared, cycle, Some(value), !pieces.is_empty());
         for (route, size, lane) in pieces {
             let access = Self::access(shared, route, cycle, size);
             let data = match lane {
@@ -350,19 +354,20 @@ impl Routes {
         Ok(())
     }
 
-    /// The port the first peripheral to take the cycle gives it, if it
-    /// says cycle by cycle.
+    /// The port the first peripheral to take the cycle, in its
+    /// direction, gives it, if it says cycle by cycle.
     pub(crate) fn dsack_port(&self, shared: &Shared, cycle: BusCycle) -> Option<PortSize> {
-        let &(route, size, _) = self.pieces(cycle, false).first()?;
+        let &(route, size, _) = self.pieces(cycle).first()?;
         let access = Self::access(shared, route, cycle, size);
         shared.peripherals[route.peripheral]
             .borrow_mut()
             .dsack_port(access)
     }
 
-    /// The wait states of the first peripheral to take the cycle.
-    pub(crate) fn wait_states(&self, shared: &Shared, cycle: BusCycle, write: bool) -> Option<u8> {
-        let Some(&(route, size, _)) = self.pieces(cycle, write).first() else {
+    /// The wait states of the first peripheral to take the cycle, in
+    /// its direction.
+    pub(crate) fn wait_states(&self, shared: &Shared, cycle: BusCycle) -> Option<u8> {
+        let Some(&(route, size, _)) = self.pieces(cycle).first() else {
             return Some(0);
         };
         let access = Self::access(shared, route, cycle, size);
@@ -390,9 +395,7 @@ impl MappedPeripheral for SelectRouter {
     }
 
     fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
-        // The chip asks before the cycle, not saying its direction; a
-        // read's peripherals answer.
-        self.routes.wait_states(&self.shared, cycle, false)
+        self.routes.wait_states(&self.shared, cycle)
     }
 
     fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
@@ -464,9 +467,8 @@ impl MappedPeripheral for DecoderRouter {
     }
 
     fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
-        self.routes(cycle.address).map_or(Some(0), |routes| {
-            routes.wait_states(&self.shared, cycle, false)
-        })
+        self.routes(cycle.address)
+            .map_or(Some(0), |routes| routes.wait_states(&self.shared, cycle))
     }
 
     fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
@@ -498,7 +500,7 @@ impl MappedPeripheral for BusRouter {
     }
 
     fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
-        self.routes.wait_states(&self.shared, cycle, false)
+        self.routes.wait_states(&self.shared, cycle)
     }
 
     fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
@@ -537,7 +539,8 @@ impl MemoryRouter {
             cycle.function_code,
             self.shared.time(cycle.now),
         )
-        .through(attachment, role, Lane::Both);
+        .through(attachment, role, Lane::Both)
+        .writing(role == Role::Write);
         Some((memory.taker?, memory.name.clone(), access))
     }
 }

@@ -46,6 +46,7 @@ use mc683xx_board::time::PICOSECONDS_PER_SECOND;
 use mc683xx_board::time::Time;
 use mc683xx_board::time::TimeBase;
 use mc683xx_board::trace::Record;
+use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
@@ -330,6 +331,106 @@ parameters = { value = 0x5a }
     );
     let snapshot = board.save().expect("recorders save");
     board.restore(&snapshot).unwrap();
+}
+
+/// A read-only peripheral that never asserts DSACK.
+#[derive(Debug, Default)]
+struct Silent;
+
+impl Peripheral for Silent {
+    fn wait_states(&mut self, _: PeripheralAccess) -> Option<u8> {
+        None
+    }
+
+    fn dsack_port(&mut self, _: PeripheralAccess) -> Option<PortSize> {
+        Some(PortSize::Bits16)
+    }
+}
+
+/// A write-only 8-bit peripheral that asserts DSACK0 after a wait
+/// state, and logs the writes it takes.
+#[derive(Debug, Default)]
+struct WriteLatch {
+    /// Each write's address and value.
+    writes: Vec<(u32, u32)>,
+    /// The direction of each access its DSACK was asked of, true for a
+    /// write.
+    asked: Vec<bool>,
+}
+
+impl Peripheral for WriteLatch {
+    fn write(
+        &mut self,
+        access: PeripheralAccess,
+        value: u32,
+        _: &mut Drive<'_>,
+    ) -> Result<(), mc683xx_cpu32::bus::BusError> {
+        self.writes.push((access.address, value));
+        Ok(())
+    }
+
+    fn wait_states(&mut self, access: PeripheralAccess) -> Option<u8> {
+        self.asked.push(access.write);
+        Some(1)
+    }
+
+    fn dsack_port(&mut self, access: PeripheralAccess) -> Option<PortSize> {
+        self.asked.push(access.write);
+        Some(PortSize::Bits8)
+    }
+}
+
+#[test]
+fn a_write_takes_the_dsack_of_the_peripheral_that_takes_writes() {
+    // a read-only and a write-only peripheral on one externally
+    // terminated select: a write's DSACK is the write-only one's (SIMRM
+    // 5.1.5, 5.3.2), its DSACK0 an 8-bit port, so the word is two byte
+    // cycles (SIMRM 5.3.3)
+    let program: Vec<u16> = [
+        store(CSBAR1, CS1_BAR),
+        store(CSOR1, CS_EXTERNAL),
+        store(CS1_BASE, 0xabcd),
+    ]
+    .concat()
+    .into_iter()
+    .chain([NOP, NOP, NOP])
+    .collect();
+    let directory = directory("directions", &program);
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[peripheral]]
+name = "status"
+type = "silent"
+attach = [{ select = "CS1", role = "read" }]
+[[peripheral]]
+name = "latch"
+type = "write-latch"
+attach = [{ select = "CS1", role = "write" }]
+"#;
+    let description = Description::parse(text, &directory, &Options::default()).unwrap();
+    let mut registry = Registry::with_builtins();
+    registry
+        .register("silent", Vec::new(), |_| Ok(Box::new(Silent)))
+        .unwrap();
+    registry
+        .register("write-latch", Vec::new(), |_| {
+            Ok(Box::new(WriteLatch::default()))
+        })
+        .unwrap();
+    let mut board =
+        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    board.run_until(Time(100_000_000)).unwrap();
+    let latch = board.peripheral::<WriteLatch>("latch").unwrap();
+    assert_eq!(latch.writes, [(CS1_BASE, 0xab), (CS1_BASE + 1, 0xcd)]);
+    assert!(!latch.asked.is_empty() && latch.asked.iter().all(|&write| write));
 }
 
 #[test]

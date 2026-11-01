@@ -366,6 +366,10 @@ class BusCycle:
     def function_code(self) -> int:
         """FC[2:0]."""
     @property
+    def write(self) -> bool:
+        """Whether it is a write, R/W low; set for `wait_states` and
+        `dsack_port` too."""
+    @property
     def now(self) -> int:
         """When it starts, in system clocks."""
 
@@ -1034,6 +1038,10 @@ class PeripheralAccess:
     @property
     def function_code(self) -> int:
         """FC[2:0]."""
+    @property
+    def write(self) -> bool:
+        """Whether it is a write, R/W low; set for `wait_states` and
+        `dsack_port` too."""
     @property
     def now(self) -> int:
         """When its instruction started, in picoseconds."""

@@ -170,6 +170,40 @@ fn a_select_beside_a_bus_peripheral_ends_at_the_first_dsack() {
 }
 
 #[test]
+fn dsack0_and_dsack1_at_once_are_a_16_bit_port_in_either_order() {
+    // two peripherals in one window, one driving DSACK0 and one DSACK1,
+    // asserting at once: the pins together are a 16-bit port (SIMRM
+    // 5.3.2, Table 5-2), so a word is one cycle whichever was added first
+    for pins in [
+        [Dsack::Dsack0, Dsack::Dsack1],
+        [Dsack::Dsack1, Dsack::Dsack0],
+    ] {
+        let mut builder = Builder::default();
+        builder
+            .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+            .unwrap();
+        for pin in pins {
+            builder
+                .bus_peripheral(
+                    Recorder::answering(0x1234),
+                    &[BusDecode::Window {
+                        base: Address(WINDOW),
+                        length: WINDOW_BYTES,
+                    }],
+                    pin,
+                )
+                .unwrap();
+        }
+        let mut chip = builder.build();
+        assert_eq!(
+            cycle(&mut chip, WINDOW, Size::Word, None),
+            Ok((0x1234, 3)),
+            "{pins:?}"
+        );
+    }
+}
+
+#[test]
 fn a_bus_peripheral_takes_a_fixed_memorys_cycles() {
     let mut builder = Builder::default();
     builder
