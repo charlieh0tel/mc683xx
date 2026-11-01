@@ -15,6 +15,7 @@ pub mod extension;
 pub mod families;
 pub mod firmware;
 pub mod functions;
+pub mod layout;
 pub mod libc;
 pub mod machine;
 pub mod oracles;

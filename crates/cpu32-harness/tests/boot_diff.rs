@@ -32,6 +32,8 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
+use cpu32_harness::layout;
+use cpu32_harness::layout::FIRMWARE;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cycles::Cycles;
@@ -45,7 +47,6 @@ use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
 
-use common::FIRMWARE;
 use common::board;
 
 mod common;
@@ -64,6 +65,8 @@ const OUTPUT: &str = "BOOT_DIFF_OUTPUT";
 const SECONDS_PAST_REFERENCE: f64 = 1.0;
 /// Where the reference's header names its image and EEPROM dump.
 const FIRMWARE_PATH: &str = "third_party/firmware/";
+/// The images' directory under `FIRMWARE_PATH` (`cpu32_harness::layout`).
+const IMAGES_DIRECTORY: &str = "images/";
 /// The EEPROM dumps' directory under it.
 const EEPROM_DIRECTORY: &str = "eeprom/";
 /// smartclock-emu's board clock (the reference's header).
@@ -306,6 +309,8 @@ impl ReferenceRun {
             .lines()
             .take_while(|line| line.starts_with('#'))
             .flat_map(|line| line.split(FIRMWARE_PATH).skip(1))
+            // a trace may name a file under `images/` or, older, beside it
+            .map(|rest| rest.strip_prefix(IMAGES_DIRECTORY).unwrap_or(rest))
             .filter_map(|rest| {
                 rest.split(|c: char| c.is_whitespace() || c == ')' || c == '>')
                     .next()
@@ -1730,8 +1735,9 @@ fn boot_follows_the_reference() {
         "boot-diff: {} with {}, for {seconds} s",
         run.image, run.eeprom
     );
-    let image = fs::read(firmware.join(&run.image)).expect("the image");
-    let eeprom = fs::read(firmware.join(&run.eeprom)).expect("the EEPROM's dump");
+    let images = layout::images(&firmware);
+    let image = fs::read(images.join(&run.image)).expect("the image");
+    let eeprom = fs::read(images.join(&run.eeprom)).expect("the EEPROM's dump");
     let reference = parse_reference(&text);
     let displays = reference_displays(&text);
     let expected_port = Port::of(
