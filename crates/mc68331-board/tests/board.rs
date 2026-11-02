@@ -60,6 +60,7 @@ use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::debug::TargetError;
 use mc683xx_mc68331::event::DsackFault;
 use mc683xx_mc68331::event::Event;
 use mc683xx_mc68331::gpt::Gpt;
@@ -3759,4 +3760,108 @@ fn a_board_in_background_mode_runs_to_its_end_as_time() {
             .now,
         until + MILLISECOND
     );
+}
+
+/// The hardware breakpoint's vector (CPU32RM Table 6-1).
+const HARDWARE_BREAKPOINT: u8 = 12;
+
+/// `board` run to `until` in background mode: the run ends there, no
+/// instruction executed.
+fn run_in_background(board: &mut Board<Mc68331>, until: Time) {
+    let instructions = board.chip().instructions();
+    assert_eq!(
+        board.run_until(until).unwrap(),
+        BoardRun::new(Stop::Background(Entry::Breakpoint), until)
+    );
+    assert_eq!(board.chip().instructions(), instructions);
+}
+
+#[test]
+fn a_host_reset_with_breakpoint_is_an_external_reset_into_background_mode() {
+    let at = Time(5 * MILLISECOND);
+    let mut external = reset_board();
+    external.run_until(at).unwrap();
+    external.reset_for(ResetCause::External);
+    let external_seen = seen(&mut external, at);
+    let mut host = reset_board();
+    host.run_until(at).unwrap();
+    host.reset_with_breakpoint();
+    assert_eq!(host.chip().cpu().background(), Some(Entry::Breakpoint));
+    assert_eq!(host.chip().cpu().registers.pc, START, "before the first");
+    let mut host_seen = seen(&mut host, at);
+    assert_eq!(host.chip().cpu().background(), Some(Entry::Breakpoint));
+    assert_eq!(host_seen.registers.data[1], 1, "not started again");
+    // the RESET net pulsed, the peripherals reset, as an external reset
+    host_seen.registers = external_seen.registers.clone();
+    assert_eq!(host_seen, external_seen);
+    host.go().unwrap();
+    host.run_until(at + 2 * AFTER_RESET).unwrap();
+    assert_eq!(host.chip().cpu().registers.data[1], 2, "started again");
+}
+
+#[test]
+fn a_board_halts_and_goes_on() {
+    let mut board = reset_board();
+    assert_eq!(board.halt(), Err(TargetError::NotEnabled));
+    assert_eq!(board.go(), Err(TargetError::NotHalted));
+    board.reset_with_breakpoint();
+    board.go().unwrap();
+    assert_eq!(board.chip().cpu().background(), None);
+    board.run_until(Time(AFTER_RESET)).unwrap();
+    let instructions = board.chip().instructions();
+    assert!(instructions > 0);
+    assert_eq!(board.halt(), Ok(Entry::Breakpoint));
+    run_in_background(&mut board, Time(2 * AFTER_RESET));
+    board.go().unwrap();
+    board.run_until(Time(3 * AFTER_RESET)).unwrap();
+    assert!(board.chip().instructions() > instructions);
+}
+
+#[test]
+fn bkpt_on_a_board_without_background_mode_takes_vector_12() {
+    // the stack in RAM, for the breakpoint's frame
+    let program: Vec<u16> = [store(CSBAR0, STACK_BAR), store(CSOR0, CS_FAST)]
+        .concat()
+        .into_iter()
+        .chain([BRA_SELF])
+        .collect();
+    let mut board = board(
+        "hardware-breakpoint",
+        r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[memory]]
+name = "ram"
+size = 0x800
+writable = true
+attach = [{ select = "CS0" }]
+"#,
+        &program,
+    );
+    board.run_until(Time(AFTER_RESET)).unwrap();
+    let mut tracing = BoardTracing::default();
+    tracing.exceptions = true;
+    board.set_tracing(tracing);
+    assert!(!board.assert_breakpoint(), "background mode not enabled");
+    board.run_until(Time(AFTER_RESET + MILLISECOND)).unwrap();
+    let vectors: Vec<u8> = board
+        .take_trace()
+        .records
+        .iter()
+        .filter_map(|record| match record {
+            Record::Exception(exception) => Some(exception.vector),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(vectors.first(), Some(&HARDWARE_BREAKPOINT));
+    board.reset_with_breakpoint();
+    board.go().unwrap();
+    assert!(board.assert_breakpoint());
+    assert_eq!(board.chip().cpu().background(), Some(Entry::Breakpoint));
 }

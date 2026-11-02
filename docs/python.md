@@ -523,7 +523,7 @@ and BGND is an illegal instruction.  `reset_with_breakpoint()` holds
 BKPT low through RESET: background mode is enabled, and the CPU enters
 it before its first instruction.  `background` is the `Entry` while
 the CPU is in background mode, `None` otherwise (a board's chip has it
-too).  Between runs, `halt()` asserts BKPT: the CPU enters background
+too; the board's own controls are below).  Between runs, `halt()` asserts BKPT: the CPU enters background
 mode at once and returns its `Entry` (`assert_breakpoint()` is the
 same pin, true if the CPU entered background mode: with it disabled, a
 hardware breakpoint waits for the next run, which takes vector 12
@@ -534,6 +534,17 @@ started in background mode spends its budget as time passes and ends
 background mode not enabled at the last reset, and `go` or `step` with
 the CPU not in background mode, raise `TargetError`, as does a step a
 hook or stop request ended early.
+
+On a board BKPT is the board's: `Board` has `reset_with_breakpoint()`,
+`assert_breakpoint()`, `halt()` and `go()` (Rust's `Board` methods of
+those names), its `chip` only `background`.  `reset_with_breakpoint()`
+is `reset_for(ResetCause.EXTERNAL)` with BKPT held low: RESET goes out
+on the board's nets and the peripherals reset, the CPU then in
+background mode before its first instruction.  A board run in
+background mode spends its time without the CPU and ends
+`Stop.Background(entry)`.  There is no `Board.step()`: the chip's step
+runs outside the board's run loop, where peripherals and nets would not
+move with it.
 
 ```python
 builder = mc683xx.Builder()
@@ -1004,7 +1015,9 @@ hook it (registers, `bus_read`, `bus_write`, `peek`, the hooks,
 Rust's `Board::chip`; `reset_for(cause)` a reset for a `ResetCause`
 now, as Rust's `Board::reset_for` (`EXTERNAL` as RESET asserted and
 released by the board, any other the chip's own, which drives RESET on
-the nets; nothing while the board holds RESET low); `take_events()`
+the nets; nothing while the board holds RESET low);
+`reset_with_breakpoint()`, `assert_breakpoint()`, `halt()` and `go()`
+BKPT on the board (Background debug mode); `take_events()`
 what the chip did, as `Mc68331.take_events`; `marking(name)` the
 peripheral's `marking`, or `None`; `memory(name)`,
 `externals()` (`External`s: `name`, `kind` the nets' type, `direction`

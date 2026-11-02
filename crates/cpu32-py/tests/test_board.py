@@ -866,3 +866,99 @@ def test_a_board_resets_for_a_cause_as_its_source_does(tmp_path: Path) -> None:
     assert counter.resets == 1, "the watchdog's alone"
     board.run_for(seconds=0.001)
     assert board.chip.read_register("D1") == 2, "started again"
+
+
+BKPT_BOARD = """
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[memory]]
+name = "ram"
+size = 0x800
+writable = true
+attach = [{ select = "CS0" }]
+[[peripheral]]
+name = "counter"
+type = "counter"
+[[net]]
+name = "reset"
+type = "wired-and"
+from = ["chip.RESET", "external.reset"]
+to = ["chip.RESET", "external.observed"]
+"""
+# CSBAR0 and CSOR0 (MC68331UM Table D-3): CS0 at $100000, 64 Kbytes,
+# holding the stack, its 2 Kbytes of RAM repeating.
+CSBAR0, CSOR0 = SIM + 0x4C, SIM + 0x4E
+STACK_BAR = 0x1003
+# BRA.S to itself.
+BRANCH_TO_SELF = 0x60FE
+# The hardware breakpoint's vector (CPU32RM Table 6-1).
+HARDWARE_BREAKPOINT = 12
+
+
+def bkpt_board(tmp_path: Path, program: list[int]) -> mc683xx.Board:
+    (tmp_path / "rom.bin").write_bytes(rom(program))
+    (tmp_path / "board.toml").write_text(BKPT_BOARD)
+    return mc683xx.Board(str(tmp_path / "board.toml"), types={"counter": Counter})
+
+
+def test_a_board_reset_with_breakpoint_enters_background_mode(tmp_path: Path) -> None:
+    board = bkpt_board(tmp_path, COUNTING)
+    board.run_for(seconds=0.001)
+    board.take_received("observed")
+    counter = board.peripheral("counter")
+    assert isinstance(counter, Counter)
+    resets = counter.resets
+    board.reset_with_breakpoint()
+    assert board.chip.background == mc683xx.Entry.Breakpoint()
+    assert board.chip.read_register("PC") == START
+    assert counter.resets > resets, "the peripherals reset"
+    instructions = board.instructions
+    run = board.run_for(seconds=0.001)
+    assert run.stop == mc683xx.Stop.Background(mc683xx.Entry.Breakpoint())
+    assert board.instructions == instructions
+    assert board.chip.read_register("D1") == 1, "not started again"
+    # the RESET net pulsed by the chip, as for any reset it takes
+    assert [level for _, level in board.take_received("observed")] == [False, True]
+    board.go()
+    board.run_for(seconds=0.001)
+    assert board.chip.read_register("D1") == 2, "started again"
+
+
+def test_a_board_halts_and_goes_on(tmp_path: Path) -> None:
+    board = bkpt_board(tmp_path, COUNTING)
+    with pytest.raises(mc683xx.TargetError, match="not enabled"):
+        board.halt()
+    with pytest.raises(mc683xx.TargetError, match="not in background mode"):
+        board.go()
+    board.reset_with_breakpoint()
+    board.go()
+    board.run_for(seconds=0.001)
+    assert board.halt() == mc683xx.Entry.Breakpoint()
+    instructions = board.instructions
+    run = board.run_for(seconds=0.001)
+    assert run.stop == mc683xx.Stop.Background(mc683xx.Entry.Breakpoint())
+    assert board.instructions == instructions
+    board.go()
+    assert board.run_for(seconds=0.001).stop == mc683xx.Stop.Budget()
+    assert board.instructions > instructions
+
+
+def test_bkpt_on_a_board_without_background_mode_takes_vector_12(tmp_path: Path) -> None:
+    program = store_word(CSBAR0, STACK_BAR) + store_word(CSOR0, CSOR_FAST) + [BRANCH_TO_SELF]
+    board = bkpt_board(tmp_path, program)
+    board.run_for(seconds=0.001)
+    board.set_tracing(exceptions=True)
+    assert board.assert_breakpoint() is False
+    board.run_for(seconds=0.001)
+    exceptions = [line for line in board.take_trace() if " exception " in line]
+    assert f"vector={HARDWARE_BREAKPOINT} " in exceptions[0]
+    board.reset_with_breakpoint()
+    board.go()
+    assert board.assert_breakpoint() is True
+    assert board.chip.background == mc683xx.Entry.Breakpoint()

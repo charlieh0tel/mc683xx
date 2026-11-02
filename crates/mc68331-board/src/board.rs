@@ -34,7 +34,9 @@ use mc683xx_cpu32::memory::Space;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::ResetCause;
+use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
+use mc683xx_target::entry::Entry;
 use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
@@ -1421,15 +1423,16 @@ impl<C: Chip> Board<C> {
             return;
         }
         if let Signal::Level(level) = signal {
-            self.apply_reset(level, at);
+            self.apply_reset(level, at, false);
         }
     }
 
     /// RESET at `level` from `at`: asserted, the chip resets and is held
     /// in reset; released, its reset processing begins (SIMRM 8.3.1),
     /// its clocks on board time from then, as none ran while it was
-    /// held.
-    fn apply_reset(&mut self, level: bool, at: Time) {
+    /// held, BKPT low through the release if `breakpoint` (CPU32RM
+    /// 7.2.1).
+    fn apply_reset(&mut self, level: bool, at: Time, breakpoint: bool) {
         match (self.reset_in, level) {
             (true, false) => self.chip.reset_for(ResetCause::External),
             (false, true) => {
@@ -1438,7 +1441,11 @@ impl<C: Chip> Board<C> {
                 let at = at.max(base.time(cycles));
                 self.move_base(TimeBase::new(cycles, at, base.frequency()));
                 self.tell_system_clock();
-                self.chip.reset_for(ResetCause::External);
+                if breakpoint {
+                    self.chip.reset_with_breakpoint();
+                } else {
+                    self.chip.reset_for(ResetCause::External);
+                }
             }
             _ => {}
         }
@@ -1459,21 +1466,49 @@ impl<C: Chip> Board<C> {
             return;
         }
         if cause == ResetCause::External {
-            self.pulse_reset();
+            self.pulse_reset(false);
         } else {
             self.chip.reset_for(cause);
         }
         self.collect();
     }
 
+    /// [`reset_for`](Self::reset_for)`(`[`ResetCause::External`]`)` with
+    /// the board holding BKPT low through RESET's release, as a BDM
+    /// debugger's reset ([`Chip::reset_with_breakpoint`]): background
+    /// mode enabled, and the CPU in it before its first instruction,
+    /// FREEZE asserted (CPU32RM 7.2.1; MC68331UM 4.2.13).  The chip
+    /// drives RESET on the board's nets and the peripherals its scope
+    /// reaches reset, as for `reset_for`.  Nothing while the board holds
+    /// RESET low: BKPT is not held across a release the nets make.
+    pub fn reset_with_breakpoint(&mut self) {
+        if !self.reset_in {
+            return;
+        }
+        self.pulse_reset(true);
+        self.collect();
+    }
+
+    /// The board's BKPT asserted between runs, so at an instruction
+    /// boundary ([`Chip::assert_breakpoint`], CPU32RM 7.2.2.1): with
+    /// background mode enabled the CPU enters it at once, FREEZE with
+    /// it, and this is true; disabled, a hardware breakpoint waits for
+    /// the next run, and this is false.  What the chip's outputs did
+    /// meanwhile (a module FREEZE stops, LPSTOP's end) reaches the nets.
+    pub fn assert_breakpoint(&mut self) -> bool {
+        let entered = self.chip.assert_breakpoint();
+        self.collect();
+        entered
+    }
+
     /// RESET asserted and released now by the board, by the path a RESET
     /// net's edges take, the zero-width assertion itself not put on the
-    /// nets.
-    fn pulse_reset(&mut self) {
+    /// nets, BKPT low through the release if `breakpoint`.
+    fn pulse_reset(&mut self, breakpoint: bool) {
         let at = self.now;
         for level in [false, true] {
             self.trace_pin(C::RESET, Signal::Level(level), at);
-            self.apply_reset(level, at);
+            self.apply_reset(level, at, breakpoint);
         }
     }
 
@@ -2129,6 +2164,36 @@ impl<C: Chip> Board<C> {
                 attached.observer.restored(&net.name, self.now, *signal);
             }
         }
+    }
+}
+
+/// The chip's background debug calls on the board, between runs: each
+/// the chip's [`Cpu32Target`] one, then what its outputs did (a module
+/// FREEZE stops or starts) onto the nets.  No `step`: the chip's runs
+/// the chip outside the board's run loop.
+impl<C: Chip + Cpu32Target> Board<C> {
+    /// BKPT asserted ([`Cpu32Target::halt`]): the CPU in background
+    /// mode at once, FREEZE asserted, and its entry.
+    ///
+    /// # Errors
+    ///
+    /// The chip's: background mode not enabled at the last reset.
+    pub fn halt(&mut self) -> Result<Entry, C::Error> {
+        let entry = self.chip.halt();
+        self.collect();
+        entry
+    }
+
+    /// GO ([`Cpu32Target::go`]): background mode left, FREEZE with it,
+    /// the firmware running on at the next run.
+    ///
+    /// # Errors
+    ///
+    /// The chip's: the CPU not in background mode.
+    pub fn go(&mut self) -> Result<(), C::Error> {
+        let gone = self.chip.go();
+        self.collect();
+        gone
     }
 }
 
