@@ -2141,7 +2141,7 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   server sees every entry, but one a restored snapshot started in,
   which is stale, its ATEMP as the server started kept, until a GO,
   CALL or reset.  Transfer, the raw 17-bit exchange, answers BadRequest until
-  the serial interface is modeled.  CALL stacks RPC at the active SP
+  the serial interface is modeled.  CALL (`Mc68331::call`) stacks RPC at the active SP
   in its data space (7.2.8.13).
 - GO and CALL end whatever exception processing preceded the entry:
   a fault on the first fetch after them is an exception of its own

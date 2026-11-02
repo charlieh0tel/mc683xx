@@ -17,6 +17,7 @@ use mc683xx_target::size::Size;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::registers::status;
 
 use crate::chip::Mc68331;
 use crate::host::AccessError;
@@ -95,6 +96,29 @@ impl Mc68331 {
         Ok((0..length)
             .step_by(bytes)
             .map(move |offset| (address.offset(offset as u32), offset)))
+    }
+}
+
+impl Mc68331 {
+    /// CALL (CPU32RM 7.2.8.13): RPC stacked at the active SP, in its
+    /// data space, then execution from `address`.  A fault stacking
+    /// leaves the CPU in background mode with SP as it was.
+    ///
+    /// # Errors
+    /// The CPU is not in background mode, or stacking RPC faulted.
+    pub fn call(&mut self, address: Address) -> Result<(), TargetError> {
+        let supervisor = self.read_system_register(SystemRegister::Sr)? & u32::from(status::S) != 0;
+        let space = if supervisor {
+            FunctionCode::SUPERVISOR_DATA
+        } else {
+            FunctionCode::USER_DATA
+        };
+        let sp = self.read_register(Register::A7)?.wrapping_sub(4);
+        let rpc = self.read_system_register(SystemRegister::Rpc)?;
+        self.write_memory(Address(sp), space, Size::Long, &rpc.to_be_bytes())?;
+        self.write_register(Register::A7, sp)?;
+        self.write_system_register(SystemRegister::Rpc, address.0)?;
+        self.go()
     }
 }
 

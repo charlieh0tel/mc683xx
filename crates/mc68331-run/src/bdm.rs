@@ -596,7 +596,7 @@ impl Server {
             Request::WriteMemory(address, size, data) => function_code(chip, SystemRegister::Dfc)
                 .and_then(|space| chip.write_memory(address, space, size, &data))
                 .map(|()| Vec::new()),
-            Request::Call(address) => call(chip, address).map(|()| {
+            Request::Call(address) => chip.call(address).map(|()| {
                 self.stale = None;
                 Vec::new()
             }),
@@ -615,27 +615,6 @@ fn function_code(
 ) -> Result<FunctionCode, TargetError> {
     chip.read_system_register(register).map(FunctionCode::new)
 }
-
-/// CALL: RPC stacked at the active SP, in its data space, then
-/// execution from `address`; a fault stacking leaves the CPU in
-/// background mode with SP as it was (CPU32RM 7.2.8.13).
-fn call(chip: &mut Mc68331, address: Address) -> Result<(), TargetError> {
-    let supervisor = chip.read_system_register(SystemRegister::Sr)? & u32::from(SR_S) != 0;
-    let space = if supervisor {
-        FunctionCode::SUPERVISOR_DATA
-    } else {
-        FunctionCode::USER_DATA
-    };
-    let sp = chip.read_register(Register::A7)?.wrapping_sub(4);
-    let rpc = chip.read_system_register(SystemRegister::Rpc)?;
-    chip.write_memory(Address(sp), space, Size::Long, &rpc.to_be_bytes())?;
-    chip.write_register(Register::A7, sp)?;
-    chip.write_system_register(SystemRegister::Rpc, address.0)?;
-    chip.go()
-}
-
-/// SR's S bit (CPU32RM 2.3.2).
-const SR_S: u16 = 1 << 13;
 
 #[cfg(test)]
 mod tests {
