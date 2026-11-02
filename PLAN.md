@@ -2545,6 +2545,26 @@ then they stay our choices.
   - Input pins take no synchronizer delay or filter (GPTRM 2.2): an
     edge captures TCNT at the clock it comes in.  PCLK counts on its
     rising edges.
+  - While STOP, STOPP, LPSTOP or FREEZE with FRZ0 stops the GPT, the
+    input synchronizers are not clocked (GPTRM 9.3, 9.4; 9.2 stops
+    "all counters and prescalers"): no capture, no pulse accumulator
+    edge, no PCLK count, whether the board moves a pin or the GPT's
+    own outputs do (a forced compare, a PORTGP, DDRGP or OC1M write,
+    which 9.3 lets software make while frozen).  INCP clocks them once
+    (9.4).  Where the manual is silent (decided 2026-11-02): the
+    synchronizers hold the levels they last took, and when clocked
+    again (STOPP or FRZ0 cleared, FREEZE negated, INCP, the LPSTOP
+    wake) they take the pins' levels, so a level that changed while
+    stopped is an edge then, captured at the TCNT that was held, and a
+    pulse that came and went while stopped is lost: a synchronizer is
+    a sampling register, and edge detection compares what it held with
+    what it takes.  PORTGP, PAIS and PCLKS read an input pin's held
+    level ("the state of the pin when the STOPP bit is set", 9.4; "at
+    the time of the freeze", B.1), an output's as driven.  Not
+    modeled: activity begun before FREEZE finishing "a few clocks"
+    into freeze mode (9.3); an edge the GPT has seen as FREEZE asserts
+    is captured at once, one after it not until the synchronizers
+    run again.
   - CPR's one write (GPTRM 5.1) is the first write to TMSK2's byte.
     STOP stops what STOPP stops, and so does FREEZE with FRZ0 (7.3.2).
     While FREEZE is asserted, FRZ0 set or not, registers otherwise
