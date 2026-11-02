@@ -202,7 +202,7 @@ struct Arguments {
     #[arg(long, value_name = "HOST:PORT")]
     gdb: Option<String>,
     /// Answer a BDM debugger at this address, unix:PATH or HOST:PORT,
-    /// as the m683xx BDM pod answers on USB (its protocol, version 2):
+    /// as the mc683xx BDM pod answers on USB (its protocol, version 2):
     /// a virtual BDM cable.  It gives full control of the CPU, so expose
     /// it on trusted networks only.  While the CPU is in background
     /// mode an unpaced run waits for requests, board time standing

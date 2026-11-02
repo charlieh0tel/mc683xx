@@ -2125,7 +2125,7 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   next run, as one due while the CPU is in background mode is.  Memory is real
   bus cycles (`bus_read`, `bus_write`), as READ and WRITE make them.
 - `mc683xx-run --bdm unix:PATH|HOST:PORT` is a virtual BDM cable: it
-  answers the m683xx BDM pod's host-pod protocol, version 2, written
+  answers the mc683xx BDM pod's host-pod protocol, version 2, written
   from its `docs/usb-protocol.md` alone, over the chip's
   `Cpu32Target`.  One client at a time; another waits up to 100 ms
   for the client to go, polls and the run going on meanwhile, then is
@@ -2208,7 +2208,9 @@ then they stay our choices.
 - **RSREG's command word**: 7.2.8.6 prints it as WSREG's, $248x, bit
   8 clear; the R/W field (7.2.8.1, set for a transfer to the
   development system) and RDREG/WDREG's pair ($218x, $208x) make it
-  $258x, which the core decodes.  $248x is WSREG.
+  $258x, which the core decodes.  $248x is WSREG.  The BDM pod's
+  firmware sends RSREG as $258x too (the pod maintainer, 2026-11-02);
+  the pod's bring-up checks it on silicon.
 - **BDM serial corners** (provisional): the first response after
   entry, a reset or a debugger's own command, "???" in every sequence
   diagram, is "not ready".  RSREG and WSREG of a select code 7.2.8.6
@@ -2225,7 +2227,10 @@ then they stay our choices.
   is enabled.  DSO is then IPIPE (7.2.6), which the chip does not
   model: the word reads $1FFFF, the line high.  On silicon when the CPU
   enters background mode within the word, and so whether later bits are
-  received, depends on timing no emulated transfer has.
+  received, depends on timing no emulated transfer has.  This is the
+  model's choice, not the pod's: the pod sends a raw Transfer's words
+  as given and replies with the DSO bits it sampled, whatever IPIPE
+  shows, and leaves DSI undriven while FREEZE is low.
 - **Microcode revision** (format C transfer count word, bits 15:8;
   CPU32RM 6.4.3): a named constant of ours, $C8.  `rte` checks it, as
   the manual says the CPU does, and takes a format error on a

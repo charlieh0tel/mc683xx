@@ -1,6 +1,6 @@
 //! `--bdm`: a virtual BDM cable.  The runner answers on a socket as the
-//! m683xx BDM pod answers on USB (its host-pod protocol, version 2:
-//! github.com/charlieh0tel/m683xx-pod, `docs/usb-protocol.md`), so a
+//! mc683xx BDM pod answers on USB (its host-pod protocol, version 2:
+//! github.com/charlieh0tel/mc683xx-pod, `docs/usb-protocol.md`), so a
 //! debugger that drives a 68331 through the pod drives the board the
 //! same way, through the chip's [`Cpu32Target`].
 //!
