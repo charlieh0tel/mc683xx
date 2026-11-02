@@ -10,6 +10,7 @@ use mc683xx_target::address::Address;
 use crate::image::Image;
 use crate::image::ImageError;
 use crate::image::Segment;
+use crate::image::arrange;
 
 /// `e_ident[EI_MAG0..EI_MAG3]`.
 const MAGIC: [u8; 4] = [0x7f, b'E', b'L', b'F'];
@@ -101,6 +102,15 @@ pub enum ParseElfError {
         /// The program header, from 0.
         index: usize,
     },
+    /// The loadable segments hold more bytes than the file: they name
+    /// some of its bytes more than once.
+    #[error("the loadable segments hold {bytes} bytes, more than the file's {file}")]
+    Repeated {
+        /// The bytes in all the loadable segments.
+        bytes: u64,
+        /// The bytes in the file.
+        file: usize,
+    },
     /// The segments do not make an image.
     #[error(transparent)]
     Image(#[from] ImageError),
@@ -138,8 +148,10 @@ impl Image {
     ///
     /// # Errors
     /// The file is not ELF32, big-endian, version 1 and for the 68000
-    /// family; it is truncated; or its loadable segments overlap or
-    /// have no bytes.
+    /// family; it is truncated; or its loadable segments overlap, run
+    /// past the top of the address space, hold more bytes than the file
+    /// or have none.  Each is checked before any segment's bytes are
+    /// copied, so the image never holds more than the file.
     pub fn from_elf(file: &[u8]) -> Result<Self, ParseElfError> {
         if file.get(..MAGIC.len()) != Some(&MAGIC) {
             return Err(ParseElfError::NotElf);
@@ -176,7 +188,10 @@ impl Image {
         .ok_or(ParseElfError::Truncated {
             what: "program headers",
         })?;
-        let mut segments = Vec::new();
+        // each loadable segment's address and file bytes, checked before
+        // any is copied: a small file's headers can name its bytes many
+        // times over
+        let mut spans: Vec<(Address, Range<usize>)> = Vec::new();
         for (index, header) in file[headers]
             .as_chunks::<PROGRAM_HEADER_BYTES>()
             .0
@@ -190,11 +205,30 @@ impl Image {
                 .map_err(|_| ParseElfError::Segment { index })?;
             let bytes = within(u32_at(header, P_OFFSET), length, file.len())
                 .ok_or(ParseElfError::Segment { index })?;
-            segments.push(Segment::new(
-                Address(u32_at(header, P_PADDR)),
-                file[bytes].to_vec(),
-            ));
+            spans.push((Address(u32_at(header, P_PADDR)), bytes));
         }
+        let runs = arrange(spans, |(address, bytes)| (*address, bytes.len()))?;
+        let total: u64 = runs
+            .iter()
+            .flatten()
+            .map(|(_, bytes)| bytes.len() as u64)
+            .sum();
+        if total > file.len() as u64 {
+            return Err(ParseElfError::Repeated {
+                bytes: total,
+                file: file.len(),
+            });
+        }
+        let segments = runs.into_iter().map(|run| {
+            let address = run[0].0;
+            Segment::new(
+                address,
+                run.into_iter()
+                    .flat_map(|(_, bytes)| &file[bytes])
+                    .copied()
+                    .collect(),
+            )
+        });
         let entry = u32_at(file, E_ENTRY);
         Ok(Self::new(segments, (entry != 0).then_some(Address(entry)))?)
     }
@@ -315,6 +349,46 @@ mod tests {
         assert_eq!(
             changed(5, 1).unwrap_err().to_string(),
             "ELF data encoding 1, not big-endian (ELFDATA2MSB, 2)"
+        );
+    }
+
+    /// Bytes in the payload the repeated headers name.
+    const PAYLOAD: u32 = 0x1_0000;
+    /// Headers naming it.
+    const REPEATS: u32 = 4096;
+
+    /// A file of `REPEATS` loadable headers, each naming the same
+    /// `PAYLOAD` bytes, the `n`th at `address(n)`.
+    fn repeated(address: impl Fn(u32) -> u32) -> Vec<u8> {
+        let headers: Vec<_> = (0..REPEATS)
+            .map(|n| (1, body(REPEATS), 0, address(n), PAYLOAD, PAYLOAD))
+            .collect();
+        elf(0, &headers, &vec![0; PAYLOAD as usize])
+    }
+
+    #[test]
+    fn segments_naming_the_same_bytes_are_refused_before_they_are_copied() {
+        // apart in memory: 256 MiB from a file of 384 KiB
+        let file = repeated(|n| n * PAYLOAD);
+        assert_eq!(
+            Image::from_elf(&file),
+            Err(ParseElfError::Repeated {
+                bytes: u64::from(REPEATS) * u64::from(PAYLOAD),
+                file: file.len(),
+            })
+        );
+        assert_eq!(
+            Image::from_elf(&repeated(|_| 0x1000)),
+            Err(ParseElfError::Image(ImageError::Overlap {
+                first: Address(0x1000),
+                second: Address(0x1000),
+            }))
+        );
+        assert_eq!(
+            Image::from_elf(&repeated(|n| 0xffff_0000 - n * PAYLOAD + 1)),
+            Err(ParseElfError::Image(ImageError::Wraps {
+                address: Address(0xffff_0001),
+            }))
         );
     }
 }
