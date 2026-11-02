@@ -46,6 +46,17 @@ pub(crate) enum RunError {
     /// A pseudo-terminal that could not be opened.
     #[error("pty: {0}")]
     Pty(io::Error),
+    /// A `tty` binding while another binding takes standard input.
+    #[error("--bind {0}=tty: standard input is another binding's; tty needs it")]
+    StdinTaken(String),
+    /// A `tty` binding whose standard input is not a terminal.
+    #[error(
+        "--bind {0}=tty: standard input is not a terminal; bind stdio to read a file or a pipe"
+    )]
+    NotATerminal(String),
+    /// The terminal on standard input, which would not be made raw.
+    #[error("tty: {0}")]
+    Terminal(io::Error),
     /// Output that could not be written.
     #[error("output: {0}")]
     Output(io::Error),

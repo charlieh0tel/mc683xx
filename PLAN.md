@@ -1434,7 +1434,7 @@ hand.  The keys are in `docs/board-files.md`.
 - **Runner:** `mc683xx-run board.toml [--cycles N | --seconds S]
   [--firmware PATH] [--image NAME=PATH] [--option NAME]
   [--set PERIPHERAL.KEY=VALUE]
-  [--bind NAME=stdio|stdout|pty|null|file:PATH]
+  [--bind NAME=stdio|stdout|tty|pty|null|file:PATH]
   [--trace bus-cycles,exceptions,pins,qspi,nets] [--watch-code ADDR]
   [--position S] [--seed N] [--work-dir DIR] [--restore FILE]
   [--save FILE] [--turn-us N] [--input-after S] [--gdb HOST:PORT]
@@ -1480,7 +1480,19 @@ hand.  The keys are in `docs/board-files.md`.
   binding is refused.  A pty's master does not block: output its
   buffer cannot take, with nobody reading the slave, is dropped, as a
   UART's frames are with nothing on the line, so a run never waits on
-  a reader.
+  a reader.  `tty` is the terminal on standard input as a serial
+  console: raw input (no echo, no line editing, no signals from keys,
+  so Ctrl-C and Ctrl-Z reach the firmware as bytes) and output that
+  keeps its newline translation, so standard error's lines stay
+  lines and firmware that sends a bare LF still starts a line.
+  Ctrl-] (telnet's escape) ends the run as Ctrl-C does, `stopped` and
+  `--save` still coming; it goes no further.  The terminal is put back
+  as it was when the binding goes, however the run ends, the second
+  Ctrl-C's forced exit included (from `kill`: keys signal nothing).  A
+  SIGTERM or SIGKILL leaves it raw (`reset` mends it).  `tty` needs
+  standard input to be a terminal and to itself: the first stdio or
+  tty on the command line takes it, and a `tty` that does not is
+  refused.
 
 Adversarial review of the chip trait (2026-10-24):
 

@@ -67,7 +67,9 @@ use mc683xx_modules::qsm::sci::Frame;
 
 use crate::bdm::Server;
 use crate::binding::Binding;
+use crate::binding::Escape;
 use crate::binding::How;
+use crate::binding::restore_terminal;
 use crate::error::RunError;
 
 /// The chip the runner runs, which names its trace's lines.
@@ -137,8 +139,8 @@ struct Arguments {
     /// once.
     #[arg(long = "set")]
     settings: Vec<String>,
-    /// Bind a run-time endpoint, NAME=stdio|stdout|pty|null|file:PATH
-    /// (pty on Unix only); may be given more than once.  Unbound
+    /// Bind a run-time endpoint, NAME=stdio|stdout|tty|pty|null|file:PATH
+    /// (tty and pty on Unix only); may be given more than once.  Unbound
     /// endpoints are null.  stdout writes what stdio writes and reads
     /// nothing, leaving standard input to another binding; bindings
     /// that share standard output each write to it, and the first
@@ -150,7 +152,12 @@ struct Arguments {
     /// input that is not a terminal (a file or a pipe) is read to its
     /// end when input first goes in, and fed a byte a turn, so the run
     /// is the same each time: the run waits there for the pipe to
-    /// close.  A terminal's is live.
+    /// close.  A terminal's is live.  tty takes the terminal on standard
+    /// input raw, as a serial console: each key goes in as typed, with
+    /// no echo or line editing, Ctrl-C and Ctrl-Z included, and Ctrl-]
+    /// ends the run as Ctrl-C would; the terminal is put back as it was
+    /// when the run ends.  It needs standard input to be a terminal, and
+    /// to itself: the first stdio or tty on the command line takes it.
     #[arg(long = "bind", value_parser = pair::<How>)]
     bindings: Vec<(String, How)>,
     /// What to trace on standard error, comma-separated.
@@ -332,18 +339,23 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
     {
         return Err(RunError::Unbound((*name).to_owned()));
     }
-    // standard input goes to the first endpoint the command line binds stdio
+    // standard input goes to the first endpoint the command line binds
+    // stdio or tty
     let stdin = arguments
         .bindings
         .iter()
         .map(|(name, _)| name.as_str())
-        .find(|name| asked.get(name) == Some(&&How::Stdio));
+        .find(|name| matches!(asked.get(name), Some(&&(How::Stdio | How::Tty))));
+    let escape = Escape {
+        control: control.clone(),
+        interrupted: Arc::clone(&interrupted),
+    };
     let bindings = externals
         .into_iter()
         .map(|name| {
             let how = asked.get(name.as_str()).copied().unwrap_or(&How::Null);
             let takes_stdin = stdin == Some(name.as_str());
-            let binding = Binding::new(name, how, takes_stdin)?;
+            let binding = Binding::new(name, how, takes_stdin, &escape)?;
             // input to an endpoint that drives no serial net would be lost
             if binding.takes_input() && !senders.contains(&binding.name) {
                 return Err(RunError::NoSerialNet(binding.name));
@@ -460,6 +472,7 @@ fn interruption(
             if let Some(partial) = &partial {
                 let _ = fs::remove_file(partial);
             }
+            restore_terminal();
             process::exit(EXIT_INTERRUPTED);
         }
         control.stop();

@@ -55,9 +55,17 @@ use mc683xx_target::register::SystemRegister;
 #[cfg(unix)]
 use mc683xx_target::size::Size;
 #[cfg(unix)]
+use nix::pty::openpty;
+#[cfg(unix)]
 use nix::sys::signal::Signal;
 #[cfg(unix)]
 use nix::sys::signal::kill;
+#[cfg(unix)]
+use nix::sys::termios::LocalFlags;
+#[cfg(unix)]
+use nix::sys::termios::OutputFlags;
+#[cfg(unix)]
+use nix::sys::termios::tcgetattr;
 #[cfg(unix)]
 use nix::unistd::Pid;
 #[cfg(unix)]
@@ -431,6 +439,111 @@ fn standard_input_goes_to_the_first_stdio_on_the_command_line() {
     let mut twice = b"hellohello".to_vec();
     twice.sort_unstable();
     assert_eq!(echoed, twice, "{stderr}");
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn tty_needs_a_terminal_on_standard_input() {
+    let directory = board("tty-piped", &echo::image());
+    let file = directory.join("echo.toml");
+    let refused = runner(&[file.to_str().unwrap(), "--bind", "console=tty"], b"hello");
+    let stderr = String::from_utf8(refused.stderr).unwrap();
+    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("standard input is not a terminal"),
+        "{stderr}"
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn tty_needs_standard_input_to_itself() {
+    let directory = board("tty-taken", &echo::image());
+    let file = directory.join("echo.toml");
+    let text = fs::read_to_string(&file).unwrap();
+    let tapped = text.replace(
+        "to = [\"external.console\"]",
+        "to = [\"external.aux\", \"external.console\"]",
+    );
+    fs::write(&file, tapped).unwrap();
+    let refused = runner(
+        &[
+            file.to_str().unwrap(),
+            "--bind",
+            "console=stdio",
+            "--bind",
+            "aux=tty",
+        ],
+        b"",
+    );
+    let stderr = String::from_utf8(refused.stderr).unwrap();
+    assert_eq!(refused.status.code(), Some(1), "{stderr}");
+    assert!(
+        stderr.contains("standard input is another binding's"),
+        "{stderr}"
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn tty_takes_keystrokes_raw_and_ctrl_bracket_ends_the_run_and_restores_it() {
+    let directory = board("tty", &echo::image());
+    let saved = directory.join("saved.bin");
+    let terminal = openpty(None, None).unwrap();
+    let before = tcgetattr(&terminal.slave).unwrap();
+    assert!(before.local_flags.contains(LocalFlags::ICANON));
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mc683xx-run"))
+        .args([
+            directory.join("echo.toml").to_str().unwrap(),
+            "--bind",
+            "console=tty",
+            "--seconds",
+            "1000",
+            "--pace",
+            "realtime",
+            "--save",
+            saved.to_str().unwrap(),
+        ])
+        .stdin(Stdio::from(terminal.slave.try_clone().unwrap()))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stderr = BufReader::new(child.stderr.take().unwrap());
+    let mut line = String::new();
+    while !line.contains("bound name=console tty") {
+        line.clear();
+        assert_ne!(stderr.read_line(&mut line).unwrap(), 0, "never bound");
+    }
+    let raw = tcgetattr(&terminal.slave).unwrap();
+    assert!(!raw.local_flags.contains(LocalFlags::ICANON), "raw input");
+    assert!(
+        !raw.local_flags.contains(LocalFlags::ISIG),
+        "keys signal nothing"
+    );
+    assert!(
+        raw.output_flags.contains(OutputFlags::OPOST),
+        "output translated"
+    );
+    let mut master = fs::File::from(terminal.master);
+    // no newline: raw input goes in as typed; Ctrl-C is a byte
+    master.write_all(b"hi\x03").unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let mut echoed = [0; 3];
+    stdout.read_exact(&mut echoed).unwrap();
+    assert_eq!(&echoed, b"hi\x03");
+    master.write_all(&[0x1d]).unwrap();
+    let mut rest = String::new();
+    stderr.read_to_string(&mut rest).unwrap();
+    let status = child.wait().unwrap();
+    assert_eq!(status.code(), Some(4), "{rest}");
+    assert!(rest.ends_with("reason=requested\n"), "{rest}");
+    assert!(!fs::read(&saved).unwrap().is_empty(), "saved");
+    let after = tcgetattr(&terminal.slave).unwrap();
+    assert_eq!(after.local_flags, before.local_flags, "restored");
+    assert_eq!(after.input_flags, before.input_flags, "restored");
+    assert_eq!(after.output_flags, before.output_flags, "restored");
     fs::remove_dir_all(directory).unwrap();
 }
 

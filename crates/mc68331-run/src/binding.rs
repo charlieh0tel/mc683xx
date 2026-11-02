@@ -14,10 +14,18 @@ use std::io::Write;
 use std::os::fd::OwnedFd;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::Arc;
+#[cfg(unix)]
+use std::sync::Mutex;
+#[cfg(unix)]
+use std::sync::PoisonError;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::thread;
 
+use mc683xx_board::control::BoardControl;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
 use mc683xx_modules::qsm::sci::Frame;
@@ -30,7 +38,11 @@ use nix::fcntl::fcntl;
 #[cfg(unix)]
 use nix::pty::openpty;
 #[cfg(unix)]
+use nix::sys::termios::OutputFlags;
+#[cfg(unix)]
 use nix::sys::termios::SetArg;
+#[cfg(unix)]
+use nix::sys::termios::Termios;
 #[cfg(unix)]
 use nix::sys::termios::cfmakeraw;
 #[cfg(unix)]
@@ -43,6 +55,9 @@ use nix::unistd::ttyname;
 use crate::CHIP;
 use crate::error::RunError;
 
+/// The key that ends a run from a `tty` binding: Ctrl-], as telnet's.
+pub(crate) const ESCAPE: u8 = 0x1d;
+
 /// How an endpoint is bound.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum How {
@@ -53,6 +68,9 @@ pub(crate) enum How {
     Stdout,
     /// A new pseudo-terminal, its name on standard error.
     Pty,
+    /// The terminal on standard input, raw, and standard output:
+    /// keystrokes go in as typed, [`ESCAPE`] ends the run.
+    Tty,
     /// Nothing: what comes out is dropped, nothing goes in.
     Null,
     /// A file what comes out is written to.
@@ -67,11 +85,14 @@ impl FromStr for How {
             "stdio" => Ok(Self::Stdio),
             "stdout" => Ok(Self::Stdout),
             "pty" => Ok(Self::Pty),
+            "tty" => Ok(Self::Tty),
             "null" => Ok(Self::Null),
             _ => text
                 .strip_prefix("file:")
                 .map(|path| Self::File(PathBuf::from(path)))
-                .ok_or_else(|| format!("{text:?}: give stdio, stdout, pty, null or file:PATH")),
+                .ok_or_else(|| {
+                    format!("{text:?}: give stdio, stdout, tty, pty, null or file:PATH")
+                }),
         }
     }
 }
@@ -89,6 +110,10 @@ enum Input {
     /// Bytes from a terminal as they are typed: a run with them is not
     /// reproducible.
     Live(Receiver<u8>),
+    /// Bytes from the terminal on standard input, raw, as they are typed;
+    /// not reproducible.  The terminal is put back as it was when this
+    /// goes.
+    Raw(Receiver<u8>, RawTerminal),
     /// A pseudo-terminal's master, read without blocking: not
     /// reproducible either.  The slave stays open with it, so the master
     /// reads no hangup before a client opens the slave.
@@ -121,6 +146,24 @@ enum Output {
     Pty(File),
 }
 
+/// How a `tty` binding's [`ESCAPE`] ends the run: as Ctrl-C does
+/// (`interruption` in `main.rs`).
+#[derive(Clone)]
+pub(crate) struct Escape {
+    /// The board's control, to stop its run.
+    pub(crate) control: BoardControl,
+    /// The flag Ctrl-C sets.
+    pub(crate) interrupted: Arc<AtomicBool>,
+}
+
+impl Escape {
+    /// Ends the run.
+    fn end_run(&self) {
+        self.interrupted.store(true, Ordering::SeqCst);
+        self.control.stop();
+    }
+}
+
 /// An endpoint bound.
 pub(crate) struct Binding {
     /// The endpoint's name.
@@ -132,9 +175,15 @@ pub(crate) struct Binding {
 }
 
 impl Binding {
-    /// `name` bound `how`; `stdin` says whether a stdio binding takes
-    /// standard input.
-    pub(crate) fn new(name: String, how: &How, stdin: bool) -> Result<Self, RunError> {
+    /// `name` bound `how`; `stdin` says whether a stdio or tty binding
+    /// takes standard input, which a tty binding must; `escape` is how a
+    /// tty binding ends the run.
+    pub(crate) fn new(
+        name: String,
+        how: &How,
+        stdin: bool,
+        escape: &Escape,
+    ) -> Result<Self, RunError> {
         let (input, output) = match how {
             How::Null => (Input::Nothing, Output::Nothing),
             How::Stdout => (Input::Nothing, Output::Stdout),
@@ -148,6 +197,13 @@ impl Binding {
             How::Stdio => {
                 let input = if stdin { stdin_input() } else { Input::Nothing };
                 (input, Output::Stdout)
+            }
+            How::Tty if !stdin => return Err(RunError::StdinTaken(name)),
+            How::Tty if !io::stdin().is_terminal() => return Err(RunError::NotATerminal(name)),
+            How::Tty => {
+                let raw = RawTerminal::new()?;
+                eprintln!("{CHIP}: bound name={name} tty; Ctrl-] ends the run");
+                (Input::Raw(raw_input(escape.clone()), raw), Output::Stdout)
             }
             How::Pty => {
                 let (master, slave) = pty(&name)?;
@@ -187,7 +243,7 @@ impl Binding {
                 *next += usize::from(byte.is_some());
                 byte.into_iter().collect()
             }
-            Input::Live(receiver) => receiver.try_iter().collect(),
+            Input::Live(receiver) | Input::Raw(receiver, _) => receiver.try_iter().collect(),
             Input::Pty { master, .. } => {
                 let mut buffer = [0; 256];
                 match master.read(&mut buffer) {
@@ -259,6 +315,82 @@ fn stdin_input() -> Input {
     }
     Input::Piped
 }
+
+/// The raw terminal's keystrokes, from a reader thread that ends the run
+/// at [`ESCAPE`], which goes no further.
+fn raw_input(escape: Escape) -> Receiver<u8> {
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        for byte in io::stdin().lock().bytes() {
+            let Ok(byte) = byte else { break };
+            if byte == ESCAPE {
+                escape.end_run();
+                break;
+            }
+            if sender.send(byte).is_err() {
+                break;
+            }
+        }
+    });
+    receiver
+}
+
+/// The terminal on standard input as it was before [`RawTerminal`] made
+/// it raw, for [`restore_terminal`], which a forced exit calls too.
+#[cfg(unix)]
+static SAVED: Mutex<Option<Termios>> = Mutex::new(None);
+
+/// The terminal on standard input made raw, put back as it was when
+/// this goes.  Input is raw (no echo, no line editing, no signals from
+/// keys: Ctrl-C and Ctrl-Z go to the endpoint); output keeps its
+/// newline translation, so standard error's lines stay lines.
+pub(crate) struct RawTerminal(());
+
+impl RawTerminal {
+    #[cfg(unix)]
+    fn new() -> Result<Self, RunError> {
+        let stdin = io::stdin();
+        let saved = tcgetattr(&stdin).map_err(|error| RunError::Terminal(error.into()))?;
+        let mut raw = saved.clone();
+        cfmakeraw(&mut raw);
+        raw.output_flags |= OutputFlags::OPOST | OutputFlags::ONLCR;
+        *SAVED.lock().unwrap_or_else(PoisonError::into_inner) = Some(saved);
+        tcsetattr(&stdin, SetArg::TCSANOW, &raw).map_err(|error| {
+            restore_terminal();
+            RunError::Terminal(error.into())
+        })?;
+        Ok(Self(()))
+    }
+
+    /// None: raw terminals here are Unix's.
+    #[cfg(not(unix))]
+    fn new() -> Result<Self, RunError> {
+        Err(RunError::Terminal(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "a raw terminal needs a Unix host",
+        )))
+    }
+}
+
+impl Drop for RawTerminal {
+    fn drop(&mut self) {
+        restore_terminal();
+    }
+}
+
+/// Puts the terminal on standard input back as it was before it was made
+/// raw, if it was.
+#[cfg(unix)]
+pub(crate) fn restore_terminal() {
+    let saved = SAVED.lock().unwrap_or_else(PoisonError::into_inner).take();
+    if let Some(saved) = saved {
+        let _ = tcsetattr(io::stdin(), SetArg::TCSANOW, &saved);
+    }
+}
+
+/// Nothing: no terminal is made raw off Unix.
+#[cfg(not(unix))]
+pub(crate) const fn restore_terminal() {}
 
 /// Standard input, a file or a pipe, read to its end.
 fn read_stdin() -> Result<Vec<u8>, RunError> {

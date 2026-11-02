@@ -128,7 +128,9 @@ pod answers on USB, a virtual BDM cable (PLAN.md, Background debug
 mode).
 Standard input that is a file or a pipe is read to its end when input
 first goes in and fed a byte a turn, so the run is the same each time;
-a terminal's is live.  `--bind NAME=stdout` writes an endpoint's
+a terminal's is live.  `--bind console=tty` makes the terminal a
+serial console: keys go in raw as typed, Ctrl-C included, and Ctrl-]
+ends the run.  `--bind NAME=stdout` writes an endpoint's
 output as `stdio` does and reads nothing, for an endpoint that only
 listens or to leave standard input to another binding.
 `mc683xx-run --help` gives the rest; `--firmware` gives a board
