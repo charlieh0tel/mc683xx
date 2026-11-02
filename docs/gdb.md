@@ -339,7 +339,10 @@ it, kill leaves it halted.
   and read back, so one in ROM is refused (`E16`).  A stop at one
   reports `swbreak` with PC on it.  Each comes out of the address space
   it went into, and only if BGND is still there.  However the session
-  ends, a running target is halted and every breakpoint removed.
+  ends, a running target is halted and every breakpoint removed; one
+  that does not come out (BGND reads back) is the session's error,
+  `SessionError::Unrestored`, naming where, and a detach then leaves
+  the target halted rather than resume it over BGND.
 - **Steps** are `Cpu32Target::step`: one instruction, or into an
   exception's handler, stopping where T1 tracing would.
 - **Continue** is GO, then a look at the target and at gdb every

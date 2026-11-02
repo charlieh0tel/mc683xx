@@ -115,7 +115,8 @@ where
         Ok(_) => Ending::Detached,
         Err(error) => return Err(failure(error)),
     };
-    cleaned.map_err(SessionError::Target)?;
+    // a target left with BGND planted is not resumed
+    cleaned?;
     if ending == Ending::Detached {
         session.target.resume().map_err(SessionError::Target)?;
     }
@@ -261,8 +262,9 @@ impl<T: Target> Session<'_, T> {
     /// If the target may be running on its own, halts it and takes its
     /// stop as gdb's would be, so a breakpoint's RPC is put back; then
     /// removes every breakpoint planted.  Each is tried whatever the
-    /// last did; the first of the target's errors.
-    fn clean_up(&mut self) -> Result<(), T::Error> {
+    /// last did; the first of the target's errors, or else the
+    /// breakpoints that did not come out.
+    fn clean_up<C>(&mut self) -> Result<(), SessionError<T::Error, C>> {
         let mut first = Ok(());
         if self.going.is_some() && !self.emulated {
             let ran = match self.target.run_for(Cycles(0), &|| false) {
@@ -272,8 +274,17 @@ impl<T: Target> Session<'_, T> {
             first = ran.and_then(|ran| self.stopped(ran)).map(|_| ());
         }
         self.going = None;
-        let removed = reached(self.unplant_all()).map(|_| ());
-        first.and(removed)
+        let removed = self.unplant_all();
+        first.and(removed).map_err(SessionError::Target)?;
+        if !self.planted.is_empty() {
+            let addresses = self
+                .planted
+                .iter()
+                .map(|planted| Address(planted.address))
+                .collect();
+            return Err(SessionError::Unrestored(addresses));
+        }
+        Ok(())
     }
 }
 
