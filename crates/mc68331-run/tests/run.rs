@@ -12,6 +12,8 @@ use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
 use std::net::TcpStream;
+#[cfg(unix)]
+use std::panic;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
@@ -20,6 +22,8 @@ use std::process::Command;
 use std::process::Output;
 use std::process::Stdio;
 use std::sync::mpsc;
+#[cfg(unix)]
+use std::sync::mpsc::RecvTimeoutError;
 use std::thread;
 use std::time::Duration;
 
@@ -945,6 +949,12 @@ fn a_bdm_debugger_drives_the_board_over_the_virtual_cable() {
     assert!(status.is_some());
 }
 
+/// The longest a read or write on the cable may wait.
+#[cfg(unix)]
+const CABLE_TIMEOUT: Duration = Duration::from_secs(10);
+/// The longest the test's gdb sessions over the cable may take.
+#[cfg(unix)]
+const SESSIONS_DEADLINE: Duration = Duration::from_secs(60);
 /// The most bytes one memory request to the cable carries.
 #[cfg(unix)]
 const CABLE_MEMORY_BYTES: usize = 56;
@@ -1132,8 +1142,40 @@ fn gdb_over(
 #[test]
 fn gdb_drives_the_board_over_the_virtual_cable_as_over_a_pod() {
     let directory = board("gdb-bdm", &echo::image());
-    let (child, cable) = bdm_session(&directory.join("echo.toml"), &directory);
-    let mut cable = Cable(cable);
+    let (mut child, cable) = bdm_session(&directory.join("echo.toml"), &directory);
+    cable.set_read_timeout(Some(CABLE_TIMEOUT)).unwrap();
+    cable.set_write_timeout(Some(CABLE_TIMEOUT)).unwrap();
+    // the sessions in a thread of their own, so a stub that never
+    // answers fails the test, the runner ended, rather than hang it
+    let (sender, receiver) = mpsc::channel();
+    let sessions = thread::spawn(move || {
+        gdb_sessions_over(Cable(cable));
+        sender.send(()).unwrap();
+    });
+    match receiver.recv_timeout(SESSIONS_DEADLINE) {
+        Ok(()) => sessions.join().unwrap(),
+        Err(RecvTimeoutError::Timeout) => {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            panic!("the gdb sessions over the cable did not end in {SESSIONS_DEADLINE:?}");
+        }
+        Err(RecvTimeoutError::Disconnected) => {
+            child.kill().unwrap();
+            child.wait().unwrap();
+            match sessions.join() {
+                Err(panicked) => panic::resume_unwind(panicked),
+                Ok(()) => unreachable!("the sessions ended without saying so"),
+            }
+        }
+    }
+    let (status, _) = interrupted(child);
+    assert!(status.is_some());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+/// The test's gdb sessions over `cable`, a pod's host's.
+#[cfg(unix)]
+fn gdb_sessions_over(mut cable: Cable) {
     // BDM is enabled by a reset with BKPT held, as a pod resets
     cable.reset_halted().unwrap();
     // the firmware runs, and Ctrl-C halts it
@@ -1224,7 +1266,4 @@ fn gdb_drives_the_board_over_the_virtual_cable_as_over_a_pod() {
         )
         .unwrap();
     assert_eq!(word, [0x52, 0x80]);
-    let (status, _) = interrupted(child);
-    assert!(status.is_some());
-    fs::remove_dir_all(directory).unwrap();
 }
