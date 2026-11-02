@@ -67,17 +67,16 @@ use mc683xx_target::size::Size;
 use crate::arch::Cpu32;
 use crate::arch::GdbRegisters;
 use crate::arch::Location;
-use crate::stub::EFAULT;
-use crate::stub::EINVAL;
+use crate::protocol::EFAULT;
+use crate::protocol::EINVAL;
+use crate::protocol::EIO;
+use crate::protocol::description;
+use crate::protocol::failure;
 use crate::stub::Ending;
 use crate::stub::SessionError;
-use crate::stub::description;
-use crate::stub::failure;
 
 /// BGND (CPU32RM 4.4, BGND): a software breakpoint.
 const BGND: [u8; 2] = [0x4a, 0xfa];
-/// gdb's error for a register it cannot read or write: EIO.
-const EIO: u8 = 5;
 /// How long the stub sleeps between looks at a running target and at
 /// gdb.
 const POLL_TICK: Duration = Duration::from_millis(1);
