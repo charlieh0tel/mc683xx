@@ -7,6 +7,7 @@ use mc683xx_cpu32::flat::Unmapped;
 use mc683xx_cpu32::interrupt::NoIrqPin;
 use mc683xx_cpu32::memory::MemoryError;
 use mc683xx_mc68331::chip::BuildError;
+use mc683xx_mc68331::debug::TargetError;
 use mc683xx_mc68331::host::AccessError;
 use mc683xx_modules::sim::clock::ClockSourceError;
 
@@ -110,4 +111,7 @@ pub(crate) enum Error {
     /// The chip could not save, or refused a snapshot.
     #[error(transparent)]
     State(#[from] StateError),
+    /// The chip refused a debugger's call.
+    #[error(transparent)]
+    Target(#[from] TargetError),
 }

@@ -48,6 +48,7 @@ mod tests;
 #[cfg(feature = "python")]
 mod exceptions {
     use pyo3::exceptions::PyException;
+    use pyo3::exceptions::PyRuntimeError;
     use pyo3::exceptions::PyValueError;
 
     pyo3::create_exception!(
@@ -72,5 +73,14 @@ mod exceptions {
         PyValueError,
         "Raised by restore for a snapshot of another format or other \
          hardware, bytes that do not decode, or values no run could save."
+    );
+
+    pyo3::create_exception!(
+        mc683xx,
+        TargetError,
+        PyRuntimeError,
+        "Raised by the chip's background debug controls: halt with \
+         background mode not enabled at the last reset, or go or step \
+         with the CPU not in background mode."
     );
 }

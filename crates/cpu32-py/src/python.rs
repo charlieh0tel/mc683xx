@@ -85,6 +85,7 @@ impl From<Error> for PyErr {
                 BusError::new_err(message)
             }
             Error::Access(AccessError::Unpeekable) => exceptions::UnpeekableError::new_err(message),
+            Error::Target(_) => exceptions::TargetError::new_err(message),
             Error::Select(_)
             | Error::Input(_)
             | Error::Frame(_)
@@ -171,6 +172,10 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add(
         "StateError",
         module.py().get_type::<exceptions::StateError>(),
+    )?;
+    module.add(
+        "TargetError",
+        module.py().get_type::<exceptions::TargetError>(),
     )?;
     Ok(())
 }

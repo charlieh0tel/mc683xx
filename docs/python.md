@@ -66,6 +66,11 @@ rename renames the Python name with it.  The deliberate differences:
   levels a port's pins resolve to; `pwm(channel)`, `oc1()`, an output
   worked out from the GPT's registers).  A setter is `set_*`, never a
   writable property.
+- **Background debug:** the chip's `Cpu32Target` calls `halt`, `go`
+  and `step` are `Mc68331` methods; its `halted`, an `Entry`, is the
+  `background` property (`Cpu::background`, through `Mc68331::cpu`),
+  as `halted` is the chip's `Halt`.  `reset_halted` is
+  `reset_with_breakpoint()` then `background`.
 - **Handles:** memories and peripherals are the numbers `Builder`
   returns, not `MemoryId` and `PeripheralId`; a Rust callback trait
   (`MappedPeripheral`, `SpiPeripheral`, `Peripheral`, `Observer`) is a
@@ -503,6 +508,44 @@ assert [event.cause for event in events if isinstance(event, mc683xx.Event.Reset
 assert (len(everything.resets), len(not_watchdog.resets)) == (3, 2)
 ```
 
+## Background debug mode
+
+The chip's BKPT input, as a BDM debugger drives it (CPU32RM 7.2; the
+chip's `Cpu32Target`, `docs/gdb.md` for gdb over it).  The power-on
+reset and `reset()` leave BKPT high, so background mode is disabled
+and BGND is an illegal instruction.  `reset_with_breakpoint()` holds
+BKPT low through RESET: background mode is enabled, and the CPU enters
+it before its first instruction.  `background` is the `Entry` while
+the CPU is in background mode, `None` otherwise (a board's chip has it
+too).  Between runs, `halt()` asserts BKPT: the CPU enters background
+mode at once and returns its `Entry`; `go()` leaves it, to run on at
+the next run; `step()` runs one instruction and returns to it.  A run
+started in background mode spends its budget as time passes and ends
+`Stop.Background(entry)`; FREEZE is asserted meanwhile.  `halt` with
+background mode not enabled at the last reset, and `go` or `step` with
+the CPU not in background mode, raise `TargetError`, as does a step a
+hook or stop request ended early.
+
+```python
+builder = mc683xx.Builder()
+builder.memory(rom([BRANCH_TO_SELF]), ["CSBOOT"], writable=False)
+chip = builder.build()
+try:
+    chip.halt()
+    raise AssertionError("background mode is not enabled")
+except mc683xx.TargetError:
+    pass
+chip.reset_with_breakpoint()
+assert chip.background == mc683xx.Entry.Breakpoint()
+assert chip.read_register("PC") == START
+assert chip.run_for(100).stop == mc683xx.Stop.Background(mc683xx.Entry.Breakpoint())
+assert chip.step() == mc683xx.Entry.Breakpoint()
+chip.go()
+assert chip.background is None
+assert chip.run_for(100).stop == mc683xx.Stop.Budget()
+assert chip.halt() == mc683xx.Entry.Breakpoint()
+```
+
 ## Host I/O
 
 The modules' registers are the firmware's; the host drives and reads
@@ -836,6 +879,8 @@ chip.run_for(500)
   or other hardware, another count of peripherals, bytes that do not
   decode, or values no run could save; a peripheral that
   cannot save, named.
+- `mc683xx.TargetError` (a `RuntimeError`): a background debug control
+  the CPU's state refuses (Background debug mode).
 - `NotImplementedError`: a module that cannot save.
 - `IndexError`: an unknown memory or peripheral number, or a memory range
   past its end.
@@ -945,7 +990,8 @@ system clocks and instructions since power-on);
 `peripheral(name)` gives a Python peripheral's object back; `chip` the
 board's chip, a `BoardChip` with the `Mc68331` methods that read or
 hook it (registers, `bus_read`, `bus_write`, `peek`, the hooks,
-`protect`, what the pins drive, `now`, `halted`, `instructions`),
+`protect`, what the pins drive, `now`, `halted`, `background`,
+`instructions`),
 Rust's `Board::chip`; `take_events()` what the chip did, as
 `Mc68331.take_events`; `marking(name)` the
 peripheral's `marking`, or `None`; `memory(name)`,

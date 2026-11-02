@@ -27,6 +27,7 @@ use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::clock::ClockSource;
+use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry;
 use mc683xx_target::function_code::FunctionCode;
@@ -867,6 +868,13 @@ macro_rules! chip_methods {
                 self.with_chip(py, |chip| Ok(chip.halted().map(Halt::from)))
             }
 
+            /// The `Entry` while the CPU is in background mode (CPU32RM
+            /// 7.2.3).
+            #[getter]
+            fn background(&self, py: Python<'_>) -> PyResult<Option<Entry>> {
+                self.with_chip(py, |chip| Ok(chip.cpu().background().map(Entry::from)))
+            }
+
             /// The vector of the first exception the last run's last
             /// instruction or interrupt took, if any.
             #[getter]
@@ -1265,6 +1273,41 @@ chip_methods! {
     fn reset(&mut self) -> PyResult<()> {
         self.chip.reset();
         self.pending.check()
+    }
+
+    /// RESET driven by the board with BKPT held low through its rising
+    /// edge, as a BDM debugger's: background mode enabled, and the CPU
+    /// in it, `Entry.Breakpoint()`, before its first instruction
+    /// (CPU32RM 7.2.1).
+    fn reset_with_breakpoint(&mut self) -> PyResult<()> {
+        self.chip.reset_with_breakpoint();
+        self.pending.check()
+    }
+
+    /// BKPT asserted: the CPU enters background mode at once, between
+    /// instructions, and its `Entry`.  Raises `TargetError` unless
+    /// background mode was enabled at the last reset.
+    fn halt(&mut self) -> PyResult<Entry> {
+        let entry = Cpu32Target::halt(&mut self.chip);
+        self.pending.check()?;
+        Ok(entry.map_err(Error::from)?.into())
+    }
+
+    /// GO: leaves background mode, to run on at the next run.  Raises
+    /// `TargetError` unless the CPU is in background mode.
+    fn go(&mut self) -> PyResult<()> {
+        Ok(Cpu32Target::go(&mut self.chip).map_err(Error::from)?)
+    }
+
+    /// One instruction from background mode, back in it after, and the
+    /// `Entry`.  Raises `TargetError` unless the CPU is in background
+    /// mode, or if a hook or a stop request ended the step early (the CPU
+    /// in background mode where it stopped); a peripheral's exception as
+    /// `run_for`.
+    fn step(&mut self) -> PyResult<Entry> {
+        let entry = Cpu32Target::step(&mut self.chip);
+        self.pending.check()?;
+        Ok(entry.map_err(Error::from)?.into())
     }
 
     /// Memory number `memory`'s bytes.
