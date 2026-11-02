@@ -498,8 +498,12 @@ fn tty_takes_keystrokes_raw_and_ctrl_bracket_ends_the_run_and_restores_it() {
             directory.join("echo.toml").to_str().unwrap(),
             "--bind",
             "console=tty",
+            // input waits for the firmware to turn the receiver on
+            "--input-after",
+            "0.001",
+            // a lost echo fails in seconds, not at the run's end
             "--seconds",
-            "1000",
+            "5",
             "--pace",
             "realtime",
             "--save",
