@@ -300,7 +300,7 @@ implements it too.  The session halts the target first; detach resumes
 it, kill leaves it halted.
 
 - **Registers** are the same description's, read and written through
-  BDM; PC is RPC.
+  BDM; PC is RPC.  A `G` packet writes only the registers it changes.
 - **Memory** is real bus cycles in one address space, supervisor data
   (5) unless `monitor fc N` names another (0 to 7); `monitor fc` shows
   it.  Words when the address and length are even, else bytes.  A

@@ -236,10 +236,10 @@ impl GdbRegisters {
     }
 
     /// The writes that make registers `before` these, in order: those
-    /// given, the rest as they are.  SR goes first of all but the data
-    /// registers, so SP is the stack pointer the new S selects; SP, USP
-    /// and SSP are written only if gdb changed them, so a change to one
-    /// is not undone by the other's old value.
+    /// given that gdb changed, the rest as they are.  SR goes first of
+    /// all but the data registers, so SP is the stack pointer the new S
+    /// selects; as SP, USP and SSP are written only if gdb changed them,
+    /// a change to one is not undone by the other's old value.
     pub(crate) fn writes(&self, before: &Self) -> Vec<(Location, u32)> {
         let core: [u32; CORE_REGISTERS] = array::from_fn(|index| {
             if index < self.given {
@@ -252,16 +252,14 @@ impl GdbRegisters {
             .chain([PS])
             .chain(A0..SP)
             .chain([PC])
+            .filter(|&index| core[index] != before.core[index])
             .map(|index| (CORE_LOCATIONS[index], core[index]))
             .collect();
         if let (Some(system), Some(old)) = (self.system, before.system) {
-            for index in [USP, SSP] {
+            for index in [USP, SSP, VBR, SFC, DFC] {
                 if system[index] != old[index] {
                     writes.push((SYSTEM_LOCATIONS[index], system[index]));
                 }
-            }
-            for index in [VBR, SFC, DFC] {
-                writes.push((SYSTEM_LOCATIONS[index], system[index]));
             }
         }
         if core[SP] != before.core[SP] {
