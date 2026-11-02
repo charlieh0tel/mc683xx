@@ -3,11 +3,15 @@
 //! 4.4, BGND), so they need memory the target can write; one in ROM is
 //! refused.  BGND enters background mode with PCC at the breakpoint and
 //! RPC past it; the stub puts RPC back on the breakpoint, so the
-//! instruction runs once gdb has removed it.  Each breakpoint is
-//! removed from the address space it was planted in, and only if BGND
-//! is still there.  Memory gdb reads or writes over one is the word it
-//! replaced, unless the program has written over BGND: then the word is
-//! the program's, and the breakpoint is retired.
+//! instruction runs once gdb has removed it.  A stop is matched to a
+//! breakpoint by its address alone: gdb plants in a data space while
+//! the CPU executes in program space, and boards alias the two, so
+//! distinct memory at one address in different spaces is not
+//! supported.  Each breakpoint is removed from the address space it
+//! was planted in, and only if BGND is still there.  Memory gdb reads
+//! or writes over one is the word it replaced, unless the program has
+//! written over BGND: then the word is the program's, and the
+//! breakpoint is retired.
 
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
