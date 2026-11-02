@@ -344,8 +344,14 @@ it, kill leaves it halted.
   the word as it stands.
 - **Breakpoints** are software only: BGND written over the instruction
   and read back, so one in ROM is refused (`E16`).  A stop at one
-  reports `swbreak` with PC on it.  Each comes out of the address space
-  it went into, and only if BGND is still there.  However the session
+  reports `swbreak` with PC on it.  A stop is matched to a breakpoint
+  by its address alone, not its space: gdb plants in the data space
+  `monitor fc` names while the CPU executes in program space, and
+  boards alias the two.  Distinct memory at one address in different
+  spaces is not supported: a BGND of the program's own at a planted
+  breakpoint's address, in another space, is taken for the breakpoint.
+  Each comes out of the address space it went into, and only if BGND
+  is still there.  However the session
   ends, a running target is halted and every breakpoint removed; one
   that does not come out (BGND reads back) is the session's error,
   `SessionError::Unrestored`, naming where, and a detach then leaves

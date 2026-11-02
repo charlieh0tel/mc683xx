@@ -215,7 +215,8 @@ impl<T: Target> Session<'_, T> {
 
     /// gdb's view of why the target entered background mode for
     /// `entry`, at the BGND a step began on or else at PCC (CPU32RM
-    /// 7.2.5.3).  A planted breakpoint's BGND has RPC put back on it.
+    /// 7.2.5.3).  A planted breakpoint's BGND has RPC put back on it;
+    /// it is matched by address alone, whatever its space (planted).
     fn entered(&mut self, entry: Entry) -> Result<SingleThreadStopReason<u32>, T::Error> {
         Ok(match entry {
             Entry::Background => {
