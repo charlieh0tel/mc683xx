@@ -86,6 +86,16 @@ fn a_snapshot_mid_run_reproduces_the_run() {
 }
 
 #[test]
+fn a_pending_breakpoint_is_saved() {
+    let mut cpu = looping();
+    cpu.set_breakpoint_pending(true);
+    let snapshot = cpu.save();
+    let mut other = looping();
+    other.restore(&snapshot).unwrap();
+    assert!(other.breakpoint_pending());
+}
+
+#[test]
 fn the_format_matches_its_golden() {
     let mut cpu = looping();
     trace(&mut cpu, 333);

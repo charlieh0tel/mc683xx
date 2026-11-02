@@ -12,9 +12,11 @@ use crate::bus::BusError;
 use crate::cycles::Cycles;
 use crate::effective_address::Altered;
 use crate::exception;
+use crate::exception::Breakpoint;
 use crate::exception::CycleKind;
 use crate::exception::Exception;
 use crate::exception::Fault;
+use crate::exception::HARDWARE_BREAKPOINT_NUMBER;
 use crate::exception::Movem;
 use crate::exception::MovemResume;
 use crate::exception::Processed;
@@ -382,7 +384,8 @@ impl Cpu {
     /// state, interrupt mask 7, VBR zero, then SSP and PC from the two
     /// long words at zero in supervisor program space.  A bus or
     /// address error before the first instruction is fetched is a
-    /// double bus fault.
+    /// double bus fault.  A pending hardware breakpoint is dropped, as
+    /// reset clears all other exceptions (6.1.5).
     ///
     /// # Errors
     ///
@@ -396,6 +399,7 @@ impl Cpu {
         self.stopped = false;
         self.last_tail = 0;
         self.idle = None;
+        self.bare.breakpoint_pending = false;
         self.fault_window = true;
         self.released = None;
         self.movem_resume = None;
@@ -466,8 +470,58 @@ impl Cpu {
             self.block_start = true;
         }
         self.bare.end = None;
-        let run = self.run_instructions(bus, interrupts, now, budget, None);
+        let run = self.run_from_boundary(bus, interrupts, now, budget, None);
         self.left_pc = Address(self.registers.pc);
+        run
+    }
+
+    /// [`run_instructions`](Self::run_instructions), a pending
+    /// breakpoint acknowledged first: outside its loop, so a run with
+    /// none pending runs as it would without them.
+    #[inline]
+    fn run_from_boundary(
+        &mut self,
+        bus: &mut dyn Bus,
+        interrupts: &mut dyn Interrupts,
+        now: Cycles,
+        budget: Cycles,
+        limits: Option<Limits>,
+    ) -> Run {
+        if self.bare.breakpoint_pending && budget > Cycles::ZERO {
+            return self.run_after_breakpoint(bus, interrupts, now, budget, limits);
+        }
+        self.run_instructions(bus, interrupts, now, budget, limits)
+    }
+
+    /// [`run_from_boundary`](Self::run_from_boundary) with a breakpoint
+    /// pending: the breakpoint, then the instructions in what is left
+    /// of `budget`, unless a hook ended the run in its exception.
+    #[cold]
+    #[inline(never)]
+    fn run_after_breakpoint(
+        &mut self,
+        bus: &mut dyn Bus,
+        interrupts: &mut dyn Interrupts,
+        now: Cycles,
+        budget: Cycles,
+        limits: Option<Limits>,
+    ) -> Run {
+        self.stop_request = None;
+        let taken = Core {
+            cpu: self,
+            bus,
+            now,
+        }
+        .pending_breakpoint();
+        if let Some(stop) = self.stop_request.take() {
+            return Run {
+                cycles: taken,
+                stop,
+            };
+        }
+        let mut run =
+            self.run_instructions(bus, interrupts, now + taken, taken.until(budget), limits);
+        run.cycles += taken;
         run
     }
 
@@ -1193,6 +1247,70 @@ impl Core<'_> {
         self.cpu.taken = Some(Exception::Short { vector, pc });
         self.process(vector, pc, None, Some(level), false);
         self.cpu.sampled_mask = self.cpu.registers.interrupt_mask();
+        // a breakpoint STOP left pending: acknowledged at the end of
+        // the exception processing that ends STOP (CPU32RM 6.2.6)
+        if self.cpu.bare.breakpoint_pending && !self.cpu.bdm_enabled && self.cpu.idle.is_none() {
+            let cycles = self.hardware_breakpoint();
+            self.charge(cycles);
+        }
+    }
+
+    /// A breakpoint pending as a run starts, at an instruction boundary
+    /// after the last instruction's trace and before the interrupt
+    /// sampled there, as Table 6-2 orders them (CPU32RM 6.1.5, 6.2.10):
+    /// with background mode enabled the CPU enters it, as
+    /// [`Cpu::breakpoint`]; disabled, the hardware breakpoint is
+    /// acknowledged, unless the CPU is halted or stopped, which leaves
+    /// it pending (PLAN.md, Background debug mode).  Its clocks.
+    #[cold]
+    #[inline(never)]
+    fn pending_breakpoint(&mut self) -> Cycles {
+        let cpu = &mut *self.cpu;
+        if cpu.bdm_enabled {
+            cpu.bare.breakpoint_pending = false;
+            cpu.breakpoint();
+            return Cycles::ZERO;
+        }
+        if cpu.idle.is_some() || cpu.stopped {
+            return Cycles::ZERO;
+        }
+        cpu.stall = Cycles::ZERO;
+        cpu.extra = Cycles::ZERO;
+        cpu.taken = None;
+        let cycles = self.hardware_breakpoint();
+        cycles + self.cpu.stall + self.cpu.extra
+    }
+
+    /// A pending hardware breakpoint acknowledged, background mode
+    /// disabled (CPU32RM 6.2.6, 7.2.2.1; MC68331UM 4.5.4.1.2): the
+    /// acknowledge cycle, then, if DSACK ended it, nothing more, the
+    /// word on the bus ignored; if BERR did, exception processing
+    /// through vector 12 with a six-word frame, the next PC and the
+    /// address of the instruction executing when the breakpoint was
+    /// sensed, the last executed (6.4.2).  Its clocks (8.3.13,
+    /// Breakpoint), less the overlap; the cycles' wait states go to the
+    /// stall.
+    #[cold]
+    #[inline(never)]
+    fn hardware_breakpoint(&mut self) -> Cycles {
+        self.cpu.bare.breakpoint_pending = false;
+        if self
+            .breakpoint_acknowledge(HARDWARE_BREAKPOINT_NUMBER, Breakpoint::Hardware)
+            .is_some()
+        {
+            return self.cpu.spend(timing::exception::BREAKPOINT);
+        }
+        let vector = Vector::HARDWARE_BREAKPOINT;
+        let pc = Address(self.cpu.registers.pc);
+        let address = self.instruction_pc();
+        self.cpu.taken.get_or_insert(Exception::Long {
+            vector,
+            pc,
+            address,
+        });
+        self.cpu.leave_loop_mode();
+        self.process(vector, pc, Some(address), None, false);
+        self.cpu.spend(timing::exception::BREAKPOINT_BUS_ERROR)
     }
 
     /// Reads an operand of `size` at `address` in `function_code`'s
@@ -2140,6 +2258,191 @@ mod tests {
         assert_eq!(peek_long(&cpu, 0x300c), 0xd3);
         assert_eq!(cpu.registers.ssp, STACK);
         assert_eq!(cpu.movem_resume, None);
+    }
+
+    /// A bus that ends breakpoint acknowledge cycles with DSACK after
+    /// `stall` clocks, recording them, and nothing else.
+    #[derive(Debug, Default)]
+    struct BreakpointResponder {
+        /// The clocks each acknowledge takes beyond the tables'.
+        stall: Cycles,
+        /// The acknowledge cycles.
+        acknowledges: Vec<BusAccess>,
+    }
+
+    impl Bus for BreakpointResponder {
+        fn read(&mut self, access: BusAccess) -> Result<Read, BusError> {
+            if !access.function_code.is_cpu_space() {
+                return Err(BusError);
+            }
+            self.acknowledges.push(access);
+            // the word is ignored (CPU32RM 6.2.6)
+            Ok(Read {
+                value: ILLEGAL.into(),
+                stall: self.stall,
+            })
+        }
+
+        fn write(&mut self, _access: BusAccess, _value: u32) -> Result<Cycles, BusError> {
+            Err(BusError)
+        }
+    }
+
+    /// The six-word frame at SSP, as the long words SR and the high
+    /// word of the next PC; its low word and the format and vector; the
+    /// faulted instruction's PC (CPU32RM Figure 6-4).
+    fn six_word_frame(sr: u16, next: u32, vector: Vector, faulted: u32) -> [u32; 3] {
+        [
+            u32::from(sr) << 16 | next >> 16,
+            (next & 0xffff) << 16 | 0x2000 | vector.offset(),
+            faulted,
+        ]
+    }
+
+    /// The three long words at SSP plus `offset`.
+    fn frame_at(cpu: &Cpu, offset: u32) -> [u32; 3] {
+        let at = cpu.registers.ssp + offset;
+        [
+            peek_long(cpu, at),
+            peek_long(cpu, at + 4),
+            peek_long(cpu, at + 8),
+        ]
+    }
+
+    #[test]
+    fn a_hardware_breakpoint_acknowledge_ended_by_dsack_is_ignored() {
+        let mut cpu = prepared(&[NOP, NOP], status::S);
+        step(&mut cpu, &mut NoInterrupts);
+        cpu.set_breakpoint_pending(true);
+        let mut bus = BreakpointResponder {
+            stall: Cycles(3),
+            ..BreakpointResponder::default()
+        };
+        let run = cpu.run_for(&mut bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
+        // CPU space, type 0000, BKPT #7 on A[4:2], T on A1, a word
+        // (CPU32RM 5.3.1.1, 6.2.6; MC68331UM Figure 4-12)
+        assert_eq!(bus.acknowledges.len(), 1);
+        let acknowledge = bus.acknowledges[0];
+        assert_eq!(acknowledge.address, Address(0x1e));
+        assert_eq!(acknowledge.function_code, FunctionCode::CPU_SPACE);
+        assert_eq!(acknowledge.size, Size::Word);
+        assert!(!cpu.breakpoint_pending());
+        assert_eq!(cpu.registers.pc, CODE + 2, "nothing taken");
+        assert_eq!(cpu.registers.ssp, STACK);
+        // CPU32RM 8.3.13, Breakpoint (Acknowledged), and the wait states
+        let acknowledged = u64::from(crate::timing::exception::BREAKPOINT.cycles);
+        assert_eq!(run.cycles, Cycles(acknowledged + 3));
+        // the next run executes the next instruction
+        step(&mut cpu, &mut NoInterrupts);
+        assert_eq!(cpu.registers.pc, CODE + 4);
+        assert_eq!(bus.acknowledges.len(), 1);
+    }
+
+    #[test]
+    fn a_hardware_breakpoint_acknowledge_ended_by_berr_takes_vector_12() {
+        let sr = status::S | 2 << status::INTERRUPT_SHIFT | status::Z;
+        let mut cpu = prepared(&[NOP, NOP], sr);
+        step(&mut cpu, &mut NoInterrupts);
+        cpu.set_breakpoint_pending(true);
+        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
+        assert!(!cpu.breakpoint_pending());
+        assert_eq!(cpu.registers.pc, handler(Vector::HARDWARE_BREAKPOINT));
+        assert_eq!(cpu.registers.ssp, STACK - 12);
+        // format $2: SR, the next PC, $2030, the instruction executing
+        // when the breakpoint was sensed (CPU32RM 6.2.6, 6.4.2)
+        assert_eq!(
+            frame_at(&cpu, 0),
+            six_word_frame(sr, CODE + 2, Vector::HARDWARE_BREAKPOINT, CODE)
+        );
+        assert_eq!(cpu.registers.sr(), sr, "S set, the mask kept");
+        // CPU32RM 8.3.13, Breakpoint (Bus Error)
+        let cost = u64::from(crate::timing::exception::BREAKPOINT_BUS_ERROR.cycles);
+        assert_eq!(run.cycles, Cycles(cost));
+        assert_eq!(
+            cpu.exception_taken().map(|taken| taken.vector()),
+            Some(Vector::HARDWARE_BREAKPOINT)
+        );
+    }
+
+    #[test]
+    fn trace_then_hardware_breakpoint_then_interrupt() {
+        let sr = status::S | status::T1 | status::INTERRUPT_MASK;
+        let mut cpu = prepared(&[NOP], sr);
+        // the NOP and its trace
+        step(&mut cpu, &mut NoInterrupts);
+        cpu.registers.set_sr(status::S);
+        cpu.set_breakpoint_pending(true);
+        let mut source = Source::new(4, Acknowledge::Autovector);
+        let breakpoint = u64::from(crate::timing::exception::BREAKPOINT_BUS_ERROR.cycles);
+        cpu.run_for(
+            &mut NoBus,
+            &mut source,
+            Cycles::ZERO,
+            Cycles(breakpoint + 1),
+        );
+        // Table 6-2: the trace's processing first, then the
+        // breakpoint's, then the interrupt's, whose handler runs first
+        // and returns to the breakpoint's, which returns to the trace's
+        // (CPU32RM 6.1.5)
+        let interrupt = STACK - 12 - 12 - 8;
+        assert_eq!(cpu.registers.ssp, interrupt);
+        assert_eq!(
+            cpu.registers.pc,
+            handler(Vector::autovector(InterruptLevel::new(4).unwrap()))
+        );
+        assert_eq!(
+            peek_long(&cpu, interrupt + 2),
+            handler(Vector::HARDWARE_BREAKPOINT)
+        );
+        assert_eq!(
+            frame_at(&cpu, 8),
+            six_word_frame(
+                status::S,
+                handler(Vector::TRACE),
+                Vector::HARDWARE_BREAKPOINT,
+                CODE
+            )
+        );
+        assert_eq!(
+            frame_at(&cpu, 20),
+            six_word_frame(sr, CODE + 2, Vector::TRACE, CODE)
+        );
+    }
+
+    #[test]
+    fn a_stopped_cpu_acknowledges_its_breakpoint_after_the_interrupt_that_wakes_it() {
+        let mut cpu = prepared(&[NOP], status::S);
+        cpu.stopped = true;
+        cpu.set_breakpoint_pending(true);
+        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(100));
+        assert_eq!(run.stop, Stop::Stopped);
+        assert!(cpu.breakpoint_pending(), "STOP leaves it pending");
+        assert_eq!(cpu.registers.ssp, STACK);
+        step(&mut cpu, &mut Source::new(1, Acknowledge::Autovector));
+        assert!(!cpu.stopped);
+        assert!(!cpu.breakpoint_pending());
+        // the breakpoint's frame on the interrupt's, returning to its
+        // handler (CPU32RM 6.2.6)
+        assert_eq!(cpu.registers.pc, handler(Vector::HARDWARE_BREAKPOINT));
+        assert_eq!(cpu.registers.ssp, STACK - 8 - 12);
+        let level_1 = Vector::autovector(InterruptLevel::new(1).unwrap());
+        assert_eq!(peek_long(&cpu, cpu.registers.ssp + 2), handler(level_1));
+        assert_eq!(peek_long(&cpu, STACK - 6), CODE);
+    }
+
+    #[test]
+    fn a_pending_breakpoint_enters_background_mode_if_enabled_and_reset_drops_it() {
+        let mut cpu = prepared(&[NOP], status::S);
+        cpu.set_bdm_enabled(true);
+        cpu.set_breakpoint_pending(true);
+        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(100));
+        assert_eq!(run.stop, Stop::Background(Entry::Breakpoint));
+        assert_eq!(cpu.background(), Some(Entry::Breakpoint));
+        assert!(!cpu.breakpoint_pending());
+        assert_eq!(cpu.registers.ssp, STACK, "no acknowledge, no exception");
+        cpu.set_breakpoint_pending(true);
+        let _ = cpu.reset(&mut NoBus, Cycles::ZERO);
+        assert!(!cpu.breakpoint_pending());
     }
 
     #[test]

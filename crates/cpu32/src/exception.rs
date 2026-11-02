@@ -470,6 +470,8 @@ const BREAKPOINT_NUMBER_SHIFT: u32 = 2;
 pub(crate) enum Breakpoint {
     /// The BKPT instruction: T clear.
     Software,
+    /// The BKPT input, the hardware breakpoint: T set.
+    Hardware,
 }
 
 impl Breakpoint {
@@ -477,9 +479,15 @@ impl Breakpoint {
     const fn t_bit(self) -> u32 {
         match self {
             Self::Software => 0,
+            Self::Hardware => 1 << 1,
         }
     }
 }
+
+/// The breakpoint number a hardware breakpoint's acknowledge cycle
+/// carries, always %111 (CPU32RM 5.3.1.1; MC68331UM 4.5.4.1.2): with T
+/// set, the cycle is at $00001E (CPU32RM 6.2.6).
+pub(crate) const HARDWARE_BREAKPOINT_NUMBER: u16 = 0b111;
 
 impl Core<'_> {
     /// A breakpoint acknowledge cycle for breakpoint `number` (CPU32RM

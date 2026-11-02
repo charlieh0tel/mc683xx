@@ -34,16 +34,8 @@ pub(crate) const ZERO_DIVIDE: Cost = exception::DIVIDE_BY_ZERO.cost();
 /// spurious and uninitialized interrupts too.
 pub(crate) const INTERRUPT: Cost = exception::INTERRUPT.cost();
 /// Hardware breakpoint, acknowledged (CPU32RM 8.3.13, Breakpoint).
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the core has no BKPT pin to raise one")
-)]
 pub(crate) const BREAKPOINT: Cost = exception::BREAKPOINT.cost();
 /// Hardware breakpoint, bus error on its acknowledge (CPU32RM 8.3.13).
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the core has no BKPT pin to raise one")
-)]
 pub(crate) const BREAKPOINT_BUS_ERROR: Cost = exception::BREAKPOINT_BUS_ERROR.cost();
 /// BKPT, acknowledged (CPU32RM 8.3.13): the table's entry for BKPT,
 /// and charged again for each further acknowledge when one returns

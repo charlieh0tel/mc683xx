@@ -2103,8 +2103,8 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   `Mc68331::reset_with_breakpoint`: RESET with BKPT low through its
   rising edge enables background mode and enters it before the first
   instruction, PCC the reset PC, which the manual does not give.
-  BKPT is relatched at every reset (7.2.1) and the chip models no BKPT
-  input between resets, so an internal reset (watchdog, halt monitor)
+  BKPT is relatched at every reset (7.2.1) and the chip holds no BKPT
+  level across one, so an internal reset (watchdog, halt monitor)
   disables background mode, as a pod that has let BKPT go sees on
   silicon.  `halt` acknowledges a breakpoint at once, out of STOP or
   LPSTOP too, which wakes the modules LPSTOP stopped (an inference: the
@@ -2190,9 +2190,39 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   emulated cycle can); the halt and spurious interrupt monitors run
   on.  FRZ0 freezes the GPT and FRZ1 halts the QSPI, above; the SCI
   runs on.  Each module's snapshot keeps what FREEZE did to it.
-- With background mode disabled, BKPT should run a breakpoint
-  acknowledge cycle and take vector 12 on its bus error (6.2.6); not
-  modeled yet, so `halt` then fails and nothing happens to the CPU.
+- With background mode disabled, BKPT is a hardware breakpoint
+  exception (Table 7-1, 7.2.2.1).  `Mc68331::assert_breakpoint` is
+  the pin, asserted between runs (with background mode enabled, the
+  entry `halt` makes); the core holds the breakpoint pending
+  (`Cpu::set_breakpoint_pending`, in its snapshot), as 6.2.6 has
+  breakpoints left pending, not taken at once.  The next run
+  acknowledges it before anything else: a breakpoint acknowledge
+  cycle, a word read in CPU space at $00001E, type 0000, BKPT #7, T
+  set (5.3.1.1; MC68331UM 4.5.4.1.2, Figure 4-12), through the `Bus`,
+  so a select or bus peripheral decoding CPU space can answer it.
+  DSACK ignores the breakpoint and the word returned; BERR takes
+  vector 12 with a format $2 frame (6.4.2): SR, the next PC, and as
+  the faulted PC the last instruction executed, "the instruction
+  executing when the breakpoint was sensed".  Costs are 8.3.13's
+  Breakpoint rows.  Its place between runs is a boundary after the
+  last instruction's trace and before the interrupt sampled at the
+  next, so Table 6-2's trace, breakpoint, interrupt order holds:
+  three frames, the interrupt's on top.  Our choices, the manuals
+  silent:
+  - A breakpoint is asserted only between instructions: BKPT tagging
+    one bus cycle of an instruction (7.2.7.2; MC68331UM 4.5.4.1.2, a
+    prefetch tag dropped by a pipeline flush) is not modeled, nor is
+    a peripheral driving BKPT.
+  - A stopped CPU keeps it pending: STOP and LPSTOP end on trace,
+    interrupt or reset (CPU32RM 4.4, STOP, LPSTOP), so the interrupt
+    that ends them is processed first and the breakpoint acknowledged
+    at the end of that exception processing (6.2.6), its frame on
+    the interrupt's.  This differs from the enabled path, which
+    acknowledges out of STOP at once (above).
+  - A halted CPU keeps it pending; reset drops it ("reset clears all
+    other exceptions", 6.1.5).
+  - `halt` still fails, `NotEnabled`, and leaves the CPU alone,
+    though a pod asserting BKPT on silicon would cause the exception.
 - FAR is the address of the last bus or address error's cycle.  The
   chip's moves with every bus cycle (7.2.5.1); tracking that would
   cost every cycle a store for a register only BDM reads, so the
@@ -2273,8 +2303,10 @@ then they stay our choices.
   which `rte` refetches (6.3.2.3); the current instruction PC is the
   same, but for an odd PC, where it is the instruction before
   (6.2.3).
-- **DBUF of a read fault**: zero.  **B1, B0**: always clear; no
-  hardware breakpoint input yet.
+- **DBUF of a read fault**: zero.  **B1, B0**: always clear; a
+  hardware breakpoint is acknowledged at a boundary before any bus
+  error could find it pending (Background debug mode), and the core
+  has no on-chip breakpoint channel.
 - **T1:T0 = 11** (reserved, Table 6-3): traced as T1.
 - **T0 and group 2**: an instruction raising TRAP, TRAPcc, CHK and the
   like counts as a change of flow.  BKPT ending in an illegal
@@ -2425,10 +2457,10 @@ then they stay our choices.
     format error as illegal.  `bgnd` takes the illegal instruction
     exception (7.2.2.2), ILLEGAL's row.  Divide by zero is charged on
     top of the divide.
-  - Never charged, for the core cannot raise them: hardware breakpoint
-    (no BKPT pin), and RTE's bus error on a six-word frame (RTE reads
-    nothing of it past the format word, so a bus error comes before
-    the format is known and costs the four-word row).
+  - Never charged, for the core cannot raise it: RTE's bus error on a
+    six-word frame (RTE reads nothing of it past the format word, so
+    a bus error comes before the format is known and costs the
+    four-word row).
 - **QSM and GPT on `reset`**: QSMRM and GPTRM are silent; both return
   to their reset state, as SIMRM 8.2.6's "internal modules other than
   the CPU" reads.
