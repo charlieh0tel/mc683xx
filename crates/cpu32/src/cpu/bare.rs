@@ -174,7 +174,8 @@ impl VectorSet {
     }
 }
 
-/// The bare host's settings and what a stop for them carries.
+/// The bare host's settings, what a stop for them carries, and what
+/// the run loop looks at only between runs, kept out of its way.
 #[derive(Debug, Default)]
 pub(crate) struct Bare {
     /// Stop on a fault rather than take it.
@@ -192,6 +193,11 @@ pub(crate) struct Bare {
     pub(crate) last_invalid: Option<Invalid>,
     /// The interrupts taken since the last limited run began.
     pub(crate) interrupts_taken: u64,
+    /// Whether a hardware breakpoint is pending, BKPT asserted with
+    /// background mode disabled, until it is acknowledged (CPU32RM
+    /// 6.2.6).  Here, out of the run loop's way, as it is looked at
+    /// only as a run starts.
+    pub(crate) breakpoint_pending: bool,
 }
 
 impl Cpu {
@@ -214,7 +220,7 @@ impl Cpu {
         let budget = limits.cycles.unwrap_or(Cycles(u64::MAX - now.0));
         let first = self.instructions;
         self.bare.interrupts_taken = 0;
-        let run = self.run_instructions(bus, interrupts, now, budget, Some(limits));
+        let run = self.run_from_boundary(bus, interrupts, now, budget, Some(limits));
         self.left_pc = Address(self.registers.pc);
         let end = self.bare.end.take().unwrap_or(End::Stop(run.stop));
         LimitedRun {
@@ -284,10 +290,11 @@ impl Cpu {
     /// BKPT acknowledged between instructions: with background mode
     /// enabled the CPU enters it for a breakpoint, PCC the last
     /// instruction executed, and this is true (CPU32RM 7.2.2.1).
-    /// Disabled, nothing happens and this is false: the breakpoint
-    /// acknowledge cycle and its exception are not modeled yet
-    /// (PLAN.md, Background debug mode).  In background mode already,
-    /// true with nothing changed.
+    /// Disabled, nothing happens and this is false: BKPT then asks for
+    /// a hardware breakpoint exception, which
+    /// [`set_breakpoint_pending`](Self::set_breakpoint_pending) leaves
+    /// for the next run.  In background mode already, true with nothing
+    /// changed.
     pub fn breakpoint(&mut self) -> bool {
         if self.background().is_some() {
             return true;
@@ -298,6 +305,30 @@ impl Cpu {
         let pcc = self.instruction_pc;
         self.enter_background(Entry::Breakpoint, pcc);
         true
+    }
+
+    /// Whether a hardware breakpoint is pending.
+    #[must_use]
+    pub const fn breakpoint_pending(&self) -> bool {
+        self.bare.breakpoint_pending
+    }
+
+    /// Leaves a hardware breakpoint pending, as BKPT asserted with
+    /// background mode disabled does, or withdraws one not yet
+    /// acknowledged.  Breakpoints are left pending, not taken at once
+    /// (CPU32RM 6.2.6): the next run acknowledges it before anything
+    /// else, at the boundary where the last run ended, after that
+    /// instruction's trace and before an interrupt (Table 6-2), with a
+    /// breakpoint acknowledge cycle in CPU space at $00001E, BKPT #7
+    /// with T set (5.3.1.1).  DSACK ending it ignores the breakpoint;
+    /// BERR takes vector 12 with a six-word frame (6.4.2).  A halted CPU
+    /// keeps it pending, and a stopped one until the interrupt that
+    /// ends STOP or LPSTOP, after whose exception processing it is
+    /// acknowledged (PLAN.md, Background debug mode).  Reset drops it.
+    /// With background mode enabled the next run enters it, as
+    /// [`breakpoint`](Self::breakpoint).
+    pub const fn set_breakpoint_pending(&mut self, pending: bool) {
+        self.bare.breakpoint_pending = pending;
     }
 
     /// Leaves background mode to execute from RPC, the PC, as GO does:

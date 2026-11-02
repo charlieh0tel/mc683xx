@@ -27,7 +27,7 @@ use crate::debug::serial::Serial;
 /// The format of [`Mc68331::save`]'s bytes.  The core's, the modules',
 /// the peripherals' and the QSPI peripheral's snapshots inside carry their
 /// own.
-pub const VERSION: u32 = 14;
+pub const VERSION: u32 = 15;
 
 /// What the QSPI's peripheral's save and restore errors name.
 const QSPI_PERIPHERAL: &str = "the QSPI peripheral";

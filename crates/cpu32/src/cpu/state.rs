@@ -36,7 +36,7 @@ mod tests;
 
 /// The format of [`Cpu::save`]'s bytes.  A change to what it saves
 /// changes it.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 
 /// Bytes of the version that starts every snapshot, little-endian.
 const VERSION_BYTES: usize = size_of::<u32>();
@@ -359,6 +359,8 @@ struct CpuState {
     background: Option<u32>,
     /// [`Cpu::bdm_enabled`].
     bdm_enabled: bool,
+    /// [`Cpu::breakpoint_pending`].
+    breakpoint_pending: bool,
     /// [`Cpu::atemp`].
     atemp: u32,
     /// [`Cpu::pcc`].
@@ -435,6 +437,7 @@ impl Cpu {
             halt: self.halted(),
             background: self.background().map(Entry::atemp),
             bdm_enabled: self.bdm_enabled,
+            breakpoint_pending: self.bare.breakpoint_pending,
             atemp: self.atemp,
             pcc: self.pcc,
             far: self.far,
@@ -491,6 +494,7 @@ impl Cpu {
                 .map(|atemp| Idle::Background(Entry::from_atemp(atemp)))
         });
         self.bdm_enabled = state.bdm_enabled;
+        self.bare.breakpoint_pending = state.breakpoint_pending;
         self.atemp = state.atemp;
         self.pcc = state.pcc;
         self.far = state.far;

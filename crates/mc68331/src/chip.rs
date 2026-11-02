@@ -869,7 +869,7 @@ impl Mc68331 {
     /// SIM, the modules and the peripherals it reaches reset, the decode
     /// back to CSBOOT alone, then the CPU's reset exception (SIMRM 8;
     /// MC68331UM 4.6.8).  BKPT is relatched at every reset (CPU32RM
-    /// 7.2.1); the chip models no BKPT input between resets, so internal
+    /// 7.2.1); the chip holds no BKPT level across one, so internal
     /// resets see it high.
     fn reset_for(&mut self, cause: ResetCause, breakpoint: bool) {
         let now = self.now;

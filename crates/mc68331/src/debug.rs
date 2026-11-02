@@ -66,6 +66,26 @@ pub enum TargetError {
 }
 
 impl Mc68331 {
+    /// BKPT asserted between runs, so at an instruction boundary
+    /// (CPU32RM 7.2.2.1, Table 7-1).  With background mode enabled the
+    /// CPU enters it at once, as [`Cpu32Target::halt`] makes it, and
+    /// this is true.  Disabled, a hardware breakpoint is left pending
+    /// for the next run ([`Cpu::set_breakpoint_pending`]), and this is
+    /// false: its breakpoint acknowledge cycle, in CPU space at
+    /// $00001E, reaches the selects and the bus peripherals; one that
+    /// ends it with DSACK has the breakpoint ignored, and with none it
+    /// ends in a bus error, which takes vector 12 (CPU32RM 6.2.6;
+    /// MC68331UM 4.5.4.1.2).
+    ///
+    /// [`Cpu::set_breakpoint_pending`]: mc683xx_cpu32::cpu::Cpu::set_breakpoint_pending
+    pub fn assert_breakpoint(&mut self) -> bool {
+        if self.cpu.bdm_enabled() {
+            return self.breakpoint();
+        }
+        self.cpu.set_breakpoint_pending(true);
+        false
+    }
+
     /// BKPT acknowledged between instructions, as
     /// [`Cpu::breakpoint`](mc683xx_cpu32::cpu::Cpu::breakpoint): out of
     /// STOP or LPSTOP too, which wakes the modules LPSTOP stopped.

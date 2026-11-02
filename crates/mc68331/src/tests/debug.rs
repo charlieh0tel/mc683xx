@@ -7,6 +7,7 @@ use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
+use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_target::Cpu32Target;
@@ -19,8 +20,12 @@ use mc683xx_target::size::Size;
 
 use super::BRANCH_TO_SELF;
 use super::ROM_BYTES;
+use super::Recorder;
 use super::START;
+use super::cs;
 use super::image;
+use super::on;
+use super::write_register;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::debug::TargetError;
@@ -522,4 +527,129 @@ fn freeze_stops_the_bus_monitor_with_frzbm() {
         (false, false),
         "FRZBM cleared while frozen"
     );
+}
+
+/// CSBAR2 (MC68331UM D.3.25).
+const CSBAR2: u32 = SIM + 0x54;
+/// CSOR2 (MC68331UM D.3.26).
+const CSOR2: u32 = SIM + 0x56;
+/// CS2's option for breakpoint acknowledges: both bytes, read, DSACK
+/// after no wait states, CPU space, any level (MC68331UM Table 4-22).
+/// With CSBAR2 zero, its 2-Kbyte block covers $00001E.
+const CSOR2_BREAKPOINT_ACKNOWLEDGE: u16 = 0x6800;
+/// Where [`breakpoint_chip`]'s vector 12 handler is, from `RAM`.
+const BREAKPOINT_HANDLER: u32 = 0x100;
+/// Its supervisor stack's top, from `RAM`.
+const BREAKPOINT_STACK: u32 = 0x400;
+
+/// A chip running `program` with BDM disabled, its vectors and
+/// supervisor stack in RAM, vector 12's handler at
+/// [`BREAKPOINT_HANDLER`], and, if `answered`, a peripheral on CS2 that
+/// ends breakpoint acknowledge cycles with DSACK.
+fn breakpoint_chip(program: &[u16], answered: bool) -> (Mc68331, Option<PeripheralId>) {
+    let mut builder = Builder::default();
+    builder
+        .memory(image(program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .unwrap();
+    builder
+        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], true)
+        .unwrap();
+    let responder = answered.then(|| {
+        builder
+            .peripheral(Recorder::answering(BGND.into()), &[cs(2)])
+            .unwrap()
+    });
+    let mut chip = builder.build();
+    if answered {
+        write_register(&mut chip, CSBAR2, 0x0000);
+        write_register(&mut chip, CSOR2, CSOR2_BREAKPOINT_ACKNOWLEDGE);
+    }
+    let handler = RAM + BREAKPOINT_HANDLER;
+    let entry = RAM + Vector::HARDWARE_BREAKPOINT.offset();
+    chip.poke(Address(entry), &handler.to_be_bytes()).unwrap();
+    let registers = chip.registers_mut();
+    registers.vbr = RAM;
+    registers.ssp = RAM + BREAKPOINT_STACK;
+    (chip, responder)
+}
+
+#[test]
+fn with_bdm_disabled_bkpt_runs_an_acknowledge_that_dsack_ignores() {
+    let (mut chip, responder) = breakpoint_chip(&[MOVEQ_1_D0, MOVEQ_1_D0, BRANCH_TO_SELF], true);
+    chip.run_for(Cycles(1));
+    assert_eq!(chip.cpu().registers.pc, START + 2);
+    assert!(!chip.assert_breakpoint(), "no background mode");
+    chip.run_for(Cycles(1));
+    let reads = &chip
+        .peripheral::<Recorder>(responder.unwrap())
+        .unwrap()
+        .reads;
+    // CPU space $00001E: type 0000, BKPT #7, T set; a word (CPU32RM
+    // 5.3.1.1, 6.2.6; MC68331UM 4.5.4.1.2, Figure 4-12)
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].address, 0x1e);
+    assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
+    assert_eq!(reads[0].size, Size::Word);
+    assert_eq!(reads[0].select, on(2));
+    // the word returned is not executed, and nothing is stacked
+    assert_eq!(chip.cpu().registers.ssp, RAM + BREAKPOINT_STACK);
+    assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
+    chip.run_for(Cycles(1));
+    assert_eq!(chip.cpu().registers.pc, START + 4, "the next instruction");
+}
+
+#[test]
+fn with_bdm_disabled_bkpt_takes_vector_12_on_a_bus_error() {
+    let (mut chip, _) = breakpoint_chip(&[MOVEQ_1_D0, MOVEQ_1_D0, BRANCH_TO_SELF], false);
+    chip.run_for(Cycles(1));
+    let sr = chip.cpu().registers.sr();
+    assert!(!chip.assert_breakpoint());
+    assert!(chip.cpu().breakpoint_pending(), "left for the next run");
+    chip.run_for(Cycles(1));
+    assert!(!chip.cpu().breakpoint_pending());
+    assert_eq!(chip.cpu().registers.pc, RAM + BREAKPOINT_HANDLER);
+    // format $2 (CPU32RM 6.2.6, 6.4.2): SR, the next PC, $2030, and the
+    // instruction executing when the breakpoint was sensed
+    let frame = RAM + BREAKPOINT_STACK - 12;
+    assert_eq!(chip.cpu().registers.ssp, frame);
+    let words: Vec<u32> = (0..6)
+        .map(|word| {
+            chip.peek(
+                Address(frame + 2 * word),
+                Size::Word,
+                FunctionCode::SUPERVISOR_DATA,
+            )
+            .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        words,
+        [
+            sr.into(),
+            START >> 16,
+            (START + 2) & 0xffff,
+            0x2030,
+            START >> 16,
+            START & 0xffff
+        ]
+    );
+}
+
+#[test]
+fn a_reset_drops_a_pending_breakpoint() {
+    let (mut chip, _) = breakpoint_chip(&[MOVEQ_1_D0, BRANCH_TO_SELF], false);
+    chip.assert_breakpoint();
+    chip.reset();
+    assert!(!chip.cpu().breakpoint_pending());
+}
+
+#[test]
+fn with_bdm_enabled_bkpt_enters_background_mode_at_once() {
+    let mut chip = chip(&[MOVEQ_1_D0, BRANCH_TO_SELF]);
+    chip.reset_halted().unwrap();
+    chip.go().unwrap();
+    chip.run_for(Cycles(100));
+    assert!(chip.assert_breakpoint());
+    assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Breakpoint)));
+    assert!(!chip.cpu().breakpoint_pending());
 }
