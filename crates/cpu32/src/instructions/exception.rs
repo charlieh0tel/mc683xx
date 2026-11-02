@@ -3,6 +3,7 @@
 
 use crate::cpu::Core;
 use crate::cycles::Cycles;
+use crate::exception::Breakpoint;
 use crate::exception::CycleKind;
 use crate::exception::Exception;
 use crate::exception::Fault;
@@ -47,11 +48,6 @@ const BKPT_NUMBER: u16 = 0b111;
 /// of ours, so a responder that always returns BKPT cannot hold the
 /// run inside one instruction.
 const BKPT_CHAIN: u32 = 16;
-/// Where a breakpoint acknowledge cycle's address carries the
-/// breakpoint number, A\[4:2\]; A1, T, is clear for a software
-/// breakpoint, and A\[19:16\], the CPU space type, is 0000 (CPU32RM
-/// 5.3.1.1; MC68331UM 4.5.4.1.1).
-const BREAKPOINT_NUMBER_SHIFT: u32 = 2;
 /// TRAPcc: 0101 cccc 1111 1ooo (CPU32RM 4.4, TRAPcc).
 const TRAPCC_MASK: u16 = 0xf0f8;
 /// TRAPcc's fixed bits.
@@ -161,11 +157,9 @@ fn bkpt(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
             // The table charged the first.
             core.charge(acknowledge_cost);
         }
-        let address = Address(u32::from(number) << BREAKPOINT_NUMBER_SHIFT);
-        let Ok(word) = core.read(address, Size::Word, FunctionCode::CPU_SPACE) else {
+        let Some(replacement) = core.breakpoint_acknowledge(number, Breakpoint::Software) else {
             return Err(core.illegal());
         };
-        let replacement = word as u16;
         if replacement & BKPT_MASK != BKPT {
             return replace(core, replacement, acknowledge_cost);
         }

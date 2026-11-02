@@ -459,7 +459,44 @@ const fn transfer_count(count: u8) -> u16 {
     (MICROCODE_REVISION as u16) << frame::REVISION_SHIFT | count as u16
 }
 
+/// Where a breakpoint acknowledge cycle's address carries the
+/// breakpoint number, A\[4:2\]; A\[19:16\], the CPU space type, is
+/// 0000 (CPU32RM 5.3.1.1; MC68331UM 4.5.4.1).
+const BREAKPOINT_NUMBER_SHIFT: u32 = 2;
+
+/// What asked for a breakpoint acknowledge cycle, which its T bit, A1,
+/// tells (CPU32RM 5.3.1.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Breakpoint {
+    /// The BKPT instruction: T clear.
+    Software,
+}
+
+impl Breakpoint {
+    /// Its T bit, on A1.
+    const fn t_bit(self) -> u32 {
+        match self {
+            Self::Software => 0,
+        }
+    }
+}
+
 impl Core<'_> {
+    /// A breakpoint acknowledge cycle for breakpoint `number` (CPU32RM
+    /// 5.3.1.1; MC68331UM 4.5.4.1, Figure 4-12): a word read in CPU
+    /// space, type 0000, `number` on A\[4:2\] and `breakpoint`'s T on A1.
+    /// The word on the bus if DSACK ended it, [`None`] if BERR did.
+    pub(crate) fn breakpoint_acknowledge(
+        &mut self,
+        number: u16,
+        breakpoint: Breakpoint,
+    ) -> Option<u16> {
+        let address = Address(u32::from(number) << BREAKPOINT_NUMBER_SHIFT | breakpoint.t_bit());
+        self.read(address, Size::Word, FunctionCode::CPU_SPACE)
+            .ok()
+            .map(|word| word as u16)
+    }
+
     /// Exception processing for a four- or six-word frame (CPU32RM
     /// 6.1.3): the status register copied, S set and T1 and T0 cleared
     /// (with an interrupt, the mask set to its `level`), the frame
