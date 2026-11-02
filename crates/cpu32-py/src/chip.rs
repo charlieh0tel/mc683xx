@@ -1293,6 +1293,17 @@ chip_methods! {
         self.pending.check()
     }
 
+    /// BKPT asserted between runs (Rust's `Mc68331::assert_breakpoint`):
+    /// with background mode enabled the CPU enters it at once, as `halt`
+    /// makes it, and this is true; disabled, a hardware breakpoint is
+    /// left pending for the next run, which takes vector 12 unless a
+    /// peripheral ends its acknowledge cycle, and this is false.
+    fn assert_breakpoint(&mut self) -> PyResult<bool> {
+        let entered = self.chip.assert_breakpoint();
+        self.pending.check()?;
+        Ok(entered)
+    }
+
     /// BKPT asserted: the CPU enters background mode at once, between
     /// instructions, and its `Entry`.  Raises `TargetError` unless
     /// background mode was enabled at the last reset.
