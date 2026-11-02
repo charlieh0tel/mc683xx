@@ -2109,21 +2109,41 @@ and `mc683xx.Machine` in Python (see Python).
   from where a hook stopped calls it again.
 - **Faults:** `set_stop_on_fault`: a bus or address error ends the
   run (`End::Fault`): fetch, read or write; bus error (unmapped or a
-  peripheral's), protected, or address error; the whole address; the
-  registers restored as the instruction (or interrupt or hardware
-  breakpoint entry) began, nothing stacked; a hardware breakpoint is
-  left pending, as a TRAP reruns and an interrupt is sampled again.  A fault while stacking (a bad SSP) stops the same
+  peripheral's), protected, or address error; the whole address;
+  nothing stacked.  A fault while stacking (a bad SSP) stops the same
   way instead of a double bus fault, so the host fixes SSP and goes on
-  with no reset.  Writes the instruction made before the fault stay in
-  memory, and so do frame words stacked before a stacking fault.  A
-  fault stacking the interrupt that ends STOP or LPSTOP leaves the CPU
-  stopped, its SR as STOP or LPSTOP loaded it, so a request withdrawn
-  before the next run does not run it past the STOP.  The interrupt's
-  acknowledge cycle was made: a host modeling LPSTOP's low-power state
-  has seen it end (the chip does not stop on faults).  The code and block hooks of an instruction a fault rolled back are
-  not called again when it reruns; a fault stop in a trace, hardware
-  breakpoint or interrupt leaves those of the instruction at PC, which
-  has not begun, to be called as it does.
+  with no reset.  What the stop keeps:
+  - A fault in an instruction, its own exception's stacking included
+    (a TRAP's, a CHK's), rolls the registers back to its start: it
+    reruns, as a TRAP does, when the run goes on.
+  - A fault stacking an exception taken after an instruction completed
+    (a trace, a hardware breakpoint, an interrupt; CPU32RM 6.1.5,
+    6.2.10) keeps that instruction: the registers are as the
+    exception's processing began, and the exception stays pending.  A
+    trace and a breakpoint are held pending by the core (a trace with
+    its instruction's address, in the snapshot) and taken first when
+    the run goes on, trace before breakpoint (Table 6-2); an interrupt
+    is sampled again.  So an instruction with read-modify-write effects
+    (ADDQ #1,(A0) traced) runs once.  Trace processing "starts at the
+    end of normal processing for the traced instruction" (6.2.10); the
+    same section calls the trace an extension of the instruction, not
+    complete until its trace is, but a fault stop is ours, not the
+    CPU's, and rerunning the instruction would repeat its effects.
+  - A fault stacking the interrupt that ends STOP or LPSTOP leaves the
+    CPU stopped, its SR as STOP or LPSTOP loaded it, so a request
+    withdrawn before the next run does not run it past the STOP.  The
+    interrupt's acknowledge cycle was made: a host modeling LPSTOP's
+    low-power state has seen it end (the chip does not stop on
+    faults).
+  - Writes made before the fault stay in memory, and so do frame words
+    stacked before a stacking fault.
+  - The code and block hooks of an instruction a fault rolled back are
+    not called again when it reruns; after a fault stacking a trace,
+    breakpoint or interrupt, those of the instruction at PC, which has
+    not begun, are called as it does.
+  - A trace RTE requeues from a format $C frame's TR (6.3.2.2) is
+    the RTE's own exception: a fault stacking it rolls the RTE back,
+    and the RTE reruns.
 - **Intercepts:** `set_intercepted(vector)`: an exception an
   instruction raises (traps, illegal, line A and F, privilege, zero
   divide, CHK, TRAPV, format error; not faults, trace or interrupts)
@@ -2136,7 +2156,8 @@ and `mc683xx.Machine` in Python (see Python).
 - **Hook context:** memory and invalid access hooks see the
   instruction's address (`pc`) and whether the cycle stacks a frame
   (`stacking`); `Cpu::instruction_registers` holds the registers as
-  the instruction began while such a hook is installed or faults stop
+  the instruction, or the trace, breakpoint or interrupt processing
+  after one, began while such a hook is installed or faults stop
   the run.  Stacking writes are flagged, not hidden: a host that wants
   them hidden skips them.
 - **Deviations, for parity runs only:** `Deviations { misaligned,
@@ -2288,8 +2309,9 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   the faulted PC the last instruction executed, "the instruction
   executing when the breakpoint was sensed".  Costs are 8.3.13's
   Breakpoint rows.  Its place between runs is a boundary after the
-  last instruction's trace and before the interrupt sampled at the
-  next, so Table 6-2's trace, breakpoint, interrupt order holds:
+  last instruction's trace (one a fault stop left pending taken
+  first, Faults) and before the interrupt sampled at the next, so
+  Table 6-2's trace, breakpoint, interrupt order holds:
   three frames, the interrupt's on top.  With `set_stop_on_fault`, a
   fault stacking its frame stops the run with the registers as the
   breakpoint's processing began, after the last instruction (or the

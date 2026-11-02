@@ -233,8 +233,9 @@ pub struct Cpu {
     loop_mode: Option<Address>,
     /// Whether `began` is kept: while a hook or a setting reads it.
     capture: bool,
-    /// The registers as the instruction, or interrupt or hardware
-    /// breakpoint entry, began, while `capture`.
+    /// The registers as the instruction began, or the trace, hardware
+    /// breakpoint or interrupt processing after one, while `capture`:
+    /// what a fault stop restores (PLAN.md, Faults).
     began: Registers,
     /// The SR bits that trace: T1 and T0, or none with the untraced
     /// deviation.
@@ -400,6 +401,7 @@ impl Cpu {
         self.last_tail = 0;
         self.idle = None;
         self.bare.breakpoint_pending = false;
+        self.bare.trace_pending = None;
         self.fault_window = true;
         self.released = None;
         self.movem_resume = None;
@@ -475,9 +477,9 @@ impl Cpu {
         run
     }
 
-    /// [`run_instructions`](Self::run_instructions), a pending
-    /// breakpoint acknowledged first: outside its loop, so a run with
-    /// none pending runs as it would without them.
+    /// [`run_instructions`](Self::run_instructions), a pending trace
+    /// and breakpoint taken first: outside its loop, so a run with none
+    /// pending runs as it would without them.
     #[inline]
     fn run_from_boundary(
         &mut self,
@@ -487,18 +489,22 @@ impl Cpu {
         budget: Cycles,
         limits: Option<Limits>,
     ) -> Run {
-        if self.bare.breakpoint_pending && budget > Cycles::ZERO {
-            return self.run_after_breakpoint(bus, interrupts, now, budget, limits);
+        if (self.bare.breakpoint_pending || self.bare.trace_pending.is_some())
+            && budget > Cycles::ZERO
+        {
+            return self.run_after_pending(bus, interrupts, now, budget, limits);
         }
         self.run_instructions(bus, interrupts, now, budget, limits)
     }
 
-    /// [`run_from_boundary`](Self::run_from_boundary) with a breakpoint
-    /// pending: the breakpoint, then the instructions in what is left
-    /// of `budget`, unless a hook ended the run in its exception.
+    /// [`run_from_boundary`](Self::run_from_boundary) with a trace or a
+    /// breakpoint pending: the trace, then the breakpoint, in Table
+    /// 6-2's order (CPU32RM 6.1.5), then the instructions in what is
+    /// left of `budget`, unless a fault or a hook ended the run in
+    /// their exception processing.
     #[cold]
     #[inline(never)]
-    fn run_after_breakpoint(
+    fn run_after_pending(
         &mut self,
         bus: &mut dyn Bus,
         interrupts: &mut dyn Interrupts,
@@ -507,12 +513,18 @@ impl Cpu {
         limits: Option<Limits>,
     ) -> Run {
         self.stop_request = None;
-        let taken = Core {
+        let mut core = Core {
             cpu: self,
             bus,
             now,
-        }
-        .pending_breakpoint();
+        };
+        let traced = core.pending_trace();
+        let taken = if core.cpu.bare.breakpoint_pending && core.cpu.stop_request.is_none() {
+            core.now = now + traced;
+            traced + core.pending_breakpoint()
+        } else {
+            traced
+        };
         if let Some(stop) = self.stop_request.take() {
             return Run {
                 cycles: taken,
@@ -613,8 +625,9 @@ impl Cpu {
             let cpu = &mut *core.cpu;
             cpu.instructions += 1;
             if cpu.stop_request.is_some() {
-                if cpu.bare.end.is_some() {
-                    // A fault or intercept stop: nothing ran.
+                if cpu.bare.end.is_some() && cpu.bare.trace_pending.is_none() {
+                    // A fault or intercept stop in the instruction:
+                    // nothing ran.
                     cpu.instructions -= 1;
                 }
                 if let Some(run) = requested(cpu, elapsed) {
@@ -674,8 +687,8 @@ impl Cpu {
         }
     }
 
-    /// Keeps the registers as an instruction, or exception processing
-    /// at a boundary, begins in `began`, while `capture`.
+    /// Keeps the registers as an instruction, or the exception
+    /// processing after one, begins in `began`, while `capture`.
     #[inline(always)]
     fn capture_began(&mut self) {
         if self.capture {
@@ -1144,17 +1157,31 @@ impl Core<'_> {
         self.cpu.refund.until(cycles) + self.cpu.stall + self.cpu.extra
     }
 
-    /// Trace exception processing (CPU32RM 6.2.10): a six-word frame
-    /// with the next PC and the traced instruction's address.
+    /// Trace exception processing (CPU32RM 6.2.10) after the instruction
+    /// executing completed: a six-word frame with the next PC and the
+    /// traced instruction's address.
     fn trace(&mut self) -> Processed {
-        let pc = Address(self.cpu.registers.pc);
         let address = self.instruction_pc();
+        self.trace_at(address)
+    }
+
+    /// [`trace`](Self::trace) of the instruction at `address`, taken
+    /// after it completed (6.2.10): the registers captured first, so
+    /// that a fault stop stacking its frame keeps the instruction and
+    /// leaves the trace pending for the next run.
+    fn trace_at(&mut self, address: Address) -> Processed {
+        self.cpu.capture_began();
+        let pc = Address(self.cpu.registers.pc);
         self.cpu.taken.get_or_insert(Exception::Long {
             vector: Vector::TRACE,
             pc,
             address,
         });
-        self.process_after_instruction(Vector::TRACE, pc, Some(address), None)
+        let processed = self.process_after_instruction(Vector::TRACE, pc, Some(address), None);
+        if processed == Processed::Stopped {
+            self.cpu.bare.trace_pending = Some(address);
+        }
+        processed
     }
 
     /// Exception processing at an instruction boundary, after an
@@ -1290,6 +1317,29 @@ impl Core<'_> {
             let cycles = self.hardware_breakpoint();
             self.charge(cycles);
         }
+    }
+
+    /// A trace a fault stop left pending (PLAN.md, Faults), taken as a
+    /// run starts, at the boundary after its instruction, unless the
+    /// CPU is halted or in background mode, which leaves it pending.
+    /// Its clocks.
+    #[cold]
+    #[inline(never)]
+    fn pending_trace(&mut self) -> Cycles {
+        let cpu = &mut *self.cpu;
+        if cpu.idle.is_some() {
+            return Cycles::ZERO;
+        }
+        let Some(address) = cpu.bare.trace_pending.take() else {
+            return Cycles::ZERO;
+        };
+        cpu.stall = Cycles::ZERO;
+        cpu.extra = Cycles::ZERO;
+        cpu.taken = None;
+        cpu.leave_loop_mode();
+        self.trace_at(address);
+        let cycles = self.cpu.spend(timing::exception::TRACE);
+        cycles + self.cpu.stall + self.cpu.extra
     }
 
     /// A breakpoint pending as a run starts, at an instruction boundary

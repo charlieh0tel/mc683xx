@@ -180,8 +180,9 @@ impl FaultStopView {
         self.0.registers.pc
     }
 
-    /// The registers as the instruction began, which the CPU holds
-    /// again.
+    /// The registers as the instruction, or the trace, hardware
+    /// breakpoint or interrupt processing after one, began, which the
+    /// CPU holds again.
     #[getter]
     fn registers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         hooks::register_dictionary(py, &self.0.registers)

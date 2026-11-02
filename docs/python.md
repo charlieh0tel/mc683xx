@@ -1345,10 +1345,15 @@ stops the run on a bus or address error instead of taking it:
 `End.Fault(fault)`, its `FaultStop` giving the
 `cycle` (`CycleKind`), the `cause` (`FaultCause.BUS_ERROR` for
 unmapped or a peripheral's, `PROTECTED`, `ADDRESS_ERROR`), the whole
-`address`, `size`, `function_code`, `pc` and `registers` as the
-instruction began, which the CPU holds again, nothing stacked.  A
-fault while stacking, a bad SSP, stops it the same way rather than
-halting the CPU, so the host fixes SSP and runs on.
+`address`, `size`, `function_code`, `pc` and `registers`, which
+the CPU holds again, nothing stacked.  A fault while stacking, a bad
+SSP, stops it the same way rather than halting the CPU, so the host
+fixes SSP and runs on.  A fault in an instruction, its own exception's
+stacking included, rolls the registers back to its start, and it
+reruns; a fault stacking a trace, a hardware breakpoint or an
+interrupt, taken after an instruction completed, keeps that
+instruction and leaves the exception pending for the next run (a
+stopped CPU stays stopped).
 
 ```python
 TRAP_1, TRAP_7 = 0x4E41, 0x4E47
