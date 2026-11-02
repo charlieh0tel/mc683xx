@@ -429,3 +429,46 @@ fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_its_breakpoint_pending()
         "not acknowledged: no exception processing ended"
     );
 }
+
+/// LPSTOP #$2000 (CPU32RM 4.4, LPSTOP).
+const LPSTOP_UNMASKED: [u16; 3] = [0xf800, 0x01c0, 0x2000];
+
+#[test]
+fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_the_cpu_stopped() {
+    for code in [&STOP_UNMASKED[..], &LPSTOP_UNMASKED] {
+        let after = CODE + 2 * code.len() as u32;
+        let mut machine = machine(code);
+        machine.cpu.set_stop_on_fault(true);
+        one(&mut machine);
+        let stopped_sr = machine.cpu.registers.sr();
+        machine.cpu.registers.ssp = NOWHERE;
+        let pin = IrqPin::new(3).unwrap();
+        machine.request_interrupt(pin, None);
+        let End::Fault(fault) = one(&mut machine) else {
+            panic!("no fault");
+        };
+        assert_eq!(fault.registers.pc, after, "the interrupt not taken");
+        assert_eq!(fault.registers.sr(), stopped_sr, "SR as loaded");
+        assert!(machine.cpu.stopped, "not ended (CPU32RM 4.4, STOP, LPSTOP)");
+        // the request withdrawn: still stopped, nothing run past it
+        machine.clear_interrupt(pin);
+        assert_eq!(one(&mut machine), End::Stop(Stop::Stopped));
+        assert_eq!(machine.cpu.registers.pc, after);
+        // requested again with SSP fixed: the interrupt is taken
+        machine.cpu.registers.ssp = STACK;
+        let level_3 = handle(
+            &mut machine,
+            Vector::autovector(InterruptLevel::new(3).unwrap()),
+            0x4200,
+        );
+        machine.request_interrupt(pin, None);
+        let run = machine.run_limited(Limits {
+            steps: Some(0),
+            ..Limits::default()
+        });
+        assert_eq!((run.end, run.steps), (End::Steps, 1));
+        assert!(!machine.cpu.stopped);
+        assert_eq!(machine.cpu.registers.pc, level_3);
+        assert_eq!(frame(&machine).1, after);
+    }
+}
