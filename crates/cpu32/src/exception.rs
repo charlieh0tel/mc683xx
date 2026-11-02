@@ -320,6 +320,11 @@ pub(crate) enum Processed {
     /// A bus or address error while stacking or fetching the vector:
     /// a type IV fault taken in its place, or a double bus fault.
     Faulted,
+    /// Such a fault stopped the run ([`Cpu::set_stop_on_fault`]):
+    /// nothing taken.
+    ///
+    /// [`Cpu::set_stop_on_fault`]: crate::cpu::Cpu::set_stop_on_fault
+    Stopped,
 }
 
 /// MOVEM's progress through its operand transfers, which a type III
@@ -540,7 +545,7 @@ impl Core<'_> {
             Err(fault) if self.cpu.bare.stop_on_fault => {
                 let end = self.cpu.fault_end(fault);
                 self.cpu.end_with(end);
-                Processed::Faulted
+                Processed::Stopped
             }
             Err(fault) => {
                 self.exception_fault(fault, top, &frame, trace_pending);

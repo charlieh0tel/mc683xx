@@ -1260,7 +1260,7 @@ impl Core<'_> {
         if self.cpu.bare.breakpoint_pending
             && !self.cpu.bdm_enabled
             && self.cpu.idle.is_none()
-            && !(processed == Processed::Faulted && self.cpu.bare.stop_on_fault)
+            && processed != Processed::Stopped
         {
             self.cpu.capture_began();
             let cycles = self.hardware_breakpoint();
@@ -1325,7 +1325,7 @@ impl Core<'_> {
         });
         self.cpu.leave_loop_mode();
         let processed = self.process(vector, pc, Some(address), None, false);
-        if processed == Processed::Faulted && self.cpu.bare.stop_on_fault {
+        if processed == Processed::Stopped {
             self.cpu.bare.breakpoint_pending = true;
         }
         self.cpu.spend(timing::exception::BREAKPOINT_BUS_ERROR)
