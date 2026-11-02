@@ -712,8 +712,10 @@ chip beside `Mc68331`.
   `mc683xx.TargetError` (a `RuntimeError`).  The rest of
   `Cpu32Target` (registers and memory by BDM's names and function
   codes) is not offered: registers by name and `bus_read`/`bus_write`
-  already reach them.  A board has none of the controls: they drive
-  BKPT, a pin, and `step` runs the chip, which are the board's.
+  already reach them.  A board has its own, but `step` (Background
+  debug mode, below): BKPT is a board pin, so `Board` has
+  `reset_with_breakpoint()`, `assert_breakpoint()`, `halt()` and
+  `go()`, and its `chip` only `background`.
   `Stop`, `Halt` and `ResetCause` are enums; they, the other enums
   and the value classes that compare equal (`Frame`, `Output`,
   `Serial`) hash, so they key dicts and sets.
@@ -906,7 +908,9 @@ chip beside `Mc68331`.
   it, so code that took the names keeps working.  `observe(net,
   callback)` is `Board::observe` (Boards, Front ends), its
   `ObserverId` for `unobserve`; `inspect(name)` is `Board::inspect`, as
-  a dict.  `reset_for(ResetCause)` is `Board::reset_for`.
+  a dict.  `reset_for(ResetCause)` is `Board::reset_for`;
+  `reset_with_breakpoint`, `assert_breakpoint`, `halt` and `go` are
+  `Board`'s (Background debug mode).
   `control()` is `Board::control`, an `mc683xx.BoardControl`
   (frozen, so any thread may call it: `stop`, `send`, `set_pacing`),
   and `mc683xx.Pacing` is `pacing::Pacing` (`UNPACED`, `REAL_TIME`,
@@ -2265,6 +2269,28 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
     other exceptions", 6.1.5).
   - `halt` still fails, `NotEnabled`, and leaves the CPU alone,
     though a pod asserting BKPT on silicon would cause the exception.
+- On a board (2026-11-02) BKPT is the board's, beside RESET:
+  `Board::reset_with_breakpoint` is `reset_for(External)` with BKPT
+  held low through RESET's release (the `Chip` trait's
+  `reset_with_breakpoint` at the release, by the path a net's RESET
+  takes), so the nets see RESET and the peripherals in its scope reset
+  as for an external reset; `Board::assert_breakpoint` is the chip's
+  (the `Chip` trait's); `Board::halt` and `Board::go`, for a chip that
+  is a `Cpu32Target`, are the chip's calls.  Each then takes what the
+  chip's outputs did onto the nets, as a run's quantum does (a module
+  FREEZE stops, LPSTOP's end); FREEZE itself the chip keeps, and is on
+  no net.  A board run in background mode spends its time without the
+  CPU, as a halted one.  BKPT is held only through the call: RESET
+  released by a net later relatches it high, and while the board holds
+  RESET low `reset_with_breakpoint` does nothing, as `reset_for`.
+  There is no `Board::step`, and so no `Cpu32Target` for `Board`: the
+  chip's step runs one step of `Limits::steps` by its own run, outside
+  the board's loop, so peripherals' events and nets would not move
+  with it, and the board's own hooks (traced exceptions, watched code)
+  would end it as a failed step.  Stepping through the board would need
+  a limited run on the `Chip` trait, the board's run loop carrying the
+  limit, and the chip's step split around it; a debugger on a board
+  steps by hooks (gdb's board target) meanwhile.
 - FAR is the address of the last bus or address error's cycle.  The
   chip's moves with every bus cycle (7.2.5.1); tracking that would
   cost every cycle a store for a register only BDM reads, so the

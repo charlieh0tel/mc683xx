@@ -535,6 +535,14 @@ impl chip::Chip for Mc68331 {
         Self::reset_for(self, cause);
     }
 
+    fn reset_with_breakpoint(&mut self) {
+        Self::reset_with_breakpoint(self);
+    }
+
+    fn assert_breakpoint(&mut self) -> bool {
+        Self::assert_breakpoint(self)
+    }
+
     fn apply_diversions(&mut self) {
         // a run makes the diversions asked between runs as it starts,
         // and one of no budget does nothing else

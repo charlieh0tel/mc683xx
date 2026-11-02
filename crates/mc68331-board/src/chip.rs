@@ -267,6 +267,17 @@ pub trait Chip: Sized + 'static {
     /// [`ResetCause::External`] is RESET driven by the board.
     fn reset_for(&mut self, cause: ResetCause);
 
+    /// RESET driven by the board with BKPT held low through its rising
+    /// edge, as a BDM debugger's reset: background mode enabled, and the
+    /// CPU in it before its first instruction (CPU32RM 7.2.1).
+    fn reset_with_breakpoint(&mut self);
+
+    /// BKPT asserted between runs (CPU32RM 7.2.2.1): with background
+    /// mode enabled the CPU enters it at once, and this is true;
+    /// disabled, a hardware breakpoint is left pending for the next run,
+    /// and this is false.
+    fn assert_breakpoint(&mut self) -> bool;
+
     /// Makes the memory diversions the board's routers asked for
     /// between runs ([`Requests::divert`], [`Requests::release`]) now,
     /// so that a snapshot holds them.

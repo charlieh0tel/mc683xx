@@ -87,12 +87,14 @@ use pyo3::types::PyString;
 use pyo3::types::PyTuple;
 
 use crate::chip::BoardChip;
+use crate::chip::Entry;
 use crate::chip::Event;
 use crate::chip::ResetCause;
 use crate::chip::Stop;
 use crate::control;
 use crate::control::BoardControlView;
 use crate::control::PacingView;
+use crate::error::Error;
 use crate::exceptions;
 use crate::gdb;
 use crate::held::Held;
@@ -1678,6 +1680,46 @@ impl BoardView {
     fn reset_for(&mut self, cause: ResetCause) -> PyResult<()> {
         self.board.reset_for(cause.into());
         self.check()
+    }
+
+    /// `reset_for(ResetCause.EXTERNAL)` with BKPT held low through
+    /// RESET's release, as a BDM debugger's (Rust's
+    /// `Board::reset_with_breakpoint`): background mode enabled, and the
+    /// CPU in it, `Entry.Breakpoint()`, before its first instruction,
+    /// RESET driven on the board's nets and the peripherals reset as
+    /// for `reset_for`.  Nothing while the board holds RESET low.
+    fn reset_with_breakpoint(&mut self) -> PyResult<()> {
+        self.board.reset_with_breakpoint();
+        self.check()
+    }
+
+    /// The board's BKPT asserted between runs (Rust's
+    /// `Board::assert_breakpoint`): with background mode enabled the CPU
+    /// enters it at once and this is true; disabled, a hardware
+    /// breakpoint waits for the next run, which takes vector 12 unless a
+    /// peripheral ends its acknowledge cycle, and this is false.
+    fn assert_breakpoint(&mut self) -> PyResult<bool> {
+        let entered = self.board.assert_breakpoint();
+        self.check()?;
+        Ok(entered)
+    }
+
+    /// BKPT asserted: the CPU enters background mode at once, and its
+    /// `Entry` (Rust's `Board::halt`).  Raises `TargetError` unless
+    /// background mode was enabled at the last reset.
+    fn halt(&mut self) -> PyResult<Entry> {
+        let entry = self.board.halt();
+        self.check()?;
+        Ok(entry.map_err(Error::from)?.into())
+    }
+
+    /// GO: leaves background mode, to run on at the next run (Rust's
+    /// `Board::go`).  Raises `TargetError` unless the CPU is in
+    /// background mode.
+    fn go(&mut self) -> PyResult<()> {
+        let gone = self.board.go();
+        self.check()?;
+        Ok(gone.map_err(Error::from)?)
     }
 
     /// What the chip did since the last call (Rust's
