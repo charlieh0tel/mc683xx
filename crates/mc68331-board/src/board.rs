@@ -1411,12 +1411,16 @@ impl<C: Chip> Board<C> {
             self.chip.input(pin, signal, at_cycles);
             return;
         }
-        let Signal::Level(level) = signal else {
-            return;
-        };
-        // asserted, the chip resets and is held in reset; released, its
-        // reset processing begins (SIMRM 8.3.1), its clocks on board
-        // time from then, as none ran while it was held
+        if let Signal::Level(level) = signal {
+            self.apply_reset(level, at);
+        }
+    }
+
+    /// RESET at `level` from `at`: asserted, the chip resets and is held
+    /// in reset; released, its reset processing begins (SIMRM 8.3.1),
+    /// its clocks on board time from then, as none ran while it was
+    /// held.
+    fn apply_reset(&mut self, level: bool, at: Time) {
         match (self.reset_in, level) {
             (true, false) => self.chip.reset_for(ResetCause::External),
             (false, true) => {
@@ -1446,15 +1450,22 @@ impl<C: Chip> Board<C> {
             return;
         }
         if cause == ResetCause::External {
-            let at = self.now;
-            for level in [false, true] {
-                self.trace_pin(C::RESET, Signal::Level(level), at);
-                self.apply(C::RESET, Signal::Level(level), at);
-            }
+            self.pulse_reset();
         } else {
             self.chip.reset_for(cause);
         }
         self.collect();
+    }
+
+    /// RESET asserted and released now by the board, by the path a RESET
+    /// net's edges take, the zero-width assertion itself not put on the
+    /// nets.
+    fn pulse_reset(&mut self) {
+        let at = self.now;
+        for level in [false, true] {
+            self.trace_pin(C::RESET, Signal::Level(level), at);
+            self.apply_reset(level, at);
+        }
     }
 
     /// The chip's outputs since the last quantum onto their nets, its
