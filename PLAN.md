@@ -1664,6 +1664,14 @@ checks the bare build.
   watchpoints, and steps by `Cpu32Target::step`, which reports where
   it stopped, not always one instruction later.  Continue is GO and a
   look at `halted` and the connection each millisecond or so.
+- **Torn breakpoint writes** (2026-11-02): `Target::write_memory`
+  does not promise a word all or nothing, so a write planting BGND or
+  putting the word back that fails or does not read back may have
+  landed in part.  The breakpoint is then uncertain: its word is
+  BGND, the original or a byte-wise mix, any of which is put back
+  while the target is halted; only a word of other bytes is taken for
+  the program's.  A verified breakpoint keeps the narrower rule
+  (anything but BGND is the program's).
 - **One session, one trait** (2026-11-01): the BDM stub began as a
   second session beside the hook one; they shared the register and
   target descriptions and the session errors, and differed in three

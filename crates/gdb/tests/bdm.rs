@@ -65,8 +65,16 @@ const LOOK: Cycles = Cycles(1000);
 /// each time the stub looks.  The second field counts register writes;
 /// the third is an address where a write of anything but BGND is taken
 /// and dropped, a word that cannot be put back; the fourth a word the
-/// program writes, at its address, when it next runs.
-struct Running(Mc68331, usize, Option<u32>, Option<(u32, [u8; 2])>);
+/// program writes, at its address, when it next runs; the fifth a word
+/// whose next write at its address writes the first byte alone and
+/// fails.
+struct Running(
+    Mc68331,
+    usize,
+    Option<u32>,
+    Option<(u32, [u8; 2])>,
+    Option<(u32, [u8; 2])>,
+);
 
 impl Cpu32Target for Running {
     type Error = TargetError;
@@ -139,6 +147,15 @@ impl Cpu32Target for Running {
         if self.2 == Some(address.0) && data != BGND {
             return Ok(());
         }
+        if self
+            .4
+            .is_some_and(|(at, word)| at == address.0 && data == word)
+        {
+            self.4 = None;
+            self.0
+                .write_memory(address, function_code, Size::Byte, &data[..1])?;
+            return Err(TargetError::NotHalted);
+        }
         self.0.write_memory(address, function_code, size, data)
     }
 }
@@ -158,7 +175,7 @@ fn chip() -> Running {
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
     chip.write_register(Register::A0, STORE).unwrap();
-    Running(chip, 0, None, None)
+    Running(chip, 0, None, None, None)
 }
 
 /// Serves `script` to `target`: how it ended and the stub's replies.
@@ -519,4 +536,61 @@ fn a_target_that_cannot_step_is_offered_no_step() {
         Ok(START),
         "not stepped"
     );
+}
+
+#[test]
+fn a_breakpoint_planted_in_part_is_put_back() {
+    // BGND's first byte lands and the write fails: the original is put
+    // back, not taken for the program's
+    let mut target = chip();
+    target.4 = Some((STORE_PC, BGND));
+    let (ending, replies) = session(
+        &mut target,
+        vec![packet(&format!("Z0,{STORE_PC:x},2")), packet("k")],
+    );
+    ending.unwrap();
+    assert!(replies[0].starts_with('E'), "{}", replies[0]);
+    assert_eq!(word(&mut target, STORE_PC), [0x20, 0x80]);
+}
+
+#[test]
+fn a_breakpoint_planted_in_part_that_cannot_be_put_back_is_kept() {
+    let mut target = chip();
+    target.2 = Some(STORE_PC);
+    target.4 = Some((STORE_PC, BGND));
+    let (ending, replies) = session(
+        &mut target,
+        vec![packet(&format!("Z0,{STORE_PC:x},2")), packet("D")],
+    );
+    assert!(replies[0].starts_with('E'), "{}", replies[0]);
+    match ending {
+        Err(SessionError::Unrestored(at)) => assert_eq!(at, [Address(STORE_PC)]),
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        Cpu32Target::halted(&mut target.0).unwrap().is_some(),
+        "not resumed"
+    );
+    assert_eq!(word(&mut target, STORE_PC), [BGND[0], 0x80]);
+}
+
+#[test]
+fn a_breakpoint_put_back_in_part_is_put_back_with_the_session() {
+    // the original's first byte lands over BGND and the write fails:
+    // the session's end puts the rest back, not taking the mix for the
+    // program's
+    let mut target = chip();
+    target.4 = Some((STORE_PC, [0x20, 0x80]));
+    let (ending, replies) = session(
+        &mut target,
+        vec![
+            packet(&format!("Z0,{STORE_PC:x},2")),
+            packet(&format!("z0,{STORE_PC:x},2")),
+            packet("k"),
+        ],
+    );
+    ending.unwrap();
+    assert_eq!(replies[0], "OK");
+    assert!(replies[1].starts_with('E'), "{}", replies[1]);
+    assert_eq!(word(&mut target, STORE_PC), [0x20, 0x80]);
 }

@@ -157,8 +157,9 @@ struct Session<'t, T: Target> {
     hooked: Vec<(Kind, u32, HookId)>,
     /// The watchpoints.
     watchpoints: Vec<Watchpoint>,
-    /// The software breakpoints planted, and any whose planting may
-    /// have written BGND that could not be put back.
+    /// The software breakpoints planted, and the uncertain ones: a
+    /// write that failed or did not read back may have left a mix of
+    /// BGND and the original there, not yet put back.
     planted: Vec<Breakpoint>,
     /// What gdb last asked.
     action: Action,
@@ -394,16 +395,20 @@ impl<T: Target> SingleThreadBase for Session<'_, T> {
     }
 
     /// A write over a planted breakpoint's bytes goes to the word it
-    /// replaced, to be put back on its removal; BGND stays.  Over a
-    /// word the program wrote over BGND, it is a write like any other.
+    /// replaced, to be put back on its removal; BGND stays.  Over an
+    /// uncertain one's, it goes to both, the word and its original.
+    /// Over a word the program wrote over BGND, it is a write like any
+    /// other.
     fn write_addrs(&mut self, address: u32, data: &[u8]) -> TargetResult<(), Self> {
         let space = self.function_code;
         self.retire_overwritten(address, data.len(), space)
             .map_err(|_| TargetError::Errno(EFAULT))?;
         let overlaps = self.overlaps(address, data.len(), space);
         let mut written = data.to_vec();
-        for &(offset, _, byte) in &overlaps {
-            written[offset] = BGND[byte];
+        for &(offset, index, byte) in &overlaps {
+            if self.planted[index].verified {
+                written[offset] = BGND[byte];
+            }
         }
         self.target
             .write_memory(Address(address), space, &written)
