@@ -3459,3 +3459,268 @@ to = ["external.reset"]
         "{edges:?}"
     );
 }
+
+/// Firmware that counts its starts in D1, which a reset keeps, and
+/// spins, the watchdog on as reset leaves it (SYPCR SWE, MC68331UM
+/// D.3.12): ADDQ.L #1,D1; BRA.S to itself.
+const COUNTING: [u16; 2] = [0x5281, BRA_SELF];
+/// Board time after a reset at which `Seen` is taken: short of the
+/// watchdog's next timeout, 2^9 EXTAL periods (MC68331UM Table 4-4).
+const AFTER_RESET: u64 = MILLISECOND;
+
+/// A board running `COUNTING`, its RESET net driven by the chip and by
+/// `external.reset` and seen by `external.observed`, and `PoweredLatch`es
+/// that every reset, the watchdog's alone and power-on's alone reach.
+fn reset_board() -> Board<Mc68331> {
+    let directory = directory("reset-cause", &COUNTING);
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[peripheral]]
+name = "every"
+type = "latch"
+[[peripheral]]
+name = "watchdog"
+type = "latch"
+reset = ["watchdog"]
+[[peripheral]]
+name = "power"
+type = "latch"
+reset = ["power-on"]
+[[net]]
+name = "reset"
+type = "wired-and"
+from = ["chip.RESET", "external.reset"]
+to = ["chip.RESET", "external.observed"]
+"#;
+    let description = Description::parse(text, &directory, &Options::default()).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    let mut registry = Registry::with_builtins();
+    registry
+        .register("latch", vec![PortSpec::output("q", Kind::Logic)], |_| {
+            Ok(Box::new(PoweredLatch::default()))
+        })
+        .unwrap();
+    let mut board =
+        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+    board.take_events();
+    board
+}
+
+/// What the firmware, the peripherals and the RESET net show
+/// `AFTER_RESET` past a reset at `at`.
+#[derive(Debug, PartialEq)]
+struct Seen {
+    /// RSR.
+    reset_status: u8,
+    /// The CPU's registers.
+    registers: Registers,
+    /// The resets of the `every`, `watchdog` and `power` latches.
+    resets: [usize; 3],
+    /// The resets the chip reported, at their board times from `at`.
+    events: Vec<(u64, ResetCause)>,
+    /// The RESET net's levels, at their board times from `at`.
+    observed: Vec<(u64, Signal)>,
+}
+
+/// `board` run to `AFTER_RESET` past a reset at `at`, and what it shows.
+fn seen(board: &mut Board<Mc68331>, at: Time) -> Seen {
+    board.run_until(at + AFTER_RESET).unwrap();
+    let base = board.system_clock();
+    let resets = ["every", "watchdog", "power"].map(|name| {
+        board
+            .peripheral::<PoweredLatch>(name)
+            .map_or(0, |latch| latch.resets)
+    });
+    let events = board
+        .take_events()
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::Reset(cycles, cause) => Some((base.time(cycles).since(at), cause)),
+            _ => None,
+        })
+        .collect();
+    let observed = board
+        .take_received("observed")
+        .unwrap()
+        .into_iter()
+        .map(|(time, signal)| (time.since(at), signal))
+        .collect();
+    Seen {
+        reset_status: board.chip().sim().reset_status(),
+        registers: board.chip().cpu().registers.clone(),
+        resets,
+        events,
+        observed,
+    }
+}
+
+/// RESET's 512 clocks at SYNCR's reset rate, in picoseconds
+/// (MC68331UM 4.6.6).
+fn reset_pulse() -> u64 {
+    u64::try_from(
+        u128::from(RESET_PULSE_CLOCKS) * u128::from(PICOSECONDS_PER_SECOND)
+            / u128::from(SYNCR_RESET_HZ),
+    )
+    .unwrap()
+}
+
+/// `board`'s reset for `cause` by the host, and its board time: the
+/// chip's now, at the end of the instruction a run ended in.
+fn host_reset(board: &mut Board<Mc68331>, cause: ResetCause) -> Time {
+    let at = board.system_clock().time(board.chip().now());
+    board.reset_for(cause);
+    at
+}
+
+#[test]
+fn a_host_watchdog_reset_is_a_timeout() {
+    let mut timed_out = reset_board();
+    timed_out.run_until(Time(20 * MILLISECOND)).unwrap();
+    let base = timed_out.system_clock();
+    let timeout = timed_out
+        .take_events()
+        .into_iter()
+        .find_map(|event| match event {
+            Event::Reset(at, ResetCause::Watchdog) => Some(base.time(at)),
+            _ => None,
+        })
+        .expect("the watchdog timed out");
+    // RESET's levels from the timeout on, those the run to it saw first
+    let earlier: Vec<(u64, Signal)> = timed_out
+        .take_received("observed")
+        .unwrap()
+        .into_iter()
+        .filter(|&(time, _)| time >= timeout)
+        .map(|(time, signal)| (time.since(timeout), signal))
+        .collect();
+    let mut timed_out_seen = seen(&mut timed_out, timeout);
+    timed_out_seen.events.insert(0, (0, ResetCause::Watchdog));
+    timed_out_seen.observed.splice(0..0, earlier);
+    let mut host = reset_board();
+    let at = Time(5 * MILLISECOND);
+    host.run_until(at).unwrap();
+    host.take_received("observed").unwrap();
+    let reset = host_reset(&mut host, ResetCause::Watchdog);
+    let host_seen = seen(&mut host, reset);
+    assert_eq!(host_seen.reset_status, ResetCause::Watchdog.status());
+    assert_eq!(host_seen.registers.data[1], 2, "started again");
+    // and power-on's, at the build
+    assert_eq!(host_seen.resets, [2, 1, 1]);
+    assert_eq!(
+        host_seen.observed,
+        [
+            (0, Signal::Level(false)),
+            (reset_pulse(), Signal::Level(true))
+        ]
+    );
+    // RESET's release a picosecond apart at most, each rounded to board
+    // time from its own clock anchor
+    let levels = |seen: &Seen| {
+        seen.observed
+            .iter()
+            .map(|&(_, signal)| signal)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(levels(&host_seen), levels(&timed_out_seen));
+    for (host, timed_out) in host_seen.observed.iter().zip(&timed_out_seen.observed) {
+        assert!(host.0.abs_diff(timed_out.0) <= 1, "{host:?} {timed_out:?}");
+    }
+    timed_out_seen.observed = host_seen.observed.clone();
+    assert_eq!(host_seen, timed_out_seen);
+}
+
+#[test]
+fn a_host_external_reset_is_reset_driven_on_the_board() {
+    let at = Time(5 * MILLISECOND);
+    let mut driven = reset_board();
+    driven.run_until(at).unwrap();
+    driven.send("reset", Signal::Level(false)).unwrap();
+    driven.send("reset", Signal::Level(true)).unwrap();
+    let mut host = reset_board();
+    host.run_until(at).unwrap();
+    host.reset_for(ResetCause::External);
+    let host_seen = seen(&mut host, at);
+    assert_eq!(host_seen.reset_status, ResetCause::External.status());
+    assert_eq!(host_seen.registers.data[1], 2, "started again");
+    let mut driven_seen = seen(&mut driven, at);
+    // the board's own pulse, which the host's leaves off the net
+    assert_eq!(
+        driven_seen.observed.drain(..2).collect::<Vec<_>>(),
+        [(0, Signal::Level(false)), (0, Signal::Level(true))]
+    );
+    assert_eq!(host_seen, driven_seen);
+}
+
+#[test]
+fn a_host_power_on_reset_is_power_on() {
+    let mut fresh = reset_board();
+    let fresh_seen = seen(&mut fresh, Time::ZERO);
+    let mut host = reset_board();
+    let at = Time(5 * MILLISECOND);
+    host.run_until(at).unwrap();
+    host.take_received("observed").unwrap();
+    let reset = host_reset(&mut host, ResetCause::PowerOn);
+    let host_seen = seen(&mut host, reset);
+    assert_eq!(host_seen.reset_status, ResetCause::PowerOn.status());
+    assert_eq!(host_seen.reset_status, fresh_seen.reset_status);
+    assert_eq!(host_seen.registers.data[1], 2, "D1 kept");
+    let mut registers = host_seen.registers.clone();
+    registers.data[1] = 1;
+    assert_eq!(registers, fresh_seen.registers);
+    assert_eq!(host_seen.resets, [2, 0, 2]);
+    assert_eq!(host_seen.events, [(0, ResetCause::PowerOn)]);
+}
+
+#[test]
+fn a_host_system_reset_resets_all_but_the_cpu() {
+    let mut host = reset_board();
+    let at = Time(5 * MILLISECOND);
+    host.run_until(at).unwrap();
+    host.take_received("observed").unwrap();
+    let pc = host.chip().cpu().registers.pc;
+    let reset = host_reset(&mut host, ResetCause::System);
+    assert_eq!(host.chip().cpu().registers.pc, pc, "the CPU not reset");
+    let host_seen = seen(&mut host, reset);
+    assert_eq!(host_seen.reset_status, ResetCause::System.status());
+    assert_eq!(host_seen.registers.data[1], 1, "not started again");
+    assert_eq!(host_seen.resets, [2, 0, 1]);
+    assert_eq!(host_seen.events, [(0, ResetCause::System)]);
+    assert_eq!(
+        host_seen.observed,
+        [
+            (0, Signal::Level(false)),
+            (reset_pulse(), Signal::Level(true))
+        ]
+    );
+}
+
+#[test]
+fn a_host_reset_while_reset_is_held_does_nothing() {
+    let mut host = reset_board();
+    let at = Time(5 * MILLISECOND);
+    host.run_until(at).unwrap();
+    host.send("reset", Signal::Level(false)).unwrap();
+    host.run_until(at + 1).unwrap();
+    host.take_events();
+    let resets = |host: &Board<Mc68331>| {
+        host.peripheral::<PoweredLatch>("every")
+            .map(|latch| latch.resets)
+    };
+    let before = resets(&host);
+    let now = host.chip().now();
+    host.reset_for(ResetCause::Watchdog);
+    assert_eq!(
+        host.chip().sim().reset_status(),
+        ResetCause::External.status()
+    );
+    assert!(host.take_events().is_empty());
+    assert_eq!(resets(&host), before);
+    assert_eq!(host.chip().now(), now);
+}

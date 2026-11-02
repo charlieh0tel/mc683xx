@@ -1155,6 +1155,71 @@ fn the_watchdog_resets_the_chip_unless_serviced() {
 }
 
 #[test]
+fn a_host_reset_sets_rsr_to_its_cause_alone() {
+    // RSR one bit per source (SIMRM 8.2.8)
+    for cause in ResetCause::ALL {
+        let (mut chip, _) = booting(&[NOP]);
+        chip.run_for(Cycles(1000));
+        chip.take_events();
+        let now = chip.now();
+        chip.reset_for(cause);
+        assert_eq!(chip.sim().reset_status(), cause.status(), "{cause:?}");
+        assert_eq!(chip.take_events(), [Event::Reset(now, cause)]);
+        // the `reset` instruction's leaves the CPU running (SIMRM 8.2.6)
+        assert_eq!(
+            chip.cpu().registers.pc == START,
+            cause != ResetCause::System
+        );
+    }
+}
+
+#[test]
+fn a_host_watchdog_reset_leaves_the_chip_as_a_timeout_does() {
+    let watched = || {
+        let mut builder = Builder::default();
+        builder
+            .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+            .unwrap();
+        let not_watchdog = builder.unwired_peripheral(Recorder::default());
+        builder.reset_scope(not_watchdog, ResetScope::ALL.without(ResetCause::Watchdog));
+        let watchdog = builder.unwired_peripheral(Recorder::default());
+        builder.reset_scope(watchdog, ResetScope::of(&[ResetCause::Watchdog]));
+        let mut chip = builder.build();
+        chip.take_events();
+        (chip, [not_watchdog, watchdog])
+    };
+    // the time-out, 2^9 EXTAL periods at 256 clocks, and the chip's
+    // firmware-visible state a while after it
+    let (mut timed_out, peripherals) = watched();
+    timed_out.run_for(Cycles(512 * 256 + 100));
+    let events = timed_out.take_events();
+    let [Event::Reset(timeout, ResetCause::Watchdog)] = events[..] else {
+        panic!("{events:?}");
+    };
+    let (mut host, _) = watched();
+    host.run_for(Cycles(1000));
+    let reset = host.now();
+    host.reset_for(ResetCause::Watchdog);
+    assert_eq!(
+        host.take_events(),
+        [Event::Reset(reset, ResetCause::Watchdog)]
+    );
+    let after = Cycles(500);
+    timed_out.run_until(timeout + after);
+    host.run_until(reset + after);
+    let seen = |chip: &Mc68331| {
+        (
+            chip.sim().reset_status(),
+            chip.cpu().registers.clone(),
+            peripherals.map(|peripheral| chip.peripheral::<Recorder>(peripheral).unwrap().resets),
+        )
+    };
+    assert_eq!(seen(&host), seen(&timed_out));
+    assert_eq!(seen(&host).0, ResetCause::Watchdog.status());
+    assert_eq!(seen(&host).2, [1, 1], "power-on's, the watchdog's");
+}
+
+#[test]
 fn a_fault_on_the_reset_vectors_halts() {
     // a boot peripheral that asserts BERR (CPU32RM 6.2.1)
     let mut builder = Builder::default();

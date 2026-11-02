@@ -34,6 +34,7 @@ use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::reset::ResetScope;
@@ -262,8 +263,9 @@ pub trait Chip: Sized + 'static {
     /// Why the CPU halted, while it stays halted.
     fn halted(&self) -> Option<Halt>;
 
-    /// An external reset: RESET driven by the board.
-    fn reset(&mut self);
+    /// A reset now for `cause`, as its source makes it:
+    /// [`ResetCause::External`] is RESET driven by the board.
+    fn reset_for(&mut self, cause: ResetCause);
 
     /// Makes the memory diversions the board's routers asked for
     /// between runs ([`Requests::divert`], [`Requests::release`]) now,

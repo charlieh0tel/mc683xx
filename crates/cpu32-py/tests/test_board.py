@@ -812,3 +812,57 @@ def test_a_keyboard_interrupt_is_raised_before_an_earlier_peripheral_error(tmp_p
         board.run_for(seconds=0.001)
     assert isinstance(raised.value.__context__, RuntimeError)
     assert board.run_for(seconds=0.001).stop == mc683xx.Stop.Budget()
+
+
+RESET_BOARD = """
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[peripheral]]
+name = "counter"
+type = "counter"
+reset = ["watchdog"]
+"""
+# RSR, $YFFA07 (MC68331UM D.3.4); its SW bit, the watchdog's (SIMRM 8.2.8).
+RSR = SIM + 0x07
+RSR_SW = 0x20
+# ADDQ.L #1,D1; BRA.S to itself: counts its starts in D1, which a reset
+# keeps, the watchdog on as reset leaves it.
+COUNTING = [0x5281, 0x60FE]
+
+
+class Counter:
+    """Counts the resets that reach it."""
+
+    PORTS: list[tuple[str, str, str]] = []
+
+    def __init__(self) -> None:
+        self.resets = 0
+
+    def reset(self, now: int, drive: mc683xx.Drive) -> None:
+        self.resets += 1
+
+
+def test_a_board_resets_for_a_cause_as_its_source_does(tmp_path: Path) -> None:
+    (tmp_path / "rom.bin").write_bytes(rom(COUNTING))
+    (tmp_path / "board.toml").write_text(RESET_BOARD)
+    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"counter": Counter})
+    board.run_for(seconds=0.001)
+    board.take_events()
+    board.reset_for(mc683xx.ResetCause.WATCHDOG)
+    events = board.take_events()
+    assert [
+        event.cause for event in events if isinstance(event, mc683xx.Event.Reset)
+    ] == [mc683xx.ResetCause.WATCHDOG]
+    assert len(events) == 1
+    assert board.chip.peek(RSR, 1) == RSR_SW
+    counter = board.peripheral("counter")
+    assert isinstance(counter, Counter)
+    assert counter.resets == 1, "the watchdog's alone"
+    board.run_for(seconds=0.001)
+    assert board.chip.read_register("D1") == 2, "started again"

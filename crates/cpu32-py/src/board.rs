@@ -88,6 +88,7 @@ use pyo3::types::PyTuple;
 
 use crate::chip::BoardChip;
 use crate::chip::Event;
+use crate::chip::ResetCause;
 use crate::chip::Stop;
 use crate::control;
 use crate::control::BoardControlView;
@@ -1667,6 +1668,16 @@ impl BoardView {
         BoardChip {
             board: slf.clone().unbind(),
         }
+    }
+
+    /// A reset now for `cause`, a `ResetCause`, as its source makes it
+    /// (Rust's `Board::reset_for`): `EXTERNAL` as the board's RESET
+    /// asserted and released now, any other the chip's own, RESET
+    /// driven on the board's nets for it.  Nothing while the board holds
+    /// RESET low.
+    fn reset_for(&mut self, cause: ResetCause) -> PyResult<()> {
+        self.board.reset_for(cause.into());
+        self.check()
     }
 
     /// What the chip did since the last call (Rust's

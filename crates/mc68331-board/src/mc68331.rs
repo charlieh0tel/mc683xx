@@ -37,6 +37,7 @@ use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::sim::Configuration;
+use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::clock::ClockSource;
 use mc683xx_modules::sim::ports::PortName;
@@ -530,8 +531,8 @@ impl chip::Chip for Mc68331 {
         Self::halted(self)
     }
 
-    fn reset(&mut self) {
-        Self::reset(self);
+    fn reset_for(&mut self, cause: ResetCause) {
+        Self::reset_for(self, cause);
     }
 
     fn apply_diversions(&mut self) {

@@ -376,7 +376,7 @@ Endpoints:
 | `peripheral.port` | as the type declares | as the type declares |
 | `chip.PGP0`-`chip.PGP7`, `chip.PE0`-`PE7`, `chip.PF0`-`PF7`, `chip.PQS0`-`PQS7` | logic, edge, wired-and | either |
 | `chip.PAI`, `chip.PCLK`, `chip.IRQ1`-`IRQ7` | logic, edge, wired-and | into the chip |
-| `chip.RESET` | logic, edge, wired-and | either: low while a reset drives it; a peripheral driving it low resets the chip and holds it in reset, running no instruction while board time goes on, and as it goes high the chip's reset processing begins (MC68331UM 4.6.6).  On a `wired-and` net the chip senses the AND of the other drivers: its own reset output does not reset it (MC68331UM 4.6.6). |
+| `chip.RESET` | logic, edge, wired-and | either: low while a reset drives it; a peripheral driving it low resets the chip and holds it in reset, running no instruction while board time goes on, and as it goes high the chip's reset processing begins (MC68331UM 4.6.6).  On a `wired-and` net the chip senses the AND of the other drivers: its own reset output does not reset it (MC68331UM 4.6.6).  The host resets the chip by cause with `Board::reset_for` (host guide, Reset). |
 | `chip.PC0`-`PC6`, `chip.PWMA`, `chip.PWMB` | logic, edge | out of the chip |
 | `chip.ECLK` | clock | out of the chip: the system clock / 8 or / 16 (SYNCR EDIV), a rising edge at power-on (the manuals give no phase; our choice), retuned when the system clock or EDIV changes.  A peripheral on an ECLK-mode select (CSOR MODE, SIMRM 7.5.2) takes it as its E input and aligns its cycles to it; the chip charges each such cycle an ECLK period and a half. |
 | `chip.RXD` | serial | into the chip |
