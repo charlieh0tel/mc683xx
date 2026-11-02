@@ -2115,7 +2115,12 @@ and `mc683xx.Machine` in Python (see Python).
   left pending, as a TRAP reruns and an interrupt is sampled again.  A fault while stacking (a bad SSP) stops the same
   way instead of a double bus fault, so the host fixes SSP and goes on
   with no reset.  Writes the instruction made before the fault stay in
-  memory, and so do frame words stacked before a stacking fault.
+  memory, and so do frame words stacked before a stacking fault.  A
+  fault stacking the interrupt that ends STOP or LPSTOP leaves the CPU
+  stopped, its SR as STOP or LPSTOP loaded it, so a request withdrawn
+  before the next run does not run it past the STOP.  The interrupt's
+  acknowledge cycle was made: a host modeling LPSTOP's low-power state
+  has seen it end (the chip does not stop on faults).
 - **Intercepts:** `set_intercepted(vector)`: an exception an
   instruction raises (traps, illegal, line A and F, privilege, zero
   divide, CHK, TRAPV, format error; not faults, trace or interrupts)

@@ -957,7 +957,6 @@ impl Core<'_> {
         }
         let cpu = &mut *self.cpu;
         cpu.bare.interrupts_taken += 1;
-        cpu.stopped = false;
         cpu.leave_loop_mode();
         Some(cpu.spend(timing::exception::INTERRUPT) + cpu.stall + cpu.extra)
     }
@@ -1254,6 +1253,11 @@ impl Core<'_> {
         self.cpu.taken = Some(Exception::Short { vector, pc });
         let processed = self.process(vector, pc, None, Some(level), false);
         self.cpu.sampled_mask = self.cpu.registers.interrupt_mask();
+        // it ends STOP and LPSTOP (CPU32RM 4.4); a fault stop, the
+        // registers as before it, leaves the CPU stopped as it was
+        if processed != Processed::Stopped {
+            self.cpu.stopped = false;
+        }
         // a breakpoint STOP left pending: acknowledged at the end of
         // the exception processing that ends STOP (CPU32RM 6.2.6), a
         // boundary of its own; a fault stop ended none
