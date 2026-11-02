@@ -29,6 +29,7 @@ BUS_ERROR_HANDLER = 0x800
 LEVEL_7_HANDLER = 0x900
 # Vector numbers (CPU32RM Table 6-1).
 BUS_ERROR = 2
+HARDWARE_BREAKPOINT = 12
 LEVEL_7_AUTOVECTOR = 31
 
 # Opcodes (CPU32RM 4).
@@ -304,6 +305,26 @@ def test_step_runs_one_instruction():
     chip.reset_with_breakpoint()
     assert chip.step() == mc683xx.Entry.Breakpoint()
     assert chip.read_register("PC") == START + 2
+    assert chip.background == mc683xx.Entry.Breakpoint()
+
+
+def test_bkpt_halts_with_background_mode_and_is_vector_12_without():
+    # the stack in RAM, wired
+    builder, _, _ = board(WIRING + [NOP] * 8, Recorder())
+    chip = builder.build()
+    chip.run_for(2000)
+    chip.set_tracing(exceptions=True)
+    # background mode disabled: a hardware breakpoint, taken on the next
+    # run, its acknowledge cycle answered by no one (CPU32RM 6.2.6)
+    assert chip.assert_breakpoint() is False
+    assert chip.background is None
+    chip.run_for(10)
+    exceptions = [e for e in chip.take_events() if isinstance(e, mc683xx.Event.Exception)]
+    assert exceptions[0].vector == HARDWARE_BREAKPOINT
+    chip.reset_with_breakpoint()
+    chip.go()
+    chip.run_for(100)
+    assert chip.assert_breakpoint() is True
     assert chip.background == mc683xx.Entry.Breakpoint()
 
 

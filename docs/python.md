@@ -67,7 +67,7 @@ rename renames the Python name with it.  The deliberate differences:
   worked out from the GPT's registers).  A setter is `set_*`, never a
   writable property.
 - **Background debug:** the chip's `Cpu32Target` calls `halt`, `go`
-  and `step` are `Mc68331` methods; its `halted`, an `Entry`, is the
+  and `step`, and `assert_breakpoint`, are `Mc68331` methods; its `halted`, an `Entry`, is the
   `background` property (`Cpu::background`, through `Mc68331::cpu`),
   as `halted` is the chip's `Halt`.  `reset_halted` is
   `reset_with_breakpoint()` then `background`.
@@ -524,7 +524,10 @@ BKPT low through RESET: background mode is enabled, and the CPU enters
 it before its first instruction.  `background` is the `Entry` while
 the CPU is in background mode, `None` otherwise (a board's chip has it
 too).  Between runs, `halt()` asserts BKPT: the CPU enters background
-mode at once and returns its `Entry`; `go()` leaves it, to run on at
+mode at once and returns its `Entry` (`assert_breakpoint()` is the
+same pin, true if the CPU entered background mode: with it disabled, a
+hardware breakpoint waits for the next run, which takes vector 12
+unless a peripheral ends its acknowledge cycle); `go()` leaves it, to run on at
 the next run; `step()` runs one instruction and returns to it.  A run
 started in background mode spends its budget as time passes and ends
 `Stop.Background(entry)`; FREEZE is asserted meanwhile.  `halt` with

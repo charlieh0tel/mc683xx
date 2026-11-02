@@ -704,7 +704,8 @@ chip beside `Mc68331`.
   `system_hz`, `take_events()` (`Event.Reset`, `Event.ArbitrationTie`,
   `Event.Dsack`, and with `set_tracing(accesses=, exceptions=)` `Event.Access` and
   `Event.Exception`), `instructions`.
-  Background debug mode (below) is `reset_with_breakpoint()`, the
+  Background debug mode (below) is `reset_with_breakpoint()`,
+  `assert_breakpoint() -> bool`, the
   `Cpu32Target` calls `halt() -> Entry`, `go()` and `step() -> Entry`,
   and `background` (`Cpu::background`, an `Entry` or `None`, on a
   board's chip too); a call the CPU's state refuses raises
