@@ -1036,7 +1036,20 @@ fn a_bdm_debugger_drives_the_board_over_the_virtual_cable() {
     // a word at an odd address is the target's address error
     assert_eq!(bdm(&mut cable, &[0x0b, 1, 4, 0, 0, 1, 2]), [4]);
     assert_eq!(bdm(&mut cable, &[0x07, 16]), [1], "no register 16");
-    assert_eq!(bdm(&mut cable, &[0x01, 0, 0]), [1], "no raw exchange yet");
+    // a raw RSREG of RPC (CPU32RM 7.2.8.6): "not ready" with the
+    // command, then RPC, high word first, one u32 per word
+    let transfer = bdm(&mut cable, &[0x01, 0x80, 0x25, 0, 0, 0, 0]);
+    let expected: Vec<u8> = [0x1_0000, START >> 16, START & 0xffff]
+        .iter()
+        .flat_map(|word: &u32| word.to_le_bytes())
+        .collect();
+    assert_eq!(transfer[0], 0);
+    assert_eq!(transfer[1..], expected);
+    assert_eq!(bdm(&mut cable, &[0x01]), [1], "no words");
+    assert_eq!(bdm(&mut cable, &[0x01, 0]), [1], "half a word");
+    let mut sixteen = vec![0x01];
+    sixteen.extend([0; 32]);
+    assert_eq!(bdm(&mut cable, &sixteen), [1], "16 words");
     // a second client is closed, once the first has had its grace
     let mut second = UnixStream::connect(directory.join("bdm.sock")).unwrap();
     assert_eq!(bdm(&mut cable, &[0x0e]), [0, 2, 0, 0, 0]);

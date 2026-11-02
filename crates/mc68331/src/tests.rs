@@ -71,6 +71,7 @@ use mc683xx_modules::sim::reset::ResetScope;
 mod bus;
 mod debug;
 mod fixed;
+mod serial;
 
 /// The NOP instruction (CPU32RM 4, NOP).
 const NOP: u16 = 0x4e71;

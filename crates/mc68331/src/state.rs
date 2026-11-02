@@ -22,11 +22,12 @@ use serde::Serialize;
 use crate::board::Board;
 use crate::board::QSM;
 use crate::chip::Mc68331;
+use crate::debug::serial::Serial;
 
 /// The format of [`Mc68331::save`]'s bytes.  The core's, the modules',
 /// the peripherals' and the QSPI peripheral's snapshots inside carry their
 /// own.
-pub const VERSION: u32 = 13;
+pub const VERSION: u32 = 14;
 
 /// What the QSPI's peripheral's save and restore errors name.
 const QSPI_PERIPHERAL: &str = "the QSPI peripheral";
@@ -61,6 +62,8 @@ struct ChipState {
     /// The `DsackFault`s told of each peripheral, so a restored chip does
     /// not tell them again.
     dsack_told: Vec<u8>,
+    /// BDM's serial interface: a command in progress, its next response.
+    serial: Serial,
 }
 
 impl Board {
@@ -145,6 +148,7 @@ impl Mc68331 {
             diverted: board.diverted.clone(),
             fixed: board.fixed_layout(),
             dsack_told: board.dsack_told.clone(),
+            serial: self.serial.clone(),
         };
         Ok(encode(VERSION, &state))
     }
@@ -242,6 +246,7 @@ impl Mc68331 {
         board.output_seen = board.seen();
         // the modules' snapshots hold what FREEZE did to them
         board.frozen = self.cpu.background().is_some();
+        self.serial = state.serial;
         self.now = state.now;
         Ok(())
     }

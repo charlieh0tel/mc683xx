@@ -102,7 +102,7 @@ use crate::wiring::SharedMemory;
 
 /// The format of [`Board::save`]'s bytes.  The chip's and the peripherals'
 /// snapshots inside carry their own.
-pub const VERSION: u32 = 16;
+pub const VERSION: u32 = 17;
 
 /// The levels on PCS\[3:0\] before the QSPI drives them: high.
 const PCS_IDLE: u8 = 0xf;
