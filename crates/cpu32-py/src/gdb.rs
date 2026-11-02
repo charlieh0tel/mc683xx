@@ -10,14 +10,16 @@ use std::fmt::Display;
 use mc683xx_board::condition::Conditions;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_gdb::stub;
-use mc683xx_gdb::stub::PollError;
-use mc683xx_gdb::stub::Polled;
-use mc683xx_gdb::stub::Waiter;
+use mc683xx_gdb::SessionError;
+use mc683xx_gdb::connection;
+use mc683xx_gdb::connection::PollError;
+use mc683xx_gdb::connection::Polled;
+use mc683xx_gdb::connection::Waiter;
+use mc683xx_gdb::target::AccessError;
 use mc683xx_gdb::target::Target;
 use mc683xx_gdb::target::TargetRun;
-use mc683xx_gdb::target::Unwritable;
 use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
 use pyo3::Bound;
 use pyo3::PyAny;
 use pyo3::PyErr;
@@ -65,33 +67,52 @@ where
 {
     type Error = PyErr;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> R {
+    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
         self.target.with_cpu(call)
     }
 
-    fn peek(&mut self, address: Address, data: &mut [u8]) -> usize {
-        self.target.peek(address, data)
+    fn read_memory(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        data: &mut [u8],
+    ) -> Result<usize, AccessError<PyErr>> {
+        self.target
+            .read_memory(address, function_code, data)
+            .map_err(|error| error.map(raised_from))
     }
 
-    fn poke(&mut self, address: Address, data: &[u8]) -> Result<(), Unwritable> {
-        self.target.poke(address, data)
+    fn write_memory(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        data: &[u8],
+    ) -> Result<(), AccessError<PyErr>> {
+        self.target
+            .write_memory(address, function_code, data)
+            .map_err(|error| error.map(raised_from))
     }
 
     fn run_for(&mut self, cycles: Cycles, hit: &dyn Fn() -> bool) -> PyResult<TargetRun> {
         let ran = self.target.run_for(cycles, hit);
         self.pending.check()?;
-        let ran = ran.map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+        let ran = ran.map_err(raised_from)?;
         Python::attach(|py| py.check_signals())?;
         Ok(ran)
     }
 
-    fn reset(&mut self) -> bool {
-        self.target.reset()
+    fn reset(&mut self) -> PyResult<bool> {
+        self.target.reset().map_err(raised_from)
     }
 
     fn conditions(&mut self) -> Option<&mut dyn Conditions> {
         self.target.conditions()
     }
+}
+
+/// A Rust target's error as Python's.
+fn raised_from(error: impl Display) -> PyErr {
+    PyRuntimeError::new_err(error.to_string())
 }
 
 /// The Python host as the stub waits for gdb: other threads run during
@@ -131,7 +152,7 @@ pub(crate) fn accept<'py>(
     address: &str,
     ready: Option<&Bound<'py, PyAny>>,
 ) -> PyResult<Connection<'py>> {
-    stub::accept_polled(
+    connection::accept_polled(
         address,
         |at| ready.map_or(Ok(()), |ready| ready.call1((at.port(),)).map(drop)),
         Signals(py),
@@ -146,12 +167,12 @@ pub(crate) fn serve<T: Target<Error = PyErr>>(
     target: &mut T,
     connection: Connection<'_>,
 ) -> PyResult<Ending> {
-    match stub::serve(target, connection) {
-        Ok(stub::Ending::Detached) => Ok(Ending::Detached),
-        Ok(stub::Ending::Killed) => Ok(Ending::Killed),
-        Err(stub::SessionError::Target(error)) => Err(error),
-        Err(stub::SessionError::Connection(error)) => Err(raised(error)),
-        Err(stub::SessionError::Protocol(text)) => Err(PyRuntimeError::new_err(text)),
+    match mc683xx_gdb::serve(target, connection) {
+        Ok(mc683xx_gdb::Ending::Detached) => Ok(Ending::Detached),
+        Ok(mc683xx_gdb::Ending::Killed) => Ok(Ending::Killed),
+        Err(SessionError::Target(error)) => Err(error),
+        Err(SessionError::Connection(error)) => Err(raised(error)),
+        Err(SessionError::Protocol(text)) => Err(PyRuntimeError::new_err(text)),
         Ok(ending) => Err(PyRuntimeError::new_err(format!("{ending:?}"))),
         Err(error) => Err(PyRuntimeError::new_err(error.to_string())),
     }

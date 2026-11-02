@@ -1,12 +1,18 @@
-//! A GDB remote stub for the CPU32: the bare CPU, the chip or a board.
+//! A GDB remote stub for the CPU32: the bare CPU, the chip, a board,
+//! or a CPU32 under BDM control.
 //!
 //! gdb's remote serial protocol, through the [`gdbstub`] crate, over a
-//! [`target::Target`] ([PLAN.md, Debugger]).  [`docs/gdb.md`] is its
-//! guide, whose Rust block the `examples` crate runs as a doctest.
+//! [`target::Target`] ([PLAN.md, Debugger]): [`serve`].  An emulated
+//! target gives the CPU's controls, so breakpoints, watchpoints and
+//! steps are the core's hooks; [`bdm::Bdm`] makes any
+//! [`Cpu32Target`](mc683xx_target::Cpu32Target), a BDM pod's on
+//! silicon among them, a target whose breakpoints are BGND planted in
+//! memory.  [`docs/gdb.md`] is its guide, whose Rust block the
+//! `examples` crate runs as a doctest.
 //!
-//! It costs a run nothing until gdb is attached: breakpoints,
-//! watchpoints and steps are the core's hooks, installed while gdb
-//! wants them, and the target runs only inside [`stub::serve`].
+//! It costs an emulated run nothing until gdb is attached: its hooks
+//! are installed while gdb wants them, and the target runs only inside
+//! [`serve`].
 //!
 //! # Examples
 //!
@@ -21,8 +27,8 @@
 //! use gdbstub::conn::ConnectionExt;
 //! use mc683xx_cpu32::flat::ADDRESS_BITS;
 //! use mc683xx_cpu32::flat::Machine;
-//! use mc683xx_gdb::stub::Ending;
-//! use mc683xx_gdb::stub::serve;
+//! use mc683xx_gdb::Ending;
+//! use mc683xx_gdb::serve;
 //!
 //! /// gdb's end of the connection: its packets, and the stub's replies.
 //! struct Wire {
@@ -82,8 +88,97 @@
     clippy::missing_panics_doc
 )]
 
+use std::fmt::Display;
+
+use gdbstub::conn::ConnectionExt;
+
+use crate::target::Target;
+
 mod arch;
 pub mod bdm;
+pub mod connection;
 mod protocol;
-pub mod stub;
+mod session;
 pub mod target;
+
+/// How a session ended.
+///
+/// More endings may come, so a match needs a wildcard arm:
+///
+/// ```compile_fail
+/// use mc683xx_gdb::Ending;
+///
+/// fn detached(ending: Ending) -> bool {
+///     match ending {
+///         Ending::Detached => true,
+///         Ending::Killed => false,
+///     }
+/// }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Ending {
+    /// gdb detached: the target may run on without it.
+    Detached,
+    /// gdb killed the target: the host should stop running it.
+    Killed,
+}
+
+/// Why a session ended other than as gdb asked.
+///
+/// More reasons may come, so a match needs a wildcard arm:
+///
+/// ```compile_fail
+/// use mc683xx_gdb::SessionError;
+///
+/// fn target<E, C>(error: SessionError<E, C>) -> Option<E> {
+///     match error {
+///         SessionError::Target(error) => Some(error),
+///         SessionError::Connection(_) | SessionError::Protocol(_) => None,
+///     }
+/// }
+/// ```
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum SessionError<E, C> {
+    /// A call on the target failed: its run, or, under BDM control,
+    /// halting it or putting it back as it was.
+    #[error("target: {0}")]
+    Target(E),
+    /// The connection failed, or gdb closed it.
+    #[error("connection: {0}")]
+    Connection(C),
+    /// gdb said something the stub could not take.
+    #[error("protocol: {0}")]
+    Protocol(String),
+}
+
+/// Serves gdb on `connection` over `target` until gdb detaches or
+/// kills it.
+///
+/// The target is halted first, so gdb finds it stopped, and stays
+/// where it is until gdb continues or steps it.  When the session
+/// ends, however it ends, every hook the stub installed is removed, and
+/// a target under BDM control is halted and every breakpoint still
+/// planted removed.  Detach resumes a target under BDM control and
+/// leaves an emulated one to its host; kill leaves either halted.
+///
+/// # Errors
+///
+/// [`SessionError::Target`] if a call on the target fails (a session
+/// that failed otherwise reports that failure, not cleaning up's),
+/// [`SessionError::Connection`] if the connection fails or gdb closes
+/// it, and [`SessionError::Protocol`] if gdb sends what the stub cannot
+/// take.
+pub fn serve<T, C>(
+    target: &mut T,
+    connection: C,
+) -> Result<Ending, SessionError<T::Error, C::Error>>
+where
+    T: Target,
+    T::Error: Display,
+    C: ConnectionExt,
+    C::Error: Display,
+{
+    session::serve(target, connection)
+}

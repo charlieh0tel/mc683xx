@@ -22,7 +22,7 @@ Your own board wires its image the same way: `[[memory]]` with
 for the boot ROM), and `[board] images = ["rom.bin"]` so `--firmware
 build/rom.bin` replaces it.  A board with a peripheral of its own
 needs a host that registers it (`docs/host-guide.md`) and serves gdb
-itself (`mc683xx_gdb::stub`, or `serve_gdb` in Python).
+itself (`mc683xx_gdb::serve`, or `serve_gdb` in Python).
 
 ## Run
 

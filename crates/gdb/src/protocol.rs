@@ -6,8 +6,8 @@ use std::fmt::Display;
 use gdbstub::arch::Arch;
 use gdbstub::stub::GdbStubError;
 
+use crate::SessionError;
 use crate::arch::Cpu32;
-use crate::stub::SessionError;
 
 /// gdb's error for a register it cannot read or write: EIO.
 pub(crate) const EIO: u8 = 5;

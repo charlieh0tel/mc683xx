@@ -3,15 +3,14 @@
 The `mc683xx-gdb` crate (`crates/gdb`) is a GDB remote stub: gdb's
 remote serial protocol, through the `gdbstub` crate, over the bare
 CPU (`mc683xx_cpu32::flat::Machine`), the chip
-(`mc683xx_mc68331::chip::Mc68331`) or a board
-(`mc683xx_board::board::Board`).  gdb connects over TCP,
+(`mc683xx_mc68331::chip::Mc68331`), a board
+(`mc683xx_board::board::Board`), or any `Cpu32Target`, a BDM pod on
+silicon among them (Over BDM, below).  gdb connects over TCP,
 reads and writes registers and memory, sets breakpoints and
 watchpoints, steps, continues and interrupts.  `PLAN.md` (Debugger)
 records why it is built this way; this says how to use it.
 `docs/gdb-firmware.md` is the short recipe for a real image, worked
-on the demo board's C firmware.  A second stub, `mc683xx_gdb::bdm`,
-serves gdb over any `Cpu32Target`, a BDM pod on silicon as well as the
-emulated chip (Over BDM, below).
+on the demo board's C firmware.
 
 The crate's API is documented on docs.rs; this guide's Rust block is
 compiled by `cargo test` (the `examples` crate runs it).
@@ -78,7 +77,8 @@ harness then has it back, as gdb left it.  `ready(port)` is called
 once it listens.  The Python peripherals and hooks run under gdb as
 in `run_for`, and an exception from one ends the session and is raised.
 While the stub waits for gdb it releases the GIL, 20 ms at a time
-(`stub::accept_polled`, `stub::Polled`, a host's `stub::Waiter`), so a
+(`connection::accept_polled`, `connection::Polled`, a host's
+`connection::Waiter`), so a
 client in another thread of the same process is served, and Ctrl-C
 ends the session with `KeyboardInterrupt`, whether gdb is connected
 or not, idle or running the target; the stub's breakpoints and
@@ -90,8 +90,8 @@ watchpoints go with it.
 use mc683xx_target::address::Address;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
 use mc683xx_cpu32::flat::Machine;
-use mc683xx_gdb::stub;
-use mc683xx_gdb::stub::Ending;
+use mc683xx_gdb::Ending;
+use mc683xx_gdb::connection;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The reset vectors, then the program: `bra.s` to itself.
@@ -101,45 +101,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     machine.write(Address(0), &image[..8])?;
     machine.write(Address(0x400), &image[8..])?;
     machine.reset().map_err(|halt| format!("{halt:?}"))?;
-    let connection = stub::accept("127.0.0.1:1234", |address| {
+    let connection = connection::accept("127.0.0.1:1234", |address| {
         eprintln!("waiting for gdb on {address}");
         Ok::<(), std::io::Error>(())
     })?;
-    if stub::serve(&mut machine, connection)? == Ending::Detached {
+    if mc683xx_gdb::serve(&mut machine, connection)? == Ending::Detached {
         // gdb has let go: the host runs the machine on.
     }
     Ok(())
 }
 ```
 
-- `stub::accept(address, ready)` listens at `address`, calls `ready`
-  with the address it listens at (port 0 picks one), and takes one
-  connection.
-- `stub::serve(target, connection)` serves gdb until it detaches
+- `connection::accept(address, ready)` listens at `address`, calls
+  `ready` with the address it listens at (port 0 picks one), and takes
+  one connection.
+- `serve(target, connection)` serves gdb until it detaches
   (`Ending::Detached`) or kills the target (`Ending::Killed`).  The
-  target runs only inside it, as gdb asks: it stays where it is until
-  gdb continues or steps it.  Any `gdbstub::conn::ConnectionExt`
+  target is halted first and stays where it is until gdb continues or
+  steps it; an emulated one runs only inside `serve`.  Detach leaves
+  an emulated target to its host and resumes one under BDM control;
+  kill leaves either halted.  Any `gdbstub::conn::ConnectionExt`
   serves, a `TcpStream` or the tests' in-memory one.  It is the one
   foreign type in the stub's API, deliberately: a connection is
   gdbstub's to drive, and an own trait would only forward to it, so
   the crate's major version follows gdbstub's.
-- `stub::SessionError`: the target's run failed (`Target`, a board's peripheral
-  that stalled), the connection did (`Connection`, gdb gone without
-  detaching), or gdb sent what the stub could not take (`Protocol`).
-  `Ending`, `stub::SessionError` and `target::TargetRun` are `#[non_exhaustive]`:
-  a match on one needs a wildcard arm.
+- `SessionError`: a call on the target failed (`Target`, a board's
+  peripheral that stalled, a pod's lost link), the connection did
+  (`Connection`, gdb gone without detaching), or gdb sent what the stub
+  could not take (`Protocol`).  `Ending`, `SessionError`,
+  `target::TargetRun` and `target::AccessError` are
+  `#[non_exhaustive]`: a match on one needs a wildcard arm.
 - Features: `mc68331` (the chip as a target) and `board` (a board,
   and the chip with it), both on by default.  A bare-CPU host takes
   `default-features = false` and builds without the chip and board
   crates.
-- `target::Target` is the trait the three implement, and a host with
-  a run loop of its own implements, delegating to one of them:
-  `with_cpu` (a `CpuControl`: registers and hooks), `peek` and `poke` (memory at an `Address`, with no
-  bus cycle), `run_for(cycles, hit)` (a quantum, its end a `target::TargetRun`)
-  and `reset`.  `mc683xx-run` and the Python bindings do.  With the
-  `board` feature, `conditions` gives the target's stop conditions
-  (`mc683xx_board::condition::Conditions`, a board's; none by
-  default), for `monitor stop`.
+- `target::Target` is the one trait `serve` takes.  The bare CPU,
+  the chip and a board implement it, and a host with a run loop of its
+  own implements it, delegating to one of them (`mc683xx-run` and the
+  Python bindings do): `with_cpu` (`Some` of a call with the
+  `CpuControl`: registers and hooks), `read_memory` and `write_memory`
+  (memory at an `Address` in a function code's space, with no bus
+  cycle; a `target::AccessError` for a byte not served),
+  `run_for(cycles, hit)` (a quantum, its end a `target::TargetRun`) and
+  `reset`.  The register methods default to `with_cpu`'s; `resume`,
+  `halt` and `step` default to an emulated target's, which runs only
+  as the stub runs it.  With the `board` feature, `conditions` gives
+  the target's stop conditions (`mc683xx_board::condition::Conditions`,
+  a board's; none by default), for `monitor stop`.
+- `bdm::Bdm(&mut target)` is any `mc683xx_target::Cpu32Target` as a
+  `Target`: no `with_cpu`, its own registers, memory, run control and
+  step.  What a target gives decides what gdb gets:
+
+| | Emulated (`with_cpu` gives `Some`) | Under BDM control (`Bdm`) |
+| --- | --- | --- |
+| Breakpoints | code hooks, `break` and `hbreak`: memory untouched | `break` alone: BGND planted in memory |
+| Watchpoints | yes | no |
+| Steps | a code hook on every address | the target's own (`Cpu32Target::step`) |
+| Continue | quanta the stub runs | GO, then a look every millisecond or so |
+| Memory | no bus cycles | real bus cycles |
+| Stop conditions | a board's | none |
 
 ## Registers
 
@@ -157,8 +177,11 @@ and leaves the rest; one that ends within a register is refused with
 
 ## Memory
 
-Every access gdb makes is in supervisor data space and has no bus
-cycle, so a debugger's look never has a peripheral's side effect:
+An emulated target's memory is reached with no bus cycle, so a
+debugger's look never has a peripheral's side effect.  Accesses are in
+supervisor data space unless `monitor fc N` names another: the chip
+reads in that space through its decode and writes in supervisor space
+alone, and the bare CPU has one space whatever the code.
 
 | Access | Reads | Writes |
 | --- | --- | --- |
@@ -175,6 +198,9 @@ what came before it.  To make a real cycle, with its side effects, a
 Rust or Python host uses `Mc68331::bus_read` and `bus_write` itself.
 
 ## Breakpoints, watchpoints and steps
+
+On an emulated target (a target under BDM control has its own; Over
+BDM, below):
 
 - `break` and `hbreak` (`Z0`, `Z1`) are code hooks (`Cpu::add_code_hook`)
   at the address: nothing is written to memory, so they work in ROM,
@@ -214,11 +240,15 @@ CPU has none.
 
 ## Monitor commands
 
+- `monitor fc` shows the address space memory is read and written in,
+  supervisor data (5) to begin with, and `monitor fc N` sets it (0 to
+  7).
 - `monitor reset`: the bare CPU's reset exception (SSP and PC from
   the vectors at zero), the chip's or board's external reset (the
-  modules, the peripherals it reaches, the board's RESET net).  gdb's
-  register cache is then stale: `maintenance flush register-cache`
-  (`flushregs` in older gdbs).
+  modules, the peripherals it reaches, the board's RESET net), or a
+  reset halted before the first instruction over BDM.  gdb's register
+  cache is then stale: `maintenance flush register-cache` (`flushregs`
+  in older gdbs).
 - `monitor stop ...`: stop conditions, a board's (below).
 - `monitor help`.
 
@@ -292,7 +322,7 @@ peripherals).
 
 ## Over BDM
 
-`mc683xx_gdb::bdm::serve(target, connection)` serves gdb over a
+`serve(&mut Bdm(&mut target), connection)` serves gdb over a
 `mc683xx_target::Cpu32Target`: what a debugger has of a CPU32 through
 its background debug mode.  A host that drives a 68331 through a BDM
 pod implements the trait and serves gdb this way; the emulated chip
@@ -301,9 +331,8 @@ it, kill leaves it halted.
 
 - **Registers** are the same description's, read and written through
   BDM; PC is RPC.  A `G` packet writes only the registers it changes.
-- **Memory** is real bus cycles in one address space, supervisor data
-  (5) unless `monitor fc N` names another (0 to 7); `monitor fc` shows
-  it.  Words when the address and length are even, else bytes.  A
+- **Memory** is real bus cycles in the address space `monitor fc`
+  names.  Words when the address and length are even, else bytes.  A
   planted breakpoint reads as the word it replaced, and a write over
   it changes that word, put back when the breakpoint comes out.
 - **Breakpoints** are software only: BGND written over the instruction
@@ -316,8 +345,6 @@ it, kill leaves it halted.
 - **Continue** is GO, then a look at the target and at gdb every
   millisecond or so; Ctrl-C halts the target (`S02`).  A BGND of the
   program's own is `SIGTRAP`, a double bus fault `SIGBUS`.
-- `monitor reset` resets the target halted before its first
-  instruction.
 - A register or memory call the target fails is an error reply
   (`E05`, `E0e`), not the session's end.
 - The target must run on its own once resumed: silicon does; an
@@ -342,8 +369,9 @@ it, kill leaves it halted.
 `cargo test -p mc683xx-gdb` drives the stub with raw packets over an
 in-memory connection: registers, the target description, memory,
 steps, breakpoints, watchpoints, Ctrl-C, `monitor reset`, `monitor
-stop`, detach and kill, on the bare CPU, the chip and a board; and the BDM stub over the
-chip, which runs a little each time the stub looks, as silicon would
-run on its own.  `make gdb`, opt-in and
+stop`, detach and kill, on the bare CPU, the chip and a board; and
+`Bdm` over the chip, which runs a little each time the stub looks, as
+silicon would run on its own, and over the runner's `--bdm` socket,
+the path a pod's host takes.  `make gdb`, opt-in and
 not in `make ci`, runs `gdb-multiarch` against the runner's example
 board (`scripts/gdb-smoke.sh`).

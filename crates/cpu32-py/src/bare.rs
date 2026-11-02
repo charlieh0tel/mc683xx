@@ -37,10 +37,11 @@ use mc683xx_cpu32::flat::Machine;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::registers::Registers;
+use mc683xx_gdb::target::AccessError;
 use mc683xx_gdb::target::Target;
 use mc683xx_gdb::target::TargetRun;
-use mc683xx_gdb::target::Unwritable;
 use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
 use pyo3::Bound;
 use pyo3::Py;
 use pyo3::PyAny;
@@ -1003,16 +1004,40 @@ struct Debugged<'a, 'py>(&'a Bound<'py, MachineView>);
 impl Target for Debugged<'_, '_> {
     type Error = PyErr;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> R {
-        call(&mut CpuControl::new(&mut self.0.borrow_mut().machine.cpu))
+    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+        Some(call(&mut CpuControl::new(
+            &mut self.0.borrow_mut().machine.cpu,
+        )))
     }
 
-    fn peek(&mut self, address: Address, data: &mut [u8]) -> usize {
-        Target::peek(&mut self.0.borrow_mut().machine, address, data)
+    fn read_memory(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        data: &mut [u8],
+    ) -> Result<usize, AccessError<PyErr>> {
+        Target::read_memory(
+            &mut self.0.borrow_mut().machine,
+            address,
+            function_code,
+            data,
+        )
+        .map_err(|error| error.map(|never| match never {}))
     }
 
-    fn poke(&mut self, address: Address, data: &[u8]) -> Result<(), Unwritable> {
-        Target::poke(&mut self.0.borrow_mut().machine, address, data)
+    fn write_memory(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        data: &[u8],
+    ) -> Result<(), AccessError<PyErr>> {
+        Target::write_memory(
+            &mut self.0.borrow_mut().machine,
+            address,
+            function_code,
+            data,
+        )
+        .map_err(|error| error.map(|never| match never {}))
     }
 
     fn run_for(&mut self, cycles: Cycles, hit: &dyn Fn() -> bool) -> PyResult<TargetRun> {
@@ -1035,7 +1060,7 @@ impl Target for Debugged<'_, '_> {
         })
     }
 
-    fn reset(&mut self) -> bool {
-        Target::reset(&mut self.0.borrow_mut().machine)
+    fn reset(&mut self) -> PyResult<bool> {
+        Ok(Target::reset(&mut self.0.borrow_mut().machine).unwrap_or_else(|never| match never {}))
     }
 }

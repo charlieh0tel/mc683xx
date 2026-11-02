@@ -6,7 +6,6 @@
 //! floating-point feature and gdb shows no FP registers.
 
 use std::array;
-use std::convert::Infallible;
 
 use gdbstub::arch::Arch;
 use mc683xx_cpu32::registers::Registers;
@@ -122,7 +121,7 @@ const SYSTEM_LOCATIONS: [Location; SYSTEM_REGISTERS] = [
 
 /// The register at `location` in `registers`; PCC, ATEMP and FAR,
 /// which the description lacks, read zero.
-fn get(registers: &Registers, location: Location) -> u32 {
+pub(crate) fn get(registers: &Registers, location: Location) -> u32 {
     match location {
         Location::Register(register) => {
             let number = usize::from(register.code());
@@ -147,7 +146,7 @@ fn get(registers: &Registers, location: Location) -> u32 {
 /// Writes `value` to the register at `location` in `registers`: SR's
 /// low word, SFC's and DFC's low three bits; PCC, ATEMP and FAR not at
 /// all.
-fn set(registers: &mut Registers, location: Location, value: u32) {
+pub(crate) fn set(registers: &mut Registers, location: Location, value: u32) {
     match location {
         Location::Register(register) => {
             let number = usize::from(register.code());
@@ -220,15 +219,6 @@ impl GdbRegisters {
         })
     }
 
-    /// The CPU's registers as gdb sees them.
-    pub(crate) fn of(registers: &Registers) -> Self {
-        let read: Result<Self, Infallible> = Self::read(|location| Ok(get(registers, location)));
-        match read {
-            Ok(read) => read,
-            Err(never) => match never {},
-        }
-    }
-
     /// Whether they came from a `G` packet that ended within a
     /// register, which the stub refuses rather than guess at.
     pub(crate) const fn is_ragged(&self) -> bool {
@@ -266,14 +256,6 @@ impl GdbRegisters {
             writes.push((CORE_LOCATIONS[SP], core[SP]));
         }
         writes
-    }
-
-    /// Writes them to the CPU's registers, as [`writes`](Self::writes)
-    /// orders them.  SR's unimplemented bits stay clear.
-    pub(crate) fn store(&self, registers: &mut Registers) {
-        for (location, value) in self.writes(&Self::of(registers)) {
-            set(registers, location, value);
-        }
     }
 }
 

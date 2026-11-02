@@ -47,7 +47,7 @@ crates.io.
 - **Stock peripherals:** 74x373/374 latches, 74x244 buffer, 74x164
   shift register, AD569 DAC, ADC0838 ADC, AT28C64B EEPROM, MC144110
   DAC, MC68681 and SCC68692 DUARTs, each modeled from its datasheet.
-- **gdb:** a GDB remote stub over the bare CPU, the chip or a board.
+- **gdb:** a GDB remote stub over the bare CPU, the chip or a board, or a CPU32 under BDM control.
 - **Python:** the chip, boards and a bare CPU, with Python objects as
   peripherals and callables as hooks, and type stubs.
 

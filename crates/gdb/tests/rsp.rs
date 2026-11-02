@@ -29,13 +29,13 @@ use mc683xx_cpu32::cpu::bare::End;
 use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
 use mc683xx_cpu32::flat::Machine;
-use mc683xx_gdb::stub::Ending;
-use mc683xx_gdb::stub::POLL;
-use mc683xx_gdb::stub::PollError;
-use mc683xx_gdb::stub::SessionError;
-use mc683xx_gdb::stub::Waiter;
-use mc683xx_gdb::stub::accept_polled;
-use mc683xx_gdb::stub::serve;
+use mc683xx_gdb::Ending;
+use mc683xx_gdb::SessionError;
+use mc683xx_gdb::connection::POLL;
+use mc683xx_gdb::connection::PollError;
+use mc683xx_gdb::connection::Waiter;
+use mc683xx_gdb::connection::accept_polled;
+use mc683xx_gdb::serve;
 use mc683xx_gdb::target::Target;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
@@ -414,6 +414,49 @@ fn the_chip_peeks_and_pokes_without_cycles() {
     assert!(replies[5].contains("swbreak"));
     assert_eq!(replies[6], "S05");
     assert_eq!(chip.cpu().registers.pc, START);
+}
+
+#[test]
+fn monitor_fc_names_the_space_memory_goes_to() {
+    // the bare CPU has one space; the chip writes in supervisor space
+    // alone
+    let mut machine = machine();
+    let (ending, replies) = session(
+        &mut machine,
+        vec![
+            packet(&format!("qRcmd,{}", hex("fc"))),
+            packet(&format!("qRcmd,{}", hex("fc 6"))),
+            packet(&format!("m{START:x},2")),
+            packet("D"),
+        ],
+    );
+    ending.unwrap();
+    let said = |replies: &[String], text: &str| {
+        replies
+            .iter()
+            .any(|reply| *reply == format!("O{}", hex(text)))
+    };
+    assert!(said(&replies, "fc 5\n"));
+    assert!(said(&replies, "fc 6\n"));
+    assert!(replies.iter().any(|reply| reply == "7005"));
+    let mut chip = chip();
+    let (ending, replies) = session(
+        &mut chip,
+        vec![
+            packet(&format!("qRcmd,{}", hex("fc 7"))),
+            packet(&format!("M{STORE:x},2:abcd")),
+            packet(&format!("qRcmd,{}", hex("fc 6"))),
+            packet(&format!("M{STORE:x},2:abcd")),
+            packet("D"),
+        ],
+    );
+    ending.unwrap();
+    let written: Vec<&String> = replies
+        .iter()
+        .filter(|reply| *reply == "OK" || reply.starts_with('E'))
+        .collect();
+    // each monitor command, each write, then the detach
+    assert_eq!(written, ["OK", "E0e", "OK", "OK", "OK"]);
 }
 
 /// A board with the program in a boot ROM on CSBOOT, and `more` in its
