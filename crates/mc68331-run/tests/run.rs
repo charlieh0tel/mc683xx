@@ -24,8 +24,32 @@ use std::thread;
 use std::time::Duration;
 
 use mc683xx_examples::echo;
+#[cfg(unix)]
+use mc683xx_examples::firmware::RAM_BASE;
 use mc683xx_examples::firmware::START;
 use mc683xx_examples::firmware::rom;
+#[cfg(unix)]
+use mc683xx_gdb::Ending;
+#[cfg(unix)]
+use mc683xx_gdb::SessionError;
+#[cfg(unix)]
+use mc683xx_gdb::bdm::Bdm;
+#[cfg(unix)]
+use mc683xx_gdb::serve;
+#[cfg(unix)]
+use mc683xx_target::Cpu32Target;
+#[cfg(unix)]
+use mc683xx_target::address::Address;
+#[cfg(unix)]
+use mc683xx_target::entry::Entry;
+#[cfg(unix)]
+use mc683xx_target::function_code::FunctionCode;
+#[cfg(unix)]
+use mc683xx_target::register::Register;
+#[cfg(unix)]
+use mc683xx_target::register::SystemRegister;
+#[cfg(unix)]
+use mc683xx_target::size::Size;
 #[cfg(unix)]
 use nix::sys::signal::Signal;
 #[cfg(unix)]
@@ -33,7 +57,28 @@ use nix::sys::signal::kill;
 #[cfg(unix)]
 use nix::unistd::Pid;
 #[cfg(unix)]
+use std::cell::RefCell;
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
+#[cfg(unix)]
+use std::rc::Rc;
+#[cfg(unix)]
+use wire::Send;
+#[cfg(unix)]
+use wire::Wire;
+#[cfg(unix)]
+use wire::bytes;
+#[cfg(unix)]
+use wire::hex;
+#[cfg(unix)]
+use wire::registers;
+#[cfg(unix)]
+use wire::replies;
+
+/// gdb's end of an in-memory connection, the gdb stub's tests' own.
+#[cfg(unix)]
+#[path = "../../gdb/tests/wire/mod.rs"]
+mod wire;
 
 /// TRAP #0 (CPU32RM 4, TRAP).
 const TRAP: u16 = 0x4e40;
@@ -898,4 +943,288 @@ fn a_bdm_debugger_drives_the_board_over_the_virtual_cable() {
     assert_eq!(bdm(&mut cable, &[0x04]), [0, 1, 0, 0, 0, 0], "and again");
     let (status, _) = interrupted(child);
     assert!(status.is_some());
+}
+
+/// The most bytes one memory request to the cable carries.
+#[cfg(unix)]
+const CABLE_MEMORY_BYTES: usize = 56;
+/// PC's index in a `g` packet.
+#[cfg(unix)]
+const PC: usize = 17;
+/// Registers in the core feature of a `G` packet: D0-D7, A0-A7, SR, PC.
+#[cfg(unix)]
+const CORE_REGISTERS: usize = 18;
+/// The program gdb writes into RAM (CPU32RM 4): `moveq #5,d0`, then
+/// `addq.l #1,d0` and `bra.s` back to it, for ever.
+#[cfg(unix)]
+const RAM_PROGRAM: [u16; 3] = [0x7005, 0x5280, 0x60fc];
+/// The `addq`'s address, where gdb's breakpoint goes.
+#[cfg(unix)]
+const RAM_BREAKPOINT: u32 = RAM_BASE + 2;
+
+/// The virtual cable's refusal of a request.
+#[cfg(unix)]
+#[derive(Debug, thiserror::Error)]
+enum CableError {
+    /// The reply's status, not Ok (the protocol's reply table).
+    #[error("the cable answered status {0}")]
+    Status(u8),
+    /// The protocol has no step request.
+    #[error("the cable cannot step")]
+    NoStep,
+}
+
+/// The virtual cable as a pod's host drives it: a `Cpu32Target` whose
+/// every call is the protocol's request (`crates/mc68331-run/src/bdm.rs`).
+#[cfg(unix)]
+struct Cable(UnixStream);
+
+#[cfg(unix)]
+impl Cable {
+    /// The body of the reply to `request`.
+    fn request(&mut self, request: &[u8]) -> Result<Vec<u8>, CableError> {
+        let reply = bdm(&mut self.0, request);
+        match reply.split_first() {
+            Some((0, body)) => Ok(body.to_vec()),
+            Some((&status, _)) => Err(CableError::Status(status)),
+            None => Err(CableError::Status(u8::MAX)),
+        }
+    }
+
+    /// The entry an ATEMP field (its kind, then ATEMP) reports, if the
+    /// CPU is in background mode.
+    fn entry(field: &[u8]) -> Option<Entry> {
+        let atemp = u32::from_le_bytes([field[1], field[2], field[3], field[4]]);
+        (field[0] != 0).then(|| Entry::from_atemp(atemp))
+    }
+
+    /// `access` with `register`, SFC or DFC, holding `function_code`,
+    /// and then as it was.
+    fn in_space<R>(
+        &mut self,
+        register: SystemRegister,
+        function_code: FunctionCode,
+        access: impl FnOnce(&mut Self) -> Result<R, CableError>,
+    ) -> Result<R, CableError> {
+        let held = self.read_system_register(register)?;
+        self.write_system_register(register, u32::from(function_code.bits()))?;
+        let result = access(self);
+        self.write_system_register(register, held)?;
+        result
+    }
+
+    /// A memory request's header: its code, `address` and `size`.
+    fn memory_request(code: u8, address: Address, size: Size) -> Vec<u8> {
+        let mut request = vec![code];
+        request.extend_from_slice(&address.0.to_le_bytes());
+        request.push(size.field() as u8);
+        request
+    }
+}
+
+#[cfg(unix)]
+impl Cpu32Target for Cable {
+    type Error = CableError;
+
+    fn reset_halted(&mut self) -> Result<Entry, CableError> {
+        let field = self.request(&[0x03])?;
+        Ok(Self::entry(&field).unwrap_or(Entry::Breakpoint))
+    }
+
+    fn halt(&mut self) -> Result<Entry, CableError> {
+        let field = self.request(&[0x04])?;
+        Ok(Self::entry(&field).unwrap_or(Entry::Breakpoint))
+    }
+
+    fn halted(&mut self) -> Result<Option<Entry>, CableError> {
+        let pins = self.request(&[0x02])?;
+        Ok(Self::entry(&pins[3..]))
+    }
+
+    fn go(&mut self) -> Result<(), CableError> {
+        self.request(&[0x05]).map(drop)
+    }
+
+    fn step(&mut self) -> Result<Entry, CableError> {
+        Err(CableError::NoStep)
+    }
+
+    fn read_register(&mut self, register: Register) -> Result<u32, CableError> {
+        let value = self.request(&[0x07, register.code() as u8])?;
+        Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
+    }
+
+    fn write_register(&mut self, register: Register, value: u32) -> Result<(), CableError> {
+        let mut request = vec![0x08, register.code() as u8];
+        request.extend_from_slice(&value.to_le_bytes());
+        self.request(&request).map(drop)
+    }
+
+    fn read_system_register(&mut self, register: SystemRegister) -> Result<u32, CableError> {
+        let value = self.request(&[0x09, register.code() as u8])?;
+        Ok(u32::from_le_bytes([value[0], value[1], value[2], value[3]]))
+    }
+
+    fn write_system_register(
+        &mut self,
+        register: SystemRegister,
+        value: u32,
+    ) -> Result<(), CableError> {
+        let mut request = vec![0x0a, register.code() as u8];
+        request.extend_from_slice(&value.to_le_bytes());
+        self.request(&request).map(drop)
+    }
+
+    fn read_memory(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        size: Size,
+        data: &mut [u8],
+    ) -> Result<(), CableError> {
+        self.in_space(SystemRegister::Sfc, function_code, |cable| {
+            for (index, chunk) in data.chunks_mut(CABLE_MEMORY_BYTES).enumerate() {
+                let at = address.offset((index * CABLE_MEMORY_BYTES) as u32);
+                let mut request = Self::memory_request(0x0b, at, size);
+                request.push(chunk.len() as u8);
+                chunk.copy_from_slice(&cable.request(&request)?);
+            }
+            Ok(())
+        })
+    }
+
+    fn write_memory(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        size: Size,
+        data: &[u8],
+    ) -> Result<(), CableError> {
+        self.in_space(SystemRegister::Dfc, function_code, |cable| {
+            for (index, chunk) in data.chunks(CABLE_MEMORY_BYTES).enumerate() {
+                let at = address.offset((index * CABLE_MEMORY_BYTES) as u32);
+                let mut request = Self::memory_request(0x0c, at, size);
+                request.extend_from_slice(chunk);
+                cable.request(&request)?;
+            }
+            Ok(())
+        })
+    }
+}
+
+/// gdb's `script` served over the cable through `Bdm`: how the session
+/// ended, and the stub's replies.
+#[cfg(unix)]
+fn gdb_over(
+    cable: &mut Cable,
+    script: Vec<Send>,
+) -> (
+    Result<Ending, SessionError<CableError, io::Error>>,
+    Vec<String>,
+) {
+    let output = Rc::new(RefCell::new(Vec::new()));
+    let ending = serve(&mut Bdm(cable), Wire::new(script, &output));
+    let replies = replies(&output.borrow());
+    (ending, replies)
+}
+
+#[cfg(unix)]
+#[test]
+fn gdb_drives_the_board_over_the_virtual_cable_as_over_a_pod() {
+    let directory = board("gdb-bdm", &echo::image());
+    let (child, cable) = bdm_session(&directory.join("echo.toml"), &directory);
+    let mut cable = Cable(cable);
+    // BDM is enabled by a reset with BKPT held, as a pod resets
+    cable.reset_halted().unwrap();
+    // the firmware runs, and Ctrl-C halts it
+    let (ending, replies) = gdb_over(
+        &mut cable,
+        vec![
+            wire::packet("c"),
+            Send::Now(vec![INTERRUPT]),
+            wire::packet("k"),
+        ],
+    );
+    assert_eq!(ending.unwrap(), Ending::Killed);
+    assert_eq!(replies[0], "S02");
+    // until its prologue has mapped the RAM
+    let mut word = [0; 2];
+    for _ in 0..100 {
+        let mapped = cable.read_memory(
+            Address(RAM_BASE),
+            FunctionCode::SUPERVISOR_DATA,
+            Size::Word,
+            &mut word,
+        );
+        if mapped.is_ok() {
+            break;
+        }
+        cable.go().unwrap();
+        thread::sleep(Duration::from_millis(10));
+        cable.halt().unwrap();
+    }
+    // gdb writes a program into RAM, sets PC there, and breaks in it
+    let mut core: Vec<u32> = (0..16)
+        .map(|code| {
+            cable
+                .read_register(Register::from_code(code).unwrap())
+                .unwrap()
+        })
+        .collect();
+    core.push(cable.read_system_register(SystemRegister::Sr).unwrap());
+    core.push(RAM_BASE);
+    assert_eq!(core.len(), CORE_REGISTERS);
+    let core: String = core.iter().map(|value| format!("{value:08x}")).collect();
+    let program: String = bytes(&RAM_PROGRAM)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let (ending, replies) = gdb_over(
+        &mut cable,
+        vec![
+            wire::packet(&format!("M{RAM_BASE:x},6:{program}")),
+            wire::packet(&format!("G{core}")),
+            wire::packet(&format!("Z0,{RAM_BREAKPOINT:x},2")),
+            wire::packet("c"),
+            wire::packet("g"),
+            wire::packet(&format!("z0,{RAM_BREAKPOINT:x},2")),
+            wire::packet(&format!("m{RAM_BREAKPOINT:x},2")),
+            wire::packet(&format!("qRcmd,{}", hex("fc"))),
+            wire::packet("D"),
+        ],
+    );
+    assert_eq!(ending.unwrap(), Ending::Detached);
+    assert_eq!(replies[..3], ["OK", "OK", "OK"]);
+    assert!(replies[3].starts_with("T05") && replies[3].contains("swbreak"));
+    let stopped = registers(&replies[4]);
+    assert_eq!(stopped[PC], RAM_BREAKPOINT, "on the breakpoint");
+    assert_eq!(stopped[0], 5, "D0 after the moveq");
+    assert_eq!(replies[5], "OK");
+    assert_eq!(replies[6], "5280", "BGND removed");
+    assert!(replies.contains(&format!("O{}", hex("fc 5\n"))));
+    // detached, it runs on round the loop
+    assert_eq!(cable.halted().unwrap(), None);
+    let mut ran_on = false;
+    for _ in 0..100 {
+        thread::sleep(Duration::from_millis(10));
+        cable.halt().unwrap();
+        ran_on = cable.read_register(Register::D0).unwrap() > 5;
+        if ran_on {
+            break;
+        }
+        cable.go().unwrap();
+    }
+    assert!(ran_on, "D0 counts on");
+    cable
+        .read_memory(
+            Address(RAM_BREAKPOINT),
+            FunctionCode::SUPERVISOR_DATA,
+            Size::Word,
+            &mut word,
+        )
+        .unwrap();
+    assert_eq!(word, [0x52, 0x80]);
+    let (status, _) = interrupted(child);
+    assert!(status.is_some());
+    fs::remove_dir_all(directory).unwrap();
 }

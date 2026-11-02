@@ -595,6 +595,7 @@ version = "0.2.0"
 dependencies = [
  "clap",
  "ctrlc",
+ "gdbstub",
  "mc683xx-board",
  "mc683xx-cpu32",
  "mc683xx-examples",

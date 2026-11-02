@@ -36,4 +36,5 @@ thiserror = "2.0.21"
 nix = { version = "0.31.3", features = ["term", "fs"] }
 
 [dev-dependencies]
+gdbstub = "0.7.10"
 mc683xx-examples = { path = "../../examples" }
