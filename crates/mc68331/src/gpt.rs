@@ -461,9 +461,11 @@ pub struct Gpt {
     pwm: Pwm,
     /// The levels the board drives on the input pins.
     inputs: Inputs,
-    /// The input levels the GPT has seen: frozen while STOP or STOPP.
+    /// The input levels the GPT has seen: held while stopped.
     seen: Inputs,
-    /// Port GP's pin levels as last seen, for input capture edges.
+    /// Port GP's pin levels as the input synchronizers last took them,
+    /// for input capture edges: held while stopped, the GPT's own
+    /// outputs' included (GPTRM 9.3, 9.4).
     levels: u8,
     /// When the GPT last saw PCLK rise, the start of the clock outputs'
     /// pulse when PCLK clocks their counter.
@@ -842,7 +844,8 @@ impl Gpt {
         if self.seen.pai != before.pai {
             self.pai_edge(before.pai, now);
         }
-        self.pins_changed(now);
+        self.report_port(now);
+        self.capture(now);
     }
 
     /// PAI changed from `was` at `now` (GPTRM 4.1): an event counted,
@@ -977,10 +980,14 @@ impl Gpt {
     }
 
     /// Port GP's levels may have changed at `now`: an edge for the host
-    /// on an output, and the input captures see the pins.
+    /// on an output, and the input captures see the pins unless
+    /// stopped, the input synchronizers not clocked (GPTRM 9.3, 9.4);
+    /// they see what changed when clocked again.
     fn pins_changed(&mut self, now: Cycles) {
         self.report_port(now);
-        self.capture(now);
+        if !self.stopped() {
+            self.capture(now);
+        }
     }
 
     /// The input captures see port GP's levels at `now`: a selected edge

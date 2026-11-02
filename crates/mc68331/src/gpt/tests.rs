@@ -493,6 +493,139 @@ fn stopp_freezes_and_incp_steps() {
     assert_eq!(read(&mut gpt, 0x0a, 5000 + 4), 12);
 }
 
+/// What stops the input synchronizers in a test (GPTRM 9.3, 9.4).
+#[derive(Debug, Clone, Copy)]
+enum Hold {
+    /// GPTMCR's STOPP.
+    Stopp,
+    /// FREEZE with FRZ0.
+    Freeze,
+}
+
+impl Hold {
+    /// Both.
+    const BOTH: [Self; 2] = [Self::Stopp, Self::Freeze];
+
+    /// Stops the GPT at `now` if `held`, or starts it again.
+    fn set(self, gpt: &mut Gpt, held: bool, now: u64) {
+        match self {
+            Self::Stopp => write(gpt, 0x00, if held { 0x1007 } else { 0x0007 }, now),
+            Self::Freeze => {
+                write(gpt, 0x00, 0x2007, now);
+                gpt.set_freeze(held, Cycles(now));
+            }
+        }
+    }
+}
+
+#[test]
+fn a_forced_compare_is_not_captured_while_held() {
+    for hold in Hold::BOTH {
+        let mut gpt = gpt();
+        // OC1M7 drives PGP7 low, then input capture 4 on any edge
+        write(&mut gpt, 0x08, 0x8000, 0);
+        write(&mut gpt, 0x0c, 0x0400, 0);
+        write(&mut gpt, 0x1e, 0x00c0, 0);
+        hold.set(&mut gpt, true, 4 * 0x10);
+        // FOC1 drives OC1D7 high, then low again (GPTRM 3.3.4, 9.3)
+        write(&mut gpt, 0x08, 0x8080, 4 * 0x10);
+        write_byte(&mut gpt, 0x24, 0x08, 4 * 0x10);
+        assert_eq!(gpt.port_outputs(Cycles(4 * 0x10)).levels, 0x80, "{hold:?}");
+        write(&mut gpt, 0x08, 0x8000, 4 * 0x10);
+        write_byte(&mut gpt, 0x24, 0x08, 4 * 0x10);
+        assert_eq!(read(&mut gpt, 0x22, 4 * 0x10), 0, "{hold:?}: no I4O5F");
+        hold.set(&mut gpt, false, 4 * 0x20);
+        assert_eq!(read(&mut gpt, 0x22, 4 * 0x20), 0, "{hold:?}: no edge left");
+        assert_eq!(read(&mut gpt, 0x1c, 4 * 0x20), 0xffff, "{hold:?}");
+    }
+    // FREEZE without FRZ0 is ignored: the forced compare is captured
+    let mut gpt = gpt();
+    write(&mut gpt, 0x08, 0x8080, 0);
+    write(&mut gpt, 0x0c, 0x0400, 0);
+    write(&mut gpt, 0x1e, 0x00c0, 0);
+    gpt.set_freeze(true, Cycles(4 * 0x10));
+    write_byte(&mut gpt, 0x24, 0x08, 4 * 0x10);
+    assert_eq!(read(&mut gpt, 0x22, 4 * 0x10), 0x8000, "I4O5F");
+    assert_eq!(read(&mut gpt, 0x1c, 4 * 0x10), 0x10);
+}
+
+#[test]
+fn a_portgp_write_is_seen_only_as_the_synchronizers_are_clocked() {
+    for hold in Hold::BOTH {
+        let mut gpt = gpt();
+        // PGP1 an output, high; EDGE2 falling
+        write(&mut gpt, 0x06, 0x0202, 0);
+        write(&mut gpt, 0x1e, 0x0008, 0);
+        hold.set(&mut gpt, true, 4 * 0x10);
+        write(&mut gpt, 0x06, 0x0200, 4 * 0x10);
+        write(&mut gpt, 0x06, 0x0202, 4 * 0x10);
+        write(&mut gpt, 0x06, 0x0200, 4 * 0x10);
+        assert_eq!(read(&mut gpt, 0x22, 4 * 0x10), 0, "{hold:?}: no IC2F");
+        // the level that changed is an edge once they are clocked
+        hold.set(&mut gpt, false, 4 * 0x20);
+        assert_eq!(read(&mut gpt, 0x22, 4 * 0x20), 0x0200, "{hold:?}: IC2F");
+        assert_eq!(read(&mut gpt, 0x10, 4 * 0x20), 0x10, "{hold:?}: TCNT held");
+    }
+}
+
+#[test]
+fn incp_clocks_the_synchronizers_once() {
+    let mut gpt = gpt();
+    // PGP1 an output, high; EDGE2 falling; STOPP
+    write(&mut gpt, 0x06, 0x0202, 0);
+    write(&mut gpt, 0x1e, 0x0008, 0);
+    write(&mut gpt, 0x00, 0x1007, 4 * 0x10);
+    write(&mut gpt, 0x06, 0x0200, 4 * 0x10);
+    assert_eq!(read(&mut gpt, 0x22, 4 * 0x10), 0);
+    // INCP (GPTRM 9.4): TCNT's tap is 4, so the capture holds $10
+    write(&mut gpt, 0x00, 0x1807, 4 * 0x10 + 2);
+    assert_eq!(read(&mut gpt, 0x22, 4 * 0x10 + 2), 0x0200, "IC2F");
+    assert_eq!(read(&mut gpt, 0x10, 4 * 0x10 + 2), 0x10);
+}
+
+#[test]
+fn an_external_edge_is_not_captured_while_held() {
+    for hold in Hold::BOTH {
+        let mut gpt = gpt();
+        // EDGE1 falling
+        write(&mut gpt, 0x1e, 0x0002, 0);
+        hold.set(&mut gpt, true, 4 * 0x10);
+        // a pulse is lost
+        gpt.set_port_pins(0xfe, Cycles(4 * 0x10 + 1));
+        gpt.set_port_pins(0xff, Cycles(4 * 0x10 + 2));
+        hold.set(&mut gpt, false, 4 * 0x20);
+        assert_eq!(read(&mut gpt, 0x22, 4 * 0x20), 0, "{hold:?}: pulse lost");
+        // a level changed while held is an edge once they are clocked
+        hold.set(&mut gpt, true, 4 * 0x30);
+        gpt.set_port_pins(0xfe, Cycles(4 * 0x30 + 1));
+        assert_eq!(read(&mut gpt, 0x22, 4 * 0x40), 0, "{hold:?}");
+        hold.set(&mut gpt, false, 4 * 0x40);
+        assert_eq!(read(&mut gpt, 0x22, 4 * 0x40), 0x0100, "{hold:?}: IC1F");
+        // TCNT held at $30, then counted on from it
+        assert_eq!(read(&mut gpt, 0x0e, 4 * 0x40), 0x20, "{hold:?}");
+    }
+}
+
+#[test]
+fn the_pulse_accumulator_ignores_pai_while_held() {
+    for hold in Hold::BOTH {
+        let mut gpt = gpt();
+        // PAEN, rising edges; PAI low
+        write(&mut gpt, 0x0c, 0x5000, 0);
+        gpt.set_pai(false, Cycles(1));
+        hold.set(&mut gpt, true, 4 * 0x10);
+        gpt.set_pai(true, Cycles(4 * 0x10 + 1));
+        gpt.set_pai(false, Cycles(4 * 0x10 + 2));
+        gpt.set_pai(true, Cycles(4 * 0x10 + 3));
+        assert_eq!(read_byte(&mut gpt, 0x0d, 4 * 0x20), 0, "{hold:?}: PACNT");
+        assert_eq!(read(&mut gpt, 0x22, 4 * 0x20), 0, "{hold:?}: no PAIF");
+        // the level that rose while held is an edge once they are clocked
+        hold.set(&mut gpt, false, 4 * 0x20);
+        assert_eq!(read_byte(&mut gpt, 0x0d, 4 * 0x20), 1, "{hold:?}: PACNT");
+        assert_eq!(read(&mut gpt, 0x22, 4 * 0x20), 0x0010, "{hold:?}: PAIF");
+    }
+}
+
 #[test]
 fn freeze_lets_tcnt_be_written_whatever_frz0() {
     let mut gpt = gpt();
