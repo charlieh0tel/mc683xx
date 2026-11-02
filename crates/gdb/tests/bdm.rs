@@ -411,3 +411,112 @@ fn a_breakpoint_the_program_wrote_over_is_the_program_s() {
     assert_eq!(replies[5], "OK");
     assert_eq!(word(&mut target, at), [0x70, 0x02]);
 }
+
+/// A target with neither the CPU's controls nor a step of its own, in
+/// a module of its own, where the stub's `Target` does not shadow the
+/// chip's `Cpu32Target`.
+mod unsteppable {
+    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_gdb::bdm::Bdm;
+    use mc683xx_gdb::target::AccessError;
+    use mc683xx_gdb::target::Target;
+    use mc683xx_gdb::target::TargetRun;
+    use mc683xx_mc68331::debug::TargetError;
+    use mc683xx_target::address::Address;
+    use mc683xx_target::function_code::FunctionCode;
+    use mc683xx_target::register::Register;
+    use mc683xx_target::register::SystemRegister;
+
+    use super::Running;
+
+    /// A target with neither the CPU's controls nor a step of its own: the
+    /// chip under BDM control, its step withheld.
+    pub(crate) struct Unsteppable<'t>(pub(crate) Bdm<'t, Running>);
+
+    impl Target for Unsteppable<'_> {
+        type Error = TargetError;
+
+        fn read_register(&mut self, register: Register) -> Result<u32, AccessError<TargetError>> {
+            self.0.read_register(register)
+        }
+
+        fn write_register(
+            &mut self,
+            register: Register,
+            value: u32,
+        ) -> Result<(), AccessError<TargetError>> {
+            self.0.write_register(register, value)
+        }
+
+        fn read_system_register(
+            &mut self,
+            register: SystemRegister,
+        ) -> Result<u32, AccessError<TargetError>> {
+            self.0.read_system_register(register)
+        }
+
+        fn write_system_register(
+            &mut self,
+            register: SystemRegister,
+            value: u32,
+        ) -> Result<(), AccessError<TargetError>> {
+            self.0.write_system_register(register, value)
+        }
+
+        fn read_memory(
+            &mut self,
+            address: Address,
+            function_code: FunctionCode,
+            data: &mut [u8],
+        ) -> Result<usize, AccessError<TargetError>> {
+            self.0.read_memory(address, function_code, data)
+        }
+
+        fn write_memory(
+            &mut self,
+            address: Address,
+            function_code: FunctionCode,
+            data: &[u8],
+        ) -> Result<(), AccessError<TargetError>> {
+            self.0.write_memory(address, function_code, data)
+        }
+
+        fn resume(&mut self) -> Result<(), TargetError> {
+            self.0.resume()
+        }
+
+        fn run_for(
+            &mut self,
+            cycles: Cycles,
+            hit: &dyn Fn() -> bool,
+        ) -> Result<TargetRun, TargetError> {
+            self.0.run_for(cycles, hit)
+        }
+
+        fn halt(&mut self) -> Result<TargetRun, TargetError> {
+            self.0.halt()
+        }
+    }
+}
+
+#[test]
+fn a_target_that_cannot_step_is_offered_no_step() {
+    let mut target = chip();
+    let output = Rc::new(RefCell::new(Vec::new()));
+    let script = vec![packet("vCont?"), packet("s")];
+    let ending = serve(
+        &mut unsteppable::Unsteppable(Bdm(&mut target)),
+        Wire::new(script, &output),
+    );
+    let replies = replies(&output.borrow());
+    assert_eq!(replies[0], "vCont;c;C", "no s");
+    assert!(
+        matches!(ending, Err(SessionError::Protocol(_))),
+        "{ending:?}"
+    );
+    assert_eq!(
+        target.read_system_register(SystemRegister::Rpc),
+        Ok(START),
+        "not stepped"
+    );
+}

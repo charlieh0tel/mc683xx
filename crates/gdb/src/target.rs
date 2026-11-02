@@ -155,12 +155,26 @@ impl<E> AccessError<E> {
     }
 }
 
+/// A target's own step ([`Target::native_step`]).
+pub trait NativeStep {
+    /// The target's error.
+    type Error;
+
+    /// One step: how it stopped, [`TargetRun::Background`] for a
+    /// target under BDM control.
+    ///
+    /// # Errors
+    ///
+    /// The target's error.
+    fn step(&mut self) -> Result<TargetRun, Self::Error>;
+}
+
 /// What the stub debugs.
 ///
 /// An emulated target implements [`with_cpu`](Self::with_cpu),
 /// [`read_memory`](Self::read_memory), [`write_memory`](Self::write_memory)
 /// and [`run_for`](Self::run_for), and [`reset`](Self::reset) if it
-/// can; the rest have its defaults.  A target under BDM control is
+/// can; the rest have its defaults, and it steps by the stub's hook.  A target under BDM control is
 /// [`Bdm`](crate::bdm::Bdm), which implements them all.
 ///
 /// An emulated target's memory is reached without bus cycles, so a
@@ -313,15 +327,13 @@ pub trait Target {
         Ok(TargetRun::Requested)
     }
 
-    /// Steps the target by its own means: `Some` of how it stopped.
-    /// The default, `None`, has the stub step it with a hook, which
-    /// needs [`with_cpu`](Self::with_cpu).
-    ///
-    /// # Errors
-    ///
-    /// The target's error.
-    fn step(&mut self) -> Result<Option<TargetRun>, Self::Error> {
-        Ok(None)
+    /// The target's own step, for a target that steps by its own means
+    /// (one under BDM control).  Without one, the default, the stub
+    /// steps the target with a hook, which needs
+    /// [`with_cpu`](Self::with_cpu); a target with neither cannot step,
+    /// and gdb is offered none.
+    fn native_step(&mut self) -> Option<&mut dyn NativeStep<Error = Self::Error>> {
+        None
     }
 
     /// Resets the CPU as the target resets (the reset exception on the

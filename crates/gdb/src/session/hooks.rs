@@ -9,6 +9,7 @@ use std::ops::ControlFlow;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
 
+use gdbstub::common::Signal;
 use gdbstub::stub::SingleThreadStopReason;
 use gdbstub::target::ext::breakpoints::WatchKind;
 use mc683xx_cpu32::cpu::hooks::HookId;
@@ -77,7 +78,8 @@ impl<T: Target> Session<'_, T> {
     /// before the next.  If the hook stopped it before the first (no
     /// hook had stopped there yet), the next run goes past it, as a
     /// run does past a hook's stop.  The CPU waiting in `stop` steps no
-    /// further than a quantum's wait.
+    /// further than a quantum's wait.  A target without the CPU's
+    /// controls, offered no step, is `SIGILL`.
     pub(super) fn hook_step(&mut self) -> Result<SingleThreadStopReason<u32>, T::Error> {
         let hits = Rc::clone(&self.hit);
         let Some((id, pc, count)) = self.target.with_cpu(|cpu| {
@@ -87,7 +89,7 @@ impl<T: Target> Session<'_, T> {
             });
             (id, cpu.registers.pc, cpu.instructions())
         }) else {
-            return Ok(SingleThreadStopReason::DoneStep);
+            return Ok(SingleThreadStopReason::Signal(Signal::SIGILL));
         };
         let stepped = self.step_runs(pc, count);
         self.target.with_cpu(|cpu| cpu.remove_hook(id));

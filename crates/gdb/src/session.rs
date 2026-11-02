@@ -236,26 +236,32 @@ impl<T: Target> Session<'_, T> {
         })
     }
 
+    /// Whether the target can step: by its own means, or by the stub's
+    /// hook.
+    fn steps(&mut self) -> bool {
+        self.emulated || self.target.native_step().is_some()
+    }
+
     /// One step, and why it stopped: done, unless it ran into a
-    /// breakpoint, a watchpoint, a BGND or a halt.  An emulated target
-    /// steps by the stub's hook, another by its own means.
+    /// breakpoint, a watchpoint, a BGND or a halt.  A target with a
+    /// step of its own takes it, another the stub's hook.
     fn step(&mut self) -> Result<SingleThreadStopReason<u32>, T::Error> {
-        if self.emulated {
+        if self.target.native_step().is_none() {
             self.going = None;
             return self.hook_step();
         }
         if let Some(at) = reached(self.target.read_system_register(SystemRegister::Rpc))? {
             self.going = Some(Going::Stepped(at));
         }
-        match self.target.step()? {
-            Some(
-                TargetRun::Background(Entry::Breakpoint) | TargetRun::Quantum | TargetRun::Hook,
-            )
-            | None => {
+        let Some(stepper) = self.target.native_step() else {
+            return self.hook_step();
+        };
+        match stepper.step()? {
+            TargetRun::Background(Entry::Breakpoint) | TargetRun::Quantum | TargetRun::Hook => {
                 self.going = None;
                 Ok(SingleThreadStopReason::DoneStep)
             }
-            Some(other) => self.stopped(other),
+            other => self.stopped(other),
         }
     }
 
@@ -420,8 +426,10 @@ impl<T: Target> SingleThreadResume for Session<'_, T> {
         self.target.resume()
     }
 
+    /// A target that cannot step is offered none: `vCont?` lists no
+    /// `s`, and gdbstub refuses one.
     fn support_single_step(&mut self) -> Option<SingleThreadSingleStepOps<'_, Self>> {
-        Some(self)
+        if self.steps() { Some(self) } else { None }
     }
 }
 

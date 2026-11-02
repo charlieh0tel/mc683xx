@@ -25,6 +25,7 @@ use mc683xx_target::register::SystemRegister;
 use mc683xx_target::size::Size;
 
 use crate::target::AccessError;
+use crate::target::NativeStep;
 use crate::target::Target;
 use crate::target::TargetRun;
 
@@ -129,13 +130,19 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
         self.0.halt().map(TargetRun::Background)
     }
 
-    fn step(&mut self) -> Result<Option<TargetRun>, T::Error> {
-        self.0
-            .step()
-            .map(|entry| Some(TargetRun::Background(entry)))
+    fn native_step(&mut self) -> Option<&mut dyn NativeStep<Error = T::Error>> {
+        Some(self)
     }
 
     fn reset(&mut self) -> Result<bool, T::Error> {
         self.0.reset_halted().map(|_| true)
+    }
+}
+
+impl<T: Cpu32Target> NativeStep for Bdm<'_, T> {
+    type Error = T::Error;
+
+    fn step(&mut self) -> Result<TargetRun, T::Error> {
+        self.0.step().map(TargetRun::Background)
     }
 }

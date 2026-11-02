@@ -1537,8 +1537,10 @@ so not in `third_party/NOTICE`): one session, `serve`, over one trait,
 `target::Target`.  An emulated target gives `with_cpu` (registers and
 hooks), `read_memory` and `write_memory` (memory with no bus cycle, in
 a function code's space), `run_for(cycles, hit)` (a quantum) and
-`reset`; the trait's other methods (registers, `resume`, `halt`,
-`step`) default to it.  The bare CPU (`flat::Machine`), the chip and a
+`reset`; the trait's other methods (registers, `resume`, `halt`)
+default to it, and it steps by a hook.  A target that steps by its own
+means gives `native_step`, a `NativeStep`; one with neither cannot step
+and gdb is offered no step, never a step that does not move.  The bare CPU (`flat::Machine`), the chip and a
 board implement it; the runner (`--gdb`) and the Python bindings
 (`serve_gdb` on `Machine`, `Mc68331` and `Board`) implement it over
 those, keeping their own work between quanta.  `bdm::Bdm` makes any

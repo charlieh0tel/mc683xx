@@ -143,9 +143,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   (memory at an `Address` in a function code's space, with no bus
   cycle; a `target::AccessError` for a byte not served),
   `run_for(cycles, hit)` (a quantum, its end a `target::TargetRun`) and
-  `reset`.  The register methods default to `with_cpu`'s; `resume`,
-  `halt` and `step` default to an emulated target's, which runs only
-  as the stub runs it.  With the `board` feature, `conditions` gives
+  `reset`.  The register methods default to `with_cpu`'s; `resume`
+  and `halt` default to an emulated target's, which runs only as the
+  stub runs it.  `native_step` gives a target's own step
+  (`target::NativeStep`); without one the stub steps by a hook, and a
+  target with neither that nor `with_cpu` cannot step: gdb is offered
+  none (`vCont?` lists no `s`), and gdbstub refuses a bare `s`, which
+  ends the session as a `Protocol` error.  With the `board` feature, `conditions` gives
   the target's stop conditions (`mc683xx_board::condition::Conditions`,
   a board's; none by default), for `monitor stop`.
 - `bdm::Bdm(&mut target)` is any `mc683xx_target::Cpu32Target` as a
