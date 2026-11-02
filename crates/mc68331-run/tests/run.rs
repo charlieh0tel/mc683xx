@@ -1069,10 +1069,6 @@ fn a_bdm_reset_halt_is_the_board_asserting_reset_with_bkpt() {
     let text = fs::read_to_string(&file).unwrap() + RESET_NET;
     fs::write(&file, text).unwrap();
     let (mut child, mut cable) = bdm_session(&file, &directory, &["--trace", "pins,nets"]);
-    // ResetHalt: a fresh breakpoint entry, ATEMP 0, as on the chip
-    assert_eq!(bdm(&mut cable, &[0x03]), [0, 1, 0, 0, 0, 0]);
-    // Go: the run traces the board's RESET pulse, then the chip's
-    assert_eq!(bdm(&mut cable, &[0x05]), [0]);
     let stderr = BufReader::new(child.stderr.take().unwrap());
     let (sender, receiver) = mpsc::channel();
     thread::spawn(move || {
@@ -1084,7 +1080,42 @@ fn a_bdm_reset_halt_is_the_board_asserting_reset_with_bkpt() {
     });
     let deadline = Instant::now() + WAITING;
     let mut trace = String::new();
-    while !board_reset_traced(&trace) {
+    // past power-on's reset, so the board's pulse is not at time 0 with
+    // power-on's
+    traced_until(&mut child, &receiver, &mut trace, deadline, |trace| {
+        traced_levels(trace, " pin=RESET ")
+            .iter()
+            .any(|&(time, level)| time > 0 && level == 1)
+    });
+    // ResetHalt: a fresh breakpoint entry, ATEMP 0, as on the chip
+    assert_eq!(bdm(&mut cable, &[0x03]), [0, 1, 0, 0, 0, 0]);
+    // Go: the run traces the board's RESET pulse, then the chip's
+    assert_eq!(bdm(&mut cable, &[0x05]), [0]);
+    traced_until(
+        &mut child,
+        &receiver,
+        &mut trace,
+        deadline,
+        board_reset_traced,
+    );
+    let pid = Pid::from_raw(i32::try_from(child.id()).unwrap());
+    kill(pid, Signal::SIGINT).unwrap();
+    child.wait().unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}
+
+/// Reads `receiver`'s trace lines into `trace` until `done` holds of
+/// it; past `deadline`, kills and reaps `child` and fails with what was
+/// read.
+#[cfg(unix)]
+fn traced_until(
+    child: &mut Child,
+    receiver: &mpsc::Receiver<String>,
+    trace: &mut String,
+    deadline: Instant,
+    done: impl Fn(&str) -> bool,
+) {
+    while !done(trace) {
         let left = deadline.saturating_duration_since(Instant::now());
         match receiver.recv_timeout(left) {
             Ok(line) => {
@@ -1094,14 +1125,10 @@ fn a_bdm_reset_halt_is_the_board_asserting_reset_with_bkpt() {
             Err(_) => {
                 child.kill().unwrap();
                 child.wait().unwrap();
-                panic!("no board RESET pulse traced:\n{trace}");
+                panic!("not traced in time:\n{trace}");
             }
         }
     }
-    let pid = Pid::from_raw(i32::try_from(child.id()).unwrap());
-    kill(pid, Signal::SIGINT).unwrap();
-    child.wait().unwrap();
-    fs::remove_dir_all(directory).unwrap();
 }
 
 #[cfg(unix)]
