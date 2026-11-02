@@ -9,7 +9,6 @@
 
 use std::mem;
 
-use mc683xx_modules::sim::ResetCause;
 use mc683xx_target::address::Address;
 use mc683xx_target::register::Register;
 use mc683xx_target::register::SystemRegister;
@@ -312,8 +311,11 @@ impl Mc68331 {
                 Ok(()) => Outcome::Resumed,
                 Err(_) => Outcome::Fault,
             },
+            // RST: RESET driven, as the `reset` instruction drives it,
+            // the CPU not reset (7.2.8.14), at once: no time passes in
+            // background mode, FREEZE still asserted
             Command::Reset => {
-                self.reset_peripherals();
+                self.system_reset();
                 Outcome::Complete
             }
             Command::Nop => Outcome::Complete,
@@ -343,23 +345,6 @@ impl Mc68331 {
         match self.bus_write(Address(address), size, space, value) {
             Ok(()) => Outcome::Complete,
             Err(_) => Outcome::Fault,
-        }
-    }
-
-    /// RST: RESET driven, as the `reset` instruction drives it, the CPU
-    /// not reset (7.2.8.14), at once: no time passes in background mode.
-    /// The modules come out of their reset frozen, FREEZE still asserted.
-    fn reset_peripherals(&mut self) {
-        self.board.reset_instruction(self.now);
-        if mem::take(&mut self.board.system_reload) {
-            self.board.reload(&mut self.cpu.memory, ResetCause::System);
-        }
-        if self.board.decode_changed {
-            self.board.rebuild(&mut self.cpu.memory);
-        }
-        self.board.frozen = false;
-        if self.board.set_freeze(true, self.now) {
-            self.board.rebuild(&mut self.cpu.memory);
         }
     }
 
