@@ -368,9 +368,11 @@ impl<T: Target> SingleThreadBase for Session<'_, T> {
     }
 
     /// Memory as the program has it: a planted breakpoint's bytes read
-    /// as the word it replaced.
+    /// as the word it replaced, unless the program wrote over BGND.
     fn read_addrs(&mut self, address: u32, data: &mut [u8]) -> TargetResult<usize, Self> {
         let space = self.function_code;
+        self.retire_overwritten(address, data.len(), space)
+            .map_err(|_| TargetError::Errno(EFAULT))?;
         let read = self
             .target
             .read_memory(Address(address), space, data)
@@ -385,9 +387,12 @@ impl<T: Target> SingleThreadBase for Session<'_, T> {
     }
 
     /// A write over a planted breakpoint's bytes goes to the word it
-    /// replaced, to be put back on its removal; BGND stays.
+    /// replaced, to be put back on its removal; BGND stays.  Over a
+    /// word the program wrote over BGND, it is a write like any other.
     fn write_addrs(&mut self, address: u32, data: &[u8]) -> TargetResult<(), Self> {
         let space = self.function_code;
+        self.retire_overwritten(address, data.len(), space)
+            .map_err(|_| TargetError::Errno(EFAULT))?;
         let overlaps = self.overlaps(address, data.len(), space);
         let mut written = data.to_vec();
         for &(offset, _, byte) in &overlaps {

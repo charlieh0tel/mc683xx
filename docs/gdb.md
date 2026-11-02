@@ -334,7 +334,10 @@ it, kill leaves it halted.
 - **Memory** is real bus cycles in the address space `monitor fc`
   names.  Words when the address and length are even, else bytes.  A
   planted breakpoint reads as the word it replaced, and a write over
-  it changes that word, put back when the breakpoint comes out.
+  it changes that word, put back when the breakpoint comes out.  Once
+  the program has written over BGND the word is the program's: an
+  access there finds that, retires the breakpoint, and reads or writes
+  the word as it stands.
 - **Breakpoints** are software only: BGND written over the instruction
   and read back, so one in ROM is refused (`E16`).  A stop at one
   reports `swbreak` with PC on it.  Each comes out of the address space
