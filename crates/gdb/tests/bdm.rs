@@ -7,9 +7,10 @@ use std::io;
 use std::rc::Rc;
 
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_gdb::bdm::serve;
-use mc683xx_gdb::stub::Ending;
-use mc683xx_gdb::stub::SessionError;
+use mc683xx_gdb::Ending;
+use mc683xx_gdb::SessionError;
+use mc683xx_gdb::bdm::Bdm;
+use mc683xx_gdb::serve;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::debug::TargetError;
@@ -158,7 +159,7 @@ fn session(
     Vec<String>,
 ) {
     let output = Rc::new(RefCell::new(Vec::new()));
-    let ending = serve(target, Wire::new(script, &output));
+    let ending = serve(&mut Bdm(target), Wire::new(script, &output));
     let replies = replies(&output.borrow());
     (ending, replies)
 }

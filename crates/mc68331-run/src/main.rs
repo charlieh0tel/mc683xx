@@ -60,7 +60,7 @@ use mc683xx_board::trace::Line;
 use mc683xx_board::trace::header;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_gdb::stub::Ending;
+use mc683xx_gdb::Ending;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
 

@@ -865,7 +865,7 @@ chip beside `Mc68331`.
   `ready(port)` is called once it listens, before the target is
   held, so a test starts its client then (port 0 picks one) and may
   look at the target.  It waits for gdb (to connect, or for its next
-  packet) in waits of `stub::POLL`, 20 ms, through the stub's
+  packet) in waits of `connection::POLL`, 20 ms, through the stub's
   `Waiter` (`accept_polled`, a `Polled` connection): the GIL released
   during each, so another thread (an in-process client) runs, and
   `check_signals` between them.  Between a continue's quanta it
@@ -1463,7 +1463,7 @@ hand.  The keys are in `docs/board-files.md`.
   writing nothing more and saving nothing, for a run that cannot reach
   a sync point (one waiting on piped input).  The handler is set
   before `--gdb`'s session, whose waits for gdb are polled
-  (`stub::accept_polled`, a `Waiter` that looks for Ctrl-C between
+  (`connection::accept_polled`, a `Waiter` that looks for Ctrl-C between
   them): Ctrl-C while waiting for gdb, or while gdb holds the board,
   ends the session and the run, with the `stopped` record and
   `--save`, at the next wait.  A wrong command
@@ -1533,13 +1533,16 @@ Adversarial review of the board layer (2026-10-23):
 
 `mc683xx-gdb` serves gdb's remote serial protocol through the
 `gdbstub` crate (MIT OR Apache-2.0, a Cargo dependency like any other,
-so not in `third_party/NOTICE`), over a small trait, `target::Target`:
-`with_cpu` (registers and hooks), `peek` and `poke` (memory with no
-bus cycle), `run_for(cycles, hit)` (a quantum) and `reset`.  The bare CPU
-(`flat::Machine`), the chip and a board implement it; the runner
-(`--gdb`) and the Python bindings (`serve_gdb` on `Machine`, `Mc68331` and
-`Board`) implement it over those, keeping their own work between
-quanta.  docs/gdb.md is the guide.  The chip's and the board's
+so not in `third_party/NOTICE`): one session, `serve`, over one trait,
+`target::Target`.  An emulated target gives `with_cpu` (registers and
+hooks), `read_memory` and `write_memory` (memory with no bus cycle, in
+a function code's space), `run_for(cycles, hit)` (a quantum) and
+`reset`; the trait's other methods (registers, `resume`, `halt`,
+`step`) default to it.  The bare CPU (`flat::Machine`), the chip and a
+board implement it; the runner (`--gdb`) and the Python bindings
+(`serve_gdb` on `Machine`, `Mc68331` and `Board`) implement it over
+those, keeping their own work between quanta.  `bdm::Bdm` makes any
+`Cpu32Target` one (Over BDM, below).  docs/gdb.md is the guide.  The chip's and the board's
 `Target` impls are features (`mc68331`, `board`), on by default, so a
 bare-CPU host builds the stub without the chip and board crates; the
 runner and the Python bindings name `board`, and `make features`
@@ -1561,7 +1564,8 @@ checks the bare build.
   runner takes a failed session (`Connection` or `Protocol`) as a
   detach, said on standard error, so one bad packet does not cost the
   run; a `Target` error, the board's, still ends it.
-- **Memory:** supervisor data space, no bus cycle: memory the core
+- **Memory:** supervisor data space unless `monitor fc` names
+  another, no bus cycle: memory the core
   serves (ROM too, so `load` works), module registers read through
   `Module::peek`; peripherals neither read nor written (`E0e`).  A
   debugger's look never has a side effect; a host wanting real cycles
@@ -1581,18 +1585,31 @@ checks the bare build.
 - **Stops gdb did not ask for:** the host's own hook stops are
   `SIGTRAP`, a halt and a bare host's fault stop `SIGBUS`, a stop
   request `SIGINT`.
-- **Over BDM** (`bdm::serve`, 2026-11-01): a second session over any
-  `Cpu32Target`, so a host driving silicon through a BDM pod has gdb.
-  It shares the register description (`GdbRegisters`, read and
-  written by location, a BDM register or system register), the target
-  description and the session errors with the first.  Breakpoints are
-  BGND planted in memory and read back, refused in ROM; hardware
-  breakpoints and watchpoints wait for a capability trait beside
-  `Cpu32Target` that the emulator would implement with its hooks.
-  Continue is GO and a poll of `halted` and the connection; steps are
-  `Cpu32Target::step`, which reports where it stopped, not always one
-  instruction later.  The emulator's own `--gdb` stays on the hook
-  session for now.
+- **Over BDM** (2026-11-01): `bdm::Bdm`, any `Cpu32Target` as a
+  `Target`, so a host driving silicon through a BDM pod has gdb.  It
+  gives no `with_cpu`, so the session plants BGND for a breakpoint,
+  read back and refused in ROM, has no hardware breakpoints or
+  watchpoints, and steps by `Cpu32Target::step`, which reports where
+  it stopped, not always one instruction later.  Continue is GO and a
+  look at `halted` and the connection each millisecond or so.
+- **One session, one trait** (2026-11-01): the BDM stub began as a
+  second session beside the hook one; they shared the register and
+  target descriptions and the session errors, and differed in three
+  things only: who runs the target (the stub, in quanta, or the target
+  itself), how it stops (hooks, or BGND and the target's step), and
+  their extras (stop conditions, `monitor fc`).  They are one session
+  now, over one `Target` whose `with_cpu` decides the first two, so
+  gdb behaves alike on both where they overlap (Ctrl-C while stopped
+  is nothing, a `G` packet writes only what it changes, `monitor fc`
+  on either) and a fix reaches both.  The emulator stays off
+  `Cpu32Target` for its own debugging, for three reasons: the chip's
+  `Cpu32Target` answers only with BDM enabled (BKPT at reset), which an
+  emulated session must not need; each stop would assert FREEZE,
+  stopping the SIM's counters and the QSPI where their FRZ bits are
+  set, which firmware could see and the hook session does not do; and
+  the chip's step runs the chip alone, past the runner's turns and the
+  Python bindings' exception checks.  Hooks also leave memory alone,
+  where BGND does not: firmware that sums its code never sees them.
 - **Stop conditions** (`monitor stop`, 2026-11-01): a board's nets and
   peripherals stop the run where something outside the CPU happens,
   which no breakpoint or watchpoint reaches (a DUART's character, a
@@ -2773,7 +2790,7 @@ checks move onto real code hooks.
 | abi3 wheels and the crates published by the `release` workflow, both by trusted publishing | One wheel per platform covers every Python from 3.10; no token is stored.  crates.io's trusted publishing needs the crate to exist first, so only the first release is published by hand (decided 2026-10-24). |
 | A GDB stub on the gdbstub crate, generic over a small `Target` trait, its breakpoints and steps hooks | Decided 2026-10-24; gdbstub is MIT OR Apache-2.0.  Hooks cost nothing until installed and never touch memory; one trait serves the bare CPU, the chip, a board and hosts with run loops of their own. |
 | gdb's memory access without bus cycles | A debugger's look must not clear a flag or feed a peripheral (the reason `Module::peek` exists); real cycles stay the host's (`bus_read`, `bus_write`). |
-| The public API names no foreign type but gdbstub's `ConnectionExt` | A dependency's major release must not break ours: board parameters are `registry::ParameterValue`, a syntax error a `SyntaxError`, a snapshot that does not decode a `DecodeError`, each opaque or ours.  `stub::serve` keeps gdbstub's connection trait, which an own trait would only forward to (decided 2026-10-24). |
+| The public API names no foreign type but gdbstub's `ConnectionExt` | A dependency's major release must not break ours: board parameters are `registry::ParameterValue`, a syntax error a `SyntaxError`, a snapshot that does not decode a `DecodeError`, each opaque or ours.  `serve` keeps gdbstub's connection trait, which an own trait would only forward to (decided 2026-10-24). |
 | `Cpu::registers` and `Cpu::memory` stay public fields | The programming model is the host's to read and write as it likes (a test's setup, a harness's comparison); no invariant spans them that a setter would guard, and hosts reach them a thousand times as fields (decided 2026-10-24). |
 | A fixed memory on no select, emulator-only; a matching select wins | A host's hybrid boot maps rewritten code beside an image it must not change, where the only alternative was patching the reset code to program a select the firmware leaves unused.  A select winning keeps the firmware's decode as on hardware wherever it decodes; fast termination and no DSACK by default, as the chip has nothing to model, a select's internal timing (port, wait states) on request so code runs at its original bus speed; contents survive resets as RAM's unless a reload scope says (decided 2026-10-24). |
 | Pacing host-side, a front end's control taken at sync points | A GUI wants board time at wall speed and a stop and keys from its own thread; sleeping between quanta against the wall clock, outside the board's model, and taking a thread-safe handle's stop and inputs at sync points on the board's thread, keeps the core single-threaded, host time out of the model and the run the same whatever the pacing (decided 2026-10-24). |

@@ -10,15 +10,17 @@ use mc683xx_board::board::Board;
 use mc683xx_board::condition::Conditions;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_gdb::stub;
-use mc683xx_gdb::stub::Ending;
-use mc683xx_gdb::stub::PollError;
-use mc683xx_gdb::stub::Waiter;
+use mc683xx_gdb::Ending;
+use mc683xx_gdb::SessionError;
+use mc683xx_gdb::connection;
+use mc683xx_gdb::connection::PollError;
+use mc683xx_gdb::connection::Waiter;
+use mc683xx_gdb::target::AccessError;
 use mc683xx_gdb::target::Target;
 use mc683xx_gdb::target::TargetRun;
-use mc683xx_gdb::target::Unwritable;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
 
 use crate::Turns;
 use crate::error::RunError;
@@ -34,16 +36,28 @@ struct Debugged<'a> {
 impl Target for Debugged<'_> {
     type Error = RunError;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> R {
-        self.board.with_cpu(call)
+    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+        Target::with_cpu(self.board, call)
     }
 
-    fn peek(&mut self, address: Address, data: &mut [u8]) -> usize {
-        Target::peek(self.board, address, data)
+    fn read_memory(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        data: &mut [u8],
+    ) -> Result<usize, AccessError<RunError>> {
+        Target::read_memory(self.board, address, function_code, data)
+            .map_err(|error| error.map(RunError::from))
     }
 
-    fn poke(&mut self, address: Address, data: &[u8]) -> Result<(), Unwritable> {
-        Target::poke(self.board, address, data)
+    fn write_memory(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        data: &[u8],
+    ) -> Result<(), AccessError<RunError>> {
+        Target::write_memory(self.board, address, function_code, data)
+            .map_err(|error| error.map(RunError::from))
     }
 
     fn run_for(&mut self, cycles: Cycles, hit: &dyn Fn() -> bool) -> Result<TargetRun, RunError> {
@@ -53,8 +67,8 @@ impl Target for Debugged<'_> {
         Ok(ran)
     }
 
-    fn reset(&mut self) -> bool {
-        Target::reset(self.board)
+    fn reset(&mut self) -> Result<bool, RunError> {
+        Ok(Target::reset(self.board)?)
     }
 
     fn conditions(&mut self) -> Option<&mut dyn Conditions> {
@@ -99,7 +113,7 @@ pub(crate) fn serve(
     address: &str,
     interrupted: &AtomicBool,
 ) -> Result<Ending, RunError> {
-    let accepted = stub::accept_polled(
+    let accepted = connection::accept_polled(
         address,
         |at| {
             eprintln!("mc683xx-run: waiting for gdb on {at}");
@@ -113,10 +127,10 @@ pub(crate) fn serve(
         Err(PollError::Connection(error)) => return Err(RunError::Gdb(error)),
         Err(error) => return Err(RunError::Gdb(io::Error::other(error.to_string()))),
     };
-    match stub::serve(&mut Debugged { board, turns }, connection) {
+    match mc683xx_gdb::serve(&mut Debugged { board, turns }, connection) {
         Ok(ending) => Ok(ending),
-        Err(stub::SessionError::Target(error)) => Err(error),
-        Err(stub::SessionError::Connection(PollError::Host(Interrupted))) => Ok(Ending::Detached),
+        Err(SessionError::Target(error)) => Err(error),
+        Err(SessionError::Connection(PollError::Host(Interrupted))) => Ok(Ending::Detached),
         Err(error) => {
             eprintln!("mc683xx-run: gdb: {error}; running on as if it detached");
             Ok(Ending::Detached)

@@ -9,24 +9,36 @@ use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
 
+use super::AccessError;
 use super::Target;
 use super::TargetRun;
-use super::Unwritable;
+use super::widen;
 
 impl Target for Board<Mc68331> {
     type Error = RunError;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> R {
-        call(&mut self.chip_mut().cpu_control())
+    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+        Some(call(&mut self.chip_mut().cpu_control()))
     }
 
-    fn peek(&mut self, address: Address, data: &mut [u8]) -> usize {
-        Target::peek(self.chip_mut(), address, data)
+    fn read_memory(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        data: &mut [u8],
+    ) -> Result<usize, AccessError<RunError>> {
+        Target::read_memory(self.chip_mut(), address, function_code, data).map_err(widen)
     }
 
-    fn poke(&mut self, address: Address, data: &[u8]) -> Result<(), Unwritable> {
-        Target::poke(self.chip_mut(), address, data)
+    fn write_memory(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        data: &[u8],
+    ) -> Result<(), AccessError<RunError>> {
+        Target::write_memory(self.chip_mut(), address, function_code, data).map_err(widen)
     }
 
     /// Runs the board to the board time `cycles` past the chip's now,
@@ -44,8 +56,8 @@ impl Target for Board<Mc68331> {
 
     /// An external reset of the chip; the board drives RESET on its
     /// nets as it does for any reset the chip reports.
-    fn reset(&mut self) -> bool {
-        Target::reset(self.chip_mut())
+    fn reset(&mut self) -> Result<bool, RunError> {
+        Ok(Target::reset(self.chip_mut()).unwrap_or_else(|never| match never {}))
     }
 
     fn conditions(&mut self) -> Option<&mut dyn Conditions> {

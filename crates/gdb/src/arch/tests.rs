@@ -1,3 +1,5 @@
+use std::convert::Infallible;
+
 use gdbstub::arch::Registers as _;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_cpu32::registers::status;
@@ -7,6 +9,29 @@ use super::PS;
 use super::SP;
 use super::SSP;
 use super::USP;
+use super::get;
+use super::set;
+
+/// The CPU's registers as gdb sees them, and stored as the stub
+/// stores them.
+impl GdbRegisters {
+    /// The CPU's registers as gdb sees them.
+    fn of(registers: &Registers) -> Self {
+        let read: Result<Self, Infallible> = Self::read(|location| Ok(get(registers, location)));
+        match read {
+            Ok(read) => read,
+            Err(never) => match never {},
+        }
+    }
+
+    /// Writes them to the CPU's registers, as [`writes`](Self::writes)
+    /// orders them.  SR's unimplemented bits stay clear.
+    fn store(&self, registers: &mut Registers) {
+        for (location, value) in self.writes(&Self::of(registers)) {
+            set(registers, location, value);
+        }
+    }
+}
 
 /// User and supervisor stack pointers apart.
 fn supervisor() -> Registers {
