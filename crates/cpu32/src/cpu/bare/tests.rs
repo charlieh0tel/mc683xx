@@ -345,3 +345,87 @@ fn a_step_keeps_what_its_instruction_left_for_the_host() {
         matches!(machine.cpu.exception_taken(), Some(Exception::Short { vector, .. }) if vector == Vector::trap(0))
     );
 }
+
+/// STOP #$2000 (CPU32RM 4, STOP).
+const STOP_UNMASKED: [u16; 2] = [0x4e72, 0x2000];
+
+/// A run of no instructions: what is pending at the boundary taken.
+fn boundary_only(machine: &mut Machine) -> End {
+    machine
+        .run_limited(Limits {
+            instructions: Some(0),
+            ..Limits::default()
+        })
+        .end
+}
+
+#[test]
+fn a_fault_stacking_a_pending_breakpoint_keeps_the_instruction_before_it() {
+    let mut machine = machine(&[MOVEQ_1_D1, NOP]);
+    machine.cpu.set_stop_on_fault(true);
+    one(&mut machine);
+    let mut bad_stack = machine.cpu.registers.clone();
+    assert_eq!(bad_stack.data[1], 1);
+    bad_stack.ssp = NOWHERE;
+    machine.cpu.set_breakpoint_pending(true);
+    machine.cpu.registers.ssp = NOWHERE;
+    let End::Fault(fault) = boundary_only(&mut machine) else {
+        panic!("no fault");
+    };
+    assert_eq!(fault.cycle, CycleKind::Write);
+    assert_eq!(fault.address, Address(NOWHERE - 2));
+    assert_eq!(fault.registers, bad_stack, "the MOVEQ kept");
+    assert_eq!(machine.cpu.registers, bad_stack);
+    assert!(machine.cpu.breakpoint_pending(), "left for the next run");
+    // SSP fixed, the run goes on: vector 12 (CPU32RM 6.2.6), its frame
+    // returning after the MOVEQ
+    machine.cpu.registers.ssp = STACK;
+    boundary_only(&mut machine);
+    assert!(!machine.cpu.breakpoint_pending());
+    assert_eq!(machine.cpu.registers.pc, HANDLER);
+    assert_eq!(machine.cpu.registers.ssp, STACK - 12);
+    assert_eq!(frame(&machine).1, CODE + 2);
+}
+
+#[test]
+fn a_fault_stacking_a_breakpoint_after_stop_keeps_the_interrupt_before_it() {
+    let mut machine = machine(&STOP_UNMASKED);
+    machine.cpu.set_stop_on_fault(true);
+    one(&mut machine);
+    let level_3 = handle(
+        &mut machine,
+        Vector::autovector(InterruptLevel::new(3).unwrap()),
+        0x4200,
+    );
+    machine.cpu.set_breakpoint_pending(true);
+    // room for the interrupt's four words, not the breakpoint's six
+    machine.cpu.registers.ssp = 8;
+    machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+    let End::Fault(fault) = one(&mut machine) else {
+        panic!("no fault");
+    };
+    assert_eq!(fault.cycle, CycleKind::Write);
+    assert_eq!(fault.registers.pc, level_3, "the interrupt kept");
+    assert_eq!(fault.registers.ssp, 0);
+    assert_eq!(fault.registers.interrupt_mask(), 3);
+    assert!(machine.cpu.breakpoint_pending(), "left for the next run");
+}
+
+#[test]
+fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_its_breakpoint_pending() {
+    let mut machine = machine(&STOP_UNMASKED);
+    machine.cpu.set_stop_on_fault(true);
+    one(&mut machine);
+    machine.cpu.set_breakpoint_pending(true);
+    machine.cpu.registers.ssp = NOWHERE;
+    machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+    let End::Fault(fault) = one(&mut machine) else {
+        panic!("no fault");
+    };
+    assert_eq!(fault.address, Address(NOWHERE - 2));
+    assert_eq!(fault.registers.pc, CODE + 4, "the interrupt not taken");
+    assert!(
+        machine.cpu.breakpoint_pending(),
+        "not acknowledged: no exception processing ended"
+    );
+}

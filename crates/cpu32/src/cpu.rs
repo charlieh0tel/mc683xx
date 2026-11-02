@@ -233,8 +233,8 @@ pub struct Cpu {
     loop_mode: Option<Address>,
     /// Whether `began` is kept: while a hook or a setting reads it.
     capture: bool,
-    /// The registers as the instruction, or interrupt entry, began,
-    /// while `capture`.
+    /// The registers as the instruction, or interrupt or hardware
+    /// breakpoint entry, began, while `capture`.
     began: Registers,
     /// The SR bits that trace: T1 and T0, or none with the untraced
     /// deviation.
@@ -1252,11 +1252,17 @@ impl Core<'_> {
         };
         let pc = Address(self.cpu.registers.pc);
         self.cpu.taken = Some(Exception::Short { vector, pc });
-        self.process(vector, pc, None, Some(level), false);
+        let processed = self.process(vector, pc, None, Some(level), false);
         self.cpu.sampled_mask = self.cpu.registers.interrupt_mask();
         // a breakpoint STOP left pending: acknowledged at the end of
-        // the exception processing that ends STOP (CPU32RM 6.2.6)
-        if self.cpu.bare.breakpoint_pending && !self.cpu.bdm_enabled && self.cpu.idle.is_none() {
+        // the exception processing that ends STOP (CPU32RM 6.2.6), a
+        // boundary of its own; a fault stop ended none
+        if self.cpu.bare.breakpoint_pending
+            && !self.cpu.bdm_enabled
+            && self.cpu.idle.is_none()
+            && !(processed == Processed::Faulted && self.cpu.bare.stop_on_fault)
+        {
+            self.cpu.capture_began();
             let cycles = self.hardware_breakpoint();
             self.charge(cycles);
         }
@@ -1281,6 +1287,7 @@ impl Core<'_> {
         if cpu.idle.is_some() || cpu.stopped {
             return Cycles::ZERO;
         }
+        cpu.capture_began();
         cpu.stall = Cycles::ZERO;
         cpu.extra = Cycles::ZERO;
         cpu.taken = None;
@@ -1294,9 +1301,10 @@ impl Core<'_> {
     /// word on the bus ignored; if BERR did, exception processing
     /// through vector 12 with a six-word frame, the next PC and the
     /// address of the instruction executing when the breakpoint was
-    /// sensed, the last executed (6.4.2).  Its clocks (8.3.13,
-    /// Breakpoint), less the overlap; the cycles' wait states go to the
-    /// stall.
+    /// sensed, the last executed (6.4.2).  A fault stop in that
+    /// processing leaves it pending, as nothing was taken.  Its clocks
+    /// (8.3.13, Breakpoint), less the overlap; the cycles' wait states
+    /// go to the stall.
     #[cold]
     #[inline(never)]
     fn hardware_breakpoint(&mut self) -> Cycles {
@@ -1316,7 +1324,10 @@ impl Core<'_> {
             address,
         });
         self.cpu.leave_loop_mode();
-        self.process(vector, pc, Some(address), None, false);
+        let processed = self.process(vector, pc, Some(address), None, false);
+        if processed == Processed::Faulted && self.cpu.bare.stop_on_fault {
+            self.cpu.bare.breakpoint_pending = true;
+        }
         self.cpu.spend(timing::exception::BREAKPOINT_BUS_ERROR)
     }
 

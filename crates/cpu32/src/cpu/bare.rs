@@ -75,7 +75,7 @@ pub enum FaultCause {
 
 /// A fault that stopped the run ([`Cpu::set_stop_on_fault`]): nothing
 /// stacked, the registers back as the faulting instruction (or
-/// interrupt entry) began.
+/// interrupt or hardware breakpoint entry) began.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct FaultStop {
@@ -236,9 +236,10 @@ impl Cpu {
         self.resume = None;
     }
 
-    /// The registers as the last instruction, or interrupt entry, began,
-    /// while they are kept: while a read, write or invalid access hook
-    /// is installed or faults stop the run.
+    /// The registers as the last instruction, or interrupt or hardware
+    /// breakpoint entry, began, while they are kept: while a read,
+    /// write or invalid access hook is installed or faults stop the
+    /// run.
     #[must_use]
     pub const fn instruction_registers(&self) -> &Registers {
         &self.began
