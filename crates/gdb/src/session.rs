@@ -108,15 +108,20 @@ where
         going: None,
     };
     let served = GdbStub::new(connection).run_blocking::<EventLoop<'_, T, C>>(&mut session);
-    // a failed session's error is the one reported, not cleaning up's
     let cleaned = session.clean_up();
-    let ending = match served {
-        Ok(DisconnectReason::Kill) => Ending::Killed,
-        Ok(_) => Ending::Detached,
-        Err(error) => return Err(failure(error)),
-    };
     // a target left with BGND planted is not resumed
-    cleaned?;
+    let ending = match (served, cleaned) {
+        (Ok(DisconnectReason::Kill), Ok(())) => Ending::Killed,
+        (Ok(_), Ok(())) => Ending::Detached,
+        (Ok(_), Err(cleanup)) => return Err(cleanup),
+        (Err(error), Ok(())) => return Err(failure(error)),
+        (Err(error), Err(cleanup)) => {
+            return Err(SessionError::Uncleaned {
+                error: Box::new(failure(error)),
+                cleanup: Box::new(cleanup),
+            });
+        }
+    };
     if ending == Ending::Detached {
         session.target.resume().map_err(SessionError::Target)?;
     }

@@ -594,3 +594,51 @@ fn a_breakpoint_put_back_in_part_is_put_back_with_the_session() {
     assert!(replies[1].starts_with('E'), "{}", replies[1]);
     assert_eq!(word(&mut target, STORE_PC), [0x20, 0x80]);
 }
+
+/// Serves a breakpoint that cannot be put back, then `ending`: the
+/// session's failure, cleaning up's both reported, the target halted.
+fn uncleaned(ending: Vec<Send>) -> SessionError<TargetError, io::Error> {
+    let mut target = chip();
+    target.2 = Some(STORE_PC);
+    let mut script = vec![packet(&format!("Z0,{STORE_PC:x},2"))];
+    script.extend(ending);
+    let (ending, replies) = session(&mut target, script);
+    assert_eq!(replies[0], "OK");
+    assert!(
+        Cpu32Target::halted(&mut target.0).unwrap().is_some(),
+        "not resumed"
+    );
+    let Err(SessionError::Uncleaned { error, cleanup }) = ending else {
+        panic!("{ending:?}");
+    };
+    match *cleanup {
+        SessionError::Unrestored(at) => assert_eq!(at, [Address(STORE_PC)]),
+        other => panic!("{other:?}"),
+    }
+    *error
+}
+
+#[test]
+fn a_lost_session_that_cannot_put_a_breakpoint_back_reports_both() {
+    let error = uncleaned(Vec::new());
+    assert!(matches!(error, SessionError::Connection(_)), "{error:?}");
+}
+
+#[test]
+fn a_malformed_packet_that_ends_a_session_and_a_breakpoint_left_report_both() {
+    let error = uncleaned(vec![packet("m,")]);
+    assert!(matches!(error, SessionError::Protocol(_)), "{error:?}");
+    let shown = SessionError::<TargetError, io::Error>::Uncleaned {
+        error: Box::new(error),
+        cleanup: Box::new(SessionError::Unrestored(vec![Address(STORE_PC)])),
+    }
+    .to_string();
+    assert!(
+        shown.starts_with("protocol: ")
+            && shown.ends_with(&format!(
+                "; cleaning up: breakpoints still planted at {}",
+                Address(STORE_PC)
+            )),
+        "{shown}"
+    );
+}
