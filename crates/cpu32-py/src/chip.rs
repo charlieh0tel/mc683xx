@@ -1275,6 +1275,15 @@ chip_methods! {
         self.pending.check()
     }
 
+    /// A reset now for `cause`, a `ResetCause`, as its source makes it
+    /// (Rust's `Mc68331::reset_for`): RSR its bit alone; `SYSTEM`, the
+    /// `reset` instruction's, resets all but the CPU; `EXTERNAL` is
+    /// `reset()`.
+    fn reset_for(&mut self, cause: ResetCause) -> PyResult<()> {
+        self.chip.reset_for(cause.into());
+        self.pending.check()
+    }
+
     /// RESET driven by the board with BKPT held low through its rising
     /// edge, as a BDM debugger's: background mode enabled, and the CPU
     /// in it, `Entry.Breakpoint()`, before its first instruction

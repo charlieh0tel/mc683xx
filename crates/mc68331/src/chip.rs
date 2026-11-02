@@ -853,7 +853,25 @@ impl Mc68331 {
     /// RESET driven by the board: an external reset, BKPT high as it
     /// rises, so background mode is disabled (CPU32RM 7.2.1).
     pub fn reset(&mut self) {
-        self.reset_as(ResetCause::External, false);
+        self.reset_for(ResetCause::External);
+    }
+
+    /// A reset now for `cause`, as its source makes it (SIMRM 8.2,
+    /// Table 8-1), RSR its bit alone (SIMRM 8.2.8), BKPT high.  The
+    /// `reset` instruction's, [`ResetCause::System`], resets the
+    /// modules and the peripherals in its scope but not the CPU or the
+    /// SIM's configuration (SIMRM 8.2.6); every other resets the chip
+    /// through the path the watchdog's and the halt monitor's take in a
+    /// run, so [`ResetCause::Watchdog`] leaves the chip as a timeout at
+    /// this time would, and [`ResetCause::External`] is
+    /// [`reset`](Self::reset).  [`ResetCause::PowerOn`] is the reset
+    /// [`Builder::build`] makes, on a chip that keeps its time and its
+    /// memories' contents (PLAN.md, Reset by cause).
+    pub fn reset_for(&mut self, cause: ResetCause) {
+        match cause {
+            ResetCause::System => self.system_reset(),
+            cause => self.reset_as(cause, false),
+        }
     }
 
     /// RESET driven by the board with BKPT held low through its rising

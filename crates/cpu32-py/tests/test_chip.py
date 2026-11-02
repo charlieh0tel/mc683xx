@@ -1275,6 +1275,23 @@ def test_the_qspi_reset_scope_limits_the_qspi_peripheral_s_resets():
     assert resets([]) == 0
 
 
+def test_a_reset_for_a_cause_sets_rsr_to_it():
+    # RSR, $YFFA07 (MC68331UM D.3.4): one bit per cause
+    rsr = 0xFFFA07
+    for cause, bit in [
+        (mc683xx.ResetCause.EXTERNAL, 0x80),
+        (mc683xx.ResetCause.POWER_ON, 0x40),
+        (mc683xx.ResetCause.WATCHDOG, 0x20),
+        (mc683xx.ResetCause.SYSTEM, 0x02),
+    ]:
+        chip = booting([]).build()
+        chip.run_for(1000)
+        chip.take_events()
+        chip.reset_for(cause)
+        assert chip.peek(rsr, 1) == bit
+        assert [event.cause for event in chip.take_events()] == [cause]
+
+
 class Stopping(Alarm):
     """At `at`, asks the run through `request` (a stop or a sync)."""
 

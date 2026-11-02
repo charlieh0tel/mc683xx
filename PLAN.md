@@ -694,7 +694,7 @@ chip beside `Mc68331`.
   `Stop.Halted(halt)`, `Stop.Hook(hook)`, ...),
   `run_until(target)`, `bus_read`, `bus_write`, `peek` (`size` in
   bytes, `function_code` 5 by default; `BusError`, `UnpeekableError`),
-  `reset()`,
+  `reset()`, `reset_for(ResetCause)`,
   `now`, `halted`, `exception_taken` (a vector), `read_register`,
   `write_register`, `registers()`, `memory`, `read_memory`,
   `write_memory` (a memory's own bytes, by offset), `peripheral(n)` (the
@@ -905,7 +905,8 @@ chip beside `Mc68331`.
   it, so code that took the names keeps working.  `observe(net,
   callback)` is `Board::observe` (Boards, Front ends), its
   `ObserverId` for `unobserve`; `inspect(name)` is `Board::inspect`, as
-  a dict.  `control()` is `Board::control`, an `mc683xx.BoardControl`
+  a dict.  `reset_for(ResetCause)` is `Board::reset_for`.
+  `control()` is `Board::control`, an `mc683xx.BoardControl`
   (frozen, so any thread may call it: `stop`, `send`, `set_pacing`),
   and `mc683xx.Pacing` is `pacing::Pacing` (`UNPACED`, `REAL_TIME`,
   `scaled(factor)`).
@@ -1221,6 +1222,40 @@ hand.  The keys are in `docs/board-files.md`.
   and an input (MC68331UM 4.6.6), and the chip's own pulse, a
   `reset` instruction's, resets the board but not the chip.
   DSACK, AVEC and MODCLK are configuration, not endpoints.
+- **Reset by cause:** a host resets the chip as a given source would,
+  `Mc68331::reset_for(ResetCause)` and `Board::reset_for` (the
+  `Chip` trait's `reset_for`, which replaced its `reset()`), so a
+  board's reset control (a front panel's, say) gives the firmware the
+  restart it tells apart by RSR: a warm one for the watchdog's SW, a
+  cold one for EXT (SIMRM 8.2, Table 8-1; RSR one bit per source, SIMRM
+  8.2.8).  Every cause but `System` takes the path the run takes for the
+  watchdog's and the halt monitor's resets (`reset_as`): the SIM to its
+  reset values but the port latches, RSR the cause's bit, the modules,
+  the peripherals and QSPI peripheral in the cause's scope, the memories
+  it reloads, then the CPU's reset exception; so a `Watchdog` reset is
+  a timeout at the chip's now, and its tests compare the two.
+  `System` is the `reset` instruction's: RSR SYS, the modules and the
+  peripherals in its scope, not the CPU nor the SIM's configuration
+  (SIMRM 8.2.6).  On a board every internal cause's event drives
+  `chip.RESET` low for 512 clocks of the clock after it (SIMRM 8.3.2,
+  MC68331UM 4.6.6), as for one in a run; `External` is RESET asserted
+  and released by the board at once, the path a net's RESET takes: the
+  chip resets at both edges, two `Reset(External)` events, its own
+  512-clock pulse after (SIMRM 8.3.1), but the board's zero-width
+  assertion is not put on the net, as there is no host driver to put
+  it there.  While the board holds RESET low the chip is in reset
+  already and its release resets it, so `Board::reset_for` does
+  nothing.  Not modeled, so not what the manual says:
+  `PowerOn` keeps the chip's and the board's time, every memory's
+  contents but those its scope reloads (a power cycle would lose a
+  RAM's), the port latches (undefined at power-up,
+  SIMRM Table 8-4, so any value is valid) and what the board's nets
+  hold; no peripheral's `power_on` runs again.  `Test` and
+  `LossOfClock`, which the chip never raises, reset the clock too,
+  though the test submodule's reset leaves CLKRST alone (SIMRM Table
+  8-1).  A synchronous source (external, loss of clock) waits for the
+  bus cycle to end (SIMRM 8.1): a host's reset comes between
+  instructions anyway.
 - **Board time:** `Time`, integer picoseconds in a `u64` (213 days),
   with no floats in scheduling.  The board's scheduler holds the
   peripherals' next events and the drives in flight, in (time, sequence)

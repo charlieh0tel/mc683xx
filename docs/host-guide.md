@@ -637,6 +637,19 @@ included).  Every reset source drives RESET (SIMRM Table 8-1), but a
 board need not wire every peripheral to it: `ResetScope` names the causes
 that reach one.
 
+`Mc68331::reset_for(cause)` is the reset `cause`'s source makes, now:
+RSR holds its bit alone (SIMRM 8.2.8), so a host's reset control can
+give the firmware the restart it tells apart by RSR.
+`ResetCause::Watchdog` takes the path a watchdog timeout takes in a
+run, so the chip is as a timeout now would leave it; `External` is
+`reset()`; `System` is the `reset` instruction's, which resets all but
+the CPU and the SIM's configuration (SIMRM 8.2.6); `PowerOn` is
+`build()`'s, on a chip that keeps its time and its memories' contents
+(PLAN.md, Reset by cause).  A board's `Board::reset_for(cause)` is the
+same with its RESET nets driven: `External` as the board asserting and
+releasing RESET now, any other the chip driving RESET for 512 clocks
+as for a reset it takes in a run.
+
 ```rust
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cycles::Cycles;
@@ -678,6 +691,9 @@ let mut chip = builder.build();
 // The watchdog's 2^9 EXTAL periods of 256 clocks (MC68331UM 4.2.10).
 chip.run_for(Cycles(512 * 256 + 100));
 chip.reset();
+// A panel's reset control, as the watchdog's: RSR SW (SIMRM 8.2.8).
+chip.reset_for(ResetCause::Watchdog);
+assert_eq!(chip.sim().reset_status(), ResetCause::Watchdog.status());
 let causes: Vec<ResetCause> = chip
     .take_events()
     .into_iter()
@@ -688,10 +704,15 @@ let causes: Vec<ResetCause> = chip
     .collect();
 assert_eq!(
     causes,
-    [ResetCause::PowerOn, ResetCause::Watchdog, ResetCause::External]
+    [
+        ResetCause::PowerOn,
+        ResetCause::Watchdog,
+        ResetCause::External,
+        ResetCause::Watchdog
+    ]
 );
 let resets = |id| chip.peripheral::<Counter>(id).unwrap().0;
-assert_eq!((resets(everything), resets(not_watchdog)), (3, 2));
+assert_eq!((resets(everything), resets(not_watchdog)), (4, 2));
 ```
 
 ## Host I/O

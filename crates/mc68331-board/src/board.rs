@@ -33,6 +33,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
+use mc683xx_modules::sim::ResetCause;
 use mc683xx_target::address::Address;
 use mc683xx_target::size::Size;
 use serde::Deserialize;
@@ -1417,18 +1418,43 @@ impl<C: Chip> Board<C> {
         // reset processing begins (SIMRM 8.3.1), its clocks on board
         // time from then, as none ran while it was held
         match (self.reset_in, level) {
-            (true, false) => self.chip.reset(),
+            (true, false) => self.chip.reset_for(ResetCause::External),
             (false, true) => {
                 let base = self.shared.base.get();
                 let cycles = self.chip.now();
                 let at = at.max(base.time(cycles));
                 self.move_base(TimeBase::new(cycles, at, base.frequency()));
                 self.tell_system_clock();
-                self.chip.reset();
+                self.chip.reset_for(ResetCause::External);
             }
             _ => {}
         }
         self.reset_in = level;
+    }
+
+    /// A reset now for `cause`, as its source makes it
+    /// ([`Chip::reset_for`]): [`ResetCause::External`] as the board's
+    /// RESET asserted and released now, by the path a RESET net's edges
+    /// take, the zero-width assertion itself not put on the nets; any
+    /// other the chip's own.  The chip then drives RESET on the board's
+    /// nets as for a reset it takes in a run, the peripherals its scope
+    /// reaches reset with it.
+    /// While the board holds RESET low the chip is in reset already and
+    /// its release resets it: the call does nothing.
+    pub fn reset_for(&mut self, cause: ResetCause) {
+        if !self.reset_in {
+            return;
+        }
+        if cause == ResetCause::External {
+            let at = self.now;
+            for level in [false, true] {
+                self.trace_pin(C::RESET, Signal::Level(level), at);
+                self.apply(C::RESET, Signal::Level(level), at);
+            }
+        } else {
+            self.chip.reset_for(cause);
+        }
+        self.collect();
     }
 
     /// The chip's outputs since the last quantum onto their nets, its

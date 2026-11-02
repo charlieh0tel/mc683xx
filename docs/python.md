@@ -476,7 +476,10 @@ assert chip.run_for(100).stop == mc683xx.Stop.Budget()
 
 ## Reset
 
-`reset()` is RESET from the board.  Each reset, the power-on one
+`reset()` is RESET from the board; `reset_for(cause)` is the reset
+`cause`'s source makes, now, as Rust's `Mc68331::reset_for`: RSR its bit
+alone, `WATCHDOG` as a watchdog timeout now, `SYSTEM` the `reset`
+instruction's.  Each reset, the power-on one
 included, is an `Event.Reset(now, cause)` in `take_events()`, and
 reaches the peripherals whose scope holds its `ResetCause`; all by default.
 
@@ -498,14 +501,17 @@ builder.reset_scope(builder.unwired_peripheral(not_watchdog), causes)
 chip = builder.build()
 chip.run_for(512 * 256 + 100)  # the watchdog's 2^9 EXTAL periods
 chip.reset()
+chip.reset_for(mc683xx.ResetCause.WATCHDOG)  # a panel's, as the watchdog's
+assert chip.peek(0xFFFA07, 1) == 0x20  # RSR SW (MC68331UM D.3.4)
 events = chip.take_events()
 assert all(isinstance(event, mc683xx.Event.Reset) for event in events)
 assert [event.cause for event in events if isinstance(event, mc683xx.Event.Reset)] == [
     mc683xx.ResetCause.POWER_ON,
     mc683xx.ResetCause.WATCHDOG,
     mc683xx.ResetCause.EXTERNAL,
+    mc683xx.ResetCause.WATCHDOG,
 ]
-assert (len(everything.resets), len(not_watchdog.resets)) == (3, 2)
+assert (len(everything.resets), len(not_watchdog.resets)) == (4, 2)
 ```
 
 ## Background debug mode
@@ -992,8 +998,11 @@ board's chip, a `BoardChip` with the `Mc68331` methods that read or
 hook it (registers, `bus_read`, `bus_write`, `peek`, the hooks,
 `protect`, what the pins drive, `now`, `halted`, `background`,
 `instructions`),
-Rust's `Board::chip`; `take_events()` what the chip did, as
-`Mc68331.take_events`; `marking(name)` the
+Rust's `Board::chip`; `reset_for(cause)` a reset for a `ResetCause`
+now, as Rust's `Board::reset_for` (`EXTERNAL` as RESET asserted and
+released by the board, any other the chip's own, which drives RESET on
+the nets; nothing while the board holds RESET low); `take_events()`
+what the chip did, as `Mc68331.take_events`; `marking(name)` the
 peripheral's `marking`, or `None`; `memory(name)`,
 `externals()` (`External`s: `name`, `kind` the nets' type, `direction`
 `in`, `out` or `in-out`; each is its name as a string and equals it),
