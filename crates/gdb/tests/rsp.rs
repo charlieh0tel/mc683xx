@@ -39,7 +39,9 @@ use mc683xx_gdb::serve;
 use mc683xx_gdb::target::Target;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::event::Event;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::sim::ResetCause;
 use mc683xx_target::address::Address;
 use wire::Send;
 use wire::Wire;
@@ -519,6 +521,47 @@ fn a_board_runs_under_the_stub() {
     assert!(replies[3].contains("swbreak"));
     assert_eq!(replies[5], "S02");
     assert!(board.now().0 > 0);
+}
+
+#[test]
+fn monitor_reset_on_a_board_drives_reset_as_the_board_does() {
+    let mut board = board(
+        "reset",
+        r#"
+        [[net]]
+        name = "reset"
+        type = "wired-and"
+        from = ["chip.RESET"]
+        to = ["external.observed"]
+        "#,
+    );
+    board.take_events();
+    board.take_received("observed").unwrap();
+    let (ending, _) = session(&mut board, vec![monitor("reset"), packet("D")]);
+    ending.unwrap();
+    // reported at once, both edges' resets as a board-driven RESET's
+    let causes: Vec<ResetCause> = board
+        .take_events()
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::Reset(_, cause) => Some(cause),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(causes, [ResetCause::External, ResetCause::External]);
+    assert_eq!(
+        board.chip().sim().reset_status(),
+        ResetCause::External.status()
+    );
+    let now = board.now();
+    board.run_until(now + 1_000_000_000).unwrap();
+    let levels: Vec<Signal> = board
+        .take_received("observed")
+        .unwrap()
+        .into_iter()
+        .map(|(_, signal)| signal)
+        .collect();
+    assert_eq!(levels, [Signal::Level(false), Signal::Level(true)]);
 }
 
 /// What the stub said on gdb's console: the `O` packets' text.
