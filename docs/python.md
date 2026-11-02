@@ -779,7 +779,7 @@ and interrupt, until it detaches (`Ending.DETACHED`) or kills the target
 conditions); a Python peripheral offers none yet, and the bindings have
 no API of their own for them.
 Peripherals and hooks run under gdb as in `run_for`; an exception one
-raises, or Ctrl-C in Python (`KeyboardInterrupt`, while gdb is
+raises (in a `monitor reset`'s resets too), or Ctrl-C in Python (`KeyboardInterrupt`, while gdb is
 connected or not, idle or running the target), ends the session, the
 stub's breakpoints and watchpoints removed, and is raised by
 `serve_gdb`.  While it waits for gdb it releases the GIL, so a client
