@@ -1208,6 +1208,21 @@ impl Gpt {
         }
     }
 
+    /// TMSK1 and TMSK2 written with `word` by `access` at the
+    /// prescaler's `count`: CPR takes its one write (GPTRM 5.1).
+    fn write_tmsk(&mut self, access: RegisterAccess, word: u16, count: u64) {
+        let [upper, lower] = word.to_be_bytes();
+        let [_, old] = self.tmsk.to_be_bytes();
+        let mut tmsk2 = lower & TMSK2_WRITABLE;
+        if access.lower() && !self.cpr_written {
+            self.cpr_written = true;
+            self.counter.set_divisor(cpr_divisor(tmsk2), count);
+        } else {
+            tmsk2 = tmsk2 & !TMSK2_CPR_MASK | old & TMSK2_CPR_MASK;
+        }
+        self.tmsk = u16::from_be_bytes([upper, tmsk2]);
+    }
+
     /// The word at `access`'s register written with `word`, the
     /// cycle's bytes merged into the old value, at the prescaler's
     /// `count`.
@@ -1247,18 +1262,7 @@ impl Gpt {
                 self.tctl = word;
                 self.pins_changed(now);
             }
-            TMSK => {
-                let [_, old] = self.tmsk.to_be_bytes();
-                let mut tmsk2 = lower & TMSK2_WRITABLE;
-                if access.lower() && !self.cpr_written {
-                    // CPR is written once after reset (GPTRM 5.1)
-                    self.cpr_written = true;
-                    self.counter.set_divisor(cpr_divisor(tmsk2), count);
-                } else {
-                    tmsk2 = tmsk2 & !TMSK2_CPR_MASK | old & TMSK2_CPR_MASK;
-                }
-                self.tmsk = u16::from_be_bytes([upper, tmsk2]);
-            }
+            TMSK => self.write_tmsk(access, word, count),
             TFLG => {
                 let cleared = self.armed & !word & FLAGS;
                 self.flags &= !cleared;
