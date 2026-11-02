@@ -35,6 +35,7 @@ use self::pwm::Channel;
 use self::pwm::Output;
 use self::pwm::Pwm;
 use self::timer::Counter;
+use self::timer::PRESCALER_SPAN;
 use self::timer::Prescaler;
 
 /// The GPT's register block, $YFF900 to $YFF93F (MC68331UM Table D-1).
@@ -126,7 +127,7 @@ const IC4_PIN: u8 = 7;
 /// Input captures 1 to 3 on PGP0 to PGP2.
 const CAPTURES: u8 = 3;
 /// The format of the GPT's snapshot ([`Module::save`]).
-const STATE_VERSION: u32 = 5;
+const STATE_VERSION: u32 = 6;
 /// Output compares 1 to 4, TOC1 to TOC4; OC5 is TI4/O5.
 const COMPARES: usize = 4;
 /// PACTL PAIS, the PAI pin (GPTRM 4.1.1).
@@ -205,7 +206,7 @@ const CFORC_FPWM: u8 = 0b11;
 /// PWMC F1A and F1B, which read the pins (GPTRM 6.3.1).
 const PWMC_F1: u8 = 0b11;
 /// PRESCL's bits (MC68331UM D.2.18).
-const PRESCL_MASK: u64 = 0x1ff;
+const PRESCL_MASK: u64 = PRESCALER_SPAN - 1;
 /// The latest time a snapshot's GPT may have reached, 2^62 system
 /// clocks (some 8,700 years at 16.78 MHz): no count from it overflows.
 const LATEST_TIME: u64 = 1 << 62;
@@ -1209,18 +1210,41 @@ impl Gpt {
     }
 
     /// TMSK1 and TMSK2 written with `word` by `access` at the
-    /// prescaler's `count`: CPR takes its one write (GPTRM 5.1).
+    /// prescaler's `count`: CPR takes its one write, or any while
+    /// FREEZE is asserted (GPTRM 5.1, 9.3).
     fn write_tmsk(&mut self, access: RegisterAccess, word: u16, count: u64) {
         let [upper, lower] = word.to_be_bytes();
         let [_, old] = self.tmsk.to_be_bytes();
         let mut tmsk2 = lower & TMSK2_WRITABLE;
-        if access.lower() && !self.cpr_written {
+        if access.lower() && (!self.cpr_written || self.frozen) {
             self.cpr_written = true;
             self.counter.set_divisor(cpr_divisor(tmsk2), count);
         } else {
             tmsk2 = tmsk2 & !TMSK2_CPR_MASK | old & TMSK2_CPR_MASK;
         }
         self.tmsk = u16::from_be_bytes([upper, tmsk2]);
+    }
+
+    /// TCNT written with `word` at the prescaler's `count`: the
+    /// compares at `word` and an overflow to it are taken, matching
+    /// only as TCNT counts to them (PLAN.md, GPT).
+    fn write_tcnt(&mut self, word: u16, count: u64) {
+        self.counter.set(word, count);
+        self.tick = self.counter.ticks(count);
+        self.gated = self.gated_count(count);
+    }
+
+    /// PRESCL written with `word` at the prescaler's `count` at `now`:
+    /// TCNT, PWMCNT and the gated mode's clock keep their counts, each
+    /// clocked next as the new value counts to its tap (PLAN.md, GPT).
+    fn write_prescaler(&mut self, word: u16, count: u64, now: Cycles) {
+        self.prescaler.set(u64::from(word), now);
+        let to = self.prescaler.count(now);
+        self.counter.rebase(count, to);
+        self.pwm.rebase(count, to);
+        self.gated = self.gated_count(to);
+        self.edges.pwm_found = Found::new(to, now);
+        self.edges.oc1_found = Found::new(to, now);
     }
 
     /// The word at `access`'s register written with `word`, the
@@ -1256,8 +1280,16 @@ impl Gpt {
                 self.pins_changed(now);
             }
             TOC1..=TOC4 => self.compares[((offset - TOC1) / WORD_BYTES) as usize] = word,
-            // TI4/O5 is TIC4 with I4/O5 set, read-only (GPTRM 3.4)
-            TI4O5 if !self.input_capture_4() => self.ti4o5 = word,
+            // TI4/O5 is TIC4 with I4/O5 set, read-only but while FREEZE
+            // is asserted (GPTRM 3.4, 9.3), as are TCNT, TIC1 to TIC3,
+            // PWMCNT and PRESCL (3.1, 3.2.1, 6.1, 5.1)
+            TI4O5 if !self.input_capture_4() || self.frozen => self.ti4o5 = word,
+            TCNT if self.frozen => self.write_tcnt(word, count),
+            TIC1..=TIC3 if self.frozen => {
+                self.captures[((offset - TIC1) / WORD_BYTES) as usize] = word;
+            }
+            PWMCNT if self.frozen => self.pwm.write_count(word, count),
+            PRESCL if self.frozen => self.write_prescaler(word, count, now),
             TCTL => {
                 self.tctl = word;
                 self.pins_changed(now);
@@ -1278,8 +1310,9 @@ impl Gpt {
                 }
             }
             PWMA_PWMB => self.pwm.duty = [upper, lower],
-            // TCNT, the captures, PWMCNT, the buffers and PRESCL are
-            // read-only outside test and freeze mode (GPTRM 9.1, 9.3)
+            // the buffers are read-only always (GPTRM 6.2), PAIS and
+            // PCLKS read the pins; test mode is not modeled (PLAN.md,
+            // GPT)
             _ => {}
         }
     }

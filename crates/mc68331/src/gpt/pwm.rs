@@ -233,6 +233,32 @@ impl Pwm {
         }
     }
 
+    /// PWMCNT written with `value` at the prescaler's `count`,
+    /// synchronized: an output whose period's most significant bit
+    /// goes from one to zero sees a zero detect, a new period, and the
+    /// other keeps its own (GPTRM 6.1).
+    pub(super) const fn write_count(&mut self, value: u16, count: u64) {
+        let before = self.count(count);
+        self.counter.set(value, count);
+        let after = self.count(count);
+        let mut index = 0;
+        while index < Channel::BOTH.len() {
+            let channel = Channel::BOTH[index];
+            let top = 1 << (self.shift(channel) + DUTY_BITS - 1);
+            if before & top != 0 && after & top == 0 {
+                self.buffer[index] = self.duty[index];
+                self.high[index] = self.control & channel.bit(PWMC_F1A) != 0;
+            }
+            self.period[index] = self.period_of(channel, after);
+            index += 1;
+        }
+    }
+
+    /// The prescaler moves from `count` to `to`, PWMCNT kept.
+    pub(super) const fn rebase(&mut self, count: u64, to: u64) {
+        self.counter.rebase(count, to);
+    }
+
     /// A rising edge on PCLK.
     pub(super) const fn pclk(&mut self) {
         self.counter.pclk();
