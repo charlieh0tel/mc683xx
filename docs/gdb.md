@@ -202,7 +202,7 @@ Rust or Python host uses `Mc68331::bus_read` and `bus_write` itself.
 | A breakpoint | `SIGTRAP`, at it (`swbreak` or `hwbreak`) |
 | A watchpoint | `SIGTRAP`, with the watched address |
 | A step | `SIGTRAP` |
-| Ctrl-C | `SIGINT` |
+| Ctrl-C | `SIGINT`; one while the target is stopped already is nothing |
 | The host's own hook (a Rust closure, a Python callable) | `SIGTRAP` |
 | A stop condition (`monitor stop`) | `SIGTRAP`; `monitor stop` names it |
 | A peripheral's or the host's stop request | `SIGINT` |

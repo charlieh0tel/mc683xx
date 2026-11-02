@@ -322,6 +322,26 @@ fn ctrl_c_interrupts_a_run() {
 }
 
 #[test]
+fn ctrl_c_while_stopped_is_nothing() {
+    // Ctrl-C with the target stopped, then a continue: it runs to the
+    // breakpoint, not stopping at once for the Ctrl-C
+    let mut machine = machine();
+    let (ending, replies) = session(
+        &mut machine,
+        vec![
+            packet(&format!("Z0,{STORE_PC:x},2")),
+            Send::Now(vec![INTERRUPT]),
+            packet("c"),
+            packet("D"),
+        ],
+    );
+    ending.unwrap();
+    assert_eq!(replies[0], "OK");
+    assert!(replies[1].starts_with("T05") && replies[1].contains("swbreak"));
+    assert_eq!(machine.cpu.registers.pc, STORE_PC);
+}
+
+#[test]
 fn monitor_reset_and_kill() {
     let mut machine = machine();
     let (ending, replies) = session(
