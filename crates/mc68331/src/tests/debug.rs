@@ -29,6 +29,7 @@ use super::write_register;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::debug::TargetError;
+use crate::debug::serial::NOT_IN_BACKGROUND;
 
 /// BGND (CPU32RM 4.4).
 const BGND: u16 = 0x4afa;
@@ -633,6 +634,39 @@ fn with_bdm_disabled_bkpt_takes_vector_12_on_a_bus_error() {
             START & 0xffff
         ]
     );
+}
+
+#[test]
+fn with_bdm_disabled_a_transfer_is_bkpt_that_dsack_ignores() {
+    let (mut chip, responder) = breakpoint_chip(&[MOVEQ_1_D0, MOVEQ_1_D0, BRANCH_TO_SELF], true);
+    chip.run_for(Cycles(1));
+    assert_eq!(chip.bdm_exchange(0), NOT_IN_BACKGROUND);
+    assert!(chip.cpu().breakpoint_pending(), "left for the next run");
+    chip.run_for(Cycles(1));
+    let reads = &chip
+        .peripheral::<Recorder>(responder.unwrap())
+        .unwrap()
+        .reads;
+    // the breakpoint acknowledge cycle (CPU32RM 6.2.6; MC68331UM
+    // 4.5.4.1.2)
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].address, 0x1e);
+    assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
+    assert_eq!(chip.cpu().registers.ssp, RAM + BREAKPOINT_STACK);
+    assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
+}
+
+#[test]
+fn with_bdm_disabled_a_transfer_is_bkpt_that_takes_vector_12_on_a_bus_error() {
+    let (mut chip, _) = breakpoint_chip(&[MOVEQ_1_D0, MOVEQ_1_D0, BRANCH_TO_SELF], false);
+    chip.run_for(Cycles(1));
+    assert_eq!(chip.bdm_exchange(0), NOT_IN_BACKGROUND);
+    assert!(chip.cpu().breakpoint_pending(), "left for the next run");
+    chip.run_for(Cycles(1));
+    assert!(!chip.cpu().breakpoint_pending());
+    assert_eq!(chip.cpu().registers.pc, RAM + BREAKPOINT_HANDLER);
+    assert_eq!(chip.cpu().registers.ssp, RAM + BREAKPOINT_STACK - 12);
+    assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
 }
 
 #[test]

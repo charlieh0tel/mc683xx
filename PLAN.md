@@ -2352,9 +2352,11 @@ then they stay our choices.
   follows it at once, not after RESET's 512 clocks (7.2.8.14).
 - **A transfer outside background mode** (provisional): the serial
   interface is off once FREEZE negates (7.2.6), so the word is not
-  received; its DSCLK pulses are BKPT pulses (7.2.7.2), acknowledged
-  as one breakpoint after the word, which enters background mode if it
-  is enabled.  DSO is then IPIPE (7.2.6), which the chip does not
+  received; its DSCLK pulses are BKPT pulses (7.2.7.2), asserted as
+  one breakpoint after the word, as `assert_breakpoint` asserts it:
+  background mode entered if it is enabled, a hardware breakpoint left
+  pending if not, its acknowledge cycle and, on BERR, vector 12 at the
+  next run (CPU32RM 6.2.6).  DSO is then IPIPE (7.2.6), which the chip does not
   model: the word reads $1FFFF, the line high.  On silicon when the CPU
   enters background mode within the word, and so whether later bits are
   received, depends on timing no emulated transfer has.  This is the

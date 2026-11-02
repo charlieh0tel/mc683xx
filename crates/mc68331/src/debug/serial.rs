@@ -250,13 +250,14 @@ impl Mc68331 {
     ///
     /// While the CPU is not in background mode the interface is off
     /// (7.2.6): the word is not received, and its DSCLK pulses are
-    /// BKPT's, a breakpoint (7.2.7.2) acknowledged after it, as
-    /// [`Cpu32Target::halt`](mc683xx_target::Cpu32Target::halt) does
-    /// (provisional; PLAN.md, Background debug mode).  The transfer
-    /// reads [`NOT_IN_BACKGROUND`].
+    /// BKPT's (7.2.7.2), asserted after it as
+    /// [`assert_breakpoint`](Self::assert_breakpoint) asserts it: with
+    /// background mode enabled the CPU enters it, disabled a hardware
+    /// breakpoint is left pending (provisional; PLAN.md, Background
+    /// debug mode).  The transfer reads [`NOT_IN_BACKGROUND`].
     pub fn bdm_exchange(&mut self, word: u32) -> u32 {
         if self.cpu.background().is_none() {
-            self.breakpoint();
+            self.assert_breakpoint();
             return NOT_IN_BACKGROUND;
         }
         let data = (word & DATA) as u16;
