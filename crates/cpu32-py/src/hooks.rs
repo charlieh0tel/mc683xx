@@ -132,8 +132,10 @@ impl MemoryAccessView {
         self.0.stacking
     }
 
-    /// The registers as the instruction began, by name; on the bare
-    /// `Machine` only, `None` on the chip.
+    /// The registers as the instruction began, or, while a trace,
+    /// hardware breakpoint or interrupt taken after one stacks its
+    /// frame, as that processing began; by name, on the bare `Machine`
+    /// only, `None` on the chip.
     #[getter]
     fn registers<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
         self.1
@@ -267,8 +269,10 @@ impl InvalidAccessView {
         self.0.stacking
     }
 
-    /// The registers as the instruction began, by name; on the bare
-    /// `Machine` only, `None` on the chip.
+    /// The registers as the instruction began, or, while a trace,
+    /// hardware breakpoint or interrupt taken after one stacks its
+    /// frame, as that processing began; by name, on the bare `Machine`
+    /// only, `None` on the chip.
     #[getter]
     fn registers<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
         self.1
@@ -387,7 +391,7 @@ pub(crate) const fn invalid_access(access: &InvalidAccess) -> InvalidAccessView 
 }
 
 /// A read or write hook's argument on the bare CPU, with the registers
-/// as the instruction began.
+/// as the instruction, or the exception processing after one, began.
 pub(crate) const fn memory_access_with(
     access: MemoryAccess,
     registers: Registers,
