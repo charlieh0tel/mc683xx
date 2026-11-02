@@ -702,6 +702,15 @@ chip beside `Mc68331`.
   `system_hz`, `take_events()` (`Event.Reset`, `Event.ArbitrationTie`,
   `Event.Dsack`, and with `set_tracing(accesses=, exceptions=)` `Event.Access` and
   `Event.Exception`), `instructions`.
+  Background debug mode (below) is `reset_with_breakpoint()`, the
+  `Cpu32Target` calls `halt() -> Entry`, `go()` and `step() -> Entry`,
+  and `background` (`Cpu::background`, an `Entry` or `None`, on a
+  board's chip too); a call the CPU's state refuses raises
+  `mc683xx.TargetError` (a `RuntimeError`).  The rest of
+  `Cpu32Target` (registers and memory by BDM's names and function
+  codes) is not offered: registers by name and `bus_read`/`bus_write`
+  already reach them.  A board has none of the controls: they drive
+  BKPT, a pin, and `step` runs the chip, which are the board's.
   `Stop`, `Halt` and `ResetCause` are enums; they, the other enums
   and the value classes that compare equal (`Frame`, `Output`,
   `Serial`) hash, so they key dicts and sets.
@@ -756,7 +765,8 @@ chip beside `Mc68331`.
   into the chip that ran the peripheral (`run_for`, `reset`, `build`) raises
   it when it returns, the chip as it then is.  The bindings' own
   errors are `ValueError` (`StateError` among them), `IndexError`,
-  `OverflowError`, `RuntimeError` and `NotImplementedError`; nothing
+  `OverflowError`, `RuntimeError` (`TargetError` among them) and
+  `NotImplementedError`; nothing
   panics across the boundary.
 - **Ctrl-C:** `Mc68331.run_for` and `run_until` run as `run_until`s
   100,000 clocks apart, `Board.run_for` as runs 5 ms of board time apart,

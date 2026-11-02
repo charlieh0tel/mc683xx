@@ -270,6 +270,64 @@ def test_resets_are_events():
     assert chip.take_events() == []
 
 
+def test_a_reset_with_breakpoint_enters_background_mode_before_the_first_instruction():
+    builder, _, _ = board([NOP], Recorder())
+    chip = builder.build()
+    assert chip.background is None
+    chip.reset_with_breakpoint()
+    assert chip.background == mc683xx.Entry.Breakpoint()
+    assert chip.read_register("PC") == START
+    instructions = chip.instructions
+    run = chip.run_for(100)
+    assert run.stop == mc683xx.Stop.Background(mc683xx.Entry.Breakpoint())
+    assert (chip.read_register("PC"), chip.instructions) == (START, instructions)
+
+
+def test_go_resumes_and_halt_stops():
+    builder, _, _ = board([NOP], Recorder())
+    chip = builder.build()
+    chip.reset_with_breakpoint()
+    chip.go()
+    assert chip.background is None
+    assert chip.run_for(100).stop == mc683xx.Stop.Budget()
+    pc = chip.read_register("PC")
+    assert pc > START
+    assert chip.halt() == mc683xx.Entry.Breakpoint()
+    assert chip.background == mc683xx.Entry.Breakpoint()
+    assert chip.run_for(100).stop == mc683xx.Stop.Background(mc683xx.Entry.Breakpoint())
+    assert chip.read_register("PC") == pc
+
+
+def test_step_runs_one_instruction():
+    builder, _, _ = board([NOP], Recorder())
+    chip = builder.build()
+    chip.reset_with_breakpoint()
+    assert chip.step() == mc683xx.Entry.Breakpoint()
+    assert chip.read_register("PC") == START + 2
+    assert chip.background == mc683xx.Entry.Breakpoint()
+
+
+def test_background_controls_need_background_mode():
+    builder, _, _ = board([NOP], Recorder())
+    chip = builder.build()
+    # the power-on reset leaves background mode disabled
+    with pytest.raises(mc683xx.TargetError, match="not enabled"):
+        chip.halt()
+    with pytest.raises(mc683xx.TargetError, match="not in background mode"):
+        chip.go()
+    with pytest.raises(mc683xx.TargetError, match="not in background mode"):
+        chip.step()
+    chip.reset_with_breakpoint()
+    chip.go()
+    with pytest.raises(mc683xx.TargetError):
+        chip.go()
+    # RESET with BKPT high disables it again
+    chip.reset()
+    with pytest.raises(mc683xx.TargetError, match="not enabled"):
+        chip.halt()
+    assert chip.background is None
+
+
 def test_registers_and_memory():
     builder, ram, _ = board([NOP], Recorder())
     chip = builder.build()

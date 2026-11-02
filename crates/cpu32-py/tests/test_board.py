@@ -166,6 +166,7 @@ def test_a_board_s_chip_reads_and_hooks_as_a_chip_does(tmp_path: Path) -> None:
     assert chip.registers()["PC"] == chip.read_register("PC")
     assert chip.peek(CSBAR1, 2) == CS1_BAR
     assert chip.halted is None
+    assert chip.background is None
     assert chip.instructions == board.instructions
     assert chip.now == board.cycles
     assert chip.system_hz == 8_388_608
