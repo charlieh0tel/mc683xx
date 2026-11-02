@@ -674,6 +674,15 @@ impl Cpu {
         }
     }
 
+    /// Keeps the registers as an instruction, or exception processing
+    /// at a boundary, begins in `began`, while `capture`.
+    #[inline(always)]
+    fn capture_began(&mut self) {
+        if self.capture {
+            self.began.clone_from(&self.registers);
+        }
+    }
+
     /// Leaves loop mode, as an exception does (CPU32RM 1.1.2), and
     /// forgets the last instruction, which an exception came after.
     fn leave_loop_mode(&mut self) {
@@ -937,9 +946,7 @@ impl Core<'_> {
     #[inline(always)]
     fn boundary(&mut self, interrupts: &mut dyn Interrupts, now: Cycles) -> Option<Cycles> {
         let cpu = &mut *self.cpu;
-        if cpu.capture {
-            cpu.began.clone_from(&cpu.registers);
-        }
+        cpu.capture_began();
         cpu.stall = Cycles::ZERO;
         cpu.extra = Cycles::ZERO;
         cpu.refund = Cycles::ZERO;
