@@ -1374,7 +1374,10 @@ hand.  The keys are in `docs/board-files.md`.
   runs.  `Board::run_until_quantized(until, quantum, before)` runs it in quanta
   of board time (a `NonZeroU64`: a quantum of 0 would never end), calling `before` before each (the Python bindings'
   Ctrl-C checks), `Break` ending it `Stop::Requested`; a board halted
-  before a quantum goes on to the next, so the quanta change nothing.
+  or in background mode before a quantum goes on to the next, so the
+  quanta change nothing.  `run_until` on such a board runs to `until`
+  as time passes without the CPU, as the chip's run does, and ends
+  `Halted` or `Background` if the CPU still is.
   `Board::stop_request()` is the host's `board::BoardStopRequest`
   (not the core's: it holds the board weakly, so a peripheral may keep
   it, and stops the board's loop as well as the chip), which stops the
