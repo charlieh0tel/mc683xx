@@ -1766,7 +1766,13 @@ the emulator.
   the termination's usual filler (the manual's own example, `S9030000FC`)
   and on a CPU32 the reset SSP's vector, never code (CPU32RM 6.2.1).
   Overlapping segments are refused, not last-wins, so a load's verify
-  cannot fail on bytes the image itself overwrote.
+  cannot fail on bytes the image itself overwrote.  An ELF file's
+  loadable segments are laid out and checked (overlap, the top of
+  the address space) by address and length before any is copied, and
+  refused if together they hold more bytes than the file: a small
+  file's program headers can otherwise name its bytes thousands of
+  times over and ask gigabytes of the host (decided 2026-11-02).
+  S-records cannot: each data byte is two characters of the text.
 - **Load:** `Image::load(target, options)`: word writes in supervisor
   data space (FC 5) unless the options name another; a segment's odd
   start or end byte refused before anything is written unless the
