@@ -614,3 +614,30 @@ fn a_pending_trace_is_taken_before_a_pending_breakpoint() {
     );
     assert!(!machine.cpu.breakpoint_pending());
 }
+
+#[test]
+fn a_fault_stacking_an_interrupt_is_not_a_step() {
+    let mut machine = machine(&[MOVEQ_1_D1, NOP]);
+    machine.cpu.set_stop_on_fault(true);
+    let level_3 = handle(
+        &mut machine,
+        Vector::autovector(InterruptLevel::new(3).unwrap()),
+        0x4200,
+    );
+    machine.cpu.registers.ssp = NOWHERE;
+    machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+    let run = machine.run_limited(Limits {
+        steps: Some(1),
+        ..Limits::default()
+    });
+    assert!(matches!(run.end, End::Fault(_)));
+    assert_eq!(run.steps, 0, "the interrupt not taken");
+    // SSP fixed: taken on resume, and counted then
+    machine.cpu.registers.ssp = STACK;
+    let run = machine.run_limited(Limits {
+        steps: Some(0),
+        ..Limits::default()
+    });
+    assert_eq!((run.end, run.steps), (End::Steps, 1));
+    assert_eq!(machine.cpu.registers.pc, level_3);
+}
