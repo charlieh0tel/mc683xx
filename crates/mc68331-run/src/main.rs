@@ -417,10 +417,10 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
     let mut pacer = Pacer::new();
     let outcome = loop {
         if let Some(server) = &mut server {
-            server.poll(board.chip_mut());
+            server.poll(&mut board);
             if unpaced && board.chip().cpu().background().is_some() {
                 // board time stands still between a debugger's requests
-                server.wait(board.chip_mut(), &interrupted);
+                server.wait(&mut board, &interrupted);
                 if interrupted.load(Ordering::SeqCst) {
                     break BoardRun::new(Stop::Requested, board.now());
                 }

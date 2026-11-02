@@ -75,6 +75,8 @@ use std::os::unix::net::UnixStream;
 #[cfg(unix)]
 use std::rc::Rc;
 #[cfg(unix)]
+use std::time::Instant;
+#[cfg(unix)]
 use wire::Send;
 #[cfg(unix)]
 use wire::Wire;
@@ -914,15 +916,16 @@ fn bdm(cable: &mut UnixStream, request: &[u8]) -> Vec<u8> {
     reply
 }
 
-/// The runner with `--bdm` on a Unix socket in `directory`, and a
+/// The runner with `--bdm` on a Unix socket in `directory` and `more`, and a
 /// connection to it.
 #[cfg(unix)]
-fn bdm_session(file: &Path, directory: &Path) -> (Child, UnixStream) {
+fn bdm_session(file: &Path, directory: &Path, more: &[&str]) -> (Child, UnixStream) {
     let socket = directory.join("bdm.sock");
     let _ = fs::remove_file(&socket);
     let address = format!("unix:{}", socket.display());
     let mut child = Command::new(env!("CARGO_BIN_EXE_mc683xx-run"))
         .args([file.to_str().unwrap(), "--bdm", &address])
+        .args(more)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -931,8 +934,14 @@ fn bdm_session(file: &Path, directory: &Path) -> (Child, UnixStream) {
     let mut stderr = BufReader::new(child.stderr.take().unwrap());
     let (sender, receiver) = mpsc::channel();
     let reader = thread::spawn(move || {
-        let mut line = String::new();
-        stderr.read_line(&mut line).unwrap();
+        // past a trace's header
+        let line = loop {
+            let mut line = String::new();
+            stderr.read_line(&mut line).unwrap();
+            if !line.starts_with('#') {
+                break line;
+            }
+        };
         sender.send(line).unwrap();
         stderr
     });
@@ -963,7 +972,7 @@ fn interrupted_promptly(child: Child) -> Option<i32> {
 #[test]
 fn a_bdm_client_that_does_not_read_its_replies_cannot_wedge_the_runner() {
     let directory = board("bdm-flood", &echo::image());
-    let (child, mut cable) = bdm_session(&directory.join("echo.toml"), &directory);
+    let (child, mut cable) = bdm_session(&directory.join("echo.toml"), &directory, &[]);
     // ResetHalt, so the unpaced runner waits on the cable
     assert_eq!(bdm(&mut cable, &[0x03]), [0, 1, 0, 0, 0, 0]);
     cable.set_nonblocking(true).unwrap();
@@ -992,7 +1001,7 @@ fn a_bdm_client_that_does_not_read_its_replies_cannot_wedge_the_runner() {
 #[test]
 fn a_bdm_message_s_length_out_of_range_closes_the_connection() {
     let directory = board("bdm-length", &echo::image());
-    let (child, mut cable) = bdm_session(&directory.join("echo.toml"), &directory);
+    let (child, mut cable) = bdm_session(&directory.join("echo.toml"), &directory, &[]);
     for length in [0, 65] {
         cable.write_all(&[length, 0x0e]).unwrap();
         assert_eq!(cable.read(&mut [0]).unwrap(), 0, "length {length}");
@@ -1003,12 +1012,104 @@ fn a_bdm_message_s_length_out_of_range_closes_the_connection() {
     fs::remove_dir_all(directory).unwrap();
 }
 
+/// The echo board's RESET on a net of its own.
+const RESET_NET: &str = r#"
+[[net]]
+name = "reset"
+type = "wired-and"
+from = ["chip.RESET"]
+to = ["chip.RESET"]
+"#;
+
+/// (time, level) of each line of `trace` that has `what`.
+#[cfg(unix)]
+fn traced_levels(trace: &str, what: &str) -> Vec<(u64, u8)> {
+    trace
+        .lines()
+        .filter(|line| line.contains(what))
+        .map(|line| {
+            let field = |key: &str| {
+                line.split(' ')
+                    .find_map(|pair| pair.strip_prefix(key))
+                    .unwrap()
+            };
+            (
+                field("time=").parse().unwrap(),
+                field("level=").parse().unwrap(),
+            )
+        })
+        .collect()
+}
+
+/// Whether `trace` holds the board's RESET pulse, asserted and released
+/// at once past power-on's, and after it the chip's pulse on the
+/// `reset` net, low then high.
+#[cfg(unix)]
+fn board_reset_traced(trace: &str) -> bool {
+    let pins = traced_levels(trace, " pin=RESET ");
+    let Some(at) = pins.windows(2).find_map(|pair| match pair {
+        [(low_at, 0), (high_at, 1)] if low_at == high_at && *low_at > 0 => Some(*low_at),
+        _ => None,
+    }) else {
+        return false;
+    };
+    let net: Vec<u8> = traced_levels(trace, " name=reset ")
+        .into_iter()
+        .filter(|&(time, _)| time >= at)
+        .map(|(_, level)| level)
+        .collect();
+    net.starts_with(&[0, 1])
+}
+
+#[cfg(unix)]
+#[test]
+fn a_bdm_reset_halt_is_the_board_asserting_reset_with_bkpt() {
+    let directory = board("bdm-reset", &echo::image());
+    let file = directory.join("echo.toml");
+    let text = fs::read_to_string(&file).unwrap() + RESET_NET;
+    fs::write(&file, text).unwrap();
+    let (mut child, mut cable) = bdm_session(&file, &directory, &["--trace", "pins,nets"]);
+    // ResetHalt: a fresh breakpoint entry, ATEMP 0, as on the chip
+    assert_eq!(bdm(&mut cable, &[0x03]), [0, 1, 0, 0, 0, 0]);
+    // Go: the run traces the board's RESET pulse, then the chip's
+    assert_eq!(bdm(&mut cable, &[0x05]), [0]);
+    let stderr = BufReader::new(child.stderr.take().unwrap());
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        for line in stderr.lines() {
+            if sender.send(line.unwrap()).is_err() {
+                break;
+            }
+        }
+    });
+    let deadline = Instant::now() + WAITING;
+    let mut trace = String::new();
+    while !board_reset_traced(&trace) {
+        let left = deadline.saturating_duration_since(Instant::now());
+        match receiver.recv_timeout(left) {
+            Ok(line) => {
+                trace.push_str(&line);
+                trace.push('\n');
+            }
+            Err(_) => {
+                child.kill().unwrap();
+                child.wait().unwrap();
+                panic!("no board RESET pulse traced:\n{trace}");
+            }
+        }
+    }
+    let pid = Pid::from_raw(i32::try_from(child.id()).unwrap());
+    kill(pid, Signal::SIGINT).unwrap();
+    child.wait().unwrap();
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn a_bdm_debugger_drives_the_board_over_the_virtual_cable() {
     let image = echo::image();
     let directory = board("bdm", &image);
-    let (child, mut cable) = bdm_session(&directory.join("echo.toml"), &directory);
+    let (child, mut cable) = bdm_session(&directory.join("echo.toml"), &directory, &[]);
     // Hello: version 2
     assert_eq!(bdm(&mut cable, &[0x0e]), [0, 2, 0, 0, 0]);
     // Pins: running, FREEZE low, RESET and DS high, 5000 mV, kind 0
@@ -1272,7 +1373,7 @@ fn gdb_over(
 #[test]
 fn gdb_drives_the_board_over_the_virtual_cable_as_over_a_pod() {
     let directory = board("gdb-bdm", &echo::image());
-    let (mut child, cable) = bdm_session(&directory.join("echo.toml"), &directory);
+    let (mut child, cable) = bdm_session(&directory.join("echo.toml"), &directory, &[]);
     cable.set_read_timeout(Some(CABLE_TIMEOUT)).unwrap();
     cable.set_write_timeout(Some(CABLE_TIMEOUT)).unwrap();
     // the sessions in a thread of their own, so a stub that never

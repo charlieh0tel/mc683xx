@@ -2173,7 +2173,13 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
 - `mc683xx-run --bdm unix:PATH|HOST:PORT` is a virtual BDM cable: it
   answers the mc683xx BDM pod's host-pod protocol, version 2, written
   from its `docs/usb-protocol.md` alone, over the chip's
-  `Cpu32Target`.  One client at a time; another waits up to 100 ms
+  `Cpu32Target`, but for ResetHalt, which is the board's
+  (`Board::reset_with_breakpoint`): RESET asserted and released by the
+  board with BKPT held, so its nets and the peripherals in the reset's
+  scope see it as they see gdb's `monitor reset`, the reply's ATEMP
+  field the fresh breakpoint entry as before.  While a net holds RESET
+  low it resets nothing and the CPU is not in background mode, so the
+  reply is NoFreeze.  One client at a time; another waits up to 100 ms
   for the client to go, polls and the run going on meanwhile, then is
   closed, and connections are taken one a poll.
   The server holds at most two requests unanswered and a few replies

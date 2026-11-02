@@ -28,6 +28,7 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
+use mc683xx_board::board::Board;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::debug::TargetError;
 use mc683xx_target::Cpu32Target;
@@ -350,6 +351,27 @@ impl Write for Stream {
     }
 }
 
+/// What the cable drives: the chip, and the RESET with BKPT held that
+/// `ResetHalt` makes, which on a board is the board's, so its nets and
+/// peripherals see it.
+pub(crate) trait Wired {
+    /// The chip.
+    fn chip(&mut self) -> &mut Mc68331;
+
+    /// RESET with BKPT held low through its release.
+    fn reset_with_breakpoint(&mut self);
+}
+
+impl Wired for Board<Mc68331> {
+    fn chip(&mut self) -> &mut Mc68331 {
+        self.chip_mut()
+    }
+
+    fn reset_with_breakpoint(&mut self) {
+        Self::reset_with_breakpoint(self);
+    }
+}
+
 /// The virtual cable's server.
 pub(crate) struct Server {
     /// Where clients connect.
@@ -390,13 +412,13 @@ impl Server {
     /// Hands the cable to a new connection if the client has gone, and
     /// answers up to [`MAX_ANSWERS`] whole requests the client has sent,
     /// not blocking.  Whether it answered one.
-    pub(crate) fn poll(&mut self, chip: &mut Mc68331) -> bool {
+    pub(crate) fn poll(&mut self, target: &mut impl Wired) -> bool {
         self.hand_off();
         let mut answers = 0;
         while answers < MAX_ANSWERS && self.flush() {
             match self.message() {
                 Ok(Some(packet)) => {
-                    let answer = self.answer(chip, &packet);
+                    let answer = self.answer(target, &packet);
                     self.send(&answer);
                     answers += 1;
                 }
@@ -464,9 +486,9 @@ impl Server {
     }
 
     /// Waits for a request and answers it, or until `interrupted`.
-    pub(crate) fn wait(&mut self, chip: &mut Mc68331, interrupted: &AtomicBool) {
+    pub(crate) fn wait(&mut self, target: &mut impl Wired, interrupted: &AtomicBool) {
         while !interrupted.load(Ordering::SeqCst) {
-            if self.poll(chip) {
+            if self.poll(target) {
                 return;
             }
             thread::sleep(WAIT_TICK);
@@ -569,10 +591,11 @@ impl Server {
     }
 
     /// The reply to `packet`.
-    fn answer(&mut self, chip: &mut Mc68331, packet: &[u8]) -> Vec<u8> {
+    fn answer(&mut self, target: &mut impl Wired, packet: &[u8]) -> Vec<u8> {
         let Some(request) = Request::parse(packet) else {
             return reply(Status::BadRequest, &[]);
         };
+        let chip = target.chip();
         let frozen = Cpu32Target::halted(chip).ok().flatten().is_some();
         let result = match request {
             Request::Transfer(words) => Ok(self.transfer(chip, &words)),
@@ -587,7 +610,13 @@ impl Server {
             }
             Request::ResetHalt => {
                 self.stale = None;
-                chip.reset_halted().map(|_| self.atemp(chip))
+                // as the chip's `reset_halted`, on the board
+                target.reset_with_breakpoint();
+                let chip = target.chip();
+                chip.cpu()
+                    .background()
+                    .ok_or(TargetError::NotEnabled)
+                    .map(|_| self.atemp(chip))
             }
             Request::Halt => chip.halt().map(|_| self.atemp(chip)),
             _ if !frozen => return reply(Status::NoFreeze, &[]),
@@ -634,6 +663,17 @@ fn function_code(
     register: SystemRegister,
 ) -> Result<FunctionCode, TargetError> {
     chip.read_system_register(register).map(FunctionCode::new)
+}
+
+#[cfg(test)]
+impl Wired for Mc68331 {
+    fn chip(&mut self) -> &mut Mc68331 {
+        self
+    }
+
+    fn reset_with_breakpoint(&mut self) {
+        Self::reset_with_breakpoint(self);
+    }
 }
 
 #[cfg(test)]
