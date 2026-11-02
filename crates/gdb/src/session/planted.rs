@@ -12,6 +12,11 @@
 //! or writes over one is the word it replaced, unless the program has
 //! written over BGND: then the word is the program's, and the
 //! breakpoint is retired.
+//!
+//! A write that fails or does not read back, planting BGND or putting
+//! the word back, may have written part of the word: the breakpoint is
+//! then uncertain, its word BGND, the original or a mix of their bytes,
+//! and is put back from any of these.
 
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
@@ -32,44 +37,73 @@ pub(super) struct Breakpoint {
     function_code: FunctionCode,
     /// The word BGND replaced.
     pub(super) original: [u8; 2],
+    /// Whether BGND read back after it was planted and no write there
+    /// has failed since: if not, the word may be BGND, the original or
+    /// any mix of their bytes.
+    pub(super) verified: bool,
+}
+
+impl Breakpoint {
+    /// Whether `word`, read at the breakpoint, needs nothing put back:
+    /// anything but BGND for a verified breakpoint; for an uncertain
+    /// one, the original, or a word not made of BGND's and the
+    /// original's bytes, the program's.
+    fn settled(&self, word: [u8; 2]) -> bool {
+        if self.verified {
+            return word != BGND;
+        }
+        word == self.original
+            || (0..BGND.len())
+                .any(|byte| word[byte] != BGND[byte] && word[byte] != self.original[byte])
+    }
 }
 
 impl<T: Target> Session<'_, T> {
     /// Plants BGND at `address`, an even one, in the session's address
     /// space: false if the word there cannot be read, or does not read
     /// back as BGND, as in ROM.  A breakpoint whose BGND was written
-    /// over since is planted again.  If BGND was written and the word
-    /// cannot be put back, the breakpoint is kept for the session's
-    /// end to try again.
+    /// over since is planted again; an uncertain one is planted again
+    /// over the original it keeps.  If the write may have changed the
+    /// word and it cannot be put back, the breakpoint is kept,
+    /// uncertain, for the session's end to try again.
     pub(super) fn plant(&mut self, address: u32) -> Result<bool, AccessError<T::Error>> {
         let space = self.function_code;
         if let Some(index) = self.planted_at(address, space) {
-            if self.holds_bgnd(self.planted[index])? {
+            let planted = self.planted[index];
+            if self.settled(planted)? {
+                self.planted.remove(index);
+            } else if planted.verified {
                 return Ok(true);
             }
-            self.planted.remove(index);
         }
         if !address.is_multiple_of(2) {
             return Ok(false);
         }
-        let Ok(original) = self.word(address, space) else {
-            return Ok(false);
+        let index = match self.planted_at(address, space) {
+            Some(index) => index,
+            None => {
+                let Ok(original) = self.word(address, space) else {
+                    return Ok(false);
+                };
+                self.planted.push(Breakpoint {
+                    address,
+                    function_code: space,
+                    original,
+                    verified: false,
+                });
+                self.planted.len() - 1
+            }
         };
-        let planted = Breakpoint {
-            address,
-            function_code: space,
-            original,
-        };
-        self.planted.push(planted);
         let written = self
             .target
             .write_memory(Address(address), space, &BGND)
             .and_then(|()| self.word(address, space));
         if written.is_ok_and(|word| word == BGND) {
+            self.planted[index].verified = true;
             return Ok(true);
         }
-        if self.put_back(self.planted.len() - 1).unwrap_or(false) {
-            self.planted.pop();
+        if self.put_back(index).unwrap_or(false) {
+            self.planted.remove(index);
         }
         Ok(false)
     }
@@ -95,28 +129,31 @@ impl<T: Target> Session<'_, T> {
         Ok(all)
     }
 
-    /// Puts back the word the breakpoint at `index` replaced if BGND is
-    /// still there (a word the program or gdb wrote over it since
-    /// stands): whether the word there is no longer BGND.
+    /// Puts back the word the breakpoint at `index` replaced unless the
+    /// word there is settled (a word the program or gdb wrote over it
+    /// since stands): whether it is settled now.  A write tried leaves
+    /// the breakpoint uncertain until it comes out.
     fn put_back(&mut self, index: usize) -> Result<bool, AccessError<T::Error>> {
         let planted = self.planted[index];
-        if self.holds_bgnd(planted)? {
-            let space = planted.function_code;
-            self.target
-                .write_memory(Address(planted.address), space, &planted.original)?;
-            return Ok(self.word(planted.address, space)? == planted.original);
+        if self.settled(planted)? {
+            return Ok(true);
         }
-        Ok(true)
+        self.planted[index].verified = false;
+        let space = planted.function_code;
+        self.target
+            .write_memory(Address(planted.address), space, &planted.original)?;
+        Ok(self.word(planted.address, space)? == planted.original)
     }
 
-    /// Whether `planted`'s word, in its address space, is BGND still.
-    fn holds_bgnd(&mut self, planted: Breakpoint) -> Result<bool, AccessError<T::Error>> {
-        Ok(self.word(planted.address, planted.function_code)? == BGND)
+    /// Whether `planted`'s word, in its address space, needs nothing
+    /// put back ([`Breakpoint::settled`]).
+    fn settled(&mut self, planted: Breakpoint) -> Result<bool, AccessError<T::Error>> {
+        Ok(planted.settled(self.word(planted.address, planted.function_code)?))
     }
 
     /// Puts back every breakpoint planted, each tried whatever the last
-    /// did: those that did not come out, their BGND read back or not
-    /// read at all, are kept.  The first of the target's errors.
+    /// did: those that did not come out, their word not read back or
+    /// not read at all, are kept.  The first of the target's errors.
     pub(super) fn unplant_all(&mut self) -> Result<(), T::Error> {
         let mut first = Ok(());
         let mut index = 0;
@@ -135,9 +172,9 @@ impl<T: Target> Session<'_, T> {
     }
 
     /// Retires the breakpoints planted in `space` that `length` bytes at
-    /// `address` reach whose word is no longer BGND: the program wrote
-    /// over it, so the word there is the program's, neither shadowed
-    /// nor put back.
+    /// `address` reach whose word is settled: the program wrote over
+    /// it, so the word there is the program's, neither shadowed nor put
+    /// back, or an uncertain one's original is there again.
     pub(super) fn retire_overwritten(
         &mut self,
         address: u32,
@@ -149,7 +186,7 @@ impl<T: Target> Session<'_, T> {
             let planted = self.planted[index];
             let reached = planted.function_code == space
                 && (0..BGND.len()).any(|byte| offset(planted, byte, address) < length);
-            if reached && !self.holds_bgnd(planted)? {
+            if reached && self.settled(planted)? {
                 self.planted.remove(index);
                 continue;
             }

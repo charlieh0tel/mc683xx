@@ -357,7 +357,10 @@ it, kill leaves it halted.
   spaces is not supported: a BGND of the program's own at a planted
   breakpoint's address, in another space, is taken for the breakpoint.
   Each comes out of the address space it went into, and only if BGND
-  is still there.  However the session
+  is still there.  A write planting or removing one that fails or
+  does not read back may have written one byte of the word: the
+  original is then put back over BGND, the original or any mix of
+  their bytes.  However the session
   ends, a running target is halted and every breakpoint removed; one
   that does not come out (BGND reads back) is the session's error,
   `SessionError::Unrestored`, naming where, and a detach then leaves
