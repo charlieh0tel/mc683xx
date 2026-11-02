@@ -343,6 +343,22 @@ fn freeze_holds_the_watchdog_with_frzsw_and_the_gpt_with_frz0() {
 }
 
 #[test]
+fn background_mode_writes_tcnt() {
+    // TCNT is writable while FREEZE is asserted (GPTRM 3.1, 9.3);
+    // GPTMCR FRZ0 and SUPV hold it there
+    let mut chip = chip(&[BRANCH_TO_SELF]);
+    chip.reset_halted().unwrap();
+    store(&mut chip, GPT, 0x2080);
+    store(&mut chip, TCNT, 0x8000);
+    assert_eq!(load(&mut chip, TCNT), 0x8000);
+    chip.go().unwrap();
+    chip.run_for(Cycles(10_000));
+    chip.halt().unwrap();
+    let counted = load(&mut chip, TCNT);
+    assert!(counted > 0x8000, "{counted:#x}: counting on from the write");
+}
+
+#[test]
 fn a_halt_in_lpstop_wakes_the_chip() {
     let mut chip = chip(&[LPSTOP[0], LPSTOP[1], LPSTOP[2], BRANCH_TO_SELF]);
     chip.reset_halted().unwrap();

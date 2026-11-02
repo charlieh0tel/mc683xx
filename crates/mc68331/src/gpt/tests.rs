@@ -494,6 +494,157 @@ fn stopp_freezes_and_incp_steps() {
 }
 
 #[test]
+fn freeze_lets_tcnt_be_written_whatever_frz0() {
+    let mut gpt = gpt();
+    // read-only while FREEZE is negated (GPTRM 3.1)
+    write(&mut gpt, 0x0a, 0x1000, 100);
+    assert_eq!(read(&mut gpt, 0x0a, 100), 25);
+    // FRZ0 clear: writable all the same, counting on (GPTRM 9.3); the
+    // compares at their reset value $FFFF do not match the write
+    gpt.set_freeze(true, Cycles(100));
+    write(&mut gpt, 0x0a, 0xffff, 100);
+    assert_eq!(read(&mut gpt, 0x0a, 100), 0xffff);
+    assert_eq!(read(&mut gpt, 0x22, 103), 0);
+    assert_eq!(read(&mut gpt, 0x0a, 104), 0);
+    assert_eq!(read(&mut gpt, 0x22, 104), 0x0080, "TOF as it rolls over");
+    // FRZ0: TCNT holds what is written
+    write(&mut gpt, 0x00, 0x2007, 200);
+    write(&mut gpt, 0x0a, 0x1234, 200);
+    assert_eq!(read(&mut gpt, 0x0a, 10_000), 0x1234);
+    gpt.set_freeze(false, Cycles(10_000));
+    assert_eq!(read(&mut gpt, 0x0a, 10_003), 0x1234);
+    assert_eq!(read(&mut gpt, 0x0a, 10_004), 0x1235);
+    write(&mut gpt, 0x0a, 0, 10_004);
+    assert_eq!(read(&mut gpt, 0x0a, 10_004), 0x1235, "read-only again");
+}
+
+#[test]
+fn freeze_lets_the_captures_be_written() {
+    let mut gpt = gpt();
+    // TIC2, and TI4/O5 as input capture 4, are read-only (GPTRM 3.2.1,
+    // 3.4)
+    write_byte(&mut gpt, 0x0c, 0x04, 0);
+    write(&mut gpt, 0x10, 0x1234, 0);
+    write(&mut gpt, 0x1c, 0x5678, 0);
+    assert_eq!(read(&mut gpt, 0x10, 0), 0xffff);
+    assert_eq!(read(&mut gpt, 0x1c, 0), 0xffff);
+    gpt.set_freeze(true, Cycles(0));
+    write(&mut gpt, 0x10, 0x1234, 0);
+    write(&mut gpt, 0x1c, 0x5678, 0);
+    assert_eq!(read(&mut gpt, 0x10, 0), 0x1234);
+    assert_eq!(read(&mut gpt, 0x1c, 0), 0x5678);
+}
+
+#[test]
+fn freeze_lets_cpr_be_written_again() {
+    let mut gpt = gpt();
+    // CPR 3, then 1 while FREEZE is asserted (GPTRM 5.1, 9.3)
+    write_byte(&mut gpt, 0x21, 0x03, 0);
+    gpt.set_freeze(true, Cycles(0));
+    write_byte(&mut gpt, 0x21, 0x01, 0);
+    assert_eq!(read(&mut gpt, 0x20, 0), 0x0001);
+    assert_eq!(read(&mut gpt, 0x0a, 80), 10, "the system clock / 8");
+    gpt.set_freeze(false, Cycles(80));
+    write_byte(&mut gpt, 0x21, 0x02, 80);
+    assert_eq!(read(&mut gpt, 0x20, 80), 0x0001, "written once");
+    // a write while FREEZE is asserted is the one write
+    let mut gpt = self::gpt();
+    gpt.set_freeze(true, Cycles(0));
+    write_byte(&mut gpt, 0x21, 0x01, 0);
+    gpt.set_freeze(false, Cycles(0));
+    write_byte(&mut gpt, 0x21, 0x02, 0);
+    assert_eq!(read(&mut gpt, 0x20, 0), 0x0001);
+}
+
+#[test]
+fn freeze_lets_the_prescaler_be_written() {
+    let mut gpt = gpt();
+    // read-only while FREEZE is negated (GPTRM 5.1)
+    write(&mut gpt, 0x2c, 0, 500);
+    assert_eq!(read(&mut gpt, 0x2c, 500), 0x1f4);
+    // FRZ0: TCNT 250 and PWMCNT 500 hold, the prescaler $1FD
+    write(&mut gpt, 0x00, 0x2007, 500);
+    gpt.set_freeze(true, Cycles(1000));
+    write(&mut gpt, 0x2c, 0xfffd, 1000);
+    assert_eq!(read(&mut gpt, 0x2c, 2000), 0x1fd);
+    assert_eq!(read(&mut gpt, 0x0a, 2000), 250);
+    assert_eq!(read(&mut gpt, 0x28, 2000), 500);
+    // the taps clock their counters as the new value counts to them:
+    // PWMCNT at $1FE, TCNT at $200
+    gpt.set_freeze(false, Cycles(2000));
+    assert_eq!(read(&mut gpt, 0x28, 2001), 501);
+    assert_eq!(read(&mut gpt, 0x0a, 2002), 250);
+    assert_eq!(read(&mut gpt, 0x0a, 2003), 251);
+    assert_eq!(read(&mut gpt, 0x2c, 2003), 0);
+}
+
+#[test]
+fn freeze_lets_pwmcnt_be_written_and_a_falling_top_bit_starts_a_period() {
+    let mut gpt = gpt();
+    // FRZ0; PWMA $80 from the next period, fast at the system clock / 2
+    write(&mut gpt, 0x00, 0x2007, 0);
+    write(&mut gpt, 0x26, 0x8000, 0);
+    write(&mut gpt, 0x28, 0x1234, 0);
+    assert_eq!(read(&mut gpt, 0x28, 0), 0, "read-only (GPTRM 6.1)");
+    gpt.set_freeze(true, Cycles(0x180));
+    assert_eq!(read(&mut gpt, 0x28, 0x180), 0xc0);
+    assert_eq!(read(&mut gpt, 0x2a, 0x180), 0);
+    // bit 7 from one to zero is a zero detect: PWMA's period starts
+    // (GPTRM 6.1)
+    write(&mut gpt, 0x28, 0x0005, 0x180);
+    assert_eq!(read(&mut gpt, 0x28, 0x180), 5);
+    assert_eq!(read(&mut gpt, 0x2a, 0x180), 0x8000);
+    assert!(gpt.pwm_level(Channel::A, Cycles(0x180)));
+    // bit 7 from zero, to zero or one, is none, whatever the count
+    // passes
+    write(&mut gpt, 0x26, 0x4000, 0x180);
+    write(&mut gpt, 0x28, 0x0040, 0x180);
+    write(&mut gpt, 0x28, 0x01c3, 0x180);
+    assert_eq!(read(&mut gpt, 0x2a, 0x180), 0x8000);
+    assert!(!gpt.pwm_level(Channel::A, Cycles(0x180)));
+    // PWMA $40 from the period that starts as PWMCNT counts to $200
+    gpt.set_freeze(false, Cycles(0x1000));
+    assert_eq!(read(&mut gpt, 0x2a, 0x1000 + 2 * 0x3d - 1), 0x8000);
+    assert_eq!(read(&mut gpt, 0x2a, 0x1000 + 2 * 0x3d), 0x4000);
+}
+
+#[test]
+fn freeze_with_frz0_lets_compares_be_forced_and_pins_written() {
+    let mut gpt = gpt();
+    write(&mut gpt, 0x00, 0x2007, 0);
+    gpt.set_freeze(true, Cycles(10));
+    // OC3 sets PGP5, FOC3 forces it; PORTGP drives PGP0 (GPTRM 9.3)
+    write(&mut gpt, 0x1e, 0x0c00, 10);
+    write_byte(&mut gpt, 0x24, 0x20, 10);
+    write(&mut gpt, 0x06, 0x0101, 10);
+    assert_eq!(
+        gpt.port_outputs(Cycles(10)),
+        PortLevels {
+            driven: 0x21,
+            levels: 0x21
+        }
+    );
+}
+
+#[test]
+fn a_snapshot_keeps_what_freeze_mode_wrote() {
+    let mut gpt = gpt();
+    gpt.set_freeze(true, Cycles(100));
+    write(&mut gpt, 0x0a, 0x8000, 100);
+    write(&mut gpt, 0x2c, 0x01fd, 100);
+    write(&mut gpt, 0x28, 0x1234, 100);
+    let mut restored = Gpt::new(Cycles::ZERO);
+    restored.restore(&gpt.save().unwrap()).unwrap();
+    for offset in [0x0a, 0x28, 0x2c] {
+        assert_eq!(
+            read(&mut restored, offset, 150),
+            read(&mut gpt, offset, 150),
+            "{offset:#x}"
+        );
+    }
+}
+
+#[test]
 fn pwm_duty_takes_effect_at_the_end_of_a_period() {
     let mut gpt = gpt();
     // PWMA $80 in fast mode at the system clock / 2: 512 clocks a

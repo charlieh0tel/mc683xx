@@ -2458,8 +2458,24 @@ then they stay our choices.
     rising edges.
   - CPR's one write (GPTRM 5.1) is the first write to TMSK2's byte.
     STOP stops what STOPP stops, and so does FREEZE with FRZ0 (7.3.2).
-    Freeze mode's writes to registers otherwise read-only or write-once
-    (GPTRM 9.3) are not modeled, nor test mode's.
+    While FREEZE is asserted, FRZ0 set or not, registers otherwise
+    read-only or write-once take writes (GPTRM 9.3): TCNT (3.1),
+    TI4/O5 as input capture 4 (3.4), CPR as often as written (5.1),
+    PRESCL (5.1) and PWMCNT (6.1), all named, and TIC1 to TIC3,
+    read-only (3.2.1) and not named, by 9.3's "registers ... normally
+    read-only".  PWMABUF and PWMBBUF stay read-only, "at all times"
+    (6.2), and PAIS and PCLKS read the pins.  Test mode's writes are
+    not modeled.  Where the manual is silent (decided 2026-11-01): a
+    CPR write under FREEZE is the one write, so CPR is fixed once
+    FREEZE ends; a TCNT write keeps the tap's phase, and the compares
+    at the value written, and TOF for a write of $0000, are taken, a
+    compare matching only as TCNT counts to it (above); a PRESCL write
+    gives TCNT, PWMCNT and the gated mode's clock no count, GPTRM 5.1's
+    "may cause an extra count" left out, each clocked next as the new
+    value counts to its tap.  A PWMCNT write starts an output's period,
+    taking the duty and F1x, only where the top bit of the period's
+    eight (bit 7 fast, 14 slow) goes from one to zero, "seen as a zero
+    detect" (6.1), whatever the counts it skips.
   - The PWM buffers start at 0, so the first period after reset is low.
 - **SIM reset values where the manuals differ**: SIMCR $00CF
   (MC68331UM D.3.1) over SIMRM Table 8-4's FRZSW and FRZBM set;

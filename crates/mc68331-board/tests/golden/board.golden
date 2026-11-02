@@ -1,5 +1,5 @@
 # A snapshot golden (PLAN.md, State); generated, not edited.
 # A format change bumps its VERSION, then UPDATE_GOLDEN=1 cargo test.
-versions board=15 chip=12 cpu=7 qsm=5 gpt=5 builtin=1 stateless=1
-length 82205
-fnv1a64 8b23b60c3e1f0b3a
+versions board=16 chip=13 cpu=7 qsm=5 gpt=6 builtin=1 stateless=1
+length 82208
+fnv1a64 6398652deb1fed15
