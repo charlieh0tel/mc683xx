@@ -129,6 +129,33 @@ def test_gdb_peeks_the_chip_and_resets_it() -> None:
     assert chip.read_register("PC") == START
 
 
+@pytest.mark.parametrize("ending", ["D", "k"])
+def test_a_peripheral_s_exception_in_a_reset_ends_the_session(ending: str) -> None:
+    class Failing:
+        """A QSPI peripheral whose resets after power-on raise."""
+
+        def __init__(self) -> None:
+            self.resets = 0
+
+        def transfer(self, transfer: mc683xx.QspiTransfer) -> int:
+            return 0
+
+        def reset(self, now: int) -> None:
+            self.resets += 1
+            if self.resets > 1:
+                raise ValueError("the reset failed")
+
+    image = bytearray(4 * 2048)
+    struct.pack_into(">II", image, 0, STACK, START)
+    image[START : START + 8] = words(PROGRAM)
+    builder = mc683xx.Builder()
+    builder.memory(bytes(image), ["CSBOOT"], writable=False)
+    builder.qspi(Failing())
+    chip = builder.build()
+    with pytest.raises(ValueError, match="the reset failed"):
+        serve(chip, "qRcmd," + b"reset".hex(), ending)
+
+
 BOARD = """
 version = 1
 

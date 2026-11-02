@@ -101,8 +101,14 @@ where
         Ok(ran)
     }
 
+    /// A reset, its Python peripherals' exceptions raised as a run's
+    /// are.
     fn reset(&mut self) -> PyResult<bool> {
-        self.target.reset().map_err(raised_from)
+        let reset = self.target.reset();
+        self.pending.check()?;
+        let reset = reset.map_err(raised_from)?;
+        Python::attach(|py| py.check_signals())?;
+        Ok(reset)
     }
 
     fn conditions(&mut self) -> Option<&mut dyn Conditions> {
