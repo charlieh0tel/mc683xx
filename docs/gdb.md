@@ -288,9 +288,13 @@ Program received signal SIGTRAP, Trace/breakpoint trap.
   changes, and each peripheral's own conditions with their arguments,
   or only `PERIPHERAL`'s.
 - `monitor stop net NET CHANGE`: a net's change.  `rise` and `fall`
-  are a level's change (from no value yet too); `high` and `low` its
-  every drive to that level, whatever it was; `change` a level that
-  differs from the last, or any other net's every change.  Only
+  are a level's change (from no value yet too); `high` and `low` the
+  net carrying that level to its sinks, whatever it was: every drive
+  to it of a net of one driver, repeated drives too, but a wired-AND
+  net's (RESET's) only as its level changes to it, as a second
+  driver's drive low while the net is low already, or a release while
+  another holds it low, changes nothing on the wire; `change` a level
+  that differs from the last, or any other net's every change.  Only
   `change` watches a net that carries no levels (a clock, serial, a
   value, a bus).
 - `monitor stop peripheral NAME CONDITION [ARGUMENTS]`: one of a

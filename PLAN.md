@@ -1691,7 +1691,15 @@ checks the bare build.
   `peripheral NAME CONDITION [ARGUMENTS]`), armed on the board
   (`Conditions`, which `Board` implements) until disarmed.  A net's is
   an observer and the board's stop request, so peripherals need
-  nothing; a peripheral's is three defaulted `Peripheral` methods
+  nothing.  It sees what the net's sinks see: every drive of a net of
+  one driver, but a wired-AND net's resolved level only as it
+  changes, so `high` and `low` there hold as `rise` and `fall` do, and
+  a second driver's drive to the level the net has already holds
+  nothing (decided 2026-11-02: nothing changed on the wire, and no
+  sink is told but the chip's RESET, which senses the net without its
+  own drive; a drive notification apart from the observer's would
+  fire `high` on a release that leaves the net low, or need a
+  driver's word in the condition).  A peripheral's is three defaulted `Peripheral` methods
   (`conditions`, `arm`, `disarm`) and `Drive::fire(token)`, which
   stops the run as `Drive::stop` does and records which condition held,
   for `Conditions::fired` and the stub's `TargetRun::Condition`,

@@ -78,9 +78,15 @@ pub enum NetChange {
     /// Any change: a logic net's level that differs from the last, or
     /// any other net's every change.
     Change,
-    /// A logic net driven high, whatever it was.
+    /// A logic net carrying high to its sinks, whatever it was: each
+    /// drive high of a net of one driver, again and again, but a
+    /// wired-AND net's level only as it changes to high, since one
+    /// driver's drive that leaves the level as it was changes nothing
+    /// on the wire.
     High,
-    /// A logic net driven low, whatever it was.
+    /// A logic net carrying low to its sinks, as [`High`](Self::High)
+    /// carries high: on a wired-AND net, a second driver's drive low
+    /// while the net is low already holds nothing.
     Low,
 }
 

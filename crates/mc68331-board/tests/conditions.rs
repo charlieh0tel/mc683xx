@@ -7,6 +7,7 @@ use std::env;
 use mc683xx_board::board::Board;
 use mc683xx_board::condition::ArmError;
 use mc683xx_board::condition::Condition;
+use mc683xx_board::condition::ConditionId;
 use mc683xx_board::condition::ConditionInfo;
 use mc683xx_board::condition::ConditionToken;
 use mc683xx_board::condition::Conditions;
@@ -170,6 +171,73 @@ fn a_net_s_fall_and_change_stop_where_they_hold() {
     board.run_until(Time(RUN_PS)).unwrap();
     assert_eq!(board.net_value("pps").unwrap(), Some(Signal::Level(true)));
     assert_eq!(board.fired(), vec![change]);
+}
+
+/// A board whose host drives `line`, a wired-AND net, from `a` and
+/// `b`, and `switch`, a net of one driver.
+fn driven_board() -> Board<Mc68331> {
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "ram"
+size = 0x800
+attach = [{ select = "CSBOOT" }]
+[[net]]
+name = "line"
+type = "wired-and"
+from = ["external.a", "external.b"]
+to = ["external.line-seen"]
+[[net]]
+name = "switch"
+type = "logic"
+from = "external.switch"
+to = ["external.switch-seen"]
+"#;
+    let description = Description::parse(text, &env::temp_dir(), &Options::default()).unwrap();
+    Board::<Mc68331>::load(
+        &description,
+        &Registry::with_builtins(),
+        Environment::default(),
+    )
+    .unwrap()
+}
+
+/// The conditions that fired once the host's endpoint `name` drives
+/// `level` and the board runs a period.
+fn drive(board: &mut Board<Mc68331>, name: &str, level: bool) -> Vec<ConditionId> {
+    board.send(name, Signal::Level(level)).unwrap();
+    board.run_for(PERIOD_PS).unwrap();
+    board.fired()
+}
+
+#[test]
+fn a_wired_net_s_level_conditions_hold_as_its_level_changes_to_them() {
+    let mut board = driven_board();
+    let low = board.arm("net line low".parse().unwrap()).unwrap();
+    let high = board.arm("net line high".parse().unwrap()).unwrap();
+    assert_eq!(drive(&mut board, "a", false), vec![low]);
+    // the net is low already: another driver's drive changes nothing on
+    // the wire, nor does a release while one still holds it
+    assert_eq!(drive(&mut board, "b", false), vec![]);
+    assert_eq!(drive(&mut board, "a", false), vec![]);
+    assert_eq!(drive(&mut board, "a", true), vec![]);
+    assert_eq!(drive(&mut board, "b", true), vec![high]);
+    assert_eq!(drive(&mut board, "a", true), vec![]);
+    assert_eq!(drive(&mut board, "b", false), vec![low]);
+}
+
+#[test]
+fn a_net_of_one_driver_s_level_conditions_hold_at_each_drive() {
+    let mut board = driven_board();
+    let high = board.arm("net switch high".parse().unwrap()).unwrap();
+    let rise = board.arm("net switch rise".parse().unwrap()).unwrap();
+    assert_eq!(drive(&mut board, "switch", true), vec![high, rise]);
+    assert_eq!(drive(&mut board, "switch", true), vec![high]);
+    assert_eq!(drive(&mut board, "switch", false), vec![]);
+    assert_eq!(drive(&mut board, "switch", true), vec![high, rise]);
 }
 
 #[test]
