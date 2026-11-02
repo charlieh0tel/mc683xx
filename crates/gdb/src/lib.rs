@@ -84,5 +84,6 @@
 
 mod arch;
 pub mod bdm;
+mod protocol;
 pub mod stub;
 pub mod target;
