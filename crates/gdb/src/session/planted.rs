@@ -39,7 +39,7 @@ impl<T: Target> Session<'_, T> {
     pub(super) fn plant(&mut self, address: u32) -> Result<bool, AccessError<T::Error>> {
         let space = self.function_code;
         if let Some(index) = self.planted_at(address, space) {
-            if self.word(address, space)? == BGND {
+            if self.holds_bgnd(self.planted[index])? {
                 return Ok(true);
             }
             self.planted.remove(index);
@@ -95,13 +95,18 @@ impl<T: Target> Session<'_, T> {
     /// word the program or gdb wrote over it since stands): whether the
     /// word there is no longer BGND.
     fn put_back(&mut self, planted: Breakpoint) -> Result<bool, AccessError<T::Error>> {
-        let space = planted.function_code;
-        if self.word(planted.address, space)? == BGND {
+        if self.holds_bgnd(planted)? {
+            let space = planted.function_code;
             self.target
                 .write_memory(Address(planted.address), space, &planted.original)?;
             return Ok(self.word(planted.address, space)? == planted.original);
         }
         Ok(true)
+    }
+
+    /// Whether `planted`'s word, in its address space, is BGND still.
+    fn holds_bgnd(&mut self, planted: Breakpoint) -> Result<bool, AccessError<T::Error>> {
+        Ok(self.word(planted.address, planted.function_code)? == BGND)
     }
 
     /// Removes every breakpoint planted; the first error, after trying
