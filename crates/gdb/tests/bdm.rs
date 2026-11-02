@@ -64,8 +64,9 @@ const LOOK: Cycles = Cycles(1000);
 /// The chip as silicon behind a pod: it runs on its own, here a little
 /// each time the stub looks.  The second field counts register writes;
 /// the third is an address where a write of anything but BGND is taken
-/// and dropped, a word that cannot be put back.
-struct Running(Mc68331, usize, Option<u32>);
+/// and dropped, a word that cannot be put back; the fourth a word the
+/// program writes, at its address, when it next runs.
+struct Running(Mc68331, usize, Option<u32>, Option<(u32, [u8; 2])>);
 
 impl Cpu32Target for Running {
     type Error = TargetError;
@@ -80,6 +81,9 @@ impl Cpu32Target for Running {
 
     fn halted(&mut self) -> Result<Option<Entry>, TargetError> {
         if Cpu32Target::halted(&mut self.0)?.is_none() {
+            if let Some((at, word)) = self.3.take() {
+                self.0.poke(Address(at), &word).unwrap();
+            }
             self.0.run_for(LOOK);
         }
         Cpu32Target::halted(&mut self.0)
@@ -154,7 +158,7 @@ fn chip() -> Running {
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
     chip.write_register(Register::A0, STORE).unwrap();
-    Running(chip, 0, None)
+    Running(chip, 0, None, None)
 }
 
 /// Serves `script` to `target`: how it ended and the stub's replies.
@@ -375,4 +379,35 @@ fn a_breakpoint_that_cannot_be_put_back_fails_the_session_and_stays_halted() {
         "not resumed"
     );
     assert_eq!(word(&mut target, STORE_PC), BGND);
+}
+
+#[test]
+fn a_breakpoint_the_program_wrote_over_is_the_program_s() {
+    // the program replaces the word BGND is planted over: gdb sees and
+    // changes the program's word, and the removal leaves it
+    let mut target = chip();
+    let at = START + 0x40;
+    target.3 = Some((at, [0x70, 0x01]));
+    let byte = at + 1;
+    let (ending, replies) = session(
+        &mut target,
+        vec![
+            packet(&format!("Z0,{at:x},2")),
+            packet("c"),
+            Send::Now(vec![INTERRUPT]),
+            packet(&format!("m{at:x},2")),
+            packet(&format!("M{byte:x},1:02")),
+            packet(&format!("m{at:x},2")),
+            packet(&format!("z0,{at:x},2")),
+            packet("k"),
+        ],
+    );
+    ending.unwrap();
+    assert_eq!(replies[0], "OK");
+    assert_eq!(replies[1], "S02");
+    assert_eq!(replies[2], "7001", "the program's word, not the shadow");
+    assert_eq!(replies[3], "OK");
+    assert_eq!(replies[4], "7002", "no byte of BGND merged in");
+    assert_eq!(replies[5], "OK");
+    assert_eq!(word(&mut target, at), [0x70, 0x02]);
 }

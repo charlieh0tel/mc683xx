@@ -6,7 +6,8 @@
 //! instruction runs once gdb has removed it.  Each breakpoint is
 //! removed from the address space it was planted in, and only if BGND
 //! is still there.  Memory gdb reads or writes over one is the word it
-//! replaced.
+//! replaced, unless the program has written over BGND: then the word is
+//! the program's, and the breakpoint is retired.
 
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
@@ -129,6 +130,30 @@ impl<T: Target> Session<'_, T> {
         first
     }
 
+    /// Retires the breakpoints planted in `space` that `length` bytes at
+    /// `address` reach whose word is no longer BGND: the program wrote
+    /// over it, so the word there is the program's, neither shadowed
+    /// nor put back.
+    pub(super) fn retire_overwritten(
+        &mut self,
+        address: u32,
+        length: usize,
+        space: FunctionCode,
+    ) -> Result<(), AccessError<T::Error>> {
+        let mut index = 0;
+        while index < self.planted.len() {
+            let planted = self.planted[index];
+            let reached = planted.function_code == space
+                && (0..BGND.len()).any(|byte| offset(planted, byte, address) < length);
+            if reached && !self.holds_bgnd(planted)? {
+                self.planted.remove(index);
+                continue;
+            }
+            index += 1;
+        }
+        Ok(())
+    }
+
     /// The bytes of breakpoints planted in `space` that fall in `length`
     /// bytes at `address`: each byte's offset there, its breakpoint's
     /// index and the byte's index in the word.
@@ -144,12 +169,9 @@ impl<T: Target> Session<'_, T> {
                 continue;
             }
             for byte in 0..BGND.len() {
-                let offset = planted
-                    .address
-                    .wrapping_add(byte as u32)
-                    .wrapping_sub(address);
-                if (offset as usize) < length {
-                    bytes.push((offset as usize, index, byte));
+                let offset = offset(*planted, byte, address);
+                if offset < length {
+                    bytes.push((offset, index, byte));
                 }
             }
         }
@@ -179,4 +201,13 @@ impl<T: Target> Session<'_, T> {
         }
         Ok(word)
     }
+}
+
+/// Byte `byte` of `planted`'s word, as an offset from `address`: past
+/// an access's length if the access does not reach it.
+fn offset(planted: Breakpoint, byte: usize, address: u32) -> usize {
+    planted
+        .address
+        .wrapping_add(byte as u32)
+        .wrapping_sub(address) as usize
 }
