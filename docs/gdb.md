@@ -248,8 +248,10 @@ CPU has none.
   supervisor data (5) to begin with, and `monitor fc N` sets it (0 to
   7).
 - `monitor reset`: the bare CPU's reset exception (SSP and PC from
-  the vectors at zero), the chip's or board's external reset (the
-  modules, the peripherals it reaches, the board's RESET net), or a
+  the vectors at zero), the chip's external reset (the modules and the
+  peripherals it reaches), a board's as the board asserting RESET
+  (`Board::reset_for(ResetCause::External)`: the chip's RESET pulse on
+  the board's nets at once; nothing while the board holds RESET low), or a
   reset halted before the first instruction over BDM.  gdb's register
   cache is then stale: `maintenance flush register-cache` (`flushregs`
   in older gdbs).

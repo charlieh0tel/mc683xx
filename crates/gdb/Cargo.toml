@@ -23,7 +23,7 @@ default = ["mc68331", "board"]
 # The chip, `Mc68331`, as a target.
 mc68331 = ["dep:mc683xx-mc68331"]
 # A board, `mc683xx_board::board::Board`, as a target; the chip with it.
-board = ["mc68331", "dep:mc683xx-board"]
+board = ["mc68331", "dep:mc683xx-board", "dep:mc683xx-modules"]
 
 [dependencies]
 gdbstub = "0.7.10"
@@ -31,6 +31,7 @@ mc683xx-board = { workspace = true, optional = true }
 mc683xx-cpu32.workspace = true
 mc683xx-target.workspace = true
 mc683xx-mc68331 = { workspace = true, optional = true }
+mc683xx-modules = { workspace = true, optional = true }
 thiserror = "2.0.21"
 
 [dev-dependencies]
