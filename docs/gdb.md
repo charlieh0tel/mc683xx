@@ -128,7 +128,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - `SessionError`: a call on the target failed (`Target`, a board's
   peripheral that stalled, a pod's lost link), the connection did
   (`Connection`, gdb gone without detaching), or gdb sent what the stub
-  could not take (`Protocol`).  `Ending`, `SessionError`,
+  could not take (`Protocol`); breakpoints planted could not be put
+  back (`Unrestored`); or the session failed and cleaning up after it
+  failed too (`Uncleaned`, both kept).  `Ending`, `SessionError`,
   `target::TargetRun` and `target::AccessError` are
   `#[non_exhaustive]`: a match on one needs a wildcard arm.
 - Features: `mc68331` (the chip as a target) and `board` (a board,
@@ -360,11 +362,14 @@ it, kill leaves it halted.
   is still there.  A write planting or removing one that fails or
   does not read back may have written one byte of the word: the
   original is then put back over BGND, the original or any mix of
-  their bytes.  However the session
-  ends, a running target is halted and every breakpoint removed; one
-  that does not come out (BGND reads back) is the session's error,
+  their bytes.  However the session ends, a running target is halted
+  and every breakpoint removed; one that does not come out (the
+  original does not read back) is the session's error,
   `SessionError::Unrestored`, naming where, and a detach then leaves
-  the target halted rather than resume it over BGND.
+  the target halted rather than resume it over BGND.  A session that
+  failed already (gdb gone, a packet it could not take) and then
+  cannot halt the target or put a breakpoint back reports both,
+  `SessionError::Uncleaned`.
 - **Steps** are `Cpu32Target::step`: one instruction, or into an
   exception's handler, stopping where T1 tracing would.
 - **Continue** is GO, then a look at the target and at gdb every

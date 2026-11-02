@@ -136,7 +136,7 @@ pub enum Ending {
 ///     match error {
 ///         SessionError::Target(error) => Some(error),
 ///         SessionError::Connection(_) | SessionError::Protocol(_) => None,
-///         SessionError::Unrestored(_) => None,
+///         SessionError::Unrestored(_) | SessionError::Uncleaned { .. } => None,
 ///     }
 /// }
 /// ```
@@ -158,6 +158,22 @@ pub enum SessionError<E, C> {
     /// halted, not resumed.
     #[error("breakpoints still planted at {}", listed(.0))]
     Unrestored(Vec<Address>),
+    /// The session failed, and so did cleaning up after it: halting a
+    /// target under BDM control or removing its breakpoints.  The
+    /// target is left halted, not resumed.
+    #[error("{}; cleaning up: {}", shown(error), shown(cleanup))]
+    Uncleaned {
+        /// The session's failure: `Target`, `Connection` or `Protocol`.
+        error: Box<SessionError<E, C>>,
+        /// Cleaning up's: `Target` or `Unrestored`.
+        cleanup: Box<SessionError<E, C>>,
+    },
+}
+
+/// `error` as its message: a nested session error, which thiserror
+/// would otherwise bound on its own `Display`, an unprovable cycle.
+fn shown<E: Display, C: Display>(error: &SessionError<E, C>) -> String {
+    error.to_string()
 }
 
 /// `addresses`, comma-separated.
@@ -181,12 +197,13 @@ fn listed(addresses: &[Address]) -> String {
 ///
 /// # Errors
 ///
-/// [`SessionError::Target`] if a call on the target fails (a session
-/// that failed otherwise reports that failure, not cleaning up's),
+/// [`SessionError::Target`] if a call on the target fails,
 /// [`SessionError::Connection`] if the connection fails or gdb closes
 /// it, [`SessionError::Protocol`] if gdb sends what the stub cannot
 /// take, and [`SessionError::Unrestored`] if a breakpoint planted
-/// cannot be put back; then a detach does not resume the target.
+/// cannot be put back; then a detach does not resume the target.  A
+/// session that failed and then failed to clean up reports both,
+/// [`SessionError::Uncleaned`].
 pub fn serve<T, C>(
     target: &mut T,
     connection: C,
