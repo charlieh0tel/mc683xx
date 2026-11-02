@@ -59,8 +59,8 @@ const PC: usize = 17;
 const LOOK: Cycles = Cycles(1000);
 
 /// The chip as silicon behind a pod: it runs on its own, here a little
-/// each time the stub looks.
-struct Running(Mc68331);
+/// each time the stub looks.  The second field counts register writes.
+struct Running(Mc68331, usize);
 
 impl Cpu32Target for Running {
     type Error = TargetError;
@@ -93,6 +93,7 @@ impl Cpu32Target for Running {
     }
 
     fn write_register(&mut self, register: Register, value: u32) -> Result<(), TargetError> {
+        self.1 += 1;
         self.0.write_register(register, value)
     }
 
@@ -105,6 +106,7 @@ impl Cpu32Target for Running {
         register: SystemRegister,
         value: u32,
     ) -> Result<(), TargetError> {
+        self.1 += 1;
         self.0.write_system_register(register, value)
     }
 
@@ -144,7 +146,7 @@ fn chip() -> Running {
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
     chip.write_register(Register::A0, STORE).unwrap();
-    Running(chip)
+    Running(chip, 0)
 }
 
 /// Serves `script` to `target`: how it ended and the stub's replies.
@@ -241,6 +243,7 @@ fn a_breakpoint_in_rom_is_refused_and_registers_write_through() {
     assert_eq!(replies[0], "E16");
     assert_eq!(replies[1], "OK");
     assert_eq!(target.read_register(Register::D0), Ok(0x42));
+    assert_eq!(target.1, 1, "D0 alone written");
     assert_eq!(target.read_system_register(SystemRegister::Rpc), Ok(START));
 }
 
