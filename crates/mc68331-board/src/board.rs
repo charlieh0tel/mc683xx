@@ -905,12 +905,13 @@ impl<C: Chip> Board<C> {
         self.collect();
     }
 
-    /// Runs the board to `until`, or until the CPU halts, a hook stops
-    /// it, or the host or a peripheral asks it to stop.  At each sync
-    /// point it takes what its [`control`](Self::control) holds.  A
-    /// board whose CPU is already halted runs to `until` as time passes
-    /// without the CPU ([`Chip::run_for`]), ending [`Stop::Halted`] if it
-    /// still is.
+    /// Runs the board to `until`, or until the CPU halts or enters
+    /// background mode, a hook stops it, or the host or a peripheral asks
+    /// it to stop.  At each sync point it takes what its
+    /// [`control`](Self::control) holds.  A board whose CPU is already
+    /// halted or in background mode runs to `until` as time passes
+    /// without the CPU ([`Chip::run_for`]), ending [`Stop::Halted`] or
+    /// [`Stop::Background`] if it still is.
     ///
     /// # Errors
     ///
@@ -927,8 +928,7 @@ impl<C: Chip> Board<C> {
                 return Ok(self.outcome(Stop::Requested));
             }
             if self.now >= until {
-                let stop = self.chip.halted().map_or(Stop::Budget, Stop::Halted);
-                return Ok(self.outcome(stop));
+                return Ok(self.outcome(self.idle().unwrap_or(Stop::Budget)));
             }
             let next = self.next_event().map_or(until, |next| next.min(until));
             // a peripheral's `next_event` may have asked (`BoardStopRequest`)
@@ -943,7 +943,7 @@ impl<C: Chip> Board<C> {
                 continue;
             }
             let target = self.shared.base.get().cycles(next);
-            let halted = self.chip.halted().is_some();
+            let idle = self.idle();
             let stop = if target > self.chip.now() {
                 self.shared.quantum_end.set(Some(next));
                 let stop = self.chip.run_for(self.chip.now().until(target)).stop;
@@ -954,8 +954,9 @@ impl<C: Chip> Board<C> {
             };
             self.collect();
             let stop = match stop {
-                // halted throughout: as a budget spent
-                Stop::Halted(_) if halted => Stop::Budget,
+                // halted or in background mode throughout: as a budget
+                // spent
+                Stop::Halted(_) | Stop::Background(_) if idle == Some(stop) => Stop::Budget,
                 other => other,
             };
             match stop {
@@ -973,6 +974,15 @@ impl<C: Chip> Board<C> {
                 }
             }
         }
+    }
+
+    /// Why the CPU executes nothing, if it does not: halted, or in
+    /// background mode.
+    fn idle(&self) -> Option<Stop> {
+        self.chip
+            .halted()
+            .map(Stop::Halted)
+            .or_else(|| self.chip.cpu().background().map(Stop::Background))
     }
 
     /// Whether a peripheral or the host asked the run to stop; withdraws the
@@ -1127,10 +1137,9 @@ impl<C: Chip> Board<C> {
                 return Ok(self.outcome(Stop::Requested));
             }
             let target = Time(self.now.0.saturating_add(quantum.get())).min(until);
-            let halted = self.chip.halted().is_some();
+            let idle = self.idle();
             let outcome = self.run_until(target)?;
-            let quantized =
-                outcome.stop == Stop::Budget || (halted && matches!(outcome.stop, Stop::Halted(_)));
+            let quantized = outcome.stop == Stop::Budget || idle == Some(outcome.stop);
             if !quantized || self.now >= until {
                 return Ok(outcome);
             }

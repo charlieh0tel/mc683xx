@@ -20,6 +20,7 @@ use mc683xx_board::adapter::RELEASED_LEVELS;
 use mc683xx_board::adapter::SELECTED_LEVELS;
 use mc683xx_board::adapter::SpiAdapter;
 use mc683xx_board::board::Board;
+use mc683xx_board::board::BoardRun;
 use mc683xx_board::board::BoardTracing;
 use mc683xx_board::builtin::EdgeCounter;
 use mc683xx_board::builtin::Recorder;
@@ -73,6 +74,7 @@ use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_modules::sim::ResetCause;
+use mc683xx_target::entry::Entry;
 use mc683xx_target::size::Size;
 use snapshot_golden::version_of;
 
@@ -3723,4 +3725,38 @@ fn a_host_reset_while_reset_is_held_does_nothing() {
     assert!(host.take_events().is_empty());
     assert_eq!(resets(&host), before);
     assert_eq!(host.chip().now(), now);
+}
+
+#[test]
+fn a_board_in_background_mode_runs_to_its_end_as_time() {
+    let mut board = reset_board();
+    let at = Time(5 * MILLISECOND);
+    board.run_until(at).unwrap();
+    board.take_received("observed").unwrap();
+    board.chip_mut().reset_with_breakpoint();
+    let instructions = board.chip().instructions();
+    let until = at + AFTER_RESET;
+    // past the RESET release the chip drives, a board event
+    assert_eq!(
+        board.run_until(until).unwrap(),
+        BoardRun::new(Stop::Background(Entry::Breakpoint), until)
+    );
+    assert_eq!(board.chip().instructions(), instructions);
+    let observed: Vec<Signal> = board
+        .take_received("observed")
+        .unwrap()
+        .into_iter()
+        .map(|(_, signal)| signal)
+        .collect();
+    assert_eq!(observed, [Signal::Level(false), Signal::Level(true)]);
+    // quantized, as a halted board's
+    assert_eq!(
+        board
+            .run_until_quantized(until + MILLISECOND, MILLISECOND_QUANTUM, |_| {
+                ControlFlow::Continue(())
+            })
+            .unwrap()
+            .now,
+        until + MILLISECOND
+    );
 }
