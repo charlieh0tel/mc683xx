@@ -20,7 +20,7 @@ fmt-check:
 # The license texts in each published crate and the Python package:
 # copies of the root's, not links, so a Windows checkout has them too.
 LICENSE_FILES := LICENSE-MIT LICENSE-APACHE
-LICENSED_CRATES := cpu32 cpu32-py gdb mc683xx mc68331 mc68331-board mc68331-run peripherals target
+LICENSED_CRATES := cpu32 cpu32-py debug gdb mc683xx mc68331 mc68331-board mc68331-run peripherals target
 
 licenses:
 	@for crate in $(LICENSED_CRATES); do \
@@ -33,7 +33,7 @@ clippy:
 	cargo clippy --workspace --all-targets -- -D warnings
 
 # The published crates' rustdoc, as docs.rs builds it, with no warnings.
-PUBLISHED_LIBRARIES := mc683xx-target mc683xx-cpu32 mc683xx-modules mc683xx-mc68331 mc683xx-board mc683xx-gdb mc683xx-peripherals
+PUBLISHED_LIBRARIES := mc683xx-target mc683xx-cpu32 mc683xx-modules mc683xx-mc68331 mc683xx-board mc683xx-gdb mc683xx-debug mc683xx-peripherals
 docs:
 	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps $(addprefix -p ,$(PUBLISHED_LIBRARIES))
 

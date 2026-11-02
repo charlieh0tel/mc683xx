@@ -23,8 +23,9 @@ Crates: `mc683xx-target` (`Address`, `Size`, `FunctionCode`, and the
 `SpiPeripheral` traits), `mc683xx-mc68331` (GPT, and the chip: `Builder`,
 `Mc68331`), `mc683xx-board` (board files, the `Registry` of peripheral
 types, nets, board time and `Board`), `mc683xx-peripherals` (the stock
-peripherals, `docs/peripherals.md`) and `mc683xx-gdb` (the GDB remote
-stub, `docs/gdb.md`).
+peripherals, `docs/peripherals.md`), `mc683xx-gdb` (the GDB remote
+stub, `docs/gdb.md`) and `mc683xx-debug` (loading images and running
+init scripts over a `Cpu32Target`).
 
 ## Building a chip
 

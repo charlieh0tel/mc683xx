@@ -97,6 +97,8 @@ Out:
 - `mc683xx-run` (`crates/mc68331-run`): the runner, the workspace's one
   binary, for a board file (see Boards).
 - `mc683xx-gdb` (`crates/gdb`): the GDB remote stub (see Debugger).
+- `mc683xx-debug` (`crates/debug`): loading images and running init
+  scripts over any `Cpu32Target` (see Loading).
 - `mc683xx-peripherals` (`crates/peripherals`): stock chips as board-file peripherals
   (see Stock peripherals).
 - `cpu32-harness`, `cpu32-oracle`: instruction-level tests against
@@ -105,7 +107,7 @@ Out:
   State); test-only, `publish = false`.
 
 `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`,
-`mc683xx-mc68331`, `mc683xx-board`, `mc683xx-gdb`,
+`mc683xx-mc68331`, `mc683xx-board`, `mc683xx-gdb`, `mc683xx-debug`,
 `mc683xx-peripherals` and `mc683xx-run` are published to crates.io, depended on through the root
 `[workspace.dependencies]` with a path and a version
 (`docs/releasing.md`).  The published crates share the `mc683xx-`
@@ -1697,6 +1699,86 @@ Adversarial review (2026-10-24):
   `add_code_hook` and the memory hooks, `Memory::entry` and
   `region_mut` for pokes, `Mc68331::peek` for peeks.
 
+### Loading
+
+`mc683xx-debug` loads an image and runs an init script on any halted
+`Cpu32Target`, so a BDM pod's host and the emulator share one loader
+(decided 2026-11-01 with the pod's maintainer).  It depends on
+`mc683xx-target` and `thiserror` alone: a pod's host links it without
+the emulator.
+
+- **Images:** `image::Image`, segments in address order, apart (ones
+  that touch are joined) and not empty, and an optional entry point.
+  From S-records (M68000PRM Appendix C): S1-S3 data, S0 ignored, S5
+  and S6 counts checked (S6, a 24-bit count, is not in the manual but
+  tools write it), one S7-S9 termination, its address the entry.  From
+  ELF32 big-endian for `EM_68K` (the System V generic ABI): each
+  `PT_LOAD` segment's file bytes at `p_paddr`, `e_entry` the entry;
+  another class, encoding, version or machine is refused by name.
+  From raw binary at a given address, with no entry.  An entry of zero
+  is none: the generic ABI says so for ELF, and for S-records it is
+  the termination's usual filler (the manual's own example, `S9030000FC`)
+  and on a CPU32 the reset SSP's vector, never code (CPU32RM 6.2.1).
+  Overlapping segments are refused, not last-wins, so a load's verify
+  cannot fail on bytes the image itself overwrote.
+- **Load:** `Image::load(target, options)`: word writes in supervisor
+  data space (FC 5) unless the options name another; a segment's odd
+  start or end byte refused before anything is written unless the
+  options say byte writes (CPU32RM 6.2.3: a word at an odd address is
+  an address error); calls of at most 256 bytes, so a failure names a
+  small range; then, unless skipped, every byte read back in the same
+  accesses and compared, the first difference an error; then RPC set
+  to the entry, if there is one.  No SSP: the image's reset vector
+  holds it for a reset, and a host that wants one sets it in a script.
+  ELF `.bss` (memory past a segment's file bytes) is not written, as
+  gdb's `load` leaves it.  `LoadReport` gives the segments, the bytes,
+  the entry and whether it verified.
+- **Init scripts:** `script::Script`, one command a line, `#`
+  comments and blank lines: `write_memory.b|w|l ADDR VALUE [fc N]`,
+  `write_register NAME VALUE`, `write_system_register NAME VALUE`
+  (names as the target crate's `FromStr` takes them),
+  `read_memory.b|w|l ADDR expect V [mask M] [fc N]` and
+  `poll_memory.b|w|l ADDR mask M expect V timeout_ms N [fc N]`; the
+  clauses in any order, each once; numbers hex with `0x` or decimal.
+  Parsing refuses what cannot work: a value wider than its access, an
+  expected value outside its mask, a word or long access at an odd
+  address, a function code past 7.  A parse error carries its line; a
+  run error its line, the command (printed back as a script writes
+  it) and the target's error, the value read or the timeout.
+- **Host time:** `poll_memory` alone takes host time
+  (`std::time::Instant`), the one use of it outside a runner's pacing:
+  a peripheral on silicon settles in real time.  The first read is
+  always made, then reads repeat with no sleep until the mask matches
+  or the timeout has passed.  On the emulated chip, halted, nothing
+  moves between reads, so a poll holds at once or times out.
+
+Adversarial review (2026-11-01):
+
+- *What breaks.*  Flash and EEPROM take no plain writes: a load into
+  them fails its verify, which says so, but programming them needs
+  the part's algorithm, which this does not have.  A tool's S-records
+  that patch bytes by writing them twice are refused as overlapping.
+  A program with no startup code that expects the loader to clear
+  `.bss` finds it as it was.  An image whose entry is truly address
+  zero cannot set RPC from the image (a CPU32 cannot run there).
+  Polls on the emulated chip spin a host core until they time out.
+- *What it costs.*  Nothing in the core, the chip or the board: the
+  crate is outside them, over the trait.  Verify doubles a load's
+  time over BDM, and is optional.  The 256-byte calls are several of
+  the pod's 56-byte requests each, so the pod host's own chunking
+  sets the speed, not this.
+- *Determinism.*  Loads and every command but `poll_memory` are as
+  deterministic as the target; a poll's outcome on silicon is host
+  time's.  The emulator itself takes no host time from this crate.
+- *What it forecloses.*  Little: `Command`, the errors, `OddEdges`,
+  `LoadOptions` and `LoadReport` are `#[non_exhaustive]`, so a
+  command (a delay, a loop), long writes, a progress report or a
+  flash algorithm can be added in a minor release.  The script is
+  its own small language, not another BDM tool's init format; a
+  converter could come later.  No CLI yet: a runner front end
+  (`--load`, `--init`) belongs where a pod host or `mc683xx-run` needs
+  one.
+
 ## Architecture
 
 ### Interpreter
@@ -2821,6 +2903,7 @@ checks move onto real code hooks.
 | Front ends outside the repository and the board file; they observe nets and inspect peripherals | Board files describe hardware, which a UI is not; a front end's needs are the host API's: read-only observers on nets, peripherals' state by type, inputs through externals.  Read-only keeps every run deterministic whatever watches it (decided 2026-10-24). |
 | Board nets with their own picosecond time | Peripheral-to-peripheral edges need sub-cycle time (an FPGA interpolator resolves about 0.5 ns against 59.6 ns cycles); integer time keeps it deterministic, and only chip inputs round to a clock (decided 2026-10-23). |
 | `Cpu32Target`: a memory call names its function code; halting reports the entry source; `halted` polls; `step` stops at the next boundary | Decided 2026-10-31 with the BDM pod; `step` 2026-11-01.  A named space leaves no hidden SFC/DFC state between calls for a debugger to forget, and an implementation over READ and WRITE restores the program's SFC and DFC before GO.  ATEMP holds the entry source only until the next command (CPU32RM 7.2.3), so halting returns it.  A poll, not a blocking wait, as `no_std` firmware has no clock to wait on.  `step` runs one instruction, or takes one exception, and stops before any handler's first instruction, so a debugger over it reads RPC rather than assuming one instruction; the pod meets that on silicon by stepping with T1 and pointing VBR, for the step, at a RAM table whose every vector is a BGND stub.  `Error: core::error::Error`, so a host carries either target's errors as its own. |
+| Loading and init scripts in `mc683xx-debug`, over `Cpu32Target` | Decided 2026-11-01 with the BDM pod's maintainer.  One loader for silicon and the emulator, tested on the chip; a crate of its own, on `mc683xx-target` alone, so a pod host links it without the emulator.  Word writes, verify by default, RPC from the entry and no SSP inference, an init script with line-numbered errors; host time in `poll_memory` only. |
 | `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels) stay exhaustive, so a match on one needs no wildcard; the bindings' matches on the others end in a panic naming what they do not know (decided 2026-10-24). |
 
 ## Open

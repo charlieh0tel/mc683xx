@@ -10,7 +10,7 @@ release, step 7).
 
 | Package | Where | Built by |
 | --- | --- | --- |
-| `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`, `mc683xx-board`, `mc683xx-gdb`, `mc683xx-peripherals`, `mc683xx-run` | crates.io | `cargo publish --workspace`: the first release by hand, then the `release` workflow |
+| `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`, `mc683xx-board`, `mc683xx-gdb`, `mc683xx-debug`, `mc683xx-peripherals`, `mc683xx-run` | crates.io | `cargo publish --workspace`: the first release by hand, then the `release` workflow |
 | `mc683xx` (the Python package, from `crates/cpu32-py`) | PyPI | `.github/workflows/release.yml`, from a `v*` tag |
 
 Every other member has `publish = false`: `cpu32-py` (its wheel is its
@@ -128,8 +128,8 @@ Once, before the first release.
 
    Cargo uploads in dependency order, waiting for each crate to reach
    the index: `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`,
-   `mc683xx-board`, `mc683xx-gdb`, `mc683xx-peripherals`,
-   `mc683xx-run`.  If it stops partway, publish the rest one at a time
+   `mc683xx-board`, `mc683xx-debug`, `mc683xx-gdb`,
+   `mc683xx-peripherals`, `mc683xx-run`.  If it stops partway, publish the rest one at a time
    in that order with `cargo publish -p <crate>`.  Then revoke the
    token and add the trusted publishers (Setup, step 3).
 9. Make a GitHub release from the tag with the notes.

@@ -8,6 +8,7 @@ members = [
     "crates/cpu32-harness",
     "crates/cpu32-oracle",
     "crates/cpu32-py",
+    "crates/debug",
     "crates/gdb",
     "crates/mc683xx",
     "crates/mc68331",
@@ -39,6 +40,7 @@ categories = ["emulators", "embedded"]
 [workspace.dependencies]
 mc683xx-board = { path = "crates/mc68331-board", version = "=0.2.0" }
 mc683xx-cpu32 = { path = "crates/cpu32", version = "=0.2.0" }
+mc683xx-debug = { path = "crates/debug", version = "=0.2.0" }
 mc683xx-gdb = { path = "crates/gdb", version = "=0.2.0" }
 mc683xx-mc68331 = { path = "crates/mc68331", version = "=0.2.0" }
 mc683xx-modules = { path = "crates/mc683xx", version = "=0.2.0" }
