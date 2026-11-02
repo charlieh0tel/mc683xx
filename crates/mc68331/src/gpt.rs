@@ -977,11 +977,16 @@ impl Gpt {
     }
 
     /// Port GP's levels may have changed at `now`: an edge for the host
-    /// on an output, and a selected edge on an input capture's pin
-    /// latches TCNT and sets its flag, even with the flag set (GPTRM
-    /// 3.2).
+    /// on an output, and the input captures see the pins.
     fn pins_changed(&mut self, now: Cycles) {
         self.report_port(now);
+        self.capture(now);
+    }
+
+    /// The input captures see port GP's levels at `now`: a selected edge
+    /// on an input capture's pin latches TCNT and sets its flag, even
+    /// with the flag set (GPTRM 3.2).
+    fn capture(&mut self, now: Cycles) {
         let levels = self.port_levels(now);
         let changed = levels ^ self.levels;
         self.levels = levels;
