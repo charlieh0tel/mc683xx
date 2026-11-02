@@ -526,6 +526,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mc683xx-debug"
+version = "0.2.0"
+dependencies = [
+ "mc683xx-mc68331",
+ "mc683xx-modules",
+ "mc683xx-target",
+ "thiserror",
+]
+
+[[package]]
 name = "mc683xx-examples"
 version = "0.2.0"
 dependencies = [

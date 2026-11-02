@@ -22,6 +22,7 @@ crates.io.
 | `mc683xx-board` | Board files: memories, peripherals from a registry, decoders and nets around the chip, on board time. |
 | `mc683xx-peripherals` | Stock peripherals for board files, each from its datasheet. |
 | `mc683xx-gdb` | A GDB remote stub over the bare CPU, the chip or a board, and over any `Cpu32Target`, a BDM pod's among them. |
+| `mc683xx-debug` | Loading S-records, ELF and raw binary, and running init scripts, over any `Cpu32Target`: a BDM pod's or the chip's. |
 | `mc683xx-run` | The runner: runs a board file from the command line. |
 | `mc683xx` (PyPI) | The Python package. |
 
@@ -48,6 +49,9 @@ crates.io.
   shift register, AD569 DAC, ADC0838 ADC, AT28C64B EEPROM, MC144110
   DAC, MC68681 and SCC68692 DUARTs, each modeled from its datasheet.
 - **gdb:** a GDB remote stub over the bare CPU, the chip or a board, or a CPU32 under BDM control.
+- **Loading:** S-records, ELF and raw binary loaded, verified and
+  started, and init scripts run, on a CPU32 under BDM control or the
+  emulated chip.
 - **Python:** the chip, boards and a bare CPU, with Python objects as
   peripherals and callables as hooks, and type stubs.
 
@@ -169,7 +173,8 @@ The crates above are in `crates/`: `target` (`mc683xx-target`),
 `cpu32` (`mc683xx-cpu32`),
 `mc683xx` (`mc683xx-modules`), `mc68331` (`mc683xx-mc68331`),
 `mc68331-board` (`mc683xx-board`), `peripherals`
-(`mc683xx-peripherals`), `gdb` (`mc683xx-gdb`) and `mc68331-run`
+(`mc683xx-peripherals`), `gdb` (`mc683xx-gdb`), `debug`
+(`mc683xx-debug`) and `mc68331-run`
 (`mc683xx-run`).  The other members are not on crates.io:
 
 - `cpu32-py` (`crates/cpu32-py`): the Python package `mc683xx`, on PyPI.
