@@ -68,7 +68,7 @@ impl<T: Target> Session<'_, T> {
         if written.is_ok_and(|word| word == BGND) {
             return Ok(true);
         }
-        if self.put_back(planted).unwrap_or(false) {
+        if self.put_back(self.planted.len() - 1).unwrap_or(false) {
             self.planted.pop();
         }
         Ok(false)
@@ -83,9 +83,8 @@ impl<T: Target> Session<'_, T> {
         let mut all = true;
         let mut index = 0;
         while index < self.planted.len() {
-            let planted = self.planted[index];
-            if planted.address == address {
-                if self.put_back(planted)? {
+            if self.planted[index].address == address {
+                if self.put_back(index)? {
                     self.planted.remove(index);
                     continue;
                 }
@@ -96,10 +95,11 @@ impl<T: Target> Session<'_, T> {
         Ok(all)
     }
 
-    /// Puts back the word `planted` replaced if BGND is still there (a
-    /// word the program or gdb wrote over it since stands): whether the
-    /// word there is no longer BGND.
-    fn put_back(&mut self, planted: Breakpoint) -> Result<bool, AccessError<T::Error>> {
+    /// Puts back the word the breakpoint at `index` replaced if BGND is
+    /// still there (a word the program or gdb wrote over it since
+    /// stands): whether the word there is no longer BGND.
+    fn put_back(&mut self, index: usize) -> Result<bool, AccessError<T::Error>> {
+        let planted = self.planted[index];
         if self.holds_bgnd(planted)? {
             let space = planted.function_code;
             self.target
@@ -121,7 +121,7 @@ impl<T: Target> Session<'_, T> {
         let mut first = Ok(());
         let mut index = 0;
         while index < self.planted.len() {
-            match self.put_back(self.planted[index]) {
+            match self.put_back(index) {
                 Ok(true) => {
                     self.planted.remove(index);
                     continue;
