@@ -91,6 +91,7 @@
 use std::fmt::Display;
 
 use gdbstub::conn::ConnectionExt;
+use mc683xx_target::address::Address;
 
 use crate::target::Target;
 
@@ -135,6 +136,7 @@ pub enum Ending {
 ///     match error {
 ///         SessionError::Target(error) => Some(error),
 ///         SessionError::Connection(_) | SessionError::Protocol(_) => None,
+///         SessionError::Unrestored(_) => None,
 ///     }
 /// }
 /// ```
@@ -151,6 +153,20 @@ pub enum SessionError<E, C> {
     /// gdb said something the stub could not take.
     #[error("protocol: {0}")]
     Protocol(String),
+    /// Breakpoints planted that the stub could not put back, BGND read
+    /// back or not read at all, at these addresses; the target is left
+    /// halted, not resumed.
+    #[error("breakpoints still planted at {}", listed(.0))]
+    Unrestored(Vec<Address>),
+}
+
+/// `addresses`, comma-separated.
+fn listed(addresses: &[Address]) -> String {
+    addresses
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Serves gdb on `connection` over `target` until gdb detaches or
@@ -168,8 +184,9 @@ pub enum SessionError<E, C> {
 /// [`SessionError::Target`] if a call on the target fails (a session
 /// that failed otherwise reports that failure, not cleaning up's),
 /// [`SessionError::Connection`] if the connection fails or gdb closes
-/// it, and [`SessionError::Protocol`] if gdb sends what the stub cannot
-/// take.
+/// it, [`SessionError::Protocol`] if gdb sends what the stub cannot
+/// take, and [`SessionError::Unrestored`] if a breakpoint planted
+/// cannot be put back; then a detach does not resume the target.
 pub fn serve<T, C>(
     target: &mut T,
     connection: C,

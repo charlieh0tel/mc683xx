@@ -53,6 +53,8 @@ const BRANCH_PC: u32 = START + 6;
 const ROM_ADDRESS: u32 = 0x100;
 /// gdb's Ctrl-C.
 const INTERRUPT: u8 = 0x03;
+/// BGND (CPU32RM 4.4, BGND), a planted breakpoint.
+const BGND: [u8; 2] = [0x4a, 0xfa];
 /// PC's index in a `g` packet.
 const PC: usize = 17;
 /// System clocks the chip runs each time the stub asks whether it has
@@ -60,8 +62,10 @@ const PC: usize = 17;
 const LOOK: Cycles = Cycles(1000);
 
 /// The chip as silicon behind a pod: it runs on its own, here a little
-/// each time the stub looks.  The second field counts register writes.
-struct Running(Mc68331, usize);
+/// each time the stub looks.  The second field counts register writes;
+/// the third is an address where a write of anything but BGND is taken
+/// and dropped, a word that cannot be put back.
+struct Running(Mc68331, usize, Option<u32>);
 
 impl Cpu32Target for Running {
     type Error = TargetError;
@@ -128,6 +132,9 @@ impl Cpu32Target for Running {
         size: Size,
         data: &[u8],
     ) -> Result<(), TargetError> {
+        if self.2 == Some(address.0) && data != BGND {
+            return Ok(());
+        }
         self.0.write_memory(address, function_code, size, data)
     }
 }
@@ -147,7 +154,7 @@ fn chip() -> Running {
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
     chip.write_register(Register::A0, STORE).unwrap();
-    Running(chip, 0)
+    Running(chip, 0, None)
 }
 
 /// Serves `script` to `target`: how it ended and the stub's replies.
@@ -346,4 +353,26 @@ fn memory_over_a_breakpoint_is_the_program_s() {
     assert_eq!(replies[2], "OK");
     assert_eq!(replies[3], "2081");
     assert_eq!(word(&mut target, STORE_PC), [0x20, 0x81]);
+}
+
+#[test]
+fn a_breakpoint_that_cannot_be_put_back_fails_the_session_and_stays_halted() {
+    // the restore is taken but BGND reads back: the detach does not
+    // resume the target over it
+    let mut target = chip();
+    target.2 = Some(STORE_PC);
+    let (ending, replies) = session(
+        &mut target,
+        vec![packet(&format!("Z0,{STORE_PC:x},2")), packet("D")],
+    );
+    assert_eq!(replies[0], "OK");
+    match ending {
+        Err(SessionError::Unrestored(at)) => assert_eq!(at, [Address(STORE_PC)]),
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        Cpu32Target::halted(&mut target.0).unwrap().is_some(),
+        "not resumed"
+    );
+    assert_eq!(word(&mut target, STORE_PC), BGND);
 }

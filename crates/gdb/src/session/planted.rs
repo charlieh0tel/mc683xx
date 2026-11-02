@@ -109,18 +109,22 @@ impl<T: Target> Session<'_, T> {
         Ok(self.word(planted.address, planted.function_code)? == BGND)
     }
 
-    /// Removes every breakpoint planted; the first error, after trying
-    /// them all.
-    pub(super) fn unplant_all(&mut self) -> Result<(), AccessError<T::Error>> {
-        let mut addresses: Vec<u32> = self.planted.iter().map(|planted| planted.address).collect();
-        addresses.sort_unstable();
-        addresses.dedup();
+    /// Puts back every breakpoint planted, each tried whatever the last
+    /// did: those that did not come out, their BGND read back or not
+    /// read at all, are kept.  The first of the target's errors.
+    pub(super) fn unplant_all(&mut self) -> Result<(), T::Error> {
         let mut first = Ok(());
-        for address in addresses {
-            let removed = self.unplant(address).map(|_| ());
-            if first.is_ok() {
-                first = removed;
+        let mut index = 0;
+        while index < self.planted.len() {
+            match self.put_back(self.planted[index]) {
+                Ok(true) => {
+                    self.planted.remove(index);
+                    continue;
+                }
+                Err(AccessError::Target(error)) if first.is_ok() => first = Err(error),
+                Ok(false) | Err(_) => {}
             }
+            index += 1;
         }
         first
     }
