@@ -2140,9 +2140,40 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   FREEZE has them do.  ATEMP is always fresh: the
   server sees every entry, but one a restored snapshot started in,
   which is stale, its ATEMP as the server started kept, until a GO,
-  CALL or reset.  Transfer, the raw 17-bit exchange, answers BadRequest until
-  the serial interface is modeled.  CALL (`Mc68331::call`) stacks RPC at the active SP
-  in its data space (7.2.8.13).
+  CALL or reset.  Transfer goes word by word through the chip's serial
+  interface (`Mc68331::bdm_exchange`, below), with or without FREEZE,
+  as the protocol has it; a stale entry is forgotten once a word finds
+  or leaves the CPU out of background mode (a GO or CALL among the
+  words, or words clocked on a running CPU, a breakpoint the server
+  sees).  Each other request is a command of its own, as the pod
+  sequences it, so one that is a command (the FREEZE column's) drops a
+  raw command left half sent, and Pins, Hello, SetClock and a Halt of
+  a halted CPU, which clock nothing, keep it.  CALL (`Mc68331::call`)
+  stacks RPC at the active SP in its data space (7.2.8.13).
+- The serial interface (CPU32RM 7.2.7, 7.2.8; `debug::serial`) is the
+  chip's: `Mc68331::bdm_exchange` is one 17-bit transfer, bit 16 of
+  the word in ignored (Table 7-3), the 17 bits shifted out returned.
+  The output shift register reloads with "not ready" at each transfer
+  (7.2.7.1), and a command runs as soon as its last word is in and is
+  done before the next transfer, as no time passes in background
+  mode: so a result is never late, and "not ready" goes out only as a
+  command's operands come in, after an error response, and first.  A
+  long result goes out high word first, the word sent with the high
+  word not received; an ILLEGAL or BERR response is followed by "not
+  ready", the word sent with it not received (Figure 7-10, "data
+  unused from this transfer"); a word or "command complete" result
+  goes out as the next command comes in.  Any word that is not one of
+  Table 7-4's formats exactly is ILLEGAL (7.2.8.16).  READ, DUMP use
+  SFC and WRITE, FILL DFC, as real bus cycles; CALL is `Mc68331::call`;
+  RST is the `reset` instruction's reset at once, the modules frozen
+  again after it as FREEZE is still asserted.  The interface's state
+  (a command in progress, the next response, DUMP's and FILL's
+  address) is in the chip's snapshot.  Leaving or entering background
+  mode, and any reset, clear it; each `Cpu32Target` call but `halted`
+  and `halt` of a halted CPU is a debugger's command of its own, so it
+  drops a command in progress, the next response "not ready" again.
+  ATEMP is not the commands' scratch here, so it holds the entry
+  source until written, though 7.2.3 warns silicon's does not.
 - GO and CALL end whatever exception processing preceded the entry:
   a fault on the first fetch after them is an exception of its own
   (7.2.8.12), though reset or a fault's stacking entered background
@@ -2174,6 +2205,27 @@ Our choices, not the CPU's.  Those marked provisional could only be
 settled on a real 68331 over BDM, which is not available yet; until
 then they stay our choices.
 
+- **RSREG's command word**: 7.2.8.6 prints it as WSREG's, $248x, bit
+  8 clear; the R/W field (7.2.8.1, set for a transfer to the
+  development system) and RDREG/WDREG's pair ($218x, $208x) make it
+  $258x, which the core decodes.  $248x is WSREG.
+- **BDM serial corners** (provisional): the first response after
+  entry, a reset or a debugger's own command, "???" in every sequence
+  diagram, is "not ready".  RSREG and WSREG of a select code 7.2.8.6
+  does not list are ILLEGAL, unused formats (7.2.8.16).  DUMP and
+  FILL share one address, the one after the last READ, WRITE, DUMP or
+  FILL access, faulted or not, kept across other commands and $0
+  before any (their use without a READ or WRITE first is "undefined",
+  7.2.8.10, 7.2.8.11).  RST takes no time, so "command complete"
+  follows it at once, not after RESET's 512 clocks (7.2.8.14).
+- **A transfer outside background mode** (provisional): the serial
+  interface is off once FREEZE negates (7.2.6), so the word is not
+  received; its DSCLK pulses are BKPT pulses (7.2.7.2), acknowledged
+  as one breakpoint after the word, which enters background mode if it
+  is enabled.  DSO is then IPIPE (7.2.6), which the chip does not
+  model: the word reads $1FFFF, the line high.  On silicon when the CPU
+  enters background mode within the word, and so whether later bits are
+  received, depends on timing no emulated transfer has.
 - **Microcode revision** (format C transfer count word, bits 15:8;
   CPU32RM 6.4.3): a named constant of ours, $C8.  `rte` checks it, as
   the manual says the CPU does, and takes a format error on a

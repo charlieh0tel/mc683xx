@@ -68,6 +68,7 @@ use crate::board::Seen;
 use crate::board::Wire;
 use crate::board::chip_memory;
 use crate::board::stall;
+use crate::debug::serial::Serial;
 use crate::event;
 use crate::event::ChipTracing;
 use crate::event::Event;
@@ -645,6 +646,7 @@ impl Builder {
             cpu: Cpu::new(self.memory),
             board: self.board,
             now: Cycles::ZERO,
+            serial: Serial::default(),
         };
         chip.reset_for(ResetCause::PowerOn, false);
         chip
@@ -669,6 +671,8 @@ pub struct Mc68331 {
     pub(crate) board: Board,
     /// Now, on the system clock.
     pub(crate) now: Cycles,
+    /// BDM's serial interface.
+    pub(crate) serial: Serial,
 }
 
 impl Mc68331 {
@@ -875,8 +879,9 @@ impl Mc68331 {
         self.board.reset_others(now, cause);
         self.board.reload(&mut self.cpu.memory, cause);
         self.board.events.push(Event::Reset(now, cause));
-        // the modules reset unfrozen
+        // the modules reset unfrozen, the serial interface off
         self.board.frozen = false;
+        self.serial = Serial::default();
         self.board.rebuild(&mut self.cpu.memory);
         let board = RefCell::new(&mut self.board);
         self.cpu.set_bdm_enabled(breakpoint);
@@ -898,6 +903,8 @@ impl Mc68331 {
     pub(crate) fn sync_freeze(&mut self) {
         let frozen = self.cpu.background().is_some();
         if self.board.set_freeze(frozen, self.now) {
+            // the serial interface is off outside background mode (CPU32RM 7.2.6)
+            self.serial = Serial::default();
             self.board.rebuild(&mut self.cpu.memory);
         }
     }

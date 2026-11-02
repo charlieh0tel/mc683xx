@@ -4,7 +4,12 @@
 //! Every call but [`Cpu32Target::halted`] runs between the chip's runs,
 //! so between instructions.  Memory goes through [`Mc68331::bus_read`]
 //! and [`Mc68331::bus_write`]: real cycles, with their side effects, as
-//! BDM's READ and WRITE make them.
+//! BDM's READ and WRITE make them.  [`Mc68331::bdm_exchange`] is the
+//! serial interface itself ([`serial`]); each of the other calls is a
+//! command of its own, so one leaves the interface between commands,
+//! dropping a command in progress there.
+
+pub mod serial;
 
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
@@ -82,6 +87,78 @@ impl Mc68331 {
             .ok_or(TargetError::NotHalted)
     }
 
+    /// An error unless the CPU is in background mode; then the serial
+    /// interface is left between commands, as a debugger's command
+    /// through it would leave it.
+    fn command(&mut self) -> Result<(), TargetError> {
+        self.in_background()?;
+        self.serial.discard();
+        Ok(())
+    }
+
+    /// GO (CPU32RM 7.2.8.12): background mode left, FREEZE with it.
+    fn resume(&mut self) {
+        self.cpu.resume();
+        self.sync_freeze();
+    }
+
+    /// A data or address register.
+    fn register(&self, register: Register) -> u32 {
+        let number = usize::from(register.code());
+        let registers = &self.cpu.registers;
+        match number {
+            0..8 => registers.data[number],
+            _ => registers.address(number - 8),
+        }
+    }
+
+    /// Sets a data or address register, all 32 bits.
+    fn set_register(&mut self, register: Register, value: u32) {
+        let number = usize::from(register.code());
+        let registers = &mut self.cpu.registers;
+        match number {
+            0..8 => registers.data[number] = value,
+            _ => registers.set_address(number - 8, value),
+        }
+    }
+
+    /// A system register, zero-extended (CPU32RM 7.2.8.6).
+    fn system_register(&self, register: SystemRegister) -> u32 {
+        let cpu = &self.cpu;
+        let registers = &cpu.registers;
+        match register {
+            SystemRegister::Rpc => registers.pc,
+            SystemRegister::Pcc => cpu.pcc().0,
+            SystemRegister::Atemp => cpu.atemp(),
+            SystemRegister::Far => cpu.far().0,
+            SystemRegister::Vbr => registers.vbr,
+            SystemRegister::Sr => u32::from(registers.sr()),
+            SystemRegister::Usp => registers.usp,
+            SystemRegister::Ssp => registers.ssp,
+            SystemRegister::Sfc => u32::from(registers.sfc.bits()),
+            SystemRegister::Dfc => u32::from(registers.dfc.bits()),
+        }
+    }
+
+    /// Sets a system register as WSREG does: a register narrower than
+    /// 32 bits takes the low bits, and a write to FAR is ignored
+    /// (CPU32RM 7.2.8.7).
+    fn set_system_register(&mut self, register: SystemRegister, value: u32) {
+        let cpu = &mut self.cpu;
+        match register {
+            SystemRegister::Rpc => cpu.registers.pc = value,
+            SystemRegister::Pcc => cpu.set_pcc(Address(value)),
+            SystemRegister::Atemp => cpu.set_atemp(value),
+            SystemRegister::Far => {}
+            SystemRegister::Vbr => cpu.registers.vbr = value,
+            SystemRegister::Sr => cpu.registers.set_sr(value as u16),
+            SystemRegister::Usp => cpu.registers.usp = value,
+            SystemRegister::Ssp => cpu.registers.ssp = value,
+            SystemRegister::Sfc => cpu.registers.sfc = FunctionCode::new(value),
+            SystemRegister::Dfc => cpu.registers.dfc = FunctionCode::new(value),
+        }
+    }
+
     /// `data`'s accesses of `size` from `address`: each one's address
     /// and bytes, or an error if `data` is not whole accesses.
     fn accesses(
@@ -142,9 +219,8 @@ impl Cpu32Target for Mc68331 {
     }
 
     fn go(&mut self) -> Result<(), TargetError> {
-        self.in_background()?;
-        self.cpu.resume();
-        self.sync_freeze();
+        self.command()?;
+        self.resume();
         Ok(())
     }
 
@@ -154,9 +230,8 @@ impl Cpu32Target for Mc68331 {
     /// A stepped STOP or LPSTOP leaves the CPU running, as T1 does
     /// (CPU32RM 6.2.10).
     fn step(&mut self) -> Result<Entry, TargetError> {
-        self.in_background()?;
-        self.cpu.resume();
-        self.sync_freeze();
+        self.command()?;
+        self.resume();
         let mut limits = Limits::default();
         limits.steps = Some(1);
         let start = self.now;
@@ -194,42 +269,19 @@ impl Cpu32Target for Mc68331 {
     }
 
     fn read_register(&mut self, register: Register) -> Result<u32, TargetError> {
-        self.in_background()?;
-        let number = usize::from(register.code());
-        let registers = &self.cpu.registers;
-        Ok(match number {
-            0..8 => registers.data[number],
-            _ => registers.address(number - 8),
-        })
+        self.command()?;
+        Ok(self.register(register))
     }
 
     fn write_register(&mut self, register: Register, value: u32) -> Result<(), TargetError> {
-        self.in_background()?;
-        let number = usize::from(register.code());
-        let registers = &mut self.cpu.registers;
-        match number {
-            0..8 => registers.data[number] = value,
-            _ => registers.set_address(number - 8, value),
-        }
+        self.command()?;
+        self.set_register(register, value);
         Ok(())
     }
 
     fn read_system_register(&mut self, register: SystemRegister) -> Result<u32, TargetError> {
-        self.in_background()?;
-        let cpu = &self.cpu;
-        let registers = &cpu.registers;
-        Ok(match register {
-            SystemRegister::Rpc => registers.pc,
-            SystemRegister::Pcc => cpu.pcc().0,
-            SystemRegister::Atemp => cpu.atemp(),
-            SystemRegister::Far => cpu.far().0,
-            SystemRegister::Vbr => registers.vbr,
-            SystemRegister::Sr => u32::from(registers.sr()),
-            SystemRegister::Usp => registers.usp,
-            SystemRegister::Ssp => registers.ssp,
-            SystemRegister::Sfc => u32::from(registers.sfc.bits()),
-            SystemRegister::Dfc => u32::from(registers.dfc.bits()),
-        })
+        self.command()?;
+        Ok(self.system_register(register))
     }
 
     /// As WSREG: a register narrower than 32 bits takes the low bits,
@@ -239,20 +291,8 @@ impl Cpu32Target for Mc68331 {
         register: SystemRegister,
         value: u32,
     ) -> Result<(), TargetError> {
-        self.in_background()?;
-        let cpu = &mut self.cpu;
-        match register {
-            SystemRegister::Rpc => cpu.registers.pc = value,
-            SystemRegister::Pcc => cpu.set_pcc(Address(value)),
-            SystemRegister::Atemp => cpu.set_atemp(value),
-            SystemRegister::Far => {}
-            SystemRegister::Vbr => cpu.registers.vbr = value,
-            SystemRegister::Sr => cpu.registers.set_sr(value as u16),
-            SystemRegister::Usp => cpu.registers.usp = value,
-            SystemRegister::Ssp => cpu.registers.ssp = value,
-            SystemRegister::Sfc => cpu.registers.sfc = FunctionCode::new(value),
-            SystemRegister::Dfc => cpu.registers.dfc = FunctionCode::new(value),
-        }
+        self.command()?;
+        self.set_system_register(register, value);
         Ok(())
     }
 
@@ -263,7 +303,7 @@ impl Cpu32Target for Mc68331 {
         size: Size,
         data: &mut [u8],
     ) -> Result<(), TargetError> {
-        self.in_background()?;
+        self.command()?;
         let bytes = size.bytes() as usize;
         for (at, offset) in Self::accesses(address, size, data.len())? {
             let value = self
@@ -281,7 +321,7 @@ impl Cpu32Target for Mc68331 {
         size: Size,
         data: &[u8],
     ) -> Result<(), TargetError> {
-        self.in_background()?;
+        self.command()?;
         let bytes = size.bytes() as usize;
         for (at, offset) in Self::accesses(address, size, data.len())? {
             let value = data[offset..offset + bytes]

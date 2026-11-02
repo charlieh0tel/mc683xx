@@ -7,7 +7,10 @@
 //! One client at a time; another connection is closed once the client
 //! has had 100 ms to go, polls going on meanwhile.  The server is polled between the runner's turns and, while the CPU is in
 //! background mode on an unpaced run, waited on, so board time stands
-//! still between requests (PLAN.md, Background debug mode).
+//! still between requests (PLAN.md, Background debug mode).  Transfer
+//! goes through the chip's serial interface,
+//! [`Mc68331::bdm_exchange`]; each other request is a command of its
+//! own, as the pod sequences it.
 
 use std::io;
 use std::io::ErrorKind;
@@ -547,6 +550,24 @@ impl Server {
         field
     }
 
+    /// Transfer: each word through the chip's serial interface, the 17
+    /// bits shifted in for each.  An entry the server did not see is
+    /// forgotten once a word finds or leaves the CPU out of background
+    /// mode: a GO or CALL among the words, or BKPT pulses the words are
+    /// on a running CPU.
+    fn transfer(&mut self, chip: &mut Mc68331, words: &[u16]) -> Vec<u8> {
+        let mut body = Vec::with_capacity(4 * words.len());
+        for &word in words {
+            let before = Cpu32Target::halted(chip).ok().flatten().is_some();
+            let shifted = chip.bdm_exchange(u32::from(word));
+            if !before || Cpu32Target::halted(chip).ok().flatten().is_none() {
+                self.stale = None;
+            }
+            body.extend_from_slice(&shifted.to_le_bytes());
+        }
+        body
+    }
+
     /// The reply to `packet`.
     fn answer(&mut self, chip: &mut Mc68331, packet: &[u8]) -> Vec<u8> {
         let Some(request) = Request::parse(packet) else {
@@ -554,8 +575,7 @@ impl Server {
         };
         let frozen = Cpu32Target::halted(chip).ok().flatten().is_some();
         let result = match request {
-            // the raw exchange is not modeled yet
-            Request::Transfer(_) => return reply(Status::BadRequest, &[]),
+            Request::Transfer(words) => Ok(self.transfer(chip, &words)),
             Request::Hello => Ok(PROTOCOL_VERSION.to_le_bytes().to_vec()),
             Request::SetClock(hertz) => Ok(hertz.clamp(1, MAX_DSCLK_HZ).to_le_bytes().to_vec()),
             Request::Pins => {
@@ -624,6 +644,7 @@ mod tests {
     use super::code;
     use mc683xx_cpu32::cycles::Cycles;
     use mc683xx_mc68331::chip::Builder;
+    use mc683xx_mc68331::chip::Mc68331;
     use mc683xx_modules::chip_select::ChipSelect;
     use mc683xx_target::Cpu32Target;
     use mc683xx_target::address::Address;
@@ -666,6 +687,68 @@ mod tests {
         assert_eq!(server.answer(&mut chip, &[code::PINS])[PINS_KIND], FRESH);
     }
 
+    /// A chip in background mode out of a reset with BKPT, running
+    /// `BRA.B *` once resumed.
+    fn halted_chip() -> Mc68331 {
+        let mut rom = vec![0; 0x1000];
+        rom[4..8].copy_from_slice(&(START as u32).to_be_bytes());
+        rom[START..START + 2].copy_from_slice(&[0x60, 0xfe]);
+        let mut builder = Builder::default();
+        builder.memory(rom, false, &[ChipSelect::Boot]).unwrap();
+        let mut chip = builder.build();
+        chip.reset_halted().unwrap();
+        chip
+    }
+
+    /// A Transfer of `words`, as a packet.
+    fn transfer(words: &[u16]) -> Vec<u8> {
+        let mut packet = vec![code::TRANSFER];
+        packet.extend(words.iter().flat_map(|word| word.to_le_bytes()));
+        packet
+    }
+
+    /// An Ok reply's u32s.
+    fn longs(reply: &[u8]) -> Vec<u32> {
+        assert_eq!(reply[0], 0, "Ok");
+        reply[1..]
+            .chunks(4)
+            .map(|long| u32::from_le_bytes([long[0], long[1], long[2], long[3]]))
+            .collect()
+    }
+
+    #[test]
+    fn a_transfer_answers_each_word_s_17_bits_through_the_chip() {
+        let mut chip = halted_chip();
+        chip.write_register(Register::D0, 0x8765_4321).unwrap();
+        let mut server = Server::bind("127.0.0.1:0", &mut chip).unwrap();
+        // RDREG D0, two NOPs, then $FFFF, not a command, and a NOP
+        let reply = server.answer(&mut chip, &transfer(&[0x2180, 0, 0, 0xffff, 0]));
+        assert_eq!(reply.len(), 1 + 5 * 4);
+        assert_eq!(
+            longs(&reply),
+            [0x1_0000, 0x8765, 0x4321, 0xffff, 0x1_ffff],
+            "not ready, D0, command complete, illegal"
+        );
+        let fifteen = transfer(&[0; 15]);
+        assert_eq!(server.answer(&mut chip, &fifteen).len(), 1 + 15 * 4);
+    }
+
+    #[test]
+    fn a_transfer_to_a_running_cpu_is_a_breakpoint_the_server_sees() {
+        let mut chip = halted_chip();
+        chip.write_system_register(SystemRegister::Atemp, 7)
+            .unwrap();
+        let mut server = Server::bind("127.0.0.1:0", &mut chip).unwrap();
+        assert_eq!(server.answer(&mut chip, &[code::PINS])[PINS_KIND], STALE);
+        // GO, then a NOP clocked while the CPU runs: BKPT
+        let reply = server.answer(&mut chip, &transfer(&[0x0c00, 0]));
+        assert_eq!(longs(&reply), [0x1_0000, 0x1_ffff]);
+        let pins = server.answer(&mut chip, &[code::PINS]);
+        assert_eq!(pins[1] & 1, 1, "FREEZE high");
+        assert_eq!(pins[PINS_KIND], FRESH, "a breakpoint the server saw");
+        assert_eq!(pins[PINS_KIND + 1..], 0u32.to_le_bytes());
+    }
+
     #[test]
     fn requests_parse_by_the_protocols_exact_lengths_and_ranges() {
         assert_eq!(Request::parse(&[0x0e]), Some(Request::Hello));
@@ -704,5 +787,15 @@ mod tests {
             Some(Request::Transfer(vec![0x1234]))
         );
         assert_eq!(Request::parse(&[0x01, 0x34]), None, "half a word");
+        assert_eq!(Request::parse(&[0x01]), None, "no words");
+        assert_eq!(Request::parse(&[0x01, 0, 0, 0]), None, "a word and a half");
+        let mut fifteen = vec![0x01];
+        fifteen.extend([0; 30]);
+        assert_eq!(
+            Request::parse(&fifteen),
+            Some(Request::Transfer(vec![0; 15]))
+        );
+        fifteen.extend([0; 2]);
+        assert_eq!(Request::parse(&fifteen), None, "16 words");
     }
 }
