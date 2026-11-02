@@ -1154,7 +1154,21 @@ impl Core<'_> {
             pc,
             address,
         });
-        self.process(Vector::TRACE, pc, Some(address), None, false)
+        self.process_after_instruction(Vector::TRACE, pc, Some(address), None)
+    }
+
+    /// Exception processing at an instruction boundary, after an
+    /// instruction completed: a trace, a hardware breakpoint or an
+    /// interrupt (CPU32RM 6.1.5, Table 6-2), with no trace pending
+    /// beyond it.
+    fn process_after_instruction(
+        &mut self,
+        vector: Vector,
+        pc: Address,
+        faulted: Option<Address>,
+        level: Option<InterruptLevel>,
+    ) -> Processed {
+        self.process(vector, pc, faulted, level, false)
     }
 
     /// A bus or address error that aborted the instruction: type III
@@ -1251,7 +1265,7 @@ impl Core<'_> {
         };
         let pc = Address(self.cpu.registers.pc);
         self.cpu.taken = Some(Exception::Short { vector, pc });
-        let processed = self.process(vector, pc, None, Some(level), false);
+        let processed = self.process_after_instruction(vector, pc, None, Some(level));
         self.cpu.sampled_mask = self.cpu.registers.interrupt_mask();
         // it ends STOP and LPSTOP (CPU32RM 4.4); a fault stop, the
         // registers as before it, leaves the CPU stopped as it was
@@ -1328,7 +1342,7 @@ impl Core<'_> {
             address,
         });
         self.cpu.leave_loop_mode();
-        let processed = self.process(vector, pc, Some(address), None, false);
+        let processed = self.process_after_instruction(vector, pc, Some(address), None);
         if processed == Processed::Stopped {
             self.cpu.bare.breakpoint_pending = true;
         }
