@@ -472,3 +472,27 @@ fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_the_cpu_stopped() {
         assert_eq!(frame(&machine).1, after);
     }
 }
+
+#[test]
+fn a_fault_stacking_an_interrupt_leaves_the_next_instruction_s_hooks_to_run() {
+    let mut machine = machine(&[MOVEQ_1_D1, NOP]);
+    machine.cpu.set_stop_on_fault(true);
+    let calls = Rc::new(RefCell::new(0));
+    let into = Rc::clone(&calls);
+    machine
+        .cpu
+        .add_code_hook(Address(CODE + 2)..=Address(CODE + 2), move |_| {
+            *into.borrow_mut() += 1;
+            ControlFlow::Continue(())
+        });
+    one(&mut machine);
+    machine.cpu.registers.ssp = NOWHERE;
+    let pin = IrqPin::new(3).unwrap();
+    machine.request_interrupt(pin, None);
+    assert!(matches!(one(&mut machine), End::Fault(_)));
+    assert_eq!(*calls.borrow(), 0, "the NOP not reached");
+    machine.clear_interrupt(pin);
+    one(&mut machine);
+    assert_eq!(machine.cpu.registers.pc, CODE + 4);
+    assert_eq!(*calls.borrow(), 1, "called before the NOP");
+}

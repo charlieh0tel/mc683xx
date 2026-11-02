@@ -1160,7 +1160,8 @@ impl Core<'_> {
     /// Exception processing at an instruction boundary, after an
     /// instruction completed: a trace, a hardware breakpoint or an
     /// interrupt (CPU32RM 6.1.5, Table 6-2), with no trace pending
-    /// beyond it.
+    /// beyond it.  A fault stop in it leaves the hooks at PC as they
+    /// were: the instruction there has not begun.
     fn process_after_instruction(
         &mut self,
         vector: Vector,
@@ -1168,7 +1169,12 @@ impl Core<'_> {
         faulted: Option<Address>,
         level: Option<InterruptLevel>,
     ) -> Processed {
-        self.process(vector, pc, faulted, level, false)
+        let resume = self.cpu.resume;
+        let processed = self.process(vector, pc, faulted, level, false);
+        if processed == Processed::Stopped {
+            self.cpu.resume = resume;
+        }
+        processed
     }
 
     /// A bus or address error that aborted the instruction: type III
