@@ -96,6 +96,16 @@ fn a_pending_breakpoint_is_saved() {
 }
 
 #[test]
+fn a_pending_trace_is_saved() {
+    let mut cpu = looping();
+    cpu.bare.trace_pending = Some(Address(DATA));
+    let snapshot = cpu.save();
+    let mut other = looping();
+    other.restore(&snapshot).unwrap();
+    assert_eq!(other.bare.trace_pending, Some(Address(DATA)));
+}
+
+#[test]
 fn the_format_matches_its_golden() {
     let mut cpu = looping();
     trace(&mut cpu, 333);

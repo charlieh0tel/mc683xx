@@ -74,8 +74,14 @@ pub enum FaultCause {
 }
 
 /// A fault that stopped the run ([`Cpu::set_stop_on_fault`]): nothing
-/// stacked, the registers back as the faulting instruction (or
-/// interrupt or hardware breakpoint entry) began.
+/// stacked.  A fault in an instruction, its own exception's stacking
+/// included, rolls the registers back to its start.  A fault stacking
+/// an exception taken after an instruction completed (a trace, a
+/// hardware breakpoint, an interrupt) keeps that instruction, the
+/// registers as the exception's processing began, and leaves the
+/// exception pending: the next run takes the trace or breakpoint
+/// first, and samples the interrupt again.  A stopped CPU stays
+/// stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct FaultStop {
@@ -89,8 +95,8 @@ pub struct FaultStop {
     pub size: Size,
     /// Its function code.
     pub function_code: FunctionCode,
-    /// The registers as the instruction began, as the CPU holds them
-    /// again.
+    /// The registers as the instruction, or the exception processing
+    /// after one, began, as the CPU holds them again.
     pub registers: Registers,
 }
 
@@ -198,6 +204,12 @@ pub(crate) struct Bare {
     /// 6.2.6).  Here, out of the run loop's way, as it is looked at
     /// only as a run starts.
     pub(crate) breakpoint_pending: bool,
+    /// A trace whose frame a fault stopped the stacking of: the traced
+    /// instruction's address it stacks, until the next run takes it
+    /// (CPU32RM 6.2.10).  Here as [`breakpoint_pending`] is.
+    ///
+    /// [`breakpoint_pending`]: Self::breakpoint_pending
+    pub(crate) trace_pending: Option<Address>,
 }
 
 impl Cpu {
@@ -236,10 +248,11 @@ impl Cpu {
         self.resume = None;
     }
 
-    /// The registers as the last instruction, or interrupt or hardware
-    /// breakpoint entry, began, while they are kept: while a read,
-    /// write or invalid access hook is installed or faults stop the
-    /// run.
+    /// The registers as the last instruction began, or the trace,
+    /// hardware breakpoint or interrupt processing after it, while they
+    /// are kept: while a read, write or invalid access hook is
+    /// installed or faults stop the run.  A fault stop holds them again
+    /// ([`FaultStop`]).
     #[must_use]
     pub const fn instruction_registers(&self) -> &Registers {
         &self.began
@@ -479,7 +492,8 @@ impl Cpu {
         }))
     }
 
-    /// A fault's stop: the registers back as the instruction began.
+    /// A fault's stop: the registers back as captured, as the
+    /// instruction or the exception processing after one began.
     pub(crate) fn fault_end(&mut self, fault: Fault) -> End {
         let cause = if fault.vector == Vector::ADDRESS_ERROR {
             FaultCause::AddressError

@@ -13,6 +13,7 @@ use crate::cycles::Cycles;
 use crate::exception::CycleKind;
 use crate::exception::Exception;
 use crate::exception::Vector;
+use crate::exception::format;
 use crate::flat::Machine;
 use crate::interrupt::InterruptLevel;
 use crate::interrupt::IrqPin;
@@ -495,4 +496,121 @@ fn a_fault_stacking_an_interrupt_leaves_the_next_instruction_s_hooks_to_run() {
     one(&mut machine);
     assert_eq!(machine.cpu.registers.pc, CODE + 4);
     assert_eq!(*calls.borrow(), 1, "called before the NOP");
+}
+
+/// ADDQ.W #1,(A0) (CPU32RM 4, ADDQ).
+const ADDQ_1_INDIRECT_A0: u16 = 0x5250;
+/// Where [`ADDQ_1_INDIRECT_A0`] adds.
+const COUNTER: u32 = 0x2000;
+
+/// The word at `address`.
+fn word_at(machine: &Machine, address: u32) -> u16 {
+    let mut bytes = [0; 2];
+    machine.read(Address(address), &mut bytes).unwrap();
+    u16::from_be_bytes(bytes)
+}
+
+/// The six-word frame's instruction address at SP (CPU32RM 6.4.2).
+fn frame_address(machine: &Machine) -> u32 {
+    let mut bytes = [0; 4];
+    machine
+        .read(Address(machine.cpu.registers.ssp + 8), &mut bytes)
+        .unwrap();
+    u32::from_be_bytes(bytes)
+}
+
+/// [`ADDQ_1_INDIRECT_A0`] traced (T1), stopping on faults, with SSP
+/// where nothing maps.
+fn traced_addq() -> Machine {
+    let mut machine = machine(&[ADDQ_1_INDIRECT_A0, NOP]);
+    machine.cpu.set_stop_on_fault(true);
+    machine.cpu.registers.set_sr(status::S | status::T1);
+    machine.cpu.registers.set_address(0, COUNTER);
+    machine.cpu.registers.ssp = NOWHERE;
+    machine
+}
+
+#[test]
+fn a_fault_stacking_a_trace_keeps_the_traced_instruction() {
+    let mut machine = traced_addq();
+    let End::Fault(fault) = one(&mut machine) else {
+        panic!("no fault");
+    };
+    assert_eq!(fault.cycle, CycleKind::Write);
+    assert_eq!(fault.address, Address(NOWHERE - 2));
+    assert_eq!(fault.registers.pc, CODE + 2, "the ADDQ kept");
+    assert_eq!(fault.registers.sr(), status::S | status::T1);
+    assert_eq!(machine.cpu.registers, fault.registers);
+    assert_eq!(word_at(&machine, COUNTER), 1);
+    assert_eq!(machine.cpu.instructions(), 1);
+    // SSP fixed, the run goes on: the trace taken (CPU32RM 6.2.10),
+    // the ADDQ not run again
+    machine.cpu.registers.ssp = STACK;
+    assert_eq!(boundary_only(&mut machine), End::Instructions);
+    assert_eq!(word_at(&machine, COUNTER), 1, "incremented once");
+    assert_eq!(machine.cpu.registers.pc, HANDLER);
+    assert_eq!(machine.cpu.registers.ssp, STACK - 12);
+    assert_eq!(
+        frame(&machine),
+        (
+            status::S | status::T1,
+            CODE + 2,
+            format::word(format::SIX_WORD, Vector::TRACE)
+        )
+    );
+    assert_eq!(frame_address(&machine), CODE);
+    assert_eq!(machine.cpu.instructions(), 1);
+}
+
+#[test]
+fn a_fault_stacking_a_trace_after_a_trap_keeps_the_trap() {
+    let mut machine = machine(&[TRAP_0]);
+    machine.cpu.set_stop_on_fault(true);
+    machine.cpu.registers.set_sr(status::S | status::T1);
+    let trap = handle(&mut machine, Vector::trap(0), 0x4200);
+    // room for the trap's four words, not the trace's six
+    machine.cpu.registers.ssp = 8;
+    let End::Fault(fault) = one(&mut machine) else {
+        panic!("no fault");
+    };
+    assert_eq!(fault.registers.pc, trap, "the trap kept");
+    assert_eq!(fault.registers.ssp, 0);
+    machine.cpu.registers.ssp = STACK;
+    boundary_only(&mut machine);
+    assert_eq!(machine.cpu.registers.pc, HANDLER);
+    assert_eq!(frame(&machine).1, trap);
+    assert_eq!(frame_address(&machine), CODE);
+}
+
+#[test]
+fn reset_drops_a_pending_trace() {
+    let mut machine = traced_addq();
+    one(&mut machine);
+    assert!(machine.cpu.bare.trace_pending.is_some());
+    machine
+        .write(
+            Address(0),
+            &[STACK.to_be_bytes(), CODE.to_be_bytes()].concat(),
+        )
+        .unwrap();
+    machine.reset().unwrap();
+    assert_eq!(machine.cpu.bare.trace_pending, None);
+}
+
+#[test]
+fn a_pending_trace_is_taken_before_a_pending_breakpoint() {
+    let mut machine = traced_addq();
+    one(&mut machine);
+    machine.cpu.set_breakpoint_pending(true);
+    machine.cpu.registers.ssp = STACK;
+    boundary_only(&mut machine);
+    // Table 6-2's order: the breakpoint's frame on the trace's
+    assert_eq!(machine.cpu.registers.ssp, STACK - 24);
+    let (_, pc, format_vector) = frame(&machine);
+    assert_eq!(pc, HANDLER);
+    assert_eq!(
+        format_vector,
+        format::word(format::SIX_WORD, Vector::HARDWARE_BREAKPOINT)
+    );
+    assert!(!machine.cpu.breakpoint_pending());
 }
