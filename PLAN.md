@@ -2110,8 +2110,9 @@ and `mc683xx.Machine` in Python (see Python).
 - **Faults:** `set_stop_on_fault`: a bus or address error ends the
   run (`End::Fault`): fetch, read or write; bus error (unmapped or a
   peripheral's), protected, or address error; the whole address; the
-  registers restored as the instruction (or interrupt entry) began,
-  nothing stacked.  A fault while stacking (a bad SSP) stops the same
+  registers restored as the instruction (or interrupt or hardware
+  breakpoint entry) began, nothing stacked; a hardware breakpoint is
+  left pending, as a TRAP reruns and an interrupt is sampled again.  A fault while stacking (a bad SSP) stops the same
   way instead of a double bus fault, so the host fixes SSP and goes on
   with no reset.  Writes the instruction made before the fault stay in
   memory, and so do frame words stacked before a stacking fault.
@@ -2281,8 +2282,11 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   Breakpoint rows.  Its place between runs is a boundary after the
   last instruction's trace and before the interrupt sampled at the
   next, so Table 6-2's trace, breakpoint, interrupt order holds:
-  three frames, the interrupt's on top.  Our choices, the manuals
-  silent:
+  three frames, the interrupt's on top.  With `set_stop_on_fault`, a
+  fault stacking its frame stops the run with the registers as the
+  breakpoint's processing began, after the last instruction (or the
+  interrupt that ended STOP), and the breakpoint pending again.  Our
+  choices, the manuals silent:
   - A breakpoint is asserted only between instructions: BKPT tagging
     one bus cycle of an instruction (7.2.7.2; MC68331UM 4.5.4.1.2, a
     prefetch tag dropped by a pipeline flush) is not modeled, nor is
