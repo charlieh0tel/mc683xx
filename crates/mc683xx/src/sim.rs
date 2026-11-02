@@ -175,6 +175,13 @@ impl ResetCause {
             Self::Test => 1,
         }
     }
+
+    /// Whether the reset asserts CLKRST, resetting the clock module:
+    /// every source but the test submodule and the `reset` instruction
+    /// (SIMRM 8.1, Table 8-1).
+    const fn resets_clock(self) -> bool {
+        !matches!(self, Self::Test | Self::System)
+    }
 }
 
 /// The pins the SIM reads as a reset releases (SIMRM 8.6; MC68331UM
@@ -295,8 +302,10 @@ impl Sim {
     }
 
     /// A reset at `now` for `cause`: every register to its reset value
-    /// but the port latches (SIMRM 8.8), RSR to the cause.  For the
-    /// `reset` instruction use `system_reset`.
+    /// but the port latches (SIMRM 8.8), RSR to the cause, and the clock
+    /// module too unless the cause leaves CLKRST alone, as the test
+    /// submodule's does (SIMRM 8.1, Table 8-1).  For the `reset`
+    /// instruction use `system_reset`.
     pub fn reset(&mut self, cause: ResetCause, now: Cycles) {
         let before = self.all_outputs();
         let output_changes = mem::take(&mut self.output_changes);
@@ -307,12 +316,19 @@ impl Sim {
         let port_f = self
             .port_f
             .reset(Self::assignment(configuration, PFPAR_DATA));
+        let mut fresh = Self::new(configuration, now);
+        if !cause.resets_clock() {
+            // SYNCR and the EXTAL periods counted go on; the watchdog
+            // restarts on them
+            fresh.clock = self.clock.clone();
+            fresh.watchdog = Watchdog::new(fresh.protection, fresh.clock.tick(now));
+        }
         *self = Self {
             reset_status: cause.status(),
             port_e,
             port_f,
             output_changes,
-            ..Self::new(configuration, now)
+            ..fresh
         };
         self.record_outputs(before, now);
     }

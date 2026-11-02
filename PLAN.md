@@ -1251,9 +1251,12 @@ hand.  The keys are in `docs/board-files.md`.
   RAM's), the port latches (undefined at power-up,
   SIMRM Table 8-4, so any value is valid) and what the board's nets
   hold; no peripheral's `power_on` runs again.  `Test` and
-  `LossOfClock`, which the chip never raises, reset the clock too,
-  though the test submodule's reset leaves CLKRST alone (SIMRM Table
-  8-1).  A synchronous source (external, loss of clock) waits for the
+  `LossOfClock`, which the chip never raises, follow SIMRM Table 8-1
+  (and 8.1's reset lines): the test submodule's reset asserts MSTRST
+  and EXTRST but not CLKRST, so it leaves the clock module, SYNCR and
+  the EXTAL periods counted, as it was, the watchdog restarting on
+  them; loss of clock asserts all three and resets it as the others
+  do.  A synchronous source (external, loss of clock) waits for the
   bus cycle to end (SIMRM 8.1): a host's reset comes between
   instructions anyway.
 - **Board time:** `Time`, integer picoseconds in a `u64` (213 days),

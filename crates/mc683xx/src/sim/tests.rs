@@ -357,6 +357,24 @@ fn a_reset_keeps_the_port_latches_and_the_reset_instruction_all() {
     assert_eq!(sim.port_e().latch, 0x81);
 }
 
+#[test]
+fn a_test_reset_leaves_the_clock_and_a_loss_of_clock_reset_resets_it() {
+    // CLKRST for every source but the test submodule and the `reset`
+    // instruction (SIMRM 8.1, Table 8-1)
+    for (cause, syncr) in [
+        (ResetCause::Test, 0xcf08),
+        (ResetCause::LossOfClock, 0x3f08),
+    ] {
+        let mut sim = sim();
+        write(&mut sim, 0x04, Size::Word, 0xcf00, Cycles::ZERO);
+        let fast = sim.clock().frequency();
+        sim.reset(cause, Cycles(1000));
+        assert_eq!(read(&mut sim, 0x04, Size::Word), syncr, "{cause:?}");
+        assert_eq!(sim.clock().frequency() == fast, cause == ResetCause::Test);
+        assert_eq!(sim.reset_status(), cause.status());
+    }
+}
+
 /// RSR: EXT POW SW HLT, 0, LOC SYS TST (MC68331UM D.3.4).
 #[test]
 fn every_cause_has_its_rsr_bit() {
