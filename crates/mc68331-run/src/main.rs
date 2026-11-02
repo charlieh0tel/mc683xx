@@ -46,6 +46,7 @@ use mc683xx_board::board::Board;
 use mc683xx_board::board::BoardRun;
 use mc683xx_board::board::BoardTracing;
 use mc683xx_board::chip::Chip;
+use mc683xx_board::control::BoardControl;
 use mc683xx_board::description::Options;
 use mc683xx_board::pacing::Pacer;
 use mc683xx_board::pacing::Pacing;
@@ -303,6 +304,11 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         .as_ref()
         .map(|path| saveable(&board, path))
         .transpose()?;
+    let control = board.control();
+    let interrupted = interruption(
+        &control,
+        saving.as_ref().map(|saving| saving.temporary.clone()),
+    )?;
     let senders: BTreeSet<String> = board
         .externals()
         .into_iter()
@@ -376,27 +382,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         input_after: board.now() + picoseconds(arguments.input_after),
         next_position: every.map(|every| (board.now() + every, every)),
     };
-    // Ctrl-C, under gdb too, ends the run at the next sync point (or
-    // gdb's session at its next wait), and `--save` still saves; a
-    // second ends the process, for a run that does not stop
-    let control = board.control();
     control.set_pacing(arguments.pace)?;
-    let interrupted = Arc::new(AtomicBool::new(false));
-    {
-        let control = control.clone();
-        let interrupted = Arc::clone(&interrupted);
-        let partial = saving.as_ref().map(|saving| saving.temporary.clone());
-        ctrlc::set_handler(move || {
-            if interrupted.swap(true, Ordering::SeqCst) {
-                if let Some(partial) = &partial {
-                    let _ = fs::remove_file(partial);
-                }
-                process::exit(EXIT_INTERRUPTED);
-            }
-            control.stop();
-        })
-        .map_err(RunError::Interrupt)?;
-    }
     if let Some(address) = &arguments.gdb {
         let ending = gdb::serve(&mut board, &mut turns, address, &interrupted)?;
         let killed = ending == Ending::Killed;
@@ -456,6 +442,30 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         saving.save(&board)?;
     }
     Ok(outcome)
+}
+
+/// Ctrl-C, under gdb too, ends the run at the next sync point (or
+/// gdb's session at its next wait), and `--save` still saves; a second
+/// ends the process, for a run that does not stop, removing `partial`,
+/// a snapshot half written.  The flag says whether one came.
+fn interruption(
+    control: &BoardControl,
+    partial: Option<PathBuf>,
+) -> Result<Arc<AtomicBool>, RunError> {
+    let interrupted = Arc::new(AtomicBool::new(false));
+    let control = control.clone();
+    let flag = Arc::clone(&interrupted);
+    ctrlc::set_handler(move || {
+        if flag.swap(true, Ordering::SeqCst) {
+            if let Some(partial) = &partial {
+                let _ = fs::remove_file(partial);
+            }
+            process::exit(EXIT_INTERRUPTED);
+        }
+        control.stop();
+    })
+    .map_err(RunError::Interrupt)?;
+    Ok(interrupted)
 }
 
 /// A `--save` snapshot's file while it is written: a temporary file
