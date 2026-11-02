@@ -1174,6 +1174,18 @@ fn a_host_reset_sets_rsr_to_its_cause_alone() {
 }
 
 #[test]
+fn a_test_reset_keeps_the_system_clock() {
+    // no CLKRST for the test submodule's reset (SIMRM Table 8-1)
+    let (mut chip, _) = booting(&[NOP]);
+    write_register(&mut chip, SIM + 0x04, 0xcf00);
+    let fast = chip.sim().clock().frequency();
+    chip.reset_for(ResetCause::Test);
+    assert_eq!(chip.sim().clock().frequency(), fast);
+    chip.reset_for(ResetCause::LossOfClock);
+    assert_ne!(chip.sim().clock().frequency(), fast);
+}
+
+#[test]
 fn a_host_watchdog_reset_leaves_the_chip_as_a_timeout_does() {
     let watched = || {
         let mut builder = Builder::default();
