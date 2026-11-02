@@ -331,6 +331,7 @@ where
         breakpoints: Vec::new(),
         watchpoints: Vec::new(),
         action: Action::Continue,
+        going: false,
     };
     let served = GdbStub::new(connection).run_blocking::<EventLoop<'_, T, C>>(&mut session);
     match served {
@@ -405,6 +406,9 @@ struct Session<'t, T: Target> {
     watchpoints: Vec<Watchpoint>,
     /// What gdb last asked.
     action: Action,
+    /// Whether gdb set the target going and has not yet been told it
+    /// stopped.
+    going: bool,
 }
 
 impl<T: Target> Drop for Session<'_, T> {
@@ -685,6 +689,7 @@ impl<T: Target> SingleThreadResume for Session<'_, T> {
     /// A signal gdb passes is dropped: the CPU has none.
     fn resume(&mut self, _signal: Option<Signal>) -> Result<(), T::Error> {
         self.action = Action::Continue;
+        self.going = true;
         Ok(())
     }
 
@@ -696,6 +701,7 @@ impl<T: Target> SingleThreadResume for Session<'_, T> {
 impl<T: Target> SingleThreadSingleStep for Session<'_, T> {
     fn step(&mut self, _signal: Option<Signal>) -> Result<(), T::Error> {
         self.action = Action::Step;
+        self.going = true;
         Ok(())
     }
 }
@@ -817,6 +823,7 @@ where
         WaitForStopReasonError<T::Error, <C as Connection>::Error>,
     > {
         if session.action == Action::Step {
+            session.going = false;
             return session
                 .step()
                 .map(Event::TargetStopped)
@@ -824,6 +831,7 @@ where
         }
         loop {
             if let Some(reason) = session.quantum().map_err(WaitForStopReasonError::Target)? {
+                session.going = false;
                 return Ok(Event::TargetStopped(reason));
             }
             if connection
@@ -839,9 +847,15 @@ where
         }
     }
 
+    /// Ctrl-C stops a run, between its quanta: `SIGINT`.  One while
+    /// the target is stopped already is nothing.
     fn on_interrupt(
-        _session: &mut Session<'t, T>,
+        session: &mut Session<'t, T>,
     ) -> Result<Option<SingleThreadStopReason<u32>>, T::Error> {
+        if !session.going {
+            return Ok(None);
+        }
+        session.going = false;
         Ok(Some(SingleThreadStopReason::Signal(Signal::SIGINT)))
     }
 }
