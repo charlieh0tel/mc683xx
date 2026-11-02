@@ -1306,7 +1306,9 @@ the faulting word.
 
 `MemoryAccess` and `InvalidAccess` carry `pc`, the instruction's
 address, `stacking`, whether exception processing is stacking a frame
-(flagged, not hidden), and `registers`, as the instruction began.
+(flagged, not hidden), and `registers`, as the instruction began, or,
+while a trace, hardware breakpoint or interrupt taken after one stacks
+its frame, as that processing began.
 
 ```python
 calls: list[int] = []
