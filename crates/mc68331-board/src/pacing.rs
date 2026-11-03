@@ -130,7 +130,7 @@ pub enum ParsePacingError {
 ///
 /// A run that falls behind (a slow host) is not held
 /// back, and goes as fast as it can until it catches up.  Unpaced, it
-/// never waits.
+/// never waits, and never reads the clock.
 #[derive(Debug, Default)]
 pub struct Pacer {
     /// The host's clock's reading that wall times count from: its first
@@ -161,9 +161,12 @@ impl Pacer {
     /// How long to wait before running past `now` under `pacing`, zero
     /// if not ahead.  The first look, a change of factor and a board
     /// time behind the last (a restore) start the pacing again from
-    /// `now`.
+    /// `now`.  It reads the host's clock ([`Instant`]) only when paced.
     pub fn delay(&mut self, now: Time, pacing: Pacing) -> Duration {
-        let wall = self.origin.get_or_insert_with(Instant::now).elapsed();
+        let wall = match pacing.factor() {
+            Some(_) => self.origin.get_or_insert_with(Instant::now).elapsed(),
+            None => Duration::ZERO,
+        };
         self.delay_at(now, pacing, wall)
     }
 
@@ -207,7 +210,8 @@ impl Pacer {
 
     /// Waits until the board at `now` is no longer ahead under
     /// `control`'s pacing, or until a stop is asked through it
-    /// ([`BoardControl::sleep`], which wakes for either).
+    /// ([`BoardControl::sleep`], which wakes for either).  Unpaced, it
+    /// returns at once, reading neither the clock nor sleeping.
     pub fn wait(&mut self, now: Time, control: &BoardControl) {
         let slept = self.wait_with(now, control, |duration| {
             control.sleep(duration);
@@ -305,6 +309,17 @@ mod tests {
             pacer.delay_at(twenty, Pacing::RealTime, at(10)),
             Duration::from_millis(10)
         );
+    }
+
+    #[test]
+    fn an_unpaced_pacer_never_reads_the_clock() {
+        let mut pacer = Pacer::new();
+        assert_eq!(pacer.delay(Time(0), Pacing::Unpaced), Duration::ZERO);
+        assert_eq!(
+            pacer.delay(Time(MILLISECOND), Pacing::Unpaced),
+            Duration::ZERO
+        );
+        assert!(pacer.origin.is_none());
     }
 
     #[test]
