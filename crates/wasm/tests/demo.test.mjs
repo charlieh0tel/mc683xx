@@ -1,6 +1,6 @@
-// The demo board (examples/boards/demo.toml) through the npm package's Node
-// entry `make wasm` builds: booted, typed at, paced in frames, saved and
-// restored, and its mistakes thrown.
+// The demo board (examples/boards/demo.toml) through the npm package, as
+// an ES module imports it by name: booted, typed at, paced in frames,
+// saved and restored, and its mistakes thrown.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -14,7 +14,7 @@ import {
   SLICE,
   text,
 } from "./demo.mjs";
-import init, { Board } from "../pkg/node.js";
+import init, { Board } from "mc683xx";
 
 await init();
 
