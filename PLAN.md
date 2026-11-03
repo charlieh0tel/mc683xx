@@ -3209,3 +3209,25 @@ checks move onto real code hooks.
   choices.
 - Whether `smartclock-emu` moves off its feature gate once it uses this
   core.
+- WebAssembly (checked 2026-11-03, paused): `mc683xx-mc68331` and
+  `mc683xx-board` build for `wasm32-unknown-unknown` with no errors or
+  warnings; their dependencies are pure Rust (no `getrandom`, no
+  `RandomState`).  The chip and everything below it use no clock,
+  thread, file or process, so they run there too.  The board does not
+  yet:
+  - `Pacer::delay` (`pacing.rs`) reads `Instant::now()` before it looks
+    at the pacing, and that panics on this target, so
+    `Board::run_until_paced` fails even unpaced; returning early when
+    unpaced fixes that.  `run_until` does not read the clock.
+  - A paced run sleeps in `BoardControl::sleep` (`control.rs`), which
+    panics there; a paced host needs its own clock and sleep
+    (`Pacer::wait_with` takes a sleep already).
+  - `Description::parse` reads each `[[memory]] image` and
+    `Options::images` file itself (`description.rs`, `read_memory`),
+    so a host cannot hand it image bytes; they would need a field
+    taking bytes as well as paths (a new one, or `Options::images`
+    changed, which breaks the API).  `mc683xx-debug`'s loading is
+    likely the same; not checked.
+  - Open: the browser (`wasm32-unknown-unknown`) or WASI
+    (`wasm32-wasip1`, which has a clock and files and would make most
+    of the above moot), and whether CI builds for wasm32.
