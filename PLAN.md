@@ -3219,20 +3219,36 @@ checks move onto real code hooks.
   choices.
 - Whether `smartclock-emu` moves off its feature gate once it uses this
   core.
-- WebAssembly (checked 2026-11-03, paused): `mc683xx-mc68331` and
-  `mc683xx-board` build for `wasm32-unknown-unknown` with no errors or
-  warnings; their dependencies are pure Rust (no `getrandom`, no
-  `RandomState`).  The chip and everything below it use no clock,
-  thread, file or process, so they run there too.  The board does not
-  yet:
-  - Pacing: unpaced, `Pacer` reads no clock, so `Board::run_until_paced`
-    runs there unpaced.  Paced, `Pacer::delay` reads `Instant::now()` and
-    `BoardControl::sleep` blocks on a `Condvar`, and both panic there; a
-    browser host instead gives `Pacer::due` its own clock's reading and
-    runs the board to the time it says.
-  - Images: `Description::parse_with` takes each `[[memory]] image`'s
-    and `Options::images`' bytes from the host's `read(path)`;
-    `parse` is it over `fs::read`.
-  - Open: the browser (`wasm32-unknown-unknown`) or WASI
-    (`wasm32-wasip1`, which has a clock and files and would make most
-    of the above moot), and whether CI builds for wasm32.
+- WebAssembly: the target is a browser demo of the demo board
+  (`examples/boards/demo.toml`) through JS bindings
+  (`wasm32-unknown-unknown`, decided 2026-11-03).  `mc683xx-mc68331`,
+  `mc683xx-board`, `mc683xx-peripherals` and `mc683xx-debug` build for
+  it with no errors or warnings; their dependencies are pure Rust (no
+  `getrandom`, no `RandomState`).  The chip and everything below it use
+  no clock, thread, file or process.  A board runs there as
+  `examples/tests/demo_browser.rs` runs the demo board, on the host
+  through the same API: the file's text and its image as bytes
+  (`Description::parse_with`, its images from the host's `read(path)`),
+  `Board::load` with no `Environment::work_dir`, unpaced runs
+  (`Pacer` reads no clock unpaced), and paced frames from the host's
+  own clock (`Pacer::due`, the board time due by its reading; the host
+  bounds each slice).  Left:
+  - Blocking pacing: `Pacer::delay` and `wait` read `Instant::now()`
+    when paced, and `BoardControl::sleep` (`control.rs`) blocks on a
+    `Condvar`; both panic there, so a browser host never calls them
+    paced, nor `Board::run_until_paced` paced.
+  - `Description::read` and `Board::read` read the board file with
+    `fs`; a browser host parses the text.
+  - The AT28C64B (`at28c64b.rs`) reads its `image` parameter with
+    `fs::read` (`contents`) and keeps its working copy in a file
+    (`file`, or `<name>.eeprom` under `Environment::work_dir`: `open`, a
+    sibling named with `process::id()`, `File::try_lock`,
+    `fs::hard_link`); with neither, its cells are in memory from erased,
+    so it runs there but cannot take an image from the host.
+    Peripherals' path parameters (`Context::path`) have no host-supplied
+    bytes yet.  The demo board does not use it.
+  - `mc683xx-debug`'s init scripts time a poll's timeout with
+    `Instant::now()` (`script.rs`, `PollMemory`), which panics there;
+    its image parsing takes bytes and reads no file.
+  - The bindings themselves (`wasm-bindgen` or a C ABI), the page, and
+    whether CI builds for wasm32.

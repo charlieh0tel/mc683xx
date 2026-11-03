@@ -55,7 +55,9 @@ cargo run --release -p mc683xx-run -- examples/boards/demo.toml \
 `m68k-linux-gnu-gcc` (`-mcpu=cpu32`, no libgcc).
 [docs/gdb-firmware.md](../docs/gdb-firmware.md) debugs it under gdb,
 source level; `tests/demo_console.rs` pins its console
-(`UPDATE_GOLDEN=1` rewrites the golden), and the `demo/mandelbrot`
+(`UPDATE_GOLDEN=1` rewrites the golden), `tests/demo_browser.rs`
+runs it as a browser host would (its image as bytes, paced from the
+host's clock, no file, clock or sleep), and the `demo/mandelbrot`
 benchmark runs its `m`.
 
 ## Screencast
