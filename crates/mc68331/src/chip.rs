@@ -671,6 +671,9 @@ pub(crate) struct ChipRun {
     pub(crate) run: Run,
     /// Whether a limit ended it.
     pub(crate) limited: bool,
+    /// Whether the host asked it to stop in the instruction a hook, a
+    /// fault or a halt ended it at: the request taken with that stop.
+    pub(crate) asked: bool,
 }
 
 /// The chip.
@@ -715,6 +718,7 @@ impl Mc68331 {
     pub(crate) fn run(&mut self, budget: Cycles, limits: Option<&mut Limits>) -> ChipRun {
         let mut limits = limits;
         let mut limited_end = false;
+        let mut asked = false;
         let start = self.now;
         let end = start + budget;
         let mut stop = Stop::Budget;
@@ -829,7 +833,7 @@ impl Mc68331 {
                     } else {
                         // the host sees the halt as it comes, and a stop
                         // asked in the same instruction is taken with it
-                        self.board.take_stop();
+                        asked = self.board.take_stop();
                         break;
                     }
                 }
@@ -837,7 +841,7 @@ impl Mc68331 {
                 // a hook, a fault, a request: the host sees it, and a
                 // stop asked in the same instruction is taken with it
                 _ => {
-                    self.board.take_stop();
+                    asked = self.board.take_stop();
                     break;
                 }
             }
@@ -859,6 +863,7 @@ impl Mc68331 {
         ChipRun {
             run: Run::new(self.now - start, stop),
             limited: limited_end,
+            asked,
         }
     }
 
