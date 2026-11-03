@@ -414,6 +414,7 @@ impl Cpu {
         self.idle = None;
         self.bare.breakpoint_pending = false;
         self.bare.trace_pending = None;
+        self.bare.end = None;
         self.fault_window = true;
         self.released = None;
         self.movem_resume = None;

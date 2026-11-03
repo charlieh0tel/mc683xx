@@ -310,7 +310,7 @@ impl Cpu {
     }
 
     /// The fault the last run stopped for ([`Stop::Fault`],
-    /// [`End::Fault`]), until the next run starts.
+    /// [`End::Fault`]), until the next run starts or a reset.
     #[must_use]
     pub const fn fault_stop(&self) -> Option<&FaultStop> {
         match &self.bare.end {

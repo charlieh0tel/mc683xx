@@ -112,6 +112,19 @@ fn a_fault_stop_is_kept_until_the_next_run() {
     machine.cpu.registers.set_address(0, STACK);
     assert_eq!(one(&mut machine), End::Instructions);
     assert_eq!(machine.cpu.fault_stop(), None);
+    // a reset forgets one too
+    machine.cpu.registers.set_address(0, NOWHERE);
+    machine.cpu.registers.pc = CODE;
+    one(&mut machine);
+    assert!(machine.cpu.fault_stop().is_some());
+    machine
+        .write(
+            Address(0),
+            &[STACK.to_be_bytes(), CODE.to_be_bytes()].concat(),
+        )
+        .unwrap();
+    machine.reset().unwrap();
+    assert_eq!(machine.cpu.fault_stop(), None);
 }
 
 #[test]
