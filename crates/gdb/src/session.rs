@@ -198,7 +198,10 @@ impl<T: Target> Session<'_, T> {
         let ran = self
             .target
             .run_for(QUANTUM, &move || hits.get().is_some())?;
-        if let Some(hit) = self.hit.take() {
+        // a fault stop first: it undid what a watched access was part of
+        if let Some(hit) = self.hit.take()
+            && ran != TargetRun::Fault
+        {
             self.going = None;
             return Ok(Some(stop_reason(hit)));
         }
