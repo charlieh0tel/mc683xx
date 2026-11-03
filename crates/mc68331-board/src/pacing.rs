@@ -133,6 +133,9 @@ pub enum ParsePacingError {
 /// never waits.
 #[derive(Debug, Default)]
 pub struct Pacer {
+    /// The host's clock's reading that wall times count from: its first
+    /// read.
+    origin: Option<Instant>,
     /// Where the pacing started, if paced.
     anchor: Option<Anchor>,
 }
@@ -140,8 +143,8 @@ pub struct Pacer {
 /// A paced run's start: wall time and board time together, at a factor.
 #[derive(Debug, Clone, Copy)]
 struct Anchor {
-    /// Wall time.
-    wall: Instant,
+    /// Wall time, from the pacer's origin.
+    wall: Duration,
     /// Board time.
     board: Time,
     /// Board seconds a wall second.
@@ -160,11 +163,12 @@ impl Pacer {
     /// time behind the last (a restore) start the pacing again from
     /// `now`.
     pub fn delay(&mut self, now: Time, pacing: Pacing) -> Duration {
-        self.delay_at(now, pacing, Instant::now())
+        let wall = self.origin.get_or_insert_with(Instant::now).elapsed();
+        self.delay_at(now, pacing, wall)
     }
 
     /// `delay`, the wall clock reading `wall`.
-    fn delay_at(&mut self, now: Time, pacing: Pacing, wall: Instant) -> Duration {
+    fn delay_at(&mut self, now: Time, pacing: Pacing, wall: Duration) -> Duration {
         let Some(factor) = pacing.factor() else {
             self.anchor = None;
             return Duration::ZERO;
@@ -184,7 +188,7 @@ impl Pacer {
         Duration::try_from_secs_f64(board / factor)
             .ok()
             .and_then(|elapsed| anchor.wall.checked_add(elapsed))
-            .map_or(Duration::MAX, |due| due.saturating_duration_since(wall))
+            .map_or(Duration::MAX, |due| due.saturating_sub(wall))
     }
 
     /// Waits until the board at `now` is no longer ahead under
@@ -252,7 +256,7 @@ mod tests {
 
     #[test]
     fn a_pacer_holds_board_time_to_wall_time_times_the_factor() {
-        let start = Instant::now();
+        let start = Duration::ZERO;
         let mut pacer = Pacer::new();
         let twice = Pacing::Scaled(2.0);
         assert_eq!(pacer.delay_at(Time(0), twice, start), Duration::ZERO);
@@ -291,7 +295,7 @@ mod tests {
 
     #[test]
     fn a_tiny_factor_waits_without_overflow() {
-        let start = Instant::now();
+        let start = Duration::ZERO;
         let mut pacer = Pacer::new();
         let crawl = Pacing::Scaled(f64::MIN_POSITIVE);
         pacer.delay_at(Time(0), crawl, start);
