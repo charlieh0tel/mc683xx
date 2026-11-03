@@ -1488,7 +1488,9 @@ hand.  The keys are in `docs/board-files.md`.
   decides how long to sleep, so a run is the same whatever its pacing
   (`a_paced_run_is_the_unpaced_run`).  A run that falls behind is not
   held back and runs unpaced until it catches up; a new factor or a
-  restore starts the pacing again from where the board is.
+  restore starts the pacing again from where the board is.  A host
+  with its own clock that cannot sleep (a browser) gives `Pacer::due`
+  its clock's reading and runs the board to the time it says.
 - **Runner:** `mc683xx-run board.toml [--cycles N | --seconds S]
   [--firmware PATH] [--image NAME=PATH] [--option NAME]
   [--set PERIPHERAL.KEY=VALUE]
@@ -3226,7 +3228,8 @@ checks move onto real code hooks.
   - Pacing: unpaced, `Pacer` reads no clock, so `Board::run_until_paced`
     runs there unpaced.  Paced, `Pacer::delay` reads `Instant::now()` and
     `BoardControl::sleep` blocks on a `Condvar`, and both panic there; a
-    paced host needs its own clock and sleep.
+    browser host instead gives `Pacer::due` its own clock's reading and
+    runs the board to the time it says.
   - `Description::parse` reads each `[[memory]] image` and
     `Options::images` file itself (`description.rs`, `read_memory`),
     so a host cannot hand it image bytes; they would need a field

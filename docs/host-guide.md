@@ -1417,7 +1417,12 @@ every method of the chip's.
   host with a loop of its own (the runner's turns) keeps a
   `pacing::Pacer` and calls `wait(now, &control)` between its runs;
   `Board::run_until_quantized(until, quantum, before)` is the quantum loop alone.
-  Unpaced, neither reads the clock nor sleeps.
+  Unpaced, neither reads the clock nor sleeps.  A host with a clock of
+  its own that cannot sleep (a browser, from `requestAnimationFrame`
+  with `performance.now()`) asks `Pacer::due(now, pacing, wall)`
+  instead, `wall` its clock's reading as a `Duration`: the board time
+  the run may reach by then (`None` unpaced), which it runs to, bounding
+  each slice itself, and returns to its event loop.
 
 ```rust
 use std::cell::RefCell;
