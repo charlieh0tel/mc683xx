@@ -58,8 +58,8 @@ crates.io.
   emulated chip.
 - **Python:** the chip, boards and a bare CPU, with Python objects as
   peripherals and callables as hooks, and type stubs.
-- **WebAssembly:** a board from JavaScript (`crates/wasm`, not published
-  yet), and the demo board in a web page
+- **WebAssembly:** a board from JavaScript (`crates/wasm`, the npm
+  package `mc683xx`), and the demo board in a web page
   ([examples/web](https://github.com/charlieh0tel/mc683xx/blob/main/examples/README.md#web-page)).
 
 Early: 0.x, and the API may change between minor versions.
@@ -185,7 +185,7 @@ The crates above are in `crates/`: `target` (`mc683xx-target`),
 
 - `cpu32-py` (`crates/cpu32-py`): the Python package `mc683xx`, on PyPI.
 - `mc683xx-wasm` (`crates/wasm`): JavaScript bindings for boards,
-  through WebAssembly; not published yet
+  through WebAssembly, the npm package `mc683xx`
   ([crates/wasm/README.md](https://github.com/charlieh0tel/mc683xx/blob/main/crates/wasm/README.md)).
 - `examples`: the example boards and their firmware, and the
   documentation's examples run as tests ([examples/README.md](https://github.com/charlieh0tel/mc683xx/blob/main/examples/README.md)).

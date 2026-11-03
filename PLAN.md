@@ -88,8 +88,8 @@ Out:
 - `cpu32-py`: PyO3 bindings, the Python module `mc683xx` (see
   Python); `publish = false`, released as the PyPI wheel.
 - `mc683xx-wasm` (`crates/wasm`): `wasm-bindgen` bindings, a board
-  from JavaScript (see Open, WebAssembly); `publish = false` until
-  npm and crates.io are decided.
+  from JavaScript (see Open, WebAssembly); `publish = false`, released
+  as the npm package `mc683xx`.
 - `examples` (`mc683xx-examples`, `publish = false`): the host
   guide, `docs/host-guide.md`, as its crate documentation, so its
   examples are doctests `make ci` runs.
@@ -3293,7 +3293,6 @@ checks move onto real code hooks.
   - `mc683xx-debug`'s init scripts time a poll's timeout with
     `Instant::now()` (`script.rs`, `PollMemory`), which panics there;
     its image parsing takes bytes and reads no file.
-  - Whether `mc683xx-wasm` is published (npm, crates.io).
   - The bindings cover a board's load, pacing, runs, its endpoints'
     serial bytes, memories and snapshots; not the chip's registers and
     bus, JavaScript peripherals, observers or tracing.
@@ -3361,3 +3360,10 @@ checks move onto real code hooks.
   job runs `make wasm` and `make npm-test`, with wasm-bindgen's prebuilt
   release binary (`scripts/install-wasm-bindgen.sh`, its SHA-256
   checked) rather than a `cargo install` that builds it for minutes.
+  The package is published to npm as `mc683xx` (decided 2026-11-03),
+  the PyPI package's name, unscoped, at the workspace's version in
+  lockstep with the crates and the wheels: the first release by hand,
+  then the `release` workflow's `npm` job by trusted publishing, with
+  provenance (`docs/releasing.md`).  The crate is not published to
+  crates.io: a Rust host uses `mc683xx-board` itself, and the crate's
+  API is its JavaScript one.

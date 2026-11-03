@@ -7,8 +7,8 @@ rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-# Not published yet: whether it goes to npm and crates.io is open
-# (PLAN.md, WebAssembly).
+# Released as the npm package `mc683xx` (`make npm-package`,
+# docs/releasing.md), not to crates.io (PLAN.md, WebAssembly).
 publish = false
 
 [lib]

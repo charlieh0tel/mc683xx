@@ -240,10 +240,11 @@ NPM_PACKAGE := crates/wasm/pkg
 NPM_TEST = $(TARGET_DIR)/npm-test
 
 wasm: npm-package
-	cargo clippy --target wasm32-unknown-unknown -p mc683xx-wasm -- -D warnings
+	cargo clippy --locked --target wasm32-unknown-unknown -p mc683xx-wasm -- -D warnings
 
+# Built --locked: a release's package is built from its tag's Cargo.lock.
 npm-package:
-	cargo build --release --target wasm32-unknown-unknown -p mc683xx-wasm
+	cargo build --locked --release --target wasm32-unknown-unknown -p mc683xx-wasm
 	rm -rf $(NPM_PACKAGE)
 	$(WASM_BINDGEN) --target web --remove-name-section --out-name mc683xx \
 		--out-dir $(NPM_PACKAGE)/web $(call quote,$(WASM_MODULE))

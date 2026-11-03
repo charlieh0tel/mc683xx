@@ -1,7 +1,8 @@
 # Releasing
 
-How a version reaches crates.io and PyPI.  One version covers the
-workspace: every published crate and the `mc683xx` Python package.
+How a version reaches crates.io, PyPI and npm.  One version covers
+the workspace: every published crate, the `mc683xx` Python package
+and the `mc683xx` npm package.
 The maintainer pushes the tags; a `v*` tag publishes, with no
 approval step, once the `release` workflow's gate passes (Cutting a
 release, step 7).
@@ -12,9 +13,11 @@ release, step 7).
 | --- | --- | --- |
 | `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`, `mc683xx-board`, `mc683xx-gdb`, `mc683xx-debug`, `mc683xx-peripherals`, `mc683xx-run` | crates.io | `cargo publish --workspace`: the first release by hand, then the `release` workflow |
 | `mc683xx` (the Python package, from `crates/cpu32-py`) | PyPI | `.github/workflows/release.yml`, from a `v*` tag |
+| `mc683xx` (the npm package, from `crates/wasm`) | npm | `make npm-package`: the first release by hand, then the `release` workflow |
 
 Every other member has `publish = false`: `cpu32-py` (its wheel is its
-release), `cpu32-harness`, `cpu32-oracle`, `snapshot-golden`,
+release), `mc683xx-wasm` (its npm package is its release),
+`cpu32-harness`, `cpu32-oracle`, `snapshot-golden`,
 `mc683xx-bench` and `mc683xx-examples`.
 
 The published packages carry no tests that build.  A published
@@ -42,6 +45,13 @@ where no wheel fits, and checks they are in it.  `mc683xx-run`
 installs on any host; its `nix` dependency, for `--bind NAME=pty`, is
 Unix's, and elsewhere that binding is refused.
 
+The npm package is the bindings for the web and a Node entry over
+them (`crates/wasm/README.md`, The npm package), its `package.json`'s
+version the workspace's, the license texts copied in from the root by
+`make npm-package`.  CI's `wasm` job tests it as installed from its
+tarball (`make npm-test`); the `npm` job builds it again from the tag
+and publishes it with a provenance statement.
+
 ## Versions and tags
 
 - Semantic versioning from 0.1.0.  Before 1.0, a breaking change to a
@@ -60,8 +70,8 @@ Once, before the first release.
    owner `charlieh0tel`, repository `mc683xx`, workflow `release.yml`,
    environment `pypi`.  Until it exists, the `pypi` job fails and
    nothing is published.
-2. GitHub (Settings, Environments): create the environments `pypi`
-   and `crates-io`, with no required reviewers.  For each, under
+2. GitHub (Settings, Environments): create the environments `pypi`,
+   `crates-io` and `npm`, with no required reviewers.  For each, under
    deployment branches and tags choose selected branches and tags and
    add a tag rule `v*`, so only a `v` tag's run can deploy to it.
 3. crates.io: trusted publishing can only be set up for a crate that
@@ -76,6 +86,16 @@ Once, before the first release.
    a release, step 8), with a token that has `publish-update` as well
    as `publish-new`, since the crates already published go up by hand
    with it, and the new crate's trusted publisher added after.
+4. npm: as on crates.io, a trusted publisher can only be set up for a
+   package that already exists, so the first release is published by
+   hand (Cutting a release, step 9), from an npm account with
+   two-factor authentication.  Then, in the package's settings on
+   npmjs.com: add a trusted publisher, GitHub Actions, organization or
+   user `charlieh0tel`, repository `mc683xx`, workflow `release.yml`,
+   environment `npm`; and under publishing access choose "Require
+   two-factor authentication and disallow tokens", which trusted
+   publishing still passes.  Every later release is published by the
+   workflow only.
 
 ## Cutting a release
 
@@ -92,7 +112,8 @@ Once, before the first release.
    first.
 4. Run every check (AGENTS.md): `make ci`, `python`, `oracle`,
    `singlestep`, `corpus`, `boot-smoke`, `boot-diff` and
-   `smartclock-boards`, and `cargo publish --workspace --dry-run`.
+   `smartclock-boards`, and `cargo publish --workspace --dry-run`;
+   and `make wasm` and `npm-test`, which CI's `wasm` job runs too.
 5. Commit `Cargo.toml` and `Cargo.lock` as "Release X.Y.Z", and merge
    it to `main`.
 6. Wait for `ci` to pass on the merged commit, then tag it `vX.Y.Z`,
@@ -142,7 +163,37 @@ Once, before the first release.
    (a dry run only warns), and a crate's dependents need it published
    first.  Then revoke the token, turn trusted publishing only back on,
    and add the new crates' trusted publishers (Setup, step 3).
-9. Make a GitHub release from the tag with the notes.
+9. The `npm` job, after `gate` and `pypi` and beside `crates`, builds
+   the package (`make npm-package`), checks its version is the tag's
+   and runs `npm publish --provenance` with npm 11's trusted
+   publishing.  A prerelease (`v0.4.0-rc.1`) goes to the dist-tag
+   `next`, as npm refuses one without a tag, so `latest`, what `npm
+   install mc683xx` gets, stays the last release.  A patch of an older
+   line (0.3.1 after 0.4.0) would move `latest` back, so npm refuses
+   it without a tag: the job fails and publishes nothing on npm (PyPI
+   and crates.io already have it).  Publish it by hand as below, with
+   the line's own tag (`npm publish --access public --tag release-0.3`;
+   not `v0.3`, which npm refuses as a version range, nor `latest`); a
+   version that took `latest` by mistake is put right with
+   `npm dist-tag add mc683xx@0.4.0 latest`.  The first release: that
+   job fails, as trusted publishing cannot create a package, and
+   publishes nothing.  Publish by hand from a clean checkout of the
+   tag, with the `wasm32-unknown-unknown` target and the
+   `wasm-bindgen` CLI at the crate's version (`crates/wasm/README.md`,
+   Building):
 
-A broken release is yanked (`cargo yank`, PyPI's yank) and fixed in
-the next patch version; a version is never published twice.
+   ```
+   npm login              # the account's two-factor authentication
+   make npm-package
+   cd crates/wasm/pkg
+   npm publish --access public
+   ```
+
+   `npm publish` asks for a one-time password.  A package published
+   by hand has no provenance statement.  Then set up its trusted
+   publisher and publishing access (Setup, step 4), and `npm logout`.
+10. Make a GitHub release from the tag with the notes.
+
+A broken release is yanked (`cargo yank`, PyPI's yank) or deprecated
+(`npm deprecate`) and fixed in the next patch version; a version is
+never published twice.

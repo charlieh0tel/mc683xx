@@ -5,8 +5,9 @@ JavaScript bindings for MC68331 boards, through WebAssembly
 board file's text and its images' bytes, run a frame at a time from the
 page's clock, its console as bytes, its state saved and restored.
 `examples/web` runs the demo board in a page with them
-(`examples/README.md`, Web page).  Built as the npm package `mc683xx`,
-not published yet (PLAN.md, WebAssembly).
+(`examples/README.md`, Web page).  Released as the npm package
+`mc683xx` (`docs/releasing.md`); the crate is not on crates.io (PLAN.md,
+WebAssembly).
 
 ## Building
 
@@ -18,7 +19,8 @@ builds the crate for `wasm32-unknown-unknown`, lints it there with the
 workspace crates it depends on, and builds the npm package `mc683xx`
 (`make npm-package`) into the ignored `crates/wasm/pkg`, from the
 module in Cargo's target directory (`CARGO_TARGET_DIR` or the
-workspace's `target`, as `cargo metadata` gives it).  It needs the
+workspace's `target`, as `cargo metadata` gives it), built `--locked`:
+a release's package is built from its tag's `Cargo.lock`.  It needs the
 `wasm32-unknown-unknown` target (`rustup target add`) and the
 `wasm-bindgen` CLI at the crate's exact `wasm-bindgen` version, 0.2.130
 (`WASM_BINDGEN=path` names another binary).  The crate builds and
@@ -81,8 +83,8 @@ npm-package` assembles it in `crates/wasm/pkg`:
 - `README.md` (`npm/README.md`, the JavaScript guide and API) and the
   license texts.
 
-The crate itself is not published to crates.io (PLAN.md,
-WebAssembly).
+The `release` workflow's `npm` job publishes it from a release's tag
+(`docs/releasing.md`).
 
 ## API
 
