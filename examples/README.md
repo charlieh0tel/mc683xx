@@ -9,6 +9,7 @@ run as tests (`mc683xx-examples`, not published).
 | `firmware/demo/` | The demo board's C firmware |
 | `src/` | `echo.bin`'s generator, in Rust |
 | `tests/` | The host guide's and README's examples, the committed images' checks, the demo's console golden |
+| `web/` | The demo board in a web page, through the JavaScript bindings |
 
 ## Boards
 
@@ -59,6 +60,32 @@ source level; `tests/demo_console.rs` pins its console
 runs it as a browser host would (its image as bytes, paced from the
 host's clock, no file, clock or sleep), and the `demo/mandelbrot`
 benchmark runs its `m`.
+
+## Web page
+
+`web/` runs the demo board in a browser: `index.html` and `demo.js`,
+an ES module that loads the JavaScript bindings
+([crates/wasm](../crates/wasm/README.md)), fetches
+`boards/demo.toml` and `boards/demo.bin`, and shows the console in
+[xterm.js](https://xtermjs.org/) 6.0.0 from jsDelivr.  Keys go to the
+console; each animation frame runs the board to the time due by the
+page's clock, at most 0.1 s of board time a frame.  The `pace` query
+sets the pacing: `realtime` by default, `unpaced`, or a factor
+(`?pace=4`).  Build the bindings and serve the repository's top, so
+the page reaches `../boards/` and `crates/wasm/pkg/`:
+
+```text
+make wasm
+python3 -m http.server 8000
+```
+
+and open <http://localhost:8000/examples/web/>.  `make web-test`
+builds them and checks the page in headless Chrome (`web/test.mjs`, on
+the bindings' driver, `crates/wasm/tests/chrome.mjs`: the DevTools
+protocol over Node's WebSocket, Node 22 or later; `CHROME=path` names
+the browser): it types `m` and Enter and waits
+for the Mandelbrot set and the prompt.  It needs the network, for
+xterm.js.
 
 ## Screencast
 

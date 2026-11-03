@@ -3329,4 +3329,8 @@ checks move onto real code hooks.
   board starts its frames' pacer again after a `runFor`, a `restore` or
   a `setPacing`; else a restore forward or a long `runFor` would hold
   the frames until the wall clock caught up.
-  `runFor` is unpaced, as a page cannot sleep.
+  `runFor` is unpaced, as a page cannot sleep.  The demo page is
+  `examples/web`: xterm.js from a CDN at an exact version (no npm
+  dependency or bundler), the bindings' `--target web` module, the
+  board file and image fetched, tested in headless Chrome over the
+  DevTools protocol (`make web-test`, not in `ci`).

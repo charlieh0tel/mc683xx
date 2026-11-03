@@ -4,7 +4,9 @@ JavaScript bindings for MC68331 boards, through WebAssembly
 (`wasm32-unknown-unknown`, `wasm-bindgen`): a board loaded from its
 board file's text and its images' bytes, run a frame at a time from the
 page's clock, its console as bytes, its state saved and restored.
-Not published yet, to npm or crates.io (PLAN.md, WebAssembly).
+`examples/web` runs the demo board in a page with them
+(`examples/README.md`, Web page).  Not published yet, to npm or
+crates.io (PLAN.md, WebAssembly).
 
 ## Building
 
@@ -22,6 +24,17 @@ whose default export, `init`, loads the `.wasm`), and runs the Node
 tests (`tests/demo.test.mjs`, `node:test`, Node 22 or later).  It
 needs the `wasm32-unknown-unknown` target (`rustup target add`).  The
 crate builds and tests natively too, as `make ci` does.
+
+`tests/chrome.mjs` drives a page in headless Chrome for the browser
+tests, `make web-test`'s (`examples/README.md`, Web page): the
+DevTools protocol over Node's WebSocket, `python3 -m http.server`;
+`CHROME=path` names the browser.  Each step has a deadline: a server
+or browser that never says where it listens, a connection that never
+opens or a command never answered fails the test in 30 s, the
+processes stopped.  Chrome's profile is removed once Chrome and the
+processes it started have exited.  With `CI` set, as GitHub Actions
+sets it, Chrome runs with `--no-sandbox`: Ubuntu 24.04 restricts the
+unprivileged user namespaces its sandbox needs.
 
 ## API
 

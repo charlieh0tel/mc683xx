@@ -1,6 +1,6 @@
 .PHONY: hooks ci fmt-check licenses hook-test clippy features test docs deny bench singlestep-data singlestep musashi oracle python corpus \
 	firmware-path corpus-musashi unicorn corpus-unicorn corpus-oracles boot-smoke \
-	boot-diff reference-path smartclock-boards gdb echo-image demo-image wasm
+	boot-diff reference-path smartclock-boards gdb echo-image demo-image wasm web-test
 
 # Once per clone: the commit-msg hook refuses AI attribution (AGENTS.md)
 # and pre-push uploads the Git LFS objects (.gitattributes).
@@ -236,3 +236,10 @@ wasm:
 	$(WASM_BINDGEN) --target nodejs --out-dir $(WASM_PACKAGE)/nodejs $(call quote,$(WASM_MODULE))
 	$(WASM_BINDGEN) --target web --out-dir $(WASM_PACKAGE)/web $(call quote,$(WASM_MODULE))
 	node --test crates/wasm/tests/*.test.mjs
+
+# The demo page (examples/web) in headless Chrome, CHROME=path naming
+# another browser: it types at the demo board's console and waits for
+# the Mandelbrot set.  Not part of `ci`: it needs what `wasm` does,
+# Chrome, and the network for xterm.js.
+web-test: wasm
+	node examples/web/test.mjs
