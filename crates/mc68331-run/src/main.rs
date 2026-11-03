@@ -9,8 +9,9 @@
 //!
 //! Exit status: 0 the run spent its --seconds or --cycles; 1 the board or a file could
 //! not be used; 2 the command line is wrong; 3 the CPU halted; 4 a
-//! hook or a peripheral stopped the run, gdb killed it, or Ctrl-C
-//! (SIGINT) did; 130 a second Ctrl-C ended the process at once.
+//! hook, a peripheral or a fault (--stop-on-fault) stopped the run, gdb
+//! killed it, or Ctrl-C (SIGINT) did; 130 a second Ctrl-C ended the
+//! process at once.
 // The published crates also hold these; test-only crates do not.
 #![warn(
     clippy::cast_possible_wrap,
@@ -82,7 +83,7 @@ const MAX_TURN_US: u64 = u64::MAX / PICOSECONDS_PER_MICROSECOND;
 const EXIT_ERROR: u8 = 1;
 /// Exit status: the CPU halted.
 const EXIT_HALTED: u8 = 3;
-/// Exit status: a hook or a peripheral stopped the run.
+/// Exit status: a hook, a peripheral or a fault stopped the run.
 const EXIT_STOPPED: u8 = 4;
 /// Exit status: a second Ctrl-C, the shell's for death by SIGINT
 /// (128 + 2).
@@ -93,7 +94,8 @@ written and --save still saves (exit status 4).  A second Ctrl-C ends the proces
 saving nothing (exit status 130).
 
 Exit status: 0 the run spent its time; 1 the board or a file could not be used; 2 the \
-command line is wrong; 3 the CPU halted; 4 a hook, a peripheral, gdb or Ctrl-C stopped it.";
+command line is wrong; 3 the CPU halted; 4 a hook, a peripheral, a fault (--stop-on-fault), gdb \
+or Ctrl-C stopped it.";
 
 /// What `--trace` traces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -173,6 +175,11 @@ struct Arguments {
     /// The seed every noise model draws from.
     #[arg(long, default_value_t = 0)]
     seed: u64,
+    /// Stop at a bus or address error instead of taking it as an
+    /// exception, and say which (`reason=fault`); the instruction is
+    /// undone.
+    #[arg(long)]
+    stop_on_fault: bool,
     /// Where peripherals keep working copies.
     #[arg(long)]
     work_dir: Option<PathBuf>,
@@ -299,6 +306,10 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
     let mut registry = Registry::with_builtins();
     mc683xx_peripherals::register(&mut registry)?;
     let mut board = Board::<Mc68331>::read(&arguments.board, &options, &registry, environment)?;
+    board
+        .chip_mut()
+        .cpu_control()
+        .set_stop_on_fault(arguments.stop_on_fault);
     if let Some(path) = &arguments.restore {
         let snapshot = fs::read(path).map_err(|error| RunError::Io {
             path: path.clone(),
@@ -450,6 +461,9 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         }
     };
     eprintln!("{}", Line::new(CHIP, &board.stopped(outcome)));
+    if let Some(fault) = board.chip().cpu().fault_stop() {
+        eprintln!("mc683xx-run: stopped at {fault}");
+    }
     if let Some(saving) = saving {
         saving.save(&board)?;
     }
