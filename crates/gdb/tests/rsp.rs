@@ -761,3 +761,66 @@ fn a_polled_connection_reads_between_idles() {
     assert!(matches!(connection.read(), Err(PollError::Connection(_))));
     client.join().unwrap();
 }
+
+/// An odd address, which the program's long store faults at (CPU32RM
+/// 6.2.3).
+const ODD: u32 = 0x2001;
+
+/// `monitor faults` on `target`, its store at [`ODD`]: taken, then
+/// stopping the run with `SIGBUS` and saying which fault.
+fn monitor_faults_stop_the_run<T: Target>(target: &mut T)
+where
+    T::Error: Display + std::fmt::Debug,
+{
+    let (ending, replies) = session(
+        target,
+        vec![
+            packet(&format!("qRcmd,{}", hex("faults"))),
+            packet(&format!("qRcmd,{}", hex("faults stop"))),
+            packet("c"),
+            packet(&format!("qRcmd,{}", hex("faults"))),
+            packet("k"),
+        ],
+    );
+    assert_eq!(ending.unwrap(), Ending::Killed);
+    let said: Vec<String> = replies
+        .iter()
+        .filter(|reply| *reply != "OK")
+        .filter_map(|reply| reply.strip_prefix('O'))
+        .map(|text| {
+            let bytes = (0..text.len())
+                .step_by(2)
+                .map(|at| u8::from_str_radix(&text[at..at + 2], 16).unwrap())
+                .collect();
+            String::from_utf8(bytes).unwrap()
+        })
+        .collect();
+    assert_eq!(said[0], "faults take\n");
+    assert_eq!(said[1], "faults stop\n");
+    // SIGBUS, gdb's 10
+    assert!(replies.iter().any(|reply| reply == "S0a"), "{replies:?}");
+    assert_eq!(
+        said[2],
+        format!(
+            "faults stop\nstopped at address error: write of 4 bytes at {}, fc 5, pc {}\n",
+            Address(ODD),
+            Address(STORE_PC)
+        )
+    );
+}
+
+#[test]
+fn monitor_faults_stop_the_bare_cpu_s_run() {
+    let mut machine = machine();
+    machine.cpu.registers.set_address(0, ODD);
+    monitor_faults_stop_the_run(&mut machine);
+    assert_eq!(machine.cpu.registers.pc, STORE_PC);
+}
+
+#[test]
+fn monitor_faults_stop_the_chip_s_run() {
+    let mut chip = chip();
+    chip.cpu_control().registers_mut().set_address(0, ODD);
+    monitor_faults_stop_the_run(&mut chip);
+    assert_eq!(chip.cpu().registers.pc, STORE_PC);
+}

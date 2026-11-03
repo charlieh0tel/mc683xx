@@ -532,9 +532,11 @@ impl<T: Target> MonitorCmd for Session<'_, T> {
 
 impl<T: Target> Session<'_, T> {
     /// gdb's `monitor` command, in words: `fc` shows the address space
-    /// memory is read and written in and `fc N` sets it; `reset` resets
-    /// the target; `stop` lists, arms and disarms stop conditions;
-    /// `help` lists the commands.
+    /// memory is read and written in and `fc N` sets it; `faults` shows
+    /// whether faults stop the run and the last one that did, `faults
+    /// stop` and `faults take` set it; `reset` resets the target; `stop`
+    /// lists, arms and disarms stop conditions; `help` lists the
+    /// commands.
     fn monitor(&mut self, words: &[&str], out: &mut ConsoleOutput<'_>) -> Result<(), T::Error> {
         match words {
             ["fc"] => outputln!(out, "fc {}", self.function_code.bits()),
@@ -545,6 +547,30 @@ impl<T: Target> Session<'_, T> {
                 }
                 _ => outputln!(out, "fc takes a function code, 0 to 7"),
             },
+            ["faults"] => {
+                let shown = self.target.with_cpu(|cpu| {
+                    (
+                        cpu.stops_on_fault(),
+                        cpu.fault_stop().map(ToString::to_string),
+                    )
+                });
+                match shown {
+                    Some((stops, last)) => {
+                        outputln!(out, "faults {}", if stops { "stop" } else { "take" });
+                        if let Some(last) = last {
+                            outputln!(out, "stopped at {last}");
+                        }
+                    }
+                    None => outputln!(out, "this target takes its faults"),
+                }
+            }
+            ["faults", setting @ ("stop" | "take")] => {
+                let stop = *setting == "stop";
+                match self.target.with_cpu(|cpu| cpu.set_stop_on_fault(stop)) {
+                    Some(()) => outputln!(out, "faults {setting}"),
+                    None => outputln!(out, "this target takes its faults"),
+                }
+            }
             ["reset"] if self.target.reset()? => {
                 outputln!(
                     out,
@@ -559,6 +585,10 @@ impl<T: Target> Session<'_, T> {
             },
             ["help"] => {
                 outputln!(out, "fc [N]: show or set the function code memory goes to");
+                outputln!(
+                    out,
+                    "faults [stop|take]: show or set whether a bus or address error stops the run"
+                );
                 outputln!(
                     out,
                     "reset: reset the target; over BDM, halted before its first instruction"
