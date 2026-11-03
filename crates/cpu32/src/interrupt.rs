@@ -158,6 +158,14 @@ pub trait Interrupts {
     fn level(&self) -> InterruptLevel;
     /// The acknowledge cycle for `level`, at `now`.
     fn acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged;
+    /// The interrupt just acknowledged at `level` was not taken: a
+    /// fault stopped its exception processing
+    /// ([`Cpu::set_stop_on_fault`]), and the next run samples the
+    /// request again.  A source whose acknowledge cleared its request
+    /// asks again, so the stop leaves it as it was; nothing, by default.
+    ///
+    /// [`Cpu::set_stop_on_fault`]: crate::cpu::Cpu::set_stop_on_fault
+    fn withdrawn(&mut self, _level: InterruptLevel) {}
 }
 
 #[cfg(test)]

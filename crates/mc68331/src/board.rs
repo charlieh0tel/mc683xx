@@ -176,7 +176,7 @@ pub(crate) enum Wire {
 
 /// An interrupt source contending at an acknowledge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Source {
+pub(crate) enum Source {
     /// The SIM's periodic interrupt timer.
     Timer,
     /// The module at this index.
@@ -285,6 +285,10 @@ pub(crate) struct Board {
     pub(crate) level: InterruptLevel,
     /// Whether `level` needs recomputing.
     pub(crate) level_stale: bool,
+    /// The source the last acknowledge went to, until the CPU says
+    /// whether it took the interrupt: not saved, as no snapshot falls
+    /// between the two.
+    pub(crate) acknowledged: Option<Source>,
     /// The earliest next event of the SIM and the modules, while
     /// `modules_next_stale` is clear: the run asks for it every quantum,
     /// and it moves only at an access to the SIM or a module, an
@@ -1065,8 +1069,10 @@ impl Board {
             .rev()
             .max_by_key(|(arbitration, _)| *arbitration)
         else {
+            self.acknowledged = None;
             return Acknowledge::Spurious.into();
         };
+        self.acknowledged = Some(winner);
         let modules_at = contenders
             .iter()
             .filter(|(other, source)| *other == arbitration && !is_sim(*source))
@@ -1085,6 +1091,18 @@ impl Board {
                 .map_or(Acknowledge::Spurious, Acknowledge::Vector)
                 .into(),
             Source::External => self.external_acknowledge(level, now),
+        }
+    }
+
+    /// The interrupt last acknowledged was not taken (a fault stop): the
+    /// PIT's request, which its acknowledge cleared, stands again.  The
+    /// modules' acknowledges clear nothing, and the IRQ pins are
+    /// levels; a board peripheral that answered the acknowledge has
+    /// seen its cycle, and sees another when the request is taken.
+    pub(crate) fn withdrawn(&mut self) {
+        if self.acknowledged.take() == Some(Source::Timer) {
+            self.sim.withdraw_timer_acknowledge();
+            self.level_stale = true;
         }
     }
 

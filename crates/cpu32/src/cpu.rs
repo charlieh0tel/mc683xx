@@ -1334,6 +1334,9 @@ impl Core<'_> {
         self.cpu.taken = Some(Exception::Short { vector, pc });
         let processed = self.process_after_instruction(vector, pc, None, Some(level));
         self.cpu.sampled_mask = self.cpu.registers.interrupt_mask();
+        if processed == Processed::Stopped {
+            interrupts.withdrawn(level);
+        }
         // taken, it is a step and ends STOP and LPSTOP (CPU32RM 4.4);
         // a fault stop, the registers as before it, took none and
         // leaves the CPU stopped as it was
@@ -2029,6 +2032,8 @@ mod tests {
         stall: Cycles,
         /// The levels acknowledged.
         acknowledged: Vec<InterruptLevel>,
+        /// The levels acknowledged but not taken.
+        withdrawn: Vec<InterruptLevel>,
     }
 
     impl Source {
@@ -2038,6 +2043,7 @@ mod tests {
                 answer,
                 stall: Cycles::ZERO,
                 acknowledged: Vec::new(),
+                withdrawn: Vec::new(),
             }
         }
     }
@@ -2053,6 +2059,10 @@ mod tests {
                 answer: self.answer,
                 stall: self.stall,
             }
+        }
+
+        fn withdrawn(&mut self, level: InterruptLevel) {
+            self.withdrawn.push(level);
         }
     }
 
@@ -2194,6 +2204,22 @@ mod tests {
         let run = cpu.run_for(&mut bus, &mut interrupts, Cycles::ZERO, Cycles(10_000));
         assert_eq!(run.stop, Stop::Requested);
         assert_eq!(cpu.registers.pc, handler(Vector(25)));
+    }
+
+    #[test]
+    fn an_interrupt_whose_stacking_fault_stops_is_withdrawn() {
+        let mut cpu = prepared(&[NOP], status::S);
+        cpu.set_stop_on_fault(true);
+        cpu.registers.ssp = RAM_BYTES + 0x1000;
+        let mut source = Source::new(3, Acknowledge::Autovector);
+        assert_eq!(step(&mut cpu, &mut source), Stop::Fault);
+        let level = InterruptLevel::new(3).unwrap();
+        assert_eq!(source.acknowledged, [level]);
+        assert_eq!(source.withdrawn, [level], "not taken");
+        cpu.registers.ssp = STACK;
+        step(&mut cpu, &mut source);
+        assert_eq!(cpu.registers.pc, handler(Vector(27)));
+        assert_eq!(source.withdrawn, [level], "taken");
     }
 
     #[test]
