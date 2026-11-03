@@ -130,7 +130,8 @@ pub enum ParsePacingError {
 ///
 /// A run that falls behind (a slow host) is not held
 /// back, and goes as fast as it can until it catches up.  Unpaced, it
-/// never waits, and never reads the clock.
+/// never waits, and never reads the clock.  A host with a clock of its
+/// own that cannot sleep (a browser) asks it [`due`](Self::due) instead.
 #[derive(Debug, Default)]
 pub struct Pacer {
     /// The host's clock's reading that wall times count from: its first
@@ -184,6 +185,34 @@ impl Pacer {
             .ok()
             .and_then(|elapsed| anchor.wall.checked_add(elapsed))
             .map_or(Duration::MAX, |due| due.saturating_sub(wall))
+    }
+
+    /// The board time a run at `now` may go to by the host's wall clock
+    /// reading `wall` under `pacing`, [`None`] unpaced (no bound): for a
+    /// host with a clock of its own that cannot sleep (a browser's
+    /// `performance.now()`), which runs the board to it a slice at a
+    /// time rather than waiting.  `wall` is that clock's reading from
+    /// any origin the host keeps for the pacer's life, never going back;
+    /// a pacer asked this is never asked [`delay`](Self::delay), which
+    /// reads [`Instant`].  The pacing starts again from `now` and `wall`
+    /// as [`delay`](Self::delay)'s does, the time then `now`.  A host
+    /// far behind (a page hidden a while) gets a time far ahead, and
+    /// bounds each slice itself.
+    pub fn due(&mut self, now: Time, pacing: Pacing, wall: Duration) -> Option<Time> {
+        let Some(factor) = pacing.factor() else {
+            self.anchor = None;
+            return None;
+        };
+        let Some(anchor) = self.anchored(now, factor, wall) else {
+            return Some(now);
+        };
+        let elapsed = wall.saturating_sub(anchor.wall).as_secs_f64();
+        #[expect(
+            clippy::cast_sign_loss,
+            reason = "not negative, and the cast saturates"
+        )]
+        let board = (elapsed * factor * PICOSECONDS_PER_SECOND as f64) as u64;
+        Some(Time(anchor.board.0.saturating_add(board)).max(now))
     }
 
     /// The pacing's start at `factor`, or [`None`] if it starts again
@@ -318,6 +347,49 @@ mod tests {
         assert_eq!(
             pacer.delay(Time(MILLISECOND), Pacing::Unpaced),
             Duration::ZERO
+        );
+        assert!(pacer.origin.is_none());
+    }
+
+    #[test]
+    fn a_host_clock_says_how_far_the_board_may_go() {
+        let mut pacer = Pacer::new();
+        let twice = Pacing::Scaled(2.0);
+        let wall = |millis| Duration::from_millis(millis);
+        let board = |millis| Time(millis * MILLISECOND);
+        assert_eq!(pacer.due(board(0), Pacing::Unpaced, wall(0)), None);
+        // the first look starts the pacing: nothing is due yet
+        assert_eq!(pacer.due(board(0), twice, wall(100)), Some(board(0)));
+        // 5 ms of wall time is 10 ms of board time at twice real time
+        assert_eq!(pacer.due(board(0), twice, wall(105)), Some(board(10)));
+        assert_eq!(pacer.due(board(10), twice, wall(105)), Some(board(10)));
+        assert_eq!(
+            pacer.due(board(12), twice, wall(105)),
+            Some(board(12)),
+            "ahead"
+        );
+        // a new factor starts again from where the board is
+        assert_eq!(
+            pacer.due(board(12), Pacing::RealTime, wall(110)),
+            Some(board(12))
+        );
+        assert_eq!(
+            pacer.due(board(12), Pacing::RealTime, wall(130)),
+            Some(board(32))
+        );
+        // board time behind the start (a restore) starts again
+        assert_eq!(
+            pacer.due(board(1), Pacing::RealTime, wall(140)),
+            Some(board(1))
+        );
+        assert_eq!(
+            pacer.due(board(1), Pacing::RealTime, wall(150)),
+            Some(board(11))
+        );
+        // the clock going back is no time at all
+        assert_eq!(
+            pacer.due(board(11), Pacing::RealTime, wall(0)),
+            Some(board(11))
         );
         assert!(pacer.origin.is_none());
     }
