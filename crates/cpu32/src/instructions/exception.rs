@@ -314,7 +314,9 @@ fn layout(core: &mut Core<'_>, sp: Address) -> Result<Layout, Exception> {
 /// RTE of a format $C frame (CPU32RM 6.2.12, 6.3.2), not itself
 /// traced (6.2.10).  A fault loading the rest of the frame, or
 /// rewriting a faulted exception's frame, is a double bus fault
-/// (6.2.12; MC68331UM 4.5.5.2).  A trace pending in TR is requeued.
+/// (6.2.12; MC68331UM 4.5.5.2), or a fault stop of the RTE with stop
+/// on fault set, as a stacking fault is.  A trace pending in TR is
+/// requeued.
 fn rte_bus_error(
     core: &mut Core<'_>,
     sp: Address,
@@ -326,6 +328,7 @@ fn rte_bus_error(
     match restore_bus_error(core, sp, sr, return_pc, layout) {
         Ok(None) => Ok(Flow::Next),
         Ok(Some(trace)) => Err(trace),
+        Err(fault) if core.cpu.bare.stop_on_fault => Err(Exception::Fault(fault)),
         Err(fault) => {
             core.double_fault(&fault);
             Ok(Flow::Next)
