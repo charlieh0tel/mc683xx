@@ -12,8 +12,10 @@ use crate::cpu::hooks::MemoryAccess;
 use crate::cycles::Cycles;
 use crate::exception::CycleKind;
 use crate::exception::Exception;
+use crate::exception::MICROCODE_REVISION;
 use crate::exception::Vector;
 use crate::exception::format;
+use crate::exception::ssw;
 use crate::flat::Machine;
 use crate::interrupt::InterruptLevel;
 use crate::interrupt::IrqPin;
@@ -579,6 +581,57 @@ fn a_fault_stacking_a_trace_after_a_trap_keeps_the_trap() {
     boundary_only(&mut machine);
     assert_eq!(machine.cpu.registers.pc, HANDLER);
     assert_eq!(frame(&machine).1, trap);
+    assert_eq!(frame_address(&machine), CODE);
+}
+
+/// RTE (CPU32RM 4, RTE).
+const RTE: u16 = 0x4e73;
+
+#[test]
+fn a_fault_stacking_rte_s_requeued_trace_keeps_the_rte() {
+    let mut machine = machine(&[RTE, NOP]);
+    machine.cpu.set_stop_on_fault(true);
+    // a released word write to rerun, a trace pending in TR (CPU32RM
+    // 6.3.1.1, Figure 6-6)
+    let frame_at = STACK - 24;
+    let words = [
+        status::S,
+        0,
+        (CODE + 2) as u16,
+        format::word(format::BUS_ERROR, Vector::BUS_ERROR),
+        0,
+        COUNTER as u16,
+        0,
+        0x1234,
+        0,
+        CODE as u16,
+        u16::from(MICROCODE_REVISION) << 8,
+        ssw::TR | ssw::RR | ssw::SIZ_WORD << ssw::SIZ_SHIFT | 5,
+    ];
+    let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_be_bytes()).collect();
+    machine.write(Address(frame_at), &bytes).unwrap();
+    machine.cpu.registers.ssp = frame_at;
+    // the trace's frame goes where RTE's was, read-only
+    let page = Address(STACK - PAGE_BYTES);
+    machine
+        .protect(page, PAGE_BYTES, Permissions::READ)
+        .unwrap();
+    let End::Fault(fault) = one(&mut machine) else {
+        panic!("no fault");
+    };
+    assert_eq!(fault.cycle, CycleKind::Write);
+    assert_eq!(fault.registers.pc, CODE + 2, "the RTE kept");
+    assert_eq!(fault.registers.ssp, STACK);
+    assert_eq!(word_at(&machine, COUNTER), 0x1234, "the write rerun");
+    assert_eq!(machine.cpu.bare.trace_pending, Some(Address(CODE)));
+    // the run goes on: the trace taken, the write not rerun again
+    machine.write(Address(COUNTER), &[0, 0]).unwrap();
+    machine.protect(page, PAGE_BYTES, Permissions::ALL).unwrap();
+    boundary_only(&mut machine);
+    assert_eq!(word_at(&machine, COUNTER), 0);
+    assert_eq!(machine.cpu.registers.pc, HANDLER);
+    assert_eq!(machine.cpu.registers.ssp, STACK - 12);
+    assert_eq!(frame(&machine).1, CODE + 2);
     assert_eq!(frame_address(&machine), CODE);
 }
 
