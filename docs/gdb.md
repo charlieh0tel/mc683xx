@@ -239,7 +239,7 @@ BDM, below):
 | A stop condition (`monitor stop`) | `SIGTRAP`; `monitor stop` names it |
 | A peripheral's or the host's stop request | `SIGINT` |
 | A double bus fault halt | `SIGBUS`; it stays halted until a reset: `monitor reset`, or the watchdog's as time passes |
-| A bare CPU's fault or intercept stop (`set_stop_on_fault`, `set_intercepted`) | `SIGBUS` |
+| A fault stop (`monitor faults stop`, `set_stop_on_fault`) or a bare CPU's intercept (`set_intercepted`) | `SIGBUS` |
 
 A signal gdb passes back on continue (`signal SIGINT`) is dropped: the
 CPU has none.
@@ -249,6 +249,14 @@ CPU has none.
 - `monitor fc` shows the address space memory is read and written in,
   supervisor data (5) to begin with, and `monitor fc N` sets it (0 to
   7).
+- `monitor faults` shows whether a bus or address error stops the run
+  (`stop`) or is taken as an exception by the firmware (`take`, at
+  first), and the fault that last stopped it; `monitor faults stop` and
+  `monitor faults take` set it.  A fault stop reports `SIGBUS` before
+  anything is stacked, the registers as the faulting instruction
+  began; `continue` reruns it, so fix the cause first (PLAN.md,
+  Faults).  The bare CPU, the chip and a board; not over BDM, whose
+  target takes its faults.
 - `monitor reset`: the bare CPU's reset exception (SSP and PC from
   the vectors at zero), the chip's external reset (the modules and the
   peripherals it reaches), a board's as the board asserting RESET
