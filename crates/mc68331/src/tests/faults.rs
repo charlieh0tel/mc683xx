@@ -2,6 +2,8 @@
 //!
 //! [`CpuControl::set_stop_on_fault`]: mc683xx_cpu32::cpu::control::CpuControl::set_stop_on_fault
 
+use std::ops::ControlFlow;
+
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::bare::FaultCause;
 use mc683xx_cpu32::cycles::Cycles;
@@ -147,4 +149,55 @@ fn stop_on_fault_is_the_host_s_setting_not_the_snapshot_s() {
     chip.cpu_control().set_stop_on_fault(true);
     chip.restore(&snapshot).unwrap();
     assert!(chip.cpu().stops_on_fault());
+}
+
+#[test]
+fn a_stop_asked_in_a_faulting_instruction_is_taken_with_the_fault() {
+    // MOVE.W $0000,$0401: the read asks the run to stop, the write faults
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(&[0x33f9, 0, 0, 0, ODD as u16, NOP, NOP, NOP], ROM_BYTES),
+            false,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    let request = builder.stop_request();
+    let mut chip = builder.build();
+    chip.cpu_control().set_stop_on_fault(true);
+    chip.cpu_control()
+        .add_read_hook(Address(0)..=Address(1), move |_| {
+            request.request();
+            ControlFlow::Continue(())
+        });
+    assert_eq!(chip.run_for(Cycles(1000)).stop, Stop::Fault);
+    // past the MOVE: the next run is the host's own
+    chip.cpu_control().registers_mut().pc = START + 10;
+    let run = chip.run_for(Cycles(1000));
+    assert_eq!(run.stop, Stop::Budget, "{run:?}");
+}
+
+#[test]
+fn a_stop_asked_with_a_hook_stop_is_taken_with_it() {
+    // MOVE.W $0000,$2000: the read asks the run to stop, and its hook
+    // stops it
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(&[0x33f9, 0, 0, 0, 0x2000, NOP, NOP, NOP], ROM_BYTES),
+            false,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    let request = builder.stop_request();
+    let mut chip = builder.build();
+    chip.cpu_control()
+        .add_read_hook(Address(0)..=Address(1), move |_| {
+            request.request();
+            ControlFlow::Break(())
+        });
+    assert!(matches!(chip.run_for(Cycles(1000)).stop, Stop::Hook(_)));
+    chip.cpu_control().registers_mut().pc = START + 10;
+    let run = chip.run_for(Cycles(1000));
+    assert_eq!(run.stop, Stop::Budget, "{run:?}");
 }

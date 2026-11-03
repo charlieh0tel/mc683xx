@@ -826,13 +826,19 @@ impl Mc68331 {
                             break;
                         }
                     } else {
-                        // the host sees the halt as it comes
+                        // the host sees the halt as it comes, and a stop
+                        // asked in the same instruction is taken with it
+                        self.board.take_stop();
                         break;
                     }
                 }
                 Stop::Budget | Stop::Stopped => {}
-                // a hook, a request: the host sees it
-                _ => break,
+                // a hook, a fault, a request: the host sees it, and a
+                // stop asked in the same instruction is taken with it
+                _ => {
+                    self.board.take_stop();
+                    break;
+                }
             }
             // A request from between the CPU's cycles: a peripheral's
             // `advance`, or an interrupt acknowledge.
