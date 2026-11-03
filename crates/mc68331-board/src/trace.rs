@@ -251,6 +251,7 @@ const fn reason(stop: Stop) -> &'static str {
         Stop::Hook(_) => "hook",
         Stop::Requested => "requested",
         Stop::Background(_) => "background",
+        Stop::Fault => "fault",
         _ => "other",
     }
 }

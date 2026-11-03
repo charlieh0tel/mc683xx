@@ -236,7 +236,7 @@ impl Cpu {
         self.bare.exceptions_stepped = 0;
         let run = self.run_from_boundary(bus, interrupts, now, budget, Some(limits));
         self.left_pc = Address(self.registers.pc);
-        let end = self.bare.end.take().unwrap_or(End::Stop(run.stop));
+        let end = self.bare.end.clone().unwrap_or(End::Stop(run.stop));
         LimitedRun {
             cycles: run.cycles,
             end,
@@ -260,10 +260,10 @@ impl Cpu {
         &self.began
     }
 
-    /// Whether a fault stops a limited run ([`End::Fault`]) instead of
-    /// being taken as a bus or address error exception: off at first.
-    /// A fault in exception processing stops it too, rather than
-    /// halting the CPU in a double bus fault.
+    /// Whether a fault stops a run ([`End::Fault`], [`Stop::Fault`])
+    /// instead of being taken as a bus or address error exception: off
+    /// at first.  A fault in exception processing stops it too, rather
+    /// than halting the CPU in a double bus fault.
     pub fn set_stop_on_fault(&mut self, stop: bool) {
         self.bare.stop_on_fault = stop;
         self.update_capture();
@@ -278,7 +278,17 @@ impl Cpu {
         self.bare.intercepted.set(vector, intercepted);
     }
 
-    /// Whether a fault stops a limited run.
+    /// The fault the last run stopped for ([`Stop::Fault`],
+    /// [`End::Fault`]), until the next run starts.
+    #[must_use]
+    pub const fn fault_stop(&self) -> Option<&FaultStop> {
+        match &self.bare.end {
+            Some(End::Fault(fault)) => Some(fault),
+            _ => None,
+        }
+    }
+
+    /// Whether a fault stops a run.
     #[must_use]
     pub const fn stops_on_fault(&self) -> bool {
         self.bare.stop_on_fault
@@ -539,9 +549,14 @@ impl Cpu {
         })
     }
 
-    /// Ends the run at `end` once this instruction ends.
+    /// Ends the run at `end` once this instruction ends: a fault's
+    /// [`Stop::Fault`] before any other stop asked for in it.
     pub(crate) fn end_with(&mut self, end: End) {
+        if matches!(end, End::Fault(_)) {
+            self.stop_request = Some(Stop::Fault);
+        } else {
+            self.stop_request.get_or_insert(Stop::Requested);
+        }
         self.bare.end = Some(end);
-        self.stop_request.get_or_insert(Stop::Requested);
     }
 }

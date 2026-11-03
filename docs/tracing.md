@@ -140,8 +140,9 @@ of board time.
 mc68331: stopped cycle=1677721 instructions=420001 reason=budget
 ```
 
-`cycle`, `instructions`, and `reason`: `budget`, `halted`, `hook` or
-`requested` (`other` for a stop a later core adds).
+`cycle`, `instructions`, and `reason`: `budget`, `halted`, `hook`,
+`requested`, `background` or `fault` (`other` for a stop a later core
+adds).
 
 ## Net lines
 

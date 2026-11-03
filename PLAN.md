@@ -2108,9 +2108,11 @@ and `mc683xx.Machine` in Python (see Python).
   `core/nop`.  `clear_resume` forgets a hook stop's skip, so a run
   from where a hook stopped calls it again.
 - **Faults:** `set_stop_on_fault`: a bus or address error ends the
-  run (`End::Fault`): fetch, read or write; bus error (unmapped or a
-  peripheral's), protected, or address error; the whole address;
-  nothing stacked.  A fault while stacking (a bad SSP) stops the same
+  run (`End::Fault`; an unlimited run, `Stop::Fault`, before any other
+  stop asked for in the instruction): fetch, read or write; bus error
+  (unmapped or a peripheral's), protected, or address error; the whole
+  address; nothing stacked.  `Cpu::fault_stop` holds it until the next
+  run starts.  A fault while stacking (a bad SSP) stops the same
   way instead of a double bus fault, so the host fixes SSP and goes on
   with no reset.  What the stop keeps:
   - A fault in an instruction, its own exception's stacking included

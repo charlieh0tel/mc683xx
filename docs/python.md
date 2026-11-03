@@ -257,7 +257,8 @@ classes as Rust's are (`Stop.Budget()`, `Stop.Stopped()`,
 `Stop.Halted(halt)`, `Stop.Hook(hook)` with the `HookId` that stopped
 it, `Stop.Requested()`, `Stop.Background(entry)` with the `Entry`
 ATEMP reports: `Entry.Breakpoint()`, `Entry.Background()`,
-`Entry.DoubleBusFault(ssw)`, `Entry.Unknown(atemp)`), equal by value
+`Entry.DoubleBusFault(ssw)`, `Entry.Unknown(atemp)`, `Stop.Fault()`
+for a fault stop), equal by value
 and matched by pattern (`case mc683xx.Stop.Hook(hook):`).  A run ends
 at a halt or on entering background mode; one that starts so spends
 its budget as time passes for the SIM, the modules and the peripherals
