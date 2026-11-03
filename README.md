@@ -6,6 +6,10 @@ GPT), and a board layer that wires memories and peripherals around the
 chip as a board does.  It runs real firmware inside a host program:
 board emulators, firmware test harnesses, fuzzers, debuggers.
 
+![The demo board's C firmware: mc683xx-run with its console on the
+left, gdb on the right; a Mandelbrot set, a breakpoint, and a fault
+stop](https://raw.githubusercontent.com/charlieh0tel/mc683xx/main/docs/demo.gif)
+
 Licensed `MIT OR Apache-2.0`.
 
 ## Crates
