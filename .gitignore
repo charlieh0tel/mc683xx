@@ -17,3 +17,6 @@
 /crates/cpu32-py/python/mc683xx/*.so
 /crates/cpu32-py/python/mc683xx/*.pyd
 __pycache__/
+
+# What `make wasm` binds: the JavaScript bindings for Node and the web.
+/crates/wasm/pkg/

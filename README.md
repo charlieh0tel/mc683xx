@@ -181,6 +181,9 @@ The crates above are in `crates/`: `target` (`mc683xx-target`),
 (`mc683xx-run`).  The other members are not on crates.io:
 
 - `cpu32-py` (`crates/cpu32-py`): the Python package `mc683xx`, on PyPI.
+- `mc683xx-wasm` (`crates/wasm`): JavaScript bindings for boards,
+  through WebAssembly; not published yet
+  ([crates/wasm/README.md](https://github.com/charlieh0tel/mc683xx/blob/main/crates/wasm/README.md)).
 - `examples`: the example boards and their firmware, and the
   documentation's examples run as tests ([examples/README.md](https://github.com/charlieh0tel/mc683xx/blob/main/examples/README.md)).
 - `benches`: the criterion benchmarks.
@@ -196,6 +199,7 @@ The crates above are in `crates/`: `target` (`mc683xx-target`),
 make hooks   # once per clone
 make ci      # fmt check, license copies, commit-msg hook, clippy, tests, rustdoc
 make python      # the Python module in .venv, with its tests
+make wasm        # the JavaScript bindings (wasm32, wasm-bindgen), with their Node tests
 make singlestep  # SingleStepTests m68000 (fetches about 140 MB once)
 make oracle      # differential runs against Musashi (fetches it once)
 make corpus SMARTCLOCK_FIRMWARE=...  # smartclock firmware functions

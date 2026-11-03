@@ -17,6 +17,7 @@ members = [
     "crates/peripherals",
     "crates/snapshot-golden",
     "crates/target",
+    "crates/wasm",
 ]
 resolver = "3"
 
