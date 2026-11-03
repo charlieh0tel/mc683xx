@@ -286,6 +286,26 @@ fn a_stepped_lpstop_takes_a_module_interrupt_it_unmasks() {
 }
 
 #[test]
+fn a_stepped_lpstop_whose_module_interrupt_fault_stops_fails() {
+    // as above, SSP odd: stacking the SCI's interrupt faults
+    let mut chip = chip(&[LPSTOP[0], LPSTOP[1], LPSTOP[2], BRANCH_TO_SELF]);
+    chip.reset_halted().unwrap();
+    store(&mut chip, QSM, 0x0085);
+    store(&mut chip, QSM + 0x04, 0x0340);
+    store(&mut chip, QSM + 0x08, 1);
+    store(&mut chip, QSM + 0x0a, 0x0088);
+    chip.write_system_register(SystemRegister::Ssp, RAM + 0x401)
+        .unwrap();
+    chip.cpu_control().set_stop_on_fault(true);
+    assert_eq!(chip.step(), Err(TargetError::Stopped));
+    assert!(chip.cpu().fault_stop().is_some());
+    assert_eq!(
+        chip.read_system_register(SystemRegister::Rpc),
+        Ok(START + 6)
+    );
+}
+
+#[test]
 fn a_stop_the_host_asks_for_in_a_step_fails_it() {
     let (mut chip, request) = chip_and_stop(&[MOVEQ_1_D0, BRANCH_TO_SELF]);
     chip.reset_halted().unwrap();
