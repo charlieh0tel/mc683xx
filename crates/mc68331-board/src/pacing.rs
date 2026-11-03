@@ -131,7 +131,8 @@ pub enum ParsePacingError {
 /// A run that falls behind (a slow host) is not held
 /// back, and goes as fast as it can until it catches up.  Unpaced, it
 /// never waits, and never reads the clock.  A host with a clock of its
-/// own that cannot sleep (a browser) asks it [`due`](Self::due) instead.
+/// own that cannot sleep (a browser) runs the board in frames
+/// ([`Board::run_frame`](crate::board::Board::run_frame)) instead.
 #[derive(Debug, Default)]
 pub struct Pacer {
     /// The host's clock's reading that wall times count from: its first
@@ -197,8 +198,13 @@ impl Pacer {
     /// reads [`Instant`].  The pacing starts again from `now` and `wall`
     /// as [`delay`](Self::delay)'s does, the time then `now`.  A host
     /// far behind (a page hidden a while) gets a time far ahead, and
-    /// bounds each slice itself.
-    pub fn due(&mut self, now: Time, pacing: Pacing, wall: Duration) -> Option<Time> {
+    /// bounds each slice itself; to drop the time it missed rather than
+    /// catch it up, it [`restart`](Self::restart)s from where the bound
+    /// left it.  Crate-private: its wall clock is the host's, from the
+    /// host's origin, where [`delay`](Self::delay) reads [`Instant`] from
+    /// the pacer's first look, so a host must not mix the two; the board
+    /// keeps a pacer of its own for its frames.
+    pub(crate) fn due(&mut self, now: Time, pacing: Pacing, wall: Duration) -> Option<Time> {
         let Some(factor) = pacing.factor() else {
             self.anchor = None;
             return None;
@@ -213,6 +219,17 @@ impl Pacer {
         )]
         let board = (elapsed * factor * PICOSECONDS_PER_SECOND as f64) as u64;
         Some(Time(anchor.board.0.saturating_add(board)).max(now))
+    }
+
+    /// Starts the pacing again under `pacing` from `now` and the host's
+    /// clock reading `wall`, as [`due`](Self::due) takes it: for a host
+    /// that ran less than was due (a frame's bound), so later looks pace
+    /// from where it got to and the time it missed is dropped.
+    pub(crate) fn restart(&mut self, now: Time, pacing: Pacing, wall: Duration) {
+        match pacing.factor() {
+            Some(factor) => self.start(now, factor, wall),
+            None => self.anchor = None,
+        }
     }
 
     /// The pacing's start at `factor`, or [`None`] if it starts again
@@ -392,6 +409,24 @@ mod tests {
             Some(board(11))
         );
         assert!(pacer.origin.is_none());
+    }
+
+    #[test]
+    fn a_restart_drops_the_time_missed() {
+        let mut pacer = Pacer::new();
+        let wall = |millis| Duration::from_millis(millis);
+        let board = |millis| Time(millis * MILLISECOND);
+        pacer.due(board(0), Pacing::RealTime, wall(0));
+        assert_eq!(
+            pacer.due(board(0), Pacing::RealTime, wall(1000)),
+            Some(board(1000))
+        );
+        // the host ran 100 ms of it, and drops the rest
+        pacer.restart(board(100), Pacing::RealTime, wall(1000));
+        assert_eq!(
+            pacer.due(board(100), Pacing::RealTime, wall(1010)),
+            Some(board(110))
+        );
     }
 
     #[test]

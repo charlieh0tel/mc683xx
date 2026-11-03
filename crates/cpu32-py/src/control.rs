@@ -9,6 +9,7 @@ use std::hash::Hasher;
 use std::mem;
 use std::num::NonZeroU64;
 use std::ops::ControlFlow;
+use std::time::Duration;
 
 use mc683xx_board::board::Board;
 
@@ -179,6 +180,21 @@ pub(crate) fn run_until_paced(
     if outcome.is_ok() && board.now() >= until && turns.signals().is_continue() {
         let _ = pace(&mut turns, board.now());
     }
+    turns.ended(outcome)
+}
+
+/// Runs a frame of `board` (Rust's `Board::run_frame`): to the board
+/// time due by `wall` under its control's pacing, but no more than
+/// `picoseconds`, the GIL released before each quantum and Python's
+/// signal handlers run, as [`run_until_paced`] does, but never sleeping.
+pub(crate) fn run_frame(
+    py: Python<'_>,
+    board: &mut Board<Mc68331>,
+    wall: Duration,
+    picoseconds: u64,
+) -> Result<Result<BoardRun, RunError>, PyErr> {
+    let mut turns = Turns::new(py);
+    let outcome = board.run_frame_with(wall, picoseconds, |_| turns.turn());
     turns.ended(outcome)
 }
 

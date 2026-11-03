@@ -1129,6 +1129,21 @@ Front ends):
   control's pacing is set for the run and put back when it returns or
   raises, unless a `set_pacing` from another thread changed it during
   the run, which then stays (a UI's choice outlives the call).
+- `run_frame(wall, *, seconds=None, picoseconds=None)` is Rust's
+  `Board::run_frame`, for a GUI's timer, which must not sleep: it runs
+  to the board time due by `wall`, the host's clock in seconds from an
+  origin kept for the board's life (`time.monotonic()`), under the
+  control's pacing, but no more than `seconds`, or `picoseconds`, of
+  board time, however far behind the host is, dropping the time it
+  missed (the next frame is paced from where it ended); unpaced, it runs
+  them.  Paced, the first frame, and the first after a `set_pacing` to another
+  pacing (one to the pacing it has changes nothing, so a UI may set its
+  choice every frame), any other run (even of no time) or a successful
+  restore, runs nothing: it starts the pacing.  It never sleeps, but
+  releases the GIL before each quantum and runs Python's signal
+  handlers, as `run_for` does, so another thread's `control().stop()`
+  ends it (`Stop.Requested`) and Ctrl-C raises `KeyboardInterrupt`.  A
+  `wall` not finite, or below 0, raises `ValueError`.
 
 ```python
 import tempfile
