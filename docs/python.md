@@ -803,11 +803,13 @@ assert any(isinstance(event, mc683xx.Event.Exception) for event in chip.take_eve
 `set_stop_on_fault(True)` (`stops_on_fault`; on a board's
 `board.chip` too) stops a run at a bus or address error, the bus
 monitor's included, instead of taking it: the run ends
-`Stop.Fault()`, nothing stacked, the registers as the instruction
-began, and `fault_stop`, a `FaultStop` (Bare CPU, Exceptions and
-faults), says which cycle faulted, until the next run.  The
-instruction reruns when the run goes on, so a peripheral it read or
-wrote before the fault sees those cycles again.
+`Stop.Fault()`, and `fault_stop`, a `FaultStop` (Bare CPU, Exceptions
+and faults), says which cycle faulted, until the next run or a reset.
+A fault in an instruction undoes it, the registers as it began, and it
+reruns when the run goes on, so a peripheral it read or wrote before
+the fault sees those cycles again; one stacking a trace, a hardware
+breakpoint or an interrupt after an instruction completed keeps the
+instruction and leaves the exception pending (PLAN.md, Faults).
 
 ## Save and restore
 
