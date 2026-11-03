@@ -48,10 +48,30 @@ opens or a command never answered fails the test in 30 s, the
 processes stopped.  Chrome's profile is removed once Chrome and the
 processes it started have exited.  With `CI` set, as GitHub Actions
 sets it, Chrome runs with `--no-sandbox`: Ubuntu 24.04 restricts the
-unprivileged user namespaces its sandbox needs.  CI's `wasm` job runs `make wasm`
-and `make npm-test`, with the CLI `scripts/install-wasm-bindgen.sh`
-installs: a change to the crate's `wasm-bindgen` version changes its
-version and checksum too.
+unprivileged user namespaces its sandbox needs.
+
+```
+make npm-types
+```
+
+compiles the package's TypeScript declarations as its users would, in
+`npm-types` in the target directory: the tarball installed in a fresh
+project with TypeScript and `@types/node` at exact versions, fetched
+from the registry (it needs the network, so `npm-test` leaves it out),
+and the three consumers in `tests/types`, each with its own
+`tsconfig.json` (`strict`, `skipLibCheck` off), compiled with `tsc`:
+`node` (`main.mts`, `nodenext`, Node's types, no DOM: `node.d.ts`),
+`browser` (`main.ts`, `bundler`, the DOM, no Node types:
+`web/mc683xx.d.ts`) and `commonjs` (`main.cts`, `require` under
+`nodenext`: `node.d.ts`).  Each imports `init`, `initSync`, `Board`,
+`BoardRun`, `InitInput`, `SyncInitInput` and `InitOutput` and uses
+them; `@ts-expect-error` lines fail it if a declaration loosens to
+`any`.
+
+CI's `wasm` job runs `make wasm`, `make npm-test` and `make
+npm-types`, with the CLI `scripts/install-wasm-bindgen.sh` installs: a
+change to the crate's `wasm-bindgen` version changes its version and
+checksum too.
 
 ## The npm package
 

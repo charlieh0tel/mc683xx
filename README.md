@@ -204,6 +204,7 @@ make ci      # fmt check, license copies, commit-msg hook, clippy, tests, rustdo
 make python      # the Python module in .venv, with its tests
 make wasm        # the JavaScript bindings (wasm32, wasm-bindgen), linted, as the npm package
 make npm-test    # the npm package packed and installed, in Node and headless Chrome
+make npm-types   # the npm package's TypeScript declarations compiled (fetches TypeScript)
 make web-test    # the demo board's web page (examples/web) in headless Chrome
 make singlestep  # SingleStepTests m68000 (fetches about 140 MB once)
 make oracle      # differential runs against Musashi (fetches it once)

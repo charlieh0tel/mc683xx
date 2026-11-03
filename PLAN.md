@@ -3349,17 +3349,22 @@ checks move onto real code hooks.
   with `InitInput` and `SyncInitInput` `unknown`: the build fails if
   `node.d.ts` lacks a name the web types export, so a type imported
   from `mc683xx` checks under either condition.
-  No automated TypeScript check: `make npm-test` is offline and needs
-  no tool npm would fetch; they were checked by hand with TypeScript
-  5.9 and `@types/node` 22 (`nodenext`, `lib` `esnext` and `es2022`,
-  `skipLibCheck` off, and a browser's `dom` and `bundler`).  No `wasm-opt`:
-  measured, it gained nothing after gzip; `--remove-name-section`
-  strips the names instead.  `make npm-test` tests the package as
-  installed from its tarball: the Node tests by its name, ES and
-  CommonJS, and a bare page in headless Chrome, offline.  CI's `wasm`
-  job runs `make wasm` and `make npm-test`, with wasm-bindgen's prebuilt
-  release binary (`scripts/install-wasm-bindgen.sh`, its SHA-256
-  checked) rather than a `cargo install` that builds it for minutes.
+  `make npm-types` checks them with TypeScript at an exact version
+  (5.9.3, and `@types/node` 22), `strict` and `skipLibCheck` off, as
+  three consumers of the installed tarball would: a Node ES module
+  (`nodenext`, no DOM), a browser's or bundler's (`bundler`, the DOM, no
+  Node types) and a CommonJS module that requires it, each importing
+  `init`, the classes and the input and output types and using them so
+  that a wrong or `any` declaration fails (`@ts-expect-error`).  It is a
+  target of its own, not part of `make npm-test`, which stays offline.
+  No `wasm-opt`: measured, it gained nothing after gzip;
+  `--remove-name-section` strips the names instead.  `make npm-test`
+  tests the package as installed from its tarball: the Node tests by
+  its name, ES and CommonJS, and a bare page in headless Chrome,
+  offline.  CI's `wasm` job runs `make wasm`, `make npm-test`
+  and `make npm-types`, with wasm-bindgen's prebuilt release binary
+  (`scripts/install-wasm-bindgen.sh`, its SHA-256 checked) rather than a
+  `cargo install` that builds it for minutes.
   The package is published to npm as `mc683xx` (decided 2026-11-03),
   the PyPI package's name, unscoped, at the workspace's version in
   lockstep with the crates and the wheels: the first release by hand,

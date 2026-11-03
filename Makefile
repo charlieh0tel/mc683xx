@@ -1,6 +1,6 @@
 .PHONY: hooks ci fmt-check licenses hook-test clippy features test docs deny bench singlestep-data singlestep musashi oracle python corpus \
 	firmware-path corpus-musashi unicorn corpus-unicorn corpus-oracles boot-smoke \
-	boot-diff reference-path smartclock-boards gdb echo-image demo-image wasm npm-package npm-test web-test
+	boot-diff reference-path smartclock-boards gdb echo-image demo-image wasm npm-package npm-test npm-types web-test
 
 # Once per clone: the commit-msg hook refuses AI attribution (AGENTS.md)
 # and pre-push uploads the Git LFS objects (.gitattributes).
@@ -211,8 +211,8 @@ gdb:
 # depends on, and built as the npm package (npm-package), which npm-test
 # tests.  Not part of `ci`: it needs the wasm32-unknown-unknown target,
 # the wasm-bindgen CLI at the crate's exact wasm-bindgen version, and
-# Node 22.12 or later.  CI's `wasm` job runs it and npm-test, with the
-# CLI scripts/install-wasm-bindgen.sh installs.
+# Node 22.12 or later.  CI's `wasm` job runs it, npm-test and
+# npm-types, with the CLI scripts/install-wasm-bindgen.sh installs.
 WASM_BINDGEN ?= wasm-bindgen
 # Cargo's target directory, as cargo metadata gives it (absolute):
 # CARGO_TARGET_DIR or a configured one, else the workspace's target/.
@@ -284,6 +284,29 @@ npm-test: npm-package
 	cd $(call quote,$(NPM_TEST)/project) && npm install --offline --no-audit --no-fund ../mc683xx-*.tgz
 	cd $(call quote,$(NPM_TEST)/project) && node --test
 	node crates/wasm/tests/browser.mjs $(call quote,$(NPM_TEST)/project)
+
+# The package's TypeScript declarations, compiled as its users' would
+# be (tsc, `strict`, `skipLibCheck` off): the packed package installed
+# in a fresh project with TypeScript and Node's types at exact versions,
+# and three consumers in crates/wasm/tests/types, each its own
+# tsconfig.json, compiled against it: a Node ES module (node.d.ts,
+# `nodenext`, Node's types), a browser's or a bundler's (the web
+# bindings' web/mc683xx.d.ts, `bundler`, the DOM's types, not Node's)
+# and a CommonJS module that requires it (node.d.ts).  Not part of
+# `ci` or npm-test: it needs the network, for TypeScript.  CI's `wasm`
+# job runs it after npm-test.
+TYPESCRIPT_TOOLS := typescript@5.9.3 @types/node@22.20.5
+NPM_TYPES = $(TARGET_DIR)/npm-types
+TYPES_CONSUMERS := node browser commonjs
+
+npm-types: npm-package
+	$(call npm_project,$(NPM_TYPES))
+	cp -R $(addprefix crates/wasm/tests/types/,$(TYPES_CONSUMERS)) $(call quote,$(NPM_TYPES)/project/)
+	cd $(call quote,$(NPM_TYPES)/project) && npm install --no-audit --no-fund --save-exact \
+		../mc683xx-*.tgz $(TYPESCRIPT_TOOLS)
+	cd $(call quote,$(NPM_TYPES)/project) && for consumer in $(TYPES_CONSUMERS); do \
+		echo "tsc: $$consumer"; node_modules/.bin/tsc -p $$consumer || exit 1; \
+	done
 
 # The demo page (examples/web) in headless Chrome, CHROME=path naming
 # another browser: it types at the demo board's console and waits for

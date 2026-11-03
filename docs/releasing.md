@@ -49,8 +49,9 @@ The npm package is the bindings for the web and a Node entry over
 them (`crates/wasm/README.md`, The npm package), its `package.json`'s
 version the workspace's, the license texts copied in from the root by
 `make npm-package`.  CI's `wasm` job tests it as installed from its
-tarball (`make npm-test`); the `npm` job builds it again from the tag
-and publishes it with a provenance statement.
+tarball (`make npm-test`) and compiles TypeScript against its
+declarations (`make npm-types`); the `npm` job builds it again from
+the tag and publishes it with a provenance statement.
 
 ## Versions and tags
 
@@ -113,7 +114,8 @@ Once, before the first release.
 4. Run every check (AGENTS.md): `make ci`, `python`, `oracle`,
    `singlestep`, `corpus`, `boot-smoke`, `boot-diff` and
    `smartclock-boards`, and `cargo publish --workspace --dry-run`;
-   and `make wasm` and `npm-test`, which CI's `wasm` job runs too.
+   and `make wasm`, `npm-test` and `npm-types`, which CI's `wasm` job
+   runs too.
 5. Commit `Cargo.toml` and `Cargo.lock` as "Release X.Y.Z", and merge
    it to `main`.
 6. Wait for `ci` to pass on the merged commit, then tag it `vX.Y.Z`,
