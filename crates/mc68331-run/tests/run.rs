@@ -319,6 +319,22 @@ fn a_halt_and_a_wrong_command_have_their_status() {
 }
 
 #[test]
+fn stop_on_fault_stops_where_a_fault_would_halt() {
+    // TRAP #0 with nothing at the stack: stacking it faults.
+    let directory = board("fault", &rom(&[TRAP]));
+    let file = directory.join("echo.toml");
+    let stopped = runner(&[file.to_str().unwrap(), "--stop-on-fault"], b"");
+    assert_eq!(stopped.status.code(), Some(4));
+    let said = String::from_utf8(stopped.stderr).unwrap();
+    assert!(said.contains("reason=fault"), "{said}");
+    assert!(
+        said.contains("mc683xx-run: stopped at bus error: write of 2 bytes at"),
+        "{said}"
+    );
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn input_to_an_endpoint_that_drives_no_serial_net_is_refused() {
     let directory = board("listening", &echo::image());
     let file = directory.join("echo.toml");
