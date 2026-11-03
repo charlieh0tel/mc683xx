@@ -257,12 +257,12 @@ impl Cpu32Target for Mc68331 {
         limits.steps = Some(1);
         let start = self.now;
         let completed = loop {
-            let (run, limited) = self.run(STEP_BUDGET, Some(&mut limits));
-            if limited {
+            let ran = self.run(STEP_BUDGET, Some(&mut limits));
+            if ran.limited {
                 break true;
             }
             // a sync ends a run early, the step not done: it goes on
-            if run.stop != Stop::Budget || start.until(self.now) >= STEP_BUDGET {
+            if ran.run.stop != Stop::Budget || start.until(self.now) >= STEP_BUDGET {
                 break false;
             }
         };
@@ -273,8 +273,8 @@ impl Cpu32Target for Mc68331 {
             // pending at its end, unless a hook or a fault stops them
             self.board.wake(self.now);
             limits.steps = Some(0);
-            let (run, limited) = self.run(STEP_BUDGET, Some(&mut limits));
-            limited || run.stop == Stop::Budget
+            let ran = self.run(STEP_BUDGET, Some(&mut limits));
+            ran.limited || ran.run.stop == Stop::Budget
         } else {
             completed
         };

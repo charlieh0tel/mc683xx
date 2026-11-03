@@ -664,6 +664,15 @@ fn pages(bytes: &[u8]) -> Result<u32, BuildError> {
     u32::try_from(length).map_err(|_| BuildError::Length(length))
 }
 
+/// How the chip's [`run`](Mc68331::run) ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ChipRun {
+    /// As [`Mc68331::run_for`] ends.
+    pub(crate) run: Run,
+    /// Whether a limit ended it.
+    pub(crate) limited: bool,
+}
+
 /// The chip.
 #[derive(Debug)]
 pub struct Mc68331 {
@@ -696,14 +705,14 @@ impl Mc68331 {
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
     pub fn run_for(&mut self, budget: Cycles) -> Run {
-        self.run(budget, None).0
+        self.run(budget, None).run
     }
 
     /// [`run_for`](Self::run_for), the CPU's quanta limited by `limits`
     /// too, their cycles each quantum's, and the steps the CPU takes
     /// taken off theirs: the run ends where a limit ends the CPU's,
-    /// with [`Stop::Requested`] and true.
-    pub(crate) fn run(&mut self, budget: Cycles, limits: Option<&mut Limits>) -> (Run, bool) {
+    /// with [`Stop::Requested`], `limited`.
+    pub(crate) fn run(&mut self, budget: Cycles, limits: Option<&mut Limits>) -> ChipRun {
         let mut limits = limits;
         let mut limited_end = false;
         let start = self.now;
@@ -847,7 +856,10 @@ impl Mc68331 {
         }
         // asked in the run's last instruction: the run ends anyway
         self.board.sync_request.take();
-        (Run::new(self.now - start, stop), limited_end)
+        ChipRun {
+            run: Run::new(self.now - start, stop),
+            limited: limited_end,
+        }
     }
 
     /// Runs whole instructions until now is `target` or past it, as
