@@ -411,6 +411,10 @@ fn replace(path: &Path, bytes: &[u8]) -> Result<(), OpenError> {
 
 /// Syncs `path`'s directory, so that a name made or replaced in it is
 /// durable; a directory opens as a file only on Unix.
+#[cfg_attr(
+    not(unix),
+    expect(unused_variables, reason = "only Unix syncs a directory")
+)]
 fn sync_directory(path: &Path) -> Result<(), OpenError> {
     #[cfg(unix)]
     if let Some(directory) = path
@@ -426,9 +430,14 @@ fn sync_directory(path: &Path) -> Result<(), OpenError> {
 
 /// A new sibling of `path` holding `bytes`, written and synced.
 fn written_sibling(path: &Path, bytes: &[u8]) -> Result<PathBuf, OpenError> {
-    let (partial, mut file) = sibling(path)?;
-    let written = file.write_all(bytes).and_then(|()| file.sync_all());
-    drop(file);
+    let (partial, written) = {
+        let (partial, mut file) = sibling(path)?;
+        // closed before a failure removes it
+        (
+            partial,
+            file.write_all(bytes).and_then(|()| file.sync_all()),
+        )
+    };
     match written {
         Ok(()) => Ok(partial),
         Err(error) => {
