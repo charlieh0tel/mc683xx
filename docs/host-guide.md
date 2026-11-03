@@ -1088,7 +1088,16 @@ read, write and execute per 2-Kbyte page in `Space::User` or
 `Space::Supervisor`; a cycle a page does not permit is a bus error,
 and the invalid hooks see it as `Protected`.  Hooks and permissions
 outlive the chip's remaps.  Hooks cost little when absent; a memory
-hook makes its pages leave the fast path.  The GDB stub
+hook makes its pages leave the fast path.
+
+`cpu_control().set_stop_on_fault(true)` stops a run at a bus or
+address error, the bus monitor's included, instead of taking it: the
+run ends `Stop::Fault`, nothing stacked, the registers as the
+instruction began, and `cpu().fault_stop()` says which cycle faulted
+and why, until the next run.  A fault while stacking an exception (a
+bad SSP) stops the same way instead of a double bus fault.  The
+instruction reruns when the run goes on, so a peripheral it read or
+wrote before the fault sees those cycles again (PLAN.md, Faults).  The GDB stub
 (`mc683xx-gdb`, `docs/gdb.md`) sets its breakpoints, watchpoints and
 steps as hooks like these.
 

@@ -2136,9 +2136,18 @@ and `mc683xx.Machine` in Python (see Python).
   - A fault stacking the interrupt that ends STOP or LPSTOP leaves the
     CPU stopped, its SR as STOP or LPSTOP loaded it, so a request
     withdrawn before the next run does not run it past the STOP.  The
-    interrupt's acknowledge cycle was made: a host modeling LPSTOP's
-    low-power state has seen it end (the chip does not stop on
-    faults).
+    interrupt's acknowledge cycle was made: a bare host modeling
+    LPSTOP's low-power state has seen it end.  The chip puts its
+    modules back in low-power stop, as LPSTOP's broadcast left them.
+    A source whose acknowledge clears its request has dropped it, so
+    its next request is the one taken: the PIT's, which the model
+    clears at its acknowledge (SIMRM 3.6 does not say when it is
+    negated), or a board peripheral's that answers an acknowledge.
+  - The chip and a board stop on faults through
+    `CpuControl::set_stop_on_fault`, and their runs end `Stop::Fault`;
+    the bus monitor's BERR is a fault like any.  Faults are bare-host
+    behavior: a peripheral sees an instruction's cycles before its
+    fault, and again when the instruction reruns.
   - Writes made before the fault stay in memory, and so do frame words
     stacked before a stacking fault.
   - An interrupt whose stacking fault-stops was not taken: it is not a
@@ -2229,7 +2238,8 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   instruction.  A stepped STOP or LPSTOP does not stop the CPU or the
   modules, as under T1; after LPSTOP the modules wake before the
   interrupts pending are looked at, so one it unmasks is taken.  A
-  hook or a stop the host asks for fails the step (`Stopped`), the CPU
+  hook, a fault stop or a stop the host asks for fails the step
+  (`Stopped`), the CPU
   in background mode where it stopped; a sync, which ends a run early
   for the host, does not: the step goes on.
   A reset that falls due in the step's last quantum is taken on the

@@ -24,8 +24,8 @@ use crate::registers::Registers;
 use mc683xx_target::address::Address;
 
 /// A CPU lent by what runs it (a chip, a board, the gdb stub's target):
-/// its registers, hooks and page permissions to change, the rest to
-/// read.
+/// its registers, hooks, page permissions and fault stops to change,
+/// the rest to read.
 #[derive(Debug)]
 pub struct CpuControl<'a> {
     /// The CPU.
@@ -101,6 +101,15 @@ impl<'a> CpuControl<'a> {
         self.cpu.remove_hook(id)
     }
 
+    /// [`Cpu::set_stop_on_fault`]: a chip's or a board's run then ends
+    /// [`Stop::Fault`](crate::cpu::Stop::Fault) at a bus or address
+    /// error, a bus monitor timeout's among them, the instruction's
+    /// cycles before it made: a peripheral it read or wrote has seen
+    /// them, and sees them again when the instruction reruns.
+    pub fn set_stop_on_fault(&mut self, stop: bool) {
+        self.cpu.set_stop_on_fault(stop);
+    }
+
     /// The permissions of `length` bytes from `start` in `space`, as
     /// [`Memory::protect`](crate::memory::Memory::protect) sets them.
     ///
@@ -139,7 +148,7 @@ mod tests {
     use mc683xx_target::address::Address;
 
     #[test]
-    fn it_changes_registers_hooks_and_permissions_and_shows_the_rest() {
+    fn it_changes_registers_hooks_permissions_and_fault_stops_and_shows_the_rest() {
         let mut cpu = Cpu::new(Memory::new(24).unwrap());
         let mut control = CpuControl::new(&mut cpu);
         control.registers_mut().data[0] = 7;
@@ -147,8 +156,10 @@ mod tests {
         control
             .protect(Space::User, Address(0), PAGE_BYTES, Permissions::READ)
             .unwrap();
+        control.set_stop_on_fault(true);
         assert_eq!(control.registers.data[0], 7);
         assert!(control.has_hook(id));
+        assert!(control.stops_on_fault());
         assert!(control.remove_hook(id));
         assert_eq!(
             cpu.memory.permissions(Space::User, Address(0)),

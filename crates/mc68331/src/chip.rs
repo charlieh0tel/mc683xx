@@ -681,7 +681,9 @@ impl Mc68331 {
     /// ([PLAN.md], Peripherals): each sees time move between quanta.
     /// The watchdog's and the halt monitor's resets are taken as they
     /// come; it stops early only if the CPU halts, a hook stops it
-    /// ([`Cpu::add_code_hook`] and the rest, through `cpu_control`), or the
+    /// ([`Cpu::add_code_hook`] and the rest, through `cpu_control`), a
+    /// fault does ([`Stop::Fault`], with stop on fault set through
+    /// `cpu_control`), or the
     /// host asks it to ([`StopRequest`]); it ends early, at an instruction
     /// boundary, with [`Stop::Budget`] if the host's peripherals ask
     /// ([`SyncRequest`]).  A run that starts halted
@@ -746,6 +748,7 @@ impl Mc68331 {
             }
             self.board.quantum_end = self.now + quantum;
             self.board.sync = false;
+            let low_power = self.board.sim.low_power();
             // and whether a limit ended it
             let (run, limited) = {
                 let board = RefCell::new(&mut self.board);
@@ -765,12 +768,21 @@ impl Mc68331 {
                         limits.steps = limits.steps.map(|steps| steps.saturating_sub(run.steps));
                         match run.end {
                             End::Stop(stop) => (Run::new(run.cycles, stop), false),
+                            End::Fault(_) => (Run::new(run.cycles, Stop::Fault), false),
                             _ => (Run::new(run.cycles, Stop::Requested), true),
                         }
                     }
                 }
             };
             self.now += run.cycles;
+            if run.stop == Stop::Fault
+                && self.cpu.stopped()
+                && let Some(mask) = low_power
+            {
+                // the interrupt that woke the modules fault-stopped,
+                // not taken: LPSTOP goes on
+                self.board.low_power_stop(mask, self.now);
+            }
             if mem::take(&mut self.board.system_reload) {
                 self.board.reload(&mut self.cpu.memory, ResetCause::System);
             }
