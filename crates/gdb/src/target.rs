@@ -302,7 +302,9 @@ pub trait Target {
     }
 
     /// Runs an emulated target for about `cycles` system clocks, or
-    /// until a hook, a halt or a request stops it.  `hit` says whether
+    /// until a hook, a halt or a request stops it; or for none, as
+    /// [`TargetRun::Quantum`], if the host holds it back (to pace it
+    /// against wall time), the stub then looking for gdb's bytes.  `hit` says whether
     /// one of the stub's own hooks has asked to stop: a run loop that
     /// goes on past hook stops (one that calls the host's hooks between
     /// core runs) ends the quantum when it is true.

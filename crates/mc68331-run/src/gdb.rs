@@ -1,13 +1,16 @@
 //! `--gdb`: the board under gdb ([docs/gdb.md](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md)), the runner's turns kept
 //! between the stub's quanta, so the bindings and the trace go on
-//! while gdb runs it.
+//! while gdb runs it, and its pacing kept while gdb has it running.
 
 use std::io;
+use std::ops::ControlFlow;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use mc683xx_board::board::Board;
 use mc683xx_board::condition::Conditions;
+use mc683xx_board::control::BoardControl;
+use mc683xx_board::pacing::Pacer;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_gdb::Ending;
@@ -31,6 +34,29 @@ struct Debugged<'a> {
     board: &'a mut Board<Mc68331>,
     /// What goes in and out between quanta.
     turns: &'a mut Turns,
+    /// The board's control, whose pacing paces it.
+    control: BoardControl,
+    /// Holds board time to wall time under the pacing.
+    pacer: Pacer,
+    /// Whether gdb has the board running, continued and not yet
+    /// stopped: only then is it paced, so a step never waits.
+    running: bool,
+}
+
+impl Debugged<'_> {
+    /// Whether the board is still ahead of wall time under its pacing
+    /// after one wait of at most the pacer's slice, cut short by a
+    /// stop: the stub then looks for gdb's bytes before it runs on, so
+    /// a slow pacing never keeps gdb waiting.
+    fn ahead(&mut self) -> bool {
+        let control = &self.control;
+        self.pacer
+            .wait_with(self.board.now(), control, |delay| {
+                control.sleep(delay);
+                ControlFlow::Break(())
+            })
+            .is_break()
+    }
 }
 
 impl Target for Debugged<'_> {
@@ -60,11 +86,32 @@ impl Target for Debugged<'_> {
             .map_err(|error| error.map(RunError::from))
     }
 
+    fn resume(&mut self) -> Result<(), RunError> {
+        // the pacing starts again where gdb stopped the board, which
+        // does not run to catch up the wall time it stood still
+        self.pacer = Pacer::new();
+        self.running = true;
+        Ok(())
+    }
+
+    /// A quantum the pacing holds back is none: the board runs no
+    /// time, and the stub looks for gdb's bytes.
     fn run_for(&mut self, cycles: Cycles, hit: &dyn Fn() -> bool) -> Result<TargetRun, RunError> {
+        if self.running && self.ahead() {
+            return Ok(TargetRun::Quantum);
+        }
         self.turns.before(self.board)?;
         let ran = Target::run_for(self.board, cycles, hit)?;
         self.turns.after(self.board)?;
+        if ran != TargetRun::Quantum || hit() {
+            self.running = false;
+        }
         Ok(ran)
+    }
+
+    fn halt(&mut self) -> Result<TargetRun, RunError> {
+        self.running = false;
+        Ok(TargetRun::Requested)
     }
 
     fn reset(&mut self) -> Result<bool, RunError> {
@@ -127,7 +174,14 @@ pub(crate) fn serve(
         Err(PollError::Connection(error)) => return Err(RunError::Gdb(error)),
         Err(error) => return Err(RunError::Gdb(io::Error::other(error.to_string()))),
     };
-    match mc683xx_gdb::serve(&mut Debugged { board, turns }, connection) {
+    let mut debugged = Debugged {
+        control: board.control(),
+        board,
+        turns,
+        pacer: Pacer::new(),
+        running: false,
+    };
+    match mc683xx_gdb::serve(&mut debugged, connection) {
         Ok(ending) => Ok(ending),
         Err(SessionError::Target(error)) => Err(error),
         Err(SessionError::Connection(PollError::Host(Interrupted))) => Ok(Ending::Detached),

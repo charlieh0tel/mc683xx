@@ -57,7 +57,14 @@ bindings, trace and positions go on between the stub's quanta as
 between the runner's turns.  When gdb detaches the run goes on to its
 end (`--seconds` and `--cycles` count the time gdb ran it too); when
 gdb kills it the runner ends with `stopped reason=requested` and exit
-status 4.  A session that fails (gdb gone without detaching, or a
+status 4.  `--pace` paces the board while gdb has it running, as
+between the runner's turns: before each quantum the runner sleeps
+while board time is ahead of wall time times the factor, in sleeps of
+at most 20 ms with a look for gdb's bytes between, so Ctrl-C in gdb
+is not kept waiting.  While gdb has the board stopped its time stands
+still, and a continue starts the pacing again from there; steps are
+never paced.  As without gdb, the wall clock decides only how long
+the runner sleeps.  A session that fails (gdb gone without detaching, or a
 packet the stub cannot parse) is said on standard error and ends as a
 detach does: the run, its trace and `--save` go on.  Ctrl-C to the
 runner, while it waits for gdb or while gdb holds the board, ends the

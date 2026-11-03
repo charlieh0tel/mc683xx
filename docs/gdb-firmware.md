@@ -36,7 +36,10 @@ mc683xx-run examples/boards/demo.toml --bind console=stdio \
 
 The runner runs the power-on reset and waits, the PC at `reset`,
 until gdb connects; gdb then runs the board.  A `--seconds` counts
-the time gdb runs it too.  On `detach` the run goes on; on
+the time gdb runs it too.  `--pace realtime` keeps board time to wall
+time while gdb has the board running (the demo's `t` then reports
+the wall's uptime, less the time gdb held it stopped); unpaced, the
+default, it runs as fast as the host can.  On `detach` the run goes on; on
 `kill` it ends with exit status 4.  The console and gdb must not share
 a terminal: bind the console to a pty (`--bind console=pty`, which
 standard error names; `picocom` or `screen` on it), or feed

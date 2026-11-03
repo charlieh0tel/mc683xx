@@ -65,8 +65,7 @@ board's firmware under gdb: it drives `mc683xx-run` and
 `gdb-multiarch` in a tmux session, records it with asciinema
 (`screencast/demo.cast`) and renders `docs/demo.gif` with agg.  From
 the repository's top, with those on PATH or agg's path given:
-`examples/screencast/record.sh [AGG]`.  The board runs unpaced under
-gdb, so its time is not the wall's; the script shows no uptime.
+`examples/screencast/record.sh [AGG]`.
 
 ## See also
 
