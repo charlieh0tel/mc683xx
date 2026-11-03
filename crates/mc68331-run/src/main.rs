@@ -220,7 +220,8 @@ struct Arguments {
     /// the host runs it), realtime, or a factor, board seconds a wall
     /// second (2 twice real time, 0.5 half).  The run is the same
     /// whatever the pacing: wall time decides only how long the runner
-    /// sleeps between turns.
+    /// sleeps between turns, or between quanta while gdb has the board
+    /// running; while gdb has it stopped, board time stands still.
     #[arg(long, default_value_t = Pacing::Unpaced)]
     pace: Pacing,
 }

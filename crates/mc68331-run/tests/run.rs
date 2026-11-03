@@ -26,6 +26,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::RecvTimeoutError;
 use std::thread;
 use std::time::Duration;
+use std::time::Instant;
 
 use mc683xx_examples::echo;
 #[cfg(unix)]
@@ -74,8 +75,6 @@ use std::cell::RefCell;
 use std::os::unix::net::UnixStream;
 #[cfg(unix)]
 use std::rc::Rc;
-#[cfg(unix)]
-use std::time::Instant;
 #[cfg(unix)]
 use wire::Send;
 #[cfg(unix)]
@@ -852,6 +851,67 @@ fn gdb_kills_the_run() {
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert_eq!(output.status.code(), Some(4), "{stderr}");
     assert!(stderr.ends_with("reason=requested\n"), "{stderr}");
+    fs::remove_dir_all(directory).unwrap();
+}
+
+/// The cycle count the runner's last line gives.
+fn cycles_stopped(stderr: &str) -> u64 {
+    stderr
+        .lines()
+        .last()
+        .and_then(|line| line.split_once("cycle="))
+        .and_then(|(_, rest)| rest.split(' ').next())
+        .and_then(|cycles| cycles.parse().ok())
+        .unwrap_or_else(|| panic!("{stderr}"))
+}
+
+/// Cycles a board second on the example board, from the runner's own
+/// count for a run of 10 ms.
+fn cycles_a_second(file: &Path) -> f64 {
+    let output = runner(&[file.to_str().unwrap(), "--seconds", "0.01"], b"");
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(output.status.success(), "{stderr}");
+    cycles_stopped(&stderr) as f64 * 100.0
+}
+
+/// The board seconds a gdb session under `--pace pace` runs the board
+/// it continues for `wall`, and how long its Ctrl-C then takes to stop
+/// it.
+fn continued(file: &Path, pace: &str, wall: Duration) -> (f64, Duration) {
+    let (child, mut gdb) = gdb_session(file, &["--pace", pace]);
+    assert!(exchange(&mut gdb, &packet("?")).starts_with("T05"));
+    gdb.write_all(&packet("c")).unwrap();
+    thread::sleep(wall);
+    let interrupting = Instant::now();
+    assert_eq!(exchange(&mut gdb, &[INTERRUPT]), "S02");
+    let interrupted = interrupting.elapsed();
+    gdb.write_all(&packet("k")).unwrap();
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert_eq!(output.status.code(), Some(4), "{stderr}");
+    let seconds = cycles_stopped(&stderr) as f64 / cycles_a_second(file);
+    (seconds, interrupted)
+}
+
+#[test]
+fn gdb_continuing_a_paced_board_keeps_its_pace() {
+    let directory = board("gdb-paced", &echo::image());
+    let file = directory.join("echo.toml");
+    let wall = Duration::from_millis(500);
+    // a tenth of real time: 50 ms of board time, and at most a quantum
+    // more
+    let (paced, _) = continued(&file, "0.1", wall);
+    assert!((0.025..0.15).contains(&paced), "{paced} s");
+    let (unpaced, _) = continued(&file, "unpaced", wall);
+    assert!(
+        unpaced > 2.0 * paced,
+        "{unpaced} s unpaced, {paced} s paced"
+    );
+    // a quantum is seconds of wall time here, but gdb's Ctrl-C does
+    // not wait for it
+    let (crawling, interrupted) = continued(&file, "0.001", Duration::from_millis(200));
+    assert!(crawling < 0.025, "{crawling} s");
+    assert!(interrupted < Duration::from_secs(1), "{interrupted:?}");
     fs::remove_dir_all(directory).unwrap();
 }
 

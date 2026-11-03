@@ -1514,7 +1514,15 @@ hand.  The keys are in `docs/board-files.md`.
   time, 1 for a board or file error, 2 for a wrong command, 3 when the
   CPU halted, 4 when a hook or a peripheral stopped it, or Ctrl-C did.
   `--pace` paces the turns against wall time (`Board::run_until_paced`'s
-  pacing, the run the same whatever it is); Ctrl-C (SIGINT), through
+  pacing, the run the same whatever it is), and under `--gdb` the
+  stub's quanta while gdb has the board running: its `Target`'s
+  `run_for` waits at most one of the pacer's 20 ms slices and, still
+  ahead, runs nothing and returns `Quantum`, so the stub looks for
+  gdb's bytes and Ctrl-C is not held up by a slow factor.  `resume`
+  starts the pacing again, so a board gdb held stopped does not race
+  to catch up; a stop (any run that is not a plain quantum, or
+  `halt`) ends it, so steps are not paced
+  (`gdb_continuing_a_paced_board_keeps_its_pace`); Ctrl-C (SIGINT), through
   the board's control handle, ends the run at the next sync point, so
   the `stopped` record and `--save` still come.  A second Ctrl-C ends
   the process at once, exit status 130 (the shell's for SIGINT),
