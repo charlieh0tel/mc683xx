@@ -140,14 +140,14 @@ Crates:
   making a commit before moving onto something unrelated.
 - All tests must pass before committing.
 - Never use -a to commit; always enumerate the files.
-- Releases are `vX.Y.Z` tags (semver, `docs/releasing.md`); a
-  consumer (smartclock) pins a release or a commit.  Batch breaking
-  changes to public APIs and list each one precisely when it lands.
-  Tag a release only after `make ci`, `python`, `oracle`,
-  `singlestep`, `corpus`, `boot-smoke`, `boot-diff`,
-  `smartclock-boards` and `cargo publish --workspace --dry-run` all
-  pass.  A release's notes, its breaking changes first, go in its
-  GitHub release; `CHANGELOG.md` is a local working file, not tracked.
+- Releases are `vX.Y.Z` tags (semver, `docs/releasing.md`); a consumer
+  (smartclock) pins a release or a commit.  Batch breaking changes to
+  public APIs and list each one precisely when it lands.  Tag a
+  release only after `make ci`, `python`, `oracle`, `singlestep`,
+  `corpus`, `boot-smoke`, `boot-diff`, `smartclock-boards`, `wasm`,
+  `npm-test` and `cargo publish --workspace --dry-run` all pass.  A
+  release's notes, its breaking changes first, go in its GitHub
+  release; `CHANGELOG.md` is a local working file, not tracked.
 
 
 ## Programming Rules
