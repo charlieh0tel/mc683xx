@@ -113,9 +113,14 @@ Once, before the first release.
    check a branch.
 8. The `crates` job, after `gate` and `pypi`, runs `cargo publish
    --workspace` with a trusted-publishing token.
-   The first release only: that job fails, crates.io trusting no
-   workflow for a crate that does not exist yet, so publish by hand
-   from a clean checkout of the tag.  Cargo verifies each package by building it against the
+   A release that adds a crate, the first release among them: that
+   job fails, as a trusted
+   publishing token cannot create a crate, and it publishes nothing,
+   cargo checking every package first.  Publish by hand from a clean
+   checkout of the tag.  Each crate already published takes new
+   versions by trusted publishing only, so first turn off "require
+   trusted publishing" in each one's crates.io settings (Trusted
+   Publishing), and turn it back on after.  Cargo verifies each package by building it against the
    registry's copies of the crates before it, and a copy left unpacked
    in `~/.cargo/registry/src` by an earlier attempt is taken as it is,
    so start from none: remove `~/.cargo/registry/src/*/mc683xx-*`, or
@@ -130,9 +135,13 @@ Once, before the first release.
    Cargo uploads in dependency order, waiting for each crate to reach
    the index: `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`,
    `mc683xx-board`, `mc683xx-debug`, `mc683xx-gdb`,
-   `mc683xx-peripherals`, `mc683xx-run`.  If it stops partway, publish the rest one at a time
-   in that order with `cargo publish -p <crate>`.  Then revoke the
-   token and add the trusted publishers (Setup, step 3).
+   `mc683xx-peripherals`, `mc683xx-run`.  If it stops partway, go on
+   with `--exclude` for each crate already up (`cargo publish
+   --workspace --exclude mc683xx-target --locked`): a real publish
+   refuses a version already on crates.io before uploading anything
+   (a dry run only warns), and a crate's dependents need it published
+   first.  Then revoke the token, turn trusted publishing only back on,
+   and add the new crates' trusted publishers (Setup, step 3).
 9. Make a GitHub release from the tag with the notes.
 
 A broken release is yanked (`cargo yank`, PyPI's yank) and fixed in
