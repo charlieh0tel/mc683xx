@@ -173,22 +173,36 @@ impl Pacer {
             self.anchor = None;
             return Duration::ZERO;
         };
-        let anchor = match self.anchor {
-            Some(anchor) if anchor.factor == factor && anchor.board <= now => anchor,
-            _ => {
-                self.anchor = Some(Anchor {
-                    wall,
-                    board: now,
-                    factor,
-                });
-                return Duration::ZERO;
-            }
+        let Some(anchor) = self.anchored(now, factor, wall) else {
+            return Duration::ZERO;
         };
         let board = (now.0 - anchor.board.0) as f64 / PICOSECONDS_PER_SECOND as f64;
         Duration::try_from_secs_f64(board / factor)
             .ok()
             .and_then(|elapsed| anchor.wall.checked_add(elapsed))
             .map_or(Duration::MAX, |due| due.saturating_sub(wall))
+    }
+
+    /// The pacing's start at `factor`, or [`None`] if it starts again
+    /// here: at the first look, a change of factor, or a board time
+    /// behind the start (a restore).
+    fn anchored(&mut self, now: Time, factor: f64, wall: Duration) -> Option<Anchor> {
+        match self.anchor {
+            Some(anchor) if anchor.factor == factor && anchor.board <= now => Some(anchor),
+            _ => {
+                self.start(now, factor, wall);
+                None
+            }
+        }
+    }
+
+    /// Starts the pacing at `factor` from `now` and `wall`.
+    const fn start(&mut self, now: Time, factor: f64, wall: Duration) {
+        self.anchor = Some(Anchor {
+            wall,
+            board: now,
+            factor,
+        });
     }
 
     /// Waits until the board at `now` is no longer ahead under
