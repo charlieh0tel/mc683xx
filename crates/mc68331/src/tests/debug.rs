@@ -325,6 +325,26 @@ fn a_stop_the_host_asks_for_in_a_step_fails_it() {
     );
 }
 
+#[test]
+fn a_stop_the_host_asks_for_in_a_stepped_bgnd_fails_it() {
+    // BGND enters background mode itself (CPU32RM 7.2.2.2), before
+    // another cycle looks at the request
+    let (mut chip, request) = chip_and_stop(&[BGND, BRANCH_TO_SELF]);
+    chip.reset_halted().unwrap();
+    let at = Address(START);
+    chip.cpu_control().add_code_hook(at..=at, move |_| {
+        request.request();
+        ControlFlow::Continue(())
+    });
+    assert_eq!(chip.step(), Err(TargetError::Stopped));
+    chip.go().unwrap();
+    assert_ne!(
+        chip.run_for(Cycles(100)).stop,
+        Stop::Requested,
+        "the request taken"
+    );
+}
+
 /// The SIM's base (MC68331UM Table D-1).
 const SIM: u32 = 0xff_fa00;
 /// The GPT's base (MC68331UM Table D-1).
