@@ -1135,11 +1135,12 @@ impl Core<'_> {
                 self.cpu.spend(cost)
             }
             (Err(exception @ (Exception::Short { .. } | Exception::Long { .. })), None) => {
+                let trace = self.instruction_exception(exception, traced(true));
                 let cycles = match exception_cost(exception.vector(), opcode) {
                     ExceptionCost::InPlace(cost) => self.cpu.spend(cost),
                     ExceptionCost::Beyond(cycles) => instruction_cost(self.cpu) + cycles,
                 };
-                if self.instruction_exception(exception, traced(true)) {
+                if trace.is_some() {
                     cycles + self.cpu.spend(timing::exception::TRACE)
                 } else {
                     cycles
@@ -1230,8 +1231,13 @@ impl Core<'_> {
     /// An exception the instruction raised with a four- or six-word
     /// frame: group 3 before it executes, its registers untouched and
     /// untraced; group 2 as part of it, then the trace it is due if
-    /// `trace_pending` (CPU32RM 6.1.5, Table 6-2).  Whether it traced.
-    fn instruction_exception(&mut self, exception: Exception, trace_pending: bool) -> bool {
+    /// `trace_pending` (CPU32RM 6.1.5, Table 6-2).  What became of the
+    /// trace, if one followed.
+    fn instruction_exception(
+        &mut self,
+        exception: Exception,
+        trace_pending: bool,
+    ) -> Option<Processed> {
         let (vector, pc, faulted) = match exception {
             Exception::Short { vector, pc } => (vector, pc, None),
             Exception::Long {
@@ -1241,23 +1247,19 @@ impl Core<'_> {
             } => (vector, pc, Some(address)),
             Exception::Fault(fault) => {
                 self.instruction_fault(fault, self.cpu.previous_pc);
-                return false;
+                return None;
             }
         };
         if exception.before_execution() {
             self.restore_altered();
             self.process(vector, pc, faulted, None, false);
-            return false;
+            return None;
         }
         // Group 2 changes the flow to its handler; `rte`'s requeued
         // trace is itself the trace.
         let trace_pending = trace_pending && vector != Vector::TRACE;
         let processed = self.process(vector, pc, faulted, None, trace_pending);
-        if processed == Processed::Taken && trace_pending {
-            self.trace();
-            return true;
-        }
-        false
+        (processed == Processed::Taken && trace_pending).then(|| self.trace())
     }
 
     /// Samples the interrupt request and takes it if it is due: a level
