@@ -2139,6 +2139,10 @@ and `mc683xx.Machine` in Python (see Python).
     stacked before a stacking fault.
   - An interrupt whose stacking fault-stops was not taken: it is not a
     step (`LimitedRun::steps`) until it is taken on resume.
+  - Exception processing a fault stops is charged no clocks, its bus
+    cycles' none included: its clocks are charged once, when it is
+    taken on resume.  An instruction whose own exception's stacking
+    fault-stops is charged nothing, as one that faults.
   - The code and block hooks of an instruction a fault rolled back are
     not called again when it reruns; after a fault stacking a trace,
     breakpoint or interrupt, those of the instruction at PC, which has
@@ -3179,9 +3183,6 @@ checks move onto real code hooks.
 - Whether `smartclock-emu` moves off its feature gate once it uses this
   core.
 - Fault stops (Faults), left as they are for now:
-  - A trace, breakpoint or interrupt whose stacking fault-stops is
-    charged its exception's clocks, and charged again when it is
-    taken on resume.
   - No accessor shows or clears a pending trace, as
     `breakpoint_pending` does for a breakpoint.
   - A trace left pending while the CPU is halted or in background
