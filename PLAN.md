@@ -87,6 +87,9 @@ Out:
   modules into the chip.
 - `cpu32-py`: PyO3 bindings, the Python module `mc683xx` (see
   Python); `publish = false`, released as the PyPI wheel.
+- `mc683xx-wasm` (`crates/wasm`): `wasm-bindgen` bindings, a board
+  from JavaScript (see Open, WebAssembly); `publish = false` until
+  npm and crates.io are decided.
 - `examples` (`mc683xx-examples`, `publish = false`): the host
   guide, `docs/host-guide.md`, as its crate documentation, so its
   examples are doctests `make ci` runs.
@@ -3284,9 +3287,46 @@ checks move onto real code hooks.
     `fs::hard_link`); with neither, its cells are in memory from erased,
     so it runs there but cannot take an image from the host.
     Peripherals' path parameters (`Context::path`) have no host-supplied
-    bytes yet.  The demo board does not use it.
+    bytes yet: the bindings' `images` reach `[[memory]]` images alone,
+    and a board whose AT28C64B names an `image` throws as it loads.  The
+    demo board does not use it.
   - `mc683xx-debug`'s init scripts time a poll's timeout with
     `Instant::now()` (`script.rs`, `PollMemory`), which panics there;
     its image parsing takes bytes and reads no file.
-  - The bindings themselves (`wasm-bindgen` or a C ABI), the page, and
-    whether CI builds for wasm32.
+  - Whether CI builds for wasm32 and runs `make wasm`, and whether
+    `mc683xx-wasm` is published (npm, crates.io).
+  - The bindings cover a board's load, pacing, runs, its endpoints'
+    serial bytes, memories and snapshots; not the chip's registers and
+    bus, JavaScript peripherals, observers or tracing.
+
+  The bindings are `mc683xx-wasm` (`crates/wasm`, decided 2026-11-03):
+  `wasm-bindgen`, its version exact (`=0.2.130`) as the CLI that binds
+  the module must match it, its names the Python module's in
+  JavaScript's case.  One layer, not a Rust core under a JavaScript
+  one: each exported method takes and returns plain Rust types (`&str`,
+  `Vec<u8>`, `u64` as `BigInt`) and fails with the crate's `Error`,
+  which `wasm-bindgen` throws as a JavaScript `Error` with its
+  `Display` message, so the same methods are tested natively (`cargo
+  test`, `make ci`, with no wasm tools) and from Node (`make wasm`).
+  Where `wasm-bindgen` would take a JavaScript value silently wrong,
+  the exported method takes the `JsValue`, checks it with `js-sys` and
+  calls a Rust method of the same name the native tests call
+  (`run_for_js` calls `run_for`), its checks tested from Node: the
+  images' `Map` or object; picoseconds, a `bigint` that `wasm-bindgen`
+  would take modulo 2^64 (`runFor(-1n)` some 213 days), refused out of
+  0 to 2^64 - 1, and a `number` refused too, as `now` and `BoardRun.now`
+  are `bigint`s and a `number` past 2^53 is not exact.  A `Uint8Array`
+  or a `Map` is known by a built-in getter that checks an internal slot
+  (`%TypedArray%.prototype[%Symbol.toStringTag%]`, `Map.prototype.size`),
+  not by `instanceof` (`dyn_ref`), which compares constructors and so
+  refused another realm's (an iframe's, a `vm` context's); a plain
+  object by `typeof`, for the same reason.  A page runs a
+  board with `runFrame(performance.now(), picoseconds)` each animation
+  frame: `Board::run_frame` under the control's pacing,
+  bounded by the page's slice, so a hidden tab, whose frames stop, runs
+  one slice when it comes back and drops the rest of the time it
+  missed, its later frames paced from there.  The
+  board starts its frames' pacer again after a `runFor`, a `restore` or
+  a `setPacing`; else a restore forward or a long `runFor` would hold
+  the frames until the wall clock caught up.
+  `runFor` is unpaced, as a page cannot sleep.

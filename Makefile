@@ -1,6 +1,6 @@
 .PHONY: hooks ci fmt-check licenses hook-test clippy features test docs deny bench singlestep-data singlestep musashi oracle python corpus \
 	firmware-path corpus-musashi unicorn corpus-unicorn corpus-oracles boot-smoke \
-	boot-diff reference-path smartclock-boards gdb echo-image demo-image
+	boot-diff reference-path smartclock-boards gdb echo-image demo-image wasm
 
 # Once per clone: the commit-msg hook refuses AI attribution (AGENTS.md)
 # and pre-push uploads the Git LFS objects (.gitattributes).
@@ -205,3 +205,34 @@ smartclock-boards:
 gdb:
 	sh scripts/gdb-smoke.sh
 	sh scripts/gdb-demo.sh
+
+# The JavaScript bindings (crates/wasm, PLAN.md WebAssembly): the crate
+# for wasm32-unknown-unknown, linted there with the workspace crates it
+# depends on, bound by wasm-bindgen for Node (the tests, node:test) and
+# for a page (examples/web) into the ignored crates/wasm/pkg, then the
+# Node tests.  Not part of `ci`: it
+# needs the wasm32-unknown-unknown target, the wasm-bindgen CLI at the
+# crate's exact wasm-bindgen version, and Node 22 or later.
+WASM_BINDGEN ?= wasm-bindgen
+WASM_PACKAGE := crates/wasm/pkg
+# Cargo's target directory, as cargo metadata gives it (absolute):
+# CARGO_TARGET_DIR or a configured one, else the workspace's target/.
+# Read once, when a recipe first needs it, not for every make: the first
+# use sets it.  The eval parses only the assignment, never the path,
+# which takes its value as it is, `#` and `$` and all; recipes quote it
+# (quote), so a space in it is one argument.
+TARGET_DIR_READ = $(or $(shell cargo metadata --format-version 1 --no-deps \
+	| node -p 'JSON.parse(require("node:fs").readFileSync(0, "utf8")).target_directory'), \
+	$(error no target directory from cargo metadata))
+TARGET_DIR = $(eval TARGET_DIR := $$(TARGET_DIR_READ))$(TARGET_DIR)
+# $(1) as one shell word: single-quoted, each ' in it closed, escaped
+# and reopened.
+quote = '$(subst ','\'',$(1))'
+WASM_MODULE = $(TARGET_DIR)/wasm32-unknown-unknown/release/mc683xx_wasm.wasm
+
+wasm:
+	cargo clippy --target wasm32-unknown-unknown -p mc683xx-wasm -- -D warnings
+	cargo build --release --target wasm32-unknown-unknown -p mc683xx-wasm
+	$(WASM_BINDGEN) --target nodejs --out-dir $(WASM_PACKAGE)/nodejs $(call quote,$(WASM_MODULE))
+	$(WASM_BINDGEN) --target web --out-dir $(WASM_PACKAGE)/web $(call quote,$(WASM_MODULE))
+	node --test crates/wasm/tests/*.test.mjs

@@ -20,6 +20,8 @@ Crates:
 - `mc683xx-mc68331` (`crates/mc68331`): GPT; composes the core and the
   modules into the chip.
 - `cpu32-py`: PyO3 bindings.
+- `mc683xx-wasm` (`crates/wasm`): `wasm-bindgen` bindings, a board
+  from JavaScript; `make wasm` builds and tests them.
 - `mc683xx-board` (`crates/mc68331-board`): board files, peripherals from a
   registry, nets, board time and the run loop, generic over the chip
   (`chip::Chip`, the MC68331's impl its `mc68331` module).
