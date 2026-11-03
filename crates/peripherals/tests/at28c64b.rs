@@ -12,7 +12,6 @@ use mc683xx_board::board::Board;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
-use mc683xx_board::registry::Registry;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
 
@@ -123,8 +122,7 @@ fn the_cpu_writes_a_byte_and_polls_it_to_the_end_of_its_write_cycle() {
     fs::create_dir_all(&directory).unwrap();
     fs::write(directory.join("rom.bin"), image(&program())).unwrap();
     let description = Description::parse(BOARD, &directory, &Options::default()).unwrap();
-    let mut registry = Registry::with_builtins();
-    mc683xx_peripherals::register(&mut registry).unwrap();
+    let registry = mc683xx_peripherals::registry();
     let mut board =
         Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
 

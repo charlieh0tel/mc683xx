@@ -67,10 +67,8 @@ fn read(path: &Path) -> io::Result<Vec<u8>> {
 /// `text`.
 fn take_console(board: &mut Board<Mc68331>, text: &mut String) {
     for (_, signal) in board.take_received(CONSOLE).unwrap() {
-        if let Signal::Serial(Serial {
-            frame: Frame::Data(data),
-            ..
-        }) = signal
+        if let Signal::Serial(serial) = signal
+            && let Some(data) = serial.frame.data()
         {
             text.push(char::from(u8::try_from(data).expect("8-bit frames")));
         }

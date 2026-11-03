@@ -1600,3 +1600,9 @@ fn batched_entries_show_what_entry_by_entry_does() {
         assert!(seen < per_phase, "{quanta:?}");
     }
 }
+
+#[test]
+fn a_frame_s_data_is_its_bits_and_none_for_a_break() {
+    assert_eq!(Frame::Data(0x1a5).data(), Some(0x1a5));
+    assert_eq!(Frame::Break.data(), None);
+}

@@ -4,7 +4,6 @@
 use std::io;
 use std::path::PathBuf;
 
-use mc683xx_board::registry::RegistryError;
 use mc683xx_cpu32::cpu::state::StateError;
 
 /// Why the runner could not run, or finish, a board.
@@ -13,9 +12,6 @@ pub(crate) enum RunError {
     /// The board file, or its loading.
     #[error(transparent)]
     Board(#[from] mc683xx_board::error::LoadError),
-    /// The stock peripherals' registration (`mc683xx-peripherals`).
-    #[error(transparent)]
-    Registry(#[from] RegistryError),
     /// A run that could not go on: a peripheral stalled the board.
     #[error(transparent)]
     Run(#[from] mc683xx_board::error::RunError),

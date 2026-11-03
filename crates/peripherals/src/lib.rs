@@ -3,8 +3,9 @@
 //!
 //! Models of commercial peripherals, each from its maker's datasheet
 //! ([PLAN.md, Stock peripherals]); [`docs/peripherals.md`] is their
-//! guide.  [`register`] adds them to a [`Registry`] and [`names`] lists
-//! them.  Board-specific logic stays with the consumer.
+//! guide.  [`registry`] is the built-in types and them, [`register`]
+//! adds them to a [`Registry`] and [`names`] lists them.
+//! Board-specific logic stays with the consumer.
 //!
 //! # Examples
 //!
@@ -19,12 +20,10 @@
 //! use mc683xx_board::description::Description;
 //! use mc683xx_board::description::Options;
 //! use mc683xx_board::registry::Environment;
-//! use mc683xx_board::registry::Registry;
 //! use mc683xx_board::signal::Signal;
 //! use mc683xx_board::time::Time;
 //!
-//! let mut registry = Registry::with_builtins();
-//! mc683xx_peripherals::register(&mut registry)?;
+//! let registry = mc683xx_peripherals::registry();
 //! assert!(mc683xx_peripherals::names().any(|name| name == "74x374"));
 //!
 //! let text = r#"
@@ -110,7 +109,43 @@ pub fn register(registry: &mut Registry) -> Result<(), RegistryError> {
     Ok(())
 }
 
+/// A registry of the built-in types ([`Registry::with_builtins`]) and
+/// the stock ones: what a host needs for a board file with none of its
+/// own types.
+#[must_use]
+#[expect(
+    clippy::missing_panics_doc,
+    reason = "no stock type declares a port twice: a test builds it"
+)]
+pub fn registry() -> Registry {
+    let mut registry = Registry::with_builtins();
+    register(&mut registry).expect("each stock type declares each port once");
+    registry
+}
+
 /// The stock types' names.
 pub fn names() -> impl Iterator<Item = &'static str> {
     STOCK.iter().map(|(name, _)| *name)
+}
+
+#[cfg(test)]
+mod tests {
+    use mc683xx_board::registry::Registry;
+
+    use super::names;
+    use super::registry;
+
+    #[test]
+    fn the_registry_holds_the_builtins_and_every_stock_type() {
+        let registry = registry();
+        for name in names() {
+            assert!(registry.get(name).is_some(), "{name}");
+        }
+        assert!(registry.get("recorder").is_some());
+        assert!(
+            Registry::with_builtins()
+                .get(names().next().unwrap())
+                .is_none()
+        );
+    }
 }

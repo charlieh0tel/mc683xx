@@ -4,6 +4,7 @@
 //! sent to the [`Bus`]; the run loop takes exceptions, traces and
 //! interrupts between instructions (CPU32RM 6).
 
+use std::fmt;
 use std::mem;
 
 use crate::bus::Bus;
@@ -78,6 +79,24 @@ pub enum Stop {
     /// or the exception processing after one, began:
     /// [`Cpu::fault_stop`] says which fault.
     Fault,
+}
+
+/// A short lowercase name for each kind of stop, for a host to branch
+/// on: `budget`, `stopped`, `halted`, `hook`, `requested`, `background`
+/// or `fault`.  The detail a variant holds (the halt, the hook, the
+/// entry) is not part of it.
+impl fmt::Display for Stop {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Budget => "budget",
+            Self::Stopped => "stopped",
+            Self::Halted(_) => "halted",
+            Self::Hook(_) => "hook",
+            Self::Requested => "requested",
+            Self::Background(_) => "background",
+            Self::Fault => "fault",
+        })
+    }
 }
 
 /// Why the CPU halted.
@@ -2013,6 +2032,7 @@ mod tests {
     use mc683xx_target::function_code::FunctionCode;
     use mc683xx_target::size::Size;
     use std::cell::Cell;
+    use std::ops::ControlFlow;
     use std::rc::Rc;
 
     /// The supervisor stack's top.
@@ -2627,6 +2647,24 @@ mod tests {
         cpu.set_breakpoint_pending(true);
         let _ = cpu.reset(&mut NoBus, Cycles::ZERO);
         assert!(!cpu.breakpoint_pending());
+    }
+
+    #[test]
+    fn each_stop_prints_its_name() {
+        let mut cpu = Cpu::new(Memory::new(24).unwrap());
+        let hook = cpu.add_code_hook(Address(0)..=Address(0), |_| ControlFlow::Continue(()));
+        let names = [
+            (Stop::Budget, "budget"),
+            (Stop::Stopped, "stopped"),
+            (Stop::Halted(Halt::DoubleBusFault), "halted"),
+            (Stop::Hook(hook), "hook"),
+            (Stop::Requested, "requested"),
+            (Stop::Background(Entry::Background), "background"),
+            (Stop::Fault, "fault"),
+        ];
+        for (stop, name) in names {
+            assert_eq!(stop.to_string(), name);
+        }
     }
 
     #[test]

@@ -1744,6 +1744,15 @@ to = ["chip.PGP0"]
         "external.pps drives edge nets only, which do not carry the value"
     );
     assert_eq!(board.send("pps", Signal::Level(false)), Ok(()));
+    // checked alike, sending nothing
+    for (name, signal) in [("nobody", frame), ("scope", frame), ("pps", frame)] {
+        assert_eq!(
+            board.check_send(name, &signal),
+            Err(board.send(name, signal).unwrap_err()),
+            "{name}"
+        );
+    }
+    assert_eq!(board.check_send("pps", &Signal::Level(true)), Ok(()));
     assert_eq!(
         board.take_received("nobody"),
         Err(ReceiveError::Endpoint("nobody".to_owned()))

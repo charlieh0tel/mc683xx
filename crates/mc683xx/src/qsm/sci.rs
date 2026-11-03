@@ -102,6 +102,18 @@ pub enum Frame {
     Break,
 }
 
+impl Frame {
+    /// A data frame's bits, as [`Frame::Data`] holds them; [`None`] for
+    /// a break.
+    #[must_use]
+    pub const fn data(self) -> Option<u16> {
+        match self {
+            Self::Data(data) => Some(data),
+            Self::Break => None,
+        }
+    }
+}
+
 /// A frame the SCI sent on TXD, as the shifter took it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]

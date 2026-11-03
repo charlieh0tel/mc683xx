@@ -750,7 +750,8 @@ frame time at SCCR0's baud.  `take_sci_transmitted()` gives the frames
 the SCI sent on TXD as each starts, a `Transmitted`: the `frame`, its
 `start` and `end`, and `bit`, the system clocks in its bit time.  `Frame::Data(bits)` carries the
 data bits as on the line, LSB first, eight or nine, parity included;
-`Frame::Break` a break.
+`Frame::Break` a break; `Frame::data()` gives a frame's bits, `None`
+for a break.
 
 ```rust
 use mc683xx_cpu32::cycles::Cycles;
@@ -787,7 +788,7 @@ chip.sci_receive(Frame::Data(u16::from(b'!')));
 chip.run_for(Cycles(2000));
 let sent = chip.take_sci_transmitted();
 assert_eq!(sent.len(), 1);
-assert_eq!(sent[0].frame, Frame::Data(u16::from(b'!')));
+assert_eq!(sent[0].frame.data(), Some(u16::from(b'!')));
 assert!(sent[0].start < sent[0].end);
 ```
 
@@ -1383,9 +1384,11 @@ every method of the chip's.
   endpoints (`external.switch`): `Board::externals()` lists them and
   `Board::send(name, signal)` drives one now, between runs, after the
   inputs the control (below) holds, so a queued input never lands
-  after a later direct one; `Board::take_received(name)` gives what
-  reached one since the last call, with each value's time, and fails
-  (`ReceiveError::Endpoint`) for an endpoint no net drives.
+  after a later direct one, and `Board::check_send(name, &signal)`
+  fails as that send would, sending nothing;
+  `Board::take_received(name)` gives what reached one since the last
+  call, with each value's time, and fails (`ReceiveError::Endpoint`)
+  for an endpoint no net drives.
 - **Control from another thread.**  `Board::control() ->
   control::BoardControl` is the board's thread-safe handle (`Send`,
   `Sync`, cheap to `Clone`; every call gives a handle to the one
@@ -1440,7 +1443,6 @@ use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
 use mc683xx_board::inspect::Value;
 use mc683xx_board::registry::Environment;
-use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
 
@@ -1485,8 +1487,7 @@ from = "external.switch"
 to = ["chip.PGP1"]
 "#;
 let description = Description::parse(text, Path::new("."), &Options::default()).unwrap();
-let mut registry = Registry::with_builtins();
-mc683xx_peripherals::register(&mut registry).unwrap();
+let registry = mc683xx_peripherals::registry();
 let mut board = Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
 let rises = Rc::new(RefCell::new(Vec::new()));
 let seen = Rc::clone(&rises);

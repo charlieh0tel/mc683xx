@@ -28,7 +28,6 @@ use mc683xx_board::signal::Direction;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_peripherals::register;
 
 /// The variable naming the directory.
 const BOARDS: &str = "SMARTCLOCK_BOARDS";
@@ -186,8 +185,7 @@ fn registry(path: &Path) -> Registry {
             }
         }
     }
-    let mut registry = Registry::with_builtins();
-    register(&mut registry).expect("the stock types");
+    let mut registry = mc683xx_peripherals::registry();
     for type_name in types.values() {
         if registry.get(type_name).is_some() {
             continue;
