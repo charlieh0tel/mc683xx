@@ -800,6 +800,15 @@ assert chip.read_memory(ram, 0, 2) == b"\x00\x00"
 assert any(isinstance(event, mc683xx.Event.Exception) for event in chip.take_events())
 ```
 
+`set_stop_on_fault(True)` (`stops_on_fault`; on a board's
+`board.chip` too) stops a run at a bus or address error, the bus
+monitor's included, instead of taking it: the run ends
+`Stop.Fault()`, nothing stacked, the registers as the instruction
+began, and `fault_stop`, a `FaultStop` (Bare CPU, Exceptions and
+faults), says which cycle faulted, until the next run.  The
+instruction reruns when the run goes on, so a peripheral it read or
+wrote before the fault sees those cycles again.
+
 ## Save and restore
 
 `save() -> bytes` is the chip's whole state; `restore(snapshot)` puts

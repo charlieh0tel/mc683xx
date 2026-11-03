@@ -47,6 +47,7 @@ use pyo3::pymethods;
 use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
 
+use crate::bare::FaultStopView;
 use crate::board::BoardView;
 use crate::error::Error;
 use crate::gdb;
@@ -1068,6 +1069,30 @@ macro_rules! chip_methods {
             /// Removes `hook`; whether it was installed.
             fn remove_hook(&mut self, py: Python<'_>, hook: &HookIdView) -> PyResult<bool> {
                 self.with_chip_mut(py, |chip, _| Ok(chip.cpu_control().remove_hook(hook.0)))
+            }
+
+            /// Whether a bus or address error, the bus monitor's
+            /// included, stops the run (`Stop.Fault()`) rather than
+            /// being taken as an exception, a fault while stacking
+            /// included (no double bus fault).  Off at first.
+            fn set_stop_on_fault(&mut self, py: Python<'_>, stop: bool) -> PyResult<()> {
+                self.with_chip_mut(py, |chip, _| {
+                    chip.cpu_control().set_stop_on_fault(stop);
+                    Ok(())
+                })
+            }
+
+            /// Whether a fault stops the run (`set_stop_on_fault`).
+            #[getter]
+            fn stops_on_fault(&self, py: Python<'_>) -> PyResult<bool> {
+                self.with_chip(py, |chip| Ok(chip.cpu().stops_on_fault()))
+            }
+
+            /// The fault the last run stopped for (`Stop.Fault()`),
+            /// until the next run starts; `None` if none did.
+            #[getter]
+            fn fault_stop(&self, py: Python<'_>) -> PyResult<Option<FaultStopView>> {
+                self.with_chip(py, |chip| Ok(chip.cpu().fault_stop().cloned().map(FaultStopView)))
             }
 
             /// Sets the permissions of `length` bytes from `start` in
