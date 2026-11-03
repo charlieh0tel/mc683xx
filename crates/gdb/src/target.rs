@@ -88,9 +88,9 @@ pub enum TargetRun {
     Halted,
     /// The host or a peripheral asked it to stop.
     Requested,
-    /// A fault stopped it rather than being taken (the bare CPU's
-    /// [`Cpu::set_stop_on_fault`]), or an intercepted exception did
-    /// ([`Cpu::set_intercepted`]).
+    /// A fault stopped it rather than being taken
+    /// ([`Cpu::set_stop_on_fault`]), or an intercepted exception did
+    /// (the bare CPU's [`Cpu::set_intercepted`]).
     ///
     /// [`Cpu::set_stop_on_fault`]: mc683xx_cpu32::cpu::Cpu::set_stop_on_fault
     /// [`Cpu::set_intercepted`]: mc683xx_cpu32::cpu::Cpu::set_intercepted
@@ -108,6 +108,7 @@ impl From<Stop> for TargetRun {
             Stop::Budget | Stop::Stopped => Self::Quantum,
             Stop::Halted(_) | Stop::Background(_) => Self::Halted,
             Stop::Hook(_) => Self::Hook,
+            Stop::Fault => Self::Fault,
             _ => Self::Requested,
         }
     }

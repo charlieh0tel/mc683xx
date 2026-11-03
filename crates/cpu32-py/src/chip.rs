@@ -429,6 +429,9 @@ pub(crate) enum Stop {
     Requested(),
     /// The CPU is in background mode, for its entry source.
     Background(Entry),
+    /// A fault stopped it rather than being taken (`set_stop_on_fault`):
+    /// `fault_stop` says which.
+    Fault(),
 }
 
 /// Why the CPU entered background mode (Rust's
@@ -471,6 +474,7 @@ impl From<cpu::Stop> for Stop {
             cpu::Stop::Halted(halt) => Self::Halted(halt.into()),
             cpu::Stop::Hook(id) => Self::Hook(HookIdView(id)),
             cpu::Stop::Background(entry) => Self::Background(entry.into()),
+            cpu::Stop::Fault => Self::Fault(),
             _ => Self::Requested(),
         }
     }

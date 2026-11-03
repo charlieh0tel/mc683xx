@@ -73,6 +73,11 @@ pub enum Stop {
     /// (CPU32RM 7.2.3); only a debugger's GO, CALL or a reset resumes
     /// it.
     Background(Entry),
+    /// A fault stopped it rather than being taken
+    /// ([`Cpu::set_stop_on_fault`]), the registers as the instruction,
+    /// or the exception processing after one, began:
+    /// [`Cpu::fault_stop`] says which fault.
+    Fault,
 }
 
 /// Why the CPU halted.

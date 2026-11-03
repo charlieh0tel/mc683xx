@@ -97,6 +97,20 @@ fn a_fault_stops_the_run_with_the_registers_as_the_instruction_began() {
 }
 
 #[test]
+fn a_fault_stop_is_kept_until_the_next_run() {
+    let mut machine = machine(&[MOVE_LONG_A0_TO_D0, NOP]);
+    machine.cpu.set_stop_on_fault(true);
+    machine.cpu.registers.set_address(0, NOWHERE);
+    let End::Fault(fault) = one(&mut machine) else {
+        panic!("no fault");
+    };
+    assert_eq!(machine.cpu.fault_stop(), Some(&fault));
+    machine.cpu.registers.set_address(0, STACK);
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.fault_stop(), None);
+}
+
+#[test]
 fn a_protected_page_and_an_odd_address_say_so() {
     let mut machine = machine(&[MOVE_WORD_A0_TO_D0]);
     machine.cpu.set_stop_on_fault(true);

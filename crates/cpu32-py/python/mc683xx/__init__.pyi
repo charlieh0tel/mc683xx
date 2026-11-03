@@ -164,6 +164,16 @@ class Stop:
         @property
         def _0(self) -> Entry: ...
 
+    @final
+    class Fault(Stop):
+        """A fault stopped it rather than being taken
+        (`set_stop_on_fault`): `fault_stop` says which."""
+
+        __match_args__ = ()
+        def __new__(cls) -> Stop.Fault: ...
+        def __len__(self) -> int: ...
+        def __getitem__(self, key: int, /) -> object: ...
+
 @disjoint_base
 class Entry:
     """Why the CPU entered background mode (CPU32RM Table 7-2)."""
