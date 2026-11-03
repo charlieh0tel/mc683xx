@@ -819,6 +819,43 @@ fn a_trace_left_pending_by_the_host_is_taken_or_withdrawn() {
 }
 
 #[test]
+fn a_fault_rewriting_rte_s_faulted_frame_stops_rather_than_halting() {
+    let mut machine = machine(&[RTE, NOP]);
+    machine.cpu.set_stop_on_fault(true);
+    // a type IV frame (CPU32RM 6.3.1.4, Figure 6-8) for a trace's
+    // six-word frame, which RTE rewrites above it, into a read-only page
+    let page = STACK - PAGE_BYTES;
+    let frame_at = page - 24;
+    let words = [
+        status::S,
+        0,
+        (CODE + 2) as u16,
+        format::word(format::BUS_ERROR, Vector::BUS_ERROR),
+        0,
+        0,
+        status::S,
+        format::word(format::SIX_WORD, Vector::TRACE),
+        0,
+        CODE as u16,
+        u16::from(MICROCODE_REVISION) << 8,
+        ssw::TP | ssw::RW,
+    ];
+    let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_be_bytes()).collect();
+    machine.write(Address(frame_at), &bytes).unwrap();
+    machine.cpu.registers.ssp = frame_at;
+    machine
+        .protect(Address(page), PAGE_BYTES, Permissions::READ)
+        .unwrap();
+    let End::Fault(fault) = one(&mut machine) else {
+        panic!("no fault stop");
+    };
+    assert_eq!(fault.cycle, CycleKind::Write);
+    assert_eq!(fault.registers.pc, CODE, "the RTE undone");
+    assert_eq!(fault.registers.ssp, frame_at);
+    assert_eq!(machine.cpu.halted(), None);
+}
+
+#[test]
 fn reset_drops_a_pending_trace() {
     let mut machine = traced_addq();
     one(&mut machine);

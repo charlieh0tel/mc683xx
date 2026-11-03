@@ -2114,7 +2114,8 @@ and `mc683xx.Machine` in Python (see Python).
   address; nothing stacked.  `Cpu::fault_stop` holds it until the next
   run starts.  A fault while stacking (a bad SSP) stops the same
   way instead of a double bus fault, so the host fixes SSP and goes on
-  with no reset.  What the stop keeps:
+  with no reset, and so does one in `rte` loading a format $C frame
+  or rewriting its faulted frame (6.2.12): the RTE is undone.  What the stop keeps:
   - A fault in an instruction, its own exception's stacking included
     (a TRAP's, a CHK's), rolls the registers back to its start: it
     reruns, as a TRAP does, when the run goes on.
