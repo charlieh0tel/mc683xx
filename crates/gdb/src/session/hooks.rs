@@ -117,9 +117,8 @@ impl<T: Target> Session<'_, T> {
                 break;
             }
         }
+        let watched = watched.filter(|_| self.survives(ran));
         Ok(match (watched, ran) {
-            // the fault undid what the watched access was part of
-            (_, TargetRun::Fault) => signaled(ran),
             (Some(hit), _) => stop_reason(hit),
             (None, TargetRun::Quantum | TargetRun::Hook) => SingleThreadStopReason::DoneStep,
             (None, other) => signaled(other),

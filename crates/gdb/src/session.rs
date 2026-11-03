@@ -198,9 +198,8 @@ impl<T: Target> Session<'_, T> {
         let ran = self
             .target
             .run_for(QUANTUM, &move || hits.get().is_some())?;
-        // a fault stop first: it undid what a watched access was part of
         if let Some(hit) = self.hit.take()
-            && ran != TargetRun::Fault
+            && self.survives(ran)
         {
             self.going = None;
             return Ok(Some(stop_reason(hit)));
@@ -209,6 +208,20 @@ impl<T: Target> Session<'_, T> {
             TargetRun::Quantum => Ok(None),
             other => self.stopped(other).map(Some),
         }
+    }
+
+    /// Whether a hit in the run that ended `ran` stands: unless a fault
+    /// stop undid the instruction it was in.  A hit stops the run as
+    /// its instruction ends, so a fault after it in the run is one
+    /// stacking that instruction's trace, which keeps the instruction
+    /// and leaves the trace pending (PLAN.md, Faults); any other undid
+    /// it.
+    fn survives(&mut self, ran: TargetRun) -> bool {
+        ran != TargetRun::Fault
+            || self
+                .target
+                .with_cpu(|cpu| cpu.trace_pending().is_some())
+                .unwrap_or(false)
     }
 
     /// gdb's view of how the target stopped, the stop taken: for an
