@@ -15,6 +15,7 @@ use std::path::PathBuf;
 
 use crate::mapped::port_size;
 use mc683xx_board::board::Board;
+use mc683xx_board::board::BoardRun;
 use mc683xx_board::board::BoardStopRequest;
 use mc683xx_board::board::BoardTracing;
 use mc683xx_board::board::External;
@@ -1225,6 +1226,15 @@ impl BoardRunView {
     }
 }
 
+impl From<BoardRun> for BoardRunView {
+    fn from(run: BoardRun) -> Self {
+        Self {
+            stop: run.stop.into(),
+            now: run.now.0,
+        }
+    }
+}
+
 /// A board, from its file, as Python runs it.
 #[pyclass(name = "Board", module = "mc683xx", unsendable)]
 pub(crate) struct BoardView {
@@ -1308,10 +1318,7 @@ impl BoardView {
             Err(raised) => return Err(self.pending.after(raised)),
         };
         let run = outcome.map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-        Ok(BoardRunView {
-            stop: run.stop.into(),
-            now: run.now.0,
-        })
+        Ok(run.into())
     }
 }
 
