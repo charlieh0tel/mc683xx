@@ -211,7 +211,8 @@ gdb:
 # depends on, and built as the npm package (npm-package), which npm-test
 # tests.  Not part of `ci`: it needs the wasm32-unknown-unknown target,
 # the wasm-bindgen CLI at the crate's exact wasm-bindgen version, and
-# Node 22.12 or later.
+# Node 22.12 or later.  CI's `wasm` job runs it and npm-test, with the
+# CLI scripts/install-wasm-bindgen.sh installs.
 WASM_BINDGEN ?= wasm-bindgen
 # Cargo's target directory, as cargo metadata gives it (absolute):
 # CARGO_TARGET_DIR or a configured one, else the workspace's target/.

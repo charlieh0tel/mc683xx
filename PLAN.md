@@ -3293,8 +3293,7 @@ checks move onto real code hooks.
   - `mc683xx-debug`'s init scripts time a poll's timeout with
     `Instant::now()` (`script.rs`, `PollMemory`), which panics there;
     its image parsing takes bytes and reads no file.
-  - Whether CI builds for wasm32 and runs `make wasm`, and whether
-    `mc683xx-wasm` is published (npm, crates.io).
+  - Whether `mc683xx-wasm` is published (npm, crates.io).
   - The bindings cover a board's load, pacing, runs, its endpoints'
     serial bytes, memories and snapshots; not the chip's registers and
     bus, JavaScript peripherals, observers or tracing.
@@ -3358,4 +3357,7 @@ checks move onto real code hooks.
   measured, it gained nothing after gzip; `--remove-name-section`
   strips the names instead.  `make npm-test` tests the package as
   installed from its tarball: the Node tests by its name, ES and
-  CommonJS, and a bare page in headless Chrome, offline.
+  CommonJS, and a bare page in headless Chrome, offline.  CI's `wasm`
+  job runs `make wasm` and `make npm-test`, with wasm-bindgen's prebuilt
+  release binary (`scripts/install-wasm-bindgen.sh`, its SHA-256
+  checked) rather than a `cargo install` that builds it for minutes.
