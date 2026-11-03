@@ -1456,3 +1456,20 @@ def test_a_bus_peripheral_decodes_its_own_window():
         (None, window + 1, 1),
         (None, window + 2, 2),
     ], "no select; DSACK0 splits the even word"
+
+
+def test_a_fault_stop_ends_the_chip_s_run_with_the_instruction_undone():
+    # MOVE.W $401,D0: an odd address (CPU32RM 6.2.3)
+    chip = booting(load_word(START + 1, 0)).build()
+    assert not chip.stops_on_fault
+    chip.set_stop_on_fault(True)
+    assert chip.stops_on_fault
+    run = chip.run_for(1000)
+    assert run.stop == mc683xx.Stop.Fault()
+    fault = chip.fault_stop
+    assert (fault.cycle, fault.cause) == (mc683xx.CycleKind.READ, mc683xx.FaultCause.ADDRESS_ERROR)
+    assert (fault.address, fault.pc) == (START + 1, START)
+    assert chip.registers()["PC"] == START
+    chip.set_stop_on_fault(False)
+    assert chip.run_for(1000).stop != mc683xx.Stop.Fault()
+    assert chip.fault_stop is None

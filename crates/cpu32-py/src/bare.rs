@@ -136,11 +136,11 @@ impl From<FaultCause> for FaultCauseKind {
     }
 }
 
-/// A fault that stopped a run, as `End.Fault` carries it (Rust's
-/// `bare::FaultStop`).
+/// A fault that stopped a run (`set_stop_on_fault`), as `End.Fault`
+/// and a chip's `fault_stop` carry it (Rust's `bare::FaultStop`).
 #[pyclass(name = "FaultStop", module = "mc683xx", frozen, eq, from_py_object)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct FaultStopView(FaultStop);
+pub(crate) struct FaultStopView(pub(crate) FaultStop);
 
 #[pymethods]
 impl FaultStopView {
