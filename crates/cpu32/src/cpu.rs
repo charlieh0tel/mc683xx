@@ -1255,9 +1255,13 @@ impl Core<'_> {
             self.process(vector, pc, faulted, None, false);
             return None;
         }
-        // Group 2 changes the flow to its handler; `rte`'s requeued
-        // trace is itself the trace.
-        let trace_pending = trace_pending && vector != Vector::TRACE;
+        if let Some(address) = faulted.filter(|_| vector == Vector::TRACE) {
+            // `rte`'s requeued trace (6.3.2.2), the RTE complete: a
+            // trace of its own, which a fault stop leaves pending
+            self.trace_at(address);
+            return None;
+        }
+        // Group 2 changes the flow to its handler.
         let processed = self.process(vector, pc, faulted, None, trace_pending);
         (processed == Processed::Taken && trace_pending).then(|| self.trace())
     }

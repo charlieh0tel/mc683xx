@@ -2144,8 +2144,8 @@ and `mc683xx.Machine` in Python (see Python).
     breakpoint or interrupt, those of the instruction at PC, which has
     not begun, are called as it does.
   - A trace RTE requeues from a format $C frame's TR (6.3.2.2) is
-    the RTE's own exception: a fault stacking it rolls the RTE back,
-    and the RTE reruns.
+    kept as any trace is: a fault stacking it keeps the RTE, its
+    rerun cycle not made again, and leaves the trace pending.
 - **Intercepts:** `set_intercepted(vector)`: an exception an
   instruction raises (traps, illegal, line A and F, privilege, zero
   divide, CHK, TRAPV, format error; not faults, trace or interrupts)
@@ -3179,10 +3179,6 @@ checks move onto real code hooks.
 - Whether `smartclock-emu` moves off its feature gate once it uses this
   core.
 - Fault stops (Faults), left as they are for now:
-  - A trace RTE requeues from TR is rolled back with the RTE, so an
-    RTE with RR set reruns its released write when it reruns.
-    Whether to keep the RTE and leave the trace pending, as for any
-    other trace.
   - A trace, breakpoint or interrupt whose stacking fault-stops is
     charged its exception's clocks, and charged again when it is
     taken on resume.
