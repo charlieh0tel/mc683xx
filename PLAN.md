@@ -2138,7 +2138,10 @@ and `mc683xx.Machine` in Python (see Python).
   - Writes made before the fault stay in memory, and so do frame words
     stacked before a stacking fault.
   - An interrupt whose stacking fault-stops was not taken: it is not a
-    step (`LimitedRun::steps`) until it is taken on resume.
+    step (`LimitedRun::steps`) until it is taken on resume.  A trace
+    left pending is a step of its own when the next run takes it, as
+    it starts, up to its handler; a halted CPU, or one in background
+    mode, keeps it until the run after `Cpu::resume`.
   - Exception processing a fault stops is charged no clocks, its bus
     cycles' none included: its clocks are charged once, when it is
     taken on resume.  An instruction whose own exception's stacking
@@ -3185,6 +3188,3 @@ checks move onto real code hooks.
 - Fault stops (Faults), left as they are for now:
   - No accessor shows or clears a pending trace, as
     `breakpoint_pending` does for a breakpoint.
-  - A trace left pending while the CPU is halted or in background
-    mode is taken on the first run after; the BDM step path with one
-    pending is untested.
