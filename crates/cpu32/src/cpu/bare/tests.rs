@@ -105,6 +105,10 @@ fn a_fault_stop_is_kept_until_the_next_run() {
         panic!("no fault");
     };
     assert_eq!(machine.cpu.fault_stop(), Some(&fault));
+    assert_eq!(
+        fault.to_string(),
+        "bus error: read of 4 bytes at 0x90000000, fc 5, pc 0x00001000"
+    );
     machine.cpu.registers.set_address(0, STACK);
     assert_eq!(one(&mut machine), End::Instructions);
     assert_eq!(machine.cpu.fault_stop(), None);

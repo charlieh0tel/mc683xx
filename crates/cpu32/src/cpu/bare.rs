@@ -8,6 +8,7 @@
 //!
 //! [PLAN.md, Bare CPU]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#bare-cpu
 
+use std::fmt;
 use std::mem;
 
 use super::Cpu;
@@ -74,6 +75,17 @@ pub enum FaultCause {
     AddressError,
 }
 
+/// `bus error`, `protected` or `address error`.
+impl fmt::Display for FaultCause {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::BusError => "bus error",
+            Self::Protected => "protected",
+            Self::AddressError => "address error",
+        })
+    }
+}
+
 /// A fault that stopped the run ([`Cpu::set_stop_on_fault`]): nothing
 /// stacked.  A fault in an instruction, its own exception's stacking
 /// included, rolls the registers back to its start.  A fault stacking
@@ -99,6 +111,23 @@ pub struct FaultStop {
     /// The registers as the instruction, or the exception processing
     /// after one, began, as the CPU holds them again.
     pub registers: Registers,
+}
+
+/// The cause, then the cycle: `bus error: write of 2 bytes at
+/// 0x90000000, fc 5, pc 0x00001000`.
+impl fmt::Display for FaultStop {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{}: {} of {} bytes at {}, fc {}, pc {}",
+            self.cause,
+            self.cycle,
+            self.size.bytes(),
+            self.address,
+            self.function_code,
+            Address(self.registers.pc)
+        )
+    }
 }
 
 /// An exception an instruction raised that the host intercepts

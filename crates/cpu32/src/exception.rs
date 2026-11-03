@@ -105,6 +105,17 @@ pub enum CycleKind {
     Write,
 }
 
+/// `fetch`, `read` or `write`.
+impl fmt::Display for CycleKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Fetch => "fetch",
+            Self::Read => "read",
+            Self::Write => "write",
+        })
+    }
+}
+
 /// A bus or address error's cycle: what a format $C frame records of
 /// it (CPU32RM 6.3, 6.4.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
