@@ -655,10 +655,7 @@ impl Board {
             if let Some(value) = write
                 && address == LPSTOP_BROADCAST.0
             {
-                self.modules_changed();
-                self.sim.low_power_stop((value & LPSTOP_MASK) as u8, now);
-                self.module_mut::<Gpt>(GPT).set_low_power(true, now);
-                self.module_mut::<Qsm>(QSM).stop_clock(now);
+                self.low_power_stop((value & LPSTOP_MASK) as u8, now);
                 return Ok((0, TABLE_CLOCKS.into()));
             }
         } else if let Some(offset) = address
@@ -1114,6 +1111,16 @@ impl Board {
         self.module_mut::<Qsm>(QSM).set_freeze(frozen, now);
         self.sync_at(self.modules_next_event());
         true
+    }
+
+    /// Low-power stop at `now`, the interrupt mask LPSTOP broadcast
+    /// `mask` (MC68331UM 4.5.4.2): the SIM's watchdog and the other
+    /// modules' clocks stop (4.2.12, 4.3.4).
+    pub(crate) fn low_power_stop(&mut self, mask: u8, now: Cycles) {
+        self.modules_changed();
+        self.sim.low_power_stop(mask, now);
+        self.module_mut::<Gpt>(GPT).set_low_power(true, now);
+        self.module_mut::<Qsm>(QSM).stop_clock(now);
     }
 
     /// An interrupt ends low-power stop at `now`, if the MCU is in it:
