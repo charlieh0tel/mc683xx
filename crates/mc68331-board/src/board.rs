@@ -1027,7 +1027,7 @@ impl<C: Chip> Board<C> {
     fn own_hook(&mut self, id: HookId) -> bool {
         let cycle = self.chip.now();
         if Some(id) == self.hooks.exception {
-            self.record_exceptions();
+            // recorded as the chip's run ended (`collect`)
             return true;
         }
         if self.hooks.watches.contains(&id) {
@@ -1519,8 +1519,12 @@ impl<C: Chip> Board<C> {
     }
 
     /// The chip's outputs since the last quantum onto their nets, its
-    /// events kept for the host, and the clock base moved to now.
+    /// events and the exceptions tracing saw kept for the host, and the
+    /// clock base moved to now.
     fn collect(&mut self) {
+        // exceptions entered before whatever ended the run, a fault stop
+        // or another hook as well as tracing's own
+        self.record_exceptions();
         let base = self.shared.base.get();
         // a level the board takes only where a net has the pin and it
         // changed, its last level kept as the chip emits

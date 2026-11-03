@@ -55,6 +55,9 @@ use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::memory::PAGE_BYTES;
+use mc683xx_cpu32::memory::Permissions;
+use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::registers::Registers;
@@ -75,6 +78,7 @@ use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_modules::sim::ResetCause;
+use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 use mc683xx_target::size::Size;
 use snapshot_golden::version_of;
@@ -3887,4 +3891,58 @@ attach = [{ select = "CSBOOT" }]
     assert_eq!(fault.address.0, 0x0401);
     assert_eq!(fault.registers.pc, START);
     assert!(run.now < Time::from_seconds(1), "{:?}", run.now);
+}
+
+#[test]
+fn an_exception_taken_before_a_fault_stop_is_traced() {
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+writable = true
+attach = [{ select = "CSBOOT" }]
+"#;
+    // MOVEA.L #$8008,A7; MOVE #$A700,SR (T1); TRAP #0: the TRAP's frame
+    // fits above $8000, its trace's (CPU32RM 6.2.10) goes below, read-only
+    let stack: u32 = 0x8008;
+    let program = [
+        0x2e7c,
+        (stack >> 16) as u16,
+        stack as u16,
+        0x46fc,
+        0xa700,
+        0x4e40,
+        NOP,
+    ];
+    let mut board = board("fault-trace", text, &program);
+    board.chip_mut().cpu_control().set_stop_on_fault(true);
+    board
+        .chip_mut()
+        .cpu_control()
+        .protect(
+            Space::Supervisor,
+            Address(0x8000 - PAGE_BYTES),
+            PAGE_BYTES,
+            Permissions::READ,
+        )
+        .unwrap();
+    let mut tracing = BoardTracing::default();
+    tracing.exceptions = true;
+    board.set_tracing(tracing);
+    let run = board.run_until(Time::from_seconds(1)).unwrap();
+    assert_eq!(run.stop, Stop::Fault);
+    let vectors: Vec<u8> = board
+        .take_trace()
+        .records
+        .iter()
+        .filter_map(|record| match record {
+            Record::Exception(exception) => Some(exception.vector),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(vectors, [32], "the TRAP, before the trace's fault");
 }
