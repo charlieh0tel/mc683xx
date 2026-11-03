@@ -581,7 +581,7 @@ impl Cpu {
                 }
                 // the steps taken: interrupts pending, then the end
                 if limits.steps.is_some_and(|count| {
-                    cpu.instructions - first + cpu.bare.interrupts_taken >= count
+                    cpu.instructions - first + cpu.bare.exceptions_stepped >= count
                 }) {
                     if let Some(cycles) = core.step_boundary(interrupts, now + elapsed) {
                         elapsed += cycles;
@@ -1326,7 +1326,7 @@ impl Core<'_> {
         // a fault stop, the registers as before it, took none and
         // leaves the CPU stopped as it was
         if processed != Processed::Stopped {
-            self.cpu.bare.interrupts_taken += 1;
+            self.cpu.bare.exceptions_stepped += 1;
             self.cpu.stopped = false;
         }
         // a breakpoint STOP left pending: acknowledged at the end of
@@ -1365,6 +1365,7 @@ impl Core<'_> {
         if self.trace_at(address) == Processed::Stopped {
             return Cycles::ZERO;
         }
+        self.cpu.bare.exceptions_stepped += 1;
         let cycles = self.cpu.spend(timing::exception::TRACE);
         cycles + self.cpu.stall + self.cpu.extra
     }

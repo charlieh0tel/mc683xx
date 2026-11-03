@@ -46,7 +46,8 @@ pub struct Limits {
     /// The most instructions to run.
     pub instructions: Option<u64>,
     /// The most steps to take: instructions run, each with the
-    /// exceptions it raised, and interrupts taken.  The run ends before
+    /// exceptions it raised, interrupts taken, and a trace a fault stop
+    /// left pending, taken as the run starts.  The run ends before
     /// the next instruction once it has taken them, interrupts pending
     /// there taken first, as T1 tracing stops (CPU32RM 6.2.10: the
     /// trace before a pending interrupt): one step is an interrupt
@@ -197,8 +198,9 @@ pub(crate) struct Bare {
     pub(crate) end: Option<End>,
     /// The last invalid access's reason, for a fault's cause.
     pub(crate) last_invalid: Option<Invalid>,
-    /// The interrupts taken since the last limited run began.
-    pub(crate) interrupts_taken: u64,
+    /// The interrupts taken since the last limited run began, and the
+    /// traces a fault stop left pending: steps of their own.
+    pub(crate) exceptions_stepped: u64,
     /// Whether a hardware breakpoint is pending, BKPT asserted with
     /// background mode disabled, until it is acknowledged (CPU32RM
     /// 6.2.6).  Here, out of the run loop's way, as it is looked at
@@ -231,14 +233,14 @@ impl Cpu {
         self.bare.end = None;
         let budget = limits.cycles.unwrap_or(Cycles(u64::MAX - now.0));
         let first = self.instructions;
-        self.bare.interrupts_taken = 0;
+        self.bare.exceptions_stepped = 0;
         let run = self.run_from_boundary(bus, interrupts, now, budget, Some(limits));
         self.left_pc = Address(self.registers.pc);
         let end = self.bare.end.take().unwrap_or(End::Stop(run.stop));
         LimitedRun {
             cycles: run.cycles,
             end,
-            steps: self.instructions - first + self.bare.interrupts_taken,
+            steps: self.instructions - first + self.bare.exceptions_stepped,
         }
     }
 

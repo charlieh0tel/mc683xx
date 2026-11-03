@@ -24,6 +24,7 @@ use crate::memory::Permissions;
 use crate::registers::Registers;
 use crate::registers::status;
 use mc683xx_target::address::Address;
+use mc683xx_target::entry::Entry;
 use mc683xx_target::size::Size;
 
 /// RAM from zero.
@@ -724,6 +725,31 @@ fn a_fault_stopped_exception_is_charged_once_when_taken() {
         assert_eq!(machine.cpu.registers.pc, HANDLER, "{name}");
         assert_eq!(run.cycles + resumed.cycles, unfaulted, "{name}");
     }
+}
+
+#[test]
+fn a_pending_trace_waits_out_background_mode_and_is_a_step() {
+    let mut machine = traced_addq();
+    machine.cpu.set_bdm_enabled(true);
+    one(&mut machine);
+    machine.cpu.registers.ssp = STACK;
+    assert!(machine.cpu.breakpoint(), "halted, as BKPT halts it");
+    assert_eq!(
+        boundary_only(&mut machine),
+        End::Stop(Stop::Background(Entry::Breakpoint))
+    );
+    assert_eq!(machine.cpu.bare.trace_pending, Some(Address(CODE)));
+    // a step as a debugger takes one (CPU32RM 7.2.8.12): the trace up
+    // to its handler, its first instruction not run
+    machine.cpu.resume();
+    let run = machine.run_limited(Limits {
+        steps: Some(1),
+        ..Limits::default()
+    });
+    assert_eq!((run.end, run.steps), (End::Steps, 1));
+    assert_eq!(machine.cpu.registers.pc, HANDLER);
+    assert_eq!(frame_address(&machine), CODE);
+    assert_eq!(machine.cpu.bare.trace_pending, None);
 }
 
 #[test]
