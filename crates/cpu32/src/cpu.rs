@@ -1337,6 +1337,9 @@ impl Core<'_> {
         self.cpu.sampled_mask = self.cpu.registers.interrupt_mask();
         if processed == Processed::Stopped {
             interrupts.withdrawn(level);
+            // not taken: a level 7 request still held is a transition
+            // the next sample sees again (6.2.11)
+            self.cpu.sampled_level = InterruptLevel::NONE;
         }
         // taken, it is a step and ends STOP and LPSTOP (CPU32RM 4.4);
         // a fault stop, the registers as before it, took none and
@@ -2226,6 +2229,19 @@ mod tests {
         step(&mut cpu, &mut source);
         assert_eq!(cpu.registers.pc, handler(Vector(27)));
         assert_eq!(source.withdrawn, [level], "taken");
+    }
+
+    #[test]
+    fn a_nonmaskable_interrupt_whose_stacking_fault_stops_is_taken_on_resume() {
+        let mut cpu = prepared(&[NOP, NOP], status::S);
+        cpu.set_stop_on_fault(true);
+        cpu.registers.ssp = RAM_BYTES + 0x1000;
+        let mut source = Source::new(7, Acknowledge::Autovector);
+        assert_eq!(step(&mut cpu, &mut source), Stop::Fault);
+        // IRQ7 held: its transition was not taken (CPU32RM 6.2.11)
+        cpu.registers.ssp = STACK;
+        step(&mut cpu, &mut source);
+        assert_eq!(cpu.registers.pc, handler(Vector(31)));
     }
 
     #[test]

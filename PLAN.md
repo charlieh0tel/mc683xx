@@ -2127,7 +2127,8 @@ and `mc683xx.Machine` in Python (see Python).
     and `Cpu::breakpoint_pending` show them, and their setters leave
     or withdraw one) and taken first when
     the run goes on, trace before breakpoint (Table 6-2); an interrupt
-    is sampled again.  So an instruction with read-modify-write effects
+    is sampled again, a level 7 request still held as the transition
+    it was (6.2.11).  So an instruction with read-modify-write effects
     (ADDQ #1,(A0) traced) runs once.  Trace processing "starts at the
     end of normal processing for the traced instruction" (6.2.10); the
     same section calls the trace an extension of the instruction, not
