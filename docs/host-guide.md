@@ -1088,16 +1088,7 @@ read, write and execute per 2-Kbyte page in `Space::User` or
 `Space::Supervisor`; a cycle a page does not permit is a bus error,
 and the invalid hooks see it as `Protected`.  Hooks and permissions
 outlive the chip's remaps.  Hooks cost little when absent; a memory
-hook makes its pages leave the fast path.
-
-`cpu_control().set_stop_on_fault(true)` stops a run at a bus or
-address error, the bus monitor's included, instead of taking it: the
-run ends `Stop::Fault`, nothing stacked, the registers as the
-instruction began, and `cpu().fault_stop()` says which cycle faulted
-and why, until the next run.  A fault while stacking an exception (a
-bad SSP) stops the same way instead of a double bus fault.  The
-instruction reruns when the run goes on, so a peripheral it read or
-wrote before the fault sees those cycles again (PLAN.md, Faults).  The GDB stub
+hook makes its pages leave the fast path.  The GDB stub
 (`mc683xx-gdb`, `docs/gdb.md`) sets its breakpoints, watchpoints and
 steps as hooks like these.
 
@@ -1163,6 +1154,19 @@ assert_eq!(*vectors.borrow(), [BUS_ERROR]);
 assert_eq!(chip.memory(ram)[..2], [0, 0]);
 assert_eq!(chip.cpu().registers.pc, firmware::HANDLER);
 ```
+
+`cpu_control().set_stop_on_fault(true)` stops a run at a bus or
+address error, the bus monitor's included, instead of taking it: the
+run ends `Stop::Fault` and `cpu().fault_stop()` says which cycle
+faulted and why, until the next run or a reset.  A fault in an
+instruction, its own exception's stacking included, undoes it: the
+registers are as it began, and it reruns when the run goes on, so a
+peripheral it read or wrote before the fault sees those cycles again.
+A fault stacking a trace, a hardware breakpoint or an interrupt taken
+after an instruction completed keeps that instruction and leaves the
+exception pending, for the next run to take.  A fault while stacking
+(a bad SSP) stops instead of a double bus fault.  Frame words and
+writes made before the fault stay in memory (PLAN.md, Faults).
 
 A host on a time base of its own (a board's picoseconds) calls
 `set_clock_stop(true)`: a change of the system clock's frequency (a

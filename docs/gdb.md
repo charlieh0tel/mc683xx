@@ -252,10 +252,12 @@ CPU has none.
 - `monitor faults` shows whether a bus or address error stops the run
   (`stop`) or is taken as an exception by the firmware (`take`, at
   first), and the fault that last stopped it; `monitor faults stop` and
-  `monitor faults take` set it.  A fault stop reports `SIGBUS` before
-  anything is stacked, the registers as the faulting instruction
-  began; `continue` reruns it, so fix the cause first (PLAN.md,
-  Faults).  The bare CPU, the chip and a board; not over BDM, whose
+  `monitor faults take` set it.  A fault stop reports `SIGBUS`, ahead
+  of a watchpoint it undid.  A fault in an instruction leaves the
+  registers as it began, and `continue` reruns it, so fix the cause
+  first; one stacking a trace, breakpoint or interrupt after an
+  instruction completed keeps that instruction and leaves the
+  exception pending (PLAN.md, Faults).  The bare CPU, the chip and a board; not over BDM, whose
   target takes its faults.
 - `monitor reset`: the bare CPU's reset exception (SSP and PC from
   the vectors at zero), the chip's external reset (the modules and the
