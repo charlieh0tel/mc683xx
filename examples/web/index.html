@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MC68331 demo board</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/css/xterm.css">
+<style>
+  body { margin: 1em; font-family: sans-serif; background: #fff; color: #000; }
+  #terminal { display: inline-block; }
+  #status { font-family: monospace; }
+</style>
+</head>
+<body>
+<h1>MC68331 demo board</h1>
+<p>
+  The demo board (<code>examples/boards/demo.toml</code>) and its C
+  firmware on the mc683xx emulator, in WebAssembly.  Type <kbd>h</kbd>
+  and Enter for its commands.
+</p>
+<div id="terminal"></div>
+<p id="status">Loading.</p>
+<script type="module" src="demo.js"></script>
+</body>
+</html>

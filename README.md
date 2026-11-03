@@ -58,6 +58,9 @@ crates.io.
   emulated chip.
 - **Python:** the chip, boards and a bare CPU, with Python objects as
   peripherals and callables as hooks, and type stubs.
+- **WebAssembly:** a board from JavaScript (`crates/wasm`, not published
+  yet), and the demo board in a web page
+  ([examples/web](https://github.com/charlieh0tel/mc683xx/blob/main/examples/README.md#web-page)).
 
 Early: 0.x, and the API may change between minor versions.
 
@@ -200,6 +203,7 @@ make hooks   # once per clone
 make ci      # fmt check, license copies, commit-msg hook, clippy, tests, rustdoc
 make python      # the Python module in .venv, with its tests
 make wasm        # the JavaScript bindings (wasm32, wasm-bindgen), with their Node tests
+make web-test    # the demo board's web page (examples/web) in headless Chrome
 make singlestep  # SingleStepTests m68000 (fetches about 140 MB once)
 make oracle      # differential runs against Musashi (fetches it once)
 make corpus SMARTCLOCK_FIRMWARE=...  # smartclock firmware functions
