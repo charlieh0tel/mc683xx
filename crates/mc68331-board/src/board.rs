@@ -1003,25 +1003,31 @@ impl<C: Chip> Board<C> {
         self.now = self.now.max(self.shared.time(self.chip.now()).min(next));
     }
 
+    /// Records the exceptions tracing's hook saw entered, now.
+    fn record_exceptions(&mut self) {
+        let cycle = self.chip.now();
+        let entered = mem::take(&mut *self.hooks.entered.borrow_mut());
+        for entry in entered {
+            let memory = &self.chip.cpu().memory;
+            let sr = memory
+                .peek(Space::Supervisor, Address(entry.stack), Size::Word)
+                .map(|sr| sr as u16);
+            self.records.push(Record::Exception(trace::ExceptionRecord {
+                cycle,
+                vector: entry.vector.0,
+                pc: entry.pc.0,
+                sr,
+                level: entry.level.map(|level| level.get()),
+            }));
+        }
+    }
+
     /// Whether hook `id` is tracing's: records what it stopped for and
     /// says so, for the run to go on.
     fn own_hook(&mut self, id: HookId) -> bool {
         let cycle = self.chip.now();
         if Some(id) == self.hooks.exception {
-            let entered = mem::take(&mut *self.hooks.entered.borrow_mut());
-            for entry in entered {
-                let memory = &self.chip.cpu().memory;
-                let sr = memory
-                    .peek(Space::Supervisor, Address(entry.stack), Size::Word)
-                    .map(|sr| sr as u16);
-                self.records.push(Record::Exception(trace::ExceptionRecord {
-                    cycle,
-                    vector: entry.vector.0,
-                    pc: entry.pc.0,
-                    sr,
-                    level: entry.level.map(|level| level.get()),
-                }));
-            }
+            self.record_exceptions();
             return true;
         }
         if self.hooks.watches.contains(&id) {
