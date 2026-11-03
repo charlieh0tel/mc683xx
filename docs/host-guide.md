@@ -1409,27 +1409,43 @@ every method of the chip's.
   `Board::run_until` may make long; a paced run's quanta bound it.
 - **Pacing.**  `pacing::Pacing` is `Unpaced` (as fast as the host runs
   it, the default), `RealTime`, or `Scaled(factor)`, board seconds a
-  wall second (2.0 twice real time, 0.5 half; finite and above 0,
-  else `PacingError::Factor`); it prints and parses as `unpaced`,
-  `realtime` or the factor.  `Board::run_until_paced(until, quantum)` runs to
+  wall second (2.0 twice real time, 0.5 half; finite and above 0, else
+  `PacingError::Factor`); it prints and parses as `unpaced`, `realtime`
+  or the factor.  `Board::run_until_paced(until, quantum)` runs to
   `until` in quanta of `quantum` picoseconds of board time, a
-  `NonZeroU64` so the loop always ends
-  (`pacing::QUANTUM`, 5 ms, is a good one), and before each sleeps
-  until board time is no longer ahead of wall time times the
-  control's factor, waking at once for a stop or a change of pacing;
-  a run that reaches `until` sleeps once more after its last quantum,
-  so it never returns ahead of wall time.  The wall clock is host-side only: it decides how long to sleep and
-  never reaches the board, so a paced run is the same as the unpaced
-  run.  A run that falls behind (a slow host) is not held back.  A
-  host with a loop of its own (the runner's turns) keeps a
-  `pacing::Pacer` and calls `wait(now, &control)` between its runs;
-  `Board::run_until_quantized(until, quantum, before)` is the quantum loop alone.
-  Unpaced, neither reads the clock nor sleeps.  A host with a clock of
-  its own that cannot sleep (a browser, from `requestAnimationFrame`
-  with `performance.now()`) asks `Pacer::due(now, pacing, wall)`
-  instead, `wall` its clock's reading as a `Duration`: the board time
-  the run may reach by then (`None` unpaced), which it runs to, bounding
-  each slice itself, and returns to its event loop.
+  `NonZeroU64` so the loop always ends (`pacing::QUANTUM`, 5 ms, is a
+  good one), and before each sleeps until board time is no longer ahead
+  of wall time times the control's factor, waking at once for a stop or
+  a change of pacing; a run that reaches `until` sleeps once more after
+  its last quantum, so it never returns ahead of wall time.  The wall
+  clock is host-side only: it decides how long to sleep and never
+  reaches the board, so a paced run is the same as the unpaced run.  A
+  run that falls behind (a slow host) is not held back.  A host with a
+  loop of its own (the runner's turns) keeps a `pacing::Pacer` and calls
+  `wait(now, &control)` between its runs;
+  `Board::run_until_quantized(until, quantum, before)` is the quantum
+  loop alone.  Unpaced, neither reads the clock nor sleeps.  A host with
+  a clock of its own that cannot sleep (a browser, from
+  `requestAnimationFrame` with `performance.now()`; a GUI's timer) runs
+  the board a frame at a time: `Board::run_frame(wall, picoseconds)`,
+  `wall` its clock's reading as a `Duration` from any origin it keeps,
+  never going back, runs to the board time due by then under the
+  control's pacing, but no more than `picoseconds` of board time, a
+  frame's bound however far behind the host is (a hidden page), and a
+  frame so bounded drops the time it missed, the next paced from where
+  it ended; unpaced, it runs `picoseconds`.  Paced,
+  the first frame, and the first after a `set_pacing` to another pacing (one
+  to the pacing it has changes nothing, so a UI may set its choice every
+  frame), any other run (even of no time) or a successful restore, runs
+  nothing and starts the pacing from `wall`; frames run in quanta of
+  `pacing::QUANTUM`, and are one long run.  `Board::run_frame_with(wall,
+  picoseconds, before)` calls `before` before each quantum, as
+  `run_until_quantized` does, for the host's own work between them; a
+  run, a restore or a frame in `before` ends the pacing as it would
+  between frames, and so does a frame in a quantized run's `before`.
+  The board reads no clock for it, and keeps the frames' pacer itself:
+  a `Pacer`'s wall clock is `Instant`, from its first look, so a host
+  has no frame pacing of its own to mix with it.
 
 ```rust
 use std::cell::RefCell;

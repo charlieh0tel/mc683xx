@@ -2,6 +2,7 @@
 Python: another thread stops a paced run and queues input, taken at a
 sync point, and pacing changes nothing the board does."""
 
+import _thread
 import threading
 import time
 from pathlib import Path
@@ -218,3 +219,87 @@ def test_short_paced_runs_in_a_loop_are_paced(tmp_path: Path) -> None:
         loaded.run_for(seconds=0.005, pacing=mc683xx.Pacing.scaled(0.1))
     # 0.5 s of board time at a tenth of real time
     assert time.monotonic() - started >= 5.0
+
+
+FRAME_SECONDS = 1 / 60
+SLICE_PS = 100 * 1_000_000_000
+
+
+def test_an_unpaced_frame_runs_its_slice(tmp_path: Path) -> None:
+    loaded = board(tmp_path)
+    for count in range(1, 4):
+        outcome = loaded.run_frame(0.0, picoseconds=SLICE_PS)
+        assert outcome.stop == mc683xx.Stop.Budget()
+        assert outcome.now == count * SLICE_PS
+
+
+def test_paced_frames_run_the_board_time_due_by_the_host_s_clock(tmp_path: Path) -> None:
+    factor = 4.0
+    frame_ps = FRAME_SECONDS * factor * 1e12
+    loaded = board(tmp_path)
+    loaded.control().set_pacing(mc683xx.Pacing.scaled(factor))
+    wall = 1000.0
+    assert loaded.run_frame(wall, seconds=0.1).now == 0
+    for count in range(1, 4):
+        outcome = loaded.run_frame(wall + count * FRAME_SECONDS, seconds=0.1)
+        assert abs(outcome.now - count * frame_ps) < 1e6
+    # far behind: one slice, the rest dropped
+    before = loaded.now
+    assert loaded.run_frame(wall + 60.0, picoseconds=SLICE_PS).now == before + SLICE_PS
+
+
+def test_a_frame_after_another_run_starts_the_pacing_again(tmp_path: Path) -> None:
+    loaded = board(tmp_path)
+    loaded.control().set_pacing(mc683xx.Pacing.REAL_TIME)
+    loaded.run_frame(0.0, picoseconds=SLICE_PS)
+    loaded.run_frame(FRAME_SECONDS, picoseconds=SLICE_PS)
+    snapshot = loaded.save()
+    ahead = loaded.run_for(picoseconds=SLICE_PS, pacing=mc683xx.Pacing.UNPACED).now
+    assert loaded.run_frame(2 * FRAME_SECONDS, picoseconds=SLICE_PS).now == ahead
+    loaded.restore(snapshot)
+    restored = loaded.now
+    assert loaded.run_frame(3 * FRAME_SECONDS, picoseconds=SLICE_PS).now == restored
+    outcome = loaded.run_frame(4 * FRAME_SECONDS, picoseconds=SLICE_PS)
+    assert abs(outcome.now - restored - FRAME_SECONDS * 1e12) < 1e6
+
+
+def test_a_second_thread_stops_a_long_frame(tmp_path: Path) -> None:
+    loaded = board(tmp_path)
+    control = loaded.control()
+
+    def front_end() -> None:
+        time.sleep(0.05)
+        control.stop()
+
+    thread = threading.Thread(target=front_end)
+    thread.start()
+    # unpaced, far more board time than any host runs before the stop:
+    # the thread gets the GIL between quanta
+    run = loaded.run_frame(0.0, seconds=1000.0)
+    thread.join()
+    assert run.stop == mc683xx.Stop.Requested()
+    assert loaded.now < 1000 * 10**12
+
+
+def test_ctrl_c_interrupts_a_long_frame(tmp_path: Path) -> None:
+    loaded = board(tmp_path)
+
+    def interrupt() -> None:
+        time.sleep(0.05)
+        _thread.interrupt_main()
+
+    thread = threading.Thread(target=interrupt)
+    thread.start()
+    with pytest.raises(KeyboardInterrupt):
+        loaded.run_frame(0.0, seconds=1000.0)
+    thread.join()
+    assert loaded.now < 1000 * 10**12
+
+
+def test_a_frame_s_wall_must_be_seconds(tmp_path: Path) -> None:
+    loaded = board(tmp_path)
+    for wall in [-1.0, float("inf"), float("nan")]:
+        with pytest.raises(ValueError, match="wall"):
+            loaded.run_frame(wall, seconds=0.1)
+    with pytest.raises(ValueError, match="seconds or picoseconds"):
+        loaded.run_frame(0.0)

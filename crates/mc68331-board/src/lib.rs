@@ -49,7 +49,8 @@
 //!   sync points.
 //! - [`Pacing`]: how fast a paced run ([`Board::run_until_paced`]) goes
 //!   against wall time, host-side only, and [`Pacer`], its wait, for a
-//!   host's own loop.
+//!   host's own loop; [`Board::run_frame`] runs a frame of the board
+//!   time due by a host's own clock (a browser's).
 //!
 //! # Examples
 //!
@@ -125,6 +126,7 @@
 //! [`Board::control`]: board::Board::control
 //! [`Pacing`]: pacing::Pacing
 //! [`Board::run_until_paced`]: board::Board::run_until_paced
+//! [`Board::run_frame`]: board::Board::run_frame
 //! [`Pacer`]: pacing::Pacer
 // The published crates also hold these; test-only crates do not.
 #![warn(

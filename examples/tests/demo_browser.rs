@@ -3,19 +3,17 @@
 //! sleep.  The board file's text and its image are handed over as bytes
 //! (`Description::parse_with`); the board boots unpaced
 //! (`Board::run_until_paced`, which then reads no clock), then runs in
-//! frames paced by a clock the test keeps (`Pacer::due`), as a page's
+//! frames paced by a clock the test keeps (`Board::run_frame`), as a page's
 //! `requestAnimationFrame` loop with `performance.now()` would; a
 //! command typed on the console comes back echoed, the help after it.
 
 use std::io;
-use std::ops::ControlFlow;
 use std::path::Path;
 use std::time::Duration;
 
 use mc683xx_board::board::Board;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
-use mc683xx_board::pacing::Pacer;
 use mc683xx_board::pacing::Pacing;
 use mc683xx_board::pacing::QUANTUM;
 use mc683xx_board::registry::Environment;
@@ -96,7 +94,6 @@ fn the_demo_board_runs_from_bytes_and_a_host_clock() {
 
     control.set_pacing(Pacing::Scaled(FACTOR)).unwrap();
     let mut typed = TYPED.iter();
-    let mut pacer = Pacer::new();
     let mut wall = Duration::from_secs(1000);
     let start = board.now();
     text.clear();
@@ -107,15 +104,8 @@ fn the_demo_board_runs_from_bytes_and_a_host_clock() {
             let frame = Serial::untimed(Frame::Data(byte.into()));
             board.send(CONSOLE, Signal::Serial(frame)).unwrap();
         }
-        let due = pacer
-            .due(board.now(), control.pacing(), wall)
-            .expect("paced");
-        let until = due.min(board.now() + SLICE);
-        let run = board
-            .run_until_quantized(until, QUANTUM, |_| ControlFlow::Continue(()))
-            .unwrap();
+        let run = board.run_frame(wall, SLICE).unwrap();
         assert_eq!(run.stop, Stop::Budget);
-        assert_eq!(run.now, until);
         take_console(&mut board, &mut text);
         wall += FRAME;
         frames += 1;

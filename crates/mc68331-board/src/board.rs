@@ -21,6 +21,7 @@ use std::ops::ControlFlow;
 use std::path::Path;
 use std::rc::Rc;
 use std::rc::Weak;
+use std::time::Duration;
 
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
@@ -73,6 +74,7 @@ use crate::observe::Attached;
 use crate::observe::Observer;
 use crate::observe::ObserverId;
 use crate::pacing::Pacer;
+use crate::pacing::QUANTUM;
 use crate::registry::Context;
 use crate::registry::Environment;
 use crate::registry::Parameters;
@@ -370,6 +372,58 @@ pub struct Board<C: Chip> {
     last_condition: u64,
     /// The control handle's shared state: outside the snapshot.
     control: BoardControl,
+    /// [`Board::run_frame`]'s pacing: outside the snapshot.
+    frames: Frames,
+}
+
+/// [`Board::run_frame`]'s pacing, against the host's clock readings.
+#[derive(Debug, Default)]
+struct Frames {
+    /// The pacer, [`None`] for the next frame to start the pacing again:
+    /// at first, and after any other run or a restore.
+    pacer: Option<Pacer>,
+    /// How many times the control's pacing had changed when the pacer
+    /// last paced a frame ([`BoardControl::set_pacing`]): another count
+    /// at the next starts the pacing again.
+    pacings: u64,
+    /// How many times the pacing was kept or ended: a frame that sees
+    /// it change while it runs (a run, a restore or a frame in its
+    /// `before`) keeps no pacer.
+    generation: u64,
+}
+
+impl Frames {
+    /// The pacer for a frame under the control's `pacings`th pacing,
+    /// the last frame's, a new one if the pacing was ended or set
+    /// since, and the generation it is taken at.
+    fn take(&mut self, pacings: u64) -> (Pacer, u64) {
+        let pacer = self
+            .pacer
+            .take()
+            .filter(|_| self.pacings == pacings)
+            .unwrap_or_default();
+        (pacer, self.generation)
+    }
+
+    /// Keeps `pacer`, that paced a frame under the control's
+    /// `pacings`th pacing, taken at `generation`, for the next frame,
+    /// unless the pacing was kept or ended since: then the next frame
+    /// starts it again.
+    fn keep(&mut self, pacer: Pacer, pacings: u64, generation: u64) {
+        if self.generation == generation {
+            self.pacer = Some(pacer);
+            self.pacings = pacings;
+            self.generation = self.generation.wrapping_add(1);
+        } else {
+            self.leave();
+        }
+    }
+
+    /// Ends the pacing, for the next frame to start it again.
+    const fn leave(&mut self) {
+        self.pacer = None;
+        self.generation = self.generation.wrapping_add(1);
+    }
 }
 
 impl<C: Chip + fmt::Debug> fmt::Debug for Board<C> {
@@ -759,6 +813,7 @@ impl<C: Chip> Board<C> {
             conditions: Vec::new(),
             last_condition: 0,
             control: BoardControl::new(endpoints),
+            frames: Frames::default(),
         };
         board.stop_at_outputs();
         board.power_on();
@@ -919,6 +974,18 @@ impl<C: Chip> Board<C> {
     ///
     /// A peripheral that stalls the board ([`RunError::Stalled`]).
     pub fn run_until(&mut self, until: Time) -> Result<BoardRun, RunError> {
+        self.leave_frames();
+        self.run_to(until)
+    }
+
+    /// Ends [`run_frame`](Self::run_frame)'s pacing, for the next frame
+    /// to start it again: a run or a restore outside the frames.
+    fn leave_frames(&mut self) {
+        self.frames.leave();
+    }
+
+    /// The run loop under every run: [`run_until`](Self::run_until)'s.
+    fn run_to(&mut self, until: Time) -> Result<BoardRun, RunError> {
         // a condition that held between runs is the stop still asked
         if !self.shared.stop.get() {
             self.shared.fired.borrow_mut().clear();
@@ -1118,8 +1185,10 @@ impl<C: Chip> Board<C> {
     /// change nothing the board does.  A board halted before a quantum
     /// runs it to its end with no instruction, so its halt goes on to
     /// the next quantum.  `before` returning `Break` ends the run where
-    /// it is, [`Stop::Requested`].  A quantum is never empty, so the
-    /// loop always comes to `until`:
+    /// it is, [`Stop::Requested`].  A frame `before` runs
+    /// ([`run_frame`](Self::run_frame)) leaves the pacing ended, as any
+    /// other run does.  A quantum is never empty, so the loop always
+    /// comes to `until`:
     ///
     /// ```compile_fail
     /// # use std::ops::ControlFlow;
@@ -1138,6 +1207,20 @@ impl<C: Chip> Board<C> {
         &mut self,
         until: Time,
         quantum: NonZeroU64,
+        before: impl FnMut(&mut Self) -> ControlFlow<()>,
+    ) -> Result<BoardRun, RunError> {
+        self.leave_frames();
+        let outcome = self.run_quantized(until, quantum, before);
+        // a frame `before` ran paced no more than its own run
+        self.leave_frames();
+        outcome
+    }
+
+    /// The quantum loop: [`run_until_quantized`](Self::run_until_quantized)'s.
+    fn run_quantized(
+        &mut self,
+        until: Time,
+        quantum: NonZeroU64,
         mut before: impl FnMut(&mut Self) -> ControlFlow<()>,
     ) -> Result<BoardRun, RunError> {
         loop {
@@ -1146,7 +1229,7 @@ impl<C: Chip> Board<C> {
             }
             let target = Time(self.now.0.saturating_add(quantum.get())).min(until);
             let idle = self.idle();
-            let outcome = self.run_until(target)?;
+            let outcome = self.run_to(target)?;
             let quantized = outcome.stop == Stop::Budget || idle == Some(outcome.stop);
             if !quantized || self.now >= until {
                 return Ok(outcome);
@@ -1185,6 +1268,64 @@ impl<C: Chip> Board<C> {
             pacer.wait(self.now, &control);
         }
         Ok(outcome)
+    }
+
+    /// Runs a frame, for a host with a clock of its own that cannot
+    /// sleep (a browser's `requestAnimationFrame` and `performance.now()`,
+    /// a GUI's timer): to the board time due by the host's clock reading
+    /// `wall` under the control's pacing, but no more
+    /// than `picoseconds` of board time, a frame's bound however far
+    /// behind the host is (a hidden page): a frame so bounded drops the
+    /// time it missed, and the next frames are paced from where it
+    /// ended.  Unpaced, it runs
+    /// `picoseconds`.  Paced, the first frame, and the first after the
+    /// control's [`set_pacing`](BoardControl::set_pacing) to another
+    /// pacing, any other run (even of no time) or a successful
+    /// [`restore`](Self::restore), runs nothing: it starts the pacing
+    /// from `wall`.  `wall`
+    /// is the clock's reading from any origin the host keeps for the
+    /// board's life, never going back; the board reads no clock.  It
+    /// runs in quanta of [`pacing::QUANTUM`](crate::pacing::QUANTUM), as
+    /// [`run_until_quantized`](Self::run_until_quantized), so a frame
+    /// changes nothing the board does: frames to rising times are one
+    /// long run.
+    ///
+    /// # Errors
+    ///
+    /// As [`run_until`](Self::run_until).
+    pub fn run_frame(&mut self, wall: Duration, picoseconds: u64) -> Result<BoardRun, RunError> {
+        self.run_frame_with(wall, picoseconds, |_| ControlFlow::Continue(()))
+    }
+
+    /// Runs a frame as [`run_frame`](Self::run_frame) does, calling
+    /// `before` before each of its quanta, as
+    /// [`run_until_quantized`](Self::run_until_quantized) does: a host's
+    /// own work between them (the Python bindings' Ctrl-C checks and a
+    /// waiting thread's turn).  `before` returning `Break` ends the frame
+    /// where it is, [`Stop::Requested`].  A run, a restore or a frame
+    /// that `before` makes ends the pacing as it would between frames:
+    /// the next frame starts it again.
+    ///
+    /// # Errors
+    ///
+    /// As [`run_until`](Self::run_until).
+    pub fn run_frame_with(
+        &mut self,
+        wall: Duration,
+        picoseconds: u64,
+        before: impl FnMut(&mut Self) -> ControlFlow<()>,
+    ) -> Result<BoardRun, RunError> {
+        let (pacing, pacings) = self.control.pacing_set();
+        let (mut pacer, generation) = self.frames.take(pacings);
+        let bound = Time(self.now.0.saturating_add(picoseconds));
+        let due = pacer.due(self.now, pacing, wall);
+        let until = due.map_or(bound, |due| due.min(bound));
+        let outcome = self.run_quantized(until, QUANTUM, before);
+        if due.is_some_and(|due| due > bound) {
+            pacer.restart(self.now, pacing, wall);
+        }
+        self.frames.keep(pacer, pacings, generation);
+        outcome
     }
 
     /// The outcome of a run that ends now.
@@ -2173,6 +2314,7 @@ impl<C: Chip> Board<C> {
         self.shared.writes.borrow_mut().clear();
         self.shared.diverted.set(false);
         self.shared.stop.set(false);
+        self.leave_frames();
         self.tell_restored();
         Ok(())
     }

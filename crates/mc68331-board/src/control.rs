@@ -66,6 +66,9 @@ struct State {
     inputs: Vec<(String, Signal)>,
     /// The pacing.
     pacing: Pacing,
+    /// How many times the pacing changed, for a board's frames to start
+    /// their pacing again after each.
+    pacings: u64,
 }
 
 /// What a control's handles share.
@@ -149,15 +152,26 @@ impl BoardControl {
 
     /// Paces the board's paced runs
     /// ([`Board::run_until_paced`](crate::board::Board::run_until_paced)) from their
-    /// next quantum.
+    /// next quantum, and its frames
+    /// ([`Board::run_frame`](crate::board::Board::run_frame)) from the
+    /// next, which starts their pacing again.  The pacing they have
+    /// changes nothing, so a UI may set its choice every frame; a change
+    /// and a change back between two frames are two changes, and start
+    /// it again.
     ///
     /// # Errors
     ///
     /// [`PacingError::Factor`] for a factor not finite and above 0,
     /// the pacing left as it was.
     pub fn set_pacing(&self, pacing: Pacing) -> Result<(), PacingError> {
-        self.state().pacing = pacing.checked()?;
-        self.0.changed.notify_all();
+        let pacing = pacing.checked()?;
+        let mut state = self.state();
+        if state.pacing != pacing {
+            state.pacing = pacing;
+            state.pacings = state.pacings.wrapping_add(1);
+            drop(state);
+            self.0.changed.notify_all();
+        }
         Ok(())
     }
 
@@ -165,6 +179,12 @@ impl BoardControl {
     #[must_use]
     pub fn pacing(&self) -> Pacing {
         self.state().pacing
+    }
+
+    /// The pacing, and how many times it changed.
+    pub(crate) fn pacing_set(&self) -> (Pacing, u64) {
+        let state = self.state();
+        (state.pacing, state.pacings)
     }
 
     /// Sleeps up to `duration`, waking early when a stop is asked or

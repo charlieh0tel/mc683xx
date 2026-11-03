@@ -1489,8 +1489,32 @@ hand.  The keys are in `docs/board-files.md`.
   (`a_paced_run_is_the_unpaced_run`).  A run that falls behind is not
   held back and runs unpaced until it catches up; a new factor or a
   restore starts the pacing again from where the board is.  A host
-  with its own clock that cannot sleep (a browser) gives `Pacer::due`
-  its clock's reading and runs the board to the time it says.
+  with its own clock that cannot sleep (a browser) runs the board a
+  frame at a time (`Board::run_frame(wall, picoseconds)`): to the time
+  the board's own pacer says is due by the clock's reading
+  (`Pacer::due`), bounded by the frame's slice.  A frame so bounded
+  drops the time it missed: the pacing starts again from where it
+  ended (`Pacer::restart`), so a host back
+  from a pause (a hidden page) runs one slice and then frames' worth,
+  rather than a slice a frame until it has caught up.  The board keeps
+  that pacer, outside the snapshot, and the next frame starts it again
+  after any other run (even of no time), a successful restore, or a
+  `BoardControl::set_pacing` that changes the pacing (the control
+  counts the changes, as it may be set from another thread; a set to
+  the pacing it has is none, so a UI may set its choice every frame,
+  and a change and a change back between frames are two): told so
+  explicitly, not by board time having moved, which a run and a
+  restore back, or a restore of the board as it is, would not show.
+  `Pacer::due` and `Pacer::restart` are the crate's alone: their wall
+  clock is the host's, from an origin the host keeps, where `delay`
+  and `wait` read `Instant` from the pacer's first look, and a pacer
+  given both would pace from two origins at once.
+  That holds inside a frame too: `run_frame_with`'s `before` has the
+  board, and a run, a restore or a frame there ends the pacing, the
+  board counting the pacer's changes (`Frames::generation`) so that a
+  frame that sees one while it runs keeps no pacer of its own; a
+  quantized run ends it after its quanta as well as before, for a
+  frame its `before` ran.
 - **Runner:** `mc683xx-run board.toml [--cycles N | --seconds S]
   [--firmware PATH] [--image NAME=PATH] [--option NAME]
   [--set PERIPHERAL.KEY=VALUE]
@@ -3231,8 +3255,8 @@ checks move onto real code hooks.
   (`Description::parse_with`, its images from the host's `read(path)`),
   `Board::load` with no `Environment::work_dir`, unpaced runs
   (`Pacer` reads no clock unpaced), and paced frames from the host's
-  own clock (`Pacer::due`, the board time due by its reading; the host
-  bounds each slice).  Left:
+  own clock (`Board::run_frame`, the board time due by its reading,
+  bounded by a slice).  Left:
   - Blocking pacing: `Pacer::delay` and `wait` read `Instant::now()`
     when paced, and `BoardControl::sleep` (`control.rs`) blocks on a
     `Condvar`; both panic there, so a browser host never calls them

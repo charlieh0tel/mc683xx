@@ -12,6 +12,7 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::num::NonZeroU64;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use crate::mapped::port_size;
 use mc683xx_board::board::Board;
@@ -1465,6 +1466,46 @@ impl BoardView {
     ) -> PyResult<BoardRunView> {
         let until = Time(picoseconds_of(seconds, picoseconds)?);
         self.run_until_paced(py, until, pacing, quantum_picoseconds)
+    }
+
+    /// Runs a frame (Rust's `Board::run_frame`): to the board time due
+    /// by the host's clock reading `wall`, in seconds from any origin
+    /// kept for the board's life (`time.monotonic()`), under the
+    /// control's pacing, but no more than `seconds`, or `picoseconds`,
+    /// of board time, however far behind the host is, dropping the time
+    /// it missed; unpaced, it runs them.  Paced, the first frame, and the
+    /// first after a `set_pacing` to another pacing (one to the pacing
+    /// it has changes nothing), any other run (even of no time) or a
+    /// successful restore, runs nothing: it starts the pacing.  It never
+    /// sleeps, for a GUI's timer, but releases the GIL before each
+    /// quantum and runs Python's signal handlers, as `run_for` does, so
+    /// another thread's `control().stop()` ends it and Ctrl-C raises
+    /// `KeyboardInterrupt`.  A `wall` or `seconds` not finite, or
+    /// below 0, raises `ValueError`.
+    #[pyo3(signature = (wall, *, seconds = None, picoseconds = None))]
+    fn run_frame(
+        &mut self,
+        py: Python<'_>,
+        wall: f64,
+        seconds: Option<f64>,
+        picoseconds: Option<u64>,
+    ) -> PyResult<BoardRunView> {
+        let wall = Duration::try_from_secs_f64(wall).map_err(|_| {
+            PyValueError::new_err(format!(
+                "wall {wall}: give a finite number of seconds, 0 or more"
+            ))
+        })?;
+        let slice = picoseconds_of(seconds, picoseconds)?;
+        // Ctrl-C first, even with a peripheral's error waiting
+        let outcome = match control::run_frame(py, &mut self.board, wall, slice) {
+            Ok(outcome) => {
+                self.check()?;
+                outcome
+            }
+            Err(raised) => return Err(self.pending.after(raised)),
+        };
+        let run = outcome.map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
+        Ok(run.into())
     }
 
     /// The board's control handle, for another thread (Rust's

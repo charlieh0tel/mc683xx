@@ -1293,6 +1293,13 @@ class Board:
         pacing: Pacing | None = None,
         quantum_picoseconds: int = ...,
     ) -> BoardRun: ...
+    def run_frame(
+        self,
+        wall: float,
+        *,
+        seconds: float | None = None,
+        picoseconds: int | None = None,
+    ) -> BoardRun: ...
     def control(self) -> BoardControl: ...
     def stop_request(self) -> BoardStopRequest: ...
     def serve_gdb(
