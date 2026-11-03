@@ -73,8 +73,9 @@ Once, before the first release.
    later release is published by the workflow only.  A crate new to
    the workspace is the same: the first release that has it is
    published by hand, the workspace as at the first release (Cutting
-   a release, step 8), and the new crate's trusted publisher added
-   after.
+   a release, step 8), with a token that has `publish-update` as well
+   as `publish-new`, since the crates already published go up by hand
+   with it, and the new crate's trusted publisher added after.
 
 ## Cutting a release
 
@@ -122,7 +123,7 @@ Once, before the first release.
 
    ```
    export CARGO_HOME="$(mktemp -d)"
-   cargo login            # the publish-new token
+   cargo login            # publish-new, and publish-update if any crate exists
    cargo publish --workspace --locked
    ```
 
