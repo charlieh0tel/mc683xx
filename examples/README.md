@@ -58,6 +58,16 @@ source level; `tests/demo_console.rs` pins its console
 (`UPDATE_GOLDEN=1` rewrites the golden), and the `demo/mandelbrot`
 benchmark runs its `m`.
 
+## Screencast
+
+`screencast/record.sh` records the top README's screencast, the demo
+board's firmware under gdb: it drives `mc683xx-run` and
+`gdb-multiarch` in a tmux session, records it with asciinema
+(`screencast/demo.cast`) and renders `docs/demo.gif` with agg.  From
+the repository's top, with those on PATH or agg's path given:
+`examples/screencast/record.sh [AGG]`.  The board runs unpaced under
+gdb, so its time is not the wall's; the script shows no uptime.
+
 ## See also
 
 - [docs/board-files.md](../docs/board-files.md): the board file format.
