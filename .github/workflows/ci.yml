@@ -65,8 +65,10 @@ jobs:
 
   wasm:
     # The JavaScript bindings linted on wasm32 and built as the npm
-    # package (`make wasm`), and the package packed, installed and run
-    # in Node and in headless Chrome (`make npm-test`).  The wasm32
+    # package (`make wasm`), the package packed, installed and run in
+    # Node and in headless Chrome (`make npm-test`), and its TypeScript
+    # declarations compiled by consumers in Node, a browser and
+    # CommonJS (`make npm-types`, which fetches TypeScript).  The wasm32
     # target goes on the toolchain rust-toolchain.toml names, installed
     # by the first cargo; the wasm-bindgen CLI is the release's prebuilt
     # binary at the crate's exact version, checked against its SHA-256
@@ -87,6 +89,7 @@ jobs:
           echo "$RUNNER_TEMP/wasm-bindgen" >> "$GITHUB_PATH"
       - run: make wasm
       - run: make npm-test
+      - run: make npm-types
 
   deny:
     # The dependencies' licenses and advisories against deny.toml, the

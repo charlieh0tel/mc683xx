@@ -145,9 +145,9 @@ Crates:
   public APIs and list each one precisely when it lands.  Tag a
   release only after `make ci`, `python`, `oracle`, `singlestep`,
   `corpus`, `boot-smoke`, `boot-diff`, `smartclock-boards`, `wasm`,
-  `npm-test` and `cargo publish --workspace --dry-run` all pass.  A
-  release's notes, its breaking changes first, go in its GitHub
-  release; `CHANGELOG.md` is a local working file, not tracked.
+  `npm-test`, `npm-types` and `cargo publish --workspace --dry-run`
+  all pass.  A release's notes, its breaking changes first, go in its
+  GitHub release; `CHANGELOG.md` is a local working file, not tracked.
 
 
 ## Programming Rules
