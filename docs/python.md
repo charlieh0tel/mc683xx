@@ -1114,18 +1114,26 @@ Front ends):
   second; not finite or not above 0 raises `ValueError`), or
   `Pacing(text)` from `unpaced`, `realtime` or a factor; `factor` is
   `None` unpaced.  It compares and hashes by value, so it may key a
-  dict (`scaled(1.0)` is not `REAL_TIME`).  `run_for(seconds=..., pacing=None,
-  quantum_picoseconds=5_000_000_000)` is Rust's `Board::run_until_paced`: it
-  runs in quanta, paced by the control, releases the GIL before each
-  quantum, paced or not, and sleeps between quanta with the GIL released, so another thread
-  runs (a UI's `stop` reaches an unpaced run too), and Python's signal handlers run between sleeps of at most
-  20 ms, so Ctrl-C raises `KeyboardInterrupt` promptly.  The GIL is
-  held while a quantum runs, and the board itself is not for another
-  thread (it is `unsendable`): a UI thread holds the control alone.
-  A run that reaches its end waits out its last quantum too, so it
-  never returns ahead of wall time, and short paced runs in a loop are
-  paced.  The wall clock decides only how long the run sleeps: a paced run is
-  the same as the unpaced one.  `pacing` paces that call alone: the
+  dict (`scaled(1.0)` is not `REAL_TIME`).
+  `run_for(seconds=..., pacing=None, quantum_picoseconds=5_000_000_000)`
+  is Rust's `Board::run_until_paced`: it runs in quanta, paced by the
+  control, and sleeps between quanta with the GIL released.  Paced or
+  not, it releases the GIL between quanta once it has held it two of
+  Python's switch intervals (`sys.getswitchinterval()`, 5 ms by
+  default), so another thread waiting for it runs within about that
+  (a UI's `stop` reaches an unpaced run too), the interval read again
+  each time the GIL comes back, so a `sys.setswitchinterval` from
+  another thread applies during the run; a release every quantum
+  would hand it to no one, a thread waiting for the GIL asking for it
+  only after a whole interval without a release.  Python's signal
+  handlers run between quanta and between sleeps of at most 20 ms, so
+  Ctrl-C raises `KeyboardInterrupt` promptly.  The GIL is held while a
+  quantum runs, and the board itself is not for another thread (it is
+  `unsendable`): a UI thread holds the control alone.  A run that
+  reaches its end waits out its last quantum too, so it never returns
+  ahead of wall time, and short paced runs in a loop are paced.  The
+  wall clock decides only how long the run sleeps: a paced run is the
+  same as the unpaced one.  `pacing` paces that call alone: the
   control's pacing is set for the run and put back when it returns or
   raises, unless a `set_pacing` from another thread changed it during
   the run, which then stays (a UI's choice outlives the call).
@@ -1140,10 +1148,10 @@ Front ends):
   pacing (one to the pacing it has changes nothing, so a UI may set its
   choice every frame), any other run (even of no time) or a successful
   restore, runs nothing: it starts the pacing.  It never sleeps, but
-  releases the GIL before each quantum and runs Python's signal
-  handlers, as `run_for` does, so another thread's `control().stop()`
-  ends it (`Stop.Requested`) and Ctrl-C raises `KeyboardInterrupt`.  A
-  `wall` not finite, or below 0, raises `ValueError`.
+  releases the GIL between quanta and runs Python's signal handlers, as
+  `run_for` does, so another thread's `control().stop()` ends it
+  (`Stop.Requested`) and Ctrl-C raises `KeyboardInterrupt`.  A `wall`
+  not finite, or below 0, raises `ValueError`.
 
 ```python
 import tempfile

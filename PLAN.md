@@ -782,13 +782,27 @@ chip beside `Mc68331`.
   Rust's `Board::run_until_paced`: paced by the board's control
   (`pacing=` sets it for that call alone, put back when it returns or
   raises unless another thread's `set_pacing` changed it meanwhile,
-  which stays), it releases the GIL before each quantum, paced or
-  not, and while it sleeps between quanta (`Pacer::wait_with`, sleeps
-  of at most 20 ms, the signal handlers after each), so a UI thread's
-  `stop` or `send` gets in during an unpaced run too.  Releasing it
-  once a quantum costs nothing measurable unpaced (4 board seconds of
-  the control test's board, 800 quanta: 0.191 s either way, release
-  build).  A series of
+  which stays), it releases the GIL between quanta, paced or not, and
+  while it sleeps between quanta (`Pacer::wait_with`, sleeps of at
+  most 20 ms, the signal handlers after each), so a UI thread's `stop`
+  or `send` gets in during an unpaced run too.  Between quanta it
+  releases the GIL only once it has held it two switch intervals
+  (`sys.getswitchinterval()`): CPython's waiting thread asks the
+  holder to drop the GIL only after a whole interval with no switch,
+  each release waking it to wait an interval again, and a release
+  taken straight back is no handoff, so released every quantum it
+  starved another thread for a whole fast run (the demo board, debug
+  build: a stop 50 ms in landed after the run's 620 ms); released
+  after an interval with the ask pending, the GIL is handed over, the
+  release waiting until the other thread holds it.  `yield_now` inside
+  each release does not help.  The interval is read again whenever
+  the GIL comes back, as only a thread holding it can set it, so a
+  `sys.setswitchinterval` during the run applies from its next
+  release.  The timed release, and the reading, cost nothing
+  measurable (release build, 4 board seconds of the control test's
+  board, 800 quanta: 0.188 s and 0.190 s, read again 0.188 s; 40 of
+  a CPU spinning, 8000 quanta: 1.48 s and 1.49 s, read again
+  1.49 s).  A series of
   `run_until`s is one long run, and so is a series of board runs or
   of instruction-limited core runs, so the quanta change nothing the
   target does; a quantum that ends early (a stop, a halt, a clock
