@@ -307,6 +307,7 @@ impl Builder {
                 level: InterruptLevel::NONE,
                 level_stale: true,
                 acknowledged: None,
+                woke: None,
                 modules_next: None,
                 modules_next_stale: true,
             },
@@ -749,7 +750,6 @@ impl Mc68331 {
             }
             self.board.quantum_end = self.now + quantum;
             self.board.sync = false;
-            let low_power = self.board.sim.low_power();
             // and whether a limit ended it
             let (run, limited) = {
                 let board = RefCell::new(&mut self.board);
@@ -776,14 +776,6 @@ impl Mc68331 {
                 }
             };
             self.now += run.cycles;
-            if run.stop == Stop::Fault
-                && self.cpu.stopped()
-                && let Some(mask) = low_power
-            {
-                // the interrupt that woke the modules fault-stopped,
-                // not taken: LPSTOP goes on
-                self.board.low_power_stop(mask, self.now);
-            }
             if mem::take(&mut self.board.system_reload) {
                 self.board.reload(&mut self.cpu.memory, ResetCause::System);
             }

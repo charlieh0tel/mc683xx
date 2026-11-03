@@ -132,6 +132,35 @@ fn a_fault_stacking_the_interrupt_that_ends_lpstop_leaves_the_chip_asleep() {
 }
 
 #[test]
+fn lpstop_with_an_interrupt_already_pending_stays_asleep_when_it_faults() {
+    let mut program = Vec::new();
+    program.extend(store_word(SIM + 0x20, 0));
+    program.extend(store_word(SIM + 0x22, 0x0600 | PIT_VECTOR as u16));
+    program.extend(store_word(SIM + 0x24, 0x0001));
+    program.extend(ODD_STACK);
+    // MOVE.W #2000,D1; DBRA D1,*: the PIT's request pends, masked
+    program.extend([0x323c, 2000, 0x51c9, 0xfffe]);
+    program.extend(LPSTOP_MASK_0);
+    let mut rom = image(&program, ROM_BYTES);
+    let entry = 4 * PIT_VECTOR as usize;
+    rom[entry..entry + 4].copy_from_slice(&HANDLER.to_be_bytes());
+    let mut builder = Builder::default();
+    builder.memory(rom, false, &[ChipSelect::Boot]).unwrap();
+    let mut chip = builder.build();
+    chip.cpu_control().set_stop_on_fault(true);
+    let run = loop {
+        let run = chip.run_for(Cycles(1000));
+        if run.stop != Stop::Budget && run.stop != Stop::Stopped {
+            break run;
+        }
+        assert!(chip.now() < Cycles(200_000), "never stopped");
+    };
+    assert_eq!(run.stop, Stop::Fault);
+    assert!(chip.cpu().stopped());
+    assert_eq!(chip.sim().low_power(), Some(0), "the modules asleep");
+}
+
+#[test]
 fn a_fault_stop_fails_a_bdm_step_in_background_mode_at_the_instruction() {
     let (mut chip, _) = booting(&[MOVE_WORD_FROM_ABSOLUTE, 0, ODD as u16, NOP]);
     chip.reset_halted().unwrap();

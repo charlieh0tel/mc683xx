@@ -289,6 +289,10 @@ pub(crate) struct Board {
     /// whether it took the interrupt: not saved, as no snapshot falls
     /// between the two.
     pub(crate) acknowledged: Option<Source>,
+    /// The interrupt mask LPSTOP broadcast, and when, if the last
+    /// acknowledge woke the MCU from low-power stop; not saved, as
+    /// `acknowledged` is not.
+    pub(crate) woke: Option<(u8, Cycles)>,
     /// The earliest next event of the SIM and the modules, while
     /// `modules_next_stale` is clear: the run asks for it every quantum,
     /// and it moves only at an access to the SIM or a module, an
@@ -1045,6 +1049,7 @@ impl Board {
     /// interrupt.
     pub(crate) fn acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged {
         self.modules_changed();
+        self.woke = self.sim.low_power().map(|mask| (mask, now));
         self.wake(now);
         let sim = self.sim.arbitration();
         let timer = (self.sim.timer_request() == Some(level)).then_some((sim, Source::Timer));
@@ -1098,11 +1103,16 @@ impl Board {
     /// PIT's request, which its acknowledge cleared, stands again.  The
     /// modules' acknowledges clear nothing, and the IRQ pins are
     /// levels; a board peripheral that answered the acknowledge has
-    /// seen its cycle, and sees another when the request is taken.
+    /// seen its cycle, and sees another when the request is taken.  An
+    /// acknowledge that woke the MCU from low-power stop leaves it
+    /// there again, as the CPU stays in LPSTOP.
     pub(crate) fn withdrawn(&mut self) {
         if self.acknowledged.take() == Some(Source::Timer) {
             self.sim.withdraw_timer_acknowledge();
             self.level_stale = true;
+        }
+        if let Some((mask, now)) = self.woke.take() {
+            self.low_power_stop(mask, now);
         }
     }
 
