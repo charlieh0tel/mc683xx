@@ -824,3 +824,23 @@ fn monitor_faults_stop_the_chip_s_run() {
     monitor_faults_stop_the_run(&mut chip);
     assert_eq!(chip.cpu().registers.pc, STORE_PC);
 }
+
+#[test]
+fn a_fault_stop_outranks_a_watch_hit_it_undid() {
+    for resume in ["c", "s"] {
+        let mut machine = machine();
+        // TRAP #0, SSP 4: its frame's first words go to 2 and 0,
+        // watched, then below zero, where nothing maps
+        machine.write(Address(START), &bytes(&[0x4e40])).unwrap();
+        machine.cpu.registers.ssp = 4;
+        machine.cpu.set_stop_on_fault(true);
+        let (ending, replies) = session(
+            &mut machine,
+            vec![packet("Z2,0,4"), packet(resume), packet("k")],
+        );
+        assert_eq!(ending.unwrap(), Ending::Killed);
+        assert_eq!(replies[0], "OK");
+        assert_eq!(replies[1], "S0a", "{resume}: SIGBUS: {replies:?}");
+        assert_eq!(machine.cpu.registers.pc, START, "{resume}: the TRAP undone");
+    }
+}
