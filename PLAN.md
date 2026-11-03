@@ -3230,12 +3230,9 @@ checks move onto real code hooks.
     `BoardControl::sleep` blocks on a `Condvar`, and both panic there; a
     browser host instead gives `Pacer::due` its own clock's reading and
     runs the board to the time it says.
-  - `Description::parse` reads each `[[memory]] image` and
-    `Options::images` file itself (`description.rs`, `read_memory`),
-    so a host cannot hand it image bytes; they would need a field
-    taking bytes as well as paths (a new one, or `Options::images`
-    changed, which breaks the API).  `mc683xx-debug`'s loading is
-    likely the same; not checked.
+  - Images: `Description::parse_with` takes each `[[memory]] image`'s
+    and `Options::images`' bytes from the host's `read(path)`;
+    `parse` is it over `fs::read`.
   - Open: the browser (`wasm32-unknown-unknown`) or WASI
     (`wasm32-wasip1`, which has a clock and files and would make most
     of the above moot), and whether CI builds for wasm32.

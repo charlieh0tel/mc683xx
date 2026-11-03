@@ -9,6 +9,7 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
+use std::io;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -326,6 +327,25 @@ impl Description {
     /// else wrong with the board the file describes: each a
     /// [`LoadError`] naming it.
     pub fn parse(text: &str, directory: &Path, options: &Options) -> Result<Self, LoadError> {
+        Self::parse_with(text, directory, options, |path| fs::read(path))
+    }
+
+    /// [`Description::parse`], each image's contents from `read(path)`
+    /// rather than the file system: for a host with no files (a
+    /// browser), which hands it the bytes.  `path` is as `parse` would
+    /// read: the file's image or `options`' replacement, the file's
+    /// joined to `directory`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Description::parse`], an error `read` returns as
+    /// [`LoadError::Image`].
+    pub fn parse_with(
+        text: &str,
+        directory: &Path,
+        options: &Options,
+        mut read: impl FnMut(&Path) -> io::Result<Vec<u8>>,
+    ) -> Result<Self, LoadError> {
         let versioned: schema::Versioned = toml::from_str(text).map_err(SyntaxError::from_toml)?;
         match versioned.version {
             Some(toml::Value::Integer(schema::VERSION)) => {}
@@ -421,7 +441,7 @@ impl Description {
         };
         let memories = memory
             .iter()
-            .map(|entry| read_memory(entry, directory, options, &firmware, &mut users))
+            .map(|entry| read_memory(entry, directory, options, &firmware, &mut users, &mut read))
             .collect::<Result<Vec<_>, _>>()?;
         check_fixed(&memories)?;
         let decoders = decoder
@@ -698,6 +718,7 @@ fn read_memory(
     options: &Options,
     firmware: &Firmware<'_>,
     users: &mut Users,
+    read: &mut impl FnMut(&Path) -> io::Result<Vec<u8>>,
 ) -> Result<MemorySpec, LoadError> {
     let name = &entry.name;
     let image = match (options.images.get(name), &entry.image) {
@@ -723,7 +744,7 @@ fn read_memory(
     }
     let image = image
         .map(|path| {
-            fs::read(&path).map_err(|error| LoadError::Image {
+            read(&path).map_err(|error| LoadError::Image {
                 memory: name.clone(),
                 path,
                 error,

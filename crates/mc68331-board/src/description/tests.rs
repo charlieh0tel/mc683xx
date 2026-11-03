@@ -3,9 +3,12 @@ use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_target::address::Address;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::io;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process;
 
 use mc683xx_mc68331::chip::Mc68331;
@@ -516,6 +519,49 @@ attach = [{ select = "CSBOOT" }]
         "the chosen firmware"
     );
     fs::remove_dir_all(&directory).unwrap();
+}
+
+#[test]
+fn a_host_hands_the_images_over_without_files() {
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[memory]]
+name = "data"
+image = "data.bin"
+attach = [{ select = "CS0" }]
+"#;
+    let files = BTreeMap::from([
+        (PathBuf::from("rom.bin"), vec![0xa5; 0x800]),
+        (PathBuf::from("other.bin"), vec![0x3c; 0x800]),
+    ]);
+    let read = |path: &Path| {
+        files
+            .get(path)
+            .cloned()
+            .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
+    };
+    let mut options = Options::default();
+    options
+        .images
+        .insert("data".to_owned(), PathBuf::from("other.bin"));
+    let description = Description::parse_with(text, Path::new(""), &options, read).unwrap();
+    assert_eq!(description.memories[0].bytes, [0xa5; 0x800]);
+    assert_eq!(description.memories[1].bytes, [0x3c; 0x800], "replaced");
+    let error =
+        Description::parse_with(text, Path::new(""), &Options::default(), read).unwrap_err();
+    assert!(
+        matches!(&error, LoadError::Image { memory, path, error }
+            if memory == "data" && path == Path::new("data.bin")
+                && error.kind() == io::ErrorKind::NotFound),
+        "{error}"
+    );
 }
 
 #[test]

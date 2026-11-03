@@ -1327,7 +1327,11 @@ A board is generic over the chip it is built around
 (`mc683xx_board::chip::Chip`): `Board::<Mc68331>::load(&description,
 ...)` loads one around the MC68331, and `Description::chip_type()`
 gives the file's `[chip] type`, for a host that serves several chips
-to choose by.  `board.chip()` is the chip itself, an `&Mc68331` with
+to choose by.  `Description::parse_with(text, directory, &options,
+read)` is `Description::parse` with each image's bytes from
+`read(path) -> io::Result<Vec<u8>>` rather than the file system, for a
+host with no files (a browser) to hand them over; an error it returns
+is the load's `LoadError::Image`.  `board.chip()` is the chip itself, an `&Mc68331` with
 every method of the chip's.
 
 - **Nets.** `Board::observe(net, observer) -> Result<ObserverId,
