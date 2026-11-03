@@ -3,7 +3,7 @@
 // (`realtime` by default, `unpaced` or a factor).
 
 import { Terminal } from "https://cdn.jsdelivr.net/npm/@xterm/xterm@6.0.0/lib/xterm.mjs";
-import init, { Board } from "../../crates/wasm/pkg/web/mc683xx_wasm.js";
+import init, { Board } from "../../crates/wasm/pkg/web/mc683xx.js";
 
 const BOARD_FILE = "../boards/demo.toml";
 // The image as the board file names it, and where the page fetches it.

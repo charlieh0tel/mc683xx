@@ -1,6 +1,6 @@
 .PHONY: hooks ci fmt-check licenses hook-test clippy features test docs deny bench singlestep-data singlestep musashi oracle python corpus \
 	firmware-path corpus-musashi unicorn corpus-unicorn corpus-oracles boot-smoke \
-	boot-diff reference-path smartclock-boards gdb echo-image demo-image wasm web-test
+	boot-diff reference-path smartclock-boards gdb echo-image demo-image wasm npm-package web-test
 
 # Once per clone: the commit-msg hook refuses AI attribution (AGENTS.md)
 # and pre-push uploads the Git LFS objects (.gitattributes).
@@ -208,13 +208,11 @@ gdb:
 
 # The JavaScript bindings (crates/wasm, PLAN.md WebAssembly): the crate
 # for wasm32-unknown-unknown, linted there with the workspace crates it
-# depends on, bound by wasm-bindgen for Node (the tests, node:test) and
-# for a page (examples/web) into the ignored crates/wasm/pkg, then the
-# Node tests.  Not part of `ci`: it
-# needs the wasm32-unknown-unknown target, the wasm-bindgen CLI at the
-# crate's exact wasm-bindgen version, and Node 22 or later.
+# depends on, built as the npm package (npm-package), then the Node
+# tests.  Not part of `ci`: it needs the wasm32-unknown-unknown target,
+# the wasm-bindgen CLI at the crate's exact wasm-bindgen version, and
+# Node 22.12 or later.
 WASM_BINDGEN ?= wasm-bindgen
-WASM_PACKAGE := crates/wasm/pkg
 # Cargo's target directory, as cargo metadata gives it (absolute):
 # CARGO_TARGET_DIR or a configured one, else the workspace's target/.
 # Read once, when a recipe first needs it, not for every make: the first
@@ -229,13 +227,27 @@ TARGET_DIR = $(eval TARGET_DIR := $$(TARGET_DIR_READ))$(TARGET_DIR)
 # and reopened.
 quote = '$(subst ','\'',$(1))'
 WASM_MODULE = $(TARGET_DIR)/wasm32-unknown-unknown/release/mc683xx_wasm.wasm
+# The npm package `mc683xx`, ignored: the bindings bound by wasm-bindgen
+# for the web (web/, which examples/web loads), crates/wasm/npm's Node
+# entry, README and package.json (from cargo metadata, the workspace's
+# version), the Node entry's types (node.d.ts, from the web bindings',
+# by crates/wasm/npm/types.mjs), and the license texts.  `npm publish` from here publishes it
+# (docs/releasing.md).
+NPM_PACKAGE := crates/wasm/pkg
 
-wasm:
+wasm: npm-package
 	cargo clippy --target wasm32-unknown-unknown -p mc683xx-wasm -- -D warnings
-	cargo build --release --target wasm32-unknown-unknown -p mc683xx-wasm
-	$(WASM_BINDGEN) --target nodejs --out-dir $(WASM_PACKAGE)/nodejs $(call quote,$(WASM_MODULE))
-	$(WASM_BINDGEN) --target web --out-dir $(WASM_PACKAGE)/web $(call quote,$(WASM_MODULE))
 	node --test crates/wasm/tests/*.test.mjs
+
+npm-package:
+	cargo build --release --target wasm32-unknown-unknown -p mc683xx-wasm
+	rm -rf $(NPM_PACKAGE)
+	$(WASM_BINDGEN) --target web --remove-name-section --out-name mc683xx \
+		--out-dir $(NPM_PACKAGE)/web $(call quote,$(WASM_MODULE))
+	node crates/wasm/npm/types.mjs $(NPM_PACKAGE)
+	cp crates/wasm/npm/node.js crates/wasm/npm/README.md $(LICENSE_FILES) $(NPM_PACKAGE)/
+	cargo metadata --format-version 1 --no-deps \
+		| node crates/wasm/npm/package.mjs > $(NPM_PACKAGE)/package.json
 
 # The demo page (examples/web) in headless Chrome, CHROME=path naming
 # another browser: it types at the demo board's console and waits for

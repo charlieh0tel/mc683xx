@@ -1,9 +1,8 @@
-// The demo board (examples/boards/demo.toml) through the nodejs bindings
-// `make wasm` builds: booted, typed at, paced in frames, saved and
+// The demo board (examples/boards/demo.toml) through the npm package's Node
+// entry `make wasm` builds: booted, typed at, paced in frames, saved and
 // restored, and its mistakes thrown.
 
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import {
@@ -15,9 +14,9 @@ import {
   SLICE,
   text,
 } from "./demo.mjs";
+import init, { Board } from "../pkg/node.js";
 
-const require = createRequire(import.meta.url);
-const { Board } = require("../pkg/nodejs/mc683xx_wasm.js");
+await init();
 
 const FRAME_MILLISECONDS = 16;
 

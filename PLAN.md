@@ -3334,3 +3334,26 @@ checks move onto real code hooks.
   dependency or bundler), the bindings' `--target web` module, the
   board file and image fetched, tested in headless Chrome over the
   DevTools protocol (`make web-test`, not in `ci`).
+
+  `make npm-package` builds the npm package `mc683xx`
+  (`crates/wasm/README.md`, The npm package): one binding, wasm-bindgen's
+  `--target web`, and a hand-written Node entry that instantiates its
+  module from the file, chosen by the `exports` map's `node` condition,
+  so one usage (`await init()`) runs in Node and browsers, the package
+  carries one `.wasm`, and ES and CommonJS callers (Node's `require` of
+  an ES module, from Node 22.12) share one instance.  The `node`
+  condition has types of its own (`node.d.ts`, `npm/types.mjs`): the
+  web bindings' `init` names DOM types (`RequestInfo`, `BufferSource`)
+  and WebAssembly's, so with the web types a Node project without the
+  DOM library and with `skipLibCheck` off failed to compile.  They are
+  the web types' classes, copied at build time rather than written by
+  hand so the two cannot drift, and a DOM-free `init` and `initSync`,
+  with `InitInput` and `SyncInitInput` `unknown`: the build fails if
+  `node.d.ts` lacks a name the web types export, so a type imported
+  from `mc683xx` checks under either condition.
+  No automated TypeScript check: it needs tools npm would fetch, and
+  no tool is fetched yet; they were checked by hand with TypeScript
+  5.9 and `@types/node` 22 (`nodenext`, `lib` `esnext` and `es2022`,
+  `skipLibCheck` off, and a browser's `dom` and `bundler`).  No `wasm-opt`:
+  measured, it gained nothing after gzip; `--remove-name-section`
+  strips the names instead.
