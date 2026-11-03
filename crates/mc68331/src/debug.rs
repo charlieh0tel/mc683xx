@@ -36,8 +36,9 @@ const STEP_BUDGET: Cycles = Cycles(1 << 20);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum TargetError {
-    /// The host stopped a step before it completed (a hook, or its stop
-    /// request): the CPU is in background mode where it stopped.
+    /// The host stopped a step before it completed (a hook, a fault
+    /// stop, or its stop request): the CPU is in background mode where
+    /// it stopped.
     #[error("the host stopped the step before it completed")]
     Stopped,
     /// The call needs background mode, and the CPU is not in it.

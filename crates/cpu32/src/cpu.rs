@@ -379,6 +379,13 @@ impl Cpu {
         }
     }
 
+    /// Whether STOP or LPSTOP stopped the CPU, which waits for an
+    /// interrupt (CPU32RM 4.4).
+    #[must_use]
+    pub const fn stopped(&self) -> bool {
+        self.stopped
+    }
+
     /// Instructions run since the CPU was made: executed, or attempted
     /// and ended by an exception.
     #[must_use]

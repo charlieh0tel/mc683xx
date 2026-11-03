@@ -3865,3 +3865,26 @@ attach = [{ select = "CS0" }]
     assert!(board.assert_breakpoint());
     assert_eq!(board.chip().cpu().background(), Some(Entry::Breakpoint));
 }
+
+#[test]
+fn a_fault_stop_ends_the_board_s_run() {
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+"#;
+    // MOVE.W $401,D0: an odd address (CPU32RM 6.2.3)
+    let mut board = board("fault-stop", text, &[MOVE_WORD_TO_D0, 0, 0x0401, NOP]);
+    board.chip_mut().cpu_control().set_stop_on_fault(true);
+    let run = board.run_until(Time::from_seconds(1)).unwrap();
+    assert_eq!(run.stop, Stop::Fault);
+    let fault = board.chip().cpu().fault_stop().expect("a fault stop");
+    assert_eq!(fault.address.0, 0x0401);
+    assert_eq!(fault.registers.pc, START);
+    assert!(run.now < Time::from_seconds(1), "{:?}", run.now);
+}

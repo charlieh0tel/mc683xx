@@ -70,6 +70,7 @@ use mc683xx_modules::sim::reset::ResetScope;
 
 mod bus;
 mod debug;
+mod faults;
 mod fixed;
 mod serial;
 
