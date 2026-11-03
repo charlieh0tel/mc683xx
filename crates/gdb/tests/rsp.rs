@@ -844,3 +844,36 @@ fn a_fault_stop_outranks_a_watch_hit_it_undid() {
         assert_eq!(machine.cpu.registers.pc, START, "{resume}: the TRAP undone");
     }
 }
+
+#[test]
+fn a_watch_hit_in_an_instruction_kept_through_its_trace_s_fault_is_reported() {
+    for resume in ["c", "s"] {
+        let mut machine = machine();
+        // ADDQ.W #1,(A0) traced (T1), SSP where nothing maps: the ADDQ
+        // completes, its trace's stacking faults (CPU32RM 6.2.10), and
+        // the ADDQ is kept, its trace pending
+        machine.write(Address(START), &bytes(&[0x5250])).unwrap();
+        machine.cpu.registers.set_sr(0xa700);
+        machine.cpu.registers.ssp = UNMAPPED;
+        machine.cpu.set_stop_on_fault(true);
+        let (ending, replies) = session(
+            &mut machine,
+            vec![
+                packet(&format!("Z2,{STORE:x},2")),
+                packet(resume),
+                packet("k"),
+            ],
+        );
+        assert_eq!(ending.unwrap(), Ending::Killed);
+        assert!(
+            replies[1].starts_with("T05") && replies[1].contains("watch"),
+            "{resume}: {replies:?}"
+        );
+        assert_eq!(
+            machine.cpu.registers.pc,
+            START + 2,
+            "{resume}: the ADDQ kept"
+        );
+        assert!(machine.cpu.trace_pending().is_some());
+    }
+}
