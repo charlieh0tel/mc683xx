@@ -10,6 +10,7 @@ use std::mem;
 use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::time::Duration;
+use std::time::Instant;
 
 use mc683xx_board::board::Board;
 
@@ -29,8 +30,10 @@ use pyo3::PyErr;
 use pyo3::PyResult;
 use pyo3::Python;
 use pyo3::exceptions::PyValueError;
+use pyo3::marker::Ungil;
 use pyo3::pyclass;
 use pyo3::pymethods;
+use pyo3::types::PyAnyMethods;
 
 use crate::board::signal;
 
@@ -150,8 +153,9 @@ impl BoardControlView {
 
 /// Runs `board` to `until` in quanta of `quantum` picoseconds, paced by
 /// its control (Rust's `Board::run_until_paced`): the GIL released
-/// before each quantum, paced or not, and while it sleeps between
-/// quanta, so another thread (a UI's `stop` or `send`) runs, and
+/// between quanta, paced or not, once held two switch intervals
+/// ([`Turns`]), and while it sleeps between quanta, so another thread
+/// (a UI's `stop` or `send`) runs, and
 /// Python's signal handlers run between quanta and sleeps, so Ctrl-C
 /// raises `KeyboardInterrupt`, given as the `Err` of the outer result.
 /// A run that reaches `until` waits once more after its last quantum.
@@ -165,10 +169,10 @@ pub(crate) fn run_until_paced(
 ) -> Result<Result<BoardRun, RunError>, PyErr> {
     let control = board.control();
     let mut pacer = Pacer::new();
-    let mut turns = Turns::new(py);
+    let mut turns = Turns::new(py)?;
     let mut pace = |turns: &mut Turns<'_>, now: Time| {
         pacer.wait_with(now, &control, |duration| {
-            py.detach(|| control.sleep(duration));
+            turns.detach(|| control.sleep(duration));
             turns.signals()
         })
     };
@@ -185,7 +189,7 @@ pub(crate) fn run_until_paced(
 
 /// Runs a frame of `board` (Rust's `Board::run_frame`): to the board
 /// time due by `wall` under its control's pacing, but no more than
-/// `picoseconds`, the GIL released before each quantum and Python's
+/// `picoseconds`, the GIL released between quanta and Python's
 /// signal handlers run, as [`run_until_paced`] does, but never sleeping.
 pub(crate) fn run_frame(
     py: Python<'_>,
@@ -193,7 +197,7 @@ pub(crate) fn run_frame(
     wall: Duration,
     picoseconds: u64,
 ) -> Result<Result<BoardRun, RunError>, PyErr> {
-    let mut turns = Turns::new(py);
+    let mut turns = Turns::new(py)?;
     let outcome = board.run_frame_with(wall, picoseconds, |_| turns.turn());
     turns.ended(outcome)
 }
@@ -201,21 +205,69 @@ pub(crate) fn run_frame(
 /// What a run in Python does between its quanta: another thread's turn
 /// at the GIL, and Python's signal handlers, the first exception one
 /// raises kept to end the run with.
+///
+/// A thread waiting for the GIL asks its holder to drop it only when a
+/// whole switch interval (`sys.getswitchinterval()`) passes with no
+/// other thread taking it, and each release wakes it to wait a whole
+/// interval again; a release finds the ask and hands the GIL over,
+/// waiting until the other thread holds it.  A release followed at once
+/// by the take back is no handoff, the waiting thread rarely winning
+/// that race: released every quantum, the GIL was never asked for, and
+/// another thread starved for as long as the run.  So a turn releases
+/// it only once twice the interval has passed since the last, and the
+/// thread waiting gets it within about two intervals.  The interval is
+/// read again each time the GIL comes back: another thread can set it
+/// only while it holds the GIL, so a change during the run applies from
+/// the next release on.
 struct Turns<'py> {
     /// The GIL, held.
     py: Python<'py>,
-    /// What a signal handler raised.
+    /// `sys.getswitchinterval`.
+    switch_interval: Bound<'py, PyAny>,
+    /// What a signal handler, or reading the switch interval, raised.
     raised: Option<PyErr>,
+    /// When a turn last released the GIL, or the run started.
+    released: Instant,
+    /// How long the GIL is held between releases: twice the switch
+    /// interval.
+    held: Duration,
 }
 
 impl<'py> Turns<'py> {
-    /// Turns under `py`, nothing raised.
-    const fn new(py: Python<'py>) -> Self {
-        Self { py, raised: None }
+    /// Turns under `py`, nothing raised, from now.
+    fn new(py: Python<'py>) -> PyResult<Self> {
+        let switch_interval = py.import("sys")?.getattr("getswitchinterval")?;
+        let held = held(&switch_interval)?;
+        Ok(Self {
+            py,
+            switch_interval,
+            raised: None,
+            released: Instant::now(),
+            held,
+        })
     }
 
-    /// Python's signal handlers run: `Break` if one raised.
+    /// Runs `released` with the GIL released, another thread's turn,
+    /// then reads the switch interval again, which that thread may have
+    /// set; what reading it raises is kept, and ends the run at the
+    /// next signal check.
+    fn detach<T: Ungil>(&mut self, released: impl Ungil + FnOnce() -> T) -> T {
+        let value = self.py.detach(released);
+        match held(&self.switch_interval) {
+            Ok(held) => self.held = held,
+            Err(error) => {
+                self.raised.get_or_insert(error);
+            }
+        }
+        value
+    }
+
+    /// Python's signal handlers run: `Break` if one raised, or if
+    /// something raised already.
     fn signals(&mut self) -> ControlFlow<()> {
+        if self.raised.is_some() {
+            return ControlFlow::Break(());
+        }
         match self.py.check_signals() {
             Ok(()) => ControlFlow::Continue(()),
             Err(error) => {
@@ -225,10 +277,14 @@ impl<'py> Turns<'py> {
         }
     }
 
-    /// A waiting thread's turn, a run that never sleeps releasing the
-    /// GIL here alone, then the signal handlers.
+    /// A waiting thread's turn, if the GIL has been held long enough (a
+    /// run that never sleeps releases it here alone), then the signal
+    /// handlers.
     fn turn(&mut self) -> ControlFlow<()> {
-        self.py.detach(|| ());
+        if self.released.elapsed() >= self.held {
+            self.detach(|| ());
+            self.released = Instant::now();
+        }
         self.signals()
     }
 
@@ -236,4 +292,12 @@ impl<'py> Turns<'py> {
     fn ended<T>(self, outcome: T) -> Result<T, PyErr> {
         self.raised.map_or(Ok(outcome), Err)
     }
+}
+
+/// How long a run holds the GIL between releases: twice the switch
+/// interval `switch_interval` (`sys.getswitchinterval`) gives.
+fn held(switch_interval: &Bound<'_, PyAny>) -> PyResult<Duration> {
+    let interval: f64 = switch_interval.call0()?.extract()?;
+    Duration::try_from_secs_f64(2.0 * interval)
+        .map_err(|error| PyValueError::new_err(error.to_string()))
 }

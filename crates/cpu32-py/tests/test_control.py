@@ -3,8 +3,12 @@ Python: another thread stops a paced run and queues input, taken at a
 sync point, and pacing changes nothing the board does."""
 
 import _thread
+import signal
+import struct
+import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -303,3 +307,131 @@ def test_a_frame_s_wall_must_be_seconds(tmp_path: Path) -> None:
             loaded.run_frame(wall, seconds=0.1)
     with pytest.raises(ValueError, match="seconds or picoseconds"):
         loaded.run_frame(0.0)
+
+
+# A CPU spinning in `bra.s *` and nothing else: its quanta are far
+# shorter than Python's switch interval, as a fast board's are.
+SPINNING_BOARD = """
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "spin.bin"
+size = 0x800
+attach = [{ select = "CSBOOT" }]
+"""
+# The reset vectors (SSP, PC) and `bra.s *` at the PC.
+SPINNING_STACK = 0x800
+SPINNING_START = 8
+BRA_SELF = 0x60FE
+# Far more than another thread waits for the GIL, but a short run.
+PROMPTLY = 0.5
+
+
+def spinning_board(directory: Path) -> mc683xx.Board:
+    (directory / "spin.bin").write_bytes(struct.pack(">IIH", SPINNING_STACK, SPINNING_START, BRA_SELF))
+    (directory / "board.toml").write_text(SPINNING_BOARD)
+    return mc683xx.Board(str(directory / "board.toml"))
+
+
+RUNS: dict[str, Callable[[mc683xx.Board], mc683xx.BoardRun]] = {
+    "run_for": lambda loaded: loaded.run_for(seconds=5.0),
+    "run_frame": lambda loaded: loaded.run_frame(0.0, seconds=5.0),
+}
+
+
+@pytest.mark.parametrize("run", RUNS.keys())
+def test_another_thread_s_stop_lands_promptly_on_a_fast_board(tmp_path: Path, run: str) -> None:
+    loaded = spinning_board(tmp_path)
+    control = loaded.control()
+    # each a chance for the run to win the GIL back before the thread
+    for _ in range(3):
+        stopped: list[float] = []
+
+        def front_end() -> None:
+            time.sleep(0.05)
+            stopped.append(time.monotonic())
+            control.stop()
+
+        thread = threading.Thread(target=front_end)
+        thread.start()
+        outcome = RUNS[run](loaded)
+        ended = time.monotonic()
+        thread.join()
+        assert outcome.stop == mc683xx.Stop.Requested()
+        assert ended - stopped[0] < PROMPTLY
+
+
+# A switch interval long enough that a run holding the GIL two of them
+# ends long after PROMPTLY, and a short one.
+LONG_SWITCH_INTERVAL = 0.5
+SHORT_SWITCH_INTERVAL = 0.001
+# Runs long enough to outlast the long interval's handoffs.
+LONG_RUNS: dict[str, Callable[[mc683xx.Board], mc683xx.BoardRun]] = {
+    "run_for": lambda loaded: loaded.run_for(seconds=600.0),
+    "run_frame": lambda loaded: loaded.run_frame(0.0, seconds=600.0),
+}
+
+
+@pytest.mark.parametrize("run", LONG_RUNS.keys())
+def test_a_switch_interval_set_during_a_run_applies_to_it(tmp_path: Path, run: str) -> None:
+    loaded = spinning_board(tmp_path)
+    control = loaded.control()
+    previous = sys.getswitchinterval()
+    sys.setswitchinterval(LONG_SWITCH_INTERVAL)
+    try:
+        shortened: list[float] = []
+
+        def front_end() -> None:
+            # back once the run hands the GIL over, a long interval in
+            time.sleep(0.05)
+            sys.setswitchinterval(SHORT_SWITCH_INTERVAL)
+            shortened.append(time.monotonic())
+            # back at the run's next handoff, under the short interval
+            time.sleep(0.05)
+            control.stop()
+
+        thread = threading.Thread(target=front_end)
+        thread.start()
+        outcome = LONG_RUNS[run](loaded)
+        ended = time.monotonic()
+        thread.join()
+    finally:
+        sys.setswitchinterval(previous)
+    assert outcome.stop == mc683xx.Stop.Requested()
+    assert ended - shortened[0] < PROMPTLY
+
+
+class Interrupted(Exception):
+    """What the test's SIGINT handler raises: a late one fails the test
+    alone, where a late `KeyboardInterrupt` would end pytest."""
+
+
+def interrupted(signum: int, frame: object) -> None:
+    raise Interrupted
+
+
+@pytest.mark.parametrize("run", RUNS.keys())
+def test_another_thread_s_interrupt_main_lands_promptly_on_a_fast_board(tmp_path: Path, run: str) -> None:
+    loaded = spinning_board(tmp_path)
+    previous = signal.signal(signal.SIGINT, interrupted)
+    try:
+        for _ in range(3):
+            started = time.monotonic()
+
+            def interrupt() -> None:
+                time.sleep(0.05)
+                _thread.interrupt_main()
+
+            thread = threading.Thread(target=interrupt)
+            thread.start()
+            try:
+                with pytest.raises(Interrupted):
+                    RUNS[run](loaded)
+            finally:
+                thread.join()
+            assert time.monotonic() - started < 0.05 + PROMPTLY
+    finally:
+        signal.signal(signal.SIGINT, previous)

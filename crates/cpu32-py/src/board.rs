@@ -1434,8 +1434,10 @@ impl BoardView {
     /// comes through its `control()`.  A peripheral's exception is raised
     /// once the run stops.  It runs in quanta of `quantum_picoseconds` (5
     /// ms by default), paced by the control's pacing (Rust's
-    /// `Board::run_until_paced`); the GIL is released while it sleeps
-    /// between quanta.  `pacing`, if given, paces this call alone: the
+    /// `Board::run_until_paced`); the GIL is released between quanta,
+    /// once held two switch intervals (`sys.getswitchinterval()`), so a
+    /// thread waiting for it runs within about 10 ms, and while it
+    /// sleeps.  `pacing`, if given, paces this call alone: the
     /// control's pacing is put back when the run returns or raises,
     /// unless another thread set a pacing during the run, which then
     /// stays.  Seconds not finite, or below 0, raise `ValueError`.
@@ -1477,8 +1479,8 @@ impl BoardView {
     /// first after a `set_pacing` to another pacing (one to the pacing
     /// it has changes nothing), any other run (even of no time) or a
     /// successful restore, runs nothing: it starts the pacing.  It never
-    /// sleeps, for a GUI's timer, but releases the GIL before each
-    /// quantum and runs Python's signal handlers, as `run_for` does, so
+    /// sleeps, for a GUI's timer, but releases the GIL between quanta
+    /// and runs Python's signal handlers, as `run_for` does, so
     /// another thread's `control().stop()` ends it and Ctrl-C raises
     /// `KeyboardInterrupt`.  A `wall` or `seconds` not finite, or
     /// below 0, raises `ValueError`.
