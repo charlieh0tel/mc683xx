@@ -331,6 +331,12 @@ impl PeriodicTimer {
         (self.control & PICR_PIV_MASK) as u8
     }
 
+    /// The interrupt it acknowledged was not taken: the request stands
+    /// again.
+    pub(crate) const fn withdraw_acknowledge(&mut self) {
+        self.pending = true;
+    }
+
     /// The EXTAL period the count running ends at.
     pub(crate) const fn end(&self) -> Option<u64> {
         self.end

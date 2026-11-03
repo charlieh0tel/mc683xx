@@ -112,14 +112,15 @@ fn a_fault_stacking_the_interrupt_that_ends_lpstop_leaves_the_chip_asleep() {
     );
     assert!(chip.cpu().stopped(), "LPSTOP not ended (CPU32RM 4.4)");
     assert_eq!(chip.sim().low_power(), Some(0), "the modules asleep");
-    // SSP fixed: the acknowledge cleared the PIT's request, so its next
-    // count's interrupt is taken, and the chip wakes
+    // SSP fixed: the PIT's request stands, so the next run takes it at
+    // once, and the chip wakes
     chip.cpu_control().registers_mut().ssp = RAM + RAM_BYTES as u32;
     let faulted = chip.now();
-    while chip.cpu().stopped() {
-        assert_ne!(chip.run_for(Cycles(1000)).stop, Stop::Fault);
-        assert!(chip.now() < faulted + Cycles(200_000), "never woke");
-    }
+    assert_ne!(chip.run_for(Cycles(64)).stop, Stop::Fault);
+    assert!(
+        !chip.cpu().stopped(),
+        "taken at {faulted:?}, not the next count"
+    );
     assert_eq!(chip.sim().low_power(), None);
     assert!(
         (HANDLER..HANDLER + 0x100).contains(&chip.cpu().registers.pc),

@@ -2139,10 +2139,14 @@ and `mc683xx.Machine` in Python (see Python).
     interrupt's acknowledge cycle was made: a bare host modeling
     LPSTOP's low-power state has seen it end.  The chip puts its
     modules back in low-power stop, as LPSTOP's broadcast left them.
-    A source whose acknowledge clears its request has dropped it, so
-    its next request is the one taken: the PIT's, which the model
-    clears at its acknowledge (SIMRM 3.6 does not say when it is
-    negated), or a board peripheral's that answers an acknowledge.
+    The core tells the host (`Interrupts::withdrawn`), so a source
+    whose acknowledge cleared its request asks again and the next run
+    takes it at once, as if the stop had not been: the chip's PIT,
+    whose request the model clears at its acknowledge (SIMRM 3.6 does
+    not say when it is negated).  The modules' acknowledges clear
+    nothing and the IRQ pins are levels.  A board peripheral that
+    answers the acknowledge has seen its cycle, and sees another when
+    the interrupt is taken, as a rerun instruction's peripheral does.
   - The chip and a board stop on faults through
     `CpuControl::set_stop_on_fault`, and their runs end `Stop::Fault`;
     the bus monitor's BERR is a fault like any.  Faults are bare-host

@@ -306,6 +306,7 @@ impl Builder {
                 page_selects: Vec::new(),
                 level: InterruptLevel::NONE,
                 level_stale: true,
+                acknowledged: None,
                 modules_next: None,
                 modules_next_stale: true,
             },
@@ -1406,5 +1407,9 @@ impl Interrupts for Connection<'_, '_> {
 
     fn acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged {
         self.0.borrow_mut().acknowledge(level, now)
+    }
+
+    fn withdrawn(&mut self, _level: InterruptLevel) {
+        self.0.borrow_mut().withdrawn();
     }
 }

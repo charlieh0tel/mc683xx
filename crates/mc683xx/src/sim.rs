@@ -537,6 +537,15 @@ impl Sim {
         self.timer.acknowledge()
     }
 
+    /// The timer's interrupt, acknowledged, was not taken: its request
+    /// stands again.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
+    pub fn withdraw_timer_acknowledge(&mut self) {
+        self.timer.withdraw_acknowledge();
+    }
+
     /// The LPSTOP broadcast cycle at `now`, carrying the interrupt mask
     /// (MC68331UM 4.5.4.2): the watchdog's clock stops (4.2.12).
     ///
