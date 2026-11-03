@@ -635,6 +635,97 @@ fn a_fault_stacking_rte_s_requeued_trace_keeps_the_rte() {
     assert_eq!(frame_address(&machine), CODE);
 }
 
+/// An exception a fault stops the stacking of, and the runs around it.
+struct Stacking {
+    /// The exception.
+    name: &'static str,
+    /// The code.
+    code: &'static [u16],
+    /// SR as it runs.
+    sr: u16,
+    /// Whether a breakpoint is pending.
+    breakpoint: bool,
+    /// Whether an interrupt is requested.
+    interrupt: bool,
+    /// The run whose stacking faults.
+    faults: Limits,
+    /// The run that takes it after.
+    resumes: Limits,
+}
+
+#[test]
+fn a_fault_stopped_exception_is_charged_once_when_taken() {
+    let instructions = |count| Limits {
+        instructions: Some(count),
+        ..Limits::default()
+    };
+    let steps = Limits {
+        steps: Some(0),
+        ..Limits::default()
+    };
+    let cases = [
+        Stacking {
+            name: "trace",
+            code: &[ADDQ_1_INDIRECT_A0, NOP],
+            sr: status::S | status::T1,
+            breakpoint: false,
+            interrupt: false,
+            faults: instructions(1),
+            resumes: instructions(0),
+        },
+        Stacking {
+            name: "breakpoint",
+            code: &[NOP],
+            sr: status::S,
+            breakpoint: true,
+            interrupt: false,
+            faults: instructions(0),
+            resumes: instructions(0),
+        },
+        Stacking {
+            name: "interrupt",
+            code: &[NOP],
+            sr: status::S,
+            breakpoint: false,
+            interrupt: true,
+            faults: steps,
+            resumes: steps,
+        },
+        Stacking {
+            name: "trap",
+            code: &[TRAP_0],
+            sr: status::S,
+            breakpoint: false,
+            interrupt: false,
+            faults: instructions(1),
+            resumes: instructions(1),
+        },
+    ];
+    for case in cases {
+        let prepared = || {
+            let mut machine = machine(case.code);
+            machine.cpu.set_stop_on_fault(true);
+            machine.cpu.registers.set_sr(case.sr);
+            machine.cpu.registers.set_address(0, COUNTER);
+            machine.cpu.set_breakpoint_pending(case.breakpoint);
+            if case.interrupt {
+                machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+            }
+            machine
+        };
+        let name = case.name;
+        let unfaulted = prepared().run_limited(case.faults).cycles;
+        let mut machine = prepared();
+        machine.cpu.registers.ssp = NOWHERE;
+        let run = machine.run_limited(case.faults);
+        assert!(matches!(run.end, End::Fault(_)), "{name}");
+        machine.cpu.registers.ssp = STACK;
+        let resumed = machine.run_limited(case.resumes);
+        assert_eq!(machine.cpu.registers.pc, HANDLER, "{name}");
+        assert_eq!(run.cycles + resumed.cycles, unfaulted, "{name}");
+    }
+}
+
 #[test]
 fn reset_drops_a_pending_trace() {
     let mut machine = traced_addq();

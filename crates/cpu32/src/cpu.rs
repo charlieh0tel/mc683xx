@@ -965,11 +965,13 @@ impl Core<'_> {
         cpu.refund = Cycles::ZERO;
         cpu.taken = None;
         self.now = now;
-        if !self.interrupt(interrupts) {
-            return None;
-        }
+        let processed = self.interrupt(interrupts)?;
         let cpu = &mut *self.cpu;
         cpu.leave_loop_mode();
+        if processed == Processed::Stopped {
+            // charged when it is taken on resume
+            return Some(Cycles::ZERO);
+        }
         Some(cpu.spend(timing::exception::INTERRUPT) + cpu.stall + cpu.extra)
     }
 
@@ -1104,8 +1106,12 @@ impl Core<'_> {
                     cycles + self.cpu.spend(timing::exception::BUS_ERROR)
                 } else if trace_pending {
                     // STOP and LPSTOP traced do not stop (6.2.10).
-                    self.trace();
-                    cycles + self.cpu.spend(timing::exception::TRACE)
+                    if self.trace() == Processed::Stopped {
+                        // charged when it is taken on resume
+                        cycles
+                    } else {
+                        cycles + self.cpu.spend(timing::exception::TRACE)
+                    }
                 } else {
                     self.cpu.stopped = flow == Flow::Stop;
                     cycles
@@ -1135,12 +1141,20 @@ impl Core<'_> {
                 self.cpu.spend(cost)
             }
             (Err(exception @ (Exception::Short { .. } | Exception::Long { .. })), None) => {
-                let trace = self.instruction_exception(exception, traced(true));
+                let requeued = exception.vector() == Vector::TRACE;
+                let (processed, trace) = self.instruction_exception(exception, traced(true));
+                if processed == Processed::Stopped && !requeued {
+                    // Nothing ran, as with a fault in the instruction.
+                    self.cpu.leave_loop_mode();
+                    return Cycles::ZERO;
+                }
                 let cycles = match exception_cost(exception.vector(), opcode) {
+                    // `rte`'s trace, charged when it is taken on resume
+                    _ if processed == Processed::Stopped => instruction_cost(self.cpu),
                     ExceptionCost::InPlace(cost) => self.cpu.spend(cost),
                     ExceptionCost::Beyond(cycles) => instruction_cost(self.cpu) + cycles,
                 };
-                if trace.is_some() {
+                if trace.is_some_and(|trace| trace != Processed::Stopped) {
                     cycles + self.cpu.spend(timing::exception::TRACE)
                 } else {
                     cycles
@@ -1188,7 +1202,8 @@ impl Core<'_> {
     /// instruction completed: a trace, a hardware breakpoint or an
     /// interrupt (CPU32RM 6.1.5, Table 6-2), with no trace pending
     /// beyond it.  A fault stop in it leaves the hooks at PC as they
-    /// were: the instruction there has not begun.
+    /// were, the instruction there not begun, and charges none of its
+    /// bus cycles.
     fn process_after_instruction(
         &mut self,
         vector: Vector,
@@ -1196,10 +1211,11 @@ impl Core<'_> {
         faulted: Option<Address>,
         level: Option<InterruptLevel>,
     ) -> Processed {
-        let resume = self.cpu.resume;
+        let (resume, stall) = (self.cpu.resume, self.cpu.stall);
         let processed = self.process(vector, pc, faulted, level, false);
         if processed == Processed::Stopped {
-            self.cpu.resume = resume;
+            // its cycles charged when it is taken on resume
+            (self.cpu.resume, self.cpu.stall) = (resume, stall);
         }
         processed
     }
@@ -1231,13 +1247,13 @@ impl Core<'_> {
     /// An exception the instruction raised with a four- or six-word
     /// frame: group 3 before it executes, its registers untouched and
     /// untraced; group 2 as part of it, then the trace it is due if
-    /// `trace_pending` (CPU32RM 6.1.5, Table 6-2).  What became of the
-    /// trace, if one followed.
+    /// `trace_pending` (CPU32RM 6.1.5, Table 6-2).  What became of it,
+    /// and of the trace, if one followed.
     fn instruction_exception(
         &mut self,
         exception: Exception,
         trace_pending: bool,
-    ) -> Option<Processed> {
+    ) -> (Processed, Option<Processed>) {
         let (vector, pc, faulted) = match exception {
             Exception::Short { vector, pc } => (vector, pc, None),
             Exception::Long {
@@ -1247,33 +1263,32 @@ impl Core<'_> {
             } => (vector, pc, Some(address)),
             Exception::Fault(fault) => {
                 self.instruction_fault(fault, self.cpu.previous_pc);
-                return None;
+                return (Processed::Faulted, None);
             }
         };
         if exception.before_execution() {
             self.restore_altered();
-            self.process(vector, pc, faulted, None, false);
-            return None;
+            return (self.process(vector, pc, faulted, None, false), None);
         }
         if let Some(address) = faulted.filter(|_| vector == Vector::TRACE) {
             // `rte`'s requeued trace (6.3.2.2), the RTE complete: a
             // trace of its own, which a fault stop leaves pending
-            self.trace_at(address);
-            return None;
+            return (self.trace_at(address), None);
         }
         // Group 2 changes the flow to its handler.
         let processed = self.process(vector, pc, faulted, None, trace_pending);
-        (processed == Processed::Taken && trace_pending).then(|| self.trace())
+        let trace = (processed == Processed::Taken && trace_pending).then(|| self.trace());
+        (processed, trace)
     }
 
     /// Samples the interrupt request and takes it if it is due: a level
     /// above the mask, or level 7 on its transition to 7 and when the
     /// mask drops from 7 while it stays at 7 (CPU32RM 6.2.11).
     /// Acknowledged, it gives a vector, the autovector of its level, or
-    /// the spurious vector; the mask is set to its level.  Whether one
-    /// was taken.
+    /// the spurious vector; the mask is set to its level.  What became
+    /// of the one due, if one was.
     #[inline]
-    fn interrupt(&mut self, interrupts: &mut dyn Interrupts) -> bool {
+    fn interrupt(&mut self, interrupts: &mut dyn Interrupts) -> Option<Processed> {
         let level = interrupts.level();
         let mask = self.cpu.registers.interrupt_mask();
         let due = if level == InterruptLevel::NONMASKABLE {
@@ -1283,16 +1298,18 @@ impl Core<'_> {
         };
         self.cpu.sampled_level = level;
         self.cpu.sampled_mask = mask;
-        if due {
-            self.take_interrupt(interrupts, level);
-        }
-        due
+        due.then(|| self.take_interrupt(interrupts, level))
     }
 
-    /// Acknowledges the interrupt request at `level` and takes it.
+    /// Acknowledges the interrupt request at `level` and takes it: what
+    /// became of it.
     #[cold]
     #[inline(never)]
-    fn take_interrupt(&mut self, interrupts: &mut dyn Interrupts, level: InterruptLevel) {
+    fn take_interrupt(
+        &mut self,
+        interrupts: &mut dyn Interrupts,
+        level: InterruptLevel,
+    ) -> Processed {
         let acknowledged = interrupts.acknowledge(level, self.now);
         self.bus_stop_requested();
         self.cpu.stall += acknowledged.stall;
@@ -1324,6 +1341,7 @@ impl Core<'_> {
             let cycles = self.hardware_breakpoint();
             self.charge(cycles);
         }
+        processed
     }
 
     /// A trace a fault stop left pending (PLAN.md, Faults), taken as a
@@ -1344,7 +1362,9 @@ impl Core<'_> {
         cpu.extra = Cycles::ZERO;
         cpu.taken = None;
         cpu.leave_loop_mode();
-        self.trace_at(address);
+        if self.trace_at(address) == Processed::Stopped {
+            return Cycles::ZERO;
+        }
         let cycles = self.cpu.spend(timing::exception::TRACE);
         cycles + self.cpu.stall + self.cpu.extra
     }
@@ -1383,12 +1403,13 @@ impl Core<'_> {
     /// through vector 12 with a six-word frame, the next PC and the
     /// address of the instruction executing when the breakpoint was
     /// sensed, the last executed (6.4.2).  A fault stop in that
-    /// processing leaves it pending, as nothing was taken.  Its clocks
-    /// (8.3.13, Breakpoint), less the overlap; the cycles' wait states
-    /// go to the stall.
+    /// processing leaves it pending, as nothing was taken, and charges
+    /// nothing.  Its clocks (8.3.13, Breakpoint), less the overlap; the
+    /// cycles' wait states go to the stall.
     #[cold]
     #[inline(never)]
     fn hardware_breakpoint(&mut self) -> Cycles {
+        let stall = self.cpu.stall;
         self.cpu.bare.breakpoint_pending = false;
         if self
             .breakpoint_acknowledge(HARDWARE_BREAKPOINT_NUMBER, Breakpoint::Hardware)
@@ -1407,7 +1428,10 @@ impl Core<'_> {
         self.cpu.leave_loop_mode();
         let processed = self.process_after_instruction(vector, pc, Some(address), None);
         if processed == Processed::Stopped {
+            // its acknowledge cycle made again on resume
             self.cpu.bare.breakpoint_pending = true;
+            self.cpu.stall = stall;
+            return Cycles::ZERO;
         }
         self.cpu.spend(timing::exception::BREAKPOINT_BUS_ERROR)
     }
