@@ -268,13 +268,16 @@ impl Cpu32Target for Mc68331 {
         };
         // a stop the host asked for in the step's last quantum
         let stopped = self.board.take_stop();
-        if completed && self.board.sim.low_power().is_some() {
+        let completed = if completed && self.board.sim.low_power().is_some() {
             // a stepped LPSTOP: the modules awake, then the interrupts
-            // pending at its end
+            // pending at its end, unless a hook or a fault stops them
             self.board.wake(self.now);
             limits.steps = Some(0);
-            self.run(STEP_BUDGET, Some(&mut limits));
-        }
+            let (run, limited) = self.run(STEP_BUDGET, Some(&mut limits));
+            limited || run.stop == Stop::Budget
+        } else {
+            completed
+        };
         // a BGND or a double bus fault entered background mode itself
         let entered = self.cpu.background();
         self.breakpoint();
