@@ -347,6 +347,26 @@ impl Cpu {
         self.bare.breakpoint_pending = pending;
     }
 
+    /// The traced instruction's address of a trace pending: one whose
+    /// frame a fault stopped the stacking of ([`set_stop_on_fault`],
+    /// PLAN.md, Faults).
+    ///
+    /// [`set_stop_on_fault`]: Self::set_stop_on_fault
+    #[must_use]
+    pub const fn trace_pending(&self) -> Option<Address> {
+        self.bare.trace_pending
+    }
+
+    /// Leaves a trace of the instruction at `address` pending, or
+    /// withdraws one ([`None`]).  The next run takes it before anything
+    /// else, at the boundary where the last run ended, before a pending
+    /// breakpoint (CPU32RM 6.1.5, Table 6-2): a six-word frame with PC
+    /// and `address` (6.2.10), a step of its own.  A halted CPU, or one
+    /// in background mode, keeps it pending.  Reset drops it.
+    pub const fn set_trace_pending(&mut self, address: Option<Address>) {
+        self.bare.trace_pending = address;
+    }
+
     /// Leaves background mode to execute from RPC, the PC, as GO does:
     /// the pipeline flushed (CPU32RM 7.2.6, 7.2.8.12).  Nothing out of
     /// it.  Whatever exception processing preceded the entry is over: a

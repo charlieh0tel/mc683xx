@@ -624,7 +624,7 @@ fn a_fault_stacking_rte_s_requeued_trace_keeps_the_rte() {
     assert_eq!(fault.registers.pc, CODE + 2, "the RTE kept");
     assert_eq!(fault.registers.ssp, STACK);
     assert_eq!(word_at(&machine, COUNTER), 0x1234, "the write rerun");
-    assert_eq!(machine.cpu.bare.trace_pending, Some(Address(CODE)));
+    assert_eq!(machine.cpu.trace_pending(), Some(Address(CODE)));
     // the run goes on: the trace taken, the write not rerun again
     machine.write(Address(COUNTER), &[0, 0]).unwrap();
     machine.protect(page, PAGE_BYTES, Permissions::ALL).unwrap();
@@ -738,7 +738,7 @@ fn a_pending_trace_waits_out_background_mode_and_is_a_step() {
         boundary_only(&mut machine),
         End::Stop(Stop::Background(Entry::Breakpoint))
     );
-    assert_eq!(machine.cpu.bare.trace_pending, Some(Address(CODE)));
+    assert_eq!(machine.cpu.trace_pending(), Some(Address(CODE)));
     // a step as a debugger takes one (CPU32RM 7.2.8.12): the trace up
     // to its handler, its first instruction not run
     machine.cpu.resume();
@@ -749,14 +749,32 @@ fn a_pending_trace_waits_out_background_mode_and_is_a_step() {
     assert_eq!((run.end, run.steps), (End::Steps, 1));
     assert_eq!(machine.cpu.registers.pc, HANDLER);
     assert_eq!(frame_address(&machine), CODE);
-    assert_eq!(machine.cpu.bare.trace_pending, None);
+    assert_eq!(machine.cpu.trace_pending(), None);
+}
+
+#[test]
+fn a_trace_left_pending_by_the_host_is_taken_or_withdrawn() {
+    let mut taken = machine(&[MOVEQ_1_D1, NOP]);
+    one(&mut taken);
+    taken.cpu.set_trace_pending(Some(Address(CODE)));
+    boundary_only(&mut taken);
+    assert_eq!(taken.cpu.trace_pending(), None);
+    assert_eq!(taken.cpu.registers.pc, HANDLER);
+    assert_eq!(frame(&taken).1, CODE + 2);
+    assert_eq!(frame_address(&taken), CODE);
+    let mut withdrawn = machine(&[MOVEQ_1_D1, NOP]);
+    one(&mut withdrawn);
+    withdrawn.cpu.set_trace_pending(Some(Address(CODE)));
+    withdrawn.cpu.set_trace_pending(None);
+    boundary_only(&mut withdrawn);
+    assert_eq!(withdrawn.cpu.registers.pc, CODE + 2, "none taken");
 }
 
 #[test]
 fn reset_drops_a_pending_trace() {
     let mut machine = traced_addq();
     one(&mut machine);
-    assert!(machine.cpu.bare.trace_pending.is_some());
+    assert!(machine.cpu.trace_pending().is_some());
     machine
         .write(
             Address(0),
@@ -764,7 +782,7 @@ fn reset_drops_a_pending_trace() {
         )
         .unwrap();
     machine.reset().unwrap();
-    assert_eq!(machine.cpu.bare.trace_pending, None);
+    assert_eq!(machine.cpu.trace_pending(), None);
 }
 
 #[test]

@@ -2121,7 +2121,9 @@ and `mc683xx.Machine` in Python (see Python).
     6.2.10) keeps that instruction: the registers are as the
     exception's processing began, and the exception stays pending.  A
     trace and a breakpoint are held pending by the core (a trace with
-    its instruction's address, in the snapshot) and taken first when
+    its instruction's address, in the snapshot; `Cpu::trace_pending`
+    and `Cpu::breakpoint_pending` show them, and their setters leave
+    or withdraw one) and taken first when
     the run goes on, trace before breakpoint (Table 6-2); an interrupt
     is sampled again.  So an instruction with read-modify-write effects
     (ADDQ #1,(A0) traced) runs once.  Trace processing "starts at the
@@ -3185,6 +3187,3 @@ checks move onto real code hooks.
   choices.
 - Whether `smartclock-emu` moves off its feature gate once it uses this
   core.
-- Fault stops (Faults), left as they are for now:
-  - No accessor shows or clears a pending trace, as
-    `breakpoint_pending` does for a breakpoint.
