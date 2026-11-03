@@ -410,6 +410,23 @@ fn a_fault_stacking_a_pending_breakpoint_keeps_the_instruction_before_it() {
 }
 
 #[test]
+fn a_pending_breakpoint_taken_is_a_step_up_to_its_handler() {
+    let mut machine = machine(&[NOP, NOP]);
+    machine.cpu.set_breakpoint_pending(true);
+    let run = machine.run_limited(Limits {
+        steps: Some(1),
+        ..Limits::default()
+    });
+    assert_eq!((run.end, run.steps), (End::Steps, 1));
+    // vector 12 (CPU32RM 6.2.6), its handler's first instruction not run
+    assert_eq!(machine.cpu.registers.pc, HANDLER);
+    assert_eq!(
+        frame(&machine).2,
+        format::word(format::SIX_WORD, Vector::HARDWARE_BREAKPOINT)
+    );
+}
+
+#[test]
 fn a_fault_stacking_a_breakpoint_after_stop_keeps_the_interrupt_before_it() {
     let mut machine = machine(&STOP_UNMASKED);
     machine.cpu.set_stop_on_fault(true);

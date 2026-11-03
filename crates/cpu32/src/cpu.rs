@@ -1391,7 +1391,8 @@ impl Core<'_> {
     /// with background mode enabled the CPU enters it, as
     /// [`Cpu::breakpoint`]; disabled, the hardware breakpoint is
     /// acknowledged, unless the CPU is halted or stopped, which leaves
-    /// it pending (PLAN.md, Background debug mode).  Its clocks.
+    /// it pending (PLAN.md, Background debug mode), and vector 12
+    /// taken is a step.  Its clocks.
     #[cold]
     #[inline(never)]
     fn pending_breakpoint(&mut self) -> Cycles {
@@ -1409,6 +1410,10 @@ impl Core<'_> {
         cpu.extra = Cycles::ZERO;
         cpu.taken = None;
         let cycles = self.hardware_breakpoint();
+        if self.cpu.taken.is_some() && !self.cpu.bare.breakpoint_pending {
+            // vector 12 taken: a step of its own, up to its handler
+            self.cpu.bare.exceptions_stepped += 1;
+        }
         cycles + self.cpu.stall + self.cpu.extra
     }
 
