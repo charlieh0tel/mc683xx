@@ -48,7 +48,8 @@ pub struct Limits {
     pub instructions: Option<u64>,
     /// The most steps to take: instructions run, each with the
     /// exceptions it raised, interrupts taken, and a trace a fault stop
-    /// left pending, taken as the run starts.  The run ends before
+    /// left pending or a hardware breakpoint pending
+    /// ([`Cpu::set_breakpoint_pending`]), taken as the run starts.  The run ends before
     /// the next instruction once it has taken them, interrupts pending
     /// there taken first, as T1 tracing stops (CPU32RM 6.2.10: the
     /// trace before a pending interrupt): one step is an interrupt
@@ -228,7 +229,8 @@ pub(crate) struct Bare {
     /// The last invalid access's reason, for a fault's cause.
     pub(crate) last_invalid: Option<Invalid>,
     /// The interrupts taken since the last limited run began, and the
-    /// traces a fault stop left pending: steps of their own.
+    /// traces and hardware breakpoints pending as it began: steps of
+    /// their own.
     pub(crate) exceptions_stepped: u64,
     /// Whether a hardware breakpoint is pending, BKPT asserted with
     /// background mode disabled, until it is acknowledged (CPU32RM

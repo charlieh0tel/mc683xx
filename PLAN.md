@@ -2157,7 +2157,11 @@ and `mc683xx.Machine` in Python (see Python).
   - An interrupt whose stacking fault-stops was not taken: it is not a
     step (`LimitedRun::steps`) until it is taken on resume.  A trace
     left pending is a step of its own when the next run takes it, as
-    it starts, up to its handler; a halted CPU, or one in background
+    it starts, up to its handler, and so is a pending hardware
+    breakpoint taken through vector 12, whether a fault stop or the
+    host left it (BKPT with background mode disabled), as an
+    interrupt pending at the start is; one DSACK ends takes nothing
+    and is no step; a halted CPU, or one in background
     mode, keeps it until the run after `Cpu::resume`.
   - Exception processing a fault stops is charged no clocks, its bus
     cycles' none included: its clocks are charged once, when it is
