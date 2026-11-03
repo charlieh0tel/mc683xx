@@ -1,9 +1,11 @@
 // The demo board (examples/boards/demo.toml) the bindings' tests run:
 // its file's text, its image's bytes and what the tests know of it.
+// `make npm-test` copies the tests, this module and the board's files
+// (into boards/) beside a project the package is installed in.
 
 import { readFileSync } from "node:fs";
 
-const boards = new URL("../../../examples/boards/", import.meta.url);
+const boards = new URL("boards/", import.meta.url);
 export const text = readFileSync(new URL("demo.toml", boards), "utf8");
 export const image = new Uint8Array(readFileSync(new URL("demo.bin", boards)));
 

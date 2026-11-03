@@ -1,6 +1,6 @@
 .PHONY: hooks ci fmt-check licenses hook-test clippy features test docs deny bench singlestep-data singlestep musashi oracle python corpus \
 	firmware-path corpus-musashi unicorn corpus-unicorn corpus-oracles boot-smoke \
-	boot-diff reference-path smartclock-boards gdb echo-image demo-image wasm npm-package web-test
+	boot-diff reference-path smartclock-boards gdb echo-image demo-image wasm npm-package npm-test web-test
 
 # Once per clone: the commit-msg hook refuses AI attribution (AGENTS.md)
 # and pre-push uploads the Git LFS objects (.gitattributes).
@@ -208,7 +208,7 @@ gdb:
 
 # The JavaScript bindings (crates/wasm, PLAN.md WebAssembly): the crate
 # for wasm32-unknown-unknown, linted there with the workspace crates it
-# depends on, built as the npm package (npm-package), then the Node
+# depends on, and built as the npm package (npm-package), which npm-test
 # tests.  Not part of `ci`: it needs the wasm32-unknown-unknown target,
 # the wasm-bindgen CLI at the crate's exact wasm-bindgen version, and
 # Node 22.12 or later.
@@ -234,10 +234,12 @@ WASM_MODULE = $(TARGET_DIR)/wasm32-unknown-unknown/release/mc683xx_wasm.wasm
 # by crates/wasm/npm/types.mjs), and the license texts.  `npm publish` from here publishes it
 # (docs/releasing.md).
 NPM_PACKAGE := crates/wasm/pkg
+# Where npm-test packs the package and installs it in a project of its
+# own, as a user would.
+NPM_TEST = $(TARGET_DIR)/npm-test
 
 wasm: npm-package
 	cargo clippy --target wasm32-unknown-unknown -p mc683xx-wasm -- -D warnings
-	node --test crates/wasm/tests/*.test.mjs
 
 npm-package:
 	cargo build --release --target wasm32-unknown-unknown -p mc683xx-wasm
@@ -248,6 +250,38 @@ npm-package:
 	cp crates/wasm/npm/node.js crates/wasm/npm/README.md $(LICENSE_FILES) $(NPM_PACKAGE)/
 	cargo metadata --format-version 1 --no-deps \
 		| node crates/wasm/npm/package.mjs > $(NPM_PACKAGE)/package.json
+
+# A fresh project for the package in $(1), $(1)/project, its own
+# package.json, and the package packed beside it, $(1)/mc683xx-*.tgz,
+# for the recipe to install.  A directory with a `#` in its path is
+# refused: npm reads one in a tarball's path as a URL's fragment, and
+# installs nothing.
+define npm_project
+	@case $(call quote,$(1)) in *\#*) \
+		echo "$@: npm cannot install from a path with a '#':" $(call quote,$(1)) >&2; \
+		exit 2;; esac
+	rm -rf $(call quote,$(1))
+	mkdir -p $(call quote,$(1)/project)
+	cd $(NPM_PACKAGE) && npm pack --pack-destination $(call quote,$(1))
+	echo '{ "private": true }' > $(call quote,$(1)/project/package.json)
+endef
+
+# The packed package installed from its tarball in a fresh project
+# (offline: it has no dependencies), with the Node tests
+# (crates/wasm/tests/*.test.*), the demo module they share and the demo
+# board's files copied in: the tests import `mc683xx` by name, as an ES
+# module and from CommonJS; then a bare page in headless Chrome
+# (crates/wasm/tests/browser.mjs, CHROME=path naming another browser)
+# imports the file the package gives a browser and runs the board.
+# Needs Chrome and python3 (http.server), but no network.
+npm-test: npm-package
+	$(call npm_project,$(NPM_TEST))
+	mkdir $(call quote,$(NPM_TEST)/project/boards)
+	cp crates/wasm/tests/*.test.* crates/wasm/tests/demo.mjs $(call quote,$(NPM_TEST)/project/)
+	cp examples/boards/demo.toml examples/boards/demo.bin $(call quote,$(NPM_TEST)/project/boards/)
+	cd $(call quote,$(NPM_TEST)/project) && npm install --offline --no-audit --no-fund ../mc683xx-*.tgz
+	cd $(call quote,$(NPM_TEST)/project) && node --test
+	node crates/wasm/tests/browser.mjs $(call quote,$(NPM_TEST)/project)
 
 # The demo page (examples/web) in headless Chrome, CHROME=path naming
 # another browser: it types at the demo board's console and waits for

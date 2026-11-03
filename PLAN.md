@@ -3307,7 +3307,7 @@ checks move onto real code hooks.
   `Vec<u8>`, `u64` as `BigInt`) and fails with the crate's `Error`,
   which `wasm-bindgen` throws as a JavaScript `Error` with its
   `Display` message, so the same methods are tested natively (`cargo
-  test`, `make ci`, with no wasm tools) and from Node (`make wasm`).
+  test`, `make ci`, with no wasm tools) and from Node (`make npm-test`).
   Where `wasm-bindgen` would take a JavaScript value silently wrong,
   the exported method takes the `JsValue`, checks it with `js-sys` and
   calls a Rust method of the same name the native tests call
@@ -3351,9 +3351,11 @@ checks move onto real code hooks.
   with `InitInput` and `SyncInitInput` `unknown`: the build fails if
   `node.d.ts` lacks a name the web types export, so a type imported
   from `mc683xx` checks under either condition.
-  No automated TypeScript check: it needs tools npm would fetch, and
-  no tool is fetched yet; they were checked by hand with TypeScript
+  No automated TypeScript check: `make npm-test` is offline and needs
+  no tool npm would fetch; they were checked by hand with TypeScript
   5.9 and `@types/node` 22 (`nodenext`, `lib` `esnext` and `es2022`,
   `skipLibCheck` off, and a browser's `dom` and `bundler`).  No `wasm-opt`:
   measured, it gained nothing after gzip; `--remove-name-section`
-  strips the names instead.
+  strips the names instead.  `make npm-test` tests the package as
+  installed from its tarball: the Node tests by its name, ES and
+  CommonJS, and a bare page in headless Chrome, offline.
