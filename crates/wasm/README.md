@@ -46,7 +46,10 @@ opens or a command never answered fails the test in 30 s, the
 processes stopped.  Chrome's profile is removed once Chrome and the
 processes it started have exited.  With `CI` set, as GitHub Actions
 sets it, Chrome runs with `--no-sandbox`: Ubuntu 24.04 restricts the
-unprivileged user namespaces its sandbox needs.
+unprivileged user namespaces its sandbox needs.  CI's `wasm` job runs `make wasm`
+and `make npm-test`, with the CLI `scripts/install-wasm-bindgen.sh`
+installs: a change to the crate's `wasm-bindgen` version changes its
+version and checksum too.
 
 ## The npm package
 
