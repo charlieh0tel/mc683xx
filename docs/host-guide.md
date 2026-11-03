@@ -1417,6 +1417,7 @@ every method of the chip's.
   host with a loop of its own (the runner's turns) keeps a
   `pacing::Pacer` and calls `wait(now, &control)` between its runs;
   `Board::run_until_quantized(until, quantum, before)` is the quantum loop alone.
+  Unpaced, neither reads the clock nor sleeps.
 
 ```rust
 use std::cell::RefCell;

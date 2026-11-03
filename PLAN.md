@@ -1484,8 +1484,8 @@ hand.  The keys are in `docs/board-files.md`.
   more after its last quantum, so it never returns ahead of wall time
   and short paced runs in a loop (a UI's frame at a time) are paced
   too.  The wall clock (`Instant`) is read
-  there and nowhere else in the board, and only decides how long to
-  sleep, so a run is the same whatever its pacing
+  there, only when paced, and nowhere else in the board, and only
+  decides how long to sleep, so a run is the same whatever its pacing
   (`a_paced_run_is_the_unpaced_run`).  A run that falls behind is not
   held back and runs unpaced until it catches up; a new factor or a
   restore starts the pacing again from where the board is.
@@ -3223,13 +3223,10 @@ checks move onto real code hooks.
   `RandomState`).  The chip and everything below it use no clock,
   thread, file or process, so they run there too.  The board does not
   yet:
-  - `Pacer::delay` (`pacing.rs`) reads `Instant::now()` before it looks
-    at the pacing, and that panics on this target, so
-    `Board::run_until_paced` fails even unpaced; returning early when
-    unpaced fixes that.  `run_until` does not read the clock.
-  - A paced run sleeps in `BoardControl::sleep` (`control.rs`), which
-    panics there; a paced host needs its own clock and sleep
-    (`Pacer::wait_with` takes a sleep already).
+  - Pacing: unpaced, `Pacer` reads no clock, so `Board::run_until_paced`
+    runs there unpaced.  Paced, `Pacer::delay` reads `Instant::now()` and
+    `BoardControl::sleep` blocks on a `Condvar`, and both panic there; a
+    paced host needs its own clock and sleep.
   - `Description::parse` reads each `[[memory]] image` and
     `Options::images` file itself (`description.rs`, `read_memory`),
     so a host cannot hand it image bytes; they would need a field
