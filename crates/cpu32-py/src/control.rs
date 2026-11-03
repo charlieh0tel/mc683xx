@@ -164,29 +164,60 @@ pub(crate) fn run_until_paced(
 ) -> Result<Result<BoardRun, RunError>, PyErr> {
     let control = board.control();
     let mut pacer = Pacer::new();
-    let mut raised = None;
-    let mut signals = || match py.check_signals() {
-        Ok(()) => ControlFlow::Continue(()),
-        Err(error) => {
-            raised = Some(error);
-            ControlFlow::Break(())
-        }
-    };
-    let mut wait = |now: Time| {
-        signals()?;
+    let mut turns = Turns::new(py);
+    let mut pace = |turns: &mut Turns<'_>, now: Time| {
         pacer.wait_with(now, &control, |duration| {
             py.detach(|| control.sleep(duration));
-            signals()
+            turns.signals()
         })
     };
     let outcome = board.run_until_quantized(until, quantum, |board| {
-        // a waiting thread's turn, an unpaced run never sleeping
-        py.detach(|| ());
-        wait(board.now())
+        turns.turn()?;
+        pace(&mut turns, board.now())
     });
     // the last quantum waited out, as Rust's does
-    if outcome.is_ok() && board.now() >= until {
-        let _ = wait(board.now());
+    if outcome.is_ok() && board.now() >= until && turns.signals().is_continue() {
+        let _ = pace(&mut turns, board.now());
     }
-    raised.map_or(Ok(outcome), Err)
+    turns.ended(outcome)
+}
+
+/// What a run in Python does between its quanta: another thread's turn
+/// at the GIL, and Python's signal handlers, the first exception one
+/// raises kept to end the run with.
+struct Turns<'py> {
+    /// The GIL, held.
+    py: Python<'py>,
+    /// What a signal handler raised.
+    raised: Option<PyErr>,
+}
+
+impl<'py> Turns<'py> {
+    /// Turns under `py`, nothing raised.
+    const fn new(py: Python<'py>) -> Self {
+        Self { py, raised: None }
+    }
+
+    /// Python's signal handlers run: `Break` if one raised.
+    fn signals(&mut self) -> ControlFlow<()> {
+        match self.py.check_signals() {
+            Ok(()) => ControlFlow::Continue(()),
+            Err(error) => {
+                self.raised = Some(error);
+                ControlFlow::Break(())
+            }
+        }
+    }
+
+    /// A waiting thread's turn, a run that never sleeps releasing the
+    /// GIL here alone, then the signal handlers.
+    fn turn(&mut self) -> ControlFlow<()> {
+        self.py.detach(|| ());
+        self.signals()
+    }
+
+    /// `outcome`, or what a signal handler raised.
+    fn ended<T>(self, outcome: T) -> Result<T, PyErr> {
+        self.raised.map_or(Ok(outcome), Err)
+    }
 }
