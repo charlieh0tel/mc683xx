@@ -13,7 +13,6 @@ use mc683xx_board::board::Board;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
-use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
@@ -148,8 +147,7 @@ to = ["u2.A"]
         ));
     }
     let description = Description::parse(&text, &directory, &Options::default()).unwrap();
-    let mut registry = Registry::with_builtins();
-    mc683xx_peripherals::register(&mut registry).unwrap();
+    let registry = mc683xx_peripherals::registry();
     let board = Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board

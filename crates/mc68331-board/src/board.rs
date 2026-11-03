@@ -1778,6 +1778,17 @@ impl<C: Chip> Board<C> {
         self.drive_endpoint(name, signal)
     }
 
+    /// What [`send`](Self::send) of `signal` to `name` would fail with,
+    /// sending nothing: for a host that checks an endpoint before it
+    /// sends to it, or sends it nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`send`](Self::send).
+    pub fn check_send(&self, name: &str, signal: &Signal) -> Result<(), SendError> {
+        self.control.endpoints().carrying(name, signal).map(drop)
+    }
+
     /// The run-time endpoint `name` drives `signal` now: [`send`](Self::send)
     /// without the control.
     fn drive_endpoint(&mut self, name: &str, signal: Signal) -> Result<(), SendError> {

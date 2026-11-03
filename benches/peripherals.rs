@@ -19,7 +19,6 @@ use mc683xx_board::board::Board;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
-use mc683xx_board::registry::Registry;
 use mc683xx_mc68331::chip::Mc68331;
 
 /// The supervisor stack and the program's start, as reset reads them.
@@ -158,8 +157,7 @@ fn board(name: &str, target: u32, peripherals: &str) -> Board<Mc68331> {
     let description =
         Description::parse(&text, &directory, &Options::default()).expect("the board file");
     fs::remove_dir_all(&directory).expect("the scratch directory removed");
-    let mut registry = Registry::with_builtins();
-    mc683xx_peripherals::register(&mut registry).expect("the stock peripherals");
+    let registry = mc683xx_peripherals::registry();
     let mut board =
         Board::<Mc68331>::load(&description, &registry, Environment::default()).expect("the board");
     board.run_for(SPAN).expect("the boot");

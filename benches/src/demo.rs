@@ -143,10 +143,9 @@ impl Demo {
             .expect("the console receives")
             .into_iter()
             .filter_map(|(_, signal)| match signal {
-                Signal::Serial(Serial {
-                    frame: Frame::Data(data),
-                    ..
-                }) => u8::try_from(data).ok(),
+                Signal::Serial(serial) => {
+                    serial.frame.data().and_then(|data| u8::try_from(data).ok())
+                }
                 _ => None,
             })
             .collect()

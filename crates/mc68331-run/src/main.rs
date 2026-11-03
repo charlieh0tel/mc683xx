@@ -52,7 +52,6 @@ use mc683xx_board::description::Options;
 use mc683xx_board::pacing::Pacer;
 use mc683xx_board::pacing::Pacing;
 use mc683xx_board::registry::Environment;
-use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
@@ -304,8 +303,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
     let mut environment = Environment::default();
     environment.seed = arguments.seed;
     environment.work_dir = arguments.work_dir.clone();
-    let mut registry = Registry::with_builtins();
-    mc683xx_peripherals::register(&mut registry)?;
+    let registry = mc683xx_peripherals::registry();
     let mut board = Board::<Mc68331>::read(&arguments.board, &options, &registry, environment)?;
     board
         .chip_mut()

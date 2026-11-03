@@ -17,7 +17,6 @@ use std::path::Path;
 use mc683xx_board::board::Board;
 use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
-use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
@@ -47,8 +46,7 @@ const GOLDEN: &str = "tests/golden/demo-console.golden";
 /// The console's text from power-on to `END`, with `SCRIPT` typed.
 fn console() -> Vec<u8> {
     let directory = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut registry = Registry::with_builtins();
-    mc683xx_peripherals::register(&mut registry).unwrap();
+    let registry = mc683xx_peripherals::registry();
     let mut board = Board::<Mc68331>::read(
         &directory.join("boards/demo.toml"),
         &Options::default(),
@@ -68,10 +66,8 @@ fn console() -> Vec<u8> {
         let run = board.run_until((board.now() + TURN).min(END)).unwrap();
         assert_eq!(run.stop, Stop::Budget, "at {}", run.now);
         for (_, signal) in board.take_received(CONSOLE).unwrap() {
-            if let Signal::Serial(Serial {
-                frame: Frame::Data(data),
-                ..
-            }) = signal
+            if let Signal::Serial(serial) = signal
+                && let Some(data) = serial.frame.data()
             {
                 text.push(u8::try_from(data).expect("8-bit frames"));
             }

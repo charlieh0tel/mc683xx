@@ -15,7 +15,6 @@ use mc683xx_board::board::Board;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
-use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
@@ -233,8 +232,7 @@ fn board_from(text: &str) -> Board<Mc68331> {
         .collect();
     let text = format!("{text}{nets}");
     let description = Description::parse(&text, &directory, &Options::default()).unwrap();
-    let mut registry = Registry::with_builtins();
-    mc683xx_peripherals::register(&mut registry).unwrap();
+    let registry = mc683xx_peripherals::registry();
     let board = Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board
@@ -375,8 +373,7 @@ type = "mc144110"
 attach = [{ qspi = 0b1110 }]
 "#;
     let description = Description::parse(text, &directory, &Options::default()).unwrap();
-    let mut registry = Registry::with_builtins();
-    mc683xx_peripherals::register(&mut registry).unwrap();
+    let registry = mc683xx_peripherals::registry();
     let mut board =
         Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();

@@ -27,7 +27,6 @@ use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::event::Event;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_modules::qsm::sci::Frame;
 
 use common::board;
 
@@ -466,10 +465,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
     let sci: Vec<u8> = chip
         .take_sci_transmitted()
         .into_iter()
-        .filter_map(|sent| match sent.frame {
-            Frame::Data(data) => Some(data as u8),
-            Frame::Break => None,
-        })
+        .filter_map(|sent| sent.frame.data().map(|data| data as u8))
         .collect();
     println!("{name}: SCI sent: \"{}\"", sci.escape_ascii());
     println!(

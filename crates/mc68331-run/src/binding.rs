@@ -28,7 +28,6 @@ use std::thread;
 use mc683xx_board::control::BoardControl;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
-use mc683xx_modules::qsm::sci::Frame;
 #[cfg(unix)]
 use nix::fcntl::FcntlArg;
 #[cfg(unix)]
@@ -259,11 +258,7 @@ impl Binding {
         let mut bytes = Vec::new();
         for (at, signal) in received {
             match signal {
-                Signal::Serial(serial) => {
-                    if let Frame::Data(data) = serial.frame {
-                        bytes.push(data as u8);
-                    }
-                }
+                Signal::Serial(serial) => bytes.extend(serial.frame.data().map(|data| data as u8)),
                 other => eprintln!("{CHIP}: external name={} time={} {other}", self.name, at.0),
             }
         }

@@ -659,10 +659,7 @@ fn python_value(py: Python<'_>, signal: Signal, timed: bool) -> PyResult<Py<PyAn
     match signal {
         Signal::Level(level) => level.into_py_any(py),
         Signal::Serial(serial) if timed => SerialView(serial).into_py_any(py),
-        Signal::Serial(serial) => match serial.frame {
-            Frame::Data(data) => data.into_py_any(py),
-            Frame::Break => Ok(py.None()),
-        },
+        Signal::Serial(serial) => serial.frame.data().into_py_any(py),
         Signal::Analog(value) => value.into_py_any(py),
         Signal::Bus(word) => word.into_py_any(py),
         Signal::Clock(clock) => (clock.at.0, clock.frequency.0, clock.phase.0).into_py_any(py),

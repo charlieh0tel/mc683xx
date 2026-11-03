@@ -81,13 +81,11 @@ use std::path::Path;
 use mc683xx_board::board::Board;
 use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
-use mc683xx_board::registry::Registry;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let mut registry = Registry::with_builtins();
-    mc683xx_peripherals::register(&mut registry)?;
+    let registry = mc683xx_peripherals::registry();
     let mut board = Board::<Mc68331>::read(
         Path::new("examples/boards/echo.toml"),
         &Options::default(),
@@ -100,10 +98,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 }
 ```
 
-`Registry::with_builtins()` holds the built-in peripheral types,
-`mc683xx_peripherals::register` adds the stock ones, and a host
-registers its own peripheral models the same way.  A host can also
-build the chip directly, without a board file, with
+`mc683xx_peripherals::registry()` holds the built-in peripheral types
+(`Registry::with_builtins()`) and the stock ones, and a host registers
+its own peripheral models in a registry with `Registry::register`.  A
+host can also build the chip directly, without a board file, with
 `mc683xx_mc68331::chip::Builder` (the host guide, below).
 
 ## Python: a board (`mc683xx`)
