@@ -27,4 +27,4 @@ thiserror = "2.0.21"
 [dev-dependencies]
 mc683xx-mc68331.workspace = true
 snapshot-golden = { path = "../snapshot-golden" }
-toml = "1.1.8"
+toml = "1.2.0"
