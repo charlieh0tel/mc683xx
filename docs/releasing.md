@@ -1,8 +1,8 @@
 # Releasing
 
-How a version reaches crates.io, PyPI and npm.  One version covers
-the workspace: every published crate, the `mc683xx` Python package
-and the `mc683xx` npm package.
+How a version reaches crates.io, PyPI and npm, and its demo page
+GitHub Pages.  One version covers the workspace: every published
+crate, the `mc683xx` Python package and the `mc683xx` npm package.
 The maintainer pushes the tags; a `v*` tag publishes, with no
 approval step, once the `release` workflow's gate passes (Cutting a
 release, step 7).
@@ -53,6 +53,22 @@ tarball (`make npm-test`) and compiles TypeScript against its
 declarations (`make npm-types`); the `npm` job builds it again from
 the tag and publishes it with a provenance statement.
 
+The demo page (`examples/web`) is deployed to GitHub Pages, at
+<https://charlieh0tel.github.io/mc683xx/>, by
+`.github/workflows/pages.yml`: from each `v*` tag, so the site shows
+the latest release, and from a manual run (Actions, `pages`, Run
+workflow) on `main` or a tag, to redeploy or to put an earlier
+release's back (a tag that has the workflow and `make pages`).  Its `build` job assembles the site (`make pages`:
+the page, the npm package's web module and `.wasm`, and the demo
+board's files) and checks it in headless Chrome under the site's
+subpath (`make pages-test`, which fetches xterm.js from jsDelivr, as
+the page does); its `deploy` job, in the `github-pages` environment,
+deploys it.  It does not wait for the `release` workflow's `gate`: a
+workflow cannot wait on another's job, the site publishes no package,
+and a bad deploy is put right by a manual run on the previous tag.
+A tag that fails `gate` still deploys its page, and the next release's
+deploy replaces it.
+
 ## Versions and tags
 
 - Semantic versioning from 0.1.0.  Before 1.0, a breaking change to a
@@ -97,6 +113,12 @@ Once, before the first release.
    two-factor authentication and disallow tokens", which trusted
    publishing still passes.  Every later release is published by the
    workflow only.
+5. GitHub Pages (Settings, Pages): under Build and deployment, set
+   Source to GitHub Actions.  That creates the `github-pages`
+   environment, which allows only `main` to deploy; in it (Settings,
+   Environments), under deployment branches and tags, add a tag rule
+   `v*` beside `main`, or a tag's `pages` run is refused.  No required
+   reviewers.
 
 ## Cutting a release
 
@@ -194,7 +216,9 @@ Once, before the first release.
    `npm publish` asks for a one-time password.  A package published
    by hand has no provenance statement.  Then set up its trusted
    publisher and publishing access (Setup, step 4), and `npm logout`.
-10. Make a GitHub release from the tag with the notes.
+10. The tag also runs `pages`, which deploys the tag's demo page to
+    GitHub Pages (What is published).
+11. Make a GitHub release from the tag with the notes.
 
 A broken release is yanked (`cargo yank`, PyPI's yank) or deprecated
 (`npm deprecate`) and fixed in the next patch version; a version is

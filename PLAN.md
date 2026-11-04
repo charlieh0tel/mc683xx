@@ -3332,6 +3332,16 @@ checks move onto real code hooks.
   dependency or bundler), the bindings' `--target web` module, the
   board file and image fetched, tested in headless Chrome over the
   DevTools protocol (`make web-test`, not in `ci`).
+  The page is on GitHub Pages (decided 2026-11-03), deployed by its
+  own workflow (`pages.yml`) from each `v*` tag and by hand, not from
+  every push to `main`, so the site shows a release.  The site
+  (`make pages`) keeps the repository's paths for the page, the
+  bindings and the board, so the page is the same file served from
+  the repository's top or from the site, with a top page that sends a
+  visitor on to it.  The deploy does not wait for `release`'s `gate`
+  (a workflow cannot wait on another's job, and the site publishes no
+  package); it waits on its own check of the site in headless Chrome
+  (`make pages-test`), under the site's subpath (`docs/releasing.md`).
 
   `make npm-package` builds the npm package `mc683xx`
   (`crates/wasm/README.md`, The npm package): one binding, wasm-bindgen's

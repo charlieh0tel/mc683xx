@@ -60,7 +60,8 @@ crates.io.
   peripherals and callables as hooks, and type stubs.
 - **WebAssembly:** a board from JavaScript (`crates/wasm`, the npm
   package `mc683xx`), and the demo board in a web page
-  ([examples/web](https://github.com/charlieh0tel/mc683xx/blob/main/examples/README.md#web-page)).
+  ([examples/web](https://github.com/charlieh0tel/mc683xx/blob/main/examples/README.md#web-page)):
+  [try it in your browser](https://charlieh0tel.github.io/mc683xx/).
 
 Early: 0.x, and the API may change between minor versions.
 
@@ -206,6 +207,8 @@ make wasm        # the JavaScript bindings (wasm32, wasm-bindgen), linted, as th
 make npm-test    # the npm package packed and installed, in Node and headless Chrome
 make npm-types   # the npm package's TypeScript declarations compiled (fetches TypeScript)
 make web-test    # the demo board's web page (examples/web) in headless Chrome
+make pages       # the web page as a static site, for GitHub Pages
+make pages-test  # that site in headless Chrome, under its subpath
 make singlestep  # SingleStepTests m68000 (fetches about 140 MB once)
 make oracle      # differential runs against Musashi (fetches it once)
 make corpus SMARTCLOCK_FIRMWARE=...  # smartclock firmware functions

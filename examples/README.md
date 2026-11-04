@@ -87,6 +87,17 @@ the browser): it types `m` and Enter and waits
 for the Mandelbrot set and the prompt.  It needs the network, for
 xterm.js.
 
+The page is on GitHub Pages, at
+<https://charlieh0tel.github.io/mc683xx/>, deployed from each release
+(`docs/releasing.md`).  `make pages` assembles that site in Cargo's
+target directory, `pages/mc683xx/`: the page, the bindings' web module
+and `.wasm`, and the board's files at their repository paths, so the
+page's relative paths hold, and at its top `web/pages.html`, which
+sends a visitor on to `examples/web/` with the query kept.  `make
+pages-test` serves `pages/` and checks the site as `web-test` checks
+the page, opened at `/mc683xx/`, the subpath GitHub Pages serves it
+under.
+
 ## Screencast
 
 `screencast/record.sh` records the top README's screencast, the demo

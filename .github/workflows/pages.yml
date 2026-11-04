@@ -1,0 +1,59 @@
+name: pages
+
+# The demo page (examples/web) on GitHub Pages, at
+# https://charlieh0tel.github.io/mc683xx/ (docs/releasing.md): built
+# from a `v*` tag, so the site shows the latest release, or from the
+# branch or tag a manual run names.  It needs the repository's Pages
+# source set to GitHub Actions and the `github-pages` environment to
+# allow the ref (docs/releasing.md, Setup).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; one under way finishes, and a newer run waits.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # The site (`make pages`), checked in headless Chrome before it is
+    # deployed (`make pages-test`, which builds it), with the tools CI's
+    # `wasm` job uses: the wasm32 target on rust-toolchain.toml's
+    # toolchain, the wasm-bindgen CLI at the crate's exact version, Node
+    # 22 and the runner image's google-chrome.  The check fetches
+    # xterm.js from jsDelivr, as the page does.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - run: |
+          cargo --version
+          rustup target add wasm32-unknown-unknown
+      - run: |
+          sh scripts/install-wasm-bindgen.sh "$RUNNER_TEMP/wasm-bindgen"
+          echo "$RUNNER_TEMP/wasm-bindgen" >> "$GITHUB_PATH"
+      - run: make pages-test
+      # The Makefile's PAGES_SITE, in Cargo's default target directory.
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: target/pages/mc683xx
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        id: deployment
