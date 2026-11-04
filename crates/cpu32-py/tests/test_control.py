@@ -336,9 +336,12 @@ def spinning_board(directory: Path) -> mc683xx.Board:
     return mc683xx.Board(str(directory / "board.toml"))
 
 
+# Runs far longer than PROMPTLY even on a fast host (a release build
+# runs 5 s of this board in well under 0.2 s), and than the long switch
+# interval's handoffs: a run that ends at its budget fails the test.
 RUNS: dict[str, Callable[[mc683xx.Board], mc683xx.BoardRun]] = {
-    "run_for": lambda loaded: loaded.run_for(seconds=5.0),
-    "run_frame": lambda loaded: loaded.run_frame(0.0, seconds=5.0),
+    "run_for": lambda loaded: loaded.run_for(seconds=600.0),
+    "run_frame": lambda loaded: loaded.run_frame(0.0, seconds=600.0),
 }
 
 
@@ -368,14 +371,9 @@ def test_another_thread_s_stop_lands_promptly_on_a_fast_board(tmp_path: Path, ru
 # ends long after PROMPTLY, and a short one.
 LONG_SWITCH_INTERVAL = 0.5
 SHORT_SWITCH_INTERVAL = 0.001
-# Runs long enough to outlast the long interval's handoffs.
-LONG_RUNS: dict[str, Callable[[mc683xx.Board], mc683xx.BoardRun]] = {
-    "run_for": lambda loaded: loaded.run_for(seconds=600.0),
-    "run_frame": lambda loaded: loaded.run_frame(0.0, seconds=600.0),
-}
 
 
-@pytest.mark.parametrize("run", LONG_RUNS.keys())
+@pytest.mark.parametrize("run", RUNS.keys())
 def test_a_switch_interval_set_during_a_run_applies_to_it(tmp_path: Path, run: str) -> None:
     loaded = spinning_board(tmp_path)
     control = loaded.control()
@@ -395,7 +393,7 @@ def test_a_switch_interval_set_during_a_run_applies_to_it(tmp_path: Path, run: s
 
         thread = threading.Thread(target=front_end)
         thread.start()
-        outcome = LONG_RUNS[run](loaded)
+        outcome = RUNS[run](loaded)
         ended = time.monotonic()
         thread.join()
     finally:
