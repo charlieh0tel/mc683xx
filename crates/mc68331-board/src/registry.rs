@@ -11,6 +11,9 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fs;
+use std::io;
+use std::path::Path;
 use std::path::PathBuf;
 
 use crate::builtin;
@@ -457,8 +460,14 @@ const fn mix(seed: u64) -> u64 {
     mixed ^ (mixed >> 31)
 }
 
+/// A file's contents from the file system: a load's unless the host
+/// gives its own.
+fn read_file(path: &Path) -> io::Result<Vec<u8>> {
+    fs::read(path)
+}
+
 /// What a constructor is given.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 #[non_exhaustive]
 pub struct Context<'a> {
     /// The peripheral's name in the board file.
@@ -467,6 +476,19 @@ pub struct Context<'a> {
     pub parameters: &'a Parameters,
     /// The run's choices.
     pub environment: &'a Environment,
+    /// What reads a path parameter's contents.
+    read: &'a dyn Fn(&Path) -> io::Result<Vec<u8>>,
+}
+
+impl fmt::Debug for Context<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Context")
+            .field("name", &self.name)
+            .field("parameters", &self.parameters)
+            .field("environment", &self.environment)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> Context<'a> {
@@ -479,15 +501,30 @@ impl<'a> Context<'a> {
         parameters: &'a Parameters,
         environment: &'a Environment,
     ) -> Self {
+        Self::with_read(name, parameters, environment, &read_file)
+    }
+
+    /// [`Context::new`], [`contents`](Self::contents) from `read`, as
+    /// [`Board::load_with`](crate::board::Board::load_with) gives it.
+    #[must_use]
+    pub const fn with_read(
+        name: &'a str,
+        parameters: &'a Parameters,
+        environment: &'a Environment,
+        read: &'a dyn Fn(&Path) -> io::Result<Vec<u8>>,
+    ) -> Self {
         Self {
             name,
             parameters,
             environment,
+            read,
         }
     }
 
     /// A path parameter `key`, if given, relative to the board file's
-    /// directory: a flash's or an FPGA design's image.
+    /// directory: a file the peripheral itself opens.  One it only reads
+    /// (an image) is [`contents`](Self::contents), which a host with no
+    /// files can supply.
     ///
     /// # Errors
     ///
@@ -497,6 +534,23 @@ impl<'a> Context<'a> {
             .parameters
             .string(key)?
             .map(|path| self.environment.board_dir.join(path)))
+    }
+
+    /// The contents of the file path parameter `key` names, if given: a
+    /// flash's or an FPGA design's image.
+    ///
+    /// # Errors
+    ///
+    /// A `key` that is not a string ([`ParameterError::Type`]), or that
+    /// names what cannot be read ([`ParameterError::Invalid`]).
+    pub fn contents(&self, key: &str) -> Result<Option<Vec<u8>>, ParameterError> {
+        self.path(key)?
+            .map(|path| {
+                (self.read)(&path).map_err(|error| {
+                    ParameterError::invalid(key, format!("reading {}: {error}", path.display()))
+                })
+            })
+            .transpose()
     }
 }
 
@@ -692,6 +746,11 @@ impl Registry {
 
 #[cfg(test)]
 mod tests {
+    use std::io;
+    use std::path::Path;
+    use std::path::PathBuf;
+
+    use super::Context;
     use super::Environment;
     use super::ParameterError;
     use super::ParameterValue;
@@ -777,6 +836,31 @@ mod tests {
             })
         );
         assert!(registry.names().any(|name| name == "divider"));
+    }
+
+    #[test]
+    fn contents_come_from_the_host_relative_to_the_board_file() {
+        let parameters = Parameters::parse("image = \"cells.bin\"\nmissing = \"no.bin\"").unwrap();
+        let environment = Environment {
+            board_dir: PathBuf::from("boards"),
+            ..Environment::default()
+        };
+        let read = |path: &Path| {
+            if path == Path::new("boards/cells.bin") {
+                Ok(vec![1, 2, 3])
+            } else {
+                Err(io::Error::from(io::ErrorKind::NotFound))
+            }
+        };
+        let context = Context::with_read("eeprom", &parameters, &environment, &read);
+        assert_eq!(context.contents("image"), Ok(Some(vec![1, 2, 3])));
+        assert_eq!(context.contents("absent"), Ok(None));
+        let error = context.contents("missing").unwrap_err();
+        assert!(
+            matches!(&error, ParameterError::Invalid { key, reason }
+                if key == "missing" && reason.starts_with("reading boards/no.bin: ")),
+            "{error}"
+        );
     }
 
     #[test]

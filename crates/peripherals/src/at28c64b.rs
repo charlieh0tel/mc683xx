@@ -355,11 +355,6 @@ fn failed<'a>(what: &'static str, path: &'a Path) -> impl FnOnce(io::Error) -> O
     }
 }
 
-/// `path`'s contents, which must fit the peripheral.
-fn contents(path: &Path) -> Result<Vec<u8>, OpenError> {
-    fitting(path, fs::read(path).map_err(failed("reading", path))?)
-}
-
 /// `bytes`, the contents of `path`, if they fit the peripheral.
 fn fitting(path: &Path, bytes: Vec<u8>) -> Result<Vec<u8>, OpenError> {
     if bytes.len() > SIZE {
@@ -628,7 +623,8 @@ impl At28c64b {
         let protected = context.parameters.boolean(PROTECTED)?.unwrap_or(false);
         let image = context
             .path(IMAGE)?
-            .map(|path| contents(&path))
+            .zip(context.contents(IMAGE)?)
+            .map(|(path, bytes)| fitting(&path, bytes))
             .transpose()
             .map_err(invalid(IMAGE))?;
         let path = context.path(FILE)?.or_else(|| {
@@ -864,6 +860,8 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), RegistryError> {
 mod tests {
     use std::env;
     use std::fs;
+    use std::io;
+    use std::path::Path;
     use std::path::PathBuf;
     use std::process;
     use std::sync::Barrier;
@@ -1227,6 +1225,56 @@ mod tests {
         let (cells, _, _) = open(&path, Some(vec![9; SIZE])).unwrap();
         assert_eq!(&cells[..4], [1, 2, 3, ERASED], "not the image");
         assert!(cells[3..].iter().all(|&cell| cell == ERASED));
+    }
+
+    /// A peripheral from the board-file parameters `text`, its contents
+    /// from `read`.
+    fn construct_with(
+        text: &str,
+        read: &dyn Fn(&Path) -> io::Result<Vec<u8>>,
+    ) -> Result<At28c64b, ParameterError> {
+        let parameters = Parameters::parse(text).unwrap();
+        let environment = Environment::default();
+        let context = Context::with_read("eeprom", &parameters, &environment, read);
+        At28c64b::from_context(&context)
+    }
+
+    /// With no file, a host keeps the cells and hands them back as the
+    /// image, the protection as its parameter.
+    #[test]
+    fn a_host_with_no_files_gives_the_image_and_carries_the_cells() {
+        let image = vec![7_u8; 16];
+        let read = |path: &Path| {
+            assert_eq!(path, Path::new("image.bin"));
+            Ok(image.clone())
+        };
+        let mut peripheral = construct_with("image = \"image.bin\"", &read).unwrap();
+        assert_eq!(peripheral.cells()[15], 7);
+        assert_eq!(peripheral.cells()[16], ERASED, "padded");
+        write(&mut peripheral, 0xc3, 0x77, Time::ZERO);
+        at(&mut peripheral, done(Time::ZERO));
+        let cells = peripheral.cells().to_vec();
+        let read = |_: &Path| Ok(cells.clone());
+        let again = construct_with("image = \"image.bin\"\nprotected = true", &read).unwrap();
+        assert_eq!(again.cells()[0xc3], 0x77);
+        assert!(again.protected());
+    }
+
+    #[test]
+    fn an_image_the_host_lacks_or_too_large_is_refused() {
+        let missing = |_: &Path| Err(io::Error::from(io::ErrorKind::NotFound));
+        let error = construct_with("image = \"image.bin\"", &missing).unwrap_err();
+        assert!(
+            matches!(&error, ParameterError::Invalid { key, reason }
+                if key == "image" && reason.starts_with("reading image.bin: ")),
+            "{error}"
+        );
+        let large = |_: &Path| Ok(vec![0; SIZE + 1]);
+        let error = construct_with("image = \"image.bin\"", &large).unwrap_err();
+        assert!(
+            matches!(&error, ParameterError::Invalid { key, .. } if key == "image"),
+            "{error}"
+        );
     }
 
     #[test]

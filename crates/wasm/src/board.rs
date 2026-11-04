@@ -45,9 +45,10 @@ pub struct Board {
 }
 
 impl Board {
-    /// The board file `text` describes, its images' bytes in `images`
-    /// by the paths the file names, with the options `enabled`; its
-    /// types the built-in ones and the stock peripherals'.
+    /// The board file `text` describes, its images' bytes, its memories'
+    /// and its peripherals' (an AT28C64B's `image`), in `images` by the
+    /// paths the file names, with the options `enabled`; its types the
+    /// built-in ones and the stock peripherals'.
     ///
     /// # Errors
     ///
@@ -66,11 +67,12 @@ impl Board {
                 .cloned()
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
         };
-        let description = Description::parse_with(text, Path::new(""), &options, read)?;
-        let board = mc683xx_board::board::Board::load(
+        let description = Description::parse_with(text, Path::new(""), &options, &read)?;
+        let board = mc683xx_board::board::Board::load_with(
             &description,
             &mc683xx_peripherals::registry(),
             Environment::default(),
+            read,
         )?;
         Ok(Self { board })
     }

@@ -4,6 +4,8 @@
 
 use std::env;
 use std::fs;
+use std::io;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 
@@ -14,6 +16,7 @@ use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_peripherals::at28c64b::At28c64b;
 
 /// The initial stack pointer and program counter in the image.
 const STACK: u32 = 0x10_fffe;
@@ -114,6 +117,33 @@ attach = [{ select = "CS1", lines = 13 }]
 reset = []
 parameters = { file = "eeprom.bin" }
 "#;
+
+/// A host with no files hands a board both its memory's image and the
+/// peripheral's, by one reader.
+#[test]
+fn a_host_gives_the_peripheral_s_image_as_it_gives_a_memory_s() {
+    let board_file = BOARD.replace(
+        "parameters = { file = \"eeprom.bin\" }",
+        "parameters = { image = \"eeprom.bin\" }",
+    );
+    let rom = image(&program());
+    let read = |path: &Path| match path.to_str() {
+        Some("rom.bin") => Ok(rom.clone()),
+        Some("eeprom.bin") => Ok(vec![0x5a; 4]),
+        _ => Err(io::Error::from(io::ErrorKind::NotFound)),
+    };
+    let description =
+        Description::parse_with(&board_file, Path::new(""), &Options::default(), &read).unwrap();
+    let board = Board::<Mc68331>::load_with(
+        &description,
+        &mc683xx_peripherals::registry(),
+        Environment::default(),
+        read,
+    )
+    .unwrap();
+    let eeprom = board.peripheral::<At28c64b>("eeprom").unwrap();
+    assert_eq!(eeprom.cells()[..5], [0x5a, 0x5a, 0x5a, 0x5a, 0xff]);
+}
 
 #[test]
 fn the_cpu_writes_a_byte_and_polls_it_to_the_end_of_its_write_cycle() {

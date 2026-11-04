@@ -448,12 +448,17 @@ The contract a host's peripheral models target (rustdoc in
   (`signal::Direction::InOut`, an open-drain pin on a wired net);
   kinds `signal::Kind::{Logic, Edge, Clock, Serial, Analog, Bus}`.  The
   constructor takes a `registry::Context` (`Context::new(name,
-  parameters, environment)` builds one to test it): the peripheral's `name`, its
+  parameters, environment)` builds one to test it, and
+  `Context::with_read(name, parameters, environment, read)` one whose
+  `contents` come from `read`): the peripheral's `name`, its
   `parameters` (typed getters `integer`, `required`, `boolean`,
   `float`, `string`, `value`, `table`, the values `registry::ParameterValue`s,
   the board's own type, not the TOML parser's; a key no getter read is an
-  unknown-parameter error), `path(key)` (a parameter path relative to
-  the board file: an image), and the run's `environment` (`seed`,
+  unknown-parameter error), `contents(key)` (the bytes of the file a
+  path parameter names, relative to the board file: an image, which a
+  host with no files supplies through `Board::load_with`), `path(key)`
+  (that path, for a file the peripheral itself opens), and the run's
+  `environment` (`seed`,
   `seed_for(name)`, `work_dir`, `board_dir`).  `Parameters::unread()`
   is the first key no getter read, the load's unknown-parameter error,
   for a host's tests of its constructors, which build their `Parameters`
