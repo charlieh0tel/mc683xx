@@ -156,9 +156,9 @@ def test_a_paced_run_is_the_unpaced_run(tmp_path: Path) -> None:
 
 def test_real_time_pacing_keeps_board_time_with_wall_time(tmp_path: Path) -> None:
     loaded = board(tmp_path)
-    started = time.monotonic()
+    started = time.perf_counter()
     loaded.run_for(seconds=0.2, pacing=mc683xx.Pacing.REAL_TIME)
-    paced = time.monotonic() - started
+    paced = time.perf_counter() - started
     # never ahead of wall time, its last quantum waited out too;
     # generous above, for a loaded host
     assert 0.2 <= paced < 5.0
@@ -218,11 +218,11 @@ def test_a_second_thread_stops_an_unpaced_run(tmp_path: Path) -> None:
 
 def test_short_paced_runs_in_a_loop_are_paced(tmp_path: Path) -> None:
     loaded = board(tmp_path)
-    started = time.monotonic()
+    started = time.perf_counter()
     for _ in range(100):
         loaded.run_for(seconds=0.005, pacing=mc683xx.Pacing.scaled(0.1))
     # 0.5 s of board time at a tenth of real time
-    assert time.monotonic() - started >= 5.0
+    assert time.perf_counter() - started >= 5.0
 
 
 FRAME_SECONDS = 1 / 60
@@ -355,13 +355,13 @@ def test_another_thread_s_stop_lands_promptly_on_a_fast_board(tmp_path: Path, ru
 
         def front_end() -> None:
             time.sleep(0.05)
-            stopped.append(time.monotonic())
+            stopped.append(time.perf_counter())
             control.stop()
 
         thread = threading.Thread(target=front_end)
         thread.start()
         outcome = RUNS[run](loaded)
-        ended = time.monotonic()
+        ended = time.perf_counter()
         thread.join()
         assert outcome.stop == mc683xx.Stop.Requested()
         assert ended - stopped[0] < PROMPTLY
@@ -386,7 +386,7 @@ def test_a_switch_interval_set_during_a_run_applies_to_it(tmp_path: Path, run: s
             # back once the run hands the GIL over, a long interval in
             time.sleep(0.05)
             sys.setswitchinterval(SHORT_SWITCH_INTERVAL)
-            shortened.append(time.monotonic())
+            shortened.append(time.perf_counter())
             # back at the run's next handoff, under the short interval
             time.sleep(0.05)
             control.stop()
@@ -394,7 +394,7 @@ def test_a_switch_interval_set_during_a_run_applies_to_it(tmp_path: Path, run: s
         thread = threading.Thread(target=front_end)
         thread.start()
         outcome = RUNS[run](loaded)
-        ended = time.monotonic()
+        ended = time.perf_counter()
         thread.join()
     finally:
         sys.setswitchinterval(previous)
@@ -417,7 +417,7 @@ def test_another_thread_s_interrupt_main_lands_promptly_on_a_fast_board(tmp_path
     previous = signal.signal(signal.SIGINT, interrupted)
     try:
         for _ in range(3):
-            started = time.monotonic()
+            started = time.perf_counter()
 
             def interrupt() -> None:
                 time.sleep(0.05)
@@ -430,6 +430,6 @@ def test_another_thread_s_interrupt_main_lands_promptly_on_a_fast_board(tmp_path
                     RUNS[run](loaded)
             finally:
                 thread.join()
-            assert time.monotonic() - started < 0.05 + PROMPTLY
+            assert time.perf_counter() - started < 0.05 + PROMPTLY
     finally:
         signal.signal(signal.SIGINT, previous)
