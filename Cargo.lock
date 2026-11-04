@@ -264,7 +264,7 @@ checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
 
 [[package]]
 name = "cpu32-harness"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "cpu32-oracle",
  "mc683xx-cpu32",
@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "cpu32-oracle"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "cc",
  "unicorn-engine",
@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "cpu32-py"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "mc683xx-board",
  "mc683xx-cpu32",
@@ -505,7 +505,7 @@ checksum = "0ca88d725a0a943b096803bd34e73a4437208b6077654cc4ecb2947a5f91618d"
 
 [[package]]
 name = "mc683xx-bench"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "criterion",
  "mc683xx-board",
@@ -518,7 +518,7 @@ dependencies = [
 
 [[package]]
 name = "mc683xx-board"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "mc683xx-cpu32",
  "mc683xx-mc68331",
@@ -532,7 +532,7 @@ dependencies = [
 
 [[package]]
 name = "mc683xx-cpu32"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "mc683xx-target",
  "postcard",
@@ -543,7 +543,7 @@ dependencies = [
 
 [[package]]
 name = "mc683xx-debug"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "mc683xx-mc68331",
  "mc683xx-modules",
@@ -553,7 +553,7 @@ dependencies = [
 
 [[package]]
 name = "mc683xx-examples"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "mc683xx-board",
  "mc683xx-cpu32",
@@ -566,7 +566,7 @@ dependencies = [
 
 [[package]]
 name = "mc683xx-gdb"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "gdbstub",
  "mc683xx-board",
@@ -579,7 +579,7 @@ dependencies = [
 
 [[package]]
 name = "mc683xx-mc68331"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "mc683xx-cpu32",
  "mc683xx-modules",
@@ -591,7 +591,7 @@ dependencies = [
 
 [[package]]
 name = "mc683xx-modules"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "mc683xx-cpu32",
  "mc683xx-target",
@@ -602,7 +602,7 @@ dependencies = [
 
 [[package]]
 name = "mc683xx-peripherals"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "mc683xx-board",
  "mc683xx-cpu32",
@@ -617,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "mc683xx-run"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "clap",
  "ctrlc",
@@ -636,7 +636,7 @@ dependencies = [
 
 [[package]]
 name = "mc683xx-target"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "postcard",
  "serde",
@@ -645,7 +645,7 @@ dependencies = [
 
 [[package]]
 name = "mc683xx-wasm"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "js-sys",
  "mc683xx-board",
@@ -975,7 +975,7 @@ checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
 name = "snapshot-golden"
-version = "0.4.0"
+version = "0.4.1"
 
 [[package]]
 name = "strsim"
