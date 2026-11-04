@@ -153,7 +153,10 @@ jobs:
           pattern: wheels-*
           merge-multiple: true
           path: dist
+      # Skips files PyPI has, so a failed release re-runs.
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          skip-existing: true
 
   crates:
     # crates.io by trusted publishing (OIDC): a short-lived token, none
@@ -172,9 +175,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: rust-lang/crates-io-auth-action@c6f97d42243bad5fab37ca0427f495c86d5b1a18 # v1.0.5
         id: auth
-      # Cargo uploads in dependency order, waiting for each crate to
-      # reach the index; the toolchain is rust-toolchain.toml's.
-      - run: cargo publish --workspace --locked
+      # Cargo uploads in dependency order; the toolchain is
+      # rust-toolchain.toml's.  Crates already published are excluded,
+      # as cargo refuses the whole workspace otherwise.
+      - run: |
+          published=$(sh scripts/published-crates.sh)
+          set --
+          for name in $published; do
+            echo "already on crates.io: $name"
+            set -- "$@" --exclude "$name"
+          done
+          cargo publish --workspace --locked "$@"
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
@@ -225,10 +236,17 @@ jobs:
       # already published (an older line's patch, docs/releasing.md).
       # A prerelease has a `-` before any build metadata (`+...`), which
       # may have one of its own.
+      # Skips a version npm has, so a failed release re-runs.
       - name: Publish
         working-directory: crates/wasm/pkg
         run: |
           version=$(node -p 'require("./package.json").version')
+          status=$(curl -sS -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/mc683xx/${version%%+*}")
+          case $status in
+            200) echo "npm already has mc683xx@${version%%+*}"; exit 0 ;;
+            404) ;;
+            *) echo "registry.npmjs.org: HTTP $status"; exit 1 ;;
+          esac
           case "${version%%+*}" in
             *-*) npm publish --provenance --access public --tag next ;;
             *) npm publish --provenance --access public ;;
