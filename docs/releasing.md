@@ -159,7 +159,9 @@ Once, before the first release.
    has passed.  To look over the artifacts first, make a manual run
    of `release` before tagging: a manual run (Actions, Run workflow)
    skips `gate` and builds the same artifacts without publishing, to
-   check a branch.
+   check a branch.  A release that failed partway is finished by
+   re-running its failed jobs: each publishing job skips what its
+   registry already has.
 8. The `crates` job, after `gate` and `pypi`, runs `cargo publish
    --workspace` with a trusted-publishing token.
    A release that adds a crate, the first release among them: that
@@ -185,12 +187,10 @@ Once, before the first release.
    the index: `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`,
    `mc683xx-board`, `mc683xx-debug`, `mc683xx-gdb`,
    `mc683xx-peripherals`, `mc683xx-run`.  If it stops partway, go on
-   with `--exclude` for each crate already up (`cargo publish
-   --workspace --exclude mc683xx-target --locked`): a real publish
-   refuses a version already on crates.io before uploading anything
-   (a dry run only warns), and a crate's dependents need it published
-   first.  Then revoke the token, turn trusted publishing only back on,
-   and add the new crates' trusted publishers (Setup, step 3).
+   with `--exclude` for each crate already up
+   (`scripts/published-crates.sh` lists them).  Then revoke the token,
+   turn trusted publishing only back on, and add the new crates'
+   trusted publishers (Setup, step 3).
 9. The `npm` job, after `gate` and `pypi` and beside `crates`, builds
    the package (`make npm-package`), checks its version is the tag's
    and runs `npm publish --provenance` with npm 11's trusted
