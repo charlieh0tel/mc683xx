@@ -25,7 +25,7 @@ mc683xx-mc68331 = { workspace = true, optional = true }
 mc683xx-modules.workspace = true
 serde = { version = "1.0.229", features = ["derive"] }
 thiserror = "2.0.21"
-toml = "1.1.8"
+toml = "1.2.0"
 
 [features]
 default = ["mc68331"]
@@ -34,4 +34,4 @@ mc68331 = ["dep:mc683xx-mc68331"]
 
 [dev-dependencies]
 snapshot-golden = { path = "../snapshot-golden" }
-toml = "1.1.8"
+toml = "1.2.0"
