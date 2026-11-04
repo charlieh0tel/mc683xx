@@ -357,7 +357,11 @@ fn failed<'a>(what: &'static str, path: &'a Path) -> impl FnOnce(io::Error) -> O
 
 /// `path`'s contents, which must fit the peripheral.
 fn contents(path: &Path) -> Result<Vec<u8>, OpenError> {
-    let bytes = fs::read(path).map_err(failed("reading", path))?;
+    fitting(path, fs::read(path).map_err(failed("reading", path))?)
+}
+
+/// `bytes`, the contents of `path`, if they fit the peripheral.
+fn fitting(path: &Path, bytes: Vec<u8>) -> Result<Vec<u8>, OpenError> {
     if bytes.len() > SIZE {
         return Err(OpenError::TooLarge {
             path: path.to_owned(),
