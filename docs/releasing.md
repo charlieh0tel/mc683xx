@@ -137,7 +137,9 @@ Once, before the first release.
    `singlestep`, `corpus`, `boot-smoke`, `boot-diff` and
    `smartclock-boards`, and `cargo publish --workspace --dry-run`;
    and `make wasm`, `npm-test` and `npm-types`, which CI's `wasm` job
-   runs too.
+   runs too.  CI's `python` job tests a release build of the Python
+   package on Linux, macOS and Windows, as the release's wheels are
+   tested; `make python` tests a debug build on this host only.
 5. Commit `Cargo.toml` and `Cargo.lock` as "Release X.Y.Z", and merge
    it to `main`.
 6. Wait for `ci` to pass on the merged commit, then tag it `vX.Y.Z`,
