@@ -96,7 +96,8 @@ Once, before the first release.
    a release, step 8), with an API token (`publish-new` scope) in
    `cargo login`, revoked after.  Then, for each published crate, add
    a trusted publisher on crates.io: owner `charlieh0tel`, repository
-   `mc683xx`, workflow `release.yml`, environment `crates-io`.  Every
+   `mc683xx`, workflow `release.yml`, environment `crates-io`; a field
+   that differs fails that crate's publish.  Every
    later release is published by the workflow only.  A crate new to
    the workspace is the same: the first release that has it is
    published by hand, the workspace as at the first release (Cutting
@@ -109,7 +110,8 @@ Once, before the first release.
    two-factor authentication.  Then, in the package's settings on
    npmjs.com: add a trusted publisher, GitHub Actions, organization or
    user `charlieh0tel`, repository `mc683xx`, workflow `release.yml`,
-   environment `npm`; and under publishing access choose "Require
+   environment `npm`, with "Allow npm publish" checked (otherwise it
+   may only stage); and under publishing access choose "Require
    two-factor authentication and disallow tokens", which trusted
    publishing still passes.  Every later release is published by the
    workflow only.
@@ -215,9 +217,11 @@ Once, before the first release.
    npm publish --access public
    ```
 
-   `npm publish` asks for a one-time password.  A package published
-   by hand has no provenance statement.  Then set up its trusted
-   publisher and publishing access (Setup, step 4), and `npm logout`.
+   `npm publish` asks for a one-time password.  If npm stages it
+   instead, approve it under the package's Staged Packages and
+   unpublish the `0.0.0-stage` placeholder.  A package published by
+   hand has no provenance statement.  Then set up its trusted publisher
+   and publishing access (Setup, step 4), and `npm logout`.
 10. The tag also runs `pages`, which deploys the tag's demo page to
     GitHub Pages (What is published).
 11. Make a GitHub release from the tag with the notes.
