@@ -61,10 +61,10 @@ def alarm() -> Iterator[None]:
 
 def interrupted(run: Callable[[], object]) -> float:
     """How long `run_for` took to raise the alarm's exception."""
-    start = time.monotonic()
+    start = time.perf_counter()
     with alarm(), pytest.raises(Alarm):
         run()
-    return time.monotonic() - start
+    return time.perf_counter() - start
 
 
 def image() -> bytes:
