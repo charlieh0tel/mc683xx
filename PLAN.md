@@ -3270,7 +3270,8 @@ checks move onto real code hooks.
   `examples/tests/demo_browser.rs` runs the demo board, on the host
   through the same API: the file's text and its image as bytes
   (`Description::parse_with`, its images from the host's `read(path)`),
-  `Board::load` with no `Environment::work_dir`, unpaced runs
+  `Board::load` with no `Environment::work_dir` (`Board::load_with`
+  for a peripheral's image from the host's `read`), unpaced runs
   (`Pacer` reads no clock unpaced), and paced frames from the host's
   own clock (`Board::run_frame`, the board time due by its reading,
   bounded by a slice).  Left:
@@ -3280,16 +3281,11 @@ checks move onto real code hooks.
     paced, nor `Board::run_until_paced` paced.
   - `Description::read` and `Board::read` read the board file with
     `fs`; a browser host parses the text.
-  - The AT28C64B (`at28c64b.rs`) reads its `image` parameter with
-    `fs::read` (`contents`) and keeps its working copy in a file
+  - The AT28C64B (`at28c64b.rs`) keeps its working copy in a file
     (`file`, or `<name>.eeprom` under `Environment::work_dir`: `open`, a
     sibling named with `process::id()`, `File::try_lock`,
-    `fs::hard_link`); with neither, its cells are in memory from erased,
-    so it runs there but cannot take an image from the host.
-    Peripherals' path parameters (`Context::path`) have no host-supplied
-    bytes yet: the bindings' `images` reach `[[memory]]` images alone,
-    and a board whose AT28C64B names an `image` throws as it loads.  The
-    demo board does not use it.
+    `fs::hard_link`); with neither, its cells are in memory from its
+    `image` or erased, and the host keeps them.
   - `mc683xx-debug`'s init scripts time a poll's timeout with
     `Instant::now()` (`script.rs`, `PollMemory`), which panics there;
     its image parsing takes bytes and reads no file.

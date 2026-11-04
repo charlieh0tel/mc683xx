@@ -399,6 +399,9 @@ otherwise.
 Without `file`, a run given a work directory (`mc683xx-run
 --work-dir`, `Environment::work_dir`) keeps the cells in
 `<work-dir>/<peripheral name>.eeprom`; a run with neither keeps nothing.
+A host with no files (`Board::load_with`) gives the `image` as bytes and
+keeps the cells itself: `At28c64b::cells` and `protected`, handed back
+as the next board's `image` and `protected` parameter.
 A run sets the file without editing the board file with `--set
 eeprom.file=PATH`, a path relative to the board file as there.
 

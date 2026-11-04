@@ -109,22 +109,34 @@ test("picoseconds are a bigint in a u64's range", () => {
   assert.equal(board.runFor(0n).now, run.now);
 });
 
-test("images reach memories, not a peripheral's file parameters", () => {
-  const eeprom = `${text}
+/** The demo board with an AT28C64B of the given parameters. */
+const withEeprom = (parameters) => `${text}
 [[peripheral]]
 name = "eeprom"
 type = "at28c64b"
 attach = [{ select = "CS1", lines = 13 }]
 reset = []
-parameters = { image = "eeprom.bin" }
+parameters = { ${parameters} }
 `;
+
+test("images reach a peripheral's image, and it must be there", () => {
+  const eeprom = withEeprom('image = "eeprom.bin"');
   const images = new Map([
     ["demo.bin", image],
     ["eeprom.bin", new Uint8Array(16)],
   ]);
+  new Board(eeprom, images).free();
   assert.throws(
-    () => new Board(eeprom, images),
-    /eeprom: parameter "image": reading eeprom\.bin: operation not supported/,
+    () => new Board(eeprom, new Map([["demo.bin", image]])),
+    /eeprom: parameter "image": reading eeprom\.bin: /,
+  );
+});
+
+test("a file a peripheral keeps needs a file system", () => {
+  const images = new Map([["demo.bin", image]]);
+  assert.throws(
+    () => new Board(withEeprom('file = "eeprom.bin"'), images),
+    /eeprom: parameter "file": /,
   );
 });
 

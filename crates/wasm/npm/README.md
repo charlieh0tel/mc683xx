@@ -109,13 +109,13 @@ an ES module (TypeScript 5.8 and later); under `node16` it is an error
 - `new Board(text, images, enabled = [])`: the board file `text`
   describes, through its power-on reset, built around the MC68331; its
   peripheral types the built-in ones and the stock peripherals'.
-  `images` gives each `[[memory]]` image's bytes, a `Map` or an object
+  `images` gives each image's bytes, a `[[memory]]`'s or a
+  peripheral's (an AT28C64B's `image`), a `Map` or an object
   from the path the file names (as it names it), a string, to a
   `Uint8Array`, `null` or `undefined` for none; the `Map` and the
-  arrays of any realm, an iframe's too.  They reach memories
-  alone: a peripheral's file parameter (an AT28C64B's `image` or
-  `file`) still names a file, which the module cannot read, so such a
-  board throws (an AT28C64B with neither runs, erased, in memory); `enabled` the board file's options to turn on.
+  arrays of any realm, an iframe's too.  A file a peripheral keeps (an
+  AT28C64B's `file`) is one the module cannot open, so such a board
+  throws; `enabled` the board file's options to turn on.
 - `now`: board time.
 - `pacing`, `setPacing(text)`: what `runFrame` keeps, as its text
   (`"unpaced"`, the default, `"realtime"`, or a factor, board seconds a

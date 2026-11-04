@@ -15,6 +15,8 @@ use std::cell::RefMut;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fs;
+use std::io;
 use std::mem;
 use std::num::NonZeroU64;
 use std::ops::ControlFlow;
@@ -629,6 +631,24 @@ impl<C: Chip> Board<C> {
         registry: &Registry,
         environment: Environment,
     ) -> Result<Self, LoadError> {
+        Self::load_with(description, registry, environment, |path| fs::read(path))
+    }
+
+    /// [`Board::load`], each path parameter's contents
+    /// ([`Context::contents`]) from `read(path)` rather than the file
+    /// system: for a host with no files (a browser), as
+    /// [`Description::parse_with`] is for its images.
+    ///
+    /// # Errors
+    ///
+    /// As [`Board::load`], an error `read` returns as
+    /// [`LoadError::Parameter`].
+    pub fn load_with(
+        description: &Description,
+        registry: &Registry,
+        environment: Environment,
+        read: impl Fn(&Path) -> io::Result<Vec<u8>>,
+    ) -> Result<Self, LoadError> {
         let environment = Environment {
             board_dir: description.directory.clone(),
             ..environment
@@ -641,11 +661,7 @@ impl<C: Chip> Board<C> {
                 kind: spec.kind.clone(),
             })?;
             let parameters = Parameters::new(spec.parameters.clone());
-            let context = Context {
-                name: &spec.name,
-                parameters: &parameters,
-                environment: &environment,
-            };
+            let context = Context::with_read(&spec.name, &parameters, &environment, &read);
             let parameter_error = |error| LoadError::Parameter {
                 peripheral: spec.name.clone(),
                 error,

@@ -1332,7 +1332,11 @@ to choose by.  `Description::parse_with(text, directory, &options,
 read)` is `Description::parse` with each image's bytes from
 `read(path) -> io::Result<Vec<u8>>` rather than the file system, for a
 host with no files (a browser) to hand them over; an error it returns
-is the load's `LoadError::Image`.  `board.chip()` is the chip itself, an `&Mc68331` with
+is the load's `LoadError::Image`.  `Board::load_with(&description,
+&registry, environment, read)` is `Board::load` with each peripheral
+path parameter's bytes (`Context::contents`) from the same kind of
+`read`, an error the load's `LoadError::Parameter`: a closure over the
+host's bytes passes to both, `&read` to the first.  `board.chip()` is the chip itself, an `&Mc68331` with
 every method of the chip's.
 
 - **Nets.** `Board::observe(net, observer) -> Result<ObserverId,

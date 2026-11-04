@@ -114,10 +114,10 @@ JavaScript's case, Rust's where Python has none; where they differ
 from Python's:
 
 - `new Board(text, images, enabled)` takes the board file's text and
-  its `[[memory]]` images' bytes; Python's `Board(path, ...)` reads the
-  file and its images itself.  A peripheral's file parameter (an
-  AT28C64B's `image`) is not among them, and throws (PLAN.md,
-  WebAssembly).
+  its images' bytes, its memories' and its peripherals' (an AT28C64B's
+  `image`); Python's `Board(path, ...)` reads the file and its images
+  itself.  A file a peripheral keeps (an AT28C64B's `file`) throws
+  (PLAN.md, WebAssembly).
 - `setPacing(text)` takes the text Python's `Pacing(text)` takes.
 - `runFrame(wall, picoseconds)` is Rust's `Board::run_frame`, `wall`
   in milliseconds (`performance.now()`); Python's `run_frame` takes

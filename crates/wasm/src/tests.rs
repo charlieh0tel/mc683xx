@@ -11,6 +11,7 @@ use mc683xx_cpu32::cpu::Cpu;
 use mc683xx_cpu32::cpu::Halt;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::memory::Memory;
+use mc683xx_peripherals::at28c64b::At28c64b;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 
@@ -35,6 +36,29 @@ const FRAME_PICOSECONDS: u64 = PICOSECONDS_PER_SECOND / 1000 * 16;
 /// How far a frame's board time may be from its wall time's, the page's
 /// clock being a float: a nanosecond.
 const ROUNDING: u64 = 1000;
+
+/// The demo board with an AT28C64B taking its image from `eeprom.bin`.
+fn with_eeprom() -> String {
+    format!(
+        "{TEXT}\n[[peripheral]]\nname = \"eeprom\"\ntype = \"at28c64b\"\n\
+         attach = [{{ select = \"CS1\", lines = 13 }}]\nreset = []\n\
+         parameters = {{ image = \"eeprom.bin\" }}\n"
+    )
+}
+
+#[test]
+fn images_reach_a_peripheral_s_image() {
+    let mut images = BTreeMap::from([("demo.bin".to_owned(), IMAGE.to_vec())]);
+    let error = Board::with_images(&with_eeprom(), &images, &[]).unwrap_err();
+    assert!(
+        error.to_string().contains("reading eeprom.bin: "),
+        "{error}"
+    );
+    images.insert("eeprom.bin".to_owned(), vec![0x5a; 4]);
+    let board = Board::with_images(&with_eeprom(), &images, &[]).unwrap();
+    let eeprom = board.board().peripheral::<At28c64b>("eeprom").unwrap();
+    assert_eq!(eeprom.cells()[3], 0x5a);
+}
 
 /// The demo board, booted, its console's text since power-on.
 fn booted() -> (Board, String) {
