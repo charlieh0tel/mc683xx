@@ -1,15 +1,20 @@
-// The demo page in headless Chrome, served from the repository's top:
-// it waits for the prompt, types `m` and Enter into the terminal as
-// keys, and waits for the Mandelbrot set and the prompt after it.  `make
-// web-test` runs it after `make wasm`; CHROME names the browser
-// (crates/wasm/tests/chrome.mjs).
+// The demo page in headless Chrome: `test.mjs [ROOT PAGE]` serves the
+// directory ROOT and opens PAGE, a path under it, the repository's top
+// and examples/web/index.html by default.  It waits for the prompt,
+// types `m` and Enter into the terminal as keys, and waits for the
+// Mandelbrot set and the prompt after it.  `make web-test` runs it after
+// `make wasm`; CHROME names the browser (crates/wasm/tests/chrome.mjs).
 
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { POLL_MILLISECONDS, sleep, withPage } from "../../crates/wasm/tests/chrome.mjs";
 
-const TOP = fileURLToPath(new URL("../../", import.meta.url));
-const PAGE = "examples/web/index.html";
+const ARGUMENTS = process.argv.slice(2);
+assert.ok([0, 2].includes(ARGUMENTS.length), "usage: test.mjs [ROOT PAGE]");
+const [ROOT, PAGE] =
+  ARGUMENTS.length > 0
+    ? ARGUMENTS
+    : [fileURLToPath(new URL("../../", import.meta.url)), "examples/web/index.html"];
 // How long the page may take to boot, and the Mandelbrot set to come.
 const TIMEOUT_MILLISECONDS = 120_000;
 // The prompt, its trailing space trimmed as the terminal's lines are.
@@ -17,7 +22,7 @@ const PROMPT = ">";
 // A run of the set's inside, which only the Mandelbrot set prints.
 const INSIDE = "@@@@@@";
 
-await withPage(TOP, PAGE, async ({ send, evaluate }) => {
+await withPage(ROOT, PAGE, async ({ send, evaluate }) => {
   // The terminal's lines, scrollback included, or null before it opens.
   const LINES = `(() => {
     if (!globalThis.demo) return null;
