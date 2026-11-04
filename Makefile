@@ -1,6 +1,7 @@
 .PHONY: hooks ci fmt-check licenses hook-test clippy features test docs deny bench singlestep-data singlestep musashi oracle python corpus \
 	firmware-path corpus-musashi unicorn corpus-unicorn corpus-oracles boot-smoke \
-	boot-diff reference-path smartclock-boards gdb echo-image demo-image wasm npm-package npm-test npm-types web-test
+	boot-diff reference-path smartclock-boards gdb echo-image demo-image wasm npm-package npm-test npm-types web-test \
+	pages pages-test
 
 # Once per clone: the commit-msg hook refuses AI attribution (AGENTS.md)
 # and pre-push uploads the Git LFS objects (.gitattributes).
@@ -314,3 +315,32 @@ npm-types: npm-package
 # Chrome, and the network for xterm.js.
 web-test: wasm
 	node examples/web/test.mjs
+
+# The demo page as a static site, for GitHub Pages
+# (.github/workflows/pages.yml): the page, the npm package's web module
+# and .wasm as npm-package builds them, and the demo board's files, each
+# at its repository path so the page's relative paths hold, and at the
+# top examples/web/pages.html, which sends a visitor on to the page.
+# Built in PAGES_SITE, a directory named for the project site's
+# subpath, so serving PAGES serves it as GitHub Pages does, at
+# /mc683xx/.
+PAGES = $(TARGET_DIR)/pages
+PAGES_SITE = $(PAGES)/mc683xx
+PAGES_WEB := examples/web
+PAGES_BOARDS := examples/boards
+PAGES_MODULE := $(NPM_PACKAGE)/web
+
+pages: npm-package
+	rm -rf $(call quote,$(PAGES))
+	mkdir -p $(foreach dir,$(PAGES_WEB) $(PAGES_BOARDS) $(PAGES_MODULE),$(call quote,$(PAGES_SITE)/$(dir)))
+	cp $(PAGES_WEB)/pages.html $(call quote,$(PAGES_SITE)/index.html)
+	cp $(PAGES_WEB)/index.html $(PAGES_WEB)/demo.js $(call quote,$(PAGES_SITE)/$(PAGES_WEB)/)
+	cp $(PAGES_BOARDS)/demo.toml $(PAGES_BOARDS)/demo.bin $(call quote,$(PAGES_SITE)/$(PAGES_BOARDS)/)
+	cp $(PAGES_MODULE)/mc683xx.js $(PAGES_MODULE)/mc683xx_bg.wasm $(call quote,$(PAGES_SITE)/$(PAGES_MODULE)/)
+
+# The site in headless Chrome as web-test checks the page: PAGES
+# served, the site's top opened at /mc683xx/, so the page is reached
+# through pages.html, under the subpath.  Not part of `ci`, as
+# web-test is not; the `pages` workflow runs it before it deploys.
+pages-test: pages
+	node examples/web/test.mjs $(call quote,$(PAGES)) mc683xx/
