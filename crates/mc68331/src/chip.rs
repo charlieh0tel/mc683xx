@@ -119,6 +119,37 @@ impl SyncRequest {
     }
 }
 
+/// A handle by which the host's peripherals learn, within an external
+/// cycle, the earliest a watched output ([`OutputStop`]) may change
+/// after the cycle's start: for a peripheral that samples a cycle at
+/// its end, which must know whether a chip output through the host's
+/// nets may still reach it.
+///
+/// Set before each external cycle while the chip publishes it
+/// ([`Mc68331::set_publish_output_horizon`]): the cycle's start if a
+/// write earlier in its instruction changed a watched output, else the
+/// earliest of the SIM's and the modules' next events (a compare, a
+/// QSPI transfer, a frame on TXD, a reset) and a watched PWM pin's or
+/// OC1's next reported edge, the cycle's start for one carrying a
+/// clock.  [`None`] while no output is watched, or none will change.
+/// Clones share one value.
+#[derive(Debug, Clone, Default)]
+pub struct OutputHorizon(Rc<Cell<Option<Cycles>>>);
+
+impl OutputHorizon {
+    /// The earliest a watched output may change, as the cycle running
+    /// left it.
+    #[must_use]
+    pub fn get(&self) -> Option<Cycles> {
+        self.0.get()
+    }
+
+    /// Sets it.
+    pub(crate) fn set(&self, horizon: Option<Cycles>) {
+        self.0.set(horizon);
+    }
+}
+
 /// The chip's outputs whose change ends `run_for` after its instruction
 /// ([`Mc68331::set_output_stop`]).
 ///
@@ -301,6 +332,8 @@ impl Builder {
                 output_stop: OutputStop::default(),
                 output_seen: Seen::default(),
                 output_moved: false,
+                output_horizon: OutputHorizon::default(),
+                publish_output_horizon: false,
                 frozen: false,
                 tracing: ChipTracing::default(),
                 page_selects: Vec::new(),
@@ -340,6 +373,13 @@ impl Builder {
     #[must_use]
     pub fn sync_request(&self) -> SyncRequest {
         self.board.sync_request.clone()
+    }
+
+    /// The handle by which the host's peripherals learn when a watched
+    /// output may next change ([`OutputHorizon`]), for them to hold.
+    #[must_use]
+    pub fn output_horizon(&self) -> OutputHorizon {
+        self.board.output_horizon.clone()
     }
 
     /// Wires `wire` to `pins`.
@@ -1313,6 +1353,13 @@ impl Mc68331 {
     pub fn set_output_stop(&mut self, stop: OutputStop) {
         self.board.output_stop = stop;
         self.board.output_seen = self.board.seen();
+    }
+
+    /// Whether the chip sets its [`OutputHorizon`] before each external
+    /// cycle, for a host whose peripheral asks.  Off by default, which
+    /// costs nothing.
+    pub const fn set_publish_output_horizon(&mut self, publish: bool) {
+        self.board.publish_output_horizon = publish;
     }
 
     /// What the events trace beyond resets and IARB ties.

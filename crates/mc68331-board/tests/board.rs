@@ -3955,3 +3955,313 @@ attach = [{ select = "CSBOOT" }]
         .collect();
     assert_eq!(vectors, [32], "the TRAP, before the trace's fault");
 }
+
+/// When `Ahead` drives its edge, and the edge's time: a net change
+/// waiting between them.
+const AHEAD_DRIVES_PS: u64 = 2_000_000_000;
+/// The edge `Ahead` drives ahead.
+const AHEAD_EDGE_PS: u64 = 6_000_000_000;
+/// `Sampled`'s own event, before `Ahead`'s: never its horizon.
+const SAMPLED_EVENT_PS: u64 = 1_000_000_000;
+/// The run's end.
+const HORIZON_RUN_PS: u64 = 10_000_000_000;
+
+/// A peripheral with one event, at which it drives an edge ahead.
+#[derive(Debug, Default)]
+struct Ahead {
+    /// Whether it has driven.
+    driven: bool,
+}
+
+impl Peripheral for Ahead {
+    fn next_event(&self) -> Option<Time> {
+        (!self.driven).then_some(Time(AHEAD_DRIVES_PS))
+    }
+
+    fn advance(&mut self, _: Time, drive: &mut Drive<'_>) {
+        self.driven = true;
+        drive.drive_at(Time(AHEAD_EDGE_PS), 0, Signal::Level(true));
+    }
+}
+
+/// When OC2's compare toggles PGP4 in `sampled_board`'s
+/// `chip_output` firmware: TCNT $4000, at four clocks a count, 65536
+/// clocks at 8.388608 MHz (GPTRM 3.3).
+const COMPARE_PS: u64 = 7_812_500_000;
+/// TOC2.
+const TOC2: u32 = GPT + 0x16;
+/// TCTL1: OC2 toggles its pin (GPTRM 3.3.6).
+const OC2_TOGGLES: u16 = 0x0100;
+/// How far ahead of its cycle `Driver` drives.
+const DRIVER_AHEAD_PS: u64 = 100_000;
+/// The run of a board with a `Driver`.
+const DRIVER_RUN_PS: u64 = 1_000_000_000;
+
+/// A peripheral on CS1 that keeps each cycle's time and horizon.
+#[derive(Debug, Default)]
+struct Sampled {
+    /// Whether it asks for horizons.
+    wants: bool,
+    /// Whether its own event has passed.
+    advanced: bool,
+    /// Each cycle's `now` and `horizon`.
+    cycles: Vec<(Time, Option<Time>)>,
+}
+
+impl Peripheral for Sampled {
+    fn read(
+        &mut self,
+        access: PeripheralAccess,
+        _: &mut Drive<'_>,
+    ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+        self.cycles.push((access.now, access.horizon));
+        Ok(0)
+    }
+
+    fn write(
+        &mut self,
+        access: PeripheralAccess,
+        _: u32,
+        _: &mut Drive<'_>,
+    ) -> Result<(), mc683xx_cpu32::bus::BusError> {
+        self.cycles.push((access.now, access.horizon));
+        Ok(())
+    }
+
+    fn wants_horizon(&self) -> bool {
+        self.wants
+    }
+
+    fn next_event(&self) -> Option<Time> {
+        (!self.advanced).then_some(Time(SAMPLED_EVENT_PS))
+    }
+
+    fn advance(&mut self, _: Time, _: &mut Drive<'_>) {
+        self.advanced = true;
+    }
+}
+
+/// A peripheral on CS2 whose every read drives an edge `DRIVER_AHEAD_PS`
+/// ahead.
+#[derive(Debug, Default)]
+struct Driver {
+    /// The level it drove last.
+    level: bool,
+}
+
+impl Peripheral for Driver {
+    fn read(
+        &mut self,
+        access: PeripheralAccess,
+        drive: &mut Drive<'_>,
+    ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+        self.level = !self.level;
+        let at = Time(access.now.0 + DRIVER_AHEAD_PS);
+        drive.drive_at(at, 0, Signal::Level(self.level));
+        Ok(0)
+    }
+}
+
+/// A board of a ROM running `program` after CS1's and CS2's setup, a
+/// `Sampled` asking for horizons if `wants`, and `rest` of the board
+/// file, run to `until`: `Sampled`'s cycles.
+fn sampled_cycles(
+    wants: bool,
+    program: &[u16],
+    rest: &str,
+    until: Time,
+) -> Vec<(Time, Option<Time>)> {
+    let program: Vec<u16> = [
+        store(CSBAR1, CS1_BAR),
+        store(CSOR1, CS_FAST),
+        store(CSBAR2, CS2_BAR),
+        store(CSOR2, CS_FAST),
+    ]
+    .concat()
+    .into_iter()
+    .chain(program.iter().copied())
+    .collect();
+    let directory = directory("horizon", &program);
+    let text = format!(
+        r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{{ select = "CSBOOT" }}]
+[[peripheral]]
+name = "sampled"
+type = "sampled"
+attach = [{{ select = "CS1" }}]
+{rest}"#
+    );
+    let description = Description::parse(&text, &directory, &Options::default()).unwrap();
+    let mut registry = Registry::with_builtins();
+    registry
+        .register("ahead", vec![PortSpec::output("out", Kind::Edge)], |_| {
+            Ok(Box::new(Ahead::default()))
+        })
+        .unwrap();
+    registry
+        .register("driver", vec![PortSpec::output("out", Kind::Edge)], |_| {
+            Ok(Box::new(Driver::default()))
+        })
+        .unwrap();
+    registry
+        .register(
+            "sampled",
+            vec![
+                PortSpec::input("in", Kind::Edge),
+                PortSpec::input("pin", Kind::Logic),
+            ],
+            move |_| {
+                Ok(Box::new(Sampled {
+                    wants,
+                    ..Sampled::default()
+                }))
+            },
+        )
+        .unwrap();
+    let mut board =
+        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    board.run_until(until).unwrap();
+    board
+        .peripheral::<Sampled>("sampled")
+        .unwrap()
+        .cycles
+        .clone()
+}
+
+/// `Sampled` read in a loop beside `Ahead`, run to `HORIZON_RUN_PS`,
+/// and with PGP4 on a net it senses, OC2 toggling it at `COMPARE_PS`,
+/// if `chip_output`: its reads.
+fn sampled_reads(wants: bool, chip_output: bool) -> Vec<(Time, Option<Time>)> {
+    let compare = if chip_output {
+        [store(TOC2, 0x4000), store(TCTL, OC2_TOGGLES)].concat()
+    } else {
+        Vec::new()
+    };
+    let program: Vec<u16> = compare
+        .into_iter()
+        .chain([
+            MOVE_WORD_TO_D0,
+            (CS1_BASE >> 16) as u16,
+            CS1_BASE as u16,
+            NOP,
+            NOP,
+            NOP,
+            BRA_BACK_SIX,
+        ])
+        .collect();
+    let pin = if chip_output {
+        r#"
+[[net]]
+name = "pin"
+type = "logic"
+from = "chip.PGP4"
+to = ["sampled.pin"]
+"#
+    } else {
+        ""
+    };
+    let rest = format!(
+        r#"[[peripheral]]
+name = "ahead"
+type = "ahead"
+[[net]]
+name = "edge"
+type = "edge"
+from = "ahead.out"
+to = ["sampled.in"]
+{pin}"#
+    );
+    sampled_cycles(wants, &program, &rest, Time(HORIZON_RUN_PS))
+}
+
+/// The horizon `Sampled` should see at `now` beside `Ahead`, before
+/// any chip output: `Ahead`'s event, then the edge it drove ahead, then
+/// the run's end; never its own event, which is not an input.
+const fn ahead_horizon(now: u64) -> u64 {
+    if now < AHEAD_DRIVES_PS {
+        AHEAD_DRIVES_PS
+    } else if now < AHEAD_EDGE_PS {
+        AHEAD_EDGE_PS
+    } else {
+        HORIZON_RUN_PS
+    }
+}
+
+#[test]
+fn a_horizon_is_the_first_input_that_could_still_arrive() {
+    let reads = sampled_reads(true, false);
+    assert!(reads.len() > 100, "{} reads", reads.len());
+    for &(now, horizon) in &reads {
+        let expected = ahead_horizon(now.0);
+        assert_eq!(horizon, Some(Time(expected)), "a read at {now:?}");
+    }
+    for bound in [SAMPLED_EVENT_PS, AHEAD_DRIVES_PS, AHEAD_EDGE_PS] {
+        assert!(
+            reads.iter().any(|&(now, _)| now.0 > bound),
+            "reads past {bound} ps"
+        );
+    }
+}
+
+#[test]
+fn a_sensed_chip_output_bounds_the_horizon() {
+    let reads = sampled_reads(true, true);
+    for &(now, horizon) in &reads {
+        let expected = match ahead_horizon(now.0) {
+            bound if now.0 < COMPARE_PS => bound.min(COMPARE_PS),
+            bound => bound,
+        };
+        assert_eq!(horizon, Some(Time(expected)), "a read at {now:?}");
+    }
+    assert!(
+        reads
+            .iter()
+            .any(|&(now, _)| AHEAD_EDGE_PS < now.0 && now.0 < COMPARE_PS),
+        "reads the compare bounds"
+    );
+}
+
+#[test]
+fn a_drive_earlier_in_the_instruction_bounds_the_horizon() {
+    // each MOVE reads `Driver`, which drives ahead, then writes `Sampled`
+    let program = [
+        MOVE_WORD_ABSOLUTE,
+        (CS2_BASE >> 16) as u16,
+        CS2_BASE as u16,
+        (CS1_BASE >> 16) as u16,
+        CS1_BASE as u16,
+        NOP,
+        BRA_BACK_SIX,
+    ];
+    let rest = r#"[[peripheral]]
+name = "driver"
+type = "driver"
+attach = [{ select = "CS2" }]
+[[net]]
+name = "edge"
+type = "edge"
+from = "driver.out"
+to = ["sampled.in"]
+"#;
+    let writes = sampled_cycles(true, &program, rest, Time(DRIVER_RUN_PS));
+    assert!(writes.len() > 50, "{} writes", writes.len());
+    for &(now, horizon) in &writes {
+        let expected = Time(now.0 + DRIVER_AHEAD_PS).min(Time(SAMPLED_EVENT_PS));
+        assert_eq!(horizon, Some(expected), "a write at {now:?}");
+    }
+}
+
+#[test]
+fn a_peripheral_that_does_not_ask_has_no_horizon() {
+    let reads = sampled_reads(false, true);
+    assert!(!reads.is_empty());
+    assert!(reads.iter().all(|&(_, horizon)| horizon.is_none()));
+}

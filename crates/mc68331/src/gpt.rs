@@ -679,6 +679,50 @@ impl Gpt {
         .chain(fall)
     }
 
+    /// The next edge after `now` of the reported fast outputs among the
+    /// PWM pins in `pwm` (bit 0 PWMA, bit 1 PWMB) and OC1's pin in
+    /// `port_gp`, while the registers stay as they are: for a host that
+    /// must know when one may reach its peripherals
+    /// ([`OutputHorizon`](crate::chip::OutputHorizon)), as no event
+    /// marks them.  A PWM clocked by PCLK changes at its inputs, which
+    /// are events.
+    pub(crate) fn next_fast_edge(&self, now: Cycles, pwm: u8, port_gp: u8) -> Option<Cycles> {
+        let count = self.prescaler.count(now);
+        let clock_edge = |counter: Counter| {
+            let fall = self
+                .pclk_rise
+                .map(|rise| rise + CLOCK_OUT_HIGH)
+                .filter(|&fall| counter.on_pclk() && now < fall);
+            counter
+                .next_clock_edge(count)
+                .and_then(|edge| self.prescaler.when(edge))
+                .into_iter()
+                .chain(fall)
+                .min()
+        };
+        let pwm_edges = Channel::BOTH
+            .into_iter()
+            .filter(|channel| {
+                pwm & 1 << channel.index() != 0 && self.edges.pwm[channel.index()].is_some()
+            })
+            .filter_map(|channel| {
+                if self.pwm.clock_out(channel) {
+                    clock_edge(self.pwm.counter())
+                } else {
+                    self.pwm
+                        .next_edge(channel, self.pwm.count(count))
+                        .and_then(|edge| self.pwm.count_at(edge))
+                        .and_then(|edge| self.prescaler.when(edge))
+                }
+            });
+        let oc1 = (port_gp & 1 << OC1_PIN != 0
+            && self.edges.oc1_clock.is_some()
+            && self.compare_clock_out())
+        .then(|| clock_edge(self.counter))
+        .flatten();
+        pwm_edges.chain(oc1).min()
+    }
+
     /// The output changes since the last call, each at the time it
     /// happened, in time order ([PLAN.md], Peripherals).
     ///

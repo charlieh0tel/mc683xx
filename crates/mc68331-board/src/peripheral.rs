@@ -176,6 +176,25 @@ pub struct PeripheralAccess {
     pub write: bool,
     /// When its instruction started, on board time.
     pub now: Time,
+    /// On a read or a write of a peripheral that asks for it
+    /// ([`Peripheral::wants_horizon`]), the board time before which
+    /// everything that could reach it has: the earliest of the net
+    /// changes waiting, the other peripherals' next events (`now` for
+    /// one busy) and undelivered drives, the next change of a chip
+    /// output the board senses (`now` if one changed earlier in the
+    /// instruction), and the chip's run's end.  A peripheral that
+    /// samples a cycle later than `now` (at its end, after its wait
+    /// states) and before this may advance its own model to its sample
+    /// and answer from it; at or past this, an input dated before its
+    /// sample may still arrive after the access.  Not counted: the
+    /// drives a deferred QSPI peripheral
+    /// ([`Peripheral::qspi_deferrable`]) has yet to make.  [`None`] otherwise.
+    ///
+    /// The run's end is where the host cuts the run, so the peripheral's
+    /// answer must not depend on which side of this its sample falls
+    /// unless an input lands before its sample: else the run depends on
+    /// how the host cuts it.
+    pub horizon: Option<Time>,
 }
 
 impl PeripheralAccess {
@@ -200,6 +219,7 @@ impl PeripheralAccess {
             function_code,
             write: false,
             now,
+            horizon: None,
         }
     }
 
@@ -654,6 +674,13 @@ pub trait Peripheral: Any {
     /// file says.
     fn dsack_port(&mut self, access: PeripheralAccess) -> Option<PortSize> {
         None
+    }
+
+    /// Whether its reads and writes carry
+    /// [`PeripheralAccess::horizon`], asked once, as the board is built.
+    /// By default no, which costs the board nothing.
+    fn wants_horizon(&self) -> bool {
+        false
     }
 
     /// Whether its interrupt output, which the board file wires to an

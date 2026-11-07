@@ -1179,6 +1179,13 @@ by mask, PWMA and PWMB, TXD, RESET) whose change ends `run_for`, after
 the instruction that changed one or at the sync point where a
 compare, a PWM edge or a frame's start did: for a host whose peripherals
 sense them and may answer within the run.  None by default.
+`set_publish_output_horizon(true)` has the chip set its
+`OutputHorizon` (the handle `Builder::output_horizon` gives) before
+each external cycle: when a watched output may next change, the
+cycle's start if a write earlier in its instruction changed one, else
+the SIM's and the modules' next event or a reported PWM or OC1 clock
+edge, for a peripheral that samples a cycle at its end.  Off by
+default.
 
 Tracing goes through the chip's events (`take_events`), off by
 default: `set_tracing(tracing)`, a `ChipTracing::default()` with

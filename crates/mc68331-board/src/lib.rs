@@ -17,8 +17,9 @@
 //!   [`Environment`]: the seed and the work directory).
 //! - [`Peripheral`]: what a constructor builds.  Every method has a
 //!   default, so a peripheral implements only the sides it is on: the
-//!   bus (`read`, `write`, `wait_states`, through an attachment, which a
-//!   [`PeripheralAccess`] names by index with its [`Role`]), the IRQ pin
+//!   bus (`read`, `write`, `wait_states`, `wants_horizon`, through an
+//!   attachment, which a [`PeripheralAccess`] names by index with its
+//!   [`Role`]), the IRQ pin
 //!   (`interrupt_request`), RESET (`reset`), the QSPI (`transfer`,
 //!   `select`, `qspi_clock`, `qspi_deferrable`), its net ports (`input`,
 //!   and [`Drive`] for its outputs), its own time (`next_event`,

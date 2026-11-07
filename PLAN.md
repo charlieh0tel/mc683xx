@@ -1132,6 +1132,50 @@ hand.  The keys are in `docs/board-files.md`.
   only that they conflict on the shared DSACK counter and should not
   differ): the first still ends it.  Both are what a board that obeys
   7.5.1 never sees (decided 2026-10-31).
+- **A cycle sampled at its end, the horizon:** the core stamps every
+  bus cycle of an instruction with the instruction's start
+  (`Core::access`), and the board delivers events between
+  instructions, so a peripheral that samples a cycle at its end (an
+  FPGA netlist behind 12 wait states, about 894 ns) could not know
+  whether an input dated inside the cycle (a 1 PPS edge) was still to
+  come.  A peripheral that asks (`Peripheral::wants_horizon`, asked
+  once as the board is built and kept on its `Route`) gets with each
+  read and write `PeripheralAccess::horizon`: the board time before
+  which everything that could reach it has, the earliest of the net
+  changes waiting (the board's, kept in `Shared::run_horizon` with the
+  run's end while the chip runs), the other peripherals' next events
+  (the access's time for one busy), the drives not yet taken, and the
+  next change of a chip output the board senses.  The chip holds its
+  output changes until the run ends, so it publishes that bound
+  itself, before each external cycle, while the board asks
+  (`Mc68331::set_publish_output_horizon`, an `OutputHorizon` read
+  through `Requests::output_horizon`): the cycle's start if a write
+  earlier in the instruction changed a watched output, else the SIM's
+  and the modules' next event (a compare, a QSPI transfer, a frame, the
+  watchdog: more than outputs, never less) and the next edge of a
+  reported PWM pin or OC1 clock, which no event marks.  A sample before
+  it, the peripheral advances its own model there and answers, with no
+  clone of it; past it (an edge within the cycle, rare) it falls back
+  as it chooses.  Its own next event is no bound: it is the
+  peripheral's to run.  The run's end is where the host cuts the run,
+  so the peripheral's answer must be the same either side of the
+  horizon unless an input lands before its sample, or the run depends
+  on the cut: the contract is the peripheral's, as the board cannot
+  check it.  Not counted: the drives a deferred QSPI peripheral
+  (`qspi_deferrable`) has yet to make, which a board with both would
+  have to flush mid-instruction.  Settling the
+  board mid-instruction would move the net queue and nets from `Board`,
+  held while the chip runs, into `Shared` and hold the chip's own
+  inputs to the instruction's end; a real stall or a two-phase read
+  would rework the core's bus path; neither was worth its cost.  The
+  sample time stays the peripheral's estimate (the instruction's start,
+  3 clocks and its wait states), as placing a cycle within its
+  instruction would cost on every access.  Cost: a `bool` on the
+  `Route` per access and one in the chip per external cycle, its
+  publishing out of line: `benches/peripherals.rs`' `registers_writes`
+  moved -1.1% to +0.8% with code layout, within its noise; for a
+  peripheral that asks, a scan of the others' next events and the
+  chip's per read or write (decided 2026-11-07).
 - **Address decoders, as data:** a decoder on one select (a 74AC138)
   splits its window by its inputs into outputs, each attached to a
   peripheral as a select is: `{ decoder = "u31", output = 2 }`.  Its
@@ -3260,29 +3304,6 @@ checks move onto real code hooks.
   choices.
 - Whether `smartclock-emu` moves off its feature gate once it uses this
   core.
-- A peripheral that samples a bus cycle at its end (an FPGA netlist
-  behind 12 wait states, about 894 ns) answers from the cycle's start:
-  the core stamps every bus cycle of an instruction with the
-  instruction's start (`Core::access`), and the board delivers events
-  only between instructions, so an input dated inside the cycle (a
-  1 PPS edge) reaches it after the read.  smartclock-emu answers from a
-  clone of its model run through the cycle.  Settling the board
-  mid-instruction would move the net queue and nets from `Board` (held
-  while the chip runs) into `Shared` and keep the chip's own inputs
-  until the instruction ends; a real stall or a two-phase read would
-  rework the core's bus path.  Neither is worth its cost for this.
-  The cheap form, if a host asks for it: a peripheral that opts in
-  (asked once at load) is told with each access the board time up to
-  which everything it could receive has been delivered: the earliest of
-  the net queue, the other peripherals' next events, their undelivered
-  drives and the run's end.  Its sample time at or before that, it
-  advances its own model there and answers, with no clone; past it (an
-  edge within the cycle, rare) it falls back.  Nothing for a board
-  without one; for one, a scan of the peripherals' next events per
-  access.  The sample time stays the peripheral's own estimate (the
-  instruction's start, 3 clocks and its wait states): the core does not
-  place a cycle within its instruction, which would cost on every
-  access.
 - WebAssembly: the target is a browser demo of the demo board
   (`examples/boards/demo.toml`) through JS bindings
   (`wasm32-unknown-unknown`, decided 2026-11-03).  `mc683xx-mc68331`,

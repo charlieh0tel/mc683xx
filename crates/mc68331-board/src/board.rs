@@ -723,6 +723,7 @@ impl<C: Chip> Board<C> {
             chip_stop: builder.stop_request(),
             requests: builder.requests(),
             quantum_end: Cell::new(None),
+            run_horizon: Cell::new(None),
             trace_bus_cycles: Cell::new(false),
             trace_qspi: Cell::new(false),
             pc: Rc::default(),
@@ -771,6 +772,11 @@ impl<C: Chip> Board<C> {
             });
         }
         let mut chip = builder.build();
+        let horizon = shared
+            .peripherals
+            .iter()
+            .any(|peripheral| peripheral.borrow().wants_horizon());
+        chip.set_publish_output_horizon(horizon);
         shared
             .base
             .set(shared.base.get().moved(Cycles::ZERO, chip.system_clock()));
@@ -870,6 +876,7 @@ impl<C: Chip> Board<C> {
                     lane: spec.lane,
                     lines: spec.lines.clone(),
                     offset: spec.offset,
+                    horizon: shared.peripherals[peripheral].borrow().wants_horizon(),
                 };
                 match spec.target {
                     Target::Select(select) => selects.entry(select).or_default().0.push(route),
@@ -1031,8 +1038,11 @@ impl<C: Chip> Board<C> {
             let idle = self.idle();
             let stop = if target > self.chip.now() {
                 self.shared.quantum_end.set(Some(next));
+                let queued = self.first_change().map_or(until, |at| at.min(until));
+                self.shared.run_horizon.set(Some(queued));
                 let stop = self.chip.run_for(self.chip.now().until(target)).stop;
                 self.shared.quantum_end.set(None);
+                self.shared.run_horizon.set(None);
                 stop
             } else {
                 Stop::Budget
