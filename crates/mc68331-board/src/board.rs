@@ -1354,7 +1354,7 @@ impl<C: Chip> Board<C> {
 
     /// The earliest change waiting or peripheral's next event.
     fn next_event(&self) -> Option<Time> {
-        let change = self.queue.keys().next().map(|&(at, _)| at);
+        let change = self.first_change();
         let peripheral = self
             .shared
             .peripherals
@@ -1362,6 +1362,11 @@ impl<C: Chip> Board<C> {
             .filter_map(|peripheral| peripheral.borrow().next_event())
             .min();
         change.into_iter().chain(peripheral).min()
+    }
+
+    /// When the first net change waiting is due.
+    fn first_change(&self) -> Option<Time> {
+        self.queue.keys().next().map(|&(at, _)| at)
     }
 
     /// Handles everything due by now, in time order: changes before
