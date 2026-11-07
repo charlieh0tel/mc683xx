@@ -49,6 +49,7 @@ use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
 use crate::chip::Diversion;
+use crate::chip::OutputHorizon;
 use crate::chip::OutputStop;
 use crate::chip::SyncRequest;
 use crate::event::ChipTracing;
@@ -270,6 +271,11 @@ pub(crate) struct Board {
     pub(crate) output_seen: Seen,
     /// Whether one changed in the quantum in progress.
     pub(crate) output_moved: bool,
+    /// When one may next change, for the host's peripherals.
+    pub(crate) output_horizon: OutputHorizon,
+    /// Whether `output_horizon` is set before each external cycle
+    /// ([`Mc68331::set_publish_output_horizon`](crate::chip::Mc68331::set_publish_output_horizon)).
+    pub(crate) publish_output_horizon: bool,
     /// Whether FREEZE is asserted, the CPU in background mode, as the
     /// modules were last told (MC68331UM 4.2.13).
     pub(crate) frozen: bool,
@@ -428,6 +434,33 @@ impl Board {
         let moved = seen != self.output_seen;
         self.output_seen = seen;
         moved
+    }
+
+    /// The earliest a watched output may change after `now`, a cycle's
+    /// start ([`OutputHorizon`]): `now` if a write in its instruction
+    /// changed one already, as the quantum then ends after it.
+    fn output_horizon_at(&mut self, now: Cycles) -> Option<Cycles> {
+        let stop = self.output_stop;
+        if stop == OutputStop::default() {
+            return None;
+        }
+        if self.output_moved {
+            return Some(now);
+        }
+        let pwm = u8::from(stop.pwm_a) | u8::from(stop.pwm_b) << 1;
+        let fast = self
+            .module::<Gpt>(GPT)
+            .next_fast_edge(now, pwm, stop.port_gp);
+        self.modules_next().into_iter().chain(fast).min()
+    }
+
+    /// Sets `output_horizon` for a cycle at `now`: out of line, off the
+    /// path of the boards that do not ask.
+    #[cold]
+    #[inline(never)]
+    fn publish_output_horizon(&mut self, now: Cycles) {
+        let horizon = self.output_horizon_at(now);
+        self.output_horizon.set(horizon);
     }
 
     /// A watched output that changed within an instruction ends the
@@ -903,6 +936,9 @@ impl Board {
                 _ => 0,
             };
             return Ok((value, cycles * u16::from(clocks)));
+        }
+        if self.publish_output_horizon {
+            self.publish_output_horizon(now);
         }
         let bus_cycle = BusCycle::new(address, size, function_code, now).writing(write.is_some());
         let mut first: Option<(u8, PortSize)> = None;

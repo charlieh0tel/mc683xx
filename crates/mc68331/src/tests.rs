@@ -52,6 +52,7 @@ use crate::chip::Builder;
 use crate::chip::Diversion;
 use crate::chip::Mc68331;
 use crate::chip::MemoryId;
+use crate::chip::OutputHorizon;
 use crate::chip::OutputStop;
 use crate::chip::SyncRequest;
 use crate::event::ChipTracing;
@@ -2466,6 +2467,108 @@ fn a_peripheral_ends_the_run_early_after_its_instruction() {
     let run = chip.run_for(Cycles(100));
     assert_eq!(run.stop, Stop::Budget);
     assert!(run.cycles >= Cycles(100));
+}
+
+/// A peripheral that keeps the output horizon its last cycle saw.  What
+/// it keeps is the test's, not state.
+#[derive(Debug)]
+struct Horizons {
+    /// The chip's handle.
+    horizon: OutputHorizon,
+    /// What it held at the last cycle, if one came.
+    seen: Rc<Cell<Option<Option<Cycles>>>>,
+}
+
+impl MappedPeripheral for Horizons {
+    fn read(&mut self, _: BusCycle) -> Result<u32, BusError> {
+        self.seen.set(Some(self.horizon.get()));
+        Ok(0)
+    }
+
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), BusError> {
+        self.seen.set(Some(self.horizon.get()));
+        Ok(())
+    }
+}
+
+impl Stateless for Horizons {}
+
+impl Timed for Horizons {}
+
+/// A chip set up by `setup`, then watching `stop` and publishing its
+/// output horizon if `publish`, with a [`Horizons`] on CS1 at
+/// `CS1_BASE`, and what it saw.
+fn horizons(
+    setup: fn(&mut Mc68331),
+    stop: OutputStop,
+    publish: bool,
+) -> (Mc68331, Rc<Cell<Option<Option<Cycles>>>>) {
+    let mut builder = Builder::default();
+    builder
+        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .unwrap();
+    let seen = Rc::new(Cell::new(None));
+    let horizons = Horizons {
+        horizon: builder.output_horizon(),
+        seen: Rc::clone(&seen),
+    };
+    builder.peripheral(horizons, &[cs(1)]).unwrap();
+    let mut chip = builder.build();
+    write_register(&mut chip, SIM + 0x50, CS1_BAR);
+    write_register(&mut chip, SIM + 0x52, CS1_FAST);
+    setup(&mut chip);
+    chip.set_output_stop(stop);
+    chip.set_publish_output_horizon(publish);
+    (chip, seen)
+}
+
+/// What a read of CS1 at the chip's time sees as its horizon.
+fn horizon_seen(chip: &mut Mc68331, seen: &Cell<Option<Option<Cycles>>>) -> Option<Cycles> {
+    cycle(chip, CS1_BASE, Size::Word, None).unwrap();
+    seen.take().expect("a cycle")
+}
+
+#[test]
+fn a_peripheral_learns_when_a_watched_output_may_next_change() {
+    // OC2 toggles PGP4 at TCNT $10, four clocks a count (GPTRM 3.3)
+    let compare = |chip: &mut Mc68331| {
+        write_register(chip, GPT + 0x1e, 0x0d00);
+        write_register(chip, GPT + 0x16, 0x0010);
+    };
+    let pgp4 = OutputStop {
+        port_gp: 1 << 4,
+        port_f: 1,
+        ..OutputStop::default()
+    };
+    let (mut chip, seen) = horizons(compare, pgp4, false);
+    assert_eq!(horizon_seen(&mut chip, &seen), None, "not published");
+    let (mut chip, seen) = horizons(compare, OutputStop::default(), true);
+    assert_eq!(horizon_seen(&mut chip, &seen), None, "nothing watched");
+    let (mut chip, seen) = horizons(compare, pgp4, true);
+    assert_eq!(horizon_seen(&mut chip, &seen), Some(Cycles(4 * 0x10)));
+    // PF0 an output driven low (MC68331UM D.3.11): the change is the
+    // host's after the instruction, so now
+    write_register(&mut chip, SIM + 0x1e, 0);
+    write_register(&mut chip, SIM + 0x1c, 1);
+    write_register(&mut chip, SIM + 0x18, 0);
+    assert_eq!(horizon_seen(&mut chip, &seen), Some(chip.now()));
+}
+
+#[test]
+fn a_reported_pwm_edge_bounds_the_output_horizon() {
+    let pwm_b = OutputStop {
+        pwm_b: true,
+        ..OutputStop::default()
+    };
+    // PWMB $01: high for 2 of every 512 clocks from 512, no event marking
+    // its edges
+    let duty = |chip: &mut Mc68331| write_register(chip, GPT + 0x26, 0x0001);
+    let (mut chip, seen) = horizons(duty, pwm_b, true);
+    // the SIM's next event, the watchdog's out of reset, alone
+    let modules = horizon_seen(&mut chip, &seen);
+    assert!(modules > Some(Cycles(512)), "edges not reported");
+    chip.set_report_pwm_edges(Channel::B, true);
+    assert_eq!(horizon_seen(&mut chip, &seen), Some(Cycles(512)));
 }
 
 /// ILLEGAL (CPU32RM 4, ILLEGAL).

@@ -1137,6 +1137,11 @@ class PeripheralAccess:
     @property
     def now(self) -> int:
         """When its instruction started, in picoseconds."""
+    @property
+    def horizon(self) -> int | None:
+        """On a read or write of a peripheral whose `wants_horizon()` is
+        true, the board time in picoseconds before which everything that
+        could reach it has; `None` otherwise."""
 
 @final
 class Transfer:

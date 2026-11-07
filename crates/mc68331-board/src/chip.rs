@@ -99,6 +99,13 @@ pub trait Requests {
 
     /// Memory `memory`'s cycles reach it again.
     fn release(&self, memory: usize);
+
+    /// Within a cycle on the external bus, while the chip publishes it
+    /// ([`Chip::set_publish_output_horizon`]): the earliest an output
+    /// whose change ends the run ([`Chip::stop_at_outputs`]) may change
+    /// after the cycle's start, its start if one changed earlier in its
+    /// instruction.  [`None`] if none will.
+    fn output_horizon(&self) -> Option<Cycles>;
 }
 
 /// Where a board memory answers.
@@ -309,6 +316,11 @@ pub trait Chip: Sized + 'static {
     /// a peripheral, the chip or an observer senses.  Set as the board is
     /// built and again as observers come and go.
     fn stop_at_outputs(&mut self, sensed: &[Self::Pin]);
+
+    /// Whether it gives [`Requests::output_horizon`] within its cycles:
+    /// set as the board is built, on if a peripheral asks for its
+    /// accesses' horizons.
+    fn set_publish_output_horizon(&mut self, publish: bool);
 
     /// `signal` on input `pin` now, or for a [`ChipPin::scheduled`]
     /// pin at `at`.  Not RESET, which the board handles.

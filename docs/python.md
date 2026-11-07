@@ -965,7 +965,9 @@ are the built-in ones and `types`' classes, by the name the file's
 Its object has any of the peripheral's methods, each optional:
 `read(access, drive) -> int`, `write(access, value, drive)`,
 `wait_states(access) -> int | None`, `dsack_port(access) -> int | None`,
-`interrupt_request() -> bool`,
+`wants_horizon() -> bool` (asked once, as the board is built: whether
+its reads and writes carry `horizon`, as `Peripheral::wants_horizon` says,
+docs/board-files.md), `interrupt_request() -> bool`,
 `power_on(drive)`, `reset(now, drive)`, `transfer(transfer, drive) ->
 int` (an `mc683xx.Transfer`: `attachment`, `entry`, `chip_selects`,
 `out`, `bits`, `clock`, the `QspiClock` it is shifted with, its mode,
@@ -987,7 +989,8 @@ access, drive) -> int` and
 board time in picoseconds; a `PeripheralAccess` carries `attachment`,
 `select` (the chip select's name), `role` (a `Role`), `lane` (a
 `Lane`), `address`, `size`, `function_code`, `write` (as a
-`BusCycle`'s) and `now`.  A `Drive`
+`BusCycle`'s), `now` and `horizon` (`None` but on a read or write of
+a peripheral that wants it).  A `Drive`
 drives outputs by port index (`drive(port, value)`, `drive_at(at,
 port, value)`), reads an analog input (`sample(port)`, its value as
 the call began, `None` if nothing drove it), writes a board memory

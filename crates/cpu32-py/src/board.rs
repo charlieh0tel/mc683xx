@@ -244,10 +244,18 @@ impl AccessView {
         self.0.now.0
     }
 
+    /// On a read or write of a peripheral whose `wants_horizon()` is
+    /// true, the board time in picoseconds before which everything that
+    /// could reach it has; `None` otherwise.
+    #[getter]
+    fn horizon(&self) -> Option<u64> {
+        self.0.horizon.map(|horizon| horizon.0)
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "PeripheralAccess(attachment={}, select={}, role={:?}, lane={:?}, address={:#x}, \
-             size={}, write={}, now={})",
+             size={}, write={}, now={}, horizon={})",
             self.attachment(),
             self.select().as_deref().unwrap_or("None"),
             self.role(),
@@ -255,7 +263,9 @@ impl AccessView {
             self.address(),
             self.size(),
             if self.write() { "True" } else { "False" },
-            self.now()
+            self.now(),
+            self.horizon()
+                .map_or_else(|| "None".to_owned(), |horizon| horizon.to_string())
         )
     }
 }
@@ -986,6 +996,15 @@ impl Peripheral for PythonPeripheral {
             |py| Ok(vec![access_argument(py, access)?]),
             port_size,
             None,
+        )
+    }
+
+    fn wants_horizon(&self) -> bool {
+        self.ask(
+            "wants_horizon",
+            |_| Ok(Vec::new()),
+            |value| value.is_truthy(),
+            false,
         )
     }
 

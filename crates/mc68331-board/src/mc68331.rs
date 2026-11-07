@@ -26,6 +26,7 @@ use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Diversion;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::chip::MemoryId;
+use mc683xx_mc68331::chip::OutputHorizon;
 use mc683xx_mc68331::chip::OutputStop;
 use mc683xx_mc68331::chip::SyncRequest;
 use mc683xx_mc68331::event::Event;
@@ -300,6 +301,8 @@ struct Handles {
     sync: SyncRequest,
     /// Its memory diversions.
     diversion: Diversion,
+    /// When a watched output may next change.
+    horizon: OutputHorizon,
     /// Each board memory and the router its cycles go to while diverted,
     /// in the order built.
     memories: RefCell<Vec<(MemoryId, PeripheralId)>>,
@@ -320,6 +323,10 @@ impl Requests for Handles {
         if let Some(&(id, _)) = self.memories.borrow().get(memory) {
             self.diversion.release(id);
         }
+    }
+
+    fn output_horizon(&self) -> Option<Cycles> {
+        self.horizon.get()
     }
 }
 
@@ -510,6 +517,7 @@ impl chip::Chip for Mc68331 {
         let handles = Rc::new(Handles {
             sync: builder.sync_request(),
             diversion: builder.diversion(),
+            horizon: builder.output_horizon(),
             memories: RefCell::default(),
         });
         Ok(Mc68331Builder {
@@ -600,6 +608,10 @@ impl chip::Chip for Mc68331 {
             }
         }
         self.set_output_stop(stop);
+    }
+
+    fn set_publish_output_horizon(&mut self, publish: bool) {
+        Self::set_publish_output_horizon(self, publish);
     }
 
     fn input(&mut self, pin: Pin, signal: Signal, at: Cycles) {

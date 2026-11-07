@@ -498,9 +498,25 @@ The contract a host's peripheral models target (rustdoc in
     carries `attachment` (the index in the peripheral's `attach`), its
     `role` and `lane`, `address` (`offset` plus ADDR on its `lines`),
     `size`, `function_code`, `write` (R/W low, set for `wait_states` and
-    `dsack_port` too), `now` in board time, and `select`, the
-    chip select that carried it (the decoder's, through a decoder;
-    `None` on no select).
+    `dsack_port` too), `now` in board time (when its instruction
+    started), `select`, the chip select that carried it (the decoder's,
+    through a decoder; `None` on no select), and `horizon`.  A
+    peripheral that samples a cycle at its end rather than at `now` (an
+    FPGA's netlist behind wait states) returns true from
+    `wants_horizon()`, asked once as the board is built, and its reads
+    and writes carry `horizon`: the board time before which everything
+    that could reach it has (the net changes waiting, the other
+    peripherals' next events and undelivered drives, the next change
+    of a chip output the board senses, `now` if one changed earlier in
+    the instruction, the chip's run's end; not the drives a deferred
+    QSPI peripheral has yet to make).  A sample before it, the
+    peripheral may advance its own model there and answer; at or past
+    it, an input dated before the sample (an edge within the cycle) may
+    arrive after the access, and the peripheral answers as it chooses.
+    The run's end is where the host cuts the run, so the answer must be
+    the same either side of `horizon` unless an input lands before the
+    sample, or the run depends on how it is cut.  `None` for the
+    others, which costs the board nothing.
     `PeripheralAccess` is `#[non_exhaustive]`: a host's test builds one with
     `PeripheralAccess::new(select, address, size, function_code, now)`
     (`PeripheralAccess::on_no_select(address, size, function_code, now)`

@@ -85,6 +85,9 @@ pub(crate) struct Shared {
     /// While the chip runs, the board time its run is to end at: a
     /// peripheral called then is called from within it.
     pub(crate) quantum_end: Cell<Option<Time>>,
+    /// While the chip runs, the earlier of its run's end and the first
+    /// net change waiting: a horizon's bound before the peripherals'.
+    pub(crate) run_horizon: Cell<Option<Time>>,
     /// Whether peripheral cycles are traced.
     pub(crate) trace_bus_cycles: Cell<bool>,
     /// Whether QSPI transfers are traced.
@@ -201,6 +204,27 @@ impl Shared {
         self.diverted.set(true);
     }
 
+    /// [`PeripheralAccess::horizon`] for `peripheral`'s access at `now`,
+    /// while the chip runs: the run's bound, the other peripherals' next
+    /// events, `now` for one busy, the drives not yet taken, and the
+    /// chip's sensed outputs' next change.
+    fn horizon(&self, peripheral: usize, now: Time) -> Option<Time> {
+        let run = self.run_horizon.get()?;
+        let events = self
+            .peripherals
+            .iter()
+            .enumerate()
+            .filter(|&(index, _)| index != peripheral)
+            .filter_map(|(_, other)| match other.try_borrow() {
+                Ok(other) => other.next_event(),
+                Err(_) => Some(now),
+            });
+        let outbox = self.outbox.borrow();
+        let drives = outbox.iter().map(|(_, driven)| driven.at);
+        let outputs = self.requests.output_horizon().map(|at| self.time(at));
+        Some(events.chain(drives).chain(outputs).fold(run, Time::min))
+    }
+
     /// The analog value on `peripheral`'s input `port` at `at`.
     fn sample(&self, peripheral: usize, port: usize, at: Time) -> Option<f64> {
         let net = (*self.analog_inputs.get(peripheral)?.get(port)?)?;
@@ -232,6 +256,9 @@ pub(crate) struct Route {
     pub(crate) lines: Vec<u8>,
     /// Added to the address.
     pub(crate) offset: u32,
+    /// Whether the peripheral wants its accesses' horizons
+    /// ([`Peripheral::wants_horizon`]).
+    pub(crate) horizon: bool,
 }
 
 impl Route {
@@ -306,6 +333,16 @@ impl Routes {
         .writing(cycle.write)
     }
 
+    /// `route`'s access for a piece of `cycle` it reads or writes, with
+    /// its horizon if it asks.
+    fn sampled(shared: &Shared, route: &Route, cycle: BusCycle, size: Size) -> PeripheralAccess {
+        let mut access = Self::access(shared, route, cycle, size);
+        if route.horizon {
+            access.horizon = shared.horizon(route.peripheral, access.now);
+        }
+        access
+    }
+
     /// Notes a cycle in the trace, if it is on and a peripheral took it.
     fn traced(shared: &Shared, cycle: BusCycle, value: Option<u32>, answered: bool) {
         if answered && shared.trace_bus_cycles.get() {
@@ -329,7 +366,7 @@ impl Routes {
         let cycle = cycle.writing(false);
         let pieces = self.pieces(cycle);
         let read = pieces.iter().try_fold(0, |value, &(route, size, lane)| {
-            let access = Self::access(shared, route, cycle, size);
+            let access = Self::sampled(shared, route, cycle, size);
             let read = shared.call(route.peripheral, access.now, |peripheral, drive| {
                 peripheral.read(access, drive)
             })?;
@@ -355,7 +392,7 @@ impl Routes {
         let pieces = self.pieces(cycle);
         Self::traced(shared, cycle, Some(value), !pieces.is_empty());
         for (route, size, lane) in pieces {
-            let access = Self::access(shared, route, cycle, size);
+            let access = Self::sampled(shared, route, cycle, size);
             let data = match lane {
                 Lane::Upper if cycle.size != Size::Byte => value >> 8 & 0xff,
                 Lane::Both => value,

@@ -733,6 +733,45 @@ def test_a_keyboard_interrupt_in_a_read_stops_the_run_without_a_bus_error(tmp_pa
 
 
 
+class Horizoned:
+    """Keeps each read's time and horizon; asks for horizons if `wants`."""
+
+    PORTS: list[tuple[str, str, str]] = []
+
+    def __init__(self, wants: bool) -> None:
+        self.wants = wants
+        self.reads: list[tuple[int, int | None]] = []
+
+    def wants_horizon(self) -> bool:
+        return self.wants
+
+    def read(self, access: mc683xx.PeripheralAccess, drive: mc683xx.Drive) -> int:
+        self.reads.append((access.now, access.horizon))
+        return 0
+
+
+@pytest.mark.parametrize("wants", [True, False])
+def test_a_python_peripheral_asks_for_its_horizon(tmp_path: Path, wants: bool) -> None:
+    program = store_word(CSBAR1, CS1_BAR) + store_word(CSOR1, CSOR_FAST)
+    program += [MOVE_WORD_ABSOLUTE_TO_D0, LATCH >> 16, LATCH & 0xFFFF, BRA_BACK_8]
+    (tmp_path / "rom.bin").write_bytes(rom(program))
+    parameters = f"parameters = {{ wants = {str(wants).lower()} }}"
+    board_file = INTERRUPTED_BOARD.replace('type = "interrupted"', 'type = "horizoned"')
+    board_file = board_file.replace(
+        'attach = [{ select = "CS1" }]', f'attach = [{{ select = "CS1" }}]\n{parameters}'
+    )
+    (tmp_path / "board.toml").write_text(board_file)
+    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"horizoned": Horizoned})
+    end = 1_000_000_000
+    board.run_for(picoseconds=end)
+    peripheral = board.peripheral("register")
+    assert isinstance(peripheral, Horizoned)
+    assert peripheral.reads
+    # nothing else on the board: the run's end
+    expected = end if wants else None
+    assert all(horizon == expected for _, horizon in peripheral.reads), peripheral.reads[:3]
+
+
 class LookupInterrupted(Interrupted):
     """Reads 0x1234, but looking up its first read is interrupted."""
 
