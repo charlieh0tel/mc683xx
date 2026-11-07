@@ -347,6 +347,17 @@ impl Board {
     /// the SIM's and the modules' recomputed only when they may have
     /// moved.
     pub(crate) fn next_event(&mut self) -> Option<Cycles> {
+        let modules = self.modules_next();
+        let peripherals = self
+            .peripherals
+            .iter()
+            .filter_map(|peripheral| peripheral.next_event());
+        modules.into_iter().chain(peripherals).min()
+    }
+
+    /// The earliest next event of the SIM and the modules, recomputed
+    /// only when it may have moved.
+    fn modules_next(&mut self) -> Option<Cycles> {
         if self.modules_next_stale {
             self.modules_next = self.modules_next_event();
             self.modules_next_stale = false;
@@ -356,11 +367,7 @@ impl Board {
             self.modules_next_event(),
             "a stale next event"
         );
-        let peripherals = self
-            .peripherals
-            .iter()
-            .filter_map(|peripheral| peripheral.next_event());
-        self.modules_next.into_iter().chain(peripherals).min()
+        self.modules_next
     }
 
     /// The earliest next event of the SIM and the modules.
