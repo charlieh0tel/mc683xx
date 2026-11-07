@@ -3260,6 +3260,29 @@ checks move onto real code hooks.
   choices.
 - Whether `smartclock-emu` moves off its feature gate once it uses this
   core.
+- A peripheral that samples a bus cycle at its end (an FPGA netlist
+  behind 12 wait states, about 894 ns) answers from the cycle's start:
+  the core stamps every bus cycle of an instruction with the
+  instruction's start (`Core::access`), and the board delivers events
+  only between instructions, so an input dated inside the cycle (a
+  1 PPS edge) reaches it after the read.  smartclock-emu answers from a
+  clone of its model run through the cycle.  Settling the board
+  mid-instruction would move the net queue and nets from `Board` (held
+  while the chip runs) into `Shared` and keep the chip's own inputs
+  until the instruction ends; a real stall or a two-phase read would
+  rework the core's bus path.  Neither is worth its cost for this.
+  The cheap form, if a host asks for it: a peripheral that opts in
+  (asked once at load) is told with each access the board time up to
+  which everything it could receive has been delivered: the earliest of
+  the net queue, the other peripherals' next events, their undelivered
+  drives and the run's end.  Its sample time at or before that, it
+  advances its own model there and answers, with no clone; past it (an
+  edge within the cycle, rare) it falls back.  Nothing for a board
+  without one; for one, a scan of the peripherals' next events per
+  access.  The sample time stays the peripheral's own estimate (the
+  instruction's start, 3 clocks and its wait states): the core does not
+  place a cycle within its instruction, which would cost on every
+  access.
 - WebAssembly: the target is a browser demo of the demo board
   (`examples/boards/demo.toml`) through JS bindings
   (`wasm32-unknown-unknown`, decided 2026-11-03).  `mc683xx-mc68331`,
