@@ -1274,8 +1274,8 @@ hand.  The keys are in `docs/board-files.md`.
   declares, or, for a type whose ports depend on its parameters (an
   FPGA's design, a latch's width), each peripheral's own.  Built-in types
   are generic only: `fixed` (reads a value), `registers` (a register
-  file), `recorder` (logs accesses), `clock`, `divider` and
-  `edge-counter`.  A host registers its own types (smartclock its
+  file), `recorder` (logs accesses), `clock`, `divider`,
+  `edge-counter` and `dc-source` (a fixed analog source).  A host registers its own types (smartclock its
   DUART, EEPROM, FPGA and GPS engine), Python its classes by name.
   The file names a type by its name alone, so a plugin source (a
   dynamic library, later) registers names into the same registry and

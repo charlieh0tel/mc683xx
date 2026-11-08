@@ -677,7 +677,8 @@ impl Registry {
     }
 
     /// A registry with the built-in generic types (`fixed`,
-    /// `registers`, `recorder`, `clock`, `divider`, `edge-counter`).
+    /// `registers`, `recorder`, `clock`, `divider`, `edge-counter`,
+    /// `dc-source`).
     #[must_use]
     pub fn with_builtins() -> Self {
         let mut registry = Self::new();

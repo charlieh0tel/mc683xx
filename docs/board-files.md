@@ -423,6 +423,7 @@ frequency changes.
 | `clock` | `hz`, `phase_ps` (0) | `out` clock | A steady clock, a rising edge at `phase_ps`. |
 | `divider` | `divide`, `high` (half) | `in` clock, `out` edge | A rising edge at every `divide`th input edge, high for `high` of them, each change driven one ahead: exact while the input's frequency holds.  A drive cannot be withdrawn, so across a retune the change already driven keeps the old clock's time, and those after it follow the new. |
 | `edge-counter` | -- | `in` edge | Counts rising edges, keeping the last one's time. |
+| `dc-source` | `volts` | `out` analog | A fixed analog source: drives `volts` (any finite number; a missing, NaN or infinite one is a load error) from power-on and answers every sample with it.  Its snapshot is empty: its voltage is its parameter. |
 
 Each shows its state to a front end (`Peripheral::inspect`,
 docs/host-guide.md, Front ends): `fixed` its `value`; `registers` its
@@ -431,7 +432,7 @@ docs/host-guide.md, Front ends): `fixed` its `value`; `registers` its
 `at`, when it took effect) and whether it has `driven` it; `divider`
 `divide`, `high`, its input `clock` and the `pending` change (the
 input `edge` it follows and its time, `at`); `edge-counter` its input's
-`level`, `count` and `last` edge's time.  What has no value yet shows
+`level`, `count` and `last` edge's time; `dc-source` its `volts`.  What has no value yet shows
 as the text `none`.
 
 ## The Rust API for peripheral types
