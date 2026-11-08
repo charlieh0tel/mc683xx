@@ -583,7 +583,7 @@ mod tests {
         (0..count)
             .map(|index| {
                 cpu.memory
-                    .read(Space::Supervisor, Address(at + 2 * index), Size::Word)
+                    .read_backed(Space::Supervisor, Address(at + 2 * index), Size::Word)
                     .expect("RAM")
                     .0 as u16
             })

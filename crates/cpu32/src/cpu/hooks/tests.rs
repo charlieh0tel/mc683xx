@@ -247,9 +247,9 @@ fn memory_hooks_slow_only_their_pages() {
     assert_eq!(cpu.memory.watched(Address(DATA)), 0);
     assert_ne!(cpu.memory.watched(Address(page)), 0);
     // The hooked page leaves the fast path; the others stay on it.
-    let word = |cpu: &Cpu, at| cpu.memory.read(Space::Supervisor, Address(at), Size::Word);
-    assert!(word(&cpu, page).is_none());
-    assert!(word(&cpu, DATA).is_some());
+    let word = |cpu: &mut Cpu, at| cpu.memory.read(Space::Supervisor, Address(at), Size::Word);
+    assert!(word(&mut cpu, page).is_none());
+    assert!(word(&mut cpu, DATA).is_some());
     assert!(
         cpu.memory
             .read_backed(Space::Supervisor, Address(page), Size::Word)

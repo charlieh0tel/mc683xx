@@ -317,6 +317,29 @@ by up to 1.6x between rounds), so the counts are the evidence.
 | `chip/ram_move` | 639 | 522 |
 | `chip/peripheral_move` | 1626 | 1507 |
 
+**Data reads and writes through cached pages, over the compact fast
+entry** (PLAN.md, Memory): the data fast path reads or writes
+through the page it last used in that direction, one entry each, its
+`FastBacking` cached.  Measured as host instructions (`perf stat -e
+cpu_core/instructions/u`, pinned to the performance cores) per
+emulated instruction over 30 s of board time from power-on, the 1 ms
+load's count subtracted, three interleaved runs each, identical to
+0.01%.  Worse than the compact entry alone: the cache's lookup and
+miss make `Core::cycle_read` and `cycle_write` too large to inline
+into `access_read` and `access_write` again, which is the compact
+entry's gain.  With the miss out of line they still do not inline
+(444 on the Z3805A).  Not adopted.
+
+| Run | Before the compact entry | Compact entry | With the cache |
+| --- | --- | --- | --- |
+| Z3805A 3543B | 446.1 | 390.2 | 432.8 |
+| 58503A 3704 | 445.2 | 389.4 | 431.9 |
+
+Criterion, the minimum of eight interleaved rounds on one shared
+performance core: with the cache, up to 12.9% slower than the compact
+entry alone (`core/move_postincrement`) and up to 6.8% slower than
+before it (`core/btst_immediate`).
+
 **A leaner `step`**: the common case (the instruction completed,
 untraced, no released write's fault) is taken first, with no
 exception matching; the stall, extra and refunded clocks are cleared

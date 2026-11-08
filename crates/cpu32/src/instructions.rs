@@ -441,7 +441,7 @@ pub(crate) mod tests {
     pub(crate) fn peek_long(cpu: &Cpu, at: u32) -> u32 {
         let word = |at| {
             cpu.memory
-                .read(Space::Supervisor, Address(at), Size::Word)
+                .read_backed(Space::Supervisor, Address(at), Size::Word)
                 .expect("RAM")
                 .0
         };
