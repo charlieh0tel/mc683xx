@@ -27,9 +27,10 @@ the buffer its inputs; the 74x164 its stages and CLR; the DACs their
 latches or codes and each output's volts; the ADC0838 its frame's
 phase, address or result, DO and /SE; the AT28C64B a summary of its
 cells (`At28c64b::cells` gives them), its protection and the write
-cycle running; the DUART each channel's modes, status, receive FIFO
-and holding register, its interrupt registers, ports and
-counter/timer, as of its last call.
+cycle running; the ACIA its control and status registers, data
+registers and lines; the DUART each channel's modes, status, receive
+FIFO and holding register, its interrupt registers, ports and
+counter/timer; each UART as of its last call.
 
 ## 74x374 and 74x373: octal latch
 
@@ -523,6 +524,160 @@ type = "analog"
 from = "trim.out0"
 to = ["external.trim"]
 ```
+
+## MC6850
+
+`type = "mc6850"`: a Motorola MC6850 ACIA (MC6850 data sheet
+DS9493R4, 1985, cited by heading).  One full-duplex asynchronous
+channel, double buffered both ways, with RTS, CTS and DCD and an
+interrupt output that gives no vector.
+
+### Parameters
+
+| Key | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `tx_clk_hz` | integer | required | Tx CLK's frequency in hertz: the transmitter's bit rate times the counter divide (Clock Inputs; Counter Divide Select Bits). |
+| `rx_clk_hz` | integer | required | Rx CLK's, the receiver's. |
+
+### Ports
+
+| Port | Kind | Direction | Meaning |
+| --- | --- | --- | --- |
+| `RxData` | serial | in | The receive line. |
+| `TxData` | serial | out | The transmit line: each frame at its start bit, with its baud and length. |
+| `CTS` | logic | in | Clear-to-send, low until driven. |
+| `DCD` | logic | in | Data carrier detect, low until driven. |
+| `RTS` | logic | out | Request-to-send, the level it shows. |
+| `IRQ` | logic | out | The interrupt output's level, low while asserted. |
+
+Attach the registers to a select with RS on one address line (`lines
+= [1]` for RS on ADDR1: control and status at even address 0, the data
+registers at 2).  It is an 8-bit peripheral, D7-D0 (above).  R/W picks
+the register of each pair: a read of RS low is the status register, a
+write the control register; a read of RS high is the receive data
+register, a write the transmit data register (Table 1).  The MC6850
+has no interrupt acknowledge: its interrupt is taken by autovector
+(`autovector` in `[chip]`, or a select that asks AVEC), and an `iack`
+attachment's cycle ends in BERR.  `irq` wires the interrupt to an IRQ
+pin; the `IRQ` port is the same open-drain output for a net.  It has
+no RESET input: only a master reset resets it, so a board file gives it
+`reset = []`.  E, the bus clock, is the select's cycle (a select
+synchronous to ECLK, MODE in CSOR, times it).
+
+### Example
+
+The HP 58503B's ACIA: on CS8, an 8-bit port synchronous to ECLK, RS on
+ADDR1, its interrupt on level 2 through the autovector, Tx CLK and Rx
+CLK at 153.6 kHz, 16 times 9600 baud.
+
+```toml
+[chip]
+type = "mc68331"
+autovector = [2]
+
+[[peripheral]]
+name = "acia"
+type = "mc6850"
+attach = [{ select = "CS8", lines = [1] }]  # RS on ADDR1, D7-D0 on the 8-bit port
+irq = 2
+reset = []
+parameters = { tx_clk_hz = 153_600, rx_clk_hz = 153_600 }
+
+[[net]]
+name = "gps-out"
+type = "serial"
+from = "acia.TxData"
+to = ["external.gps"]
+
+[[net]]
+name = "gps-in"
+type = "serial"
+from = "external.gps"
+to = ["acia.RxData"]
+```
+
+`crates/peripherals/tests/mc6850.rs` runs this wiring: the CPU master
+resets the ACIA, sets divide by 16 and 8N1 with the receive interrupt,
+transmits, and echoes a character the host sends from the autovectored
+interrupt.
+
+### Behavior
+
+- **Master reset (Device Operation, Master Reset; Counter Divide
+  Select Bits).**  CR1:0 `11` clears the status register but for CTS
+  and DCD, initializes the receiver and transmitter (the transmit data
+  register emptied, the character on RxData lost; a frame already on
+  TxData ends) and holds them so: TDRE reads 0, characters written are
+  ignored and none is received.  IRQ is held high.  RTS is held high
+  through the first master reset after power-on whatever CR6:5 say,
+  and follows CR6:5 at each later one.  The other control bits are
+  the value written.
+- **Control register (Control Register).**  CR1:0 divide Tx CLK and Rx
+  CLK by 1, 16 or 64 into the bit rates; CR4:2 select one of the eight
+  formats (7 bits and even or odd parity with 1 or 2 stop bits, 8 bits
+  with no parity and 1 or 2 stop bits, 8 bits and even or odd parity
+  with 1); CR6:5 set RTS and the transmit interrupt, `11` sending a
+  break; CR7 enables the receive interrupt.  A format change is
+  effective at once (Word Select Bits): a character is framed in the
+  format of its start bit, and received in the format of its
+  transfer.
+- **Transmitter (Transmit; Transmit Data Register).**  A character
+  written while the transmitter is idle goes out at once, TDRE setting
+  as it moves to the shift register; one written while a character
+  shifts waits in the data register for its end.  A write while the
+  data register is full replaces its character.  Each goes out as one
+  frame on TxData: the data bits, the parity bit after them, and the
+  stop bits, at Tx CLK over the divide.
+- **Break (Transmitter Control Bits).**  With CR6:5 `11` the
+  transmitter sends what it holds, then break frames a character long,
+  back to back, until CR6:5 change; TxData is then high a bit time
+  before the next character.
+- **Receiver (Receive; Receive Data Register).**  A frame on RxData
+  starts at its time, or as the frame before it ends, and is
+  transferred at the center of its first stop bit at Rx CLK over the
+  divide, setting RDRF; the receiver does not check the sender's baud,
+  as the MC68681 does not.  An untimed frame (a host's) is a character
+  long at the receiver's rate.  A seven-bit character reads with bit 7
+  zero.  A data read clears RDRF; the register keeps its character.
+  A break frame is a character of zeros with FE; back-to-back break
+  frames are one.
+- **Errors (Status Register).**  PE is set for a character whose
+  parity bit is wrong, FE for one with no stop bit (a break); each
+  stays with its character in the data register, through its read,
+  until the next character's transfer or a master reset.
+- **Overrun (Status Register, Receiver Overrun).**  A character that
+  completes while RDRF is set is lost.  OVRN shows once the character
+  before it is read, RDRF staying set with it; the next data read
+  clears both, giving that character again.  Characters arriving
+  meanwhile are lost too.
+- **DCD (Peripheral/Modem Control, Data Carrier Detect; Status
+  Register).**  DCD's rise latches the DCD status bit and, with CR7,
+  interrupts.  A status read that shows the latched bit, then a data
+  read, clear the latch, as a master reset does; after that the bit
+  follows DCD.  DCD high inhibits and initializes the receiver: RDRF,
+  FE, PE and OVRN clear and characters are lost until it falls.
+- **CTS (Peripheral/Modem Control, Clear-to-Send; Status Register).**
+  The CTS bit is CTS's level.  CTS high inhibits TDRE, and so the
+  transmit interrupt; it does not stop a character written from going
+  out.
+- **Interrupts (Interrupt Request).**  IRQ is asserted, and SR7 set,
+  while CR7 is set with RDRF, OVRN or the DCD latch, or CR6:5 are
+  `01` with TDRE.  RTS and IRQ are logic nets, driven at power-on and
+  at each change.
+- **Power-on.**  The data sheet gives no power-on state but asks for a
+  master reset first: the ACIA powers on in its first master reset,
+  RTS and IRQ high, CTS and DCD taken low until driven.
+- **Snapshot.**  The clocks, the registers, the lines' frames and the
+  levels driven, format version 1.  Refused: other clocks, an overrun
+  with the data register empty, a DCD read without its latch, the
+  first reset outside master reset, a status a master reset clears
+  set in master reset, an error bit other than FE or PE, a level past
+  IRQ.
+
+Not modeled: the divide-by-1 mode's external synchronization (it runs
+as the other ratios do, a bit a clock), the false start bit deletion,
+the up-to-one-bit delay of a write's transfer to the shift register
+(it is at once), and the bus timing.
 
 ## MC68681
 

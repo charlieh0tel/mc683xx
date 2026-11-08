@@ -67,6 +67,7 @@ mod character;
 mod dac;
 mod latch;
 mod mc144110;
+mod mc6850;
 mod mc68681;
 mod noise;
 mod octal;
@@ -90,6 +91,7 @@ const STOCK: &[Stock] = &[
     (latch::NAME_373, latch::register_373),
     (latch::NAME_374, latch::register_374),
     (mc144110::NAME, mc144110::register),
+    (mc6850::NAME, mc6850::register),
     (mc68681::MC68681, mc68681::register_mc68681),
     (mc68681::SCC68692, mc68681::register_scc68692),
     (sipo::NAME, sipo::register),

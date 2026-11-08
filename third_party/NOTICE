@@ -115,6 +115,16 @@ says otherwise.
                    order, ENB latch and output scale.
                    SHA-256 797dcb9d152061ef76c92ae1a4501d62
                            93b70742a08df58fe287e253ba41c702
+  MC6850.pdf       "MC6850 Asynchronous Communications Interface
+                   Adapter (ACIA)", Motorola, DS9493R4, (c) Motorola
+                   Inc. 1985, printed 1994 (MC6850/D).  docs.ampnuts.ru/
+                   eevblog.docs/Tektronix/TLA_Ensoniq/Datasheets/
+                   MC6850.pdf, a scan, fetched 2026-11-07.  The
+                   `mc6850` part in full: its device operation, its
+                   registers (Table 1; Control Register, Status
+                   Register) and its modem controls.
+                   SHA-256 294a8b9f557d03a2a7f4d736d060244f
+                           39216dad2d5479d2e47954feb4f34655
   MC68681.pdf      "MC68681 Dual Asynchronous Receiver/Transmitter
                    (DUART)", Motorola, Advance Information, ADI988R1,
                    September 1985, (c) Motorola Inc. 1985, as scanned
