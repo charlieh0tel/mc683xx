@@ -39,7 +39,7 @@ use serde::Serialize;
 
 use crate::octal::LEVELS;
 use crate::octal::LINES;
-use crate::octal::level;
+use crate::octal::choice;
 use crate::shift_register::ShiftRegister;
 
 /// Its registered name.
@@ -144,11 +144,11 @@ impl Sipo {
         if initial >> width != 0 {
             return Err(ParameterError::invalid(INITIAL, "a stage past the chain's"));
         }
-        let clr = level(context, CLR_LEVEL, LEVELS, true)?;
+        let clr = choice(context, CLR_LEVEL, LEVELS, true)?;
         Ok(Self {
             configuration: Configuration {
                 width,
-                qh_on_miso: level(context, MISO, MISO_WORDS, true)?,
+                qh_on_miso: choice(context, MISO, MISO_WORDS, true)?,
             },
             state: State {
                 // CLR held low clears whatever it powers on with

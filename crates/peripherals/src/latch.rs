@@ -40,7 +40,7 @@ use serde::Serialize;
 use crate::octal::LEVELS;
 use crate::octal::LINES;
 use crate::octal::PULLS;
-use crate::octal::level;
+use crate::octal::choice;
 
 /// The edge-triggered register's registered name.
 pub(crate) const NAME_374: &str = "74x374";
@@ -101,8 +101,8 @@ impl Latch {
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         Ok(Self {
             held: context.parameters.integer(INITIAL)?.unwrap_or(0),
-            oe: level(context, OE_LEVEL, LEVELS, false)?,
-            pull: level(context, PULL, PULLS, true)?,
+            oe: choice(context, OE_LEVEL, LEVELS, false)?,
+            pull: choice(context, PULL, PULLS, true)?,
             driven: None,
         })
     }

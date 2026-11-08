@@ -34,7 +34,7 @@ use serde::Serialize;
 use crate::dac::Span;
 use crate::dac::Volts;
 use crate::octal::LEVELS;
-use crate::octal::level;
+use crate::octal::choice;
 
 /// Its registered name.
 pub(crate) const NAME: &str = "ad569";
@@ -156,7 +156,7 @@ impl Ad569 {
     /// From `initial` (0), `vref_negative`, `vref_positive` and the
     /// controls' levels.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
-        let tied = |index: usize| level(context, CONTROLS[index], LEVELS, true);
+        let tied = |index: usize| choice(context, CONTROLS[index], LEVELS, true);
         let initial: u16 = context.parameters.integer(INITIAL)?.unwrap_or(0);
         Ok(Self {
             span: Span::from_parameters(context, VREF_NEGATIVE, VREF_POSITIVE)?,

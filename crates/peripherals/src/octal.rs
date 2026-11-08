@@ -1,5 +1,5 @@
 //! What the octal logic peripherals share, the latch and the buffer: their
-//! level parameters.
+//! lines and their word parameters.
 
 use mc683xx_board::registry::Context;
 use mc683xx_board::registry::ParameterError;
@@ -7,27 +7,29 @@ use mc683xx_board::registry::ParameterError;
 /// A peripheral's eight data lines, one a bit of its byte.
 pub(crate) const LINES: usize = 8;
 
-/// A level parameter's words for high and low.
-pub(crate) type Words = [(&'static str, bool); 2];
+/// A word parameter's two words and what each means: a level's for
+/// high and low by default.
+pub(crate) type Words<T = bool> = [(&'static str, T); 2];
 /// A pin's level: `"high"` or `"low"`.
 pub(crate) const LEVELS: Words = [("high", true), ("low", false)];
 /// A pull resistor's: `"up"` (high) or `"down"`.
 pub(crate) const PULLS: Words = [("up", true), ("down", false)];
 
-/// The level parameter `key`, one of `words`, or `default` without it.
-pub(crate) fn level(
+/// The word parameter `key`, what one of `words` means, or `default`
+/// without it.
+pub(crate) fn choice<T: Copy>(
     context: &Context<'_>,
     key: &str,
-    words: Words,
-    default: bool,
-) -> Result<bool, ParameterError> {
+    words: Words<T>,
+    default: T,
+) -> Result<T, ParameterError> {
     let Some(word) = context.parameters.string(key)? else {
         return Ok(default);
     };
     words
         .iter()
         .find(|(name, _)| *name == word)
-        .map(|(_, level)| *level)
+        .map(|(_, meaning)| *meaning)
         .ok_or_else(|| {
             ParameterError::invalid(
                 key,
