@@ -134,7 +134,8 @@ to = ["u13.A"]
 port for a parallel peripheral (an AD569's DB15-DB0).  MOSI is the serial
 input (A and B, B tied high), SCK its CLK: each rising edge shifts the
 serial bit into QA and each stage into the next, QH's bit leaving (9.1;
-Table 1).  Chained, a chip's QH is the next chip's A.
+Table 1).  Chained, a chip's QH is the next chip's A.  A board that
+inverts SCK in front of CLK takes `clock = "falling"`.
 
 | Port | Kind | Direction | Meaning |
 | --- | --- | --- | --- |
@@ -147,6 +148,7 @@ Table 1).  Chained, a chip's QH is the next chip's A.
 | `initial` | `0` | The stages out of power-on, driven on `Q` (bit 8k + n is chip k's stage n): the datasheet gives no power-on state; CLR held low clears it. |
 | `clr` | `"high"` | CLR's level until a net drives it: `"high"` or `"low"`. |
 | `miso` | `"qh"` | What answers on MISO: `"qh"`, the last chip's QH, or `"none"`, MISO not wired and undriven (all ones). |
+| `clock` | `"rising"` | The edge of SCK it shifts on: `"rising"`, SCK wired to CLK, or `"falling"`, SCK inverted to CLK on the board.  A QSPI clock is not a net, so an inverter cannot be wired in front of it: this stands for the board's. |
 
 - Attach it with `{ qspi = code, mask = pins }`: it shifts on the
   transfers that select it, as a board gating SCK (or MOSI) by a PCS
@@ -166,22 +168,27 @@ Table 1).  Chained, a chip's QH is the next chip's A.
   (docs/board-files.md, SPI edges).  A capture takes the level before
   its edge, so a side that acts on the edge the other changes its
   output on sees the bit before; MOSI before a transfer's first bit is
-  taken as 0.  The '164 samples and shifts on CLK's rise.
-  - Modes 0, 2 and 3: the rise takes each bit as the master sent it,
-    and the master captures QH before the rise that shifts it, so a
-    transfer as long as the chain reads back the word before it.
-  - Mode 1: the rise leads each bit, and the master changes MOSI on
-    it, so the chain takes each bit one late (the first, 0); the
-    master captures QH on the fall after, one bit early: the word
-    before shifted up one, the transfer's first bit in last.
+  taken as 0.  The '164 samples and shifts on CLK's rise: SCK's rise,
+  or with `clock = "falling"` its fall.
+  - Modes 0, 2 and 3 (`"falling"`: 0, 1 and 2): the shift edge takes
+    each bit as the master sent it, and the master captures QH before
+    the edge that shifts it, so a transfer as long as the chain reads
+    back the word before it.
+  - Mode 1 (`"falling"`: 3): the shift edge leads each bit, and the
+    master changes MOSI on it, so the chain takes each bit one late
+    (the first, 0); the master captures QH on the edge after, one bit
+    early: the word before shifted up one, the transfer's first bit in
+    last.  The HP 58503B's and Z3816A's EFC register needs this: SCK
+    inverted to its CLK, the firmware writes it in mode 2, reads it
+    back in mode 3 and shifts the word back down before comparing.
 - `Q` is driven at power-on and as each transfer ends when it changed:
   the outputs follow each clock on the peripheral, but the clocks within a
   transfer are not resolved.  With CLR low nothing shifts and QH is low.
 - The datasheet gives no power-on state: every stage starts low.  Its
   only reset is CLR, so RESET changes nothing.
 - Its QSPI calls are not deferrable: they drive `Q`.
-- Snapshot: `cascade` and `miso`, the stages and CLR's level, format
-  version 2.  Refused: another chain's, a stage past the chain, a
+- Snapshot: `cascade`, `miso` and `clock`, the stages and CLR's
+  level, format version 3.  Refused: another chain's, a stage past the chain, a
   stage set while CLR is low.
 
 ```toml

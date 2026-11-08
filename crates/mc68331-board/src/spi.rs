@@ -25,6 +25,8 @@
 use mc683xx_modules::peripheral::ClockPhase;
 use mc683xx_modules::peripheral::ClockPolarity;
 use mc683xx_modules::peripheral::QspiClock;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::peripheral::Transfer;
 
@@ -41,7 +43,7 @@ const MOSI_BETWEEN_TRANSFERS: bool = false;
 pub const UNDRIVEN: bool = true;
 
 /// An SCK edge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Edge {
     /// Low to high.
     Rising,

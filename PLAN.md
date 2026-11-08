@@ -622,7 +622,12 @@ silent are in `docs/peripherals.md`; the datasheets are in
   down); the ADC0838 reads a clock late in modes 1 and 2
   (docs/peripherals.md).  The firmware's own mode is not checked
   against the peripheral's: a mismatch is a board's, and shows as it does
-  on the bench.
+  on the bench.  A board that inverts SCK in front of a
+  peripheral's clock (the 58503B's and Z3816A's EFC '164, whose
+  self-test passes only shifting on SCK's fall) cannot wire an
+  inverter there, since a QSPI clock is not a net: the peripheral takes
+  the board's inversion as a parameter (`74x164`'s `clock`), its edges
+  still the datasheet's on CLK.
 - *Parallel peripherals and their serial front ends.*  The AD569 is a
   parallel peripheral (Table I: CS, HBE, LBE, LDAC), and `ad569` is that
   peripheral, DB15-DB0 a bus net, each control a net or tied.  A board that
