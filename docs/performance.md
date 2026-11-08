@@ -653,3 +653,46 @@ profile on the machine above (load average 3 to 5):
 
 Real time is its 0.273 s of board time at 16.78 MHz; the run includes
 the snapshot's restore.
+
+## On a board, and the memory path
+
+The Z3805A and 58503A firmware on their board files (smartclock's
+`boards/`, with smartclock's own parts as recording stubs and the stock
+parts real), 30 s of board time from power-on: 446 and 445 host
+instructions an instruction before the long-operand lookup
+(Optimizations).  The core is about 94% of the profile; the board
+crate and the stock parts under 1%, the SIM and modules about 3%.  A
+board costs what its chip does.
+
+Measuring on this machine (a hybrid i9-13900H, shared):
+
+- Pin to the performance cores (`taskset -c 0-11`): a process the
+  scheduler moves to an efficiency core has its `instructions:u`
+  scaled across two counters (bogus counts, 540 to 897 for 446), and
+  criterion's times swing 2x.
+- The primary figure is host instructions an instruction, (30 s run -
+  1 ms run) / instructions run: the same to within 0.01% run to run,
+  whatever the load.
+- A criterion slowdown is checked with `perf stat` of instructions and
+  cycles over a fixed number of the kernel's iterations (2N - N): the
+  same instructions and cycles, in a build whose handler compiles the
+  same, is code placement, not work.
+
+The memory fast path, each change against the same main (host
+instructions an instruction on both firmwares; criterion lowest of
+interleaved runs on one performance core):
+
+| Change | Host instructions | Criterion | Outcome |
+| --- | --- | --- | --- |
+| A long operand in one page lookup | -18.4% | slower only by placement | adopted (Optimizations) |
+| A long instruction fetch in one read from the fetch page | -3.5% more | | not adopted: below 5% |
+| A one-entry data page cache per direction, as the fetch page's | -4.4% | within 3% | not adopted: below 5% |
+| A compact fast entry (32 bytes, stalls precomputed) and a fixed slab directory | -12.5% | `cmpi`, `btst_immediate` +2 to +5% cycles, real | not adopted: most of the gain is `cycle_read` inlining into `access_read`, which any change to it can undo |
+| The compact entry and the long lookup | -21.4% | as the compact entry | not adopted: 3 points over the long lookup for the cost above |
+| The compact entry and the data page cache | -3.0% | up to +6.8% | not adopted: the cache stops `cycle_read` inlining |
+
+The bar was 5% fewer host instructions on both firmwares and no
+benchmark 3% slower in fact.  What is left of a data access is the
+page walk itself (mask, slab, entry, region, bounds checks, about 20
+instructions); the compact entry is the next candidate once `cmpi`'s
+and `btst_immediate`'s cost is understood.
