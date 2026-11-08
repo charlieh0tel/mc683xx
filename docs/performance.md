@@ -445,6 +445,44 @@ same either way and has no `always`.
 | `shift::shift` | three rotate handlers change |
 | `shift::set_flags` | 85 shift and rotate handlers change |
 
+**A long operand in one page lookup** (PLAN.md, Memory): an even long
+whose two words the fast table serves from one page is read or written
+at once (`Memory::read_long`, `write_long`), its stall two words';
+any other takes the two word cycles as before.  Longs are about 87% of
+the firmware's data accesses (Z3805A: 25.7 of 29.4 million, 58503A:
+21.8 of 25.2 million, counted in the first 30 s).  Measured on the real
+firmware (Real firmware in long quanta, below) for 30 s of board time
+from power-on: host instructions (`perf stat`, user space, pinned to
+the performance cores) less those of a 1 ms run (the load), over the
+instructions run; the same in each of three runs to within 0.01.
+Before is the compact fast entry (PLAN.md, Memory); the long change
+alone, on the release before both, measured 446.1 to 364.1 and 445.2
+to 363.6.
+
+| Run | Instructions | Host instructions each, release | Compact entry | And this |
+| --- | --- | --- | --- | --- |
+| Z3805A, 30 s | 32.9 million | 446.1 | 390.2 | 350.6 (-10.1%, -21.4% on the release) |
+| 58503A, 30 s | 31.0 million | 445.2 | 389.4 | 350.1 (-10.1%, -21.4% on the release) |
+
+Criterion, the four builds (the release, each change alone, both)
+interleaved, ten rounds, each run pinned to one performance core whose
+sibling thread other work shared, so a run's time swings by up to 2x
+and only the lowest of each is worth comparing: against the release,
+`core/move_postincrement` -36%, `core/pea_displacement` -28%,
+`core/add_to_memory` -12%, `core/bset_memory` -13%,
+`core/move_indirect` -10%, most others within 2%.  Four were more than
+3% slower by that lowest time; counted with `perf stat` per iteration
+of a fixed run of each kernel on the same core, two are placement, not
+work, and two are the compact entry's, which this change does not add
+to:
+
+| Benchmark | Lowest time | Host instructions per iteration | Cycles per iteration |
+| --- | --- | --- | --- |
+| `core/mulu` | +6.7% | -1.0% | -2% |
+| `core/lea_displacement` | +3.6% | +0.4% | about +1% |
+| `core/btst_immediate` | +3.6% | +1.4% (compact entry alone +1.8%) | +3.5% (alone +4.6%) |
+| `core/cmpi` | +3.1% | +1.2% (alone +1.6%) | +3% (alone +2.3%) |
+
 ## QSPI queues
 
 A run syncs only where the queue shows (PLAN.md, Peripherals): with a
