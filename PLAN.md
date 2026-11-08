@@ -633,6 +633,56 @@ silent are in `docs/peripherals.md`; the datasheets are in
   two.  The '164 drives its outputs as each transfer ends, not at each
   clock: a transparent latch behind it sees the word, not the bits
   arriving.
+- *MC6850.*  A `Peripheral` keeping board time, as the DUART does, its
+  rates Tx CLK and Rx CLK (`tx_clk_hz`, `rx_clk_hz`, required: no
+  frequency is standard) over the counter divide.  It shares the
+  character format (`character`) with the DUART, and as the DUART a
+  frame goes out at its start bit and a frame in is transferred at its
+  first stop bit's center at the receiver's rate, which does not check
+  the sender's baud.  Where its data sheet (DS9493R4) is silent or
+  ambiguous, the model's choices (docs/peripherals.md, MC6850):
+  - Power-on: no state is given, only that a master reset must come
+    first; it powers on in its first master reset (RTS and IRQ high,
+    TDRE inhibited).  CTS and DCD are low, asserted, until driven.
+  - The first master reset: "During the first master reset, the IRQ
+    and RTS outputs are held at level 1"; it lasts from power-on to
+    the first control word that is not a master reset.
+  - In master reset the transmit data register ignores writes and the
+    receiver takes no character: the reset "initializes" both and the
+    ACIA is "maintained in the Reset condition"; a DCD rise is not
+    latched then, since the reset holds the status clear.
+  - FE and PE stay with their character "as long as the data character
+    is in the RDR", which keeps it after a read: they clear at the next
+    transfer, not at the read.
+  - OVRN: the overrun condition begins as the second character
+    completes, here at its first stop bit's center, the transfer point
+    (the sheet says "the midpoint of the last bit"); the character is
+    lost, never reaching the RDR.  It shows once the RDR's character
+    is read, with RDRF held, and the next data read clears it, as the
+    status register section says ("reset after the reading of data");
+    the interrupt section's status-read-then-data-read sequence is
+    required for DCD alone, whose own section says so too, since for
+    OVRN it would clear the condition before it showed.
+  - DCD high "inhibits and initializes the receiver": the character in
+    the RDR, its FE and PE, and an overrun are cleared, and characters
+    are lost until DCD falls.
+  - CTS high inhibits TDRE only, as the sheet says; it does not hold a
+    character already written.
+  - A break (CR6:5 `11`) goes out after what the transmitter holds, as
+    break frames a character long, then a bit time of mark before the
+    next character, as the DUART's; a received break is one zero
+    character with FE (and PE where the zero parity bit is wrong), and
+    back-to-back break frames are one break, as on the DUART.
+  - A transmit data write is transferred at once if the transmitter is
+    idle ("within 1-bit time"), and replaces a character still in the
+    data register; a word length change takes effect at the next
+    frame's start for the transmitter and at the transfer for the
+    receiver ("effective immediately").
+  - Divide by 1 runs a bit a clock, without the external
+    synchronization the sheet asks for; the false start bit deletion is
+    not modeled.
+  - It has no interrupt acknowledge (an `iack` attachment ends in BERR)
+    and no RESET pin (a board reset changes nothing).
 - *MC68681 and SCC68692.*  One model, two names: the SCC68692 differs
   where firmware sees it (CR bit 7 starts its extra commands, which
   the MC68681 ignores; what RESET does to the counter/timer), so a

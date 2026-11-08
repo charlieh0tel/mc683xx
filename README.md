@@ -51,7 +51,8 @@ crates.io.
   command that runs one.
 - **Stock peripherals:** 74x373/374 latches, 74x244 buffer, 74x164
   shift register, AD569 DAC, ADC0838 ADC, AT28C64B EEPROM, MC144110
-  DAC, MC68681 and SCC68692 DUARTs, each modeled from its datasheet.
+  DAC, MC6850 ACIA, MC68681 and SCC68692 DUARTs, each modeled from its
+  datasheet.
 - **gdb:** a GDB remote stub over the bare CPU, the chip or a board, or a CPU32 under BDM control.
 - **Loading:** S-records, ELF and raw binary loaded, verified and
   started, and init scripts run, on a CPU32 under BDM control or the
