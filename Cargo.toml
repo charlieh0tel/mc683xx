@@ -26,7 +26,7 @@ version = "0.5.0"
 edition = "2024"
 # The toolchain rust-toolchain.toml pins, the one CI builds and tests
 # with; no older compiler is checked, so none is claimed.
-rust-version = "1.98.1"
+rust-version = "1.99.1"
 authors = ["Christopher Hoover <ch@murgatroid.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/charlieh0tel/mc683xx"
