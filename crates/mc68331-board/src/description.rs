@@ -1035,7 +1035,7 @@ fn read_attachment(
         attachment.qspi,
     ) {
         (None, None, None, None) if on_bus && attachment.mask.is_none() => {
-            bus_decode(attachment, role).map_err(&error)?
+            bus_decode(attachment, role).map_err(error)?
         }
         _ if on_bus => {
             return Err(error(
