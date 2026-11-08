@@ -317,6 +317,38 @@ by up to 1.6x between rounds), so the counts are the evidence.
 | `chip/ram_move` | 639 | 522 |
 | `chip/peripheral_move` | 1626 | 1507 |
 
+**Data reads and writes through cached pages** (PLAN.md, Memory):
+the data fast path, as fetch's, reads or writes through the page it
+last used in that direction, one entry each, with no page table
+lookup.  Measured as host instructions (`perf stat -e
+cpu_core/instructions/u`, pinned to the performance cores) per
+emulated instruction over 30 s of board time from power-on, the
+1 ms load's count subtracted, three runs each, identical to 0.01%;
+the emulated instruction counts are the same on both sides.  The Z3805A
+run misses fewer than 2 million times on reads in 32.9 million
+instructions, so more entries would not help.  Criterion: the
+interleaved minimum of six rounds, pinned the same way (load average
+about 16); unpinned, runs landing on the efficiency cores moved
+medians by up to 2x.
+
+| Run | Host instructions before | After | Fewer |
+| --- | --- | --- | --- |
+| Z3805A 3543B, 32.9M instructions | 446.1 | 426.7 | 4.4% |
+| 58503A 3704, 31.0M instructions | 445.2 | 425.8 | 4.4% |
+
+| Benchmark | Criterion before | After |
+| --- | --- | --- |
+| `core/nop` | 72.8 us | 69.2 us |
+| `core/move_indirect` | 70.9 us | 66.2 us |
+| `core/move_postincrement` | 57.2 us | 51.4 us |
+| `core/bset_memory` | 43.5 us | 38.9 us |
+| `chip/ram_move` | 23.7 us | 22.9 us |
+| `chip/flash_nop` | 38.8 us | 39.3 us |
+| `core/short_runs` | 14.2 us | 14.7 us |
+
+The rest within 2% either way.  Short of the 5% asked of it for the
+code it adds; a variant with the miss out of line was worse (441).
+
 **A leaner `step`**: the common case (the instruction completed,
 untraced, no released write's fault) is taken first, with no
 exception matching; the stall, extra and refunded clocks are cleared

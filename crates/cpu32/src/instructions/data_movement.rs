@@ -603,7 +603,7 @@ pub(super) mod tests {
     /// The word at `at` in supervisor space.
     pub(crate) fn peek_word(cpu: &Cpu, at: u32) -> u32 {
         cpu.memory
-            .read(Space::Supervisor, Address(at), Size::Word)
+            .read_backed(Space::Supervisor, Address(at), Size::Word)
             .expect("RAM")
             .0
     }
@@ -611,7 +611,7 @@ pub(super) mod tests {
     /// The byte at `at` in supervisor space.
     pub(crate) fn peek_byte(cpu: &Cpu, at: u32) -> u32 {
         cpu.memory
-            .read(Space::Supervisor, Address(at), Size::Byte)
+            .read_backed(Space::Supervisor, Address(at), Size::Byte)
             .expect("RAM")
             .0
     }

@@ -2036,6 +2036,13 @@ Adversarial review (2026-11-01):
   does not say what a write to an already-prefetched word does; this
   is our choice.  It serves only what the fast table serves, so a
   hooked or protected page still fetches through the slow path.
+- Data reads and data writes each cache the page they last used the
+  same way (`Memory::read`, `write`), one entry each, apart from
+  fetch's: code, a source and a destination on three pages (a copy
+  loop) do not evict each other, and a read-only page's read entry
+  says nothing of its writes.  One entry per direction, not per space:
+  firmware runs in supervisor space, and a miss costs only the lookup
+  the table did before.  The same changes drop all three.
 
 ### Interrupts
 

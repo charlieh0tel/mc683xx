@@ -197,11 +197,12 @@ const SLAB_PAGES: usize = 1 << SLAB_SHIFT;
 /// A page number's bits within its slab.
 const SLAB_MASK: usize = SLAB_PAGES - 1;
 
-/// The page instruction fetch last read on the fast path, what it maps
-/// to and what a word there costs: fetch looks no page table up while
-/// the PC stays on it ([PLAN.md, Memory]).  It holds the mapping, not
-/// the bytes, so fetch always reads memory as it is now; any change to
-/// the tables drops it.
+/// A page the fast path last served for one kind of access (fetch,
+/// read or write), what it maps to in that direction and what a cycle
+/// there costs: the access looks no page table up while it stays on
+/// the page ([PLAN.md, Memory]).  It holds the mapping, not the bytes,
+/// so an access always sees memory as it is now; any change to the
+/// tables or the regions drops it.
 ///
 /// [PLAN.md, Memory]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#memory
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -210,12 +211,58 @@ struct CachedPage {
     space: Space,
     /// The page number, on the address lines.
     page: usize,
-    /// The region its reads come from.
+    /// The region the direction's cycles go to.
     region: usize,
     /// The byte offset in the region of the page's first byte.
     offset: usize,
+    /// A byte's stall there.
+    byte_stall: Cycles,
     /// A word's stall there.
-    stall: Cycles,
+    word_stall: Cycles,
+}
+
+impl CachedPage {
+    /// Page `page` of `space`, whose `entry` a direction serves from
+    /// `backing`.
+    fn new(space: Space, page: usize, entry: &Page, backing: Backing) -> Self {
+        Self {
+            space,
+            page,
+            region: backing.region.0,
+            offset: backing.offset as usize,
+            byte_stall: stall(Size::Byte, entry.port, entry.clocks),
+            word_stall: stall(Size::Word, entry.port, entry.clocks),
+        }
+    }
+
+    /// Whether it is page `page` of `space`.
+    #[inline(always)]
+    fn is(&self, space: Space, page: usize) -> bool {
+        self.page == page && self.space == space
+    }
+
+    /// The stall of a cycle of `size` there.
+    #[inline(always)]
+    fn stall(&self, size: Size) -> Cycles {
+        if size == Size::Byte {
+            self.byte_stall
+        } else {
+            self.word_stall
+        }
+    }
+}
+
+/// The pages the fast path last served, one for each kind of access:
+/// fetch, data reads and data writes keep apart, so code, a source and a
+/// destination on three pages (a copy loop) do not evict each other.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct CachedPages {
+    /// Instruction fetch's.
+    fetch: Option<CachedPage>,
+    /// Data reads'.
+    read: Option<CachedPage>,
+    /// Data writes'.
+    write: Option<CachedPage>,
 }
 
 /// [`SLAB_PAGES`] pages of both spaces: their entries, the fast path's
@@ -331,8 +378,9 @@ pub struct Memory {
     /// Whether any page has a hook or less than [`Permissions::ALL`]:
     /// while not, no cycle or instruction looks either up.
     special: bool,
-    /// The page instruction fetch is on, while the tables keep it.
-    fetch_page: Option<CachedPage>,
+    /// The pages fetch, reads and writes last used, while the tables
+    /// and the regions keep them.
+    cached: CachedPages,
 }
 
 impl fmt::Debug for Memory {
@@ -398,7 +446,7 @@ impl Memory {
             unallocated: vec![0; slabs],
             watches: Vec::new(),
             special: false,
-            fetch_page: None,
+            cached: CachedPages::default(),
         })
     }
 
@@ -759,7 +807,7 @@ impl Memory {
     /// Drops the pages cached for the fast path: the tables or the
     /// regions changed.
     fn forget_cached(&mut self) {
-        self.fetch_page = None;
+        self.cached = CachedPages::default();
     }
 
     /// Recomputes `special`.
@@ -798,12 +846,36 @@ impl Memory {
     }
 
     /// A byte or word read the fast path serves, with its stall, or
-    /// [`None`] if it takes the slow path or goes to the bus.  A word is
-    /// aligned, so it never leaves a page.
+    /// [`None`] if it takes the slow path or goes to the bus: through the
+    /// cached read page while reads stay on it.  A word is aligned, so it
+    /// never leaves a page.
     #[inline]
-    pub(crate) fn read(&self, space: Space, address: Address, size: Size) -> Option<(u32, Cycles)> {
-        let (slab, index, within) = self.locate(address)?;
-        self.read_in(&slab.fast[space.index()][index], within, size)
+    pub(crate) fn read(
+        &mut self,
+        space: Space,
+        address: Address,
+        size: Size,
+    ) -> Option<(u32, Cycles)> {
+        let address = self.mask(address).0;
+        let page = (address >> PAGE_SHIFT) as usize;
+        let cached = match self.cached.read {
+            Some(cached) if cached.is(space, page) => cached,
+            _ => {
+                let cached = self.served(space, page, |entry| entry.read)?;
+                self.cached.read = Some(cached);
+                cached
+            }
+        };
+        let at = cached.offset + (address % PAGE_BYTES) as usize;
+        let region = &self.regions[cached.region];
+        let value = match size {
+            Size::Byte => u32::from(region[at]),
+            _ => {
+                let bytes = &region[at..at + 2];
+                u32::from(u16::from_be_bytes([bytes[0], bytes[1]]))
+            }
+        };
+        Some((value, cached.stall(size)))
     }
 
     /// A byte or word read served here, hooked page or not, with its
@@ -832,40 +904,46 @@ impl Memory {
 
     /// The word an instruction fetch reads at `address`, even, with its
     /// stall, if the fast path serves it: [`read`](Self::read) of a word,
-    /// through the cached page while the PC stays on it.  Always inlined:
-    /// the run loop's opcode fetch is its hottest caller.
+    /// through the cached fetch page while the PC stays on it.  Always
+    /// inlined: the run loop's opcode fetch is its hottest caller.
     #[inline(always)]
     pub(crate) fn fetch(&mut self, space: Space, address: Address) -> Option<(u16, Cycles)> {
         let address = self.mask(address).0;
         let page = (address >> PAGE_SHIFT) as usize;
-        let cached = match self.fetch_page {
-            Some(cached) if cached.page == page && cached.space == space => cached,
+        let cached = match self.cached.fetch {
+            Some(cached) if cached.is(space, page) => cached,
             _ => self.fetch_miss(space, page)?,
         };
         let at = cached.offset + (address % PAGE_BYTES) as usize;
         let bytes = &self.regions[cached.region][at..at + 2];
-        Some((u16::from_be_bytes([bytes[0], bytes[1]]), cached.stall))
+        Some((u16::from_be_bytes([bytes[0], bytes[1]]), cached.word_stall))
     }
 
     /// Caches `page` of `space` for fetch, if the fast path serves it.
     #[inline]
     fn fetch_miss(&mut self, space: Space, page: usize) -> Option<CachedPage> {
-        let slab = self.slabs[page >> SLAB_SHIFT].as_deref()?;
-        let entry = slab.fast[space.index()][page & SLAB_MASK];
-        let backing = entry.read?;
-        let cached = CachedPage {
-            space,
-            page,
-            region: backing.region.0,
-            offset: backing.offset as usize,
-            stall: stall(Size::Word, entry.port, entry.clocks),
-        };
-        self.fetch_page = Some(cached);
+        let cached = self.served(space, page, |entry| entry.read)?;
+        self.cached.fetch = Some(cached);
         Some(cached)
     }
 
+    /// `page` of `space` as the fast path serves it in the direction
+    /// `backing` picks from its entry, if it does.
+    #[inline]
+    fn served(
+        &self,
+        space: Space,
+        page: usize,
+        backing: impl Fn(&Page) -> Option<Backing>,
+    ) -> Option<CachedPage> {
+        let slab = self.slabs[page >> SLAB_SHIFT].as_deref()?;
+        let entry = &slab.fast[space.index()][page & SLAB_MASK];
+        Some(CachedPage::new(space, page, entry, backing(entry)?))
+    }
+
     /// A byte or word write the fast path serves, with its stall, or
-    /// [`None`] if it takes the slow path or goes to the bus.
+    /// [`None`] if it takes the slow path or goes to the bus: through the
+    /// cached write page while writes stay on it.
     #[inline]
     pub(crate) fn write(
         &mut self,
@@ -874,9 +952,23 @@ impl Memory {
         size: Size,
         value: u32,
     ) -> Option<Cycles> {
-        let (slab, index, within) = self.locate(address)?;
-        let page = slab.fast[space.index()][index];
-        self.write_in(page, within, size, value)
+        let address = self.mask(address).0;
+        let page = (address >> PAGE_SHIFT) as usize;
+        let cached = match self.cached.write {
+            Some(cached) if cached.is(space, page) => cached,
+            _ => {
+                let cached = self.served(space, page, |entry| entry.write)?;
+                self.cached.write = Some(cached);
+                cached
+            }
+        };
+        let at = cached.offset + (address % PAGE_BYTES) as usize;
+        let region = &mut self.regions[cached.region];
+        match size {
+            Size::Byte => region[at] = value as u8,
+            _ => region[at..at + 2].copy_from_slice(&(value as u16).to_be_bytes()),
+        }
+        Some(cached.stall(size))
     }
 
     /// Whether the tables serve writes at `address`, hooked page or not.
@@ -955,6 +1047,79 @@ mod tests {
         assert_eq!(memory.fetch(Space::Supervisor, at), Some((0, Cycles::ZERO)));
         memory.clear();
         assert_eq!(memory.fetch(Space::Supervisor, at), None);
+    }
+
+    #[test]
+    fn reads_and_writes_honor_a_table_change_after_their_cached_page() {
+        let mut memory = Memory::new(24).unwrap();
+        ram(&mut memory, 0, PAGE_BYTES);
+        let at = Address(0x10);
+        let read = |memory: &mut Memory| memory.read(Space::Supervisor, at, Size::Word);
+        let write =
+            |memory: &mut Memory, value| memory.write(Space::Supervisor, at, Size::Word, value);
+        assert_eq!(write(&mut memory, 0x1234), Some(Cycles::ZERO));
+        assert_eq!(read(&mut memory), Some((0x1234, Cycles::ZERO)));
+        // Remapped to fresh RAM with a wait state, at 8 bits.
+        let region = memory.add_region(vec![0; PAGE_BYTES as usize]);
+        let backing = Some(Backing { region, offset: 0 });
+        let slow = Page {
+            read: backing,
+            write: backing,
+            port: PortSize::Bits8,
+            clocks: 3,
+        };
+        memory
+            .map(Space::Supervisor, Address(0), PAGE_BYTES, slow)
+            .unwrap();
+        assert_eq!(read(&mut memory), Some((0, Cycles(4))));
+        assert_eq!(write(&mut memory, 0x5678), Some(Cycles(4)));
+        assert_eq!(memory.region(region)[0x10..0x12], [0x56, 0x78]);
+        // Read-only: writes go to the bus, reads stay.
+        let rom = Page {
+            write: None,
+            ..slow
+        };
+        memory
+            .map(Space::Supervisor, Address(0), PAGE_BYTES, rom)
+            .unwrap();
+        assert_eq!(write(&mut memory, 0), None);
+        assert_eq!(read(&mut memory), Some((0x5678, Cycles(4))));
+        // Permissions short of all: both take the slow path.
+        memory
+            .map(Space::Supervisor, Address(0), PAGE_BYTES, slow)
+            .unwrap();
+        assert!(write(&mut memory, 0x9abc).is_some());
+        memory
+            .protect(
+                Space::Supervisor,
+                Address(0),
+                PAGE_BYTES,
+                super::Permissions::READ,
+            )
+            .unwrap();
+        assert_eq!(read(&mut memory), None);
+        assert_eq!(write(&mut memory, 0), None);
+        memory
+            .protect(
+                Space::Supervisor,
+                Address(0),
+                PAGE_BYTES,
+                super::Permissions::ALL,
+            )
+            .unwrap();
+        assert_eq!(read(&mut memory), Some((0x9abc, Cycles(4))));
+        // A hook: the slow path; unhooked, the fast path again.
+        assert!(write(&mut memory, 0x9abc).is_some());
+        memory.set_watched([(at..=at, super::watch::READ)].into_iter());
+        assert_eq!(read(&mut memory), None);
+        assert_eq!(write(&mut memory, 0), None);
+        memory.set_watched(std::iter::empty());
+        assert_eq!(read(&mut memory), Some((0x9abc, Cycles(4))));
+        // Unmapped: the bus.
+        assert!(write(&mut memory, 0x9abc).is_some());
+        memory.clear();
+        assert_eq!(read(&mut memory), None);
+        assert_eq!(write(&mut memory, 0), None);
     }
 
     #[test]
