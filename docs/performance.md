@@ -445,6 +445,32 @@ same either way and has no `always`.
 | `shift::shift` | three rotate handlers change |
 | `shift::set_flags` | 85 shift and rotate handlers change |
 
+**A long operand in one page lookup** (PLAN.md, Memory): an even long
+whose two words the fast table serves from one page is read or written
+at once (`Memory::read_long`, `write_long`), its stall two words';
+any other takes the two word cycles as before.  Longs are about 87% of
+the firmware's data accesses (Z3805A: 25.7 of 29.4 million, 58503A:
+21.8 of 25.2 million, counted in the first 30 s).  Measured on the real
+firmware (Real firmware in long quanta, below) for 30 s of board time
+from power-on: host instructions (`perf stat`, user space, pinned to
+the performance cores) less those of a 1 ms run (the load), over the
+instructions run; the same in each of three runs to within 0.01.
+
+| Run | Instructions | Host instructions each, before | After |
+| --- | --- | --- | --- |
+| Z3805A, 30 s | 32.9 million | 446.1 | 364.1 (-18.4%) |
+| 58503A, 30 s | 31.0 million | 445.2 | 363.6 (-18.3%) |
+
+Criterion, the before and after binaries interleaved on the
+performance cores, six rounds (and twelve more of those that came out
+slower), the lowest of each: `core/move_postincrement` -32%,
+`core/pea_displacement` -26%, `core/move_register`, `moveq` and `nop`
+-5% to -6%, `core/move_indirect` -4%; most others within 2%; slower
+`chip/peripheral_move` +3.4% and `core/dbra_self` +3.2%, though
+`dbcc` and `run_instructions` compile to the same instructions in both
+(`dbcc` moved from 16 to 48 bytes past a 64-byte line: placement, not
+work).
+
 ## QSPI queues
 
 A run syncs only where the queue shows (PLAN.md, Peripherals): with a

@@ -17,7 +17,10 @@ use crate::exception::Vector;
 use crate::instructions::tests::CODE;
 use crate::instructions::tests::NoBus;
 use crate::instructions::tests::NoInterrupts;
+use crate::instructions::tests::RAM_BYTES;
 use crate::instructions::tests::machine;
+use crate::instructions::tests::machine_with_clocks;
+use crate::instructions::tests::peek_long;
 use crate::instructions::tests::poke_long;
 use crate::instructions::tests::step;
 use crate::memory::PAGE_BYTES;
@@ -261,6 +264,68 @@ fn memory_hooks_slow_only_their_pages() {
     assert!(!cpu.remove_hook(id));
     // No hooks left: no cycle looks one up.
     assert!(!cpu.memory.is_special());
+}
+
+#[test]
+fn a_long_across_a_page_costs_and_reads_as_one_inside_a_page() {
+    let code = [MOVE_D0_TO_INDIRECT, MOVE_INDIRECT_TO_D1];
+    let run = |at: u32| {
+        let mut cpu = machine_with_clocks(&code, 3);
+        cpu.registers.set_address(0, at);
+        cpu.registers.data[0] = 0x1234_5678;
+        let cycles = [step(&mut cpu, 1).cycles, step(&mut cpu, 1).cycles];
+        assert_eq!(cpu.registers.data[1], 0x1234_5678);
+        assert_eq!(peek_long(&cpu, at), 0x1234_5678);
+        cycles
+    };
+    assert_eq!(run(DATA + PAGE_BYTES - 2), run(DATA + PAGE_BYTES - 4));
+}
+
+#[test]
+fn a_long_onto_a_hooked_page_shows_the_hook_its_low_word() {
+    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT, MOVE_INDIRECT_TO_D1], &[]);
+    let page = DATA + PAGE_BYTES;
+    cpu.registers.set_address(0, page - 2);
+    cpu.registers.data[0] = 0x1234_5678;
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_write_hook(Address(page)..=Address(page + 1), move |access| {
+        into.borrow_mut().push((access.address.0, access.value));
+        ControlFlow::Continue(())
+    });
+    let into = Rc::clone(&seen);
+    cpu.add_read_hook(Address(page)..=Address(page + 1), move |access| {
+        into.borrow_mut().push((access.address.0, access.value));
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 2);
+    assert_eq!(*seen.borrow(), [(page, 0x5678), (page, 0x5678)]);
+    assert_eq!(cpu.registers.data[1], 0x1234_5678);
+}
+
+#[test]
+fn a_long_onto_the_bus_writes_its_high_word_then_faults_on_its_low() {
+    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT], &[]);
+    cpu.registers.set_address(0, RAM_BYTES - 2);
+    cpu.registers.data[0] = 0x1234_5678;
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_invalid_hook(everywhere(), move |access: &InvalidAccess| {
+        into.borrow_mut()
+            .push((access.address, access.size, access.value));
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 1);
+    assert_eq!(cpu.registers.pc, HANDLER);
+    assert_eq!(
+        *seen.borrow(),
+        [(Address(RAM_BYTES), Size::Word, Some(0x5678))]
+    );
+    assert_eq!(
+        cpu.memory
+            .peek(Space::Supervisor, Address(RAM_BYTES - 2), Size::Word),
+        Some(0x1234)
+    );
 }
 
 #[test]

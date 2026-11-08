@@ -824,6 +824,50 @@ impl Memory {
         Some((value, stall(size, page.port, page.clocks)))
     }
 
+    /// An even long's two word reads, high word first, with their stall,
+    /// if the fast path serves both from one page: [`None`] if it takes
+    /// the slow path, goes to the bus or crosses a page, with no read
+    /// made.
+    #[inline]
+    pub(crate) fn read_long(&self, space: Space, address: Address) -> Option<(u32, Cycles)> {
+        let (slab, index, within) = self.locate(address)?;
+        let page = &slab.fast[space.index()][index];
+        let (backing, word) = (page.read?, stall(Size::Word, page.port, page.clocks));
+        let at = backing.offset as usize + Self::long_within(within)?;
+        let bytes = &self.regions[backing.region.0][at..at + 4];
+        Some((
+            u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]),
+            word + word,
+        ))
+    }
+
+    /// An even long's two word writes, high word first, with their
+    /// stall, if the fast path serves both on one page, as
+    /// [`read_long`](Self::read_long).
+    #[inline]
+    pub(crate) fn write_long(
+        &mut self,
+        space: Space,
+        address: Address,
+        value: u32,
+    ) -> Option<Cycles> {
+        let (slab, index, within) = self.locate(address)?;
+        let page = slab.fast[space.index()][index];
+        let (backing, word) = (page.write?, stall(Size::Word, page.port, page.clocks));
+        let at = backing.offset as usize + Self::long_within(within)?;
+        self.regions[backing.region.0][at..at + 4].copy_from_slice(&value.to_be_bytes());
+        Some(word + word)
+    }
+
+    /// `within`, if a long that far into a page ends in it.
+    const fn long_within(within: usize) -> Option<usize> {
+        if within <= PAGE_BYTES as usize - 4 {
+            Some(within)
+        } else {
+            None
+        }
+    }
+
     /// The word an instruction fetch reads at `address`, even, with its
     /// stall, if the fast path serves it: [`read`](Self::read) of a word,
     /// through the cached page while the PC stays on it.  Always inlined:

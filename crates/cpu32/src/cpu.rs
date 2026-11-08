@@ -1565,6 +1565,13 @@ impl Core<'_> {
             return read.ok_or_else(|| fault(Vector::BUS_ERROR, address, Size::Long));
         }
         if size == Size::Long {
+            if function_code.is_memory_space()
+                && let Some((value, stall)) =
+                    self.cpu.memory.read_long(Space::of(function_code), address)
+            {
+                self.cpu.stall += stall;
+                return Ok(value);
+            }
             let high = self
                 .cycle_read(address, Size::Word, function_code, cycle)
                 .ok_or_else(|| fault(Vector::BUS_ERROR, address, Size::Long))?;
@@ -1622,6 +1629,15 @@ impl Core<'_> {
             return written.ok_or_else(|| fault(Vector::BUS_ERROR, address, Size::Long));
         }
         if size == Size::Long {
+            if function_code.is_memory_space()
+                && let Some(stall) =
+                    self.cpu
+                        .memory
+                        .write_long(Space::of(function_code), address, data)
+            {
+                self.cpu.stall += stall;
+                return Ok(());
+            }
             self.cycle_write(address, Size::Word, function_code, data >> 16)
                 .ok_or_else(|| fault(Vector::BUS_ERROR, address, Size::Long))?;
             let low_address = address.offset(2);

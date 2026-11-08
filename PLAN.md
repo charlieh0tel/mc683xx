@@ -2075,7 +2075,13 @@ Adversarial review (2026-11-01):
   peripheral).  Neither can wait for the end of a quantum.
 - The core splits a long operand into two word cycles, high word
   first, as the CPU32 does on its 16-bit bus; the `Bus` sees only byte
-  and word cycles.
+  and word cycles.  An even long whose two words the fast table serves
+  from one page is read or written with one lookup (`Memory::read_long`,
+  `write_long`), its stall two words'; any other (across a page, onto
+  a hooked, protected or bus page) takes the two word cycles, so
+  faults, hooks and the `Bus` see the cycles they did.  Longs are about
+  87% of the Z3805A and 58503A firmware's data accesses: 18% fewer host
+  instructions an instruction on its whole runs (`docs/performance.md`).
 - Addresses are masked to the chip's address lines (24 on the 68331,
   ADDR[23:0], MC68331UM 4.4.1.1), so the upper lines alias.  The
   manuals do not say what the CPU32 drives on A[31:24] inside the
