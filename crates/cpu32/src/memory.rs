@@ -196,6 +196,10 @@ const SLAB_SHIFT: u32 = 10;
 const SLAB_PAGES: usize = 1 << SLAB_SHIFT;
 /// A page number's bits within its slab.
 const SLAB_MASK: usize = SLAB_PAGES - 1;
+/// Slabs in the directory: enough for 32 address lines, whatever the
+/// chip has, so a slab's number from any address indexes it with no
+/// bounds check.
+const DIRECTORY_SLABS: usize = 1 << (u32::BITS - PAGE_SHIFT - SLAB_SHIFT);
 
 /// The page instruction fetch last read on the fast path, what it maps
 /// to and what a word there costs: fetch looks no page table up while
@@ -218,6 +222,84 @@ struct FetchPage {
     stall: Cycles,
 }
 
+/// One direction of a page as the fast path serves it: a [`Backing`]
+/// flattened, with its byte and word stalls computed when the entry is
+/// built, not at every cycle.  A direction the fast path does not serve
+/// names no region ([`UNSERVED`](Self::UNSERVED)), so the region's
+/// lookup, which a served cycle needs anyway, is also its only test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FastBacking {
+    /// The region, by [`RegionId`]; one past any region if unserved.
+    region: u32,
+    /// The byte offset in the region of the page's first byte.
+    offset: u32,
+    /// A byte's stall there, and a long's: one bus cycle.
+    byte_stall: u32,
+    /// A word's stall there.
+    word_stall: u32,
+}
+
+impl FastBacking {
+    /// Serves nothing: every cycle misses.
+    const UNSERVED: Self = Self {
+        region: u32::MAX,
+        offset: 0,
+        byte_stall: 0,
+        word_stall: 0,
+    };
+
+    /// `backing` on `page`, or [`UNSERVED`](Self::UNSERVED) if none, or
+    /// if its region's number does not fit (the slow path serves it).
+    fn new(backing: Option<Backing>, page: &Page) -> Self {
+        let stall = |size| {
+            u32::try_from(stall(size, page.port, page.clocks).0)
+                .expect("a stall of at most two cycles of 255 clocks")
+        };
+        backing
+            .and_then(|backing| {
+                let region = u32::try_from(backing.region.0).ok()?;
+                (region != Self::UNSERVED.region).then_some(Self {
+                    region,
+                    offset: backing.offset,
+                    byte_stall: stall(Size::Byte),
+                    word_stall: stall(Size::Word),
+                })
+            })
+            .unwrap_or(Self::UNSERVED)
+    }
+
+    /// A cycle of `size`'s stall: [`stall`] as the entry was built.
+    #[inline]
+    fn stall(self, size: Size) -> Cycles {
+        Cycles(u64::from(if size == Size::Word {
+            self.word_stall
+        } else {
+            self.byte_stall
+        }))
+    }
+}
+
+/// A page's entry as the fast path serves it: [`Page`]'s, compact, and
+/// [`FastBacking::UNSERVED`] in a direction with a hook or with less
+/// than [`Permissions::ALL`] ([PLAN.md, Memory]).
+///
+/// [PLAN.md, Memory]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#memory
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct FastPage {
+    /// Where reads go.
+    read: FastBacking,
+    /// Where writes go.
+    write: FastBacking,
+}
+
+impl FastPage {
+    /// Serves nothing: [`Page::BUS`]'s.
+    const BUS: Self = Self {
+        read: FastBacking::UNSERVED,
+        write: FastBacking::UNSERVED,
+    };
+}
+
 /// [`SLAB_PAGES`] pages of both spaces: their entries, the fast path's
 /// copies of them, their permissions and their [`watch`] bits.  A slab
 /// is allocated when a map or a protection first reaches it, so a wide
@@ -232,7 +314,7 @@ struct Slab {
     /// nothing, so its cycles take the slow path ([PLAN.md, Hooks]).
     ///
     /// [PLAN.md, Hooks]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#hooks
-    fast: [[Page; SLAB_PAGES]; 2],
+    fast: [[FastPage; SLAB_PAGES]; 2],
     /// Each page's permissions, by [`Space::index`].
     permissions: [[Permissions; SLAB_PAGES]; 2],
     /// Each page's [`watch`] bits, in both spaces.
@@ -241,14 +323,14 @@ struct Slab {
 
 impl Slab {
     /// Every page on the bus, with every permission and no hook.  Built
-    /// on the stack, about 230 Kbytes, then moved: a debug build on a
+    /// on the stack, about 180 Kbytes, then moved: a debug build on a
     /// small-stack thread needs a bigger one ([PLAN.md, Memory]).
     ///
     /// [PLAN.md, Memory]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#memory
     fn new() -> Box<Self> {
         Box::new(Self {
             tables: [[Page::BUS; SLAB_PAGES]; 2],
-            fast: [[Page::BUS; SLAB_PAGES]; 2],
+            fast: [[FastPage::BUS; SLAB_PAGES]; 2],
             permissions: [[Permissions::ALL; SLAB_PAGES]; 2],
             watched: [0; SLAB_PAGES],
         })
@@ -260,13 +342,12 @@ impl Slab {
         let slow = self.watched[index] & (watch::READ | watch::WRITE) != 0
             || self.permissions[space][index] != Permissions::ALL;
         self.fast[space][index] = if slow {
-            Page {
-                read: None,
-                write: None,
-                ..entry
-            }
+            FastPage::BUS
         } else {
-            entry
+            FastPage {
+                read: FastBacking::new(entry.read, &entry),
+                write: FastBacking::new(entry.write, &entry),
+            }
         };
     }
 
@@ -320,10 +401,11 @@ pub struct Memory {
     free: BTreeSet<usize>,
     /// The pages on the address lines.
     pages: usize,
-    /// The slabs, by number; [`None`] until one is mapped or protected.
-    slabs: Vec<Option<Box<Slab>>>,
-    /// The [`watch`] bits of each slab not allocated: those of the hooks
-    /// covering any of it.
+    /// The slabs, by number; [`None`] until one is mapped or protected,
+    /// and past the address lines.
+    slabs: Box<[Option<Box<Slab>>; DIRECTORY_SLABS]>,
+    /// The [`watch`] bits of each slab on the address lines not
+    /// allocated: those of the hooks covering any of it.
     unallocated: Vec<u8>,
     /// The hooks' address ranges with their [`watch`] bits, on the
     /// address lines, for a slab allocated after they were set.
@@ -394,7 +476,7 @@ impl Memory {
             regions: Vec::new(),
             free: BTreeSet::new(),
             pages,
-            slabs: (0..slabs).map(|_| None).collect(),
+            slabs: Box::new([const { None }; DIRECTORY_SLABS]),
             unallocated: vec![0; slabs],
             watches: Vec::new(),
             special: false,
@@ -472,8 +554,11 @@ impl Memory {
     pub fn clear(&mut self) {
         self.fetch_page = None;
         for slab in self.slabs.iter_mut().flatten() {
-            for table in slab.tables.iter_mut().chain(&mut slab.fast) {
+            for table in &mut slab.tables {
                 table.fill(Page::BUS);
+            }
+            for table in &mut slab.fast {
+                table.fill(FastPage::BUS);
             }
         }
     }
@@ -729,7 +814,7 @@ impl Memory {
             .windows(2)
             .all(|pair| pair[0].index < pair[1].index);
         let fits = state.slabs.iter().all(|slab| {
-            slab.index < self.slabs.len()
+            slab.index < self.unallocated.len()
                 && slab.tables.iter().all(|table| table.len() == SLAB_PAGES)
                 && slab
                     .permissions
@@ -797,7 +882,17 @@ impl Memory {
     #[inline]
     pub(crate) fn read(&self, space: Space, address: Address, size: Size) -> Option<(u32, Cycles)> {
         let (slab, index, within) = self.locate(address)?;
-        self.read_in(&slab.fast[space.index()][index], within, size)
+        let backing = slab.fast[space.index()][index].read;
+        let bytes = self.regions.get(backing.region as usize)?;
+        let at = backing.offset as usize + within;
+        let value = match size {
+            Size::Byte => u32::from(*bytes.get(at)?),
+            _ => {
+                let word = bytes.get(at..at + 2)?;
+                u32::from(u16::from_be_bytes([word[0], word[1]]))
+            }
+        };
+        Some((value, backing.stall(size)))
     }
 
     /// A byte or word read served here, hooked page or not, with its
@@ -845,14 +940,16 @@ impl Memory {
     #[inline]
     fn fetch_miss(&mut self, space: Space, page: usize) -> Option<FetchPage> {
         let slab = self.slabs[page >> SLAB_SHIFT].as_deref()?;
-        let entry = slab.fast[space.index()][page & SLAB_MASK];
-        let backing = entry.read?;
+        let backing = slab.fast[space.index()][page & SLAB_MASK].read;
+        if backing == FastBacking::UNSERVED {
+            return None;
+        }
         let cached = FetchPage {
             space,
             page,
-            region: backing.region.0,
+            region: backing.region as usize,
             offset: backing.offset as usize,
-            stall: stall(Size::Word, entry.port, entry.clocks),
+            stall: backing.stall(Size::Word),
         };
         self.fetch_page = Some(cached);
         Some(cached)
@@ -869,8 +966,16 @@ impl Memory {
         value: u32,
     ) -> Option<Cycles> {
         let (slab, index, within) = self.locate(address)?;
-        let page = slab.fast[space.index()][index];
-        self.write_in(page, within, size, value)
+        let backing = slab.fast[space.index()][index].write;
+        let bytes = self.regions.get_mut(backing.region as usize)?;
+        let at = backing.offset as usize + within;
+        match size {
+            Size::Byte => *bytes.get_mut(at)? = value as u8,
+            _ => bytes
+                .get_mut(at..at + 2)?
+                .copy_from_slice(&(value as u16).to_be_bytes()),
+        }
+        Some(backing.stall(size))
     }
 
     /// Whether the tables serve writes at `address`, hooked page or not.
@@ -915,6 +1020,7 @@ mod tests {
     use super::Page;
     use super::Space;
     use crate::bus::PortSize;
+    use crate::bus::stall;
     use crate::cycles::Cycles;
     use mc683xx_target::address::Address;
     use mc683xx_target::size::Size;
@@ -964,6 +1070,55 @@ mod tests {
             memory.read(Space::Supervisor, at.offset(1), Size::Byte),
             Some((0x34, Cycles::ZERO))
         );
+    }
+
+    #[test]
+    fn the_fast_path_stalls_as_its_page_costs() {
+        let mut memory = Memory::new(24).unwrap();
+        let region = memory.add_region(vec![0; PAGE_BYTES as usize]);
+        let backing = Some(Backing { region, offset: 0 });
+        let (port, clocks) = (PortSize::Bits8, 3);
+        let page = Page {
+            read: backing,
+            write: backing,
+            port,
+            clocks,
+        };
+        memory
+            .map(Space::Supervisor, Address(0), PAGE_BYTES, page)
+            .unwrap();
+        let (byte, word) = (
+            stall(Size::Byte, port, clocks),
+            stall(Size::Word, port, clocks),
+        );
+        assert_eq!((byte, word), (Cycles(1), Cycles(4)));
+        let at = Address(0x10);
+        assert_eq!(
+            memory.write(Space::Supervisor, at, Size::Word, 0x1234),
+            Some(word)
+        );
+        assert_eq!(
+            memory.write(Space::Supervisor, at, Size::Byte, 0x56),
+            Some(byte)
+        );
+        assert_eq!(
+            memory.read(Space::Supervisor, at, Size::Word),
+            Some((0x5634, word))
+        );
+        assert_eq!(
+            memory.read(Space::Supervisor, at.offset(1), Size::Byte),
+            Some((0x34, byte))
+        );
+        assert_eq!(memory.fetch(Space::Supervisor, at), Some((0x5634, word)));
+    }
+
+    #[test]
+    fn a_state_with_a_slab_past_the_address_lines_does_not_restore() {
+        let mut wide = Memory::new(32).unwrap();
+        ram(&mut wide, 0x8000_0000, PAGE_BYTES);
+        let mut narrow = Memory::new(24).unwrap();
+        narrow.add_region(vec![0; PAGE_BYTES as usize]);
+        assert_eq!(narrow.restore(wide.state()), Err("page tables"));
     }
 
     #[test]

@@ -1994,8 +1994,11 @@ Adversarial review (2026-11-01):
   cost only what it maps.  A snapshot holds the slabs allocated.  The
   lookup adds one load to the fast path's reads and writes, within the
   noise (+-5%) of the core benchmarks, measured interleaved on one
-  pinned core; fetch, through its cached page, is unchanged.  A slab
-  is built on the stack and moved to the heap: about 230 Kbytes, which
+  pinned core; fetch, through its cached page, is unchanged.  The
+  directory has a slot for every slab of 32 address lines (2048, 16
+  Kbytes), whatever the chip's lines, so a slab's number indexes it
+  with no bounds check.  A slab
+  is built on the stack and moved to the heap: about 180 Kbytes, which
   an optimized build places directly but a debug build may not, so a
   debug build on a thread with a small stack makes its `Machine` (or
   `Memory`) on a thread with a bigger one.  Building each table on the
@@ -2010,6 +2013,11 @@ Adversarial review (2026-11-01):
   in that direction, on lanes the selects cover; it takes the timing
   of the select whose DSACK comes first.  A page shared with a peripheral,
   and the module space, go to the `Bus`.
+- The fast path's copy of the tables (Hooks, below) is compact: per
+  direction a region number, an offset and the byte and word stalls,
+  computed when the entry is built, not at every cycle.  A direction it
+  does not serve names no region, so the region lookup a served cycle
+  needs is also its only test (`docs/performance.md`, Optimizations).
 - The same rebuild records the selects whose blocks hold each page;
   a cycle to the `Bus` tries only those (all twelve while a decode
   change awaits its rebuild).
