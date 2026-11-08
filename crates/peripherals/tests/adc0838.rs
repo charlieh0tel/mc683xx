@@ -1,4 +1,4 @@
-//! An ADC0838 on a board: a fixed analog source on a channel, and CPU
+//! An ADC0838 on a board: a `dc-source` on a channel, and CPU
 //! code that converts it over the QSPI and reads the reply; and the
 //! same beside a 74x164 that sees every transfer.
 
@@ -10,12 +10,7 @@ use mc683xx_board::board::Board;
 
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
-use mc683xx_board::peripheral::Drive;
-use mc683xx_board::peripheral::Peripheral;
 use mc683xx_board::registry::Environment;
-use mc683xx_board::registry::PortSpec;
-use mc683xx_board::registry::Registry;
-use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
@@ -73,7 +68,7 @@ const BRA_BACK_SIX: u16 = 0x60f2;
 /// NOP.
 const NOP: u16 = 0x4e71;
 
-/// The source's level and the ADC's reference.
+/// The source's level.
 const SOURCE_VOLTS: f64 = 1.234;
 /// The ADC's reference.
 const VREF_VOLTS: f64 = 2.5;
@@ -126,16 +121,6 @@ fn image(program: &[u16]) -> Vec<u8> {
     image
 }
 
-/// A fixed analog source: drives its level from power-on.
-#[derive(Debug)]
-struct Source(f64);
-
-impl Peripheral for Source {
-    fn power_on(&mut self, drive: &mut Drive<'_>) {
-        drive.drive(0, Signal::Analog(self.0));
-    }
-}
-
 /// The board: the ROM, the source on the ADC's channel 3, and `more`;
 /// run with `program(word)` until the reply is in D0.
 fn run(word: u16, more: &str) -> Board<Mc68331> {
@@ -158,7 +143,8 @@ image = "rom.bin"
 attach = [{{ select = "CSBOOT" }}]
 [[peripheral]]
 name = "source"
-type = "source"
+type = "dc-source"
+parameters = {{ volts = {SOURCE_VOLTS:?} }}
 [[peripheral]]
 name = "adc"
 type = "adc0838"
@@ -172,15 +158,7 @@ to = ["adc.ch3"]
 {more}"#
     );
     let description = Description::parse(&text, &directory, &Options::default()).unwrap();
-    let mut registry = Registry::with_builtins();
-    registry
-        .register(
-            "source",
-            vec![PortSpec::output("out", Kind::Analog)],
-            |_| Ok(Box::new(Source(SOURCE_VOLTS))),
-        )
-        .unwrap();
-    mc683xx_peripherals::register(&mut registry).unwrap();
+    let registry = mc683xx_peripherals::registry();
     let mut board =
         Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();

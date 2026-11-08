@@ -37,6 +37,8 @@ const VERSION: u32 = 1;
 
 /// The unit of a frequency.
 const HERTZ: &str = "Hz";
+/// The unit of a voltage.
+const VOLTS: &str = "V";
 
 /// `value` as an inspection's integer, saturating.
 fn saturating(value: impl TryInto<i64>) -> i64 {
@@ -84,7 +86,7 @@ type Builds = fn(&Context<'_>) -> Result<Box<dyn Peripheral>, ParameterError>;
 
 /// Registers the built-in types in `registry`.
 pub(crate) fn register(registry: &mut Registry) {
-    let types: [(&str, Vec<PortSpec>, Builds); 6] = [
+    let types: [(&str, Vec<PortSpec>, Builds); 7] = [
         ("fixed", Vec::new(), |context| {
             Ok(Box::new(Fixed::from_parameters(context)?))
         }),
@@ -111,6 +113,11 @@ pub(crate) fn register(registry: &mut Registry) {
             "edge-counter",
             vec![PortSpec::input("in", Kind::Edge)],
             |_| Ok(Box::new(EdgeCounter::default())),
+        ),
+        (
+            "dc-source",
+            vec![PortSpec::output("out", Kind::Analog)],
+            |context| Ok(Box::new(DcSource::from_parameters(context)?)),
         ),
     ];
     for (name, ports, constructor) in types {
@@ -650,6 +657,72 @@ impl Peripheral for EdgeCounter {
     }
 }
 
+/// `dc-source`: a fixed analog source, driving `volts` on `out` from
+/// power-on and answering every sample with it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DcSource {
+    /// What it drives, in volts: finite.
+    volts: f64,
+}
+
+impl DcSource {
+    /// Its one port.
+    const OUT: usize = 0;
+    /// Its parameter.
+    const VOLTS: &str = "volts";
+
+    /// One that drives `volts`; [`None`] unless it is finite.
+    #[must_use]
+    pub const fn new(volts: f64) -> Option<Self> {
+        if volts.is_finite() {
+            Some(Self { volts })
+        } else {
+            None
+        }
+    }
+
+    /// What it drives, in volts.
+    #[must_use]
+    pub const fn volts(&self) -> f64 {
+        self.volts
+    }
+
+    /// From `volts`, which it needs.
+    fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
+        let volts = context
+            .parameters
+            .float(Self::VOLTS)?
+            .ok_or_else(|| ParameterError::Missing(Self::VOLTS.to_owned()))?;
+        Self::new(volts).ok_or_else(|| {
+            ParameterError::invalid(Self::VOLTS, format!("{volts} is not a voltage"))
+        })
+    }
+}
+
+impl Peripheral for DcSource {
+    fn power_on(&mut self, drive: &mut Drive<'_>) {
+        drive.drive(Self::OUT, Signal::Analog(self.volts));
+    }
+
+    fn sample(&mut self, _: usize, _: Time) -> Option<f64> {
+        Some(self.volts)
+    }
+
+    /// Its voltage.
+    fn inspect(&self) -> Inspection {
+        Inspection::default().real("volts", self.volts, VOLTS)
+    }
+
+    /// Nothing: its voltage is its parameter.
+    fn save(&self) -> Result<Vec<u8>, StateError> {
+        Ok(Vec::new())
+    }
+
+    fn restore(&mut self, _: &[u8]) -> Result<(), StateError> {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mc683xx_cpu32::cpu::state::StateError;
@@ -657,6 +730,7 @@ mod tests {
     use mc683xx_target::function_code::FunctionCode;
     use mc683xx_target::size::Size;
 
+    use super::DcSource;
     use super::Divider;
     use super::EdgeCounter;
     use super::Fixed;
@@ -669,6 +743,10 @@ mod tests {
     use crate::peripheral::Drive;
     use crate::peripheral::Peripheral;
     use crate::peripheral::PeripheralAccess;
+    use crate::registry::Context;
+    use crate::registry::Environment;
+    use crate::registry::ParameterError;
+    use crate::registry::Parameters;
     use crate::signal::Signal;
     use crate::time::Clock;
     use crate::time::Time;
@@ -800,6 +878,46 @@ mod tests {
     }
 
     #[test]
+    fn a_dc_source_drives_its_voltage_and_answers_each_sample_with_it() {
+        let mut source = DcSource::new(-1.25).unwrap();
+        let mut drive = Drive::new(Time::ZERO);
+        source.power_on(&mut drive);
+        let driven = drive.finish().driven;
+        assert_eq!(driven.len(), 1);
+        assert_eq!(
+            (driven[0].port, driven[0].signal),
+            (DcSource::OUT, Signal::Analog(-1.25))
+        );
+        assert_eq!(source.sample(DcSource::OUT, Time(1_000)), Some(-1.25));
+        assert_eq!(source.volts(), -1.25);
+        for volts in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(DcSource::new(volts), None);
+        }
+    }
+
+    #[test]
+    fn a_dc_source_needs_a_finite_voltage() {
+        let built = |table: &str| {
+            let parameters = Parameters::parse(table).unwrap();
+            let environment = Environment::default();
+            DcSource::from_parameters(&Context::new("source", &parameters, &environment))
+        };
+        assert_eq!(built("volts = 1.5").unwrap().volts(), 1.5);
+        assert_eq!(built("volts = 3").unwrap().volts(), 3.0);
+        assert_eq!(built(""), Err(ParameterError::Missing("volts".to_owned())));
+        for table in ["volts = nan", "volts = inf", "volts = -inf"] {
+            assert!(
+                matches!(built(table), Err(ParameterError::Invalid { .. })),
+                "{table}"
+            );
+        }
+        assert!(matches!(
+            built("volts = \"5\""),
+            Err(ParameterError::Type { .. })
+        ));
+    }
+
+    #[test]
     fn a_recorder_saves_its_value_and_keeps_its_log() {
         let saved = Recorder {
             value: 0x0f,
@@ -893,6 +1011,10 @@ mod tests {
         assert_eq!(counted.get("level"), Some(&Value::Boolean(true)));
         assert_eq!(counted.get("count"), Some(&Value::Integer(1)));
         assert_eq!(counted.get("last"), Some(&Value::Integer(10)));
+        assert_eq!(
+            DcSource::new(2.5).unwrap().inspect().get("volts"),
+            Some(&Value::Real(2.5))
+        );
     }
 
     #[test]
