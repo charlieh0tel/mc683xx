@@ -63,6 +63,7 @@ mod ad569;
 mod adc0838;
 pub mod at28c64b;
 mod buffer;
+mod character;
 mod dac;
 mod latch;
 mod mc144110;

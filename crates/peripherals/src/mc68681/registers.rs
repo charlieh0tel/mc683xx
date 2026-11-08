@@ -247,10 +247,6 @@ pub(super) const PRELOAD_MINIMUM: u32 = 2;
 /// our reading where the datasheets set a minimum of 2.
 pub(super) const COUNTER_TURN: u32 = 0x1_0000;
 
-/// Sixteenths of a bit: the 16X clock's periods in one bit time
-/// (1.2).
-pub(super) const SIXTEENTHS: u64 = 16;
-
 /// The baud rate generator's 16X clock divisors of X1/CLK for CSR codes
 /// 0 to 12, baud rate set 1 and set 2 (Table 4-5, CSRA; ACR\[7\]).
 /// Each is X1/CLK over the 16X clock Table 4-6 gives for its rate at
