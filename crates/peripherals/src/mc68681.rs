@@ -55,6 +55,8 @@ use mc683xx_cpu32::cpu::state::encode;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::character::SIXTEENTHS;
+
 use self::channel::Channel;
 use self::channel::Clocks;
 use self::condition::CONDITIONS;
@@ -108,7 +110,6 @@ use self::registers::RB_TB;
 use self::registers::REGISTER_MASK;
 use self::registers::RTS_PINS;
 use self::registers::SAMPLE_DIVISOR;
-use self::registers::SIXTEENTHS;
 use self::registers::SOURCE_COUNTER_TXCA;
 use self::registers::SOURCE_COUNTER_TXCB;
 use self::registers::SOURCE_COUNTER_X1_16;

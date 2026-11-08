@@ -13,6 +13,9 @@ use mc683xx_modules::qsm::sci::Frame;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::character::Format;
+use crate::character::SIXTEENTHS;
+
 use super::registers::COMMAND_RESET_BREAK_CHANGE;
 use super::registers::COMMAND_RESET_ERROR;
 use super::registers::COMMAND_RESET_POINTER;
@@ -34,7 +37,6 @@ use super::registers::MR1_RX_RTS;
 use super::registers::MR2_CTS;
 use super::registers::MR2_MODE_SHIFT;
 use super::registers::MR2_TX_RTS;
-use super::registers::SIXTEENTHS;
 use super::registers::SR_FFULL;
 use super::registers::SR_FIFO_STATUS;
 use super::registers::SR_OVERRUN;
@@ -44,7 +46,7 @@ use super::registers::SR_RXRDY;
 use super::registers::SR_TXEMT;
 use super::registers::SR_TXRDY;
 use super::timing::Crystal;
-use super::timing::Format;
+use super::timing::format_of;
 use super::timing::generator;
 
 /// The clocks a channel can select (MC68681 Table 4-5, CSRA).
@@ -234,7 +236,7 @@ impl Channel {
 
     /// The transmitter's format.
     const fn format(&self) -> Format {
-        Format::of(self.mr1(), self.mr2())
+        format_of(self.mr1(), self.mr2())
     }
 
     /// Whether the CPU reaches the transmitter: not in the echo modes
@@ -672,7 +674,7 @@ impl Channel {
     /// mode sends it on (4.2.2.1).
     fn start(&mut self, arrival: Arrival, start: Time, clocks: &Clocks) {
         let crystal = clocks.crystal;
-        let format = Format::of(self.mr1(), self.mr2());
+        let format = format_of(self.mr1(), self.mr2());
         let mode = self.mode();
         let looped = arrival.looped.is_some();
         let divisor = arrival.looped.or_else(|| self.receive_divisor(clocks));
@@ -732,7 +734,7 @@ impl Channel {
         if !incoming.taken || incoming.continues_break {
             return;
         }
-        let format = Format::of(incoming.mr1, self.mr2());
+        let format = format_of(incoming.mr1, self.mr2());
         let received = match incoming.frame {
             Frame::Data(bits) => {
                 let decoded = format.decode(bits);
