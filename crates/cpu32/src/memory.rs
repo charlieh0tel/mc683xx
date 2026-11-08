@@ -209,7 +209,7 @@ const DIRECTORY_SLABS: usize = 1 << (u32::BITS - PAGE_SHIFT - SLAB_SHIFT);
 ///
 /// [PLAN.md, Memory]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#memory
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FetchPage {
+struct CachedPage {
     /// The space.
     space: Space,
     /// The page number, on the address lines.
@@ -414,7 +414,7 @@ pub struct Memory {
     /// while not, no cycle or instruction looks either up.
     special: bool,
     /// The page instruction fetch is on, while the tables keep it.
-    fetch_page: Option<FetchPage>,
+    fetch_page: Option<CachedPage>,
 }
 
 impl fmt::Debug for Memory {
@@ -504,7 +504,7 @@ impl Memory {
     /// Frees region `id`'s bytes; [`add_region`](Self::add_region) reuses
     /// its slot.  No page may be backed by it any more.
     pub(crate) fn remove_region(&mut self, id: RegionId) {
-        self.fetch_page = None;
+        self.forget_cached();
         self.regions[id.0] = Vec::new();
         self.free.insert(id.0);
     }
@@ -513,7 +513,7 @@ impl Memory {
     /// at `keep.start` is at offset zero now, so a page still backed by
     /// the region must be mapped again.
     pub(crate) fn trim_region(&mut self, id: RegionId, keep: Range<usize>) {
-        self.fetch_page = None;
+        self.forget_cached();
         let bytes = &mut self.regions[id.0];
         bytes.truncate(keep.end);
         bytes.drain(..keep.start);
@@ -552,7 +552,7 @@ impl Memory {
 
     /// Every page of both spaces back on the bus.
     pub fn clear(&mut self) {
-        self.fetch_page = None;
+        self.forget_cached();
         for slab in self.slabs.iter_mut().flatten() {
             for table in &mut slab.tables {
                 table.fill(Page::BUS);
@@ -626,7 +626,7 @@ impl Memory {
 
     /// Brings `pages` of space `index`'s fast table up to date.
     fn refresh(&mut self, index: usize, pages: Range<usize>) {
-        self.fetch_page = None;
+        self.forget_cached();
         for page in pages {
             if let Some(slab) = self.slabs[page >> SLAB_SHIFT].as_deref_mut() {
                 slab.refresh(index, page & SLAB_MASK);
@@ -760,7 +760,7 @@ impl Memory {
 
     /// Brings every allocated slab's fast tables up to date.
     fn refresh_all(&mut self) {
-        self.fetch_page = None;
+        self.forget_cached();
         for slab in self.slabs.iter_mut().flatten() {
             for space in 0..slab.fast.len() {
                 for index in 0..SLAB_PAGES {
@@ -839,6 +839,12 @@ impl Memory {
         let watches = mem::take(&mut self.watches);
         self.set_watched(watches.into_iter());
         Ok(())
+    }
+
+    /// Drops the pages cached for the fast path: the tables or the
+    /// regions changed.
+    fn forget_cached(&mut self) {
+        self.fetch_page = None;
     }
 
     /// Recomputes `special`.
@@ -938,13 +944,13 @@ impl Memory {
 
     /// Caches `page` of `space` for fetch, if the fast path serves it.
     #[inline]
-    fn fetch_miss(&mut self, space: Space, page: usize) -> Option<FetchPage> {
+    fn fetch_miss(&mut self, space: Space, page: usize) -> Option<CachedPage> {
         let slab = self.slabs[page >> SLAB_SHIFT].as_deref()?;
         let backing = slab.fast[space.index()][page & SLAB_MASK].read;
         if backing == FastBacking::UNSERVED {
             return None;
         }
-        let cached = FetchPage {
+        let cached = CachedPage {
             space,
             page,
             region: backing.region as usize,
