@@ -3,7 +3,10 @@
 //!
 //! MOSI is the serial input, A and B (A AND B, B tied high) and SCK
 //! is CLK: each rising edge shifts the serial bit into QA and every
-//! stage into the next, QH's bit leaving (9.1; Table 1).  Chained, a
+//! stage into the next, QH's bit leaving (9.1; Table 1).  A board that
+//! inverts SCK in front of CLK, which a QSPI clock, not a net, cannot
+//! be wired to show, takes `clock = "falling"`: it shifts on SCK's
+//! fall.  Chained, a
 //! chip's QH is the next chip's A.  The parallel outputs drive `Q`, a
 //! bus net: bit 8k + n is chip k's stage n (QA 0 to QH 7), chip 0 the
 //! one MOSI feeds, so the last bit shifted is bit 0 and a 16-bit chain
@@ -39,6 +42,7 @@ use serde::Serialize;
 
 use crate::octal::LEVELS;
 use crate::octal::LINES;
+use crate::octal::Words;
 use crate::octal::choice;
 use crate::shift_register::ShiftRegister;
 
@@ -46,12 +50,7 @@ use crate::shift_register::ShiftRegister;
 pub(crate) const NAME: &str = "74x164";
 
 /// The format of its snapshots.
-const VERSION: u32 = 2;
-
-/// Its serial edges: each rising edge of CLK shifts A AND B into QA
-/// and every stage into the next (9.1; Table 1), QH the last stage,
-/// always driven.
-const EDGES: Edges = Edges::new(Edge::Rising, Edge::Rising, true);
+const VERSION: u32 = 3;
 
 /// Its ports: the parallel outputs, then CLR.
 const Q: usize = 0;
@@ -70,7 +69,13 @@ const INITIAL: &str = "initial";
 /// `"none"`, MISO not wired, undriven.
 const MISO: &str = "miso";
 /// `miso`'s words.
-const MISO_WORDS: [(&str, bool); 2] = [("qh", true), ("none", false)];
+const MISO_WORDS: Words = [("qh", true), ("none", false)];
+/// The edge of SCK it shifts on: `"rising"` (by default), SCK straight
+/// to CLK, or `"falling"`, SCK inverted to CLK on the board.
+const CLOCK: &str = "clock";
+/// `clock`'s words: CLK's rise, which shifts (9.1; Table 1), is SCK's
+/// rise or its fall.
+const CLOCK_WORDS: Words<Edge> = [("rising", Edge::Rising), ("falling", Edge::Falling)];
 
 /// Registers `74x164`.
 pub(crate) fn register(registry: &mut Registry) -> Result<(), RegistryError> {
@@ -114,6 +119,17 @@ struct Configuration {
     width: u32,
     /// Whether the last chip's QH answers on MISO.
     qh_on_miso: bool,
+    /// The edge of SCK that is CLK's rise.
+    clock: Edge,
+}
+
+impl Configuration {
+    /// Its serial edges: each rising edge of CLK, `clock` on SCK,
+    /// shifts A AND B into QA and every stage into the next (9.1;
+    /// Table 1), QH the last stage, always driven.
+    const fn edges(self) -> Edges {
+        Edges::new(self.clock, self.clock, true)
+    }
 }
 
 /// The chain.  The datasheet gives no power-on state: it powers on
@@ -129,8 +145,8 @@ struct Sipo {
 }
 
 impl Sipo {
-    /// From `cascade` (1), `initial` (0), `clr` (`"high"`) and `miso`
-    /// (`"qh"`).
+    /// From `cascade` (1), `initial` (0), `clr` (`"high"`), `miso`
+    /// (`"qh"`) and `clock` (`"rising"`).
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         let cascade: u8 = context.parameters.integer(CASCADE)?.unwrap_or(1);
         if !(1..=MOST_CASCADED).contains(&cascade) {
@@ -149,6 +165,7 @@ impl Sipo {
             configuration: Configuration {
                 width,
                 qh_on_miso: choice(context, MISO, MISO_WORDS, true)?,
+                clock: choice(context, CLOCK, CLOCK_WORDS, Edge::Rising)?,
             },
             state: State {
                 // CLR held low clears whatever it powers on with
@@ -174,8 +191,8 @@ impl Peripheral for Sipo {
         drive.drive(Q, Signal::Bus(self.state.register.bits() as u32));
     }
 
-    /// Shifts the transfer's bits in on its edges (`EDGES`) in the
-    /// transfer's mode.  On MISO, with `miso = "qh"`, the last chip's
+    /// Shifts the transfer's bits in on its edges
+    /// (`Configuration::edges`) in the transfer's mode.  On MISO, with `miso = "qh"`, the last chip's
     /// QH, its last stage's output (9.2, Functional Block Diagram): the
     /// bits that leave the chain.  In modes 0, 2 and 3 the rise takes
     /// each bit as the master sent it and the master captures QH before
@@ -184,12 +201,15 @@ impl Peripheral for Sipo {
     /// shifts as the master puts the bit on MOSI, so it takes the bit
     /// before (the first, MOSI's level before the transfer), and the
     /// master captures QH on the fall after it, a bit early.  With CLR
-    /// low nothing shifts and QH is low (Table 1).
+    /// low nothing shifts and QH is low (Table 1).  With `clock =
+    /// "falling"` the fall is the shift edge: modes 0, 1 and 2 shift
+    /// as sent and read back the word before, and mode 3, whose fall
+    /// leads, shifts a bit late and reads QH a bit early.
     fn transfer(&mut self, transfer: Transfer, drive: &mut Drive<'_>) -> u16 {
         let before = self.state.register.bits();
         let back = if self.state.clr {
             let mut stages = self.state.register.stages(self.configuration.width);
-            spi::exchange(transfer, EDGES, &mut stages)
+            spi::exchange(transfer, self.configuration.edges(), &mut stages)
         } else {
             0
         };
@@ -354,6 +374,42 @@ mod tests {
         assert_eq!(back, 0x8140);
     }
 
+    /// What a 16-bit chain built from `table` reads back of each of
+    /// the EFC self-test's words written in SPI mode `write` and read
+    /// in mode `read`.
+    fn read_back(table: &str, write: u8, read: u8) -> [u16; 2] {
+        [0x5555, 0xaaaa].map(|word| {
+            let mut sipo = peripheral(table).unwrap();
+            shift_in(write, &mut sipo, word, 16);
+            shift_in(read, &mut sipo, 0, 16).0
+        })
+    }
+
+    #[test]
+    fn a_falling_clock_reads_back_a_bit_early_in_mode_3() {
+        // the 58503B's and Z3816A's EFC register: written in mode 2,
+        // read in mode 3, the word shifted back down (lsr.w) to compare
+        let inverted = "cascade = 2\nclock = \"falling\"";
+        assert_eq!(read_back(inverted, 2, 3), [0xaaaa, 0x5554]);
+        assert_eq!(
+            read_back(inverted, 2, 3).map(|word| word >> 1),
+            [0x5555, 0x2aaa]
+        );
+        // SCK straight to CLK reads it back unchanged, and fails it
+        assert_eq!(read_back("cascade = 2", 2, 3), [0x5555, 0xaaaa]);
+        assert_eq!(
+            read_back("cascade = 2\nclock = \"rising\"", 2, 3),
+            [0x5555, 0xaaaa]
+        );
+    }
+
+    #[test]
+    fn a_rising_clock_reads_back_mode_3_writes_in_mode_2_unchanged() {
+        // the Z3801A's, Z3805A's and 58503A's: written in mode 3, read in
+        // mode 2, compared as read
+        assert_eq!(read_back("cascade = 2", 3, 2), [0x5555, 0xaaaa]);
+    }
+
     #[test]
     fn one_chip_keeps_the_last_eight_bits() {
         let mut sipo = peripheral("").unwrap();
@@ -400,10 +456,12 @@ mod tests {
             peripheral("cascade = 0"),
             Err(ParameterError::Range { .. })
         ));
-        assert!(matches!(
-            peripheral("miso = \"qa\""),
-            Err(ParameterError::Invalid { .. })
-        ));
+        for invalid in ["miso = \"qa\"", "clock = \"high\""] {
+            assert!(matches!(
+                peripheral(invalid),
+                Err(ParameterError::Invalid { .. })
+            ));
+        }
     }
 
     #[test]
@@ -421,7 +479,11 @@ mod tests {
         let mut sipo = peripheral("cascade = 2").unwrap();
         shift(&mut sipo, 0xbeef, 16);
         let before = sipo.state;
-        for other in ["cascade = 3", "cascade = 2\nmiso = \"none\""] {
+        for other in [
+            "cascade = 3",
+            "cascade = 2\nmiso = \"none\"",
+            "cascade = 2\nclock = \"falling\"",
+        ] {
             let snapshot = peripheral(other).unwrap().save().unwrap();
             assert!(matches!(
                 sipo.restore(&snapshot),
