@@ -152,10 +152,10 @@ pub(crate) struct PythonSpiPeripheral {
     object: Held,
     /// `transfer(transfer) -> int`, given a `QspiTransfer`.
     transfer: Held,
-    /// `chip_selects(levels, now)`, if it has one.
-    chip_selects: Option<Held>,
-    /// `clock(clock, now)`, if it has one.
-    clock: Option<Held>,
+    /// `set_chip_selects(levels, now)`, if it has one.
+    set_chip_selects: Option<Held>,
+    /// `set_clock(clock, now)`, if it has one.
+    set_clock: Option<Held>,
     /// `reset(now)`, if it has one.
     reset: Option<Held>,
     /// `deferrable() -> bool`, if it has one.
@@ -173,11 +173,11 @@ impl PythonSpiPeripheral {
         Ok(Self {
             object: pending.keep(object),
             transfer: pending.keep(&transfer),
-            chip_selects: object
-                .getattr_opt("chip_selects")?
+            set_chip_selects: object
+                .getattr_opt("set_chip_selects")?
                 .map(|method| pending.keep(&method)),
-            clock: object
-                .getattr_opt("clock")?
+            set_clock: object
+                .getattr_opt("set_clock")?
                 .map(|method| pending.keep(&method)),
             reset: object
                 .getattr_opt("reset")?
@@ -230,8 +230,8 @@ impl SpiPeripheral for PythonSpiPeripheral {
         })
     }
 
-    fn chip_selects(&mut self, levels: u8, now: Cycles) {
-        let Some(method) = &self.chip_selects else {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
+        let Some(method) = &self.set_chip_selects else {
             return;
         };
         Python::attach(|py| {
@@ -267,8 +267,8 @@ impl SpiPeripheral for PythonSpiPeripheral {
         });
     }
 
-    fn clock(&mut self, clock: peripheral::QspiClock, now: Cycles) {
-        let Some(method) = &self.clock else {
+    fn set_clock(&mut self, clock: peripheral::QspiClock, now: Cycles) {
+        let Some(method) = &self.set_clock else {
             return;
         };
         Python::attach(|py| {

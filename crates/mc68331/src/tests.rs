@@ -1515,7 +1515,7 @@ impl SpiPeripheral for Framed {
         0
     }
 
-    fn chip_selects(&mut self, levels: u8, _: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, _: Cycles) {
         self.levels.push(levels);
     }
 
@@ -1627,7 +1627,7 @@ impl SpiPeripheral for Clocked {
         0
     }
 
-    fn clock(&mut self, clock: QspiClock, _: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, _: Cycles) {
         self.told.push(clock);
     }
 }

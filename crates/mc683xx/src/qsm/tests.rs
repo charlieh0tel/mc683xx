@@ -94,11 +94,11 @@ impl SpiPeripheral for Echo {
         !transfer.out
     }
 
-    fn chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
         self.0.borrow_mut().push(Seen::Selects(levels, now.0));
     }
 
-    fn clock(&mut self, clock: QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, now: Cycles) {
         self.0.borrow_mut().push(Seen::Clock(clock, now.0));
     }
 }
@@ -654,7 +654,7 @@ fn the_reset_clock_is_spcr0_out_of_reset() {
     write_word(&mut qsm, 0x1c, 0x0100, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
     qsm.advance(Cycles(10_000));
-    let reset = QspiClock::reset(Frequency::from_hz(SYSTEM_HZ));
+    let reset = QspiClock::at_reset(Frequency::from_hz(SYSTEM_HZ));
     assert_eq!(clocks(&seen), [(reset, 0)]);
     assert_eq!(
         reset,
@@ -1331,11 +1331,11 @@ impl SpiPeripheral for Logged {
         !transfer.out
     }
 
-    fn chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
         self.log(Seen::Selects(levels, now.0));
     }
 
-    fn clock(&mut self, clock: QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, now: Cycles) {
         self.log(Seen::Clock(clock, now.0));
     }
 

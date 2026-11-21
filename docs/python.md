@@ -640,8 +640,8 @@ the levels on PCS[3:0]; `out`, the bits out, right-aligned, MSB first;
 `bits`; `clock`, the `QspiClock` it is shifted with, its mode and SCK
 period; `now`, when it ends, in system clocks), returns the bits in;
 optionally
-`chip_selects(levels, now)` (every change of the PCS levels),
-`clock(QspiClock, now)`, `reset(now)` (each reset in
+`set_chip_selects(levels, now)` (every change of the PCS levels),
+`set_clock(QspiClock, now)`, `reset(now)` (each reset in
 `Builder.qspi_reset_scope`, every one by default) and `deferrable() -> bool` (whether its
 calls may come in a batch where the CPU next sees the QSPI).  As a slave
 (MSTR clear) the host is the master: `set_qspi_slave_select(asserted)`
@@ -661,7 +661,7 @@ class Peripheral:
         self.transfers.append((transfer.chip_selects, transfer.out, transfer.bits))
         return 0xEF
 
-    def clock(self, clock: mc683xx.QspiClock, now: int) -> None:
+    def set_clock(self, clock: mc683xx.QspiClock, now: int) -> None:
         self.clocks.append(clock)
 
 

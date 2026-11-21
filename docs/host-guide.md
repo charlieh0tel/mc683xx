@@ -948,7 +948,7 @@ out, right-aligned, MSB first, their number, the `QspiClock` they are
 shifted with (its mode, CPOL and CPHA, and SCK period) and when the
 transfer ends.  A `QspiClock` (`#[non_exhaustive]`) is
 `QspiClock::new(polarity, phase, period, system_clock)`;
-`QspiClock::reset(system_clock)` is the clock out of
+`QspiClock::at_reset(system_clock)` is the clock out of
 reset (SPCR0 $0104: CPOL clear, CPHA set, SPBR 4, QSMRM 4.3.1) at the
 system clock the caller gives, 8.388608 MHz out of reset from a
 32.768-kHz reference; `floating_miso(bits)` is MISO no peripheral drives, all

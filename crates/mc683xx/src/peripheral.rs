@@ -96,7 +96,7 @@ pub enum ClockPhase {
 /// The QSPI's serial clock as SPCR0 and the system clock set it
 /// (QSMRM 4.3.1).
 ///
-/// Built with [`QspiClock::new`] or [`QspiClock::reset`], so a field
+/// Built with [`QspiClock::new`] or [`QspiClock::at_reset`], so a field
 /// added later gets a default and no host's code changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
@@ -228,7 +228,7 @@ pub trait SpiPeripheral {
     /// framed by its select sees the frame start and end here, as the
     /// levels it decodes go to its code and away.  Levels that do not
     /// change are not told.  By default nothing changes.
-    fn chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
         let _ = (levels, now);
     }
 
@@ -237,7 +237,7 @@ pub trait SpiPeripheral {
     /// CPOL, CPHA or SPBR, or the system clock, changed.  A peripheral
     /// that checks its SPI mode or its fastest SCK does it here.  By
     /// default nothing changes.
-    fn clock(&mut self, clock: QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, now: Cycles) {
         let _ = (clock, now);
     }
 

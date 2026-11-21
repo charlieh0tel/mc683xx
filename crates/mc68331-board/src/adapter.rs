@@ -315,12 +315,12 @@ impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
         } else {
             RELEASED_LEVELS
         };
-        self.peripheral.chip_selects(levels, now);
+        self.peripheral.set_chip_selects(levels, now);
     }
 
     fn qspi_clock(&mut self, clock: QspiClock, now: Time) {
         let now = self.clock.base().cycles(now);
-        self.peripheral.clock(clock, now);
+        self.peripheral.set_clock(clock, now);
     }
 
     fn qspi_deferrable(&self) -> bool {

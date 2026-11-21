@@ -384,7 +384,7 @@ surrounds the SoC with its board peripherals through:
   (`a_net_sensing_pcs_keeps_the_qspi_from_deferring`; checked again as
   observers attach and detach).  Code only, not in the board file: a peripheral's calls
   are its code's to vouch for, and a v1 file would mean something new
-  (2026-10-24, docs/board-files.md).  `SpiPeripheral::clock`, defaulted to nothing,
+  (2026-10-24, docs/board-files.md).  `SpiPeripheral::set_clock`, defaulted to nothing,
   tells it the serial clock (`QspiClock`: CPOL, CPHA, the SCK period
   in system clocks and the system clock's frequency, so `baud` is
   QSMRM equation 4-1) at the first entry and at any entry after one of

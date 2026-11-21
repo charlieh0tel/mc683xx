@@ -717,17 +717,17 @@ pub trait Peripheral: Any {
     /// `now`, as the board decodes PCS\[3:0\] for it: a peripheral framed
     /// by its select sees the frame start and end here.  The canonical
     /// framing for a board peripheral: a peripheral sees only its own select's
-    /// changes, never another peripheral's ([`SpiPeripheral::chip_selects`], every
+    /// changes, never another peripheral's ([`SpiPeripheral::set_chip_selects`], every
     /// level change, is the chip's, for a host without this crate).
     /// By default nothing changes.
     ///
-    /// [`SpiPeripheral::chip_selects`]: mc683xx_modules::peripheral::SpiPeripheral::chip_selects
+    /// [`SpiPeripheral::set_chip_selects`]: mc683xx_modules::peripheral::SpiPeripheral::set_chip_selects
     fn select(&mut self, attachment: usize, selected: bool, now: Time, drive: &mut Drive<'_>) {}
 
-    /// The QSPI's serial clock from `now` ([`SpiPeripheral::clock`]).  By
+    /// The QSPI's serial clock from `now` ([`SpiPeripheral::set_clock`]).  By
     /// default nothing changes.
     ///
-    /// [`SpiPeripheral::clock`]: mc683xx_modules::peripheral::SpiPeripheral::clock
+    /// [`SpiPeripheral::set_clock`]: mc683xx_modules::peripheral::SpiPeripheral::set_clock
     fn qspi_clock(&mut self, clock: QspiClock, now: Time) {}
 
     /// Whether its QSPI calls (`transfer`, `select`, `qspi_clock`) may
@@ -906,7 +906,7 @@ mod tests {
 
     #[test]
     fn a_transfer_takes_another_clock_and_keeps_the_rest() {
-        let reset = QspiClock::reset(Frequency::from_hz(8_388_608));
+        let reset = QspiClock::at_reset(Frequency::from_hz(8_388_608));
         let transfer = Transfer::new(1, 2, 0xe, 0xa5, 8, reset, Time(9)).continuing();
         let fast = QspiClock::new(
             ClockPolarity::IdleHigh,

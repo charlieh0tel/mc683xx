@@ -99,7 +99,7 @@ class Peripheral:
     def transfer(self, transfer):
         return transfer.out >> 8 if transfer.chip_selects else 0x1ff
 
-    def chip_selects(self, levels, now):
+    def set_chip_selects(self, levels, now):
         self.levels.append((levels, now))
 "#;
 
@@ -247,7 +247,7 @@ fn a_qspi_peripheral_shifts_back() {
         let pending = Pending::default();
         let mut peripheral = PythonSpiPeripheral::new(&python, pending.clone()).unwrap();
         assert_eq!(peripheral.transfer(qspi_transfer(0b0101, 0x1234, 16)), 0x12);
-        peripheral.chip_selects(0b1111, Cycles(9));
+        peripheral.set_chip_selects(0b1111, Cycles(9));
         assert!(pending.check().is_ok());
         let levels: Vec<(u8, u64)> = python.getattr("levels").unwrap().extract().unwrap();
         assert_eq!(levels, [(0b1111, 9)]);

@@ -791,7 +791,7 @@ impl SpiPeripheral for QspiRouter {
         input
     }
 
-    fn chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
         let now = self.shared.time(now);
         let was = self
             .shared
@@ -816,7 +816,7 @@ impl SpiPeripheral for QspiRouter {
         }
     }
 
-    fn clock(&mut self, clock: QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, now: Cycles) {
         let now = self.shared.time(now);
         let mut told: Vec<usize> = Vec::new();
         for target in &self.targets {

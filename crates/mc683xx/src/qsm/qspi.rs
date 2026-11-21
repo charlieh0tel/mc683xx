@@ -289,7 +289,7 @@ impl QspiClock {
     /// (8.388608 MHz from a 32.768-kHz reference, MC68331UM 4.3), so the
     /// caller gives it.
     #[must_use]
-    pub const fn reset(system_clock: Frequency) -> Self {
+    pub const fn at_reset(system_clock: Frequency) -> Self {
         serial_clock(
             SPCR0_RESET,
             (SPCR0_RESET & SPCR0_SPBR_MASK) as u64,
@@ -377,7 +377,7 @@ impl Qspi {
             && let Some(peripheral) = &mut self.peripheral
         {
             self.told = Some(clock);
-            peripheral.clock(clock, now);
+            peripheral.set_clock(clock, now);
         }
     }
 
@@ -492,7 +492,7 @@ impl Qspi {
         if levels != self.selects {
             self.selects = levels;
             if let Some(peripheral) = &mut self.peripheral {
-                peripheral.chip_selects(levels, now);
+                peripheral.set_chip_selects(levels, now);
             }
         }
     }

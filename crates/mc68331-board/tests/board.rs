@@ -1436,7 +1436,7 @@ impl SpiPeripheral for Dac {
         0
     }
 
-    fn chip_selects(&mut self, levels: u8, _: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, _: Cycles) {
         self.levels.push(levels);
     }
 }
@@ -2522,7 +2522,7 @@ impl SpiPeripheral for Logged {
         !transfer.out
     }
 
-    fn chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
         self.levels.push((levels, now));
     }
 

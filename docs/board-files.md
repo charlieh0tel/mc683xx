@@ -554,7 +554,7 @@ The contract a host's peripheral models target (rustdoc in
     first transfer since the attachment's select asserted
     (`.continuing()` builds a later one; `.shifting(out, bits)` another
     word; `.clocked(clock)` another clock, such as
-    `QspiClock::reset(system_clock)`, SPCR0's out of reset), and `now`, when it ends) returns the bits in, all ones by
+    `QspiClock::at_reset(system_clock)`, SPCR0's out of reset), and `now`, when it ends) returns the bits in, all ones by
     default (`mc683xx_modules::peripheral::floating_miso`),
     `select(attachment, selected, now, drive)`, `qspi_clock(clock,
     now)`.  Framing: the board decodes PCS[3:0] by each attachment's
@@ -569,7 +569,7 @@ The contract a host's peripheral models target (rustdoc in
     winning a contention.  A peripheral whose output is not wired to MISO
     must say so (`74x164`'s `miso = "none"`), or its bits mask the
     others'; no match shifts all ones in.  The chip's
-    `SpiPeripheral::chip_selects`, every change of the levels whatever
+    `SpiPeripheral::set_chip_selects`, every change of the levels whatever
     they select, is for a host on the chip without this crate; on a
     board the decode is that peripheral.  A peripheral's RESET is its peripheral's
     `reset`, by its own scope; the QSPI's own reset scope plays no
@@ -660,8 +660,8 @@ The contract a host's peripheral models target (rustdoc in
   `BusCycle` with the access's select and address and its start in system
   clocks, and its times converted through the board's `TimeBase`; its
   `advance` runs at its `next_event`'s time.  A `SpiAdapter`'s model
-  hears the board's framing as `chip_selects(0)` and
-  `chip_selects(0xf)` and each transfer as a
+  hears the board's framing as `set_chip_selects(0)` and
+  `set_chip_selects(0xf)` and each transfer as a
   `QspiTransfer`, its time in system clocks.  `peripheral()` and `peripheral_mut()` give the model
   back (`Board::peripheral::<MappedAdapter<M>>`).  An adapted peripheral drives
   no nets.  The model implements `mc683xx_cpu32::cpu::state::Save` (`save()

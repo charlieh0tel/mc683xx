@@ -480,10 +480,10 @@ class Peripheral:
         self.transfer_clocks.append(transfer.clock)
         return self.value
 
-    def chip_selects(self, levels, now):
+    def set_chip_selects(self, levels, now):
         self.levels.append(levels)
 
-    def clock(self, clock, now):
+    def set_clock(self, clock, now):
         self.clocks.append(clock)
 
 
