@@ -21,13 +21,12 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::chip_select::ChipSelect;
-use mc683xx_modules::peripheral::ClockPhase;
-use mc683xx_modules::peripheral::ClockPolarity;
 use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::peripheral::floating_miso;
+use mc683xx_target::address::Address;
 use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
@@ -95,7 +94,7 @@ pub(crate) struct Shared {
     pub(crate) trace_qspi: Cell<bool>,
     /// The PC of the instruction running, while peripheral cycles are
     /// traced: a code hook sets it.
-    pub(crate) pc: Rc<Cell<u32>>,
+    pub(crate) pc: Rc<Cell<Address>>,
     /// The peripheral and QSPI records, until the board takes them.
     pub(crate) records: RefCell<Vec<Record>>,
     /// The board's memories, in file order, as peripherals take them.
@@ -361,8 +360,8 @@ impl Routes {
                     cycle: cycle.now,
                     pc: shared.pc.get(),
                     write: cycle.write,
-                    address: cycle.address.0,
-                    size: cycle.size.bytes(),
+                    address: cycle.address,
+                    size: cycle.size,
                     value,
                 }));
         }
@@ -784,8 +783,8 @@ impl SpiPeripheral for QspiRouter {
                     bits,
                     out,
                     input,
-                    cpol: clock.polarity == ClockPolarity::IdleHigh,
-                    cpha: clock.phase == ClockPhase::ChangeLeading,
+                    polarity: clock.polarity,
+                    phase: clock.phase,
                 }));
         }
         input

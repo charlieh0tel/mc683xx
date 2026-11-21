@@ -10,6 +10,12 @@ use std::fmt;
 
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
+use mc683xx_cpu32::interrupt::InterruptLevel;
+use mc683xx_modules::peripheral::ClockPhase;
+use mc683xx_modules::peripheral::ClockPolarity;
+use mc683xx_target::address::Address;
+use mc683xx_target::size::Size;
 
 #[cfg(doc)]
 use crate::chip::Chip;
@@ -91,13 +97,13 @@ pub struct BusCycleRecord {
     /// When its instruction started.
     pub cycle: Cycles,
     /// That instruction's address.
-    pub pc: u32,
+    pub pc: Address,
     /// Whether it wrote.
     pub write: bool,
     /// The address on ADDR.
-    pub address: u32,
-    /// Bytes: 1 or 2.
-    pub size: u32,
+    pub address: Address,
+    /// Its size: a byte or a word, the bus's width.
+    pub size: Size,
     /// The value read or written; [`None`] for a read that ended in BERR.
     pub value: Option<u32>,
 }
@@ -108,14 +114,14 @@ pub struct BusCycleRecord {
 pub struct ExceptionRecord {
     /// When its frame was stacked.
     pub cycle: Cycles,
-    /// Its vector number.
-    pub vector: u8,
+    /// Its vector.
+    pub vector: Vector,
     /// The PC its frame stacked.
-    pub pc: u32,
+    pub pc: Address,
     /// The SR its frame stacked, if the core could read it.
     pub sr: Option<u16>,
     /// An interrupt's level.
-    pub level: Option<u8>,
+    pub level: Option<InterruptLevel>,
 }
 
 /// A chip pin on a net changed level.
@@ -146,10 +152,10 @@ pub struct QspiRecord {
     pub out: u16,
     /// Shifted in.
     pub input: u16,
-    /// CPOL: SCK idles high (QSMRM 4.3.1).
-    pub cpol: bool,
-    /// CPHA: data is changed on SCK's leading edge (QSMRM 4.3.1).
-    pub cpha: bool,
+    /// CPOL (QSMRM 4.3.1).
+    pub polarity: ClockPolarity,
+    /// CPHA (QSMRM 4.3.1).
+    pub phase: ClockPhase,
 }
 
 /// A watched instruction about to run.
@@ -159,7 +165,7 @@ pub struct CodeRecord {
     /// Now.
     pub cycle: Cycles,
     /// Its address.
-    pub pc: u32,
+    pub pc: Address,
     /// SR.
     pub sr: u16,
     /// D0 to D7.
@@ -177,13 +183,13 @@ pub struct PositionRecord {
     /// Now.
     pub cycle: Cycles,
     /// PC.
-    pub pc: u32,
+    pub pc: Address,
     /// SR.
     pub sr: u16,
     /// VBR.
-    pub vbr: u32,
-    /// A7.
-    pub a7: u32,
+    pub vbr: Address,
+    /// A7, the active stack pointer.
+    pub a7: Address,
     /// Instructions run since power-on.
     pub instructions: u64,
 }
@@ -279,19 +285,19 @@ impl fmt::Display for Record {
             Self::BusCycle(record) => {
                 write!(
                     formatter,
-                    "bus-cycle cycle={} pc={:#010x} access={} address={:#010x} size={} value=",
+                    "bus-cycle cycle={} pc={} access={} address={} size={} value=",
                     record.cycle.0,
                     record.pc,
                     if record.write { "write" } else { "read" },
                     record.address,
-                    record.size
+                    record.size.bytes()
                 )?;
                 match record.value {
                     Some(value) => {
                         write!(
                             formatter,
                             "{value:#0width$x}",
-                            width = 2 + 2 * record.size as usize
+                            width = 2 + 2 * record.size.bytes() as usize
                         )
                     }
                     None => formatter.write_str("berr"),
@@ -300,7 +306,7 @@ impl fmt::Display for Record {
             Self::Exception(record) => {
                 write!(
                     formatter,
-                    "exception cycle={} vector={} pc={:#010x} sr=",
+                    "exception cycle={} vector={} pc={} sr=",
                     record.cycle.0, record.vector, record.pc
                 )?;
                 match record.sr {
@@ -308,7 +314,7 @@ impl fmt::Display for Record {
                     None => formatter.write_str("------")?,
                 }
                 if let Some(level) = record.level {
-                    write!(formatter, " level={level}")?;
+                    write!(formatter, " level={}", level.get())?;
                 }
                 Ok(())
             }
@@ -328,12 +334,12 @@ impl fmt::Display for Record {
                 record.bits,
                 record.out,
                 record.input,
-                u8::from(record.cpol),
-                u8::from(record.cpha)
+                u8::from(record.polarity == ClockPolarity::IdleHigh),
+                u8::from(record.phase == ClockPhase::ChangeLeading)
             ),
             Self::Code(record) => write!(
                 formatter,
-                "code cycle={} pc={:#010x} sr={:#06x} d={} a={} stack={}",
+                "code cycle={} pc={} sr={:#06x} d={} a={} stack={}",
                 record.cycle.0,
                 record.pc,
                 record.sr,
@@ -343,7 +349,7 @@ impl fmt::Display for Record {
             ),
             Self::Position(record) => write!(
                 formatter,
-                "position cycle={} pc={:#010x} sr={:#06x} vbr={:#010x} a7={:#010x} instructions={}",
+                "position cycle={} pc={} sr={:#06x} vbr={} a7={} instructions={}",
                 record.cycle.0, record.pc, record.sr, record.vbr, record.a7, record.instructions
             ),
             Self::Stopped(record) => write!(
@@ -362,8 +368,14 @@ mod tests {
     use mc683xx_cpu32::cpu::Stop;
     use mc683xx_cpu32::cycles::Cycles;
 
+    use mc683xx_cpu32::exception::Vector;
     use mc683xx_cpu32::frequency::Frequency;
+    use mc683xx_cpu32::interrupt::InterruptLevel;
+    use mc683xx_modules::peripheral::ClockPhase;
+    use mc683xx_modules::peripheral::ClockPolarity;
     use mc683xx_modules::qsm::sci::Frame;
+    use mc683xx_target::address::Address;
+    use mc683xx_target::size::Size;
 
     use super::BusCycleRecord;
     use super::CodeRecord;
@@ -385,10 +397,10 @@ mod tests {
     fn records_print_as_docs_tracing_shows() {
         let peripheral = Record::BusCycle(BusCycleRecord {
             cycle: Cycles(42),
-            pc: 0x1_5f88,
+            pc: Address(0x1_5f88),
             write: false,
-            address: 0x20_0003,
-            size: 1,
+            address: Address(0x20_0003),
+            size: Size::Byte,
             value: Some(4),
         });
         assert_eq!(
@@ -397,10 +409,10 @@ mod tests {
         );
         let word = Record::BusCycle(BusCycleRecord {
             cycle: Cycles(42),
-            pc: 0x1_5f88,
+            pc: Address(0x1_5f88),
             write: true,
-            address: 0x20_0003,
-            size: 2,
+            address: Address(0x20_0003),
+            size: Size::Word,
             value: Some(0x542),
         });
         assert!(
@@ -412,20 +424,20 @@ mod tests {
             write: false,
             ..BusCycleRecord {
                 cycle: Cycles(1),
-                pc: 0,
+                pc: Address(0),
                 write: false,
-                address: 0,
-                size: 2,
+                address: Address(0),
+                size: Size::Word,
                 value: None,
             }
         });
         assert!(berr.to_string().ends_with("value=berr"));
         let exception = Record::Exception(ExceptionRecord {
             cycle: Cycles(7),
-            vector: 66,
-            pc: 0x100,
+            vector: Vector(66),
+            pc: Address(0x100),
             sr: Some(0x2000),
-            level: Some(5),
+            level: InterruptLevel::new(5),
         });
         assert_eq!(
             exception.to_string(),
@@ -447,8 +459,8 @@ mod tests {
             bits: 16,
             out: 0x8000,
             input: 0xffff,
-            cpol: true,
-            cpha: true,
+            polarity: ClockPolarity::IdleHigh,
+            phase: ClockPhase::ChangeLeading,
         });
         assert_eq!(
             qspi.to_string(),
@@ -456,7 +468,7 @@ mod tests {
         );
         let code = Record::Code(CodeRecord {
             cycle: Cycles(5),
-            pc: 0x1234,
+            pc: Address(0x1234),
             sr: 0x2700,
             data: [0; 8],
             address: [0, 0, 0, 0, 0, 0, 0, 0x10_fffc],
@@ -468,10 +480,10 @@ mod tests {
         ));
         let position = Record::Position(PositionRecord {
             cycle: Cycles(1),
-            pc: 2,
+            pc: Address(2),
             sr: 0x2700,
-            vbr: 0,
-            a7: 0x10_fffc,
+            vbr: Address(0),
+            a7: Address(0x10_fffc),
             instructions: 9,
         });
         assert_eq!(

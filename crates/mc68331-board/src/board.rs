@@ -1075,10 +1075,10 @@ impl<C: Chip> Board<C> {
                 .map(|sr| sr as u16);
             self.records.push(Record::Exception(trace::ExceptionRecord {
                 cycle,
-                vector: entry.vector.0,
-                pc: entry.pc.0,
+                vector: entry.vector,
+                pc: entry.pc,
                 sr,
-                level: entry.level.map(|level| level.get()),
+                level: entry.level,
             }));
         }
     }
@@ -1102,7 +1102,7 @@ impl<C: Chip> Board<C> {
             });
             self.records.push(Record::Code(trace::CodeRecord {
                 cycle,
-                pc: registers.pc.0,
+                pc: registers.pc,
                 sr: registers.sr(),
                 data: registers.data,
                 address: array::from_fn(|index| registers.address(index)),
@@ -1130,10 +1130,10 @@ impl<C: Chip> Board<C> {
         let registers = &self.chip.cpu().registers;
         Record::Position(trace::PositionRecord {
             cycle: self.chip.now(),
-            pc: registers.pc.0,
+            pc: registers.pc,
             sr: registers.sr(),
-            vbr: registers.vbr.0,
-            a7: registers.address(7),
+            vbr: registers.vbr,
+            a7: Address(registers.address(7)),
             instructions: self.chip.instructions(),
         })
     }
@@ -2040,7 +2040,7 @@ impl<C: Chip> Board<C> {
                 self.hooks.pc = Some(cpu.add_code_hook(
                     Address(0)..=Address(u32::MAX),
                     move |instruction| {
-                        pc.set(instruction.pc.0);
+                        pc.set(instruction.pc);
                         ControlFlow::Continue(())
                     },
                 ));

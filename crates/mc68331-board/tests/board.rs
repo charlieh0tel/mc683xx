@@ -55,6 +55,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::PAGE_BYTES;
@@ -719,7 +720,10 @@ parameters = { bytes = 4 }
     let Record::Code(code) = records[0] else {
         panic!("{records:?}");
     };
-    assert_eq!((code.pc, code.sr, code.address[7]), (START, 0x2700, STACK));
+    assert_eq!(
+        (code.pc, code.sr, code.address[7]),
+        (Address(START), 0x2700, STACK)
+    );
     let peripheral = records
         .iter()
         .find_map(|record| match record {
@@ -748,7 +752,7 @@ parameters = { bytes = 4 }
             exception.sr,
             exception.level
         ),
-        (32, START + 42, Some(0x2700), None)
+        (Vector(32), Address(START + 42), Some(0x2700), None)
     );
 }
 
@@ -3962,7 +3966,7 @@ attach = [{ select = "CS0" }]
         .records
         .iter()
         .filter_map(|record| match record {
-            Record::Exception(exception) => Some(exception.vector),
+            Record::Exception(exception) => Some(exception.vector.0),
             _ => None,
         })
         .collect();
@@ -4043,7 +4047,7 @@ attach = [{ select = "CSBOOT" }]
         .records
         .iter()
         .filter_map(|record| match record {
-            Record::Exception(exception) => Some(exception.vector),
+            Record::Exception(exception) => Some(exception.vector.0),
             _ => None,
         })
         .collect();
