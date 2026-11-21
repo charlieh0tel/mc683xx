@@ -910,7 +910,6 @@ use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm::Channel;
 use mc683xx_mc68331::gpt::pwm::Output;
 use mc683xx_mc68331::port::Port;
-use mc683xx_mc68331::port::PortChange;
 use mc683xx_modules::pins::PortLevels;
 
 // TCTL1:TCTL2, TOC2, TIC1 (GPTRM 3).  OM2:OL2 01 toggles OC2, PGP4,
@@ -938,14 +937,12 @@ chip.run_for(Cycles(CLOCKS_PER_COUNT * 0x1000 + 100));
 let changes = chip.take_port_changes();
 let last = changes.last().unwrap();
 assert_eq!(last.0, Cycles(CLOCKS_PER_COUNT * 0x1000));
+assert_eq!(last.1.port, Port::Gp);
 assert_eq!(
-    last.1,
-    PortChange {
-        port: Port::Gp,
-        outputs: PortLevels {
-            driven: OC2,
-            levels: OC2
-        }
+    last.1.outputs,
+    PortLevels {
+        driven: OC2,
+        levels: OC2
     }
 );
 let captured = chip.peek(Address(TIC1), Size::Word, FunctionCode::SUPERVISOR_DATA);

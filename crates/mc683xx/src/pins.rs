@@ -34,6 +34,7 @@ impl PortLevels {
 /// A port's registers and the levels the board drives on its pins, in
 /// one form for every module's ports.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct PortState {
     /// The data latch: what the firmware last wrote to the port's data
     /// register.
@@ -45,6 +46,20 @@ pub struct PortState {
     pub assignment: u8,
     /// The levels the board drives on the pins.
     pub pins: u8,
+}
+
+impl PortState {
+    /// A port's data latch, data direction, pin assignment and the
+    /// levels the board drives on its pins.
+    #[must_use]
+    pub const fn new(latch: u8, direction: u8, assignment: u8, pins: u8) -> Self {
+        Self {
+            latch,
+            direction,
+            assignment,
+            pins,
+        }
+    }
 }
 
 #[cfg(test)]

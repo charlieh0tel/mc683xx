@@ -103,6 +103,7 @@ impl NoInputsError {
 /// A change in what a port drives: from its time on, the pins it drives
 /// and their levels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct PortChange {
     /// The port.
     pub port: Port,

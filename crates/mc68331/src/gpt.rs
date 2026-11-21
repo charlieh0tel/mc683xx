@@ -323,6 +323,7 @@ pub struct ParseInputError(String);
 ///
 /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct PwmChange {
     /// The pin.
     pub channel: Channel,
@@ -652,12 +653,12 @@ impl Gpt {
         } else {
             0
         };
-        PortState {
-            latch: self.latch,
-            direction: self.direction,
-            assignment: self.compared_pins() | clocked,
-            pins: self.inputs.port,
-        }
+        PortState::new(
+            self.latch,
+            self.direction,
+            self.compared_pins() | clocked,
+            self.inputs.port,
+        )
     }
 
     /// Whether OC1's pin carries TCNT's clock: CPROUT, with OC1M3 clear

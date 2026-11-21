@@ -2311,23 +2311,10 @@ fn the_host_sees_each_port_edge_and_drives_the_inputs() {
     );
     chip.run_for(Cycles(2000));
     assert_eq!(chip.cpu().registers.data[0] & 0xff, 0x02);
-    assert_eq!(
-        chip.port(Port::E),
-        PortState {
-            latch: 0x00,
-            direction: 0x01,
-            assignment: 0xfe,
-            pins: 0x02
-        }
-    );
+    assert_eq!(chip.port(Port::E), PortState::new(0x00, 0x01, 0xfe, 0x02));
     assert_eq!(
         chip.port(Port::C),
-        PortState {
-            latch: 0x7d,
-            direction: 0x7f,
-            assignment: 0x78,
-            pins: 0xff
-        },
+        PortState::new(0x7d, 0x7f, 0x78, 0xff),
         "port C has no inputs"
     );
     assert_eq!(
