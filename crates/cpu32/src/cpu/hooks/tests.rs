@@ -102,11 +102,7 @@ fn a_code_hook_sees_registers_and_the_stack_and_stops_before() {
     assert_eq!(cpu.registers.pc.0, CODE + 4);
     assert_eq!(
         *seen.borrow(),
-        [(
-            Address(CODE + 2),
-            Some(Address(0xdead_beef)),
-            Address(STACK)
-        )]
+        [(Address(CODE + 2), Some(0xdead_beef), Address(STACK))]
     );
 }
 

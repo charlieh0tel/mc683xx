@@ -48,9 +48,10 @@ pub struct Instruction {
     /// The registers.
     pub registers: Registers,
     /// The long word at A7, in data space, if the core serves it from
-    /// memory (no bus cycle is run for it): at a subroutine's first
-    /// instruction, its return address.
-    pub stack_top: Option<Address>,
+    /// memory (no bus cycle is run for it).  A word of data, not an
+    /// [`Address`]: it is one only where the code makes it one, as at a
+    /// subroutine's first instruction, its return address.
+    pub stack_top: Option<u32>,
 }
 
 /// A bus cycle in user or supervisor space, as a memory hook sees it.
@@ -399,14 +400,11 @@ impl Cpu {
         let instruction = || Instruction {
             pc,
             registers: self.registers.clone(),
-            stack_top: self
-                .memory
-                .peek(
-                    Space::of(self.registers.data_space()),
-                    Address(self.registers.address(7)),
-                    Size::Long,
-                )
-                .map(Address),
+            stack_top: self.memory.peek(
+                Space::of(self.registers.data_space()),
+                Address(self.registers.address(7)),
+                Size::Long,
+            ),
         };
         let block = block_start && watched & watch::BLOCK != 0 && resume.is_none();
         let code =

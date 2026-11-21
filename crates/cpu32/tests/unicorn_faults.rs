@@ -683,7 +683,7 @@ fn a_code_hook_sees_the_system_byte_at_each_instruction() {
                 instruction.pc,
                 registers.sr(),
                 registers.address(7),
-                instruction.stack_top.map(u32::from),
+                instruction.stack_top,
             )
         })
         .collect();
@@ -708,7 +708,7 @@ fn a_block_hook_sees_the_status_a_trap_enters_with() {
         (
             seen.registers.sr(),
             seen.registers.address(7),
-            seen.stack_top.map(u32::from)
+            seen.stack_top
         ),
         (status::S | status::Z, frame, Some(frame_top))
     );

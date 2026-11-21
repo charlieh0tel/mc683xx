@@ -78,7 +78,7 @@ impl InstructionView {
     /// if a peripheral would.
     #[getter]
     fn stack_top(&self) -> Option<u32> {
-        self.0.stack_top.map(u32::from)
+        self.0.stack_top
     }
 
     fn __repr__(&self) -> String {
