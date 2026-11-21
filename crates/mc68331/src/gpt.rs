@@ -563,11 +563,12 @@ impl Gpt {
     }
 
     /// The board drives port GP's input pins in `mask` to their levels
-    /// in `value` at `now`, the others as they were.
+    /// in `value` at `now`, the others as they were: as the inputs
+    /// scheduled up to `now` left them, which it takes first, each edge
+    /// at its time (GPTRM 3.2, 3.2.3).
     pub(crate) fn set_port_pins(&mut self, value: u8, mask: u8, now: Cycles) {
-        let pins = merge_pins(self.inputs.port, value, mask);
         self.advance(now);
-        self.inputs.port = pins;
+        self.inputs.port = merge_pins(self.inputs.port, value, mask);
         self.input_changed(now);
         self.refresh();
     }

@@ -2403,6 +2403,33 @@ fn a_scheduled_gpt_input_edge_is_captured_inside_a_run() {
     );
 }
 
+#[test]
+fn set_pins_takes_the_scheduled_gpt_inputs_before_it_merges() {
+    let pgp0 = Input::PortGp(PortGpPin::new(0).unwrap());
+    // TFLG1 IC1F (GPTRM 7.1.2.1)
+    let ic1f = 0x0100;
+    for (value, mask, pins, flags) in [
+        (0x00, 0x00, 0xfe, 0),
+        (0x00, 0x02, 0xfc, 0),
+        (0xff, 0xfe, 0xfe, 0),
+        // PGP0 back high: a rising edge after the scheduled fall
+        (0x01, 0x01, 0xff, ic1f),
+    ] {
+        let (mut chip, _) = booting(&[NOP]);
+        // EDGE1 rising (GPTRM 3.2)
+        write_register(&mut chip, GPT + 0x1e, 0x0001);
+        let now = chip.now();
+        chip.schedule_gpt_input(now, pgp0, false);
+        chip.set_pins(Port::Gp, value, mask).unwrap();
+        assert_eq!(chip.port(Port::Gp).pins, pins, "{value:#x} {mask:#x}");
+        assert_eq!(
+            cycle(&mut chip, GPT + 0x22, Size::Word, None).unwrap().0 & ic1f,
+            flags,
+            "{value:#x} {mask:#x}"
+        );
+    }
+}
+
 /// CS1's base address in the tests that wire a peripheral to it.
 const CS1_BASE: u32 = 0x20_0000;
 /// CSBAR1 for it: ADDR\[23:11\] from bit 3, BLKSZ 011, 64 Kbytes (SIMRM
