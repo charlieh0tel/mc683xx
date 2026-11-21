@@ -870,7 +870,7 @@ macro_rules! chip_methods {
             /// Why the CPU halted, while it stays halted.
             #[getter]
             fn halted(&self, py: Python<'_>) -> PyResult<Option<Halt>> {
-                self.with_chip(py, |chip| Ok(chip.halted().map(Halt::from)))
+                self.with_chip(py, |chip| Ok(chip.cpu().halted().map(Halt::from)))
             }
 
             /// The `Entry` while the CPU is in background mode (CPU32RM
@@ -1146,7 +1146,7 @@ impl Chip {
             let target = Cycles(self.chip.now().0.saturating_add(QUANTUM.0)).min(end);
             // A chip halted before the quantum spends it as time passes
             // (no instruction runs), so its halt goes on to the next.
-            let halted = self.chip.halted().is_some();
+            let halted = self.chip.cpu().halted().is_some();
             let run = self.chip.run_until(target);
             self.pending.check()?;
             let now = self.chip.now();

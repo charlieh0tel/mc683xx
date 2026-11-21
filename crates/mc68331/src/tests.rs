@@ -303,7 +303,7 @@ fn write_register(chip: &mut Mc68331, address: u32, value: u16) {
 #[test]
 fn csboot_serves_the_reset_vectors_with_13_wait_states() {
     let (mut chip, _) = booting(&[NOP]);
-    assert_eq!(chip.halted(), None);
+    assert_eq!(chip.cpu().halted(), None);
     assert_eq!(chip.cpu().registers.ssp.0, STACK);
     assert_eq!(chip.cpu().registers.pc.0, START);
     // one NOP: a two-clock fetch from a 16-clock select (MC68331UM
@@ -512,7 +512,7 @@ fn wired_patched(program: &[u16], patches: &[(u32, &[u16])]) -> Wired {
     builder.interrupt(duart, IrqPin::new(1).unwrap());
     let mut chip = builder.build();
     chip.run_for(Cycles(40 * WIRED_SELECTS.len() as u64));
-    assert_eq!(chip.halted(), None);
+    assert_eq!(chip.cpu().halted(), None);
     Wired {
         chip,
         ram,
@@ -539,7 +539,7 @@ fn the_wired_map() {
     let mut board = wired(&program);
     let chip = &mut board.chip;
     chip.run_for(Cycles(400));
-    assert_eq!(chip.halted(), None);
+    assert_eq!(chip.cpu().halted(), None);
     let registers = &chip.cpu().registers;
     assert_eq!(registers.data[0] & 0xffff, 0x1234);
     assert_eq!(registers.data[1] & 0xffff, 0x2222, "the upper bank on CS1");
@@ -1236,7 +1236,7 @@ fn a_fault_on_the_reset_vectors_halts() {
     let mut builder = Builder::default();
     builder.peripheral(Faulting, &[ChipSelect::Boot]).unwrap();
     let mut chip = builder.build();
-    assert!(chip.halted().is_some());
+    assert!(chip.cpu().halted().is_some());
     // time passes while it is halted
     let run = chip.run_for(Cycles(100));
     assert!(matches!(run.stop, Stop::Halted(_)));
@@ -1264,7 +1264,11 @@ fn the_watchdog_resets_a_halted_chip() {
         matches!(events[..], [Event::Reset(at, ResetCause::Watchdog), ..] if at <= timeout),
         "{events:?}"
     );
-    assert_eq!(chip.halted(), Some(Halt::DoubleBusFault), "and halts again");
+    assert_eq!(
+        chip.cpu().halted(),
+        Some(Halt::DoubleBusFault),
+        "and halts again"
+    );
     assert_eq!(run.stop, Stop::Halted(Halt::DoubleBusFault));
 }
 
@@ -1786,7 +1790,7 @@ fn in_lpstop_only_the_pit_wakes_and_the_gpt_and_qsm_stop() {
     while chip.sim().low_power().is_none() {
         chip.run_for(Cycles(16));
         assert!(chip.now() < Cycles(20_000), "never stopped");
-        assert_eq!(chip.halted(), None);
+        assert_eq!(chip.cpu().halted(), None);
     }
     let (stopped, counted) = (chip.now(), tcnt(chip));
     // the SCI's request at level 3 waits; the PIT's at 6 wakes it
@@ -1800,7 +1804,7 @@ fn in_lpstop_only_the_pit_wakes_and_the_gpt_and_qsm_stop() {
             break taken;
         }
         assert!(chip.now() < stopped + Cycles(200_000), "never woke");
-        assert_eq!(chip.halted(), None);
+        assert_eq!(chip.cpu().halted(), None);
     };
     let (woke, vector, level) = taken;
     assert_eq!((vector, level), (Vector(0x50), InterruptLevel::new(6)));

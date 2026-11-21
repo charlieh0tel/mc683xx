@@ -543,7 +543,7 @@ impl chip::Chip for Mc68331 {
     }
 
     fn halted(&self) -> Option<Halt> {
-        Self::halted(self)
+        self.cpu().halted()
     }
 
     fn reset_for(&mut self, cause: ResetCause) {

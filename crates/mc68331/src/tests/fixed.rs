@@ -169,7 +169,7 @@ fn a_read_only_fixed_memory_ignores_writes() {
     let program = ending(&[&store_word(CODE + 0x100, 0x1234)]);
     let (mut chip, code, _) = fixed(&program, ResetScope::NONE);
     chip.run_for(Cycles(500));
-    assert_eq!(chip.halted(), None);
+    assert_eq!(chip.cpu().halted(), None);
     assert_eq!(chip.memory(code)[0x100..0x102], [0, 0]);
     assert_eq!(
         cycle(&mut chip, CODE + 0x100, Size::Word, Some(0x55)),
@@ -222,7 +222,7 @@ fn the_reset_instruction_reloads_before_the_next_instruction() {
     let (mut kept, _, _) = fixed(&program, ResetScope::NONE);
     for chip in [&mut reloaded, &mut kept] {
         chip.run_for(Cycles(2000));
-        assert_eq!(chip.halted(), None);
+        assert_eq!(chip.cpu().halted(), None);
     }
     assert_eq!(reloaded.cpu().registers.data[0] & 0xffff, 0x5a5a);
     assert_eq!(kept.cpu().registers.data[0] & 0xffff, 0x1234);

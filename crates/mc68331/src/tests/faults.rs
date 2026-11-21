@@ -63,7 +63,7 @@ fn a_bus_monitor_timeout_stops_the_run_rather_than_halting() {
     let fault = chip.cpu().fault_stop().expect("a fault stop");
     assert_eq!(fault.cycle, CycleKind::Fetch);
     assert_eq!(fault.cause, FaultCause::BusError);
-    assert_eq!(chip.halted(), None, "no double bus fault");
+    assert_eq!(chip.cpu().halted(), None, "no double bus fault");
 }
 
 /// MOVEA.L #1,A7: SSP odd, so stacking faults (CPU32RM 4, MOVEA).

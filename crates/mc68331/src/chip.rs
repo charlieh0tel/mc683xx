@@ -1040,12 +1040,6 @@ impl Mc68331 {
         CpuControl::new(&mut self.cpu)
     }
 
-    /// Why the CPU halted, while it stays halted.
-    #[must_use]
-    pub const fn halted(&self) -> Option<Halt> {
-        self.cpu.halted()
-    }
-
     /// The SIM: its registers, ports, clock and chip selects.
     #[must_use]
     pub const fn sim(&self) -> &Sim {

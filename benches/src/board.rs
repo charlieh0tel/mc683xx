@@ -354,7 +354,7 @@ impl Board {
         let mut chip = builder.build();
         while chip.cpu().registers.pc != Address(sled_start) {
             chip.run_for(Cycles(1));
-            assert_eq!(chip.halted(), None::<Halt>, "the boot code halted");
+            assert_eq!(chip.cpu().halted(), None::<Halt>, "the boot code halted");
         }
         let mut board = Self {
             chip,

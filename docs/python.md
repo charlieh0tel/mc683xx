@@ -69,7 +69,7 @@ rename renames the Python name with it.  The deliberate differences:
 - **Background debug:** the chip's `Cpu32Target` calls `halt`, `go`
   and `step`, and `assert_breakpoint`, are `Mc68331` methods; its `halted`, an `Entry`, is the
   `background` property (`Cpu::background`, through `Mc68331::cpu`),
-  as `halted` is the chip's `Halt`.  `reset_halted` is
+  as `halted` is the CPU's `Halt` (`Cpu::halted`, likewise).  `reset_halted` is
   `reset_with_breakpoint()` then `background`.
 - **Handles:** memories and peripherals are the numbers `Builder`
   returns, not `MemoryId` and `PeripheralId`; a Rust callback trait
