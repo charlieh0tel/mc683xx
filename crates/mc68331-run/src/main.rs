@@ -385,7 +385,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         input_after: board.now() + Span::from_seconds_f64(arguments.input_after),
         next_position: every.map(|every| (board.now() + every, every)),
     };
-    control.set_pacing(arguments.pace)?;
+    control.set_pacing(arguments.pace);
     if let Some(address) = &arguments.gdb {
         let ending = gdb::serve(&mut board, &mut turns, address, &interrupted)?;
         let killed = ending == Ending::Killed;

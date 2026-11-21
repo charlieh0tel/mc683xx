@@ -22,7 +22,6 @@ use std::time::Duration;
 
 use crate::error::SendError;
 use crate::pacing::Pacing;
-use crate::pacing::PacingError;
 use crate::signal::Kind;
 use crate::signal::Signal;
 
@@ -158,13 +157,7 @@ impl BoardControl {
     /// changes nothing, so a UI may set its choice every frame; a change
     /// and a change back between two frames are two changes, and start
     /// it again.
-    ///
-    /// # Errors
-    ///
-    /// [`PacingError::Factor`] for a factor not finite and above 0,
-    /// the pacing left as it was.
-    pub fn set_pacing(&self, pacing: Pacing) -> Result<(), PacingError> {
-        let pacing = pacing.checked()?;
+    pub fn set_pacing(&self, pacing: Pacing) {
         let mut state = self.state();
         if state.pacing != pacing {
             state.pacing = pacing;
@@ -172,7 +165,6 @@ impl BoardControl {
             drop(state);
             self.0.changed.notify_all();
         }
-        Ok(())
     }
 
     /// The pacing, [`Pacing::Unpaced`] until set.

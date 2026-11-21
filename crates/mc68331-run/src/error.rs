@@ -62,9 +62,6 @@ pub(crate) enum RunError {
     /// gdb's address: no listening there, or no connection taken.
     #[error("gdb: {0}")]
     Gdb(io::Error),
-    /// `--pace`'s factor, refused.
-    #[error(transparent)]
-    Pacing(#[from] mc683xx_board::pacing::PacingError),
     /// Ctrl-C's handler, which could not be set.
     #[error("Ctrl-C: {0}")]
     Interrupt(ctrlc::Error),

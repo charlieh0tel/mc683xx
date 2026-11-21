@@ -1665,8 +1665,8 @@ hand.  The keys are in `docs/board-files.md`.
   inputs at the same board times give the same run; a
   live UI's input lands at the sync point after it is queued, timed
   by when the UI sent it, which is inherent to live input.  Pacing
-  (`pacing::Pacing`: `Unpaced`, the default, `RealTime`, `Scaled(f64)`
-  board seconds a wall second) is host-side only: `Board::run_until_paced(until,
+  (`pacing::Pacing`: `Unpaced`, the default, `RealTime`, `Scaled(Factor)`
+  board seconds a wall second, finite and above 0 by construction) is host-side only: `Board::run_until_paced(until,
   quantum)` runs as `run_until_quantized` does (`pacing::QUANTUM`, 5 ms, a good
   quantum) and, before each quantum, a `pacing::Pacer` sleeps until board
   time is no longer ahead of wall time times the factor, waking for a

@@ -1456,7 +1456,7 @@ outside semver.
   control), for a front end whose event loop is another thread:
   `stop()` asks the run to stop, `send(name, signal) -> Result<(),
   SendError>` queues an input, checked at once as `Board::send` checks
-  it, and `set_pacing(pacing) -> Result<(), PacingError>` sets the
+  it, and `set_pacing(pacing)` sets the
   pacing (`pacing()` reads it, `stopping()` says whether a stop waits).
   The run takes what the handle holds at each sync point, on the
   board's own thread: the inputs are driven at that board time in the
@@ -1470,8 +1470,9 @@ outside semver.
   `Board::run_until` may make long; a paced run's quanta bound it.
 - **Pacing.**  `pacing::Pacing` is `Unpaced` (as fast as the host runs
   it, the default), `RealTime`, or `Scaled(factor)`, board seconds a
-  wall second (2.0 twice real time, 0.5 half; finite and above 0, else
-  `PacingError::Factor`); it prints and parses as `unpaced`, `realtime`
+  wall second (2.0 twice real time, 0.5 half), a `pacing::Factor`
+  (`Factor::new(f64)`, finite and above 0, else `PacingError::Factor`,
+  so every `Pacing` can be kept, and it is `Eq` and `Hash`); it prints and parses as `unpaced`, `realtime`
   or the factor.  `Board::run_until_paced(until, quantum)` runs to
   `until` in quanta of `quantum` of board time, a `time::NonZeroSpan`
   (never zero, so the loop always ends: `NonZeroSpan::new(span)` is
@@ -1625,7 +1626,7 @@ to = ["chip.PGP1"]
 let description = Description::parse(text, Path::new("."), &Options::default()).unwrap();
 let mut board = Board::<Mc68331>::load(&description, &Registry::with_builtins(), &Environment::default()).unwrap();
 let control = board.control();
-control.set_pacing(Pacing::RealTime).unwrap();
+control.set_pacing(Pacing::RealTime);
 let front_end = control.clone();
 let ui = thread::spawn(move || {
     thread::sleep(Duration::from_millis(20));

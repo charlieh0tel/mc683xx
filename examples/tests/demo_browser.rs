@@ -14,6 +14,7 @@ use std::time::Duration;
 use mc683xx_board::board::Board;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
+use mc683xx_board::pacing::Factor;
 use mc683xx_board::pacing::Pacing;
 use mc683xx_board::pacing::QUANTUM;
 use mc683xx_board::registry::Environment;
@@ -93,7 +94,7 @@ fn the_demo_board_runs_from_bytes_and_a_host_clock() {
     assert!(text.contains(BANNER), "{text:?}");
     assert!(text.ends_with("> "), "{text:?}");
 
-    control.set_pacing(Pacing::Scaled(FACTOR)).unwrap();
+    control.set_pacing(Pacing::Scaled(Factor::new(FACTOR).unwrap()));
     let mut typed = TYPED.iter();
     let mut wall = Duration::from_secs(1000);
     let start = board.now();

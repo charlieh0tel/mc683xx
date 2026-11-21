@@ -7,7 +7,6 @@ use mc683xx_board::error::LoadError;
 use mc683xx_board::error::ReceiveError;
 use mc683xx_board::error::RunError;
 use mc683xx_board::error::SendError;
-use mc683xx_board::pacing::PacingError;
 use mc683xx_board::pacing::ParsePacingError;
 use mc683xx_cpu32::cpu::state::StateError;
 use wasm_bindgen::JsValue;
@@ -35,9 +34,6 @@ pub enum Error {
     /// Text that names no pacing.
     #[error(transparent)]
     ParsePacing(#[from] ParsePacingError),
-    /// A pacing the control refuses.
-    #[error(transparent)]
-    Pacing(#[from] PacingError),
     /// Picoseconds that are not a `bigint`: what they are (`a number`).
     #[error("picoseconds are not a bigint but {0}")]
     PicosecondsType(String),
@@ -95,7 +91,7 @@ impl Error {
             | Self::Bytes { .. } => Thrown::Type,
             Self::Picoseconds(_) | Self::Wall(_) => Thrown::Range,
             Self::Load(_) => Thrown::Named("LoadError"),
-            Self::ParsePacing(_) | Self::Pacing(_) => Thrown::Named("PacingError"),
+            Self::ParsePacing(_) => Thrown::Named("PacingError"),
             Self::Run(_) => Thrown::Named("RunError"),
             Self::Send(_) => Thrown::Named("SendError"),
             Self::Receive(_) => Thrown::Named("ReceiveError"),

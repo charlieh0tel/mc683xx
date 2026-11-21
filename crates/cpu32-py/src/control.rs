@@ -17,6 +17,7 @@ use mc683xx_board::board::Board;
 use mc683xx_board::board::BoardRun;
 use mc683xx_board::control::BoardControl;
 use mc683xx_board::error::RunError;
+use mc683xx_board::pacing;
 use mc683xx_board::pacing::Pacer;
 use mc683xx_board::pacing::Pacing;
 use mc683xx_board::pacing::ParsePacingError;
@@ -61,22 +62,19 @@ pub(crate) enum PacingView {
     },
 }
 
-/// A scaled pacing's factor, finite and above 0 as Rust's
-/// `Pacing::checked` requires, from Python or from a Rust pacing that
-/// is checked: so no `Pacing.Scaled` holds a NaN or a signed zero, and
-/// `==` and `hash` agree.
+/// A scaled pacing's factor, Rust's `pacing::Factor` (finite and above
+/// 0) as a Python float: so no `Pacing.Scaled` holds a NaN or a signed
+/// zero, and `==` and `hash` agree.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Factor(f64);
+pub(crate) struct Factor(pacing::Factor);
 
 impl<'a, 'py> FromPyObject<'a, 'py> for Factor {
     type Error = PyErr;
 
     /// A factor not finite and above 0 raises `ValueError`.
     fn extract(object: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        let factor = object.extract()?;
-        Pacing::Scaled(factor)
-            .checked()
-            .map(|_| Self(factor))
+        pacing::Factor::new(object.extract()?)
+            .map(Self)
             .map_err(|error| PyValueError::new_err(error.to_string()))
     }
 }
@@ -87,7 +85,7 @@ impl<'py> IntoPyObject<'py> for Factor {
     type Error = Infallible;
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        self.0.into_pyobject(py)
+        self.0.get().into_pyobject(py)
     }
 }
 
@@ -103,7 +101,7 @@ impl PacingView {
 }
 
 impl From<Pacing> for PacingView {
-    /// A Rust pacing, checked where a board took it or a parse made it.
+    /// A Rust pacing.
     fn from(pacing: Pacing) -> Self {
         match pacing {
             Pacing::Unpaced => Self::Unpaced(),
@@ -114,6 +112,7 @@ impl From<Pacing> for PacingView {
             // a pacing the bindings do not know, by its factor
             other => other
                 .factor()
+                .and_then(|factor| pacing::Factor::new(factor).ok())
                 .map_or(Self::Unpaced(), |factor| Self::Scaled {
                     factor: Factor(factor),
                 }),
@@ -156,7 +155,7 @@ impl PacingView {
         Ok(match self {
             Self::Unpaced() => "Pacing.Unpaced()".to_owned(),
             Self::RealTime() => "Pacing.RealTime()".to_owned(),
-            Self::Scaled { factor } => format!("Pacing.Scaled({})", repr(py, factor.0)?),
+            Self::Scaled { factor } => format!("Pacing.Scaled({})", repr(py, factor.0.get())?),
         })
     }
 }
@@ -197,10 +196,8 @@ impl BoardControlView {
     }
 
     /// Paces the board's runs from their next quantum.
-    fn set_pacing(&self, pacing: PacingView) -> PyResult<()> {
-        self.0
-            .set_pacing(pacing.pacing())
-            .map_err(|error| PyValueError::new_err(error.to_string()))
+    fn set_pacing(&self, pacing: PacingView) {
+        self.0.set_pacing(pacing.pacing());
     }
 
     /// The pacing, `Pacing.Unpaced()` until set.

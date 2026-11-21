@@ -1310,14 +1310,14 @@ impl BoardView {
         let control = self.board.control();
         let previous = control.pacing();
         if let Some(pacing) = pacing {
-            control.set_pacing(pacing).map_err(value_error)?;
+            control.set_pacing(pacing);
         }
         let outcome = control::run_until_paced(py, &mut self.board, until, quantum);
         // this call's pacing put back, unless another thread changed it
         if let Some(pacing) = pacing
             && control.pacing() == pacing
         {
-            control.set_pacing(previous).map_err(value_error)?;
+            control.set_pacing(previous);
         }
         self.finished(outcome)
     }

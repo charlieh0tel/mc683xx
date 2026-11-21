@@ -10,6 +10,8 @@
 //! [plan-boards]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#boards
 
 use std::fmt;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::time::Duration;
@@ -28,8 +30,64 @@ pub const QUANTUM: NonZeroSpan = NonZeroSpan::from_millis(5);
 /// for a stop or a change of pacing (and, in Python, for Ctrl-C).
 const SLICE: Duration = Duration::from_millis(20);
 
+/// Board seconds a wall second, for [`Pacing::Scaled`]: finite and
+/// above 0, so never a NaN or a signed zero, and `==` and `Hash` agree.
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub struct Factor(f64);
+
+impl Factor {
+    /// `factor`, if it is finite and above 0.
+    ///
+    /// # Errors
+    ///
+    /// [`PacingError::Factor`] for any other.
+    pub fn new(factor: f64) -> Result<Self, PacingError> {
+        if factor.is_finite() && factor > 0.0 {
+            Ok(Self(factor))
+        } else {
+            Err(PacingError::Factor(factor))
+        }
+    }
+
+    /// Its value.
+    #[must_use]
+    pub const fn get(self) -> f64 {
+        self.0
+    }
+}
+
+impl TryFrom<f64> for Factor {
+    type Error = PacingError;
+
+    fn try_from(factor: f64) -> Result<Self, PacingError> {
+        Self::new(factor)
+    }
+}
+
+impl From<Factor> for f64 {
+    fn from(factor: Factor) -> Self {
+        factor.0
+    }
+}
+
+// Never a NaN, so equality is total.
+impl Eq for Factor {}
+
+impl Hash for Factor {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.to_bits().hash(state);
+    }
+}
+
+/// Its value, as a number.
+impl fmt::Display for Factor {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.0)
+    }
+}
+
 /// How fast a paced run's board time may go against wall time.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
 pub enum Pacing {
     /// As fast as the host runs it.
@@ -38,8 +96,8 @@ pub enum Pacing {
     /// A board second a wall second.
     RealTime,
     /// This many board seconds a wall second: 2.0 twice real time,
-    /// 0.5 half.  Finite and above 0.
-    Scaled(f64),
+    /// 0.5 half.
+    Scaled(Factor),
 }
 
 impl Pacing {
@@ -49,21 +107,7 @@ impl Pacing {
         match self {
             Self::Unpaced => None,
             Self::RealTime => Some(1.0),
-            Self::Scaled(factor) => Some(factor),
-        }
-    }
-
-    /// It, if its factor is finite and above 0.
-    ///
-    /// # Errors
-    ///
-    /// [`PacingError::Factor`] for any other factor.
-    pub fn checked(self) -> Result<Self, PacingError> {
-        match self {
-            Self::Scaled(factor) if !(factor.is_finite() && factor > 0.0) => {
-                Err(PacingError::Factor(factor))
-            }
-            other => Ok(other),
+            Self::Scaled(factor) => Some(factor.get()),
         }
     }
 }
@@ -95,15 +139,15 @@ impl FromStr for Pacing {
                 let factor: f64 = text
                     .parse()
                     .map_err(|_| ParsePacingError::Unknown(text.to_owned()))?;
-                Self::Scaled(factor)
-                    .checked()
+                Factor::new(factor)
+                    .map(Self::Scaled)
                     .map_err(ParsePacingError::Factor)
             }
         }
     }
 }
 
-/// A pacing that cannot be kept.
+/// A pacing's factor that cannot be kept.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 #[non_exhaustive]
 pub enum PacingError {
@@ -293,12 +337,25 @@ mod tests {
     /// A millisecond in picoseconds.
     const MILLISECOND: u64 = Span::from_millis(1).picos();
 
+    /// The pacing at `factor`.
+    fn scaled(factor: f64) -> Pacing {
+        Pacing::Scaled(Factor::new(factor).unwrap())
+    }
+
+    #[test]
+    fn a_factor_is_finite_and_above_0() {
+        assert_eq!(Factor::new(0.5).map(f64::from), Ok(0.5));
+        for factor in [0.0, -0.0, -1.0, f64::INFINITY, f64::NAN] {
+            assert!(Factor::new(factor).is_err(), "{factor}");
+        }
+    }
+
     #[test]
     fn a_pacing_reads_as_it_prints() {
-        for pacing in [Pacing::Unpaced, Pacing::RealTime, Pacing::Scaled(2.5)] {
+        for pacing in [Pacing::Unpaced, Pacing::RealTime, scaled(2.5)] {
             assert_eq!(pacing.to_string().parse(), Ok(pacing));
         }
-        assert_eq!("0.5".parse(), Ok(Pacing::Scaled(0.5)));
+        assert_eq!("0.5".parse(), Ok(scaled(0.5)));
         assert_eq!(
             "fast".parse::<Pacing>(),
             Err(ParsePacingError::Unknown("fast".to_owned()))
@@ -318,7 +375,7 @@ mod tests {
     fn a_pacer_holds_board_time_to_wall_time_times_the_factor() {
         let start = Duration::ZERO;
         let mut pacer = Pacer::new();
-        let twice = Pacing::Scaled(2.0);
+        let twice = scaled(2.0);
         assert_eq!(
             pacer.delay_at(Time::from_picos(0), twice, start),
             Duration::ZERO
@@ -373,7 +430,7 @@ mod tests {
     #[test]
     fn a_host_clock_says_how_far_the_board_may_go() {
         let mut pacer = Pacer::new();
-        let twice = Pacing::Scaled(2.0);
+        let twice = scaled(2.0);
         let wall = |millis| Duration::from_millis(millis);
         let board = |millis| Time::from_picos(millis * MILLISECOND);
         assert_eq!(pacer.due(board(0), Pacing::Unpaced, wall(0)), None);
@@ -435,7 +492,7 @@ mod tests {
     fn a_tiny_factor_waits_without_overflow() {
         let start = Duration::ZERO;
         let mut pacer = Pacer::new();
-        let crawl = Pacing::Scaled(f64::MIN_POSITIVE);
+        let crawl = scaled(f64::MIN_POSITIVE);
         pacer.delay_at(Time::from_picos(0), crawl, start);
         assert_eq!(
             pacer.delay_at(Time::from_picos(1), crawl, start),

@@ -186,7 +186,8 @@ impl Board {
     #[wasm_bindgen(js_name = setPacing)]
     pub fn set_pacing(&mut self, pacing: &str) -> Result<(), Error> {
         let pacing: Pacing = pacing.parse()?;
-        Ok(self.board.control().set_pacing(pacing)?)
+        self.board.control().set_pacing(pacing);
+        Ok(())
     }
 
     /// Runs `picoseconds` of board time from now, unpaced (Rust's
