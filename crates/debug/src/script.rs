@@ -82,6 +82,12 @@ const MASK: &str = "mask";
 const TIMEOUT_MS: &str = "timeout_ms";
 /// The `fc` clause.
 const FC: &str = "fc";
+/// An address operand, as an error names it.
+const ADDRESS: &str = "address";
+/// A value operand, as an error names it.
+const VALUE: &str = "value";
+/// A register operand, as an error names it.
+const REGISTER: &str = "register";
 
 /// A memory command's clause: a keyword and a number after it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -98,6 +104,9 @@ pub enum Clause {
 }
 
 impl Clause {
+    /// Every clause.
+    const ALL: [Self; 4] = [Self::Expect, Self::Mask, Self::TimeoutMs, Self::Fc];
+
     /// The clause's keyword.
     const fn keyword(self) -> &'static str {
         match self {
@@ -115,6 +124,23 @@ impl fmt::Display for Clause {
         formatter.write_str(self.keyword())
     }
 }
+
+/// The clause its keyword names, as [`Clause`]'s `Display` prints it.
+impl FromStr for Clause {
+    type Err = ParseClauseError;
+
+    fn from_str(keyword: &str) -> Result<Self, ParseClauseError> {
+        Self::ALL
+            .into_iter()
+            .find(|clause| clause.keyword() == keyword)
+            .ok_or_else(|| ParseClauseError(keyword.to_owned()))
+    }
+}
+
+/// Text that is no clause's keyword.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no clause {0:?}")]
+pub struct ParseClauseError(String);
 
 /// What a command can lack ([`ParseCommandError::Missing`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,13 +160,35 @@ pub enum Operand {
 impl fmt::Display for Operand {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Address => formatter.write_str("address"),
-            Self::Value => formatter.write_str("value"),
-            Self::Register => formatter.write_str("register"),
+            Self::Address => formatter.write_str(ADDRESS),
+            Self::Value => formatter.write_str(VALUE),
+            Self::Register => formatter.write_str(REGISTER),
             Self::Clause(clause) => clause.fmt(formatter),
         }
     }
 }
+
+/// The operand as [`Operand`]'s `Display` prints it.
+impl FromStr for Operand {
+    type Err = ParseOperandError;
+
+    fn from_str(name: &str) -> Result<Self, ParseOperandError> {
+        match name {
+            ADDRESS => Ok(Self::Address),
+            VALUE => Ok(Self::Value),
+            REGISTER => Ok(Self::Register),
+            _ => name
+                .parse()
+                .map(Self::Clause)
+                .map_err(|_| ParseOperandError(name.to_owned())),
+        }
+    }
+}
+
+/// Text that names no operand.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no operand {0:?}")]
+pub struct ParseOperandError(String);
 
 /// One command of a script.
 #[derive(Debug, Clone, PartialEq, Eq)]

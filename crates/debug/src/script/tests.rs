@@ -437,3 +437,25 @@ fn a_bad_line_names_its_number() {
         "line 3: \"d9\": not a data or address register"
     );
 }
+
+#[test]
+fn clauses_and_operands_print_as_named_and_parse_back() {
+    let operands = [Operand::Address, Operand::Value, Operand::Register]
+        .into_iter()
+        .chain(Clause::ALL.map(Operand::Clause));
+    for operand in operands {
+        assert_eq!(operand.to_string().parse(), Ok(operand));
+    }
+    for clause in Clause::ALL {
+        assert_eq!(clause.to_string().parse(), Ok(clause));
+    }
+    assert_eq!("timeout_ms".parse(), Ok(Clause::TimeoutMs));
+    assert_eq!(
+        "Mask".parse::<Clause>().unwrap_err().to_string(),
+        "no clause \"Mask\""
+    );
+    assert_eq!(
+        "size".parse::<Operand>().unwrap_err().to_string(),
+        "no operand \"size\""
+    );
+}
