@@ -208,7 +208,8 @@ Crates:
   a mutator is `set_*`; an accessor is the noun, `_mut` for the
   mutable one (`Board::peripheral`, `peripheral_mut`); a state reads
   as the state (`halted`).  How a run ended is a `*Run` (`Run`,
-  `LimitedRun`, `BoardRun`); `restore` is a snapshot's alone.
+  `LimitedRun`, `BoardRun`); a gdb session is not a run, so how one
+  ended is not a `*Run` (`Ending`).  `restore` is a snapshot's alone.
 - A type with a name or a printed form implements `Display`, and
   `FromStr` if it can be named, not `name()` and `from_name()`; the
   parse error is `Parse<Type>Error`.
