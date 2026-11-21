@@ -1158,6 +1158,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "a Windows lock is mandatory, and this reads the file a run holds"
+    )]
     fn writes_reach_the_file_and_the_next_run() {
         let scratch = Scratch::new("persist");
         fs::write(scratch.file("image.bin"), [7_u8; SIZE]).unwrap();
@@ -1302,6 +1306,10 @@ mod tests {
     /// The lock comes first: a run refused the file neither reads nor
     /// replaces it.
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "a Windows lock is mandatory, and this reads the file a run holds"
+    )]
     fn a_run_refused_the_lock_leaves_the_file_alone() {
         let scratch = Scratch::new("order");
         let path = scratch.file("cells.bin");
@@ -1316,6 +1324,10 @@ mod tests {
     /// Runs opening one file at once: one has it, the others are
     /// refused, and the file is whole.
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "a Windows lock is mandatory, and this reads the file a run holds"
+    )]
     fn of_runs_opening_the_file_at_once_one_has_it() {
         const RUNS: usize = 8;
         for round in 0..16 {
