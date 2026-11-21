@@ -368,7 +368,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
         }
         for event in chip.take_events() {
             println!("{name}: {event:?} at PC {pc:#x}");
-            if let Event::Reset(..) = event {
+            if let Event::Reset { .. } = event {
                 tail_start = None;
                 resets += 1;
             }

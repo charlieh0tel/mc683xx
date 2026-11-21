@@ -1234,17 +1234,20 @@ fn peripheral_of(chip: &Mc68331, id: PeripheralId) -> &Replay {
 /// `event`'s record, if the reference would trace it.
 fn chip_record(chip: &Mc68331, ram: MemoryId, pc: u32, event: Event) -> Option<Record> {
     match event {
-        Event::Access(access)
-            if traced_address(access.address.0) && !access.function_code.is_cpu_space() =>
-        {
-            Some(Record::Access {
-                write: access.write,
-                address: access.address.0,
-                size: access.size.bytes() as u8,
-                value: access.value.unwrap_or_default(),
-            })
-        }
-        Event::Exception(_, entry) => {
+        Event::Access {
+            address,
+            size,
+            function_code,
+            write,
+            value,
+            ..
+        } if traced_address(address.0) && !function_code.is_cpu_space() => Some(Record::Access {
+            write,
+            address: address.0,
+            size: size.bytes() as u8,
+            value: value.unwrap_or_default(),
+        }),
+        Event::Exception { entry, .. } => {
             let memory = chip.memory(ram);
             let offset = entry.stack.0 as usize & (memory.len() - 1);
             let sr = memory

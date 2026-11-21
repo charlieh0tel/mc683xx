@@ -711,7 +711,7 @@ impl chip::Chip for Mc68331 {
 
     fn reset_pulse(event: &Event) -> Option<(Cycles, Cycles)> {
         match *event {
-            Event::Reset(at, _) => Some((at, at + Cycles(RESET_CLOCKS))),
+            Event::Reset { now, .. } => Some((now, now + Cycles(RESET_CLOCKS))),
             _ => None,
         }
     }

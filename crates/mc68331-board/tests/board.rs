@@ -1829,7 +1829,7 @@ dsack = "DSACK1"
         .take_events()
         .into_iter()
         .filter_map(|event| match event {
-            Event::Dsack(_, fault) => Some(fault),
+            Event::Dsack { fault, .. } => Some(fault),
             _ => None,
         })
         .collect();
@@ -1900,7 +1900,7 @@ dsack = "both"
         !board
             .take_events()
             .iter()
-            .any(|event| matches!(event, Event::Dsack(..))),
+            .any(|event| matches!(event, Event::Dsack { .. })),
         "DSACK1 ends every cycle"
     );
     let registers = &board.chip().cpu().registers;
@@ -3165,7 +3165,7 @@ to = ["chip.RESET"]
         .take_events()
         .into_iter()
         .filter_map(|event| match event {
-            Event::Reset(_, cause) => Some(cause),
+            Event::Reset { cause, .. } => Some(cause),
             _ => None,
         })
         .collect();
@@ -3230,7 +3230,11 @@ to = ["chip.RESET"]
             .take_events()
             .into_iter()
             .filter_map(|event| match event {
-                Event::Reset(at, ResetCause::External) => Some(base.time(at)),
+                Event::Reset {
+                    now,
+                    cause: ResetCause::External,
+                    ..
+                } => Some(base.time(now)),
                 _ => None,
             })
             .collect()
@@ -3470,7 +3474,11 @@ to = ["external.reset"]
         .take_events()
         .into_iter()
         .find_map(|event| match event {
-            Event::Reset(at, ResetCause::Watchdog) => Some(at),
+            Event::Reset {
+                now,
+                cause: ResetCause::Watchdog,
+                ..
+            } => Some(now),
             _ => None,
         });
     assert!(watchdog.is_some(), "the watchdog reset the chip");
@@ -3573,7 +3581,7 @@ fn seen(board: &mut Board<Mc68331>, at: Time) -> Seen {
         .take_events()
         .into_iter()
         .filter_map(|event| match event {
-            Event::Reset(cycles, cause) => Some((base.time(cycles).since(at), cause)),
+            Event::Reset { now, cause, .. } => Some((base.time(now).since(at), cause)),
             _ => None,
         })
         .collect();
@@ -3619,7 +3627,11 @@ fn a_host_watchdog_reset_is_a_timeout() {
         .take_events()
         .into_iter()
         .find_map(|event| match event {
-            Event::Reset(at, ResetCause::Watchdog) => Some(base.time(at)),
+            Event::Reset {
+                now,
+                cause: ResetCause::Watchdog,
+                ..
+            } => Some(base.time(now)),
             _ => None,
         })
         .expect("the watchdog timed out");

@@ -727,6 +727,8 @@ pub(crate) enum Event {
     /// Two interrupt sources of one level had the same nonzero IARB;
     /// a fixed order chose (PLAN.md, Where the manuals are silent).
     ArbitrationTie {
+        /// When the level was acknowledged, in system clocks.
+        now: u64,
         /// The level acknowledged.
         level: u8,
         /// The IARB value they shared.
@@ -760,6 +762,10 @@ pub(crate) enum Event {
         pc: u32,
         /// Its handler's address.
         handler: u32,
+        /// SSP: its frame's lowest address.
+        stack: u32,
+        /// The interrupt level, for an interrupt.
+        level: Option<u8>,
     },
     /// A peripheral's DSACK pins (`Builder.dsack`) disagree with the chip
     /// on an externally terminated cycle at `now`: told once for each
@@ -776,30 +782,47 @@ impl Event {
     /// `event` as Python sees it, if Python has it.
     pub(crate) fn of(event: event::Event) -> Option<Self> {
         Some(match event {
-            event::Event::Reset(now, cause) => Self::Reset {
+            event::Event::Reset { now, cause, .. } => Self::Reset {
                 now: now.0,
                 cause: cause.into(),
             },
-            event::Event::ArbitrationTie { level, arbitration } => Self::ArbitrationTie {
+            event::Event::ArbitrationTie {
+                now,
+                level,
+                arbitration,
+                ..
+            } => Self::ArbitrationTie {
+                now: now.0,
                 level: level.get(),
                 arbitration,
             },
-            event::Event::Access(access) => Self::Access {
-                now: access.now.0,
-                address: access.address.0,
-                size: access.size.bytes(),
-                function_code: access.function_code.bits(),
-                write: access.write,
-                value: access.value,
-                bus_error: access.bus_error,
+            event::Event::Access {
+                now,
+                address,
+                size,
+                function_code,
+                write,
+                value,
+                bus_error,
+                ..
+            } => Self::Access {
+                now: now.0,
+                address: address.0,
+                size: size.bytes(),
+                function_code: function_code.bits(),
+                write,
+                value,
+                bus_error,
             },
-            event::Event::Exception(now, entry) => Self::Exception {
+            event::Event::Exception { now, entry, .. } => Self::Exception {
                 now: now.0,
                 vector: entry.vector.0,
                 pc: entry.pc.0,
                 handler: entry.handler.0,
+                stack: entry.stack.0,
+                level: entry.level.map(|level| level.get()),
             },
-            event::Event::Dsack(now, fault) => Self::Dsack {
+            event::Event::Dsack { now, fault, .. } => Self::Dsack {
                 now: now.0,
                 fault: DsackFaultView::of(fault)?,
             },

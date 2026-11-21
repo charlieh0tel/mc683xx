@@ -318,7 +318,10 @@ fn csboot_serves_the_reset_vectors_with_13_wait_states() {
     assert_eq!(run.stop, Stop::Budget);
     assert_eq!(
         chip.take_events(),
-        [Event::Reset(Cycles::ZERO, ResetCause::PowerOn)]
+        [Event::Reset {
+            now: Cycles::ZERO,
+            cause: ResetCause::PowerOn
+        }]
     );
     // the 1-Mbyte block repeats the 64-Kbyte ROM
     assert_eq!(cycle(&mut chip, 0x1_0004, Size::Word, None), Ok((0, 16)));
@@ -834,10 +837,10 @@ fn a_peripherals_dsack_is_checked_against_pepar() {
     assert_eq!(cycle(&mut chip, 0x60_0000, Size::Word, None), Err(BusError));
     assert_eq!(
         chip.take_events(),
-        [Event::Dsack(
-            Cycles::ZERO,
-            DsackFault::Unassigned { select: cs(2) }
-        )]
+        [Event::Dsack {
+            now: Cycles::ZERO,
+            fault: DsackFault::Unassigned { select: cs(2) }
+        }]
     );
     // PE1 alone assigned: DSACK1 ends it
     write_register(&mut chip, SIM + 0x16, 0x0002);
@@ -1191,7 +1194,13 @@ fn the_watchdog_resets_the_chip_unless_serviced() {
     chip.run_for(Cycles(timeout.0));
     let events = chip.take_events();
     assert!(
-        matches!(events[..], [Event::Reset(_, ResetCause::Watchdog)]),
+        matches!(
+            events[..],
+            [Event::Reset {
+                cause: ResetCause::Watchdog,
+                ..
+            }]
+        ),
         "{events:?}"
     );
     assert_eq!(chip.sim().reset_status(), 0x20);
@@ -1208,7 +1217,7 @@ fn a_host_reset_sets_rsr_to_its_cause_alone() {
         let now = chip.now();
         chip.reset_for(cause);
         assert_eq!(chip.sim().reset_status(), cause.status(), "{cause:?}");
-        assert_eq!(chip.take_events(), [Event::Reset(now, cause)]);
+        assert_eq!(chip.take_events(), [Event::Reset { now, cause }]);
         // the `reset` instruction's leaves the CPU running (SIMRM 8.2.6)
         assert_eq!(
             chip.cpu().registers.pc == Address(START),
@@ -1253,7 +1262,13 @@ fn a_host_watchdog_reset_leaves_the_chip_as_a_timeout_does() {
     let (mut timed_out, peripherals) = watched();
     timed_out.run_for(Cycles(512 * 256 + 100));
     let events = timed_out.take_events();
-    let [Event::Reset(timeout, ResetCause::Watchdog)] = events[..] else {
+    let [
+        Event::Reset {
+            now: timeout,
+            cause: ResetCause::Watchdog,
+        },
+    ] = events[..]
+    else {
         panic!("{events:?}");
     };
     let (mut host, _) = watched();
@@ -1262,7 +1277,10 @@ fn a_host_watchdog_reset_leaves_the_chip_as_a_timeout_does() {
     host.reset_for(ResetCause::Watchdog);
     assert_eq!(
         host.take_events(),
-        [Event::Reset(reset, ResetCause::Watchdog)]
+        [Event::Reset {
+            now: reset,
+            cause: ResetCause::Watchdog
+        }]
     );
     let after = Cycles(500);
     timed_out.run_until(timeout + after);
@@ -1310,7 +1328,7 @@ fn the_watchdog_resets_a_halted_chip() {
     let run = chip.run_for(timeout);
     let events = chip.take_events();
     assert!(
-        matches!(events[..], [Event::Reset(at, ResetCause::Watchdog), ..] if at <= timeout),
+        matches!(events[..], [Event::Reset { now: at, cause: ResetCause::Watchdog }, ..] if at <= timeout),
         "{events:?}"
     );
     assert_eq!(
@@ -1339,9 +1357,13 @@ fn a_halt_monitor_reset_that_slows_the_clock_ends_the_run() {
     let run = chip.run_for(Cycles(100_000));
     let events = chip.take_events();
     assert!(
-        events
-            .iter()
-            .any(|event| matches!(event, Event::Reset(_, ResetCause::HaltMonitor))),
+        events.iter().any(|event| matches!(
+            event,
+            Event::Reset {
+                cause: ResetCause::HaltMonitor,
+                ..
+            }
+        )),
         "{events:?}"
     );
     assert_eq!(chip.sim().clock().frequency().hz(), 8_388_608);
@@ -1373,6 +1395,7 @@ fn iarb_arbitrates_the_sim_qsm_and_gpt_at_one_level() {
     chip.run_for(Cycles(2000));
     chip.take_events();
     let tie = Event::ArbitrationTie {
+        now: chip.now(),
         level: five,
         arbitration: 0xf,
     };
@@ -1425,7 +1448,10 @@ fn the_reset_instruction_resets_the_peripherals_not_the_sim() {
     assert_eq!(chip.peripheral::<Recorder>(board.duart).unwrap().resets, 2);
     assert_eq!(
         chip.take_events().last(),
-        Some(&Event::Reset(Cycles(7), ResetCause::System))
+        Some(&Event::Reset {
+            now: Cycles(7),
+            cause: ResetCause::System
+        })
     );
 }
 
@@ -1525,7 +1551,10 @@ fn the_reset_instruction_ends_a_run_watching_reset_from_fast_memory() {
     assert!(run.cycles < Cycles(1_000), "after it: {:?}", run.cycles);
     assert_eq!(
         chip.take_events().last(),
-        Some(&Event::Reset(Cycles::ZERO, ResetCause::System))
+        Some(&Event::Reset {
+            now: Cycles::ZERO,
+            cause: ResetCause::System
+        })
     );
 }
 
@@ -1859,7 +1888,7 @@ fn in_lpstop_only_the_pit_wakes_and_the_gpt_and_qsm_stop() {
     let taken = loop {
         chip.run_for(Cycles(16));
         if let Some(taken) = chip.take_events().iter().find_map(|event| match event {
-            Event::Exception(now, entry) => Some((*now, entry.vector, entry.level)),
+            Event::Exception { now, entry } => Some((*now, entry.vector, entry.level)),
             _ => None,
         }) {
             break taken;
@@ -1898,7 +1927,7 @@ fn first_interrupt(program: &[u16], vector: u8, budget: Cycles) -> Cycles {
     while chip.now() < end {
         chip.run_for(budget);
         if let Some(now) = chip.take_events().iter().find_map(|event| match event {
-            Event::Exception(now, _) => Some(*now),
+            Event::Exception { now, .. } => Some(*now),
             _ => None,
         }) {
             return now;
@@ -2246,7 +2275,13 @@ fn a_reset_reaches_only_the_peripherals_in_its_scope() {
     chip.run_for(Cycles(512 * 256 + 100));
     let events = chip.take_events();
     assert!(
-        matches!(events[..], [Event::Reset(_, ResetCause::Watchdog)]),
+        matches!(
+            events[..],
+            [Event::Reset {
+                cause: ResetCause::Watchdog,
+                ..
+            }]
+        ),
         "{events:?}"
     );
     assert_eq!(resets(&chip), [4, 3, 1, 0]);
@@ -2502,7 +2537,7 @@ fn a_request_the_host_moves_between_runs_is_seen() {
     assert!(
         chip.take_events().iter().any(|event| matches!(
             event,
-            Event::Exception(_, entry) if entry.level == Some(seven.level())
+            Event::Exception { entry, .. } if entry.level == Some(seven.level())
         )),
         "level 7 taken"
     );
@@ -2678,14 +2713,20 @@ fn tracing_reports_peripheral_cycles_and_exceptions() {
     let before = chip.instructions();
     chip.run_for(Cycles(2000));
     let events = chip.take_events();
-    let Some(Event::Access(access)) = events.first() else {
+    let Some(&Event::Access {
+        address,
+        write,
+        value,
+        ..
+    }) = events.first()
+    else {
         panic!("an access first: {events:?}");
     };
-    assert_eq!(access.address, Address(CS1_BASE + 2));
-    assert_eq!((access.write, access.value), (false, Some(0x1234)));
+    assert_eq!(address, Address(CS1_BASE + 2));
+    assert_eq!((write, value), (false, Some(0x1234)));
     assert!(events.iter().any(|event| matches!(
         event,
-        Event::Exception(_, entry)
+        Event::Exception { entry, .. }
             if entry.vector == Vector::ILLEGAL_INSTRUCTION && entry.pc == Address(START + 6)
     )));
     assert!(chip.instructions() >= before + 2);
@@ -3505,7 +3546,7 @@ fn oc1_after_wake(budget: Cycles) -> Cycles {
     while chip.now() < end {
         chip.run_for(budget);
         for event in chip.take_events() {
-            if let Event::Exception(now, entry) = event {
+            if let Event::Exception { now, entry } = event {
                 woke |= entry.vector == Vector(0x50);
                 if entry.vector == Vector(0x64) {
                     assert!(woke, "OC1 before the wake");

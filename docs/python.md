@@ -774,8 +774,10 @@ invalid hooks.
 
 `set_tracing(accesses=, exceptions=)` adds `Event.Access` for each bus
 cycle that reaches the chip (not the RAM and ROM the core serves) and
-`Event.Exception` for each exception entered; `instructions` counts
-instructions.
+`Event.Exception(now, vector, pc, handler, stack, level)` for each
+exception entered, the fields an `ExceptionEntry` has; `instructions`
+counts instructions.  Every `Event` has its time, `now`, in system
+clocks.
 
 ```python
 store = START + 2 * len(PROLOGUE)

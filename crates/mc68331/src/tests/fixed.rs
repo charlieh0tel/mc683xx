@@ -206,9 +206,15 @@ fn a_fixed_memory_survives_resets_unless_reloaded() {
 
 /// Whether the watchdog reset the chip since the last look.
 fn watchdog_reset(chip: &mut Mc68331) -> bool {
-    chip.take_events()
-        .iter()
-        .any(|event| matches!(event, Event::Reset(_, ResetCause::Watchdog)))
+    chip.take_events().iter().any(|event| {
+        matches!(
+            event,
+            Event::Reset {
+                cause: ResetCause::Watchdog,
+                ..
+            }
+        )
+    })
 }
 
 #[test]

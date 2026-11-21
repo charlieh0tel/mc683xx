@@ -514,7 +514,10 @@ impl Board {
             self.system_reload = true;
             self.sync = true;
         }
-        self.events.push(Event::Reset(now, ResetCause::System));
+        self.events.push(Event::Reset {
+            now,
+            cause: ResetCause::System,
+        });
         self.output_written();
         if self.output_stop.reset {
             self.output_moved = true;
@@ -871,7 +874,7 @@ impl Board {
     fn tell_dsack(&mut self, peripheral: usize, told: u8, now: Cycles, fault: DsackFault) {
         if self.dsack_told[peripheral] & told == 0 {
             self.dsack_told[peripheral] |= told;
-            self.events.push(Event::Dsack(now, fault));
+            self.events.push(Event::Dsack { now, fault });
         }
     }
 
@@ -1138,8 +1141,11 @@ impl Board {
             .iter()
             .any(|(other, source)| *other == arbitration && is_sim(*source));
         if modules_at + usize::from(sim_at) > 1 {
-            self.events
-                .push(Event::ArbitrationTie { level, arbitration });
+            self.events.push(Event::ArbitrationTie {
+                now,
+                level,
+                arbitration,
+            });
         }
         match winner {
             Source::Timer => Acknowledge::Vector(self.sim.acknowledge_timer()).into(),

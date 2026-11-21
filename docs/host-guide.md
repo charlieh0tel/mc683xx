@@ -637,7 +637,7 @@ assert_eq!(chip.peripheral::<Alarm>(alarm).unwrap().now, then);
 The watchdog, the halt monitor and the `reset` instruction make their
 own.  Each resets the SIM and the modules, returns the decode to
 CSBOOT alone, resets the peripherals in its scope, and appears as an
-`Event::Reset(now, cause)` in `take_events` (the power-on reset
+`Event::Reset { now, cause }` in `take_events` (the power-on reset
 included).  Every reset source drives RESET (SIMRM Table 8-1), but a
 board need not wire every peripheral to it: `ResetScope` names the causes
 that reach one.
@@ -708,7 +708,7 @@ let causes: Vec<ResetCause> = chip
     .take_events()
     .into_iter()
     .filter_map(|event| match event {
-        Event::Reset(_, cause) => Some(cause),
+        Event::Reset { cause, .. } => Some(cause),
         _ => None,
     })
     .collect();
@@ -1224,7 +1224,7 @@ let writes: Vec<u32> = chip
     .take_events()
     .into_iter()
     .filter_map(|event| match event {
-        Event::Access(access) if access.write => Some(access.address.0),
+        Event::Access { address, write: true, .. } => Some(address.0),
         _ => None,
     })
     .collect();
@@ -1655,14 +1655,16 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `FaultCause`, `hooks::Invalid`, the GPT's `OutputChange` and
   `pwm::Output`, and the board's `Signal`, `signal::Kind`,
   `mc68331::Pin`, `peripheral::Role`, `chip::MemoryPlace` and
-  `trace::Record`.  A match on one needs a wildcard arm.  Enums of
+  `trace::Record`.  A match on one needs a wildcard arm.  The chip's
+  `Event` is, and so is each of its variants, a struct variant with
+  its time (`now`): a pattern on one needs `..`.  Enums of
   what the hardware fixes (`Size`, `ChipSelect`, `PortName`,
   `pwm::Channel`, `Lane`, `Direction`) are not.
 - So are the structs a host reads but does not build: the hook
   payloads (`hooks::Instruction`, `MemoryAccess`, `InvalidAccess`,
   `ExceptionEntry`), `bus::BusAccess`, `peripheral::BusCycle`, the run
   results (`Run`, `LimitedRun`, `FaultStop`, `Intercepted`,
-  `BoardRun`), `event::TracedAccess`, the trace's record structs,
+  `BoardRun`), the trace's record structs,
   `board::External`, `board::Trace`, `peripheral::Driving`, `Driven`
   and `MemoryWrite`, `builtin::Logged`, `inspect::Inspection` and
   `Field`, and `registry::Constructed` and `Context`; and the values a

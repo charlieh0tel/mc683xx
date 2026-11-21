@@ -666,8 +666,10 @@ class Event:
     class ArbitrationTie(Event):
         """Two interrupt sources of one level had the same nonzero IARB."""
 
-        __match_args__ = ("level", "arbitration")
-        def __new__(cls, level: int, arbitration: int) -> Event.ArbitrationTie: ...
+        __match_args__ = ("now", "level", "arbitration")
+        def __new__(cls, now: int, level: int, arbitration: int) -> Event.ArbitrationTie: ...
+        @property
+        def now(self) -> int: ...
         @property
         def level(self) -> int: ...
         @property
@@ -715,8 +717,10 @@ class Event:
     class Exception(Event):
         """An exception entered, while exceptions are traced."""
 
-        __match_args__ = ("now", "vector", "pc", "handler")
-        def __new__(cls, now: int, vector: int, pc: int, handler: int) -> Event.Exception: ...
+        __match_args__ = ("now", "vector", "pc", "handler", "stack", "level")
+        def __new__(
+            cls, now: int, vector: int, pc: int, handler: int, stack: int, level: int | None
+        ) -> Event.Exception: ...
         @property
         def now(self) -> int: ...
         @property
@@ -725,6 +729,10 @@ class Event:
         def pc(self) -> int: ...
         @property
         def handler(self) -> int: ...
+        @property
+        def stack(self) -> int: ...
+        @property
+        def level(self) -> int | None: ...
 
     @final
     class Dsack(Event):

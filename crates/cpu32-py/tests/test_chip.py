@@ -227,6 +227,11 @@ def test_tracing_sees_peripheral_cycles_and_exceptions():
     exceptions = [e for e in events if isinstance(e, mc683xx.Event.Exception)]
     assert exceptions[0].vector == BUS_ERROR
     assert exceptions[0].handler == BUS_ERROR_HANDLER
+    match exceptions[0]:
+        case mc683xx.Event.Exception(_, _, _, _, stack, level):
+            assert (stack, level) == (chip.read_register("SSP"), None)
+        case other:
+            pytest.fail(f"not an exception: {other}")
     assert chip.instructions > 5
 
 
@@ -250,9 +255,12 @@ def test_the_irq_pins():
     builder.autovector(7)
     chip = builder.build()
     chip.run_for(1000)
+    chip.set_tracing(exceptions=True)
     chip.set_interrupt_pin(7, True)
     chip.run_for(1000)
     assert chip.read_register("PC") > LEVEL_7_HANDLER
+    levels = [e.level for e in chip.take_events() if isinstance(e, mc683xx.Event.Exception)]
+    assert levels[0] == 7
     with pytest.raises(ValueError):
         chip.set_interrupt_pin(0, True)
 

@@ -549,7 +549,7 @@ fn monitor_reset_on_a_board_drives_reset_as_the_board_does() {
         .take_events()
         .into_iter()
         .filter_map(|event| match event {
-            Event::Reset(_, cause) => Some(cause),
+            Event::Reset { cause, .. } => Some(cause),
             _ => None,
         })
         .collect();

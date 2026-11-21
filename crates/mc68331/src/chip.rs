@@ -69,7 +69,6 @@ use crate::board::Wire;
 use crate::board::chip_memory;
 use crate::board::stall;
 use crate::debug::serial::Serial;
-use crate::event;
 use crate::event::ChipTracing;
 use crate::event::Event;
 use crate::gpt::Gpt;
@@ -981,7 +980,7 @@ impl Mc68331 {
         self.board.clock_changed();
         self.board.reset_others(now, cause);
         self.board.reload(&mut self.cpu.memory, cause);
-        self.board.events.push(Event::Reset(now, cause));
+        self.board.events.push(Event::Reset { now, cause });
         // the modules reset unfrozen, the serial interface off
         self.board.frozen = false;
         self.serial = Serial::default();
@@ -1408,7 +1407,7 @@ impl Connection<'_, '_> {
             write,
         );
         if board.tracing.accesses {
-            board.events.push(Event::Access(event::TracedAccess {
+            board.events.push(Event::Access {
                 now: access.now,
                 address: access.address,
                 size: access.size,
@@ -1416,7 +1415,7 @@ impl Connection<'_, '_> {
                 write: write.is_some(),
                 value: write.or(ended.ok().map(|(value, _)| value)),
                 bus_error: ended.is_err(),
-            }));
+            });
         }
         let (value, clocks) = ended?;
         Ok((value, stall(clocks)))
@@ -1460,7 +1459,7 @@ impl Bus for Connection<'_, '_> {
     fn exception_entered(&mut self, entry: &ExceptionEntry, now: Cycles) {
         let mut board = self.0.borrow_mut();
         if board.tracing.exceptions {
-            board.events.push(Event::Exception(now, *entry));
+            board.events.push(Event::Exception { now, entry: *entry });
         }
     }
 

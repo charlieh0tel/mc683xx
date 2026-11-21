@@ -128,10 +128,10 @@ fn a_bus_peripherals_dsack_waits_sizes_and_is_checked_against_pepar() {
     assert_eq!(cycle(&mut chip, WINDOW, Size::Byte, None), Err(BusError));
     assert_eq!(
         chip.take_events(),
-        [Event::Dsack(
-            Cycles::ZERO,
-            DsackFault::BusUnassigned { peripheral: id }
-        )]
+        [Event::Dsack {
+            now: Cycles::ZERO,
+            fault: DsackFault::BusUnassigned { peripheral: id }
+        }]
     );
 }
 
