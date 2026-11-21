@@ -767,6 +767,40 @@ fn a_polled_connection_reads_between_idles() {
     client.join().unwrap();
 }
 
+#[test]
+fn a_polled_peek_fails_once_gdb_has_gone() {
+    let (sender, port) = mpsc::channel();
+    let client = thread::spawn(move || {
+        let port: u16 = port.recv().unwrap();
+        drop(TcpStream::connect(("127.0.0.1", port)).unwrap());
+    });
+    let waiter = Counting {
+        waits: 0,
+        idles: 0,
+        last: usize::MAX,
+    };
+    let mut connection = accept_polled(
+        "127.0.0.1:0",
+        |at| {
+            sender.send(at.port()).unwrap();
+            Ok(())
+        },
+        waiter,
+    )
+    .unwrap();
+    client.join().unwrap();
+    let peeked = loop {
+        match connection.peek() {
+            Ok(None) => thread::sleep(POLL),
+            other => break other,
+        }
+    };
+    assert!(
+        matches!(&peeked, Err(PollError::Connection(error)) if error.kind() == io::ErrorKind::UnexpectedEof),
+        "{peeked:?}"
+    );
+}
+
 /// What `gdb` reads up to the end of the stub's next packet, its
 /// checksum's two digits included.
 fn read_packet(gdb: &mut TcpStream) -> String {

@@ -105,20 +105,27 @@ impl Connection for TcpStream {
     }
 
     fn peek(&mut self) -> io::Result<Option<u8>> {
-        self.set_nonblocking(true)?;
-        let mut byte = [0];
-        let peeked = TcpStream::peek(self, &mut byte);
-        self.set_nonblocking(false)?;
-        match peeked {
-            Ok(0) => Err(io::ErrorKind::UnexpectedEof.into()),
-            Ok(_) => Ok(Some(byte[0])),
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
-            Err(error) => Err(error),
-        }
+        peek_stream(self)
     }
 
     fn start(&mut self) -> io::Result<()> {
         self.set_nodelay(true)
+    }
+}
+
+/// The next byte on `stream` if one has come, without waiting for it
+/// or taking it; gdb having closed the connection, an
+/// [`UnexpectedEof`](io::ErrorKind::UnexpectedEof) error.
+fn peek_stream(stream: &TcpStream) -> io::Result<Option<u8>> {
+    stream.set_nonblocking(true)?;
+    let mut byte = [0];
+    let peeked = stream.peek(&mut byte);
+    stream.set_nonblocking(false)?;
+    match peeked {
+        Ok(0) => Err(io::ErrorKind::UnexpectedEof.into()),
+        Ok(_) => Ok(Some(byte[0])),
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
+        Err(error) => Err(error),
     }
 }
 
@@ -245,18 +252,7 @@ impl<W: Waiter> Connection for Polled<W> {
     /// threads in (gdb's own client among them).
     fn peek(&mut self) -> Result<Option<u8>, Self::Error> {
         let stream = &self.stream;
-        let peeked = self.waiter.wait(|| {
-            stream.set_nonblocking(true)?;
-            let mut byte = [0];
-            let peeked = stream.peek(&mut byte);
-            stream.set_nonblocking(false)?;
-            peeked.map(|_| byte[0])
-        });
-        match peeked {
-            Ok(byte) => Ok(Some(byte)),
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
-            Err(error) => Err(error.into()),
-        }
+        Ok(self.waiter.wait(|| peek_stream(stream))?)
     }
 
     fn start(&mut self) -> Result<(), Self::Error> {
