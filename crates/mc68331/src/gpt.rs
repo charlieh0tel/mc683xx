@@ -572,17 +572,10 @@ impl Gpt {
         self.refresh();
     }
 
-    /// The board drives PAI to `level` at `now`.
-    pub(crate) fn set_pai(&mut self, level: bool, now: Cycles) {
+    /// The board drives `input` to `level` at `now`.
+    pub(crate) fn set_input(&mut self, input: Input, level: bool, now: Cycles) {
         self.advance(now);
-        self.drive(Input::Pai, level, now);
-        self.refresh();
-    }
-
-    /// The board drives PCLK to `level` at `now`.
-    pub(crate) fn set_pclk(&mut self, level: bool, now: Cycles) {
-        self.advance(now);
-        self.drive(Input::Pclk, level, now);
+        self.drive(input, level, now);
         self.refresh();
     }
 

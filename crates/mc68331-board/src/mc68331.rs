@@ -564,10 +564,10 @@ impl ChipBuilder for Mc68331Builder {
             }
         }
         if let Some(pai) = pins.pai {
-            chip.set_pai(pai);
+            chip.set_gpt_input(Input::Pai, pai);
         }
         if let Some(pclk) = pins.pclk {
-            chip.set_pclk(pclk);
+            chip.set_gpt_input(Input::Pclk, pclk);
         }
         chip
     }

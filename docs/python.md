@@ -621,8 +621,8 @@ what the chip drives within a run comes back as timed changes.
   Port, driven, levels)]`, every port's in time order, OC1's CPROUT
   clock in port GP's while `set_report_oc1_clock_edges(True)` asks (a
   host with no board takes them, or they gather in the chip).
-- GPT: `set_pai`, `set_pclk`; `schedule_gpt_input(at, input, level)`
-  with `input` `"PGP0"`-`"PGP7"`, `"PAI"` or `"PCLK"`; `pwm(Channel.A |
+- GPT: `set_gpt_input(input, level)` now and
+  `schedule_gpt_input(at, input, level)` ahead, `input` `"PGP0"`-`"PGP7"`, `"PAI"` or `"PCLK"`; `pwm(Channel.A |
   B)` (`Output.Level(level)`, `Output.Wave`, `Output.Clock`); `oc1()`
   (`Output.Clock` under CPROUT, else `Output.Level`);
   `take_pwm_changes() -> [(now, Channel, level)]` while

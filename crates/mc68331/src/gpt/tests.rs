@@ -434,12 +434,12 @@ fn the_pulse_accumulator_counts_events_and_overflows() {
     let mut gpt = gpt();
     // PAEN, rising edges; PACNT $FE
     write(&mut gpt, 0x0c, 0x50fe, 0);
-    gpt.set_pai(false, Cycles(1));
-    gpt.set_pai(true, Cycles(2));
+    gpt.set_input(Input::Pai, false, Cycles(1));
+    gpt.set_input(Input::Pai, true, Cycles(2));
     assert_eq!(read(&mut gpt, 0x0c, 2), 0xd8ff, "PAIS, PCLKS");
     assert_eq!(read(&mut gpt, 0x22, 2), 0x0010, "PAIF");
-    gpt.set_pai(false, Cycles(3));
-    gpt.set_pai(true, Cycles(4));
+    gpt.set_input(Input::Pai, false, Cycles(3));
+    gpt.set_input(Input::Pai, true, Cycles(4));
     assert_eq!(read_byte(&mut gpt, 0x0d, 4), 0);
     assert_eq!(read(&mut gpt, 0x22, 4), 0x0030, "PAOVF");
 }
@@ -448,16 +448,16 @@ fn the_pulse_accumulator_counts_events_and_overflows() {
 fn gated_accumulation_counts_while_pai_is_high() {
     let mut gpt = gpt();
     // PAEN, PAMOD, PEDGE clear: a zero inhibits; the system clock / 512
-    gpt.set_pai(false, Cycles::ZERO);
+    gpt.set_input(Input::Pai, false, Cycles::ZERO);
     write(&mut gpt, 0x0c, 0x6000, 0);
-    gpt.set_pai(true, Cycles(512 * 10 + 100));
-    gpt.set_pai(false, Cycles(512 * 30));
+    gpt.set_input(Input::Pai, true, Cycles(512 * 10 + 100));
+    gpt.set_input(Input::Pai, false, Cycles(512 * 30));
     assert_eq!(read_byte(&mut gpt, 0x0d, 512 * 40), 20);
     assert_eq!(read(&mut gpt, 0x22, 512 * 40), 0x0010, "PAIF at the end");
     // PAOVI: the overflow is an event
     write(&mut gpt, 0x0c, 0x60f0, 512 * 40);
     write_byte(&mut gpt, 0x21, 0x20, 512 * 40);
-    gpt.set_pai(true, Cycles(512 * 40));
+    gpt.set_input(Input::Pai, true, Cycles(512 * 40));
     assert_eq!(gpt.next_event(), Some(Cycles(512 * 56)));
 }
 
@@ -467,8 +467,8 @@ fn pclk_can_clock_tcnt() {
     write_byte(&mut gpt, 0x21, 0x07, 0);
     write(&mut gpt, 0x14, 0x0002, 0);
     for edge in 1..=2 {
-        gpt.set_pclk(false, Cycles(edge * 10));
-        gpt.set_pclk(true, Cycles(edge * 10 + 5));
+        gpt.set_input(Input::Pclk, false, Cycles(edge * 10));
+        gpt.set_input(Input::Pclk, true, Cycles(edge * 10 + 5));
     }
     assert_eq!(read(&mut gpt, 0x0a, 1000), 2);
     assert_eq!(read(&mut gpt, 0x22, 1000), 0x0800, "OC1F");
@@ -616,11 +616,11 @@ fn the_pulse_accumulator_ignores_pai_while_held() {
         let mut gpt = gpt();
         // PAEN, rising edges; PAI low
         write(&mut gpt, 0x0c, 0x5000, 0);
-        gpt.set_pai(false, Cycles(1));
+        gpt.set_input(Input::Pai, false, Cycles(1));
         hold.set(&mut gpt, true, 4 * 0x10);
-        gpt.set_pai(true, Cycles(4 * 0x10 + 1));
-        gpt.set_pai(false, Cycles(4 * 0x10 + 2));
-        gpt.set_pai(true, Cycles(4 * 0x10 + 3));
+        gpt.set_input(Input::Pai, true, Cycles(4 * 0x10 + 1));
+        gpt.set_input(Input::Pai, false, Cycles(4 * 0x10 + 2));
+        gpt.set_input(Input::Pai, true, Cycles(4 * 0x10 + 3));
         assert_eq!(read_byte(&mut gpt, 0x0d, 4 * 0x20), 0, "{hold:?}: PACNT");
         assert_eq!(read(&mut gpt, 0x22, 4 * 0x20), 0, "{hold:?}: no PAIF");
         // the level that rose while held is an edge once they are clocked

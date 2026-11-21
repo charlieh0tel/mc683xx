@@ -1130,18 +1130,14 @@ impl Mc68331 {
         self.board.module(GPT)
     }
 
-    /// The board drives PAI to `level` now: the pulse accumulator's
-    /// input (GPTRM 4).
-    pub fn set_pai(&mut self, level: bool) {
+    /// The board drives the GPT's `input` to `level` now: a pin of port
+    /// GP (GPTRM 3.2, 8.1), PAI, the pulse accumulator's input (GPTRM
+    /// 4), or PCLK, its external clock (GPTRM 2.7).
+    pub fn set_gpt_input(&mut self, input: Input, level: bool) {
         let now = self.now;
-        self.board.module_mut::<Gpt>(GPT).set_pai(level, now);
-    }
-
-    /// The board drives PCLK to `level` now: the GPT's external clock
-    /// (GPTRM 2.7).
-    pub fn set_pclk(&mut self, level: bool) {
-        let now = self.now;
-        self.board.module_mut::<Gpt>(GPT).set_pclk(level, now);
+        self.board
+            .module_mut::<Gpt>(GPT)
+            .set_input(input, level, now);
     }
 
     /// The board will drive the GPT's `input` to `level` at `at`, or

@@ -876,8 +876,8 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
 
 ### GPT
 
-- Inputs now: `set_pins(Port::Gp, ..)` (IC1 to IC4/OC5), `set_pai`,
-  `set_pclk`.
+- Inputs now: `set_pins(Port::Gp, ..)` (IC1 to IC4/OC5), or one
+  `set_gpt_input(Input, level)`: a port GP pin, PAI or PCLK.
 - Inputs ahead: `schedule_gpt_input(at, Input, level)` for an edge a
   board model times itself (an FPGA's 1 PPS on IC1): the GPT captures,
   counts or clocks at `at`, and a run's quantum ends there.  `Input` is

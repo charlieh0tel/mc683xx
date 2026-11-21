@@ -1599,14 +1599,11 @@ chip_methods! {
         Ok((shifted.miso, shifted.driven))
     }
 
-    /// The board drives PAI to `level` now (GPTRM 4).
-    fn set_pai(&mut self, level: bool) {
-        self.chip.set_pai(level);
-    }
-
-    /// The board drives PCLK to `level` now (GPTRM 2.7).
-    fn set_pclk(&mut self, level: bool) {
-        self.chip.set_pclk(level);
+    /// The board drives GPT input `input`, `PGP0` to `PGP7`, `PAI` or
+    /// `PCLK`, to `level` now.
+    fn set_gpt_input(&mut self, input: &str, level: bool) -> Result<(), Error> {
+        self.chip.set_gpt_input(peripherals::input(input)?, level);
+        Ok(())
     }
 
     /// The board will drive GPT input `input`, `PGP0` to `PGP7`, `PAI`

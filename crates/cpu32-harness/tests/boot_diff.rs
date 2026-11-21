@@ -43,6 +43,7 @@ use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::chip::MemoryId;
 use mc683xx_mc68331::event::Event;
+use mc683xx_mc68331::gpt::Input;
 use mc683xx_mc68331::port::Port as ChipPort;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
@@ -1228,8 +1229,8 @@ fn drive_pins(
                 .set_pins(ChipPort::Gp, level, u8::MAX)
                 .expect("an input port"),
             _ => {
-                chip.set_pai(level & PACTL_PAIS != 0);
-                chip.set_pclk(level & PACTL_PCLKS != 0);
+                chip.set_gpt_input(Input::Pai, level & PACTL_PAIS != 0);
+                chip.set_gpt_input(Input::Pclk, level & PACTL_PCLKS != 0);
             }
         }
     }

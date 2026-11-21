@@ -634,8 +634,8 @@ def test_a_gpt_output_compare_toggles_its_pin():
     assert oc1 == mc683xx.Output.Level(level=oc1.level)
     chip.set_pins(mc683xx.Port.GP, 0xFF)
     assert chip.port(mc683xx.Port.GP).pins == 0xFF
-    chip.set_pai(True)
-    chip.set_pclk(True)
+    chip.set_gpt_input("PAI", True)
+    chip.set_gpt_input("PCLK", True)
 
 
 # TMSK2 in the lower byte of its word; CPROUT with CPR %011, TCNT's
