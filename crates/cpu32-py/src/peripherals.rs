@@ -201,9 +201,11 @@ impl From<pwm::Output> for Output {
             } => Self::Wave {
                 period,
                 high,
-                clocks,
+                clocks: clocks.map(u64::from),
             },
-            pwm::Output::Clock { clocks } => Self::Clock { clocks },
+            pwm::Output::Clock { clocks } => Self::Clock {
+                clocks: clocks.map(u64::from),
+            },
             _ => panic!("a PWM output the bindings do not know"),
         }
     }

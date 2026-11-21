@@ -5,6 +5,8 @@
 use std::fmt;
 use std::str::FromStr;
 
+use mc683xx_cpu32::cycles::Cycles;
+
 use super::timer::Counter;
 
 /// PWMC PPROUT: PWMA carries PWMCNT's clock (GPTRM 6.3.1).
@@ -113,14 +115,23 @@ pub enum Output {
         /// Counts high.
         high: u32,
         /// System clocks a count, or `None` when PCLK clocks PWMCNT.
-        clocks: Option<u64>,
+        clocks: Option<Cycles>,
     },
     /// A counter's clock, high one system clock a count: PWMCNT's on
     /// PWMA (PPROUT), TCNT's on OC1 (CPROUT).
     Clock {
         /// System clocks a count, or `None` for PCLK.
-        clocks: Option<u64>,
+        clocks: Option<Cycles>,
     },
+}
+
+/// A prescaler tap's `divisor` as the system clocks a count takes,
+/// `None` for PCLK.
+pub(super) const fn tap_clocks(divisor: Option<u64>) -> Option<Cycles> {
+    match divisor {
+        Some(divisor) => Some(Cycles(divisor)),
+        None => None,
+    }
 }
 
 /// The PWM unit's state.
@@ -331,7 +342,7 @@ impl Pwm {
 
     /// What `channel`'s pin carries at the prescaler's `count`.
     pub(super) const fn output(&self, channel: Channel, count: u64) -> Output {
-        let clocks = Self::divisor(self.control);
+        let clocks = tap_clocks(Self::divisor(self.control));
         if self.forced(channel) {
             return Output::Level(self.control & channel.bit(PWMC_F1A) != 0);
         }

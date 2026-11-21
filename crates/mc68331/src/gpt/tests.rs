@@ -791,7 +791,7 @@ fn pwm_duty_takes_effect_at_the_end_of_a_period() {
         Output::Wave {
             period: 256,
             high: 128,
-            clocks: Some(2)
+            clocks: Some(Cycles(2))
         }
     );
     assert!(gpt.pwm_level(Channel::A, Cycles(512 + 255)));
@@ -806,7 +806,7 @@ fn pwm_duty_takes_effect_at_the_end_of_a_period() {
         Output::Wave {
             period: 32768,
             high: 64 * 128,
-            clocks: Some(128)
+            clocks: Some(Cycles(128))
         }
     );
     // F1A: high from the next period; FPWMB: B a discrete output of F1B
@@ -823,7 +823,9 @@ fn pwm_duty_takes_effect_at_the_end_of_a_period() {
     write_byte(&mut gpt, 0x25, 0x80, 2000);
     assert_eq!(
         gpt.pwm(Channel::A, Cycles(2000)),
-        Output::Clock { clocks: Some(2) }
+        Output::Clock {
+            clocks: Some(Cycles(2))
+        }
     );
 }
 
@@ -963,7 +965,12 @@ fn cprout_drives_tcnts_clock_on_oc1() {
     assert_eq!(gpt.oc1(Cycles(10)), Output::Level(true));
     // CPROUT, CPR %001: TCNT at the system clock / 8 (GPTRM Table 5-1)
     write(&mut gpt, 0x20, 0x0009, 10);
-    assert_eq!(gpt.oc1(Cycles(10)), Output::Clock { clocks: Some(8) });
+    assert_eq!(
+        gpt.oc1(Cycles(10)),
+        Output::Clock {
+            clocks: Some(Cycles(8))
+        }
+    );
     assert_eq!(gpt.next_event(), None);
     gpt.advance(Cycles(30));
     assert_eq!(
@@ -1042,7 +1049,9 @@ fn pprout_drives_pwmcnts_clock_on_pwma() {
     write_byte(&mut gpt, 0x25, 0xa0, 10);
     assert_eq!(
         gpt.pwm(Channel::A, Cycles(10)),
-        Output::Clock { clocks: Some(8) }
+        Output::Clock {
+            clocks: Some(Cycles(8))
+        }
     );
     assert!(gpt.pwm_level(Channel::A, Cycles(16)));
     assert!(!gpt.pwm_level(Channel::A, Cycles(17)));

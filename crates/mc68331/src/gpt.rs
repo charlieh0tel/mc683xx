@@ -35,6 +35,7 @@ use serde::de::Unexpected;
 use self::pwm::Channel;
 use self::pwm::Output;
 use self::pwm::Pwm;
+use self::pwm::tap_clocks;
 use self::timer::Counter;
 use self::timer::PRESCALER_SPAN;
 use self::timer::Prescaler;
@@ -776,7 +777,7 @@ impl Gpt {
     pub const fn oc1(&self, now: Cycles) -> Output {
         if self.compare_clock_out() {
             Output::Clock {
-                clocks: self.counter.divisor(),
+                clocks: tap_clocks(self.counter.divisor()),
             }
         } else {
             Output::Level(self.port_levels(now) & 1 << OC1_PIN != 0)
