@@ -27,6 +27,7 @@ use mc683xx_target::size::Size;
 use crate::target::AccessError;
 use crate::target::NativeStep;
 use crate::target::Target;
+use crate::target::TargetReset;
 use crate::target::TargetRun;
 
 /// How long a look at a target still running waits before the stub
@@ -145,8 +146,8 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
         Some(self)
     }
 
-    fn reset(&mut self) -> Result<bool, T::Error> {
-        self.target.reset_halted().map(|_| true)
+    fn reset(&mut self) -> Result<TargetReset, T::Error> {
+        self.target.reset_halted().map(|_| TargetReset::Done)
     }
 }
 

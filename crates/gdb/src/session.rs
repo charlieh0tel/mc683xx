@@ -66,6 +66,7 @@ use crate::protocol::description;
 use crate::protocol::failure;
 use crate::target::AccessError;
 use crate::target::Target;
+use crate::target::TargetReset;
 use crate::target::TargetRun;
 use hooks::Hits;
 use hooks::Kind;
@@ -595,13 +596,13 @@ impl<T: Target> Session<'_, T> {
                     None => outputln!(out, "this target takes its faults"),
                 }
             }
-            ["reset"] if self.target.reset()? => {
-                outputln!(
+            ["reset"] => match self.target.reset()? {
+                TargetReset::Done => outputln!(
                     out,
                     "reset; `maintenance flush register-cache` to see the registers"
-                );
-            }
-            ["reset"] => outputln!(out, "this target cannot reset"),
+                ),
+                _ => outputln!(out, "this target cannot reset"),
+            },
             #[cfg(feature = "board")]
             ["stop", words @ ..] => match self.target.conditions() {
                 Some(conditions) => conditions::monitor(conditions, words, out),

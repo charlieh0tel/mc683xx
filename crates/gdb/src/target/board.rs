@@ -15,6 +15,7 @@ use mc683xx_target::function_code::FunctionCode;
 
 use super::AccessError;
 use super::Target;
+use super::TargetReset;
 use super::TargetRun;
 use super::widen;
 
@@ -63,9 +64,9 @@ impl Target for Board<Mc68331> {
     /// ([`Board::reset_for`]): the chip's reset and the RESET it then
     /// drives on the board's nets, now.  Nothing while the board holds
     /// RESET low.
-    fn reset(&mut self) -> Result<bool, RunError> {
+    fn reset(&mut self) -> Result<TargetReset, RunError> {
         self.reset_for(ResetCause::External);
-        Ok(true)
+        Ok(TargetReset::Done)
     }
 
     fn conditions(&mut self) -> Option<&mut dyn Conditions> {

@@ -17,6 +17,7 @@ use mc683xx_gdb::connection::Polled;
 use mc683xx_gdb::connection::Waiter;
 use mc683xx_gdb::target::AccessError;
 use mc683xx_gdb::target::Target;
+use mc683xx_gdb::target::TargetReset;
 use mc683xx_gdb::target::TargetRun;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
@@ -103,7 +104,7 @@ where
 
     /// A reset, its Python peripherals' exceptions raised as a run's
     /// are.
-    fn reset(&mut self) -> PyResult<bool> {
+    fn reset(&mut self) -> PyResult<TargetReset> {
         let reset = self.target.reset();
         self.pending.check()?;
         let reset = reset.map_err(raised_from)?;

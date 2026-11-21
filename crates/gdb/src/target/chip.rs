@@ -11,6 +11,7 @@ use mc683xx_target::size::Size;
 
 use super::AccessError;
 use super::Target;
+use super::TargetReset;
 use super::TargetRun;
 use super::peek_bytes;
 
@@ -62,8 +63,8 @@ impl Target for Mc68331 {
         Ok(self.run_until(target).stop.into())
     }
 
-    fn reset(&mut self) -> Result<bool, Infallible> {
+    fn reset(&mut self) -> Result<TargetReset, Infallible> {
         Self::reset(self);
-        Ok(true)
+        Ok(TargetReset::Done)
     }
 }

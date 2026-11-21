@@ -114,6 +114,29 @@ impl From<Stop> for TargetRun {
     }
 }
 
+/// Whether a [`Target::reset`] reset the target.
+///
+/// More answers may come, so a match needs a wildcard arm:
+///
+/// ```compile_fail
+/// use mc683xx_gdb::target::TargetReset;
+///
+/// fn reset(answer: TargetReset) -> bool {
+///     match answer {
+///         TargetReset::Done => true,
+///         TargetReset::Unsupported => false,
+///     }
+/// }
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TargetReset {
+    /// The target reset.
+    Done,
+    /// The target cannot reset.
+    Unsupported,
+}
+
 /// Why a register or memory access failed.
 ///
 /// More reasons may come, so a match needs a wildcard arm:
@@ -342,13 +365,13 @@ pub trait Target {
     /// Resets the CPU as the target resets (the reset exception on the
     /// bare CPU, an external reset on the chip, a reset halted before
     /// the first instruction over BDM); whether it could.  The default
-    /// cannot.
+    /// cannot, [`TargetReset::Unsupported`].
     ///
     /// # Errors
     ///
     /// The target's error.
-    fn reset(&mut self) -> Result<bool, Self::Error> {
-        Ok(false)
+    fn reset(&mut self) -> Result<TargetReset, Self::Error> {
+        Ok(TargetReset::Unsupported)
     }
 
     /// The target's stop conditions, for `monitor stop`
@@ -411,10 +434,10 @@ impl Target for Machine {
         })
     }
 
-    fn reset(&mut self) -> Result<bool, Infallible> {
+    fn reset(&mut self) -> Result<TargetReset, Infallible> {
         // A halt reading the vectors is what the next run reports.
         let _ = Self::reset(self);
-        Ok(true)
+        Ok(TargetReset::Done)
     }
 }
 

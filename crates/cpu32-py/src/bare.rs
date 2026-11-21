@@ -39,6 +39,7 @@ use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_gdb::target::AccessError;
 use mc683xx_gdb::target::Target;
+use mc683xx_gdb::target::TargetReset;
 use mc683xx_gdb::target::TargetRun;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
@@ -1066,7 +1067,7 @@ impl Target for Debugged<'_, '_> {
         })
     }
 
-    fn reset(&mut self) -> PyResult<bool> {
+    fn reset(&mut self) -> PyResult<TargetReset> {
         Ok(Target::reset(&mut self.0.borrow_mut().machine).unwrap_or_else(|never| match never {}))
     }
 }
