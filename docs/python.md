@@ -966,7 +966,8 @@ chip.run_for(500)
   this build's bindings have no Python value for (a role, an invalid
   access's reason, a PWM output, a reset cause, a DSACK fault), which a
   newer Rust crate could give but none does today.  `take_events()`
-  raises it for an event holding such a value; a kind of event the
+  raises it for an event holding such a value, taking none of the
+  events, which stay for a later take; a kind of event the
   bindings lack is left out.
 - `IndexError`: an unknown memory or peripheral number, or a memory range
   past its end.

@@ -2032,6 +2032,13 @@ impl<C: Chip> Board<C> {
         mem::take(&mut self.events)
     }
 
+    /// What [`take_events`](Self::take_events) would take now, left for
+    /// it.
+    #[must_use]
+    pub fn events(&self) -> &[C::Event] {
+        &self.events
+    }
+
     /// What the board traces from now on.
     pub fn set_tracing(&mut self, tracing: BoardTracing) {
         self.tracing = tracing;

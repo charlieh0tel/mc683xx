@@ -1334,6 +1334,13 @@ impl Mc68331 {
         mem::take(&mut self.board.events)
     }
 
+    /// What [`take_events`](Self::take_events) would take now, left for
+    /// it.
+    #[must_use]
+    pub fn events(&self) -> &[Event] {
+        &self.board.events
+    }
+
     /// Whether a change of the system clock's frequency (a SYNCR write,
     /// a reset) ends `run_for` after its instruction, [`Stop::Budget`] with
     /// budget left: for a host on its own time base (a board's

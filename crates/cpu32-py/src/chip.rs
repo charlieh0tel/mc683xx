@@ -928,13 +928,33 @@ impl Event {
     }
 }
 
-/// `events` as Python sees them, those of a kind Python lacks left
-/// out; [`Error::Unmapped`] for a value in one the bindings do not know.
-pub(crate) fn events(events: Vec<event::Event>) -> Result<Vec<Event>, Error> {
-    events
-        .into_iter()
-        .filter_map(|event| Event::of(event).transpose())
-        .collect()
+/// The events `source` holds, as Python sees them, those of a kind
+/// Python lacks left out: `queued` gives them and `take` takes them,
+/// only once every one has converted, so a value in one the bindings do
+/// not know ([`Error::Unmapped`]) leaves them all to take.
+pub(crate) fn take_events<S>(
+    source: &mut S,
+    queued: impl Fn(&S) -> &[event::Event],
+    take: impl FnOnce(&mut S),
+) -> Result<Vec<Event>, Error> {
+    take_converted(source, queued, Event::of, take)
+}
+
+/// What `queued` gives of `source`, each through `convert`, those it
+/// gives none for left out, taken by `take` only once every one has
+/// converted.
+fn take_converted<S, E: Copy, T>(
+    source: &mut S,
+    queued: impl Fn(&S) -> &[E],
+    convert: impl Fn(E) -> Result<Option<T>, Error>,
+    take: impl FnOnce(&mut S),
+) -> Result<Vec<T>, Error> {
+    let converted = queued(source)
+        .iter()
+        .filter_map(|&value| convert(value).transpose())
+        .collect::<Result<_, _>>()?;
+    take(source);
+    Ok(converted)
 }
 
 /// The `Mc68331` methods a board's chip has too, for `Chip` and
@@ -1648,7 +1668,9 @@ chip_methods! {
 
     /// What happened since the last call.
     fn take_events(&mut self) -> Result<Vec<Event>, Error> {
-        events(self.chip.take_events())
+        take_events(&mut self.chip, Mc68331::events, |chip| {
+            chip.take_events();
+        })
     }
 
     /// Whether the events trace each bus cycle that reaches the chip
@@ -1680,5 +1702,35 @@ chip_methods! {
         let restored = self.chip.restore(&snapshot);
         self.pending.check()?;
         Ok(restored.map_err(Error::from)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::take_converted;
+    use crate::error::Error;
+
+    #[test]
+    fn a_value_the_bindings_do_not_know_leaves_every_one_to_take() {
+        let convert = |value: u8| match value {
+            0 => Ok(None),
+            9 => Err(Error::unmapped("test value")),
+            _ => Ok(Some(value)),
+        };
+        let take = |queue: &mut Vec<u8>| queue.clear();
+        let mut queue = vec![1, 9, 2];
+        let taken = take_converted(&mut queue, Vec::as_slice, convert, take);
+        assert!(matches!(
+            taken,
+            Err(Error::Unmapped {
+                kind: "test value",
+                name: None
+            })
+        ));
+        assert_eq!(queue, [1, 9, 2]);
+        let mut queue = vec![1, 0, 2];
+        let taken = take_converted(&mut queue, Vec::as_slice, convert, take);
+        assert_eq!(taken.ok(), Some(vec![1, 2]));
+        assert!(queue.is_empty());
     }
 }
