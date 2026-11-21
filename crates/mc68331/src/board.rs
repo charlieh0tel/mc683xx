@@ -1239,19 +1239,16 @@ impl Board {
             now,
             None,
         ) {
-            Ok((vector, clocks)) => Acknowledged {
-                answer: Acknowledge::Vector(vector as u8),
-                stall: stall(clocks),
-            },
+            Ok((vector, clocks)) => {
+                Acknowledged::new(Acknowledge::Vector(vector as u8)).stalled(stall(clocks))
+            }
             // no DSACK in time: the bus monitor's BERR ends the cycle
             // at its period (SIMRM 3.2, 6.4.3); with BME clear, a bus
             // error at once (PLAN.md, A cycle no DSACK ends)
-            Err(BusError) => Acknowledged {
-                answer: Acknowledge::Spurious,
-                stall: self
-                    .bus_monitor()
+            Err(BusError) => Acknowledged::new(Acknowledge::Spurious).stalled(
+                self.bus_monitor()
                     .map_or(Cycles::ZERO, |limit| stall(limit.into())),
-            },
+            ),
         }
     }
 

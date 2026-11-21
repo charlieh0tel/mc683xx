@@ -45,10 +45,7 @@ impl Bus for SparseBus {
             Size::Byte => u32::from(self.0.read_byte(at)),
             Size::Word | Size::Long => u32::from(self.0.read_word(at)),
         };
-        Ok(Read {
-            value,
-            stall: Cycles::ZERO,
-        })
+        Ok(Read::new(value))
     }
 
     fn write(&mut self, access: BusAccess, value: u32) -> Result<Cycles, BusError> {

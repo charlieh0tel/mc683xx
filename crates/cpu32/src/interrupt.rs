@@ -132,7 +132,11 @@ pub enum Acknowledge {
 /// An interrupt acknowledge cycle: how it ended and the clocks it took
 /// beyond the timing tables' two-clock bus cycle (CPU32RM 8.1.5), its
 /// wait states, which the interrupt's cost does not include.
+///
+/// Built with [`Acknowledged::new`] (or from an [`Acknowledge`]), so a
+/// field added later gets a default and no host's code changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Acknowledged {
     /// How it ended.
     pub answer: Acknowledge,
@@ -140,13 +144,27 @@ pub struct Acknowledged {
     pub stall: Cycles,
 }
 
-impl From<Acknowledge> for Acknowledged {
-    /// An acknowledge with no wait states.
-    fn from(answer: Acknowledge) -> Self {
+impl Acknowledged {
+    /// An acknowledge that ended as `answer`, with no wait states.
+    #[must_use]
+    pub const fn new(answer: Acknowledge) -> Self {
         Self {
             answer,
             stall: Cycles::ZERO,
         }
+    }
+
+    /// This acknowledge, taking `stall` clocks beyond two.
+    #[must_use]
+    pub const fn stalled(self, stall: Cycles) -> Self {
+        Self { stall, ..self }
+    }
+}
+
+impl From<Acknowledge> for Acknowledged {
+    /// An acknowledge with no wait states.
+    fn from(answer: Acknowledge) -> Self {
+        Self::new(answer)
     }
 }
 

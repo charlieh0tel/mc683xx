@@ -118,7 +118,11 @@ impl fmt::Display for CycleKind {
 
 /// A bus or address error's cycle: what a format $C frame records of
 /// it (CPU32RM 6.3, 6.4.3).
+///
+/// Built with [`Fault::new`], so a field added later gets a default
+/// and no host's code changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct Fault {
     /// [`Vector::BUS_ERROR`] or [`Vector::ADDRESS_ERROR`].
     pub vector: Vector,
@@ -140,6 +144,52 @@ pub struct Fault {
     /// Whether the cycle was the read or write of a read-modify-write
     /// operation (TAS): the SSW's RM.
     pub read_modify_write: bool,
+}
+
+impl Fault {
+    /// A fault of `vector` in a `cycle` at `address` in
+    /// `function_code`'s space, `size` of the operand remaining: not of
+    /// a long operand, no data, not read-modify-write.
+    #[must_use]
+    pub const fn new(
+        vector: Vector,
+        address: Address,
+        function_code: FunctionCode,
+        size: Size,
+        cycle: CycleKind,
+    ) -> Self {
+        Self {
+            vector,
+            address,
+            function_code,
+            size,
+            long: false,
+            cycle,
+            data: 0,
+            read_modify_write: false,
+        }
+    }
+
+    /// This fault, of a long operand.
+    #[must_use]
+    pub const fn of_long(self) -> Self {
+        Self { long: true, ..self }
+    }
+
+    /// This fault, of a write of `data`.
+    #[must_use]
+    pub const fn carrying(self, data: u32) -> Self {
+        Self { data, ..self }
+    }
+
+    /// This fault, the read or write of a read-modify-write operation.
+    #[must_use]
+    pub const fn in_read_modify_write(self) -> Self {
+        Self {
+            read_modify_write: true,
+            ..self
+        }
+    }
 }
 
 /// An exception an instruction or a bus cycle raises.  The variant is
@@ -199,10 +249,7 @@ impl Exception {
     #[must_use]
     pub(crate) const fn in_read_modify_write(self) -> Self {
         match self {
-            Self::Fault(fault) => Self::Fault(Fault {
-                read_modify_write: true,
-                ..fault
-            }),
+            Self::Fault(fault) => Self::Fault(fault.in_read_modify_write()),
             other => other,
         }
     }
