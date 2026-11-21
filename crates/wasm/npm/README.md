@@ -136,10 +136,11 @@ an ES module (TypeScript 5.8 and later); under `node16` it is an error
 - `now`: board time.
 - `pacing`, `setPacing(text)`: what `runFrame` keeps, as its text
   (`"unpaced"`, the default, `"realtime"`, or a factor, board seconds a
-  wall second, such as `"2"`).
+  wall second, such as `"2"`).  They are the board's here; Rust's and
+  Python's are on the board's control handle.
 - `runFrame(wall, picoseconds)`: runs to the board time due by the
-  page's clock reading `wall`, in milliseconds (`performance.now()`),
-  under the pacing, but no more than `picoseconds`, so a page hidden a
+  page's clock reading `wall`, in milliseconds (`performance.now()`;
+  Python's `run_frame` takes seconds), under the pacing, but no more than `picoseconds`, so a page hidden a
   while does not run away: such a frame drops the time the page missed,
   and the next frames are paced from where it ended; unpaced, it runs
   `picoseconds`.  Paced, the first frame, and the first after a `setPacing`
@@ -154,7 +155,10 @@ an ES module (TypeScript 5.8 and later); under `node16` it is an error
   `2n ** 64n - 1n`; one out of that range, or a `number`, throws.
 - Both give a `BoardRun`: `stop`, why it ended (`"budget"` its time ran
   out, `"stopped"`, `"halted"`, `"hook"`, `"requested"`,
-  `"background"`, `"fault"`), and `now`.
+  `"background"`, `"fault"`, or `"unknown"` for a kind this release
+  does not name), and `now`.  `stop`'s TypeScript type, `StopKind`,
+  lists the names but is open (`string & {}`): a minor release may
+  add a kind, so a `switch` on it keeps a `default`.
 - `sendBytes(name, data)`: the run-time endpoint `name` sends each
   byte of `data`, a `Uint8Array` of any realm, an iframe's too
   (anything else throws, another typed array too), now, an untimed

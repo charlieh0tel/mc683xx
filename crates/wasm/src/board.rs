@@ -143,8 +143,9 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// [`Error::Images`], [`Error::ImageName`] and [`Error::Image`] for
-    /// images of another shape, and as [`with_images`](Self::with_images).
+    /// Throws a `TypeError` for images of another shape, and a
+    /// `LoadError` for a board file or a board that does not load, an
+    /// image `images` lacks among them.
     #[wasm_bindgen(constructor)]
     pub fn new(
         text: &str,
@@ -167,20 +168,21 @@ impl Board {
         self.board.now().0
     }
 
-    /// The pacing [`run_frame`](Self::run_frame_js) keeps: `unpaced`,
-    /// `realtime` or a factor, board seconds a wall second.
+    /// The pacing `runFrame` keeps: `unpaced`, `realtime` or a factor,
+    /// board seconds a wall second.  On the board, as there is no
+    /// control handle here (Rust's and Python's are on the board's
+    /// control).
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn pacing(&self) -> String {
         self.board.control().pacing().to_string()
     }
 
-    /// Sets the pacing from its text, as [`pacing`](Self::pacing) gives
-    /// it.
+    /// Sets the pacing from its text, as `pacing` gives it.
     ///
     /// # Errors
     ///
-    /// [`Error::ParsePacing`] for text that names no pacing.
+    /// Throws a `PacingError` for text that names no pacing.
     #[wasm_bindgen(js_name = setPacing)]
     pub fn set_pacing(&mut self, pacing: &str) -> Result<(), Error> {
         let pacing: Pacing = pacing.parse()?;
@@ -192,9 +194,9 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// [`Error::PicosecondsType`] for picoseconds not a `bigint`,
-    /// [`Error::Picoseconds`] for a `bigint` out of a `u64`'s range, and
-    /// [`Error::Run`] for a run that fails.
+    /// Throws a `TypeError` for picoseconds not a `bigint`, a
+    /// `RangeError` for one out of `0n` to `2n ** 64n - 1n`, and a
+    /// `RunError` for a run that fails.
     #[wasm_bindgen(js_name = runFor)]
     pub fn run_for_js(
         &mut self,
@@ -205,21 +207,20 @@ impl Board {
 
     /// Runs a frame (Rust's `Board::run_frame`): to the board time due by
     /// the page's clock reading `wall`, in milliseconds
-    /// (`performance.now()`), under the pacing, but no more than
+    /// (`performance.now()`; Python's `run_frame` takes seconds, Rust's a
+    /// `Duration`), under the pacing, but no more than
     /// `picoseconds` of board time, a frame's bound however far behind the
     /// page is (a hidden tab), which drops the time the page missed.
     /// Unpaced it runs `picoseconds`.  Paced, the first frame, and the first
-    /// after a [`set_pacing`](Self::set_pacing) to another pacing (not to
-    /// the one it has), a [`run_for`](Self::run_for_js) (even of no time)
-    /// or a successful [`restore`](Self::restore), runs nothing: it
-    /// starts the pacing.
+    /// after a `setPacing` to another pacing (not to the one it has), a
+    /// `runFor` (even of no time) or a successful `restore`, runs
+    /// nothing: it starts the pacing.
     ///
     /// # Errors
     ///
-    /// [`Error::Wall`] for a reading that is not finite or below 0,
-    /// [`Error::PicosecondsType`] and [`Error::Picoseconds`] as for
-    /// [`run_for_js`](Self::run_for_js), and [`Error::Run`] for a run
-    /// that fails.
+    /// Throws a `RangeError` for a reading that is not finite or below
+    /// 0, a `TypeError` or a `RangeError` for picoseconds as `runFor`
+    /// does, and a `RunError` for a run that fails.
     #[wasm_bindgen(js_name = runFrame)]
     pub fn run_frame_js(
         &mut self,
@@ -230,12 +231,12 @@ impl Board {
     }
 
     /// Sends `data`, a `Uint8Array`, to the run-time endpoint `name`
-    /// now, a serial frame a byte.
+    /// now, an untimed serial frame a byte.
     ///
     /// # Errors
     ///
-    /// [`Error::Bytes`] for data not a `Uint8Array`, and
-    /// [`Error::Send`] for an endpoint that drives no serial net.
+    /// Throws a `TypeError` for data not a `Uint8Array`, and a
+    /// `SendError` for an endpoint that drives no serial net.
     #[wasm_bindgen(js_name = sendBytes)]
     pub fn send_bytes_js(
         &mut self,
@@ -251,7 +252,7 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// [`Error::Receive`] for an endpoint no net drives.
+    /// Throws a `ReceiveError` for an endpoint no net drives.
     #[wasm_bindgen(js_name = takeReceivedBytes)]
     pub fn take_received_bytes(&mut self, name: &str) -> Result<Vec<u8>, Error> {
         Ok(self
@@ -269,7 +270,7 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// [`Error::Memory`] for a memory the board lacks.
+    /// Throws a `MemoryError` for a memory the board lacks.
     pub fn memory(&self, name: &str) -> Result<Vec<u8>, Error> {
         self.board
             .memory(name)
@@ -281,7 +282,7 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// [`Error::State`] for a peripheral that cannot save.
+    /// Throws a `StateError` for a peripheral that cannot save.
     pub fn save(&self) -> Result<Vec<u8>, Error> {
         Ok(self.board.save()?)
     }
@@ -291,8 +292,8 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// [`Error::Bytes`] for a snapshot not a `Uint8Array`, and
-    /// [`Error::State`] for a snapshot the board refuses.
+    /// Throws a `TypeError` for a snapshot not a `Uint8Array`, and a
+    /// `StateError` for a snapshot the board refuses.
     #[wasm_bindgen(js_name = restore)]
     pub fn restore_js(
         &mut self,
@@ -316,8 +317,9 @@ pub struct BoardRun {
 impl BoardRun {
     /// Why it ended, the kind of Rust's `Stop`: `budget` (its time ran
     /// out), `stopped`, `halted`, `hook`, `requested`, `background` or
-    /// `fault`.
-    #[wasm_bindgen(getter)]
+    /// `fault`; `unknown` for a kind this release does not name.  A later
+    /// minor release may add a kind, so a page keeps a default branch.
+    #[wasm_bindgen(getter, unchecked_return_type = "StopKind")]
     #[must_use]
     pub fn stop(&self) -> String {
         stop_name(self.stop).to_owned()
@@ -330,6 +332,27 @@ impl BoardRun {
         self.now
     }
 }
+
+/// The TypeScript type of [`BoardRun::stop`]: the names [`stop_name`]
+/// gives, open (`string & {}`, which keeps the names' completion), as a
+/// later minor release may name a new kind.
+#[wasm_bindgen(typescript_custom_section)]
+const STOP_KIND: &str = r#"
+/**
+ * Why a run ended (`BoardRun.stop`): one of these names, or another a
+ * later minor release adds.
+ */
+export type StopKind =
+    | "budget"
+    | "stopped"
+    | "halted"
+    | "hook"
+    | "requested"
+    | "background"
+    | "fault"
+    | "unknown"
+    | (string & {});
+"#;
 
 /// JavaScript's name for the kind of `stop`: the bindings' own, not
 /// `Stop`'s `Display`, so a change there does not change what a page

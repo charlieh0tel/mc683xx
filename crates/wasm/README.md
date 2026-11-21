@@ -64,9 +64,9 @@ and the three consumers in `tests/types`, each with its own
 `browser` (`main.ts`, `bundler`, the DOM, no Node types:
 `web/mc683xx.d.ts`) and `commonjs` (`main.cts`, `require` under
 `nodenext`: `node.d.ts`).  Each imports `init`, `initSync`, `Board`,
-`BoardRun`, `InitInput`, `SyncInitInput` and `InitOutput` and uses
-them; `@ts-expect-error` lines fail it if a declaration loosens to
-`any`.
+`BoardRun`, `StopKind`, `InitInput`, `SyncInitInput` and
+`InitOutput` and uses them; `@ts-expect-error` lines fail it if a
+declaration loosens to `any`.
 
 CI's `wasm` job runs `make wasm`, `make npm-test` and `make
 npm-types`, with the CLI `scripts/install-wasm-bindgen.sh` installs: a
@@ -97,9 +97,9 @@ npm-package` assembles it in `crates/wasm/pkg`:
   types lack; the web bindings' `InitOutput` made opaque but for its
   `memory`, as wasm-bindgen's lists the module's every export, the
   bindings' internals; both reference the `esnext.disposable` library
-  for the classes' `[Symbol.dispose]`.  Copied, not written by hand, so the
-  two keep in step; anything new after the classes in wasm-bindgen's
-  output, or a browser's type in them, stops the build.
+  for the classes' `[Symbol.dispose]`.  Copied, not written by hand,
+  so the two keep in step; anything new after the classes in
+  wasm-bindgen's output, or a browser's type in them, stops the build.
 - `package.json`, written by `npm/package.mjs` from `cargo metadata`:
   the version is the workspace's.
 - `README.md` (`npm/README.md`, the JavaScript guide and API) and the
@@ -120,15 +120,24 @@ from Python's:
   `image`); Python's `Board(path, ...)` reads the file and its images
   itself.  A file a peripheral keeps (an AT28C64B's `file`) throws
   (PLAN.md, WebAssembly).
-- `setPacing(text)` takes the text Python's `Pacing(text)` takes.
+- `pacing` and `setPacing(text)` are on the `Board`, as the bindings
+  have no control handle; Rust's and Python's are on the board's
+  control (`Board::control`, Python's `Board.control()`).  `setPacing`
+  takes the text Rust's `Pacing` parses (Python's `Pacing.parse`), and
+  `pacing` gives it.
 - `runFrame(wall, picoseconds)` is Rust's `Board::run_frame`, `wall`
-  in milliseconds (`performance.now()`); Python's `run_frame` takes
-  `wall` in seconds and `seconds` or `picoseconds` by keyword.
+  in milliseconds (`performance.now()`), a `number`; Python's
+  `run_frame` takes `wall` in seconds and `seconds` or `picoseconds`
+  by keyword, Rust's a `Duration`.
 - `runFor` is Rust's `Board::run_for`, unpaced (Python's `run_for`
   paces, which a page cannot: it cannot sleep).
 - `BoardRun.stop` names the kind of Rust's `Stop` (`"budget"`,
   `"halted"`, ...), by a mapping of the bindings' own, not `Stop`'s
-  `Display`.
+  `Display`; `"unknown"` for a kind the mapping lacks.  Its TypeScript
+  type, `StopKind`, is the names, open (`string & {}`), so a minor
+  release may add one.
+- Failures throw a `TypeError`, a `RangeError` or an `Error` named for
+  its kind (`LoadError`), where Python raises its own classes.
 - `sendBytes(name, data)` sends each byte of `data` as a serial frame
   (Python's `send` sends one value, of any kind);
   `takeReceivedBytes(name)` gives the serial frames' bytes alone, no

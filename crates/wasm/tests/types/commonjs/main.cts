@@ -2,7 +2,7 @@
 // them (node.d.ts): compiled, not run, by `make npm-types`.
 
 import mc683xx = require("mc683xx");
-import type { BoardRun, InitInput, InitOutput, SyncInitInput } from "mc683xx";
+import type { BoardRun, InitInput, InitOutput, StopKind, SyncInitInput } from "mc683xx";
 
 const { Board, initSync } = mc683xx;
 const init = mc683xx.default;
@@ -35,9 +35,13 @@ function run(text: string, image: Uint8Array): [string, bigint, Uint8Array] {
   // @ts-expect-error a stop is a string
   const code: number = ran.stop;
   const stop: string = ran.stop;
+  // a known kind, or any other a later release adds
+  const kind: StopKind = ran.stop === "budget" ? "budget" : "a later kind";
+  // @ts-expect-error a kind is a string
+  const notKind: StopKind = 0;
   const now: bigint = board.now + framed.now;
   const pacing: string = board.pacing;
-  return [stop + pacing, now, board.takeReceivedBytes("console")];
+  return [stop + kind + notKind + pacing, now, board.takeReceivedBytes("console")];
 }
 
 export = { initialized, output, run };

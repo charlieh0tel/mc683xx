@@ -2,7 +2,7 @@
 // (web/mc683xx.d.ts): compiled, not run, by `make npm-types`.
 
 import init, { Board, BoardRun, initSync } from "mc683xx";
-import type { InitInput, InitOutput, SyncInitInput } from "mc683xx";
+import type { InitInput, InitOutput, StopKind, SyncInitInput } from "mc683xx";
 
 const input: InitInput = new URL("./mc683xx_bg.wasm", import.meta.url);
 const output: InitOutput = await init({ module_or_path: input });
@@ -31,9 +31,13 @@ function run(text: string, image: Uint8Array): [string, bigint, Uint8Array] {
   // @ts-expect-error a stop is a string
   const code: number = ran.stop;
   const stop: string = ran.stop;
+  // a known kind, or any other a later release adds
+  const kind: StopKind = ran.stop === "budget" ? "budget" : "a later kind";
+  // @ts-expect-error a kind is a string
+  const notKind: StopKind = 0;
   const now: bigint = board.now + framed.now;
   const pacing: string = board.pacing;
-  return [stop + pacing, now, board.takeReceivedBytes("console")];
+  return [stop + kind + notKind + pacing, now, board.takeReceivedBytes("console")];
 }
 
 export { memory, output, run, sameOutput };
