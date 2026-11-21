@@ -188,7 +188,7 @@ impl Clock {
     /// The bit rate at its rate divided by `divide`.
     fn baud(self, divide: u64) -> Frequency {
         let nanohertz = u128::from(self.hz) * u128::from(NANOHERTZ_PER_HERTZ) / u128::from(divide);
-        Frequency(nanohertz as u64)
+        Frequency::from_nanohertz(nanohertz as u64)
     }
 }
 

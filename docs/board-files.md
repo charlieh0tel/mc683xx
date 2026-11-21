@@ -702,7 +702,8 @@ The contract a host's peripheral models target (rustdoc in
 - `time::Time` (picoseconds since power-on) and `time::Span` (a span
   of it, picoseconds: `Time + Span`, `Time - Time` a `Span`),
   `mc683xx_cpu32::frequency::Frequency`
-  (nanohertz, the chip's clocks too: `TimeBase::frequency`),
+  (nanohertz, `from_nanohertz` and `nanohertz`; the chip's clocks too:
+  `TimeBase::frequency`),
   `time::Phase` (cycles, 10^21 units each) and `time::Clock`:
   `new(frequency, edge)`, `with_phase(frequency, at, phase)`,
   `phase_at(time)` (with `cycles()` and

@@ -652,7 +652,7 @@ impl chip::Chip for Mc68331 {
     fn clock_output(&self, pin: Pin) -> Option<Frequency> {
         (pin == Pin::Eclk).then(|| {
             let clock = self.sim().clock();
-            Frequency(clock.frequency().0 / clock.eclk_divisor())
+            Frequency::from_nanohertz(clock.frequency().nanohertz() / clock.eclk_divisor())
         })
     }
 
@@ -686,10 +686,10 @@ impl chip::Chip for Mc68331 {
         let system_clock = self.sim().clock().frequency();
         for sent in self.take_sci_transmitted() {
             let start = base.time(sent.start);
-            let baud = u128::from(system_clock.0) / u128::from(sent.bit.0);
+            let baud = u128::from(system_clock.nanohertz()) / u128::from(sent.bit.0);
             let serial = Serial::timed(
                 sent.frame,
-                Frequency(u64::try_from(baud).unwrap_or(u64::MAX)),
+                Frequency::from_nanohertz(u64::try_from(baud).unwrap_or(u64::MAX)),
                 base.time(sent.end).since(start),
             );
             emit(start, Pin::Txd, Signal::Serial(serial));

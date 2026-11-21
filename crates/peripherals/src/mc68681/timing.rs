@@ -55,7 +55,7 @@ impl Crystal {
     pub(super) fn baud(self, divisor: u64) -> Frequency {
         let nanohertz = u128::from(self.hz) * u128::from(NANOHERTZ_PER_HERTZ)
             / u128::from(SIXTEENTHS * divisor);
-        Frequency(nanohertz as u64)
+        Frequency::from_nanohertz(nanohertz as u64)
     }
 }
 

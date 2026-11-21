@@ -158,7 +158,7 @@ fn a_state_no_run_could_save_is_refused() {
         ),
         (
             edited(&snapshot, |state| {
-                state.base = TimeBase::new(Cycles::ZERO, Time::ZERO, Frequency(0));
+                state.base = TimeBase::new(Cycles::ZERO, Time::ZERO, Frequency::from_nanohertz(0));
             }),
             StateError::invalid("the system clock's frequency"),
         ),

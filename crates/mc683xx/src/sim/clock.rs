@@ -75,7 +75,7 @@ pub enum ClockSourceError {
 
 /// `frequency`, if it is whole hertz.
 const fn whole_hertz(frequency: Frequency) -> Result<Frequency, ClockSourceError> {
-    if frequency.0.is_multiple_of(NANOHERTZ_PER_HERTZ) {
+    if frequency.nanohertz().is_multiple_of(NANOHERTZ_PER_HERTZ) {
         Ok(frequency)
     } else {
         Err(ClockSourceError::FractionalHertz(frequency))
@@ -123,7 +123,9 @@ impl ClockSource {
     /// hertz, [`ClockSourceError::ReferenceRange`] if it is outside
     /// [`REFERENCE_MIN`] to [`REFERENCE_MAX`].
     pub const fn synthesizer(reference: Frequency) -> Result<Self, ClockSourceError> {
-        if reference.0 < REFERENCE_MIN.0 || reference.0 > REFERENCE_MAX.0 {
+        if reference.nanohertz() < REFERENCE_MIN.nanohertz()
+            || reference.nanohertz() > REFERENCE_MAX.nanohertz()
+        {
             return Err(ClockSourceError::ReferenceRange(reference));
         }
         match whole_hertz(reference) {
@@ -388,16 +390,16 @@ mod tests {
 
     #[test]
     fn a_chip_clock_is_whole_hertz() {
-        let fractional = Frequency(16_000_000_500_000_000);
+        let fractional = Frequency::from_nanohertz(16_000_000_500_000_000);
         assert_eq!(
             ClockSource::external(fractional),
             Err(ClockSourceError::FractionalHertz(fractional))
         );
         assert_eq!(
-            ClockSource::synthesizer(Frequency(32_768_000_000_001)),
-            Err(ClockSourceError::FractionalHertz(Frequency(
-                32_768_000_000_001
-            )))
+            ClockSource::synthesizer(Frequency::from_nanohertz(32_768_000_000_001)),
+            Err(ClockSourceError::FractionalHertz(
+                Frequency::from_nanohertz(32_768_000_000_001)
+            ))
         );
         // past u64's nanohertz, hertz saturate to a fraction
         assert!(ClockSource::external(Frequency::from_hz(u64::MAX)).is_err());

@@ -72,8 +72,9 @@ fn main() -> Result<(), BuildError> {
   assignments; MC68331UM 4.6.3) and the clock source, a synthesizer
   reference (`ClockSource::synthesizer(reference)`) or, with MODCLK
   low, an external clock (`ClockSource::external(frequency)`), each a
-  `Frequency` (`mc683xx_cpu32::frequency`, nanohertz;
-  `Frequency::from_hz`) of whole hertz: either refuses a fraction
+  `Frequency` (`mc683xx_cpu32::frequency`, nanohertz:
+  `Frequency::from_hz` and `hz`, `from_nanohertz` and `nanohertz`) of
+  whole hertz: either refuses a fraction
   with `ClockSourceError::FractionalHertz`, since the chip's snapshot
   saves its clocks as hertz, and `synthesizer` a reference outside 25
   to 50 kHz (SIMRM 4.4.1) with `ClockSourceError::ReferenceRange`.  `Builder::system_frequency()` gives the

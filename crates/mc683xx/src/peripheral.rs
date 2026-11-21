@@ -134,7 +134,7 @@ impl QspiClock {
     /// 4-1), rounded down.
     #[must_use]
     pub const fn baud(self) -> Frequency {
-        Frequency(self.system_clock.0 / self.period.0)
+        Frequency::from_nanohertz(self.system_clock.nanohertz() / self.period.0)
     }
 }
 

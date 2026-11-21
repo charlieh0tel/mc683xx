@@ -355,7 +355,7 @@ impl SerialView {
     fn new(frame: FrameView, baud_nanohertz: u64, bits: u32) -> PyResult<Self> {
         Ok(Self(Serial::new(
             Frame::try_from(frame)?,
-            Frequency(baud_nanohertz),
+            Frequency::from_nanohertz(baud_nanohertz),
             bits,
         )))
     }
@@ -367,7 +367,7 @@ impl SerialView {
     fn timed(frame: FrameView, baud_nanohertz: u64, length: u64) -> PyResult<Self> {
         Ok(Self(Serial::timed(
             Frame::try_from(frame)?,
-            Frequency(baud_nanohertz),
+            Frequency::from_nanohertz(baud_nanohertz),
             Span::from_picos(length),
         )))
     }
@@ -388,7 +388,7 @@ impl SerialView {
     /// The sender's bit rate, in nanohertz; zero if untimed.
     #[getter]
     const fn baud_nanohertz(&self) -> u64 {
-        self.0.baud.0
+        self.0.baud.nanohertz()
     }
 
     /// Picoseconds from start bit to the end of the stop bits; zero if
@@ -655,7 +655,7 @@ pub(crate) fn signal(kind: Kind, value: &Bound<'_, PyAny>) -> PyResult<Signal> {
         Kind::Clock => {
             let (at, frequency, phase): (u64, u64, u128) = value.extract()?;
             Signal::Clock(Clock::with_phase(
-                Frequency(frequency),
+                Frequency::from_nanohertz(frequency),
                 Time(at),
                 Phase(phase),
             ))
@@ -673,7 +673,9 @@ fn python_value(py: Python<'_>, signal: Signal, timed: bool) -> PyResult<Py<PyAn
         Signal::Serial(serial) => serial.frame.data().into_py_any(py),
         Signal::Analog(value) => value.into_py_any(py),
         Signal::Bus(word) => word.into_py_any(py),
-        Signal::Clock(clock) => (clock.at.0, clock.frequency.0, clock.phase.0).into_py_any(py),
+        Signal::Clock(clock) => {
+            (clock.at.0, clock.frequency.nanohertz(), clock.phase.0).into_py_any(py)
+        }
         _ => Err(PyTypeError::new_err("no Python value for this signal")),
     }
 }

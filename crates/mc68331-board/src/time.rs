@@ -392,7 +392,7 @@ impl Clock {
     /// Its phase at `time`.
     #[must_use]
     pub const fn phase_at(&self, time: Time) -> Phase {
-        let frequency = self.frequency.0 as u128;
+        let frequency = self.frequency.nanohertz() as u128;
         if time.0 >= self.at.0 {
             Phase(self.phase.0 + frequency * (time.0 - self.at.0) as u128)
         } else {
@@ -429,7 +429,7 @@ impl Clock {
     /// The first picosecond at which its phase is at least `phase`.
     #[must_use]
     pub fn when(&self, phase: Phase) -> Option<Time> {
-        let frequency = u128::from(self.frequency.0);
+        let frequency = u128::from(self.frequency.nanohertz());
         if frequency == 0 {
             return None;
         }
@@ -797,11 +797,11 @@ mod tests {
         let mut exact: u128 = 0;
         let mut frequency = TEN_MHZ;
         for second in 1..=seconds {
-            exact += u128::from(frequency.0);
+            exact += u128::from(frequency.nanohertz());
             // A step of 6.25e-13, a DAC count's, up and down in turn,
             // drifting: 6.25 uHz is 6250 nHz.
             let step = 6_250 * (second % 7);
-            frequency = Frequency(TEN_MHZ.0 + step - 6_250 * 3);
+            frequency = Frequency::from_nanohertz(TEN_MHZ.nanohertz() + step - 6_250 * 3);
             clock = clock.retuned(Time::from_seconds(second) + ps(7), frequency);
             history.push(clock);
         }
@@ -812,7 +812,7 @@ mod tests {
         // The next edge after the end, exactly: the remaining fraction
         // at the last frequency, rounded up to a picosecond.
         let remaining = PHASE_UNITS - phase.fraction();
-        let picoseconds = remaining.div_ceil(u128::from(frequency.0));
+        let picoseconds = remaining.div_ceil(u128::from(frequency.nanohertz()));
         assert_eq!(
             history.to_next_edge(end),
             Some((ps(u64::try_from(picoseconds).unwrap()), remaining))
@@ -822,13 +822,13 @@ mod tests {
         let target = (phase.cycles() + 10_000_000) * PHASE_UNITS;
         assert_eq!(
             u128::from(edge.0 - end.0),
-            (target - phase.0).div_ceil(u128::from(frequency.0))
+            (target - phase.0).div_ceil(u128::from(frequency.nanohertz()))
         );
     }
 
     #[test]
     fn a_stopped_clock_has_no_edges() {
-        let clock = Clock::new(Frequency(0), Time(5));
+        let clock = Clock::new(Frequency::from_nanohertz(0), Time(5));
         assert_eq!(clock.edge_after(Time(5), 1), None);
         assert_eq!(clock.edges(Time(0), Time::MAX), 0);
     }

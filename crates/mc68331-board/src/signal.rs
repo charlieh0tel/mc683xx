@@ -104,10 +104,10 @@ impl Serial {
     #[must_use]
     pub const fn new(frame: Frame, baud: Frequency, bits: u32) -> Self {
         let scale = PICOSECONDS_PER_SECOND as u128 * NANOHERTZ_PER_HERTZ as u128;
-        let length = if baud.0 == 0 {
+        let length = if baud.nanohertz() == 0 {
             0
         } else {
-            bits as u128 * scale / baud.0 as u128
+            bits as u128 * scale / baud.nanohertz() as u128
         };
         Self::timed(frame, baud, Span::from_picos(length as u64))
     }
@@ -127,7 +127,7 @@ impl Serial {
     /// takes whole at its time.
     #[must_use]
     pub const fn untimed(frame: Frame) -> Self {
-        Self::timed(frame, Frequency(0), Span::ZERO)
+        Self::timed(frame, Frequency::from_nanohertz(0), Span::ZERO)
     }
 
     /// When the frame's stop bits end, for a frame whose start bit
@@ -239,7 +239,9 @@ impl fmt::Display for Signal {
             Self::Clock(clock) => write!(
                 formatter,
                 "clock_at={} frequency={} phase={}",
-                clock.at.0, clock.frequency.0, clock.phase.0
+                clock.at.0,
+                clock.frequency.nanohertz(),
+                clock.phase.0
             ),
             Self::Serial(serial) => {
                 match serial.frame {
@@ -249,7 +251,7 @@ impl fmt::Display for Signal {
                 write!(
                     formatter,
                     " baud={} length={}",
-                    serial.baud.0,
+                    serial.baud.nanohertz(),
                     serial.length.picos()
                 )
             }
