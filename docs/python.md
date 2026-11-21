@@ -47,7 +47,9 @@ rename renames the Python name with it.  The deliberate differences:
   (`Frequency` itself: a serial frame's baud, a clock net's frequency,
   a `QspiClock`'s `system_clock_nanohertz` and `baud_nanohertz`) is an
   `int` named `_nanohertz`.  Times are `int`s, system
-  clocks or picoseconds.
+  clocks or picoseconds.  A board run's span, Rust's `Span` or
+  `NonZeroSpan`, is a keyword pair, `seconds=` (a `float`) or
+  `picoseconds=` (an `int`), and its quantum `quantum_picoseconds=`.
 - **Settings:** a struct of settings is keyword arguments
   (`set_tracing(accesses=, exceptions=)` for `ChipTracing`,
   `Builder(data=, reference_hz=, external_hz=)` for `Configuration`); a
@@ -84,6 +86,17 @@ rename renames the Python name with it.  The deliberate differences:
   returns, not `MemoryId` and `PeripheralId`; a Rust callback trait
   (`MappedPeripheral`, `SpiPeripheral`, `Peripheral`, `Observer`) is a
   duck-typed object or callable.
+- **Errors:** a Rust error is a Python exception (Errors, below): the
+  module's own where Python has none to match, named as Rust's error
+  is (`LoadError`, `RunError`, `StateError`, `TargetError`, `BusError`;
+  `UnpeekableError` for `AccessError::Unpeekable`), a builtin
+  (`ValueError`, `IndexError`, `OSError`) where one fits.
+- **Python's own:** names with no Rust item behind them: `BoardChip`
+  (`Board.chip`, the `Mc68331` methods over a board's chip), a board
+  peripheral class's `PORTS` and `TIMED_SERIAL` (its `PortSpec`s, and
+  whether it is told serial frames as `Serial`s), the `timed=` keyword
+  of `take_received`, `net_value` and `observe`, `External` equal to its
+  name as a string, and `__version__`.
 
 Not offered, as a Python host has another way or no use for them:
 `Machine::remove_peripheral`, `take_natively_once` (a declined
@@ -1472,8 +1485,9 @@ bare.set_stop_on_fault(False)
 (`deviations`), Rust's `bare::Deviations`: odd word and long data
 accesses as byte cycles, and T1 and T0 tracing nothing, for parity
 runs against Unicorn only: not CPU32 behavior, off by default.
-`Deviations`, `set_intercepted` and `set_intercept_callback`, for
-parity with Unicorn, are outside semver (docs/releasing.md, Semver
+`Deviations` (`set_deviations`, `deviations`), `Intercepted`,
+`set_intercepted` and `set_intercept_callback`, for parity with
+Unicorn, are outside semver (docs/releasing.md, Semver
 scope): a minor release may change them.
 
 ### From Unicorn

@@ -96,8 +96,8 @@ class UnpeekableError(Exception):
 class StateError(ValueError):
     """Raised by restore for a snapshot of another format or other
     hardware, another count of peripherals, bytes that do not decode, or
-    values no run could save; by save and restore for a peripheral or
-    peripheral that cannot save, named."""
+    values no run could save; by save and restore for a peripheral that
+    cannot save, named."""
 
 class LoadError(ValueError):
     """Raised by Board for a board file it refuses, naming what in the
@@ -956,7 +956,9 @@ class FaultStop:
 
 @final
 class Intercepted:
-    """An exception an instruction raised, before anything is stacked."""
+    """An exception an instruction raised, before anything is stacked,
+    for parity runs against Unicorn only.  Outside semver
+    (docs/releasing.md)."""
 
     @property
     def vector(self) -> int: ...
@@ -965,8 +967,8 @@ class Intercepted:
 
 @final
 class Deviations:
-    """Deviations from the CPU32, for parity runs; never the CPU's
-    behavior."""
+    """Deviations from the CPU32, for parity runs against Unicorn only;
+    never the CPU's behavior.  Outside semver (docs/releasing.md)."""
 
     def __new__(cls, *, misaligned: bool = False, untraced: bool = False) -> Deviations: ...
     @property
@@ -1110,14 +1112,18 @@ class Machine:
     def serve_gdb(
         self, address: str = ..., ready: Callable[[int], object] | None = None
     ) -> Ending: ...
-    def set_intercepted(self, vector: int, intercepted: bool) -> None: ...
-    def set_intercept_callback(self, callback: Callable[[Intercepted], object] | None) -> None: ...
+    def set_intercepted(self, vector: int, intercepted: bool) -> None:
+        """For parity runs against Unicorn only; outside semver."""
+    def set_intercept_callback(self, callback: Callable[[Intercepted], object] | None) -> None:
+        """For parity runs against Unicorn only; outside semver."""
     def set_stop_on_fault(self, stop: bool) -> None: ...
     @property
     def stops_on_fault(self) -> bool: ...
-    def set_deviations(self, deviations: Deviations) -> None: ...
+    def set_deviations(self, deviations: Deviations) -> None:
+        """For parity runs against Unicorn only; outside semver."""
     @property
-    def deviations(self) -> Deviations: ...
+    def deviations(self) -> Deviations:
+        """For parity runs against Unicorn only; outside semver."""
     @property
     def instructions(self) -> int: ...
     @property

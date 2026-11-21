@@ -112,8 +112,9 @@ Not covered, so a minor or patch release may change them:
   `#[doc(hidden)]` ("Not part of the semver API");
 - npm package files outside its `exports`;
 - the Unicorn-parity Python items, for parity runs against Unicorn
-  only: `Deviations`, `Machine.set_intercepted` and
-  `Machine.set_intercept_callback`;
+  only: `Deviations` (with `Machine.set_deviations` and `deviations`),
+  `Intercepted`, `Machine.set_intercepted` and
+  `Machine.set_intercept_callback`, so marked in the stubs;
 - snapshot formats: a snapshot restores only into a build with the
   format versions that saved it (PLAN.md, State), so it is read by the
   release that wrote it.  Any release may bump one, and its notes say
