@@ -1323,6 +1323,16 @@ core refuses, so the chip and its peripherals are unchanged on an error.
 Not in it: hooks (which stay), tracing and events not yet taken.  The same snapshot and the same inputs give the
 same run.
 
+A snapshot restores only into a build with the same format versions
+(`docs/releasing.md`, Semver scope).  The snapshots a host restores
+whole (the core's, `Machine`'s, the chip's, the board's) name their
+layer, so one handed to another layer's `restore` is
+`StateError::Layer` (`a chip snapshot, not a board snapshot`), and
+bytes no layer saved `StateError::NotSnapshot`.  A peripheral's own
+bytes are its own: it versions them through `state::encode` and
+`decode`, as the `Alarm` above does, with no header, and only the
+layer that holds it hands them back.
+
 The bare `Machine` (`mc683xx_cpu32::flat`) does the same with its
 peripherals: a `MappedPeripheral` is `Save`, and `Machine::save()` holds each
 peripheral's snapshot in the order added, an error naming the peripheral by its

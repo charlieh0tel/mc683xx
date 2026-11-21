@@ -3,10 +3,13 @@ use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use super::CpuState;
+use super::Layer;
+use super::MAGIC;
 use super::StateError;
 use super::VERSION;
-use super::decode;
+use super::decode_layer;
 use super::encode;
+use super::encode_layer;
 use super::restore_each;
 use crate::cpu::Cpu;
 use crate::cycles::Cycles;
@@ -143,15 +146,17 @@ fn hooks_stay_and_permissions_come_back() {
 fn another_format_is_refused() {
     let mut cpu = looping();
     let mut snapshot = cpu.save().unwrap();
-    snapshot[0] ^= 0xff;
+    snapshot[MAGIC.len() + 1] ^= 0xff;
     assert!(matches!(
         cpu.restore(&snapshot),
         Err(StateError::Version { found, expected }) if (found, expected) == (VERSION ^ 0xff, VERSION)
     ));
-    assert!(matches!(
-        cpu.restore(&snapshot[..2]),
-        Err(StateError::Truncated)
-    ));
+    for length in [2, MAGIC.len(), MAGIC.len() + 2] {
+        assert!(matches!(
+            cpu.restore(&snapshot[..length]),
+            Err(StateError::Truncated)
+        ));
+    }
     let good = looping().save().unwrap();
     assert!(matches!(
         cpu.restore(&good[..good.len() / 2]),
@@ -164,6 +169,34 @@ fn another_format_is_refused() {
         Err(StateError::Invalid(reason)) if reason == "bytes past the end of the snapshot"
     ));
     // Unchanged by the refusals.
+    assert_eq!(cpu.registers.data[0], 40);
+}
+
+#[test]
+fn another_layers_snapshot_is_refused_as_such() {
+    let mut cpu = looping();
+    let snapshot = cpu.save().unwrap();
+    let board = encode_layer(Layer::Board, VERSION, &());
+    let error = cpu.restore(&board).unwrap_err();
+    assert!(matches!(
+        error,
+        StateError::Layer {
+            found: Layer::Board,
+            expected: Layer::Cpu
+        }
+    ));
+    assert_eq!(error.to_string(), "a board snapshot, not a CPU snapshot");
+    let mut unnamed = snapshot.clone();
+    unnamed[MAGIC.len()] = 0;
+    assert!(matches!(
+        cpu.restore(&unnamed),
+        Err(StateError::Invalid(reason)) if reason == "snapshot layer 0"
+    ));
+    // a part's snapshot, or one from before the magic
+    assert!(matches!(
+        cpu.restore(&encode(VERSION, &())),
+        Err(StateError::NotSnapshot)
+    ));
     assert_eq!(cpu.registers.data[0], 40);
 }
 
@@ -186,9 +219,9 @@ fn other_hardware_is_refused() {
 
 /// `snapshot` with `change` made to what it holds.
 fn edited(snapshot: &[u8], change: impl FnOnce(&mut CpuState)) -> Vec<u8> {
-    let mut state: CpuState = decode(VERSION, snapshot).unwrap();
+    let mut state: CpuState = decode_layer(Layer::Cpu, VERSION, snapshot).unwrap();
     change(&mut state);
-    encode(VERSION, &state)
+    encode_layer(Layer::Cpu, VERSION, &state)
 }
 
 #[test]

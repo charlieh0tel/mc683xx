@@ -915,8 +915,9 @@ chip.run_for(500)
   nothing answers; a bare `Machine`'s `read` or `write` of bytes no map
   covers.
 - `mc683xx.UnpeekableError`: a peek only a real cycle can answer.
-- `mc683xx.StateError` (a `ValueError`): a snapshot of another format
-  or other hardware, another count of peripherals, bytes that do not
+- `mc683xx.StateError` (a `ValueError`): a snapshot of another format,
+  of another layer (`a chip snapshot, not a board snapshot`) or of
+  other hardware, another count of peripherals, bytes that do not
   decode, or values no run could save; a peripheral that
   cannot save, named.
 - `mc683xx.TargetError` (a `RuntimeError`): a background debug control

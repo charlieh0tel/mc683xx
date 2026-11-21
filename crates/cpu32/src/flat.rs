@@ -23,9 +23,10 @@ use crate::cpu::Cpu;
 use crate::cpu::Halt;
 use crate::cpu::bare::LimitedRun;
 use crate::cpu::bare::Limits;
+use crate::cpu::state::Layer;
 use crate::cpu::state::StateError;
-use crate::cpu::state::decode;
-use crate::cpu::state::encode;
+use crate::cpu::state::decode_layer;
+use crate::cpu::state::encode_layer;
 use crate::cpu::state::restore_each;
 use crate::cycles::Cycles;
 use crate::exception::Vector;
@@ -53,7 +54,7 @@ use mc683xx_target::size::Size;
 mod tests;
 
 /// The format of [`Machine::save`]'s bytes.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 /// The address lines a machine has unless the host says otherwise:
 /// all of the CPU32's (CPU32RM 5.3), so no address aliases.
 pub const ADDRESS_BITS: u32 = 32;
@@ -641,7 +642,8 @@ impl Machine {
     /// A peripheral that cannot save, named by its first address
     /// ([`StateError::Peripheral`]).
     pub fn save(&self) -> Result<Vec<u8>, StateError> {
-        Ok(encode(
+        Ok(encode_layer(
+            Layer::Machine,
             VERSION,
             &MachineState {
                 cpu: self.cpu.save()?,
@@ -666,7 +668,7 @@ impl Machine {
     /// peripheral that cannot save or refuses its snapshot, named
     /// ([`StateError::Peripheral`]).
     pub fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
-        let state: MachineState = decode(VERSION, snapshot)?;
+        let state: MachineState = decode_layer(Layer::Machine, VERSION, snapshot)?;
         if state.peripherals.len() != self.bus.peripherals.len() {
             return Err(StateError::mismatch("peripherals"));
         }

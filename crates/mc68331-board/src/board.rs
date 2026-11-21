@@ -27,9 +27,10 @@ use std::time::Duration;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
 use mc683xx_cpu32::cpu::hooks::HookId;
+use mc683xx_cpu32::cpu::state::Layer;
 use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cpu::state::decode_layer;
+use mc683xx_cpu32::cpu::state::encode_layer;
 use mc683xx_cpu32::cpu::state::restore_each;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::memory::MemoryKind;
@@ -111,7 +112,7 @@ use crate::wiring::SharedMemory;
 
 /// The format of [`Board::save`]'s bytes.  The chip's and the peripherals'
 /// snapshots inside carry their own.
-pub const VERSION: u32 = 19;
+pub const VERSION: u32 = 20;
 
 /// The levels on PCS\[3:0\] before the QSPI drives them: high.
 const PCS_IDLE: u8 = 0xf;
@@ -2129,7 +2130,7 @@ impl<C: Chip> Board<C> {
             qspi: self.shared.qspi.borrow().clone(),
             ahead: self.ahead.clone(),
         };
-        Ok(encode(VERSION, &state))
+        Ok(encode_layer(Layer::Board, VERSION, &state))
     }
 
     /// Each peripheral's snapshot, in file order; an error names the
@@ -2244,7 +2245,7 @@ impl<C: Chip> Board<C> {
     ///
     /// [`Peripheral::restore`]: crate::peripheral::Peripheral::restore
     pub fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
-        let state: BoardState<C::Pin> = decode(VERSION, snapshot)?;
+        let state: BoardState<C::Pin> = decode_layer(Layer::Board, VERSION, snapshot)?;
         self.check(&state)?;
         let backups = self.save_peripherals()?;
         let parts: Vec<&[u8]> = state

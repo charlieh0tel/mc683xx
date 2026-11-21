@@ -8,9 +8,10 @@
 //! [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
 
 use mc683xx_cpu32::cpu::Halt;
+use mc683xx_cpu32::cpu::state::Layer;
 use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cpu::state::decode_layer;
+use mc683xx_cpu32::cpu::state::encode_layer;
 use mc683xx_cpu32::cpu::state::restore_each;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::memory::RegionId;
@@ -27,7 +28,7 @@ use crate::debug::serial::Serial;
 /// The format of [`Mc68331::save`]'s bytes.  The core's, the modules',
 /// the peripherals' and the QSPI peripheral's snapshots inside carry their
 /// own.
-pub const VERSION: u32 = 16;
+pub const VERSION: u32 = 17;
 
 /// What the QSPI's peripheral's save and restore errors name.
 const QSPI_PERIPHERAL: &str = "the QSPI peripheral";
@@ -150,7 +151,7 @@ impl Mc68331 {
             dsack_told: board.dsack_told.clone(),
             serial: self.serial.clone(),
         };
-        Ok(encode(VERSION, &state))
+        Ok(encode_layer(Layer::Chip, VERSION, &state))
     }
 
     /// Restores a snapshot `save` made of a chip built the same way.
@@ -179,7 +180,7 @@ impl Mc68331 {
     /// peripheral or the QSPI's peripheral that cannot save or refuses its
     /// snapshot, named ([`StateError::Peripheral`]).
     pub fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
-        let state: ChipState = decode(VERSION, snapshot)?;
+        let state: ChipState = decode_layer(Layer::Chip, VERSION, snapshot)?;
         if state.modules.len() != self.board.modules.len() {
             return Err(StateError::mismatch("modules"));
         }
@@ -255,9 +256,10 @@ impl Mc68331 {
 /// `snapshot` with `change` made to its state.
 #[cfg(test)]
 fn changed(snapshot: &[u8], change: impl FnOnce(&mut ChipState)) -> Vec<u8> {
-    let mut state: ChipState = decode(VERSION, snapshot).expect("a chip's snapshot");
+    let mut state: ChipState =
+        decode_layer(Layer::Chip, VERSION, snapshot).expect("a chip's snapshot");
     change(&mut state);
-    encode(VERSION, &state)
+    encode_layer(Layer::Chip, VERSION, &state)
 }
 
 /// `snapshot` with `change` made to its diversions.

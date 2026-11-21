@@ -2,9 +2,11 @@ use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 
+use mc683xx_cpu32::cpu::state::Layer;
 use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
+use mc683xx_cpu32::cpu::state::decode_layer;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cpu::state::encode_layer;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 
@@ -91,9 +93,9 @@ attach = [{ qspi = 0b1110 }]
 
 /// `snapshot` with `change` made to the board's own state.
 fn edited(snapshot: &[u8], change: impl FnOnce(&mut BoardState<Pin>)) -> Vec<u8> {
-    let mut state: BoardState<Pin> = decode(VERSION, snapshot).unwrap();
+    let mut state: BoardState<Pin> = decode_layer(Layer::Board, VERSION, snapshot).unwrap();
     change(&mut state);
-    encode(VERSION, &state)
+    encode_layer(Layer::Board, VERSION, &state)
 }
 
 /// A change on net `net` by driver `driver`, numbered `sequence`.

@@ -11,6 +11,7 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu;
 use mc683xx_cpu32::cpu::Halt;
 use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::cpu::state::Layer;
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::Stateless;
@@ -3364,11 +3365,18 @@ fn a_module_that_cannot_save_refuses_the_snapshot() {
         chip.restore(&snapshot),
         Err(StateError::Mismatch(reason)) if reason == "modules"
     ));
+    assert!(matches!(
+        booting(&[NOP]).0.restore(&chip.cpu.save().unwrap()),
+        Err(StateError::Layer {
+            found: Layer::Cpu,
+            expected: Layer::Chip
+        })
+    ));
     let mut snapshot = snapshot;
     snapshot[0] ^= 1;
     assert!(matches!(
         booting(&[NOP]).0.restore(&snapshot),
-        Err(StateError::Version { .. })
+        Err(StateError::NotSnapshot)
     ));
 }
 

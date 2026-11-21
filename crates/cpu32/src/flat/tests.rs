@@ -12,11 +12,14 @@ use crate::cpu::bare::Limits;
 use crate::cpu::hooks::Instruction;
 use crate::cpu::hooks::MemoryAccess;
 use crate::cpu::state;
+use crate::cpu::state::Layer;
 use crate::cpu::state::Save;
 use crate::cpu::state::StateError;
 use crate::cpu::state::Stateless;
 use crate::cpu::state::decode;
+use crate::cpu::state::decode_layer;
 use crate::cpu::state::encode;
+use crate::cpu::state::encode_layer;
 use crate::cycles::Cycles;
 use crate::exception::Vector;
 use crate::interrupt::IrqPin;
@@ -661,7 +664,8 @@ fn a_snapshot_holds_each_peripheral_in_the_order_added() {
     machine.restore(&snapshot).unwrap();
     assert_eq!(latch(&mut machine, PERIPHERAL), 1);
     assert_eq!(latch(&mut machine, SECOND), 2);
-    let state: super::MachineState = decode(super::VERSION, &snapshot).unwrap();
+    let state: super::MachineState =
+        decode_layer(Layer::Machine, super::VERSION, &snapshot).unwrap();
     let held: Vec<Option<u32>> = state
         .peripherals
         .iter()
@@ -716,12 +720,14 @@ fn a_restore_into_another_count_of_peripheral_is_refused_and_changes_nothing() {
 fn a_peripheral_or_core_that_refuses_its_snapshot_leaves_every_peripheral_as_it_was() {
     let mut machine = latched();
     let good = machine.save().unwrap();
-    let mut state: super::MachineState = decode(super::VERSION, &good).unwrap();
+    let mut state: super::MachineState =
+        decode_layer(Layer::Machine, super::VERSION, &good).unwrap();
     state.peripherals[1] = encode(LATCH_VERSION + 1, &5_u32);
-    let bad_peripheral = encode(super::VERSION, &state);
-    let mut state: super::MachineState = decode(super::VERSION, &good).unwrap();
+    let bad_peripheral = encode_layer(Layer::Machine, super::VERSION, &state);
+    let mut state: super::MachineState =
+        decode_layer(Layer::Machine, super::VERSION, &good).unwrap();
     state.cpu.truncate(2);
-    let bad_cpu = encode(super::VERSION, &state);
+    let bad_cpu = encode_layer(Layer::Machine, super::VERSION, &state);
     set_latch(&mut machine, PERIPHERAL, 10);
     set_latch(&mut machine, SECOND, 20);
     let refused = machine.restore(&bad_peripheral).unwrap_err();

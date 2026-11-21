@@ -114,10 +114,12 @@ Not covered, so a minor or patch release may change them:
 - the Unicorn-parity Python items, for parity runs against Unicorn
   only: `Deviations`, `Machine.set_intercepted` and
   `Machine.set_intercept_callback`;
-- snapshot formats: a restore needs the versions that saved it
-  (PLAN.md, State), so a snapshot is read by the release that wrote
-  it.  A minor release may change one, and its notes say so; a patch
-  release never does.
+- snapshot formats: a snapshot restores only into a build with the
+  format versions that saved it (PLAN.md, State), so it is read by the
+  release that wrote it.  Any release may bump one, and its notes say
+  so.  A snapshot handed to the wrong layer's `restore` (a chip's to a
+  board's) is refused as such (`StateError::Layer`), whatever its
+  version.
 
 Dependencies and platforms:
 

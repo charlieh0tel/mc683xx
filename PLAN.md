@@ -234,7 +234,23 @@ prefix; their directories keep the short names.
   is cached for speed (the interrupt level, the next events, the
   GPT's among them) is not saved: a restore finds it again.  Each
   format is a little-endian `u32` version, then postcard (serde)
-  bytes; another version, short or undecodable bytes or bytes past its end, other
+  bytes (`state::encode`, `decode`).  A layer a host restores whole
+  (the core's, `Machine`'s, the chip's, the board's: `state::Layer`)
+  puts a magic (`M683`) and its layer's tag byte before the version
+  (`state::encode_layer`, `decode_layer`, hidden), so a snapshot
+  handed to another layer's `restore` is `StateError::Layer` ("a chip
+  snapshot, not a board snapshot"), not a version mismatch, and bytes
+  without the magic (a part's snapshot, one from before the header)
+  `StateError::NotSnapshot`.  The header goes with the format, not
+  with where it sits: the core's snapshot inside a chip's carries it
+  too, the same bytes `Cpu::save` gives, at five bytes a copy.  A
+  part's format (a module's, a peripheral's, a host's peripheral's
+  through `encode` and `decode`) has none: only its layer restores it,
+  by its place, so no host can hand it the wrong one, and a host's
+  peripheral's format stays the host's.  A snapshot restores only
+  into a build with the same format versions; any release may bump
+  one, and its notes say so (`docs/releasing.md`, Semver scope).
+  Another version, short or undecodable bytes or bytes past its end, other
   hardware (address lines, region sizes, page counts, module count),
   or values no run could save (`StateError::Invalid`: a register bit
   the peripheral does not implement, an index past what it indexes, a
@@ -3367,6 +3383,7 @@ checks move onto real code hooks.
 | PPROUT's edges share PWMA's `set_report_pwm_edges` opt-in | Same pin; one opt-in per pin (decided 2026-10-23). |
 | Permissions and hook bits beside the page entries, not in them | The chip rebuilds the entries from the decode; the host's protection and hooks must outlive that. |
 | Snapshots as a version then postcard bytes, one version per layer | serde derives keep the state types the code's own; postcard is small and deterministic; the core, the chip and each module change apart. |
+| A magic and a layer tag before the version of each format a host restores whole (core, machine, chip, board), not of parts | Without it a chip snapshot handed to a board's `restore` is refused as another version, which reads as a stale build; the tag names the mistake.  The header is the format's, so the core's inside a chip's carries it as `Cpu::save`'s does, rather than a second hidden save without it.  Parts (modules, peripherals) are placed by their layer, so a wrong one cannot reach them, and a host's peripheral keeps its own format (decided 2026-11-21). |
 | A golden file per snapshot format, keyed by the versions in it | Two branches changing one format each bumped its version apart and merged cleanly; a golden they both regenerate conflicts.  A hash, not the bytes, keeps it small; nested versions in the key catch an inner bump that left an outer version alone: the outer layer's bytes changed, so it bumps too, and a reader of the outer version alone knows the format changed. |
 | `Module::save` and `restore` required, with no default; a module that cannot save makes the chip's fail | A snapshot missing a module's state would not reproduce the run; failing says so, and a new module cannot forget it silently. |
 | A peripheral's `Save::save` and `restore` both required: both, `Stateless` or `unsavable!` | A default for each would let a peripheral give `save` alone, saving snapshots its own `restore` refuses, which a rollback cannot put back.  A macro, not an `Unsavable` marker trait: a second blanket impl of `Save` beside `Stateless`'s conflicts (decided 2026-10-24). |

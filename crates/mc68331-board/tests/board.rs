@@ -49,6 +49,7 @@ use mc683xx_board::time::TimeBase;
 use mc683xx_board::trace::Record;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::cpu::state::Layer;
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
@@ -610,6 +611,21 @@ fn the_format_matches_its_golden() {
         ],
         &board.save().unwrap(),
     );
+}
+
+#[test]
+fn a_chips_snapshot_is_refused_as_one() {
+    let mut board = phase_board(37);
+    let chip = board.chip().save().unwrap();
+    let error = board.restore(&chip).unwrap_err();
+    assert!(matches!(
+        error,
+        StateError::Layer {
+            found: Layer::Chip,
+            expected: Layer::Board
+        }
+    ));
+    assert_eq!(error.to_string(), "a chip snapshot, not a board snapshot");
 }
 
 /// TIC1 as the program copied it, after the first rising edge.
