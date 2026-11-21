@@ -86,7 +86,7 @@ const TIMEOUT_MS: &str = "timeout_ms";
 const FC: &str = "fc";
 
 /// One command of a script.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Command {
     /// Writes `value` to memory.
@@ -638,7 +638,7 @@ impl Command {
 }
 
 /// A command and the line it is on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Line {
     /// The line, from 1.
@@ -715,7 +715,7 @@ impl Script {
         self.lines.iter().try_for_each(|line| {
             line.command.run(target).map_err(|error| ScriptError {
                 line: line.number,
-                command: line.command,
+                command: line.command.clone(),
                 error,
             })
         })

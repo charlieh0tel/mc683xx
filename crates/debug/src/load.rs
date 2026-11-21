@@ -30,7 +30,7 @@ pub enum OddEdges {
 }
 
 /// How to load an image.  `LoadOptions::default()`, then set fields.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct LoadOptions {
     /// The address space written: supervisor data by default.

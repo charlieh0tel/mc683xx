@@ -1995,7 +1995,10 @@ Adversarial review (2026-11-01):
 - *What it forecloses.*  Little: `Command`, the errors, `OddEdges`,
   `LoadOptions` and `LoadReport` are `#[non_exhaustive]`, so a
   command (a delay, a loop), long writes, a progress report or a
-  flash algorithm can be added in a minor release.  The script is
+  flash algorithm can be added in a minor release.  `Command`, `Line`
+  and `LoadOptions` are `Clone` but not `Copy`, so a command or an
+  option that carries data `Copy` cannot (a loop's body, a file name)
+  is no breaking change either.  The script is
   its own small language, not another BDM tool's init format; a
   converter could come later.  No CLI yet: a runner front end
   (`--load`, `--init`) belongs where a pod host or `mc683xx-run` needs
