@@ -1540,9 +1540,9 @@ chip_methods! {
         self.chip
             .take_port_changes()
             .into_iter()
-            .map(|(now, change)| {
+            .map(|change| {
                 (
-                    now.0,
+                    change.now.0,
                     change.port.into(),
                     change.outputs.driven,
                     change.outputs.levels,
@@ -1625,7 +1625,7 @@ chip_methods! {
         self.chip
             .take_pwm_changes()
             .into_iter()
-            .map(|(now, change)| (now.0, change.channel.into(), change.level))
+            .map(|change| (change.now.0, change.channel.into(), change.level))
             .collect()
     }
 

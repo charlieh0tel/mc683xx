@@ -5,6 +5,7 @@
 use std::fmt;
 use std::str::FromStr;
 
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::sim::ports::PortName;
 
@@ -105,6 +106,8 @@ impl NoInputsError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct PortChange {
+    /// When.
+    pub now: Cycles,
     /// The port.
     pub port: Port,
     /// What it drives.

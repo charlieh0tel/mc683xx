@@ -2332,11 +2332,11 @@ fn the_host_sees_each_port_edge_and_drives_the_inputs() {
         }
     );
     let changes = chip.take_port_changes();
-    let seen: Vec<PortChange> = changes.iter().map(|&(_, change)| change).collect();
-    let change = |port, driven, levels| PortChange {
-        port,
-        outputs: PortLevels { driven, levels },
-    };
+    let seen: Vec<_> = changes
+        .iter()
+        .map(|change| (change.port, change.outputs))
+        .collect();
+    let change = |port, driven, levels| (port, PortLevels { driven, levels });
     assert_eq!(
         seen,
         [
@@ -2348,7 +2348,7 @@ fn the_host_sees_each_port_edge_and_drives_the_inputs() {
         ]
     );
     // each at the time of its write, within one quantum
-    assert!(changes.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    assert!(changes.windows(2).all(|pair| pair[0].now < pair[1].now));
     assert!(chip.take_port_changes().is_empty());
 }
 
@@ -2372,31 +2372,28 @@ fn gpt_output_edges_keep_their_times_across_quanta() {
         ports.extend(chip.take_port_changes());
         pwm.extend(chip.take_pwm_changes());
     }
-    let gp = |driven, levels| PortChange {
+    let gp = |at, driven, levels| PortChange {
+        now: Cycles(at),
         port: Port::Gp,
         outputs: PortLevels { driven, levels },
     };
-    let b = |level| PwmChange {
+    let b = |at, level| PwmChange {
+        now: Cycles(at),
         channel: Channel::B,
         level,
     };
     assert_eq!(
         ports,
         [
-            (Cycles(0), gp(0x30, 0x00)),
-            (Cycles(4 * 0x10), gp(0x30, 0x10)),
-            (Cycles(4 * 0x30), gp(0x30, 0x30)),
-            (Cycles(4 * 0x50), gp(0x30, 0x10)),
+            gp(0, 0x30, 0x00),
+            gp(4 * 0x10, 0x30, 0x10),
+            gp(4 * 0x30, 0x30, 0x30),
+            gp(4 * 0x50, 0x30, 0x10),
         ]
     );
     assert_eq!(
         pwm,
-        [
-            (Cycles(512), b(true)),
-            (Cycles(514), b(false)),
-            (Cycles(1024), b(true)),
-            (Cycles(1026), b(false)),
-        ]
+        [b(512, true), b(514, false), b(1024, true), b(1026, false),]
     );
 }
 
@@ -3670,8 +3667,8 @@ fn port_qs_toggles(step: u64) -> Vec<(Cycles, PortLevels)> {
         changes.extend(
             chip.take_port_changes()
                 .into_iter()
-                .filter(|(_, change)| change.port == Port::Qs)
-                .map(|(at, change)| (at, change.outputs)),
+                .filter(|change| change.port == Port::Qs)
+                .map(|change| (change.now, change.outputs)),
         );
     }
     changes

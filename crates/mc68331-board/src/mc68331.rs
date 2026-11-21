@@ -744,16 +744,21 @@ impl chip::Chip for Mc68331 {
     }
 
     fn collect<F: FnMut(Time, Pin, Signal)>(&mut self, base: TimeBase, mut emit: F) {
-        for (at, change) in self.take_port_changes() {
-            emit_port(&mut emit, base.time(at), change.port, change.outputs);
+        for change in self.take_port_changes() {
+            emit_port(
+                &mut emit,
+                base.time(change.now),
+                change.port,
+                change.outputs,
+            );
         }
-        for (at, change) in self.take_pwm_changes() {
+        for change in self.take_pwm_changes() {
             let pin = if change.channel == Channel::A {
                 Pin::PwmA
             } else {
                 Pin::PwmB
             };
-            emit(base.time(at), pin, Signal::Level(change.level));
+            emit(base.time(change.now), pin, Signal::Level(change.level));
         }
         let system_clock = self.sim().clock().frequency();
         for sent in self.take_sci_transmitted() {

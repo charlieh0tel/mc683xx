@@ -1183,7 +1183,7 @@ impl Mc68331 {
     /// ([PLAN.md], Peripherals).
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
-    pub fn take_pwm_changes(&mut self) -> Vec<(Cycles, PwmChange)> {
+    pub fn take_pwm_changes(&mut self) -> Vec<PwmChange> {
         self.board.module_mut::<Gpt>(GPT).take_pwm_changes()
     }
 
@@ -1248,7 +1248,7 @@ impl Mc68331 {
     /// clock's while `set_report_oc1_clock_edges` asks for them; the
     /// QSPI's PCS and the SCI's TXD at their entries' and frames'
     /// times.
-    pub fn take_port_changes(&mut self) -> Vec<(Cycles, PortChange)> {
+    pub fn take_port_changes(&mut self) -> Vec<PortChange> {
         self.board.take_port_changes()
     }
 

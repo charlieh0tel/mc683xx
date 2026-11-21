@@ -510,7 +510,7 @@ surrounds the SoC with its board peripherals through:
   quanta, so the host sees each with the time it happened, not only
   the level at a sync point: port GP's come in `take_port_changes`
   with every port's, and the PWM pins' in `take_pwm_changes`,
-  `(time, PwmChange { channel, level })` in time order.  The PWM pins
+  `PwmChange { now, channel, level }` in time order.  The PWM pins
   are no port's, so they keep a stream of their own; the GPT holds
   both in one queue (its snapshot unchanged) and each take draws its
   own.  A change takes the time it happened, which is the cycle's

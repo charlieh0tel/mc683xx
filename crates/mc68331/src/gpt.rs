@@ -325,9 +325,11 @@ pub struct ParseInputError(String);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct PwmChange {
+    /// When.
+    pub now: Cycles,
     /// The pin.
     pub channel: Channel,
-    /// Its level from the change's time on.
+    /// Its level from then on.
     pub level: bool,
 }
 
@@ -762,13 +764,19 @@ impl Gpt {
         })
     }
 
-    /// The PWM pins' reported edges since the last call, each at the
-    /// time it happened, in time order.
-    pub(crate) fn take_pwm_changes(&mut self) -> Vec<(Cycles, PwmChange)> {
+    /// The PWM pins' reported edges since the last call, in time order.
+    pub(crate) fn take_pwm_changes(&mut self) -> Vec<PwmChange> {
         self.take_changes(|change| match change {
-            OutputChange::Pwm { channel, level } => Some(PwmChange { channel, level }),
+            OutputChange::Pwm { channel, level } => Some((channel, level)),
             OutputChange::PortGp(_) => None,
         })
+        .into_iter()
+        .map(|(now, (channel, level))| PwmChange {
+            now,
+            channel,
+            level,
+        })
+        .collect()
     }
 
     /// The queued changes `select` takes, in time order, those at one

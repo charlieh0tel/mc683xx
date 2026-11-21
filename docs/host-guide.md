@@ -819,8 +819,8 @@ Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
   their chip select; port GP's assignment is the pins the output
   compares take from PORTGP; port QS's is PQSPAR's, TXD's while the
   transmitter has it.
-- Changes: `take_port_changes()` gives `(time, PortChange { port,
-  outputs })`, every port's in time order: a register write's at its
+- Changes: `take_port_changes()` gives `PortChange { now, port,
+  outputs }`, every port's in time order: a register write's at its
   instruction's start, the compares' at their match, the QSPI's PCS and
   the SCI's TXD at the entry's or frame's own time.
 
@@ -865,8 +865,8 @@ assert_eq!(chip.port(Port::E).direction, PE0);
 let edges: Vec<(u8, u8)> = chip
     .take_port_changes()
     .into_iter()
-    .filter(|(_, change)| change.port == Port::E)
-    .map(|(_, change)| (change.outputs.driven, change.outputs.levels))
+    .filter(|change| change.port == Port::E)
+    .map(|change| (change.outputs.driven, change.outputs.levels))
     .collect();
 assert_eq!(edges, [(PE0, 0), (PE0, PE0), (PE0, 0)]);
 // PE1, an input, as PORTE reads it.
@@ -893,8 +893,8 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
 - Changes: port GP's come in `take_port_changes()`; a compare's edge
   has the time TCNT matched.  CPROUT's clock edges on OC1 come there
   only while `set_report_oc1_clock_edges(true)` asks; otherwise the
-  changes show the pin low.  `take_pwm_changes()` gives `(time,
-  PwmChange { channel, level })` in time order for a channel
+  changes show the pin low.  `take_pwm_changes()` gives `PwmChange {
+  now, channel, level }` in time order for a channel
   `set_report_pwm_edges(channel, true)` asks for, PPROUT's clock edges
   included.
 
@@ -936,10 +936,10 @@ chip.schedule_gpt_input(Cycles(3000), ic1, true);
 chip.run_for(Cycles(CLOCKS_PER_COUNT * 0x1000 + 100));
 let changes = chip.take_port_changes();
 let last = changes.last().unwrap();
-assert_eq!(last.0, Cycles(CLOCKS_PER_COUNT * 0x1000));
-assert_eq!(last.1.port, Port::Gp);
+assert_eq!(last.now, Cycles(CLOCKS_PER_COUNT * 0x1000));
+assert_eq!(last.port, Port::Gp);
 assert_eq!(
-    last.1.outputs,
+    last.outputs,
     PortLevels {
         driven: OC2,
         levels: OC2

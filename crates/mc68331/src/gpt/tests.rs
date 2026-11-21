@@ -899,27 +899,21 @@ fn port_and_pwm_changes_are_taken_apart_each_in_time_order() {
     assert_eq!(
         gpt.take_pwm_changes(),
         [
-            (
-                Cycles(512),
-                PwmChange {
-                    channel: Channel::A,
-                    level: true
-                }
-            ),
-            (
-                Cycles(768),
-                PwmChange {
-                    channel: Channel::A,
-                    level: false
-                }
-            ),
-            (
-                Cycles(1024),
-                PwmChange {
-                    channel: Channel::A,
-                    level: true
-                }
-            ),
+            PwmChange {
+                now: Cycles(512),
+                channel: Channel::A,
+                level: true,
+            },
+            PwmChange {
+                now: Cycles(768),
+                channel: Channel::A,
+                level: false,
+            },
+            PwmChange {
+                now: Cycles(1024),
+                channel: Channel::A,
+                level: true,
+            },
         ]
     );
     assert_eq!(gpt.take_port_changes(), []);
