@@ -94,8 +94,10 @@ npm-package` assembles it in `crates/wasm/pkg`:
   written by `npm/types.mjs` from wasm-bindgen's: the classes copied,
   `init`, `initSync` and `InitOutput` declared as the Node entry gives
   them, naming no DOM or WebAssembly type, which a Node project's
-  types lack; both reference the `esnext.disposable` library for the
-  classes' `[Symbol.dispose]`.  Copied, not written by hand, so the
+  types lack; the web bindings' `InitOutput` made opaque but for its
+  `memory`, as wasm-bindgen's lists the module's every export, the
+  bindings' internals; both reference the `esnext.disposable` library
+  for the classes' `[Symbol.dispose]`.  Copied, not written by hand, so the
   two keep in step; anything new after the classes in wasm-bindgen's
   output, or a browser's type in them, stops the build.
 - `package.json`, written by `npm/package.mjs` from `cargo metadata`:

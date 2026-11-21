@@ -7,6 +7,8 @@ import type { InitInput, InitOutput, SyncInitInput } from "mc683xx";
 const input: InitInput = new URL("./mc683xx_bg.wasm", import.meta.url);
 const output: InitOutput = await init(input);
 const sameOutput: InitOutput = initSync(new Uint8Array() satisfies SyncInitInput);
+// @ts-expect-error the bindings' internals are no API
+output.__wbindgen_start();
 
 function run(text: string, image: Uint8Array): [string, bigint, Uint8Array] {
   using board = new Board(text, new Map([["demo.bin", image]]), ["option"]);

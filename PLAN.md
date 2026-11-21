@@ -3518,7 +3518,10 @@ checks move onto real code hooks.
   hand so the two cannot drift, and a DOM-free `init` and `initSync`,
   with `InitInput` and `SyncInitInput` `unknown`: the build fails if
   `node.d.ts` lacks a name the web types export, so a type imported
-  from `mc683xx` checks under either condition.
+  from `mc683xx` checks under either condition.  Under both, `InitOutput`
+  is opaque but for its memory: wasm-bindgen declares the module's
+  every export, the bindings' internals, which are no API (decided
+  2026-11-21).
   `make npm-types` checks them with TypeScript at an exact version
   (5.9.3, and `@types/node` 22), `strict` and `skipLibCheck` off, as
   three consumers of the installed tarball would: a Node ES module

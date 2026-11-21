@@ -98,7 +98,8 @@ The package carries its TypeScript types: Node's entry its own, which
 name no DOM or WebAssembly type (its `init` and `initSync` take any
 argument and return at once, `InitInput` and `SyncInitInput` are
 `unknown`, `InitOutput` opaque), so a Node project without the DOM
-library checks them; a browser's are the bindings'.  Both export the
+library checks them; a browser's are the bindings', with `InitOutput`
+opaque but for its `memory`, a `WebAssembly.Memory`.  Both export the
 same names.
 Both reference the `esnext.disposable` library, which the classes'
 `[Symbol.dispose]` needs.  A CommonJS TypeScript file imports the

@@ -12,6 +12,8 @@ async function initialized(input: InitInput): Promise<InitOutput> {
 }
 
 const output: InitOutput = initSync(new Uint8Array() satisfies SyncInitInput);
+// @ts-expect-error the bindings' internals are no API
+output.__wbindgen_start();
 
 function run(text: string, image: Uint8Array): [string, bigint, Uint8Array] {
   using board = new Board(text, new Map([["demo.bin", image]]));
