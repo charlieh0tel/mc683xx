@@ -366,13 +366,9 @@ impl Board {
         mask: u8,
         now: Cycles,
     ) -> Result<(), NoInputsError> {
-        if port == Port::C {
-            return Err(NoInputsError { port });
-        }
         let pins = self.port(port).pins & !mask | value & mask;
         match port {
-            // refused above
-            Port::C => {}
+            Port::C => return Err(NoInputsError { port }),
             Port::E => {
                 self.modules_changed();
                 self.sim.set_port_pins(PortName::E, pins);
