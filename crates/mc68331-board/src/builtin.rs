@@ -9,6 +9,7 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
@@ -191,7 +192,7 @@ pub struct RegisterFile {
     /// reach.
     bytes: Vec<u8>,
     /// The vector an acknowledge reads, if it answers one.
-    vector: Option<u8>,
+    vector: Option<Vector>,
 }
 
 impl RegisterFile {
@@ -199,7 +200,7 @@ impl RegisterFile {
     /// with `vector`; [`None`] unless `length` is a power of two that
     /// ADDR\[23:0\] reach.
     #[must_use]
-    pub fn new(length: usize, vector: Option<u8>) -> Option<Self> {
+    pub fn new(length: usize, vector: Option<Vector>) -> Option<Self> {
         (length.is_power_of_two() && length <= ADDRESS_SPACE).then(|| Self {
             bytes: vec![0; length],
             vector,
@@ -219,7 +220,7 @@ impl RegisterFile {
 
     /// The vector an acknowledge reads, if it answers one.
     #[must_use]
-    pub const fn vector(&self) -> Option<u8> {
+    pub const fn vector(&self) -> Option<Vector> {
         self.vector
     }
 
@@ -240,7 +241,7 @@ impl RegisterFile {
         }
         Ok(Self {
             bytes: vec![0; length as usize],
-            vector: context.parameters.integer("vector")?,
+            vector: context.parameters.integer("vector")?.map(Vector),
         })
     }
 
@@ -253,7 +254,10 @@ impl RegisterFile {
 impl Peripheral for RegisterFile {
     fn read(&mut self, access: PeripheralAccess, _: &mut Drive<'_>) -> Result<u32, BusError> {
         if access.role == Role::Iack {
-            return self.vector.map(u32::from).ok_or(BusError);
+            return self
+                .vector
+                .map(|vector| u32::from(vector.0))
+                .ok_or(BusError);
         }
         Ok(access.read_byte(self.bytes[self.index(access.address)]))
     }
@@ -273,7 +277,7 @@ impl Peripheral for RegisterFile {
     fn inspect(&self) -> Inspection {
         let shown = Inspection::default().bytes("registers", self.bytes.as_slice());
         match self.vector {
-            Some(vector) => shown.register("vector", vector),
+            Some(vector) => shown.register("vector", vector.0),
             None => shown.text("vector", "none"),
         }
     }
@@ -734,6 +738,7 @@ impl Peripheral for DcSource {
 #[cfg(test)]
 mod tests {
     use mc683xx_cpu32::cpu::state::StateError;
+    use mc683xx_cpu32::exception::Vector;
     use mc683xx_modules::chip_select::ChipSelect;
     use mc683xx_target::function_code::FunctionCode;
     use mc683xx_target::size::Size;
@@ -837,10 +842,10 @@ mod tests {
         assert_eq!(RegisterFile::new(3, None), None);
         assert_eq!(RegisterFile::new(0, None), None);
         assert_eq!(RegisterFile::new(super::ADDRESS_SPACE * 2, None), None);
-        let mut registers = RegisterFile::new(4, Some(0x40)).unwrap();
+        let mut registers = RegisterFile::new(4, Some(Vector(0x40))).unwrap();
         registers.bytes_mut()[1] = 0x56;
         assert_eq!(registers.bytes(), [0, 0x56, 0, 0]);
-        assert_eq!(registers.vector(), Some(0x40));
+        assert_eq!(registers.vector(), Some(Vector(0x40)));
         let mut recorder = Recorder::new(7);
         assert_eq!(recorder.value(), 7);
         assert!(recorder.take_log().is_empty());
@@ -989,7 +994,7 @@ mod tests {
             Fixed::new(0x1234).inspect().get("value"),
             Some(&Value::Integer(0x1234))
         );
-        let registers = RegisterFile::new(2, Some(0x40)).unwrap().inspect();
+        let registers = RegisterFile::new(2, Some(Vector(0x40))).unwrap().inspect();
         assert_eq!(registers.get("registers"), Some(&Value::Bytes(vec![0, 0])));
         assert_eq!(registers.get("vector"), Some(&Value::Integer(0x40)));
         assert_eq!(
@@ -1093,7 +1098,7 @@ mod tests {
         let peripherals: [&dyn Peripheral; 5] = [
             &RegisterFile {
                 bytes: vec![1, 2, 3, 4],
-                vector: Some(0x40),
+                vector: Some(Vector(0x40)),
             },
             &Recorder {
                 value: 0x0f,
