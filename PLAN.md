@@ -923,8 +923,8 @@ chip beside `Mc68331`.
   one) and optionally
   `chip_selects(levels, now)` and `clock(clock, now)` on the QSPI, the
   `SpiPeripheral` trait's methods (`QspiClock` carries `polarity`, a
-  `ClockPolarity`, `phase`, a `ClockPhase`, `period`, `system_clock_hz`
-  and `baud_hz`); the bits shifted back must fit the transfer, and an
+  `ClockPolarity`, `phase`, a `ClockPhase`, `period`,
+  `system_clock_nanohertz` and `baud_nanohertz`); the bits shifted back must fit the transfer, and an
   exception waits as a bus peripheral's does, zeros shifting in.  The chip
   adds `qspi_peripheral()`, `qspi_chip_selects`, `set_qspi_slave_select`,
   `qspi_slave_shift(mosi, bits, period) -> (miso, driven)` (a word

@@ -43,9 +43,10 @@ rename renames the Python name with it.  The deliberate differences:
   reads by name is a class with a property for each field
   (`PortState`'s `latch`, `direction`, `assignment`, `pins`).
 - **Units:** a frequency Rust gives in whole hertz (`Frequency::hz`) is
-  an `int` named `_hz` (`system_hz`, `baud_hz`); one it keeps in
-  nanohertz (`Frequency` itself: a serial frame's baud, a clock net's
-  frequency) is an `int` named `_nanohertz`.  Times are `int`s, system
+  an `int` named `_hz` (`system_hz`); one it keeps in nanohertz
+  (`Frequency` itself: a serial frame's baud, a clock net's frequency,
+  a `QspiClock`'s `system_clock_nanohertz` and `baud_nanohertz`) is an
+  `int` named `_nanohertz`.  Times are `int`s, system
   clocks or picoseconds.
 - **Settings:** a struct of settings is keyword arguments
   (`set_tracing(accesses=, exceptions=)` for `ChipTracing`,
@@ -692,7 +693,7 @@ chip = builder.build()
 chip.run_for(5000)
 assert peripheral.transfers == [(0b0101, 0x34, 8)]
 assert chip.peek(RECEIVE_RAM, 2) == 0xEF
-assert peripheral.clocks[0].baud_hz == chip.system_hz // 4
+assert peripheral.clocks[0].baud_nanohertz == chip.system_hz * 1_000_000_000 // 4
 
 # Slave: MISO an output, MOSI and PCS0/SS inputs; 8 bits; one entry.
 slave = (

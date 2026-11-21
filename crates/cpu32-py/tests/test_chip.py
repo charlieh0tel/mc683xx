@@ -525,8 +525,8 @@ def test_a_qspi_transfer_reaches_the_peripheral():
     [clock] = peripheral.clocks
     assert clock.polarity == mc683xx.ClockPolarity.IDLE_LOW
     assert clock.phase == mc683xx.ClockPhase.CAPTURE_LEADING
-    assert (clock.period, clock.system_clock_hz) == (4, chip.system_hz)
-    assert clock.baud_hz == chip.system_hz // 4
+    assert (clock.period, clock.system_clock_nanohertz) == (4, chip.system_hz * 1_000_000_000)
+    assert clock.baud_nanohertz == chip.system_hz * 1_000_000_000 // 4
     [carried] = peripheral.transfer_clocks
     assert (carried.polarity, carried.phase, carried.period) == (
         clock.polarity,

@@ -25,6 +25,8 @@ STACK = 0x10FFFE
 START = 0x400
 NOP = 0x4E71
 MOVE_WORD_IMMEDIATE_TO_ABSOLUTE = 0x33FC
+# Nanohertz in a hertz.
+NANOHERTZ = 1_000_000_000
 
 
 def store_word(address: int, value: int) -> list[int]:
@@ -423,11 +425,11 @@ class ClockedFlash:
         self.transfers: list[tuple[mc683xx.ClockPolarity, mc683xx.ClockPhase, int]] = []
 
     def set_qspi_clock(self, clock: mc683xx.QspiClock, now: int) -> None:
-        self.told.append((clock.polarity, clock.phase, clock.system_clock_hz))
+        self.told.append((clock.polarity, clock.phase, clock.system_clock_nanohertz))
 
     def transfer(self, transfer: mc683xx.Transfer, drive: mc683xx.Drive) -> int:
         clock = transfer.clock
-        self.transfers.append((clock.polarity, clock.phase, clock.system_clock_hz))
+        self.transfers.append((clock.polarity, clock.phase, clock.system_clock_nanohertz))
         return 0
 
 
@@ -439,8 +441,8 @@ def test_a_qspi_peripheral_is_told_the_clock_and_each_transfer_carries_it(tmp_pa
     flash = board.peripheral("flash")
     assert isinstance(flash, ClockedFlash)
     expected = [
-        (mc683xx.ClockPolarity.IDLE_LOW, mc683xx.ClockPhase.CAPTURE_LEADING, 8_388_608),
-        (mc683xx.ClockPolarity.IDLE_HIGH, mc683xx.ClockPhase.CHANGE_LEADING, 16_777_216),
+        (mc683xx.ClockPolarity.IDLE_LOW, mc683xx.ClockPhase.CAPTURE_LEADING, 8_388_608 * NANOHERTZ),
+        (mc683xx.ClockPolarity.IDLE_HIGH, mc683xx.ClockPhase.CHANGE_LEADING, 16_777_216 * NANOHERTZ),
     ]
     assert flash.told == expected
     assert flash.transfers == expected

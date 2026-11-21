@@ -478,9 +478,12 @@ class QspiClock:
     def period(self) -> int:
         """System clocks in an SCK period, 2 x SPBR."""
     @property
-    def system_clock_hz(self) -> int: ...
+    def system_clock_nanohertz(self) -> int:
+        """The system clock's frequency, in nanohertz."""
     @property
-    def baud_hz(self) -> int: ...
+    def baud_nanohertz(self) -> int:
+        """SCK's frequency, the system clock / period (QSMRM equation
+        4-1), in nanohertz, rounded down."""
 
 @final
 class QspiTransfer:

@@ -68,10 +68,10 @@ pub(crate) struct QspiClock {
     phase: ClockPhase,
     /// System clocks in an SCK period, 2 x SPBR.
     period: u64,
-    /// The system clock's frequency.
-    system_clock_hz: u64,
-    /// SCK's frequency (QSMRM equation 4-1), rounded down.
-    baud_hz: u64,
+    /// The system clock's frequency, nanohertz.
+    system_clock_nanohertz: u64,
+    /// SCK's frequency (QSMRM equation 4-1), nanohertz, rounded down.
+    baud_nanohertz: u64,
 }
 
 impl From<peripheral::QspiClock> for QspiClock {
@@ -86,8 +86,8 @@ impl From<peripheral::QspiClock> for QspiClock {
                 peripheral::ClockPhase::ChangeLeading => ClockPhase::ChangeLeading,
             },
             period: clock.period.0,
-            system_clock_hz: clock.system_clock.hz(),
-            baud_hz: clock.baud().hz(),
+            system_clock_nanohertz: clock.system_clock.nanohertz(),
+            baud_nanohertz: clock.baud().nanohertz(),
         }
     }
 }
@@ -96,8 +96,13 @@ impl From<peripheral::QspiClock> for QspiClock {
 impl QspiClock {
     fn __repr__(&self) -> String {
         format!(
-            "QspiClock(polarity={:?}, phase={:?}, period={}, system_clock_hz={}, baud_hz={})",
-            self.polarity, self.phase, self.period, self.system_clock_hz, self.baud_hz
+            "QspiClock(polarity={:?}, phase={:?}, period={}, system_clock_nanohertz={}, \
+             baud_nanohertz={})",
+            self.polarity,
+            self.phase,
+            self.period,
+            self.system_clock_nanohertz,
+            self.baud_nanohertz
         )
     }
 }
