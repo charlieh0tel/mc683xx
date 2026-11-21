@@ -961,9 +961,10 @@ chip.run_for(500)
   which a newer Rust core could give but none does today.
 - `NotImplementedError`: a module that cannot save; or any other value
   this build's bindings have no Python value for (a role, an invalid
-  access's reason, a PWM output, a reset cause), which a newer Rust
-  crate could give but none does today.  An event with such a value is
-  not reported.
+  access's reason, a PWM output, a reset cause, a DSACK fault), which a
+  newer Rust crate could give but none does today.  `take_events()`
+  raises it for an event holding such a value; a kind of event the
+  bindings lack is left out.
 - `IndexError`: an unknown memory or peripheral number, or a memory range
   past its end.
 - `OverflowError`: a run past the end of time.

@@ -792,17 +792,18 @@ pub(crate) enum DsackFaultView {
 }
 
 impl DsackFaultView {
-    /// `fault` as Python sees it, if Python has it.
-    fn of(fault: DsackFault) -> Option<Self> {
+    /// `fault` as Python sees it, or [`Error::Unmapped`] for one the
+    /// bindings do not know.
+    fn of(fault: DsackFault) -> Result<Self, Error> {
         match fault {
-            DsackFault::Unassigned { select } => Some(Self::Unassigned {
+            DsackFault::Unassigned { select } => Ok(Self::Unassigned {
                 select: select.to_string(),
             }),
             // Python numbers the chip's peripherals as it adds them
-            DsackFault::BusUnassigned { peripheral } => Some(Self::BusUnassigned {
+            DsackFault::BusUnassigned { peripheral } => Ok(Self::BusUnassigned {
                 peripheral: peripheral.into(),
             }),
-            _ => None,
+            _ => Err(Error::Unmapped("DSACK fault")),
         }
     }
 }
@@ -873,12 +874,14 @@ pub(crate) enum Event {
 }
 
 impl Event {
-    /// `event` as Python sees it, if Python has it.
-    pub(crate) fn of(event: event::Event) -> Option<Self> {
-        Some(match event {
+    /// `event` as Python sees it, `None` for a kind of event Python
+    /// lacks, or [`Error::Unmapped`] for a value in it (a reset cause,
+    /// a DSACK fault) the bindings do not know.
+    pub(crate) fn of(event: event::Event) -> Result<Option<Self>, Error> {
+        Ok(Some(match event {
             event::Event::Reset { now, cause, .. } => Self::Reset {
                 now: now.0,
-                cause: cause.try_into().ok()?,
+                cause: cause.try_into()?,
             },
             event::Event::ArbitrationTie {
                 now,
@@ -920,9 +923,18 @@ impl Event {
                 now: now.0,
                 fault: DsackFaultView::of(fault)?,
             },
-            _ => return None,
-        })
+            _ => return Ok(None),
+        }))
     }
+}
+
+/// `events` as Python sees them, those of a kind Python lacks left
+/// out; [`Error::Unmapped`] for a value in one the bindings do not know.
+pub(crate) fn events(events: Vec<event::Event>) -> Result<Vec<Event>, Error> {
+    events
+        .into_iter()
+        .filter_map(|event| Event::of(event).transpose())
+        .collect()
 }
 
 /// The `Mc68331` methods a board's chip has too, for `Chip` and
@@ -1638,12 +1650,8 @@ chip_methods! {
     }
 
     /// What happened since the last call.
-    fn take_events(&mut self) -> Vec<Event> {
-        self.chip
-            .take_events()
-            .into_iter()
-            .filter_map(Event::of)
-            .collect()
+    fn take_events(&mut self) -> Result<Vec<Event>, Error> {
+        events(self.chip.take_events())
     }
 
     /// Whether the events trace each bus cycle that reaches the chip

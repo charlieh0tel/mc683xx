@@ -97,6 +97,7 @@ use crate::chip::Entry;
 use crate::chip::Event;
 use crate::chip::ResetCause;
 use crate::chip::Stop;
+use crate::chip::events;
 use crate::control;
 use crate::control::BoardControlView;
 use crate::control::PacingView;
@@ -1803,12 +1804,8 @@ impl BoardView {
 
     /// What the chip did since the last call (Rust's
     /// `Board::take_events`), as `Mc68331.take_events` gives it.
-    fn take_events(&mut self) -> Vec<Event> {
-        self.board
-            .take_events()
-            .into_iter()
-            .filter_map(Event::of)
-            .collect()
+    fn take_events(&mut self) -> Result<Vec<Event>, Error> {
+        events(self.board.take_events())
     }
 
     /// The trace since the last call, a line each (docs/tracing.md).

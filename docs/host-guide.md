@@ -644,6 +644,8 @@ included).  Every reset source drives RESET (SIMRM Table 8-1), but a
 board need not wire every peripheral to it: `ResetScope` names the causes
 that reach one.
 
+A `ResetCause` prints as a board file's reset scope names it
+(`power-on`, `watchdog`, ...) and parses back (`FromStr`).
 `Mc68331::reset_for(cause)` is the reset `cause`'s source makes, now:
 RSR holds its bit alone (SIMRM 8.2.8), so a host's reset control can
 give the firmware the restart it tells apart by RSR.

@@ -17,7 +17,9 @@ pub mod ports;
 mod protection;
 pub mod reset;
 
+use std::fmt;
 use std::mem;
+use std::str::FromStr;
 
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
@@ -195,6 +197,39 @@ impl ResetCause {
         !matches!(self, Self::Test | Self::System)
     }
 }
+
+/// Its name as a board file's reset scope gives it: `external`,
+/// `power-on`, `watchdog`, `halt-monitor`, `system`, `loss-of-clock`,
+/// `test`.
+impl fmt::Display for ResetCause {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::External => "external",
+            Self::PowerOn => "power-on",
+            Self::Watchdog => "watchdog",
+            Self::HaltMonitor => "halt-monitor",
+            Self::System => "system",
+            Self::LossOfClock => "loss-of-clock",
+            Self::Test => "test",
+        })
+    }
+}
+
+impl FromStr for ResetCause {
+    type Err = ParseResetCauseError;
+
+    fn from_str(name: &str) -> Result<Self, ParseResetCauseError> {
+        Self::ALL
+            .into_iter()
+            .find(|cause| cause.to_string() == name)
+            .ok_or_else(|| ParseResetCauseError(name.to_owned()))
+    }
+}
+
+/// Text that names no reset cause.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no reset cause {0:?}")]
+pub struct ParseResetCauseError(String);
 
 /// The pins the SIM reads as a reset releases (SIMRM 8.6; MC68331UM
 /// 4.6.3).

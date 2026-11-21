@@ -9,6 +9,7 @@ use mc683xx_target::address::Address;
 use mc683xx_target::size::Size;
 
 use super::Configuration;
+use super::ParseResetCauseError;
 use super::ResetCause;
 use super::Sim;
 use super::clock::ClockSource;
@@ -477,5 +478,18 @@ fn a_pulse_between_quanta_is_two_changes() {
                 }
             ),
         ]
+    );
+}
+
+#[test]
+fn reset_causes_print_as_board_files_name_them_and_parse_back() {
+    for cause in ResetCause::ALL {
+        assert_eq!(cause.to_string().parse(), Ok(cause));
+    }
+    assert_eq!(ResetCause::PowerOn.to_string(), "power-on");
+    assert_eq!(ResetCause::HaltMonitor.to_string(), "halt-monitor");
+    assert_eq!(
+        "POW".parse::<ResetCause>(),
+        Err(ParseResetCauseError("POW".to_owned()))
     );
 }
