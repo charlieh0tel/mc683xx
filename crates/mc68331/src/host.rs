@@ -134,13 +134,14 @@ impl Mc68331 {
     /// Writes `data` at `address` up, with no bus cycle, a debugger's
     /// write: into the memories the core serves in supervisor space, as
     /// the decode now maps them, a ROM's included, whatever the pages'
-    /// permissions.
+    /// permissions; as the bare machine's
+    /// [`Machine::write`](mc683xx_cpu32::flat::Machine::write).
     ///
     /// # Errors
     ///
     /// [`Unserved`] for a byte the core does not serve (a peripheral's,
     /// or one a peripheral shares); then nothing is written.
-    pub fn poke(&mut self, address: Address, data: &[u8]) -> Result<(), Unserved> {
+    pub fn write(&mut self, address: Address, data: &[u8]) -> Result<(), Unserved> {
         let memory = &mut self.cpu.memory;
         let places = (0..data.len() as u32)
             .map(|offset| {

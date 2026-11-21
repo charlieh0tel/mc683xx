@@ -115,8 +115,8 @@ The host can also reach the core: `cpu()` gives the `Cpu` to read;
 pages' permissions (see Hooks), changes its registers and reads the
 rest.  Neither hands out the core's memory map, which the chip keeps
 in step with its decode, nor runs the core apart from the chip.
-`poke(address, bytes)` writes the memories the core serves without a
-cycle, as a debugger does, a ROM's included (`Unserved` for a byte it
+`write(address, bytes)` writes the memories the core serves without a
+cycle, as a debugger does and as the bare `Machine::write` does, a ROM's included (`Unserved` for a byte it
 does not serve).
 
 ### Fixed memory

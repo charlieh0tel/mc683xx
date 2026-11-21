@@ -2412,14 +2412,14 @@ impl Timed for Stopper {}
 #[test]
 fn a_poke_writes_rom_and_refuses_what_the_core_does_not_serve() {
     let (mut chip, _) = booting(&[NOP, NOP]);
-    chip.poke(Address(START), &[0x4e, 0x75]).unwrap();
+    chip.write(Address(START), &[0x4e, 0x75]).unwrap();
     assert_eq!(
         chip.peek(Address(START), Size::Word, FunctionCode::SUPERVISOR_DATA),
         Ok(0x4e75)
     );
     // the SIM's registers are the chip's, not memory the core serves
     let simcr = Address(0x00ff_fa00);
-    assert_eq!(chip.poke(simcr, &[0]), Err(Unserved(simcr)));
+    assert_eq!(chip.write(simcr, &[0]), Err(Unserved(simcr)));
 }
 
 #[test]

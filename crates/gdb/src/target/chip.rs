@@ -50,7 +50,7 @@ impl Target for Mc68331 {
         {
             return Err(AccessError::Unserved(address));
         }
-        Self::poke(self, address, data).map_err(|unserved| AccessError::Unserved(unserved.0))
+        Self::write(self, address, data).map_err(|unserved| AccessError::Unserved(unserved.0))
     }
 
     fn run_for(

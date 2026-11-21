@@ -91,7 +91,7 @@ impl Cpu32Target for Running {
     fn halted(&mut self) -> Result<Option<Entry>, TargetError> {
         if Cpu32Target::halted(&mut self.0)?.is_none() {
             if let Some((at, word)) = self.3.take() {
-                self.0.poke(Address(at), &word).unwrap();
+                self.0.write(Address(at), &word).unwrap();
             }
             self.0.run_for(LOOK);
         }
