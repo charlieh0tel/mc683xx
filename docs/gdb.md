@@ -423,7 +423,6 @@ in-memory connection: registers, the target description, memory,
 steps, breakpoints, watchpoints, Ctrl-C, `monitor reset`, `monitor
 stop`, detach and kill, on the bare CPU, the chip and a board; and
 `Bdm` over the chip, which runs a little each time the stub looks, as
-silicon would run on its own, and over the runner's `--bdm` socket,
-the path a pod's host takes.  `make gdb`, opt-in and
+silicon would run on its own.  `make gdb`, opt-in and
 not in `make ci`, runs `gdb-multiarch` against the runner's example
 board (`scripts/gdb-smoke.sh`).

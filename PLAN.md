@@ -2424,38 +2424,15 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   A reset that falls due in the step's last quantum is taken on the
   next run, as one due while the CPU is in background mode is.  Memory is real
   bus cycles (`bus_read`, `bus_write`), as READ and WRITE make them.
-- `mc683xx-run --bdm unix:PATH|HOST:PORT` is a virtual BDM cable: it
-  answers the mc683xx BDM pod's host-pod protocol, version 2, written
-  from its `docs/usb-protocol.md` alone, over the chip's
-  `Cpu32Target`, but for ResetHalt, which is the board's
-  (`Board::reset_with_breakpoint`): RESET asserted and released by the
-  board with BKPT held, so its nets and the peripherals in the reset's
-  scope see it as they see gdb's `monitor reset`, the reply's ATEMP
-  field the fresh breakpoint entry as before.  While a net holds RESET
-  low it resets nothing and the CPU is not in background mode, so the
-  reply is NoFreeze.  One client at a time; another waits up to 100 ms
-  for the client to go, polls and the run going on meanwhile, then is
-  closed, and connections are taken one a poll.
-  The server holds at most two requests unanswered and a few replies
-  untaken, reading no more until it answers and answering no more
-  until the client reads, at most 32 requests a poll, so a client that
-  floods it or never reads waits on its own socket, not the runner.
-  The server is polled between turns; while the CPU is in background
-  mode an unpaced run waits on it, board time standing still between
-  requests, and a paced one keeps time going, the modules doing what
-  FREEZE has them do.  ATEMP is always fresh: the
-  server sees every entry, but one a restored snapshot started in,
-  which is stale, its ATEMP as the server started kept, until a GO,
-  CALL or reset.  Transfer goes word by word through the chip's serial
-  interface (`Mc68331::bdm_exchange`, below), with or without FREEZE,
-  as the protocol has it; a stale entry is forgotten once a word finds
-  or leaves the CPU out of background mode (a GO or CALL among the
-  words, or words clocked on a running CPU, a breakpoint the server
-  sees).  Each other request is a command of its own, as the pod
-  sequences it, so one that is a command (the FREEZE column's) drops a
-  raw command left half sent, and Pins, Hello, SetClock and a Halt of
-  a halted CPU, which clock nothing, keep it.  CALL (`Mc68331::call`)
-  stacks RPC at the active SP in its data space (7.2.8.13).
+- CALL (`Mc68331::call`) stacks RPC at the active SP in its data space
+  (7.2.8.13).
+- The runner has no BDM socket.  `mc683xx-run --bdm`, a virtual BDM
+  cable answering the BDM pod's host-pod protocol, version 2, was
+  removed in 0.8.0: it followed a protocol this project does not own,
+  nobody kept it in step with the pod's, and nobody used it.  Nothing
+  replaces it.  A server backed by the emulator can be built on the
+  public API: the chip's `Cpu32Target`, `Mc68331::bdm_exchange` and
+  `Board::reset_with_breakpoint`.
 - The serial interface (CPU32RM 7.2.7, 7.2.8; `debug::serial`) is the
   chip's: `Mc68331::bdm_exchange` is one 17-bit transfer, bit 16 of
   the word in ignored (Table 7-3), the 17 bits shifted out returned.

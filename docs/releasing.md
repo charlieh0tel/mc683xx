@@ -117,9 +117,7 @@ Not covered, so a minor or patch release may change them:
 - snapshot formats: a restore needs the versions that saved it
   (PLAN.md, State), so a snapshot is read by the release that wrote
   it.  A minor release may change one, and its notes say so; a patch
-  release never does;
-- the `--bdm` protocol, which follows the BDM pod's, not this
-  version.
+  release never does.
 
 Dependencies and platforms:
 
