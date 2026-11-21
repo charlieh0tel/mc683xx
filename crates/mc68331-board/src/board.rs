@@ -93,7 +93,9 @@ use crate::time::Time;
 use crate::time::TimeBase;
 use crate::trace;
 use crate::trace::NetRecord;
+use crate::trace::PositionRecord;
 use crate::trace::Record;
+use crate::trace::StoppedRecord;
 use crate::trace::Trace;
 use crate::wiring::BusRouter;
 use crate::wiring::DecoderRouter;
@@ -1126,26 +1128,26 @@ impl<C: Chip> Board<C> {
 
     /// Where the CPU is now, as a `position` record.
     #[must_use]
-    pub fn position(&self) -> Record {
+    pub fn position(&self) -> PositionRecord {
         let registers = &self.chip.cpu().registers;
-        Record::Position(trace::PositionRecord {
+        PositionRecord {
             cycle: self.chip.now(),
             pc: registers.pc,
             sr: registers.sr(),
             vbr: registers.vbr,
             a7: Address(registers.address(7)),
             instructions: self.chip.instructions(),
-        })
+        }
     }
 
     /// The run's end after `outcome`, as a `stopped` record.
     #[must_use]
-    pub fn stopped(&self, outcome: BoardRun) -> Record {
-        Record::Stopped(trace::StoppedRecord {
+    pub fn stopped(&self, outcome: BoardRun) -> StoppedRecord {
+        StoppedRecord {
             cycle: self.chip.now(),
             instructions: self.chip.instructions(),
             reason: outcome.stop,
-        })
+        }
     }
 
     /// The handle by which the host asks the run to stop.
