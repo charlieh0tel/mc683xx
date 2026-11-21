@@ -1347,7 +1347,12 @@ is the load's `LoadError::Image`.  `Board::load_with(&description,
 path parameter's bytes (`Context::contents`) from the same kind of
 `read`, an error the load's `LoadError::Parameter`: a closure over the
 host's bytes passes to both, `&read` to the first.  `board.chip()` is the chip itself, an `&Mc68331` with
-every method of the chip's.
+every method of the chip's.  `Chip` is sealed: a host names it in a
+bound (`Board<C: Chip>`) and calls its methods (`cpu`, `now`,
+`memory`, `halted`, the resets, `save`), but cannot implement it, nor
+`ChipBuilder` or `ChipPin`; a new part is added inside mc683xx.  The
+plumbing the board runs the chip with is hidden from the docs and
+outside semver.
 
 - **Nets.** `Board::observe(net, observer) -> Result<ObserverId,
   NetError>` attaches an `observe::Observer` (a closure
