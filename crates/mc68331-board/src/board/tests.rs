@@ -9,6 +9,7 @@ use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cpu::state::encode_layer;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_mc68331::port::Port;
 
 use super::Board;
 use super::BoardState;
@@ -19,6 +20,7 @@ use crate::builtin::EdgeCounter;
 use crate::description::Description;
 use crate::description::Options;
 use crate::mc68331::Pin;
+use crate::mc68331::PortPin;
 use crate::peripheral::Peripheral;
 use crate::registry::Environment;
 use crate::registry::Registry;
@@ -121,7 +123,9 @@ fn a_state_no_run_could_save_is_refused() {
         ),
         (
             edited(&snapshot, |state| {
-                state.outputs.push((Pin::PortGp(3), true));
+                state
+                    .outputs
+                    .push((Pin::Port(PortPin::new(Port::Gp, 3).unwrap()), true));
             }),
             StateError::mismatch("chip output pins"),
         ),

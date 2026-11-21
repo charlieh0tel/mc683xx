@@ -1682,7 +1682,9 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   (`CSBOOT`, `CS0`, any case), `Address` (`0x00001234`, and
   `LowerHex`), `Cycles` (`12 clocks`), `Frequency` (`16777216 Hz`),
   `Vector` and `FunctionCode` (their numbers), and on a board `Time`
-  (`1000 ps`), the MC68331's `mc68331::Pin` (`IRQ7`), `signal::Kind`,
+  (`1000 ps`), the MC68331's `mc68331::Pin` (`IRQ7`; a port's pin is
+  `Pin::Port(PortPin)`, `PortPin::new(Port::E, 0)` refusing a bit the
+  port lacks, `PE0`), `signal::Kind`,
   `Direction`, `peripheral::Role` (`read-write`) and `Lane` (`upper`),
   as the board file names them; `port::Port` (`E`, `GP`) and the
   GPT's `pwm::Channel` (`A`), any case.
