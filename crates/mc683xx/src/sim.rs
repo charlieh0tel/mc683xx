@@ -272,6 +272,10 @@ pub struct Sim {
 
 impl Sim {
     /// The SIM out of a power-on reset at `now`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a SIM on its own is not a host's to build.
+    #[doc(hidden)]
     #[must_use]
     pub fn new(configuration: Configuration, now: Cycles) -> Self {
         let modclk = configuration.clock.modclk();

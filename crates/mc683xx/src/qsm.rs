@@ -135,6 +135,10 @@ pub struct Qsm {
 impl Qsm {
     /// The QSM out of reset, with no QSPI peripheral, the system clock
     /// at `system_clock`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a QSM on its own is not a host's to build.
+    #[doc(hidden)]
     #[must_use]
     pub const fn new(system_clock: Frequency) -> Self {
         let port = PortQs::new();

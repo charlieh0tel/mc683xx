@@ -485,14 +485,12 @@ pub struct Gpt {
     next: Option<Cycles>,
 }
 
-impl Default for Gpt {
-    fn default() -> Self {
-        Self::new(Cycles::ZERO)
-    }
-}
-
 impl Gpt {
     /// The GPT out of reset at `now`, the board's pins high.
+    ///
+    /// Not part of the semver API: the chip builds its GPT; a GPT on
+    /// its own is not a host's to build.
+    #[doc(hidden)]
     #[must_use]
     pub const fn new(now: Cycles) -> Self {
         Self::with_inputs(now, Inputs::HIGH)
