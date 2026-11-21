@@ -19,7 +19,7 @@ use super::peek_bytes;
 impl Target for Mc68331 {
     type Error = Infallible;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+    fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
         Some(call(&mut self.cpu_control()))
     }
 

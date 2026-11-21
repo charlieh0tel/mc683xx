@@ -82,7 +82,7 @@ impl<T: Target> Session<'_, T> {
     /// controls, offered no step, is `SIGILL`.
     pub(super) fn hook_step(&mut self) -> Result<SingleThreadStopReason<u32>, T::Error> {
         let hits = Rc::clone(&self.hit);
-        let Some((id, pc, count)) = self.target.with_cpu(|cpu| {
+        let Some((id, pc, count)) = self.target.cpu_scope(|cpu| {
             let id = cpu.add_code_hook(everywhere(), move |_| {
                 record(&hits, Hit::Step);
                 ControlFlow::Break(())
@@ -92,7 +92,7 @@ impl<T: Target> Session<'_, T> {
             return Ok(SingleThreadStopReason::Signal(Signal::SIGILL));
         };
         let stepped = self.step_runs(pc.0, count);
-        self.target.with_cpu(|cpu| cpu.remove_hook(id));
+        self.target.cpu_scope(|cpu| cpu.remove_hook(id));
         stepped
     }
 
@@ -111,7 +111,7 @@ impl<T: Target> Session<'_, T> {
             }
             let moved = self
                 .target
-                .with_cpu(|cpu| cpu.instructions() != count || cpu.registers.pc != Address(pc))
+                .cpu_scope(|cpu| cpu.instructions() != count || cpu.registers.pc != Address(pc))
                 .unwrap_or(true);
             if moved || ran != TargetRun::Hook {
                 break;
@@ -135,7 +135,7 @@ impl<T: Target> Session<'_, T> {
             return true;
         }
         let hits = Rc::clone(&self.hit);
-        let Some(id) = self.target.with_cpu(|cpu| {
+        let Some(id) = self.target.cpu_scope(|cpu| {
             let at = cpu.memory.mask(Address(address));
             cpu.add_code_hook(at..=at, move |_| {
                 record(&hits, Hit::Breakpoint(kind));
@@ -160,7 +160,7 @@ impl<T: Target> Session<'_, T> {
         };
         let (_, _, id) = self.hooked.remove(index);
         self.target
-            .with_cpu(|cpu| cpu.remove_hook(id))
+            .cpu_scope(|cpu| cpu.remove_hook(id))
             .unwrap_or(false)
     }
 
@@ -172,7 +172,7 @@ impl<T: Target> Session<'_, T> {
             return false;
         };
         let hits = &self.hit;
-        let Some(hooks) = self.target.with_cpu(|cpu| {
+        let Some(hooks) = self.target.cpu_scope(|cpu| {
             let first = cpu.memory.mask(Address(address)).0;
             let last = first.saturating_add(last_offset);
             let reach = Address(first.saturating_sub(ACCESS_REACH))..=Address(last);
@@ -218,7 +218,7 @@ impl<T: Target> Session<'_, T> {
             return false;
         };
         let watch = self.watchpoints.remove(index);
-        self.target.with_cpu(|cpu| {
+        self.target.cpu_scope(|cpu| {
             for id in watch.hooks {
                 cpu.remove_hook(id);
             }
@@ -234,7 +234,7 @@ impl<T: Target> Session<'_, T> {
         if hooks.is_empty() {
             return;
         }
-        self.target.with_cpu(|cpu| {
+        self.target.cpu_scope(|cpu| {
             for id in hooks {
                 cpu.remove_hook(id);
             }

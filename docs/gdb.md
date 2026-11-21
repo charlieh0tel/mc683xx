@@ -150,25 +150,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - `target::Target` is the one trait `serve` takes.  The bare CPU,
   the chip and a board implement it, and a host with a run loop of its
   own implements it, delegating to one of them (`mc683xx-run` and the
-  Python bindings do): `with_cpu` (`Some` of a call with the
+  Python bindings do): `cpu_scope` (`Some` of a call with the
   `CpuControl`: registers and hooks), `read_memory` and `write_memory`
   (memory at an `Address` in a function code's space, with no bus
   cycle; a `target::AccessError` for a byte not served),
   `run_for(cycles, hit)` (a quantum, its end a `target::TargetRun`) and
-  `reset`.  The register methods default to `with_cpu`'s; `resume`
+  `reset`.  The register methods default to `cpu_scope`'s; `resume`
   and `halt` default to an emulated target's, which runs only as the
   stub runs it.  `native_step` gives a target's own step
   (`target::NativeStep`); without one the stub steps by a hook, and a
-  target with neither that nor `with_cpu` cannot step: gdb is offered
+  target with neither that nor `cpu_scope` cannot step: gdb is offered
   none (`vCont?` lists no `s`), and gdbstub refuses a bare `s`, which
   ends the session as a `Protocol` error.  With the `board` feature, `conditions` gives
   the target's stop conditions (`mc683xx_board::condition::Conditions`,
   a board's; none by default), for `monitor stop`.
 - `bdm::Bdm::new(&mut target)` is any `mc683xx_target::Cpu32Target` as a
-  `Target`: no `with_cpu`, its own registers, memory, run control and
+  `Target`: no `cpu_scope`, its own registers, memory, run control and
   step.  What a target gives decides what gdb gets:
 
-| | Emulated (`with_cpu` gives `Some`) | Under BDM control (`Bdm`) |
+| | Emulated (`cpu_scope` gives `Some`) | Under BDM control (`Bdm`) |
 | --- | --- | --- |
 | Breakpoints | code hooks, `break` and `hbreak`: memory untouched | `break` alone: BGND planted in memory |
 | Watchpoints | yes | no |

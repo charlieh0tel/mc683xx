@@ -67,8 +67,8 @@ where
 {
     type Error = PyErr;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
-        self.target.with_cpu(call)
+    fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+        self.target.cpu_scope(call)
     }
 
     fn read_memory(

@@ -165,7 +165,7 @@ prefix; their directories keep the short names.
   `Mc68331::cpu_control`, a `CpuControl` that lends the registers, the
   hooks and the pages' permissions and shows the rest read-only, so a
   host cannot remap the core's memory apart from the chip's decode or
-  run the core itself (the gdb stub's `Target::with_cpu` lends one
+  run the core itself (the gdb stub's `Target::cpu_scope` lends one
   too).  A callback returns `ControlFlow`; `Break`
   stops the run.
 - **Memory protection:** `Memory::protect(space, start, length,
@@ -1787,7 +1787,7 @@ Adversarial review of the board layer (2026-10-23):
 so not in `third_party/NOTICE`, and named nowhere in the public API):
 one session, `serve`, over one trait, `target::Target`, on a
 `connection::Connection`, the stub's own trait, which it adapts to
-gdbstub's.  An emulated target gives `with_cpu` (registers and
+gdbstub's.  An emulated target gives `cpu_scope` (registers and
 hooks), `read_memory` and `write_memory` (memory with no bus cycle, in
 a function code's space), `run_for(cycles, hit)` (a quantum) and
 `reset`; the trait's other methods (registers, `resume`, `halt`)
@@ -1842,7 +1842,7 @@ checks the bare build.
   request `SIGINT`.
 - **Over BDM** (2026-11-01): `bdm::Bdm`, any `Cpu32Target` as a
   `Target`, so a host driving silicon through a BDM pod has gdb.  It
-  gives no `with_cpu`, so the session plants BGND for a breakpoint,
+  gives no `cpu_scope`, so the session plants BGND for a breakpoint,
   read back and refused in ROM, has no hardware breakpoints or
   watchpoints, and steps by `Cpu32Target::step`, which reports where
   it stopped, not always one instruction later.  Continue is GO and a
@@ -1861,7 +1861,7 @@ checks the bare build.
   things only: who runs the target (the stub, in quanta, or the target
   itself), how it stops (hooks, or BGND and the target's step), and
   their extras (stop conditions, `monitor fc`).  They are one session
-  now, over one `Target` whose `with_cpu` decides the first two, so
+  now, over one `Target` whose `cpu_scope` decides the first two, so
   gdb behaves alike on both where they overlap (Ctrl-C while stopped
   is nothing, a `G` packet writes only what it changes, `monitor fc`
   on either) and a fix reaches both.  The emulator stays off

@@ -1010,7 +1010,7 @@ struct Debugged<'a, 'py>(&'a Bound<'py, MachineView>);
 impl Target for Debugged<'_, '_> {
     type Error = PyErr;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+    fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
         Some(call(&mut CpuControl::new(
             &mut self.0.borrow_mut().machine.cpu,
         )))

@@ -62,8 +62,8 @@ impl Debugged<'_> {
 impl Target for Debugged<'_> {
     type Error = RunError;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
-        Target::with_cpu(self.board, call)
+    fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+        Target::cpu_scope(self.board, call)
     }
 
     fn read_memory(

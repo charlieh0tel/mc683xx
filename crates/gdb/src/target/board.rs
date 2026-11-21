@@ -21,7 +21,7 @@ use super::widen;
 impl Target for Board<Mc68331> {
     type Error = RunError;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+    fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
         Some(call(&mut self.chip_mut().cpu_control()))
     }
 

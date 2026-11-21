@@ -6,7 +6,7 @@
 //! - **Emulated**: the bare CPU ([`Machine`]), the chip ([`Mc68331`]),
 //!   a board ([`Board`]), or a host's run loop around one (the Python
 //!   bindings, a runner that serves its I/O between quanta).  It gives
-//!   the CPU's controls ([`Target::with_cpu`]), so the stub's
+//!   the CPU's controls ([`Target::cpu_scope`]), so the stub's
 //!   breakpoints, watchpoints and steps are the core's hooks, and it
 //!   runs only as the stub runs it, a quantum at a time
 //!   ([`Target::run_for`]).
@@ -172,7 +172,7 @@ pub trait NativeStep {
 
 /// What the stub debugs.
 ///
-/// An emulated target implements [`with_cpu`](Self::with_cpu),
+/// An emulated target implements [`cpu_scope`](Self::cpu_scope),
 /// [`read_memory`](Self::read_memory), [`write_memory`](Self::write_memory)
 /// and [`run_for`](Self::run_for), and [`reset`](Self::reset) if it
 /// can; the rest have its defaults, and it steps by the stub's hook.  A target under BDM control is
@@ -195,12 +195,12 @@ pub trait Target {
         unused_variables,
         reason = "the default ignores its argument, and the name documents it"
     )]
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+    fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
         None
     }
 
     /// A data or address register.  By default through
-    /// [`with_cpu`](Self::with_cpu).
+    /// [`cpu_scope`](Self::cpu_scope).
     ///
     /// # Errors
     ///
@@ -208,12 +208,12 @@ pub trait Target {
     /// the CPU's controls; the target's error for one under BDM
     /// control.
     fn read_register(&mut self, register: Register) -> Result<u32, AccessError<Self::Error>> {
-        self.with_cpu(|cpu| get(&cpu.registers, Location::Register(register)))
+        self.cpu_scope(|cpu| get(&cpu.registers, Location::Register(register)))
             .ok_or(AccessError::Unreachable)
     }
 
     /// Writes a data or address register.  By default through
-    /// [`with_cpu`](Self::with_cpu).
+    /// [`cpu_scope`](Self::cpu_scope).
     ///
     /// # Errors
     ///
@@ -223,12 +223,12 @@ pub trait Target {
         register: Register,
         value: u32,
     ) -> Result<(), AccessError<Self::Error>> {
-        self.with_cpu(|cpu| set(cpu.registers_mut(), Location::Register(register), value))
+        self.cpu_scope(|cpu| set(cpu.registers_mut(), Location::Register(register), value))
             .ok_or(AccessError::Unreachable)
     }
 
     /// A system register, as BDM names them (CPU32RM 7.2.8): the PC is
-    /// RPC.  By default through [`with_cpu`](Self::with_cpu), where
+    /// RPC.  By default through [`cpu_scope`](Self::cpu_scope), where
     /// PCC, ATEMP and FAR read zero.
     ///
     /// # Errors
@@ -238,12 +238,12 @@ pub trait Target {
         &mut self,
         register: SystemRegister,
     ) -> Result<u32, AccessError<Self::Error>> {
-        self.with_cpu(|cpu| get(&cpu.registers, Location::System(register)))
+        self.cpu_scope(|cpu| get(&cpu.registers, Location::System(register)))
             .ok_or(AccessError::Unreachable)
     }
 
     /// Writes a system register.  By default through
-    /// [`with_cpu`](Self::with_cpu): SR's low word, SFC's and DFC's low
+    /// [`cpu_scope`](Self::cpu_scope): SR's low word, SFC's and DFC's low
     /// three bits, and PCC, ATEMP and FAR not at all.
     ///
     /// # Errors
@@ -254,7 +254,7 @@ pub trait Target {
         register: SystemRegister,
         value: u32,
     ) -> Result<(), AccessError<Self::Error>> {
-        self.with_cpu(|cpu| set(cpu.registers_mut(), Location::System(register), value))
+        self.cpu_scope(|cpu| set(cpu.registers_mut(), Location::System(register), value))
             .ok_or(AccessError::Unreachable)
     }
 
@@ -333,7 +333,7 @@ pub trait Target {
     /// The target's own step, for a target that steps by its own means
     /// (one under BDM control).  Without one, the default, the stub
     /// steps the target with a hook, which needs
-    /// [`with_cpu`](Self::with_cpu); a target with neither cannot step,
+    /// [`cpu_scope`](Self::cpu_scope); a target with neither cannot step,
     /// and gdb is offered none.
     fn native_step(&mut self) -> Option<&mut dyn NativeStep<Error = Self::Error>> {
         None
@@ -367,7 +367,7 @@ pub trait Target {
 impl Target for Machine {
     type Error = Infallible;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+    fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
         Some(call(&mut CpuControl::new(&mut self.cpu)))
     }
 

@@ -97,7 +97,7 @@ where
     target
         .halt()
         .map_err(|error| SessionError::Target { error })?;
-    let emulated = target.with_cpu(|_| ()).is_some();
+    let emulated = target.cpu_scope(|_| ()).is_some();
     let mut session = Session {
         target,
         emulated,
@@ -226,7 +226,7 @@ impl<T: Target> Session<'_, T> {
         ran != TargetRun::Fault
             || self
                 .target
-                .with_cpu(|cpu| cpu.trace_pending().is_some())
+                .cpu_scope(|cpu| cpu.trace_pending().is_some())
                 .unwrap_or(false)
     }
 
@@ -572,7 +572,7 @@ impl<T: Target> Session<'_, T> {
                 None => outputln!(out, "fc takes a function code, 0 to 7"),
             },
             ["faults"] => {
-                let shown = self.target.with_cpu(|cpu| {
+                let shown = self.target.cpu_scope(|cpu| {
                     (
                         cpu.stops_on_fault(),
                         cpu.fault_stop().map(ToString::to_string),
@@ -590,7 +590,7 @@ impl<T: Target> Session<'_, T> {
             }
             ["faults", setting @ ("stop" | "take")] => {
                 let stop = *setting == "stop";
-                match self.target.with_cpu(|cpu| cpu.set_stop_on_fault(stop)) {
+                match self.target.cpu_scope(|cpu| cpu.set_stop_on_fault(stop)) {
                     Some(()) => outputln!(out, "faults {setting}"),
                     None => outputln!(out, "this target takes its faults"),
                 }
