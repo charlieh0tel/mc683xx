@@ -189,6 +189,15 @@ fn an_option_puts_its_entries_on_the_board() {
     };
     let description = Description::parse(text, Path::new("."), &options).unwrap();
     assert_eq!(description.peripherals.len(), 1);
+    assert_eq!(description.options(), ["x"]);
+    let all = Options {
+        all_enabled: true,
+        ..Options::default()
+    };
+    let description = Description::parse(text, Path::new("."), &all).unwrap();
+    assert_eq!(description.peripherals.len(), 1);
+    let description = Description::parse(text, Path::new("."), &Options::default()).unwrap();
+    assert!(description.peripherals.is_empty());
     let options = Options {
         enabled: ["y".to_owned()].into(),
         ..Options::default()

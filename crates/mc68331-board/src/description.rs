@@ -81,6 +81,10 @@ pub struct Options {
     /// The options enabled: entries `when` names are on the board only
     /// if their option is here.
     pub enabled: BTreeSet<String>,
+    /// Every option the file declares enabled, as if each were in
+    /// `enabled`: the board with every option fitted, whatever the file
+    /// declares.
+    pub all_enabled: bool,
     /// The firmware image to run, one of `[board] images` or another:
     /// it replaces every memory's image that is one of them.
     pub firmware: Option<PathBuf>,
@@ -487,7 +491,7 @@ impl Description {
         let on = |option: &Option<String>| {
             option
                 .as_ref()
-                .is_none_or(|option| options.enabled.contains(option))
+                .is_none_or(|option| options.all_enabled || options.enabled.contains(option))
         };
         let memory: Vec<_> = file
             .memory

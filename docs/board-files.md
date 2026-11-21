@@ -31,7 +31,8 @@ loader's, never a parameter or a code.  Numbers may be written in hex (`0xff`) o
 are not `chip` or `external` and hold no `.`.  Any memory, decoder,
 peripheral, unconnected select or net may carry `option = "name"`, one of
 `[board] options`: it is on the board only when the run enables that
-option (`--option`), so one file states a board with and without an
+option (`--option`; a host may enable every option the file declares,
+`Options::all_enabled`), so one file states a board with and without an
 option (the 58503A's front panel).  A net's endpoints on a peripheral an
 option leaves off go with it, and a net left with no driver or no sink
 goes too.
