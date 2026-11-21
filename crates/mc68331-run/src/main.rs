@@ -612,13 +612,12 @@ impl Turns {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use std::fs;
 
     use super::temporary_file;
 
-    #[cfg(unix)]
     #[test]
     fn a_link_at_the_temporary_path_is_not_followed() {
         let directory = std::env::temp_dir().join(format!("mc683xx-run-{}", std::process::id()));
