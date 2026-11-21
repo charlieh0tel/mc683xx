@@ -1423,7 +1423,13 @@ hand.  The keys are in `docs/board-files.md`.
   toward the chip a time rounds up to the first clock at or after it
   (Peripherals, GPT input edges), toward the board a clock rounds
   down.  A peripheral gets the anchor in every `Drive` and, at load and at
-  each change, through `Peripheral::system_clock`.  Edges between
+  each change, through `Peripheral::system_clock`.  A part the chip
+  does not clock (an oscillator, an oven, a GPS engine) that counts in
+  cycles counts on `TimeBase::steady(frequency)`, clock zero at
+  power-on and never moved: on the chip's base it would fall behind
+  board time at each reset, the synthesizer back at its default until
+  SYNCR is written.  Its rate is its own, so the board offers none: a
+  constructor, not a board-wide base (decided 2026-11, for 0.8.0).  Edges between
   peripherals are never quantized.  A peripheral drives a port at its time or
   later; a drive to a GPT input is scheduled into the GPT at once
   (`schedule_gpt_input`), so a peripheral that drives an edge ahead of time

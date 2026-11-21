@@ -712,6 +712,10 @@ The contract a host's peripheral models target (rustdoc in
   to its picosecond or the one before; so `cycles(time(c))` is `c`.  The
   board moves its base only where the frequency changes, so one base
   maps all the time between changes without drift.
+  `TimeBase::steady(frequency)` is a base on board time alone, clock
+  zero at power-on, never moved: for a part the chip does not clock
+  (an oscillator, an oven, a GPS engine) that counts cycles of a rate
+  of its own, which on the chip's base would fall behind at each reset.
 - `time::Time` (picoseconds since power-on) and `time::Span` (a span
   of it, picoseconds: `Time + Span`, `Time - Time` a `Span`),
   `mc683xx_cpu32::frequency::Frequency`

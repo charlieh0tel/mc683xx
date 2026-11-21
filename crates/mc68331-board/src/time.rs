@@ -732,6 +732,19 @@ impl TimeBase {
         }
     }
 
+    /// A base on board time alone: clock zero at power-on, at
+    /// `frequency`, whole hertz, throughout.
+    ///
+    /// For a part the chip does not clock (an oscillator, an oven, a GPS
+    /// engine) that counts in cycles of a rate of its own: the chip's
+    /// system clock base moves at each reset, its synthesizer back at its
+    /// default until SYNCR is written (MC68331UM 4.3), so on it such a part
+    /// would fall behind board time at each one.  This one never moves.
+    #[must_use]
+    pub const fn steady(frequency: Frequency) -> Self {
+        Self::new(Cycles::ZERO, Time::ZERO, frequency)
+    }
+
     /// The system clock's frequency.
     #[must_use]
     pub const fn frequency(&self) -> Frequency {
@@ -1017,6 +1030,16 @@ mod tests {
             base,
             "no drift"
         );
+    }
+
+    #[test]
+    fn a_steady_base_counts_from_power_on() {
+        let base = TimeBase::steady(Frequency::from_hz(16_777_216));
+        assert_eq!(
+            base,
+            TimeBase::new(Cycles::ZERO, Time::ZERO, Frequency::from_hz(16_777_216))
+        );
+        assert_eq!(base.cycles(Time::from_seconds(1)), Cycles(16_777_216));
     }
 
     #[test]
