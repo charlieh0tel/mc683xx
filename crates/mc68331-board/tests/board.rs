@@ -2907,9 +2907,9 @@ fn ran(board: &mut Board<Mc68331>) -> Ran {
     let changes = trace
         .nets
         .into_iter()
-        .map(|change| (change.at, change.signal))
+        .map(|change| (change.now, change.signal))
         .chain(trace.records.iter().filter_map(|record| match record {
-            Record::Pin(pin) => Some((pin.time, Signal::Level(pin.level))),
+            Record::Pin(pin) => Some((pin.now, Signal::Level(pin.level))),
             _ => None,
         }))
         .collect();
@@ -3527,7 +3527,7 @@ to = ["external.reset"]
         .take_trace()
         .nets
         .into_iter()
-        .map(|change| (change.at, change.signal))
+        .map(|change| (change.now, change.signal))
         .collect();
     let [.., (low, Signal::Level(false)), (high, Signal::Level(true))] = edges[..] else {
         panic!("no RESET pulse: {edges:?}");

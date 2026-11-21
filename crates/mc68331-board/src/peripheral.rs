@@ -378,7 +378,7 @@ impl Transfer {
 #[non_exhaustive]
 pub struct Driven {
     /// When it takes effect: never before the call that drove it.
-    pub at: Time,
+    pub now: Time,
     /// The port: its index in the type's declared ports.
     pub port: usize,
     /// The value.
@@ -526,7 +526,7 @@ impl<'a> Drive<'a> {
     /// Drives `signal` on `port` from `at`, or now if that is past.
     pub fn drive_at(&mut self, at: Time, port: usize, signal: Signal) {
         self.driven.push(Driven {
-            at: at.max(self.now),
+            now: at.max(self.now),
             port,
             signal,
         });

@@ -216,7 +216,7 @@ fn frames(driven: &[Driven], port: usize) -> Vec<(Time, Serial)> {
         .iter()
         .filter(|driven| driven.port == port)
         .filter_map(|driven| match driven.signal {
-            Signal::Serial(serial) => Some((driven.at, serial)),
+            Signal::Serial(serial) => Some((driven.now, serial)),
             _ => None,
         })
         .collect()
@@ -773,7 +773,7 @@ fn the_timer_sets_its_ready_bit_every_second_terminal_count_and_squares_op3() {
     let edges: Vec<(Time, bool)> = driven
         .into_iter()
         .filter(|driven| driven.port == OP0 + 3)
-        .map(|driven| (driven.at, driven.signal == Signal::Level(true)))
+        .map(|driven| (driven.now, driven.signal == Signal::Level(true)))
         .collect();
     // the start inverted it low; each terminal count inverts it
     assert_eq!(

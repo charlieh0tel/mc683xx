@@ -60,7 +60,7 @@ impl<R: fmt::Display + ?Sized> fmt::Display for Line<'_, R> {
 #[non_exhaustive]
 pub struct NetRecord {
     /// When.
-    pub at: Time,
+    pub now: Time,
     /// The net's name.
     pub net: String,
     /// The value.
@@ -77,7 +77,7 @@ impl fmt::Display for NetRecord {
         write!(
             formatter,
             "net time={} name={} {}",
-            self.at.picos(),
+            self.now.picos(),
             self.net,
             self.signal
         )
@@ -125,7 +125,7 @@ pub struct PinRecord {
     /// The system clock it takes effect at.
     pub cycle: Cycles,
     /// Its board time.
-    pub time: Time,
+    pub now: Time,
     /// The pin, by its name after `chip.`.
     pub pin: &'static str,
     /// Its level.
@@ -316,7 +316,7 @@ impl fmt::Display for Record {
                 formatter,
                 "pin cycle={} time={} pin={} level={}",
                 record.cycle.0,
-                record.time.picos(),
+                record.now.picos(),
                 record.pin,
                 u8::from(record.level)
             ),
@@ -433,7 +433,7 @@ mod tests {
         );
         let pin = Record::Pin(PinRecord {
             cycle: Cycles(1677),
-            time: Time::from_picos(100_000_037),
+            now: Time::from_picos(100_000_037),
             pin: "PGP0",
             level: true,
         });
@@ -493,7 +493,7 @@ mod tests {
     fn net_lines_carry_each_signal_s_fields() {
         let line = |signal| {
             NetRecord {
-                at: Time::from_picos(5),
+                now: Time::from_picos(5),
                 net: "pps".to_owned(),
                 signal,
             }

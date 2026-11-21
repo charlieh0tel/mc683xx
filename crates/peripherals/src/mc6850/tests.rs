@@ -183,7 +183,7 @@ fn frames(driven: &[Driven]) -> Vec<(Time, Serial)> {
         .iter()
         .filter(|driven| driven.port == TX_DATA)
         .filter_map(|driven| match driven.signal {
-            Signal::Serial(serial) => Some((driven.at, serial)),
+            Signal::Serial(serial) => Some((driven.now, serial)),
             _ => None,
         })
         .collect()

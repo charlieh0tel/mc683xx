@@ -1396,7 +1396,7 @@ impl<C: Chip> Board<C> {
         for (peripheral, driven) in driven {
             self.drive(
                 &Source::Peripheral(peripheral, driven.port),
-                driven.at,
+                driven.now,
                 driven.signal,
             );
         }
@@ -1483,7 +1483,7 @@ impl<C: Chip> Board<C> {
         if changed {
             if self.tracing.nets {
                 self.net_trace.push(NetRecord {
-                    at,
+                    now: at,
                     net: state.name.clone(),
                     signal,
                 });
@@ -1748,7 +1748,7 @@ impl<C: Chip> Board<C> {
         {
             self.records.push(Record::Pin(trace::PinRecord {
                 cycle: self.shared.base.get().cycles(at),
-                time: at,
+                now: at,
                 pin: pin.name(),
                 level,
             }));
