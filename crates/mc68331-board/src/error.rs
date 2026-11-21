@@ -24,7 +24,7 @@ pub enum LoadError {
     },
     /// The TOML does not parse, or a key or value is not the schema's.
     #[error(transparent)]
-    Syntax(SyntaxError),
+    Syntax(#[from] SyntaxError),
     /// A version other than this build's, or none.
     #[error("board file version {0}: this build reads version 1")]
     Version(String),
@@ -247,13 +247,42 @@ pub enum EditError {
 /// its line, column and what is wrong, as the message says.  Opaque:
 /// the parser is not part of the API.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{0}")]
-pub struct SyntaxError(toml::de::Error);
+#[error("{error}")]
+pub struct SyntaxError {
+    /// The parser's error.
+    error: toml::de::Error,
+    /// Where in the text it is, line and column from 1, if the parser
+    /// placed it.
+    place: Option<(usize, usize)>,
+}
 
 impl SyntaxError {
-    /// `error`, as a load's.
-    pub(crate) const fn from_toml(error: toml::de::Error) -> LoadError {
-        LoadError::Syntax(Self(error))
+    /// The parser's `error` in `text`.
+    pub(crate) fn new(error: toml::de::Error, text: &str) -> Self {
+        let place = error
+            .span()
+            .and_then(|span| text.get(..span.start))
+            .map(|before| {
+                let line_start = before.rfind('\n').map_or(0, |newline| newline + 1);
+                (
+                    before.matches('\n').count() + 1,
+                    before[line_start..].chars().count() + 1,
+                )
+            });
+        Self { error, place }
+    }
+
+    /// The line it is on, from 1, if the parser placed it.
+    #[must_use]
+    pub fn line(&self) -> Option<usize> {
+        self.place.map(|(line, _)| line)
+    }
+
+    /// The column it is at on its line, in characters from 1, if the
+    /// parser placed it.
+    #[must_use]
+    pub fn column(&self) -> Option<usize> {
+        self.place.map(|(_, column)| column)
     }
 }
 

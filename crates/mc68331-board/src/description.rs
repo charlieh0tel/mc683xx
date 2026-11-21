@@ -454,13 +454,15 @@ impl Description {
         options: &Options,
         mut read: impl FnMut(&Path) -> io::Result<Vec<u8>>,
     ) -> Result<Self, LoadError> {
-        let versioned: schema::Versioned = toml::from_str(text).map_err(SyntaxError::from_toml)?;
+        let versioned: schema::Versioned =
+            toml::from_str(text).map_err(|error| SyntaxError::new(error, text))?;
         match versioned.version {
             Some(toml::Value::Integer(schema::VERSION)) => {}
             Some(other) => return Err(LoadError::Version(other.to_string())),
             None => return Err(LoadError::Version("missing".to_owned())),
         }
-        let file: schema::File = toml::from_str(text).map_err(SyntaxError::from_toml)?;
+        let file: schema::File =
+            toml::from_str(text).map_err(|error| SyntaxError::new(error, text))?;
         let board = file.board;
         let declared: BTreeSet<&str> = board.options.iter().map(String::as_str).collect();
         if let Some(option) = options
@@ -627,12 +629,13 @@ impl Description {
             /// `[chip]`.
             chip: Option<S>,
         }
-        let only: ChipOnly<S> = toml::from_str(&self.text).map_err(SyntaxError::from_toml)?;
+        let only: ChipOnly<S> =
+            toml::from_str(&self.text).map_err(|error| SyntaxError::new(error, &self.text))?;
         match only.chip {
             Some(section) => Ok(section),
             None => toml::Value::Table(toml::Table::new())
                 .try_into()
-                .map_err(SyntaxError::from_toml),
+                .map_err(|error| SyntaxError::new(error, "").into()),
         }
     }
 

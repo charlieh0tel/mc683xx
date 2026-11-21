@@ -473,7 +473,9 @@ The contract a host's peripheral models target (rustdoc in
   which a load sets itself).  `Parameters::unread()`
   is the first key no getter read, the load's unknown-parameter error,
   for a host's tests of its constructors, which build their `Parameters`
-  with `Parameters::parse(toml_text)`.  A host holding TOML that sets
+  with `Parameters::parse(toml_text)` (text that is not a TOML table an
+  `error::SyntaxError`, its `line()` and `column()` from 1, as a board
+  file's `LoadError::Syntax` carries).  A host holding TOML that sets
   a peripheral's parameters (`description::Options::parameters`) takes the
   table as `Parameters::parse(toml_text)?.into_table()`, and one value
   with `Options::parse_setting("PERIPHERAL.KEY=VALUE")` (its error a

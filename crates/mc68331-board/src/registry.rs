@@ -17,7 +17,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::builtin;
-use crate::error::LoadError;
 use crate::error::SyntaxError;
 use crate::peripheral::Peripheral;
 use crate::signal::Direction;
@@ -304,9 +303,10 @@ impl Parameters {
     ///
     /// # Errors
     ///
-    /// A `text` that is not a TOML table ([`LoadError::Syntax`]).
-    pub fn parse(text: &str) -> Result<Self, LoadError> {
-        let table: toml::Table = toml::from_str(text).map_err(SyntaxError::from_toml)?;
+    /// A `text` that is not a TOML table.
+    pub fn parse(text: &str) -> Result<Self, SyntaxError> {
+        let table: toml::Table =
+            toml::from_str(text).map_err(|error| SyntaxError::new(error, text))?;
         Ok(Self::new(table_from_toml(table)))
     }
 
@@ -820,7 +820,8 @@ mod tests {
         assert_eq!(ParameterValue::from("x").as_str(), Some("x"));
         assert_eq!(ParameterValue::from(3).as_integer(), Some(3));
         assert_eq!(ParameterValue::from(3).as_float(), None);
-        assert!(Parameters::parse("a = ").is_err());
+        let error = Parameters::parse("a = 1\nb = ").unwrap_err();
+        assert_eq!((error.line(), error.column()), (Some(2), Some(5)));
     }
 
     #[test]

@@ -417,6 +417,14 @@ fn unknown_keys_are_refused_with_their_line() {
     let message = error("[chip]\ncrystal = 1\n");
     assert!(message.contains("crystal"), "{message}");
     assert!(message.contains("line"), "{message}");
+    let Err(LoadError::Syntax(error)) = parse(&with("[[peripheral]]\nnome = \"d\"\n")) else {
+        panic!("an unknown key is a syntax error");
+    };
+    assert_eq!(
+        (error.line(), error.column()),
+        (Some(13), Some(1)),
+        "{error}"
+    );
 }
 
 #[test]
