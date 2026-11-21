@@ -305,18 +305,19 @@ def test_a_write_to_read_only_code_is_protected():
     assert end == mc683xx.End.Fault(fault=fault)
 
 
-class Register:
-    """A peripheral: a long register, and a log of its cycles."""
+class Register(mc683xx.MappedPeripheral):
+    """A peripheral, typed by the protocol it subclasses: a long
+    register, and a log of its cycles."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.value = 0x11223344
-        self.cycles = []
+        self.cycles: list[tuple[str, int, int]] = []
 
-    def read(self, cycle):
+    def read(self, cycle: mc683xx.BusCycle, /) -> int:
         self.cycles.append(("read", cycle.address, cycle.size))
         return self.value if cycle.size == 4 else self.value & 0xFFFF
 
-    def write(self, cycle, value):
+    def write(self, cycle: mc683xx.BusCycle, value: int, /) -> None:
         self.cycles.append(("write", cycle.address, cycle.size))
         self.value = value
 

@@ -69,21 +69,61 @@ __all__ = [
     "LoadError",
     "RunError",
     "TargetError",
+    "MappedPeripheral",
+    "SpiPeripheral",
+    "Peripheral",
 ]
 
 __version__: str
 """The package's version, one for the crates, the package and npm's."""
 
-# What the host passes in: bus peripherals, models and QSPI peripherals are
-# duck-typed; these name the methods the chip calls.  Every method but
-# `read` and `write` (and the QSPI's `transfer`) is optional.
+# What the host passes in, the methods the module calls on it.  Each
+# protocol declares the methods it requires; its docstring the optional
+# ones, a missing one taking the Rust trait's default.
 
-class _MappedPeripheral(Protocol):
+class MappedPeripheral(Protocol):
+    """A bus peripheral, as `Builder.peripheral`, `Builder.bus_peripheral`
+    and `Machine.add_peripheral` take it (Rust's `MappedPeripheral` and
+    `Timed`): `read` and `write` answer its cycles.  The module also
+    calls these, each optional, a missing one taking the trait's
+    default: `wait_states(cycle) -> int | None`, `dsack_port(cycle) ->
+    int | None` (8, 16 or None), `interrupt_request() -> bool`,
+    `reset(now: int)`, `next_event() -> int | None`, `advance(now:
+    int)`, and `save() -> bytes` with `restore(snapshot: bytes)`, both
+    or neither."""
+
     def read(self, cycle: BusCycle, /) -> int: ...
     def write(self, cycle: BusCycle, value: int, /) -> object: ...
 
-class _SpiPeripheral(Protocol):
+class SpiPeripheral(Protocol):
+    """The QSPI's peripheral, as `Builder.qspi` takes it (Rust's
+    `SpiPeripheral`): `transfer` shifts a queue entry's bits.  The
+    module also calls these, each optional: `set_chip_selects(levels:
+    int, now: int)`, `set_clock(clock: QspiClock, now: int)`,
+    `reset(now: int)`, `deferrable() -> bool`, and `save() -> bytes`
+    with `restore(snapshot: bytes)`, both or neither."""
+
     def transfer(self, transfer: QspiTransfer, /) -> int: ...
+
+class Peripheral(Protocol):
+    """A board peripheral, as the class `Board`'s `types` names makes it
+    (Rust's `Peripheral`), called with its parameters as keyword
+    arguments.  Its class declares its ports in `PORTS`, `(name, kind,
+    direction)` each, and sets `TIMED_SERIAL` to be told serial frames
+    as `Serial`s; every method is optional, a missing one taking the
+    trait's default: `read(access, drive) -> int`, `write(access,
+    value, drive)`, `wait_states(access) -> int | None`,
+    `dsack_port(access) -> int | None`, `wants_horizon() -> bool`,
+    `interrupt_request() -> bool`, `power_on(drive)`, `reset(now,
+    drive)`, `transfer(transfer, drive) -> int`, `set_qspi_clock(clock,
+    now)`, `select(attachment, selected, now, drive)`, `input(port,
+    value, now, drive)`, `sample(port, now) -> float | None`,
+    `next_event() -> int | None`, `advance(now, drive)`,
+    `qspi_deferrable() -> bool`, `memory_read(memory, access, drive) ->
+    int`, `memory_write(memory, access, value, drive)`, `inspect() ->
+    Mapping[str, object]`, and `save() -> bytes` with
+    `restore(snapshot: bytes)`, both or neither (docs/python.md, Board
+    files)."""
 
 class BusError(Exception):
     """Raised by a peripheral's read or write: BERR ends
@@ -764,17 +804,17 @@ class Builder:
         self, memory: int, *, port: int = 16, termination: Termination | None = None
     ) -> None: ...
     def set_reload_scope(self, memory: int, scope: Sequence[ResetCause]) -> None: ...
-    def peripheral(self, peripheral: _MappedPeripheral, pins: Sequence[str]) -> int: ...
+    def peripheral(self, peripheral: MappedPeripheral, pins: Sequence[str]) -> int: ...
     def bus_peripheral(
         self,
-        peripheral: _MappedPeripheral,
+        peripheral: MappedPeripheral,
         *,
         windows: Sequence[tuple[int, int]] = ...,
         acknowledges: Sequence[int] = ...,
         dsack: Dsack,
     ) -> int: ...
     def unwired_peripheral(self, peripheral: object) -> int: ...
-    def qspi(self, peripheral: _SpiPeripheral) -> None: ...
+    def qspi(self, peripheral: SpiPeripheral) -> None: ...
     def dsack(self, peripheral: int, pins: Dsack) -> None: ...
     def set_qspi_reset_scope(self, scope: Sequence[ResetCause]) -> None: ...
     def stop_request(self) -> StopRequest: ...
@@ -1093,7 +1133,7 @@ class Machine:
     def protect(self, start: int, length: int, permissions: str) -> None: ...
     def read(self, address: int, length: int) -> bytes: ...
     def write(self, address: int, data: bytes | bytearray) -> None: ...
-    def add_peripheral(self, begin: int, end: int, peripheral: _MappedPeripheral) -> None: ...
+    def add_peripheral(self, begin: int, end: int, peripheral: MappedPeripheral) -> None: ...
     def read_register(self, name: str) -> int: ...
     def write_register(self, name: str, value: int) -> None: ...
     def registers(self) -> dict[str, int]: ...
@@ -1347,7 +1387,7 @@ class Board:
         cls,
         path: str | PathLike[str],
         *,
-        types: Mapping[str, Callable[..., object]] | None = None,
+        types: Mapping[str, Callable[..., Peripheral]] | None = None,
         enabled: Sequence[str] = ...,
         firmware: str | PathLike[str] | None = None,
         images: Mapping[str, str | PathLike[str]] | None = None,

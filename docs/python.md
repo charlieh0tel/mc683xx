@@ -85,7 +85,12 @@ rename renames the Python name with it.  The deliberate differences:
 - **Handles:** memories and peripherals are the numbers `Builder`
   returns, not `MemoryId` and `PeripheralId`; a Rust callback trait
   (`MappedPeripheral`, `SpiPeripheral`, `Peripheral`, `Observer`) is a
-  duck-typed object or callable.
+  duck-typed object or callable.  The protocol classes
+  `mc683xx.MappedPeripheral`, `SpiPeripheral` and `Peripheral` type the
+  first three for a type checker: each declares the methods it
+  requires (`read` and `write`, `transfer`, none) and its docstring the
+  optional ones the module calls, which are API as the classes are
+  (docs/releasing.md); a peripheral may subclass one, or only match it.
 - **Errors:** a Rust error is a Python exception (Errors, below): the
   module's own where Python has none to match, named as Rust's error
   is (`LoadError`, `RunError`, `StateError`, `TargetError`, `BusError`;

@@ -92,7 +92,8 @@ means a change to:
 - the Python API: the names `__init__.pyi` declares, their arguments,
   enum members, the exception classes, their bases and which errors
   raise which, and the methods the module calls on a host's objects
-  (a peripheral's, a hook's callable);
+  (a peripheral's, as the protocol classes `MappedPeripheral`,
+  `SpiPeripheral` and `Peripheral` list them; a hook's callable);
 - the npm package's JavaScript and TypeScript API, through its
   `exports`, but `InitOutput`, the module's own exports, which is
   opaque;

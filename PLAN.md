@@ -843,7 +843,12 @@ chip beside `Mc68331`.
   None` and `advance(now)`, the `MappedPeripheral` and `Timed` traits' methods;
   a missing one takes the trait's default.  A model on no pin needs
   neither `read` nor `write`.  The methods are looked up once, when
-  the object is wired.  A `BusCycle` carries `select`, `address`, `size`
+  the object is wired.  The methods the module calls on a host's
+  objects are API, so the package types them as the protocol classes
+  `MappedPeripheral`, `SpiPeripheral` and `Peripheral` (pure Python, in
+  its `__init__.py`): each declares its required methods, its
+  docstring the optional ones, as `typing.Protocol` has no optional
+  member (decided 2026-11-21).  A `BusCycle` carries `select`, `address`, `size`
   (bytes), `function_code` and `now`.  A read's value must fit the
   cycle.
 - **Errors:** raising `mc683xx.BusError` in `read` or `write` asserts
@@ -921,7 +926,8 @@ chip beside `Mc68331`.
 - **QSM and GPT:** `Builder.qspi(object)` puts an object with
   `transfer(transfer) -> int` (an `mc683xx.QspiTransfer`, as the Rust
   one) and optionally
-  `chip_selects(levels, now)` and `clock(clock, now)` on the QSPI, the
+  `set_chip_selects(levels, now)`, `set_clock(clock, now)`,
+  `reset(now)` and `deferrable()` on the QSPI, the
   `SpiPeripheral` trait's methods (`QspiClock` carries `polarity`, a
   `ClockPolarity`, `phase`, a `ClockPhase`, `period`,
   `system_clock_nanohertz` and `baud_nanohertz`); the bits shifted back must fit the transfer, and an
