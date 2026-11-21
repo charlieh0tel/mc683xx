@@ -1413,7 +1413,7 @@ impl Core<'_> {
     /// after the last instruction's trace and before the interrupt
     /// sampled there, as Table 6-2 orders them (CPU32RM 6.1.5, 6.2.10):
     /// with background mode enabled the CPU enters it, as
-    /// [`Cpu::breakpoint`]; disabled, the hardware breakpoint is
+    /// [`Cpu::assert_breakpoint`]; disabled, the hardware breakpoint is
     /// acknowledged, unless the CPU is halted or stopped, which leaves
     /// it pending (PLAN.md, Background debug mode), and vector 12
     /// taken is a step.  Its clocks.
@@ -1423,7 +1423,7 @@ impl Core<'_> {
         let cpu = &mut *self.cpu;
         if cpu.bdm_enabled {
             cpu.bare.breakpoint_pending = false;
-            cpu.breakpoint();
+            cpu.assert_breakpoint();
             return Cycles::ZERO;
         }
         if cpu.idle.is_some() || cpu.stopped {

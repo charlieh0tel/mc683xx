@@ -393,6 +393,25 @@ fn boundary_only(machine: &mut Machine) -> End {
 }
 
 #[test]
+fn bkpt_asserted_enters_background_mode_or_is_left_pending() {
+    let mut disabled = machine(&[MOVEQ_1_D1, NOP]);
+    one(&mut disabled);
+    assert!(!disabled.cpu.assert_breakpoint());
+    assert!(disabled.cpu.breakpoint_pending(), "left for the next run");
+    assert_eq!(disabled.cpu.background(), None);
+    let mut enabled = machine(&[MOVEQ_1_D1, NOP]);
+    enabled.cpu.set_bdm_enabled(true);
+    one(&mut enabled);
+    assert!(enabled.cpu.assert_breakpoint());
+    assert!(!enabled.cpu.breakpoint_pending());
+    assert_eq!(enabled.cpu.background(), Some(Entry::Breakpoint));
+    assert!(
+        enabled.cpu.assert_breakpoint(),
+        "in background mode already"
+    );
+}
+
+#[test]
 fn a_fault_stacking_a_pending_breakpoint_keeps_the_instruction_before_it() {
     let mut machine = machine(&[MOVEQ_1_D1, NOP]);
     machine.cpu.set_stop_on_fault(true);
@@ -779,7 +798,7 @@ fn a_pending_trace_waits_out_background_mode_and_is_a_step() {
     machine.cpu.set_bdm_enabled(true);
     one(&mut machine);
     machine.cpu.registers.ssp = Address(STACK);
-    assert!(machine.cpu.breakpoint(), "halted, as BKPT halts it");
+    assert!(machine.cpu.assert_breakpoint(), "halted, as BKPT halts it");
     assert_eq!(
         boundary_only(&mut machine),
         End::Stop(Stop::Background(Entry::Breakpoint))

@@ -84,24 +84,19 @@ impl Mc68331 {
     ///
     /// [`Cpu::set_breakpoint_pending`]: mc683xx_cpu32::cpu::Cpu::set_breakpoint_pending
     pub fn assert_breakpoint(&mut self) -> bool {
-        if self.cpu.bdm_enabled() {
-            return self.breakpoint();
-        }
-        self.cpu.set_breakpoint_pending(true);
-        false
-    }
-
-    /// BKPT acknowledged between instructions, as
-    /// [`Cpu::breakpoint`](mc683xx_cpu32::cpu::Cpu::breakpoint): out of
-    /// STOP or LPSTOP too, which wakes the modules LPSTOP stopped.
-    /// Whether the CPU is in background mode.
-    fn breakpoint(&mut self) -> bool {
-        let entered = self.cpu.breakpoint();
+        let entered = self.cpu.assert_breakpoint();
         if entered {
             self.board.wake(self.now);
             self.sync_freeze();
         }
         entered
+    }
+
+    /// BKPT asserted with background mode enabled, as
+    /// [`assert_breakpoint`](Self::assert_breakpoint); disabled,
+    /// nothing, and false.  Whether the CPU is in background mode.
+    fn breakpoint(&mut self) -> bool {
+        self.cpu.bdm_enabled() && self.assert_breakpoint()
     }
 
     /// An error unless the CPU is in background mode.

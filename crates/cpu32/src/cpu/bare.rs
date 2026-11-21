@@ -344,19 +344,24 @@ impl Cpu {
         }
     }
 
-    /// BKPT acknowledged between instructions: with background mode
+    /// BKPT asserted between instructions: with background mode
     /// enabled the CPU enters it for a breakpoint, PCC the last
-    /// instruction executed, and this is true (CPU32RM 7.2.2.1).
-    /// Disabled, nothing happens and this is false: BKPT then asks for
-    /// a hardware breakpoint exception, which
-    /// [`set_breakpoint_pending`](Self::set_breakpoint_pending) leaves
-    /// for the next run.  In background mode already, true with nothing
-    /// changed.
-    pub fn breakpoint(&mut self) -> bool {
+    /// instruction executed, out of STOP or LPSTOP too, and this is true
+    /// (CPU32RM 7.2.2.1); halted, nothing happens and this is false.
+    /// Disabled, BKPT
+    /// asks for a hardware breakpoint exception, left pending for the
+    /// next run as [`set_breakpoint_pending`](Self::set_breakpoint_pending)
+    /// leaves it, and this is false.  In background mode already, true
+    /// with nothing changed.
+    pub fn assert_breakpoint(&mut self) -> bool {
         if self.background().is_some() {
             return true;
         }
-        if !self.bdm_enabled || self.idle.is_some() {
+        if !self.bdm_enabled {
+            self.bare.breakpoint_pending = true;
+            return false;
+        }
+        if self.idle.is_some() {
             return false;
         }
         let pcc = self.instruction_pc;
@@ -383,7 +388,7 @@ impl Cpu {
     /// ends STOP or LPSTOP, after whose exception processing it is
     /// acknowledged (PLAN.md, Background debug mode).  Reset drops it.
     /// With background mode enabled the next run enters it, as
-    /// [`breakpoint`](Self::breakpoint).
+    /// [`assert_breakpoint`](Self::assert_breakpoint).
     pub const fn set_breakpoint_pending(&mut self, pending: bool) {
         self.bare.breakpoint_pending = pending;
     }

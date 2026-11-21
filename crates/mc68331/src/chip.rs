@@ -974,7 +974,7 @@ impl Mc68331 {
         // a double bus fault fetching the vectors leaves the CPU halted,
         // or in background mode
         let _ = self.cpu.reset(&mut Connection(&board), now);
-        if breakpoint && self.cpu.background().is_none() && self.cpu.breakpoint() {
+        if breakpoint && self.cpu.background().is_none() && self.cpu.assert_breakpoint() {
             // BKPT tags the first fetch: acknowledged before it, PCC
             // where it would have begun (PLAN.md, Background debug mode)
             let pc = self.cpu.registers.pc;
