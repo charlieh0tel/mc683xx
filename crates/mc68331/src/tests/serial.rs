@@ -17,12 +17,12 @@ use super::START;
 use super::image;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
-use crate::debug::serial::BUS_ERROR;
-use crate::debug::serial::COMPLETE;
-use crate::debug::serial::ILLEGAL;
-use crate::debug::serial::NOT_IN_BACKGROUND;
-use crate::debug::serial::NOT_READY;
-use crate::debug::serial::STATUS;
+use mc683xx_target::serial::BUS_ERROR;
+use mc683xx_target::serial::COMPLETE;
+use mc683xx_target::serial::ILLEGAL;
+use mc683xx_target::serial::NOT_IN_BACKGROUND;
+use mc683xx_target::serial::NOT_READY;
+use mc683xx_target::serial::STATUS;
 
 /// RDREG D0 (CPU32RM 7.2.8.4); the register code is added.
 const RDREG: u16 = 0x2180;

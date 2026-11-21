@@ -19,6 +19,7 @@ pub mod address;
 pub mod entry;
 pub mod function_code;
 pub mod register;
+pub mod serial;
 pub mod size;
 
 use address::Address;
