@@ -1450,7 +1450,8 @@ chip_methods! {
     /// with background mode enabled the CPU enters it at once, as `halt`
     /// makes it, and this is true; disabled, a hardware breakpoint is
     /// left pending for the next run, which takes vector 12 unless a
-    /// peripheral ends its acknowledge cycle, and this is false.
+    /// peripheral ends its acknowledge cycle, and this is false.  A
+    /// halted CPU ignores it, and this is false.
     fn assert_breakpoint(&mut self) -> PyResult<bool> {
         let entered = self.chip.assert_breakpoint();
         self.pending.check()?;

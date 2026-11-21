@@ -2553,7 +2553,9 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   the pin, asserted between runs (with background mode enabled, the
   entry `halt` makes); the core holds the breakpoint pending
   (`Cpu::set_breakpoint_pending`, in its snapshot), as 6.2.6 has
-  breakpoints left pending, not taken at once.  The next run
+  breakpoints left pending, not taken at once.  A halted CPU ignores
+  BKPT, enabled or not, and nothing is left pending: only RESET
+  restarts a halted processor (6.2.2).  The next run
   acknowledges it before anything else: a breakpoint acknowledge
   cycle, a word read in CPU space at $00001E, type 0000, BKPT #7, T
   set (5.3.1.1; MC68331UM 4.5.4.1.2, Figure 4-12), through the `Bus`,

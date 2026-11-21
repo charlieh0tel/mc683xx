@@ -1313,6 +1313,19 @@ fn a_fault_on_the_reset_vectors_halts() {
 }
 
 #[test]
+fn a_halted_chip_ignores_bkpt() {
+    // only RESET restarts a halted processor (CPU32RM 6.2.2): BKPT with
+    // background mode disabled leaves no breakpoint pending
+    let mut builder = Builder::default();
+    builder.peripheral(Faulting, &[ChipSelect::Boot]).unwrap();
+    let mut chip = builder.build();
+    assert!(chip.cpu().halted().is_some());
+    assert!(!chip.assert_breakpoint());
+    assert!(!chip.cpu().breakpoint_pending());
+    assert!(chip.cpu().halted().is_some());
+}
+
+#[test]
 fn the_watchdog_resets_a_halted_chip() {
     // ILLEGAL with no stack: the exception's stacking faults twice, a
     // double bus fault (CPU32RM 6.2.1); the halt monitor off (SYPCR

@@ -364,26 +364,27 @@ impl Cpu {
     /// BKPT asserted between instructions: with background mode
     /// enabled the CPU enters it for a breakpoint, PCC the last
     /// instruction executed, out of STOP or LPSTOP too, and this is true
-    /// (CPU32RM 7.2.2.1); halted, nothing happens and this is false.
-    /// Disabled, BKPT
-    /// asks for a hardware breakpoint exception, left pending for the
-    /// next run as [`set_breakpoint_pending`](Self::set_breakpoint_pending)
-    /// leaves it, and this is false.  In background mode already, true
-    /// with nothing changed.
+    /// (CPU32RM 7.2.2.1).  Disabled, BKPT asks for a hardware breakpoint
+    /// exception, left pending for the next run as
+    /// [`set_breakpoint_pending`](Self::set_breakpoint_pending) leaves
+    /// it, and this is false.  In background mode already, true with
+    /// nothing changed.  Halted, nothing happens, nothing is left
+    /// pending, and this is false, background mode enabled or not: only
+    /// RESET restarts a halted processor (CPU32RM 5.1, 6.2.2).
     pub fn assert_breakpoint(&mut self) -> bool {
-        if self.background().is_some() {
-            return true;
+        match self.idle {
+            Some(Idle::Background(_)) => true,
+            Some(Idle::Halted(_)) => false,
+            None if !self.bdm_enabled => {
+                self.bare.breakpoint_pending = true;
+                false
+            }
+            None => {
+                let pcc = self.instruction_pc;
+                self.enter_background(Entry::Breakpoint, pcc);
+                true
+            }
         }
-        if !self.bdm_enabled {
-            self.bare.breakpoint_pending = true;
-            return false;
-        }
-        if self.idle.is_some() {
-            return false;
-        }
-        let pcc = self.instruction_pc;
-        self.enter_background(Entry::Breakpoint, pcc);
-        true
     }
 
     /// Whether a hardware breakpoint is pending.

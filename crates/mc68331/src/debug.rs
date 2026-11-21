@@ -80,7 +80,9 @@ impl Mc68331 {
     /// $00001E, reaches the selects and the bus peripherals; one that
     /// ends it with DSACK has the breakpoint ignored, and with none it
     /// ends in a bus error, which takes vector 12 (CPU32RM 6.2.6;
-    /// MC68331UM 4.5.4.1.2).
+    /// MC68331UM 4.5.4.1.2).  A halted CPU ignores it, enabled or not,
+    /// nothing left pending, and this is false: only RESET restarts it
+    /// (CPU32RM 6.2.2).
     ///
     /// [`Cpu::set_breakpoint_pending`]: mc683xx_cpu32::cpu::Cpu::set_breakpoint_pending
     pub fn assert_breakpoint(&mut self) -> bool {

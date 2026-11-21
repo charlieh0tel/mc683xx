@@ -331,7 +331,7 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     /// BKPT asserted between runs (CPU32RM 7.2.2.1): with background
     /// mode enabled the CPU enters it at once, and this is true;
     /// disabled, a hardware breakpoint is left pending for the next run,
-    /// and this is false.
+    /// and this is false; halted, nothing, and false.
     fn assert_breakpoint(&mut self) -> bool;
 
     /// Makes the memory diversions the board's routers asked for
