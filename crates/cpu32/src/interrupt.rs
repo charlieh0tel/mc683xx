@@ -48,6 +48,12 @@ impl InterruptLevel {
     pub const fn get(self) -> u8 {
         self.0
     }
+
+    /// The level in the low three bits of `bits`, as SR's I\[2:0\]
+    /// holds one.
+    pub(crate) const fn from_low_bits(bits: u8) -> Self {
+        Self(bits & Self::NONMASKABLE.0)
+    }
 }
 
 /// An interrupt request line: one of the levels a request can have, 1

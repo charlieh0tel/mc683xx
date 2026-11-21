@@ -1323,7 +1323,7 @@ impl Core<'_> {
     #[inline]
     fn interrupt(&mut self, interrupts: &mut dyn Interrupts) -> Option<Processed> {
         let level = interrupts.level();
-        let mask = self.cpu.registers.interrupt_mask();
+        let mask = self.cpu.registers.interrupt_mask().get();
         let due = if level == InterruptLevel::NONMASKABLE {
             self.cpu.sampled_level != level || self.cpu.sampled_mask == MASK_ALL && mask < MASK_ALL
         } else {
@@ -1354,7 +1354,7 @@ impl Core<'_> {
         let pc = self.cpu.registers.pc;
         self.cpu.taken = Some(Exception::Short { vector, pc });
         let processed = self.process_after_instruction(vector, pc, None, Some(level));
-        self.cpu.sampled_mask = self.cpu.registers.interrupt_mask();
+        self.cpu.sampled_mask = self.cpu.registers.interrupt_mask().get();
         if processed == Processed::Stopped {
             interrupts.withdrawn(level);
             // not taken: a level 7 request still held is a transition
@@ -2146,7 +2146,7 @@ mod tests {
         assert_eq!(source.acknowledged, [InterruptLevel::new(3).unwrap()]);
         let vector = Vector::autovector(InterruptLevel::new(3).unwrap());
         assert_eq!(cpu.registers.pc.0, handler(vector));
-        assert_eq!(cpu.registers.interrupt_mask(), 3);
+        assert_eq!(cpu.registers.interrupt_mask().get(), 3);
         // Figure 6-3: the PC of the instruction not yet executed.
         assert_eq!(peek_long(&cpu, STACK - 8), 0x2200_0000 | CODE >> 16);
         assert_eq!(peek_long(&cpu, STACK - 4), (CODE & 0xffff) << 16 | 0x006c);

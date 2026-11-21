@@ -457,7 +457,7 @@ fn a_fault_stacking_a_breakpoint_after_stop_keeps_the_interrupt_before_it() {
     assert_eq!(fault.cycle, CycleKind::Write);
     assert_eq!(fault.registers.pc.0, level_3, "the interrupt kept");
     assert_eq!(fault.registers.ssp.0, 0);
-    assert_eq!(fault.registers.interrupt_mask(), 3);
+    assert_eq!(fault.registers.interrupt_mask().get(), 3);
     assert!(machine.cpu.breakpoint_pending(), "left for the next run");
 }
 

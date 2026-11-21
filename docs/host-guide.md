@@ -544,6 +544,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
@@ -621,7 +622,7 @@ let before = chip.save().unwrap();
 let then = chip.peripheral::<Alarm>(alarm).unwrap().now;
 chip.run_for(Cycles(4000));
 assert_eq!(chip.cpu().registers.pc.0, firmware::HANDLER);
-assert_eq!(chip.cpu().registers.interrupt_mask(), 7);
+assert_eq!(chip.cpu().registers.interrupt_mask(), InterruptLevel::NONMASKABLE);
 // The alarm's time is in the chip's snapshot.
 chip.restore(&before).unwrap();
 assert_eq!(chip.peripheral::<Alarm>(alarm).unwrap().now, then);

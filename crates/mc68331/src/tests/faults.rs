@@ -8,6 +8,7 @@ use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::bare::FaultCause;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::CycleKind;
+use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
@@ -113,7 +114,11 @@ fn a_fault_stacking_the_interrupt_that_ends_lpstop_leaves_the_chip_asleep() {
         Some(CycleKind::Write)
     );
     assert!(chip.cpu().stopped(), "LPSTOP not ended (CPU32RM 4.4)");
-    assert_eq!(chip.sim().low_power(), Some(0), "the modules asleep");
+    assert_eq!(
+        chip.sim().low_power(),
+        Some(InterruptLevel::NONE),
+        "the modules asleep"
+    );
     // SSP fixed: the PIT's request stands, so the next run takes it at
     // once, and the chip wakes
     chip.cpu_control().registers_mut().ssp = Address(RAM + RAM_BYTES as u32);
@@ -157,7 +162,11 @@ fn lpstop_with_an_interrupt_already_pending_stays_asleep_when_it_faults() {
     };
     assert_eq!(run.stop, Stop::Fault);
     assert!(chip.cpu().stopped());
-    assert_eq!(chip.sim().low_power(), Some(0), "the modules asleep");
+    assert_eq!(
+        chip.sim().low_power(),
+        Some(InterruptLevel::NONE),
+        "the modules asleep"
+    );
 }
 
 #[test]

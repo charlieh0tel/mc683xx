@@ -347,7 +347,7 @@ fn nothing_answers_outside_the_selects() {
         Some(5),
     );
     assert_eq!(lpstop, Ok((0, 2)));
-    assert_eq!(board.sim.low_power(), Some(5));
+    assert_eq!(board.sim.low_power(), InterruptLevel::new(5));
 }
 
 #[test]
@@ -1712,7 +1712,7 @@ fn takes_vector(program: &[u16], vector: u8, level: u8) -> Mc68331 {
     chip.registers_mut().set_sr(0x2000);
     chip.run_for(Cycles(20_000));
     assert_eq!(chip.memory(board.ram)[..2], [0xbe, 0xef], "the handler ran");
-    assert_eq!(chip.cpu().registers.interrupt_mask(), level);
+    assert_eq!(chip.cpu().registers.interrupt_mask().get(), level);
     let frame = (chip.cpu().registers.ssp.0 - RAM) as usize;
     let format_vector = &chip.memory(board.ram)[frame + 6..frame + 8];
     assert_eq!(
@@ -2072,7 +2072,7 @@ fn taken_vector(chip: &Mc68331, ram: MemoryId) -> (u16, u8) {
     let format_vector = &chip.memory(ram)[frame + 6..frame + 8];
     (
         u16::from_be_bytes([format_vector[0], format_vector[1]]) / 4,
-        chip.cpu().registers.interrupt_mask(),
+        chip.cpu().registers.interrupt_mask().get(),
     )
 }
 

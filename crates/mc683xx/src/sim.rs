@@ -18,6 +18,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
+use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_target::address::Address;
 use mc683xx_target::size::Size;
 
@@ -260,7 +261,7 @@ pub struct Sim {
     reset_request: Option<ResetCause>,
     /// The interrupt mask LPSTOP stored, while the MCU is stopped
     /// (MC68331UM 4.3.4).
-    low_power: Option<u8>,
+    low_power: Option<InterruptLevel>,
     /// Whether FREEZE is asserted: the CPU in background mode
     /// (MC68331UM 4.2.13).
     frozen: bool,
@@ -374,12 +375,6 @@ impl Sim {
         }
         if self.port_c & !PORTC_IMPLEMENTED != 0 || !self.timer.is_valid() {
             return Err(StateError::invalid("SIM registers"));
-        }
-        if self
-            .low_power
-            .is_some_and(|mask| InterruptLevel::new(mask).is_none())
-        {
-            return Err(StateError::invalid("LPSTOP's interrupt mask"));
         }
         Ok(())
     }
@@ -531,8 +526,8 @@ impl Sim {
     /// Whether IRQ`level`'s pin has its interrupt function (PFPAR,
     /// MC68331UM Table D-5).
     #[must_use]
-    pub const fn interrupt_pin(&self, level: InterruptLevel) -> bool {
-        level.get() != 0 && self.port_f.assignment & 1 << level.get() != 0
+    pub const fn interrupt_pin(&self, pin: IrqPin) -> bool {
+        self.port_f.assignment & 1 << pin.get() != 0
     }
 
     /// PEPAR: a set bit assigns its port E pin its bus control
@@ -581,7 +576,7 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn low_power_stop(&mut self, mask: u8, now: Cycles) {
+    pub fn low_power_stop(&mut self, mask: InterruptLevel, now: Cycles) {
         self.low_power = Some(mask);
         self.counters_changed(self.clock.tick(now));
     }
@@ -643,7 +638,7 @@ impl Sim {
     /// The interrupt mask LPSTOP stored, while the MCU is in low-power
     /// stop.
     #[must_use]
-    pub const fn low_power(&self) -> Option<u8> {
+    pub const fn low_power(&self) -> Option<InterruptLevel> {
         self.low_power
     }
 

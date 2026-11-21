@@ -18,6 +18,7 @@ use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::Acknowledged;
 use mc683xx_cpu32::interrupt::InterruptLevel;
+use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::Backing;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::PAGE_BYTES;
@@ -299,7 +300,7 @@ pub(crate) struct Board {
     /// The interrupt mask LPSTOP broadcast, and when, if the last
     /// acknowledge woke the MCU from low-power stop; not saved, as
     /// `acknowledged` is not.
-    pub(crate) woke: Option<(u8, Cycles)>,
+    pub(crate) woke: Option<(InterruptLevel, Cycles)>,
     /// The earliest next event of the SIM and the modules, while
     /// `modules_next_stale` is clear: the run asks for it every quantum,
     /// and it moves only at an access to the SIM or a module, an
@@ -704,7 +705,10 @@ impl Board {
             if let Some(value) = write
                 && address == LPSTOP_BROADCAST.0
             {
-                self.low_power_stop((value & LPSTOP_MASK) as u8, now);
+                self.low_power_stop(
+                    InterruptLevel::new((value & LPSTOP_MASK) as u8).unwrap_or_default(),
+                    now,
+                );
                 return Ok((0, TABLE_CLOCKS.into()));
             }
         } else if let Some(offset) = address
@@ -1041,9 +1045,9 @@ impl Board {
             });
         (1..=InterruptLevel::NONMASKABLE.get())
             .rev()
-            .filter_map(InterruptLevel::new)
-            .find(|&level| driven & 1 << level.get() != 0 && self.sim.interrupt_pin(level))
-            .unwrap_or(InterruptLevel::NONE)
+            .filter_map(IrqPin::new)
+            .find(|&pin| driven & 1 << pin.get() != 0 && self.sim.interrupt_pin(pin))
+            .map_or(InterruptLevel::NONE, IrqPin::level)
     }
 
     /// The highest level requested of the CPU, recomputed only when a
@@ -1189,7 +1193,7 @@ impl Board {
     /// Low-power stop at `now`, the interrupt mask LPSTOP broadcast
     /// `mask` (MC68331UM 4.5.4.2): the SIM's watchdog and the other
     /// modules' clocks stop (4.2.12, 4.3.4).
-    pub(crate) fn low_power_stop(&mut self, mask: u8, now: Cycles) {
+    pub(crate) fn low_power_stop(&mut self, mask: InterruptLevel, now: Cycles) {
         self.modules_changed();
         self.sim.low_power_stop(mask, now);
         self.module_mut::<Gpt>(GPT).set_low_power(true, now);

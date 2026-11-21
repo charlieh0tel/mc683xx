@@ -511,7 +511,7 @@ fn a_requested_interrupt_is_taken_through_its_vector() {
     });
     assert_eq!(run.end, End::Until);
     assert_eq!(machine.cpu.instructions(), 0, "taken before the first");
-    assert_eq!(machine.cpu.registers.interrupt_mask(), 3);
+    assert_eq!(machine.cpu.registers.interrupt_mask().get(), 3);
     machine.clear_interrupt(IrqPin::new(3).unwrap());
     // With no budget, a stop does not wait.
     let run = machine.run_limited(Limits::default());

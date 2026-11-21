@@ -3,6 +3,8 @@
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 
+use crate::interrupt::InterruptLevel;
+
 /// Status register bits (CPU32RM 2.3.1.3, Figure 2-3).
 pub mod status {
     /// T1: trace on every instruction.
@@ -116,10 +118,12 @@ impl Registers {
         self.sr & status::S != 0
     }
 
-    /// The interrupt priority mask, 0 to 7.
+    /// The interrupt priority mask.
     #[must_use]
-    pub const fn interrupt_mask(&self) -> u8 {
-        ((self.sr & status::INTERRUPT_MASK) >> status::INTERRUPT_SHIFT) as u8
+    pub const fn interrupt_mask(&self) -> InterruptLevel {
+        InterruptLevel::from_low_bits(
+            ((self.sr & status::INTERRUPT_MASK) >> status::INTERRUPT_SHIFT) as u8,
+        )
     }
 
     /// Whether condition code `flag` is set.

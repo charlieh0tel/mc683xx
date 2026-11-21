@@ -57,13 +57,7 @@ fn a_snapshot_s_sim_must_fit_the_chip_and_be_one_a_run_could_leave() {
     stopped.clock.set_multiplier_unchecked(0);
     let mut port_c = sim();
     port_c.port_c = 0xff;
-    let mut low_power = sim();
-    low_power.low_power = Some(8);
-    for (snapshot, what) in [
-        (stopped, "SYNCR"),
-        (port_c, "SIM registers"),
-        (low_power, "LPSTOP's interrupt mask"),
-    ] {
+    for (snapshot, what) in [(stopped, "SYNCR"), (port_c, "SIM registers")] {
         assert!(matches!(
             snapshot.check_snapshot(&current),
             Err(StateError::Invalid(reason)) if reason == what
@@ -288,7 +282,7 @@ fn a_new_swp_takes_effect_at_once() {
 fn lpstop_stops_the_watchdog() {
     let mut sim = sim();
     let tick = |n: u64| Cycles(n * RESET_CLOCKS_PER_TICK);
-    sim.low_power_stop(0, tick(100));
+    sim.low_power_stop(InterruptLevel::NONE, tick(100));
     assert_eq!(sim.next_event(), None);
     sim.wake(tick(1000));
     assert_eq!(sim.next_event(), Some(tick(1000 + 412)));
