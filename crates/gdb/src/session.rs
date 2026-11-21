@@ -564,12 +564,12 @@ impl<T: Target> Session<'_, T> {
     fn monitor(&mut self, words: &[&str], out: &mut ConsoleOutput<'_>) -> Result<(), T::Error> {
         match words {
             ["fc"] => outputln!(out, "fc {}", self.function_code.bits()),
-            ["fc", code] => match code.parse::<u32>() {
-                Ok(code) if code <= u32::from(FunctionCode::CPU_SPACE.bits()) => {
-                    self.function_code = FunctionCode::new(code);
-                    outputln!(out, "fc {code}");
+            ["fc", code] => match code.parse().ok().and_then(FunctionCode::from_bits) {
+                Some(function_code) => {
+                    self.function_code = function_code;
+                    outputln!(out, "fc {function_code}");
                 }
-                _ => outputln!(out, "fc takes a function code, 0 to 7"),
+                None => outputln!(out, "fc takes a function code, 0 to 7"),
             },
             ["faults"] => {
                 let shown = self.target.with_cpu(|cpu| {

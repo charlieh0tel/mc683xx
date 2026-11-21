@@ -314,8 +314,8 @@ fn movec(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
         let value = general_register(core, extension);
         let registers = &mut core.cpu.registers;
         match code {
-            control::SFC => registers.sfc = FunctionCode::new(value),
-            control::DFC => registers.dfc = FunctionCode::new(value),
+            control::SFC => registers.sfc = FunctionCode::from_low_bits(value),
+            control::DFC => registers.dfc = FunctionCode::from_low_bits(value),
             control::USP => registers.usp = value,
             _ => registers.vbr = value,
         }
@@ -624,7 +624,7 @@ mod tests {
         for code in 0..=7 {
             // MOVES.W D0, (A0)
             let mut cpu = supervisor(&[0x0e50, 0x0800]);
-            let function_code = FunctionCode::new(code);
+            let function_code = FunctionCode::from_low_bits(code);
             cpu.registers.dfc = function_code;
             cpu.registers.data[0] = 0xdead_beef;
             cpu.registers.set_address(0, DATA);

@@ -425,7 +425,7 @@ fn rerun(core: &mut Core<'_>, status: u16, address: Address, data: u32) {
     let Some(size) = rerun_size(status) else {
         return;
     };
-    let function_code = FunctionCode::new(u32::from(status & ssw::FUNC));
+    let function_code = FunctionCode::from_low_bits(u32::from(status & ssw::FUNC));
     let result = if status & ssw::RW != 0 {
         core.access_read(address, size, function_code, CycleKind::Read)
             .map(|_| ())

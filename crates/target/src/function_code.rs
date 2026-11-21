@@ -14,14 +14,12 @@ pub struct FunctionCode(u8);
 impl<'de> serde::Deserialize<'de> for FunctionCode {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let bits = u8::deserialize(deserializer)?;
-        if bits & !Self::MASK == 0 {
-            Ok(Self(bits))
-        } else {
-            Err(serde::de::Error::invalid_value(
+        Self::from_bits(bits).ok_or_else(|| {
+            serde::de::Error::invalid_value(
                 serde::de::Unexpected::Unsigned(bits.into()),
                 &"a function code, 0 to 7",
-            ))
-        }
+            )
+        })
     }
 }
 
@@ -43,11 +41,21 @@ impl FunctionCode {
     /// LPSTOP broadcast (CPU32RM 5.3.1).
     pub const CPU_SPACE: Self = Self(7);
 
-    /// The function code in the low three bits of `bits`; the rest are
+    /// The function code FC\[2:0\] `bits` give, none past FC2.
+    #[must_use]
+    pub const fn from_bits(bits: u8) -> Option<Self> {
+        if bits & !Self::MASK == 0 {
+            Some(Self(bits))
+        } else {
+            None
+        }
+    }
+
+    /// The function code in the low three bits of `value`; the rest are
     /// ignored, as SFC and DFC ignore them (CPU32RM 2.3.1.3).
     #[must_use]
-    pub const fn new(bits: u32) -> Self {
-        Self(bits as u8 & Self::MASK)
+    pub const fn from_low_bits(value: u32) -> Self {
+        Self(value as u8 & Self::MASK)
     }
 
     /// FC\[2:0\].
@@ -105,9 +113,11 @@ mod tests {
     #[test]
     fn only_three_bits() {
         assert_eq!(
-            FunctionCode::new(0xffff_fffd),
+            FunctionCode::from_low_bits(0xffff_fffd),
             FunctionCode::SUPERVISOR_DATA
         );
+        assert_eq!(FunctionCode::from_bits(7), Some(FunctionCode::CPU_SPACE));
+        assert_eq!(FunctionCode::from_bits(8), None);
     }
 
     #[cfg(feature = "serde")]
@@ -127,7 +137,7 @@ mod tests {
         assert!(FunctionCode::CPU_SPACE.is_cpu_space());
         assert!(FunctionCode::USER_DATA.is_memory_space());
         for code in [0, 3, 4, 7] {
-            assert!(!FunctionCode::new(code).is_memory_space());
+            assert!(!FunctionCode::from_low_bits(code).is_memory_space());
         }
     }
 

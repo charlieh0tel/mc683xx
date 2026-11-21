@@ -130,8 +130,8 @@ impl Register {
             Self::Usp => registers.usp = value,
             Self::Ssp => registers.ssp = value,
             Self::Vbr => registers.vbr = value,
-            Self::Sfc => registers.sfc = FunctionCode::new(value),
-            Self::Dfc => registers.dfc = FunctionCode::new(value),
+            Self::Sfc => registers.sfc = FunctionCode::from_low_bits(value),
+            Self::Dfc => registers.dfc = FunctionCode::from_low_bits(value),
         }
         Ok(())
     }

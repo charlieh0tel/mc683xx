@@ -63,8 +63,6 @@ const COMMENT: char = '#';
 const SIZE_SEPARATOR: char = '.';
 /// Hex numbers' prefix.
 const HEX_PREFIX: &str = "0x";
-/// The highest function code, FC\[2:0\] all set (CPU32RM 5.3).
-const MAX_FUNCTION_CODE: u32 = 7;
 
 /// `write_memory`.
 const WRITE_MEMORY: &str = "write_memory";
@@ -318,8 +316,10 @@ fn required(value: Option<u32>, clause: &'static str) -> Result<u32, ParseComman
 fn function_code(value: Option<u32>) -> Result<FunctionCode, ParseCommandError> {
     match value {
         None => Ok(FunctionCode::SUPERVISOR_DATA),
-        Some(value) if value <= MAX_FUNCTION_CODE => Ok(FunctionCode::new(value)),
-        Some(value) => Err(ParseCommandError::FunctionCode { value }),
+        Some(value) => u8::try_from(value)
+            .ok()
+            .and_then(FunctionCode::from_bits)
+            .ok_or(ParseCommandError::FunctionCode { value }),
     }
 }
 

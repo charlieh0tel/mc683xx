@@ -179,8 +179,8 @@ impl Mc68331 {
             SystemRegister::Sr => cpu.registers.set_sr(value as u16),
             SystemRegister::Usp => cpu.registers.usp = value,
             SystemRegister::Ssp => cpu.registers.ssp = value,
-            SystemRegister::Sfc => cpu.registers.sfc = FunctionCode::new(value),
-            SystemRegister::Dfc => cpu.registers.dfc = FunctionCode::new(value),
+            SystemRegister::Sfc => cpu.registers.sfc = FunctionCode::from_low_bits(value),
+            SystemRegister::Dfc => cpu.registers.dfc = FunctionCode::from_low_bits(value),
         }
     }
 

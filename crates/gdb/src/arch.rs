@@ -161,8 +161,8 @@ pub(crate) fn set(registers: &mut Registers, location: Location, value: u32) {
             SystemRegister::Usp => registers.usp = value,
             SystemRegister::Ssp => registers.ssp = value,
             SystemRegister::Vbr => registers.vbr = value,
-            SystemRegister::Sfc => registers.sfc = FunctionCode::new(value),
-            SystemRegister::Dfc => registers.dfc = FunctionCode::new(value),
+            SystemRegister::Sfc => registers.sfc = FunctionCode::from_low_bits(value),
+            SystemRegister::Dfc => registers.dfc = FunctionCode::from_low_bits(value),
             SystemRegister::Pcc | SystemRegister::Atemp | SystemRegister::Far => {}
         },
     }

@@ -753,7 +753,7 @@ mod tests {
         assert!(selected(&selects, write).is_empty());
         // FC 3, reserved, is user space by FC2 (PLAN.md)
         let reserved = DecodeRequest {
-            function_code: FunctionCode::new(3),
+            function_code: FunctionCode::from_low_bits(3),
             ..user
         };
         assert_eq!(selected(&selects, reserved), [cs(1)]);
