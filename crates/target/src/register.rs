@@ -117,14 +117,20 @@ impl FromStr for Register {
         Self::ALL
             .into_iter()
             .find(|candidate| candidate.name().eq_ignore_ascii_case(name))
-            .ok_or(ParseRegisterError)
+            .ok_or(ParseRegisterError {})
     }
 }
 
 /// Text that names no data or address register.
+///
+/// Unlike the other crates' parse errors it does not hold the text:
+/// this crate is `no_std` without `alloc`, for a pod's firmware.  A
+/// caller that wants the text in its message adds it, as
+/// `mc683xx-debug`'s script errors do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("not a data or address register")]
-pub struct ParseRegisterError;
+#[non_exhaustive]
+pub struct ParseRegisterError {}
 
 /// A system register, with its RSREG/WSREG select code (CPU32RM
 /// 7.2.8.6).  RPC, PCC, ATEMP and FAR exist only in background mode
@@ -227,14 +233,16 @@ impl FromStr for SystemRegister {
         Self::ALL
             .into_iter()
             .find(|candidate| candidate.name().eq_ignore_ascii_case(name))
-            .ok_or(ParseSystemRegisterError)
+            .ok_or(ParseSystemRegisterError {})
     }
 }
 
-/// Text that names no system register.
+/// Text that names no system register; without the text, as
+/// [`ParseRegisterError`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("not a system register")]
-pub struct ParseSystemRegisterError;
+#[non_exhaustive]
+pub struct ParseSystemRegisterError {}
 
 #[cfg(test)]
 mod tests {
@@ -289,14 +297,14 @@ mod tests {
             assert_eq!(register.to_string().parse(), Ok(register));
         }
         assert_eq!("A7".parse(), Ok(Register::A7));
-        assert_eq!("d8".parse::<Register>(), Err(ParseRegisterError));
+        assert_eq!("d8".parse::<Register>(), Err(ParseRegisterError {}));
         for register in SystemRegister::ALL {
             assert_eq!(register.to_string().parse(), Ok(register));
         }
         assert_eq!("ATEMP".parse(), Ok(SystemRegister::Atemp));
         assert_eq!(
             "pc".parse::<SystemRegister>(),
-            Err(ParseSystemRegisterError)
+            Err(ParseSystemRegisterError {})
         );
     }
 }

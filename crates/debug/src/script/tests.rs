@@ -2,8 +2,6 @@ use std::time::Duration;
 
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::ParseRegisterError;
-use mc683xx_target::register::ParseSystemRegisterError;
 use mc683xx_target::register::Register;
 use mc683xx_target::register::SystemRegister;
 use mc683xx_target::size::Size;
@@ -180,14 +178,14 @@ fn words_that_name_nothing() {
         error("write_register d8 1"),
         ParseCommandError::Register {
             name: "d8".to_owned(),
-            error: ParseRegisterError,
+            error: "d8".parse::<Register>().unwrap_err(),
         }
     );
     assert_eq!(
         error("write_system_register pc 1"),
         ParseCommandError::SystemRegister {
             name: "pc".to_owned(),
-            error: ParseSystemRegisterError,
+            error: "pc".parse::<SystemRegister>().unwrap_err(),
         }
     );
 }
@@ -430,7 +428,7 @@ fn a_bad_line_names_its_number() {
             line: 3,
             error: ParseCommandError::Register {
                 name: "d9".to_owned(),
-                error: ParseRegisterError,
+                error: "d9".parse::<Register>().unwrap_err(),
             },
         }
     );

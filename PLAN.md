@@ -78,6 +78,9 @@ Out:
   and `FunctionCode`, which the core uses, serde behind its `serde`
   feature.  A BDM pod's host crate shares it
   with the emulator, so one debugger runs on silicon or the emulator.
+  It does not use `alloc`, so its parse errors, unlike the other
+  crates', do not hold the text that failed; they are
+  `#[non_exhaustive]`, so a field could still come (2026-11-21).
 - `mc683xx-cpu32` (`crates/cpu32`): the core.  Depends on nothing
   board- or chip-specific.
 - `mc683xx-modules` (`crates/mc683xx`): SIM (with board time, which
