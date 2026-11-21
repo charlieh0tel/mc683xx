@@ -123,7 +123,7 @@ const FIXED_READS: [(u32, u8); 2] = [(0x20_0003, 0x0c), (0x20_0013, 0x0c)];
 fn select_of(cycle: BusCycle) -> ChipSelect {
     cycle
         .select
-        .and_then(ChipSelect::from_select)
+        .and_then(|select| ChipSelect::try_from(select).ok())
         .expect("a chip's cycle carries its select")
 }
 

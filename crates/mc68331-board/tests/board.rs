@@ -1328,7 +1328,10 @@ const EVENT: Cycles = Cycles(1_000);
 impl MappedPeripheral for TimedWords {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
         self.cycles.push((
-            cycle.select.and_then(ChipSelect::from_select).unwrap(),
+            cycle
+                .select
+                .and_then(|select| ChipSelect::try_from(select).ok())
+                .unwrap(),
             cycle.now,
         ));
         self.words.read(cycle)
@@ -1336,7 +1339,10 @@ impl MappedPeripheral for TimedWords {
 
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
         self.cycles.push((
-            cycle.select.and_then(ChipSelect::from_select).unwrap(),
+            cycle
+                .select
+                .and_then(|select| ChipSelect::try_from(select).ok())
+                .unwrap(),
             cycle.now,
         ));
         self.words.write(cycle, value)

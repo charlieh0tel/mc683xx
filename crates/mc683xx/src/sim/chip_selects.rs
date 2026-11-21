@@ -294,9 +294,14 @@ impl Selects {
     /// All twelve.
     pub const ALL: Self = Self((1 << SELECTS) - 1);
 
-    /// Whether it holds the select of index `number`.
+    /// Whether it holds `select`.
     #[must_use]
-    pub const fn contains(self, number: usize) -> bool {
+    pub const fn contains(self, select: ChipSelect) -> bool {
+        self.contains_index(select.index())
+    }
+
+    /// Whether it holds the select of index `number`.
+    const fn contains_index(self, number: usize) -> bool {
         self.0 & 1 << number != 0
     }
 }
@@ -464,7 +469,7 @@ impl ChipSelects {
         self.selects
             .iter()
             .enumerate()
-            .filter(move |&(number, _)| candidates.contains(number))
+            .filter(move |&(number, _)| candidates.contains_index(number))
             .filter_map(move |(number, &registers)| self.matching(number, registers, request))
     }
 
@@ -786,7 +791,7 @@ mod tests {
         selects.write_base(cs(5), 0x5103);
         selects.write_option(cs(5), 0x7830);
         let at = selects.at(Address(0x50_0000));
-        assert!(at.contains(cs(4).index()) && !at.contains(cs(5).index()));
+        assert!(at.contains(cs(4)) && !at.contains(cs(5)));
         for address in [
             0, 0x7_fffe, 0x50_0000, 0x50_07fe, 0x50_0800, 0x51_8000, 0xff_fff5,
         ] {

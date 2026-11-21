@@ -21,7 +21,7 @@
 //! assert_eq!(sim.clock().frequency(), Frequency::from_hz(32_768 * 4 * 64));
 //! // Out of reset only CSBOOT decodes, from address 0 (SIMRM 7.9.3).
 //! let selects = sim.chip_selects().at(Address(0x400));
-//! assert!(selects.contains(ChipSelect::Boot.index()));
+//! assert!(selects.contains(ChipSelect::Boot));
 //! ```
 // The published crates also hold these; test-only crates do not.
 #![warn(

@@ -208,7 +208,7 @@ impl BusCycleView {
     fn select(&self) -> Option<String> {
         self.0
             .select
-            .and_then(ChipSelect::from_select)
+            .and_then(|select| ChipSelect::try_from(select).ok())
             .map(|select| select.to_string())
     }
 

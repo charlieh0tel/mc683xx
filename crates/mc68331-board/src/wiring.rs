@@ -325,7 +325,10 @@ impl Routes {
     fn access(shared: &Shared, route: &Route, cycle: BusCycle, size: Size) -> PeripheralAccess {
         let address = route.address(cycle.address.0);
         let now = shared.time(cycle.now);
-        match cycle.select.and_then(ChipSelect::from_select) {
+        match cycle
+            .select
+            .and_then(|select| ChipSelect::try_from(select).ok())
+        {
             Some(select) => PeripheralAccess::new(select, address, size, cycle.function_code, now),
             None => PeripheralAccess::on_no_select(address, size, cycle.function_code, now),
         }
@@ -837,6 +840,6 @@ impl SpiPeripheral for QspiRouter {
 fn select_of(cycle: BusCycle) -> ChipSelect {
     cycle
         .select
-        .and_then(ChipSelect::from_select)
+        .and_then(|select| ChipSelect::try_from(select).ok())
         .expect("a chip's cycle carries its select")
 }

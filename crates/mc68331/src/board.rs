@@ -847,7 +847,10 @@ impl Board {
         let dsack0 = pins.drives_dsack0() && assigned & PEPA_DSACK0 != 0;
         let dsack1 = pins.drives_dsack1() && assigned & PEPA_DSACK1 != 0;
         if !dsack0 && !dsack1 {
-            let fault = match cycle.select.and_then(ChipSelect::from_select) {
+            let fault = match cycle
+                .select
+                .and_then(|select| ChipSelect::try_from(select).ok())
+            {
                 Some(select) => DsackFault::Unassigned { select },
                 None => DsackFault::BusUnassigned {
                     peripheral: PeripheralId::from(peripheral as u64),
