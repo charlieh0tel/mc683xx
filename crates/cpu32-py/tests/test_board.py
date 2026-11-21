@@ -677,6 +677,17 @@ def test_the_options_are_any_mappings(tmp_path: Path) -> None:
     assert latch.width == 2
 
 
+def test_enabled_turns_a_file_s_options_on(tmp_path: Path) -> None:
+    (tmp_path / "rom.bin").write_bytes(rom([]))
+    optional = BOARD.replace("version = 1\n", 'version = 1\n[board]\noptions = ["spare"]\n')
+    optional += '[[peripheral]]\nname = "spare"\ntype = "lamp"\noption = "spare"\n'
+    (tmp_path / "board.toml").write_text(optional)
+    path = str(tmp_path / "board.toml")
+    types = {"latch": Latch, "lamp": Lamp}
+    assert mc683xx.Board(path, types=types).peripheral("spare") is None
+    assert isinstance(mc683xx.Board(path, types=types, enabled=["spare"]).peripheral("spare"), Lamp)
+
+
 def test_a_board_of_another_chip_is_refused(tmp_path: Path) -> None:
     (tmp_path / "rom.bin").write_bytes(rom([]))
     (tmp_path / "board.toml").write_text(BOARD.replace('type = "mc68331"', 'type = "mc68332"'))

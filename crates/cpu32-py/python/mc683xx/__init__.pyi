@@ -1294,7 +1294,7 @@ class Board:
         path: str | PathLike[str],
         *,
         types: Mapping[str, Callable[..., object]] | None = None,
-        options: Sequence[str] = ...,
+        enabled: Sequence[str] = ...,
         firmware: str | PathLike[str] | None = None,
         images: Mapping[str, str | PathLike[str]] | None = None,
         seed: int = 0,

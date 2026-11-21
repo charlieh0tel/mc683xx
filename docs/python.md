@@ -967,13 +967,17 @@ except mc683xx.StateError:
 
 ## Board files
 
-`mc683xx.Board(path, types={...}, options=[...], firmware=None,
+`mc683xx.Board(path, types={...}, enabled=[...], firmware=None,
 images=None, seed=0, work_dir=None, parameters=None)` loads a board
-file (`docs/board-files.md`) through its power-on reset, `parameters`
-(`{peripheral: {key: value}}`, values a `bool`, `int`, `float`, `str`,
-`list` or mapping) set over the file's and checked as they are;
-`types`, `images` and `parameters` take any mapping, a `dict` or
-another.  The board is built around the MC68331 (Rust's
+file (`docs/board-files.md`) through its power-on reset: `types` maps
+a peripheral type's name to the Python class that makes it (below),
+`enabled` names the file's `[board] options` to turn on (Rust's
+`Options::enabled`; `firmware`, `images` and `parameters` are
+`Options`' other fields, `seed` and `work_dir` `Environment`'s), and
+`parameters` (`{peripheral: {key: value}}`, values a `bool`, `int`,
+`float`, `str`, `list` or mapping) are set over the file's and checked
+as they are; `types`, `images` and `parameters` take any mapping, a
+`dict` or another.  The board is built around the MC68331 (Rust's
 `Board<Mc68331>`): a file whose `[chip] type` names another chip raises
 `mc683xx.LoadError`, as does any file the load refuses (Rust's
 `LoadError`, its message naming what is wrong; a `ValueError`); a file

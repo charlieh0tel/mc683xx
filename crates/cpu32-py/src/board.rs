@@ -1365,9 +1365,11 @@ impl BoardView {
     }
 
     /// The board file at `path`, its peripheral types the built-in ones and
-    /// `types`' classes by name, through its power-on reset.
+    /// `types`' classes by name, through its power-on reset; `enabled`
+    /// and the rest are Rust's `Options` (`enabled` the file's options
+    /// on) and `Environment`.
     #[new]
-    #[pyo3(signature = (path, *, types = None, options = Vec::new(), firmware = None, images = None, seed = 0, work_dir = None, parameters = None))]
+    #[pyo3(signature = (path, *, types = None, enabled = Vec::new(), firmware = None, images = None, seed = 0, work_dir = None, parameters = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "Python's keyword arguments, each optional"
@@ -1375,7 +1377,7 @@ impl BoardView {
     fn new(
         path: PathBuf,
         types: Option<&Bound<'_, PyMapping>>,
-        options: Vec<String>,
+        enabled: Vec<String>,
         firmware: Option<PathBuf>,
         images: Option<&Bound<'_, PyMapping>>,
         seed: u64,
@@ -1441,7 +1443,7 @@ impl BoardView {
         };
         let options = {
             let mut built = Options::default();
-            built.enabled = options.into_iter().collect();
+            built.enabled = enabled.into_iter().collect();
             built.firmware = firmware;
             built.images = images;
             built.parameters = parameters;
