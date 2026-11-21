@@ -32,6 +32,7 @@ use mc683xx_target::address::Address;
 use crate::endpoint::Endpoint;
 use crate::error::EditError;
 use crate::error::LoadError;
+use crate::error::ParseSettingError;
 use crate::error::SyntaxError;
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
@@ -117,10 +118,9 @@ impl Options {
     ///
     /// # Errors
     ///
-    /// An `assignment` not of that form, its peripheral or key empty
-    /// ([`LoadError::Setting`]).
-    pub fn set(&mut self, assignment: &str) -> Result<(), LoadError> {
-        let malformed = || LoadError::Setting(assignment.to_owned());
+    /// An `assignment` not of that form, its peripheral or key empty.
+    pub fn parse_setting(&mut self, assignment: &str) -> Result<(), ParseSettingError> {
+        let malformed = || ParseSettingError(assignment.to_owned());
         let (path, text) = assignment.split_once('=').ok_or_else(malformed)?;
         let (peripheral, key) = path.split_once('.').ok_or_else(malformed)?;
         if peripheral.is_empty() || key.is_empty() {

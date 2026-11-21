@@ -25,6 +25,7 @@ use crate::builtin::Fixed;
 use crate::endpoint::Endpoint;
 use crate::error::EditError;
 use crate::error::LoadError;
+use crate::error::ParseSettingError;
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
 use crate::registry::Constructed;
@@ -212,9 +213,9 @@ fn an_option_puts_its_entries_on_the_board() {
 fn a_run_sets_parameters_over_the_files() {
     let text = "version = 1\n[chip]\ntype = \"mc68331\"\n[board]\noptions = [\"x\"]\n[[peripheral]]\nname = \"d\"\ntype = \"fixed\"\nparameters = { value = 1, keep = \"k\" }\n[[peripheral]]\nname = \"e\"\ntype = \"fixed\"\noption = \"x\"\n";
     let mut options = Options::default();
-    options.set("d.value=0x10").unwrap();
-    options.set("d.name=eeprom.bin").unwrap();
-    options.set("e.value=2").unwrap();
+    options.parse_setting("d.value=0x10").unwrap();
+    options.parse_setting("d.name=eeprom.bin").unwrap();
+    options.parse_setting("e.value=2").unwrap();
     options.set_parameter("d", "on", true);
     let mut description = Description::parse(text, Path::new("."), &options).unwrap();
     let parameters = &description.peripherals[0].parameters;
@@ -246,15 +247,15 @@ fn a_run_sets_parameters_over_the_files() {
         description.remove_parameter("z", "keep"),
         Err(EditError::Peripheral("z".to_owned()))
     );
-    options.set("z.value=1").unwrap();
+    options.parse_setting("z.value=1").unwrap();
     assert!(matches!(
         Description::parse(text, Path::new("."), &options),
         Err(LoadError::Peripheral(peripheral)) if peripheral == "z"
     ));
     for malformed in ["d.value", "value=1", ".value=1", "d.=1"] {
         assert!(matches!(
-            Options::default().set(malformed),
-            Err(LoadError::Setting(setting)) if setting == malformed
+            Options::default().parse_setting(malformed),
+            Err(ParseSettingError(setting)) if setting == malformed
         ));
     }
 }

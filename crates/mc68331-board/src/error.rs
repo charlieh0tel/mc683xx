@@ -128,9 +128,6 @@ pub enum LoadError {
     /// Parameters set for a peripheral the file does not name.
     #[error("parameters set for {0:?}, which the board file does not name")]
     Peripheral(String),
-    /// A parameter setting not of the form `PERIPHERAL.KEY=VALUE`.
-    #[error("{0:?}: give PERIPHERAL.KEY=VALUE")]
-    Setting(String),
     /// Both a reference and an external clock.
     #[error("chip: give reference_hz or external_hz, not both")]
     Clock,
@@ -219,6 +216,14 @@ pub enum LoadError {
     #[error(transparent)]
     Build(Box<dyn std::error::Error + Send + Sync>),
 }
+
+/// A parameter setting not of the form `PERIPHERAL.KEY=VALUE`
+/// ([`Options::parse_setting`]).
+///
+/// [`Options::parse_setting`]: crate::description::Options::parse_setting
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0:?}: give PERIPHERAL.KEY=VALUE")]
+pub struct ParseSettingError(pub(crate) String);
 
 /// Why a [`Description`] edit was refused.
 ///

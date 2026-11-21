@@ -2257,7 +2257,7 @@ parameters = { value = 1 }
     let directory = directory("run-time-parameters", &[]);
     let load = |setting: &str| {
         let mut options = Options::default();
-        options.set(setting).unwrap();
+        options.parse_setting(setting).unwrap();
         let description = Description::parse(text, &directory, &options).unwrap();
         Board::<Mc68331>::load(
             &description,

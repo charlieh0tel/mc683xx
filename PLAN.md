@@ -1505,7 +1505,7 @@ hand.  The keys are in `docs/board-files.md`.
   command line serves the board with and without it.  The merge is
   per key, not deep: a table-valued parameter is replaced whole.  A
   host holding TOML builds the values from its text
-  (`Parameters::parse(text)?.into_table()`, `Options::set`), not from
+  (`Parameters::parse(text)?.into_table()`, `Options::parse_setting`), not from
   the parser's `toml::Value`: a `From<toml::Value>` would put the
   parser's types, and its major versions, in the API.
 - **Board choice:** the runner takes a board file; a host may choose
