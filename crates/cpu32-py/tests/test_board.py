@@ -637,8 +637,8 @@ def test_a_peripheral_s_failed_question_stops_the_run_at_once(tmp_path: Path) ->
     assert peripheral.calls - calls < 100
 
 
-@pytest.mark.parametrize("seconds", [float("nan"), float("inf"), float("-inf"), -1e-6])
-def test_a_run_refuses_seconds_not_finite_or_negative(tmp_path: Path, seconds: float) -> None:
+@pytest.mark.parametrize("seconds", [float("nan"), float("inf"), float("-inf"), -1e-6, 1e300, 2e7])
+def test_a_run_refuses_seconds_not_finite_negative_or_out_of_range(tmp_path: Path, seconds: float) -> None:
     (tmp_path / "rom.bin").write_bytes(rom([]))
     (tmp_path / "board.toml").write_text(BOARD)
     board = mc683xx.Board(str(tmp_path / "board.toml"), types={"latch": Latch, "lamp": Lamp})

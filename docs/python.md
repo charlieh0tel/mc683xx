@@ -1080,7 +1080,7 @@ leaves its `next_event` at or before the time it was given, 1000
 times running, stalls the board, and `run_for` raises
 `mc683xx.RunError` naming it.
 
-`run_for(seconds=...)` (finite, 0 or more, or `ValueError`) or
+`run_for(seconds=...)` (finite, 0 or more, within board time's 2**64 ps, or `ValueError`) or
 `run_for(picoseconds=...)` gives a `BoardRun` (Rust's: `stop`, a `Stop`, and `now`, board time at its end), as does `run_until` with a board time (Rust's `Board::run_until`; `run_for` is `Board::run_for`); `now`
 (board time in picoseconds), `cycles` and `instructions` (the chip's
 system clocks and instructions since power-on);

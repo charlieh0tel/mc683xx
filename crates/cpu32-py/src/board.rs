@@ -1304,12 +1304,11 @@ impl BoardView {
 /// The span of `seconds` or `picoseconds`, whichever is given.
 fn span_of(seconds: Option<f64>, picoseconds: Option<u64>) -> PyResult<Span> {
     match (seconds, picoseconds) {
-        (Some(seconds), None) if seconds.is_finite() && seconds >= 0.0 => {
-            Ok(Span::from_seconds_f64(seconds))
-        }
-        (Some(seconds), None) => Err(PyValueError::new_err(format!(
-            "{seconds}: give a finite number of seconds, 0 or more"
-        ))),
+        (Some(seconds), None) => Span::checked_from_seconds_f64(seconds).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "{seconds}: give a finite number of seconds, 0 or more, within board time"
+            ))
+        }),
         (None, Some(picoseconds)) => Ok(Span::from_picos(picoseconds)),
         _ => Err(PyValueError::new_err("give seconds or picoseconds")),
     }
@@ -1479,8 +1478,8 @@ impl BoardView {
     /// sleeps.  `pacing`, if given, paces this call alone: the
     /// control's pacing is put back when the run returns or raises,
     /// unless another thread set a pacing during the run, which then
-    /// stays.  Seconds not finite, or below 0, and a quantum of 0 raise
-    /// `ValueError`.
+    /// stays.  Seconds not finite, below 0 or past board time's range
+    /// (`2**64` ps), and a quantum of 0 raise `ValueError`.
     #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.get().picos()))]
     fn run_for(
         &mut self,
@@ -1521,8 +1520,8 @@ impl BoardView {
     /// sleeps, for a GUI's timer, but releases the GIL between quanta
     /// and runs Python's signal handlers, as `run_for` does, so
     /// another thread's `control().stop()` ends it and Ctrl-C raises
-    /// `KeyboardInterrupt`.  A `wall` or `seconds` not finite, or
-    /// below 0, raises `ValueError`.
+    /// `KeyboardInterrupt`.  A `wall` not finite, or below 0, or
+    /// `seconds` as `run_for` refuses them, raises `ValueError`.
     #[pyo3(signature = (wall, *, seconds = None, picoseconds = None))]
     fn run_frame(
         &mut self,
