@@ -219,6 +219,10 @@ fn an_observer_is_detached_by_its_id() {
     let pps = board.observe("pps", log.observer()).unwrap();
     let switch = board.observe("switch", log.observer()).unwrap();
     assert_ne!(pps, switch);
+    assert_eq!(
+        (pps.to_string(), switch.to_string()),
+        ("observer 0".to_owned(), "observer 1".to_owned())
+    );
     assert!(board.unobserve(pps).is_some());
     assert!(board.unobserve(pps).is_none());
     run(&mut board);
