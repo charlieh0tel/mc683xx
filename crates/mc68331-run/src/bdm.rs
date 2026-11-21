@@ -227,6 +227,7 @@ const fn status(error: TargetError) -> Status {
     match error {
         TargetError::Access { .. } => Status::BusError,
         TargetError::Length { .. } => Status::BadRequest,
+        TargetError::Unsupported(_) => Status::BadRequest,
         _ => Status::NoFreeze,
     }
 }
