@@ -203,12 +203,12 @@ impl OutputStop {
 pub struct Diversion(Rc<RefCell<Vec<Diverted>>>);
 
 /// A diversion asked for: a memory's region, and the peripheral's index or
-/// `None` to restore it.
+/// `None` to release it.
 type Diverted = (RegionId, Option<usize>);
 
 impl Diversion {
     /// Every cycle that reaches `memory` reaches `peripheral` instead, as a
-    /// cycle on the select that carried it, until `restore`; the core
+    /// cycle on the select that carried it, until `release`; the core
     /// serves none of its pages meanwhile.
     pub fn divert(&self, memory: MemoryId, peripheral: PeripheralId) {
         self.0

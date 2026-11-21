@@ -641,21 +641,19 @@ impl ClockHistory {
         self.segments.back().copied()
     }
 
-    /// The segment that holds `time`, and the time the next begins.
-    fn segment(&self, time: Time) -> Option<(usize, &Clock)> {
-        let index = self
-            .segments
+    /// The segment that holds `time`: the newest from at or before
+    /// it, or the oldest for a time before every segment.
+    fn segment(&self, time: Time) -> Option<&Clock> {
+        self.segments
             .iter()
-            .rposition(|segment| segment.at <= time)
-            .unwrap_or(0);
-        self.segments.get(index).map(|segment| (index, segment))
+            .rfind(|segment| segment.at <= time)
+            .or_else(|| self.segments.front())
     }
 
     /// The phase at `time`.
     #[must_use]
     pub fn phase_at(&self, time: Time) -> Option<Phase> {
-        self.segment(time)
-            .map(|(_, segment)| segment.phase_at(time))
+        self.segment(time).map(|segment| segment.phase_at(time))
     }
 
     /// Rising edges after `from` and at or before `to`.
@@ -699,7 +697,7 @@ impl ClockHistory {
 }
 
 /// The chip's system clock on board time: from `cycles`, which fell at
-/// `time`, each clock lasts 1 / `hz` seconds.
+/// `time`, each clock lasts 1 / `frequency` seconds.
 ///
 /// The board moves it only
 /// where the frequency changes (SYNCR, a reset), right after the
