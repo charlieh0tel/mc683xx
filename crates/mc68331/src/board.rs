@@ -390,25 +390,30 @@ impl Board {
     /// The changes in what each port drives since the last call, in
     /// time order, those at one time in [`Port::ALL`]'s order.
     pub(crate) fn take_port_changes(&mut self) -> Vec<(Cycles, PortChange)> {
-        let sim = self
-            .sim
-            .take_output_changes()
-            .into_iter()
-            .map(|(at, change)| {
-                let port = Port::from_sim(change.port);
-                (at, port, change.outputs)
-            });
+        let sim = self.sim.take_output_changes();
         let gp = self.module_mut::<Gpt>(GPT).take_port_changes();
         let qs = self.module_mut::<Qsm>(QSM).take_output_changes();
-        let mut changes: Vec<_> = sim
-            .chain(gp.into_iter().map(|(at, outputs)| (at, Port::Gp, outputs)))
-            .chain(qs.into_iter().map(|(at, outputs)| (at, Port::Qs, outputs)))
-            .collect();
-        changes.sort_by_key(|&(at, port, _)| (at, port));
-        changes
+        let sources = [sim.is_empty(), gp.is_empty(), qs.is_empty()]
             .into_iter()
-            .map(|(at, port, outputs)| (at, PortChange { port, outputs }))
-            .collect()
+            .filter(|empty| !empty)
+            .count();
+        if sources == 0 {
+            return Vec::new();
+        }
+        let of = |port| move |(at, outputs)| (at, PortChange { port, outputs });
+        let mut changes: Vec<_> = sim
+            .into_iter()
+            .map(|(at, change)| of(Port::from_sim(change.port))((at, change.outputs)))
+            .chain(gp.into_iter().map(of(Port::Gp)))
+            .chain(qs.into_iter().map(of(Port::Qs)))
+            .collect();
+        // each source is in time order, the SIM's ports at one time in
+        // their order: a stable sort of several merges their runs
+        if sources > 1 {
+            changes.sort_by_key(|&(at, change)| (at, change.port));
+        }
+        debug_assert!(changes.is_sorted_by_key(|&(at, change)| (at, change.port)));
+        changes
     }
 
     /// The module at `index`, which is an `M`.
