@@ -35,24 +35,32 @@ pub struct PortSpec {
 }
 
 impl PortSpec {
-    /// An input `name` of `kind`.
+    /// A port `name` of `kind` facing `direction`.
     #[must_use]
-    pub fn input(name: impl Into<String>, kind: Kind) -> Self {
+    pub fn new(name: impl Into<String>, kind: Kind, direction: Direction) -> Self {
         Self {
             name: name.into(),
             kind,
-            direction: Direction::In,
+            direction,
         }
+    }
+
+    /// An input `name` of `kind`.
+    #[must_use]
+    pub fn input(name: impl Into<String>, kind: Kind) -> Self {
+        Self::new(name, kind, Direction::In)
     }
 
     /// An output `name` of `kind`.
     #[must_use]
     pub fn output(name: impl Into<String>, kind: Kind) -> Self {
-        Self {
-            name: name.into(),
-            kind,
-            direction: Direction::Out,
-        }
+        Self::new(name, kind, Direction::Out)
+    }
+
+    /// A port `name` of `kind` both ways.
+    #[must_use]
+    pub fn in_out(name: impl Into<String>, kind: Kind) -> Self {
+        Self::new(name, kind, Direction::InOut)
     }
 }
 

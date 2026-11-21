@@ -36,6 +36,19 @@ pub struct ConditionInfo {
     pub help: &'static str,
 }
 
+impl ConditionInfo {
+    /// The condition `name`, its usage line's `arguments`, and `help`,
+    /// what it stops for.
+    #[must_use]
+    pub const fn new(name: &'static str, arguments: &'static str, help: &'static str) -> Self {
+        Self {
+            name,
+            arguments,
+            help,
+        }
+    }
+}
+
 /// A peripheral's own handle on a condition it armed
 /// ([`Peripheral::arm`]), given back to fire and disarm it.
 ///

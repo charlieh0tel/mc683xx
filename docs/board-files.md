@@ -451,8 +451,9 @@ The contract a host's peripheral models target (rustdoc in
   whose ports depend on its parameters (an FPGA's design, a latch's
   width; the constructor returns `registry::Constructed::new(peripheral,
   ports)`).  Ports are `registry::PortSpec`s: `PortSpec::input(name,
-  kind)`, `PortSpec::output(name, kind)`, or `in-out`
-  (`signal::Direction::InOut`, an open-drain pin on a wired net);
+  kind)`, `PortSpec::output(name, kind)`, `PortSpec::in_out(name,
+  kind)` (`signal::Direction::InOut`, an open-drain pin on a wired
+  net), or `PortSpec::new(name, kind, direction)`;
   kinds `signal::Kind::{Logic, Edge, Clock, Serial, Analog, Bus}`.  The
   constructor takes a `registry::Context` (`Context::new(name,
   parameters, environment)` builds one to test it, and
@@ -486,8 +487,8 @@ The contract a host's peripheral models target (rustdoc in
   `Board::inspect(name)`).
   - Stop conditions, for a debugger and the emulator's alone
     ([docs/gdb.md](gdb.md), Stop conditions): `conditions()` lists
-    what it offers (`condition::ConditionInfo`: name, arguments, help;
-    none by default), `arm(condition, arguments)` arms one and gives
+    what it offers (`condition::ConditionInfo::new(name, arguments,
+    help)`, a `const fn` for a static list; none by default), `arm(condition, arguments)` arms one and gives
     its own `condition::ConditionToken` (or a `condition::ArmError`),
     and `disarm(token)` disarms it.  Each time an armed condition
     holds the peripheral calls `drive.fire(token)`, which stops the run
@@ -700,7 +701,8 @@ The contract a host's peripheral models target (rustdoc in
 - `time::Time` (picoseconds), `mc683xx_cpu32::frequency::Frequency`
   (nanohertz, the chip's clocks too: `TimeBase::frequency`),
   `time::Phase` (cycles, 10^21 units each) and `time::Clock`:
-  `new(frequency, edge)`, `phase_at(time)` (with `cycles()` and
+  `new(frequency, edge)`, `with_phase(frequency, at, phase)`,
+  `phase_at(time)` (with `cycles()` and
   `fraction()`), `edges(from, to)` (rising edges in (from, to]),
   `edge_after(from, n)`, `edge(number)`, and `retuned(at, frequency)`:
   a source whose frequency moves (an OCXO following its EFC) drives a

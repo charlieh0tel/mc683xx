@@ -10,17 +10,17 @@ use mc683xx_board::condition::ConditionInfo;
 use mc683xx_board::condition::ConditionToken;
 
 /// `tx CHANNEL [BYTE]`.
-const TX: ConditionInfo = ConditionInfo {
-    name: "tx",
-    arguments: "CHANNEL [BYTE]",
-    help: "channel a or b starts sending a character, BYTE or any",
-};
+const TX: ConditionInfo = ConditionInfo::new(
+    "tx",
+    "CHANNEL [BYTE]",
+    "channel a or b starts sending a character, BYTE or any",
+);
 /// `rx CHANNEL [BYTE]`.
-const RX: ConditionInfo = ConditionInfo {
-    name: "rx",
-    arguments: "CHANNEL [BYTE]",
-    help: "channel a or b receives a character, BYTE or any",
-};
+const RX: ConditionInfo = ConditionInfo::new(
+    "rx",
+    "CHANNEL [BYTE]",
+    "channel a or b receives a character, BYTE or any",
+);
 /// Both.
 pub(super) const CONDITIONS: &[ConditionInfo] = &[TX, RX];
 

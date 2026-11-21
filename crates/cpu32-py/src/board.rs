@@ -655,11 +655,11 @@ pub(crate) fn signal(kind: Kind, value: &Bound<'_, PyAny>) -> PyResult<Signal> {
         Kind::Bus => Signal::Bus(value.extract()?),
         Kind::Clock => {
             let (at, frequency, phase): (u64, u64, u128) = value.extract()?;
-            Signal::Clock(Clock {
-                at: Time(at),
-                frequency: Frequency(frequency),
-                phase: Phase(phase),
-            })
+            Signal::Clock(Clock::with_phase(
+                Frequency(frequency),
+                Time(at),
+                Phase(phase),
+            ))
         }
         _ => return Err(PyTypeError::new_err("no Python value for this net type")),
     })
@@ -1218,11 +1218,7 @@ fn ports(class: &Bound<'_, PyAny>) -> PyResult<Vec<PortSpec>> {
             let direction: Direction = direction
                 .parse()
                 .map_err(|error| PyTypeError::new_err(format!("{name}: {error}")))?;
-            Ok(PortSpec {
-                name,
-                kind,
-                direction,
-            })
+            Ok(PortSpec::new(name, kind, direction))
         })
         .collect()
 }

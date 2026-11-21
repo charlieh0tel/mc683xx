@@ -194,14 +194,13 @@ fn registry(path: &Path) -> Registry {
             .get(type_name)
             .into_iter()
             .flatten()
-            .map(|(name, &(kind, drives, sinks))| PortSpec {
-                name: name.clone(),
-                kind,
-                direction: match (drives, sinks) {
+            .map(|(name, &(kind, drives, sinks))| {
+                let direction = match (drives, sinks) {
                     (true, true) => Direction::InOut,
                     (true, false) => Direction::Out,
                     _ => Direction::In,
-                },
+                };
+                PortSpec::new(name.clone(), kind, direction)
             })
             .collect();
         registry

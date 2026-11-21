@@ -184,10 +184,16 @@ impl Clock {
     /// A clock of `frequency` with a rising edge at `edge`.
     #[must_use]
     pub const fn new(frequency: Frequency, edge: Time) -> Self {
+        Self::with_phase(frequency, edge, Phase(0))
+    }
+
+    /// A clock of `frequency` whose phase at `at` is `phase`.
+    #[must_use]
+    pub const fn with_phase(frequency: Frequency, at: Time, phase: Phase) -> Self {
         Self {
-            at: edge,
+            at,
             frequency,
-            phase: Phase(0),
+            phase,
         }
     }
 
