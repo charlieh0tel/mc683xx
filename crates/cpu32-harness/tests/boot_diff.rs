@@ -1146,7 +1146,7 @@ fn run_chip(
             );
         }
         if let Stop::Halted(halt) = run.stop {
-            break format!("a halt, {halt:?}, at PC {pc:#x}, clock {}", chip.now().0);
+            break format!("a halt, {halt}, at PC {pc:#x}, clock {}", chip.now().0);
         }
     };
     let qspi_unreplayed = chip

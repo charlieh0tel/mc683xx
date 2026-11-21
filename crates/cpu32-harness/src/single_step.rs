@@ -211,7 +211,7 @@ impl Runner {
             Ended::Exception(exception) => {
                 Outcome::Failed(vec![format!("the core raised {exception:?}")])
             }
-            Ended::Halted(halt) => Outcome::Failed(vec![format!("the core halted: {halt:?}")]),
+            Ended::Halted(halt) => Outcome::Failed(vec![format!("the core halted: {halt}")]),
         };
         self.unmap(&pages);
         outcome

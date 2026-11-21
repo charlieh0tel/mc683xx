@@ -109,6 +109,15 @@ pub enum Halt {
     DoubleBusFault,
 }
 
+/// Why it halted, in words: `double bus fault`.
+impl fmt::Display for Halt {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::DoubleBusFault => "double bus fault",
+        })
+    }
+}
+
 /// PCC after a double bus fault out of reset (CPU32RM 7.2.5.3; 7.2.3
 /// gives $FFFFFFFF instead: PLAN.md, Background debug mode).
 const PCC_RESET_DOUBLE_FAULT: u32 = 0x0000_0001;
@@ -2680,6 +2689,11 @@ mod tests {
         for (stop, name) in names {
             assert_eq!(stop.to_string(), name);
         }
+    }
+
+    #[test]
+    fn a_halt_prints_why() {
+        assert_eq!(Halt::DoubleBusFault.to_string(), "double bus fault");
     }
 
     #[test]

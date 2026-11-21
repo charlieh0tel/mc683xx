@@ -375,7 +375,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
         }
         if let Stop::Halted(halt) = run.stop {
             println!(
-                "{name}: halted, {halt:?}, at PC {pc:#x}, clock {}",
+                "{name}: halted, {halt}, at PC {pc:#x}, clock {}",
                 chip.now().0
             );
             break;
