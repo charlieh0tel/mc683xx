@@ -71,7 +71,7 @@ pub enum Event {
         entry: ExceptionEntry,
     },
     /// A peripheral's DSACK pins
-    /// ([`Builder::dsack`](crate::chip::Builder::dsack)) disagree with
+    /// ([`Builder::set_dsack`](crate::chip::Builder::set_dsack)) disagree with
     /// the chip on an externally terminated cycle: told once for each
     /// peripheral and kind of fault, what was told kept in the chip's
     /// snapshot.

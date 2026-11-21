@@ -521,7 +521,7 @@ fn wired_patched(program: &[u16], patches: &[(u32, &[u16])]) -> Wired {
     let duart = builder
         .peripheral(Recorder::answering(0x40), &[cs(8), cs(10)])
         .unwrap();
-    builder.interrupt(duart, IrqPin::new(1).unwrap());
+    builder.set_interrupt(duart, IrqPin::new(1).unwrap());
     let mut chip = builder.build();
     chip.run_for(Cycles(40 * WIRED_SELECTS.len() as u64));
     assert_eq!(chip.cpu().halted(), None);
@@ -653,7 +653,7 @@ fn another_board() {
     let ram = builder
         .memory(vec![0; 32 << 10], MemoryKind::Ram, &[cs(1)])
         .unwrap();
-    builder.autovector(IrqPin::new(3).unwrap());
+    builder.set_autovector(IrqPin::new(3).unwrap());
     let mut chip = builder.build();
     // a word fetch is two 16-clock byte cycles
     assert_eq!(chip.run_for(Cycles(1)).cycles, Cycles(32));
@@ -816,7 +816,7 @@ fn externally_terminated(pins: Dsack) -> (Mc68331, PeripheralId) {
     let peripheral = builder
         .peripheral(Recorder::answering(0x1234), &[cs(2)])
         .unwrap();
-    builder.dsack(peripheral, pins);
+    builder.set_dsack(peripheral, pins);
     let mut chip = builder.build();
     write_register(&mut chip, SIM + 0x54, 0x6000);
     write_register(&mut chip, SIM + 0x56, 0x7bf0);
@@ -2161,7 +2161,7 @@ fn duart_board(wait: u8, protection: Option<u16>) -> (Mc68331, MemoryId, Periphe
     let duart = builder
         .peripheral(Duart::new(wait), &[cs(8), cs(10)])
         .unwrap();
-    builder.interrupt(duart, IrqPin::new(2).unwrap());
+    builder.set_interrupt(duart, IrqPin::new(2).unwrap());
     let mut chip = builder.build();
     chip.run_for(Cycles(5000));
     (chip, ram, duart)
@@ -2553,8 +2553,8 @@ fn a_request_the_host_moves_between_runs_is_seen() {
         .peripheral(Line(Rc::clone(&line)), &[cs(1)])
         .unwrap();
     let seven = IrqPin::IRQ7;
-    builder.interrupt(peripheral, seven);
-    builder.autovector(seven);
+    builder.set_interrupt(peripheral, seven);
+    builder.set_autovector(seven);
     let mut chip = builder.build();
     write_register(&mut chip, SIM + 0x50, CS1_BAR);
     write_register(&mut chip, SIM + 0x52, CS1_FAST);

@@ -519,7 +519,7 @@ impl ChipBuilder for Mc68331Builder {
     ) -> Result<(), LoadError> {
         let id = self.builder.peripheral(router, &[select]).map_err(built)?;
         if let Some(pins) = dsack {
-            self.builder.dsack(id, pins);
+            self.builder.set_dsack(id, pins);
         }
         Ok(())
     }
@@ -540,7 +540,7 @@ impl ChipBuilder for Mc68331Builder {
         let id = self.builder.unwired_peripheral(pins);
         self.builder.set_reset_scope(id, reset);
         if let Some(level) = irq {
-            self.builder.interrupt(id, level);
+            self.builder.set_interrupt(id, level);
         }
     }
 
@@ -612,7 +612,7 @@ impl chip::Chip for Mc68331 {
                 owner: "chip".to_owned(),
                 level,
             })?;
-            builder.autovector(pin);
+            builder.set_autovector(pin);
         }
         let handles = Rc::new(Handles {
             sync: builder.sync_request(),

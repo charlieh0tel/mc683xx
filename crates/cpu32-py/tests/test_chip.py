@@ -240,8 +240,8 @@ def test_a_model_interrupts_on_time():
     builder, _, _ = board(WIRING, Recorder())
     alarm = Alarm(5000)
     number = builder.unwired_peripheral(alarm)
-    builder.interrupt(number, 7)
-    builder.autovector(7)
+    builder.set_interrupt(number, 7)
+    builder.set_autovector(7)
     chip = builder.build()
     chip.run_for(4000)
     assert chip.read_register("PC") < LEVEL_7_HANDLER
@@ -253,7 +253,7 @@ def test_a_model_interrupts_on_time():
 
 def test_the_irq_pins():
     builder, _, _ = board(WIRING, Recorder())
-    builder.autovector(7)
+    builder.set_autovector(7)
     chip = builder.build()
     chip.run_for(1000)
     chip.set_tracing(exceptions=True)
@@ -391,7 +391,7 @@ def test_wiring_mistakes():
     with pytest.raises(TypeError):
         builder.peripheral(object(), ["CS2"])
     with pytest.raises(IndexError):
-        builder.interrupt(3, 1)
+        builder.set_interrupt(3, 1)
     with pytest.raises(ValueError):
         mc683xx.Builder(reference_hz=32768, external_hz=16_000_000)
     with pytest.raises(ValueError):
@@ -1274,9 +1274,9 @@ DSACK_BASE = 0x600000
 def test_a_peripheral_s_unassigned_dsack_is_an_event():
     builder = booting([])
     number = builder.peripheral(Recorder(0x1234), ["CS2"])
-    builder.dsack(number, mc683xx.Dsack.BOTH)
+    builder.set_dsack(number, mc683xx.Dsack.BOTH)
     with pytest.raises(IndexError):
-        builder.dsack(9, mc683xx.Dsack.DSACK0)
+        builder.set_dsack(9, mc683xx.Dsack.DSACK0)
     chip = builder.build()
     chip.bus_write(CSBAR2, 2, DSACK_BASE >> 8)
     chip.bus_write(CSOR2, 2, CSOR_EXTERNAL)

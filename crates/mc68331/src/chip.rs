@@ -591,7 +591,7 @@ impl Builder {
     /// give by its own decode of the address bus, as board logic does:
     /// an address window, an interrupt acknowledge, or both.  It drives
     /// DSACK `pins` itself, as a peripheral on an externally terminated
-    /// select does ([`Builder::dsack`]): its `wait_states` time each
+    /// select does ([`Builder::set_dsack`]): its `wait_states` time each
     /// cycle, the pins' port sizes it (or its `dsack_port`, cycle by
     /// cycle), and with none of them assigned as DSACK by PEPAR the bus
     /// monitor ends it ([`DsackFault::BusUnassigned`](crate::event::DsackFault::BusUnassigned)).  It takes a cycle
@@ -666,7 +666,7 @@ impl Builder {
     /// Table 5-2: DSACK0 8 bits, DSACK1 or both 16) sizes the cycle,
     /// not the select's port field (SIMRM 5.3.3).  Unstated by default:
     /// unchecked, and the select's field sizes it.
-    pub fn dsack(&mut self, peripheral: PeripheralId, pins: Dsack) {
+    pub fn set_dsack(&mut self, peripheral: PeripheralId, pins: Dsack) {
         self.board.dsack_pins[index(peripheral)] = Some(pins);
     }
 
@@ -678,7 +678,7 @@ impl Builder {
     }
 
     /// `peripheral`'s interrupt output wired to `pin`.
-    pub fn interrupt(&mut self, peripheral: PeripheralId, pin: IrqPin) {
+    pub fn set_interrupt(&mut self, peripheral: PeripheralId, pin: IrqPin) {
         self.board
             .interrupt_wires
             .push((index(peripheral), pin.level()));
@@ -686,7 +686,7 @@ impl Builder {
 
     /// The board asserts AVEC (PE2) at every acknowledge of `pin`'s
     /// level, as a pin tied low or decode logic does (SIMRM 6.4).
-    pub const fn autovector(&mut self, pin: IrqPin) {
+    pub const fn set_autovector(&mut self, pin: IrqPin) {
         self.board.autovector_levels |= 1 << pin.get();
     }
 

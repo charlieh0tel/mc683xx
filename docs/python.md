@@ -252,9 +252,9 @@ assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
   put a memory's contents back as built, none by default.
 - `peripheral(object, pins)` and `unwired_peripheral(object)` (on no pin) return a
   peripheral number for `interrupt`, `set_reset_scope` and `Mc68331.peripheral`.
-- `interrupt(peripheral, pin)` (IRQ1 to IRQ7 as 1 to 7), `autovector(pin)`,
+- `set_interrupt(peripheral, pin)` (IRQ1 to IRQ7 as 1 to 7), `set_autovector(pin)`,
   `set_reset_scope(peripheral, scope)`, `qspi(object)`: as in Rust.
-- `dsack(peripheral, Dsack.DSACK0 | DSACK1 | BOTH)`: the DSACK pins a
+- `set_dsack(peripheral, Dsack.DSACK0 | DSACK1 | BOTH)`: the DSACK pins a
   peripheral drives on an externally terminated select, checked
   against PEPAR at each such cycle (a disagreement is an
   `Event.Dsack(now, DsackFault.Unassigned(select))`, once for each
@@ -433,7 +433,7 @@ handler = store_word(RAM_BASE, 0xBEEF) + [BRANCH_TO_SELF]
 builder, ram = booting(program, {**vector(VECTOR, HANDLER), HANDLER: handler})
 interrupter = Interrupter()
 number = builder.peripheral(interrupter, ["CS1", "CS10"])
-builder.interrupt(number, LEVEL)
+builder.set_interrupt(number, LEVEL)
 chip = builder.build()
 chip.run_for(5000)
 assert chip.read_memory(ram, 0, 2) == b"\xbe\xef", "the handler ran"
@@ -468,8 +468,8 @@ builder, _ = booting(
     set_sr(UNMASKED) + [BRANCH_TO_SELF],
     {**vector(AUTOVECTOR_7, HANDLER), HANDLER: [BRANCH_TO_SELF]},
 )
-builder.interrupt(builder.unwired_peripheral(Alarm(5000)), 7)
-builder.autovector(7)
+builder.set_interrupt(builder.unwired_peripheral(Alarm(5000)), 7)
+builder.set_autovector(7)
 chip = builder.build()
 chip.run_for(4000)
 assert chip.read_register("PC") != HANDLER
@@ -982,7 +982,7 @@ builder.memory(bytes(2048), ["CSBOOT"])
 for mistake in (
     lambda: builder.memory(bytes(2048), ["CSBOOT"]),
     lambda: builder.memory(bytes(100), ["CS1"]),
-    lambda: builder.interrupt(0, 0),
+    lambda: builder.set_interrupt(0, 0),
 ):
     try:
         mistake()

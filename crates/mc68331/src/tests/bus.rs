@@ -71,7 +71,7 @@ fn decoding<D: MappedPeripheral + Timed + Stateless + 'static>(
             pins,
         )
         .unwrap();
-    builder.interrupt(id, IrqPin::new(4).unwrap());
+    builder.set_interrupt(id, IrqPin::new(4).unwrap());
     (builder.build(), id)
 }
 

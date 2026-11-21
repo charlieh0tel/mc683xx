@@ -98,9 +98,9 @@ fn main() -> Result<(), BuildError> {
   adds one on no pin: something that only keeps time or drives an
   interrupt.  `Mc68331::peripheral::<D>(id)` and `peripheral_mut` give it back
   by type.
-- `interrupt(peripheral, pin)` wires a peripheral's interrupt output to an
+- `set_interrupt(peripheral, pin)` wires a peripheral's interrupt output to an
   IRQ pin, an `IrqPin` (levels 1 to 7; `IrqPin::new(level)`);
-  `autovector(pin)` ties AVEC for every acknowledge of its level, as
+  `set_autovector(pin)` ties AVEC for every acknowledge of its level, as
   decode logic does (SIMRM 6.4).
 - `set_reset_scope(peripheral, ResetScope)` says which reset causes reach a
   peripheral; all do by default (see Reset).
@@ -355,7 +355,7 @@ refuses.
   its reads, or a select shared by a read-only and a write-only one,
   times each direction by its own.  Each wait state costs the
   CPU a clock, so slow peripherals cost what they do on the board.
-  `Builder::dsack(peripheral, Dsack)` states which DSACK pins it drives:
+  `Builder::set_dsack(peripheral, Dsack)` states which DSACK pins it drives:
   the chip then checks PEPAR at each such cycle (a pin assigned as
   port E ends no cycle, SIMRM 9.1, told as `Event::Dsack`; `Event` is
   `#[non_exhaustive]`), and the port size they encode sizes the cycle
@@ -366,9 +366,9 @@ refuses.
   pins differ from cycle to cycle, the port this cycle's gives,
   `Bits16` on DSACK1 and `Bits8` on DSACK0 alone, checked against
   PEPAR as the stated pins are.  By default `None`: the pins
-  `Builder::dsack` states say.
+  `Builder::set_dsack` states say.
 - `interrupt_request() -> bool`: its interrupt output, level-sensitive,
-  on the IRQ pin `Builder::interrupt` wired.  It may change only at a
+  on the IRQ pin `Builder::set_interrupt` wired.  It may change only at a
   board event: a bus cycle to the board, an acknowledge, `advance`, a
   reset, the host's `peripheral_mut`, or between runs.  The chip caches
   the level it requests between them.
@@ -405,10 +405,10 @@ on no select, taking the cycles `decodes` give
   (`BuildError::Window` if it is empty or runs past).
 - `BusDecode::Acknowledge(IrqPin)`: interrupt acknowledge cycles at the
   pin's level; its read gives the vector.  Wire its output with
-  `Builder::interrupt` as for any peripheral.
+  `Builder::set_interrupt` as for any peripheral.
 
 It drives DSACK itself: `pins` are the DSACK pins it drives, as
-`Builder::dsack` states them for a peripheral on an externally
+`Builder::set_dsack` states them for a peripheral on an externally
 terminated select.  Its `wait_states` time each cycle, the pins (or
 `dsack_port`) size it, a cycle longer than the bus monitor's period is
 a bus error, and with PEPAR assigning none of its pins as DSACK the bus
@@ -433,7 +433,7 @@ and the acknowledge reaches the peripheral as a CPU-space byte read at
 $FFFFF1 + 2 x level; the value read is the vector.  With an external
 DSACK the peripheral's wait states apply; one later than the bus monitor
 allows, or a bus error, is the spurious vector.  Without one, a level
-the board autovectors (`Builder::autovector`, or a select's AVEC bit)
+the board autovectors (`Builder::set_autovector`, or a select's AVEC bit)
 takes the autovector.
 
 This peripheral has a vector register and a request register on CS1,
@@ -524,7 +524,7 @@ let (mut builder, ram) = firmware::booting(image);
 let peripheral = builder
     .peripheral(Interrupter::default(), &[firmware::cs(1), firmware::cs(10)])
     .unwrap();
-builder.interrupt(peripheral, IrqPin::new(LEVEL).unwrap());
+builder.set_interrupt(peripheral, IrqPin::new(LEVEL).unwrap());
 let mut chip = builder.build();
 chip.run_for(Cycles(5000));
 assert_eq!(chip.memory(ram)[..2], [0xbe, 0xef], "the handler ran");
@@ -618,8 +618,8 @@ let alarm = builder.unwired_peripheral(Alarm {
     now: Cycles::ZERO,
 });
 let seven = IrqPin::IRQ7;
-builder.interrupt(alarm, seven);
-builder.autovector(seven);
+builder.set_interrupt(alarm, seven);
+builder.set_autovector(seven);
 let mut chip = builder.build();
 chip.run_for(Cycles(4000));
 assert_ne!(chip.cpu().registers.pc.0, firmware::HANDLER);

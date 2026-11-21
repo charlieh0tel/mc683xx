@@ -1029,7 +1029,7 @@ fn run_chip(
     if let Some(qspi) = qspi {
         builder.qspi(qspi);
     }
-    builder.interrupt(
+    builder.set_interrupt(
         id,
         mc683xx_cpu32::interrupt::IrqPin::new(DUART_LEVEL).expect("a level"),
     );

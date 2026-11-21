@@ -352,9 +352,9 @@ impl ChipBuilder {
     /// PEPAR at each such cycle (`Event.Dsack`), and sizing it (SIMRM
     /// Table 5-2); unstated by default: unchecked, the select's port
     /// field sizing it.
-    fn dsack(&mut self, peripheral: usize, pins: DsackView) -> Result<(), Error> {
+    fn set_dsack(&mut self, peripheral: usize, pins: DsackView) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
-        self.builder()?.dsack(peripheral, pins.into());
+        self.builder()?.set_dsack(peripheral, pins.into());
         Ok(())
     }
 
@@ -389,10 +389,10 @@ impl ChipBuilder {
     }
 
     /// Peripheral `peripheral`'s interrupt output to IRQ`pin`.
-    fn interrupt(&mut self, peripheral: usize, pin: u8) -> Result<(), Error> {
+    fn set_interrupt(&mut self, peripheral: usize, pin: u8) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
         let pin = IrqPin::try_from(pin)?;
-        self.builder()?.interrupt(peripheral, pin);
+        self.builder()?.set_interrupt(peripheral, pin);
         Ok(())
     }
 
@@ -407,9 +407,9 @@ impl ChipBuilder {
 
     /// The board asserts AVEC at every acknowledge on IRQ`pin` (SIMRM
     /// 6.4).
-    fn autovector(&mut self, pin: u8) -> Result<(), Error> {
+    fn set_autovector(&mut self, pin: u8) -> Result<(), Error> {
         let pin = IrqPin::try_from(pin)?;
-        self.builder()?.autovector(pin);
+        self.builder()?.set_autovector(pin);
         Ok(())
     }
 

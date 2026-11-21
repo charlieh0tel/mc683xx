@@ -768,8 +768,8 @@ chip beside `Mc68331`.
 - **Shape:** the Rust host API, one to one.  `Builder(data=,
   reference_hz= | external_hz=)` wires `memory(contents, pins,
   writable=)`, `peripheral(object, pins)`, `unwired_peripheral(object)`,
-  `interrupt(peripheral, pin)`, `autovector(pin)` and
-  `set_reset_scope(peripheral, [ResetCause])`, `dsack(peripheral, Dsack)`,
+  `set_interrupt(peripheral, pin)`, `set_autovector(pin)` and
+  `set_reset_scope(peripheral, [ResetCause])`, `set_dsack(peripheral, Dsack)`,
   `set_qspi_reset_scope([ResetCause])`, and the handles a peripheral holds,
   `stop_request()`, `sync_request()` and `diversion()` (a `Diversion`
   by memory and peripheral numbers); `build()` gives
@@ -1168,7 +1168,7 @@ hand.  The keys are in `docs/board-files.md`.
   `unconnected` has its select to itself; any other sharing is an
   error naming both users.  A peripheral's `dsack` names the DSACK pins it
   drives on an externally terminated select (`open` if not known), and
-  the chip checks them at each such cycle (`Builder::dsack`): PEPAR
+  the chip checks them at each such cycle (`Builder::set_dsack`): PEPAR
   assigning none of them as DSACK leaves the cycle to the bus monitor,
   as the pins are then port E's (SIMRM 9.1, told as `Event::Dsack`,
   once a peripheral, what was told kept in the chip's snapshot); otherwise the port size they encode (SIMRM Table
@@ -1205,7 +1205,7 @@ hand.  The keys are in `docs/board-files.md`.
   one on FC lines; a later `BusDecode` variant can add either, as the
   enum is `#[non_exhaustive]`.  `MappedPeripheral::dsack_port` lets a
   peripheral size each cycle (DSACK1 16 bits, DSACK0 alone 8), for one
-  that answers some cycles on each pin; `Builder::dsack` stays the
+  that answers some cycles on each pin; `Builder::set_dsack` stays the
   default.  In a board file, an attachment of `base` and `size`, or
   `iack`, is on no select; one router takes each such decode, its
   peripherals split by role and lane as a select's are, so a read-only

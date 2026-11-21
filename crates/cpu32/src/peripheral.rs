@@ -155,7 +155,7 @@ pub trait MappedPeripheral: Save {
     /// peripheral whose pins differ from cycle to cycle: 16 bits on
     /// DSACK1, 8 on DSACK0 alone (SIMRM Table 5-2).  Asked with
     /// `wait_states`.  By default `None`: the pins the board gives the
-    /// peripheral (`mc683xx-mc68331`'s `Builder::dsack`) say.
+    /// peripheral (`mc683xx-mc68331`'s `Builder::set_dsack`) say.
     fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
         let _ = cycle;
         None
