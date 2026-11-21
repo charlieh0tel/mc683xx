@@ -1415,7 +1415,7 @@ impl Connection<'_, '_> {
 impl Bus for Connection<'_, '_> {
     fn read(&mut self, access: BusAccess) -> Result<Read, BusError> {
         let (value, stall) = self.read_or_write(None, access, None)?;
-        Ok(Read { value, stall })
+        Ok(Read::new(value).stalled(stall))
     }
 
     fn write(&mut self, access: BusAccess, value: u32) -> Result<Cycles, BusError> {
@@ -1429,7 +1429,7 @@ impl Bus for Connection<'_, '_> {
         memory: &mut Memory,
     ) -> Result<Read, BusError> {
         let (value, stall) = self.read_or_write(Some(memory), access, None)?;
-        Ok(Read { value, stall })
+        Ok(Read::new(value).stalled(stall))
     }
 
     fn write_with_memory(

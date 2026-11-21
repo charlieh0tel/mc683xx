@@ -71,13 +71,70 @@ deploy replaces it.
 
 ## Versions and tags
 
-- Semantic versioning from 0.1.0.  Before 1.0, a breaking change to a
-  public API (Rust or Python) bumps the minor version; anything else
-  the patch.
+- Semantic versioning from 0.1.0.  Before 1.0, a breaking change
+  (Semver scope) bumps the minor version; anything else the patch.
+- CI's `semver` job checks the published crates' APIs against their
+  last release (cargo-semver-checks).  Before 1.0 it reports a break
+  without failing, since the version is bumped only at release.
 - A release is an annotated tag `vX.Y.Z` on a commit of `main` that
   has passed every check (AGENTS.md).  Its notes, breaking changes
   first, are its GitHub release's.
 - A consumer pins a release, or a commit for work not yet released.
+
+## Semver scope
+
+One version covers the crates, the Python package and the npm package,
+so a breaking change to any of them is a breaking change to the
+release: from 1.0 a major release, before it a minor one.  Breaking
+means a change to:
+
+- the published crates' public Rust APIs;
+- the Python API: the names `__init__.pyi` declares, their arguments,
+  enum members, the exception classes, their bases and which errors
+  raise which, and the methods the module calls on a host's objects
+  (a peripheral's, a hook's callable);
+- the npm package's JavaScript and TypeScript API, through its
+  `exports`, but `InitOutput`, the module's own exports, which is
+  opaque;
+- board files, version 1 (`docs/board-files.md`), with the built-in
+  and stock peripheral types' names, parameters and ports
+  (`docs/peripherals.md`);
+- the runner's flags, their values and its exit statuses;
+- the trace text (`docs/tracing.md`), versioned by its first line;
+- the GDB stub's target description, monitor commands and stop
+  signals (`docs/gdb.md`).
+
+Not covered, so a minor or patch release may change them:
+
+- the text of messages, `repr` and `Display` (but the trace's);
+- enum integer values;
+- Python names that start with `_`, and Rust items that are
+  `#[doc(hidden)]` ("Not part of the semver API");
+- npm package files outside its `exports`;
+- the Unicorn-parity Python items, for parity runs against Unicorn
+  only: `Deviations`, `Machine.set_intercepted` and
+  `Machine.set_intercept_callback`;
+- snapshot formats: a restore needs the versions that saved it
+  (PLAN.md, State), so a snapshot is read by the release that wrote
+  it.  A minor release may change one, and its notes say so; a patch
+  release never does;
+- the `--bdm` protocol, which follows the BDM pod's, not this
+  version.
+
+Dependencies and platforms:
+
+- serde 1 is in the public API, an accepted exception to naming no
+  foreign type: public types derive its `Serialize` and
+  `Deserialize`, the core's state types and, behind its `serde`
+  feature, `mc683xx-target`'s.
+  serde 1 is stable; a move to another major version of it would be a
+  breaking release.  The bytes it writes, the snapshots, stay outside
+  semver (above).
+- The minimum supported Rust is 1.99 (`rust-version`); raising it is
+  a minor release.
+- The Python package supports Python 3.10 and later (abi3 wheels).
+  Dropping a Python or Node release past its end of life is a minor
+  release.
 
 ## Setup
 

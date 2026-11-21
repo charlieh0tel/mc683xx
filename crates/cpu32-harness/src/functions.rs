@@ -806,16 +806,13 @@ mod tests {
     fn faulted(vector: Vector, cycle: CycleKind, address: u32) -> Call {
         Call {
             stopped: Stopped::Exception {
-                exception: Exception::Fault(Fault {
+                exception: Exception::Fault(Fault::new(
                     vector,
-                    address: Address(address),
-                    function_code: FunctionCode::SUPERVISOR_DATA,
-                    size: Size::Word,
-                    long: false,
+                    Address(address),
+                    FunctionCode::SUPERVISOR_DATA,
+                    Size::Word,
                     cycle,
-                    data: 0,
-                    read_modify_write: false,
-                }),
+                )),
                 pc: 0x400,
             },
             ..returned(0)

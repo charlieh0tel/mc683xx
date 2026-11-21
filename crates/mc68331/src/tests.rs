@@ -629,10 +629,7 @@ fn the_duart_is_vectored_through_cs10() {
 /// select.
 #[test]
 fn another_board() {
-    let configuration = Configuration {
-        data: !1,
-        ..Configuration::default()
-    };
+    let configuration = Configuration::new(!1, ClockSource::default());
     let mut builder = Builder::new(configuration);
     builder
         .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
@@ -1868,10 +1865,10 @@ fn an_event_a_write_makes_ends_the_quantum() {
 /// a 1 PPS on IC2.
 #[test]
 fn an_external_clock_board_uses_the_sci_and_the_gpt() {
-    let configuration = Configuration {
-        clock: ClockSource::external(Frequency::from_hz(16_000_000)).unwrap(),
-        ..Configuration::default()
-    };
+    let configuration = Configuration::new(
+        u16::MAX,
+        ClockSource::external(Frequency::from_hz(16_000_000)).unwrap(),
+    );
     let mut builder = Builder::new(configuration);
     builder
         .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])

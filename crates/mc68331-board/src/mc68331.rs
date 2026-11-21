@@ -55,6 +55,7 @@ use crate::chip::ChipPin;
 use crate::chip::MemoryPlace;
 use crate::chip::MemoryPlan;
 use crate::chip::Requests;
+use crate::chip::sealed::Sealed;
 use crate::error::LoadError;
 use crate::signal::Direction;
 use crate::signal::Kind;
@@ -201,6 +202,8 @@ impl Pin {
     }
 }
 
+impl Sealed for Pin {}
+
 impl ChipPin for Pin {
     fn name(self) -> &'static str {
         match self {
@@ -252,7 +255,7 @@ impl ChipPin for Pin {
 /// power-on, `[chip.pins]`.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Pins {
+pub(crate) struct Pins {
     /// Ignored.
     #[serde(rename = "note")]
     _note: Option<String>,
@@ -331,6 +334,9 @@ impl Requests for Handles {
 }
 
 /// The MC68331 being wired for a board.
+///
+/// Not part of the semver API: plumbing the board builds the chip with.
+#[doc(hidden)]
 pub struct Mc68331Builder {
     /// The chip's builder.
     builder: Builder,
@@ -353,6 +359,8 @@ impl fmt::Debug for Mc68331Builder {
 fn built(error: mc683xx_mc68331::chip::BuildError) -> LoadError {
     LoadError::Build(Box::new(error))
 }
+
+impl Sealed for Mc68331Builder {}
 
 impl ChipBuilder for Mc68331Builder {
     type Chip = Mc68331;
@@ -484,6 +492,8 @@ fn emit_port(
     }
 }
 
+impl Sealed for Mc68331 {}
+
 impl chip::Chip for Mc68331 {
     const TYPE: &'static str = "mc68331";
     const RESET: Pin = Pin::Reset;
@@ -502,10 +512,7 @@ impl chip::Chip for Mc68331 {
             (None, None) => Ok(ClockSource::default()),
         }
         .map_err(|error| LoadError::Frequency { error })?;
-        let configuration = Configuration {
-            data: section.data.unwrap_or(u16::MAX),
-            clock,
-        };
+        let configuration = Configuration::new(section.data.unwrap_or(u16::MAX), clock);
         let mut builder = Builder::new(configuration);
         for &level in &section.autovector {
             let pin = IrqPin::new(level).ok_or_else(|| LoadError::Level {

@@ -66,8 +66,9 @@ fn main() -> Result<(), BuildError> {
 }
 ```
 
-- `Builder::new(Configuration)` takes what the SIM reads as reset
-  releases: the levels on `DATA[15:0]` (boot port width, pin
+- `Builder::new(Configuration)` (`#[non_exhaustive]`;
+  `Configuration::new(data, clock)` or `Configuration::default()`)
+  takes what the SIM reads as reset releases: the levels on `DATA[15:0]` (boot port width, pin
   assignments; MC68331UM 4.6.3) and the clock source, a synthesizer
   reference (`ClockSource::synthesizer(reference)`) or, with MODCLK
   low, an external clock (`ClockSource::external(frequency)`), each a
@@ -943,7 +944,9 @@ carries the queue entry's index (0-15), the levels on `PCS[3:0]` (four
 selects or a decoded peripheral number, as the board wires them), the bits
 out, right-aligned, MSB first, their number, the `QspiClock` they are
 shifted with (its mode, CPOL and CPHA, and SCK period) and when the
-transfer ends; `QspiClock::reset(system_clock)` is the clock out of
+transfer ends.  A `QspiClock` (`#[non_exhaustive]`) is
+`QspiClock::new(polarity, phase, period, system_clock)`;
+`QspiClock::reset(system_clock)` is the clock out of
 reset (SPCR0 $0104: CPOL clear, CPHA set, SPBR 4, QSMRM 4.3.1) at the
 system clock the caller gives, 8.388608 MHz out of reset from a
 32.768-kHz reference; `floating_miso(bits)` is MISO no peripheral drives, all
@@ -1344,7 +1347,12 @@ is the load's `LoadError::Image`.  `Board::load_with(&description,
 path parameter's bytes (`Context::contents`) from the same kind of
 `read`, an error the load's `LoadError::Parameter`: a closure over the
 host's bytes passes to both, `&read` to the first.  `board.chip()` is the chip itself, an `&Mc68331` with
-every method of the chip's.
+every method of the chip's.  `Chip` is sealed: a host names it in a
+bound (`Board<C: Chip>`) and calls its methods (`cpu`, `now`,
+`memory`, `halted`, the resets, `save`), but cannot implement it, nor
+`ChipBuilder` or `ChipPin`; a new part is added inside mc683xx.  The
+plumbing the board runs the chip with is hidden from the docs and
+outside semver.
 
 - **Nets.** `Board::observe(net, observer) -> Result<ObserverId,
   NetError>` attaches an `observe::Observer` (a closure
@@ -1623,7 +1631,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   (`CSBOOT`, `CS0`, any case), `Address` (`0x00001234`, and
   `LowerHex`), `Cycles` (`12 clocks`), `Frequency` (`16777216 Hz`),
   `Vector` and `FunctionCode` (their numbers), and on a board `Time`
-  (`1000 ps`), `Endpoint` (`chip.IRQ7`), the MC68331's `mc68331::Pin` (`IRQ7`), `signal::Kind`,
+  (`1000 ps`), the MC68331's `mc68331::Pin` (`IRQ7`), `signal::Kind`,
   `Direction`, `peripheral::Role` (`read-write`) and `Lane` (`upper`),
   as the board file names them; `PortName` (`E`) and the GPT's
   `pwm::Channel` (`A`), any case.
@@ -1632,7 +1640,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
 - Every public error enum is `#[non_exhaustive]`, and so are the
   enums that may grow: `Stop`, `Halt`, the bare run's `End` and
   `FaultCause`, `hooks::Invalid`, the GPT's `OutputChange` and
-  `pwm::Output`, and the board's `Signal`, `signal::Kind`, `Endpoint`,
+  `pwm::Output`, and the board's `Signal`, `signal::Kind`,
   `mc68331::Pin`, `peripheral::Role`, `chip::MemoryPlace` and
   `trace::Record`.  A match on one needs a wildcard arm.  Enums of
   what the hardware fixes (`Size`, `ChipSelect`, `PortName`,
@@ -1642,10 +1650,17 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `ExceptionEntry`), `bus::BusAccess`, `peripheral::BusCycle`, the run
   results (`Run`, `LimitedRun`, `FaultStop`, `Intercepted`,
   `BoardRun`), `event::TracedAccess`, the trace's record structs,
-  `board::External`, `peripheral::Driving`, and `registry::Constructed`
-  and `Context`.  A host that must build one has a constructor:
-  `Run::new`, `BoardRun::new`, `BusCycle::new`, `Constructed::new`,
-  `Context::new` (to test a constructor).
+  `board::External`, `board::Trace`, `peripheral::Driving`, `Driven`
+  and `MemoryWrite`, `builtin::Logged`, `inspect::Inspection` and
+  `Field`, and `registry::Constructed` and `Context`; and the values a
+  host builds but whose fields may grow: `registry::PortSpec`,
+  `condition::ConditionInfo`, `spi::Edges` and `time::Clock`.  A host
+  that must build one has a constructor: `Run::new`, `BoardRun::new`,
+  `BusCycle::new`, `Constructed::new`, `Context::new` (to test a
+  constructor), `PortSpec::new` (and `input`, `output`, `in_out`),
+  `ConditionInfo::new`, `Edges::new`, `Clock::new` and
+  `Clock::with_phase`, `Field::new`, and `Inspection::default()` with
+  its builders.
 - The configuration structs (`Limits`, `Deviations`, `BoardTracing`,
   `ChipTracing`, `description::Options`, `registry::Environment`) are
   `#[non_exhaustive]` too, with every field public: build one from

@@ -254,8 +254,11 @@ impl From<End> for EndView {
             End::Until => Self::Until(),
             End::Instructions => Self::Instructions(),
             End::Fault(fault) => Self::Fault(FaultStopView(fault)),
-            // answered within the run, never its end
-            _ => Self::Stop(Stop::Requested()),
+            End::Steps => unreachable!("run_limited takes no step limit"),
+            End::Intercepted(_) => {
+                unreachable!("run_limited answers an intercepted exception within the run")
+            }
+            _ => panic!("a limited run's end the bindings do not know"),
         }
     }
 }
@@ -1063,5 +1066,18 @@ impl Target for Debugged<'_, '_> {
 
     fn reset(&mut self) -> PyResult<bool> {
         Ok(Target::reset(&mut self.0.borrow_mut().machine).unwrap_or_else(|never| match never {}))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mc683xx_cpu32::cpu::bare::End;
+
+    use super::EndView;
+
+    #[test]
+    #[should_panic(expected = "run_limited takes no step limit")]
+    fn a_step_limit_end_is_not_reported_as_a_stop_request() {
+        drop(EndView::from(End::Steps));
     }
 }

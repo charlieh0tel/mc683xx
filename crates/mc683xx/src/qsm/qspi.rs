@@ -154,11 +154,12 @@ impl Shifted {
 }
 
 /// A QSPI peripheral the chip holds, which the host can get back by
-/// type.  It says whether it saves ([`Save`]), as a chip's peripherals do:
-/// the chip's snapshot holds it.
+/// type (`Mc68331::qspi_peripheral` and `qspi_peripheral_mut` name it
+/// as their bound).  It says whether it saves ([`Save`]), as a chip's
+/// peripherals do: the chip's snapshot holds it.
 ///
-/// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
-#[doc(hidden)]
+/// Every [`SpiPeripheral`] that is [`Save`] and `'static` is one: a
+/// host implements those two, never this.
 pub trait AnySpiPeripheral: SpiPeripheral + Save + Any {}
 
 impl<T: SpiPeripheral + Save + Any> AnySpiPeripheral for T {}

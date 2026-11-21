@@ -117,7 +117,7 @@ impl FromStr for PortName {
 /// Text that names no SIM port.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no SIM port {0:?}")]
-pub struct ParsePortNameError(pub String);
+pub struct ParsePortNameError(String);
 
 /// A change in what a port drives: from its time on, the pins it
 /// drives and their levels.

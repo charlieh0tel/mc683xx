@@ -1,13 +1,15 @@
 //! What both stubs answer gdb alike: errors, the target description,
-//! and gdbstub's failures as a session's.
+//! a connection as gdbstub's, and gdbstub's failures as a session's.
 
 use std::fmt::Display;
 
 use gdbstub::arch::Arch;
+use gdbstub::conn::ConnectionExt;
 use gdbstub::stub::GdbStubError;
 
 use crate::SessionError;
 use crate::arch::Cpu32;
+use crate::connection::Connection;
 
 /// gdb's error for a register it cannot read or write: EIO.
 pub(crate) const EIO: u8 = 5;
@@ -21,6 +23,39 @@ const INVALID_ANNEX: u8 = 0;
 /// The one annex of the target description.
 const TARGET_XML: &[u8] = b"target.xml";
 
+/// A [`Connection`] as gdbstub's, which the public API does not name.
+pub(crate) struct Adapted<C>(pub(crate) C);
+
+impl<C: Connection> gdbstub::conn::Connection for Adapted<C> {
+    type Error = C::Error;
+
+    fn write(&mut self, byte: u8) -> Result<(), C::Error> {
+        self.0.write_all(&[byte])
+    }
+
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), C::Error> {
+        self.0.write_all(bytes)
+    }
+
+    fn flush(&mut self) -> Result<(), C::Error> {
+        self.0.flush()
+    }
+
+    fn on_session_start(&mut self) -> Result<(), C::Error> {
+        self.0.start()
+    }
+}
+
+impl<C: Connection> ConnectionExt for Adapted<C> {
+    fn read(&mut self) -> Result<u8, C::Error> {
+        self.0.read()
+    }
+
+    fn peek(&mut self) -> Result<Option<u8>, C::Error> {
+        self.0.peek()
+    }
+}
+
 /// gdbstub's error as ours.
 pub(crate) fn failure<E: Display, C: Display>(error: GdbStubError<E, C>) -> SessionError<E, C> {
     let text = error.to_string();
@@ -28,12 +63,14 @@ pub(crate) fn failure<E: Display, C: Display>(error: GdbStubError<E, C>) -> Sess
         return error
             .into_connection_error()
             .map_or(SessionError::Protocol(text), |(error, _)| {
-                SessionError::Connection(error)
+                SessionError::Connection { error }
             });
     }
     error
         .into_target_error()
-        .map_or(SessionError::Protocol(text), SessionError::Target)
+        .map_or(SessionError::Protocol(text), |error| SessionError::Target {
+            error,
+        })
 }
 
 /// `length` bytes of the architecture's description at `offset`, into

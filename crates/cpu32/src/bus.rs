@@ -38,13 +38,34 @@ pub struct BusAccess {
 }
 
 /// How a bus cycle that read ended.
+///
+/// Built with [`Read::new`], so a field added later gets a default
+/// and no host's code changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Read {
     /// The value, right-aligned.
     pub value: u32,
     /// The clocks it took beyond the timing tables' two-clock cycle
     /// (see [`stall`]).
     pub stall: Cycles,
+}
+
+impl Read {
+    /// A read of `value` with no wait states.
+    #[must_use]
+    pub const fn new(value: u32) -> Self {
+        Self {
+            value,
+            stall: Cycles::ZERO,
+        }
+    }
+
+    /// This read, taking `stall` clocks beyond two.
+    #[must_use]
+    pub const fn stalled(self, stall: Cycles) -> Self {
+        Self { stall, ..self }
+    }
 }
 
 /// A handle by which the host asks a run to stop.

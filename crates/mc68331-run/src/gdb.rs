@@ -183,8 +183,10 @@ pub(crate) fn serve(
     };
     match mc683xx_gdb::serve(&mut debugged, connection) {
         Ok(ending) => Ok(ending),
-        Err(SessionError::Target(error)) => Err(error),
-        Err(SessionError::Connection(PollError::Host(Interrupted))) => Ok(Ending::Detached),
+        Err(SessionError::Target { error }) => Err(error),
+        Err(SessionError::Connection {
+            error: PollError::Host(Interrupted),
+        }) => Ok(Ending::Detached),
         Err(error) => {
             eprintln!("mc683xx-run: gdb: {error}; running on as if it detached");
             Ok(Ending::Detached)

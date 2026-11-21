@@ -293,6 +293,7 @@ impl Peripheral for RegisterFile {
 
 /// An access a [`Recorder`] logged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Logged {
     /// The access.
     pub access: PeripheralAccess,

@@ -8,7 +8,13 @@ configured, never what a peripheral does.
 
 Version 1 is frozen from the first release, 0.1.0: a change that
 would make a version 1 file mean something else, or refuse one this
-reference accepts, is version 2.
+reference accepts, is version 2.  A minor release may add keys to
+version 1, each marked here as added within it; a file without one
+means what it did, and a file that uses one needs at least the release
+that added it, as an earlier one refuses the key as unknown.  Every
+1.x release reads every version 1 file.  The built-in types below and
+the stock types (`docs/peripherals.md`) are under the same freeze:
+their names, parameters and ports (docs/releasing.md, Semver scope).
 
 Two words, used one way throughout: a **peripheral** is anything
 outside the chip that the board wires to it (a memory's command
@@ -445,8 +451,9 @@ The contract a host's peripheral models target (rustdoc in
   whose ports depend on its parameters (an FPGA's design, a latch's
   width; the constructor returns `registry::Constructed::new(peripheral,
   ports)`).  Ports are `registry::PortSpec`s: `PortSpec::input(name,
-  kind)`, `PortSpec::output(name, kind)`, or `in-out`
-  (`signal::Direction::InOut`, an open-drain pin on a wired net);
+  kind)`, `PortSpec::output(name, kind)`, `PortSpec::in_out(name,
+  kind)` (`signal::Direction::InOut`, an open-drain pin on a wired
+  net), or `PortSpec::new(name, kind, direction)`;
   kinds `signal::Kind::{Logic, Edge, Clock, Serial, Analog, Bus}`.  The
   constructor takes a `registry::Context` (`Context::new(name,
   parameters, environment)` builds one to test it, and
@@ -460,7 +467,9 @@ The contract a host's peripheral models target (rustdoc in
   host with no files supplies through `Board::load_with`), `path(key)`
   (that path, for a file the peripheral itself opens), and the run's
   `environment` (`seed`,
-  `seed_for(name)`, `work_dir`, `board_dir`).  `Parameters::unread()`
+  `seed_for(name)`, `work_dir`; a test of a constructor through
+  `Context::new` gives it the board directory with `set_board_dir`,
+  which a load sets itself).  `Parameters::unread()`
   is the first key no getter read, the load's unknown-parameter error,
   for a host's tests of its constructors, which build their `Parameters`
   with `Parameters::parse(toml_text)`.  A host holding TOML that sets
@@ -480,8 +489,8 @@ The contract a host's peripheral models target (rustdoc in
   `Board::inspect(name)`).
   - Stop conditions, for a debugger and the emulator's alone
     ([docs/gdb.md](gdb.md), Stop conditions): `conditions()` lists
-    what it offers (`condition::ConditionInfo`: name, arguments, help;
-    none by default), `arm(condition, arguments)` arms one and gives
+    what it offers (`condition::ConditionInfo::new(name, arguments,
+    help)`, a `const fn` for a static list; none by default), `arm(condition, arguments)` arms one and gives
     its own `condition::ConditionToken` (or a `condition::ArmError`),
     and `disarm(token)` disarms it.  Each time an armed condition
     holds the peripheral calls `drive.fire(token)`, which stops the run
@@ -636,8 +645,7 @@ The contract a host's peripheral models target (rustdoc in
     the instruction that changes the frequency, so a peripheral never keeps
     a base past a call: it takes `Drive::system_clock` at each call, or
     the one `system_clock` last told it (the adapters do).  A test
-    gives its drive one with `Drive::set_system_clock(base)`, or in one
-    expression with `Drive::new(now).with_system_clock(base)`.
+    gives its drive one with `Drive::new(now).with_system_clock(base)`.
   - State: `save()`, `restore(bytes)`; by default it cannot, and the
     board's save fails with `StateError::Peripheral`, which names the peripheral
     (`stub: the peripheral cannot save its state`); so does a peripheral that
@@ -652,8 +660,8 @@ The contract a host's peripheral models target (rustdoc in
   `BusCycle` with the access's select and address and its start in system
   clocks, and its times converted through the board's `TimeBase`; its
   `advance` runs at its `next_event`'s time.  A `SpiAdapter`'s model
-  hears the board's framing as `chip_selects(SELECTED_LEVELS)` (0) and
-  `chip_selects(RELEASED_LEVELS)` (0xf) and each transfer as a
+  hears the board's framing as `chip_selects(0)` and
+  `chip_selects(0xf)` and each transfer as a
   `QspiTransfer`, its time in system clocks.  `peripheral()` and `peripheral_mut()` give the model
   back (`Board::peripheral::<MappedAdapter<M>>`).  An adapted peripheral drives
   no nets.  The model implements `mc683xx_cpu32::cpu::state::Save` (`save()
@@ -694,7 +702,8 @@ The contract a host's peripheral models target (rustdoc in
 - `time::Time` (picoseconds), `mc683xx_cpu32::frequency::Frequency`
   (nanohertz, the chip's clocks too: `TimeBase::frequency`),
   `time::Phase` (cycles, 10^21 units each) and `time::Clock`:
-  `new(frequency, edge)`, `phase_at(time)` (with `cycles()` and
+  `new(frequency, edge)`, `with_phase(frequency, at, phase)`,
+  `phase_at(time)` (with `cycles()` and
   `fraction()`), `edges(from, to)` (rising edges in (from, to]),
   `edge_after(from, n)`, `edge(number)`, and `retuned(at, frequency)`:
   a source whose frequency moves (an OCXO following its EFC) drives a

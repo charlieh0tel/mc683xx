@@ -128,8 +128,8 @@ impl Board {
 impl Board {
     /// The board file `text` describes, its images' bytes in `images`, a
     /// `Map` or an object from the path the file names to a
-    /// `Uint8Array` (none for `null` or `undefined`), with the options
-    /// `enabled` names.
+    /// `Uint8Array` (none for `null`, `undefined` or none given), with
+    /// the options `enabled` names.
     ///
     /// # Errors
     ///
@@ -139,10 +139,13 @@ impl Board {
     pub fn new(
         text: &str,
         #[wasm_bindgen(
-            unchecked_param_type = "Map<string, Uint8Array> | Record<string, Uint8Array> | null | undefined"
+            unchecked_optional_param_type = "Map<string, Uint8Array> | Record<string, Uint8Array> | null"
         )]
         images: &JsValue,
-        enabled: Option<Vec<String>>,
+        // Declared optional too: a required parameter cannot follow one.
+        #[wasm_bindgen(unchecked_optional_param_type = "string[] | null")] enabled: Option<
+            Vec<String>,
+        >,
     ) -> Result<Self, Error> {
         Self::with_images(text, &image_bytes(images)?, &enabled.unwrap_or_default())
     }

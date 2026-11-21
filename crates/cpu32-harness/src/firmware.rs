@@ -240,10 +240,7 @@ impl Bus for Peripherals {
                 });
             value = value << 8 | u32::from(byte);
         }
-        Ok(Read {
-            value,
-            stall: Cycles::ZERO,
-        })
+        Ok(Read::new(value))
     }
 
     fn write(&mut self, access: BusAccess, value: u32) -> Result<Cycles, BusError> {

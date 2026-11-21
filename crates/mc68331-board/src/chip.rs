@@ -48,10 +48,21 @@ use crate::signal::Signal;
 use crate::time::Time;
 use crate::time::TimeBase;
 
+/// What seals [`Chip`], [`ChipBuilder`] and [`ChipPin`]: only the
+/// workspace's chips implement them, so their methods may change in any
+/// release.
+pub(crate) mod sealed {
+    /// Implemented by the workspace's chips, their builders and their
+    /// pins alone.
+    pub trait Sealed {}
+}
+
 /// A chip pin a net reaches, `chip.NAME` in a board file: the chip's own
 /// set, each with what it carries and which way it faces.
+///
+/// Sealed: a host cannot implement it.
 pub trait ChipPin:
-    Copy + Ord + fmt::Debug + FromStr + Serialize + DeserializeOwned + 'static
+    Copy + Ord + fmt::Debug + FromStr + Serialize + DeserializeOwned + sealed::Sealed + 'static
 {
     /// Its name after `chip.`: `PE0`, `RESET`.
     fn name(self) -> &'static str;
@@ -68,11 +79,17 @@ pub trait ChipPin:
     /// time ([`Chip::input`] at a later cycle): an input the chip times
     /// itself, such as a timer's capture input, so a peripheral that
     /// drives an edge ahead is captured at exactly its clock.
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn scheduled(self) -> bool;
 
     /// Whether it is one of the QSPI's peripheral chip selects,
     /// PCS\[3:0\]: a net that senses one keeps the QSPI's calls from
     /// being deferred, so it sees each change at its time.
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn pcs(self) -> bool;
 }
 
@@ -86,6 +103,9 @@ pub(crate) fn takes<P: ChipPin>(pin: P, kind: Kind) -> bool {
 
 /// What a board's routers ask of the chip from within its run, the
 /// chip's handles behind one trait object.
+///
+/// Not part of the semver API: plumbing the board runs the chip with.
+#[doc(hidden)]
 pub trait Requests {
     /// Ends the chip's run after the instruction running, short of its
     /// budget, for the board to see what a peripheral did.
@@ -109,6 +129,9 @@ pub trait Requests {
 }
 
 /// Where a board memory answers.
+///
+/// Not part of the semver API: plumbing the board runs the chip with.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MemoryPlace<'a> {
@@ -126,6 +149,9 @@ pub enum MemoryPlace<'a> {
 }
 
 /// A board memory as the board hands it to the chip.
+///
+/// Not part of the semver API: plumbing the board runs the chip with.
+#[doc(hidden)]
 #[derive(Debug)]
 pub struct MemoryPlan<'a> {
     /// Its contents.
@@ -140,17 +166,27 @@ pub struct MemoryPlan<'a> {
 
 /// A mapped peripheral the board hands the chip: one of the board's
 /// routers.  Every type that is one implements it.
+///
+/// Not part of the semver API: plumbing the board runs the chip with.
+#[doc(hidden)]
 pub trait BoardMapped: MappedPeripheral + Timed + Save + Any {}
 
 impl<T: MappedPeripheral + Timed + Save + Any> BoardMapped for T {}
 
 /// An SPI peripheral the board hands the chip: its PCS decode.
+///
+/// Not part of the semver API: plumbing the board runs the chip with.
+#[doc(hidden)]
 pub trait BoardSpi: SpiPeripheral + Save + Any {}
 
 impl<T: SpiPeripheral + Save + Any> BoardSpi for T {}
 
 /// The chip being wired, before its power-on reset.
-pub trait ChipBuilder {
+///
+/// Sealed: a host cannot implement it.  Not part of the semver API:
+/// only the board builds a chip.
+#[doc(hidden)]
+pub trait ChipBuilder: sealed::Sealed {
     /// The chip it builds.
     type Chip: Chip;
 
@@ -222,7 +258,20 @@ pub trait ChipBuilder {
 }
 
 /// A 683xx chip a board runs around.
-pub trait Chip: Sized + 'static {
+///
+/// Sealed: a host cannot implement it.  A new part (a 68332) is added
+/// here, beside [`crate::mc68331`]; a host names the chip a board runs
+/// (`Board<Mc68331>`) or is generic over it (`Board<C: Chip>`) and calls
+/// its methods, which is all a host needs.  So this does not compile:
+///
+/// ```compile_fail,E0277
+/// use mc683xx_board::chip::Chip;
+///
+/// struct Mine;
+///
+/// impl Chip for Mine {}
+/// ```
+pub trait Chip: Sized + sealed::Sealed + 'static {
     /// Its name as `[chip] type` gives it: `"mc68331"`.
     const TYPE: &'static str;
 
@@ -253,6 +302,9 @@ pub trait Chip: Sized + 'static {
     /// # Errors
     ///
     /// A section whose values the chip refuses.
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn builder(section: &Self::Section) -> Result<Self::Builder, LoadError>;
 
     /// Now, on the system clock.
@@ -288,6 +340,9 @@ pub trait Chip: Sized + 'static {
     /// Makes the memory diversions the board's routers asked for
     /// between runs ([`Requests::divert`], [`Requests::release`]) now,
     /// so that a snapshot holds them.
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn apply_diversions(&mut self);
 
     /// The CPU.
@@ -310,26 +365,41 @@ pub trait Chip: Sized + 'static {
 
     /// The output pins on nets, whose changes the chip reports: set
     /// once, as the board is built.
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn watch_outputs(&mut self, on_nets: &[Self::Pin]);
 
     /// Those of the output pins on nets whose change ends its run: those
     /// a peripheral, the chip or an observer senses.  Set as the board is
     /// built and again as observers come and go.
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn stop_at_outputs(&mut self, sensed: &[Self::Pin]);
 
     /// Whether it gives [`Requests::output_horizon`] within its cycles:
     /// set as the board is built, on if a peripheral asks for its
     /// accesses' horizons.
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn set_publish_output_horizon(&mut self, publish: bool);
 
     /// `signal` on input `pin` now, or for a [`ChipPin::scheduled`]
     /// pin at `at`.  Not RESET, which the board handles.
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn input(&mut self, pin: Self::Pin, signal: Signal, at: Cycles);
 
     /// Withdraws the levels `input` scheduled on [`ChipPin::scheduled`]
     /// pins for after now, those up to now coming first: the board's
     /// time base moved (a frequency change, a reset held), and it
     /// schedules them again at their new clocks.
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn unschedule_inputs(&mut self);
 
     /// The frequency a clock output (a pin of [`Kind::Clock`]) runs at
@@ -340,6 +410,9 @@ pub trait Chip: Sized + 'static {
     /// did them, each on board time through `base`: every pin of a
     /// changed port, changed or not (the board drives only changes),
     /// a frame on a serial pin.  Not clock outputs and not RESET.
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn collect<F: FnMut(Time, Self::Pin, Signal)>(&mut self, base: TimeBase, emit: F);
 
     /// What the chip reported since the last call.
@@ -348,6 +421,9 @@ pub trait Chip: Sized + 'static {
     /// When the chip drives RESET low and high again for `event`, if it
     /// is a reset the chip drives: the board converts the release with
     /// the system clock after the reset.
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn reset_pulse(event: &Self::Event) -> Option<(Cycles, Cycles)>;
 
     /// The chip's state, versioned.

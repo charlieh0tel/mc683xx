@@ -244,7 +244,10 @@ datasheets in `third_party/`, cite them, and come with tests.
 
 ## Releases
 
-One version for the crates and the Python package, semver from 0.1.0.
+One version for the crates, the Python package and the npm package,
+semver from 0.1.0; what it covers is in
+[docs/releasing.md](https://github.com/charlieh0tel/mc683xx/blob/main/docs/releasing.md),
+Semver scope.
 Release notes are on GitHub's
 [releases](https://github.com/charlieh0tel/mc683xx/releases).
 

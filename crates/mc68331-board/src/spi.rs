@@ -152,6 +152,7 @@ impl Mode {
 
 /// A slave's edges, as its datasheet gives them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Edges {
     /// The edge it samples MOSI on.
     pub sample: Edge,
@@ -262,12 +263,12 @@ mod tests {
     /// A transfer in SPI mode `number`, a frame's first.
     fn transfer(number: u8) -> Transfer {
         let mode = Mode::numbered(number);
-        let clock = QspiClock {
-            polarity: mode.polarity,
-            phase: mode.phase,
-            period: Cycles(8),
-            system_clock: Frequency::from_hz(16_777_216),
-        };
+        let clock = QspiClock::new(
+            mode.polarity,
+            mode.phase,
+            Cycles(8),
+            Frequency::from_hz(16_777_216),
+        );
         Transfer::new(0, 0, 0, 0, 0, clock, Time::ZERO)
     }
 

@@ -81,7 +81,7 @@ impl FromStr for ChipSelect {
 /// Text that names no chip select: none of CSBOOT, CS0 to CS10.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no chip select {0:?}")]
-pub struct ParseChipSelectError(pub String);
+pub struct ParseChipSelectError(String);
 
 /// The pins' names, by [`ChipSelect::index`].
 const NAMES: [&str; ChipSelect::COUNT] = [

@@ -43,6 +43,9 @@ const MODULE_BASE_LOW: u32 = 0x7f_f000;
 /// The module space's base with MM set.
 const MODULE_BASE_HIGH: u32 = 0xff_f000;
 /// The SIM's register block, $YFFA00 to $YFFA7F (MC68331UM Table D-1).
+///
+/// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+#[doc(hidden)]
 pub const BLOCK: Block = Block {
     offset: 0xa00,
     length: 0x80,
@@ -186,7 +189,11 @@ impl ResetCause {
 
 /// The pins the SIM reads as a reset releases (SIMRM 8.6; MC68331UM
 /// 4.6.3).
+///
+/// Built with [`Configuration::new`] or [`Configuration::default`], so
+/// a field added later gets a default and no host's code changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct Configuration {
     /// DATA\[15:0\]'s levels; the weak pull-ups leave them high.
     pub data: u16,
@@ -194,12 +201,18 @@ pub struct Configuration {
     pub clock: ClockSource,
 }
 
+impl Configuration {
+    /// DATA\[15:0\] at `data`, the clock source `clock`.
+    #[must_use]
+    pub const fn new(data: u16, clock: ClockSource) -> Self {
+        Self { data, clock }
+    }
+}
+
 impl Default for Configuration {
+    /// DATA\[15:0\] high, the default clock source.
     fn default() -> Self {
-        Self {
-            data: u16::MAX,
-            clock: ClockSource::default(),
-        }
+        Self::new(u16::MAX, ClockSource::default())
     }
 }
 
@@ -306,6 +319,9 @@ impl Sim {
     /// module too unless the cause leaves CLKRST alone, as the test
     /// submodule's does (SIMRM 8.1, Table 8-1).  For the `reset`
     /// instruction use `system_reset`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn reset(&mut self, cause: ResetCause, now: Cycles) {
         let before = self.all_outputs();
         let output_changes = mem::take(&mut self.output_changes);
@@ -368,6 +384,9 @@ impl Sim {
 
     /// The `reset` instruction: RSR to SYS; the SIM's configuration
     /// stays (SIMRM 8.2.6).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub const fn system_reset(&mut self) {
         self.reset_status = ResetCause::System.status();
     }
@@ -484,16 +503,25 @@ impl Sim {
     /// The changes in what ports C, E and F drive since the last call,
     /// each with its time: a firmware pulse shorter than a quantum
     /// is both its edges.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn take_output_changes(&mut self) -> Vec<(Cycles, Change)> {
         mem::take(&mut self.output_changes)
     }
 
     /// The board drives port E's pins to `pins`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub const fn set_port_e_pins(&mut self, pins: u8) {
         self.port_e.pins = pins;
     }
 
     /// The board drives port F's pins to `pins`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub const fn set_port_f_pins(&mut self, pins: u8) {
         self.port_f.pins = pins;
     }

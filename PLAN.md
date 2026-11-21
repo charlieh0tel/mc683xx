@@ -1007,7 +1007,9 @@ hand.  The keys are in `docs/board-files.md`.
   a `note` the loader ignores, for provenance and confidence.
   Version 1 is frozen from 0.1.0, the first release: from then a change
   that makes a version 1 file mean something else, or refuses one, is
-  version 2.  Before it the schema changed and stayed version 1, since
+  version 2.  A minor release may add a key to version 1; a file
+  using it needs at least that release, and every 1.x release reads
+  every version 1 file.  Before it the schema changed and stayed version 1, since
   no release read the earlier form: `[[device]]` became
   `[[peripheral]]` and `[chip] type` became required (2026-10-24), and
   smartclock's six board files are the consumer's to convert.  `[board]` names the board (`name`,
@@ -1053,7 +1055,13 @@ hand.  The keys are in `docs/board-files.md`.
   typed (`board.chip()` is an `&Mc68331`), and a pin is the chip's own
   type rather than a string; a host that serves several chips
   dispatches on `Description::chip_type` (decided 2026-10-24, before
-  0.1.0).  The board's snapshot holds the chip's pins (its outputs'
+  0.1.0).  `Chip`, `ChipBuilder` and `ChipPin` are sealed: a host names
+  `Board<Mc68331>`, or is generic over `Board<C: Chip>`, and calls the
+  chip's methods, but implements none of them; the plumbing only the
+  board calls (`Chip::builder`, `input`, `collect`, the output watches,
+  the diversions, `ChipPin::pcs` and `scheduled`, `Requests`, the
+  memory plans, `BoardMapped`, `BoardSpi`, `Mc68331Builder`) is
+  `#[doc(hidden)]`, outside semver (decided 2026-11-21).  The board's snapshot holds the chip's pins (its outputs'
   last levels, its clock outputs' clocks) in the chip's own pin
   type, and the levels the board drives on the chip's inputs are the
   chip's, in its snapshot, no longer the board's.
@@ -1753,8 +1761,10 @@ Adversarial review of the board layer (2026-10-23):
 
 `mc683xx-gdb` serves gdb's remote serial protocol through the
 `gdbstub` crate (MIT OR Apache-2.0, a Cargo dependency like any other,
-so not in `third_party/NOTICE`): one session, `serve`, over one trait,
-`target::Target`.  An emulated target gives `with_cpu` (registers and
+so not in `third_party/NOTICE`, and named nowhere in the public API):
+one session, `serve`, over one trait, `target::Target`, on a
+`connection::Connection`, the stub's own trait, which it adapts to
+gdbstub's.  An emulated target gives `with_cpu` (registers and
 hooks), `read_memory` and `write_memory` (memory with no bus cycle, in
 a function code's space), `run_for(cycles, hit)` (a quantum) and
 `reset`; the trait's other methods (registers, `resume`, `halt`)
@@ -1991,7 +2001,10 @@ Adversarial review (2026-11-01):
 - *What it forecloses.*  Little: `Command`, the errors, `OddEdges`,
   `LoadOptions` and `LoadReport` are `#[non_exhaustive]`, so a
   command (a delay, a loop), long writes, a progress report or a
-  flash algorithm can be added in a minor release.  The script is
+  flash algorithm can be added in a minor release.  `Command`, `Line`
+  and `LoadOptions` are `Clone` but not `Copy`, so a command or an
+  option that carries data `Copy` cannot (a loop's body, a file name)
+  is no breaking change either.  The script is
   its own small language, not another BDM tool's init format; a
   converter could come later.  No CLI yet: a runner front end
   (`--load`, `--init`) belongs where a pod host or `mc683xx-run` needs
@@ -2446,6 +2459,10 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
 - The serial interface (CPU32RM 7.2.7, 7.2.8; `debug::serial`) is the
   chip's: `Mc68331::bdm_exchange` is one 17-bit transfer, bit 16 of
   the word in ignored (Table 7-3), the 17 bits shifted out returned.
+  Table 7-3's response codes are `mc683xx_target::serial`'s, shared
+  with a pod's host; what a transfer reads outside background mode,
+  which the chip does not model (IPIPE on DSO, 7.2.6), is the chip's
+  own `NOT_IN_BACKGROUND`, equal to "illegal command".
   The output shift register reloads with "not ready" at each transfer
   (7.2.7.1), and a command runs as soon as its last word is in and is
   done before the next transfer, as no time passes in background
@@ -3306,7 +3323,8 @@ checks move onto real code hooks.
 | Manuals kept in the repo, in Git LFS | The specification, beside the code that cites it.  NXP no longer serves them; its terms of use allow reproduction for personal non-commercial use only, a risk accepted for the public repo. |
 | Firmware images by path, not committed | Vendor images are not ours; feature-gated system tests read them from a path in an environment variable, for any board. |
 | Runs named `run_until` and `run_for` | A run to an absolute time is `run_until`, a run for a duration `run_for`, at every layer (the core, the chip, the board, gdb's targets, Python); a bare machine's run to limits is `run_limited`.  No bare `run`, whose meaning a reader must look up (decided 2026-10-24, before 0.1.0). |
-| The modules crate's assembly API sealed and hidden | `Module` and the plumbing only `mc683xx-mc68331` uses to compose the chip (register cycles, decode requests, the SIM's timer and reset handshakes, the serde helpers) change with the chip; sealing `Module` and `#[doc(hidden)]` with a "Not part of the semver API" note keep them out of semver, so the chip can change them in a minor release, while what a host needs stays public (decided 2026-10-24, before 0.1.0). |
+| The modules crate's assembly API sealed and hidden | `Module` and the plumbing only `mc683xx-mc68331` uses to compose the chip (register cycles, decode requests, the SIM's timer and reset handshakes, the serde helpers; from 0.7.0 the modules' blocks, chip-select decode, and the `Qsm` and `Sim` mutators a host cannot reach through the chip's `&Qsm` and `&Sim`) change with the chip; sealing `Module` and `#[doc(hidden)]` with a "Not part of the semver API" note keep them out of semver, so the chip can change them in a minor release, while what a host needs stays public (decided 2026-10-24, before 0.1.0). |
+| The board's chip traits sealed | `Chip`, `ChipBuilder` and `ChipPin` are what the board's run loop needs of a part, and change with it; a new chip (a 68332) is added inside mc683xx, beside `mc683xx_board::mc68331`, not by a host.  Sealing them and `#[doc(hidden)]` on the plumbing only the board calls keep them out of semver, while a host keeps `Board<Mc68331>`, `Board<C: Chip>` and the chip's methods it calls (`cpu`, `now`, `memory`, the resets, `save`).  Opening them later is not breaking (decided 2026-11-21, before 1.0). |
 | Board time with the SIM | It derives from SYNCR. |
 | Not cycle accurate, not cycle stupid | Firmware timing comes from peripherals, but timing loops and peripheral pacing need table-based estimates with wait states. |
 | Level-sensitive IPL plus IACK | Matches the chip; makes IARB natural. |
@@ -3319,7 +3337,7 @@ checks move onto real code hooks.
 | Block cache and lazy flags deferred | Simpler core; the per-instruction overhead measured first (`docs/performance.md`) is cheaper to cut directly. |
 | Benchmarks with criterion in the `benches/` workspace member | Statistics and saved baselines for before and after; its shared setup is tested by `make ci`, which only compiles the benchmarks. |
 | Python bindings behind a crate feature | The workspace forbids default-members; a `python` feature keeps PyO3, and a Python interpreter, out of `make ci`. |
-| Python mirrors the Rust types it wraps: `Run`, `LimitedRun` and `BoardRun`, `Stop` and `End` a class per variant, `Machine`, `HookId`, plain enums as enum classes | One name per item across both APIs (AGENTS.md); a host porting between them translates nothing.  A Rust type with `FromStr` crosses as its string; `End::Intercepted` alone has no Python variant, as the run answers it (decided 2026-10-24, before 0.1.0). |
+| Python mirrors the Rust types it wraps: `Run`, `LimitedRun` and `BoardRun`, `Stop` and `End` a class per variant, `Machine`, `HookId`, plain enums as enum classes | One name per item across both APIs (AGENTS.md); a host porting between them translates nothing.  A Rust type with `FromStr` crosses as its string; `End::Intercepted` and `End::Steps` have no Python variant, as the run answers an intercept and takes no step limit (decided 2026-10-24, before 0.1.0). |
 | A peripheral's Python exception stops the run after its instruction and is raised when `run_for` returns | The `MappedPeripheral` trait can report only BERR; the chip's `StopRequest` ends the run there, and the exception cannot cross it. |
 | A bare `Machine`'s hooks may write the CPU; their callables run between core runs | Unicorn's harness stubs routines and peripherals from hooks; queuing in the core and calling Python with nothing borrowed needs no `unsafe` and costs only hooks that fire. |
 | A Python hook stops the run on a truthy result; its exception stops it as `Break` and is raised when `run_for` returns | A breakpoint is `return True`; a hook returns `Control`, so it can stop where it is, with no stop request left for the next run. |
@@ -3342,13 +3360,14 @@ checks move onto real code hooks.
 | abi3 wheels and the crates published by the `release` workflow, both by trusted publishing | One wheel per platform covers every Python from 3.10; no token is stored.  crates.io's trusted publishing needs the crate to exist first, so only the first release is published by hand (decided 2026-10-24). |
 | A GDB stub on the gdbstub crate, generic over a small `Target` trait, its breakpoints and steps hooks | Decided 2026-10-24; gdbstub is MIT OR Apache-2.0.  Hooks cost nothing until installed and never touch memory; one trait serves the bare CPU, the chip, a board and hosts with run loops of their own. |
 | gdb's memory access without bus cycles | A debugger's look must not clear a flag or feed a peripheral (the reason `Module::peek` exists); real cycles stay the host's (`bus_read`, `bus_write`). |
-| The public API names no foreign type but gdbstub's `ConnectionExt` | A dependency's major release must not break ours: board parameters are `registry::ParameterValue`, a syntax error a `SyntaxError`, a snapshot that does not decode a `DecodeError`, each opaque or ours.  `serve` keeps gdbstub's connection trait, which an own trait would only forward to (decided 2026-10-24). |
+| The public API names no foreign type but serde 1's traits (below) | A dependency's major release must not break ours: board parameters are `registry::ParameterValue`, a syntax error a `SyntaxError`, a snapshot that does not decode a `DecodeError`, each opaque or ours.  `serve` takes the stub's own `connection::Connection` (write, flush, a blocking read and a peek that does not wait), adapted to gdbstub's inside the crate, so gdbstub's major version is not ours (decided 2026-11-21, reversing 2026-10-24's keeping of gdbstub's `ConnectionExt`). |
+| serde 1 in the public API, an accepted exception | The state types derive `Serialize` and `Deserialize` (`mc683xx-target`'s behind its `serde` feature), which is how the snapshot layers encode them; hiding the derives would mean a second set of types to keep in step.  serde 1 is stable, so a host is not broken by our dependency; the snapshot bytes stay outside semver (`docs/releasing.md`, Semver scope) (decided 2026-11-21, before 1.0).  The serde bounds on the board's chip traits (`ChipPin`'s `Serialize` and `DeserializeOwned`, `Chip::Section`'s) are not host API: those traits are sealed (above), so no host type has to meet them. |
 | `Cpu::registers` and `Cpu::memory` stay public fields | The programming model is the host's to read and write as it likes (a test's setup, a harness's comparison); no invariant spans them that a setter would guard, and hosts reach them a thousand times as fields (decided 2026-10-24). |
 | A fixed memory on no select, emulator-only; a matching select wins | A host's hybrid boot maps rewritten code beside an image it must not change, where the only alternative was patching the reset code to program a select the firmware leaves unused.  A select winning keeps the firmware's decode as on hardware wherever it decodes; fast termination and no DSACK by default, as the chip has nothing to model, a select's internal timing (port, wait states) on request so code runs at its original bus speed; contents survive resets as RAM's unless a reload scope says (decided 2026-10-24). |
 | Pacing host-side, a front end's control taken at sync points | A GUI wants board time at wall speed and a stop and keys from its own thread; sleeping between quanta against the wall clock, outside the board's model, and taking a thread-safe handle's stop and inputs at sync points on the board's thread, keeps the core single-threaded, host time out of the model and the run the same whatever the pacing (decided 2026-10-24). |
 | Front ends outside the repository and the board file; they observe nets and inspect peripherals | Board files describe hardware, which a UI is not; a front end's needs are the host API's: read-only observers on nets, peripherals' state by type, inputs through externals.  Read-only keeps every run deterministic whatever watches it (decided 2026-10-24). |
 | Board nets with their own picosecond time | Peripheral-to-peripheral edges need sub-cycle time (an FPGA interpolator resolves about 0.5 ns against 59.6 ns cycles); integer time keeps it deterministic, and only chip inputs round to a clock (decided 2026-10-23). |
-| `Cpu32Target`: a memory call names its function code; halting reports the entry source; `halted` polls; `step` stops at the next boundary | Decided 2026-10-31 with the BDM pod; `step` 2026-11-01.  A named space leaves no hidden SFC/DFC state between calls for a debugger to forget, and an implementation over READ and WRITE restores the program's SFC and DFC before GO.  ATEMP holds the entry source only until the next command (CPU32RM 7.2.3), so halting returns it.  A poll, not a blocking wait, as `no_std` firmware has no clock to wait on.  `step` runs one instruction, or takes one exception, and stops before any handler's first instruction, so a debugger over it reads RPC rather than assuming one instruction; the pod meets that on silicon by stepping with T1 and pointing VBR, for the step, at a RAM table whose every vector is a BGND stub.  `Error: core::error::Error`, so a host carries either target's errors as its own. |
+| `Cpu32Target`: a memory call names its function code; halting reports the entry source; `halted` polls; `step` stops at the next boundary | Decided 2026-10-31 with the BDM pod; `step` 2026-11-01.  A named space leaves no hidden SFC/DFC state between calls for a debugger to forget, and an implementation over READ and WRITE restores the program's SFC and DFC before GO.  ATEMP holds the entry source only until the next command (CPU32RM 7.2.3), so halting returns it.  A poll, not a blocking wait, as `no_std` firmware has no clock to wait on.  `step` runs one instruction, or takes one exception, and stops before any handler's first instruction, so a debugger over it reads RPC rather than assuming one instruction; the pod meets that on silicon by stepping with T1 and pointing VBR, for the step, at a RAM table whose every vector is a BGND stub.  `Error: core::error::Error + From<Unsupported> + 'static` (2026-11-21, with the pod), so a host carries either target's errors as its own, as a `source()` too.  After 1.0 the trait gains a method only with a default body that returns `Err(Unsupported { what }.into())`: an implementation written before it still builds, and that call fails cleanly.  The pod names `reset_running`, `call`, `hold` and `resync` as candidates. |
 | Loading and init scripts in `mc683xx-debug`, over `Cpu32Target` | Decided 2026-11-01 with the BDM pod's maintainer.  One loader for silicon and the emulator, tested on the chip; a crate of its own, on `mc683xx-target` alone, so a pod host links it without the emulator.  Word writes, verify by default, RPC from the entry and no SSP inference, an init script with line-numbered errors; host time in `poll_memory` only. |
 | `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels) stay exhaustive, so a match on one needs no wildcard; the bindings' matches on the others end in a panic naming what they do not know (decided 2026-10-24). |
 

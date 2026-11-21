@@ -15,8 +15,6 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use gdbstub::common::Signal;
-use gdbstub::conn::Connection;
-use gdbstub::conn::ConnectionExt;
 use gdbstub::stub::DisconnectReason;
 use gdbstub::stub::GdbStub;
 use gdbstub::stub::SingleThreadStopReason;
@@ -59,6 +57,8 @@ use crate::SessionError;
 use crate::arch::Cpu32;
 use crate::arch::GdbRegisters;
 use crate::arch::Location;
+use crate::connection::Connection;
+use crate::protocol::Adapted;
 use crate::protocol::EFAULT;
 use crate::protocol::EINVAL;
 use crate::protocol::EIO;
@@ -91,10 +91,12 @@ pub(crate) fn serve<T, C>(
 where
     T: Target,
     T::Error: Display,
-    C: ConnectionExt,
+    C: Connection,
     C::Error: Display,
 {
-    target.halt().map_err(SessionError::Target)?;
+    target
+        .halt()
+        .map_err(|error| SessionError::Target { error })?;
     let emulated = target.with_cpu(|_| ()).is_some();
     let mut session = Session {
         target,
@@ -107,7 +109,8 @@ where
         action: Action::Continue,
         going: None,
     };
-    let served = GdbStub::new(connection).run_blocking::<EventLoop<'_, T, C>>(&mut session);
+    let served =
+        GdbStub::new(Adapted(connection)).run_blocking::<EventLoop<'_, T, C>>(&mut session);
     let cleaned = session.clean_up();
     // a target left with BGND planted is not resumed
     let ending = match (served, cleaned) {
@@ -123,7 +126,10 @@ where
         }
     };
     if ending == Ending::Detached {
-        session.target.resume().map_err(SessionError::Target)?;
+        session
+            .target
+            .resume()
+            .map_err(|error| SessionError::Target { error })?;
     }
     Ok(ending)
 }
@@ -304,7 +310,9 @@ impl<T: Target> Session<'_, T> {
         }
         self.going = None;
         let removed = self.unplant_all();
-        first.and(removed).map_err(SessionError::Target)?;
+        first
+            .and(removed)
+            .map_err(|error| SessionError::Target { error })?;
         if !self.planted.is_empty() {
             let addresses = self
                 .planted
@@ -625,19 +633,17 @@ struct EventLoop<'t, T, C>(PhantomData<(&'t mut T, C)>);
 impl<'t, T, C> BlockingEventLoop for EventLoop<'t, T, C>
 where
     T: Target,
-    C: ConnectionExt,
+    C: Connection,
 {
     type Target = Session<'t, T>;
-    type Connection = C;
+    type Connection = Adapted<C>;
     type StopReason = SingleThreadStopReason<u32>;
 
     fn wait_for_stop_reason(
         session: &mut Session<'t, T>,
-        connection: &mut C,
-    ) -> Result<
-        Event<SingleThreadStopReason<u32>>,
-        WaitForStopReasonError<T::Error, <C as Connection>::Error>,
-    > {
+        connection: &mut Adapted<C>,
+    ) -> Result<Event<SingleThreadStopReason<u32>>, WaitForStopReasonError<T::Error, C::Error>>
+    {
         if session.action == Action::Step {
             return session
                 .step()
@@ -649,11 +655,13 @@ where
                 return Ok(Event::TargetStopped(reason));
             }
             if connection
+                .0
                 .peek()
                 .map_err(WaitForStopReasonError::Connection)?
                 .is_some()
             {
                 let byte = connection
+                    .0
                     .read()
                     .map_err(WaitForStopReasonError::Connection)?;
                 return Ok(Event::IncomingData(byte));

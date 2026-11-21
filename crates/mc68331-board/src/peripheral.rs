@@ -362,6 +362,7 @@ impl Transfer {
 
 /// A value a peripheral drives on one of its ports, from a time on.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Driven {
     /// When it takes effect: never before the call that drove it.
     pub at: Time,
@@ -374,6 +375,7 @@ pub struct Driven {
 /// Bytes a peripheral writes into one of the board's memories, by name: a
 /// flash's command logic programming the array the core serves.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct MemoryWrite {
     /// The memory's name in the board file.
     pub memory: String,
@@ -479,13 +481,16 @@ impl<'a> Drive<'a> {
 
     /// Gives the drive the chip's system clock on board time, as the
     /// board gives every call.
+    ///
+    /// Not part of the semver API: the board's; a test or a host builds
+    /// its drive with [`Drive::with_system_clock`].
+    #[doc(hidden)]
     pub const fn set_system_clock(&mut self, system_clock: TimeBase) {
         self.system_clock = Some(system_clock);
     }
 
-    /// The drive with the chip's system clock on board time, as
-    /// [`Drive::set_system_clock`] gives it: for a test's or a host's
-    /// drive in one expression.
+    /// The drive with the chip's system clock on board time, as the
+    /// board gives every call: for a test's or a host's drive.
     #[must_use]
     pub const fn with_system_clock(mut self, system_clock: TimeBase) -> Self {
         self.set_system_clock(system_clock);
@@ -903,12 +908,12 @@ mod tests {
     fn a_transfer_takes_another_clock_and_keeps_the_rest() {
         let reset = QspiClock::reset(Frequency::from_hz(8_388_608));
         let transfer = Transfer::new(1, 2, 0xe, 0xa5, 8, reset, Time(9)).continuing();
-        let fast = QspiClock {
-            polarity: ClockPolarity::IdleHigh,
-            phase: ClockPhase::CaptureLeading,
-            period: Cycles(4),
-            ..reset
-        };
+        let fast = QspiClock::new(
+            ClockPolarity::IdleHigh,
+            ClockPhase::CaptureLeading,
+            Cycles(4),
+            reset.system_clock,
+        );
         let clocked = transfer.clocked(fast);
         assert_eq!(clocked.clock, fast);
         assert_eq!(

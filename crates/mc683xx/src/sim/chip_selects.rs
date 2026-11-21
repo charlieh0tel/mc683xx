@@ -338,7 +338,10 @@ pub struct ChipSelects {
 impl ChipSelects {
     /// The registers out of reset, with `data` the levels of DATA\[15:0\]
     /// as the reset releases (SIMRM 7.9).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[must_use]
+    #[doc(hidden)]
     pub fn new(data: u16) -> Self {
         let high = |pin: u32| u16::from(data & 1 << pin != 0);
         let mut cspar0 = CSPAR0_CSBOOT_SELECT | high(CSBOOT_DATA);
@@ -436,6 +439,9 @@ impl ChipSelects {
 
     /// The selects `request` matches, CSBOOT first then CS0 to CS10
     /// (SIMRM 7.4, Figure 7-2).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn matches(&self, request: DecodeRequest) -> impl Iterator<Item = Match> + '_ {
         self.matches_among(request, Selects::ALL)
     }
@@ -443,6 +449,9 @@ impl ChipSelects {
     /// The selects among `candidates` that `request` matches, in
     /// `matches`' order: with `candidates` the selects whose blocks
     /// hold the cycle's address (`at`), the same as `matches`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn matches_among(
         &self,
         request: DecodeRequest,

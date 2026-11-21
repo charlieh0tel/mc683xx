@@ -103,7 +103,7 @@ pub(crate) type Taken = (bool, Vec<(String, Signal)>);
 /// from a live UI lands at the sync point after it was queued, timed by
 /// when the UI sent it.  A stop or input asked between runs is taken at the
 /// next run's start.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct BoardControl(Arc<Inner>);
 
 impl BoardControl {
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn a_sleep_wakes_for_a_stop() {
-        let control = BoardControl::default();
+        let control = BoardControl(Arc::default());
         let stopper = control.clone();
         let thread = thread::spawn(move || stopper.stop());
         // an hour, cut short by the stop

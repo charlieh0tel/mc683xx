@@ -2,9 +2,10 @@
 //! or a CPU32 under BDM control.
 //!
 //! gdb's remote serial protocol, through the [`gdbstub`] crate, over a
-//! [`target::Target`] ([PLAN.md, Debugger]): [`serve`].  An emulated
-//! target gives the CPU's controls, so breakpoints, watchpoints and
-//! steps are the core's hooks; [`bdm::Bdm`] makes any
+//! [`target::Target`] ([PLAN.md, Debugger]): [`serve`], on a
+//! [`connection::Connection`].  An emulated target gives the CPU's
+//! controls, so breakpoints, watchpoints and steps are the core's
+//! hooks; [`bdm::Bdm`] makes any
 //! [`Cpu32Target`](mc683xx_target::Cpu32Target), a BDM pod's on
 //! silicon among them, a target whose breakpoints are BGND planted in
 //! memory.  [`docs/gdb.md`] is its guide, whose Rust block the
@@ -23,11 +24,10 @@
 //! use std::collections::VecDeque;
 //! use std::io;
 //!
-//! use gdbstub::conn::Connection;
-//! use gdbstub::conn::ConnectionExt;
 //! use mc683xx_cpu32::flat::ADDRESS_BITS;
 //! use mc683xx_cpu32::flat::Machine;
 //! use mc683xx_gdb::Ending;
+//! use mc683xx_gdb::connection::Connection;
 //! use mc683xx_gdb::serve;
 //!
 //! /// gdb's end of the connection: its packets, and the stub's replies.
@@ -41,17 +41,15 @@
 //! impl Connection for Wire {
 //!     type Error = io::Error;
 //!
-//!     fn write(&mut self, byte: u8) -> io::Result<()> {
-//!         self.output.push(byte);
+//!     fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+//!         self.output.extend_from_slice(bytes);
 //!         Ok(())
 //!     }
 //!
 //!     fn flush(&mut self) -> io::Result<()> {
 //!         Ok(())
 //!     }
-//! }
 //!
-//! impl ConnectionExt for Wire {
 //!     fn read(&mut self) -> io::Result<u8> {
 //!         self.input
 //!             .pop_front()
@@ -69,10 +67,7 @@
 //!     input: b"$?#3f$D#44".iter().copied().collect(),
 //!     output: Vec::new(),
 //! };
-//! let ending = serve(
-//!     &mut machine,
-//!     &mut wire as &mut dyn ConnectionExt<Error = io::Error>,
-//! )?;
+//! let ending = serve(&mut machine, &mut wire)?;
 //! assert_eq!(ending, Ending::Detached);
 //! assert!(wire.output.starts_with(b"+$T05"));
 //! # Ok::<(), Box<dyn std::error::Error>>(())
@@ -90,9 +85,9 @@
 
 use std::fmt::Display;
 
-use gdbstub::conn::ConnectionExt;
 use mc683xx_target::address::Address;
 
+use crate::connection::Connection;
 use crate::target::Target;
 
 mod arch;
@@ -134,8 +129,8 @@ pub enum Ending {
 ///
 /// fn target<E, C>(error: SessionError<E, C>) -> Option<E> {
 ///     match error {
-///         SessionError::Target(error) => Some(error),
-///         SessionError::Connection(_) | SessionError::Protocol(_) => None,
+///         SessionError::Target { error } => Some(error),
+///         SessionError::Connection { .. } | SessionError::Protocol(_) => None,
 ///         SessionError::Unrestored(_) | SessionError::Uncleaned { .. } => None,
 ///     }
 /// }
@@ -145,11 +140,17 @@ pub enum Ending {
 pub enum SessionError<E, C> {
     /// A call on the target failed: its run, or, under BDM control,
     /// halting it or putting it back as it was.
-    #[error("target: {0}")]
-    Target(E),
+    #[error("target: {error}")]
+    Target {
+        /// The target's error.
+        error: E,
+    },
     /// The connection failed, or gdb closed it.
-    #[error("connection: {0}")]
-    Connection(C),
+    #[error("connection: {error}")]
+    Connection {
+        /// The connection's error.
+        error: C,
+    },
     /// gdb said something the stub could not take.
     #[error("protocol: {0}")]
     Protocol(String),
@@ -211,7 +212,7 @@ pub fn serve<T, C>(
 where
     T: Target,
     T::Error: Display,
-    C: ConnectionExt,
+    C: Connection,
     C::Error: Display,
 {
     session::serve(target, connection)

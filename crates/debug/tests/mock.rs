@@ -13,6 +13,7 @@ use mc683xx_debug::script::CommandError;
 use mc683xx_debug::script::Script;
 use mc683xx_debug::script::ScriptError;
 use mc683xx_target::Cpu32Target;
+use mc683xx_target::Unsupported;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
@@ -33,6 +34,9 @@ enum MockError {
     /// An access touched the failing byte, or memory the mock lacks.
     #[error("bus error at {0}")]
     Bus(Address),
+    /// A call the mock lacks.
+    #[error(transparent)]
+    Unsupported(#[from] Unsupported),
 }
 
 /// One memory call the mock took.
@@ -462,6 +466,7 @@ fn a_mismatch_stops_the_script_at_its_line() {
                 line: 3,
                 command: Command::ReadMemory { .. },
                 error: CommandError::Mismatch { read: 0x1234 },
+                ..
             }
         ),
         "{error}"

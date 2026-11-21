@@ -11,11 +11,11 @@ use mc683xx_modules::peripheral::QspiClock;
 /// (`Transfer::shifting` gives it its word).
 pub(crate) fn transfer(number: u8) -> Transfer {
     let mode = Mode::numbered(number);
-    let clock = QspiClock {
-        polarity: mode.polarity,
-        phase: mode.phase,
-        period: Cycles(8),
-        system_clock: Frequency::from_hz(16_777_216),
-    };
+    let clock = QspiClock::new(
+        mode.polarity,
+        mode.phase,
+        Cycles(8),
+        Frequency::from_hz(16_777_216),
+    );
     Transfer::new(0, 0, 0, 0, 0, clock, Time::ZERO)
 }

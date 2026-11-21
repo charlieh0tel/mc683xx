@@ -86,7 +86,7 @@ const TIMEOUT_MS: &str = "timeout_ms";
 const FC: &str = "fc";
 
 /// One command of a script.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Command {
     /// Writes `value` to memory.
@@ -638,7 +638,7 @@ impl Command {
 }
 
 /// A command and the line it is on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Line {
     /// The line, from 1.
@@ -657,6 +657,7 @@ pub struct Script {
 /// A line of a script that is not a command.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("line {line}: {error}")]
+#[non_exhaustive]
 pub struct ParseScriptError {
     /// The line, from 1.
     pub line: usize,
@@ -667,6 +668,7 @@ pub struct ParseScriptError {
 /// A command of a script that failed, and the line it is on.
 #[derive(Debug, thiserror::Error)]
 #[error("line {line}: `{command}`: {error}")]
+#[non_exhaustive]
 pub struct ScriptError<E> {
     /// The line, from 1.
     pub line: usize,
@@ -715,7 +717,7 @@ impl Script {
         self.lines.iter().try_for_each(|line| {
             line.command.run(target).map_err(|error| ScriptError {
                 line: line.number,
-                command: line.command,
+                command: line.command.clone(),
                 error,
             })
         })

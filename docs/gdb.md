@@ -127,11 +127,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   target is halted first and stays where it is until gdb continues or
   steps it; an emulated one runs only inside `serve`.  Detach leaves
   an emulated target to its host and resumes one under BDM control;
-  kill leaves either halted.  Any `gdbstub::conn::ConnectionExt`
-  serves, a `TcpStream` or the tests' in-memory one.  It is the one
-  foreign type in the stub's API, deliberately: a connection is
-  gdbstub's to drive, and an own trait would only forward to it, so
-  the crate's major version follows gdbstub's.
+  kill leaves either halted.  Any `connection::Connection` serves: a
+  `TcpStream`, a `connection::Polled` one, a borrowed one (`&mut`),
+  or a host's own, the tests' in-memory one among them.  A connection
+  gives `write_all`, `flush`, `read` (the next byte, waiting for it),
+  `peek` (the next byte if one has come, not waiting: the stub looks
+  for gdb's Ctrl-C between a run's quanta) and `start` (called as the
+  session starts; a `TcpStream` turns off Nagle's delay).  The stub's
+  API names no type of the `gdbstub` crate it is built on.
 - `SessionError`: a call on the target failed (`Target`, a board's
   peripheral that stalled, a pod's lost link), the connection did
   (`Connection`, gdb gone without detaching), or gdb sent what the stub
@@ -161,7 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   ends the session as a `Protocol` error.  With the `board` feature, `conditions` gives
   the target's stop conditions (`mc683xx_board::condition::Conditions`,
   a board's; none by default), for `monitor stop`.
-- `bdm::Bdm(&mut target)` is any `mc683xx_target::Cpu32Target` as a
+- `bdm::Bdm::new(&mut target)` is any `mc683xx_target::Cpu32Target` as a
   `Target`: no `with_cpu`, its own registers, memory, run control and
   step.  What a target gives decides what gdb gets:
 
@@ -351,11 +354,13 @@ peripherals).
 
 ## Over BDM
 
-`serve(&mut Bdm(&mut target), connection)` serves gdb over a
+`serve(&mut Bdm::new(&mut target), connection)` serves gdb over a
 `mc683xx_target::Cpu32Target`: what a debugger has of a CPU32 through
 its background debug mode.  A host that drives a 68331 through a BDM
 pod implements the trait and serves gdb this way; the emulated chip
-implements it too.  The session halts the target first; detach resumes
+implements it too.  The trait's error is `'static` and converts from
+`mc683xx_target::Unsupported`, which a method added to the trait later
+returns by default.  The session halts the target first; detach resumes
 it, kill leaves it halted.
 
 - **Registers** are the same description's, read and written through

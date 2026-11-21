@@ -27,6 +27,7 @@ use crate::wiring::Shared;
 /// A condition a peripheral offers, as `monitor stop conditions` lists
 /// it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConditionInfo {
     /// Its name, the word that arms it.
     pub name: &'static str,
@@ -34,6 +35,19 @@ pub struct ConditionInfo {
     pub arguments: &'static str,
     /// What it stops for.
     pub help: &'static str,
+}
+
+impl ConditionInfo {
+    /// The condition `name`, its usage line's `arguments`, and `help`,
+    /// what it stops for.
+    #[must_use]
+    pub const fn new(name: &'static str, arguments: &'static str, help: &'static str) -> Self {
+        Self {
+            name,
+            arguments,
+            help,
+        }
+    }
 }
 
 /// A peripheral's own handle on a condition it armed

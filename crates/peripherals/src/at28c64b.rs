@@ -975,7 +975,7 @@ mod tests {
     fn construct(text: &str, directory: &Scratch) -> Result<At28c64b, ParameterError> {
         let parameters = Parameters::parse(text).unwrap();
         let mut environment = Environment::default();
-        environment.board_dir = directory.0.clone();
+        environment.set_board_dir(directory.0.clone());
         let context = Context::new("eeprom", &parameters, &environment);
         let peripheral = At28c64b::from_context(&context);
         assert_eq!(parameters.unread(), None);

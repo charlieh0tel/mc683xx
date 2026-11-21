@@ -43,6 +43,8 @@ use mc683xx_gdb::serve;
 #[cfg(unix)]
 use mc683xx_target::Cpu32Target;
 #[cfg(unix)]
+use mc683xx_target::Unsupported;
+#[cfg(unix)]
 use mc683xx_target::address::Address;
 #[cfg(unix)]
 use mc683xx_target::entry::Entry;
@@ -1316,6 +1318,9 @@ enum CableError {
     /// The protocol has no step request.
     #[error("the cable cannot step")]
     NoStep,
+    /// A call the cable lacks.
+    #[error(transparent)]
+    Unsupported(#[from] Unsupported),
 }
 
 /// The virtual cable as a pod's host drives it: a `Cpu32Target` whose
@@ -1467,7 +1472,7 @@ fn gdb_over(
     Vec<String>,
 ) {
     let output = Rc::new(RefCell::new(Vec::new()));
-    let ending = serve(&mut Bdm(cable), Wire::new(script, &output));
+    let ending = serve(&mut Bdm::new(cable), Wire::new(script, &output));
     let replies = replies(&output.borrow());
     (ending, replies)
 }

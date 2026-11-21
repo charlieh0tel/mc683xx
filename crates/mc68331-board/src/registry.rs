@@ -25,6 +25,7 @@ use crate::signal::Kind;
 
 /// A port a peripheral type declares: a net endpoint `peripheral.name`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct PortSpec {
     /// Its name.
     pub name: String,
@@ -35,24 +36,32 @@ pub struct PortSpec {
 }
 
 impl PortSpec {
-    /// An input `name` of `kind`.
+    /// A port `name` of `kind` facing `direction`.
     #[must_use]
-    pub fn input(name: impl Into<String>, kind: Kind) -> Self {
+    pub fn new(name: impl Into<String>, kind: Kind, direction: Direction) -> Self {
         Self {
             name: name.into(),
             kind,
-            direction: Direction::In,
+            direction,
         }
+    }
+
+    /// An input `name` of `kind`.
+    #[must_use]
+    pub fn input(name: impl Into<String>, kind: Kind) -> Self {
+        Self::new(name, kind, Direction::In)
     }
 
     /// An output `name` of `kind`.
     #[must_use]
     pub fn output(name: impl Into<String>, kind: Kind) -> Self {
-        Self {
-            name: name.into(),
-            kind,
-            direction: Direction::Out,
-        }
+        Self::new(name, kind, Direction::Out)
+    }
+
+    /// A port `name` of `kind` both ways.
+    #[must_use]
+    pub fn in_out(name: impl Into<String>, kind: Kind) -> Self {
+        Self::new(name, kind, Direction::InOut)
     }
 }
 
@@ -433,8 +442,9 @@ pub struct Environment {
     /// Where peripherals keep working copies (an EEPROM's), if the run gives
     /// one.
     pub work_dir: Option<PathBuf>,
-    /// The board file's directory, which its paths are relative to.
-    pub board_dir: PathBuf,
+    /// The board file's directory, which its paths are relative to: the
+    /// load sets it from the board file.
+    board_dir: PathBuf,
 }
 
 impl Environment {
@@ -450,6 +460,13 @@ impl Environment {
             (hash ^ u64::from(byte)).wrapping_mul(PRIME)
         });
         mix(self.seed ^ hash)
+    }
+
+    /// Sets the directory a constructor's paths are relative to, for a test
+    /// of the constructor through [`Context::new`].  A load sets its own,
+    /// the board file's directory, in place of this one.
+    pub fn set_board_dir(&mut self, board_dir: impl Into<PathBuf>) {
+        self.board_dir = board_dir.into();
     }
 }
 
@@ -596,6 +613,10 @@ enum Builds {
 }
 
 /// A registered peripheral type.
+///
+/// Not part of the semver API: the loader builds peripherals with it, and
+/// a host's tests of its constructors reach it through `Registry::get`.
+#[doc(hidden)]
 pub struct PeripheralType {
     /// How it builds its peripherals.
     builds: Builds,
@@ -734,6 +755,10 @@ impl Registry {
     }
 
     /// The type `name`, if registered.
+    ///
+    /// Not part of the semver API: the loader's, and a host's tests' of
+    /// its constructors.
+    #[doc(hidden)]
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&PeripheralType> {
         self.types.get(name)

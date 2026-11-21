@@ -3,7 +3,6 @@
 use std::io;
 use std::path::PathBuf;
 
-use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_modules::sim::clock::ClockSourceError;
 
 use crate::condition::ArmError;
@@ -219,9 +218,6 @@ pub enum LoadError {
     /// The chip refused the wiring: its own error.
     #[error(transparent)]
     Build(Box<dyn std::error::Error + Send + Sync>),
-    /// A snapshot that does not restore into this board.
-    #[error(transparent)]
-    State(#[from] StateError),
 }
 
 /// Why a board file's TOML does not parse, or does not fit the schema:

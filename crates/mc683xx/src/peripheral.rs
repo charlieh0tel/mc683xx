@@ -95,7 +95,11 @@ pub enum ClockPhase {
 
 /// The QSPI's serial clock as SPCR0 and the system clock set it
 /// (QSMRM 4.3.1).
+///
+/// Built with [`QspiClock::new`] or [`QspiClock::reset`], so a field
+/// added later gets a default and no host's code changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct QspiClock {
     /// CPOL.
     pub polarity: ClockPolarity,
@@ -109,6 +113,23 @@ pub struct QspiClock {
 }
 
 impl QspiClock {
+    /// A clock of `polarity` and `phase`, `period` system clocks an SCK
+    /// period, the system clock at `system_clock`.
+    #[must_use]
+    pub const fn new(
+        polarity: ClockPolarity,
+        phase: ClockPhase,
+        period: Cycles,
+        system_clock: Frequency,
+    ) -> Self {
+        Self {
+            polarity,
+            phase,
+            period,
+            system_clock,
+        }
+    }
+
     /// SCK's frequency, the system clock / (2 x SPBR) (QSMRM equation
     /// 4-1), rounded down.
     #[must_use]

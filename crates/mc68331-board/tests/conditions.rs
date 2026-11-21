@@ -38,11 +38,7 @@ const FIRST_FALL: Time = Time(PERIOD_PS / 2 + 37);
 const RUN_PS: u64 = 10 * PERIOD_PS;
 
 /// The probe's one condition.
-const HIGH: ConditionInfo = ConditionInfo {
-    name: "high",
-    arguments: "",
-    help: "its input driven high",
-};
+const HIGH: ConditionInfo = ConditionInfo::new("high", "", "its input driven high");
 
 /// A peripheral offering one condition: its input driven high.
 #[derive(Debug, Default)]

@@ -45,6 +45,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: make oracle
 
+  semver:
+    # The published crates' APIs against their last release on
+    # crates.io (cargo-semver-checks): a breaking change needs a
+    # version that allows it.  Until 1.0 the version is bumped only at
+    # release, so a break reports here without failing the run.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: obi1kenobi/cargo-semver-checks-action@6b69fcf40e9b5fb17adeb57e4b6ecd020649a239 # v2.9
+
   package:
     # The published crates package and build from their packages alone,
     # in dependency order, as `cargo publish --workspace` would upload

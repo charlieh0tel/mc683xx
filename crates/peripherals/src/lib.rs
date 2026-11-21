@@ -100,6 +100,11 @@ const STOCK: &[Stock] = &[
 /// Registers each stock type `registry` does not already have, so a
 /// host's own type of the same name takes precedence.
 ///
+/// A host with types of its own registers them first, then calls this:
+/// a stock name already present is skipped, not refused, as Python's
+/// `Board` does.  Registered after, a host type of a stock name is
+/// [`RegistryError::Duplicate`].
+///
 /// # Errors
 ///
 /// If a type declares a port twice.
@@ -115,6 +120,12 @@ pub fn register(registry: &mut Registry) -> Result<(), RegistryError> {
 /// A registry of the built-in types ([`Registry::with_builtins`]) and
 /// the stock ones: what a host needs for a board file with none of its
 /// own types.
+///
+/// A host with types of its own starts from
+/// [`Registry::with_builtins`], registers them, then calls [`register`],
+/// which skips a stock name already present; registered into this
+/// registry, a host type of a stock name is
+/// [`RegistryError::Duplicate`].
 #[must_use]
 #[expect(
     clippy::missing_panics_doc,

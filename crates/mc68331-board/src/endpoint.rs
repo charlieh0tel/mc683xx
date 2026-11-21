@@ -15,8 +15,7 @@ use serde::Serialize;
 
 /// An endpoint as a board file names it.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum Endpoint {
+pub(crate) enum Endpoint {
     /// A peripheral's port: `peripheral.port`.
     Peripheral {
         /// The peripheral.
@@ -58,7 +57,7 @@ impl fmt::Display for Endpoint {
 /// Text that names no endpoint.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no endpoint {0:?}")]
-pub struct ParseEndpointError(pub String);
+pub(crate) struct ParseEndpointError(String);
 
 impl Endpoint {
     /// The endpoint `name`, if it is one.
