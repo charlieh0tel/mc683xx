@@ -487,16 +487,10 @@ impl<'a> Drive<'a> {
     /// A drive for a call at `now`, the chip's system clock on board time
     /// `system_clock`, whose analog inputs `sampler` reads.
     #[must_use]
-    pub const fn with_sampler(now: Time, system_clock: TimeBase, sampler: Sampler<'a>) -> Self {
+    pub fn with_sampler(now: Time, system_clock: TimeBase, sampler: Sampler<'a>) -> Self {
         Self {
-            now,
-            driven: Vec::new(),
-            writes: Vec::new(),
-            stop: false,
-            fired: Vec::new(),
             sampler: Some(sampler),
-            system_clock,
-            memories: Vec::new(),
+            ..Self::new(now, system_clock)
         }
     }
 

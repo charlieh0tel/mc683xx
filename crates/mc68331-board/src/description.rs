@@ -731,17 +731,14 @@ impl Description {
         environment: &Environment,
         read: impl FnMut(&Path) -> io::Result<Vec<u8>>,
     ) -> Result<(), LoadError> {
-        let mut environment = environment.clone();
-        environment.set_board_dir(self.directory.clone());
-        let read = RefCell::new(read);
-        let read = |path: &Path| (read.borrow_mut())(path);
+        let construct = self.constructor(registry, environment, read);
         let ports = self
             .peripherals
             .iter()
             .map(|spec| {
                 let ports = match registry.ports(&spec.kind) {
                     Some(ports) => Cow::Borrowed(ports),
-                    None => Cow::Owned(construct(spec, registry, &environment, &read)?.ports),
+                    None => Cow::Owned(construct(spec)?.ports),
                 };
                 Ok((spec.name.as_str(), ports))
             })
@@ -763,6 +760,25 @@ impl Description {
             }
         }
         Ok(())
+    }
+
+    /// What builds this description's peripherals by their types in
+    /// `registry`, in `environment` with the board's directory its own,
+    /// their paths' contents from `read`.
+    pub(crate) fn constructor<'a>(
+        &self,
+        registry: &'a Registry,
+        environment: &Environment,
+        read: impl FnMut(&Path) -> io::Result<Vec<u8>> + 'a,
+    ) -> impl Fn(&PeripheralSpec) -> Result<Constructed, LoadError> + 'a {
+        let mut environment = environment.clone();
+        environment.set_board_dir(self.directory.clone());
+        let read = RefCell::new(read);
+        move |spec| {
+            construct(spec, registry, &environment, &|path: &Path| {
+                (read.borrow_mut())(path)
+            })
+        }
     }
 
     /// The marking of `peripheral`, if the file gives one.
@@ -1467,7 +1483,7 @@ fn read_net(
 
 /// Peripheral `spec` built by its type in `registry`, its paths' contents
 /// from `read`: each parameter read, and no port name used twice.
-pub(crate) fn construct(
+fn construct(
     spec: &PeripheralSpec,
     registry: &Registry,
     environment: &Environment,

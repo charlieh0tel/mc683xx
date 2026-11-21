@@ -64,7 +64,6 @@ use crate::description::Description;
 use crate::description::NetSpec;
 use crate::description::Options;
 use crate::description::Target;
-use crate::description::construct;
 use crate::description::port_of;
 use crate::endpoint::Endpoint;
 use crate::error::ConditionError;
@@ -644,14 +643,11 @@ impl<C: Chip> Board<C> {
         environment: &Environment,
         read: impl FnMut(&Path) -> io::Result<Vec<u8>>,
     ) -> Result<Self, LoadError> {
-        let mut environment = environment.clone();
-        environment.set_board_dir(description.directory.clone());
-        let read = RefCell::new(read);
-        let read = |path: &Path| (read.borrow_mut())(path);
+        let construct = description.constructor(registry, environment, read);
         let mut cells: Vec<PeripheralCell> = Vec::new();
         let mut peripherals = Vec::new();
         for spec in &description.peripherals {
-            let constructed = construct(spec, registry, &environment, &read)?;
+            let constructed = construct(spec)?;
             cells.push(Rc::new(RefCell::new(constructed.peripheral)));
             peripherals.push(PeripheralInfo {
                 name: spec.name.clone(),
