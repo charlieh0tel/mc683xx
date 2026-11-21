@@ -54,14 +54,14 @@ fn trace(cpu: &mut Cpu, budget: u64) -> Vec<u32> {
 
 /// What a run leaves that the next could see.
 fn observed(cpu: &Cpu) -> (Vec<u8>, u64) {
-    (cpu.save(), cpu.instructions())
+    (cpu.save().unwrap(), cpu.instructions())
 }
 
 #[test]
 fn a_snapshot_mid_run_reproduces_the_run() {
     let mut cpu = looping();
     trace(&mut cpu, 333);
-    let snapshot = cpu.save();
+    let snapshot = cpu.save().unwrap();
     let first = trace(&mut cpu, 1000);
     let after = observed(&cpu);
     assert!(
@@ -89,7 +89,7 @@ fn a_snapshot_mid_run_reproduces_the_run() {
 fn a_pending_breakpoint_is_saved() {
     let mut cpu = looping();
     cpu.set_breakpoint_pending(true);
-    let snapshot = cpu.save();
+    let snapshot = cpu.save().unwrap();
     let mut other = looping();
     other.restore(&snapshot).unwrap();
     assert!(other.breakpoint_pending());
@@ -99,7 +99,7 @@ fn a_pending_breakpoint_is_saved() {
 fn a_pending_trace_is_saved() {
     let mut cpu = looping();
     cpu.bare.trace_pending = Some(Address(DATA));
-    let snapshot = cpu.save();
+    let snapshot = cpu.save().unwrap();
     let mut other = looping();
     other.restore(&snapshot).unwrap();
     assert_eq!(other.bare.trace_pending, Some(Address(DATA)));
@@ -113,7 +113,7 @@ fn the_format_matches_its_golden() {
         env!("CARGO_MANIFEST_DIR"),
         "cpu",
         &[("cpu", VERSION)],
-        &cpu.save(),
+        &cpu.save().unwrap(),
     );
 }
 
@@ -123,7 +123,7 @@ fn hooks_stay_and_permissions_come_back() {
     cpu.memory
         .protect(Space::User, Address(0), PAGE_BYTES, Permissions::READ)
         .unwrap();
-    let snapshot = cpu.save();
+    let snapshot = cpu.save().unwrap();
     let mut other = machine(&LOOP);
     let id = other.add_write_hook(Address(DATA)..=Address(DATA), |_| ControlFlow::Break(()));
     other.restore(&snapshot).unwrap();
@@ -142,7 +142,7 @@ fn hooks_stay_and_permissions_come_back() {
 #[test]
 fn another_format_is_refused() {
     let mut cpu = looping();
-    let mut snapshot = cpu.save();
+    let mut snapshot = cpu.save().unwrap();
     snapshot[0] ^= 0xff;
     assert!(matches!(
         cpu.restore(&snapshot),
@@ -152,7 +152,7 @@ fn another_format_is_refused() {
         cpu.restore(&snapshot[..2]),
         Err(StateError::Truncated)
     ));
-    let good = looping().save();
+    let good = looping().save().unwrap();
     assert!(matches!(
         cpu.restore(&good[..good.len() / 2]),
         Err(StateError::Decode(_))
@@ -169,7 +169,7 @@ fn another_format_is_refused() {
 
 #[test]
 fn other_hardware_is_refused() {
-    let snapshot = looping().save();
+    let snapshot = looping().save().unwrap();
     let mut small = Cpu::new(Memory::new(24).unwrap());
     small.registers.set_sr(status::S);
     assert!(matches!(
@@ -193,7 +193,7 @@ fn edited(snapshot: &[u8], change: impl FnOnce(&mut CpuState)) -> Vec<u8> {
 
 #[test]
 fn a_state_no_run_could_save_is_refused() {
-    let snapshot = looping().save();
+    let snapshot = looping().save().unwrap();
     let invalid: [(Vec<u8>, &str); 3] = [
         (
             edited(&snapshot, |state| {
@@ -214,7 +214,7 @@ fn a_state_no_run_could_save_is_refused() {
     for (bytes, what) in invalid {
         assert!(matches!(cpu.restore(&bytes), Err(StateError::Invalid(reason)) if reason == what));
     }
-    assert_eq!(cpu.save(), snapshot, "unchanged by the refusals");
+    assert_eq!(cpu.save().unwrap(), snapshot, "unchanged by the refusals");
 }
 
 #[test]

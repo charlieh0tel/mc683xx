@@ -182,7 +182,7 @@ prefix; their directories keep the short names.
   `Cpu::instructions` (and `Mc68331::instructions`) counts
   instructions run.
 - **State:** save and restore the whole core, module and peripheral
-  state.  `Cpu::save() -> Vec<u8>` and
+  state.  `Cpu::save() -> Result<Vec<u8>, StateError>`, a `Result` as every layer's, and
   `Cpu::restore(&[u8])`: registers, the run loop's timing and
   exception state, every memory region (ROM's too; a freed one
   empty), page tables and permissions; not hooks, which stay.  `Mc68331::save()` and

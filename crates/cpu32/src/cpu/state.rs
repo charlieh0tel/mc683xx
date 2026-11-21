@@ -428,8 +428,13 @@ impl Cpu {
     /// The core's whole state, as a snapshot: registers, the run
     /// loop's timing and exception state, and memory (its regions,
     /// ROM's included, page tables and permissions).  Not the hooks.
-    #[must_use]
-    pub fn save(&self) -> Vec<u8> {
+    ///
+    /// # Errors
+    ///
+    /// None the core gives today; a `Result` as every other layer's
+    /// `save` gives, so a state the core cannot save can be refused
+    /// later without a break.
+    pub fn save(&self) -> Result<Vec<u8>, StateError> {
         let memory = &self.memory;
         let state = CpuState {
             registers: self.registers.clone(),
@@ -464,7 +469,7 @@ impl Cpu {
             address_mask: memory.address_mask,
             memory: memory.state(),
         };
-        encode(VERSION, &state)
+        Ok(encode(VERSION, &state))
     }
 
     /// Restores a snapshot [`save`](Self::save) made of a CPU with the same

@@ -648,7 +648,7 @@ impl Machine {
         Ok(encode(
             VERSION,
             &MachineState {
-                cpu: self.cpu.save(),
+                cpu: self.cpu.save()?,
                 now: self.now,
                 requests: self.requests,
                 peripherals: self.bus.save_peripherals()?,

@@ -2951,7 +2951,7 @@ mod tests {
             let mut cpu = looping(&[ADDQ, DBF, BACK], 5);
             cycles(&mut cpu);
             cycles(&mut cpu);
-            let snapshot = cpu.save();
+            let snapshot = cpu.save().unwrap();
             let mut restored = looping(&[ADDQ, DBF, BACK], 0);
             restored.restore(&snapshot).unwrap();
             assert_eq!(restored.loop_mode, Some(DBCC));

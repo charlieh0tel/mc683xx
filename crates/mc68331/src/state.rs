@@ -132,7 +132,7 @@ impl Mc68331 {
     pub fn save(&self) -> Result<Vec<u8>, StateError> {
         let board = &self.board;
         let state = ChipState {
-            cpu: self.cpu.save(),
+            cpu: self.cpu.save()?,
             sim: board.sim.clone(),
             modules: board
                 .modules

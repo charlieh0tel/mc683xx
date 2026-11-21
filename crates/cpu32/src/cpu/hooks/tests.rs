@@ -188,9 +188,9 @@ fn a_host_jump_back_to_a_stopped_hook_runs_it_again() {
 #[test]
 fn a_restore_starts_a_block() {
     let (mut cpu, starts) = stopping_at_the_second();
-    let stopped = cpu.save();
+    let stopped = cpu.save().unwrap();
     assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
-    let running = cpu.save();
+    let running = cpu.save().unwrap();
     assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
     cpu.restore(&running).unwrap();
     assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
