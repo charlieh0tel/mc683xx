@@ -377,7 +377,10 @@ fn a_host_stands_in_for_a_peripheral_through_an_external_endpoint() {
         Err(EditError::Port("div.uot".to_owned())),
         "a misspelled port is on no net"
     );
-    description.remove_peripheral("div").unwrap();
+    assert_eq!(
+        description.remove_peripheral("div"),
+        Ok(vec!["c".to_owned()])
+    );
     assert_eq!(
         description
             .nets
@@ -420,6 +423,27 @@ fn a_host_stands_in_for_a_peripheral_through_an_external_endpoint() {
         description.rebind("count.in", "osc.out"),
         Err(EditError::External("osc.out".to_owned()))
     );
+}
+
+#[test]
+fn removing_a_peripheral_names_the_nets_that_went_an_external_end_s_among_them() {
+    let mut description = parse(&with(
+        "[[peripheral]]\nname = \"osc\"\ntype = \"clock\"\nparameters = { hz = 10 }\n\
+         [[peripheral]]\nname = \"count\"\ntype = \"edge-counter\"\n\
+         [[net]]\nname = \"scope\"\ntype = \"clock\"\nfrom = \"osc.out\"\nto = [\"external.scope\"]\n\
+         [[net]]\nname = \"in\"\ntype = \"edge\"\nfrom = \"external.edges\"\nto = [\"count.in\"]\n",
+    ))
+    .unwrap();
+    assert_eq!(
+        description.remove_peripheral("count"),
+        Ok(vec!["in".to_owned()]),
+        "external.edges is left on no net"
+    );
+    assert_eq!(
+        description.remove_peripheral("osc"),
+        Ok(vec!["scope".to_owned()])
+    );
+    assert!(description.nets.is_empty());
 }
 
 #[test]

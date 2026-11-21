@@ -14,6 +14,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
 use std::io;
+use std::mem;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -349,13 +350,15 @@ impl Description {
 
     /// Removes peripheral `name` from the board, as an option off would
     /// leave it off: its net ends go, and a net left with no driver or no
-    /// sink goes with them.  An end to keep is rebound first
-    /// ([`Description::rebind`]).
+    /// sink goes with them, whatever ends it had left, an `external.*` end
+    /// among them.  The names of the nets that went, in the file's order,
+    /// so that a host sees an external endpoint it binds left on no net.
+    /// An end to keep is rebound first ([`Description::rebind`]).
     ///
     /// # Errors
     ///
     /// A description with no peripheral `name` ([`EditError::Peripheral`]).
-    pub fn remove_peripheral(&mut self, name: &str) -> Result<(), EditError> {
+    pub fn remove_peripheral(&mut self, name: &str) -> Result<Vec<String>, EditError> {
         let index = self
             .peripherals
             .iter()
@@ -367,9 +370,11 @@ impl Description {
             net.from.retain(of_other);
             net.to.retain(of_other);
         }
-        self.nets
-            .retain(|net| !net.from.is_empty() && !net.to.is_empty());
-        Ok(())
+        let (kept, removed) = mem::take(&mut self.nets)
+            .into_iter()
+            .partition(|net| !net.from.is_empty() && !net.to.is_empty());
+        self.nets = kept;
+        Ok(removed.into_iter().map(|net: NetSpec| net.name).collect())
     }
 
     /// Moves every net end at `endpoint`, a peripheral's port

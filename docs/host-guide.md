@@ -1384,7 +1384,9 @@ peripheral's port to a run-time endpoint the host binds (the ends
 moved; a port on no net, a misspelled one among them, refused);
 `remove_peripheral(name)` takes a
 part off as an option off would, its net ends and any net left with no
-driver or no sink going with it.  Each refuses a name the description
+driver or no sink going with it, an `external.*` end it had left
+among them; it gives the names of the nets that went, so a host sees
+an external endpoint left on no net.  Each refuses a name the description
 lacks (`error::EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
 every method of the chip's.  `Chip` is sealed: a host names it in a
 bound (`Board<C: Chip>`) and calls its methods (`cpu`, `now`,
