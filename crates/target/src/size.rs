@@ -1,5 +1,7 @@
 //! Operand sizes.
 
+use core::fmt;
+
 /// The size of an operand or a bus cycle (CPU32RM 2.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -82,9 +84,29 @@ impl Size {
     }
 }
 
+/// `byte`, `word` or `long`: CPU32RM 2.3's sizes, `long` its long word.
+impl fmt::Display for Size {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Byte => "byte",
+            Self::Word => "word",
+            Self::Long => "long",
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::string::ToString;
+
     use super::Size;
+
+    #[test]
+    fn a_size_shows_as_its_name() {
+        assert_eq!(Size::Byte.to_string(), "byte");
+        assert_eq!(Size::Word.to_string(), "word");
+        assert_eq!(Size::Long.to_string(), "long");
+    }
 
     #[test]
     fn sign_extension() {
