@@ -439,7 +439,7 @@ fn a_module_that_cannot_peek_says_so() {
 
     let Board { mut chip, .. } = board(&[BRANCH_TO_SELF], None);
     chip.board.modules.push(Box::new(Opaque));
-    let address = chip.sim().module_base() + 0x700;
+    let address = chip.sim().module_base().0 + 0x700;
     assert_eq!(
         peek(&chip, address, Size::Word),
         Err(AccessError::Unpeekable)

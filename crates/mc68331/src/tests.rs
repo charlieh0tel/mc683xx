@@ -377,7 +377,7 @@ fn a_chip_select_write_remaps_at_once() {
 fn mm_moves_the_module_space() {
     let (mut chip, _) = booting(&[NOP]);
     write_register(&mut chip, SIM, 0x008f);
-    assert_eq!(chip.sim().module_base(), 0x7f_f000);
+    assert_eq!(chip.sim().module_base(), Address(0x7f_f000));
     assert_eq!(
         cycle(&mut chip, 0x7f_fa04, Size::Word, None),
         Ok((0x3f08, 2))

@@ -3,6 +3,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
+use mc683xx_target::address::Address;
 use mc683xx_target::size::Size;
 
 use super::Configuration;
@@ -86,7 +87,7 @@ fn registers_out_of_reset() {
     assert_eq!(read(&mut sim, 0x4e, Size::Word), 0x0000);
     assert_eq!(read(&mut sim, 0x17, Size::Byte), 0xff, "PEPAR");
     assert_eq!(read(&mut sim, 0x1f, Size::Byte), 0xff, "PFPAR");
-    assert_eq!(sim.module_base(), 0xff_f000);
+    assert_eq!(sim.module_base(), Address(0xff_f000));
     assert_eq!(sim.arbitration(), 0xf);
 }
 
@@ -109,9 +110,9 @@ fn mm_is_written_once() {
     let mut sim = sim();
     let written = sim.write(access(0x00, Size::Word, Cycles::ZERO), 0x008f);
     assert!(written.unwrap().decode);
-    assert_eq!(sim.module_base(), 0x7f_f000);
+    assert_eq!(sim.module_base(), Address(0x7f_f000));
     write(&mut sim, 0x00, Size::Word, 0x00cf, Cycles::ZERO);
-    assert_eq!(sim.module_base(), 0x7f_f000);
+    assert_eq!(sim.module_base(), Address(0x7f_f000));
     assert_eq!(read(&mut sim, 0x00, Size::Word), 0x008f);
 }
 

@@ -12,6 +12,7 @@
 //! use mc683xx_modules::chip_select::ChipSelect;
 //! use mc683xx_modules::sim::Configuration;
 //! use mc683xx_modules::sim::Sim;
+//! use mc683xx_target::address::Address;
 //!
 //! // DATA[15:0] high, the 32.768 kHz crystal.
 //! let sim = Sim::new(Configuration::default(), Cycles::ZERO);
@@ -19,7 +20,7 @@
 //! // (MC68331UM 4.3.2).
 //! assert_eq!(sim.clock().frequency(), Frequency::from_hz(32_768 * 4 * 64));
 //! // Out of reset only CSBOOT decodes, from address 0 (SIMRM 7.9.3).
-//! let selects = sim.chip_selects().at(0x400);
+//! let selects = sim.chip_selects().at(Address(0x400));
 //! assert!(selects.contains(ChipSelect::Boot.index()));
 //! ```
 // The published crates also hold these; test-only crates do not.

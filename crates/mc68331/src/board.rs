@@ -559,7 +559,7 @@ impl Board {
                 wiring
                     .decodes
                     .iter()
-                    .any(|decode| decode.takes(address, function_code))
+                    .any(|decode| decode.takes(Address(address), function_code))
             })
             .map(|wiring| wiring.peripheral)
             .collect()
@@ -584,7 +584,7 @@ impl Board {
             wiring
                 .decodes
                 .iter()
-                .any(|decode| decode.takes(address, function_code))
+                .any(|decode| decode.takes(Address(address), function_code))
         })
     }
 
@@ -707,7 +707,7 @@ impl Board {
                 return Ok((0, TABLE_CLOCKS.into()));
             }
         } else if let Some(offset) = address
-            .checked_sub(self.sim.module_base())
+            .checked_sub(self.sim.module_base().0)
             .filter(|&offset| offset < MODULE_SPACE_BYTES)
             && let Some(value) = self.internal(offset, size, function_code, now, write)
         {
@@ -1218,7 +1218,7 @@ impl Board {
     fn external_acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged {
         let address = iack_address(level);
         let request = DecodeRequest {
-            address,
+            address: address.0,
             function_code: FunctionCode::CPU_SPACE,
             write: false,
             size: Size::Byte,
@@ -1234,7 +1234,7 @@ impl Board {
         }
         match self.external(
             None,
-            address,
+            address.0,
             Size::Byte,
             FunctionCode::CPU_SPACE,
             now,
@@ -1266,13 +1266,13 @@ impl Board {
         let fixed = self
             .fixed
             .iter()
-            .map(|fixed| (fixed.memory.base, fixed.memory.length));
+            .map(|fixed| (Address(fixed.memory.base), fixed.memory.length));
         for (start, length) in self.sim.chip_selects().blocks().chain(fixed) {
-            let first = (start / PAGE_BYTES) as usize;
+            let first = (start.0 / PAGE_BYTES) as usize;
             let count = (length / PAGE_BYTES) as usize;
             covered[first..(first + count).min(PAGES)].fill(true);
         }
-        let modules = self.sim.module_base();
+        let modules = self.sim.module_base().0;
         for page in (0..PAGES).filter(|&page| covered[page]) {
             let address = page as u32 * PAGE_BYTES;
             if (modules..modules + MODULE_SPACE_BYTES).contains(&address)
@@ -1309,7 +1309,7 @@ impl Board {
     pub(crate) fn decode_pages(&mut self) {
         let chip_selects = self.sim.chip_selects();
         self.page_selects = (0..PAGES)
-            .map(|page| chip_selects.at(page as u32 * PAGE_BYTES))
+            .map(|page| chip_selects.at(Address(page as u32 * PAGE_BYTES)))
             .collect();
     }
 

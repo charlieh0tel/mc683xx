@@ -17,6 +17,7 @@ use std::mem;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::interrupt::InterruptLevel;
+use mc683xx_target::address::Address;
 use mc683xx_target::size::Size;
 
 use self::chip_selects::ChipSelects;
@@ -419,12 +420,12 @@ impl Sim {
 
     /// The module space's base, by MM.
     #[must_use]
-    pub const fn module_base(&self) -> u32 {
-        if self.simcr & SIMCR_MM != 0 {
+    pub const fn module_base(&self) -> Address {
+        Address(if self.simcr & SIMCR_MM != 0 {
             MODULE_BASE_HIGH
         } else {
             MODULE_BASE_LOW
-        }
+        })
     }
 
     /// SIMCR's IARB: the SIM's arbitration priority, for the timer and

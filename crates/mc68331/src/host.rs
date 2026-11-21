@@ -214,7 +214,7 @@ impl Mc68331 {
         let board = &self.board;
         if !function_code.is_cpu_space()
             && let Some(offset) = address
-                .checked_sub(board.sim.module_base())
+                .checked_sub(board.sim.module_base().0)
                 .filter(|&offset| offset < MODULE_SPACE_BYTES)
         {
             let access = |block: module::Block| module::RegisterAccess {
