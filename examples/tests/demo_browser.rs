@@ -21,6 +21,7 @@ use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_mc68331::chip::Mc68331;
@@ -42,7 +43,7 @@ const FRAME: Duration = Duration::from_micros(16_667);
 const FACTOR: f64 = 4.0;
 /// The most board time a frame runs, however far behind: a page's
 /// bound on a slice.
-const SLICE: u64 = PICOSECONDS_PER_SECOND / 10;
+const SLICE: Span = Span::from_millis(100);
 /// The most frames the help may take to come back.
 const FRAMES: u32 = 200;
 /// What is typed, a byte a frame: the help command.

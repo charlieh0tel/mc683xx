@@ -7,7 +7,6 @@ use std::hash::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::mem;
-use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::time::Duration;
 use std::time::Instant;
@@ -22,6 +21,7 @@ use mc683xx_board::pacing::Pacing;
 use mc683xx_board::pacing::ParsePacingError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::ParseKindError;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
 use pyo3::Bound;
@@ -165,7 +165,7 @@ pub(crate) fn run_until_paced(
     py: Python<'_>,
     board: &mut Board<Mc68331>,
     until: Time,
-    quantum: NonZeroU64,
+    quantum: Span,
 ) -> Result<Result<BoardRun, RunError>, PyErr> {
     let control = board.control();
     let mut pacer = Pacer::new();
@@ -189,16 +189,16 @@ pub(crate) fn run_until_paced(
 
 /// Runs a frame of `board` (Rust's `Board::run_frame`): to the board
 /// time due by `wall` under its control's pacing, but no more than
-/// `picoseconds`, the GIL released between quanta and Python's
+/// `bound`, the GIL released between quanta and Python's
 /// signal handlers run, as [`run_until_paced`] does, but never sleeping.
 pub(crate) fn run_frame(
     py: Python<'_>,
     board: &mut Board<Mc68331>,
     wall: Duration,
-    picoseconds: u64,
+    bound: Span,
 ) -> Result<Result<BoardRun, RunError>, PyErr> {
     let mut turns = Turns::new(py)?;
-    let outcome = board.run_frame_with(wall, picoseconds, |_| turns.turn());
+    let outcome = board.run_frame_with(wall, bound, |_| turns.turn());
     turns.ended(outcome)
 }
 

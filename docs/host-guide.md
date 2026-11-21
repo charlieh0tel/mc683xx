@@ -1354,6 +1354,15 @@ bound (`Board<C: Chip>`) and calls its methods (`cpu`, `now`,
 plumbing the board runs the chip with is hidden from the docs and
 outside semver.
 
+- **Board time.** `time::Time` is a time on the board, picoseconds
+  since power-on; `time::Span` is a span of it, picoseconds too, made
+  by `Span::from_picos`, `from_nanos`, `from_micros`, `from_millis`,
+  `from_seconds` or `from_seconds_f64` and read by `picos` or
+  `seconds_f64`.  `Time + Span` and `Time - Span` are times, `Time -
+  Time` (`since`) the `Span` between them, and spans add, subtract and
+  scale by a count, all saturating.  A run for a while
+  (`Board::run_for(Span::from_millis(10))`), a frame's bound, a
+  quantum and a serial frame's length are `Span`s.
 - **Nets.** `Board::observe(net, observer) -> Result<ObserverId,
   NetError>` attaches an `observe::Observer` (a closure
   `FnMut(&str, Time, Signal)` is one) to a net by name; `NetError::Unknown`
@@ -1431,9 +1440,9 @@ outside semver.
   wall second (2.0 twice real time, 0.5 half; finite and above 0, else
   `PacingError::Factor`); it prints and parses as `unpaced`, `realtime`
   or the factor.  `Board::run_until_paced(until, quantum)` runs to
-  `until` in quanta of `quantum` picoseconds of board time, a
-  `NonZeroU64` so the loop always ends (`pacing::QUANTUM`, 5 ms, is a
-  good one), and before each sleeps until board time is no longer ahead
+  `until` in quanta of `quantum` of board time, a `time::Span` (a zero
+  quantum is a picosecond, so the loop always ends; `pacing::QUANTUM`,
+  5 ms, is a good one), and before each sleeps until board time is no longer ahead
   of wall time times the control's factor, waking at once for a stop or
   a change of pacing; a run that reaches `until` sleeps once more after
   its last quantum, so it never returns ahead of wall time.  The wall
@@ -1446,19 +1455,19 @@ outside semver.
   loop alone.  Unpaced, neither reads the clock nor sleeps.  A host with
   a clock of its own that cannot sleep (a browser, from
   `requestAnimationFrame` with `performance.now()`; a GUI's timer) runs
-  the board a frame at a time: `Board::run_frame(wall, picoseconds)`,
+  the board a frame at a time: `Board::run_frame(wall, bound)`,
   `wall` its clock's reading as a `Duration` from any origin it keeps,
   never going back, runs to the board time due by then under the
-  control's pacing, but no more than `picoseconds` of board time, a
+  control's pacing, but no more than `bound`, a `Span` of board time, a
   frame's bound however far behind the host is (a hidden page), and a
   frame so bounded drops the time it missed, the next paced from where
-  it ended; unpaced, it runs `picoseconds`.  Paced,
+  it ended; unpaced, it runs `bound`.  Paced,
   the first frame, and the first after a `set_pacing` to another pacing (one
   to the pacing it has changes nothing, so a UI may set its choice every
   frame), any other run (even of no time) or a successful restore, runs
   nothing and starts the pacing from `wall`; frames run in quanta of
   `pacing::QUANTUM`, and are one long run.  `Board::run_frame_with(wall,
-  picoseconds, before)` calls `before` before each quantum, as
+  bound, before)` calls `before` before each quantum, as
   `run_until_quantized` does, for the host's own work between them; a
   run, a restore or a frame in `before` ends the pacing as it would
   between frames, and so does a frame in a quantized run's `before`.

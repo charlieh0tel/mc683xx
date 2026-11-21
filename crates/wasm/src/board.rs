@@ -21,6 +21,7 @@ use mc683xx_board::pacing::Pacing;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Span;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
@@ -77,24 +78,24 @@ impl Board {
         Ok(Self { board })
     }
 
-    /// [`runFor`](Self::run_for_js), its picoseconds a `u64`.
+    /// [`runFor`](Self::run_for_js), its time a [`Span`].
     ///
     /// # Errors
     ///
     /// As [`run_for_js`](Self::run_for_js).
-    pub fn run_for(&mut self, picoseconds: u64) -> Result<BoardRun, Error> {
-        Ok(self.board.run_for(picoseconds)?.into())
+    pub fn run_for(&mut self, span: Span) -> Result<BoardRun, Error> {
+        Ok(self.board.run_for(span)?.into())
     }
 
-    /// [`runFrame`](Self::run_frame_js), its picoseconds a `u64`.
+    /// [`runFrame`](Self::run_frame_js), its bound a [`Span`].
     ///
     /// # Errors
     ///
     /// As [`run_frame_js`](Self::run_frame_js).
-    pub fn run_frame(&mut self, wall: f64, picoseconds: u64) -> Result<BoardRun, Error> {
+    pub fn run_frame(&mut self, wall: f64, bound: Span) -> Result<BoardRun, Error> {
         let wall = Duration::try_from_secs_f64(wall / MILLISECONDS_PER_SECOND)
             .map_err(|_| Error::Wall(wall))?;
-        Ok(self.board.run_frame(wall, picoseconds)?.into())
+        Ok(self.board.run_frame(wall, bound)?.into())
     }
 
     /// [`send`](Self::send_js), its data bytes.
@@ -346,14 +347,16 @@ impl From<mc683xx_board::board::BoardRun> for BoardRun {
 /// `value` as picoseconds of board time: a `bigint` from 0 to 2 ** 64 - 1.
 /// wasm-bindgen would take a `bigint` modulo 2 ** 64 (so `-1n` would run
 /// for 213 days), and a `number` is no `bigint`, however exact.
-fn picoseconds_of(value: JsValue) -> Result<u64, Error> {
+fn picoseconds_of(value: JsValue) -> Result<Span, Error> {
     let Some(bigint) = value.dyn_ref::<BigInt>() else {
         return Err(Error::PicosecondsType(described(&value)));
     };
     let text = bigint
         .to_string(DECIMAL)
         .map_or_else(|_| String::new(), String::from);
-    u64::try_from(value).map_err(|_| Error::Picoseconds(text))
+    u64::try_from(value)
+        .map(Span::from_picos)
+        .map_err(|_| Error::Picoseconds(text))
 }
 
 /// The images in `images`, a `Map` or an object, by path; none for

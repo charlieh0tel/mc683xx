@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 
-use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::Cpu;
 use mc683xx_cpu32::cpu::Halt;
@@ -26,13 +26,13 @@ const IMAGE: &[u8] = include_bytes!("../../../examples/boards/demo.bin");
 /// The console's endpoint.
 const CONSOLE: &str = "console";
 /// Board time the boot runs for, past the banner and the prompt.
-const BOOT: u64 = PICOSECONDS_PER_SECOND / 10;
+const BOOT: Span = Span::from_millis(100);
 /// The most board time a frame runs.
-const SLICE: u64 = PICOSECONDS_PER_SECOND / 10;
+const SLICE: Span = Span::from_millis(100);
 /// A frame's wall time in milliseconds, about 60 a second.
 const FRAME: f64 = 16.0;
 /// Its board time in real time.
-const FRAME_PICOSECONDS: u64 = PICOSECONDS_PER_SECOND / 1000 * 16;
+const FRAME_PICOSECONDS: u64 = Span::from_millis(16).picos();
 /// How far a frame's board time may be from its wall time's, the page's
 /// clock being a float: a nanosecond.
 const ROUNDING: u64 = 1000;
@@ -66,7 +66,7 @@ fn booted() -> (Board, String) {
     let mut board = Board::with_images(TEXT, &images, &[]).unwrap();
     let run = board.run_for(BOOT).unwrap();
     assert_eq!(run.stop(), "budget");
-    assert_eq!(run.now(), BOOT);
+    assert_eq!(run.now(), BOOT.picos());
     let text = String::from_utf8(board.take_received(CONSOLE).unwrap()).unwrap();
     (board, text)
 }
@@ -88,7 +88,10 @@ fn frames_keep_to_the_clock_and_the_slice() {
     let (mut board, _) = booted();
     assert_eq!(board.pacing(), "unpaced");
     let start = board.now();
-    assert_eq!(board.run_frame(0.0, SLICE).unwrap().now(), start + SLICE);
+    assert_eq!(
+        board.run_frame(0.0, SLICE).unwrap().now(),
+        start + SLICE.picos()
+    );
 
     board.set_pacing("realtime").unwrap();
     assert_eq!(board.pacing(), "realtime");
@@ -101,7 +104,7 @@ fn frames_keep_to_the_clock_and_the_slice() {
     // an hour behind runs one slice
     let behind = board.now();
     let run = board.run_frame(wall + 3_600_000.0, SLICE).unwrap();
-    assert_eq!(run.now(), behind + SLICE);
+    assert_eq!(run.now(), behind + SLICE.picos());
 
     board.set_pacing("2").unwrap();
     assert_eq!(board.pacing(), "2");
@@ -114,7 +117,7 @@ fn a_run_of_no_time_starts_the_frames_pacing_again() {
     let wall = 5000.0;
     board.run_frame(wall, SLICE).unwrap();
     let before = board.run_frame(wall + FRAME, SLICE).unwrap().now();
-    board.run_for(0).unwrap();
+    board.run_for(Span::ZERO).unwrap();
     let run = board.run_frame(wall + 2.0 * FRAME, SLICE).unwrap();
     assert_eq!(run.now(), before, "starts");
 }

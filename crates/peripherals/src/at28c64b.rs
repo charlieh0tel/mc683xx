@@ -78,7 +78,7 @@ use mc683xx_board::registry::Context;
 use mc683xx_board::registry::ParameterError;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;
-use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
@@ -101,10 +101,8 @@ const PAGE_BITS: u32 = 6;
 /// contents a peripheral ships with.
 const ERASED: u8 = 0xff;
 
-/// Picoseconds in a microsecond.
-const PICOSECONDS_PER_MICROSECOND: u64 = PICOSECONDS_PER_SECOND / 1_000_000;
 /// tBLC, the Byte Load Cycle Time, at most (Table 6-4).
-const BYTE_LOAD: u64 = 150 * PICOSECONDS_PER_MICROSECOND;
+const BYTE_LOAD: Span = Span::from_micros(150);
 /// tWC, the Write Cycle Time, at most, in microseconds (Table 6-4): a
 /// peripheral's own is anything up to it, and the model's by default.
 const WRITE_CYCLE_MAX_US: u64 = 10_000;
@@ -266,8 +264,8 @@ impl WriteCycle {
         self.last_at + BYTE_LOAD
     }
 
-    /// When its programming ends, `write_cycle` picoseconds later.
-    fn done(&self, write_cycle: u64) -> Time {
+    /// When its programming ends, `write_cycle` later.
+    fn done(&self, write_cycle: Span) -> Time {
         self.programming_from() + write_cycle
     }
 
@@ -573,8 +571,8 @@ pub struct At28c64b {
     protected: bool,
     /// The write cycle running, if one is.
     writing: Option<WriteCycle>,
-    /// tWC, in picoseconds.
-    write_cycle: u64,
+    /// tWC.
+    write_cycle: Span,
     /// The file the cells are written through to, if any.
     store: Option<Store>,
     /// Why writing through to the file failed, if it did; the file is
@@ -584,9 +582,9 @@ pub struct At28c64b {
 
 impl At28c64b {
     /// A peripheral holding `cells`, padded erased, with tWC `write_cycle`
-    /// picoseconds and protection `protected`, writing through to
+    /// and protection `protected`, writing through to
     /// `store`.
-    fn new(cells: Vec<u8>, write_cycle: u64, protected: bool, store: Option<Store>) -> Self {
+    fn new(cells: Vec<u8>, write_cycle: Span, protected: bool, store: Option<Store>) -> Self {
         Self {
             cells: whole(cells),
             protected,
@@ -643,7 +641,7 @@ impl At28c64b {
         };
         Ok(Self::new(
             cells,
-            write_cycle_us * PICOSECONDS_PER_MICROSECOND,
+            Span::from_micros(write_cycle_us),
             protected,
             store,
         ))
@@ -820,7 +818,7 @@ impl Peripheral for At28c64b {
     /// or sidecar that cannot be written drops the file, as a run's
     /// failed write does, and [`At28c64b::file_error`] says why.
     fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
-        let (write_cycle, cells, protected, writing): (u64, Vec<u8>, bool, Option<WriteCycle>) =
+        let (write_cycle, cells, protected, writing): (Span, Vec<u8>, bool, Option<WriteCycle>) =
             decode(VERSION, snapshot)?;
         if write_cycle != self.write_cycle {
             return Err(StateError::mismatch("an AT28C64B of another tWC"));
@@ -877,6 +875,7 @@ mod tests {
     use mc683xx_board::registry::Environment;
     use mc683xx_board::registry::ParameterError;
     use mc683xx_board::registry::Parameters;
+    use mc683xx_board::time::Span;
     use mc683xx_board::time::Time;
     use mc683xx_cpu32::cpu::state::StateError;
     use mc683xx_cpu32::cpu::state::encode;
@@ -893,7 +892,6 @@ mod tests {
     use super::Offset;
     use super::OpenError;
     use super::Opened;
-    use super::PICOSECONDS_PER_MICROSECOND;
     use super::SIZE;
     use super::VERSION;
     use super::WRITE_CYCLE_MAX_US;
@@ -901,7 +899,7 @@ mod tests {
     use super::open;
 
     /// tWC in the tests.
-    const WRITE_CYCLE: u64 = WRITE_CYCLE_MAX_US * PICOSECONDS_PER_MICROSECOND;
+    const WRITE_CYCLE: Span = Span::from_micros(WRITE_CYCLE_MAX_US);
 
     /// A peripheral holding `cells`, unprotected, with no file.
     fn peripheral(cells: Vec<u8>) -> At28c64b {
@@ -1001,7 +999,7 @@ mod tests {
             0x80,
             "any address polls"
         );
-        at(&mut peripheral, done(Time::ZERO) - 1);
+        at(&mut peripheral, done(Time::ZERO) - Span::from_picos(1));
         assert_ne!(read(&mut peripheral, 0x10c0), 0x5a, "still programming");
         assert_eq!(peripheral.next_event(), Some(done(Time::ZERO)));
         at(&mut peripheral, done(Time::ZERO));
@@ -1168,7 +1166,7 @@ mod tests {
         let parameters = "image = \"image.bin\"\nfile = \"cells.bin\"";
         let mut peripheral = construct(parameters, &scratch).unwrap();
         write(&mut peripheral, 0xc3, 0x77, Time::ZERO);
-        at(&mut peripheral, done(Time::ZERO) - 1);
+        at(&mut peripheral, done(Time::ZERO) - Span::from_picos(1));
         let held = fs::read(scratch.file("cells.bin")).unwrap();
         assert_eq!(held[0xc3], 7, "not before its cycle ends");
         at(&mut peripheral, done(Time::ZERO));
@@ -1379,7 +1377,7 @@ mod tests {
         write(&mut peripheral, 0, 1, Time::ZERO);
         assert_eq!(
             peripheral.next_event(),
-            Some(Time::ZERO + BYTE_LOAD + 2000 * PICOSECONDS_PER_MICROSECOND)
+            Some(Time::ZERO + BYTE_LOAD + Span::from_micros(2000))
         );
     }
 

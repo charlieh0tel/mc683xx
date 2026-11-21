@@ -31,6 +31,7 @@ use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
@@ -175,13 +176,13 @@ struct Clock {
 }
 
 impl Clock {
-    /// The picoseconds `sixteenths` sixteenths of a bit take at its
-    /// rate divided by `divide`, rounded down.
-    fn span(self, sixteenths: u64, divide: u64) -> u64 {
+    /// The span `sixteenths` sixteenths of a bit take at its rate
+    /// divided by `divide`, rounded down to a picosecond.
+    fn span(self, sixteenths: u64, divide: u64) -> Span {
         let picoseconds =
             u128::from(sixteenths) * u128::from(divide) * u128::from(PICOSECONDS_PER_SECOND)
                 / (u128::from(SIXTEENTHS) * u128::from(self.hz));
-        picoseconds as u64
+        Span::from_picos(picoseconds as u64)
     }
 
     /// The bit rate at its rate divided by `divide`.
@@ -555,7 +556,7 @@ impl Acia {
         let divide = divide(state.control);
         let own_length = divide.map(|divide| self.rx_clock.span(format.length(), divide));
         let length = match serial.length {
-            0 => own_length.unwrap_or(0),
+            Span::ZERO => own_length.unwrap_or(Span::ZERO),
             length => length,
         };
         let end = start + length;

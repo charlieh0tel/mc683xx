@@ -10,19 +10,18 @@
 //! [plan-boards]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#boards
 
 use std::fmt;
-use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::time::Duration;
 use std::time::Instant;
 
 use crate::control::BoardControl;
-use crate::time::PICOSECONDS_PER_SECOND;
+use crate::time::Span;
 use crate::time::Time;
 
 /// Board time a paced run goes between looks at the wall clock and the
 /// [`BoardControl`]: 5 ms, about 84,000 clocks of a 16.78 MHz chip.
-pub const QUANTUM: NonZeroU64 = NonZeroU64::new(5_000_000_000).expect("not zero");
+pub const QUANTUM: Span = Span::from_millis(5);
 
 /// The longest the host sleeps before it looks at the control again,
 /// for a stop or a change of pacing (and, in Python, for Ctrl-C).
@@ -181,7 +180,7 @@ impl Pacer {
         let Some(anchor) = self.anchored(now, factor, wall) else {
             return Duration::ZERO;
         };
-        let board = (now.0 - anchor.board.0) as f64 / PICOSECONDS_PER_SECOND as f64;
+        let board = now.since(anchor.board).seconds_f64();
         Duration::try_from_secs_f64(board / factor)
             .ok()
             .and_then(|elapsed| anchor.wall.checked_add(elapsed))
@@ -213,12 +212,8 @@ impl Pacer {
             return Some(now);
         };
         let elapsed = wall.saturating_sub(anchor.wall).as_secs_f64();
-        #[expect(
-            clippy::cast_sign_loss,
-            reason = "not negative, and the cast saturates"
-        )]
-        let board = (elapsed * factor * PICOSECONDS_PER_SECOND as f64) as u64;
-        Some(Time(anchor.board.0.saturating_add(board)).max(now))
+        let board = Span::from_seconds_f64(elapsed * factor);
+        Some((anchor.board + board).max(now))
     }
 
     /// Starts the pacing again under `pacing` from `now` and the host's
@@ -295,7 +290,7 @@ mod tests {
     use super::*;
 
     /// A millisecond in picoseconds.
-    const MILLISECOND: u64 = PICOSECONDS_PER_SECOND / 1000;
+    const MILLISECOND: u64 = Span::from_millis(1).picos();
 
     #[test]
     fn a_pacing_reads_as_it_prints() {

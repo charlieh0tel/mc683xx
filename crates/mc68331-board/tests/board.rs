@@ -7,7 +7,6 @@ use std::cell::Cell;
 use std::cell::Ref;
 use std::env;
 use std::fs;
-use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::process;
@@ -42,6 +41,7 @@ use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_board::time::TimeBase;
 use mc683xx_board::trace::Record;
@@ -80,6 +80,11 @@ use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 use mc683xx_target::size::Size;
 use snapshot_golden::version_of;
+
+/// `picoseconds` picoseconds.
+const fn ps(picoseconds: u64) -> Span {
+    Span::from_picos(picoseconds)
+}
 
 /// The PCS levels a `SpiAdapter`'s model hears as its decode selects
 /// it: all low.
@@ -819,7 +824,7 @@ impl Peripheral for ClockWatcher {
 
     fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
         self.driven = drive.system_clock();
-        self.next = Some(now + 1_000_000);
+        self.next = Some(now + Span::from_micros(1));
     }
 }
 
@@ -1772,9 +1777,9 @@ to = ["chip.PGP0"]
 fn a_serial_frame_carries_its_length() {
     let frame = Serial::new(Frame::Data(0x41), Frequency::from_hz(9_600), 10);
     // ten bits at 9600 baud: 1.0416666 ms
-    assert_eq!(frame.length, 1_041_666_666);
+    assert_eq!(frame.length, Span::from_picos(1_041_666_666));
     assert_eq!(frame.end(Time(5)), Time(1_041_666_671));
-    assert_eq!(Serial::untimed(Frame::Break).length, 0);
+    assert_eq!(Serial::untimed(Frame::Break).length, Span::ZERO);
 }
 
 /// PEPAR (MC68331UM Table D-1).
@@ -1931,7 +1936,7 @@ const PROGRAM: u32 = 0xa0;
 const DQ7: u32 = 0x80;
 /// How long a word takes to program: 1 ms, longer than a real part's
 /// microseconds, so that the slow boot ROM's loop polls it.
-const PROGRAM_PICOSECONDS: u64 = 1_000_000_000;
+const PROGRAM_PICOSECONDS: Span = Span::from_millis(1);
 
 /// Where the flash's command logic is in a command sequence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2196,7 +2201,7 @@ fn d0(board: &Board<Mc68331>) -> u32 {
 
 #[test]
 fn a_memory_write_between_quanta_reaches_the_next_and_the_snapshot() {
-    let soon = OVERWRITE_AT + 10_000_000;
+    let soon = OVERWRITE_AT + Span::from_micros(10);
     let mut board = overwritten(false);
     board.run_until(soon).unwrap();
     assert_eq!(d0(&board), 0x5678, "the quantum after the write reads it");
@@ -2212,7 +2217,7 @@ fn a_memory_write_between_quanta_reaches_the_next_and_the_snapshot() {
 
 #[test]
 fn a_memory_taken_between_quanta_is_in_the_snapshot() {
-    let soon = OVERWRITE_AT + 10_000_000;
+    let soon = OVERWRITE_AT + Span::from_micros(10);
     let mut board = overwritten(true);
     board.run_until(soon).unwrap();
     assert_eq!(d0(&board), 0x1234, "the peripheral answers");
@@ -2426,12 +2431,12 @@ attach = [{ select = "CS1" }]
 #[test]
 fn a_stop_asked_between_quanta_stops_one_run_only() {
     let mut board = stopper_board("stop-advance", true, &[BRA_SELF]);
-    let stopped = board.run_for(10_000_000_000).unwrap();
+    let stopped = board.run_for(Span::from_millis(10)).unwrap();
     assert_eq!((stopped.stop, stopped.now), (Stop::Requested, AT));
     let instructions = board.chip().instructions();
-    let ran = board.run_for(10_000_000_000).unwrap();
+    let ran = board.run_for(Span::from_millis(10)).unwrap();
     assert_eq!(ran.stop, Stop::Budget, "the stop is not left pending");
-    assert_eq!(ran.now, AT + 10_000_000_000);
+    assert_eq!(ran.now, AT + Span::from_millis(10));
     assert!(board.chip().instructions() > instructions + 1);
 }
 
@@ -2447,7 +2452,7 @@ fn a_run_stopped_by_an_instruction_past_its_end_ends_at_its_end() {
     .chain([BRA_SELF])
     .collect();
     let stopped = stopper_board("stop-write", false, &program)
-        .run_for(10_000_000_000)
+        .run_for(Span::from_millis(10))
         .unwrap();
     assert_eq!(stopped.stop, Stop::Requested);
     // the write's instruction starts before `until` and ends after it
@@ -2833,7 +2838,7 @@ fn quantized(mut board: Board<Mc68331>, total: u64, quantum: u64) -> Ran {
     trace_nets_and_pins(&mut board);
     while board.now() < Time(total) {
         let outcome = board
-            .run_until((board.now() + quantum).min(Time(total)))
+            .run_until((board.now() + ps(quantum)).min(Time(total)))
             .unwrap();
         assert_eq!(outcome.stop, Stop::Budget);
     }
@@ -2909,7 +2914,7 @@ to = ["chip.PQS0"]
 /// A millisecond in picoseconds.
 const MILLISECOND: u64 = 1_000_000_000;
 /// A millisecond, as a quantum.
-const MILLISECOND_QUANTUM: NonZeroU64 = NonZeroU64::new(MILLISECOND).expect("not zero");
+const MILLISECOND_QUANTUM: Span = Span::from_millis(1);
 
 #[test]
 fn a_run_in_quanta_is_one_run() {
@@ -3105,7 +3110,7 @@ fn an_observer_that_stops_at_a_chip_output_stops_the_run_there() {
     let low = low.get().expect("PF0 went low");
     assert_eq!(outcome.stop, Stop::Requested);
     assert!(
-        outcome.now >= low && outcome.now < low + 10_000_000,
+        outcome.now >= low && outcome.now < low + Span::from_micros(10),
         "stopped at {:?}, the change at {low:?}",
         outcome.now
     );
@@ -3223,26 +3228,26 @@ to = ["chip.RESET"]
             })
             .collect()
     };
-    board.run_until(RESET_ASSERTED + 500_000_000).unwrap();
+    board.run_until(RESET_ASSERTED + ps(500_000_000)).unwrap();
     let asserted = resets(&mut board);
     assert!(
-        matches!(asserted[..], [at] if at >= RESET_ASSERTED && at < RESET_ASSERTED + 10_000_000),
+        matches!(asserted[..], [at] if at >= RESET_ASSERTED && at < RESET_ASSERTED + ps(10_000_000)),
         "{asserted:?}"
     );
     let held = board.chip().instructions();
     assert_eq!(
-        board.run_until(RESET_RELEASED - 1).unwrap().now,
-        RESET_RELEASED - 1
+        board.run_until(RESET_RELEASED - ps(1)).unwrap().now,
+        RESET_RELEASED - ps(1)
     );
     assert_eq!(
         board.chip().instructions(),
         held,
         "no instruction while held"
     );
-    board.run_until(RESET_RELEASED + 1_000_000_000).unwrap();
+    board.run_until(RESET_RELEASED + ps(1_000_000_000)).unwrap();
     let released = resets(&mut board);
     assert!(
-        matches!(released[..], [at] if at >= RESET_RELEASED && at < RESET_RELEASED + 10_000_000),
+        matches!(released[..], [at] if at >= RESET_RELEASED && at < RESET_RELEASED + ps(10_000_000)),
         "{released:?}"
     );
     assert!(board.chip().instructions() > held);
@@ -3333,9 +3338,9 @@ fn a_gpt_input_edge_during_a_held_reset_shows_as_reset_ends() {
         (RESET_RELEASED, 0, true),
     ];
     let mut board = scripted(&[], SCRIPT);
-    board.run_until(RESET_RELEASED - 1).unwrap();
+    board.run_until(RESET_RELEASED - ps(1)).unwrap();
     assert!(!pgp0(&board), "read before the reset");
-    board.run_until(RESET_RELEASED + 50_000_000).unwrap();
+    board.run_until(RESET_RELEASED + ps(50_000_000)).unwrap();
     assert!(pgp0(&board), "high since before the reset ended");
 }
 
@@ -3345,10 +3350,10 @@ fn a_gpt_input_edge_driven_ahead_keeps_its_time_across_a_syncr_write() {
     const SCRIPT: &[(Time, usize, bool)] = &[(Time::ZERO, 1, false), (EDGE, 1, true)];
     let setup = store(SYNCR, SYNCR_FAST);
     let mut board = scripted(&setup, SCRIPT);
-    board.run_until(EDGE - 20_000_000).unwrap();
+    board.run_until(EDGE - ps(20_000_000)).unwrap();
     assert_eq!(board.system_clock().frequency().hz(), 16_777_216);
     assert!(!pgp0(&board), "low until its time");
-    board.run_until(EDGE + 20_000_000).unwrap();
+    board.run_until(EDGE + ps(20_000_000)).unwrap();
     assert!(pgp0(&board), "high from its time");
 }
 
@@ -3472,7 +3477,7 @@ to = ["external.reset"]
         panic!("no RESET pulse: {edges:?}");
     };
     assert_eq!(
-        u128::from(high.since(low)),
+        u128::from(high.since(low).picos()),
         u128::from(RESET_PULSE_CLOCKS) * u128::from(PICOSECONDS_PER_SECOND)
             / u128::from(SYNCR_RESET_HZ),
         "{edges:?}"
@@ -3485,7 +3490,7 @@ to = ["external.reset"]
 const COUNTING: [u16; 2] = [0x5281, BRA_SELF];
 /// Board time after a reset at which `Seen` is taken: short of the
 /// watchdog's next timeout, 2^9 EXTAL periods (MC68331UM Table 4-4).
-const AFTER_RESET: u64 = MILLISECOND;
+const AFTER_RESET: Span = Span::from_millis(1);
 
 /// A board running `COUNTING`, its RESET net driven by the chip and by
 /// `external.reset` and seen by `external.observed`, and `PoweredLatch`es
@@ -3543,9 +3548,9 @@ struct Seen {
     /// The resets of the `every`, `watchdog` and `power` latches.
     resets: [usize; 3],
     /// The resets the chip reported, at their board times from `at`.
-    events: Vec<(u64, ResetCause)>,
+    events: Vec<(Span, ResetCause)>,
     /// The RESET net's levels, at their board times from `at`.
-    observed: Vec<(u64, Signal)>,
+    observed: Vec<(Span, Signal)>,
 }
 
 /// `board` run to `AFTER_RESET` past a reset at `at`, and what it shows.
@@ -3582,12 +3587,12 @@ fn seen(board: &mut Board<Mc68331>, at: Time) -> Seen {
 
 /// RESET's 512 clocks at SYNCR's reset rate, in picoseconds
 /// (MC68331UM 4.6.6).
-fn reset_pulse() -> u64 {
-    u64::try_from(
+fn reset_pulse() -> Span {
+    ps(u64::try_from(
         u128::from(RESET_PULSE_CLOCKS) * u128::from(PICOSECONDS_PER_SECOND)
             / u128::from(SYNCR_RESET_HZ),
     )
-    .unwrap()
+    .unwrap())
 }
 
 /// `board`'s reset for `cause` by the host, and its board time: the
@@ -3612,7 +3617,7 @@ fn a_host_watchdog_reset_is_a_timeout() {
         })
         .expect("the watchdog timed out");
     // RESET's levels from the timeout on, those the run to it saw first
-    let earlier: Vec<(u64, Signal)> = timed_out
+    let earlier: Vec<(Span, Signal)> = timed_out
         .take_received("observed")
         .unwrap()
         .into_iter()
@@ -3620,7 +3625,9 @@ fn a_host_watchdog_reset_is_a_timeout() {
         .map(|(time, signal)| (time.since(timeout), signal))
         .collect();
     let mut timed_out_seen = seen(&mut timed_out, timeout);
-    timed_out_seen.events.insert(0, (0, ResetCause::Watchdog));
+    timed_out_seen
+        .events
+        .insert(0, (Span::ZERO, ResetCause::Watchdog));
     timed_out_seen.observed.splice(0..0, earlier);
     let mut host = reset_board();
     let at = Time(5 * MILLISECOND);
@@ -3635,7 +3642,7 @@ fn a_host_watchdog_reset_is_a_timeout() {
     assert_eq!(
         host_seen.observed,
         [
-            (0, Signal::Level(false)),
+            (Span::ZERO, Signal::Level(false)),
             (reset_pulse(), Signal::Level(true))
         ]
     );
@@ -3649,7 +3656,10 @@ fn a_host_watchdog_reset_is_a_timeout() {
     };
     assert_eq!(levels(&host_seen), levels(&timed_out_seen));
     for (host, timed_out) in host_seen.observed.iter().zip(&timed_out_seen.observed) {
-        assert!(host.0.abs_diff(timed_out.0) <= 1, "{host:?} {timed_out:?}");
+        assert!(
+            host.0.picos().abs_diff(timed_out.0.picos()) <= 1,
+            "{host:?} {timed_out:?}"
+        );
     }
     timed_out_seen.observed = host_seen.observed.clone();
     assert_eq!(host_seen, timed_out_seen);
@@ -3672,7 +3682,10 @@ fn a_host_external_reset_is_reset_driven_on_the_board() {
     // the board's own pulse, which the host's leaves off the net
     assert_eq!(
         driven_seen.observed.drain(..2).collect::<Vec<_>>(),
-        [(0, Signal::Level(false)), (0, Signal::Level(true))]
+        [
+            (Span::ZERO, Signal::Level(false)),
+            (Span::ZERO, Signal::Level(true))
+        ]
     );
     assert_eq!(host_seen, driven_seen);
 }
@@ -3694,7 +3707,7 @@ fn a_host_power_on_reset_is_power_on() {
     registers.data[1] = 1;
     assert_eq!(registers, fresh_seen.registers);
     assert_eq!(host_seen.resets, [2, 0, 2]);
-    assert_eq!(host_seen.events, [(0, ResetCause::PowerOn)]);
+    assert_eq!(host_seen.events, [(Span::ZERO, ResetCause::PowerOn)]);
 }
 
 #[test]
@@ -3710,11 +3723,11 @@ fn a_host_system_reset_resets_all_but_the_cpu() {
     assert_eq!(host_seen.reset_status, ResetCause::System.status());
     assert_eq!(host_seen.registers.data[1], 1, "not started again");
     assert_eq!(host_seen.resets, [2, 0, 1]);
-    assert_eq!(host_seen.events, [(0, ResetCause::System)]);
+    assert_eq!(host_seen.events, [(Span::ZERO, ResetCause::System)]);
     assert_eq!(
         host_seen.observed,
         [
-            (0, Signal::Level(false)),
+            (Span::ZERO, Signal::Level(false)),
             (reset_pulse(), Signal::Level(true))
         ]
     );
@@ -3726,7 +3739,7 @@ fn a_host_reset_while_reset_is_held_does_nothing() {
     let at = Time(5 * MILLISECOND);
     host.run_until(at).unwrap();
     host.send("reset", Signal::Level(false)).unwrap();
-    host.run_until(at + 1).unwrap();
+    host.run_until(at + ps(1)).unwrap();
     host.take_events();
     let resets = |host: &Board<Mc68331>| {
         host.peripheral::<PoweredLatch>("every")
@@ -3742,6 +3755,20 @@ fn a_host_reset_while_reset_is_held_does_nothing() {
     assert!(host.take_events().is_empty());
     assert_eq!(resets(&host), before);
     assert_eq!(host.chip().now(), now);
+}
+
+#[test]
+fn a_zero_quantum_is_a_picosecond() {
+    let mut board = reset_board();
+    let mut quanta = 0;
+    let outcome = board
+        .run_until_quantized(Time(100), Span::ZERO, |_| {
+            quanta += 1;
+            ControlFlow::Continue(())
+        })
+        .unwrap();
+    assert_eq!(outcome.now, Time(100));
+    assert_eq!(quanta, 100);
 }
 
 #[test]
@@ -3769,12 +3796,12 @@ fn a_board_in_background_mode_runs_to_its_end_as_time() {
     // quantized, as a halted board's
     assert_eq!(
         board
-            .run_until_quantized(until + MILLISECOND, MILLISECOND_QUANTUM, |_| {
+            .run_until_quantized(until + ps(MILLISECOND), MILLISECOND_QUANTUM, |_| {
                 ControlFlow::Continue(())
             })
             .unwrap()
             .now,
-        until + MILLISECOND
+        until + ps(MILLISECOND)
     );
 }
 
@@ -3811,7 +3838,7 @@ fn a_host_reset_with_breakpoint_is_an_external_reset_into_background_mode() {
     host_seen.registers = external_seen.registers.clone();
     assert_eq!(host_seen, external_seen);
     host.go().unwrap();
-    host.run_until(at + 2 * AFTER_RESET).unwrap();
+    host.run_until(at + AFTER_RESET * 2).unwrap();
     assert_eq!(host.chip().cpu().registers.data[1], 2, "started again");
 }
 
@@ -3823,13 +3850,13 @@ fn a_board_halts_and_goes_on() {
     board.reset_with_breakpoint();
     board.go().unwrap();
     assert_eq!(board.chip().cpu().background(), None);
-    board.run_until(Time(AFTER_RESET)).unwrap();
+    board.run_until(Time::ZERO + AFTER_RESET).unwrap();
     let instructions = board.chip().instructions();
     assert!(instructions > 0);
     assert_eq!(board.halt(), Ok(Entry::Breakpoint));
-    run_in_background(&mut board, Time(2 * AFTER_RESET));
+    run_in_background(&mut board, Time::ZERO + 2 * AFTER_RESET);
     board.go().unwrap();
-    board.run_until(Time(3 * AFTER_RESET)).unwrap();
+    board.run_until(Time::ZERO + 3 * AFTER_RESET).unwrap();
     assert!(board.chip().instructions() > instructions);
 }
 
@@ -3860,12 +3887,14 @@ attach = [{ select = "CS0" }]
 "#,
         &program,
     );
-    board.run_until(Time(AFTER_RESET)).unwrap();
+    board.run_until(Time::ZERO + AFTER_RESET).unwrap();
     let mut tracing = BoardTracing::default();
     tracing.exceptions = true;
     board.set_tracing(tracing);
     assert!(!board.assert_breakpoint(), "background mode not enabled");
-    board.run_until(Time(AFTER_RESET + MILLISECOND)).unwrap();
+    board
+        .run_until(Time::ZERO + AFTER_RESET + ps(MILLISECOND))
+        .unwrap();
     let vectors: Vec<u8> = board
         .take_trace()
         .records

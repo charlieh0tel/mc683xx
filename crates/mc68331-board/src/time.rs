@@ -9,9 +9,11 @@
 
 use std::collections::VecDeque;
 use std::fmt;
+use std::iter::Sum;
 use std::ops::Add;
 use std::ops::AddAssign;
 use std::ops::Div;
+use std::ops::Mul;
 use std::ops::Rem;
 use std::ops::Sub;
 use std::ops::SubAssign;
@@ -30,12 +32,12 @@ pub const PHASE_UNITS: u128 = PICOSECONDS_PER_SECOND as u128 * NANOHERTZ_PER_HER
 
 /// A time on the board: picoseconds since power-on, 213 days of them.
 ///
-/// Its arithmetic is with spans in picoseconds, `u64`: `+` and `-` (and
-/// `+=`, `-=`) move it, saturating at power-on and the last time; `-` of
-/// two times is the span between them, zero if the second is later
-/// (`since`); `/` and `%` by a period are the whole periods since
-/// power-on and the picoseconds into the current one (`now / PERIOD`),
-/// and panic on a zero period, as integers do.
+/// Its arithmetic is with [`Span`]s: `+` and `-` (and `+=`, `-=`) move
+/// it, saturating at power-on and the last time; `-` of two times is the
+/// span between them, zero if the second is later (`since`); `/` and `%`
+/// by a period are the whole periods since power-on and the span into
+/// the current one (`now / PERIOD`), and panic on a zero period, as
+/// integers do.
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
@@ -69,72 +71,261 @@ impl Time {
     /// `seconds` seconds, or the last time if that is past it.
     #[must_use]
     pub const fn from_seconds(seconds: u64) -> Self {
-        Self(seconds.saturating_mul(PICOSECONDS_PER_SECOND))
+        Self(Span::from_seconds(seconds).0)
     }
 
-    /// Picoseconds from `earlier` to this, zero if it is later.
+    /// The span from `earlier` to this, zero if it is later.
     #[must_use]
-    pub const fn since(self, earlier: Self) -> u64 {
-        self.0.saturating_sub(earlier.0)
+    pub const fn since(self, earlier: Self) -> Span {
+        Span(self.0.saturating_sub(earlier.0))
     }
 }
 
-impl Add<u64> for Time {
+impl Add<Span> for Time {
     type Output = Self;
 
-    /// Picoseconds later, or the last time.
-    fn add(self, picoseconds: u64) -> Self {
-        Self(self.0.saturating_add(picoseconds))
+    /// `span` later, or the last time.
+    fn add(self, span: Span) -> Self {
+        Self(self.0.saturating_add(span.0))
     }
 }
 
-impl Sub<u64> for Time {
+impl Sub<Span> for Time {
     type Output = Self;
 
-    /// Picoseconds earlier, or power-on.
-    fn sub(self, picoseconds: u64) -> Self {
-        Self(self.0.saturating_sub(picoseconds))
+    /// `span` earlier, or power-on.
+    fn sub(self, span: Span) -> Self {
+        Self(self.0.saturating_sub(span.0))
     }
 }
 
-impl AddAssign<u64> for Time {
-    /// Picoseconds later, or the last time.
-    fn add_assign(&mut self, picoseconds: u64) {
-        *self = *self + picoseconds;
+impl AddAssign<Span> for Time {
+    /// `span` later, or the last time.
+    fn add_assign(&mut self, span: Span) {
+        *self = *self + span;
     }
 }
 
-impl SubAssign<u64> for Time {
-    /// Picoseconds earlier, or power-on.
-    fn sub_assign(&mut self, picoseconds: u64) {
-        *self = *self - picoseconds;
+impl SubAssign<Span> for Time {
+    /// `span` earlier, or power-on.
+    fn sub_assign(&mut self, span: Span) {
+        *self = *self - span;
     }
 }
 
 impl Sub for Time {
-    type Output = u64;
+    type Output = Span;
 
-    /// Picoseconds from `earlier` to this, zero if it is later.
-    fn sub(self, earlier: Self) -> u64 {
+    /// The span from `earlier` to this, zero if it is later.
+    fn sub(self, earlier: Self) -> Span {
         self.since(earlier)
     }
 }
 
-impl Div<u64> for Time {
+impl Div<Span> for Time {
     type Output = u64;
 
-    /// The whole periods of `period` picoseconds since power-on.
-    fn div(self, period: u64) -> u64 {
-        self.0 / period
+    /// The whole periods of `period` since power-on.
+    fn div(self, period: Span) -> u64 {
+        self.0 / period.0
     }
 }
 
-impl Rem<u64> for Time {
+impl Rem<Span> for Time {
+    type Output = Span;
+
+    /// The span into the current period of `period`.
+    fn rem(self, period: Span) -> Span {
+        Span(self.0 % period.0)
+    }
+}
+
+/// A span of board time: whole picoseconds, up to the last [`Time`].
+///
+/// Made from a count of a unit (`Span::from_micros(5)`) or from seconds,
+/// and read back as either.  `+`, `-` and `*` by a count saturate, at
+/// zero and the longest span, as [`Time`]'s arithmetic does; `/` by a
+/// count rounds down, `/` by a span is the whole spans in it and `%` what
+/// is left, and these panic on zero, as integers do.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
+pub struct Span(u64);
+
+/// Picoseconds in a nanosecond.
+const PICOSECONDS_PER_NANOSECOND: u64 = 1_000;
+/// Picoseconds in a microsecond.
+const PICOSECONDS_PER_MICROSECOND: u64 = 1_000_000;
+/// Picoseconds in a millisecond.
+const PICOSECONDS_PER_MILLISECOND: u64 = 1_000_000_000;
+
+impl Span {
+    /// No time.
+    pub const ZERO: Self = Self(0);
+    /// The longest span: power-on to the last time.
+    pub const MAX: Self = Self(u64::MAX);
+
+    /// `picoseconds` picoseconds.
+    #[must_use]
+    pub const fn from_picos(picoseconds: u64) -> Self {
+        Self(picoseconds)
+    }
+
+    /// `nanoseconds` nanoseconds, or the longest span.
+    #[must_use]
+    pub const fn from_nanos(nanoseconds: u64) -> Self {
+        Self(nanoseconds.saturating_mul(PICOSECONDS_PER_NANOSECOND))
+    }
+
+    /// `microseconds` microseconds, or the longest span.
+    #[must_use]
+    pub const fn from_micros(microseconds: u64) -> Self {
+        Self(microseconds.saturating_mul(PICOSECONDS_PER_MICROSECOND))
+    }
+
+    /// `milliseconds` milliseconds, or the longest span.
+    #[must_use]
+    pub const fn from_millis(milliseconds: u64) -> Self {
+        Self(milliseconds.saturating_mul(PICOSECONDS_PER_MILLISECOND))
+    }
+
+    /// `seconds` seconds, or the longest span.
+    #[must_use]
+    pub const fn from_seconds(seconds: u64) -> Self {
+        Self(seconds.saturating_mul(PICOSECONDS_PER_SECOND))
+    }
+
+    /// `seconds` seconds, rounded down to a picosecond: zero for a
+    /// negative number or a NaN, the longest span past it.
+    #[must_use]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the cast saturates, and takes a NaN to zero"
+    )]
+    pub fn from_seconds_f64(seconds: f64) -> Self {
+        Self((seconds * PICOSECONDS_PER_SECOND as f64) as u64)
+    }
+
+    /// Its picoseconds.
+    #[must_use]
+    pub const fn picos(self) -> u64 {
+        self.0
+    }
+
+    /// Its seconds, to an `f64`'s precision.
+    #[must_use]
+    pub fn seconds_f64(self) -> f64 {
+        self.0 as f64 / PICOSECONDS_PER_SECOND as f64
+    }
+
+    /// Whether it is no time.
+    #[must_use]
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+}
+
+/// The picoseconds and their unit: `1000 ps`.
+impl fmt::Display for Span {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{} ps", self.0)
+    }
+}
+
+impl From<u64> for Span {
+    fn from(picoseconds: u64) -> Self {
+        Self(picoseconds)
+    }
+}
+
+impl From<Span> for u64 {
+    fn from(span: Span) -> Self {
+        span.0
+    }
+}
+
+impl Add for Span {
+    type Output = Self;
+
+    /// Both spans, or the longest span.
+    fn add(self, other: Self) -> Self {
+        Self(self.0.saturating_add(other.0))
+    }
+}
+
+impl Sub for Span {
+    type Output = Self;
+
+    /// `other` shorter, or zero.
+    fn sub(self, other: Self) -> Self {
+        Self(self.0.saturating_sub(other.0))
+    }
+}
+
+impl AddAssign for Span {
+    /// Both spans, or the longest span.
+    fn add_assign(&mut self, other: Self) {
+        *self = *self + other;
+    }
+}
+
+impl SubAssign for Span {
+    /// `other` shorter, or zero.
+    fn sub_assign(&mut self, other: Self) {
+        *self = *self - other;
+    }
+}
+
+impl Mul<u64> for Span {
+    type Output = Self;
+
+    /// `count` of it, or the longest span.
+    fn mul(self, count: u64) -> Self {
+        Self(self.0.saturating_mul(count))
+    }
+}
+
+impl Mul<Span> for u64 {
+    type Output = Span;
+
+    /// This many of `span`, or the longest span.
+    fn mul(self, span: Span) -> Span {
+        span * self
+    }
+}
+
+impl Div<u64> for Span {
+    type Output = Self;
+
+    /// A `count`th of it, rounded down to a picosecond.
+    fn div(self, count: u64) -> Self {
+        Self(self.0 / count)
+    }
+}
+
+impl Div for Span {
     type Output = u64;
 
-    /// Picoseconds into the current period of `period`.
-    fn rem(self, period: u64) -> u64 {
-        self.0 % period
+    /// The whole `period`s in it.
+    fn div(self, period: Self) -> u64 {
+        self.0 / period.0
+    }
+}
+
+impl Rem for Span {
+    type Output = Self;
+
+    /// What is left of it after its whole `period`s.
+    fn rem(self, period: Self) -> Self {
+        Self(self.0 % period.0)
+    }
+}
+
+impl Sum for Span {
+    /// All of them, or the longest span.
+    fn sum<I: Iterator<Item = Self>>(spans: I) -> Self {
+        spans.fold(Self::ZERO, Add::add)
     }
 }
 
@@ -244,7 +435,7 @@ impl Clock {
         }
         if phase.0 <= self.phase.0 {
             let back = (self.phase.0 - phase.0) / frequency;
-            return Some(self.at - u64::try_from(back).unwrap_or(u64::MAX));
+            return Some(self.at - Span(u64::try_from(back).unwrap_or(u64::MAX)));
         }
         let ahead = u64::try_from((phase.0 - self.phase.0).div_ceil(frequency)).ok()?;
         self.at.0.checked_add(ahead).map(Time)
@@ -274,14 +465,14 @@ impl Clock {
 pub struct ClockHistory {
     /// The segments, oldest first, each from its `at`.
     segments: VecDeque<Clock>,
-    /// Picoseconds of history kept behind the newest segment.
-    span: u64,
+    /// The history kept behind the newest segment.
+    span: Span,
 }
 
 impl ClockHistory {
-    /// An empty history keeping `span` picoseconds.
+    /// An empty history keeping `span`.
     #[must_use]
-    pub const fn new(span: u64) -> Self {
+    pub const fn new(span: Span) -> Self {
         Self {
             segments: VecDeque::new(),
             span,
@@ -357,11 +548,11 @@ impl ClockHistory {
         self.edge(self.phase_at(from)?.cycles() + u128::from(n))
     }
 
-    /// From `time` to the next rising edge after it, in picoseconds,
-    /// rounded up, and exactly, in the cycle's `PHASE_UNITS` still to
+    /// From `time` to the next rising edge after it, rounded up to a
+    /// picosecond, and exactly, in the cycle's `PHASE_UNITS` still to
     /// run: the interpolator's measure.
     #[must_use]
-    pub fn to_next_edge(&self, time: Time) -> Option<(u64, u128)> {
+    pub fn to_next_edge(&self, time: Time) -> Option<(Span, u128)> {
         let phase = self.phase_at(time)?;
         let next = self.edge(phase.cycles() + 1)?;
         Some((next.since(time), PHASE_UNITS - phase.fraction()))
@@ -425,7 +616,7 @@ impl TimeBase {
     pub fn time(&self, at: Cycles) -> Time {
         let picoseconds = |clocks: u64| u128::from(clocks) * u128::from(PICOSECONDS_PER_SECOND);
         let hz = u128::from(self.frequency.hz().max(1));
-        let whole = |picoseconds: u128| u64::try_from(picoseconds).unwrap_or(u64::MAX);
+        let whole = |picoseconds: u128| Span(u64::try_from(picoseconds).unwrap_or(u64::MAX));
         if at >= self.cycles {
             self.time + whole(picoseconds(at.0 - self.cycles.0) / hz)
         } else {
@@ -436,7 +627,7 @@ impl TimeBase {
     /// The first system clock at or after `at`, before the base too.
     #[must_use]
     pub fn cycles(&self, at: Time) -> Cycles {
-        let scale = |picoseconds: u64| u128::from(picoseconds) * u128::from(self.frequency.hz());
+        let scale = |span: Span| u128::from(span.0) * u128::from(self.frequency.hz());
         let whole = |clocks: u128| u64::try_from(clocks).unwrap_or(u64::MAX);
         if at >= self.time {
             let clocks = scale(at.since(self.time)).div_ceil(u128::from(PICOSECONDS_PER_SECOND));
@@ -468,7 +659,7 @@ mod tests {
     use super::Clock;
     use super::ClockHistory;
     use super::PHASE_UNITS;
-    use super::PICOSECONDS_PER_SECOND;
+    use super::Span;
     use super::Time;
     use super::TimeBase;
     use mc683xx_cpu32::frequency::Frequency;
@@ -476,25 +667,56 @@ mod tests {
     /// Ten megahertz, an OCXO's.
     const TEN_MHZ: Frequency = Frequency::from_hz(10_000_000);
 
+    /// `picoseconds` picoseconds.
+    const fn ps(picoseconds: u64) -> Span {
+        Span::from_picos(picoseconds)
+    }
+
     #[test]
     fn time_moves_by_spans_and_divides_into_periods() {
         let mut time = Time(2_500);
-        time += 500;
+        time += ps(500);
         assert_eq!(time, Time(3_000));
-        time -= 4_000;
+        time -= ps(4_000);
         assert_eq!(time, Time::ZERO, "saturating at power-on");
-        assert_eq!(Time::MAX + 1, Time::MAX);
-        assert_eq!(Time(3_000) - Time(1_000), 2_000);
-        assert_eq!(Time(1_000) - Time(3_000), 0);
-        assert_eq!(Time(2_500) / 1_000, 2);
-        assert_eq!(Time(2_500) % 1_000, 500);
+        assert_eq!(Time::MAX + ps(1), Time::MAX);
+        assert_eq!(Time(3_000) - Time(1_000), ps(2_000));
+        assert_eq!(Time(1_000) - Time(3_000), Span::ZERO);
+        assert_eq!(Time(2_500) / ps(1_000), 2);
+        assert_eq!(Time(2_500) % ps(1_000), ps(500));
+    }
+
+    #[test]
+    fn spans_come_in_units_and_scale() {
+        assert_eq!(Span::from_nanos(3), ps(3_000));
+        assert_eq!(Span::from_micros(3), Span::from_nanos(3_000));
+        assert_eq!(Span::from_millis(3), Span::from_micros(3_000));
+        assert_eq!(Span::from_seconds(3), Span::from_millis(3_000));
+        assert_eq!(Span::from_seconds_f64(0.25), Span::from_millis(250));
+        assert_eq!(Span::from_seconds_f64(-1.0), Span::ZERO);
+        assert_eq!(Span::from_seconds_f64(f64::NAN), Span::ZERO);
+        assert_eq!(Span::from_seconds_f64(1e300), Span::MAX);
+        assert_eq!(Span::from_seconds(u64::MAX), Span::MAX);
+        assert!((Span::from_millis(1_500).seconds_f64() - 1.5).abs() < f64::EPSILON);
+        assert_eq!(ps(2) + ps(3), ps(5));
+        assert_eq!(ps(2) - ps(3), Span::ZERO, "saturating at zero");
+        assert_eq!(Span::MAX + ps(1), Span::MAX);
+        assert_eq!(ps(7) * 3, ps(21));
+        assert_eq!(Span::MAX * 2, Span::MAX);
+        assert_eq!(3 * ps(7), ps(21));
+        assert_eq!(ps(7) / 2, ps(3));
+        assert_eq!(ps(7) / ps(2), 3);
+        assert_eq!(ps(7) % ps(2), ps(1));
+        assert_eq!([ps(1), ps(2), ps(3)].into_iter().sum::<Span>(), ps(6));
+        assert_eq!(Span::from_micros(5).to_string(), "5000000 ps");
+        assert_eq!(Span::from(9_u64).picos(), 9);
     }
 
     #[test]
     fn edges_are_counted_exactly_over_long_spans() {
         let clock = Clock::new(TEN_MHZ, Time(123));
         let day = Time::from_seconds(86_400);
-        assert_eq!(clock.edges(Time(123), day + 123), 864_000_000_000);
+        assert_eq!(clock.edges(Time(123), day + ps(123)), 864_000_000_000);
         assert_eq!(clock.edge_after(Time(123), 1), Some(Time(100_123)));
         assert_eq!(clock.edge_after(Time(124), 10), Some(Time(1_000_123)));
     }
@@ -528,7 +750,7 @@ mod tests {
     #[test]
     fn a_history_integrates_across_its_changes() {
         // 10 MHz, then 20 MHz from 1 us: 10 edges, then 20 a us.
-        let mut history = ClockHistory::new(64 * PICOSECONDS_PER_SECOND);
+        let mut history = ClockHistory::new(Span::from_seconds(64));
         let clock = Clock::new(TEN_MHZ, Time::ZERO);
         history.push(clock);
         let faster = clock.retuned(Time(1_000_000), Frequency::from_hz(20_000_000));
@@ -543,7 +765,7 @@ mod tests {
         );
         assert_eq!(
             history.to_next_edge(Time(1_010_000)),
-            Some((40_000, PHASE_UNITS * 4 / 5))
+            Some((ps(40_000), PHASE_UNITS * 4 / 5))
         );
         // A push from the past replaces what it overlaps.
         history.push(clock.retuned(Time(1_000_000), TEN_MHZ));
@@ -552,7 +774,7 @@ mod tests {
 
     #[test]
     fn a_history_keeps_its_span() {
-        let mut history = ClockHistory::new(10);
+        let mut history = ClockHistory::new(ps(10));
         let mut clock = Clock::new(TEN_MHZ, Time::ZERO);
         for at in 1..=100 {
             clock = clock.retuned(Time(at), TEN_MHZ);
@@ -568,7 +790,7 @@ mod tests {
     fn days_of_retunes_accumulate_no_rounding() {
         const DAYS: u64 = 3;
         let seconds = DAYS * 86_400;
-        let mut history = ClockHistory::new(64 * PICOSECONDS_PER_SECOND);
+        let mut history = ClockHistory::new(Span::from_seconds(64));
         let mut clock = Clock::new(TEN_MHZ, Time(7));
         history.push(clock);
         // The exact phase, in nanohertz-seconds: cycles x 10^9.
@@ -580,10 +802,10 @@ mod tests {
             // drifting: 6.25 uHz is 6250 nHz.
             let step = 6_250 * (second % 7);
             frequency = Frequency(TEN_MHZ.0 + step - 6_250 * 3);
-            clock = clock.retuned(Time::from_seconds(second) + 7, frequency);
+            clock = clock.retuned(Time::from_seconds(second) + ps(7), frequency);
             history.push(clock);
         }
-        let end = Time::from_seconds(seconds) + 7;
+        let end = Time::from_seconds(seconds) + ps(7);
         let phase = history.phase_at(end).unwrap();
         // Phase units are 10^-21 cycle; a nanohertz-second is 10^-9.
         assert_eq!(phase.0, exact * 1_000_000_000_000);
@@ -593,7 +815,7 @@ mod tests {
         let picoseconds = remaining.div_ceil(u128::from(frequency.0));
         assert_eq!(
             history.to_next_edge(end),
-            Some((u64::try_from(picoseconds).unwrap(), remaining))
+            Some((ps(u64::try_from(picoseconds).unwrap()), remaining))
         );
         // Ten million edges on, within the last segment.
         let edge = history.edge_after(end, 10_000_000).unwrap();
@@ -621,7 +843,7 @@ mod tests {
         assert_eq!(base.cycles(base.time(Cycles(500))), Cycles(500));
         let moved = base.moved(Cycles(20), Frequency::from_hz(8_388_608));
         assert_eq!(moved.time, base.time(Cycles(20)));
-        assert_eq!(moved.cycles(moved.time + 1), Cycles(21));
+        assert_eq!(moved.cycles(moved.time + ps(1)), Cycles(21));
         assert_eq!(
             base.moved(Cycles(20), Frequency::from_hz(16_777_216)),
             base,

@@ -13,7 +13,7 @@ fn mandelbrot(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("demo");
     let mut demo = Demo::new(MANDELBROT);
     eprintln!(
-        "mandelbrot: {} instructions, {} ps of board time a run",
+        "mandelbrot: {} instructions, {} of board time a run",
         demo.instructions, demo.span
     );
     group.throughput(Throughput::Elements(demo.instructions));

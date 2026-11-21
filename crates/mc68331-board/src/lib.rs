@@ -36,7 +36,7 @@
 //!   `Clock` on `clock` nets ([`Clock`]: exact phase, frequency changes
 //!   at a time, edge counting and edge times), `Serial` frames, `Analog`
 //!   values.
-//! - [`Time`]: board time, integer picoseconds.
+//! - [`Time`] and [`Span`]: board time and its spans, integer picoseconds.
 //!
 //! What a front end (a TUI, a GUI) uses, outside the board file:
 //!
@@ -118,6 +118,7 @@
 //! [`Signal`]: signal::Signal
 //! [`Clock`]: time::Clock
 //! [`Time`]: time::Time
+//! [`Span`]: time::Span
 //! [`Observer`]: observe::Observer
 //! [`Board::observe`]: board::Board::observe
 //! [`Inspection`]: inspect::Inspection

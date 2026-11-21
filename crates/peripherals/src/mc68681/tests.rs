@@ -18,6 +18,7 @@ use mc683xx_board::signal::Direction;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
@@ -91,6 +92,11 @@ const BIT: u64 = 104_166_666;
 const CHARACTER: u64 = 1_041_666_666;
 /// Start bit to the center of the stop bit: nine and a half bits.
 const TO_STOP_CENTER: u64 = 989_583_333;
+
+/// `picoseconds` picoseconds.
+const fn ps(picoseconds: u64) -> Span {
+    Span::from_picos(picoseconds)
+}
 
 /// A DUART under test.
 struct Bench {
@@ -296,7 +302,7 @@ fn x1_clk_is_a_parameter_that_scales_every_rate() {
     bench.channel(0);
     let sent = frames(&bench.write(RBA, b'2', Time::ZERO), TXDA);
     assert_eq!(sent[0].1.baud, Frequency::from_hz(19_200));
-    assert_eq!(sent[0].1.length, CHARACTER / 2);
+    assert_eq!(sent[0].1.length, ps(CHARACTER / 2));
 }
 
 #[test]
@@ -343,7 +349,7 @@ fn a_character_goes_out_at_its_write_and_the_next_waits_in_the_holding_register(
             Serial::timed(
                 Frame::Data(u16::from(b'p')),
                 Frequency::from_hz(9600),
-                CHARACTER
+                ps(CHARACTER)
             )
         )]
     );
@@ -390,7 +396,7 @@ fn parity_and_character_length_shape_the_frame() {
     // 0x41 has two ones: odd parity sets bit 7
     assert_eq!(sent[0].1.frame, Frame::Data(0xc1));
     // start, seven data, parity: 144 sixteenths; and 25: 4056 ticks
-    assert_eq!(sent[0].1.length, 1_100_260_416);
+    assert_eq!(sent[0].1.length, ps(1_100_260_416));
     // forced low parity, five bits: 1 1/16 stop bits at code 0
     bench.write(CRA, 0x10, Time::ZERO);
     bench.write(MRA, 0x08, Time::ZERO);
@@ -435,17 +441,17 @@ fn a_character_arrives_at_the_center_of_its_stop_bit() {
     bench.channel(MRB);
     let start = Time(5000);
     bench.input(RXDB, character(b'x'), start);
-    assert_eq!(bench.duart.next_event(), Some(start + TO_STOP_CENTER));
-    bench.run(start + TO_STOP_CENTER - 1);
+    assert_eq!(bench.duart.next_event(), Some(start + ps(TO_STOP_CENTER)));
+    bench.run(start + ps(TO_STOP_CENTER - 1));
     assert_eq!(bench.read(SRB, start) & 0x01, 0, "on the line");
-    bench.run(start + TO_STOP_CENTER);
+    bench.run(start + ps(TO_STOP_CENTER));
     assert_eq!(
-        bench.read(SRB, start + TO_STOP_CENTER) & 0x01,
+        bench.read(SRB, start + ps(TO_STOP_CENTER)) & 0x01,
         0x01,
         "RxRDY"
     );
-    assert_eq!(bench.read(RBB, start + TO_STOP_CENTER), b'x');
-    assert_eq!(bench.read(SRB, start + TO_STOP_CENTER) & 0x01, 0);
+    assert_eq!(bench.read(RBB, start + ps(TO_STOP_CENTER)), b'x');
+    assert_eq!(bench.read(SRB, start + ps(TO_STOP_CENTER)) & 0x01, 0);
 }
 
 /// The group `name` of `inspection`.
@@ -463,7 +469,7 @@ fn it_shows_each_channel_s_fifo_and_its_registers() {
     bench.write(ISR, 0x20, Time::ZERO);
     let start = Time(5000);
     bench.input(RXDB, character(b'x'), start);
-    bench.run(start + TO_STOP_CENTER);
+    bench.run(start + ps(TO_STOP_CENTER));
     let inspection = bench.duart.inspect();
     assert_eq!(
         inspection.get("variant"),
@@ -561,7 +567,7 @@ fn automatic_echo_retransmits_what_it_receives_and_cuts_off_the_cpu() {
             Serial::timed(
                 Frame::Data(u16::from(b'e')),
                 Frequency::from_hz(9600),
-                CHARACTER
+                ps(CHARACTER)
             )
         )]
     );
@@ -692,8 +698,8 @@ fn the_counter_counts_down_from_its_start_to_terminal_count() {
     assert_eq!(bench.read(ISR, terminal) & 0x08, 0x08, "ISR[3]");
     assert!(bench.duart.interrupt_request());
     // it rolls over to $FFFF and counts on (3.5.1)
-    assert_eq!(count(&mut bench, terminal + 16 * tick + 300), 0xffff);
-    let _ = bench.read(STOP, terminal + 32 * tick + 300);
+    assert_eq!(count(&mut bench, terminal + ps(16 * tick + 300)), 0xffff);
+    let _ = bench.read(STOP, terminal + ps(32 * tick + 300));
     assert_eq!(bench.read(ISR, terminal) & 0x08, 0, "stop clears it");
     assert_eq!(
         count(&mut bench, Time(1_000_000_000_000)),
@@ -817,7 +823,7 @@ fn rts_follows_the_receivers_fifo_and_the_transmitters_disable() {
     let at = Time(10 * CHARACTER);
     bench.write(RBA, b'!', at);
     bench.write(CRA, 0x08, at);
-    let driven = levels(&bench.run(at + 2 * CHARACTER));
+    let driven = levels(&bench.run(at + ps(2 * CHARACTER)));
     assert_eq!(driven, [(OP0, true)]);
     assert_eq!(bench.duart.state.opr & 1, 0);
 }
@@ -1169,13 +1175,13 @@ fn a_stop_condition_fires_for_its_character_and_survives_a_restore() {
     };
     bench.input(RXDB, character(b'y'), start);
     assert!(
-        fired(&mut bench, start + TO_STOP_CENTER).is_empty(),
+        fired(&mut bench, start + ps(TO_STOP_CENTER)).is_empty(),
         "not x"
     );
     bench.duart.restore(&snapshot).unwrap();
     bench.input(RXDB, character(b'x'), start);
-    assert_eq!(fired(&mut bench, start + TO_STOP_CENTER), [received]);
-    assert_eq!(written(&mut bench, b'p', start + CHARACTER), [sent]);
+    assert_eq!(fired(&mut bench, start + ps(TO_STOP_CENTER)), [received]);
+    assert_eq!(written(&mut bench, b'p', start + ps(CHARACTER)), [sent]);
     bench.duart.disarm(sent);
-    assert!(written(&mut bench, b'q', start + 3 * CHARACTER).is_empty());
+    assert!(written(&mut bench, b'q', start + ps(3 * CHARACTER)).is_empty());
 }

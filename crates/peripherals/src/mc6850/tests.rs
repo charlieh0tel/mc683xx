@@ -16,6 +16,7 @@ use mc683xx_board::signal::Direction;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
@@ -84,6 +85,11 @@ const BIT: u64 = 104_166_666;
 const CHARACTER: u64 = 1_041_666_666;
 /// Start bit to the center of the stop bit: nine and a half bits.
 const TO_STOP_CENTER: u64 = 989_583_333;
+
+/// `picoseconds` picoseconds.
+const fn ps(picoseconds: u64) -> Span {
+    Span::from_picos(picoseconds)
+}
 
 /// An ACIA under test.
 struct Bench {
@@ -301,7 +307,7 @@ fn a_master_reset_clears_the_status_and_holds_irq_high() {
     bench.write(DATA, b'y', now);
     bench.write(STATUS, RESET, now);
     assert!(frames(&bench.write(DATA, b'z', now)).is_empty());
-    let after = now + CHARACTER;
+    let after = now + ps(CHARACTER);
     assert!(frames(&bench.run(after)).is_empty());
     let sent = frames(&bench.write(STATUS, RUN, after));
     assert!(sent.is_empty(), "nothing held across the reset: {sent:?}");
@@ -330,7 +336,11 @@ fn each_word_select_frames_its_character() {
         };
         assert_eq!(at, Time::ZERO);
         assert_eq!(serial.frame, Frame::Data(line), "{word:03b}");
-        assert_eq!(serial.length, bits * 1_000_000_000_000 / 9600, "{word:03b}");
+        assert_eq!(
+            serial.length,
+            ps(bits * 1_000_000_000_000 / 9600),
+            "{word:03b}"
+        );
         assert_eq!(serial.baud, Frequency::from_hz(9600));
     }
 }
@@ -342,7 +352,7 @@ fn the_counter_divide_gives_the_bit_rate() {
         let mut bench = Bench::started(0x14 | divide);
         let sent = frames(&bench.write(DATA, b'd', Time::ZERO));
         assert_eq!(sent[0].1.baud, Frequency::from_hz(baud));
-        assert_eq!(sent[0].1.length, 10_000_000_000_000 / baud);
+        assert_eq!(sent[0].1.length, ps(10_000_000_000_000 / baud));
     }
 }
 
@@ -456,13 +466,13 @@ fn an_overrun_shows_after_the_character_before_it_is_read() {
     assert!(bench.acia.interrupt_request());
     // characters keep being lost while it shows
     bench.input(RX_DATA, character(b'd'), now);
-    let now = now + CHARACTER;
+    let now = now + ps(CHARACTER);
     bench.run(now);
     assert_eq!(bench.read(DATA, now), b'a', "the lost ones never arrive");
     assert_eq!(bench.read(STATUS, now), TDRE);
     assert!(!bench.acia.interrupt_request());
     bench.input(RX_DATA, character(b'e'), now);
-    let now = now + CHARACTER;
+    let now = now + ps(CHARACTER);
     bench.run(now);
     assert_eq!(bench.read(DATA, now), b'e');
 }
@@ -510,7 +520,7 @@ fn dcd_latches_its_rise_until_a_status_and_a_data_read() {
     assert!(!bench.acia.interrupt_request());
     // frames are lost while it is high
     bench.input(RX_DATA, character(b'l'), now);
-    let later = now + CHARACTER;
+    let later = now + ps(CHARACTER);
     bench.run(later);
     assert_eq!(bench.read(STATUS, later) & RDRF, 0);
     bench.input(DCD, Signal::Level(false), later);

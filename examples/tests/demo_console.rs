@@ -19,7 +19,7 @@ use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
-use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_mc68331::chip::Mc68331;
@@ -31,10 +31,10 @@ const SCRIPT: &[u8] = b"h\nm\np\nt\nc\nx 0\nf\nt\n";
 const CONSOLE: &str = "console";
 /// Board time between turns, a byte of input a turn: `mc683xx-run`'s
 /// default `--turn-us`, 1 ms.
-const TURN: u64 = PICOSECONDS_PER_SECOND / 1000;
+const TURN: Span = Span::from_millis(1);
 /// Board time before input goes in, past the firmware's enabling its
 /// receiver: 10 ms.
-const INPUT_AFTER: Time = Time(PICOSECONDS_PER_SECOND / 100);
+const INPUT_AFTER: Time = Time(Span::from_millis(10).picos());
 /// Board time the run ends at, past the last command's end (about
 /// 2.15 s).
 const END: Time = Time::from_seconds(3);

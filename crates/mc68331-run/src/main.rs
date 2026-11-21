@@ -54,7 +54,7 @@ use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
-use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_board::trace::Line;
 use mc683xx_board::trace::header;
@@ -72,10 +72,8 @@ use crate::error::RunError;
 
 /// The chip the runner runs, which names its trace's lines.
 const CHIP: &str = <Mc68331 as Chip>::TYPE;
-/// Picoseconds in a microsecond, `--turn-us`'s unit.
-const PICOSECONDS_PER_MICROSECOND: u64 = PICOSECONDS_PER_SECOND / 1_000_000;
-/// The longest turn, in microseconds, whose picoseconds a `u64` holds.
-const MAX_TURN_US: u64 = u64::MAX / PICOSECONDS_PER_MICROSECOND;
+/// The longest turn, in microseconds, that a [`Span`] holds.
+const MAX_TURN_US: u64 = Span::MAX.picos() / Span::from_micros(1).picos();
 /// Exit status: the board or a file could not be used.
 const EXIT_ERROR: u8 = 1;
 /// Exit status: the CPU halted.
@@ -255,16 +253,6 @@ fn hexadecimal(text: &str) -> Result<u32, ParseIntError> {
     u32::from_str_radix(text.trim_start_matches("0x"), 16)
 }
 
-/// Seconds as board time, picoseconds.  Floats only parse the command
-/// line; the run's time is integers.
-#[expect(
-    clippy::cast_sign_loss,
-    reason = "the flags refuse negative and non-finite seconds"
-)]
-fn picoseconds(seconds: f64) -> u64 {
-    (seconds * PICOSECONDS_PER_SECOND as f64) as u64
-}
-
 fn main() -> ExitCode {
     let arguments = Arguments::parse();
     match run(&arguments) {
@@ -381,17 +369,19 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         eprintln!("{}", header(CHIP));
     }
     let end = match (arguments.cycles, arguments.seconds) {
-        (None, Some(seconds)) if seconds.is_finite() => board.now() + picoseconds(seconds),
+        (None, Some(seconds)) if seconds.is_finite() => {
+            board.now() + Span::from_seconds_f64(seconds)
+        }
         _ => Time::MAX,
     };
-    let turn = arguments.turn_us * PICOSECONDS_PER_MICROSECOND;
+    let turn = Span::from_micros(arguments.turn_us);
     let every = arguments
         .position
-        .map(picoseconds)
-        .filter(|&every| every > 0);
+        .map(Span::from_seconds_f64)
+        .filter(|every| !every.is_zero());
     let mut turns = Turns {
         bindings,
-        input_after: board.now() + picoseconds(arguments.input_after),
+        input_after: board.now() + Span::from_seconds_f64(arguments.input_after),
         next_position: every.map(|every| (board.now() + every, every)),
     };
     control.set_pacing(arguments.pace)?;
@@ -417,7 +407,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         // always moves time on.
         let until = arguments.cycles.map_or(until, |cycles| {
             let at = board.system_clock().time(Cycles(cycles));
-            until.min(at.max(board.now() + 1))
+            until.min(at.max(board.now() + Span::from_picos(1)))
         });
         let outcome = board.run_until(until)?;
         turns.after(&mut board)?;
@@ -535,7 +525,7 @@ struct Turns {
     /// Board time before which no input goes in.
     input_after: Time,
     /// When the next position is taken, and how often.
-    next_position: Option<(Time, u64)>,
+    next_position: Option<(Time, Span)>,
 }
 
 impl Turns {

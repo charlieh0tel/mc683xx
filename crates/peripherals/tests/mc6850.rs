@@ -17,6 +17,7 @@ use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_mc68331::chip::Mc68331;
@@ -230,14 +231,17 @@ fn the_cpu_transmits_and_echoes_through_the_autovectored_interrupt() {
             )),
         )
         .unwrap();
-    board.run_until(sent_at + 3_000_000_000).unwrap();
+    board.run_until(sent_at + Span::from_millis(3)).unwrap();
     let echoed = received(&mut board);
     let [(at, serial)] = echoed[..] else {
         panic!("one frame: {echoed:?}");
     };
     assert_eq!(serial.frame, Frame::Data(u16::from(b'x')));
     // after the receiver's nine and a half bits
-    assert!(at.since(sent_at) > 989_000_000, "{at:?} from {sent_at:?}");
+    assert!(
+        at.since(sent_at) > Span::from_micros(989),
+        "{at:?} from {sent_at:?}"
+    );
     let data = &board.chip().cpu().registers.data;
     assert_eq!(data[0] & 0xff, u32::from(b'x'));
     // RDRF, TDRE and IRQ when the handler read the status

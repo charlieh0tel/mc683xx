@@ -25,6 +25,7 @@ use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_mc68331::chip::Mc68331;
@@ -191,7 +192,7 @@ fn another_thread_stops_a_paced_run_and_its_input_lands_at_a_sync_point() {
     assert!(Time::ZERO < *at && *at <= outcome.now, "{at:?}");
     // a sync point: a quantum's end, or a quantum's, at a tick's edge
     assert!(
-        at.0 % QUANTUM.get() == 0
+        (*at % QUANTUM).is_zero()
             || seen
                 .iter()
                 .any(|(net, edge, _)| net == "tick" && edge == at),
@@ -254,7 +255,7 @@ fn short_paced_runs_in_a_loop_are_paced() {
     board.control().set_pacing(Pacing::Scaled(0.1)).unwrap();
     let started = Instant::now();
     for _ in 0..20 {
-        let until = board.now() + 5 * MILLISECOND;
+        let until = board.now() + Span::from_millis(5);
         board.run_until_paced(until, QUANTUM).unwrap();
     }
     // 100 ms of board time at a tenth of real time
@@ -265,7 +266,7 @@ fn short_paced_runs_in_a_loop_are_paced() {
 /// Wall time between frames, a 60 Hz display's.
 const FRAME: Duration = Duration::from_micros(16_667);
 /// The most board time a frame runs.
-const SLICE: u64 = 100 * MILLISECOND;
+const SLICE: Span = Span::from_millis(100);
 
 /// Board picoseconds a frame's wall time is worth at `factor`.
 #[expect(
@@ -283,7 +284,7 @@ fn an_unpaced_frame_runs_its_slice() {
     for count in 1..=3 {
         let outcome = board.run_frame(Duration::ZERO, SLICE).unwrap();
         assert_eq!(outcome.stop, Stop::Budget);
-        assert_eq!(outcome.now, Time(count * SLICE));
+        assert_eq!(outcome.now, Time::ZERO + SLICE * count);
     }
 }
 
@@ -322,7 +323,7 @@ fn frames_after_one_far_behind_are_paced_from_its_end() {
     // slice each until the minute is caught up
     wall += Duration::from_secs(60);
     let resumed = board.run_frame(wall, SLICE).unwrap().now;
-    assert_eq!(resumed, Time(SLICE));
+    assert_eq!(resumed, Time::ZERO + SLICE);
     for count in 1..=5 {
         wall += FRAME;
         let outcome = board.run_frame(wall, SLICE).unwrap();
@@ -370,7 +371,7 @@ fn a_frame_after_anything_else_starts_the_pacing_again() {
             board.restore(snapshot).unwrap();
         }),
         ("a run of no time", |board, _| {
-            board.run_for(0).unwrap();
+            board.run_for(Span::ZERO).unwrap();
         }),
         ("a quantized run of no time", |board, _| {
             let now = board.now();
@@ -421,7 +422,7 @@ fn a_run_or_restore_in_a_frame_s_before_starts_the_pacing_again() {
             board.run_for(SLICE).unwrap();
         }),
         ("a run of no time", |board, _| {
-            board.run_for(0).unwrap();
+            board.run_for(Span::ZERO).unwrap();
         }),
         ("a restore forward", |board, ahead| {
             board.restore(ahead).unwrap();
@@ -514,7 +515,7 @@ fn frames_are_one_long_run() {
     framed.control().set_pacing(Pacing::Scaled(4.0)).unwrap();
     let mut wall = Duration::ZERO;
     while framed.now() < total {
-        let left = total.0 - framed.now().0;
+        let left = total - framed.now();
         framed.run_frame(wall, SLICE.min(left)).unwrap();
         wall += FRAME;
     }

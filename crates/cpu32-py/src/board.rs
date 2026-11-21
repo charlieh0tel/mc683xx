@@ -10,7 +10,6 @@ use std::fmt;
 use std::hash::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
-use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -46,8 +45,8 @@ use mc683xx_board::signal::ParseKindError;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Clock;
-use mc683xx_board::time::PICOSECONDS_PER_SECOND;
 use mc683xx_board::time::Phase;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_board::trace::Line;
 use mc683xx_cpu32::bus::BusError;
@@ -369,7 +368,7 @@ impl SerialView {
         Ok(Self(Serial::timed(
             Frame::try_from(frame)?,
             Frequency(baud_nanohertz),
-            length,
+            Span::from_picos(length),
         )))
     }
 
@@ -396,7 +395,7 @@ impl SerialView {
     /// untimed.
     #[getter]
     const fn length(&self) -> u64 {
-        self.0.length
+        self.0.length.picos()
     }
 
     /// When its stop bits end, for a start bit at `start` picoseconds.
@@ -1287,16 +1286,16 @@ impl BoardView {
     }
 }
 
-/// Picoseconds from `seconds` or `picoseconds`, whichever is given.
-fn picoseconds_of(seconds: Option<f64>, picoseconds: Option<u64>) -> PyResult<u64> {
+/// The span of `seconds` or `picoseconds`, whichever is given.
+fn span_of(seconds: Option<f64>, picoseconds: Option<u64>) -> PyResult<Span> {
     match (seconds, picoseconds) {
         (Some(seconds), None) if seconds.is_finite() && seconds >= 0.0 => {
-            Ok((seconds * PICOSECONDS_PER_SECOND as f64) as u64)
+            Ok(Span::from_seconds_f64(seconds))
         }
         (Some(seconds), None) => Err(PyValueError::new_err(format!(
             "{seconds}: give a finite number of seconds, 0 or more"
         ))),
-        (None, Some(picoseconds)) => Ok(picoseconds),
+        (None, Some(picoseconds)) => Ok(Span::from_picos(picoseconds)),
         _ => Err(PyValueError::new_err("give seconds or picoseconds")),
     }
 }
@@ -1311,8 +1310,10 @@ impl BoardView {
         pacing: Option<PacingView>,
         quantum: u64,
     ) -> PyResult<BoardRunView> {
-        let quantum = NonZeroU64::new(quantum)
-            .ok_or_else(|| PyValueError::new_err("give a quantum of 1 ps or more"))?;
+        if quantum == 0 {
+            return Err(PyValueError::new_err("give a quantum of 1 ps or more"));
+        }
+        let quantum = Span::from_picos(quantum);
         let control = self.board.control();
         let previous = control.pacing();
         if let Some(pacing) = pacing {
@@ -1456,7 +1457,7 @@ impl BoardView {
     /// control's pacing is put back when the run returns or raises,
     /// unless another thread set a pacing during the run, which then
     /// stays.  Seconds not finite, or below 0, raise `ValueError`.
-    #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.get()))]
+    #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.picos()))]
     fn run_for(
         &mut self,
         py: Python<'_>,
@@ -1465,14 +1466,13 @@ impl BoardView {
         pacing: Option<PacingView>,
         quantum_picoseconds: u64,
     ) -> PyResult<BoardRunView> {
-        let span = picoseconds_of(seconds, picoseconds)?;
-        let until = Time(self.board.now().0.saturating_add(span));
+        let until = self.board.now() + span_of(seconds, picoseconds)?;
         self.run_until_paced(py, until, pacing, quantum_picoseconds)
     }
 
     /// Runs to board time `seconds`, or `picoseconds`, as `run_for` runs
     /// for them: at once if the board is already there.
-    #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.get()))]
+    #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.picos()))]
     fn run_until(
         &mut self,
         py: Python<'_>,
@@ -1481,7 +1481,7 @@ impl BoardView {
         pacing: Option<PacingView>,
         quantum_picoseconds: u64,
     ) -> PyResult<BoardRunView> {
-        let until = Time(picoseconds_of(seconds, picoseconds)?);
+        let until = Time::ZERO + span_of(seconds, picoseconds)?;
         self.run_until_paced(py, until, pacing, quantum_picoseconds)
     }
 
@@ -1512,7 +1512,7 @@ impl BoardView {
                 "wall {wall}: give a finite number of seconds, 0 or more"
             ))
         })?;
-        let slice = picoseconds_of(seconds, picoseconds)?;
+        let slice = span_of(seconds, picoseconds)?;
         // Ctrl-C first, even with a peripheral's error waiting
         let outcome = match control::run_frame(py, &mut self.board, wall, slice) {
             Ok(outcome) => {

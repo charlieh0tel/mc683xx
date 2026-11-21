@@ -23,6 +23,7 @@ use mc683xx_board::registry::PortSpec;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_mc68331::chip::Mc68331;
@@ -205,7 +206,7 @@ to = ["external.switch-seen"]
 /// `level` and the board runs a period.
 fn drive(board: &mut Board<Mc68331>, name: &str, level: bool) -> Vec<ConditionId> {
     board.send(name, Signal::Level(level)).unwrap();
-    board.run_for(PERIOD_PS).unwrap();
+    board.run_for(Span::from_picos(PERIOD_PS)).unwrap();
     board.fired()
 }
 

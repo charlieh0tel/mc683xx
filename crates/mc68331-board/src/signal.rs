@@ -12,6 +12,7 @@ use serde::Serialize;
 
 use crate::time::Clock;
 use crate::time::PICOSECONDS_PER_SECOND;
+use crate::time::Span;
 use crate::time::Time;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::frequency::NANOHERTZ_PER_HERTZ;
@@ -91,9 +92,9 @@ pub struct Serial {
     pub frame: Frame,
     /// The sender's bit rate; zero if it gave none (an untimed frame).
     pub baud: Frequency,
-    /// Picoseconds from the start bit's leading edge to the end of the
-    /// stop bits; zero for an untimed frame.
-    pub length: u64,
+    /// From the start bit's leading edge to the end of the stop bits;
+    /// zero for an untimed frame.
+    pub length: Span,
 }
 
 impl Serial {
@@ -108,13 +109,13 @@ impl Serial {
         } else {
             bits as u128 * scale / baud.0 as u128
         };
-        Self::timed(frame, baud, length as u64)
+        Self::timed(frame, baud, Span::from_picos(length as u64))
     }
 
-    /// `frame` at `baud`, `length` picoseconds from start bit to the end
-    /// of its stop bits (one and a half stop bits, say).
+    /// `frame` at `baud`, `length` from start bit to the end of its stop
+    /// bits (one and a half stop bits, say).
     #[must_use]
-    pub const fn timed(frame: Frame, baud: Frequency, length: u64) -> Self {
+    pub const fn timed(frame: Frame, baud: Frequency, length: Span) -> Self {
         Self {
             frame,
             baud,
@@ -126,7 +127,7 @@ impl Serial {
     /// takes whole at its time.
     #[must_use]
     pub const fn untimed(frame: Frame) -> Self {
-        Self::timed(frame, Frequency(0), 0)
+        Self::timed(frame, Frequency(0), Span::ZERO)
     }
 
     /// When the frame's stop bits end, for a frame whose start bit
@@ -248,7 +249,8 @@ impl fmt::Display for Signal {
                 write!(
                     formatter,
                     " baud={} length={}",
-                    serial.baud.0, serial.length
+                    serial.baud.0,
+                    serial.length.picos()
                 )
             }
             Self::Analog(value) => write!(formatter, "analog={value}"),

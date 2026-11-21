@@ -24,6 +24,7 @@ use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Span;
 use mc683xx_cpu32::cpu::bare::End;
 use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
@@ -555,7 +556,7 @@ fn monitor_reset_on_a_board_drives_reset_as_the_board_does() {
         ResetCause::External.status()
     );
     let now = board.now();
-    board.run_until(now + 1_000_000_000).unwrap();
+    board.run_until(now + Span::from_millis(1)).unwrap();
     let levels: Vec<Signal> = board
         .take_received("observed")
         .unwrap()

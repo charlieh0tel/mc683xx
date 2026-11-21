@@ -4,6 +4,7 @@
 use mc683xx_board::board::Board;
 use mc683xx_board::condition::Conditions;
 use mc683xx_board::error::RunError;
+use mc683xx_board::time::Span;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
@@ -47,7 +48,10 @@ impl Target for Board<Mc68331> {
     /// time with the chip.
     fn run_for(&mut self, cycles: Cycles, _hit: &dyn Fn() -> bool) -> Result<TargetRun, RunError> {
         let chip = self.chip().now() + cycles;
-        let until = self.system_clock().time(chip).max(self.now() + 1);
+        let until = self
+            .system_clock()
+            .time(chip)
+            .max(self.now() + Span::from_picos(1));
         let stop = Self::run_until(self, until)?.stop;
         Ok(match stop {
             Stop::Requested if !self.fired().is_empty() => TargetRun::Condition,

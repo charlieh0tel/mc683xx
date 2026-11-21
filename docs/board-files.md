@@ -689,7 +689,7 @@ The contract a host's peripheral models target (rustdoc in
   `Serial(signal::Serial)`, `Analog(f64)`, `Bus(u32)`.  A
   `signal::Serial` (`#[non_exhaustive]`) is `frame` (`Frame::Data`, the
   bits as on the line, or `Frame::Break`), `baud` (a `Frequency`) and
-  `length` (picoseconds from the start bit to the end of the stop
+  `length` (a `time::Span`, from the start bit to the end of the stop
   bits), timed from its start bit; build one with `Serial::new(frame,
   baud, bits)`, `Serial::timed(frame, baud, length)` or
   `Serial::untimed(frame)`, and `end(start)` gives its end.
@@ -699,7 +699,9 @@ The contract a host's peripheral models target (rustdoc in
   to its picosecond or the one before; so `cycles(time(c))` is `c`.  The
   board moves its base only where the frequency changes, so one base
   maps all the time between changes without drift.
-- `time::Time` (picoseconds), `mc683xx_cpu32::frequency::Frequency`
+- `time::Time` (picoseconds since power-on) and `time::Span` (a span
+  of it, picoseconds: `Time + Span`, `Time - Time` a `Span`),
+  `mc683xx_cpu32::frequency::Frequency`
   (nanohertz, the chip's clocks too: `TimeBase::frequency`),
   `time::Phase` (cycles, 10^21 units each) and `time::Clock`:
   `new(frequency, edge)`, `with_phase(frequency, at, phase)`,
@@ -711,9 +713,10 @@ The contract a host's peripheral models target (rustdoc in
   a sink counts and times edges across the change with no rounding.
   A sink that queries back across changes keeps a
   `time::ClockHistory` (`new(span)`, `push(clock)` at each input;
-  64 s of history is plenty): `phase_at`, `edges(from, to)`,
+  `Span::from_seconds(64)` of history is plenty): `phase_at`, `edges(from, to)`,
   `edge(number)`, `edge_after(from, n)` and `to_next_edge(time)`
-  (picoseconds rounded up, and the exact fraction of a cycle) integrate
+  (a `Span` rounded up to a picosecond, and the exact fraction of a
+  cycle) integrate
   each segment at its own frequency.  Edge numbers are absolute, so a
   sink counts from any edge it likes (after a sync step, from that
   edge).  Frequencies resolve 10^-16 of 10 MHz, and a phase stays

@@ -1389,7 +1389,18 @@ hand.  The keys are in `docs/board-files.md`.
   bus cycle to end (SIMRM 8.1): a host's reset comes between
   instructions anyway.
 - **Board time:** `Time`, integer picoseconds in a `u64` (213 days),
-  with no floats in scheduling.  The board's scheduler holds the
+  with no floats in scheduling.  A span of it is a `Span`, picoseconds
+  too, its field private (`from_picos`, `from_nanos`, `from_micros`,
+  `from_millis`, `from_seconds`, `from_seconds_f64`; `picos`,
+  `seconds_f64`), so a time and a span cannot be mixed up: `Time +
+  Span` and `Time - Span` are times, `Time - Time` a `Span`, `Span`s
+  add and scale by counts, all saturating as `Time` does.  Every API
+  taking or giving a span takes a `Span` (`Board::run_for`,
+  `run_frame`, a quantum, `Serial::length`, `ClockHistory`'s span);
+  Python and wasm keep their numbers (seconds, or picoseconds as an
+  integer or a `bigint`) and convert at the binding (decided
+  2026-11, for 0.8.0; `Interval` is left free for a start..end range).
+  The board's scheduler holds the
   peripherals' next events and the drives in flight, in (time, sequence)
   order, and runs the chip with `run_for(budget)` in quanta that end at
   the earliest of them.  Chip cycles convert to board time from an
@@ -1500,7 +1511,8 @@ hand.  The keys are in `docs/board-files.md`.
   embed (smartclock-emu builds its own command on it); `send` and
   `take_received` move values through run-time endpoints between
   runs.  `Board::run_until_quantized(until, quantum, before)` runs it in quanta
-  of board time (a `NonZeroU64`: a quantum of 0 would never end), calling `before` before each (the Python bindings'
+  of board time (a `Span`; a quantum of 0, which would never end, is a
+  picosecond), calling `before` before each (the Python bindings'
   Ctrl-C checks), `Break` ending it `Stop::Requested`; a board halted
   or in background mode before a quantum goes on to the next, so the
   quanta change nothing.  `run_until` on such a board runs to `until`
@@ -1614,7 +1626,7 @@ hand.  The keys are in `docs/board-files.md`.
   held back and runs unpaced until it catches up; a new factor or a
   restore starts the pacing again from where the board is.  A host
   with its own clock that cannot sleep (a browser) runs the board a
-  frame at a time (`Board::run_frame(wall, picoseconds)`): to the time
+  frame at a time (`Board::run_frame(wall, bound)`): to the time
   the board's own pacer says is due by the clock's reading
   (`Pacer::due`), bounded by the frame's slice.  A frame so bounded
   drops the time it missed: the pacing starts again from where it
@@ -1684,8 +1696,8 @@ hand.  The keys are in `docs/board-files.md`.
   ends the session and the run, with the `stopped` record and
   `--save`, at the next wait.  A wrong command
   includes seconds (`--seconds`, `--position`, `--input-after`) that
-  are not finite or are negative, and a `--turn-us` of 0 or one whose
-  picoseconds overflow.  Piped input is read
+  are not finite or are negative, and a `--turn-us` of 0 or one longer
+  than a `Span` holds.  Piped input is read
   whole and fed a byte a turn from `--input-after`, so a run with it
   is reproducible; a terminal's or a pty's is not.  It is read when
   input first goes in, after `--gdb` has said where it waits, and the
