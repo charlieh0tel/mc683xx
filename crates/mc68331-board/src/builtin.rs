@@ -438,7 +438,7 @@ impl Peripheral for Oscillator {
         (!self.driven).then_some(Time::ZERO)
     }
 
-    fn advance(&mut self, _: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
         drive.drive(Self::OUT, Signal::Clock(self.clock));
         self.driven = true;
     }
@@ -532,13 +532,13 @@ impl Divider {
         }
     }
 
-    /// Drives the change after input edge `edge`, no earlier than
-    /// `not_before`.
-    fn drive_after(&mut self, edge: u128, not_before: Time, drive: &mut Drive<'_>) {
+    /// Drives the change after input edge `edge`, no earlier than the
+    /// drive's time.
+    fn drive_after(&mut self, edge: u128, drive: &mut Drive<'_>) {
         let Some(clock) = self.clock else { return };
         let next = self.after(edge);
         self.pending = clock.edge(next).map(|at| {
-            let at = at.max(not_before);
+            let at = at.max(drive.now());
             let rising = next.is_multiple_of(self.divide);
             drive.drive_at(at, Self::OUT, Signal::Level(rising));
             Transition { edge: next, at }
@@ -547,11 +547,11 @@ impl Divider {
 }
 
 impl Peripheral for Divider {
-    fn input(&mut self, port: usize, signal: Signal, now: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
         if let (Self::IN, Signal::Clock(clock)) = (port, signal) {
             self.clock = Some(clock);
             if self.pending.is_none() {
-                self.drive_after(clock.phase_at(now).cycles(), now, drive);
+                self.drive_after(clock.phase_at(drive.now()).cycles(), drive);
             }
         }
     }
@@ -560,9 +560,9 @@ impl Peripheral for Divider {
         self.pending.map(|pending| pending.at)
     }
 
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
         if let Some(pending) = self.pending {
-            self.drive_after(pending.edge, now, drive);
+            self.drive_after(pending.edge, drive);
         }
     }
 
@@ -638,11 +638,11 @@ impl EdgeCounter {
 }
 
 impl Peripheral for EdgeCounter {
-    fn input(&mut self, _: usize, signal: Signal, now: Time, _: &mut Drive<'_>) {
+    fn input(&mut self, _: usize, signal: Signal, drive: &mut Drive<'_>) {
         if let Signal::Level(level) = signal {
             if level && !self.level {
                 self.count += 1;
-                self.last = Some(now);
+                self.last = Some(drive.now());
             }
             self.level = level;
         }
@@ -791,13 +791,13 @@ mod tests {
         // 10 MHz with an edge at 37 ps: edges at 37 + 100000n.
         let clock = Clock::new(Frequency::from_hz(10_000_000), Time::from_picos(37));
         let mut drive = Drive::new(Time::from_picos(50), SYSTEM_CLOCK);
-        divider.input(0, Signal::Clock(clock), Time::from_picos(50), &mut drive);
+        divider.input(0, Signal::Clock(clock), &mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven.len(), 1);
         assert_eq!(driven[0].now, Time::from_picos(37 + 300_000));
         assert_eq!(driven[0].signal, Signal::Level(false));
         let mut drive = Drive::new(Time::from_picos(300_037), SYSTEM_CLOCK);
-        divider.advance(Time::from_picos(300_037), &mut drive);
+        divider.advance(&mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven[0].now, Time::from_picos(1_000_037));
         assert_eq!(driven[0].signal, Signal::Level(true));
@@ -894,17 +894,11 @@ mod tests {
         divider.input(
             0,
             Signal::Clock(clock),
-            Time::from_picos(50),
             &mut Drive::new(Time::from_picos(50), SYSTEM_CLOCK),
         );
         let retuned = clock.retuned(Time::from_picos(100_000), Frequency::from_hz(20_000_000));
         let mut drive = Drive::new(Time::from_picos(100_000), SYSTEM_CLOCK);
-        divider.input(
-            0,
-            Signal::Clock(retuned),
-            Time::from_picos(100_000),
-            &mut drive,
-        );
+        divider.input(0, Signal::Clock(retuned), &mut drive);
         assert!(drive.finish().driven.is_empty());
         assert_eq!(
             divider.next_event(SYSTEM_CLOCK),
@@ -912,7 +906,7 @@ mod tests {
             "the fall driven ahead keeps the old clock's time"
         );
         let mut drive = Drive::new(Time::from_picos(300_037), SYSTEM_CLOCK);
-        divider.advance(Time::from_picos(300_037), &mut drive);
+        divider.advance(&mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven[0].now, retuned.edge(10).unwrap());
         assert_eq!(driven[0].signal, Signal::Level(true));
@@ -1038,7 +1032,6 @@ mod tests {
         divider.input(
             0,
             Signal::Clock(clock),
-            Time::from_picos(50),
             &mut Drive::new(Time::from_picos(50), SYSTEM_CLOCK),
         );
         let divided = divider.inspect();
@@ -1058,7 +1051,6 @@ mod tests {
         counter.input(
             0,
             Signal::Level(true),
-            Time::from_picos(10),
             &mut Drive::new(Time::from_picos(10), SYSTEM_CLOCK),
         );
         let counted = counter.inspect();
@@ -1083,7 +1075,6 @@ mod tests {
         divider.input(
             0,
             Signal::Clock(clock),
-            Time::from_picos(50),
             &mut Drive::new(Time::from_picos(50), SYSTEM_CLOCK),
         );
         let mut counter = EdgeCounter::new();
@@ -1091,7 +1082,6 @@ mod tests {
             counter.input(
                 0,
                 Signal::Level(level),
-                Time::from_picos(at),
                 &mut Drive::new(Time::from_picos(at), SYSTEM_CLOCK),
             );
         }

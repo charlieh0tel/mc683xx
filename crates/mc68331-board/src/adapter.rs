@@ -26,6 +26,7 @@ use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::peripheral::QspiClock;
@@ -127,6 +128,11 @@ impl<D> MappedAdapter<D> {
     }
 }
 
+/// The time of `drive`'s call in the chip's system clocks.
+fn cycles(drive: &Drive<'_>) -> Cycles {
+    drive.system_clock().cycles(drive.now())
+}
+
 /// The cycle a model sees for `access`, its time in system clocks on
 /// `base`, through its select if one carried it.
 fn carried(access: PeripheralAccess, base: TimeBase) -> BusCycle {
@@ -170,16 +176,16 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
         self.peripheral.interrupt_request()
     }
 
-    fn reset(&mut self, now: Time, drive: &mut Drive<'_>) {
-        self.peripheral.reset(drive.system_clock().cycles(now));
+    fn reset(&mut self, drive: &mut Drive<'_>) {
+        self.peripheral.reset(cycles(drive));
     }
 
     fn next_event(&self, system_clock: TimeBase) -> Option<Time> {
         self.peripheral.next_event().map(|at| system_clock.time(at))
     }
 
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
-        self.peripheral.advance(drive.system_clock().cycles(now));
+    fn advance(&mut self, drive: &mut Drive<'_>) {
+        self.peripheral.advance(cycles(drive));
     }
 
     fn inspect(&self) -> Inspection {
@@ -243,27 +249,25 @@ impl<D> SpiAdapter<D> {
 }
 
 impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
-    fn reset(&mut self, now: Time, drive: &mut Drive<'_>) {
-        self.peripheral.reset(drive.system_clock().cycles(now));
+    fn reset(&mut self, drive: &mut Drive<'_>) {
+        self.peripheral.reset(cycles(drive));
     }
 
     fn transfer(&mut self, transfer: Transfer, drive: &mut Drive<'_>) -> u16 {
-        let now = drive.system_clock().cycles(transfer.now);
         self.peripheral.transfer(
-            QspiTransfer::new(transfer.out, transfer.bits, transfer.clock, now)
+            QspiTransfer::new(transfer.out, transfer.bits, transfer.clock, cycles(drive))
                 .at_entry(transfer.entry)
                 .selecting(transfer.chip_selects),
         )
     }
 
-    fn select(&mut self, _: usize, selected: bool, now: Time, drive: &mut Drive<'_>) {
-        let now = drive.system_clock().cycles(now);
+    fn select(&mut self, _: usize, selected: bool, drive: &mut Drive<'_>) {
         let levels = if selected {
             SELECTED_LEVELS
         } else {
             RELEASED_LEVELS
         };
-        self.peripheral.set_chip_selects(levels, now);
+        self.peripheral.set_chip_selects(levels, cycles(drive));
     }
 
     fn set_qspi_clock(&mut self, clock: QspiClock, now: Time, system_clock: TimeBase) {

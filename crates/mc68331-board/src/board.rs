@@ -1388,7 +1388,7 @@ impl<C: Chip> Board<C> {
                     }
                     repeats[index] = (at, count);
                     self.shared
-                        .call(index, at, |peripheral, drive| peripheral.advance(at, drive));
+                        .call(index, at, |peripheral, drive| peripheral.advance(drive));
                 }
                 (_, None) => return Ok(()),
             }
@@ -1509,7 +1509,7 @@ impl<C: Chip> Board<C> {
                 _ if !changed => {}
                 Sink::Peripheral(peripheral, port) => {
                     self.shared.call(peripheral, at, |peripheral, drive| {
-                        peripheral.input(port, signal, at, drive);
+                        peripheral.input(port, signal, drive);
                     });
                 }
                 Sink::Chip(pin) => {

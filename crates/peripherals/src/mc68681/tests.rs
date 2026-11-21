@@ -187,7 +187,7 @@ impl Bench {
     /// `signal` into `port` at `now`: what it drove.
     fn input(&mut self, port: usize, signal: Signal, now: Time) -> Vec<Driven> {
         let mut drive = Drive::new(now, SYSTEM_CLOCK);
-        self.duart.input(port, signal, now, &mut drive);
+        self.duart.input(port, signal, &mut drive);
         drive.finish().driven
     }
 
@@ -200,11 +200,11 @@ impl Bench {
             .filter(|&next| next <= until)
         {
             let mut drive = Drive::new(next, SYSTEM_CLOCK);
-            self.duart.advance(next, &mut drive);
+            self.duart.advance(&mut drive);
             driven.extend(drive.finish().driven);
         }
         let mut drive = Drive::new(until, SYSTEM_CLOCK);
-        self.duart.advance(until, &mut drive);
+        self.duart.advance(&mut drive);
         driven.extend(drive.finish().driven);
         driven
     }
@@ -959,7 +959,7 @@ fn reset_clears_the_mask_the_output_port_and_the_channels() {
     bench.write(START, 0xff, Time::ZERO);
     bench.write(ACR, 0x30, Time::ZERO);
     let mut drive = Drive::new(Time::from_picos(10), SYSTEM_CLOCK);
-    bench.duart.reset(Time::from_picos(10), &mut drive);
+    bench.duart.reset(&mut drive);
     let driven = levels(&drive.finish().driven);
     assert_eq!(driven.len(), 9, "every pin high, IRQ negated");
     assert!(driven.iter().all(|&(_, level)| level));
@@ -1201,9 +1201,7 @@ fn reset_runs_the_mc68681s_timer_and_stops_the_scc68692s() {
         // X1/16, preload 4: a terminal count every 64 ticks
         bench.write(ACR, acr, Time::ZERO);
         bench.write(CTLR, 4, Time::ZERO);
-        bench
-            .duart
-            .reset(tick(32), &mut Drive::new(tick(32), SYSTEM_CLOCK));
+        bench.duart.reset(&mut Drive::new(tick(32), SYSTEM_CLOCK));
         assert_eq!(bench.duart.state.acr, 0x70, "{variant:?}: timer mode");
         // the second terminal count from RESET
         let second = tick(32 + 2 * 64);
@@ -1243,7 +1241,7 @@ fn a_stop_condition_fires_for_its_character_and_survives_a_restore() {
     let start = Time::from_picos(5000);
     let fired = |bench: &mut Bench, at: Time| {
         let mut drive = Drive::new(at, SYSTEM_CLOCK);
-        bench.duart.advance(at, &mut drive);
+        bench.duart.advance(&mut drive);
         drive.finish().fired
     };
     let written = |bench: &mut Bench, byte: u8, at: Time| {

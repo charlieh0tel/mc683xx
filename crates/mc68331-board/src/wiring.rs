@@ -653,7 +653,7 @@ impl MappedPeripheral for PeripheralPins {
     fn reset(&mut self, now: Cycles) {
         let now = self.shared.time(now);
         self.shared.call(self.peripheral, now, |peripheral, drive| {
-            peripheral.reset(now, drive)
+            peripheral.reset(drive)
         });
     }
 }
@@ -752,7 +752,7 @@ impl SpiPeripheral for QspiRouter {
             if !target.selected(chip_selects) {
                 continue;
             }
-            let transfer = Transfer::new(out, bits, clock, now)
+            let transfer = Transfer::new(out, bits, clock)
                 .through(target.attachment)
                 .at_entry(entry)
                 .selecting(chip_selects);
@@ -806,7 +806,7 @@ impl SpiPeripheral for QspiRouter {
                 }
                 self.shared
                     .call(target.peripheral, now, |peripheral, drive| {
-                        peripheral.select(target.attachment, after, now, drive);
+                        peripheral.select(target.attachment, after, drive);
                     });
             }
         }

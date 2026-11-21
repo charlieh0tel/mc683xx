@@ -51,7 +51,7 @@ struct Probe {
 }
 
 impl Peripheral for Probe {
-    fn input(&mut self, _port: usize, signal: Signal, _now: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, _port: usize, signal: Signal, drive: &mut Drive<'_>) {
         if signal == Signal::Level(true) {
             for &token in &self.armed {
                 drive.fire(token);

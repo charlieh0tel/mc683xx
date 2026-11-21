@@ -29,7 +29,6 @@ use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
-use mc683xx_board::time::Time;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
@@ -147,7 +146,7 @@ impl Peripheral for Latch {
         self.sync(drive);
     }
 
-    fn input(&mut self, port: usize, signal: Signal, _: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
         if let (OE, Signal::Level(level)) = (port, signal) {
             self.oe = level;
             self.sync(drive);
@@ -248,7 +247,7 @@ mod tests {
         let mut latch = latch(0x81);
         latch.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
         let mut drive = Drive::new(Time::from_picos(1), SYSTEM_CLOCK);
-        latch.input(OE, Signal::Level(true), Time::from_picos(1), &mut drive);
+        latch.input(OE, Signal::Level(true), &mut drive);
         assert_eq!(levels(drive).len(), 6, "the six low bits go high");
         latch
             .write(
@@ -258,7 +257,7 @@ mod tests {
             )
             .unwrap();
         let mut drive = Drive::new(Time::from_picos(3), SYSTEM_CLOCK);
-        latch.input(OE, Signal::Level(false), Time::from_picos(3), &mut drive);
+        latch.input(OE, Signal::Level(false), &mut drive);
         assert_eq!(
             levels(drive),
             (0..8)
@@ -274,7 +273,6 @@ mod tests {
         latch.input(
             OE,
             Signal::Level(true),
-            Time::from_picos(1),
             &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
         );
         let inspection = latch.inspect();

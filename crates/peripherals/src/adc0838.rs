@@ -29,7 +29,6 @@ use mc683xx_board::spi;
 use mc683xx_board::spi::Edge;
 use mc683xx_board::spi::Edges;
 use mc683xx_board::spi::Slave;
-use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
@@ -362,7 +361,7 @@ impl Peripheral for Adc0838 {
 
     /// CS high clears its registers; CS low starts a frame waiting for
     /// the start bit (SNAS531B, THE DIGITAL INTERFACE steps 1 and 9).
-    fn select(&mut self, _: usize, _: bool, _: Time, _: &mut Drive<'_>) {
+    fn select(&mut self, _: usize, _: bool, _: &mut Drive<'_>) {
         self.state.phase = Phase::Idle;
     }
 
@@ -372,7 +371,7 @@ impl Peripheral for Adc0838 {
         false
     }
 
-    fn input(&mut self, port: usize, signal: Signal, _: Time, _: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, _: &mut Drive<'_>) {
         if let (SHIFT_ENABLE, Signal::Level(level)) = (port, signal) {
             self.state.shift_enable = level;
         }
@@ -507,13 +506,13 @@ mod tests {
     fn frame_in(mode: u8, adc: &mut Adc0838, inputs: Inputs, transfers: &[(u16, u8)]) -> Vec<u16> {
         let sampler = move |port: usize, _: Time| inputs.get(port).copied().flatten();
         let mut drive = Drive::with_sampler(Time::from_picos(0), SYSTEM_CLOCK, &sampler);
-        adc.select(0, true, Time::from_picos(0), &mut drive);
+        adc.select(0, true, &mut drive);
         let replies = transfers
             .iter()
             .enumerate()
             .map(|(index, &(out, bits))| adc.transfer(transfer(mode, index, out, bits), &mut drive))
             .collect();
-        adc.select(0, false, Time::from_picos(0), &mut drive);
+        adc.select(0, false, &mut drive);
         assert!(drive.finish().driven.is_empty(), "it drives nothing");
         replies
     }
@@ -689,15 +688,10 @@ mod tests {
         inputs[1] = Some(code_volts(0b1010_0101));
         let mut adc = adc();
         let mut drive = Drive::new(Time::from_picos(0), SYSTEM_CLOCK);
-        adc.input(
-            SHIFT_ENABLE,
-            Signal::Level(true),
-            Time::from_picos(0),
-            &mut drive,
-        );
+        adc.input(SHIFT_ENABLE, Signal::Level(true), &mut drive);
         let sampler = move |port: usize, _: Time| inputs.get(port).copied().flatten();
         let mut drive = Drive::with_sampler(Time::from_picos(0), SYSTEM_CLOCK, &sampler);
-        adc.select(0, true, Time::from_picos(0), &mut drive);
+        adc.select(0, true, &mut drive);
         // the start bit, channel 1, the leading zero, MSB first
         let first = adc.transfer(transfer(mode, 0, 0b1_1100 << 9, 14), &mut drive);
         assert_eq!(first, 0b1_1111 << 9 | 0b1010_0101);
@@ -706,12 +700,7 @@ mod tests {
             0b1111,
             "D0 held"
         );
-        adc.input(
-            SHIFT_ENABLE,
-            Signal::Level(false),
-            Time::from_picos(0),
-            &mut drive,
-        );
+        adc.input(SHIFT_ENABLE, Signal::Level(false), &mut drive);
         assert_eq!(
             adc.transfer(transfer(mode, 2, 0, 8), &mut drive),
             after,
@@ -779,7 +768,7 @@ mod tests {
     /// then eight more: the replies.
     fn rest(adc: &mut Adc0838, inputs: Inputs, drive: &mut Drive<'_>) -> (u16, Vec<u16>) {
         let tail = adc.transfer(transfer(3, 1, 0, 16), drive);
-        adc.select(0, false, Time::from_picos(0), drive);
+        adc.select(0, false, drive);
         let next = (0..8)
             .flat_map(|_| frame(adc, inputs, &[(command(0b1001), 16)]))
             .collect();
@@ -796,7 +785,7 @@ mod tests {
         for _ in 0..5 {
             frame(&mut first, inputs, &[(command(0b1001), 16)]);
         }
-        first.select(0, true, Time::from_picos(0), &mut drive);
+        first.select(0, true, &mut drive);
         first.transfer(transfer(3, 0, 0b1_1001 << 3, 8), &mut drive);
         let snapshot = first.save().unwrap();
         let mut second = built("noise_volts = 0.05", 99).unwrap();

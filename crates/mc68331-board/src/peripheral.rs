@@ -308,16 +308,13 @@ pub struct Transfer {
     /// transfer of a frame held selected (CONT, QSMRM 4.3.6.3) after
     /// the first is not.
     pub starts_frame: bool,
-    /// When it ends, on board time.
-    pub now: Time,
 }
 
 impl Transfer {
     /// A frame's first transfer of `bits` of `out`, shifted with
-    /// `clock`, ending at `now`: through attachment 0, queue entry 0,
-    /// PCS\[3:0\] all low.
+    /// `clock`: through attachment 0, queue entry 0, PCS\[3:0\] all low.
     #[must_use]
-    pub const fn new(out: u16, bits: u8, clock: QspiClock, now: Time) -> Self {
+    pub const fn new(out: u16, bits: u8, clock: QspiClock) -> Self {
         Self {
             attachment: 0,
             entry: 0,
@@ -326,7 +323,6 @@ impl Transfer {
             bits,
             clock,
             starts_frame: true,
-            now,
         }
     }
 
@@ -708,21 +704,21 @@ pub trait Peripheral: Any {
     /// before its first write).  By default nothing is driven.
     fn power_on(&mut self, drive: &mut Drive<'_>) {}
 
-    /// RESET reaches it at `now`, as its reset scope says.  By default
-    /// nothing changes.
-    fn reset(&mut self, now: Time, drive: &mut Drive<'_>) {}
+    /// RESET reaches it, at the drive's time, as its reset scope says.
+    /// By default nothing changes.
+    fn reset(&mut self, drive: &mut Drive<'_>) {}
 
     /// A QSPI transfer while its attachment selects it: shifts its
     /// `bits` of `out`, most significant first, in its clock's mode,
     /// and returns the bits shifted back, right-aligned (QSMRM 4.3.6;
-    /// `spi` reckons the edges).  By default MISO floats: all ones
-    /// (`floating_miso`).
+    /// `spi` reckons the edges).  It ends at the drive's time.  By
+    /// default MISO floats: all ones (`floating_miso`).
     fn transfer(&mut self, transfer: Transfer, drive: &mut Drive<'_>) -> u16 {
         floating_miso(transfer.bits)
     }
 
     /// Its QSPI attachment `attachment` becomes selected, or not, at
-    /// `now`, as the board decodes PCS\[3:0\] for it: a peripheral framed
+    /// the drive's time, as the board decodes PCS\[3:0\] for it: a peripheral framed
     /// by its select sees the frame start and end here.  The canonical
     /// framing for a board peripheral: a peripheral sees only its own select's
     /// changes, never another peripheral's ([`SpiPeripheral::set_chip_selects`], every
@@ -730,7 +726,7 @@ pub trait Peripheral: Any {
     /// By default nothing changes.
     ///
     /// [`SpiPeripheral::set_chip_selects`]: mc683xx_modules::peripheral::SpiPeripheral::set_chip_selects
-    fn select(&mut self, attachment: usize, selected: bool, now: Time, drive: &mut Drive<'_>) {}
+    fn select(&mut self, attachment: usize, selected: bool, drive: &mut Drive<'_>) {}
 
     /// The QSPI's serial clock from `now` ([`SpiPeripheral::set_clock`]),
     /// the chip's system clock on board time `system_clock`.  By default
@@ -766,9 +762,9 @@ pub trait Peripheral: Any {
         false
     }
 
-    /// `signal` arrives on input `port` at `now`.  By default it is
-    /// ignored.
-    fn input(&mut self, port: usize, signal: Signal, now: Time, drive: &mut Drive<'_>) {}
+    /// `signal` arrives on input `port`, at the drive's time.  By
+    /// default it is ignored.
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {}
 
     /// The value it drives on analog output `port` at `now`, for a
     /// sink that samples it then (an ADC converting): a source whose
@@ -789,14 +785,14 @@ pub trait Peripheral: Any {
         None
     }
 
-    /// Brings it to `now`, a time `next_event` gave.  It must move
-    /// `next_event` past `now`, or to [`None`]: a peripheral advanced to one
+    /// Brings it to the drive's time, a time `next_event` gave.  It must
+    /// move `next_event` past that, or to [`None`]: a peripheral advanced to one
     /// time over and over without that stalls the board, and the run
     /// fails ([`RunError::Stalled`]).  Several events at one time may each
     /// take an advance.
     ///
     /// [`RunError::Stalled`]: crate::error::RunError::Stalled
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {}
+    fn advance(&mut self, drive: &mut Drive<'_>) {}
 
     /// Its state as a front end shows it: registers, FIFOs, levels,
     /// named ([`inspect::Inspection`]).  Read-only: it must change
@@ -915,7 +911,7 @@ mod tests {
     #[test]
     fn a_transfer_takes_another_clock_and_keeps_the_rest() {
         let reset = QspiClock::at_reset(Frequency::from_hz(8_388_608));
-        let transfer = Transfer::new(0xa5, 8, reset, Time::from_picos(9))
+        let transfer = Transfer::new(0xa5, 8, reset)
             .through(1)
             .at_entry(2)
             .selecting(0xe)

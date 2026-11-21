@@ -1028,24 +1028,25 @@ Its object has any of the peripheral's methods, each optional:
 `wants_horizon() -> bool` (asked once, as the board is built: whether
 its reads and writes carry `horizon`, as `Peripheral::wants_horizon` says,
 docs/board-files.md), `interrupt_request() -> bool`,
-`power_on(drive)`, `reset(now, drive)`, `transfer(transfer, drive) ->
+`power_on(drive)`, `reset(drive)`, `transfer(transfer, drive) ->
 int` (an `mc683xx.Transfer`: `attachment`, `entry`, `chip_selects`,
 `out`, `bits`, `clock`, the `QspiClock` it is shifted with, its mode,
-`starts_frame`, whether it is the first since its select asserted, and
-`now`, when it ends; the Rust edge walk, `mc683xx_board::spi`, is not
+and `starts_frame`, whether it is the first since its select asserted;
+it ends at the drive's `now`; the Rust edge walk, `mc683xx_board::spi`, is not
 exposed, so a Python peripheral reckons its edges from `clock.polarity` and
 `clock.phase` by the rules docs/board-files.md, SPI edges, gives),
 `set_qspi_clock(clock, now)` (the QSPI's serial
 clock, as the QSPI tells it: at the first entry and after CPOL, CPHA,
 SPBR or the system clock change), `select(attachment,
-selected, now, drive)`, `input(port, value, now, drive)`,
+selected, drive)`, `input(port, value, drive)`,
 `sample(port, now) -> float | None`, `next_event() -> int | None`,
-`advance(now, drive)`, `qspi_deferrable() -> bool` (asked once, as
+`advance(drive)`, `qspi_deferrable() -> bool` (asked once, as
 the board is built: whether its QSPI calls may come in a batch, as
 `Peripheral::qspi_deferrable` says, docs/board-files.md), `memory_read(memory,
 access, drive) -> int` and
 `memory_write(memory, access, value, drive)` (a memory it took),
-`save() -> bytes` and `restore(snapshot)`.  Times are
+`save() -> bytes` and `restore(snapshot)`.  A call given a `Drive`
+takes its time from the drive's `now`, as the Rust trait does.  Times are
 board time in picoseconds, and none of these takes the chip's system
 clock base the Rust calls do (`system_clock`, a `TimeBase` Python does
 not have): a deliberate difference, since a Python peripheral counts

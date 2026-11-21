@@ -24,7 +24,6 @@ use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
-use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
@@ -202,7 +201,7 @@ impl Peripheral for Ad569 {
         self.drive_output(drive);
     }
 
-    fn input(&mut self, port: usize, signal: Signal, _: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
         let controls = &mut self.state.controls;
         match (port, signal) {
             // DB15-DB0, by the cut
@@ -307,7 +306,7 @@ mod tests {
     /// What `signal` on `port` drove on VOUT.
     fn input(dac: &mut Ad569, port: usize, signal: Signal) -> Vec<f64> {
         let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
-        dac.input(port, signal, Time::ZERO, &mut drive);
+        dac.input(port, signal, &mut drive);
         drive
             .finish()
             .driven

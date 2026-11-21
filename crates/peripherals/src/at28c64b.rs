@@ -774,7 +774,8 @@ impl Peripheral for At28c64b {
             .map(|cycle| cycle.done(self.write_cycle))
     }
 
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
+        let now = drive.now();
         self.settle(now, drive);
     }
 

@@ -65,8 +65,8 @@ class Probe:
     def __init__(self) -> None:
         self.seen: list[tuple[str, int, object]] = []
 
-    def input(self, port: int, value: object, now: int, drive: mc683xx.Drive) -> None:
-        self.seen.append((NETS[port], now, value))
+    def input(self, port: int, value: object, drive: mc683xx.Drive) -> None:
+        self.seen.append((NETS[port], drive.now, value))
 
 
 def board(directory: Path) -> mc683xx.Board:

@@ -781,7 +781,8 @@ impl Peripheral for Acia {
         self.sync(drive);
     }
 
-    fn input(&mut self, port: usize, signal: Signal, now: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
+        let now = drive.now();
         match (port, signal) {
             (RX_DATA, Signal::Serial(serial)) => {
                 self.state.line.push_back(Arrival { at: now, serial });
@@ -804,7 +805,8 @@ impl Peripheral for Acia {
         self.next_internal()
     }
 
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
+        let now = drive.now();
         self.run_until(now);
         self.sync(drive);
     }

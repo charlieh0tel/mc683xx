@@ -858,7 +858,8 @@ impl Peripheral for ClockWatcher {
         self.next
     }
 
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
+        let now = drive.now();
         self.driven = Some(drive.system_clock());
         self.next = Some(now + Span::from_micros(1));
     }
@@ -920,7 +921,7 @@ struct Widget {
 }
 
 impl Peripheral for Widget {
-    fn input(&mut self, _port: usize, signal: Signal, _now: Time, _drive: &mut Drive<'_>) {
+    fn input(&mut self, _port: usize, signal: Signal, _drive: &mut Drive<'_>) {
         if let Signal::Level(level) = signal {
             self.levels.push(level);
         }
@@ -1135,7 +1136,7 @@ impl Peripheral for Framed {
         0
     }
 
-    fn select(&mut self, attachment: usize, selected: bool, _: Time, _: &mut Drive<'_>) {
+    fn select(&mut self, attachment: usize, selected: bool, _: &mut Drive<'_>) {
         self.selects.push((attachment, selected));
     }
 }
@@ -1303,7 +1304,7 @@ impl Peripheral for PoweredLatch {
         drive.drive(0, Signal::Level(true));
     }
 
-    fn reset(&mut self, _: Time, _: &mut Drive<'_>) {
+    fn reset(&mut self, _: &mut Drive<'_>) {
         self.resets += 1;
     }
 }
@@ -2074,7 +2075,7 @@ impl Peripheral for Flash {
         }
     }
 
-    fn advance(&mut self, _: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
         drive.release_memory("flash");
         self.state = FlashState::Read;
     }
@@ -2175,7 +2176,7 @@ impl Peripheral for Overwriter {
         (!self.done).then_some(OVERWRITE_AT)
     }
 
-    fn advance(&mut self, _: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
         self.done = true;
         if self.takes {
             drive.take_memory("ram");
@@ -2365,7 +2366,7 @@ impl Peripheral for Events {
         (self.events > 0 || !self.moves).then_some(AT)
     }
 
-    fn advance(&mut self, _: Time, _: &mut Drive<'_>) {
+    fn advance(&mut self, _: &mut Drive<'_>) {
         self.events = self.events.saturating_sub(1);
     }
 }
@@ -2435,7 +2436,7 @@ impl Peripheral for Stopper {
         self.timed.then_some(AT)
     }
 
-    fn advance(&mut self, _: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
         self.timed = false;
         drive.stop();
     }
@@ -3020,7 +3021,8 @@ fn a_peripheral_driven_within_a_run_gives_the_same_run_however_it_is_cut() {
 struct Echo;
 
 impl Peripheral for Echo {
-    fn input(&mut self, _: usize, signal: Signal, now: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, _: usize, signal: Signal, drive: &mut Drive<'_>) {
+        let now = drive.now();
         drive.drive_at(now, 0, signal);
     }
 }
@@ -4076,7 +4078,7 @@ impl Peripheral for Ahead {
         (!self.driven).then_some(Time::from_picos(AHEAD_DRIVES_PS))
     }
 
-    fn advance(&mut self, _: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
         self.driven = true;
         drive.drive_at(Time::from_picos(AHEAD_EDGE_PS), 0, Signal::Level(true));
     }
@@ -4134,7 +4136,7 @@ impl Peripheral for Sampled {
         (!self.advanced).then_some(Time::from_picos(SAMPLED_EVENT_PS))
     }
 
-    fn advance(&mut self, _: Time, _: &mut Drive<'_>) {
+    fn advance(&mut self, _: &mut Drive<'_>) {
         self.advanced = true;
     }
 }

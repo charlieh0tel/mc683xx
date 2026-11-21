@@ -48,11 +48,11 @@ class Peripheral(Protocol):
     trait's default: `read(access, drive) -> int`, `write(access,
     value, drive)`, `wait_states(access) -> int | None`,
     `dsack_port(access) -> int | None`, `wants_horizon() -> bool`,
-    `interrupt_request() -> bool`, `power_on(drive)`, `reset(now,
-    drive)`, `transfer(transfer, drive) -> int`, `set_qspi_clock(clock,
-    now)`, `select(attachment, selected, now, drive)`, `input(port,
-    value, now, drive)`, `sample(port, now) -> float | None`,
-    `next_event() -> int | None`, `advance(now, drive)`,
+    `interrupt_request() -> bool`, `power_on(drive)`,
+    `reset(drive)`, `transfer(transfer, drive) -> int`,
+    `set_qspi_clock(clock, now)`, `select(attachment, selected, drive)`,
+    `input(port, value, drive)`, `sample(port, now) -> float | None`,
+    `next_event() -> int | None`, `advance(drive)`,
     `qspi_deferrable() -> bool`, `memory_read(memory, access, drive) ->
     int`, `memory_write(memory, access, value, drive)`, `inspect() ->
     Mapping[str, object]`, and `save() -> bytes` with

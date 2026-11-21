@@ -329,23 +329,16 @@ impl TransferView {
         self.0.starts_frame
     }
 
-    /// When it ends, in picoseconds.
-    #[getter]
-    const fn now(&self) -> u64 {
-        self.0.now.picos()
-    }
-
     fn __repr__(&self) -> String {
         format!(
             "Transfer(attachment={}, entry={}, chip_selects={:#06b}, out={:#x}, bits={}, \
-             starts_frame={}, now={})",
+             starts_frame={})",
             self.0.attachment,
             self.0.entry,
             self.0.chip_selects,
             self.0.out,
             self.0.bits,
-            if self.0.starts_frame { "True" } else { "False" },
-            self.0.now.picos()
+            if self.0.starts_frame { "True" } else { "False" }
         )
     }
 }
@@ -1071,14 +1064,8 @@ impl Peripheral for PythonPeripheral {
         let _ = self.call("power_on", drive, |_| Ok(Vec::new()), |_| Ok(()), ());
     }
 
-    fn reset(&mut self, now: Time, drive: &mut Drive<'_>) {
-        let _ = self.call(
-            "reset",
-            drive,
-            |py| Ok(vec![now.picos().into_py_any(py)?]),
-            |_| Ok(()),
-            (),
-        );
+    fn reset(&mut self, drive: &mut Drive<'_>) {
+        let _ = self.call("reset", drive, |_| Ok(Vec::new()), |_| Ok(()), ());
     }
 
     fn transfer(&mut self, transfer: Transfer, drive: &mut Drive<'_>) -> u16 {
@@ -1109,17 +1096,11 @@ impl Peripheral for PythonPeripheral {
         );
     }
 
-    fn select(&mut self, attachment: usize, selected: bool, now: Time, drive: &mut Drive<'_>) {
+    fn select(&mut self, attachment: usize, selected: bool, drive: &mut Drive<'_>) {
         let _ = self.call(
             "select",
             drive,
-            |py| {
-                Ok(vec![
-                    attachment.into_py_any(py)?,
-                    selected.into_py_any(py)?,
-                    now.picos().into_py_any(py)?,
-                ])
-            },
+            |py| Ok(vec![attachment.into_py_any(py)?, selected.into_py_any(py)?]),
             |_| Ok(()),
             (),
         );
@@ -1134,7 +1115,7 @@ impl Peripheral for PythonPeripheral {
         )
     }
 
-    fn input(&mut self, port: usize, signal: Signal, now: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
         let _ = self.call(
             "input",
             drive,
@@ -1142,7 +1123,6 @@ impl Peripheral for PythonPeripheral {
                 Ok(vec![
                     port.into_py_any(py)?,
                     python_value(py, signal, self.timed_serial)?,
-                    now.picos().into_py_any(py)?,
                 ])
             },
             |_| Ok(()),
@@ -1168,14 +1148,8 @@ impl Peripheral for PythonPeripheral {
         )
     }
 
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
-        let _ = self.call(
-            "advance",
-            drive,
-            |py| Ok(vec![now.picos().into_py_any(py)?]),
-            |_| Ok(()),
-            (),
-        );
+    fn advance(&mut self, drive: &mut Drive<'_>) {
+        let _ = self.call("advance", drive, |_| Ok(Vec::new()), |_| Ok(()), ());
     }
 
     /// Its `inspect()`, a mapping; an exception waits for the board's

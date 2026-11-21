@@ -508,7 +508,8 @@ The contract a host's peripheral models target (rustdoc in
   `peripheral_mut`, and a `Box<dyn Peripheral>` upcasts to `Box<dyn Any>`.
   `inspect()` gives what a front end shows of it, an
   `inspect::Inspection` of named fields (empty by default;
-  `Board::inspect(name)`).
+  `Board::inspect(name)`).  A call that takes a `peripheral::Drive`
+  takes its time from it, `drive.now()`, and no time of its own.
   - Stop conditions, for a debugger and the emulator's alone
     ([docs/gdb.md](gdb.md), Stop conditions): `conditions()` lists
     what it offers (`condition::ConditionInfo::new(name, arguments,
@@ -563,14 +564,14 @@ The contract a host's peripheral models target (rustdoc in
     access, drive)` and `memory_write(memory, access, value, drive)`,
     the access's `address` the offset in the memory and its
     `attachment` the memory's attachment; by default BERR and ignored.
-  - IRQ: `interrupt_request()`.  RESET: `reset(now, drive)`, as the
+  - IRQ: `interrupt_request()`.  RESET: `reset(drive)`, as the
     peripheral's `reset` scope says.  Power: `power_on(drive)`, every peripheral
     at time zero before the chip's power-on reset, whatever its scope,
     where a peripheral drives its outputs' first levels (a latch with `reset
     = []`); a port nothing drives has no value until its first drive.
   - QSPI: `transfer(transfer, drive)` (a `peripheral::Transfer`,
-    `#[non_exhaustive]`, built with `Transfer::new(out, bits, clock,
-    now)`, a frame's first through attachment 0, entry 0, PCS all low,
+    `#[non_exhaustive]`, built with `Transfer::new(out, bits, clock)`,
+    a frame's first through attachment 0, entry 0, PCS all low,
     and `.through(attachment)`, `.at_entry(entry)` and
     `.selecting(chip_selects)` for the rest: `attachment`, `entry`, the
     queue entry 0-15, `chip_selects`, `out`, the bits out, right-aligned,
@@ -579,9 +580,9 @@ The contract a host's peripheral models target (rustdoc in
     first transfer since the attachment's select asserted
     (`.continuing()` builds a later one; `.shifting(out, bits)` another
     word; `.clocked(clock)` another clock, such as
-    `QspiClock::at_reset(system_clock)`, SPCR0's out of reset), and `now`, when it ends) returns the bits in, all ones by
+    `QspiClock::at_reset(system_clock)`, SPCR0's out of reset); it ends at the drive's time) returns the bits in, all ones by
     default (`mc683xx_modules::peripheral::floating_miso`),
-    `select(attachment, selected, now, drive)`, `set_qspi_clock(clock,
+    `select(attachment, selected, drive)`, `set_qspi_clock(clock,
     now, system_clock)`.  Framing: the board decodes PCS[3:0] by each attachment's
     `qspi` code and `mask`, and a peripheral sees `select` only when its own
     decode changes, true as a frame starts and false as it ends; that
@@ -649,11 +650,11 @@ The contract a host's peripheral models target (rustdoc in
     (docs/performance.md, QSPI queues).  The board file has no say: a
     model's calls are the model's to vouch for, not the wiring's, so
     it is code only (`SpiAdapter` and Python's `qspi_deferrable`).
-  - Nets: `input(port, signal, now, drive)` for each value arriving on
+  - Nets: `input(port, signal, drive)` for each value arriving on
     an input; `sample(port, now)` for an analog output a sink reads at
     its time.  Ports are indices in the declared list.
-  - Time: `next_event(system_clock)`, `advance(now, drive)`: `advance` must move
-    `next_event` past `now` or to `None`.  A peripheral advanced to one time
+  - Time: `next_event(system_clock)`, `advance(drive)`: `advance` must move
+    `next_event` past the drive's time or to `None`.  A peripheral advanced to one time
     1000 times running without that stalls the board, and `Board::run_until`
     fails with `RunError::Stalled`, naming it, rather than spin; several
     events at one time may each take an advance.  A call within the

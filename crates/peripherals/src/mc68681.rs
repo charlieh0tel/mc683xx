@@ -773,13 +773,15 @@ impl Peripheral for Duart {
         self.sync(drive);
     }
 
-    fn reset(&mut self, now: Time, drive: &mut Drive<'_>) {
+    fn reset(&mut self, drive: &mut Drive<'_>) {
+        let now = drive.now();
         self.run_until(now);
         self.hardware_reset(now);
         self.sync(drive);
     }
 
-    fn input(&mut self, port: usize, signal: Signal, now: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
+        let now = drive.now();
         match (port, signal) {
             (RXDA | RXDB, Signal::Serial(serial)) => {
                 // on the line first: a frame that starts as a break ends
@@ -809,7 +811,8 @@ impl Peripheral for Duart {
         [self.next_internal(), counter].into_iter().flatten().min()
     }
 
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
+        let now = drive.now();
         self.run_until(now);
         self.sync(drive);
     }

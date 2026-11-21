@@ -40,7 +40,8 @@ struct Probe {
 }
 
 impl Peripheral for Probe {
-    fn input(&mut self, port: usize, signal: Signal, now: Time, _drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
+        let now = drive.now();
         self.seen.push((PROBED[port].to_owned(), now, signal));
     }
 }

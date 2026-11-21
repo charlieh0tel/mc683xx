@@ -154,7 +154,7 @@ impl Bench {
     /// `signal` into `port` at `now`: what it drove.
     fn input(&mut self, port: usize, signal: Signal, now: Time) -> Vec<Driven> {
         let mut drive = Drive::new(now, SYSTEM_CLOCK);
-        self.acia.input(port, signal, now, &mut drive);
+        self.acia.input(port, signal, &mut drive);
         drive.finish().driven
     }
 
@@ -167,11 +167,11 @@ impl Bench {
             .filter(|&next| next <= until)
         {
             let mut drive = Drive::new(next, SYSTEM_CLOCK);
-            self.acia.advance(next, &mut drive);
+            self.acia.advance(&mut drive);
             driven.extend(drive.finish().driven);
         }
         let mut drive = Drive::new(until, SYSTEM_CLOCK);
-        self.acia.advance(until, &mut drive);
+        self.acia.advance(&mut drive);
         driven.extend(drive.finish().driven);
         driven
     }

@@ -91,9 +91,9 @@ class Lamp:
     def __init__(self) -> None:
         self.changes: list[tuple[int, bool]] = []
 
-    def input(self, port: int, value: object, now: int, drive: mc683xx.Drive) -> None:
+    def input(self, port: int, value: object, drive: mc683xx.Drive) -> None:
         assert isinstance(value, bool)
-        self.changes.append((now, value))
+        self.changes.append((drive.now, value))
 
 
 def test_python_peripherals_on_a_board_file(tmp_path: Path) -> None:
@@ -228,9 +228,9 @@ class Probe:
     def next_event(self) -> int | None:
         return self.next
 
-    def advance(self, now: int, drive: mc683xx.Drive) -> None:
+    def advance(self, drive: mc683xx.Drive) -> None:
         self.readings.append(drive.sample(0))
-        self.next = now + self.PERIOD
+        self.next = drive.now + self.PERIOD
 
     def save(self) -> bytes:
         return struct.pack(">QI", self.next, len(self.readings))
@@ -463,7 +463,7 @@ class TimedFlash:
         return self.DEFERRABLE
 
     def transfer(self, transfer: mc683xx.Transfer, drive: mc683xx.Drive) -> int:
-        self.transfers.append((transfer.out, transfer.now))
+        self.transfers.append((transfer.out, drive.now))
         return 0xA5
 
 
@@ -520,7 +520,7 @@ class TimedModem:
     def __init__(self) -> None:
         self.received: list[object] = []
 
-    def input(self, port: int, value: object, now: int, drive: mc683xx.Drive) -> None:
+    def input(self, port: int, value: object, drive: mc683xx.Drive) -> None:
         self.received.append(value)
         drive.drive(1, value)
 
@@ -887,7 +887,7 @@ class FailingInput:
 
     PORTS = [("in", "logic", "in")]
 
-    def input(self, port: int, value: object, now: int, drive: mc683xx.Drive) -> None:
+    def input(self, port: int, value: object, drive: mc683xx.Drive) -> None:
         raise RuntimeError("failing")
 
 
@@ -896,7 +896,7 @@ class InterruptedInput:
 
     PORTS = [("in", "logic", "in")]
 
-    def input(self, port: int, value: object, now: int, drive: mc683xx.Drive) -> None:
+    def input(self, port: int, value: object, drive: mc683xx.Drive) -> None:
         raise KeyboardInterrupt
 
 
@@ -943,7 +943,7 @@ class Counter:
     def __init__(self) -> None:
         self.resets = 0
 
-    def reset(self, now: int, drive: mc683xx.Drive) -> None:
+    def reset(self, drive: mc683xx.Drive) -> None:
         self.resets += 1
 
 
