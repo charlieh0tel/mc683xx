@@ -219,6 +219,10 @@ impl<T: Stateless> Save for T {
 /// # Errors
 ///
 /// The first error `restore` gives.
+///
+/// Not part of the semver API: plumbing the chip and the board restore
+/// their parts with.
+#[doc(hidden)]
 pub fn restore_each<B: AsRef<[u8]>>(
     snapshots: &[impl AsRef<[u8]>],
     backups: &[B],
@@ -238,6 +242,9 @@ pub fn restore_each<B: AsRef<[u8]>>(
 /// part refused.  A part that refuses its own snapshot breaks
 /// [`Save::restore`]'s contract; it is left as it is, the rest still
 /// put back, and the error the rollback follows is the one returned.
+///
+/// Not part of the semver API: [`restore_each`]'s rollback.
+#[doc(hidden)]
 pub fn put_back(
     backups: &[impl AsRef<[u8]>],
     mut restore: impl FnMut(usize, &[u8]) -> Result<(), StateError>,
