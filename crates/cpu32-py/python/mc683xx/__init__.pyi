@@ -71,6 +71,9 @@ __all__ = [
     "TargetError",
 ]
 
+__version__: str
+"""The package's version, one for the crates, the package and npm's."""
+
 # What the host passes in: bus peripherals, models and QSPI peripherals are
 # duck-typed; these name the methods the chip calls.  Every method but
 # `read` and `write` (and the QSPI's `transfer`) is optional.

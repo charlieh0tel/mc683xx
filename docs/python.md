@@ -109,6 +109,8 @@ The package is built with maturin from `crates/cpu32-py` (abi3, Python
 
 Released versions are on PyPI as `mc683xx`, abi3 wheels for Linux,
 macOS and Windows, and an sdist (`docs/releasing.md`).
+`mc683xx.__version__` is the version, one for the crates, this package
+and the npm package.
 
 ## Firmware for the examples
 

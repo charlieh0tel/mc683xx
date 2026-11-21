@@ -149,6 +149,9 @@ fn os_error(path: &Path, error: io::Error) -> PyErr {
 /// The module.
 #[pymodule]
 fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    // the package's version, the workspace's (docs/releasing.md); not in
+    // `__all__`, so a star import leaves it
+    module.setattr("__version__", env!("CARGO_PKG_VERSION"))?;
     module.add_class::<MachineView>()?;
     module.add_class::<FaultStopView>()?;
     module.add_class::<FaultCauseKind>()?;

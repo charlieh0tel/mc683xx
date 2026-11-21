@@ -3,4 +3,4 @@ maturin puts here: its names are the package's (`__init__.pyi` has
 them)."""
 
 from .mc683xx import *  # noqa: F403
-from .mc683xx import __all__, __doc__  # noqa: F401
+from .mc683xx import __all__, __doc__, __version__  # noqa: F401
