@@ -16,13 +16,17 @@ use crate::error::Error;
 /// 5.2.4).
 const FRAME_DATA_MASK: u16 = 0x1ff;
 
-/// A frame on TXD or RXD.
+/// A frame on TXD or RXD.  A variant's value is a field named for it,
+/// not Rust's `_0`.
 #[pyclass(module = "mc683xx", frozen, eq, hash, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Frame {
     /// The data bits as on the line, LSB first, right-aligned: eight,
     /// or nine with M; the parity bit with PE.
-    Data(u16),
+    Data {
+        /// The data bits.
+        data: u16,
+    },
     /// A frame of zeros, stop bit included (QSMRM 5.2.2, SBK).
     Break(),
 }
@@ -32,8 +36,8 @@ impl TryFrom<Frame> for sci::Frame {
 
     fn try_from(frame: Frame) -> Result<Self, Error> {
         match frame {
-            Frame::Data(data) if data & !FRAME_DATA_MASK != 0 => Err(Error::Frame(data)),
-            Frame::Data(data) => Ok(Self::Data(data)),
+            Frame::Data { data } if data & !FRAME_DATA_MASK != 0 => Err(Error::Frame(data)),
+            Frame::Data { data } => Ok(Self::Data(data)),
             Frame::Break() => Ok(Self::Break),
         }
     }
@@ -43,7 +47,7 @@ impl TryFrom<Frame> for sci::Frame {
 impl Frame {
     fn __repr__(&self) -> String {
         match self {
-            Self::Data(data) => format!("Frame.Data({data:#x})"),
+            Self::Data { data } => format!("Frame.Data({data:#x})"),
             Self::Break() => "Frame.Break()".to_owned(),
         }
     }
@@ -52,7 +56,7 @@ impl Frame {
 impl From<sci::Frame> for Frame {
     fn from(frame: sci::Frame) -> Self {
         match frame {
-            sci::Frame::Data(data) => Self::Data(data),
+            sci::Frame::Data(data) => Self::Data { data },
             sci::Frame::Break => Self::Break(),
         }
     }
@@ -200,7 +204,10 @@ pub(crate) fn input(name: &str) -> Result<Input, Error> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Output {
     /// A steady level.
-    Level(bool),
+    Level {
+        /// The level.
+        level: bool,
+    },
     /// High for `high` of every `period` PWMCNT counts, from the
     /// period's start; `clocks` system clocks a count, or `None` when
     /// PCLK clocks PWMCNT.
@@ -223,7 +230,7 @@ pub(crate) enum Output {
 impl From<pwm::Output> for Output {
     fn from(output: pwm::Output) -> Self {
         match output {
-            pwm::Output::Level(level) => Self::Level(level),
+            pwm::Output::Level(level) => Self::Level { level },
             pwm::Output::Wave {
                 period,
                 high,

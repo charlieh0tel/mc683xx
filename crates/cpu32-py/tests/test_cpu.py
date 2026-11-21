@@ -85,6 +85,13 @@ def test_limits_and_begin():
     assert repr(halted) == "Stop.Halted(Halt.DOUBLE_BUS_FAULT)"
     entry = mc683xx.Stop.Background(mc683xx.Entry.DoubleBusFault(0x1234))
     assert repr(entry) == "Stop.Background(Entry.DoubleBusFault(ssw=0x1234))"
+    assert halted.halt == mc683xx.Halt.DOUBLE_BUS_FAULT
+    assert entry.entry == mc683xx.Entry.DoubleBusFault(0x1234)
+    match entry:
+        case mc683xx.Stop.Background(background):
+            assert background == entry.entry
+        case _:
+            pytest.fail("Stop.Background did not match positionally")
     assert cpu.run_limited(begin=CODE, until=RETURN).end == mc683xx.End.Until()
 
 

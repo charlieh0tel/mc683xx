@@ -1208,10 +1208,10 @@ mod tests {
         let mapped: Vec<_> = stops.into_iter().map(Stop::try_from).collect();
         assert!(matches!(mapped[0], Ok(Stop::Budget())));
         assert!(matches!(mapped[1], Ok(Stop::Stopped())));
-        assert!(matches!(mapped[2], Ok(Stop::Halted(_))));
-        assert!(matches!(mapped[3], Ok(Stop::Hook(_))));
+        assert!(matches!(mapped[2], Ok(Stop::Halted { .. })));
+        assert!(matches!(mapped[3], Ok(Stop::Hook { .. })));
         assert!(matches!(mapped[4], Ok(Stop::Requested())));
-        assert!(matches!(mapped[5], Ok(Stop::Background(_))));
+        assert!(matches!(mapped[5], Ok(Stop::Background { .. })));
         assert!(matches!(mapped[6], Ok(Stop::Fault())));
     }
 }

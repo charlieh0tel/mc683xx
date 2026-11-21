@@ -430,7 +430,8 @@ impl ChipBuilder {
     }
 }
 
-/// Why a run ended (Rust's `cpu::Stop`).
+/// Why a run ended (Rust's `cpu::Stop`).  A variant's value is a field
+/// named for it, not Rust's `_0`.
 #[pyclass(module = "mc683xx", frozen, eq, hash, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Stop {
@@ -440,15 +441,24 @@ pub(crate) enum Stop {
     /// the budget passed waiting.
     Stopped(),
     /// The CPU halted; only reset restarts it.
-    Halted(Halt),
+    Halted {
+        /// Why.
+        halt: Halt,
+    },
     /// A hook stopped it: the first to, if several did at once.
-    Hook(HookIdView),
+    Hook {
+        /// The hook.
+        hook: HookIdView,
+    },
     /// The host or a peripheral asked it to stop, once the instruction
     /// whose cycle asked ended: a stop request, or a peripheral's
     /// exception, which the run raises.
     Requested(),
     /// The CPU is in background mode, for its entry source.
-    Background(Entry),
+    Background {
+        /// The entry source.
+        entry: Entry,
+    },
     /// A fault stopped it rather than being taken (`set_stop_on_fault`):
     /// `fault_stop` says which.
     Fault(),
@@ -504,10 +514,10 @@ impl Stop {
         Ok(match self {
             Self::Budget() => "Stop.Budget()".to_owned(),
             Self::Stopped() => "Stop.Stopped()".to_owned(),
-            Self::Halted(halt) => format!("Stop.Halted({})", repr(py, *halt)?),
-            Self::Hook(hook) => format!("Stop.Hook({})", repr(py, *hook)?),
+            Self::Halted { halt } => format!("Stop.Halted({})", repr(py, *halt)?),
+            Self::Hook { hook } => format!("Stop.Hook({})", repr(py, *hook)?),
             Self::Requested() => "Stop.Requested()".to_owned(),
-            Self::Background(entry) => format!("Stop.Background({})", entry.__repr__()),
+            Self::Background { entry } => format!("Stop.Background({})", entry.__repr__()),
             Self::Fault() => "Stop.Fault()".to_owned(),
         })
     }
@@ -522,10 +532,14 @@ impl TryFrom<cpu::Stop> for Stop {
         Ok(match stop {
             cpu::Stop::Budget => Self::Budget(),
             cpu::Stop::Stopped => Self::Stopped(),
-            cpu::Stop::Halted(halt) => Self::Halted(halt.into()),
-            cpu::Stop::Hook(id) => Self::Hook(HookIdView(id)),
+            cpu::Stop::Halted(halt) => Self::Halted { halt: halt.into() },
+            cpu::Stop::Hook(id) => Self::Hook {
+                hook: HookIdView(id),
+            },
             cpu::Stop::Requested => Self::Requested(),
-            cpu::Stop::Background(entry) => Self::Background(entry.into()),
+            cpu::Stop::Background(entry) => Self::Background {
+                entry: entry.into(),
+            },
             cpu::Stop::Fault => Self::Fault(),
             other => return Err(Error::RunEnd(other.to_string())),
         })

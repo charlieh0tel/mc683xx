@@ -292,7 +292,9 @@ it, `Stop.Requested()`, `Stop.Background(entry)` with the `Entry`
 ATEMP reports: `Entry.Breakpoint()`, `Entry.Background()`,
 `Entry.DoubleBusFault(ssw)`, `Entry.Unknown(atemp)`, `Stop.Fault()`
 for a fault stop), equal by value
-and matched by pattern (`case mc683xx.Stop.Hook(hook):`).  A run ends
+and matched by pattern (`case mc683xx.Stop.Hook(hook):`).  A
+variant's value is a field named for it, not Rust's `_0`:
+`stop.halt`, `stop.hook`, `stop.entry`.  A run ends
 at a halt or on entering background mode; one that starts so spends
 its budget as time passes for the SIM, the modules and the peripherals
 without the CPU, so the watchdog can reset the chip, and ends
@@ -609,7 +611,7 @@ what the chip drives within a run comes back as timed changes.
 - SCI: `sci_receive(Frame.Data(bits))` or `Frame.Break()`, and
   `take_sci_transmitted() -> [(start, Frame)]`, each frame at its
   start bit.  A frame is the data bits
-  as on the line, LSB first, parity included (`frame._0`).
+  as on the line, LSB first, parity included (`frame.data`).
 - Ports, by `Port.C`, `E`, `F`, `GP` or `QS`: `set_pins(port, value,
   mask=0xFF)` drives the pins in `mask`, all by default (port C has
   none to drive: `ValueError`);
@@ -621,7 +623,7 @@ what the chip drives within a run comes back as timed changes.
   host with no board takes them, or they gather in the chip).
 - GPT: `set_pai`, `set_pclk`; `schedule_gpt_input(at, input, level)`
   with `input` `"PGP0"`-`"PGP7"`, `"PAI"` or `"PCLK"`; `pwm(Channel.A |
-  B)` (`Output.Level`, `Output.Wave`, `Output.Clock`); `oc1()`
+  B)` (`Output.Level(level)`, `Output.Wave`, `Output.Clock`); `oc1()`
   (`Output.Clock` under CPROUT, else `Output.Level`);
   `take_pwm_changes() -> [(now, Channel, level)]` while
   `set_report_pwm_edges(channel, True)` asks (PPROUT's clock

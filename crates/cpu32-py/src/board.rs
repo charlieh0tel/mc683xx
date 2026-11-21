@@ -648,7 +648,7 @@ pub(crate) fn signal(kind: Kind, value: &Bound<'_, PyAny>) -> PyResult<Signal> {
                 Signal::Serial(serial.0)
             } else {
                 let frame = match value.extract::<Option<u16>>()? {
-                    Some(data) => Frame::try_from(FrameView::Data(data))?,
+                    Some(data) => Frame::try_from(FrameView::Data { data })?,
                     None => Frame::Break,
                 };
                 Signal::Serial(Serial::untimed(frame))

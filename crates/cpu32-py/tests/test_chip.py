@@ -468,6 +468,11 @@ def test_the_sci_echoes_what_the_host_sends():
     chip.run_for(2000)
     sent = chip.take_sci_transmitted()
     assert [frame for _, frame in sent] == [mc683xx.Frame.Data(0x21)]
+    match sent[0][1]:
+        case mc683xx.Frame.Data(data):
+            assert data == sent[0][1].data == 0x21
+        case _:
+            pytest.fail("Frame.Data did not match positionally")
     assert sent[0][0] <= chip.now
     with pytest.raises(ValueError):
         chip.sci_receive(mc683xx.Frame.Data(0x200))
@@ -624,7 +629,9 @@ def test_a_gpt_output_compare_toggles_its_pin():
         chip.schedule_gpt_input(0, "PGP8", True)
     chip.run_for(300)
     assert isinstance(chip.pwm(mc683xx.Channel.A), mc683xx.Output)
-    assert isinstance(chip.oc1(), mc683xx.Output.Level)
+    oc1 = chip.oc1()
+    assert isinstance(oc1, mc683xx.Output.Level)
+    assert oc1 == mc683xx.Output.Level(level=oc1.level)
     chip.set_pins(mc683xx.Port.GP, 0xFF)
     assert chip.port(mc683xx.Port.GP).pins == 0xFF
     chip.set_pai(True)
@@ -755,6 +762,7 @@ def test_a_code_hook_stops_before_its_instruction():
     assert re.fullmatch(r"hook \d+", repr(hook))
     run = chip.run_for(2000)
     assert run.stop == mc683xx.Stop.Hook(hook)
+    assert isinstance(run.stop, mc683xx.Stop.Hook) and run.stop.hook == hook
     assert chip.read_register("PC") == AFTER_WIRING
     (instruction,) = seen
     assert instruction.pc == AFTER_WIRING
