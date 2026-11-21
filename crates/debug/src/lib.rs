@@ -13,6 +13,11 @@
 //!   clock.
 //!
 //! The target is halted, in background mode, for both.
+//!
+//! Inputs are in memory: an ELF file and a raw binary as bytes,
+//! S-records and a script as text.  The crate opens no files, so a
+//! host reads them itself, and a parse error carries no I/O error: the
+//! errors are `Clone` and `Eq`.
 
 // The published crates also hold these; test-only crates do not.
 #![warn(

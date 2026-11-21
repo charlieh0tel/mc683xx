@@ -1950,7 +1950,10 @@ Adversarial review (2026-10-24):
 `Cpu32Target`, so a BDM pod's host and the emulator share one loader
 (decided 2026-11-01 with the pod's maintainer).  It depends on
 `mc683xx-target` and `thiserror` alone: a pod's host links it without
-the emulator.
+the emulator.  It takes its inputs in memory (bytes for ELF and raw
+binary, text for S-records and scripts) and opens no files, so its
+parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
+2026-11-21).
 
 - **Images:** `image::Image`, segments in address order, apart (ones
   that touch are joined) and not empty, and an optional entry point.
