@@ -30,7 +30,8 @@ rename renames the Python name with it.  The deliberate differences:
   Python class whose members are its variants (`Channel.A`,
   `Port.E`, `Port.GP`, `Role.READ_WRITE`, `Lane.UPPER`,
   `ResetCause.WATCHDOG`, `Space.USER`), and is never taken as a
-  string; one whose variants carry data has a class for each
+  string (its members' `int` values are their order in the class, not
+  the hardware's encoding, and outside semver); one whose variants carry data has a class for each
   (`Event.Reset(now, cause)`, `Frame.Data(bits)`), and so does
   `Pacing`, though it has `Display` and `FromStr`: its factor is a
   number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`
