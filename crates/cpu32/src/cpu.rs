@@ -2007,12 +2007,7 @@ impl Core<'_> {
 
     /// A bus cycle at `address`, stamped with the instruction's start.
     const fn access(&self, address: Address, size: Size, function_code: FunctionCode) -> BusAccess {
-        BusAccess {
-            address,
-            size,
-            function_code,
-            now: self.now,
-        }
+        BusAccess::new(address, size, function_code, self.now)
     }
 }
 

@@ -1667,7 +1667,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   host builds but whose fields may grow: `registry::PortSpec`,
   `condition::ConditionInfo`, `spi::Edges` and `time::Clock`.  A host
   that must build one has a constructor: `Run::new`, `BoardRun::new`,
-  `BusCycle::new`, `Constructed::new`, `Context::new` (to test a
+  `BusAccess::new`, `BusCycle::new`, `Constructed::new`, `Context::new` (to test a
   constructor), `PortSpec::new` (and `input`, `output`, `in_out`),
   `ConditionInfo::new`, `Edges::new`, `Clock::new` and
   `Clock::with_phase`, `Field::new`, and `Inspection::default()` with

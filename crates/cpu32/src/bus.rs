@@ -21,6 +21,9 @@ const TABLE_CLOCKS: u64 = 2;
 pub const LPSTOP_BROADCAST: Address = Address(0x3_fffe);
 
 /// One bus cycle.
+///
+/// Built with [`BusAccess::new`] outside the core (a test of a
+/// [`Bus`]), so a field added later gets a default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct BusAccess {
@@ -35,6 +38,25 @@ pub struct BusAccess {
     pub function_code: FunctionCode,
     /// When it starts, on the board's clock.
     pub now: Cycles,
+}
+
+impl BusAccess {
+    /// A cycle at `address`, of `size` and `function_code`, starting at
+    /// `now`.
+    #[must_use]
+    pub const fn new(
+        address: Address,
+        size: Size,
+        function_code: FunctionCode,
+        now: Cycles,
+    ) -> Self {
+        Self {
+            address,
+            size,
+            function_code,
+            now,
+        }
+    }
 }
 
 /// How a bus cycle that read ended.
@@ -228,10 +250,27 @@ pub fn stall(size: Size, port: PortSize, clocks: u8) -> Cycles {
 
 #[cfg(test)]
 mod tests {
+    use super::BusAccess;
     use super::PortSize;
     use super::stall;
     use crate::cycles::Cycles;
+    use mc683xx_target::address::Address;
+    use mc683xx_target::function_code::FunctionCode;
     use mc683xx_target::size::Size;
+
+    #[test]
+    fn an_access_holds_what_it_was_built_with() {
+        let access = BusAccess::new(
+            Address(0x400),
+            Size::Word,
+            FunctionCode::SUPERVISOR_PROGRAM,
+            Cycles(7),
+        );
+        assert_eq!(access.address, Address(0x400));
+        assert_eq!(access.size, Size::Word);
+        assert_eq!(access.function_code, FunctionCode::SUPERVISOR_PROGRAM);
+        assert_eq!(access.now, Cycles(7));
+    }
 
     #[test]
     fn a_two_clock_word_costs_what_the_tables_say() {
