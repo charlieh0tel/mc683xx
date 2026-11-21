@@ -127,6 +127,31 @@ impl Mc68331 {
             })
     }
 
+    /// Fills `data` from `address` up, with no bus cycle, a debugger's
+    /// read: from the memories the core serves in supervisor space, as
+    /// the decode now maps them, whatever the pages' permissions; as the
+    /// bare machine's [`Machine::read`](mc683xx_cpu32::flat::Machine::read).
+    /// [`peek`](Self::peek) reads the modules' registers too.
+    ///
+    /// # Errors
+    ///
+    /// [`Unserved`] for the first byte the core does not serve (a
+    /// peripheral's, or one a peripheral shares); `data` is then filled
+    /// up to it.
+    pub fn read(&self, address: Address, data: &mut [u8]) -> Result<(), Unserved> {
+        let memory = &self.cpu.memory;
+        for (offset, slot) in (0..).zip(data.iter_mut()) {
+            let at = address.offset(offset);
+            let backing = memory
+                .entry(Space::Supervisor, at)
+                .read
+                .ok_or(Unserved(at))?;
+            let within = memory.mask(at).0 % PAGE_BYTES;
+            *slot = memory.region(backing.region)[(backing.offset + within) as usize];
+        }
+        Ok(())
+    }
+
     /// Writes `data` at `address` up, with no bus cycle, a debugger's
     /// write: into the memories the core serves in supervisor space, as
     /// the decode now maps them, a ROM's included, whatever the pages'

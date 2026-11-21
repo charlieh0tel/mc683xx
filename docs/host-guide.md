@@ -116,8 +116,10 @@ pages' permissions (see Hooks), changes its registers and reads the
 rest.  Neither hands out the core's memory map, which the chip keeps
 in step with its decode, nor runs the core apart from the chip.
 `write(address, bytes)` writes the memories the core serves without a
-cycle, as a debugger does and as the bare `Machine::write` does, a ROM's included (`Unserved` for a byte it
-does not serve).
+cycle, as a debugger does and as the bare `Machine::write` does, a
+ROM's included, and `read(address, bytes)` reads them, as
+`Machine::read` does (`memory::Unserved` for a byte the core does
+not serve).
 
 ### Fixed memory
 
