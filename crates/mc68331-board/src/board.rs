@@ -1152,7 +1152,7 @@ impl<C: Chip> Board<C> {
         StoppedRecord {
             cycle: self.chip.now(),
             instructions: self.chip.instructions(),
-            reason: outcome.stop,
+            stop: outcome.stop,
         }
     }
 
@@ -1404,7 +1404,7 @@ impl<C: Chip> Board<C> {
         for (peripheral, driven) in driven {
             self.drive(
                 &Source::Peripheral(peripheral, driven.port),
-                driven.now,
+                driven.at,
                 driven.signal,
             );
         }

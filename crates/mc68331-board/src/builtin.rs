@@ -794,12 +794,12 @@ mod tests {
         divider.input(0, Signal::Clock(clock), &mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven.len(), 1);
-        assert_eq!(driven[0].now, Time::from_picos(37 + 300_000));
+        assert_eq!(driven[0].at, Time::from_picos(37 + 300_000));
         assert_eq!(driven[0].signal, Signal::Level(false));
         let mut drive = Drive::new(Time::from_picos(300_037), SYSTEM_CLOCK);
         divider.advance(&mut drive);
         let driven = drive.finish().driven;
-        assert_eq!(driven[0].now, Time::from_picos(1_000_037));
+        assert_eq!(driven[0].at, Time::from_picos(1_000_037));
         assert_eq!(driven[0].signal, Signal::Level(true));
         assert_eq!(
             divider.next_event(SYSTEM_CLOCK),
@@ -908,7 +908,7 @@ mod tests {
         let mut drive = Drive::new(Time::from_picos(300_037), SYSTEM_CLOCK);
         divider.advance(&mut drive);
         let driven = drive.finish().driven;
-        assert_eq!(driven[0].now, retuned.edge(10).unwrap());
+        assert_eq!(driven[0].at, retuned.edge(10).unwrap());
         assert_eq!(driven[0].signal, Signal::Level(true));
     }
 

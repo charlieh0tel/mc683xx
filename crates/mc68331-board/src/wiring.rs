@@ -148,7 +148,7 @@ impl Shared {
         // board to settle there, so the run is the same however the
         // host quanta it.
         if let Some(quantum_end) = self.quantum_end.get()
-            && (driving.driven.iter().any(|driven| driven.now < quantum_end)
+            && (driving.driven.iter().any(|driven| driven.at < quantum_end)
                 || !driving.writes.is_empty()
                 || self.peripherals[peripheral]
                     .borrow()
@@ -224,7 +224,7 @@ impl Shared {
                 Err(_) => Some(now),
             });
         let outbox = self.outbox.borrow();
-        let drives = outbox.iter().map(|(_, driven)| driven.now);
+        let drives = outbox.iter().map(|(_, driven)| driven.at);
         let outputs = self.requests.output_horizon().map(|at| self.time(at));
         Some(events.chain(drives).chain(outputs).fold(run, Time::min))
     }
@@ -779,7 +779,7 @@ impl SpiPeripheral for QspiRouter {
                 .borrow_mut()
                 .push(Record::Qspi(trace::QspiRecord {
                     cycle,
-                    pcs: chip_selects,
+                    chip_selects,
                     bits,
                     out,
                     input,

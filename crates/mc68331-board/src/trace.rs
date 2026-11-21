@@ -4,6 +4,13 @@
 //! chip's [`Chip::TYPE`] its prefix: a versioned text contract, the
 //! same run giving the same bytes ([`docs/tracing.md`][tracing]).
 //!
+//! A record's time is `cycle`, a [`Cycles`] count of the chip's system
+//! clock, for what happens on the chip, or `now`, a board [`Time`], for
+//! what happens on the board's nets; a pin record has both.  Two
+//! fields print under keys other than their names, the text's keys
+//! being the contract: [`QspiRecord::chip_selects`] as `pcs` and
+//! [`StoppedRecord::stop`] as `reason`.
+//!
 //! [tracing]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md
 
 use std::fmt;
@@ -144,8 +151,8 @@ pub struct PinRecord {
 pub struct QspiRecord {
     /// When it started.
     pub cycle: Cycles,
-    /// PCS\[3:0\]'s levels.
-    pub pcs: u8,
+    /// PCS\[3:0\]'s levels, printed as `pcs`.
+    pub chip_selects: u8,
     /// Bits shifted.
     pub bits: u8,
     /// Shifted out.
@@ -202,8 +209,8 @@ pub struct StoppedRecord {
     pub cycle: Cycles,
     /// Instructions run since power-on.
     pub instructions: u64,
-    /// Why.
-    pub reason: Stop,
+    /// Why, printed as `reason`.
+    pub stop: Stop,
 }
 
 /// What the board traced since the last
@@ -352,7 +359,7 @@ impl fmt::Display for QspiRecord {
             formatter,
             "qspi cycle={} pcs={:#x} bits={} out={:#06x} in={:#06x} cpol={} cpha={}",
             self.cycle.0,
-            self.pcs,
+            self.chip_selects,
             self.bits,
             self.out,
             self.input,
@@ -406,7 +413,7 @@ impl fmt::Display for StoppedRecord {
             "stopped cycle={} instructions={} reason={}",
             self.cycle.0,
             self.instructions,
-            reason(self.reason)
+            reason(self.stop)
         )
     }
 }
@@ -521,7 +528,7 @@ mod tests {
         );
         let qspi = Record::Qspi(QspiRecord {
             cycle: Cycles(90_210),
-            pcs: 7,
+            chip_selects: 7,
             bits: 16,
             out: 0x8000,
             input: 0xffff,
@@ -559,7 +566,7 @@ mod tests {
         let stopped = Record::Stopped(StoppedRecord {
             cycle: Cycles(3),
             instructions: 1,
-            reason: Stop::Budget,
+            stop: Stop::Budget,
         });
         assert_eq!(
             stopped.to_string(),
@@ -605,7 +612,7 @@ mod tests {
         let stopped = Record::Stopped(StoppedRecord {
             cycle: Cycles(3),
             instructions: 1,
-            reason: Stop::Budget,
+            stop: Stop::Budget,
         });
         assert_eq!(
             Line::new("mc68331", &stopped).to_string(),
