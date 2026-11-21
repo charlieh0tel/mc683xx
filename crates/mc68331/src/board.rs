@@ -366,19 +366,18 @@ impl Board {
         mask: u8,
         now: Cycles,
     ) -> Result<(), NoInputsError> {
-        let pins = self.port(port).pins & !mask | value & mask;
         match port {
             Port::C => return Err(NoInputsError { port }),
             Port::E => {
                 self.modules_changed();
-                self.sim.set_port_pins(PortName::E, pins);
+                self.sim.set_port_pins(PortName::E, value, mask);
             }
             Port::F => {
                 self.modules_changed();
-                self.sim.set_port_pins(PortName::F, pins);
+                self.sim.set_port_pins(PortName::F, value, mask);
             }
-            Port::Gp => self.module_mut::<Gpt>(GPT).set_port_pins(pins, now),
-            Port::Qs => self.module_mut::<Qsm>(QSM).set_port_pins(pins, now),
+            Port::Gp => self.module_mut::<Gpt>(GPT).set_port_pins(value, mask, now),
+            Port::Qs => self.module_mut::<Qsm>(QSM).set_port_pins(value, mask, now),
         }
         Ok(())
     }

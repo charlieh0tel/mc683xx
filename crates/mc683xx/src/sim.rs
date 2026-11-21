@@ -46,6 +46,7 @@ use crate::module::RegisterAccess;
 use crate::peripheral::Timed;
 use crate::pins::PortLevels;
 use crate::pins::PortState;
+use crate::pins::merge_pins;
 
 /// The module space's bytes, at $7FF000 or $FFF000 by MM (SIMRM 1.1).
 pub const MODULE_SPACE_BYTES: u32 = 0x1000;
@@ -529,18 +530,19 @@ impl Sim {
         }
     }
 
-    /// The board drives the pins of `port` to `pins`.  Port C has no
-    /// inputs.
+    /// The board drives the pins of `port` in `mask` to their levels in
+    /// `value`, the others as they were.  Port C has no inputs.
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
     /// the chip with; a host drives the chip's ports.
     #[doc(hidden)]
-    pub const fn set_port_pins(&mut self, port: PortName, pins: u8) {
-        match port {
-            PortName::C => {}
-            PortName::E => self.port_e.pins = pins,
-            PortName::F => self.port_f.pins = pins,
-        }
+    pub const fn set_port_pins(&mut self, port: PortName, value: u8, mask: u8) {
+        let port = match port {
+            PortName::C => return,
+            PortName::E => &mut self.port_e,
+            PortName::F => &mut self.port_f,
+        };
+        port.pins = merge_pins(port.pins, value, mask);
     }
 
     /// What each port drives, in [`PortName::ALL`]'s order.

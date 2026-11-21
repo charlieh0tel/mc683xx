@@ -93,6 +93,17 @@ impl PortState {
     }
 }
 
+/// The levels the board drives on a port's pins, `pins`, with those in
+/// `mask` driven to their levels in `value` instead.
+///
+/// Not part of the semver API: plumbing the modules' masked pin setters
+/// share.
+#[doc(hidden)]
+#[must_use]
+pub const fn merge_pins(pins: u8, value: u8, mask: u8) -> u8 {
+    pins & !mask | value & mask
+}
+
 #[cfg(test)]
 mod tests {
     use super::PortLevels;

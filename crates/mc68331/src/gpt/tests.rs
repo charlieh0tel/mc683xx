@@ -274,9 +274,9 @@ fn a_pin_edge_is_captured() {
     // EDGE1 rising, IC1I
     write(&mut gpt, 0x1e, 0x0001, 0);
     write_byte(&mut gpt, 0x20, 0x01, 0);
-    gpt.set_port_pins(0xfe, Cycles(4 * 0x100));
+    gpt.set_port_pins(0xfe, u8::MAX, Cycles(4 * 0x100));
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x100), 0, "a falling edge");
-    gpt.set_port_pins(0xff, Cycles(4 * 0x1234 + 2));
+    gpt.set_port_pins(0xff, u8::MAX, Cycles(4 * 0x1234 + 2));
     assert_eq!(read(&mut gpt, 0x0e, 4 * 0x1234 + 2), 0x1234);
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x1234 + 2), 0x0100, "IC1F");
     let six = InterruptLevel::new(6).unwrap();
@@ -284,7 +284,7 @@ fn a_pin_edge_is_captured() {
     // input capture 4 on any edge, on PGP7
     write(&mut gpt, 0x0c, 0x0400, 4 * 0x2000);
     write(&mut gpt, 0x1e, 0x00c0, 4 * 0x2000);
-    gpt.set_port_pins(0x7f, Cycles(4 * 0x2000));
+    gpt.set_port_pins(0x7f, u8::MAX, Cycles(4 * 0x2000));
     assert_eq!(read(&mut gpt, 0x1c, 4 * 0x2000), 0x2000);
     write(&mut gpt, 0x1c, 0, 4 * 0x2000);
     assert_eq!(
@@ -310,7 +310,7 @@ fn a_byte_write_changes_only_its_lane_of_ddrgp_and_portgp() {
     let mut gpt = gpt();
     // the board holds every pin low; PORTGP reads the pins, not its
     // latch (GPTRM 8.1)
-    gpt.set_port_pins(0x00, Cycles::ZERO);
+    gpt.set_port_pins(0x00, u8::MAX, Cycles::ZERO);
     write_byte(&mut gpt, 0x07, 0xff, 0);
     assert_eq!(read_byte(&mut gpt, 0x07, 0), 0x00);
     write_byte(&mut gpt, 0x06, 0x0f, 0);
@@ -354,7 +354,7 @@ fn lpstop_holds_tcnt_and_the_inputs_until_the_wake() {
     assert_eq!(read(&mut gpt, 0x0a, 4 * 0x1000), 0x10, "TCNT holds");
     // a level the board drives while stopped is seen at the wake
     // (MC68331UM 4.3.4)
-    gpt.set_port_pins(0xfe, Cycles(4 * 0x1000));
+    gpt.set_port_pins(0xfe, u8::MAX, Cycles(4 * 0x1000));
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x1000), 0, "no capture");
     gpt.set_low_power(false, Cycles(4 * 0x2000));
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x2000), 0x0100, "IC1F at the wake");
@@ -449,10 +449,10 @@ fn stopp_freezes_and_incp_steps() {
     assert_eq!(read(&mut gpt, 0x00, 4000), 0x1007, "INCP negates itself");
     // the pins are ignored until STOPP clears
     write(&mut gpt, 0x1e, 0x0001, 4000);
-    gpt.set_port_pins(0xfe, Cycles(4000));
-    gpt.set_port_pins(0xff, Cycles(4001));
+    gpt.set_port_pins(0xfe, u8::MAX, Cycles(4000));
+    gpt.set_port_pins(0xff, u8::MAX, Cycles(4001));
     assert_eq!(read(&mut gpt, 0x22, 4001), 0);
-    gpt.set_port_pins(0xfe, Cycles(4002));
+    gpt.set_port_pins(0xfe, u8::MAX, Cycles(4002));
     write(&mut gpt, 0x00, 0x0007, 5000);
     assert_eq!(read(&mut gpt, 0x06, 5000), 0x00fe);
     assert_eq!(read(&mut gpt, 0x0a, 5000 + 4), 12);
@@ -560,13 +560,13 @@ fn an_external_edge_is_not_captured_while_held() {
         write(&mut gpt, 0x1e, 0x0002, 0);
         hold.set(&mut gpt, true, 4 * 0x10);
         // a pulse is lost
-        gpt.set_port_pins(0xfe, Cycles(4 * 0x10 + 1));
-        gpt.set_port_pins(0xff, Cycles(4 * 0x10 + 2));
+        gpt.set_port_pins(0xfe, u8::MAX, Cycles(4 * 0x10 + 1));
+        gpt.set_port_pins(0xff, u8::MAX, Cycles(4 * 0x10 + 2));
         hold.set(&mut gpt, false, 4 * 0x20);
         assert_eq!(read(&mut gpt, 0x22, 4 * 0x20), 0, "{hold:?}: pulse lost");
         // a level changed while held is an edge once they are clocked
         hold.set(&mut gpt, true, 4 * 0x30);
-        gpt.set_port_pins(0xfe, Cycles(4 * 0x30 + 1));
+        gpt.set_port_pins(0xfe, u8::MAX, Cycles(4 * 0x30 + 1));
         assert_eq!(read(&mut gpt, 0x22, 4 * 0x40), 0, "{hold:?}");
         hold.set(&mut gpt, false, 4 * 0x40);
         assert_eq!(read(&mut gpt, 0x22, 4 * 0x40), 0x0100, "{hold:?}: IC1F");
@@ -810,7 +810,7 @@ fn supv_moves_the_registers_to_supervisor_space() {
 #[test]
 fn a_reset_returns_the_registers_and_keeps_the_pins() {
     let mut gpt = gpt();
-    gpt.set_port_pins(0x0f, Cycles(5));
+    gpt.set_port_pins(0x0f, u8::MAX, Cycles(5));
     write(&mut gpt, 0x14, 0x1234, 5);
     gpt.reset(Cycles(100));
     assert_eq!(read(&mut gpt, 0x14, 100), 0xffff);

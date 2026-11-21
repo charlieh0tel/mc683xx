@@ -34,6 +34,7 @@ use crate::module::RegisterAccess;
 use crate::peripheral::Timed;
 use crate::pins::PortLevels;
 use crate::pins::PortState;
+use crate::pins::merge_pins;
 
 /// The QSM's register block and RAM, $YFFC00 to $YFFDFF (MC68331UM
 /// Table D-1).
@@ -301,13 +302,14 @@ impl Qsm {
         self.sci.untaken_frames()
     }
 
-    /// The board drives port QS's input pins to `pins` at `now`.
+    /// The board drives port QS's input pins in `mask` to their levels
+    /// in `value` at `now`, the others as they were.
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn set_port_pins(&mut self, pins: u8, now: Cycles) {
+    pub fn set_port_pins(&mut self, value: u8, mask: u8, now: Cycles) {
         self.advance(now);
-        self.port.pins = pins;
+        self.port.pins = merge_pins(self.port.pins, value, mask);
         if !self.clock_off() {
             let before = self.port_outputs();
             self.pins_changed(now);
@@ -323,12 +325,7 @@ impl Qsm {
     #[doc(hidden)]
     pub fn set_slave_select(&mut self, asserted: bool, now: Cycles) {
         let pin = 1 << port::PCS0_PIN;
-        let pins = if asserted {
-            self.port.pins & !pin
-        } else {
-            self.port.pins | pin
-        };
-        self.set_port_pins(pins, now);
+        self.set_port_pins(if asserted { 0 } else { pin }, pin, now);
     }
 
     /// An external SPI master clocks one bit at `now`, `mosi` on MOSI:

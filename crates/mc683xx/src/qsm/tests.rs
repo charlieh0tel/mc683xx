@@ -866,7 +866,7 @@ fn ss_held_low_is_a_mode_fault() {
     qspi(&mut qsm);
     // PCS0/SS an input
     write_word(&mut qsm, 0x16, 0x7b76, 0);
-    qsm.set_port_pins(0xf7, Cycles(0));
+    qsm.set_port_pins(0xf7, u8::MAX, Cycles(0));
     write_word(&mut qsm, 0x18, 0x8002, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
     assert_eq!(read(&mut qsm, 0x1f, Size::Byte, 0), 0x40, "MODF");
@@ -922,7 +922,7 @@ fn woms_makes_txd_open_drain() {
     // WOMS: released, to the board's level (QSMRM 5.2.2)
     write_word(&mut qsm, 0x0a, 0x2008, 0);
     assert_eq!(qsm.port_outputs(), PortLevels::new(0x00, 0x00));
-    qsm.set_port_pins(0x7f, Cycles::ZERO);
+    qsm.set_port_pins(0x7f, u8::MAX, Cycles::ZERO);
     assert_eq!(read(&mut qsm, 0x15, Size::Byte, 0) & 0x80, 0);
 }
 
@@ -1198,7 +1198,7 @@ fn master_entry(spcr0: u32, pins: u32, latch: u32, board: u8) -> (Vec<u16>, u32)
     let seen = qspi(&mut qsm);
     write_word(&mut qsm, 0x16, pins, 0);
     write(&mut qsm, 0x15, Size::Byte, latch, 0);
-    qsm.set_port_pins(board, Cycles(0));
+    qsm.set_port_pins(board, u8::MAX, Cycles(0));
     write_word(&mut qsm, 0x120, 0x00c3, 0);
     write_word(&mut qsm, 0x18, spcr0, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
@@ -1547,7 +1547,7 @@ fn run_program(program: &Program, syncing: Syncing, peripheral: Option<bool>) ->
             .states
             .push((qsm.save().unwrap(), qsm.port_outputs(), qsm.chip_selects()));
         if let Some(pins) = pins {
-            qsm.set_port_pins(pins, now);
+            qsm.set_port_pins(pins, u8::MAX, now);
         }
     }
     shown.seen = seen.take();

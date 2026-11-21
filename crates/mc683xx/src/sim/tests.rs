@@ -152,7 +152,7 @@ fn user_mode_reaches_only_unrestricted_registers() {
 #[test]
 fn ports_read_their_pins_on_inputs() {
     let mut sim = sim();
-    sim.set_port_pins(PortName::F, 0x5a);
+    sim.set_port_pins(PortName::F, 0x5a, u8::MAX);
     write(&mut sim, 0x19, Size::Byte, 0x0f, Cycles::ZERO);
     write(&mut sim, 0x1d, Size::Byte, 0x03, Cycles::ZERO);
     assert_eq!(read(&mut sim, 0x19, Size::Byte), 0x5b);

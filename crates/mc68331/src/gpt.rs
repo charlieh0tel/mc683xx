@@ -28,6 +28,7 @@ use mc683xx_modules::module::RegisterAccess;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::pins::PortState;
+use mc683xx_modules::pins::merge_pins;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::Error;
@@ -561,8 +562,10 @@ impl Gpt {
         (self.mcr & GPTMCR_IARB_MASK) as u8
     }
 
-    /// The board drives port GP's input pins to `pins` at `now`.
-    pub(crate) fn set_port_pins(&mut self, pins: u8, now: Cycles) {
+    /// The board drives port GP's input pins in `mask` to their levels
+    /// in `value` at `now`, the others as they were.
+    pub(crate) fn set_port_pins(&mut self, value: u8, mask: u8, now: Cycles) {
+        let pins = merge_pins(self.inputs.port, value, mask);
         self.advance(now);
         self.inputs.port = pins;
         self.input_changed(now);
