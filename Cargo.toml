@@ -24,9 +24,10 @@ resolver = "3"
 [workspace.package]
 version = "0.7.0"
 edition = "2024"
-# The minimum supported Rust: the release of the toolchain
-# rust-toolchain.toml pins, which CI builds and tests with; no older
-# release is checked, so none is claimed.  Raising it is a minor
+# The minimum supported Rust: CI's msrv job checks the workspace
+# builds with its first patch release (1.99.0 for "1.99"), reading it
+# from here; the toolchain rust-toolchain.toml pins, which CI builds
+# and tests with, may be a later patch.  Raising it is a minor
 # release.
 rust-version = "1.99"
 authors = ["Christopher Hoover <ch@murgatroid.com>"]

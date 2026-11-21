@@ -38,13 +38,21 @@ jobs:
 
   msrv:
     # The workspace builds on the minimum supported Rust, the
-    # workspace's `rust-version` (docs/releasing.md): a check, not the
-    # tests.  `+` overrides rust-toolchain.toml's pin.
+    # workspace's `rust-version` (docs/releasing.md), read from
+    # Cargo.toml, ".0" added to a major.minor: a check, not the tests.
+    # `+` overrides rust-toolchain.toml's pin.
     runs-on: ubuntu-latest
-    env:
-      MSRV: "1.99.0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read the MSRV
+        run: |
+          version=$(sed -n 's/^rust-version = "\([0-9.]*\)"$/\1/p' Cargo.toml)
+          test -n "$version"
+          case "$version" in
+            *.*.*) ;;
+            *) version="$version.0" ;;
+          esac
+          echo "MSRV=$version" >> "$GITHUB_ENV"
       - run: rustup toolchain install "$MSRV" --profile minimal
       - run: cargo +"$MSRV" check --workspace --all-targets
 
