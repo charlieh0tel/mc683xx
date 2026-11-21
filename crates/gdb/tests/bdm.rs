@@ -326,7 +326,7 @@ fn a_session_lost_while_running_halts_and_cleans_up() {
         &mut target,
         vec![packet(&format!("Z0,{never:x},2")), packet("c")],
     );
-    assert!(matches!(ending, Err(SessionError::Connection(_))));
+    assert!(matches!(ending, Err(SessionError::Connection { .. })));
     assert!(
         Cpu32Target::halted(&mut target.0).unwrap().is_some(),
         "halted"
@@ -621,7 +621,10 @@ fn uncleaned(ending: Vec<Send>) -> SessionError<TargetError, io::Error> {
 #[test]
 fn a_lost_session_that_cannot_put_a_breakpoint_back_reports_both() {
     let error = uncleaned(Vec::new());
-    assert!(matches!(error, SessionError::Connection(_)), "{error:?}");
+    assert!(
+        matches!(error, SessionError::Connection { .. }),
+        "{error:?}"
+    );
 }
 
 #[test]

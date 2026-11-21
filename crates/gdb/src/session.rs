@@ -95,7 +95,9 @@ where
     C: Connection,
     C::Error: Display,
 {
-    target.halt().map_err(SessionError::Target)?;
+    target
+        .halt()
+        .map_err(|error| SessionError::Target { error })?;
     let emulated = target.with_cpu(|_| ()).is_some();
     let mut session = Session {
         target,
@@ -125,7 +127,10 @@ where
         }
     };
     if ending == Ending::Detached {
-        session.target.resume().map_err(SessionError::Target)?;
+        session
+            .target
+            .resume()
+            .map_err(|error| SessionError::Target { error })?;
     }
     Ok(ending)
 }
@@ -306,7 +311,9 @@ impl<T: Target> Session<'_, T> {
         }
         self.going = None;
         let removed = self.unplant_all();
-        first.and(removed).map_err(SessionError::Target)?;
+        first
+            .and(removed)
+            .map_err(|error| SessionError::Target { error })?;
         if !self.planted.is_empty() {
             let addresses = self
                 .planted

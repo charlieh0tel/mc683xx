@@ -63,12 +63,14 @@ pub(crate) fn failure<E: Display, C: Display>(error: GdbStubError<E, C>) -> Sess
         return error
             .into_connection_error()
             .map_or(SessionError::Protocol(text), |(error, _)| {
-                SessionError::Connection(error)
+                SessionError::Connection { error }
             });
     }
     error
         .into_target_error()
-        .map_or(SessionError::Protocol(text), SessionError::Target)
+        .map_or(SessionError::Protocol(text), |error| SessionError::Target {
+            error,
+        })
 }
 
 /// `length` bytes of the architecture's description at `offset`, into

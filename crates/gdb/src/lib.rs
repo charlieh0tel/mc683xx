@@ -129,8 +129,8 @@ pub enum Ending {
 ///
 /// fn target<E, C>(error: SessionError<E, C>) -> Option<E> {
 ///     match error {
-///         SessionError::Target(error) => Some(error),
-///         SessionError::Connection(_) | SessionError::Protocol(_) => None,
+///         SessionError::Target { error } => Some(error),
+///         SessionError::Connection { .. } | SessionError::Protocol(_) => None,
 ///         SessionError::Unrestored(_) | SessionError::Uncleaned { .. } => None,
 ///     }
 /// }
@@ -140,11 +140,17 @@ pub enum Ending {
 pub enum SessionError<E, C> {
     /// A call on the target failed: its run, or, under BDM control,
     /// halting it or putting it back as it was.
-    #[error("target: {0}")]
-    Target(E),
+    #[error("target: {error}")]
+    Target {
+        /// The target's error.
+        error: E,
+    },
     /// The connection failed, or gdb closed it.
-    #[error("connection: {0}")]
-    Connection(C),
+    #[error("connection: {error}")]
+    Connection {
+        /// The connection's error.
+        error: C,
+    },
     /// gdb said something the stub could not take.
     #[error("protocol: {0}")]
     Protocol(String),

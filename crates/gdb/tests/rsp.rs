@@ -371,7 +371,7 @@ fn its_hooks_go_with_the_session() {
             packet(&format!("Z2,{STORE:x},4")),
         ],
     );
-    assert!(matches!(ending, Err(SessionError::Connection(_))));
+    assert!(matches!(ending, Err(SessionError::Connection { .. })));
     let mut limits = Limits::default();
     limits.instructions = Some(20);
     let run = machine.run_limited(limits);

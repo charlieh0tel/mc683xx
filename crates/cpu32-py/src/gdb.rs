@@ -176,8 +176,8 @@ pub(crate) fn serve<T: Target<Error = PyErr>>(
     match mc683xx_gdb::serve(target, connection) {
         Ok(mc683xx_gdb::Ending::Detached) => Ok(Ending::Detached),
         Ok(mc683xx_gdb::Ending::Killed) => Ok(Ending::Killed),
-        Err(SessionError::Target(error)) => Err(error),
-        Err(SessionError::Connection(error)) => Err(raised(error)),
+        Err(SessionError::Target { error }) => Err(error),
+        Err(SessionError::Connection { error }) => Err(raised(error)),
         Err(SessionError::Protocol(text)) => Err(PyRuntimeError::new_err(text)),
         Ok(ending) => Err(PyRuntimeError::new_err(format!("{ending:?}"))),
         Err(error) => Err(PyRuntimeError::new_err(error.to_string())),
