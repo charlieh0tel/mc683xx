@@ -25,6 +25,24 @@ const PAGE_SHIFT: u32 = 11;
 /// Clocks in the fastest bus cycle (CPU32RM 8.1.5).
 const FASTEST_CLOCKS: u8 = 2;
 
+/// Whether the CPU may write a memory a host wires in: the chip's
+/// builder's (`mc683xx_mc68331::chip::Builder::memory`) and a board's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemoryKind {
+    /// Read-only: a write is ignored, as a ROM ignores one.
+    Rom,
+    /// Read and written.
+    Ram,
+}
+
+impl MemoryKind {
+    /// Whether the CPU writes it.
+    #[must_use]
+    pub const fn writable(self) -> bool {
+        matches!(self, Self::Ram)
+    }
+}
+
 /// The two address spaces outside CPU space that the chip-select
 /// decode tells apart (SIMRM 7.10.3, the SPACE field).  Program and
 /// data share one.

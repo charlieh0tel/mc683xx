@@ -31,10 +31,10 @@ use super::write_register;
 use crate::chip::BuildError;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
-use crate::chip::MemoryKind;
 use crate::event::DsackFault;
 use crate::event::Event;
 use crate::host::AccessError;
+use mc683xx_cpu32::memory::MemoryKind;
 
 /// Where the bus peripheral's window is: above CSBOOT's reset block,
 /// which no select decodes out of reset (MC68331UM Table 4-24).

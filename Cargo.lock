@@ -545,6 +545,7 @@ dependencies = [
 name = "mc683xx-debug"
 version = "0.7.0"
 dependencies = [
+ "mc683xx-cpu32",
  "mc683xx-mc68331",
  "mc683xx-modules",
  "mc683xx-target",

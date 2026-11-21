@@ -21,5 +21,6 @@ mc683xx-target.workspace = true
 thiserror = "2.0.21"
 
 [dev-dependencies]
+mc683xx-cpu32.workspace = true
 mc683xx-mc68331.workspace = true
 mc683xx-modules.workspace = true

@@ -27,9 +27,9 @@ use crate::chip::BuildError;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::chip::MemoryId;
-use crate::chip::MemoryKind;
 use crate::event::Event;
 use crate::state;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_modules::sim::reset::ResetScope;
 
 /// JMP (xxx).L (CPU32RM 4, JMP).

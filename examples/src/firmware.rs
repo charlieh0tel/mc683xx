@@ -5,9 +5,9 @@
 //! Real hosts load real images; these keep each example
 //! self-contained.
 
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::MemoryId;
-use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 

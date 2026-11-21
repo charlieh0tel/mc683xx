@@ -7,13 +7,13 @@ use std::io;
 use std::rc::Rc;
 
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_gdb::Ending;
 use mc683xx_gdb::SessionError;
 use mc683xx_gdb::bdm::Bdm;
 use mc683xx_gdb::serve;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_mc68331::debug::TargetError;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_target::Cpu32Target;

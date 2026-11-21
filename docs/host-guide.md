@@ -44,7 +44,7 @@ use mc683xx_modules::sim::Configuration;
 use mc683xx_examples::firmware;
 use mc683xx_mc68331::chip::BuildError;
 use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::MemoryKind;
+use mc683xx_cpu32::memory::MemoryKind;
 
 fn main() -> Result<(), BuildError> {
     // CS0 at RAM_BASE, then a word into it.
@@ -82,7 +82,7 @@ fn main() -> Result<(), BuildError> {
   system clock out of reset, `sim().clock().frequency()` as SYNCR sets
   it.
   `Builder::default()` is DATA high and the 32.768 kHz crystal.
-- `memory(bytes, kind, pins)`: RAM or ROM by `MemoryKind`, a whole number of
+- `memory(bytes, kind, pins)`: RAM or ROM by `mc683xx_cpu32::memory::MemoryKind`, a whole number of
   2-Kbyte pages, on one or more pins.  A select's block larger than
   the memory repeats it.  The core serves memory itself, fast, except
   where a peripheral shares the cycle.  `memory` and `memory_mut` give
@@ -170,7 +170,7 @@ pins too; reloading is emulator-only as well.
 use mc683xx_target::address::Address;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_examples::firmware;
-use mc683xx_mc68331::chip::MemoryKind;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_modules::sim::reset::ResetScope;
 
 // No select programmed: the boot code stores straight into it.
@@ -1718,7 +1718,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_mc68331::chip::BuildError;
 use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::MemoryKind;
+use mc683xx_cpu32::memory::MemoryKind;
 
 let mut builder = Builder::default();
 builder.memory(vec![0; 2048], MemoryKind::Rom, &[ChipSelect::Boot]).unwrap();

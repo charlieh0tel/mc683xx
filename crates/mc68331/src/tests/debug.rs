@@ -28,9 +28,9 @@ use super::on;
 use super::write_register;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
-use crate::chip::MemoryKind;
 use crate::debug::TargetError;
 use crate::debug::serial::NOT_IN_BACKGROUND;
+use mc683xx_cpu32::memory::MemoryKind;
 
 /// BGND (CPU32RM 4.4).
 const BGND: u16 = 0x4afa;

@@ -26,8 +26,8 @@ use super::AccessError;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::chip::MemoryId;
-use crate::chip::MemoryKind;
 use mc683xx_cpu32::bus::StopRequest;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::PeripheralId;
 
 /// The SIM's, QSM's and GPT's registers with MM set (MC68331UM Table

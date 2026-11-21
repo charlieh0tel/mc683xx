@@ -1,6 +1,7 @@
 //! Loads and init scripts on the emulated chip, reset halted in
 //! background mode as a BDM pod holds silicon.
 
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_debug::image::Image;
 use mc683xx_debug::load::LoadError;
 use mc683xx_debug::load::LoadOptions;
@@ -10,7 +11,6 @@ use mc683xx_debug::script::CommandError;
 use mc683xx_debug::script::Script;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_mc68331::debug::TargetError;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_target::Cpu32Target;

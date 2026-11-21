@@ -15,7 +15,7 @@
 //! use mc683xx_cpu32::cycles::Cycles;
 //! use mc683xx_mc68331::chip::BuildError;
 //! use mc683xx_mc68331::chip::Builder;
-//! use mc683xx_mc68331::chip::MemoryKind;
+//! use mc683xx_cpu32::memory::MemoryKind;
 //! use mc683xx_modules::chip_select::ChipSelect;
 //! use mc683xx_modules::sim::Configuration;
 //!

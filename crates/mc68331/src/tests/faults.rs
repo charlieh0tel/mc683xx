@@ -27,8 +27,8 @@ use super::store_word;
 use super::write_register;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
-use crate::chip::MemoryKind;
 use crate::debug::TargetError;
+use mc683xx_cpu32::memory::MemoryKind;
 
 /// An odd address, which a word access faults at (CPU32RM 6.2.3).
 const ODD: u32 = 0x0401;

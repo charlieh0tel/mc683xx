@@ -32,6 +32,7 @@ use mc683xx_cpu32::interrupt::Interrupts;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::MemoryError;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
@@ -90,23 +91,6 @@ fn index(id: PeripheralId) -> usize {
 /// Host memory wired into the chip, as [`Builder::memory`] returns it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MemoryId(pub(crate) RegionId);
-
-/// Whether the CPU may write a memory the host wires in
-/// ([`Builder::memory`], [`Builder::fixed_memory`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MemoryKind {
-    /// Read-only: a write is ignored, as a ROM ignores one.
-    Rom,
-    /// Read and written.
-    Ram,
-}
-
-impl MemoryKind {
-    /// Whether the CPU writes it.
-    const fn writable(self) -> bool {
-        matches!(self, Self::Ram)
-    }
-}
 
 /// A handle by which the host's peripherals end the chip's run early.
 ///
