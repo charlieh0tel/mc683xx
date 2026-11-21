@@ -113,6 +113,15 @@ impl Board {
         Ok(())
     }
 
+    /// [`restore`](Self::restore_js), its snapshot bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::State`] for a snapshot the board refuses.
+    pub fn restore(&mut self, snapshot: &[u8]) -> Result<(), Error> {
+        Ok(self.board.restore(snapshot)?)
+    }
+
     /// The board, to reach what the bindings do not.
     #[must_use]
     pub const fn board(&self) -> &mc683xx_board::board::Board<Mc68331> {
@@ -277,13 +286,19 @@ impl Board {
         Ok(self.board.save()?)
     }
 
-    /// Puts back the state `snapshot` holds, as Rust's `Board::restore`.
+    /// Puts back the state `snapshot`, a `Uint8Array`, holds, as Rust's
+    /// `Board::restore`.
     ///
     /// # Errors
     ///
+    /// [`Error::Bytes`] for a snapshot not a `Uint8Array`, and
     /// [`Error::State`] for a snapshot the board refuses.
-    pub fn restore(&mut self, snapshot: &[u8]) -> Result<(), Error> {
-        Ok(self.board.restore(snapshot)?)
+    #[wasm_bindgen(js_name = restore)]
+    pub fn restore_js(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Uint8Array")] snapshot: &JsValue,
+    ) -> Result<(), Error> {
+        self.restore(&bytes(snapshot, "a snapshot")?.to_vec())
     }
 }
 

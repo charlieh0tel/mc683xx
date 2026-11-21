@@ -148,7 +148,8 @@ an ES module (TypeScript 5.8 and later); under `node16` it is an error
   frame (its low eight bits; breaks and times left out).
 - `memory(name)`: the board memory's bytes.
 - `save()`, `restore(snapshot)`: the board's state as a `Uint8Array`,
-  and back.
+  and back from one, of any realm (anything else throws, an `Array` of
+  numbers or another typed array too).
 - `free()`: frees the board's memory in the module now, rather than
   when the garbage collector finds it.
 

@@ -22,6 +22,8 @@ function run(text: string, image: Uint8Array): [string, bigint, Uint8Array] {
   board.sendBytes("console", new Uint8Array([0x0d]));
   board.setPacing("realtime");
   board.restore(board.save());
+  // @ts-expect-error a snapshot is a Uint8Array
+  board.restore([...board.save()]);
   // @ts-expect-error picoseconds are a bigint
   board.runFor(1);
   // @ts-expect-error board time is read-only

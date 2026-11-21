@@ -151,6 +151,23 @@ test("a restore goes back", () => {
   assert.deepEqual(board.memory("rom").subarray(0, image.length), image);
 });
 
+test("a snapshot is a Uint8Array", () => {
+  const { board } = booted();
+  const saved = board.now;
+  const snapshot = board.save();
+  board.runFor(BOOT);
+  for (const [data, described] of [
+    [[...snapshot], "an Array"],
+    [snapshot.buffer, "an ArrayBuffer"],
+    [new Uint8ClampedArray(snapshot), "an Uint8ClampedArray"],
+    [null, "null"],
+  ]) {
+    assert.throws(() => board.restore(data), { message: `a snapshot is not a Uint8Array but ${described}` });
+  }
+  board.restore(runInNewContext("(data) => new Uint8Array(data)")([...snapshot]));
+  assert.equal(board.now, saved);
+});
+
 test("mistakes throw the Rust error's message", () => {
   assert.throws(() => new Board(text, new Map()), /demo\.bin/);
   assert.throws(() => new Board(text), /demo\.bin/);
