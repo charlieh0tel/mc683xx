@@ -63,6 +63,8 @@ use crate::description::Description;
 use crate::description::NetSpec;
 use crate::description::Options;
 use crate::description::Target;
+use crate::description::construct;
+use crate::description::port_of;
 use crate::endpoint::Endpoint;
 use crate::error::ConditionError;
 use crate::error::LoadError;
@@ -76,12 +78,9 @@ use crate::observe::Observer;
 use crate::observe::ObserverId;
 use crate::pacing::Pacer;
 use crate::pacing::QUANTUM;
-use crate::registry::Context;
 use crate::registry::Environment;
-use crate::registry::Parameters;
 use crate::registry::PortSpec;
 use crate::registry::Registry;
-use crate::registry::repeated_port;
 use crate::schema::Undecoded;
 use crate::signal::Direction;
 use crate::signal::Kind;
@@ -637,7 +636,7 @@ impl<C: Chip> Board<C> {
     }
 
     /// [`Board::load`], each path parameter's contents
-    /// ([`Context::contents`]) from `read(path)` rather than the file
+    /// ([`Context::contents`](crate::registry::Context::contents)) from `read(path)` rather than the file
     /// system: for a host with no files (a browser), as
     /// [`Description::parse_with`] is for its images.
     ///
@@ -655,28 +654,7 @@ impl<C: Chip> Board<C> {
         let mut cells: Vec<PeripheralCell> = Vec::new();
         let mut peripherals = Vec::new();
         for spec in &description.peripherals {
-            let kind = registry.get(&spec.kind).ok_or_else(|| LoadError::Type {
-                peripheral: spec.name.clone(),
-                kind: spec.kind.clone(),
-            })?;
-            let parameters = Parameters::new(spec.parameters.clone());
-            let context = Context::with_read(&spec.name, &parameters, &environment, &read);
-            let parameter_error = |error| LoadError::Parameter {
-                peripheral: spec.name.clone(),
-                error,
-            };
-            let constructed = kind.construct(&context).map_err(parameter_error)?;
-            if let Some(key) = parameters.unread() {
-                return Err(parameter_error(crate::registry::ParameterError::Unknown(
-                    key,
-                )));
-            }
-            if let Some(port) = repeated_port(&constructed.ports) {
-                return Err(LoadError::Port {
-                    peripheral: spec.name.clone(),
-                    port: port.to_owned(),
-                });
-            }
+            let constructed = construct(spec, registry, &environment, &read)?;
             cells.push(Rc::new(RefCell::new(constructed.peripheral)));
             peripherals.push(PeripheralInfo {
                 name: spec.name.clone(),
@@ -2454,51 +2432,23 @@ fn resolve_nets<P: ChipPin>(
         .nets
         .iter()
         .map(|spec| {
-            let resolve =
-                |endpoint: &Endpoint, driving: bool| -> Result<(usize, usize), LoadError> {
-                    let Endpoint::Peripheral {
-                        peripheral: owner,
-                        port,
-                    } = endpoint
-                    else {
-                        unreachable!("only peripheral endpoints resolve here");
-                    };
-                    let name = format!("{owner}.{port}");
-                    let peripheral = peripherals
-                        .iter()
-                        .position(|peripheral| &peripheral.name == owner)
-                        .expect("the description checked the peripheral");
-                    let (index, declared) = peripherals[peripheral]
-                        .ports
-                        .iter()
-                        .enumerate()
-                        .find(|(_, declared)| &declared.name == port)
-                        .ok_or_else(|| LoadError::Endpoint {
-                            net: spec.name.clone(),
-                            endpoint: name.clone(),
-                        })?;
-                    if declared.kind != spec.kind {
-                        return Err(LoadError::Kind {
-                            net: spec.name.clone(),
-                            kind: spec.kind,
-                            endpoint: name,
-                            found: declared.kind,
-                        });
-                    }
-                    let fits = if driving {
-                        declared.direction.drives()
-                    } else {
-                        declared.direction.sinks()
-                    };
-                    if !fits {
-                        return Err(LoadError::Direction {
-                            net: spec.name.clone(),
-                            endpoint: name,
-                            what: if driving { "drive" } else { "be driven" },
-                        });
-                    }
-                    Ok((peripheral, index))
+            let resolve = |endpoint: &Endpoint,
+                           driving: bool|
+             -> Result<(usize, usize), LoadError> {
+                let Endpoint::Peripheral {
+                    peripheral: owner,
+                    port,
+                } = endpoint
+                else {
+                    unreachable!("only peripheral endpoints resolve here");
                 };
+                let peripheral = peripherals
+                    .iter()
+                    .position(|peripheral| &peripheral.name == owner)
+                    .expect("the description checked the peripheral");
+                let index = port_of(spec, owner, port, driving, &peripherals[peripheral].ports)?;
+                Ok((peripheral, index))
+            };
             let drivers = spec
                 .from
                 .iter()

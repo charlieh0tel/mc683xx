@@ -31,8 +31,16 @@ use crate::error::LoadError;
 use crate::error::SyntaxError;
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
+use crate::registry::Constructed;
+use crate::registry::Context;
+use crate::registry::Environment;
+use crate::registry::ParameterError;
 use crate::registry::ParameterTable;
 use crate::registry::ParameterValue;
+use crate::registry::Parameters;
+use crate::registry::PortSpec;
+use crate::registry::Registry;
+use crate::registry::repeated_port;
 use crate::registry::table_from_toml;
 use crate::schema;
 use crate::schema::Attachment;
@@ -1262,6 +1270,78 @@ fn read_net(
         from,
         to,
     }))
+}
+
+/// Peripheral `spec` built by its type in `registry`, its paths' contents
+/// from `read`: each parameter read, and no port name used twice.
+pub(crate) fn construct(
+    spec: &PeripheralSpec,
+    registry: &Registry,
+    environment: &Environment,
+    read: &dyn Fn(&Path) -> io::Result<Vec<u8>>,
+) -> Result<Constructed, LoadError> {
+    let kind = registry.get(&spec.kind).ok_or_else(|| LoadError::Type {
+        peripheral: spec.name.clone(),
+        kind: spec.kind.clone(),
+    })?;
+    let parameters = Parameters::new(spec.parameters.clone());
+    let context = Context::with_read(&spec.name, &parameters, environment, read);
+    let parameter_error = |error| LoadError::Parameter {
+        peripheral: spec.name.clone(),
+        error,
+    };
+    let constructed = kind.construct(&context).map_err(parameter_error)?;
+    if let Some(key) = parameters.unread() {
+        return Err(parameter_error(ParameterError::Unknown(key)));
+    }
+    if let Some(port) = repeated_port(&constructed.ports) {
+        return Err(LoadError::Port {
+            peripheral: spec.name.clone(),
+            port: port.to_owned(),
+        });
+    }
+    Ok(constructed)
+}
+
+/// The index in `ports`, peripheral `owner`'s, of `port`, an endpoint of
+/// `net`: one of the net's type, that drives if `driving`, else is driven.
+pub(crate) fn port_of(
+    net: &NetSpec,
+    owner: &str,
+    port: &str,
+    driving: bool,
+    ports: &[PortSpec],
+) -> Result<usize, LoadError> {
+    let name = format!("{owner}.{port}");
+    let (index, declared) = ports
+        .iter()
+        .enumerate()
+        .find(|(_, declared)| declared.name == port)
+        .ok_or_else(|| LoadError::Endpoint {
+            net: net.name.clone(),
+            endpoint: name.clone(),
+        })?;
+    if declared.kind != net.kind {
+        return Err(LoadError::Kind {
+            net: net.name.clone(),
+            kind: net.kind,
+            endpoint: name,
+            found: declared.kind,
+        });
+    }
+    let fits = if driving {
+        declared.direction.drives()
+    } else {
+        declared.direction.sinks()
+    };
+    if !fits {
+        return Err(LoadError::Direction {
+            net: net.name.clone(),
+            endpoint: name,
+            what: if driving { "drive" } else { "be driven" },
+        });
+    }
+    Ok(index)
 }
 
 #[cfg(test)]
