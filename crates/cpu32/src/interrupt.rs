@@ -6,6 +6,7 @@ use serde::de::Error;
 use serde::de::Unexpected;
 
 use crate::cycles::Cycles;
+use crate::exception::Vector;
 
 /// An interrupt priority level: 0, none, to 7, nonmaskable (CPU32RM
 /// 6.2.11).
@@ -122,7 +123,7 @@ pub struct NoIrqPin(pub u8);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Acknowledge {
     /// A vector number from the peripheral.
-    Vector(u8),
+    Vector(Vector),
     /// AVEC: the autovector for the level, 25 to 31.
     Autovector,
     /// A bus error: the spurious interrupt vector, 24.

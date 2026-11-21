@@ -4,6 +4,7 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
@@ -422,7 +423,7 @@ fn a_module_that_cannot_peek_says_so() {
             None
         }
 
-        fn acknowledge(&mut self, _: InterruptLevel, _: Cycles) -> Option<u8> {
+        fn acknowledge(&mut self, _: InterruptLevel, _: Cycles) -> Option<Vector> {
             None
         }
 

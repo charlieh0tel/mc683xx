@@ -5,6 +5,7 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::state::Stateless;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
@@ -137,7 +138,7 @@ fn a_bus_peripheral_gives_the_vector_of_its_acknowledge() {
     assert_eq!(chip.board.level(), four);
     assert_eq!(
         chip.board.acknowledge(four, Cycles::ZERO).answer,
-        Acknowledge::Vector(0x48)
+        Acknowledge::Vector(Vector(0x48))
     );
     let three = IrqPin::new(3).unwrap().level();
     assert_eq!(

@@ -14,6 +14,7 @@ use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::Acknowledged;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -1241,7 +1242,7 @@ impl Board {
             None,
         ) {
             Ok((vector, clocks)) => {
-                Acknowledged::new(Acknowledge::Vector(vector as u8)).stalled(stall(clocks))
+                Acknowledged::new(Acknowledge::Vector(Vector(vector as u8))).stalled(stall(clocks))
             }
             // no DSACK in time: the bus monitor's BERR ends the cycle
             // at its period (SIMRM 3.2, 6.4.3); with BME clear, a bus

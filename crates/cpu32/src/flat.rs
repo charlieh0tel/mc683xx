@@ -28,6 +28,7 @@ use crate::cpu::state::decode;
 use crate::cpu::state::encode;
 use crate::cpu::state::restore_each;
 use crate::cycles::Cycles;
+use crate::exception::Vector;
 use crate::interrupt::Acknowledge;
 use crate::interrupt::Acknowledged;
 use crate::interrupt::InterruptLevel;
@@ -248,7 +249,7 @@ fn is_lpstop_broadcast(access: &BusAccess) -> bool {
 struct Requests {
     /// Levels 1 to 7's requests: their vector, [`None`] for the
     /// autovector; the outer [`None`] while not requested.
-    lines: [Option<Option<u8>>; LEVELS],
+    lines: [Option<Option<Vector>>; LEVELS],
 }
 
 impl Interrupts for Requests {
@@ -601,7 +602,7 @@ impl Machine {
     /// Requests an interrupt on `pin`, answered at its acknowledge by
     /// `vector`, or the autovector if [`None`]; it stays requested, as a
     /// level-sensitive line does, until cleared.
-    pub fn request_interrupt(&mut self, pin: IrqPin, vector: Option<u8>) {
+    pub fn request_interrupt(&mut self, pin: IrqPin, vector: Option<Vector>) {
         self.requests.lines[usize::from(pin.get() - 1)] = Some(vector);
     }
 

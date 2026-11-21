@@ -8,6 +8,7 @@ use mc683xx_cpu32::cpu::state::Stateless;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_target::size::Size;
@@ -300,7 +301,7 @@ fn tdre_and_tc_interrupt_through_the_sci_vector() {
     let three = InterruptLevel::new(3).unwrap();
     assert_eq!(qsm.request().unwrap().level, three);
     assert_eq!(qsm.request().unwrap().arbitration, 9);
-    assert_eq!(qsm.acknowledge(three, Cycles::ZERO), Some(0x40));
+    assert_eq!(qsm.acknowledge(three, Cycles::ZERO), Some(Vector(0x40)));
     read_word(&mut qsm, 0x0c, 0);
     write_word(&mut qsm, 0x0e, 0x31, 0);
     assert_eq!(qsm.request(), None);
@@ -535,7 +536,7 @@ fn a_queue_runs_with_each_entrys_pcs_and_timing() {
     );
     let four = InterruptLevel::new(4).unwrap();
     assert_eq!(qsm.request().unwrap().level, four);
-    assert_eq!(qsm.acknowledge(four, Cycles(10_000)), Some(0x41));
+    assert_eq!(qsm.acknowledge(four, Cycles(10_000)), Some(Vector(0x41)));
     write(&mut qsm, 0x1f, Size::Byte, 0x00, 10_000);
     assert_eq!(qsm.request(), None);
 }
@@ -622,10 +623,10 @@ fn the_qspi_vector_wins_over_the_scis_at_one_level() {
     write_word(&mut qsm, 0x1a, 0x8000, 0);
     qsm.advance(Cycles(1000));
     let two = InterruptLevel::new(2).unwrap();
-    assert_eq!(qsm.acknowledge(two, Cycles(1000)), Some(0x41));
+    assert_eq!(qsm.acknowledge(two, Cycles(1000)), Some(Vector(0x41)));
     read(&mut qsm, 0x1f, Size::Byte, 1000);
     write(&mut qsm, 0x1f, Size::Byte, 0, 1000);
-    assert_eq!(qsm.acknowledge(two, Cycles(1000)), Some(0x40));
+    assert_eq!(qsm.acknowledge(two, Cycles(1000)), Some(Vector(0x40)));
 }
 
 /// One 8-bit entry's time at SPBR 2 with the standard delays: half an

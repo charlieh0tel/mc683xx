@@ -611,7 +611,7 @@ fn the_duart_is_vectored_through_cs10() {
     assert_eq!(chip.board.level(), level);
     assert_eq!(
         chip.board.acknowledge(level, Cycles::ZERO).answer,
-        Acknowledge::Vector(0x40)
+        Acknowledge::Vector(Vector(0x40))
     );
     let reads = &chip.peripheral::<Recorder>(board.duart).unwrap().reads;
     let acknowledge = reads.last().unwrap();
@@ -1080,7 +1080,7 @@ fn the_periodic_timer_interrupts_on_time() {
     assert_eq!(chip.board.level(), six);
     assert_eq!(
         chip.board.acknowledge(six, chip.now()).answer,
-        Acknowledge::Vector(0x50)
+        Acknowledge::Vector(Vector(0x50))
     );
     assert_eq!(chip.board.level(), InterruptLevel::NONE);
 }
@@ -1326,12 +1326,12 @@ fn iarb_arbitrates_the_sim_qsm_and_gpt_at_one_level() {
     // a tie: the SIM, then the QSM, then the GPT (PLAN.md)
     assert_eq!(
         chip.board.acknowledge(five, chip.now()).answer,
-        Acknowledge::Vector(0x42)
+        Acknowledge::Vector(Vector(0x42))
     );
     assert_eq!(chip.take_events(), [tie]);
     assert_eq!(
         chip.board.acknowledge(five, chip.now()).answer,
-        Acknowledge::Vector(0x60)
+        Acknowledge::Vector(Vector(0x60))
     );
     assert_eq!(chip.take_events(), [tie]);
     // a higher IARB wins: the QSM 3, the GPT 4
@@ -1339,7 +1339,7 @@ fn iarb_arbitrates_the_sim_qsm_and_gpt_at_one_level() {
     write_register(&mut chip, GPT, 0x0084);
     assert_eq!(
         chip.board.acknowledge(five, chip.now()).answer,
-        Acknowledge::Vector(0x74)
+        Acknowledge::Vector(Vector(0x74))
     );
     assert!(chip.take_events().is_empty());
     // IARB 0 does not contend; with no contender, a spurious interrupt
@@ -1347,7 +1347,7 @@ fn iarb_arbitrates_the_sim_qsm_and_gpt_at_one_level() {
     write_register(&mut chip, GPT, 0x0080);
     assert_eq!(
         chip.board.acknowledge(five, chip.now()).answer,
-        Acknowledge::Vector(0x60)
+        Acknowledge::Vector(Vector(0x60))
     );
     write_register(&mut chip, QSM, 0x0080);
     assert_eq!(chip.board.level(), five);
@@ -2099,7 +2099,10 @@ fn a_duarts_wait_states_at_its_acknowledge_cost_time() {
         let (mut chip, _, _) = duart_board(wait, None);
         let now = chip.now();
         let acknowledged = chip.board.acknowledge(two, now);
-        assert_eq!(acknowledged.answer, Acknowledge::Vector(DUART_VECTOR));
+        assert_eq!(
+            acknowledged.answer,
+            Acknowledge::Vector(Vector(DUART_VECTOR))
+        );
         acknowledged.stall
     };
     // an external DSACK after no wait states: 3 clocks, one beyond the
@@ -3155,7 +3158,7 @@ fn a_module_that_cannot_save_refuses_the_snapshot() {
             None
         }
 
-        fn acknowledge(&mut self, _: InterruptLevel, _: Cycles) -> Option<u8> {
+        fn acknowledge(&mut self, _: InterruptLevel, _: Cycles) -> Option<Vector> {
             None
         }
 

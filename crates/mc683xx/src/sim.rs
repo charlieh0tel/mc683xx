@@ -16,6 +16,7 @@ use std::mem;
 
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_target::address::Address;
 use mc683xx_target::size::Size;
@@ -562,8 +563,8 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn acknowledge_timer(&mut self) -> u8 {
-        self.timer.acknowledge()
+    pub fn acknowledge_timer(&mut self) -> Vector {
+        Vector(self.timer.acknowledge())
     }
 
     /// The timer's interrupt, acknowledged, was not taken: its request

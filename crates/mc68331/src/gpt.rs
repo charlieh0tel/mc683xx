@@ -18,6 +18,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_modules::module::Block;
 use mc683xx_modules::module::InterruptRequest;
@@ -1572,14 +1573,14 @@ impl Module for Gpt {
     }
 
     /// IVBA and the pending source's number, $0 for PAB's (GPTRM 7.1.1).
-    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Option<u8> {
+    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Option<Vector> {
         if level.get() != self.level() {
             return None;
         }
         let source = self.pending_source()?;
         let adjusted = (self.icr >> ICR_PAB_SHIFT) as u8;
         let number = if source == adjusted { 0 } else { source };
-        Some((self.icr & ICR_IVBA_MASK) as u8 | number)
+        Some(Vector((self.icr & ICR_IVBA_MASK) as u8 | number))
     }
 
     /// Every register to its reset value (GPTRM 9; PLAN.md, "QSM and

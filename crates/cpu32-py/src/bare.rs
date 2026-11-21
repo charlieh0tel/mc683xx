@@ -594,8 +594,10 @@ impl MachineView {
     /// requested until `clear_interrupt`.
     #[pyo3(signature = (pin, vector = None))]
     fn request_interrupt(&mut self, pin: u8, vector: Option<u8>) -> Result<(), Error> {
-        self.machine
-            .request_interrupt(IrqPin::try_from(pin).map_err(Error::from)?, vector);
+        self.machine.request_interrupt(
+            IrqPin::try_from(pin).map_err(Error::from)?,
+            vector.map(Vector),
+        );
         Ok(())
     }
 

@@ -16,6 +16,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 
@@ -600,12 +601,12 @@ impl Module for Qsm {
 
     /// The QSPI's vector, INTV0 set, if it requests `level`, before the
     /// SCI's at the same level (QSMRM 3.2.3, 3.2.4).
-    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Option<u8> {
+    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Option<Vector> {
         let (sci, qspi) = self.levels();
         if qspi == level {
-            Some(self.qivr | INTV0)
+            Some(Vector(self.qivr | INTV0))
         } else if sci == level {
-            Some(self.qivr)
+            Some(Vector(self.qivr))
         } else {
             None
         }

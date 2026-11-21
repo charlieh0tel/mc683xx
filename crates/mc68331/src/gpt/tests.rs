@@ -2,6 +2,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_modules::module::Module;
 use mc683xx_modules::module::RegisterAccess;
@@ -198,7 +199,7 @@ fn output_compare_3_interrupts_when_tcnt_reaches_it() {
     let six = InterruptLevel::new(6).unwrap();
     let request = gpt.request().unwrap();
     assert_eq!((request.level, request.arbitration), (six, 7));
-    assert_eq!(gpt.acknowledge(six, Cycles(4 * 0x100)), Some(0x56));
+    assert_eq!(gpt.acknowledge(six, Cycles(4 * 0x100)), Some(Vector(0x56)));
     assert_eq!(
         gpt.acknowledge(InterruptLevel::new(5).unwrap(), Cycles::ZERO),
         None
@@ -300,7 +301,7 @@ fn a_pin_edge_is_captured() {
     assert_eq!(read(&mut gpt, 0x0e, 4 * 0x1234 + 2), 0x1234);
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x1234 + 2), 0x0100, "IC1F");
     let six = InterruptLevel::new(6).unwrap();
-    assert_eq!(gpt.acknowledge(six, Cycles::ZERO), Some(0x51));
+    assert_eq!(gpt.acknowledge(six, Cycles::ZERO), Some(Vector(0x51)));
     // input capture 4 on any edge, on PGP7
     write(&mut gpt, 0x0c, 0x0400, 4 * 0x2000);
     write(&mut gpt, 0x1e, 0x00c0, 4 * 0x2000);
@@ -408,7 +409,7 @@ fn tcnt_overflow_sets_tof() {
     // the compares at their reset value $FFFF matched on the way
     assert_eq!(read(&mut gpt, 0x22, 4 << 16), 0xf880);
     let six = InterruptLevel::new(6).unwrap();
-    assert_eq!(gpt.acknowledge(six, Cycles::ZERO), Some(0x59));
+    assert_eq!(gpt.acknowledge(six, Cycles::ZERO), Some(Vector(0x59)));
 }
 
 #[test]
@@ -420,9 +421,9 @@ fn pab_moves_a_source_to_the_top() {
     write_byte(&mut gpt, 0x20, 0x48, 0);
     gpt.advance(Cycles(4));
     let six = InterruptLevel::new(6).unwrap();
-    assert_eq!(gpt.acknowledge(six, Cycles(4)), Some(0x54));
+    assert_eq!(gpt.acknowledge(six, Cycles(4)), Some(Vector(0x54)));
     write(&mut gpt, 0x04, 0x7650, 4);
-    assert_eq!(gpt.acknowledge(six, Cycles(4)), Some(0x50));
+    assert_eq!(gpt.acknowledge(six, Cycles(4)), Some(Vector(0x50)));
 }
 
 #[test]

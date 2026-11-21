@@ -1,6 +1,7 @@
 use crate::pins::PortLevels;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_target::address::Address;
@@ -192,7 +193,7 @@ fn the_timer_ticks_on_extal() {
     assert_eq!(sim.timer_request(), None);
     sim.advance(period);
     assert_eq!(sim.timer_request(), InterruptLevel::new(5));
-    assert_eq!(sim.acknowledge_timer(), 0x42);
+    assert_eq!(sim.acknowledge_timer(), Vector(0x42));
     assert_eq!(sim.timer_request(), None);
     assert_eq!(sim.next_event(), Some(Cycles(2 * period.0)));
 }

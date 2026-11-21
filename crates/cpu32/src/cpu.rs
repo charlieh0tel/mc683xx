@@ -1347,7 +1347,7 @@ impl Core<'_> {
         self.bus_stop_requested();
         self.cpu.stall += acknowledged.stall;
         let vector = match acknowledged.answer {
-            Acknowledge::Vector(number) => Vector(number),
+            Acknowledge::Vector(vector) => vector,
             Acknowledge::Autovector => Vector::autovector(level),
             Acknowledge::Spurious => Vector::SPURIOUS_INTERRUPT,
         };
@@ -2164,7 +2164,10 @@ mod tests {
     #[test]
     fn vectored_and_spurious_interrupts() {
         let mut cpu = prepared(&[NOP], status::S);
-        step(&mut cpu, &mut Source::new(5, Acknowledge::Vector(0x40)));
+        step(
+            &mut cpu,
+            &mut Source::new(5, Acknowledge::Vector(Vector(0x40))),
+        );
         assert_eq!(cpu.registers.pc.0, handler(Vector(0x40)));
         assert_eq!(top_format_vector(&cpu), 0x0100);
         let mut cpu = prepared(&[NOP], status::S);
@@ -2176,7 +2179,7 @@ mod tests {
     fn an_acknowledges_wait_states_add_to_the_interrupt() {
         let cycles = |stall| {
             let mut cpu = prepared(&[NOP], status::S);
-            let mut source = Source::new(5, Acknowledge::Vector(0x40));
+            let mut source = Source::new(5, Acknowledge::Vector(Vector(0x40)));
             source.stall = Cycles(stall);
             cpu.run_for(&mut NoBus, &mut source, Cycles::ZERO, Cycles(1))
                 .cycles
