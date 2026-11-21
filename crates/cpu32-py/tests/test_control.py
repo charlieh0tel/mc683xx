@@ -326,8 +326,10 @@ attach = [{ select = "CSBOOT" }]
 SPINNING_STACK = 0x800
 SPINNING_START = 8
 BRA_SELF = 0x60FE
-# Far more than another thread waits for the GIL, but a short run.
-PROMPTLY = 0.5
+# Far more than another thread waits for the GIL, with room for a
+# loaded shared CI runner (a macOS one took 0.68 s), but far short of a
+# run.
+PROMPTLY = 2.0
 
 
 def spinning_board(directory: Path) -> mc683xx.Board:
