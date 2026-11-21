@@ -617,7 +617,8 @@ impl Description {
 
     /// The `[chip]` table as chip `expected`'s section, its own keys
     /// checked by its type, with the line of any that is wrong.  An
-    /// absent table is an empty one.
+    /// absent table is an empty one, an error in which has no line: the
+    /// file does not hold it.
     pub(crate) fn chip_section<S: DeserializeOwned>(
         &self,
         expected: &'static str,
@@ -640,7 +641,7 @@ impl Description {
             Some(section) => Ok(section),
             None => toml::Value::Table(toml::Table::new())
                 .try_into()
-                .map_err(|error| SyntaxError::new(error, "").into()),
+                .map_err(|error| SyntaxError::unplaced(error).into()),
         }
     }
 

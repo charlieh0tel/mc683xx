@@ -506,6 +506,27 @@ fn the_file_names_its_chip_and_another_chip_refuses_it() {
 }
 
 #[test]
+fn a_chip_section_the_file_lacks_reads_as_empty_and_its_error_has_no_place() {
+    /// A section with a key it requires.
+    #[derive(Debug, serde::Deserialize)]
+    struct Required {
+        /// Required.
+        #[expect(dead_code, reason = "only its absence is tested")]
+        needed: u32,
+    }
+    let mut description = parse(BASE).unwrap();
+    // a description whose text holds no [chip] table, as none parsed has
+    description.text = description
+        .text
+        .replace("[chip]\n", "")
+        .replace(CHIP_TYPE, "");
+    let Err(LoadError::Syntax(error)) = description.chip_section::<Required>("mc68331") else {
+        panic!("a missing key is a syntax error");
+    };
+    assert_eq!((error.line(), error.column()), (None, None), "{error}");
+}
+
+#[test]
 fn a_peripheral_keeps_its_marking_and_refuses_unknown_keys() {
     let description = parse(&format!(
         "{BASE}{}",

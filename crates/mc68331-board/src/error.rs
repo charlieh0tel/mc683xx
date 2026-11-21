@@ -272,6 +272,12 @@ impl SyntaxError {
         Self { error, place }
     }
 
+    /// The parser's `error` in a table the text does not hold, as an
+    /// absent one read as empty: no place.
+    pub(crate) const fn unplaced(error: toml::de::Error) -> Self {
+        Self { error, place: None }
+    }
+
     /// The line it is on, from 1, if the parser placed it.
     #[must_use]
     pub fn line(&self) -> Option<usize> {
