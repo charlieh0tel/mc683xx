@@ -659,7 +659,7 @@ impl MappedPeripheral for Replay {
             ));
         }
         Ok((0..cycle.size.bytes()).fold(0, |value, byte| {
-            value << 8 | u32::from(self.read_byte(cycle.address + byte, cycle.now))
+            value << 8 | u32::from(self.read_byte(cycle.address.0 + byte, cycle.now))
         }))
     }
 
@@ -670,7 +670,7 @@ impl MappedPeripheral for Replay {
         let bytes = cycle.size.bytes();
         for byte in 0..bytes {
             let shift = 8 * (bytes - 1 - byte);
-            self.write_byte(cycle.address + byte, (value >> shift) as u8, cycle.now);
+            self.write_byte(cycle.address.0 + byte, (value >> shift) as u8, cycle.now);
         }
         Ok(())
     }
@@ -1086,7 +1086,7 @@ fn run_chip(
         }
         let origin = chip.instructions();
         for event in chip.take_events() {
-            if let Some(record) = chip_record(&chip, ram, pc, event) {
+            if let Some(record) = chip_record(&chip, ram, pc.0, event) {
                 if let Record::Access {
                     write: false,
                     address,
@@ -1113,7 +1113,7 @@ fn run_chip(
                 }
                 trace.push(Traced {
                     record,
-                    pc,
+                    pc: pc.0,
                     origin,
                     cycle: chip.now().0,
                     split: false,
@@ -1246,7 +1246,7 @@ fn chip_record(chip: &Mc68331, ram: MemoryId, pc: u32, event: Event) -> Option<R
         }
         Event::Exception(_, entry) => {
             let memory = chip.memory(ram);
-            let offset = entry.stack as usize & (memory.len() - 1);
+            let offset = entry.stack.0 as usize & (memory.len() - 1);
             let sr = memory
                 .get(offset..offset + 2)
                 .map_or(0, |word| u16::from_be_bytes([word[0], word[1]]));

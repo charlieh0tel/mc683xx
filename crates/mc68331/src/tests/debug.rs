@@ -609,8 +609,8 @@ fn breakpoint_chip(program: &[u16], answered: bool) -> (Mc68331, Option<Peripher
     let entry = RAM + Vector::HARDWARE_BREAKPOINT.offset();
     chip.poke(Address(entry), &handler.to_be_bytes()).unwrap();
     let registers = chip.registers_mut();
-    registers.vbr = RAM;
-    registers.ssp = RAM + BREAKPOINT_STACK;
+    registers.vbr = Address(RAM);
+    registers.ssp = Address(RAM + BREAKPOINT_STACK);
     (chip, responder)
 }
 
@@ -618,7 +618,7 @@ fn breakpoint_chip(program: &[u16], answered: bool) -> (Mc68331, Option<Peripher
 fn with_bdm_disabled_bkpt_runs_an_acknowledge_that_dsack_ignores() {
     let (mut chip, responder) = breakpoint_chip(&[MOVEQ_1_D0, MOVEQ_1_D0, BRANCH_TO_SELF], true);
     chip.run_for(Cycles(1));
-    assert_eq!(chip.cpu().registers.pc, START + 2);
+    assert_eq!(chip.cpu().registers.pc.0, START + 2);
     assert!(!chip.assert_breakpoint(), "no background mode");
     chip.run_for(Cycles(1));
     let reads = &chip
@@ -628,15 +628,15 @@ fn with_bdm_disabled_bkpt_runs_an_acknowledge_that_dsack_ignores() {
     // CPU space $00001E: type 0000, BKPT #7, T set; a word (CPU32RM
     // 5.3.1.1, 6.2.6; MC68331UM 4.5.4.1.2, Figure 4-12)
     assert_eq!(reads.len(), 1);
-    assert_eq!(reads[0].address, 0x1e);
+    assert_eq!(reads[0].address, Address(0x1e));
     assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
     assert_eq!(reads[0].size, Size::Word);
     assert_eq!(reads[0].select, on(2));
     // the word returned is not executed, and nothing is stacked
-    assert_eq!(chip.cpu().registers.ssp, RAM + BREAKPOINT_STACK);
+    assert_eq!(chip.cpu().registers.ssp.0, RAM + BREAKPOINT_STACK);
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
     chip.run_for(Cycles(1));
-    assert_eq!(chip.cpu().registers.pc, START + 4, "the next instruction");
+    assert_eq!(chip.cpu().registers.pc.0, START + 4, "the next instruction");
 }
 
 #[test]
@@ -648,11 +648,11 @@ fn with_bdm_disabled_bkpt_takes_vector_12_on_a_bus_error() {
     assert!(chip.cpu().breakpoint_pending(), "left for the next run");
     chip.run_for(Cycles(1));
     assert!(!chip.cpu().breakpoint_pending());
-    assert_eq!(chip.cpu().registers.pc, RAM + BREAKPOINT_HANDLER);
+    assert_eq!(chip.cpu().registers.pc.0, RAM + BREAKPOINT_HANDLER);
     // format $2 (CPU32RM 6.2.6, 6.4.2): SR, the next PC, $2030, and the
     // instruction executing when the breakpoint was sensed
     let frame = RAM + BREAKPOINT_STACK - 12;
-    assert_eq!(chip.cpu().registers.ssp, frame);
+    assert_eq!(chip.cpu().registers.ssp.0, frame);
     let words: Vec<u32> = (0..6)
         .map(|word| {
             chip.peek(
@@ -690,9 +690,9 @@ fn with_bdm_disabled_a_transfer_is_bkpt_that_dsack_ignores() {
     // the breakpoint acknowledge cycle (CPU32RM 6.2.6; MC68331UM
     // 4.5.4.1.2)
     assert_eq!(reads.len(), 1);
-    assert_eq!(reads[0].address, 0x1e);
+    assert_eq!(reads[0].address, Address(0x1e));
     assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
-    assert_eq!(chip.cpu().registers.ssp, RAM + BREAKPOINT_STACK);
+    assert_eq!(chip.cpu().registers.ssp.0, RAM + BREAKPOINT_STACK);
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
 }
 
@@ -704,8 +704,8 @@ fn with_bdm_disabled_a_transfer_is_bkpt_that_takes_vector_12_on_a_bus_error() {
     assert!(chip.cpu().breakpoint_pending(), "left for the next run");
     chip.run_for(Cycles(1));
     assert!(!chip.cpu().breakpoint_pending());
-    assert_eq!(chip.cpu().registers.pc, RAM + BREAKPOINT_HANDLER);
-    assert_eq!(chip.cpu().registers.ssp, RAM + BREAKPOINT_STACK - 12);
+    assert_eq!(chip.cpu().registers.pc.0, RAM + BREAKPOINT_HANDLER);
+    assert_eq!(chip.cpu().registers.ssp.0, RAM + BREAKPOINT_STACK - 12);
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
 }
 

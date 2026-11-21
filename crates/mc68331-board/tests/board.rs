@@ -229,7 +229,7 @@ struct Words([u8; 4]);
 
 impl MappedPeripheral for Words {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
-        let byte = u32::from(self.0[(cycle.address & 3) as usize]);
+        let byte = u32::from(self.0[(cycle.address.0 & 3) as usize]);
         Ok(match cycle.size {
             Size::Byte => byte,
             Size::Word | Size::Long => byte << 8,
@@ -237,7 +237,7 @@ impl MappedPeripheral for Words {
     }
 
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
-        self.0[(cycle.address & 3) as usize] = match cycle.size {
+        self.0[(cycle.address.0 & 3) as usize] = match cycle.size {
             Size::Byte => value as u8,
             Size::Word | Size::Long => (value >> 8) as u8,
         };
@@ -3718,7 +3718,7 @@ fn a_host_system_reset_resets_all_but_the_cpu() {
     host.take_received("observed").unwrap();
     let pc = host.chip().cpu().registers.pc;
     let reset = host_reset(&mut host, ResetCause::System);
-    assert_eq!(host.chip().cpu().registers.pc, pc, "the CPU not reset");
+    assert_eq!(host.chip().cpu().registers.pc.0, pc.0, "the CPU not reset");
     let host_seen = seen(&mut host, reset);
     assert_eq!(host_seen.reset_status, ResetCause::System.status());
     assert_eq!(host_seen.registers.data[1], 1, "not started again");
@@ -3830,7 +3830,7 @@ fn a_host_reset_with_breakpoint_is_an_external_reset_into_background_mode() {
     host.run_until(at).unwrap();
     host.reset_with_breakpoint();
     assert_eq!(host.chip().cpu().background(), Some(Entry::Breakpoint));
-    assert_eq!(host.chip().cpu().registers.pc, START, "before the first");
+    assert_eq!(host.chip().cpu().registers.pc.0, START, "before the first");
     let mut host_seen = seen(&mut host, at);
     assert_eq!(host.chip().cpu().background(), Some(Entry::Breakpoint));
     assert_eq!(host_seen.registers.data[1], 1, "not started again");
@@ -3930,7 +3930,7 @@ attach = [{ select = "CSBOOT" }]
     assert_eq!(run.stop, Stop::Fault);
     let fault = board.chip().cpu().fault_stop().expect("a fault stop");
     assert_eq!(fault.address.0, 0x0401);
-    assert_eq!(fault.registers.pc, START);
+    assert_eq!(fault.registers.pc.0, START);
     assert!(run.now < Time::from_seconds(1), "{:?}", run.now);
 }
 

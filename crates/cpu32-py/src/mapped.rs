@@ -222,7 +222,7 @@ impl BusCycleView {
     /// The address: on a chip ADDR, on a bare `Machine` all 32 bits.
     #[getter]
     const fn address(&self) -> u32 {
-        self.0.address
+        self.0.address.0
     }
 
     /// Bytes in the cycle: 1 or 2, or 4 on a bare `Machine` for a long the

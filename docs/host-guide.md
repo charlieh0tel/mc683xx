@@ -58,7 +58,7 @@ fn main() -> Result<(), BuildError> {
     let ram = builder.memory(vec![0; firmware::RAM_BYTES], true, &[firmware::cs(0)])?;
     // The power-on reset: SSP and PC from the vectors.
     let mut chip = builder.build();
-    assert_eq!(chip.cpu().registers.pc, firmware::START);
+    assert_eq!(chip.cpu().registers.pc.0, firmware::START);
     let run = chip.run_for(Cycles(1000));
     assert_eq!(run.stop, Stop::Budget);
     assert_eq!(chip.memory(ram)[..2], [0x12, 0x34]);
@@ -467,7 +467,7 @@ impl MappedPeripheral for Interrupter {
     }
 
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
-        match cycle.address & 0xf {
+        match cycle.address.0 & 0xf {
             VECTOR_REGISTER => self.vector = value as u8,
             REQUEST_REGISTER => self.requesting = value != 0,
             _ => return Err(BusError),
@@ -526,7 +526,7 @@ assert_eq!(chip.memory(ram)[..2], [0xbe, 0xef], "the handler ran");
 let acknowledges = &chip.peripheral::<Interrupter>(peripheral).unwrap().acknowledges;
 assert_eq!(acknowledges.len(), 1);
 assert_eq!(acknowledges[0].select, Some(firmware::cs(10).into()));
-assert_eq!(acknowledges[0].address, 0xff_fff1 + 2 * u32::from(LEVEL));
+assert_eq!(acknowledges[0].address.0, 0xff_fff1 + 2 * u32::from(LEVEL));
 ```
 
 The host can also drive an IRQ pin itself:
@@ -616,11 +616,11 @@ builder.interrupt(alarm, seven);
 builder.autovector(seven);
 let mut chip = builder.build();
 chip.run_for(Cycles(4000));
-assert_ne!(chip.cpu().registers.pc, firmware::HANDLER);
+assert_ne!(chip.cpu().registers.pc.0, firmware::HANDLER);
 let before = chip.save().unwrap();
 let then = chip.peripheral::<Alarm>(alarm).unwrap().now;
 chip.run_for(Cycles(4000));
-assert_eq!(chip.cpu().registers.pc, firmware::HANDLER);
+assert_eq!(chip.cpu().registers.pc.0, firmware::HANDLER);
 assert_eq!(chip.cpu().registers.interrupt_mask(), 7);
 // The alarm's time is in the chip's snapshot.
 chip.restore(&before).unwrap();
@@ -1131,7 +1131,7 @@ let breakpoint = chip
     .cpu_control()
     .add_code_hook(store..=store, |_| ControlFlow::Break(()));
 assert_eq!(chip.run_for(Cycles(10_000)).stop, Stop::Hook(breakpoint));
-assert_eq!(chip.cpu().registers.pc, store.0);
+assert_eq!(chip.cpu().registers.pc, store);
 chip.cpu_control().remove_hook(breakpoint);
 
 // The RAM's first page read-only: the store faults.
@@ -1156,7 +1156,7 @@ chip.run_for(Cycles(1000));
 assert_eq!(*reasons.borrow(), [Invalid::Protected]);
 assert_eq!(*vectors.borrow(), [BUS_ERROR]);
 assert_eq!(chip.memory(ram)[..2], [0, 0]);
-assert_eq!(chip.cpu().registers.pc, firmware::HANDLER);
+assert_eq!(chip.cpu().registers.pc.0, firmware::HANDLER);
 ```
 
 `cpu_control().set_stop_on_fault(true)` stops a run at a bus or

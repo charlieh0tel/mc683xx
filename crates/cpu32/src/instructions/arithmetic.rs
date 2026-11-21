@@ -744,7 +744,7 @@ mod tests {
         poke_long(&mut cpu, 0x3004, 0xffff);
         step(&mut cpu, 1);
         assert_eq!(peek_long(&cpu, 0x3004), 0x0001_ffff);
-        assert_eq!(cpu.registers.pc, CODE + 8);
+        assert_eq!(cpu.registers.pc.0, CODE + 8);
         step(&mut cpu, 1);
         assert_eq!(cpu.registers.data[0], 0xff);
         assert_eq!(ccr(&cpu), status::X | status::N | status::C);
@@ -756,7 +756,7 @@ mod tests {
         let mut cpu = machine(&[0x0c7a, 0x0005, 0x0002, 0x0005]);
         step(&mut cpu, 1);
         assert_eq!(ccr(&cpu), status::Z);
-        assert_eq!(cpu.registers.pc, CODE + 6);
+        assert_eq!(cpu.registers.pc.0, CODE + 6);
     }
 
     #[test]

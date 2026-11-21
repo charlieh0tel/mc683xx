@@ -392,7 +392,7 @@ impl Target for Machine {
         data: &[u8],
     ) -> Result<(), AccessError<Infallible>> {
         self.write(address, data)
-            .map_err(|unmapped| AccessError::Unserved(Address(unmapped.0)))
+            .map_err(|unmapped| AccessError::Unserved(unmapped.0))
     }
 
     fn run_for(

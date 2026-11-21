@@ -148,7 +148,7 @@ fn a_bus_peripheral_gives_the_vector_of_its_acknowledge() {
     let reads = &chip.peripheral::<Recorder>(id).unwrap().reads;
     assert_eq!(reads.len(), 1);
     assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
-    assert_eq!(reads[0].address, 0xff_fff9);
+    assert_eq!(reads[0].address, Address(0xff_fff9));
 }
 
 #[test]
@@ -254,7 +254,7 @@ impl MappedPeripheral for Mixed {
     }
 
     fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
-        Some(if cycle.address & 2 == 0 {
+        Some(if cycle.address.0 & 2 == 0 {
             PortSize::Bits8
         } else {
             PortSize::Bits16

@@ -9,6 +9,7 @@ use std::array;
 
 use gdbstub::arch::Arch;
 use mc683xx_cpu32::registers::Registers;
+use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::register::Register;
 use mc683xx_target::register::SystemRegister;
@@ -132,10 +133,10 @@ pub(crate) fn get(registers: &Registers, location: Location) -> u32 {
         }
         Location::System(register) => match register {
             SystemRegister::Sr => registers.sr().into(),
-            SystemRegister::Rpc => registers.pc,
-            SystemRegister::Usp => registers.usp,
-            SystemRegister::Ssp => registers.ssp,
-            SystemRegister::Vbr => registers.vbr,
+            SystemRegister::Rpc => registers.pc.0,
+            SystemRegister::Usp => registers.usp.0,
+            SystemRegister::Ssp => registers.ssp.0,
+            SystemRegister::Vbr => registers.vbr.0,
             SystemRegister::Sfc => registers.sfc.bits().into(),
             SystemRegister::Dfc => registers.dfc.bits().into(),
             SystemRegister::Pcc | SystemRegister::Atemp | SystemRegister::Far => 0,
@@ -157,10 +158,10 @@ pub(crate) fn set(registers: &mut Registers, location: Location, value: u32) {
         }
         Location::System(register) => match register {
             SystemRegister::Sr => registers.set_sr(value as u16),
-            SystemRegister::Rpc => registers.pc = value,
-            SystemRegister::Usp => registers.usp = value,
-            SystemRegister::Ssp => registers.ssp = value,
-            SystemRegister::Vbr => registers.vbr = value,
+            SystemRegister::Rpc => registers.pc = Address(value),
+            SystemRegister::Usp => registers.usp = Address(value),
+            SystemRegister::Ssp => registers.ssp = Address(value),
+            SystemRegister::Vbr => registers.vbr = Address(value),
             SystemRegister::Sfc => registers.sfc = FunctionCode::from_low_bits(value),
             SystemRegister::Dfc => registers.dfc = FunctionCode::from_low_bits(value),
             SystemRegister::Pcc | SystemRegister::Atemp | SystemRegister::Far => {}

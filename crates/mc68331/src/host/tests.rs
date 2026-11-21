@@ -310,7 +310,7 @@ fn a_peripheral_sees_the_hosts_cycles_and_never_its_peeks() {
     assert_eq!(peripheral.reads.len(), 1);
     let cycle = peripheral.reads[0];
     assert_eq!(
-        (cycle.select, cycle.address, cycle.size, cycle.now),
+        (cycle.select, cycle.address.0, cycle.size, cycle.now),
         (on(1), PERIPHERAL_BASE + 2, Size::Word, chip.now())
     );
     assert_eq!(cycle.function_code, SUPERVISOR);

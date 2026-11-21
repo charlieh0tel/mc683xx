@@ -77,14 +77,15 @@ impl InstructionView {
     /// The long word at A7, in data space, if memory serves it; `None`
     /// if a peripheral would.
     #[getter]
-    const fn stack_top(&self) -> Option<u32> {
-        self.0.stack_top
+    fn stack_top(&self) -> Option<u32> {
+        self.0.stack_top.map(u32::from)
     }
 
     fn __repr__(&self) -> String {
         format!(
             "Instruction(pc={:#08x}, stack_top={:?})",
-            self.0.pc.0, self.0.stack_top
+            self.0.pc.0,
+            self.stack_top()
         )
     }
 }
@@ -323,7 +324,7 @@ impl ExceptionView {
     /// SSP: its frame's lowest address.
     #[getter]
     const fn stack(&self) -> u32 {
-        self.0.stack
+        self.0.stack.0
     }
 
     /// The interrupt level, for an interrupt.

@@ -9,6 +9,7 @@ use crate::bus::BusError;
 use crate::bus::PortSize;
 use crate::cpu::state::Save;
 use crate::cycles::Cycles;
+use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
@@ -41,7 +42,7 @@ pub struct BusCycle {
     /// The address: all 32 bits on the bare machine, ADDR (the chip's
     /// address lines) on a chip.  Board decode within a select's window
     /// is the peripheral's: it reads these.
-    pub address: u32,
+    pub address: Address,
     /// Byte, word or long.  On a chip, byte or word after dynamic bus
     /// sizing to the port: the select's field, or with an external
     /// DSACK the peripheral's DSACK pins'.  On the bare machine a long
@@ -71,7 +72,12 @@ impl BusCycle {
     /// A read cycle at `address`, of `size` and `function_code`,
     /// starting at `now`, on no select and not stacking.
     #[must_use]
-    pub const fn new(address: u32, size: Size, function_code: FunctionCode, now: Cycles) -> Self {
+    pub const fn new(
+        address: Address,
+        size: Size,
+        function_code: FunctionCode,
+        now: Cycles,
+    ) -> Self {
         Self {
             address,
             size,

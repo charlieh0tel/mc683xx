@@ -307,7 +307,7 @@ impl Routes {
             return vec![(route, cycle.size, Lane::Both)];
         }
         let lanes: &[Lane] = match cycle.size {
-            Size::Byte if cycle.address & 1 == 0 => &[Lane::Upper],
+            Size::Byte if cycle.address.0 & 1 == 0 => &[Lane::Upper],
             Size::Byte => &[Lane::Lower],
             _ => &[Lane::Upper, Lane::Lower],
         };
@@ -323,7 +323,7 @@ impl Routes {
 
     /// `route`'s access for a piece of `cycle`.
     fn access(shared: &Shared, route: &Route, cycle: BusCycle, size: Size) -> PeripheralAccess {
-        let address = route.address(cycle.address);
+        let address = route.address(cycle.address.0);
         let now = shared.time(cycle.now);
         match cycle.select.and_then(ChipSelect::from_select) {
             Some(select) => PeripheralAccess::new(select, address, size, cycle.function_code, now),
@@ -353,7 +353,7 @@ impl Routes {
                     cycle: cycle.now,
                     pc: shared.pc.get(),
                     write: cycle.write,
-                    address: cycle.address,
+                    address: cycle.address.0,
                     size: cycle.size.bytes(),
                     value,
                 }));
@@ -504,26 +504,26 @@ impl DecoderRouter {
 
 impl MappedPeripheral for DecoderRouter {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, BusError> {
-        match self.routes(cycle.address) {
+        match self.routes(cycle.address.0) {
             Some(routes) => routes.read(&self.shared, cycle),
             None => self.undecoded().map(|()| 0),
         }
     }
 
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
-        match self.routes(cycle.address) {
+        match self.routes(cycle.address.0) {
             Some(routes) => routes.write(&self.shared, cycle, value),
             None => self.undecoded(),
         }
     }
 
     fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
-        self.routes(cycle.address)
+        self.routes(cycle.address.0)
             .map_or(Some(0), |routes| routes.wait_states(&self.shared, cycle))
     }
 
     fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
-        self.routes(cycle.address)
+        self.routes(cycle.address.0)
             .and_then(|routes| routes.dsack_port(&self.shared, cycle))
     }
 }
@@ -585,7 +585,7 @@ impl MemoryRouter {
             .unwrap_or(0);
         let access = PeripheralAccess::new(
             select_of(cycle),
-            cycle.address % memory.length,
+            cycle.address.0 % memory.length,
             cycle.size,
             cycle.function_code,
             self.shared.time(cycle.now),

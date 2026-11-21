@@ -89,7 +89,7 @@ fn branch(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
         LONG_DISPLACEMENT => (core.fetch_long()?, Size::Long),
         _ => (Size::Byte.sign_extend(u32::from(opcode)), Size::Byte),
     };
-    let target = base.wrapping_add(displacement);
+    let target = base.offset(displacement);
     match condition(opcode) {
         ALWAYS => {}
         SUBROUTINE => push_return(core)?,
@@ -110,7 +110,7 @@ pub(super) fn push_return(core: &mut Core<'_>) -> Result<(), Exception> {
         .address(STACK_POINTER)
         .wrapping_sub(Size::Long.bytes());
     registers.set_address(STACK_POINTER, sp);
-    core.write_data(Address(sp), Size::Long, pc)
+    core.write_data(Address(sp), Size::Long, pc.0)
 }
 
 /// DBcc Dn, label: if the condition is false, Dn's low word less one,
@@ -146,7 +146,7 @@ fn dbcc(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
     if word == LOOP_DISPLACEMENT {
         core.enter_loop_mode();
     }
-    core.cpu.registers.pc = base.wrapping_add(Size::Word.sign_extend(u32::from(word)));
+    core.cpu.registers.pc = base.offset(Size::Word.sign_extend(u32::from(word)));
     Ok(Flow::Changed)
 }
 
@@ -171,6 +171,7 @@ mod tests {
     use crate::instructions::tests::peek_long;
     use crate::instructions::tests::step;
     use crate::registers::status;
+    use mc683xx_target::address::Address;
 
     /// A stack in the test RAM.
     const STACK: u32 = 0x4000;
@@ -178,7 +179,7 @@ mod tests {
     fn with_ccr(code: &[u16], ccr: u16) -> Cpu {
         let mut cpu = machine(code);
         cpu.registers.set_ccr(ccr as u8);
-        cpu.registers.ssp = STACK;
+        cpu.registers.ssp = Address(STACK);
         cpu
     }
 
@@ -187,19 +188,19 @@ mod tests {
         // BRA.S *+$12
         let mut cpu = with_ccr(&[0x6010], 0);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, CODE + 2 + 0x10);
+        assert_eq!(cpu.registers.pc.0, CODE + 2 + 0x10);
         // BRA.W: $00 selects the word that follows, from its address.
         let mut cpu = with_ccr(&[0x6000, 0xfffe], 0);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, CODE);
+        assert_eq!(cpu.registers.pc.0, CODE);
         // BRA.L: $FF selects the long word that follows.
         let mut cpu = with_ccr(&[0x60ff, 0x0000, 0x0100], 0);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, CODE + 2 + 0x100);
+        assert_eq!(cpu.registers.pc.0, CODE + 2 + 0x100);
         // BRA.S back: a negative byte.
         let mut cpu = with_ccr(&[0x60fe], 0);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, CODE);
+        assert_eq!(cpu.registers.pc.0, CODE);
     }
 
     #[test]
@@ -207,14 +208,14 @@ mod tests {
         // BEQ.S *+$12
         let mut cpu = with_ccr(&[0x6710], status::Z);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, CODE + 0x12);
+        assert_eq!(cpu.registers.pc.0, CODE + 0x12);
         let mut cpu = with_ccr(&[0x6710], 0);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, CODE + 2);
+        assert_eq!(cpu.registers.pc.0, CODE + 2);
         // BNE.L not taken still skips its displacement.
         let mut cpu = with_ccr(&[0x66ff, 0x0000, 0x0100], status::Z);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, CODE + 6);
+        assert_eq!(cpu.registers.pc.0, CODE + 6);
     }
 
     #[test]
@@ -232,8 +233,8 @@ mod tests {
         // BSR.W *+$102
         let mut cpu = with_ccr(&[0x6100, 0x0100], 0);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, CODE + 2 + 0x100);
-        assert_eq!(cpu.registers.ssp, STACK - 4);
+        assert_eq!(cpu.registers.pc.0, CODE + 2 + 0x100);
+        assert_eq!(cpu.registers.ssp.0, STACK - 4);
         assert_eq!(peek_long(&cpu, STACK - 4), CODE + 4);
     }
 
@@ -244,11 +245,11 @@ mod tests {
         cpu.registers.data[1] = 0x1234_0001;
         step(&mut cpu, 1);
         assert_eq!(cpu.registers.data[1], 0x1234_0000);
-        assert_eq!(cpu.registers.pc, CODE);
+        assert_eq!(cpu.registers.pc.0, CODE);
         // From zero the low word wraps to -1 and the loop ends.
         step(&mut cpu, 1);
         assert_eq!(cpu.registers.data[1], 0x1234_ffff);
-        assert_eq!(cpu.registers.pc, CODE + 4);
+        assert_eq!(cpu.registers.pc.0, CODE + 4);
     }
 
     #[test]
@@ -258,7 +259,7 @@ mod tests {
         cpu.registers.data[1] = 5;
         step(&mut cpu, 1);
         assert_eq!(cpu.registers.data[1], 5);
-        assert_eq!(cpu.registers.pc, CODE + 4);
+        assert_eq!(cpu.registers.pc.0, CODE + 4);
     }
 
     #[test]

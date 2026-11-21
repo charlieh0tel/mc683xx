@@ -603,7 +603,7 @@ fn outcome(
                     )
                 })
                 .collect();
-            if registers.ssp != sp + 4 {
+            if registers.ssp.0 != sp + 4 {
                 broken.push(format!("SP {:#x}, wanted {:#x}", registers.ssp, sp + 4));
             }
             if registers.sr() & SYSTEM_BYTE != system_byte {
@@ -792,7 +792,7 @@ mod tests {
         for (number, &value) in starting[8..].iter().enumerate() {
             registers.set_address(number, value);
         }
-        registers.ssp = sp + 4;
+        registers.ssp = Address(sp + 4);
         Call {
             stopped: Stopped::Returned,
             started: State::default(),
@@ -869,7 +869,7 @@ mod tests {
         );
         let mut call = returned(sp);
         call.registers.data[2] = 0;
-        call.registers.ssp = sp;
+        call.registers.ssp = Address(sp);
         call.registers.set_sr(0);
         let Outcome::Broke(how) = outcome(&call, sp, &starting, &keeps, SUPERVISOR) else {
             panic!("a broken convention passed");

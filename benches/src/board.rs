@@ -21,6 +21,7 @@ use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_target::address::Address;
 
 use crate::kernel::Calibration;
 use crate::kernel::Kernel;
@@ -351,7 +352,7 @@ impl Board {
         });
         let quanta = builder.unwired_peripheral(QuantumCounter::default());
         let mut chip = builder.build();
-        while chip.cpu().registers.pc != sled_start {
+        while chip.cpu().registers.pc != Address(sled_start) {
             chip.run_for(Cycles(1));
             assert_eq!(chip.halted(), None::<Halt>, "the boot code halted");
         }
@@ -375,8 +376,8 @@ impl Board {
         };
         let registers = self.chip.registers_mut();
         registers.set_sr(status::S | mask);
-        registers.ssp = STACK;
-        registers.pc = self.sled;
+        registers.ssp = Address(STACK);
+        registers.pc = Address(self.sled);
     }
 
     /// One iteration: the sled from its start for `budget` clocks.
@@ -425,7 +426,7 @@ impl Board {
             (run.cycles, taken)
         })?;
         assert!(
-            board.chip.cpu().registers.pc < HANDLER + 2,
+            board.chip.cpu().registers.pc < Address(HANDLER + 2),
             "{}: ran off its sled",
             kernel.name
         );

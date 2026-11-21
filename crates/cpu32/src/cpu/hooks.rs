@@ -48,8 +48,9 @@ pub struct Instruction {
     /// The registers.
     pub registers: Registers,
     /// The long word at A7, in data space, if the core serves it from
-    /// memory (no bus cycle is run for it).
-    pub stack_top: Option<u32>,
+    /// memory (no bus cycle is run for it): at a subroutine's first
+    /// instruction, its return address.
+    pub stack_top: Option<Address>,
 }
 
 /// A bus cycle in user or supervisor space, as a memory hook sees it.
@@ -122,7 +123,7 @@ pub struct ExceptionEntry {
     /// Its handler's address.
     pub handler: Address,
     /// SSP: its frame's lowest address.
-    pub stack: u32,
+    pub stack: Address,
     /// The level, for an interrupt.
     pub level: Option<InterruptLevel>,
 }
@@ -387,7 +388,7 @@ impl Cpu {
     /// that has them: the first that stopped the run.
     #[inline(never)]
     pub(super) fn before_instruction(&mut self) -> Option<HookId> {
-        let pc = Address(self.registers.pc);
+        let pc = self.registers.pc;
         let at = self.memory.mask(pc);
         let watched = self.memory.watched(at);
         let resume = self.resume.take().filter(|&(address, _)| address == pc);
@@ -398,11 +399,14 @@ impl Cpu {
         let instruction = || Instruction {
             pc,
             registers: self.registers.clone(),
-            stack_top: self.memory.peek(
-                Space::of(self.registers.data_space()),
-                Address(self.registers.address(7)),
-                Size::Long,
-            ),
+            stack_top: self
+                .memory
+                .peek(
+                    Space::of(self.registers.data_space()),
+                    Address(self.registers.address(7)),
+                    Size::Long,
+                )
+                .map(Address),
         };
         let block = block_start && watched & watch::BLOCK != 0 && resume.is_none();
         let code =
@@ -592,12 +596,12 @@ impl Core<'_> {
         &mut self,
         vector: Vector,
         frame: &Frame,
-        stack: u32,
+        stack: Address,
         handler: Address,
         level: Option<InterruptLevel>,
     ) {
         self.cpu.registers.ssp = stack;
-        self.cpu.registers.pc = handler.0;
+        self.cpu.registers.pc = handler;
         self.cpu.block_start = true;
         let words = frame.words();
         // Every CPU32 frame stacks its return PC after SR (CPU32RM 6.4).

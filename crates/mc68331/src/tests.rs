@@ -304,8 +304,8 @@ fn write_register(chip: &mut Mc68331, address: u32, value: u16) {
 fn csboot_serves_the_reset_vectors_with_13_wait_states() {
     let (mut chip, _) = booting(&[NOP]);
     assert_eq!(chip.halted(), None);
-    assert_eq!(chip.cpu().registers.ssp, STACK);
-    assert_eq!(chip.cpu().registers.pc, START);
+    assert_eq!(chip.cpu().registers.ssp.0, STACK);
+    assert_eq!(chip.cpu().registers.pc.0, START);
     // one NOP: a two-clock fetch from a 16-clock select (MC68331UM
     // Table 4-24; SIMRM 7.5.1)
     let run = chip.run_for(Cycles(1));
@@ -552,13 +552,13 @@ fn the_wired_map() {
         .writes;
     assert_eq!(writes.len(), 1);
     assert_eq!(writes[0].0.select, on(6));
-    assert_eq!(writes[0].0.address, 0xaaa);
+    assert_eq!(writes[0].0.address, Address(0xaaa));
     assert_eq!(writes[0].1, 0xaaaa);
     // the 8-bit port: a word is two byte cycles on CS4
     let reads = &chip.peripheral::<Recorder>(board.shared).unwrap().reads;
     let addresses: Vec<_> = reads
         .iter()
-        .map(|read| (read.address, read.size, read.select))
+        .map(|read| (read.address.0, read.size, read.select))
         .collect();
     assert_eq!(
         addresses,
@@ -616,7 +616,7 @@ fn the_duart_is_vectored_through_cs10() {
     let reads = &chip.peripheral::<Recorder>(board.duart).unwrap().reads;
     let acknowledge = reads.last().unwrap();
     assert_eq!(acknowledge.select, on(10));
-    assert_eq!(acknowledge.address, 0xff_fff3);
+    assert_eq!(acknowledge.address, Address(0xff_fff3));
     assert_eq!(acknowledge.size, Size::Byte);
     assert_eq!(acknowledge.function_code, FunctionCode::CPU_SPACE);
     // PFPAR clear makes IRQ1 a port pin
@@ -861,13 +861,13 @@ fn an_external_dsack_sizes_the_cycle() {
     let reads: Vec<(u32, Size)> = recorder
         .reads
         .iter()
-        .map(|read| (read.address, read.size))
+        .map(|read| (read.address.0, read.size))
         .collect();
     assert_eq!(reads, [(0x60_0000, Size::Byte), (0x60_0001, Size::Byte)]);
     let writes: Vec<(u32, u32)> = recorder
         .writes
         .iter()
-        .map(|(write, value)| (write.address, *value))
+        .map(|(write, value)| (write.address.0, *value))
         .collect();
     assert_eq!(writes, [(0x60_0000, 0xab), (0x60_0001, 0xcd)]);
     assert_eq!(chip.take_events(), []);
@@ -978,7 +978,7 @@ fn a_peripheral_diverts_a_memory_off_the_fast_path_within_a_quantum() {
         [0x1111, 0xbeef, 0x1111]
     );
     let read = chip.peripheral::<Recorder>(peripheral).unwrap().reads[0];
-    assert_eq!((read.select, read.address), (on(1), 0x20_0000));
+    assert_eq!((read.select, read.address.0), (on(1), 0x20_0000));
     // from the host, between runs
     chip.divert_memory(memory, Some(peripheral));
     assert_eq!(
@@ -1150,7 +1150,7 @@ fn the_watchdog_resets_the_chip_unless_serviced() {
         "{events:?}"
     );
     assert_eq!(chip.sim().reset_status(), 0x20);
-    assert!(chip.cpu().registers.pc >= START);
+    assert!(chip.cpu().registers.pc >= Address(START));
 }
 
 #[test]
@@ -1166,7 +1166,7 @@ fn a_host_reset_sets_rsr_to_its_cause_alone() {
         assert_eq!(chip.take_events(), [Event::Reset(now, cause)]);
         // the `reset` instruction's leaves the CPU running (SIMRM 8.2.6)
         assert_eq!(
-            chip.cpu().registers.pc == START,
+            chip.cpu().registers.pc == Address(START),
             cause != ResetCause::System
         );
     }
@@ -1713,7 +1713,7 @@ fn takes_vector(program: &[u16], vector: u8, level: u8) -> Mc68331 {
     chip.run_for(Cycles(20_000));
     assert_eq!(chip.memory(board.ram)[..2], [0xbe, 0xef], "the handler ran");
     assert_eq!(chip.cpu().registers.interrupt_mask(), level);
-    let frame = (chip.cpu().registers.ssp - RAM) as usize;
+    let frame = (chip.cpu().registers.ssp.0 - RAM) as usize;
     let format_vector = &chip.memory(board.ram)[frame + 6..frame + 8];
     assert_eq!(
         u16::from_be_bytes([format_vector[0], format_vector[1]]),
@@ -1970,7 +1970,7 @@ impl MappedPeripheral for Duart {
     }
 
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
-        match cycle.address >> 1 & 0xf {
+        match cycle.address.0 >> 1 & 0xf {
             DUART_IMR => self.mask = value as u8,
             DUART_IVR => self.vector = value as u8,
             _ => {}
@@ -2068,7 +2068,7 @@ fn duart_board(wait: u8, protection: Option<u16>) -> (Mc68331, MemoryId, Periphe
 /// The vector the format 0 frame on top of the stack records (CPU32RM
 /// 6.4), and the interrupt mask.
 fn taken_vector(chip: &Mc68331, ram: MemoryId) -> (u16, u8) {
-    let frame = (chip.cpu().registers.ssp - RAM) as usize;
+    let frame = (chip.cpu().registers.ssp.0 - RAM) as usize;
     let format_vector = &chip.memory(ram)[frame + 6..frame + 8];
     (
         u16::from_be_bytes([format_vector[0], format_vector[1]]) / 4,
@@ -2086,7 +2086,7 @@ fn a_duart_vectors_its_interrupt_through_a_chip_select() {
     let acknowledge = acknowledges[0];
     assert_eq!(acknowledge.select, on(10));
     // CPU space type $F, level 2 on ADDR[3:1] (MC68331UM 4.5.4)
-    assert_eq!(acknowledge.address, 0xff_fff5);
+    assert_eq!(acknowledge.address, Address(0xff_fff5));
     assert_eq!(acknowledge.size, Size::Byte);
     assert_eq!(acknowledge.function_code, FunctionCode::CPU_SPACE);
 }
@@ -2347,7 +2347,7 @@ fn a_hook_stops_the_chip_run() {
         .add_code_hook(at..=at, |_| ControlFlow::Break(()));
     let run = chip.run_for(Cycles(10_000));
     assert_eq!(run.stop, Stop::Hook(id));
-    assert_eq!(chip.cpu().registers.pc, START + 2);
+    assert_eq!(chip.cpu().registers.pc.0, START + 2);
     assert!(chip.now() < Cycles(10_000));
     // On past it.
     assert_eq!(chip.run_for(Cycles(100)).stop, Stop::Budget);
@@ -2358,7 +2358,7 @@ fn a_peripheral_stops_the_run_after_its_instruction() {
     let (mut chip, _, _) = with_peripheral(&load_word(CS1_BASE, 0), Stopper);
     let run = chip.run_for(Cycles(10_000));
     assert_eq!(run.stop, Stop::Requested);
-    assert_eq!(chip.cpu().registers.pc, START + 6);
+    assert_eq!(chip.cpu().registers.pc.0, START + 6);
     // Asked once: the next run goes on.
     assert_eq!(chip.run_for(Cycles(100)).stop, Stop::Budget);
 }
@@ -2403,7 +2403,7 @@ fn a_request_the_host_moves_between_runs_is_seen() {
     write_register(&mut chip, SIM + 0x50, CS1_BAR);
     write_register(&mut chip, SIM + 0x52, CS1_FAST);
     // a stack the peripheral takes the frame's writes on
-    chip.registers_mut().ssp = CS1_BASE + 0x1000;
+    chip.registers_mut().ssp = Address(CS1_BASE + 0x1000);
     chip.set_tracing(ChipTracing {
         accesses: false,
         exceptions: true,
@@ -2457,7 +2457,7 @@ fn a_peripheral_ends_the_run_early_after_its_instruction() {
     let start = chip.now();
     let run = chip.run_for(Cycles(10_000));
     assert_eq!(run.stop, Stop::Budget, "not a stop");
-    assert_eq!(chip.cpu().registers.pc, START + 6);
+    assert_eq!(chip.cpu().registers.pc.0, START + 6);
     assert_eq!(run.cycles, chip.now() - start);
     assert!(run.cycles < Cycles(10_000));
     // Asked once: the next run spends its budget.
@@ -2577,7 +2577,7 @@ fn tracing_reports_peripheral_cycles_and_exceptions() {
     program.push(ILLEGAL);
     let (mut chip, _, _) = with_peripheral(&program, |_| Recorder::answering(0x1234));
     // A stack the peripheral takes the frame's writes on.
-    chip.registers_mut().ssp = CS1_BASE + 0x1000;
+    chip.registers_mut().ssp = Address(CS1_BASE + 0x1000);
     chip.take_events();
     chip.set_tracing(ChipTracing {
         accesses: true,

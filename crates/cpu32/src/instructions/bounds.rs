@@ -16,7 +16,6 @@ use crate::instructions::Flow;
 use crate::instructions::Table;
 use crate::instructions::data_movement::register_field;
 use crate::registers::status;
-use mc683xx_target::address::Address;
 use mc683xx_target::size::Size;
 
 /// CHK: 0100 rrr1 s0 <ea>, size 11 word, 10 long (CPU32RM 4.4, CHK).
@@ -68,7 +67,7 @@ pub(super) fn register(table: &mut Table) {
 fn chk_exception(core: &Core<'_>) -> Exception {
     Exception::Long {
         vector: Vector::CHK,
-        pc: Address(core.cpu.registers.pc),
+        pc: core.cpu.registers.pc,
         address: core.instruction_pc(),
     }
 }
@@ -200,7 +199,7 @@ mod tests {
         step(&mut cpu, 1);
         assert_eq!(cpu.exception_taken(), None);
         assert_eq!(ccr(&cpu), 0x1f);
-        assert_eq!(cpu.registers.pc, CODE + 4);
+        assert_eq!(cpu.registers.pc.0, CODE + 4);
     }
 
     #[test]

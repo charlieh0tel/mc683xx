@@ -14,6 +14,7 @@ use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 use pyo3::Bound;
@@ -104,8 +105,13 @@ class Peripheral:
 
 /// A word cycle on CS3 at `address`.
 fn cycle(address: u32, size: Size) -> BusCycle {
-    BusCycle::new(address, size, FunctionCode::SUPERVISOR_DATA, Cycles(7))
-        .through(ChipSelect::from_index(4).unwrap().into())
+    BusCycle::new(
+        Address(address),
+        size,
+        FunctionCode::SUPERVISOR_DATA,
+        Cycles(7),
+    )
+    .through(ChipSelect::from_index(4).unwrap().into())
 }
 
 /// Runs `test` with the test peripherals' module.

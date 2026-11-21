@@ -977,7 +977,7 @@ impl Mc68331 {
         if breakpoint && self.cpu.background().is_none() && self.cpu.breakpoint() {
             // BKPT tags the first fetch: acknowledged before it, PCC
             // where it would have begun (PLAN.md, Background debug mode)
-            let pc = Address(self.cpu.registers.pc);
+            let pc = self.cpu.registers.pc;
             self.cpu.set_pcc(pc);
         }
         self.sync_freeze();

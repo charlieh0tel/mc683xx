@@ -177,7 +177,7 @@ impl FaultStopView {
     /// The faulting instruction's address.
     #[getter]
     const fn pc(&self) -> u32 {
-        self.0.registers.pc
+        self.0.registers.pc.0
     }
 
     /// The registers as the instruction, or the trace, hardware
@@ -624,7 +624,7 @@ impl MachineView {
         let first = {
             let mut this = running(slf)?;
             if let Some(begin) = begin {
-                this.machine.cpu.registers.pc = begin;
+                this.machine.cpu.registers.pc = Address(begin);
                 this.machine.cpu.clear_resume();
             }
             this.machine.stop_request().withdraw();
@@ -993,7 +993,7 @@ impl MachineView {
         };
         if !handled {
             let mut this = slf.borrow_mut();
-            if this.machine.cpu.registers.pc == interception.pc.0 {
+            if this.machine.cpu.registers.pc == interception.pc {
                 this.machine.cpu.take_natively_once();
             }
         }

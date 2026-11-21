@@ -251,9 +251,9 @@ impl Machine {
         }
         machine.poke_words(START, code);
         machine.cpu.registers.set_sr(SUPERVISOR);
-        machine.cpu.registers.ssp = STACK_TOP;
-        machine.cpu.registers.usp = USER_STACK_TOP;
-        machine.cpu.registers.pc = START;
+        machine.cpu.registers.ssp = Address(STACK_TOP);
+        machine.cpu.registers.usp = Address(USER_STACK_TOP);
+        machine.cpu.registers.pc = Address(START);
         machine
     }
 
@@ -303,7 +303,7 @@ impl Machine {
     /// Runs until PC is `end`.
     fn run_to(&mut self, end: u32) {
         for _ in 0..STEP_LIMIT {
-            if self.cpu.registers.pc == end {
+            if self.cpu.registers.pc.0 == end {
                 return;
             }
             self.steps(1);
@@ -335,7 +335,7 @@ impl Machine {
                     BUDGET,
                 );
                 assert_eq!(run.stop, Stop::Hook(id));
-                assert_eq!(self.cpu.registers.pc, at);
+                assert_eq!(self.cpu.registers.pc.0, at);
                 seen.take()
             }
         }
@@ -356,7 +356,7 @@ impl Machine {
             .cpu
             .run_for(&mut NoBus, interrupts, Cycles::ZERO, BUDGET);
         assert_eq!(run.stop, Stop::Hook(id));
-        assert_eq!(self.cpu.registers.pc, at);
+        assert_eq!(self.cpu.registers.pc.0, at);
         seen.take().expect("the hook ran")
     }
 
@@ -382,7 +382,7 @@ impl Machine {
 
     /// The SR a frame at SSP stacked.
     fn stacked_sr(&self) -> u16 {
-        self.peek_word(self.cpu.registers.ssp + FRAME_SR)
+        self.peek_word(self.cpu.registers.ssp.0 + FRAME_SR)
     }
 }
 
@@ -499,7 +499,7 @@ fn fault_2_pc_write_in_a_code_hook_keeps_the_codes() {
             let (code, starts) = program(&[&compare.code, &RECORD]);
             let mut machine = Machine::new(&code);
             machine.pause(starts[1], pause);
-            machine.cpu.registers.pc = starts[1];
+            machine.cpu.registers.pc = Address(starts[1]);
             machine.steps(RECORD.len());
             assert_eq!(
                 machine.recorded(),
@@ -577,7 +577,7 @@ fn fault_2_status_write_in_a_code_hook_before_a_fault_is_kept() {
             let name = compare.name;
             assert_eq!(machine.stacked_sr(), SUPERVISOR, "{name} {pause:?}");
             assert_eq!(machine.cpu.registers.ccr(), 0, "{name} {pause:?}");
-            machine.cpu.registers.pc = starts[2];
+            machine.cpu.registers.pc = Address(starts[2]);
             machine.steps(RECORD.len());
             assert_eq!(machine.recorded(), (0, 0), "{name} {pause:?}");
         }
@@ -683,7 +683,7 @@ fn a_code_hook_sees_the_system_byte_at_each_instruction() {
                 instruction.pc,
                 registers.sr(),
                 registers.address(7),
-                instruction.stack_top,
+                instruction.stack_top.map(u32::from),
             )
         })
         .collect();
@@ -708,7 +708,7 @@ fn a_block_hook_sees_the_status_a_trap_enters_with() {
         (
             seen.registers.sr(),
             seen.registers.address(7),
-            seen.stack_top
+            seen.stack_top.map(u32::from)
         ),
         (status::S | status::Z, frame, Some(frame_top))
     );
@@ -740,7 +740,7 @@ fn fault_3_rtr_restores_the_codes_and_returns() {
     const STACKED: u16 = 0xa715;
     let mut machine = Machine::new(&[RTR]);
     let sp = STACK_TOP - 6;
-    machine.cpu.registers.ssp = sp;
+    machine.cpu.registers.ssp = Address(sp);
     machine.poke_words(sp, &[STACKED]);
     machine.poke_long(sp + 2, RETURN);
     machine.steps(1);
@@ -748,8 +748,8 @@ fn fault_3_rtr_restores_the_codes_and_returns() {
         machine.cpu.registers.sr(),
         SUPERVISOR | (STACKED & status::CCR)
     );
-    assert_eq!(machine.cpu.registers.pc, RETURN);
-    assert_eq!(machine.cpu.registers.ssp, STACK_TOP);
+    assert_eq!(machine.cpu.registers.pc.0, RETURN);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK_TOP);
 }
 
 /// Fault 4: MOVE (SP)+, SR reads its source, on the supervisor stack,
@@ -761,14 +761,14 @@ fn fault_4_status_pop_into_user_state_pops_the_supervisor_stack() {
     const POPPED: u16 = status::Z;
     let mut machine = Machine::new(&[POP_STATUS, NOP]);
     let sp = STACK_TOP - 2;
-    machine.cpu.registers.ssp = sp;
+    machine.cpu.registers.ssp = Address(sp);
     machine.poke_words(sp, &[POPPED]);
     machine.steps(1);
     assert_eq!(machine.cpu.registers.sr(), POPPED);
-    assert_eq!(machine.cpu.registers.ssp, STACK_TOP);
-    assert_eq!(machine.cpu.registers.usp, USER_STACK_TOP);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK_TOP);
+    assert_eq!(machine.cpu.registers.usp.0, USER_STACK_TOP);
     assert_eq!(machine.cpu.registers.address(7), USER_STACK_TOP);
-    assert_eq!(machine.cpu.registers.pc, START + 2);
+    assert_eq!(machine.cpu.registers.pc.0, START + 2);
 }
 
 /// Fault 5: STOP loads SR, advances PC past itself and stops until an
@@ -790,12 +790,15 @@ fn fault_5_stop_waits_for_an_interrupt() {
     );
     assert_eq!(run.stop, Stop::Stopped);
     assert_eq!(machine.cpu.registers.sr(), LOADED);
-    assert_eq!(machine.cpu.registers.pc, START + 4);
+    assert_eq!(machine.cpu.registers.pc.0, START + 4);
     machine
         .cpu
         .run_for(&mut NoBus, &mut Request(level), Cycles::ZERO, Cycles(1));
-    assert_eq!(machine.cpu.registers.pc, handler(Vector::autovector(level)));
-    let ssp = machine.cpu.registers.ssp;
+    assert_eq!(
+        machine.cpu.registers.pc.0,
+        handler(Vector::autovector(level))
+    );
+    let ssp = machine.cpu.registers.ssp.0;
     assert_eq!(machine.peek_long(ssp + FRAME_PC), START + 4);
 }
 
@@ -810,8 +813,8 @@ fn fault_6_trap_and_rte_are_taken_by_the_cpu() {
     let mut machine = Machine::new(&code);
     machine.steps(2);
     let vector = Vector::trap(5);
-    let ssp = machine.cpu.registers.ssp;
-    assert_eq!(machine.cpu.registers.pc, handler(vector));
+    let ssp = machine.cpu.registers.ssp.0;
+    assert_eq!(machine.cpu.registers.pc.0, handler(vector));
     assert_eq!(ssp, STACK_TOP - FOUR_WORD_BYTES);
     assert_eq!(machine.peek_word(ssp + FRAME_SR), SUPERVISOR | status::Z);
     assert_eq!(machine.peek_long(ssp + FRAME_PC), starts[2]);
@@ -820,8 +823,8 @@ fn fault_6_trap_and_rte_are_taken_by_the_cpu() {
         vector.offset()
     );
     machine.steps(1);
-    assert_eq!(machine.cpu.registers.pc, starts[2]);
-    assert_eq!(machine.cpu.registers.ssp, STACK_TOP);
+    assert_eq!(machine.cpu.registers.pc.0, starts[2]);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK_TOP);
     assert_eq!(machine.cpu.registers.sr(), SUPERVISOR | status::Z);
 }
 
@@ -837,7 +840,7 @@ fn fault_7_movec_to_vbr_moves_the_vector_table() {
     machine.cpu.registers.data[0] = TABLE;
     machine.poke_long(TABLE + Vector::trap(0).offset(), MOVED_HANDLER);
     machine.steps(1);
-    assert_eq!(machine.cpu.registers.vbr, TABLE);
+    assert_eq!(machine.cpu.registers.vbr.0, TABLE);
     machine.steps(1);
-    assert_eq!(machine.cpu.registers.pc, MOVED_HANDLER);
+    assert_eq!(machine.cpu.registers.pc.0, MOVED_HANDLER);
 }

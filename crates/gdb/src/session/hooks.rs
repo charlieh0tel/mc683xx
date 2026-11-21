@@ -91,7 +91,7 @@ impl<T: Target> Session<'_, T> {
         }) else {
             return Ok(SingleThreadStopReason::Signal(Signal::SIGILL));
         };
-        let stepped = self.step_runs(pc, count);
+        let stepped = self.step_runs(pc.0, count);
         self.target.with_cpu(|cpu| cpu.remove_hook(id));
         stepped
     }
@@ -111,7 +111,7 @@ impl<T: Target> Session<'_, T> {
             }
             let moved = self
                 .target
-                .with_cpu(|cpu| cpu.instructions() != count || cpu.registers.pc != pc)
+                .with_cpu(|cpu| cpu.instructions() != count || cpu.registers.pc != Address(pc))
                 .unwrap_or(true);
             if moved || ran != TargetRun::Hook {
                 break;

@@ -223,7 +223,7 @@ mod tests {
         step(&mut cpu, 1);
         assert_eq!(cpu.registers.data[0], 0xffff_0000 | 1674);
         assert_eq!(ccr(&cpu), 0);
-        assert_eq!(cpu.registers.pc, CODE + 4);
+        assert_eq!(cpu.registers.pc.0, CODE + 4);
     }
 
     #[test]

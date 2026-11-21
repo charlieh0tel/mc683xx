@@ -72,7 +72,7 @@ pub enum MapError {
     Memory(#[from] MemoryError),
     /// Memory where some is mapped already.
     #[error("{0:#x} is mapped already")]
-    Mapped(u32),
+    Mapped(Address),
     /// Contents longer than the memory.
     #[error("{contents:#x} bytes of contents in {length:#x} bytes")]
     Contents {
@@ -83,13 +83,13 @@ pub enum MapError {
     },
     /// A peripheral range that overlaps another peripheral's, or is empty.
     #[error("peripherals overlap at {0:#x}")]
-    Overlap(u32),
+    Overlap(Address),
 }
 
 /// Host access to memory no map covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("{0:#x} is not mapped")]
-pub struct Unmapped(pub u32);
+pub struct Unmapped(pub Address);
 
 /// A peripheral with the addresses it covers.
 struct Wired {
@@ -183,7 +183,7 @@ impl FlatBus {
             return None;
         }
         let cycle = BusCycle::new(
-            access.address.0,
+            access.address,
             access.size,
             access.function_code,
             access.now,
@@ -302,26 +302,26 @@ struct MachineState {
 /// use mc683xx_cpu32::registers::status;
 ///
 /// /// Where the function's caller returns to: nothing runs there.
-/// const RETURN: u32 = 0x100;
+/// const RETURN: Address = Address(0x100);
 /// /// The function.
-/// const CODE: u32 = 0x400;
+/// const CODE: Address = Address(0x400);
 /// /// The supervisor stack's top.
-/// const STACK: u32 = 0x800;
+/// const STACK: Address = Address(0x800);
 ///
 /// let mut machine = Machine::new(ADDRESS_BITS)?;
 /// machine.map(Address(0), PAGE_BYTES, &[])?;
 /// // ADD.L D1,D0; RTS
-/// machine.write(Address(CODE), &[0xd0, 0x81, 0x4e, 0x75])?;
-/// machine.write(Address(STACK - 4), &RETURN.to_be_bytes())?;
+/// machine.write(CODE, &[0xd0, 0x81, 0x4e, 0x75])?;
+/// machine.write(STACK.before(4), &RETURN.0.to_be_bytes())?;
 ///
 /// let registers = &mut machine.cpu.registers;
 /// registers.set_sr(status::S);
-/// registers.ssp = STACK - 4;
+/// registers.ssp = STACK.before(4);
 /// registers.pc = CODE;
 /// registers.data[0] = 40;
 /// registers.data[1] = 2;
 /// let mut limits = Limits::default();
-/// limits.until = Some(Address(RETURN));
+/// limits.until = Some(RETURN);
 /// let run = machine.run_limited(limits);
 /// assert_eq!(run.end, End::Until);
 /// assert_eq!(machine.cpu.registers.data[0], 42);
@@ -386,7 +386,7 @@ impl Machine {
             .clone()
             .find(|&page| self.cpu.memory.entry(Space::Supervisor, page) != Page::BUS)
         {
-            return Err(MapError::Mapped(mapped.0));
+            return Err(MapError::Mapped(mapped));
         }
         // Checked before the region is taken, so a refusal leaves none.
         self.cpu.memory.check(start, length)?;
@@ -494,7 +494,7 @@ impl Machine {
     /// The region and offset of mapped byte `address`.
     fn locate(&self, address: Address) -> Result<(Backing, usize), Unmapped> {
         let page = self.cpu.memory.entry(Space::Supervisor, address);
-        let backing = page.read.ok_or(Unmapped(address.0))?;
+        let backing = page.read.ok_or(Unmapped(address))?;
         Ok((backing, (address.0 % PAGE_BYTES) as usize))
     }
 
@@ -556,7 +556,7 @@ impl Machine {
     ) -> Result<PeripheralId, MapError> {
         let range = range.start().0..=range.end().0;
         if range.is_empty() {
-            return Err(MapError::Overlap(*range.start()));
+            return Err(MapError::Overlap(Address(*range.start())));
         }
         let index = self
             .bus
@@ -565,7 +565,9 @@ impl Machine {
         if let Some(next) = self.bus.peripherals.get(index)
             && next.range.start() <= range.end()
         {
-            return Err(MapError::Overlap(*next.range.start().max(range.start())));
+            return Err(MapError::Overlap(Address(
+                *next.range.start().max(range.start()),
+            )));
         }
         self.bus.next += 1;
         let id = PeripheralId::from(self.bus.next);

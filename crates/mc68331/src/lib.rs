@@ -34,7 +34,7 @@
 //!     builder.memory(rom, false, &[ChipSelect::Boot])?;
 //!     // The power-on reset: SSP and PC from the vectors.
 //!     let mut chip = builder.build();
-//!     assert_eq!(chip.cpu().registers.pc, START);
+//!     assert_eq!(chip.cpu().registers.pc.0, START);
 //!     let run = chip.run_for(Cycles(10_000));
 //!     assert_eq!(run.stop, Stop::Stopped);
 //!     assert_eq!(chip.now(), run.cycles);

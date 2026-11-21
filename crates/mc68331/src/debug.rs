@@ -152,14 +152,14 @@ impl Mc68331 {
         let cpu = &self.cpu;
         let registers = &cpu.registers;
         match register {
-            SystemRegister::Rpc => registers.pc,
+            SystemRegister::Rpc => registers.pc.0,
             SystemRegister::Pcc => cpu.pcc().0,
             SystemRegister::Atemp => cpu.atemp(),
             SystemRegister::Far => cpu.far().0,
-            SystemRegister::Vbr => registers.vbr,
+            SystemRegister::Vbr => registers.vbr.0,
             SystemRegister::Sr => u32::from(registers.sr()),
-            SystemRegister::Usp => registers.usp,
-            SystemRegister::Ssp => registers.ssp,
+            SystemRegister::Usp => registers.usp.0,
+            SystemRegister::Ssp => registers.ssp.0,
             SystemRegister::Sfc => u32::from(registers.sfc.bits()),
             SystemRegister::Dfc => u32::from(registers.dfc.bits()),
         }
@@ -171,14 +171,14 @@ impl Mc68331 {
     fn set_system_register(&mut self, register: SystemRegister, value: u32) {
         let cpu = &mut self.cpu;
         match register {
-            SystemRegister::Rpc => cpu.registers.pc = value,
+            SystemRegister::Rpc => cpu.registers.pc = Address(value),
             SystemRegister::Pcc => cpu.set_pcc(Address(value)),
             SystemRegister::Atemp => cpu.set_atemp(value),
             SystemRegister::Far => {}
-            SystemRegister::Vbr => cpu.registers.vbr = value,
+            SystemRegister::Vbr => cpu.registers.vbr = Address(value),
             SystemRegister::Sr => cpu.registers.set_sr(value as u16),
-            SystemRegister::Usp => cpu.registers.usp = value,
-            SystemRegister::Ssp => cpu.registers.ssp = value,
+            SystemRegister::Usp => cpu.registers.usp = Address(value),
+            SystemRegister::Ssp => cpu.registers.ssp = Address(value),
             SystemRegister::Sfc => cpu.registers.sfc = FunctionCode::from_low_bits(value),
             SystemRegister::Dfc => cpu.registers.dfc = FunctionCode::from_low_bits(value),
         }

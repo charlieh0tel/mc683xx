@@ -16,6 +16,12 @@ impl Address {
         Self(self.0.wrapping_add(by))
     }
 
+    /// The address `by` bytes before, wrapping as the bus does.
+    #[must_use]
+    pub const fn before(self, by: u32) -> Self {
+        Self(self.0.wrapping_sub(by))
+    }
+
     /// Whether the address is odd: a word or long access there is an
     /// address error (CPU32RM 6.2.3).
     #[must_use]
@@ -62,5 +68,11 @@ mod tests {
         assert_eq!(Address(0x1234).to_string(), "0x00001234");
         assert_eq!(format!("{:#x}", Address(0xab)), "0xab");
         assert_eq!(u32::from(Address::from(7)), 7);
+    }
+
+    #[test]
+    fn offsets_wrap() {
+        assert_eq!(Address(0xffff_fffe).offset(4), Address(2));
+        assert_eq!(Address(2).before(4), Address(0xffff_fffe));
     }
 }

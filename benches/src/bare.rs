@@ -106,8 +106,8 @@ pub fn machine(kernel: &Kernel) -> Cpu {
 pub fn prepare(cpu: &mut Cpu) {
     let registers = &mut cpu.registers;
     registers.set_sr(status::S | status::INTERRUPT_MASK);
-    registers.pc = CODE;
-    registers.ssp = STACK;
+    registers.pc = Address(CODE);
+    registers.ssp = Address(STACK);
     registers.data = [0; 8];
     registers.data[D7] = LOOP_COUNT;
     registers.set_address(A0, DATA);
@@ -139,7 +139,11 @@ pub fn calibrate(kernel: &Kernel, budget: Cycles) -> Result<Calibration, Skip> {
         );
         (run.cycles, taken)
     })?;
-    assert!(cpu.registers.pc < DATA, "{}: ran off its sled", kernel.name);
+    assert!(
+        cpu.registers.pc < Address(DATA),
+        "{}: ran off its sled",
+        kernel.name
+    );
     let mut whole = machine(kernel);
     assert_eq!(
         iteration(&mut whole, budget),

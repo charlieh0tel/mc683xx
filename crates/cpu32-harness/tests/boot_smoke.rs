@@ -172,11 +172,11 @@ impl MappedPeripheral for Stub {
         self.record(cycle, false);
         *self
             .reads
-            .entry((select_of(cycle), cycle.address))
+            .entry((select_of(cycle), cycle.address.0))
             .or_default() += 1;
         let space = cycle.function_code.bits();
         Ok((0..cycle.size.bytes()).fold(0, |value, byte| {
-            let at = cycle.address.wrapping_add(byte);
+            let at = cycle.address.0.wrapping_add(byte);
             let fixed = FIXED_READS
                 .iter()
                 .find(|&&(address, _)| address == at && !cycle.function_code.is_cpu_space());
@@ -197,12 +197,12 @@ impl MappedPeripheral for Stub {
         self.record(cycle, true);
         let entry = self
             .writes
-            .entry((select_of(cycle), cycle.address))
+            .entry((select_of(cycle), cycle.address.0))
             .or_default();
         *entry = (entry.0 + 1, value);
         let log = self
             .log
-            .entry((select_of(cycle), cycle.address))
+            .entry((select_of(cycle), cycle.address.0))
             .or_default();
         if log.len() < LOG_BYTES {
             log.push(value as u8);
@@ -212,7 +212,7 @@ impl MappedPeripheral for Stub {
         for byte in 0..bytes {
             let shift = 8 * (bytes - 1 - byte);
             self.bytes.insert(
-                (space, cycle.address.wrapping_add(byte)),
+                (space, cycle.address.0.wrapping_add(byte)),
                 (value >> shift) as u8,
             );
         }
@@ -309,14 +309,14 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
             run
         };
         trace.instructions += 1;
-        if let Some(milestone) = milestones.remove(&pc) {
+        if let Some(milestone) = milestones.remove(&pc.0) {
             println!(
                 "{name}: milestone {milestone} ({pc:#x}) at clock {}",
                 chip.now().0
             );
             trace.reached.push((milestone, chip.now()));
         }
-        if !in_upper_flash && (0x4_0000..0x8_0000).contains(&pc) {
+        if !in_upper_flash && (0x4_0000..0x8_0000).contains(&pc.0) {
             in_upper_flash = true;
             println!(
                 "{name}: first instruction in CS1's upper flash at {pc:#x}, clock {}",
@@ -383,7 +383,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
         if end.saturating_sub(chip.now().0) < end / 10 {
             let start = tail_start.get_or_insert(trace.instructions);
             if trace.instructions - *start < TAIL_INSTRUCTIONS as u64 {
-                *trace.tail.entry(chip.cpu().registers.pc).or_default() += 1;
+                *trace.tail.entry(chip.cpu().registers.pc.0).or_default() += 1;
             }
         }
     }

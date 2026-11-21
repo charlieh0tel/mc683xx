@@ -940,7 +940,8 @@ impl Board {
         if self.publish_output_horizon {
             self.publish_output_horizon(now);
         }
-        let bus_cycle = BusCycle::new(address, size, function_code, now).writing(write.is_some());
+        let bus_cycle =
+            BusCycle::new(Address(address), size, function_code, now).writing(write.is_some());
         let mut first: Option<(u8, PortSize)> = None;
         for &candidate in found.iter().flatten() {
             let cycle = bus_cycle.through(candidate.select.into());

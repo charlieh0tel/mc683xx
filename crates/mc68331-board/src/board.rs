@@ -1101,7 +1101,7 @@ impl<C: Chip> Board<C> {
         for entry in entered {
             let memory = &self.chip.cpu().memory;
             let sr = memory
-                .peek(Space::Supervisor, Address(entry.stack), Size::Word)
+                .peek(Space::Supervisor, entry.stack, Size::Word)
                 .map(|sr| sr as u16);
             self.records.push(Record::Exception(trace::ExceptionRecord {
                 cycle,
@@ -1132,7 +1132,7 @@ impl<C: Chip> Board<C> {
             });
             self.records.push(Record::Code(trace::CodeRecord {
                 cycle,
-                pc: registers.pc,
+                pc: registers.pc.0,
                 sr: registers.sr(),
                 data: registers.data,
                 address: array::from_fn(|index| registers.address(index)),
@@ -1160,9 +1160,9 @@ impl<C: Chip> Board<C> {
         let registers = &self.chip.cpu().registers;
         Record::Position(trace::PositionRecord {
             cycle: self.chip.now(),
-            pc: registers.pc,
+            pc: registers.pc.0,
             sr: registers.sr(),
-            vbr: registers.vbr,
+            vbr: registers.vbr.0,
             a7: registers.address(7),
             instructions: self.chip.instructions(),
         })

@@ -98,7 +98,7 @@ fn reset_code_runs_in_a_fixed_memory_with_no_select_programmed() {
     assert_eq!(&chip.memory(data)[0..4], [0x5a, 0x5a, 0x12, 0x34]);
     assert_eq!(chip.cpu().registers.data[1] & 0xffff, 0x5a5a);
     let pc = chip.cpu().registers.pc;
-    assert!((CODE..CODE + FIXED_BYTES as u32).contains(&pc), "{pc:#x}");
+    assert!((CODE..CODE + FIXED_BYTES as u32).contains(&pc.0), "{pc:#x}");
     // a fixed memory's cycle costs only the tables' two clocks, in any
     // space but CPU space
     assert_eq!(
@@ -316,7 +316,7 @@ fn nops_reached(timing: Option<(PortSize, Termination)>) -> u32 {
     }
     let mut chip = builder.build();
     chip.run_for(Cycles(4_000));
-    chip.cpu().registers.pc - CODE
+    chip.cpu().registers.pc.0 - CODE
 }
 
 #[test]

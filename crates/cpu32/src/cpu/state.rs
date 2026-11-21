@@ -517,7 +517,7 @@ impl Cpu {
         self.taken = state.taken;
         self.instructions = state.instructions;
         self.block_start = true;
-        self.left_pc = Address(self.registers.pc);
+        self.left_pc = self.registers.pc;
         self.resume = state.resume;
         self.loopable = state.loopable;
         self.loop_mode = state.loop_mode;

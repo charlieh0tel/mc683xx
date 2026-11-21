@@ -175,8 +175,8 @@ fn register_writes_reach_the_cpu() {
     assert_eq!(replies[0], "OK");
     let registers = &machine.cpu.registers;
     assert_eq!(registers.data[1], 0x1234_5678);
-    assert_eq!(registers.pc, BRANCH_PC);
-    assert_eq!(registers.ssp, STACK);
+    assert_eq!(registers.pc.0, BRANCH_PC);
+    assert_eq!(registers.ssp.0, STACK);
 }
 
 #[test]
@@ -268,7 +268,7 @@ fn breakpoints_stop_before_and_continue_past() {
     // and the continue runs past it and round the loop to it again.
     assert_eq!(replies[5], "S05");
     assert!(replies[6].contains("hwbreak"));
-    assert_eq!(machine.cpu.registers.pc, BRANCH_PC);
+    assert_eq!(machine.cpu.registers.pc.0, BRANCH_PC);
     // Two loops and a store: the second continue went round once more.
     assert_eq!(machine.cpu.instructions(), 2 + 4 + 1 + 4);
 }
@@ -293,7 +293,7 @@ fn watchpoints_stop_after_the_access() {
     assert_eq!(replies[1], format!("T05thread:01;watch:{:x};", STORE + 3));
     assert_eq!(replies[2], "OK");
     assert_eq!(replies[4], format!("T05thread:01;awatch:{STORE:x};"));
-    assert_eq!(machine.cpu.registers.pc, BRANCH_PC);
+    assert_eq!(machine.cpu.registers.pc.0, BRANCH_PC);
     assert_eq!(machine.cpu.instructions(), 3 + 4);
 }
 
@@ -310,7 +310,7 @@ fn read_watchpoints_see_reads() {
     ending.unwrap();
     assert_eq!(replies[0], "OK");
     assert_eq!(replies[1], format!("T05thread:01;rwatch:{STORE:x};"));
-    assert_eq!(machine.cpu.registers.pc, START + 2);
+    assert_eq!(machine.cpu.registers.pc.0, START + 2);
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn ctrl_c_while_stopped_is_nothing() {
     ending.unwrap();
     assert_eq!(replies[0], "OK");
     assert!(replies[1].starts_with("T05") && replies[1].contains("swbreak"));
-    assert_eq!(machine.cpu.registers.pc, STORE_PC);
+    assert_eq!(machine.cpu.registers.pc.0, STORE_PC);
 }
 
 #[test]
@@ -359,7 +359,7 @@ fn monitor_reset_and_kill() {
     );
     assert_eq!(ending.unwrap(), Ending::Killed);
     assert!(replies.iter().any(|reply| reply == "OK"));
-    assert_eq!(machine.cpu.registers.pc, START);
+    assert_eq!(machine.cpu.registers.pc.0, START);
 }
 
 #[test]
@@ -417,7 +417,7 @@ fn the_chip_peeks_and_pokes_without_cycles() {
     assert_eq!(replies[3], "abcd");
     assert!(replies[5].contains("swbreak"));
     assert_eq!(replies[6], "S05");
-    assert_eq!(chip.cpu().registers.pc, START);
+    assert_eq!(chip.cpu().registers.pc.0, START);
 }
 
 #[test]
@@ -673,8 +673,8 @@ fn other_stops_are_signals() {
     let mut machine = self::machine();
     // An odd PC's address error, stacked where nothing is mapped: a
     // double bus fault (CPU32RM 6.2.1 to 6.2.3).
-    machine.cpu.registers.pc = START + 1;
-    machine.cpu.registers.ssp = UNMAPPED;
+    machine.cpu.registers.pc = Address(START + 1);
+    machine.cpu.registers.ssp = Address(UNMAPPED);
     let (ending, replies) = session(&mut machine, vec![packet("c"), packet("D")]);
     ending.unwrap();
     assert_eq!(replies[0], "S0a");
@@ -860,7 +860,7 @@ fn monitor_faults_stop_the_bare_cpu_s_run() {
     let mut machine = machine();
     machine.cpu.registers.set_address(0, ODD);
     monitor_faults_stop_the_run(&mut machine);
-    assert_eq!(machine.cpu.registers.pc, STORE_PC);
+    assert_eq!(machine.cpu.registers.pc.0, STORE_PC);
 }
 
 #[test]
@@ -868,7 +868,7 @@ fn monitor_faults_stop_the_chip_s_run() {
     let mut chip = chip();
     chip.cpu_control().registers_mut().set_address(0, ODD);
     monitor_faults_stop_the_run(&mut chip);
-    assert_eq!(chip.cpu().registers.pc, STORE_PC);
+    assert_eq!(chip.cpu().registers.pc.0, STORE_PC);
 }
 
 #[test]
@@ -878,7 +878,7 @@ fn a_fault_stop_outranks_a_watch_hit_it_undid() {
         // TRAP #0, SSP 4: its frame's first words go to 2 and 0,
         // watched, then below zero, where nothing maps
         machine.write(Address(START), &bytes(&[0x4e40])).unwrap();
-        machine.cpu.registers.ssp = 4;
+        machine.cpu.registers.ssp = Address(4);
         machine.cpu.set_stop_on_fault(true);
         let (ending, replies) = session(
             &mut machine,
@@ -887,7 +887,10 @@ fn a_fault_stop_outranks_a_watch_hit_it_undid() {
         assert_eq!(ending.unwrap(), Ending::Killed);
         assert_eq!(replies[0], "OK");
         assert_eq!(replies[1], "S0a", "{resume}: SIGBUS: {replies:?}");
-        assert_eq!(machine.cpu.registers.pc, START, "{resume}: the TRAP undone");
+        assert_eq!(
+            machine.cpu.registers.pc.0, START,
+            "{resume}: the TRAP undone"
+        );
     }
 }
 
@@ -900,7 +903,7 @@ fn a_watch_hit_in_an_instruction_kept_through_its_trace_s_fault_is_reported() {
         // the ADDQ is kept, its trace pending
         machine.write(Address(START), &bytes(&[0x5250])).unwrap();
         machine.cpu.registers.set_sr(0xa700);
-        machine.cpu.registers.ssp = UNMAPPED;
+        machine.cpu.registers.ssp = Address(UNMAPPED);
         machine.cpu.set_stop_on_fault(true);
         let (ending, replies) = session(
             &mut machine,
@@ -916,7 +919,7 @@ fn a_watch_hit_in_an_instruction_kept_through_its_trace_s_fault_is_reported() {
             "{resume}: {replies:?}"
         );
         assert_eq!(
-            machine.cpu.registers.pc,
+            machine.cpu.registers.pc.0,
             START + 2,
             "{resume}: the ADDQ kept"
         );

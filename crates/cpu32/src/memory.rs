@@ -162,7 +162,7 @@ pub enum MemoryError {
     #[error("{start:#x}, {length:#x} bytes: not whole pages")]
     Unaligned {
         /// Its start.
-        start: u32,
+        start: Address,
         /// Its length.
         length: u32,
     },
@@ -170,7 +170,7 @@ pub enum MemoryError {
     #[error("{start:#x}, {length:#x} bytes: out of range")]
     OutOfRange {
         /// Its start.
-        start: u32,
+        start: Address,
         /// Its length.
         length: u32,
     },
@@ -513,10 +513,7 @@ impl Memory {
         for backing in [page.read, page.write].into_iter().flatten() {
             let end = u64::from(backing.offset) + u64::from(length);
             if end > self.regions[backing.region.0].len() as u64 {
-                return Err(MemoryError::OutOfRange {
-                    start: start.0,
-                    length,
-                });
+                return Err(MemoryError::OutOfRange { start, length });
             }
         }
         for (index, number) in pages.clone().enumerate() {
@@ -611,18 +608,12 @@ impl Memory {
     /// address space.
     fn pages(&self, start: Address, length: u32) -> Result<Range<usize>, MemoryError> {
         if !start.0.is_multiple_of(PAGE_BYTES) || !length.is_multiple_of(PAGE_BYTES) {
-            return Err(MemoryError::Unaligned {
-                start: start.0,
-                length,
-            });
+            return Err(MemoryError::Unaligned { start, length });
         }
         let first = (start.0 >> PAGE_SHIFT) as usize;
         let count = (length >> PAGE_SHIFT) as usize;
         if first + count > self.pages {
-            return Err(MemoryError::OutOfRange {
-                start: start.0,
-                length,
-            });
+            return Err(MemoryError::OutOfRange { start, length });
         }
         Ok(first..first + count)
     }

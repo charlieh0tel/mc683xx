@@ -536,9 +536,9 @@ impl Firmware {
         machine::renew(&mut self.cpu);
         let registers = &mut self.cpu.registers;
         registers.set_sr(SUPERVISOR);
-        registers.vbr = VECTORS;
-        registers.ssp = sp;
-        registers.pc = entry;
+        registers.vbr = Address(VECTORS);
+        registers.ssp = Address(sp);
+        registers.pc = Address(entry);
         set(registers);
         let started = machine::capture(registers);
         let mut steps = 0;
@@ -546,7 +546,7 @@ impl Firmware {
             if steps == STEP_LIMIT {
                 break Stopped::StepLimit;
             }
-            let pc = self.cpu.registers.pc;
+            let pc = self.cpu.registers.pc.0;
             if pc == RETURN {
                 break Stopped::Returned;
             }
@@ -667,7 +667,7 @@ mod tests {
         let call = firmware.call(CODE, sp, |_| {});
         assert_eq!(call.stopped, Stopped::Returned);
         assert_eq!(call.d0(), 5);
-        assert_eq!(call.registers.ssp, sp + 4);
+        assert_eq!(call.registers.ssp.0, sp + 4);
     }
 
     #[test]

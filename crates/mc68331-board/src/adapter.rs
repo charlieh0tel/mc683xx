@@ -33,6 +33,7 @@ use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_target::address::Address;
 
 use crate::inspect::Inspection;
 use crate::peripheral::Drive;
@@ -159,8 +160,13 @@ impl<D> MappedAdapter<D> {
 /// The cycle a model sees for `access` at `now`, through its select if
 /// one carried it.
 fn carried(access: PeripheralAccess, now: Cycles) -> BusCycle {
-    let cycle =
-        BusCycle::new(access.address, access.size, access.function_code, now).writing(access.write);
+    let cycle = BusCycle::new(
+        Address(access.address),
+        access.size,
+        access.function_code,
+        now,
+    )
+    .writing(access.write);
     match access.select {
         Some(select) => cycle.through(select.into()),
         None => cycle,

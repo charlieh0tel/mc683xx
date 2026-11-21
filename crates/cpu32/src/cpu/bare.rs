@@ -126,7 +126,7 @@ impl fmt::Display for FaultStop {
             self.size.bytes(),
             self.address,
             self.function_code,
-            Address(self.registers.pc)
+            self.registers.pc
         )
     }
 }
@@ -258,7 +258,7 @@ impl Cpu {
         now: Cycles,
         limits: Limits,
     ) -> LimitedRun {
-        if self.registers.pc != self.left_pc.0 {
+        if self.registers.pc != self.left_pc {
             self.block_start = true;
         }
         self.bare.end = None;
@@ -266,7 +266,7 @@ impl Cpu {
         let first = self.instructions;
         self.bare.exceptions_stepped = 0;
         let run = self.run_from_boundary(bus, interrupts, now, budget, Some(limits));
-        self.left_pc = Address(self.registers.pc);
+        self.left_pc = self.registers.pc;
         let end = self.bare.end.clone().unwrap_or(End::Stop(run.stop));
         LimitedRun {
             cycles: run.cycles,
@@ -484,7 +484,7 @@ impl Cpu {
     /// Lets the instruction at PC take an intercepted exception
     /// natively, once, the next time it runs.
     pub const fn take_natively_once(&mut self) {
-        self.bare.native_once = Some((Address(self.registers.pc), self.instructions));
+        self.bare.native_once = Some((self.registers.pc, self.instructions));
     }
 
     /// Whether a long operand is one access: offered to the bus whole
@@ -547,7 +547,7 @@ impl Cpu {
             return None;
         }
         mem::take(&mut self.altered).undo(&mut self.registers);
-        self.registers.pc = instruction_pc.0;
+        self.registers.pc = instruction_pc;
         self.resume = Some((instruction_pc, Resume::Code));
         Some(End::Intercepted(Intercepted {
             vector,
@@ -569,7 +569,7 @@ impl Cpu {
         self.registers.clone_from(&self.began);
         self.released = None;
         self.movem = None;
-        self.resume = Some((Address(self.registers.pc), Resume::Code));
+        self.resume = Some((self.registers.pc, Resume::Code));
         End::Fault(FaultStop {
             cycle: fault.cycle,
             cause,

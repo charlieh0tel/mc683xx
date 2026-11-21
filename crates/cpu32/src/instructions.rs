@@ -433,7 +433,7 @@ pub(crate) mod tests {
         }
         let mut cpu = Cpu::new(memory);
         cpu.registers.set_sr(status::S | status::INTERRUPT_MASK);
-        cpu.registers.pc = CODE;
+        cpu.registers.pc = Address(CODE);
         cpu
     }
 

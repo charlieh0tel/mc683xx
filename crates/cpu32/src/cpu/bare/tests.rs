@@ -63,8 +63,8 @@ fn machine(code: &[u16]) -> Machine {
     let code: Vec<u8> = code.iter().flat_map(|word| word.to_be_bytes()).collect();
     machine.write(Address(CODE), &code).unwrap();
     machine.cpu.registers.set_sr(status::S);
-    machine.cpu.registers.ssp = STACK;
-    machine.cpu.registers.pc = CODE;
+    machine.cpu.registers.ssp = Address(STACK);
+    machine.cpu.registers.pc = Address(CODE);
     machine
 }
 
@@ -114,7 +114,7 @@ fn a_fault_stop_is_kept_until_the_next_run() {
     assert_eq!(machine.cpu.fault_stop(), None);
     // a reset forgets one too
     machine.cpu.registers.set_address(0, NOWHERE);
-    machine.cpu.registers.pc = CODE;
+    machine.cpu.registers.pc = Address(CODE);
     one(&mut machine);
     assert!(machine.cpu.fault_stop().is_some());
     machine
@@ -150,18 +150,18 @@ fn a_protected_page_and_an_odd_address_say_so() {
 fn a_bad_stack_pointer_stops_without_a_halt_and_the_run_goes_on() {
     let mut machine = machine(&[TRAP_0]);
     machine.cpu.set_stop_on_fault(true);
-    machine.cpu.registers.ssp = NOWHERE;
+    machine.cpu.registers.ssp = Address(NOWHERE);
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
     assert_eq!(fault.cycle, CycleKind::Write);
     assert_eq!(fault.address, Address(NOWHERE - 2));
-    assert_eq!(machine.cpu.registers.pc, CODE);
-    assert_eq!(machine.cpu.registers.ssp, NOWHERE);
-    machine.cpu.registers.ssp = STACK;
+    assert_eq!(machine.cpu.registers.pc.0, CODE);
+    assert_eq!(machine.cpu.registers.ssp.0, NOWHERE);
+    machine.cpu.registers.ssp = Address(STACK);
     one(&mut machine);
-    assert_eq!(machine.cpu.registers.pc, HANDLER);
-    assert_eq!(machine.cpu.registers.ssp, STACK - 8);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK - 8);
 }
 
 #[test]
@@ -175,13 +175,13 @@ fn an_intercepted_trap_stacks_nothing_and_can_be_taken_natively() {
             pc: Address(CODE),
         })
     );
-    assert_eq!(machine.cpu.registers.pc, CODE);
-    assert_eq!(machine.cpu.registers.ssp, STACK);
+    assert_eq!(machine.cpu.registers.pc.0, CODE);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK);
     assert_eq!(machine.cpu.instructions(), 0);
     machine.cpu.take_natively_once();
     one(&mut machine);
-    assert_eq!(machine.cpu.registers.pc, HANDLER);
-    assert_eq!(machine.cpu.registers.ssp, STACK - 8);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK - 8);
 }
 
 #[test]
@@ -221,10 +221,10 @@ fn the_untraced_deviation_ignores_t1() {
         untraced: true,
     });
     one(&mut machine);
-    assert_eq!(machine.cpu.registers.pc, CODE + 2);
+    assert_eq!(machine.cpu.registers.pc.0, CODE + 2);
     machine.cpu.set_deviations(Deviations::default());
     one(&mut machine);
-    assert_eq!(machine.cpu.registers.pc, HANDLER, "traced");
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER, "traced");
 }
 
 #[test]
@@ -244,7 +244,7 @@ fn a_memory_hook_has_the_registers_as_the_instruction_began() {
     machine.run_limited(Limits::default());
     assert_eq!(*seen.borrow(), [CODE + 2]);
     assert_eq!(machine.cpu.instruction_registers().data[1], 1);
-    assert_eq!(machine.cpu.instruction_registers().pc, CODE + 2);
+    assert_eq!(machine.cpu.instruction_registers().pc.0, CODE + 2);
 }
 
 /// One step, or whatever ends it sooner.
@@ -272,9 +272,7 @@ fn handle(machine: &mut Machine, vector: Vector, handler: u32) -> u32 {
 /// its format and vector offset (CPU32RM 6.4).
 fn frame(machine: &Machine) -> (u16, u32, u16) {
     let mut bytes = [0; 8];
-    machine
-        .read(Address(machine.cpu.registers.ssp), &mut bytes)
-        .unwrap();
+    machine.read(machine.cpu.registers.ssp, &mut bytes).unwrap();
     let word = |at: usize| u16::from_be_bytes([bytes[at], bytes[at + 1]]);
     (
         word(0),
@@ -289,14 +287,14 @@ fn a_step_is_an_instruction_or_an_exception_up_to_its_handler() {
     let trap = handle(&mut machine, Vector::trap(0), 0x4100);
     assert_eq!(step(&mut machine), End::Steps);
     assert_eq!(machine.cpu.registers.data[1], 1);
-    assert_eq!(machine.cpu.registers.pc, CODE + 2);
+    assert_eq!(machine.cpu.registers.pc.0, CODE + 2);
     // the TRAP and its exception, not the handler's first instruction
     let run = machine.run_limited(Limits {
         steps: Some(1),
         ..Limits::default()
     });
     assert_eq!((run.end, run.steps), (End::Steps, 1));
-    assert_eq!(machine.cpu.registers.pc, trap);
+    assert_eq!(machine.cpu.registers.pc.0, trap);
     assert_eq!(frame(&machine).1, CODE + 4, "the TRAP's frame");
     assert_eq!(frame(&machine).2, Vector::trap(0).offset() as u16);
     assert_eq!(machine.cpu.instructions(), 2);
@@ -313,7 +311,7 @@ fn a_step_takes_an_interrupt_pending_at_its_start_or_its_end() {
     );
     first.request_interrupt(IrqPin::new(7).unwrap(), None);
     assert_eq!(step(&mut first), End::Steps);
-    assert_eq!(first.cpu.registers.pc, level_7);
+    assert_eq!(first.cpu.registers.pc.0, level_7);
     assert_eq!(frame(&first).1, CODE, "the NOP not executed");
     assert_eq!(first.cpu.instructions(), 0);
     // pending at the end: the instruction unmasks it, it is taken, as
@@ -334,7 +332,7 @@ fn a_step_takes_an_interrupt_pending_at_its_start_or_its_end() {
         ..Limits::default()
     });
     assert_eq!((run.end, run.steps), (End::Steps, 2));
-    assert_eq!(machine.cpu.registers.pc, level_3);
+    assert_eq!(machine.cpu.registers.pc.0, level_3);
     assert_eq!(frame(&machine).1, CODE + 4, "after the MOVE");
     assert_eq!(machine.cpu.instructions(), 1);
 }
@@ -344,7 +342,7 @@ fn a_step_of_stop_ends_with_the_cpu_stopped_not_waiting() {
     // STOP #$2000
     let mut machine = machine(&[0x4e72, 0x2000]);
     assert_eq!(step(&mut machine), End::Steps);
-    assert_eq!(machine.cpu.registers.pc, CODE + 4);
+    assert_eq!(machine.cpu.registers.pc.0, CODE + 4);
 }
 
 #[test]
@@ -363,7 +361,7 @@ fn a_step_cut_by_the_budget_is_finished_by_a_run_of_zero_steps() {
         ..Limits::default()
     });
     assert_eq!((run.end, run.steps), (End::Steps, 0));
-    assert_eq!(machine.cpu.registers.pc, CODE + 2, "the NOP not run");
+    assert_eq!(machine.cpu.registers.pc.0, CODE + 2, "the NOP not run");
 }
 
 #[test]
@@ -374,7 +372,7 @@ fn a_step_keeps_what_its_instruction_left_for_the_host() {
     machine.cpu.set_stop_on_fault(true);
     assert_eq!(step(&mut machine), End::Steps);
     assert_eq!(machine.cpu.instruction_registers().data[1], 0);
-    assert_eq!(machine.cpu.instruction_registers().pc, CODE);
+    assert_eq!(machine.cpu.instruction_registers().pc.0, CODE);
     assert_eq!(step(&mut machine), End::Steps);
     assert!(
         matches!(machine.cpu.exception_taken(), Some(Exception::Short { vector, .. }) if vector == Vector::trap(0))
@@ -401,9 +399,9 @@ fn a_fault_stacking_a_pending_breakpoint_keeps_the_instruction_before_it() {
     one(&mut machine);
     let mut bad_stack = machine.cpu.registers.clone();
     assert_eq!(bad_stack.data[1], 1);
-    bad_stack.ssp = NOWHERE;
+    bad_stack.ssp = Address(NOWHERE);
     machine.cpu.set_breakpoint_pending(true);
-    machine.cpu.registers.ssp = NOWHERE;
+    machine.cpu.registers.ssp = Address(NOWHERE);
     let End::Fault(fault) = boundary_only(&mut machine) else {
         panic!("no fault");
     };
@@ -414,11 +412,11 @@ fn a_fault_stacking_a_pending_breakpoint_keeps_the_instruction_before_it() {
     assert!(machine.cpu.breakpoint_pending(), "left for the next run");
     // SSP fixed, the run goes on: vector 12 (CPU32RM 6.2.6), its frame
     // returning after the MOVEQ
-    machine.cpu.registers.ssp = STACK;
+    machine.cpu.registers.ssp = Address(STACK);
     boundary_only(&mut machine);
     assert!(!machine.cpu.breakpoint_pending());
-    assert_eq!(machine.cpu.registers.pc, HANDLER);
-    assert_eq!(machine.cpu.registers.ssp, STACK - 12);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK - 12);
     assert_eq!(frame(&machine).1, CODE + 2);
 }
 
@@ -432,7 +430,7 @@ fn a_pending_breakpoint_taken_is_a_step_up_to_its_handler() {
     });
     assert_eq!((run.end, run.steps), (End::Steps, 1));
     // vector 12 (CPU32RM 6.2.6), its handler's first instruction not run
-    assert_eq!(machine.cpu.registers.pc, HANDLER);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
     assert_eq!(
         frame(&machine).2,
         format::word(format::SIX_WORD, Vector::HARDWARE_BREAKPOINT)
@@ -451,14 +449,14 @@ fn a_fault_stacking_a_breakpoint_after_stop_keeps_the_interrupt_before_it() {
     );
     machine.cpu.set_breakpoint_pending(true);
     // room for the interrupt's four words, not the breakpoint's six
-    machine.cpu.registers.ssp = 8;
+    machine.cpu.registers.ssp = Address(8);
     machine.request_interrupt(IrqPin::new(3).unwrap(), None);
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
     assert_eq!(fault.cycle, CycleKind::Write);
-    assert_eq!(fault.registers.pc, level_3, "the interrupt kept");
-    assert_eq!(fault.registers.ssp, 0);
+    assert_eq!(fault.registers.pc.0, level_3, "the interrupt kept");
+    assert_eq!(fault.registers.ssp.0, 0);
     assert_eq!(fault.registers.interrupt_mask(), 3);
     assert!(machine.cpu.breakpoint_pending(), "left for the next run");
 }
@@ -469,13 +467,13 @@ fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_its_breakpoint_pending()
     machine.cpu.set_stop_on_fault(true);
     one(&mut machine);
     machine.cpu.set_breakpoint_pending(true);
-    machine.cpu.registers.ssp = NOWHERE;
+    machine.cpu.registers.ssp = Address(NOWHERE);
     machine.request_interrupt(IrqPin::new(3).unwrap(), None);
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
     assert_eq!(fault.address, Address(NOWHERE - 2));
-    assert_eq!(fault.registers.pc, CODE + 4, "the interrupt not taken");
+    assert_eq!(fault.registers.pc.0, CODE + 4, "the interrupt not taken");
     assert!(
         machine.cpu.breakpoint_pending(),
         "not acknowledged: no exception processing ended"
@@ -493,21 +491,21 @@ fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_the_cpu_stopped() {
         machine.cpu.set_stop_on_fault(true);
         one(&mut machine);
         let stopped_sr = machine.cpu.registers.sr();
-        machine.cpu.registers.ssp = NOWHERE;
+        machine.cpu.registers.ssp = Address(NOWHERE);
         let pin = IrqPin::new(3).unwrap();
         machine.request_interrupt(pin, None);
         let End::Fault(fault) = one(&mut machine) else {
             panic!("no fault");
         };
-        assert_eq!(fault.registers.pc, after, "the interrupt not taken");
+        assert_eq!(fault.registers.pc.0, after, "the interrupt not taken");
         assert_eq!(fault.registers.sr(), stopped_sr, "SR as loaded");
         assert!(machine.cpu.stopped, "not ended (CPU32RM 4.4, STOP, LPSTOP)");
         // the request withdrawn: still stopped, nothing run past it
         machine.clear_interrupt(pin);
         assert_eq!(one(&mut machine), End::Stop(Stop::Stopped));
-        assert_eq!(machine.cpu.registers.pc, after);
+        assert_eq!(machine.cpu.registers.pc.0, after);
         // requested again with SSP fixed: the interrupt is taken
-        machine.cpu.registers.ssp = STACK;
+        machine.cpu.registers.ssp = Address(STACK);
         let level_3 = handle(
             &mut machine,
             Vector::autovector(InterruptLevel::new(3).unwrap()),
@@ -520,7 +518,7 @@ fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_the_cpu_stopped() {
         });
         assert_eq!((run.end, run.steps), (End::Steps, 1));
         assert!(!machine.cpu.stopped);
-        assert_eq!(machine.cpu.registers.pc, level_3);
+        assert_eq!(machine.cpu.registers.pc.0, level_3);
         assert_eq!(frame(&machine).1, after);
     }
 }
@@ -538,14 +536,14 @@ fn a_fault_stacking_an_interrupt_leaves_the_next_instruction_s_hooks_to_run() {
             ControlFlow::Continue(())
         });
     one(&mut machine);
-    machine.cpu.registers.ssp = NOWHERE;
+    machine.cpu.registers.ssp = Address(NOWHERE);
     let pin = IrqPin::new(3).unwrap();
     machine.request_interrupt(pin, None);
     assert!(matches!(one(&mut machine), End::Fault(_)));
     assert_eq!(*calls.borrow(), 0, "the NOP not reached");
     machine.clear_interrupt(pin);
     one(&mut machine);
-    assert_eq!(machine.cpu.registers.pc, CODE + 4);
+    assert_eq!(machine.cpu.registers.pc.0, CODE + 4);
     assert_eq!(*calls.borrow(), 1, "called before the NOP");
 }
 
@@ -565,7 +563,7 @@ fn word_at(machine: &Machine, address: u32) -> u16 {
 fn frame_address(machine: &Machine) -> u32 {
     let mut bytes = [0; 4];
     machine
-        .read(Address(machine.cpu.registers.ssp + 8), &mut bytes)
+        .read(machine.cpu.registers.ssp.offset(8), &mut bytes)
         .unwrap();
     u32::from_be_bytes(bytes)
 }
@@ -577,7 +575,7 @@ fn traced_addq() -> Machine {
     machine.cpu.set_stop_on_fault(true);
     machine.cpu.registers.set_sr(status::S | status::T1);
     machine.cpu.registers.set_address(0, COUNTER);
-    machine.cpu.registers.ssp = NOWHERE;
+    machine.cpu.registers.ssp = Address(NOWHERE);
     machine
 }
 
@@ -589,18 +587,18 @@ fn a_fault_stacking_a_trace_keeps_the_traced_instruction() {
     };
     assert_eq!(fault.cycle, CycleKind::Write);
     assert_eq!(fault.address, Address(NOWHERE - 2));
-    assert_eq!(fault.registers.pc, CODE + 2, "the ADDQ kept");
+    assert_eq!(fault.registers.pc.0, CODE + 2, "the ADDQ kept");
     assert_eq!(fault.registers.sr(), status::S | status::T1);
     assert_eq!(machine.cpu.registers, fault.registers);
     assert_eq!(word_at(&machine, COUNTER), 1);
     assert_eq!(machine.cpu.instructions(), 1);
     // SSP fixed, the run goes on: the trace taken (CPU32RM 6.2.10),
     // the ADDQ not run again
-    machine.cpu.registers.ssp = STACK;
+    machine.cpu.registers.ssp = Address(STACK);
     assert_eq!(boundary_only(&mut machine), End::Instructions);
     assert_eq!(word_at(&machine, COUNTER), 1, "incremented once");
-    assert_eq!(machine.cpu.registers.pc, HANDLER);
-    assert_eq!(machine.cpu.registers.ssp, STACK - 12);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK - 12);
     assert_eq!(
         frame(&machine),
         (
@@ -620,15 +618,15 @@ fn a_fault_stacking_a_trace_after_a_trap_keeps_the_trap() {
     machine.cpu.registers.set_sr(status::S | status::T1);
     let trap = handle(&mut machine, Vector::trap(0), 0x4200);
     // room for the trap's four words, not the trace's six
-    machine.cpu.registers.ssp = 8;
+    machine.cpu.registers.ssp = Address(8);
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.registers.pc, trap, "the trap kept");
-    assert_eq!(fault.registers.ssp, 0);
-    machine.cpu.registers.ssp = STACK;
+    assert_eq!(fault.registers.pc.0, trap, "the trap kept");
+    assert_eq!(fault.registers.ssp.0, 0);
+    machine.cpu.registers.ssp = Address(STACK);
     boundary_only(&mut machine);
-    assert_eq!(machine.cpu.registers.pc, HANDLER);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
     assert_eq!(frame(&machine).1, trap);
     assert_eq!(frame_address(&machine), CODE);
 }
@@ -659,7 +657,7 @@ fn a_fault_stacking_rte_s_requeued_trace_keeps_the_rte() {
     ];
     let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_be_bytes()).collect();
     machine.write(Address(frame_at), &bytes).unwrap();
-    machine.cpu.registers.ssp = frame_at;
+    machine.cpu.registers.ssp = Address(frame_at);
     // the trace's frame goes where RTE's was, read-only
     let page = Address(STACK - PAGE_BYTES);
     machine
@@ -669,8 +667,8 @@ fn a_fault_stacking_rte_s_requeued_trace_keeps_the_rte() {
         panic!("no fault");
     };
     assert_eq!(fault.cycle, CycleKind::Write);
-    assert_eq!(fault.registers.pc, CODE + 2, "the RTE kept");
-    assert_eq!(fault.registers.ssp, STACK);
+    assert_eq!(fault.registers.pc.0, CODE + 2, "the RTE kept");
+    assert_eq!(fault.registers.ssp.0, STACK);
     assert_eq!(word_at(&machine, COUNTER), 0x1234, "the write rerun");
     assert_eq!(machine.cpu.trace_pending(), Some(Address(CODE)));
     // the run goes on: the trace taken, the write not rerun again
@@ -678,8 +676,8 @@ fn a_fault_stacking_rte_s_requeued_trace_keeps_the_rte() {
     machine.protect(page, PAGE_BYTES, Permissions::ALL).unwrap();
     boundary_only(&mut machine);
     assert_eq!(word_at(&machine, COUNTER), 0);
-    assert_eq!(machine.cpu.registers.pc, HANDLER);
-    assert_eq!(machine.cpu.registers.ssp, STACK - 12);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK - 12);
     assert_eq!(frame(&machine).1, CODE + 2);
     assert_eq!(frame_address(&machine), CODE);
 }
@@ -765,12 +763,12 @@ fn a_fault_stopped_exception_is_charged_once_when_taken() {
         let name = case.name;
         let unfaulted = prepared().run_limited(case.faults).cycles;
         let mut machine = prepared();
-        machine.cpu.registers.ssp = NOWHERE;
+        machine.cpu.registers.ssp = Address(NOWHERE);
         let run = machine.run_limited(case.faults);
         assert!(matches!(run.end, End::Fault(_)), "{name}");
-        machine.cpu.registers.ssp = STACK;
+        machine.cpu.registers.ssp = Address(STACK);
         let resumed = machine.run_limited(case.resumes);
-        assert_eq!(machine.cpu.registers.pc, HANDLER, "{name}");
+        assert_eq!(machine.cpu.registers.pc.0, HANDLER, "{name}");
         assert_eq!(run.cycles + resumed.cycles, unfaulted, "{name}");
     }
 }
@@ -780,7 +778,7 @@ fn a_pending_trace_waits_out_background_mode_and_is_a_step() {
     let mut machine = traced_addq();
     machine.cpu.set_bdm_enabled(true);
     one(&mut machine);
-    machine.cpu.registers.ssp = STACK;
+    machine.cpu.registers.ssp = Address(STACK);
     assert!(machine.cpu.breakpoint(), "halted, as BKPT halts it");
     assert_eq!(
         boundary_only(&mut machine),
@@ -795,7 +793,7 @@ fn a_pending_trace_waits_out_background_mode_and_is_a_step() {
         ..Limits::default()
     });
     assert_eq!((run.end, run.steps), (End::Steps, 1));
-    assert_eq!(machine.cpu.registers.pc, HANDLER);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
     assert_eq!(frame_address(&machine), CODE);
     assert_eq!(machine.cpu.trace_pending(), None);
 }
@@ -807,7 +805,7 @@ fn a_trace_left_pending_by_the_host_is_taken_or_withdrawn() {
     taken.cpu.set_trace_pending(Some(Address(CODE)));
     boundary_only(&mut taken);
     assert_eq!(taken.cpu.trace_pending(), None);
-    assert_eq!(taken.cpu.registers.pc, HANDLER);
+    assert_eq!(taken.cpu.registers.pc.0, HANDLER);
     assert_eq!(frame(&taken).1, CODE + 2);
     assert_eq!(frame_address(&taken), CODE);
     let mut withdrawn = machine(&[MOVEQ_1_D1, NOP]);
@@ -815,7 +813,7 @@ fn a_trace_left_pending_by_the_host_is_taken_or_withdrawn() {
     withdrawn.cpu.set_trace_pending(Some(Address(CODE)));
     withdrawn.cpu.set_trace_pending(None);
     boundary_only(&mut withdrawn);
-    assert_eq!(withdrawn.cpu.registers.pc, CODE + 2, "none taken");
+    assert_eq!(withdrawn.cpu.registers.pc.0, CODE + 2, "none taken");
 }
 
 #[test]
@@ -842,7 +840,7 @@ fn a_fault_rewriting_rte_s_faulted_frame_stops_rather_than_halting() {
     ];
     let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_be_bytes()).collect();
     machine.write(Address(frame_at), &bytes).unwrap();
-    machine.cpu.registers.ssp = frame_at;
+    machine.cpu.registers.ssp = Address(frame_at);
     machine
         .protect(Address(page), PAGE_BYTES, Permissions::READ)
         .unwrap();
@@ -850,8 +848,8 @@ fn a_fault_rewriting_rte_s_faulted_frame_stops_rather_than_halting() {
         panic!("no fault stop");
     };
     assert_eq!(fault.cycle, CycleKind::Write);
-    assert_eq!(fault.registers.pc, CODE, "the RTE undone");
-    assert_eq!(fault.registers.ssp, frame_at);
+    assert_eq!(fault.registers.pc.0, CODE, "the RTE undone");
+    assert_eq!(fault.registers.ssp.0, frame_at);
     assert_eq!(machine.cpu.halted(), None);
 }
 
@@ -875,10 +873,10 @@ fn a_pending_trace_is_taken_before_a_pending_breakpoint() {
     let mut machine = traced_addq();
     one(&mut machine);
     machine.cpu.set_breakpoint_pending(true);
-    machine.cpu.registers.ssp = STACK;
+    machine.cpu.registers.ssp = Address(STACK);
     boundary_only(&mut machine);
     // Table 6-2's order: the breakpoint's frame on the trace's
-    assert_eq!(machine.cpu.registers.ssp, STACK - 24);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK - 24);
     let (_, pc, format_vector) = frame(&machine);
     assert_eq!(pc, HANDLER);
     assert_eq!(
@@ -897,7 +895,7 @@ fn a_fault_stacking_an_interrupt_is_not_a_step() {
         Vector::autovector(InterruptLevel::new(3).unwrap()),
         0x4200,
     );
-    machine.cpu.registers.ssp = NOWHERE;
+    machine.cpu.registers.ssp = Address(NOWHERE);
     machine.request_interrupt(IrqPin::new(3).unwrap(), None);
     let run = machine.run_limited(Limits {
         steps: Some(1),
@@ -906,11 +904,11 @@ fn a_fault_stacking_an_interrupt_is_not_a_step() {
     assert!(matches!(run.end, End::Fault(_)));
     assert_eq!(run.steps, 0, "the interrupt not taken");
     // SSP fixed: taken on resume, and counted then
-    machine.cpu.registers.ssp = STACK;
+    machine.cpu.registers.ssp = Address(STACK);
     let run = machine.run_limited(Limits {
         steps: Some(0),
         ..Limits::default()
     });
     assert_eq!((run.end, run.steps), (End::Steps, 1));
-    assert_eq!(machine.cpu.registers.pc, level_3);
+    assert_eq!(machine.cpu.registers.pc.0, level_3);
 }
