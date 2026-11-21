@@ -1303,8 +1303,8 @@ assert bare.read_register("D0") == 6
   `Halted(halt)`.  Rust's `End::Intercepted` never ends a Python run:
   `run_limited` answers an intercepted exception within it (below).
   Rust's `Limits::steps`, which serves the chip's BDM step, has no
-  argument here.  A stop requested between runs is withdrawn as the
-  next starts.
+  argument here, nor `End::Steps` a variant.  A stop requested
+  between runs is withdrawn as the next starts.
 - **Interrupts:** `request_interrupt(pin, vector=None)` requests IRQ1
   to IRQ7 as 1 to 7, answered by `vector` or the autovector; it stays
   requested, as a level-sensitive line does, until `clear_interrupt(pin)`.
