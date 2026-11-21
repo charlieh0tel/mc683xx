@@ -67,7 +67,7 @@ fn booted() -> (Board, String) {
     let run = board.run_for(BOOT).unwrap();
     assert_eq!(run.stop(), "budget");
     assert_eq!(run.now(), BOOT.picos());
-    let text = String::from_utf8(board.take_received(CONSOLE).unwrap()).unwrap();
+    let text = String::from_utf8(board.take_received_bytes(CONSOLE).unwrap()).unwrap();
     (board, text)
 }
 
@@ -76,9 +76,9 @@ fn the_demo_boots_and_answers_help() {
     let (mut board, text) = booted();
     assert!(text.contains("MC68331 demo"), "{text:?}");
     assert!(text.ends_with("> "), "{text:?}");
-    board.send(CONSOLE, b"h\n").unwrap();
+    board.send_bytes(CONSOLE, b"h\n").unwrap();
     board.run_for(BOOT).unwrap();
-    let help = String::from_utf8(board.take_received(CONSOLE).unwrap()).unwrap();
+    let help = String::from_utf8(board.take_received_bytes(CONSOLE).unwrap()).unwrap();
     assert!(help.starts_with("h\r\n"), "{help:?}");
     assert!(help.ends_with("h, ?    this help\r\n> "), "{help:?}");
 }
@@ -127,12 +127,12 @@ fn a_restore_goes_back() {
     let (mut board, _) = booted();
     let snapshot = board.save().unwrap();
     let saved = board.now();
-    board.send(CONSOLE, b"h\n").unwrap();
+    board.send_bytes(CONSOLE, b"h\n").unwrap();
     board.run_for(BOOT).unwrap();
     board.restore(&snapshot).unwrap();
     assert_eq!(board.now(), saved);
     board.run_for(BOOT).unwrap();
-    assert!(board.take_received(CONSOLE).unwrap().is_empty());
+    assert!(board.take_received_bytes(CONSOLE).unwrap().is_empty());
     assert_eq!(board.memory("rom").unwrap()[..IMAGE.len()], *IMAGE);
 }
 
@@ -152,10 +152,16 @@ fn mistakes_are_errors() {
         Err(Error::Wall(_))
     ));
     assert!(matches!(board.run_frame(-1.0, SLICE), Err(Error::Wall(_))));
-    assert!(matches!(board.send("nowhere", b"h"), Err(Error::Send(_))));
-    assert!(matches!(board.send("nowhere", b""), Err(Error::Send(_))));
     assert!(matches!(
-        board.take_received("nowhere"),
+        board.send_bytes("nowhere", b"h"),
+        Err(Error::Send(_))
+    ));
+    assert!(matches!(
+        board.send_bytes("nowhere", b""),
+        Err(Error::Send(_))
+    ));
+    assert!(matches!(
+        board.take_received_bytes("nowhere"),
         Err(Error::Receive(_))
     ));
     assert!(matches!(board.memory("nowhere"), Err(Error::Memory(_))));

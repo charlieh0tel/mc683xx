@@ -60,7 +60,7 @@ const board = new Board(readFileSync("demo.toml", "utf8"), {
   "demo.bin": readFileSync("demo.bin"),
 });
 board.runFor(100_000_000_000n); // 0.1 s of board time
-process.stdout.write(board.takeReceived("console"));
+process.stdout.write(board.takeReceivedBytes("console"));
 ```
 
 ### Browser
@@ -78,7 +78,7 @@ board.runFor(100_000_000_000n); // boot, 0.1 s, unpaced
 board.setPacing("realtime");
 function frame(wall) {
   board.runFrame(wall, 100_000_000_000n); // at most 0.1 s a frame
-  terminal.write(board.takeReceived("console"));
+  terminal.write(board.takeReceivedBytes("console"));
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
@@ -138,14 +138,14 @@ an ES module (TypeScript 5.8 and later); under `node16` it is an error
 - Both give a `BoardRun`: `stop`, why it ended (`"budget"` its time ran
   out, `"stopped"`, `"halted"`, `"hook"`, `"requested"`,
   `"background"`, `"fault"`), and `now`.
-- `send(name, data)`: the run-time endpoint `name` sends each byte of
-  `data`, a `Uint8Array` of any realm, an iframe's too (anything else
-  throws, another typed array too), now, an untimed serial
-  frame a byte; an endpoint that drives no serial net throws, even for
-  no data.
-- `takeReceived(name)`: the data of the serial frames that reached the
-  endpoint since the last call, as a `Uint8Array`, a byte a frame (its
-  low eight bits; breaks and times left out).
+- `sendBytes(name, data)`: the run-time endpoint `name` sends each
+  byte of `data`, a `Uint8Array` of any realm, an iframe's too
+  (anything else throws, another typed array too), now, an untimed
+  serial frame a byte; an endpoint that drives no serial net throws,
+  even for no data.
+- `takeReceivedBytes(name)`: the data of the serial frames that
+  reached the endpoint since the last call, as a `Uint8Array`, a byte a
+  frame (its low eight bits; breaks and times left out).
 - `memory(name)`: the board memory's bytes.
 - `save()`, `restore(snapshot)`: the board's state as a `Uint8Array`,
   and back.

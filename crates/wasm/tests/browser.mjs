@@ -82,10 +82,10 @@ writeFileSync(
     const board = new Board(text, new Map([["demo.bin", new Uint8Array(image)]]));
     const decoder = new TextDecoder();
     board.runFor(${BOOT}n);
-    const banner = decoder.decode(board.takeReceived(${JSON.stringify(CONSOLE)}));
-    board.send(${JSON.stringify(CONSOLE)}, new TextEncoder().encode("h\\r"));
+    const banner = decoder.decode(board.takeReceivedBytes(${JSON.stringify(CONSOLE)}));
+    board.sendBytes(${JSON.stringify(CONSOLE)}, new TextEncoder().encode("h\\r"));
     board.runFor(${BOOT}n);
-    const help = decoder.decode(board.takeReceived(${JSON.stringify(CONSOLE)}));
+    const help = decoder.decode(board.takeReceivedBytes(${JSON.stringify(CONSOLE)}));
     globalThis.result = { banner, help };
   } catch (error) {
     globalThis.result = { error: String(error) };

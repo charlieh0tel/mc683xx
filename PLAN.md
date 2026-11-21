@@ -3457,7 +3457,10 @@ checks move onto real code hooks.
   The bindings are `mc683xx-wasm` (`crates/wasm`, decided 2026-11-03):
   `wasm-bindgen`, its version exact (`=0.2.130`) as the CLI that binds
   the module must match it, its names the Python module's in
-  JavaScript's case.  One layer, not a Rust core under a JavaScript
+  JavaScript's case, but where a method does less than Python's: its
+  `sendBytes` and `takeReceivedBytes` take and give serial bytes
+  alone, no other kind of value and no times, unlike Python's `send`
+  and `take_received` (decided 2026-11-21).  One layer, not a Rust core under a JavaScript
   one: each exported method takes and returns plain Rust types (`&str`,
   `Vec<u8>`, `u64` as `BigInt`) and fails with the crate's `Error`,
   which `wasm-bindgen` throws as a JavaScript `Error` with its

@@ -127,8 +127,11 @@ from Python's:
 - `BoardRun.stop` names the kind of Rust's `Stop` (`"budget"`,
   `"halted"`, ...), by a mapping of the bindings' own, not `Stop`'s
   `Display`.
-- `send(name, data)` sends each byte of `data` (Python's `send` sends
-  one value); `takeReceived(name)` gives the bytes alone (Python's
-  `take_received` gives `(time, value)` each).
+- `sendBytes(name, data)` sends each byte of `data` as a serial frame
+  (Python's `send` sends one value, of any kind);
+  `takeReceivedBytes(name)` gives the serial frames' bytes alone, no
+  times (Python's `take_received` gives `(time, value)` each).  The
+  names say they are bytes alone, not Python's `send` and
+  `take_received`.
 - `save()` and `restore(snapshot)` are Rust's `Board::save` and
   `Board::restore`.

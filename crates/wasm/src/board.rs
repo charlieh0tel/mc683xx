@@ -98,12 +98,12 @@ impl Board {
         Ok(self.board.run_frame(wall, bound)?.into())
     }
 
-    /// [`send`](Self::send_js), its data bytes.
+    /// [`sendBytes`](Self::send_bytes_js), its data bytes.
     ///
     /// # Errors
     ///
-    /// As [`send_js`](Self::send_js).
-    pub fn send(&mut self, name: &str, data: &[u8]) -> Result<(), Error> {
+    /// As [`send_bytes_js`](Self::send_bytes_js).
+    pub fn send_bytes(&mut self, name: &str, data: &[u8]) -> Result<(), Error> {
         let serial = |byte: u8| Signal::Serial(Serial::untimed(Frame::Data(byte.into())));
         // the endpoint checked even for no data
         self.board.check_send(name, &serial(0))?;
@@ -227,13 +227,13 @@ impl Board {
     ///
     /// [`Error::Bytes`] for data not a `Uint8Array`, and
     /// [`Error::Send`] for an endpoint that drives no serial net.
-    #[wasm_bindgen(js_name = send)]
-    pub fn send_js(
+    #[wasm_bindgen(js_name = sendBytes)]
+    pub fn send_bytes_js(
         &mut self,
         name: &str,
         #[wasm_bindgen(unchecked_param_type = "Uint8Array")] data: &JsValue,
     ) -> Result<(), Error> {
-        self.send(name, &bytes(data, "data to send")?.to_vec())
+        self.send_bytes(name, &bytes(data, "data to send")?.to_vec())
     }
 
     /// The data bytes of the serial frames that reached the run-time
@@ -243,8 +243,8 @@ impl Board {
     /// # Errors
     ///
     /// [`Error::Receive`] for an endpoint no net drives.
-    #[wasm_bindgen(js_name = takeReceived)]
-    pub fn take_received(&mut self, name: &str) -> Result<Vec<u8>, Error> {
+    #[wasm_bindgen(js_name = takeReceivedBytes)]
+    pub fn take_received_bytes(&mut self, name: &str) -> Result<Vec<u8>, Error> {
         Ok(self
             .board
             .take_received(name)?

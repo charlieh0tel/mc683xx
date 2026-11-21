@@ -14,7 +14,7 @@ function run(text: string, image: Uint8Array): [string, bigint, Uint8Array] {
   new Board(text).free();
   const ran: BoardRun = board.runFor(1n);
   const framed: BoardRun = board.runFrame(performance.now(), 1_000_000_000n);
-  board.send("console", new Uint8Array([0x0d]));
+  board.sendBytes("console", new Uint8Array([0x0d]));
   board.setPacing("realtime");
   board.restore(board.save());
   // @ts-expect-error picoseconds are a bigint
@@ -28,7 +28,7 @@ function run(text: string, image: Uint8Array): [string, bigint, Uint8Array] {
   const stop: string = ran.stop;
   const now: bigint = board.now + framed.now;
   const pacing: string = board.pacing;
-  return [stop + pacing, now, board.takeReceived("console")];
+  return [stop + pacing, now, board.takeReceivedBytes("console")];
 }
 
 export { output, run, sameOutput };
