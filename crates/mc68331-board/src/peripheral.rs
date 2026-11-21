@@ -398,6 +398,16 @@ pub struct MemoryWrite {
     pub bytes: Vec<u8>,
 }
 
+/// A board memory a peripheral took or gave back during a call
+/// ([`Drive::take_memory`], [`Drive::release_memory`]), by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemoryClaim {
+    /// It took the memory off the core's fast path.
+    Taken(String),
+    /// It gave the memory back.
+    Released(String),
+}
+
 /// The analog value on an input port now, sampled from its net's
 /// driver: given the peripheral's port and the time.
 pub type Sampler<'a> = &'a dyn Fn(usize, Time) -> Option<f64>;
@@ -429,8 +439,8 @@ pub struct Drive<'a> {
     sampler: Option<Sampler<'a>>,
     /// The chip's system clock on board time.
     system_clock: TimeBase,
-    /// The memories taken (`true`) or released, in order.
-    memories: Vec<(String, bool)>,
+    /// The memories taken or released, in order.
+    memories: Vec<MemoryClaim>,
 }
 
 impl fmt::Debug for Drive<'_> {
@@ -455,8 +465,8 @@ pub struct Driving {
     pub writes: Vec<MemoryWrite>,
     /// Whether a stop was asked for.
     pub stop: bool,
-    /// The memories taken (`true`) or released, in order.
-    pub memories: Vec<(String, bool)>,
+    /// The memories taken or released, in order.
+    pub memories: Vec<MemoryClaim>,
     /// The conditions that held, by the peripheral's tokens, in order.
     pub fired: Vec<ConditionToken>,
 }
@@ -555,13 +565,13 @@ impl<'a> Drive<'a> {
     /// fixed address (`base`) is never taken: no select carries its
     /// cycles, and they stay the memory's.
     pub fn take_memory(&mut self, memory: impl Into<String>) {
-        self.memories.push((memory.into(), true));
+        self.memories.push(MemoryClaim::Taken(memory.into()));
     }
 
     /// Gives the memory `memory` back to the core's fast path, if this
     /// peripheral holds it.
     pub fn release_memory(&mut self, memory: impl Into<String>) {
-        self.memories.push((memory.into(), false));
+        self.memories.push(MemoryClaim::Released(memory.into()));
     }
 
     /// Asks the board's run to stop, after the instruction running now.

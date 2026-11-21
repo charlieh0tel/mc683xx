@@ -29,6 +29,7 @@ use mc683xx_board::observe::ObserverId;
 use mc683xx_board::pacing::QUANTUM;
 use mc683xx_board::peripheral::Drive;
 use mc683xx_board::peripheral::Lane;
+use mc683xx_board::peripheral::MemoryClaim;
 use mc683xx_board::peripheral::Peripheral;
 use mc683xx_board::peripheral::PeripheralAccess;
 use mc683xx_board::peripheral::Role;
@@ -571,8 +572,8 @@ pub(crate) struct DriveView {
     /// Its analog inputs' values now, by port, sampled as the call
     /// began.
     samples: Vec<(usize, Option<f64>)>,
-    /// The memories taken (`true`) or released.
-    memories: Vec<(String, bool)>,
+    /// The memories taken or released.
+    memories: Vec<MemoryClaim>,
 }
 
 #[pymethods]
@@ -591,12 +592,12 @@ impl DriveView {
     /// come to this peripheral's `memory_read` and `memory_write` until
     /// `release_memory`.
     fn take_memory(&mut self, memory: String) {
-        self.memories.push((memory, true));
+        self.memories.push(MemoryClaim::Taken(memory));
     }
 
     /// Gives the memory `memory` back to the fast path.
     fn release_memory(&mut self, memory: String) {
-        self.memories.push((memory, false));
+        self.memories.push(MemoryClaim::Released(memory));
     }
 
     /// The call's time, in picoseconds.
@@ -893,11 +894,10 @@ impl PythonPeripheral {
             for (memory, offset, bytes) in &view.writes {
                 drive.write_memory(memory.clone(), *offset, bytes.clone());
             }
-            for (memory, take) in &view.memories {
-                if *take {
-                    drive.take_memory(memory.clone());
-                } else {
-                    drive.release_memory(memory.clone());
+            for claim in &view.memories {
+                match claim {
+                    MemoryClaim::Taken(memory) => drive.take_memory(memory.clone()),
+                    MemoryClaim::Released(memory) => drive.release_memory(memory.clone()),
                 }
             }
             if view.stop {

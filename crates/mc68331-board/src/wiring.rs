@@ -39,6 +39,7 @@ use crate::description::PCS_MASK;
 use crate::peripheral::Drive;
 use crate::peripheral::Driven;
 use crate::peripheral::Lane;
+use crate::peripheral::MemoryClaim;
 use crate::peripheral::MemoryWrite;
 use crate::peripheral::Peripheral;
 use crate::peripheral::PeripheralAccess;
@@ -164,8 +165,8 @@ impl Shared {
                 .map(|driven| (peripheral, driven)),
         );
         self.writes.borrow_mut().extend(driving.writes);
-        for (name, take) in driving.memories {
-            self.take_memory(peripheral, &name, take);
+        for claim in driving.memories {
+            self.claim_memory(peripheral, &claim);
         }
         self.fired.borrow_mut().extend(
             driving
@@ -185,21 +186,24 @@ impl Shared {
         self.chip_stop.request();
     }
 
-    /// `peripheral` takes the memory `name`, or releases it.
-    fn take_memory(&self, peripheral: usize, name: &str, take: bool) {
+    /// `peripheral` takes a memory, or releases it, as `claim` says.
+    fn claim_memory(&self, peripheral: usize, claim: &MemoryClaim) {
+        let (MemoryClaim::Taken(name) | MemoryClaim::Released(name)) = claim;
         let mut memories = self.memories.borrow_mut();
-        let Some(index) = memories.iter().position(|memory| memory.name == name) else {
+        let Some(index) = memories.iter().position(|memory| &memory.name == name) else {
             return;
         };
         let memory = &mut memories[index];
-        if take {
-            memory.taker = Some(peripheral);
-            self.requests.divert(index);
-        } else if memory.taker == Some(peripheral) {
-            memory.taker = None;
-            self.requests.release(index);
-        } else {
-            return;
+        match claim {
+            MemoryClaim::Taken(_) => {
+                memory.taker = Some(peripheral);
+                self.requests.divert(index);
+            }
+            MemoryClaim::Released(_) if memory.taker == Some(peripheral) => {
+                memory.taker = None;
+                self.requests.release(index);
+            }
+            MemoryClaim::Released(_) => return,
         }
         self.diverted.set(true);
     }
