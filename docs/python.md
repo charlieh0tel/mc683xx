@@ -1071,7 +1071,9 @@ removes) and `take_trace()` (the
 its own `save() -> bytes` and `restore(snapshot)`, its bytes inside
 the board's snapshot, and without both the board's save raises
 `StateError` naming the peripheral (`probe: a Python peripheral cannot save its
-state`).  An exception either raises from the board's call.
+state`).  An exception either raises from the board's call.  They take
+and raise as `Mc68331`'s do: `restore` takes `bytes` or a `bytearray`,
+and a cause raises the exception it raises there (Errors).
 `send` raises `ValueError` for an endpoint that drives no net, or none
 of `kind`.  A frame sent as an `int` or `None` is untimed; one received without
 `timed` drops its baud and length.

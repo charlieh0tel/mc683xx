@@ -73,6 +73,7 @@ use pyo3::Python;
 use pyo3::exceptions::PyOverflowError;
 use pyo3::exceptions::PyTypeError;
 use pyo3::exceptions::PyValueError;
+use pyo3::pybacked::PyBackedBytes;
 use pyo3::pyclass;
 use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
@@ -1819,16 +1820,15 @@ impl BoardView {
     fn save<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let saved = self.board.save();
         self.pending.check()?;
-        let snapshot = saved.map_err(|error| exceptions::StateError::new_err(error.to_string()))?;
-        Ok(PyBytes::new(py, &snapshot))
+        Ok(PyBytes::new(py, &saved.map_err(Error::from)?))
     }
 
     /// Restores a snapshot `save` made of a board loaded the same way,
     /// then calls each observer's `on_restore`.
-    fn restore(&mut self, snapshot: &[u8]) -> PyResult<()> {
-        let restored = self.board.restore(snapshot);
+    fn restore(&mut self, snapshot: PyBackedBytes) -> PyResult<()> {
+        let restored = self.board.restore(&snapshot);
         self.pending.check()?;
-        restored.map_err(|error| exceptions::StateError::new_err(error.to_string()))
+        Ok(restored.map_err(Error::from)?)
     }
 
     fn __repr__(&self) -> String {

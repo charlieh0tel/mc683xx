@@ -261,7 +261,9 @@ def test_python_peripherals_sample_and_save(tmp_path: Path) -> None:
     snapshot = board.save()
     board.run_for(picoseconds=20_000_000)
     assert len(probe.readings) == 4
-    board.restore(snapshot)
+    with pytest.raises(mc683xx.StateError):
+        board.restore(b"\x01\x02")
+    board.restore(bytearray(snapshot))
     assert len(probe.readings) == 2 and probe.next == 30_000_000
     board.run_for(picoseconds=10_000_000)
     assert probe.readings == [20.01, 20.02, 20.03]
