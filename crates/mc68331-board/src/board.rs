@@ -647,13 +647,10 @@ impl<C: Chip> Board<C> {
     pub fn load_with(
         description: &Description,
         registry: &Registry,
-        environment: Environment,
+        mut environment: Environment,
         read: impl Fn(&Path) -> io::Result<Vec<u8>>,
     ) -> Result<Self, LoadError> {
-        let environment = Environment {
-            board_dir: description.directory.clone(),
-            ..environment
-        };
+        environment.set_board_dir(description.directory.clone());
         let mut cells: Vec<PeripheralCell> = Vec::new();
         let mut peripherals = Vec::new();
         for spec in &description.peripherals {

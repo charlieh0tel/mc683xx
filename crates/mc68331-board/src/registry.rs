@@ -442,8 +442,9 @@ pub struct Environment {
     /// Where peripherals keep working copies (an EEPROM's), if the run gives
     /// one.
     pub work_dir: Option<PathBuf>,
-    /// The board file's directory, which its paths are relative to.
-    pub board_dir: PathBuf,
+    /// The board file's directory, which its paths are relative to: the
+    /// load sets it from the board file.
+    board_dir: PathBuf,
 }
 
 impl Environment {
@@ -459,6 +460,13 @@ impl Environment {
             (hash ^ u64::from(byte)).wrapping_mul(PRIME)
         });
         mix(self.seed ^ hash)
+    }
+
+    /// Sets the directory a constructor's paths are relative to, for a test
+    /// of the constructor through [`Context::new`].  A load sets its own,
+    /// the board file's directory, in place of this one.
+    pub fn set_board_dir(&mut self, board_dir: impl Into<PathBuf>) {
+        self.board_dir = board_dir.into();
     }
 }
 
