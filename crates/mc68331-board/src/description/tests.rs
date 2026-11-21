@@ -21,13 +21,17 @@ use super::Description;
 use super::Options;
 use super::Target;
 use crate::board::Board;
+use crate::builtin::Fixed;
 use crate::endpoint::Endpoint;
 use crate::error::LoadError;
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
+use crate::registry::Constructed;
 use crate::registry::Environment;
 use crate::registry::ParameterValue;
+use crate::registry::PortSpec;
 use crate::registry::Registry;
+use crate::signal::Kind;
 
 /// A board with RAM and a peripheral, for the errors to break.
 const BASE: &str = r#"
@@ -232,6 +236,70 @@ fn a_run_sets_parameters_over_the_files() {
             Err(LoadError::Setting(setting)) if setting == malformed
         ));
     }
+}
+
+#[test]
+fn net_ends_are_checked_against_the_registry_s_ports() {
+    let board = |net: &str| {
+        parse(&with(&format!(
+            "[[peripheral]]\nname = \"osc\"\ntype = \"clock\"\nparameters = {{ hz = 10 }}\n\
+             [[peripheral]]\nname = \"div\"\ntype = \"divider\"\n{net}"
+        )))
+        .unwrap()
+    };
+    let registry = Registry::with_builtins();
+    let environment = Environment::default();
+    let check = |net: &str| board(net).check_ports(&registry, &environment);
+    check("[[net]]\nname = \"c\"\ntype = \"clock\"\nfrom = \"osc.out\"\nto = [\"div.in\"]\n")
+        .unwrap();
+    assert!(matches!(
+        check("[[net]]\nname = \"c\"\ntype = \"clock\"\nfrom = \"osc.out\"\nto = [\"div.input\"]\n"),
+        Err(LoadError::Endpoint { endpoint, .. }) if endpoint == "div.input"
+    ));
+    assert!(matches!(
+        check("[[net]]\nname = \"c\"\ntype = \"edge\"\nfrom = \"osc.out\"\nto = [\"div.in\"]\n"),
+        Err(LoadError::Kind { endpoint, .. }) if endpoint == "osc.out"
+    ));
+    assert!(matches!(
+        check("[[net]]\nname = \"c\"\ntype = \"clock\"\nfrom = \"div.in\"\nto = [\"external.x\"]\n"),
+        Err(LoadError::Direction { endpoint, .. }) if endpoint == "div.in"
+    ));
+    assert!(matches!(
+        board("").check_ports(&Registry::new(), &environment),
+        Err(LoadError::Type { kind, .. }) if kind == "clock"
+    ));
+    let mut ported = Registry::with_builtins();
+    ported
+        .register_ported("probe", |context| {
+            let port = context
+                .parameters
+                .string("port")?
+                .unwrap_or("in")
+                .to_owned();
+            Ok(Constructed::new(
+                Box::new(Fixed::default()),
+                vec![PortSpec::input(port, Kind::Clock)],
+            ))
+        })
+        .unwrap();
+    let probed = |parameters: &str| {
+        parse(&with(&format!(
+            "[[peripheral]]\nname = \"osc\"\ntype = \"clock\"\n\
+             [[peripheral]]\nname = \"p\"\ntype = \"probe\"\nparameters = {{ {parameters} }}\n\
+             [[net]]\nname = \"c\"\ntype = \"clock\"\nfrom = \"osc.out\"\nto = [\"p.tip\"]\n"
+        )))
+        .unwrap()
+        .check_ports(&ported, &environment)
+    };
+    probed("port = \"tip\"").unwrap();
+    assert!(matches!(
+        probed(""),
+        Err(LoadError::Endpoint { endpoint, .. }) if endpoint == "p.tip"
+    ));
+    assert!(matches!(
+        probed("port = \"tip\", stray = 1"),
+        Err(LoadError::Parameter { peripheral, .. }) if peripheral == "p"
+    ));
 }
 
 #[test]

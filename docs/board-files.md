@@ -483,6 +483,10 @@ The contract a host's peripheral models target (rustdoc in
   and `construct(name, &context)` (`None` for no such type, else the
   constructor's `Result<Constructed, ParameterError>`; the unread-key
   check is `Parameters::unread`'s, as a load makes it).
+  `Description::check_ports(&registry, &environment)` checks a board
+  file's net ends at peripherals against their types' ports (name, type,
+  direction) as a load does, without building the board: a type whose
+  ports depend on its parameters is built to give them.
 - `peripheral::Peripheral`: what the constructor builds.  Every method has a
   default, so a peripheral implements only the sides it is on; one with
   only net ports (an OCXO, a GPS engine, an oven) is as first-class

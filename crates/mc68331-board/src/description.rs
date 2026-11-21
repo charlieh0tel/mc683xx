@@ -2,10 +2,13 @@
 //!
 //! The chip's section, the memories with their contents, the
 //! decoders, the peripherals' wiring and the nets' endpoints, every name
-//! resolved ([`docs/board-files.md`][board-files]).
+//! resolved ([`docs/board-files.md`][board-files]).  The nets' ends at
+//! peripherals are checked against a registry's ports by
+//! [`Description::check_ports`], as a load checks them.
 //!
 //! [board-files]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/board-files.md
 
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
@@ -570,6 +573,62 @@ impl Description {
         self.peripherals
             .iter()
             .map(|peripheral| (peripheral.name.as_str(), peripheral.kind.as_str()))
+    }
+
+    /// Whether each net end at a peripheral names a port the peripheral
+    /// has, of the net's type and facing the net's way, as a load checks
+    /// them, without building the board or its chip: for a host's tests
+    /// of its board files.  A fixed type's ports are its declared ones; a
+    /// type whose ports depend on its parameters is built, in
+    /// `environment` with the file's directory, its paths read from the
+    /// file system, to give its own.
+    ///
+    /// # Errors
+    ///
+    /// A peripheral whose type `registry` lacks ([`LoadError::Type`]); one
+    /// built for its ports whose parameters its constructor refuses or
+    /// leaves unread ([`LoadError::Parameter`]), or whose ports repeat a
+    /// name ([`LoadError::Port`]); or a net end at a port its peripheral
+    /// does not have, or of another type or direction than its net needs
+    /// ([`LoadError::Endpoint`], [`LoadError::Kind`],
+    /// [`LoadError::Direction`]).
+    pub fn check_ports(
+        &self,
+        registry: &Registry,
+        environment: &Environment,
+    ) -> Result<(), LoadError> {
+        let mut environment = environment.clone();
+        environment.set_board_dir(self.directory.clone());
+        let ports = self
+            .peripherals
+            .iter()
+            .map(|spec| {
+                let ports = match registry.ports(&spec.kind) {
+                    Some(ports) => Cow::Borrowed(ports),
+                    None => Cow::Owned(
+                        construct(spec, registry, &environment, &|path| fs::read(path))?.ports,
+                    ),
+                };
+                Ok((spec.name.as_str(), ports))
+            })
+            .collect::<Result<BTreeMap<_, _>, LoadError>>()?;
+        for net in &self.nets {
+            for (ends, driving) in [(&net.from, true), (&net.to, false)] {
+                for end in ends {
+                    if let Endpoint::Peripheral { peripheral, port } = end {
+                        let declared =
+                            ports
+                                .get(peripheral.as_str())
+                                .ok_or_else(|| LoadError::Endpoint {
+                                    net: net.name.clone(),
+                                    endpoint: end.to_string(),
+                                })?;
+                        port_of(net, peripheral, port, driving, declared)?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The marking of `peripheral`, if the file gives one.
