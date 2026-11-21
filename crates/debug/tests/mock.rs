@@ -462,6 +462,7 @@ fn a_mismatch_stops_the_script_at_its_line() {
                 line: 3,
                 command: Command::ReadMemory { .. },
                 error: CommandError::Mismatch { read: 0x1234 },
+                ..
             }
         ),
         "{error}"

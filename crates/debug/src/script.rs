@@ -657,6 +657,7 @@ pub struct Script {
 /// A line of a script that is not a command.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("line {line}: {error}")]
+#[non_exhaustive]
 pub struct ParseScriptError {
     /// The line, from 1.
     pub line: usize,
@@ -667,6 +668,7 @@ pub struct ParseScriptError {
 /// A command of a script that failed, and the line it is on.
 #[derive(Debug, thiserror::Error)]
 #[error("line {line}: `{command}`: {error}")]
+#[non_exhaustive]
 pub struct ScriptError<E> {
     /// The line, from 1.
     pub line: usize,
