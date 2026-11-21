@@ -135,6 +135,9 @@ impl SyncRequest {
 /// OC1's next reported edge, the cycle's start for one carrying a
 /// clock.  [`None`] while no output is watched, or none will change.
 /// Clones share one value.
+///
+/// Not part of the semver API: plumbing `mc683xx-board` runs the chip with.
+#[doc(hidden)]
 #[derive(Debug, Clone, Default)]
 pub struct OutputHorizon(Rc<Cell<Option<Cycles>>>);
 
@@ -386,6 +389,9 @@ impl Builder {
 
     /// The handle by which the host's peripherals learn when a watched
     /// output may next change ([`OutputHorizon`]), for them to hold.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-board` runs the chip with.
+    #[doc(hidden)]
     #[must_use]
     pub fn output_horizon(&self) -> OutputHorizon {
         self.board.output_horizon.clone()
@@ -1156,6 +1162,9 @@ impl Mc68331 {
     /// those up to now taking effect first: for a host whose time base
     /// moved (a SYNCR write, a reset held), to schedule them again at
     /// their new clocks.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-board` runs the chip with.
+    #[doc(hidden)]
     pub fn unschedule_gpt_inputs(&mut self) {
         let now = self.now;
         self.board.module_mut::<Gpt>(GPT).unschedule_inputs(now);
@@ -1276,6 +1285,10 @@ impl Mc68331 {
     /// `memory`'s cycles go to `peripheral` from now on, or with `None`
     /// back to the memory ([`Diversion`], which a peripheral holds to do it
     /// within a cycle).
+    ///
+    /// Not part of the semver API: a host's peripherals divert through
+    /// their [`Diversion`].
+    #[doc(hidden)]
     pub fn divert_memory(&mut self, memory: MemoryId, peripheral: Option<PeripheralId>) {
         match peripheral {
             Some(peripheral) => self.board.diversion.divert(memory, peripheral),
@@ -1324,6 +1337,9 @@ impl Mc68331 {
     /// Whether the chip sets its [`OutputHorizon`] before each external
     /// cycle, for a host whose peripheral asks.  Off by default, which
     /// costs nothing.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-board` runs the chip with.
+    #[doc(hidden)]
     pub const fn set_publish_output_horizon(&mut self, publish: bool) {
         self.board.publish_output_horizon = publish;
     }

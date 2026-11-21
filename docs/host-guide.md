@@ -153,8 +153,8 @@ the reset code to program a select the firmware leaves unused.
   off a page boundary or a memory past ADDR[23:0] is
   `BuildError::Placement`.
 - Written when `MemoryKind::Ram`; a `MemoryKind::Rom` one ignores
-  writes, as ROM on a select does.  It is never diverted: `Diversion::divert` and
-  `divert_memory` leave it as it is.
+  writes, as ROM on a select does.  It is never diverted: `Diversion::divert` leaves it
+  as it is.
 - `memory` and `memory_mut` reach its bytes by its `MemoryId`, and a
   snapshot holds them as every memory's.
 
@@ -745,8 +745,7 @@ every cycle that reaches the memory to the peripheral, as a cycle on the
 select that carried it, and takes the memory's pages off the core's
 fast path; `restore(memory)` gives them back.  Asked during a cycle,
 it takes effect as the cycle ends; between runs, as the next run
-starts.  `Mc68331::divert_memory(memory, peripheral)` does it from the
-host at once.  A snapshot keeps the diversions.  A fixed memory is
+starts.  A snapshot keeps the diversions.  A fixed memory is
 never diverted: no select carries its cycles.
 
 ### SCI
@@ -881,8 +880,6 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
   counts or clocks at `at`, and a run's quantum ends there.  `Input` is
   `PortGp(PortGpPin)`, `Pai` or `Pclk`.  Times are whole system
   clocks; a model with a finer phase rounds up.
-  `unschedule_gpt_inputs()` withdraws those past now, for a host whose
-  time base moved (a SYNCR write) to schedule again.
 - Outputs: `outputs(Port::Gp)` (a `PortLevels`, TCNT's clock on OC1
   under CPROUT); `pwm(Channel)` gives what a PWM pin carries as an
   `Output`: `Level`, `Wave { period, high, clocks }` or `Clock`
@@ -1195,13 +1192,6 @@ by mask, `OutputStop::set_port(port, mask)`; PWMA and PWMB, TXD,
 RESET) whose change ends `run_for`, after the instruction that changed
 one or at the sync point where a compare, a PWM edge or a frame's start did: for a host whose peripherals
 sense them and may answer within the run.  None by default.
-`set_publish_output_horizon(true)` has the chip set its
-`OutputHorizon` (the handle `Builder::output_horizon` gives) before
-each external cycle: when a watched output may next change, the
-cycle's start if a write earlier in its instruction changed one, else
-the SIM's and the modules' next event or a reported PWM or OC1 clock
-edge, for a peripheral that samples a cycle at its end.  Off by
-default.
 
 Tracing goes through the chip's events (`take_events`), off by
 default: `set_tracing(tracing)`, a `ChipTracing::default()` with

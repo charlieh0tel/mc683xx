@@ -498,7 +498,7 @@ surrounds the SoC with its board peripherals through:
   interrupt waits at most one instruction; a firmware read inside
   the quantum sees it if it came before the read.  An edge scheduled
   in the past takes effect at the GPT's time.  A reset keeps them:
-  they are the board's.  `unschedule_gpt_inputs()` withdraws those
+  they are the board's.  `unschedule_gpt_inputs()` (hidden, the board's) withdraws those
   past now (those up to now coming first), for a host whose clocks
   move against its own time.  Times are whole CPU clocks: the GPT samples
   its inputs on the system clock, and a capture latches TCNT, whose
@@ -1252,7 +1252,8 @@ hand.  The keys are in `docs/board-files.md`.
   output changes until the run ends, so it publishes that bound
   itself, before each external cycle, while the board asks
   (`Mc68331::set_publish_output_horizon`, an `OutputHorizon` read
-  through `Requests::output_horizon`): the cycle's start if a write
+  through `Requests::output_horizon`, both hidden: the board's
+  plumbing, outside semver, as is `Mc68331::divert_memory`): the cycle's start if a write
   earlier in the instruction changed a watched output, else the SIM's
   and the modules' next event (a compare, a QSPI transfer, a frame, the
   watchdog: more than outputs, never less) and the next edge of a
