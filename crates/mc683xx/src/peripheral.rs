@@ -174,25 +174,32 @@ pub struct QspiTransfer {
 }
 
 impl QspiTransfer {
-    /// Queue entry `entry`'s transfer of `bits` of `out` with
-    /// `chip_selects` on PCS\[3:0\], shifted with `clock`, ending at
-    /// `now`.
+    /// A transfer of `bits` of `out`, shifted with `clock`, ending at
+    /// `now`: queue entry 0, PCS\[3:0\] all low.
     #[must_use]
-    pub const fn new(
-        entry: u8,
-        chip_selects: u8,
-        out: u16,
-        bits: u8,
-        clock: QspiClock,
-        now: Cycles,
-    ) -> Self {
+    pub const fn new(out: u16, bits: u8, clock: QspiClock, now: Cycles) -> Self {
         Self {
-            entry,
-            chip_selects,
+            entry: 0,
+            chip_selects: 0,
             out,
             bits,
             clock,
             now,
+        }
+    }
+
+    /// The transfer of queue entry `entry`.
+    #[must_use]
+    pub const fn at_entry(self, entry: u8) -> Self {
+        Self { entry, ..self }
+    }
+
+    /// The transfer with `chip_selects` on PCS\[3:0\].
+    #[must_use]
+    pub const fn selecting(self, chip_selects: u8) -> Self {
+        Self {
+            chip_selects,
+            ..self
         }
     }
 }

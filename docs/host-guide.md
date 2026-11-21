@@ -956,7 +956,8 @@ assert!(matches!(chip.oc1(), Output::Level(_)));
 As a master the QSPI's peripheral is the host's `SpiPeripheral`
 (`Builder::qspi`).  `transfer(QspiTransfer) -> u16` shifts one queue
 entry and returns the bits in.  A `QspiTransfer` (`#[non_exhaustive]`,
-`QspiTransfer::new(entry, chip_selects, out, bits, clock, now)`)
+`QspiTransfer::new(out, bits, clock, now)`, queue entry 0 and
+`PCS` all low, then `.at_entry(entry)` and `.selecting(chip_selects)`)
 carries the queue entry's index (0-15), the levels on `PCS[3:0]` (four
 selects or a decoded peripheral number, as the board wires them), the bits
 out, right-aligned, MSB first, their number, the `QspiClock` they are

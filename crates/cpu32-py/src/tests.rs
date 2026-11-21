@@ -237,7 +237,7 @@ fn qspi_transfer(chip_selects: u8, out: u16, bits: u8) -> QspiTransfer {
         Cycles(8),
         Frequency::from_hz(16_777_216),
     );
-    QspiTransfer::new(0, chip_selects, out, bits, clock, Cycles(3))
+    QspiTransfer::new(out, bits, clock, Cycles(3)).selecting(chip_selects)
 }
 
 #[test]

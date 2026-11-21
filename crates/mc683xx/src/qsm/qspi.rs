@@ -896,14 +896,9 @@ impl Qspi {
             .unwrap_or_else(|| self.clock(u64::from(self.spcr0 & SPCR0_SPBR_MASK)));
         let received = match &mut self.peripheral {
             Some(peripheral) if port.sck_output() => {
-                let transfer = QspiTransfer::new(
-                    pointer,
-                    self.selects,
-                    port.mosi(out, mask),
-                    bits,
-                    clock,
-                    now,
-                );
+                let transfer = QspiTransfer::new(port.mosi(out, mask), bits, clock, now)
+                    .at_entry(pointer)
+                    .selecting(self.selects);
                 let answer = peripheral.transfer(transfer);
                 if port.miso_input() { answer } else { 0 }
             }

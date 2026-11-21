@@ -249,14 +249,11 @@ impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
 
     fn transfer(&mut self, transfer: Transfer, drive: &mut Drive<'_>) -> u16 {
         let now = drive.system_clock().cycles(transfer.now);
-        self.peripheral.transfer(QspiTransfer::new(
-            transfer.entry,
-            transfer.chip_selects,
-            transfer.out,
-            transfer.bits,
-            transfer.clock,
-            now,
-        ))
+        self.peripheral.transfer(
+            QspiTransfer::new(transfer.out, transfer.bits, transfer.clock, now)
+                .at_entry(transfer.entry)
+                .selecting(transfer.chip_selects),
+        )
     }
 
     fn select(&mut self, _: usize, selected: bool, now: Time, drive: &mut Drive<'_>) {
