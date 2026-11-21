@@ -74,6 +74,20 @@ impl Time {
         Self(Span::from_seconds(seconds).0)
     }
 
+    /// `seconds` seconds since power-on, rounded down to a picosecond, if
+    /// there is such a time: [`None`] for a negative number, a NaN or one
+    /// past the last time.
+    #[must_use]
+    pub fn checked_from_seconds_f64(seconds: f64) -> Option<Self> {
+        Span::checked_from_seconds_f64(seconds).map(|span| Self(span.0))
+    }
+
+    /// Its seconds since power-on, to an `f64`'s precision.
+    #[must_use]
+    pub fn seconds_f64(self) -> f64 {
+        Span(self.0).seconds_f64()
+    }
+
     /// The span from `earlier` to this, zero if it is later.
     #[must_use]
     pub const fn since(self, earlier: Self) -> Span {
@@ -205,6 +219,21 @@ impl Span {
     )]
     pub fn from_seconds_f64(seconds: f64) -> Self {
         Self((seconds * PICOSECONDS_PER_SECOND as f64) as u64)
+    }
+
+    /// `seconds` seconds, rounded down to a picosecond, if there is such
+    /// a span: [`None`] for a negative number, a NaN or one past the
+    /// longest span, where [`Span::from_seconds_f64`] saturates.
+    #[must_use]
+    #[expect(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        reason = "the picoseconds are checked to be in range first"
+    )]
+    pub fn checked_from_seconds_f64(seconds: f64) -> Option<Self> {
+        let picoseconds = seconds * PICOSECONDS_PER_SECOND as f64;
+        // u64::MAX rounds up to 2^64, the first value past the range
+        (picoseconds >= 0.0 && picoseconds < u64::MAX as f64).then_some(Self(picoseconds as u64))
     }
 
     /// Its picoseconds.
@@ -795,6 +824,28 @@ mod tests {
         assert_eq!(Span::from_seconds_f64(-1.0), Span::ZERO);
         assert_eq!(Span::from_seconds_f64(f64::NAN), Span::ZERO);
         assert_eq!(Span::from_seconds_f64(1e300), Span::MAX);
+        assert_eq!(
+            Span::checked_from_seconds_f64(0.25),
+            Some(Span::from_millis(250))
+        );
+        assert_eq!(Span::checked_from_seconds_f64(0.0), Some(Span::ZERO));
+        for out_of_range in [-1e-12, -1.0, f64::NAN, f64::INFINITY, 1e300, 18_446_744.1] {
+            assert_eq!(
+                Span::checked_from_seconds_f64(out_of_range),
+                None,
+                "{out_of_range}"
+            );
+        }
+        assert_eq!(
+            Span::checked_from_seconds_f64(18_446_744.0),
+            Some(Span::from_seconds(18_446_744))
+        );
+        assert_eq!(
+            Time::checked_from_seconds_f64(2.5),
+            Some(Time(2_500_000_000_000))
+        );
+        assert_eq!(Time::checked_from_seconds_f64(-2.5), None);
+        assert!((Time(1_500_000_000_000).seconds_f64() - 1.5).abs() < f64::EPSILON);
         assert_eq!(Span::from_seconds(u64::MAX), Span::MAX);
         assert!((Span::from_millis(1_500).seconds_f64() - 1.5).abs() < f64::EPSILON);
         assert_eq!(ps(2) + ps(3), ps(5));
