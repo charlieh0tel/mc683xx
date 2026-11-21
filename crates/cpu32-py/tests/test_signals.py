@@ -203,6 +203,6 @@ def test_a_paced_board_run_is_interrupted_while_it_sleeps(tmp_path: Path) -> Non
     (tmp_path / "board.toml").write_text(BOARD)
     board = mc683xx.Board(str(tmp_path / "board.toml"))
     # a quantum of board time an hour of wall time: the alarm comes in a sleep
-    crawl = mc683xx.Pacing.scaled(5e-3 / 3600)
+    crawl = mc683xx.Pacing.Scaled(5e-3 / 3600)
     assert interrupted(lambda: board.run_for(seconds=1.0, pacing=crawl)) < PROMPTLY_SECONDS
     assert board.now == 5_000_000_000

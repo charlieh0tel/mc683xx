@@ -1319,15 +1319,16 @@ impl BoardView {
     ) -> PyResult<BoardRunView> {
         let quantum = NonZeroSpan::new(Span::from_picos(quantum))
             .ok_or_else(|| PyValueError::new_err("give a quantum of 1 ps or more"))?;
+        let pacing = pacing.map(PacingView::pacing).transpose()?;
         let control = self.board.control();
         let previous = control.pacing();
         if let Some(pacing) = pacing {
-            control.set_pacing(pacing.0).map_err(value_error)?;
+            control.set_pacing(pacing).map_err(value_error)?;
         }
         let outcome = control::run_until_paced(py, &mut self.board, until, quantum);
         // this call's pacing put back, unless another thread changed it
         if let Some(pacing) = pacing
-            && control.pacing() == pacing.0
+            && control.pacing() == pacing
         {
             control.set_pacing(previous).map_err(value_error)?;
         }

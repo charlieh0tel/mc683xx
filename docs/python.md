@@ -25,13 +25,16 @@ rename renames the Python name with it.  The deliberate differences:
 - **Enums:** a Rust type with `Display` and `FromStr` crosses as its
   string, in and out: a chip select (`"CSBOOT"`, `"CS0"`), a GPT input
   (`"PGP0"`-`"PGP7"`, `"PAI"`, `"PCLK"`), a net type (`"serial"`), a
-  port direction (`"in-out"`), a `Pacing` from its text.  Registers are
+  port direction (`"in-out"`).  Registers are
   by name, Python's own (`"D0"`, `"SR"`).  Any other Rust enum is a
   Python class whose members are its variants (`Channel.A`,
   `Port.E`, `Port.GP`, `Role.READ_WRITE`, `Lane.UPPER`,
   `ResetCause.WATCHDOG`, `Space.USER`), and is never taken as a
   string; one whose variants carry data has a class for each
-  (`Event.Reset(now, cause)`, `Frame.Data(bits)`).
+  (`Event.Reset(now, cause)`, `Frame.Data(bits)`), and so does
+  `Pacing`, though it has `Display` and `FromStr`: its factor is a
+  number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`
+  the text.
 - **Tuples:** a struct of plain values a call returns is a tuple of its
   fields, in order: `PortLevels` as `(driven, levels)`, a port's change
   as `(now, port, driven, levels)`, a PWM pin's as `(now, channel,
@@ -1136,12 +1139,15 @@ Front ends):
   point: the inputs driven there in the order queued, the stop ending
   the run (`Stop.Requested()`).  An input from a live UI lands at the
   sync point after it was queued, timed by when the UI sent it.
-- `Pacing` is Rust's `pacing::Pacing`: `Pacing.UNPACED` (the default),
-  `Pacing.REAL_TIME`, `Pacing.scaled(factor)` (board seconds a wall
-  second; not finite or not above 0 raises `ValueError`), or
-  `Pacing(text)` from `unpaced`, `realtime` or a factor; `factor` is
-  `None` unpaced.  It compares and hashes by value, so it may key a
-  dict (`scaled(1.0)` is not `REAL_TIME`).
+- `Pacing` is Rust's `pacing::Pacing`, a class per variant, matched as
+  `Stop` is: `Pacing.Unpaced()` (the default), `Pacing.RealTime()`,
+  `Pacing.Scaled(factor)` (board seconds a wall second; one not finite
+  or not above 0 raises `ValueError` where a run or `set_pacing` takes
+  it), or `Pacing.parse(text)` from `unpaced`, `realtime` or a factor,
+  the runner's `--pace` (its `str` is that text); `factor` is `None`
+  unpaced, 1.0 at real time.  It compares and hashes by value, so it
+  may key a dict (`Scaled(1.0)` is not `RealTime()`).
+
   `run_for(seconds=..., pacing=None, quantum_picoseconds=5_000_000_000)`
   is Rust's `Board::run_until_paced`: it runs in quanta, paced by the
   control (a quantum of 0, which Rust's `NonZeroSpan` cannot hold,
@@ -1253,7 +1259,7 @@ def ui() -> None:
 thread = threading.Thread(target=ui)
 thread.start()
 # an hour of board time at real time, cut short by the stop
-paced = front.run_for(seconds=3600.0, pacing=mc683xx.Pacing.REAL_TIME)
+paced = front.run_for(seconds=3600.0, pacing=mc683xx.Pacing.RealTime())
 thread.join()
 assert paced.stop == mc683xx.Stop.Requested()
 assert front.net_value("switch") is True

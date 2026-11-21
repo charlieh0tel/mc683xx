@@ -1016,8 +1016,10 @@ chip beside `Mc68331`.
   `Board`'s (Background debug mode).
   `control()` is `Board::control`, an `mc683xx.BoardControl`
   (frozen, so any thread may call it: `stop`, `send`, `set_pacing`),
-  and `mc683xx.Pacing` is `pacing::Pacing` (`UNPACED`, `REAL_TIME`,
-  `scaled(factor)`).
+  and `mc683xx.Pacing` is `pacing::Pacing`, a class per variant
+  (`Pacing.Unpaced()`, `Pacing.RealTime()`, `Pacing.Scaled(factor)`,
+  matched as `Stop` is) and `Pacing.parse(text)` for its text (decided
+  2026-11-21).
 
 ### Boards
 

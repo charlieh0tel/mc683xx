@@ -1222,22 +1222,48 @@ class ObserverId:
 
     def __hash__(self) -> int: ...
 
-@final
+@disjoint_base
 class Pacing:
-    """How fast a paced run's board time may go against wall time:
-    `UNPACED`, `REAL_TIME` or `scaled(factor)`, board seconds a wall
-    second."""
+    """How fast a paced run's board time may go against wall time, a
+    class per variant."""
 
-    UNPACED: ClassVar[Pacing]
-    REAL_TIME: ClassVar[Pacing]
-
-    def __new__(cls, text: str) -> Pacing: ...
     @staticmethod
-    def scaled(factor: float) -> Pacing: ...
+    def parse(text: str) -> Pacing:
+        """`unpaced`, `realtime` or a factor, as the runner's `--pace`
+        takes it."""
     @property
-    def factor(self) -> float | None: ...
+    def factor(self) -> float | None:
+        """Board seconds a wall second, `None` unpaced."""
     def __eq__(self, other: object, /) -> bool: ...
     def __hash__(self) -> int: ...
+
+    @final
+    class Unpaced(Pacing):
+        """As fast as the host runs it, the default."""
+
+        __match_args__ = ()
+        def __new__(cls) -> Pacing.Unpaced: ...
+        def __len__(self) -> int: ...
+        def __getitem__(self, key: int, /) -> object: ...
+
+    @final
+    class RealTime(Pacing):
+        """A board second a wall second."""
+
+        __match_args__ = ()
+        def __new__(cls) -> Pacing.RealTime: ...
+        def __len__(self) -> int: ...
+        def __getitem__(self, key: int, /) -> object: ...
+
+    @final
+    class Scaled(Pacing):
+        """`factor` board seconds a wall second: finite and above 0, or a
+        run or `set_pacing` given it raises `ValueError`."""
+
+        __match_args__ = ("factor",)
+        def __new__(cls, factor: float) -> Pacing.Scaled: ...
+        @property
+        def factor(self) -> float: ...
 
 @final
 class BoardControl:

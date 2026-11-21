@@ -8,6 +8,8 @@ use mc683xx_board::error::LoadError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_mc68331::host::AccessError;
 use pyo3::Bound;
+use pyo3::IntoPyObject;
+use pyo3::IntoPyObjectExt;
 use pyo3::PyErr;
 use pyo3::PyResult;
 use pyo3::Python;
@@ -116,6 +118,12 @@ impl From<Error> for PyErr {
             | Error::Map(_) => PyValueError::new_err(message),
         }
     }
+}
+
+/// `value`'s Python `repr`, for a class's own: a value as Python
+/// writes it, not as Rust's `Debug` does.
+pub(crate) fn repr<'py>(py: Python<'py>, value: impl IntoPyObject<'py>) -> PyResult<String> {
+    Ok(value.into_bound_py_any(py)?.repr()?.to_string())
 }
 
 /// A file `path` that could not be read, as the `OSError` subclass
