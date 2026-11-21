@@ -360,7 +360,7 @@ impl Parameters {
     ///
     /// A `key` not given ([`ParameterError::Missing`]), or what
     /// [`Parameters::integer`] fails with.
-    pub fn required<T: TryFrom<i64>>(&self, key: &str) -> Result<T, ParameterError> {
+    pub fn required_integer<T: TryFrom<i64>>(&self, key: &str) -> Result<T, ParameterError> {
         self.integer(key)?
             .ok_or_else(|| ParameterError::Missing(key.to_owned()))
     }
@@ -851,7 +851,7 @@ mod tests {
             })
         );
         assert_eq!(
-            parameters.required::<u8>("e"),
+            parameters.required_integer::<u8>("e"),
             Err(ParameterError::Missing("e".to_owned()))
         );
         assert_eq!(parameters.unread(), Some("d".to_owned()));

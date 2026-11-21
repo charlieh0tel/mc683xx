@@ -419,7 +419,7 @@ impl Oscillator {
 
     /// From `hz` and `phase_ps`.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
-        let hz = context.parameters.required("hz")?;
+        let hz = context.parameters.required_integer("hz")?;
         let phase = context.parameters.integer("phase_ps")?.unwrap_or(0);
         Ok(Self {
             clock: Clock::new(Frequency::from_hz(hz), Time(phase)),
@@ -502,7 +502,7 @@ impl Divider {
     /// From `divide` (at least 2) and `high` (1 to `divide` - 1, half
     /// by default).
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
-        let divide: u64 = context.parameters.required("divide")?;
+        let divide: u64 = context.parameters.required_integer("divide")?;
         if divide < 2 {
             return Err(ParameterError::invalid("divide", "it must be at least 2"));
         }

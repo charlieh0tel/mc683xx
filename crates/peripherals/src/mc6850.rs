@@ -376,7 +376,7 @@ impl Acia {
     /// From `tx_clk_hz` and `rx_clk_hz`.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         let clock = |key| {
-            let hz: u64 = context.parameters.required(key)?;
+            let hz: u64 = context.parameters.required_integer(key)?;
             if hz == 0 {
                 return Err(ParameterError::invalid(key, "the clock must run"));
             }

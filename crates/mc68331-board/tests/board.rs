@@ -969,7 +969,7 @@ to = ["lamps.{net}"]
     // `inputs` lamps, each its own input; 0 declares one port twice
     registry
         .register_ported("lamps", |context| {
-            let inputs: u32 = context.parameters.required("inputs")?;
+            let inputs: u32 = context.parameters.required_integer("inputs")?;
             let ports = (0..inputs.max(2))
                 .map(|index| PortSpec::input(format!("in{}", index.min(inputs)), Kind::Logic))
                 .collect();
