@@ -335,7 +335,11 @@ fn a_host_stands_in_for_a_peripheral_through_an_external_endpoint() {
     ))
     .unwrap();
     assert_eq!(description.rebind("div.out", "external.divided"), Ok(1));
-    assert_eq!(description.rebind("div.unwired", "external.divided"), Ok(0));
+    assert_eq!(
+        description.rebind("div.uot", "external.divided"),
+        Err(EditError::Port("div.uot".to_owned())),
+        "a misspelled port is on no net"
+    );
     description.remove_peripheral("div").unwrap();
     assert_eq!(
         description

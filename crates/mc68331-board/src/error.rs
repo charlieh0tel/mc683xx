@@ -234,9 +234,9 @@ pub enum EditError {
     /// The description has no peripheral of that name.
     #[error("no peripheral {0:?}")]
     Peripheral(String),
-    /// An endpoint that is not `peripheral.port` of a peripheral on the
-    /// board.
-    #[error("{0:?} is no peripheral's port on the board")]
+    /// An endpoint that is not `peripheral.port` at the end of one of
+    /// the board's nets.
+    #[error("{0:?} is no peripheral's port on the board's nets")]
     Port(String),
     /// An endpoint that is not `external.name`.
     #[error("{0:?} is not an external endpoint, external.name")]

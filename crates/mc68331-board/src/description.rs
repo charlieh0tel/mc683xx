@@ -376,35 +376,37 @@ impl Description {
     /// (`external.name`) the host binds: a part the host stands in for
     /// (a real GPS engine for a modeled one), whose peripheral it then
     /// removes ([`Description::remove_peripheral`]).  The ends moved,
-    /// none for a port on no net.  The board's load checks the external
-    /// endpoint against its nets as it checks the file's.
+    /// at least one.  The board's load checks the external endpoint
+    /// against its nets as it checks the file's.
+    ///
+    /// A description has no registry, so it cannot tell a misspelled
+    /// port from a port on no net; it refuses both, as there is nothing
+    /// to rebind.
     ///
     /// # Errors
     ///
-    /// An `endpoint` that is not a port of a peripheral the description
-    /// has ([`EditError::Port`]), or an `external` that is not
+    /// An `endpoint` that is not a peripheral's port at the end of a
+    /// net ([`EditError::Port`]), or an `external` that is not
     /// `external.name` ([`EditError::External`]).
     pub fn rebind(&mut self, endpoint: &str, external: &str) -> Result<usize, EditError> {
         let from = Endpoint::parse(endpoint)
-            .filter(|parsed| match parsed {
-                Endpoint::Peripheral { peripheral, .. } => {
-                    self.peripherals.iter().any(|spec| spec.name == *peripheral)
-                }
-                Endpoint::Chip(_) | Endpoint::External(_) => false,
-            })
+            .filter(|parsed| matches!(parsed, Endpoint::Peripheral { .. }))
             .ok_or_else(|| EditError::Port(endpoint.to_owned()))?;
         let to = Endpoint::parse(external)
             .filter(|parsed| matches!(parsed, Endpoint::External(_)))
             .ok_or_else(|| EditError::External(external.to_owned()))?;
-        let mut moved = 0;
-        for end in self
+        let ends: Vec<_> = self
             .nets
             .iter_mut()
             .flat_map(|net| net.from.iter_mut().chain(&mut net.to))
             .filter(|end| **end == from)
-        {
+            .collect();
+        if ends.is_empty() {
+            return Err(EditError::Port(endpoint.to_owned()));
+        }
+        let moved = ends.len();
+        for end in ends {
             end.clone_from(&to);
-            moved += 1;
         }
         Ok(moved)
     }
