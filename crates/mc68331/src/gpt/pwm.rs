@@ -76,7 +76,7 @@ impl FromStr for Channel {
 /// Text that names no PWM channel.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no PWM channel {0:?}")]
-pub struct ParseChannelError(pub String);
+pub struct ParseChannelError(String);
 
 impl Channel {
     /// Both, A first.

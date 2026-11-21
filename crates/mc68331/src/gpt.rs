@@ -313,7 +313,7 @@ impl FromStr for Input {
 /// Text that names no GPT input pin.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no GPT input {0:?}")]
-pub struct ParseInputError(pub String);
+pub struct ParseInputError(String);
 
 /// A change in what the GPT drives on its outputs, in the shape of the
 /// SIM ports' changes ([PLAN.md], Peripherals).
