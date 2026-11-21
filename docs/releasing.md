@@ -78,7 +78,9 @@ deploy replaces it.
   without failing, since the version is bumped only at release.
 - A release is an annotated tag `vX.Y.Z` on a commit of `main` that
   has passed every check (AGENTS.md).  Its notes, breaking changes
-  first, are its GitHub release's.
+  first, are the tag message's body, below its "Release X.Y.Z"
+  subject, and the `release` workflow makes them its GitHub
+  release's.
 - A consumer pins a release, or a commit for work not yet released.
 
 ## Semver scope
@@ -190,8 +192,9 @@ Once, before the first release.
    each other at one release, so a host pinning one gets the others
    that were tested with it.  `cargo check --workspace` updates
    `Cargo.lock`.  The wheel's version follows the workspace's.
-3. Draft the release notes: what changed for a user, breaking changes
-   first.
+3. Draft the release notes in a file: a first line "Release X.Y.Z",
+   a blank line, then what changed for a user, breaking changes
+   first, in Markdown.
 4. Run every check (AGENTS.md): `make ci`, `python`, `oracle`,
    `singlestep`, `corpus`, `boot-smoke`, `boot-diff` and
    `smartclock-boards`, and `cargo publish --workspace --dry-run`;
@@ -201,8 +204,10 @@ Once, before the first release.
    tested; `make python` tests a debug build on this host only.
 5. Commit `Cargo.toml` and `Cargo.lock` as "Release X.Y.Z", and merge
    it to `main`.
-6. Wait for `ci` to pass on the merged commit, then tag it `vX.Y.Z`,
-   annotated, and push the tag.
+6. Wait for `ci` to pass on the merged commit, then tag it with the
+   notes, `git tag -a --cleanup=whitespace -F NOTES vX.Y.Z` (the
+   default cleanup would drop every Markdown heading as a comment),
+   and push the tag.
 7. The tag runs `release`.  Its `gate` job checks that the tagged
    commit is on `main` (an ancestor of `origin/main`), that the tag
    names `Cargo.toml`'s version, and, through the GitHub API with the
@@ -281,7 +286,9 @@ Once, before the first release.
    and publishing access (Setup, step 4), and `npm logout`.
 10. The tag also runs `pages`, which deploys the tag's demo page to
     GitHub Pages (What is published).
-11. Make a GitHub release from the tag with the notes.
+11. The `github-release` job makes the GitHub release from the tag
+    message's notes once `gate` has passed; `gate` refuses a tag with
+    none.
 
 A broken release is yanked (`cargo yank`, PyPI's yank) or deprecated
 (`npm deprecate`) and fixed in the next patch version; a version is
