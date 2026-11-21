@@ -183,7 +183,9 @@ impl<T: SpiPeripheral + Save + Any> BoardSpi for T {}
 
 /// The chip being wired, before its power-on reset.
 ///
-/// Sealed: a host cannot implement it.
+/// Sealed: a host cannot implement it.  Not part of the semver API:
+/// only the board builds a chip.
+#[doc(hidden)]
 pub trait ChipBuilder: sealed::Sealed {
     /// The chip it builds.
     type Chip: Chip;
