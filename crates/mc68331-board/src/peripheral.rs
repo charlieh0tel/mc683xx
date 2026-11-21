@@ -313,28 +313,41 @@ pub struct Transfer {
 }
 
 impl Transfer {
-    /// A transfer through `attachment` of `bits` of `out`, queue entry
-    /// `entry`'s, with `chip_selects` on PCS\[3:0\], shifted with `clock`,
-    /// ending at `now`: a frame's first.
+    /// A frame's first transfer of `bits` of `out`, shifted with
+    /// `clock`, ending at `now`: through attachment 0, queue entry 0,
+    /// PCS\[3:0\] all low.
     #[must_use]
-    pub const fn new(
-        attachment: usize,
-        entry: u8,
-        chip_selects: u8,
-        out: u16,
-        bits: u8,
-        clock: QspiClock,
-        now: Time,
-    ) -> Self {
+    pub const fn new(out: u16, bits: u8, clock: QspiClock, now: Time) -> Self {
         Self {
-            attachment,
-            entry,
-            chip_selects,
+            attachment: 0,
+            entry: 0,
+            chip_selects: 0,
             out,
             bits,
             clock,
             starts_frame: true,
             now,
+        }
+    }
+
+    /// The transfer through attachment `attachment`.
+    #[must_use]
+    pub const fn through(self, attachment: usize) -> Self {
+        Self { attachment, ..self }
+    }
+
+    /// The transfer of queue entry `entry`.
+    #[must_use]
+    pub const fn at_entry(self, entry: u8) -> Self {
+        Self { entry, ..self }
+    }
+
+    /// The transfer with `chip_selects` on PCS\[3:0\].
+    #[must_use]
+    pub const fn selecting(self, chip_selects: u8) -> Self {
+        Self {
+            chip_selects,
+            ..self
         }
     }
 
@@ -888,7 +901,16 @@ mod tests {
     #[test]
     fn a_transfer_takes_another_clock_and_keeps_the_rest() {
         let reset = QspiClock::at_reset(Frequency::from_hz(8_388_608));
-        let transfer = Transfer::new(1, 2, 0xe, 0xa5, 8, reset, Time(9)).continuing();
+        let transfer = Transfer::new(0xa5, 8, reset, Time(9))
+            .through(1)
+            .at_entry(2)
+            .selecting(0xe)
+            .continuing();
+        assert_eq!(
+            (transfer.attachment, transfer.entry, transfer.chip_selects),
+            (1, 2, 0xe)
+        );
+        assert!(!transfer.starts_frame);
         let fast = QspiClock::new(
             ClockPolarity::IdleHigh,
             ClockPhase::CaptureLeading,

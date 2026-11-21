@@ -269,7 +269,7 @@ mod tests {
             Cycles(8),
             Frequency::from_hz(16_777_216),
         );
-        Transfer::new(0, 0, 0, 0, 0, clock, Time::ZERO)
+        Transfer::new(0, 0, clock, Time::ZERO)
     }
 
     /// An 8-stage shift register, MISO its last stage.

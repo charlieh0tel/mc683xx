@@ -560,8 +560,10 @@ The contract a host's peripheral models target (rustdoc in
     where a peripheral drives its outputs' first levels (a latch with `reset
     = []`); a port nothing drives has no value until its first drive.
   - QSPI: `transfer(transfer, drive)` (a `peripheral::Transfer`,
-    `#[non_exhaustive]`, built with `Transfer::new(attachment, entry,
-    chip_selects, out, bits, clock, now)`: `attachment`, `entry`, the
+    `#[non_exhaustive]`, built with `Transfer::new(out, bits, clock,
+    now)`, a frame's first through attachment 0, entry 0, PCS all low,
+    and `.through(attachment)`, `.at_entry(entry)` and
+    `.selecting(chip_selects)` for the rest: `attachment`, `entry`, the
     queue entry 0-15, `chip_selects`, `out`, the bits out, right-aligned,
     MSB first, `bits`, `clock`, the `QspiClock` it is shifted with
     (CPOL, CPHA, the SCK period), `starts_frame`, whether it is the

@@ -749,15 +749,10 @@ impl SpiPeripheral for QspiRouter {
             if !target.selected(chip_selects) {
                 continue;
             }
-            let transfer = Transfer::new(
-                target.attachment,
-                entry,
-                chip_selects,
-                out,
-                bits,
-                clock,
-                now,
-            );
+            let transfer = Transfer::new(out, bits, clock, now)
+                .through(target.attachment)
+                .at_entry(entry)
+                .selecting(chip_selects);
             let framing = self
                 .shared
                 .qspi

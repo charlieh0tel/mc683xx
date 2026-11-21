@@ -56,7 +56,7 @@ fn transfer(number: u8) -> Transfer {
         Cycles(8),
         Frequency::from_hz(16_777_216),
     );
-    Transfer::new(0, 0, 0, 0, BITS, clock, Time::ZERO)
+    Transfer::new(0, BITS, clock, Time::ZERO)
 }
 
 fn transfers(criterion: &mut Criterion) {
