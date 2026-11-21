@@ -325,6 +325,40 @@ fn net_ends_are_checked_against_the_registry_s_ports() {
 }
 
 #[test]
+fn a_type_built_for_its_ports_reads_its_paths_through_the_host() {
+    let mut registry = Registry::with_builtins();
+    registry
+        .register_ported("probe", |context| {
+            let port = context.contents("ports")?.unwrap_or_default();
+            Ok(Constructed::new(
+                Box::new(Fixed::default()),
+                vec![PortSpec::input(
+                    String::from_utf8_lossy(&port).into_owned(),
+                    Kind::Clock,
+                )],
+            ))
+        })
+        .unwrap();
+    let description = parse(&with(
+        "[[peripheral]]\nname = \"osc\"\ntype = \"clock\"\n\
+         [[peripheral]]\nname = \"p\"\ntype = \"probe\"\nparameters = { ports = \"no-such-file\" }\n\
+         [[net]]\nname = \"c\"\ntype = \"clock\"\nfrom = \"osc.out\"\nto = [\"p.tip\"]\n",
+    ))
+    .unwrap();
+    let environment = Environment::default();
+    description
+        .check_ports_with(&registry, &environment, |path| {
+            assert!(path.ends_with("no-such-file"));
+            Ok(b"tip".to_vec())
+        })
+        .unwrap();
+    assert!(matches!(
+        description.check_ports_with(&registry, &environment, |_| Err(io::ErrorKind::NotFound.into())),
+        Err(LoadError::Parameter { peripheral, .. }) if peripheral == "p"
+    ));
+}
+
+#[test]
 fn a_host_stands_in_for_a_peripheral_through_an_external_endpoint() {
     let mut description = parse(&with(
         "[[peripheral]]\nname = \"osc\"\ntype = \"clock\"\nparameters = { hz = 10 }\n\

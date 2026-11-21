@@ -689,17 +689,36 @@ impl Description {
     ///
     /// # Errors
     ///
+    /// As [`Description::check_ports_with`].
+    pub fn check_ports(
+        &self,
+        registry: &Registry,
+        environment: &Environment,
+    ) -> Result<(), LoadError> {
+        self.check_ports_with(registry, environment, |path| fs::read(path))
+    }
+
+    /// [`Description::check_ports`], a type built for its ports reading
+    /// each path parameter's contents
+    /// ([`Context::contents`](crate::registry::Context::contents)) from
+    /// `read(path)` rather than the file system, as
+    /// [`Board::load_with`](crate::board::Board::load_with) does.
+    ///
+    /// # Errors
+    ///
     /// A peripheral whose type `registry` lacks ([`LoadError::Type`]); one
     /// built for its ports whose parameters its constructor refuses or
     /// leaves unread ([`LoadError::Parameter`]), or whose ports repeat a
     /// name ([`LoadError::Port`]); or a net end at a port its peripheral
     /// does not have, or of another type or direction than its net needs
     /// ([`LoadError::Endpoint`], [`LoadError::Kind`],
-    /// [`LoadError::Direction`]).
-    pub fn check_ports(
+    /// [`LoadError::Direction`]).  An error `read` returns is
+    /// [`LoadError::Parameter`].
+    pub fn check_ports_with(
         &self,
         registry: &Registry,
         environment: &Environment,
+        read: impl Fn(&Path) -> io::Result<Vec<u8>>,
     ) -> Result<(), LoadError> {
         let mut environment = environment.clone();
         environment.set_board_dir(self.directory.clone());
@@ -709,9 +728,7 @@ impl Description {
             .map(|spec| {
                 let ports = match registry.ports(&spec.kind) {
                     Some(ports) => Cow::Borrowed(ports),
-                    None => Cow::Owned(
-                        construct(spec, registry, &environment, &|path| fs::read(path))?.ports,
-                    ),
+                    None => Cow::Owned(construct(spec, registry, &environment, &read)?.ports),
                 };
                 Ok((spec.name.as_str(), ports))
             })

@@ -497,7 +497,9 @@ The contract a host's peripheral models target (rustdoc in
   `Description::check_ports(&registry, &environment)` checks a board
   file's net ends at peripherals against their types' ports (name, type,
   direction) as a load does, without building the board: a type whose
-  ports depend on its parameters is built to give them.
+  ports depend on its parameters is built to give them;
+  `check_ports_with(&registry, &environment, read)` reads that type's
+  path parameters through `read`, as `Board::load_with` does.
 - `peripheral::Peripheral`: what the constructor builds.  Every method has a
   default, so a peripheral implements only the sides it is on; one with
   only net ports (an OCXO, a GPS engine, an oven) is as first-class
