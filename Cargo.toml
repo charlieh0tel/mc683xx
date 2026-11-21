@@ -24,9 +24,11 @@ resolver = "3"
 [workspace.package]
 version = "0.6.0"
 edition = "2024"
-# The toolchain rust-toolchain.toml pins, the one CI builds and tests
-# with; no older compiler is checked, so none is claimed.
-rust-version = "1.99.1"
+# The minimum supported Rust: the release of the toolchain
+# rust-toolchain.toml pins, which CI builds and tests with; no older
+# release is checked, so none is claimed.  Raising it is a minor
+# release.
+rust-version = "1.99"
 authors = ["Christopher Hoover <ch@murgatroid.com>"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/charlieh0tel/mc683xx"
