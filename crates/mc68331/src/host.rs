@@ -9,6 +9,7 @@
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::PAGE_BYTES;
+use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::memory::Unserved;
 use mc683xx_modules::module;
@@ -140,14 +141,11 @@ impl Mc68331 {
     /// up to it.
     pub fn read(&self, address: Address, data: &mut [u8]) -> Result<(), Unserved> {
         let memory = &self.cpu.memory;
-        for (offset, slot) in (0..).zip(data.iter_mut()) {
-            let at = address.offset(offset);
-            let backing = memory
-                .entry(Space::Supervisor, at)
-                .read
-                .ok_or(Unserved(at))?;
-            let within = memory.mask(at).0 % PAGE_BYTES;
-            *slot = memory.region(backing.region)[(backing.offset + within) as usize];
+        let mut done = 0;
+        while done < data.len() {
+            let (region, from, count) = locate(memory, address, done, data.len(), false)?;
+            data[done..done + count].copy_from_slice(&memory.region(region)[from..from + count]);
+            done += count;
         }
         Ok(())
     }
@@ -163,18 +161,16 @@ impl Mc68331 {
     /// [`Unserved`] for a byte the core does not serve (a peripheral's,
     /// or one a peripheral shares); then nothing is written.
     pub fn write(&mut self, address: Address, data: &[u8]) -> Result<(), Unserved> {
-        let memory = &mut self.cpu.memory;
-        let places = (0..data.len() as u32)
-            .map(|offset| {
-                let at = address.offset(offset);
-                let page = memory.entry(Space::Supervisor, at);
-                let backing = page.write.or(page.read).ok_or(Unserved(at))?;
-                let within = memory.mask(at).0 % PAGE_BYTES;
-                Ok((backing.region, (backing.offset + within) as usize))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        for ((region, index), &byte) in places.into_iter().zip(data) {
-            memory.region_mut(region)[index] = byte;
+        let mut spans = Vec::new();
+        let mut done = 0;
+        while done < data.len() {
+            let span = locate(&self.cpu.memory, address, done, data.len(), true)?;
+            spans.push((span, done));
+            done += span.2;
+        }
+        for ((region, from, count), done) in spans {
+            self.cpu.memory.region_mut(region)[from..from + count]
+                .copy_from_slice(&data[done..done + count]);
         }
         Ok(())
     }
@@ -308,6 +304,31 @@ impl Board {
             None => Err(AccessError::Unpeekable),
         }
     }
+}
+
+/// Where a debugger's access of `length` bytes from `address` finds its
+/// bytes from `done` on, within one page of the memories the core serves
+/// in supervisor space: the region, the index in it, and how many bytes
+/// the page holds of those left.  A read takes the page's read backing;
+/// a write its write backing, else its read one, as a ROM's.
+fn locate(
+    memory: &Memory,
+    address: Address,
+    done: usize,
+    length: usize,
+    write: bool,
+) -> Result<(RegionId, usize, usize), Unserved> {
+    let at = address.offset(done as u32);
+    let page = memory.entry(Space::Supervisor, at);
+    let backing = if write {
+        page.write.or(page.read)
+    } else {
+        page.read
+    };
+    let backing = backing.ok_or(Unserved(at))?;
+    let within = memory.mask(at).0 % PAGE_BYTES;
+    let count = ((PAGE_BYTES - within) as usize).min(length - done);
+    Ok((backing.region, (backing.offset + within) as usize, count))
 }
 
 #[cfg(test)]

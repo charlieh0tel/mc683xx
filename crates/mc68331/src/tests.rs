@@ -23,6 +23,7 @@ use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
+use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::memory::Unserved;
 use mc683xx_cpu32::peripheral::BusCycle;
@@ -2474,6 +2475,24 @@ fn a_read_reads_rom_and_refuses_what_the_core_does_not_serve() {
     assert_eq!(read, [0x4e, 0x75]);
     let simcr = Address(0x00ff_fa00);
     assert_eq!(chip.read(simcr, &mut read), Err(Unserved(simcr)));
+}
+
+#[test]
+fn a_read_and_a_write_cross_pages() {
+    let (mut chip, _) = booting(&[NOP, NOP]);
+    let bytes: Vec<u8> = (0..3 * PAGE_BYTES).map(|at| at as u8 ^ 0x5a).collect();
+    chip.write(Address(START), &bytes).unwrap();
+    let mut read = vec![0; bytes.len()];
+    chip.read(Address(START), &mut read).unwrap();
+    assert_eq!(read, bytes);
+    let last = START + 3 * PAGE_BYTES - 2;
+    assert_eq!(
+        chip.peek(Address(last), Size::Word, FunctionCode::SUPERVISOR_DATA),
+        Ok(u32::from(u16::from_be_bytes([
+            bytes[bytes.len() - 2],
+            bytes[bytes.len() - 1]
+        ])))
+    );
 }
 
 #[test]
