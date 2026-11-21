@@ -28,6 +28,15 @@ use register::Register;
 use register::SystemRegister;
 use size::Size;
 
+/// A [`Cpu32Target`] call the implementation does not support: the
+/// error a method added after 1.0 returns by default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[error("{what} is not supported")]
+pub struct Unsupported {
+    /// What is not supported: the call, or what it needs.
+    pub what: &'static str,
+}
+
 /// What a debugger needs of a CPU32 with BDM enabled (CPU32RM 7.2):
 /// stopping it in background mode, its registers and memory there, and
 /// resuming it.  Register and memory calls need the target halted.
@@ -45,9 +54,15 @@ use size::Size;
 /// first and keeps the [`Entry`] for [`halt`](Cpu32Target::halt) and
 /// [`halted`](Cpu32Target::halted) to report until it resumes.  A
 /// reset forgets whatever an implementation kept.
+///
+/// A method added to the trait after 1.0 comes with a default body
+/// that fails with [`Unsupported`], so an implementation written
+/// before it still builds, and fails that call cleanly.
 pub trait Cpu32Target {
     /// What went wrong: the link, a bus error, or the target's own.
-    type Error: core::error::Error;
+    /// `'static`, so a host keeps it as a cause, and from
+    /// [`Unsupported`], for a call the implementation lacks.
+    type Error: core::error::Error + From<Unsupported> + 'static;
 
     /// Resets the target with BDM enabled and stops it in background
     /// mode before its first instruction (CPU32RM 7.2.1).
@@ -165,4 +180,19 @@ pub trait Cpu32Target {
         size: Size,
         data: &[u8],
     ) -> Result<(), Self::Error>;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::string::ToString;
+
+    use super::Unsupported;
+
+    #[test]
+    fn unsupported_names_what() {
+        assert_eq!(
+            Unsupported { what: "CALL" }.to_string(),
+            "CALL is not supported"
+        );
+    }
 }

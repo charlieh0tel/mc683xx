@@ -12,6 +12,7 @@
 pub mod serial;
 
 use mc683xx_target::Cpu32Target;
+use mc683xx_target::Unsupported;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
@@ -64,6 +65,9 @@ pub enum TargetError {
         /// The access size.
         size: Size,
     },
+    /// The chip does not support the call.
+    #[error(transparent)]
+    Unsupported(#[from] Unsupported),
 }
 
 impl Mc68331 {

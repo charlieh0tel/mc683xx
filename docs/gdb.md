@@ -358,7 +358,9 @@ peripherals).
 `mc683xx_target::Cpu32Target`: what a debugger has of a CPU32 through
 its background debug mode.  A host that drives a 68331 through a BDM
 pod implements the trait and serves gdb this way; the emulated chip
-implements it too.  The session halts the target first; detach resumes
+implements it too.  The trait's error is `'static` and converts from
+`mc683xx_target::Unsupported`, which a method added to the trait later
+returns by default.  The session halts the target first; detach resumes
 it, kill leaves it halted.
 
 - **Registers** are the same description's, read and written through
