@@ -241,7 +241,7 @@ impl fmt::Display for Signal {
                 "clock_at={} frequency={} phase={}",
                 clock.at.picos(),
                 clock.frequency.nanohertz(),
-                clock.phase.0
+                clock.phase.units()
             ),
             Self::Serial(serial) => {
                 match serial.frame {

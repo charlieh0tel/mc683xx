@@ -456,7 +456,7 @@ enum Arming {
 
 impl<C: Chip> Conditions for Board<C> {
     fn arm(&mut self, condition: Condition) -> Result<ConditionId, ConditionError> {
-        let id = ConditionId(self.last_condition + 1);
+        let id = ConditionId::new(self.last_condition + 1);
         let arming = match &condition {
             Condition::Net { net, change } => {
                 let index = self.net_index(net)?;
@@ -493,7 +493,7 @@ impl<C: Chip> Conditions for Board<C> {
                 Arming::Peripheral(index, token)
             }
         };
-        self.last_condition = id.0;
+        self.last_condition = id.number();
         self.conditions.push(Armed {
             id,
             condition,

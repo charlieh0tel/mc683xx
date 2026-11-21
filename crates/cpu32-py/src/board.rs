@@ -661,7 +661,7 @@ pub(crate) fn signal(kind: Kind, value: &Bound<'_, PyAny>) -> PyResult<Signal> {
             Signal::Clock(Clock::with_phase(
                 Frequency::from_nanohertz(frequency),
                 Time::from_picos(at),
-                Phase(phase),
+                Phase::from_units(phase),
             ))
         }
         _ => return Err(PyTypeError::new_err("no Python value for this net type")),
@@ -677,9 +677,12 @@ fn python_value(py: Python<'_>, signal: Signal, timed: bool) -> PyResult<Py<PyAn
         Signal::Serial(serial) => serial.frame.data().into_py_any(py),
         Signal::Analog(value) => value.into_py_any(py),
         Signal::Bus(word) => word.into_py_any(py),
-        Signal::Clock(clock) => {
-            (clock.at.picos(), clock.frequency.nanohertz(), clock.phase.0).into_py_any(py)
-        }
+        Signal::Clock(clock) => (
+            clock.at.picos(),
+            clock.frequency.nanohertz(),
+            clock.phase.units(),
+        )
+            .into_py_any(py),
         _ => Err(PyTypeError::new_err("no Python value for this signal")),
     }
 }

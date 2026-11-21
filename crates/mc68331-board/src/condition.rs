@@ -258,7 +258,21 @@ pub enum ParseConditionError {
 
 /// An armed condition's number, from 1, never reused on its board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ConditionId(pub u64);
+pub struct ConditionId(u64);
+
+impl ConditionId {
+    /// The condition numbered `number`.
+    #[must_use]
+    pub const fn new(number: u64) -> Self {
+        Self(number)
+    }
+
+    /// Its number.
+    #[must_use]
+    pub const fn number(self) -> u64 {
+        self.0
+    }
+}
 
 impl From<u64> for ConditionId {
     fn from(id: u64) -> Self {

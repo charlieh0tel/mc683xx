@@ -449,9 +449,33 @@ impl From<NonZeroSpan> for Span {
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
-pub struct Phase(pub u128);
+pub struct Phase(u128);
+
+impl From<u128> for Phase {
+    fn from(units: u128) -> Self {
+        Self(units)
+    }
+}
+
+impl From<Phase> for u128 {
+    fn from(phase: Phase) -> Self {
+        phase.0
+    }
+}
 
 impl Phase {
+    /// The phase `units` [`PHASE_UNITS`] past the origin.
+    #[must_use]
+    pub const fn from_units(units: u128) -> Self {
+        Self(units)
+    }
+
+    /// Its [`PHASE_UNITS`] since the origin.
+    #[must_use]
+    pub const fn units(self) -> u128 {
+        self.0
+    }
+
     /// Whole cycles: the rising edges at or before it.
     #[must_use]
     pub const fn cycles(self) -> u128 {
