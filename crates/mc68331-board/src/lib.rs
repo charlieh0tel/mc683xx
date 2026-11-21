@@ -21,7 +21,7 @@
 //!   attachment, which a [`PeripheralAccess`] names by index with its
 //!   [`Role`]), the IRQ pin
 //!   (`interrupt_request`), RESET (`reset`), the QSPI (`transfer`,
-//!   `select`, `qspi_clock`, `qspi_deferrable`), its net ports (`input`,
+//!   `select`, `set_qspi_clock`, `qspi_deferrable`), its net ports (`input`,
 //!   and [`Drive`] for its outputs), its own time (`next_event`,
 //!   `advance`), its snapshot (`save`, `restore`) and what a front end
 //!   shows of it (`inspect`).

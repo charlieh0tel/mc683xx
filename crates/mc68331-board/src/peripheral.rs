@@ -725,9 +725,9 @@ pub trait Peripheral: Any {
     /// default nothing changes.
     ///
     /// [`SpiPeripheral::set_clock`]: mc683xx_modules::peripheral::SpiPeripheral::set_clock
-    fn qspi_clock(&mut self, clock: QspiClock, now: Time) {}
+    fn set_qspi_clock(&mut self, clock: QspiClock, now: Time) {}
 
-    /// Whether its QSPI calls (`transfer`, `select`, `qspi_clock`) may
+    /// Whether its QSPI calls (`transfer`, `select`, `set_qspi_clock`) may
     /// come late, in a batch ([`SpiPeripheral::deferrable`]).  Asked once,
     /// as the board is built; the board's PCS decode lets the QSPI
     /// batch only if every peripheral on the QSPI says so and no PCS pin

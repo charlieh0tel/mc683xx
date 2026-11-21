@@ -420,7 +420,7 @@ class ClockedFlash:
         self.told: list[tuple[mc683xx.ClockPolarity, mc683xx.ClockPhase, int]] = []
         self.transfers: list[tuple[mc683xx.ClockPolarity, mc683xx.ClockPhase, int]] = []
 
-    def qspi_clock(self, clock: mc683xx.QspiClock, now: int) -> None:
+    def set_qspi_clock(self, clock: mc683xx.QspiClock, now: int) -> None:
         self.told.append((clock.polarity, clock.phase, clock.system_clock_hz))
 
     def transfer(self, transfer: mc683xx.Transfer, drive: mc683xx.Drive) -> int:

@@ -824,7 +824,7 @@ impl SpiPeripheral for QspiRouter {
                 told.push(target.peripheral);
                 self.shared.peripherals[target.peripheral]
                     .borrow_mut()
-                    .qspi_clock(clock, now);
+                    .set_qspi_clock(clock, now);
             }
         }
     }

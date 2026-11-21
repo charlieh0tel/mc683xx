@@ -318,7 +318,7 @@ impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
         self.peripheral.set_chip_selects(levels, now);
     }
 
-    fn qspi_clock(&mut self, clock: QspiClock, now: Time) {
+    fn set_qspi_clock(&mut self, clock: QspiClock, now: Time) {
         let now = self.clock.base().cycles(now);
         self.peripheral.set_clock(clock, now);
     }

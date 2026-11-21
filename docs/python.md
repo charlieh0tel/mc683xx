@@ -983,7 +983,7 @@ int` (an `mc683xx.Transfer`: `attachment`, `entry`, `chip_selects`,
 `now`, when it ends; the Rust edge walk, `mc683xx_board::spi`, is not
 exposed, so a Python peripheral reckons its edges from `clock.polarity` and
 `clock.phase` by the rules docs/board-files.md, SPI edges, gives),
-`qspi_clock(clock, now)` (the QSPI's serial
+`set_qspi_clock(clock, now)` (the QSPI's serial
 clock, as the QSPI tells it: at the first entry and after CPOL, CPHA,
 SPBR or the system clock change), `select(attachment,
 selected, now, drive)`, `input(port, value, now, drive)`,

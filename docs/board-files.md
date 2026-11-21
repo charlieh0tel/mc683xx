@@ -569,7 +569,7 @@ The contract a host's peripheral models target (rustdoc in
     word; `.clocked(clock)` another clock, such as
     `QspiClock::at_reset(system_clock)`, SPCR0's out of reset), and `now`, when it ends) returns the bits in, all ones by
     default (`mc683xx_modules::peripheral::floating_miso`),
-    `select(attachment, selected, now, drive)`, `qspi_clock(clock,
+    `select(attachment, selected, now, drive)`, `set_qspi_clock(clock,
     now)`.  Framing: the board decodes PCS[3:0] by each attachment's
     `qspi` code and `mask`, and a peripheral sees `select` only when its own
     decode changes, true as a frame starts and false as it ends; that
@@ -622,7 +622,7 @@ The contract a host's peripheral models target (rustdoc in
     PCS's changes only at its end.  A batch runs where the CPU next sees the QSPI (its
     interrupt, a read or write of the QSM) or at the sync point,
     before `Board::run_until` goes on to the board's events: each
-    `transfer`, `select` and `qspi_clock` keeps its order and its own
+    `transfer`, `select` and `set_qspi_clock` keeps its order and its own
     `now`, but the CPU, board time and the other peripherals may be past
     it.  A peripheral may say true only if, in those calls, it drives no net
     and asks for no IRQ, RESET or stop (no `drive`, `drive_at`, `stop`,

@@ -986,7 +986,7 @@ chip beside `Mc68331`.
   before timed frames, as its data alone: a peripheral opts in with
   `TIMED_SERIAL`, `take_received` with `timed`, so old classes keep
   working.  A QSPI peripheral's `transfer(transfer, drive)` gets an
-  `mc683xx.Transfer`, as the Rust peripheral's, and `qspi_clock(clock, now)`
+  `mc683xx.Transfer`, as the Rust peripheral's, and `set_qspi_clock(clock, now)`
   as the Rust peripheral is told it.
   `externals()` gives `mc683xx.External`s, name, type and direction
   as the Rust `External`; each is its name as a string and equals

@@ -1086,9 +1086,9 @@ impl Peripheral for PythonPeripheral {
         }
     }
 
-    fn qspi_clock(&mut self, clock: peripheral::QspiClock, now: Time) {
+    fn set_qspi_clock(&mut self, clock: peripheral::QspiClock, now: Time) {
         self.ask(
-            "qspi_clock",
+            "set_qspi_clock",
             |py| {
                 Ok(vec![
                     Py::new(py, QspiClock::from(clock))?.into_any(),
