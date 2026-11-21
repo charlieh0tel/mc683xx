@@ -109,6 +109,7 @@ fn a_fault_stop_is_kept_until_the_next_run() {
         fault.to_string(),
         "bus error: read of 4 bytes at 0x90000000, fc 5, pc 0x00001000"
     );
+    assert_eq!(End::Fault(fault.clone()).to_string(), "fault");
     machine.cpu.registers.set_address(0, STACK);
     assert_eq!(one(&mut machine), End::Instructions);
     assert_eq!(machine.cpu.fault_stop(), None);
@@ -182,6 +183,24 @@ fn an_intercepted_trap_stacks_nothing_and_can_be_taken_natively() {
     one(&mut machine);
     assert_eq!(machine.cpu.registers.pc.0, HANDLER);
     assert_eq!(machine.cpu.registers.ssp.0, STACK - 8);
+}
+
+#[test]
+fn an_end_prints_its_short_name() {
+    let intercepted = End::Intercepted(Intercepted {
+        vector: Vector::trap(0),
+        pc: Address(CODE),
+    });
+    let names = [
+        (End::Stop(Stop::Budget), "budget"),
+        (End::Until, "until"),
+        (End::Instructions, "instructions"),
+        (End::Steps, "steps"),
+        (intercepted, "intercepted"),
+    ];
+    for (end, name) in names {
+        assert_eq!(end.to_string(), name);
+    }
 }
 
 #[test]

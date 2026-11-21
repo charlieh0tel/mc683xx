@@ -160,6 +160,23 @@ pub enum End {
     Intercepted(Intercepted),
 }
 
+/// A short lowercase name for each way a limited run ends, as
+/// [`Stop`]'s: its stop's name, or `until`, `instructions`, `steps`,
+/// `fault` or `intercepted`.  The detail a variant holds (the fault, the
+/// exception) is not part of it.
+impl fmt::Display for End {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Stop(stop) => stop.fmt(formatter),
+            Self::Until => formatter.write_str("until"),
+            Self::Instructions => formatter.write_str("instructions"),
+            Self::Steps => formatter.write_str("steps"),
+            Self::Fault(_) => formatter.write_str("fault"),
+            Self::Intercepted(_) => formatter.write_str("intercepted"),
+        }
+    }
+}
+
 /// A limited run's outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]

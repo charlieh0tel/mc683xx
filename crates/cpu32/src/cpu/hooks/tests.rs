@@ -94,6 +94,7 @@ fn a_code_hook_sees_registers_and_the_stack_and_stops_before() {
     });
     assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
     assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(id));
+    assert_eq!(id.to_string(), "hook 1");
     // Not executed.
     assert_eq!(cpu.registers.pc.0, CODE + 2);
     assert_eq!(cpu.instructions(), 1);

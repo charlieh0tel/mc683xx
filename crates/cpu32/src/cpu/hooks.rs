@@ -35,6 +35,13 @@ mod tests;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HookId(u64);
 
+/// `hook` and its number, in installing order from 1: `hook 3`.
+impl fmt::Display for HookId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "hook {}", self.0)
+    }
+}
+
 /// What a hook returns: [`Continue`](ControlFlow::Continue), or
 /// [`Break`](ControlFlow::Break) to stop the run.
 pub type Control = ControlFlow<()>;
