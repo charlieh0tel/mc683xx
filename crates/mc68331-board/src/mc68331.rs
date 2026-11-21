@@ -33,6 +33,7 @@ use mc683xx_mc68331::event::Event;
 use mc683xx_mc68331::gpt::Input;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm::Channel;
+use mc683xx_mc68331::port::OutputChange;
 use mc683xx_mc68331::port::Port;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
@@ -762,21 +763,26 @@ impl chip::Chip for Mc68331 {
     }
 
     fn collect<F: FnMut(Time, Pin, Signal)>(&mut self, base: TimeBase, mut emit: F) {
-        for change in self.take_port_changes() {
-            emit_port(
-                &mut emit,
-                base.time(change.now),
-                change.port,
-                change.outputs,
-            );
-        }
-        for change in self.take_pwm_changes() {
-            let pin = if change.channel == Channel::A {
-                Pin::PwmA
-            } else {
-                Pin::PwmB
-            };
-            emit(base.time(change.now), pin, Signal::Level(change.level));
+        // one stream, so a port GP pin and a PWM pin the firmware changes
+        // in one instruction reach the nets in that order
+        for change in self.take_output_changes() {
+            match change {
+                OutputChange::Port(change) => emit_port(
+                    &mut emit,
+                    base.time(change.now),
+                    change.port,
+                    change.outputs,
+                ),
+                OutputChange::Pwm(change) => {
+                    let pin = if change.channel == Channel::A {
+                        Pin::PwmA
+                    } else {
+                        Pin::PwmB
+                    };
+                    emit(base.time(change.now), pin, Signal::Level(change.level));
+                }
+                _ => {}
+            }
         }
         let system_clock = self.sim().clock().frequency();
         for sent in self.take_sci_transmitted() {

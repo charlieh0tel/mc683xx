@@ -9,6 +9,8 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::sim::ports::PortName;
 
+use crate::gpt::PwmChange;
+
 /// One of the MC68331's general-purpose ports, as the manual names
 /// them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -112,6 +114,38 @@ pub struct PortChange {
     pub port: Port,
     /// What it drives.
     pub outputs: PortLevels,
+}
+
+/// A change in what the chip drives on a port or a PWM pin, as
+/// [`Mc68331::take_output_changes`](crate::chip::Mc68331::take_output_changes)
+/// gives them in the order they happened.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum OutputChange {
+    /// A port's.
+    Port(PortChange),
+    /// A PWM pin's, while the host asks for its edges.
+    Pwm(PwmChange),
+}
+
+impl OutputChange {
+    /// When it happened.
+    #[must_use]
+    pub const fn now(&self) -> Cycles {
+        match self {
+            Self::Port(change) => change.now,
+            Self::Pwm(change) => change.now,
+        }
+    }
+
+    /// The port whose place it takes among the changes at one time: a
+    /// PWM pin's port GP's, as the GPT drives both.
+    pub(crate) const fn place(&self) -> Port {
+        match self {
+            Self::Port(change) => change.port,
+            Self::Pwm(_) => Port::Gp,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -60,6 +60,7 @@ use crate::event::DsackFault;
 use crate::event::Event;
 use crate::gpt::Gpt;
 use crate::port::NoInputsError;
+use crate::port::OutputChange;
 use crate::port::Port;
 use crate::port::PortChange;
 use mc683xx_cpu32::bus::StopRequest;
@@ -382,26 +383,30 @@ impl Board {
         Ok(())
     }
 
-    /// The changes in what each port drives since the last call, in
-    /// time order, those at one time in [`Port::ALL`]'s order.
-    pub(crate) fn take_port_changes(&mut self) -> Vec<PortChange> {
+    /// The changes in what each port drives since the last call, and
+    /// with `pwm` the PWM pins' reported edges, in time order, those at
+    /// one time in [`Port::ALL`]'s order, a PWM pin's in port GP's
+    /// place, the GPT's in the order they happened.  Without `pwm` the
+    /// PWM pins' stay queued.
+    pub(crate) fn take_output_changes(&mut self, pwm: bool) -> Vec<OutputChange> {
         let sim = self.sim.take_output_changes();
-        let gp = self.module_mut::<Gpt>(GPT).take_port_changes();
+        let gpt = self.module_mut::<Gpt>(GPT).take_output_changes(pwm);
         let qs = self.module_mut::<Qsm>(QSM).take_output_changes();
-        if sim.is_empty() && gp.is_empty() && qs.is_empty() {
+        if sim.is_empty() && gpt.is_empty() && qs.is_empty() {
             return Vec::new();
         }
-        let of = |port| move |(now, outputs)| PortChange { now, port, outputs };
+        let of = |port| move |(now, outputs)| OutputChange::Port(PortChange { now, port, outputs });
         let mut changes: Vec<_> = sim
             .into_iter()
             .map(|(at, change)| of(Port::from_sim(change.port))((at, change.outputs)))
-            .chain(gp.into_iter().map(of(Port::Gp)))
+            .chain(gpt)
             .chain(qs.into_iter().map(of(Port::Qs)))
             .collect();
         // each source is in time order, but the SIM's ports at one time
         // are in the order they were written (one MOVEM can write port F
-        // before port E): sort, stably, unless already in order
-        let order = |change: &PortChange| (change.now, change.port);
+        // before port E): sort, stably, unless already in order, which
+        // keeps the GPT's port GP and PWM changes at one time in theirs
+        let order = |change: &OutputChange| (change.now(), change.place());
         if !changes.is_sorted_by_key(order) {
             changes.sort_by_key(order);
         }

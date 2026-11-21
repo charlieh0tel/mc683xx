@@ -14,13 +14,16 @@ use mc683xx_target::size::Size;
 
 use super::Gpt;
 use super::Input;
-use super::OutputChange;
 use super::PortGpPin;
 use super::PwmChange;
+use super::Queued;
 use super::STATE_VERSION;
 use super::pwm::Channel;
 use super::pwm::Output;
 use super::timer::Counter;
+use crate::port::OutputChange;
+use crate::port::Port;
+use crate::port::PortChange;
 
 fn access(offset: u32, size: Size, now: u64) -> RegisterAccess {
     RegisterAccess {
@@ -819,13 +822,13 @@ fn a_reset_returns_the_registers_and_keeps_the_pins() {
 }
 
 /// Port GP driving `driven` at `levels`.
-const fn gp(driven: u8, levels: u8) -> OutputChange {
-    OutputChange::PortGp(PortLevels::new(driven, levels))
+const fn gp(driven: u8, levels: u8) -> Queued {
+    Queued::PortGp(PortLevels::new(driven, levels))
 }
 
 /// PWMA at `level`.
-const fn pwma(level: bool) -> OutputChange {
-    OutputChange::Pwm {
+const fn pwma(level: bool) -> Queued {
+    Queued::Pwm {
         channel: Channel::A,
         level,
     }
@@ -833,7 +836,7 @@ const fn pwma(level: bool) -> OutputChange {
 
 /// Every queued change, port GP's and the PWM pins' together, in time
 /// order.
-fn take_output_changes(gpt: &mut Gpt) -> Vec<(Cycles, OutputChange)> {
+fn take_output_changes(gpt: &mut Gpt) -> Vec<(Cycles, Queued)> {
     let mut changes = mem::take(&mut gpt.edges.queue);
     changes.sort_by_key(|&(at, _)| at);
     changes
@@ -848,12 +851,16 @@ fn port_and_pwm_changes_are_taken_apart_each_in_time_order() {
     write(&mut gpt, 0x1e, 0x0c00, 20);
     write_byte(&mut gpt, 0x24, 0x20, 1000);
     gpt.advance(Cycles(1100));
+    let port = |at, levels| {
+        OutputChange::Port(PortChange {
+            now: Cycles(at),
+            port: Port::Gp,
+            outputs: PortLevels::new(0x20, levels),
+        })
+    };
     assert_eq!(
-        gpt.take_port_changes(),
-        [
-            (Cycles(20), PortLevels::new(0x20, 0x00)),
-            (Cycles(1000), PortLevels::new(0x20, 0x20)),
-        ]
+        gpt.take_output_changes(false),
+        [port(20, 0x00), port(1000, 0x20)]
     );
     assert_eq!(
         gpt.take_pwm_changes(),
@@ -875,8 +882,32 @@ fn port_and_pwm_changes_are_taken_apart_each_in_time_order() {
             },
         ]
     );
-    assert_eq!(gpt.take_port_changes(), []);
+    assert_eq!(gpt.take_output_changes(true), []);
     assert_eq!(gpt.take_pwm_changes(), []);
+}
+
+#[test]
+fn port_and_pwm_changes_at_one_time_keep_their_order() {
+    let mut gpt = gpt();
+    gpt.set_report_pwm_edges(Channel::A, true, Cycles::ZERO);
+    // FPWMA with F1A: PWMA high at once (GPTRM 6.3.1); then PORTGP drives
+    // PGP0 low, then PWMA low, all at one time
+    write(&mut gpt, 0x24, 0x0202, 100);
+    write(&mut gpt, 0x06, 0x0100, 100);
+    write(&mut gpt, 0x24, 0x0200, 100);
+    let pwm = |level| {
+        OutputChange::Pwm(PwmChange {
+            now: Cycles(100),
+            channel: Channel::A,
+            level,
+        })
+    };
+    let port = OutputChange::Port(PortChange {
+        now: Cycles(100),
+        port: Port::Gp,
+        outputs: PortLevels::new(0x01, 0x00),
+    });
+    assert_eq!(gpt.take_output_changes(true), [pwm(true), port, pwm(false)]);
 }
 
 #[test]

@@ -894,7 +894,10 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
   changes show the pin low.  `take_pwm_changes()` gives `PwmChange {
   now, channel, level }` in time order for a channel
   `set_report_pwm_edges(channel, true)` asks for, PPROUT's clock edges
-  included.
+  included.  `take_output_changes()` gives both in one stream of
+  `OutputChange::Port` and `OutputChange::Pwm`, those at one time in
+  the order they happened, for a host that drives one thing from both
+  (a peripheral clocked by PWMA, its data on a port GP pin).
 
 ```rust
 use mc683xx_target::address::Address;

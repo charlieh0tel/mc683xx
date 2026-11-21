@@ -77,6 +77,7 @@ use crate::gpt::PwmChange;
 use crate::gpt::pwm::Channel;
 use crate::gpt::pwm::Output;
 use crate::port::NoInputsError;
+use crate::port::OutputChange;
 use crate::port::Port;
 use crate::port::PortChange;
 use mc683xx_modules::sim::chip_selects::Dsack;
@@ -1254,7 +1255,25 @@ impl Mc68331 {
     /// QSPI's PCS and the SCI's TXD at their entries' and frames'
     /// times.
     pub fn take_port_changes(&mut self) -> Vec<PortChange> {
-        self.board.take_port_changes()
+        self.board
+            .take_output_changes(false)
+            .into_iter()
+            .filter_map(|change| match change {
+                OutputChange::Port(change) => Some(change),
+                OutputChange::Pwm(_) => None,
+            })
+            .collect()
+    }
+
+    /// The changes [`take_port_changes`](Self::take_port_changes) and
+    /// [`take_pwm_changes`](Self::take_pwm_changes) give, in one stream,
+    /// in time order, those at one time in [`Port::ALL`]'s order, a PWM
+    /// pin's in port GP's place, port GP's and the PWM pins' in the order
+    /// they happened: for a host that drives one thing from both, a
+    /// peripheral clocked by PWMA that takes its data from a port GP pin,
+    /// as the firmware may change both in one instruction.
+    pub fn take_output_changes(&mut self) -> Vec<OutputChange> {
+        self.board.take_output_changes(true)
     }
 
     /// The host asserts or negates `pin`.
