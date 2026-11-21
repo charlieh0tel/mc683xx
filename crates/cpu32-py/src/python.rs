@@ -1,17 +1,24 @@
 //! The Python module `mc683xx`, and the bindings' errors as Python
 //! exceptions.
 
+use std::io;
+use std::path::Path;
+
+use mc683xx_board::error::LoadError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_mc68331::host::AccessError;
 use pyo3::Bound;
 use pyo3::PyErr;
 use pyo3::PyResult;
+use pyo3::Python;
 use pyo3::exceptions::PyIndexError;
 use pyo3::exceptions::PyNotImplementedError;
+use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyOverflowError;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::exceptions::PyValueError;
 use pyo3::pymodule;
+use pyo3::types::PyAnyMethods;
 use pyo3::types::PyModule;
 use pyo3::types::PyModuleMethods;
 
@@ -86,6 +93,8 @@ impl From<Error> for PyErr {
             }
             Error::Access(AccessError::Unpeekable) => exceptions::UnpeekableError::new_err(message),
             Error::Target(_) => exceptions::TargetError::new_err(message),
+            Error::Load(LoadError::Read { path, error }) => os_error(&path, error),
+            Error::Load(_) => exceptions::LoadError::new_err(message),
             Error::Select(_)
             | Error::Input(_)
             | Error::Frame(_)
@@ -106,6 +115,25 @@ impl From<Error> for PyErr {
             | Error::Map(_) => PyValueError::new_err(message),
         }
     }
+}
+
+/// A file `path` that could not be read, as the `OSError` subclass
+/// Python gives the error's errno (`FileNotFoundError` for `ENOENT`),
+/// with `filename`; one with no errno as the bindings map its kind.
+fn os_error(path: &Path, error: io::Error) -> PyErr {
+    let Some(errno) = error.raw_os_error() else {
+        let message = format!("{}: {error}", path.display());
+        return io::Error::new(error.kind(), message).into();
+    };
+    Python::attach(|py| {
+        let strerror = py.import("os")?.getattr("strerror")?.call1((errno,))?;
+        Ok(PyOSError::new_err((
+            errno,
+            strerror.unbind(),
+            path.as_os_str().to_os_string(),
+        )))
+    })
+    .unwrap_or_else(|raised: PyErr| raised)
 }
 
 /// The module.
@@ -173,6 +201,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
         "StateError",
         module.py().get_type::<exceptions::StateError>(),
     )?;
+    module.add("LoadError", module.py().get_type::<exceptions::LoadError>())?;
     module.add(
         "TargetError",
         module.py().get_type::<exceptions::TargetError>(),

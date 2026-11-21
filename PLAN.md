@@ -857,7 +857,8 @@ chip beside `Mc68331`.
   ends (the chip's `StopRequest`; `Stop.Requested()`), and the call
   into the chip that ran the peripheral (`run_for`, `reset`, `build`) raises
   it when it returns, the chip as it then is.  The bindings' own
-  errors are `ValueError` (`StateError` among them), `IndexError`,
+  errors are `ValueError` (`StateError` and `LoadError` among them;
+  a board file not read, the `OSError` its errno gives), `IndexError`,
   `OverflowError`, `RuntimeError` (`TargetError` among them) and
   `NotImplementedError`; nothing
   panics across the boundary.

@@ -921,6 +921,8 @@ chip.run_for(500)
   other hardware, another count of peripherals, bytes that do not
   decode, or values no run could save; a peripheral that
   cannot save, named.
+- `mc683xx.LoadError` (a `ValueError`): a board file `Board` refuses
+  (Board files).
 - `mc683xx.TargetError` (a `RuntimeError`): a background debug control
   the CPU's state refuses (Background debug mode).
 - `NotImplementedError`: a module that cannot save.
@@ -931,7 +933,7 @@ chip.run_for(500)
   bare `Machine`'s hook calling `run_limited` or `serve_gdb`, or gdb sending what
   the stub cannot take.
 - `OSError`: `serve_gdb` could not listen, or gdb's connection failed
-  or closed without a detach.
+  or closed without a detach; `Board` could not read its file.
 - `TypeError`: a peripheral without `read` and `write`, a QSPI peripheral
   without `transfer`, a hook that is not callable.
 
@@ -966,7 +968,10 @@ file (`docs/board-files.md`) through its power-on reset, `parameters`
 `types`, `images` and `parameters` take any mapping, a `dict` or
 another.  The board is built around the MC68331 (Rust's
 `Board<Mc68331>`): a file whose `[chip] type` names another chip raises
-`ValueError`.  Its peripheral types
+`mc683xx.LoadError`, as does any file the load refuses (Rust's
+`LoadError`, its message naming what is wrong; a `ValueError`); a file
+it cannot read raises the `OSError` its errno gives
+(`FileNotFoundError`, `PermissionError`), with its `filename`.  Its peripheral types
 are the built-in ones and `types`' classes, by the name the file's
 `type` gives.  A class declares its ports in `PORTS`, a list of
 `(name, kind, direction)`, as Rust's `PortSpec` (a net type; `"in"`,

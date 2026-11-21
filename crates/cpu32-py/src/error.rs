@@ -1,6 +1,7 @@
 //! What a Python host can get wrong, before it becomes a Python
 //! exception.
 
+use mc683xx_board::error::LoadError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::flat::MapError;
 use mc683xx_cpu32::interrupt::NoIrqPin;
@@ -114,4 +115,7 @@ pub(crate) enum Error {
     /// The chip refused a debugger's call.
     #[error(transparent)]
     Target(#[from] TargetError),
+    /// A board file refused, or not read.
+    #[error(transparent)]
+    Load(#[from] LoadError),
 }

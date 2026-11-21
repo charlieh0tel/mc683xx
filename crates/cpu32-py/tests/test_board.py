@@ -678,8 +678,23 @@ def test_the_options_are_any_mappings(tmp_path: Path) -> None:
 def test_a_board_of_another_chip_is_refused(tmp_path: Path) -> None:
     (tmp_path / "rom.bin").write_bytes(rom([]))
     (tmp_path / "board.toml").write_text(BOARD.replace('type = "mc68331"', 'type = "mc68332"'))
-    with pytest.raises(ValueError, match="chip type \"mc68332\""):
+    with pytest.raises(mc683xx.LoadError, match="chip type \"mc68332\""):
         mc683xx.Board(str(tmp_path / "board.toml"), types={"latch": Latch, "lamp": Lamp})
+
+
+def test_a_refused_board_file_raises_load_error(tmp_path: Path) -> None:
+    (tmp_path / "board.toml").write_text("version = 2\n")
+    with pytest.raises(mc683xx.LoadError, match="board file version 2") as raised:
+        mc683xx.Board(str(tmp_path / "board.toml"))
+    assert isinstance(raised.value, ValueError)
+
+
+def test_an_unread_board_file_raises_the_os_error_its_errno_gives(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.toml"
+    with pytest.raises(FileNotFoundError) as raised:
+        mc683xx.Board(str(missing))
+    assert raised.value.filename == str(missing)
+    assert not isinstance(raised.value, mc683xx.LoadError)
 
 
 INTERRUPTED_BOARD = """

@@ -65,6 +65,7 @@ __all__ = [
     "BusError",
     "UnpeekableError",
     "StateError",
+    "LoadError",
     "TargetError",
 ]
 
@@ -92,6 +93,10 @@ class StateError(ValueError):
     hardware, another count of peripherals, bytes that do not decode, or
     values no run could save; by save and restore for a peripheral or
     peripheral that cannot save, named."""
+
+class LoadError(ValueError):
+    """Raised by Board for a board file it refuses, naming what in the
+    file is wrong; a file it cannot read raises OSError instead."""
 
 class TargetError(RuntimeError):
     """Raised by the chip's background debug controls: halt with

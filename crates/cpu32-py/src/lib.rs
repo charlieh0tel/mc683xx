@@ -77,6 +77,14 @@ mod exceptions {
 
     pyo3::create_exception!(
         mc683xx,
+        LoadError,
+        PyValueError,
+        "Raised by Board for a board file it refuses, naming what in the \
+         file is wrong; a file it cannot read raises OSError instead."
+    );
+
+    pyo3::create_exception!(
+        mc683xx,
         TargetError,
         PyRuntimeError,
         "Raised by the chip's background debug controls: halt with \
