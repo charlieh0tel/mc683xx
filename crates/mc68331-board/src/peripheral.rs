@@ -59,7 +59,7 @@ impl Role {
     /// Its name, as an attachment's `role` gives it: `read`, `write`,
     /// `read-write` or `iack`.
     #[must_use]
-    pub const fn name(self) -> &'static str {
+    const fn name(self) -> &'static str {
         match self {
             Self::Read => "read",
             Self::Write => "write",
@@ -75,7 +75,7 @@ impl fmt::Display for Role {
     }
 }
 
-/// The attachment role [`Role::name`] names.
+/// The attachment role its name, as it displays, names.
 impl FromStr for Role {
     type Err = ParseRoleError;
 
@@ -113,7 +113,7 @@ impl Lane {
     /// Its name, as an attachment's `lane` gives it: `both`, `upper` or
     /// `lower`.
     #[must_use]
-    pub const fn name(self) -> &'static str {
+    const fn name(self) -> &'static str {
         match self {
             Self::Both => "both",
             Self::Upper => "upper",
@@ -128,7 +128,7 @@ impl fmt::Display for Lane {
     }
 }
 
-/// The data lane [`Lane::name`] names.
+/// The data lane its name, as it displays, names.
 impl FromStr for Lane {
     type Err = ParseLaneError;
 
@@ -227,7 +227,7 @@ impl PeripheralAccess {
     /// `address`, of `size` and `function_code`, at `now`, through
     /// attachment 0, read-write, on both lanes.
     #[must_use]
-    pub const fn on_no_select(
+    pub const fn unselected(
         address: u32,
         size: Size,
         function_code: FunctionCode,

@@ -542,7 +542,7 @@ The contract a host's peripheral models target (rustdoc in
     others, which costs the board nothing.
     `PeripheralAccess` is `#[non_exhaustive]`: a host's test builds one with
     `PeripheralAccess::new(select, address, size, function_code, now)`
-    (`PeripheralAccess::on_no_select(address, size, function_code, now)`
+    (`PeripheralAccess::unselected(address, size, function_code, now)`
     for a peripheral on no select), a read, and
     `.through(attachment, role, lane)` and `.writing(true)`.  The board layer turns each
     chip `mc683xx_cpu32::peripheral::BusCycle` into a `PeripheralAccess`.  An 8-bit

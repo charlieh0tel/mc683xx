@@ -330,7 +330,7 @@ impl Routes {
             .and_then(|select| ChipSelect::try_from(select).ok())
         {
             Some(select) => PeripheralAccess::new(select, address, size, cycle.function_code, now),
-            None => PeripheralAccess::on_no_select(address, size, cycle.function_code, now),
+            None => PeripheralAccess::unselected(address, size, cycle.function_code, now),
         }
         .through(route.attachment, route.role, route.lane)
         .writing(cycle.write)
