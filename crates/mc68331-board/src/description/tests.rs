@@ -371,9 +371,9 @@ fn a_host_stands_in_for_a_peripheral_through_an_external_endpoint() {
          [[net]]\nname = \"e\"\ntype = \"edge\"\nfrom = \"div.out\"\nto = [\"count.in\", \"external.scope\"]\n",
     ))
     .unwrap();
-    assert_eq!(description.rebind("div.out", "external.divided"), Ok(1));
+    assert_eq!(description.rebind("div.out", "divided"), Ok(1));
     assert_eq!(
-        description.rebind("div.uot", "external.divided"),
+        description.rebind("div.uot", "divided"),
         Err(EditError::Port("div.uot".to_owned())),
         "a misspelled port is on no net"
     );
@@ -412,16 +412,16 @@ fn a_host_stands_in_for_a_peripheral_through_an_external_endpoint() {
         Err(EditError::Peripheral("div".to_owned()))
     );
     assert_eq!(
-        description.rebind("div.out", "external.x"),
+        description.rebind("div.out", "x"),
         Err(EditError::Port("div.out".to_owned()))
     );
     assert_eq!(
-        description.rebind("chip.PGP0", "external.x"),
+        description.rebind("chip.PGP0", "x"),
         Err(EditError::Port("chip.PGP0".to_owned()))
     );
     assert_eq!(
-        description.rebind("count.in", "osc.out"),
-        Err(EditError::External("osc.out".to_owned()))
+        description.rebind("count.in", ""),
+        Err(EditError::External(String::new()))
     );
 }
 

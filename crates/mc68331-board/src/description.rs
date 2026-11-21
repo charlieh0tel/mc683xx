@@ -378,8 +378,9 @@ impl Description {
     }
 
     /// Moves every net end at `endpoint`, a peripheral's port
-    /// (`peripheral.port`), to `external`, a run-time endpoint
-    /// (`external.name`) the host binds: a part the host stands in for
+    /// (`peripheral.port`), to the run-time endpoint `external` the
+    /// host binds, by its bare name (`external.<name>` in the file), as
+    /// [`Board::send`] and the rest name it: a part the host stands in for
     /// (a real GPS engine for a modeled one), whose peripheral it then
     /// removes ([`Description::remove_peripheral`]).  The ends moved,
     /// at least one.  The board's load checks the external endpoint
@@ -392,15 +393,18 @@ impl Description {
     /// # Errors
     ///
     /// An `endpoint` that is not a peripheral's port at the end of a
-    /// net ([`EditError::Port`]), or an `external` that is not
-    /// `external.name` ([`EditError::External`]).
+    /// net ([`EditError::Port`]), or an empty `external`
+    /// ([`EditError::External`]).
+    ///
+    /// [`Board::send`]: crate::board::Board::send
     pub fn rebind(&mut self, endpoint: &str, external: &str) -> Result<usize, EditError> {
         let from = Endpoint::parse(endpoint)
             .filter(|parsed| matches!(parsed, Endpoint::Peripheral { .. }))
             .ok_or_else(|| EditError::Port(endpoint.to_owned()))?;
-        let to = Endpoint::parse(external)
-            .filter(|parsed| matches!(parsed, Endpoint::External(_)))
-            .ok_or_else(|| EditError::External(external.to_owned()))?;
+        if external.is_empty() {
+            return Err(EditError::External(external.to_owned()));
+        }
+        let to = Endpoint::External(external.to_owned());
         let ends: Vec<_> = self
             .nets
             .iter_mut()

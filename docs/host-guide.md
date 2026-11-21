@@ -1367,8 +1367,9 @@ host's bytes passes to both, `&read` to the first.  A parsed
 `Description` is edited before it loads, so a host need not rewrite
 the file's TOML: `parameters(peripheral)`, `set_parameter(peripheral,
 key, value)` and `remove_parameter(peripheral, key)`;
-`rebind("gps.rx", "external.gps")` moves every net end at a
-peripheral's port to a run-time endpoint the host binds (the ends
+`rebind("gps.rx", "gps")` moves every net end at a
+peripheral's port to a run-time endpoint the host binds, by its bare
+name as `Board::send` takes it (`external.gps` in the file; the ends
 moved; a port on no net, a misspelled one among them, refused);
 `remove_peripheral(name)` takes a
 part off as an option off would, its net ends and any net left with no

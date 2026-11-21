@@ -238,8 +238,8 @@ pub enum EditError {
     /// the board's nets.
     #[error("{0:?} is no peripheral's port on the board's nets")]
     Port(String),
-    /// An endpoint that is not `external.name`.
-    #[error("{0:?} is not an external endpoint, external.name")]
+    /// An external endpoint's name that names none: an empty one.
+    #[error("{0:?} names no external endpoint")]
     External(String),
 }
 
