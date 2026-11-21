@@ -283,7 +283,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
     environment.seed = arguments.seed;
     environment.work_dir = arguments.work_dir.clone();
     let registry = mc683xx_peripherals::registry();
-    let mut board = Board::<Mc68331>::read(&arguments.board, &options, &registry, environment)?;
+    let mut board = Board::<Mc68331>::read(&arguments.board, &options, &registry, &environment)?;
     board
         .chip_mut()
         .cpu_control()

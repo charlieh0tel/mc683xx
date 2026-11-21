@@ -1461,8 +1461,8 @@ impl BoardView {
         let mut environment = Environment::default();
         environment.seed = seed;
         environment.work_dir = work_dir;
-        let board =
-            Board::<Mc68331>::read(&path, &options, &registry, environment).map_err(Error::from)?;
+        let board = Board::<Mc68331>::read(&path, &options, &registry, &environment)
+            .map_err(Error::from)?;
         pending.set_board_stop(board.stop_request());
         let view = Self { board, pending };
         view.check()?;

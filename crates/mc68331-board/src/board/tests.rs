@@ -70,7 +70,7 @@ fn divided() -> Board<Mc68331> {
     let mut board = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap();
     board.run_until(Time::from_picos(1_000_000)).unwrap();
@@ -187,7 +187,7 @@ fn qspi_levels_past_pcs_3_0_are_refused() {
     let mut board = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap();
     board.run_until(Time::from_picos(1_000_000)).unwrap();
@@ -269,7 +269,7 @@ fn a_refusing_peripheral_is_not_rolled_back_and_the_ones_before_it_are() {
         })
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     board.run_until(Time::from_picos(1_000_000)).unwrap();
     let snapshot = board.save().unwrap();
     board.run_until(Time::from_picos(2_000_000)).unwrap();

@@ -191,7 +191,7 @@ fn board(name: &str, text: &str, program: &[u16]) -> Board<Mc68331> {
     let board = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap();
     fs::remove_dir_all(directory).unwrap();
@@ -445,7 +445,7 @@ attach = [{ select = "CS1", role = "write" }]
         })
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board.run_until(Time::from_picos(100_000_000)).unwrap();
     let latch = board.peripheral::<WriteLatch>("latch").unwrap();
@@ -891,7 +891,7 @@ type = "watcher"
         })
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     assert_eq!(board.system_clock().frequency().hz(), 8_388_608);
     board.run_until(Time::from_picos(100_000_000)).unwrap();
@@ -955,7 +955,7 @@ to = ["lamp.in"]
         })
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     board.send("switch", Signal::Level(true)).unwrap();
     board.run_until(Time::from_picos(1_000_000)).unwrap();
     let levels = board
@@ -1017,7 +1017,7 @@ to = ["lamps.{net}"]
     let load = |inputs, net: &str| {
         let description =
             Description::parse(&text(inputs, net), &env::temp_dir(), &Options::default())?;
-        Board::<Mc68331>::load(&description, &registry, Environment::default())
+        Board::<Mc68331>::load(&description, &registry, &Environment::default())
     };
     let mut board = load(3, "in2").unwrap();
     board.send("switch", Signal::Level(true)).unwrap();
@@ -1092,7 +1092,7 @@ type = "periodic"
         })
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     let end = Time::from_picos(100_000_000_000);
     board.run_until(end).unwrap();
@@ -1177,7 +1177,7 @@ attach = [{ qspi = 0b1010 }]
         .register("framed", Vec::new(), |_| Ok(Box::new(Framed::default())))
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board.run_until(Time::from_picos(1_000_000_000)).unwrap();
     let seen = |name: &str| {
@@ -1255,7 +1255,7 @@ attach = [{ qspi = 0b0101 }]
     registry
         .register("clocked", Vec::new(), |_| Ok(Box::new(Clocked::default())))
         .unwrap();
-    let board = Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+    let board = Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board
 }
@@ -1338,7 +1338,7 @@ to = ["external.q"]
         })
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board.run_until(Time::from_picos(1_000)).unwrap();
     assert_eq!(
@@ -1429,7 +1429,7 @@ attach = [{ select = "CS1" }]
         })
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     let mut builder = Builder::default();
     builder
@@ -1513,7 +1513,7 @@ attach = [{ qspi = 0b1010 }]
         })
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board.run_until(Time::from_picos(1_000_000_000)).unwrap();
     let (transfers, levels) = board
@@ -1617,7 +1617,7 @@ attach = [{ select = "CS1" }]
                 })
             })
             .unwrap();
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap()
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap()
     };
     let ticker = |board: &mut Board<Mc68331>| {
         board
@@ -2136,7 +2136,7 @@ attach = [{ select = "CS2", role = "write", lines = [1, 2, 3, 4, 5, 6, 7, 8, 9, 
         })
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board.run_until(Time::from_picos(500_000_000)).unwrap();
     // polling during the program: DQ7 the complement of the data's
@@ -2240,7 +2240,7 @@ type = "overwriter"
             Ok(Box::new(Overwriter { takes, done: false }))
         })
         .unwrap();
-    Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap()
+    Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap()
 }
 
 /// D0's low word.
@@ -2303,7 +2303,7 @@ parameters = { value = 1 }
         Board::<Mc68331>::load(
             &description,
             &Registry::with_builtins(),
-            Environment::default(),
+            &Environment::default(),
         )
     };
     assert!(load("d.value=2").is_ok());
@@ -2338,7 +2338,7 @@ parameters = { bytes = 0x80000000 }
     let error = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap_err();
     assert!(
@@ -2395,7 +2395,7 @@ type = "events"
                 Ok(Box::new(Events { events, moves }))
             })
             .unwrap();
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap()
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap()
     };
     // several events at one time, each an advance, then none
     let mut board = load(10, true);
@@ -2477,7 +2477,7 @@ attach = [{ select = "CS1" }]
             Ok(Box::new(Stopper { timed }))
         })
         .unwrap();
-    Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap()
+    Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap()
 }
 
 #[test]
@@ -2668,7 +2668,7 @@ irq = 1
         .register("probe", Vec::new(), |_| Ok(Box::new(Probe::default())))
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     let mut tracing = BoardTracing::default();
     tracing.qspi = true;
@@ -2790,7 +2790,7 @@ to = ["counter.in"]
         })
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     board.run_until(Time::from_picos(2_000_000_000)).unwrap();
     board
         .peripheral::<EdgeCounter>("counter")
@@ -2960,7 +2960,7 @@ to = ["chip.PQS0"]
             |_| Ok(Box::new(BitLatch)),
         )
         .unwrap();
-    Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap()
+    Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap()
 }
 
 /// A millisecond in picoseconds.
@@ -3082,7 +3082,7 @@ to = ["chip.PQS0"]
             |_| Ok(Box::new(Echo)),
         )
         .unwrap();
-    let board = Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+    let board = Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     quantized(board, total, quantum)
 }
 
@@ -3266,7 +3266,7 @@ to = ["chip.RESET"]
         )
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     board.take_events();
     // the external resets since the last call, at their board times
     let resets = |board: &mut Board<Mc68331>| -> Vec<Time> {
@@ -3377,7 +3377,7 @@ to = ["chip.PGP0"]
             move |_| Ok(Box::new(Scripted(script))),
         )
         .unwrap();
-    Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap()
+    Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap()
 }
 
 /// PGP0 as the firmware last read it.
@@ -3592,7 +3592,7 @@ to = ["chip.RESET", "external.observed"]
         })
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     board.take_events();
     board
 }
@@ -4224,7 +4224,7 @@ attach = [{{ select = "CS1" }}]
         )
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board.run_until(until).unwrap();
     board

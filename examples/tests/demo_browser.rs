@@ -81,7 +81,7 @@ fn the_demo_board_runs_from_bytes_and_a_host_clock() {
     let mut board = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap();
     let control = board.control();

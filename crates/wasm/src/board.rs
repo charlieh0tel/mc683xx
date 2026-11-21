@@ -72,7 +72,7 @@ impl Board {
         let board = mc683xx_board::board::Board::load_with(
             &description,
             &mc683xx_peripherals::registry(),
-            Environment::default(),
+            &Environment::default(),
             read,
         )?;
         Ok(Self { board })

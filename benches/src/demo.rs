@@ -64,7 +64,7 @@ impl Demo {
             &Path::new(env!("CARGO_MANIFEST_DIR")).join(BOARD),
             &Options::default(),
             &Registry::with_builtins(),
-            Environment::default(),
+            &Environment::default(),
         )
         .expect("the demo board");
         Self::to_prompt(&mut board, b"");

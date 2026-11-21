@@ -75,7 +75,7 @@ fn board() -> Board<Mc68331> {
     Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap()
 }

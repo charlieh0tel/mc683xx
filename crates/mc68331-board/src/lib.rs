@@ -83,7 +83,7 @@
 //! "#;
 //! let description = Description::parse(text, Path::new("."), &Options::default())?;
 //! let registry = Registry::with_builtins();
-//! let mut board = Board::<Mc68331>::load(&description, &registry, Environment::default())?;
+//! let mut board = Board::<Mc68331>::load(&description, &registry, &Environment::default())?;
 //! let until = Time::from_picos(1_000_000);
 //! let run = board.run_until(until)?;
 //! assert_eq!(run.stop, Stop::Budget);

@@ -159,8 +159,8 @@ fn board(name: &str, target: u32, peripherals: &str) -> Board<Mc68331> {
         Description::parse(&text, &directory, &Options::default()).expect("the board file");
     fs::remove_dir_all(&directory).expect("the scratch directory removed");
     let registry = mc683xx_peripherals::registry();
-    let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).expect("the board");
+    let mut board = Board::<Mc68331>::load(&description, &registry, &Environment::default())
+        .expect("the board");
     board.run_for(SPAN).expect("the boot");
     board
 }

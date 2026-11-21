@@ -148,7 +148,7 @@ to = ["u2.A"]
     }
     let description = Description::parse(&text, &directory, &Options::default()).unwrap();
     let registry = mc683xx_peripherals::registry();
-    let board = Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+    let board = Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board
 }

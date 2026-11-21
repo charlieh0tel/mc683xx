@@ -137,7 +137,7 @@ fn a_host_gives_the_peripheral_s_image_as_it_gives_a_memory_s() {
     let board = Board::<Mc68331>::load_with(
         &description,
         &mc683xx_peripherals::registry(),
-        Environment::default(),
+        &Environment::default(),
         read,
     )
     .unwrap();
@@ -158,7 +158,7 @@ fn the_cpu_writes_a_byte_and_polls_it_to_the_end_of_its_write_cycle() {
     let description = Description::parse(BOARD, &directory, &Options::default()).unwrap();
     let registry = mc683xx_peripherals::registry();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
 
     board
         .run_until(Time::from_picos(WRITE_CYCLE_PS / 2))

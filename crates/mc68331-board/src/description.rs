@@ -9,6 +9,7 @@
 //! [board-files]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/board-files.md
 
 use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fs;
@@ -718,10 +719,12 @@ impl Description {
         &self,
         registry: &Registry,
         environment: &Environment,
-        read: impl Fn(&Path) -> io::Result<Vec<u8>>,
+        read: impl FnMut(&Path) -> io::Result<Vec<u8>>,
     ) -> Result<(), LoadError> {
         let mut environment = environment.clone();
         environment.set_board_dir(self.directory.clone());
+        let read = RefCell::new(read);
+        let read = |path: &Path| (read.borrow_mut())(path);
         let ports = self
             .peripherals
             .iter()

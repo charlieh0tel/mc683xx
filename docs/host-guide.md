@@ -1367,10 +1367,12 @@ A board is generic over the chip it is built around
 gives the file's `[chip] type`, for a host that serves several chips
 to choose by.  `Description::parse_with(text, directory, &options,
 read)` is `Description::parse` with each image's bytes from
-`read(path) -> io::Result<Vec<u8>>` rather than the file system, for a
-host with no files (a browser) to hand them over; an error it returns
-is the load's `LoadError::Image`.  `Board::load_with(&description,
-&registry, environment, read)` is `Board::load` with each peripheral
+`read(path) -> io::Result<Vec<u8>>` (an `FnMut`) rather than the file
+system, for a host with no files (a browser) to hand them over; an
+error it returns is the load's `LoadError::Image`.
+`Board::load_with(&description, &registry, &environment, read)` is
+`Board::load` (which, as `Description::check_ports`, borrows the
+`Environment`) with each peripheral
 path parameter's bytes (`Context::contents`) from the same kind of
 `read`, an error the load's `LoadError::Parameter`: a closure over the
 host's bytes passes to both, `&read` to the first.  A parsed
@@ -1574,7 +1576,7 @@ to = ["chip.PGP1"]
 "#;
 let description = Description::parse(text, Path::new("."), &Options::default()).unwrap();
 let registry = mc683xx_peripherals::registry();
-let mut board = Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+let mut board = Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
 let rises = Rc::new(RefCell::new(Vec::new()));
 let seen = Rc::clone(&rises);
 board
@@ -1630,7 +1632,7 @@ from = "external.key"
 to = ["chip.PGP1"]
 "#;
 let description = Description::parse(text, Path::new("."), &Options::default()).unwrap();
-let mut board = Board::<Mc68331>::load(&description, &Registry::with_builtins(), Environment::default()).unwrap();
+let mut board = Board::<Mc68331>::load(&description, &Registry::with_builtins(), &Environment::default()).unwrap();
 let control = board.control();
 control.set_pacing(Pacing::RealTime).unwrap();
 let front_end = control.clone();

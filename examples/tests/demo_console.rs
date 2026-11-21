@@ -51,7 +51,7 @@ fn console() -> Vec<u8> {
         &directory.join("boards/demo.toml"),
         &Options::default(),
         &registry,
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap();
     let mut typed = SCRIPT.iter();

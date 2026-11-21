@@ -233,7 +233,7 @@ fn board_from(text: &str) -> Board<Mc68331> {
     let text = format!("{text}{nets}");
     let description = Description::parse(&text, &directory, &Options::default()).unwrap();
     let registry = mc683xx_peripherals::registry();
-    let board = Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+    let board = Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board
 }
@@ -375,7 +375,7 @@ attach = [{ qspi = 0b1110 }]
     let description = Description::parse(text, &directory, &Options::default()).unwrap();
     let registry = mc683xx_peripherals::registry();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board.run_until(Time::from_picos(10_000_000_000)).unwrap();
     // Dout read on the rise after each shifting fall (MC144110/D 4.1;

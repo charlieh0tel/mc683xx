@@ -43,7 +43,7 @@
 //! to = ["external.lamp"]
 //! "#;
 //! let description = Description::parse(text, Path::new("."), &Options::default())?;
-//! let mut board = Board::<Mc68331>::load(&description, &registry, Environment::default())?;
+//! let mut board = Board::<Mc68331>::load(&description, &registry, &Environment::default())?;
 //! board.run_until(Time::from_picos(1))?;
 //! assert_eq!(board.take_received("lamp").unwrap(), [(Time::ZERO, Signal::Level(false))]);
 //! # Ok::<(), Box<dyn std::error::Error>>(())

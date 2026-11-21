@@ -602,7 +602,7 @@ impl<C: Chip> Board<C> {
         path: &Path,
         options: &Options,
         registry: &Registry,
-        environment: Environment,
+        environment: &Environment,
     ) -> Result<Self, LoadError> {
         let description = Description::read(path, options)?;
         Self::load(&description, registry, environment)
@@ -624,7 +624,7 @@ impl<C: Chip> Board<C> {
     pub fn load(
         description: &Description,
         registry: &Registry,
-        environment: Environment,
+        environment: &Environment,
     ) -> Result<Self, LoadError> {
         Self::load_with(description, registry, environment, |path| fs::read(path))
     }
@@ -641,10 +641,13 @@ impl<C: Chip> Board<C> {
     pub fn load_with(
         description: &Description,
         registry: &Registry,
-        mut environment: Environment,
-        read: impl Fn(&Path) -> io::Result<Vec<u8>>,
+        environment: &Environment,
+        read: impl FnMut(&Path) -> io::Result<Vec<u8>>,
     ) -> Result<Self, LoadError> {
+        let mut environment = environment.clone();
         environment.set_board_dir(description.directory.clone());
+        let read = RefCell::new(read);
+        let read = |path: &Path| (read.borrow_mut())(path);
         let mut cells: Vec<PeripheralCell> = Vec::new();
         let mut peripherals = Vec::new();
         for spec in &description.peripherals {

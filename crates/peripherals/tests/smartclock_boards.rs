@@ -222,7 +222,7 @@ fn load_and_run(path: &Path, directory: &Path, enabled: bool) -> Result<(), Stri
         .map_err(|error| error.to_string())?;
     let mut environment = Environment::default();
     environment.work_dir = Some(directory.to_owned());
-    let mut board = Board::<Mc68331>::load(&description, &registry(path), environment)
+    let mut board = Board::<Mc68331>::load(&description, &registry(path), &environment)
         .map_err(|error| error.to_string())?;
     board
         .run_until(Time::from_picos(1_000_000_000))

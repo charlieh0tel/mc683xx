@@ -92,7 +92,7 @@ reload = ["external"]
     let mut board = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap();
     fs::remove_dir_all(directory).unwrap();

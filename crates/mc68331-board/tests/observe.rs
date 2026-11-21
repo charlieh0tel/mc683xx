@@ -118,7 +118,7 @@ to = ["external.lamp"{switch}]
             |_| Ok(Box::new(Probe::default())),
         )
         .unwrap();
-    Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap()
+    Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap()
 }
 
 /// A log observers share.

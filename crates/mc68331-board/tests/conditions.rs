@@ -133,7 +133,7 @@ to = ["chip.PGP0", "counter.in"{sink}]
             Ok(Box::new(Probe::default()))
         })
         .unwrap();
-    Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap()
+    Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap()
 }
 
 /// The net condition `change` on `pps`.
@@ -200,7 +200,7 @@ to = ["external.switch-seen"]
     Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap()
 }

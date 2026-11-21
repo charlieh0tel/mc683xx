@@ -75,7 +75,7 @@ fn error(extra: &str) -> String {
         Ok(description) => Board::<Mc68331>::load(
             &description,
             &Registry::with_builtins(),
-            Environment::default(),
+            &Environment::default(),
         )
         .map(|_| ())
         .unwrap_err()
@@ -346,12 +346,15 @@ fn a_type_built_for_its_ports_reads_its_paths_through_the_host() {
     ))
     .unwrap();
     let environment = Environment::default();
+    let mut reads = 0;
     description
         .check_ports_with(&registry, &environment, |path| {
             assert!(path.ends_with("no-such-file"));
+            reads += 1;
             Ok(b"tip".to_vec())
         })
         .unwrap();
+    assert_eq!(reads, 1, "read is an FnMut");
     assert!(matches!(
         description.check_ports_with(&registry, &environment, |_| Err(io::ErrorKind::NotFound.into())),
         Err(LoadError::Parameter { peripheral, .. }) if peripheral == "p"
@@ -398,7 +401,7 @@ fn a_host_stands_in_for_a_peripheral_through_an_external_endpoint() {
     Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap();
     assert_eq!(
@@ -482,7 +485,7 @@ fn the_file_names_its_chip_and_another_chip_refuses_it() {
     let error = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .map(|_| ())
     .unwrap_err();
@@ -496,7 +499,7 @@ fn the_file_names_its_chip_and_another_chip_refuses_it() {
         Board::<Mc68331>::load(
             &description,
             &Registry::with_builtins(),
-            Environment::default()
+            &Environment::default()
         )
         .is_ok()
     );
