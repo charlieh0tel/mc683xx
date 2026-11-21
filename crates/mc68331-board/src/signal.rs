@@ -161,7 +161,7 @@ impl FromStr for Kind {
 /// Text that names no net type.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no net type {0:?}")]
-pub struct ParseKindError(pub String);
+pub struct ParseKindError(String);
 
 /// Which way a port faces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -224,7 +224,7 @@ impl FromStr for Direction {
 /// Text that names no direction.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no direction {0:?}")]
-pub struct ParseDirectionError(pub String);
+pub struct ParseDirectionError(String);
 
 /// The value as the trace writes it, `key=value` fields
 /// ([`docs/tracing.md`][tracing]): `level=1`; `clock_at=PS frequency=NHZ

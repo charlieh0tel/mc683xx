@@ -90,7 +90,7 @@ impl FromStr for Role {
 /// Text that names no attachment role.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no attachment role {0:?}")]
-pub struct ParseRoleError(pub String);
+pub struct ParseRoleError(String);
 
 /// The data lanes an attachment wires to the peripheral.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]

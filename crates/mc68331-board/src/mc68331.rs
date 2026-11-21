@@ -133,7 +133,7 @@ const IRQ: [&str; 7] = ["IRQ1", "IRQ2", "IRQ3", "IRQ4", "IRQ5", "IRQ6", "IRQ7"];
 /// Text that names no MC68331 pin.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no MC68331 pin {0:?}")]
-pub struct ParsePinError(pub String);
+pub struct ParsePinError(String);
 
 /// The pin named so, after `chip.`.
 impl FromStr for Pin {
