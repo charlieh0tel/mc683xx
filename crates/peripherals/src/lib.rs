@@ -110,7 +110,7 @@ const STOCK: &[Stock] = &[
 /// If a type declares a port twice.
 pub fn register(registry: &mut Registry) -> Result<(), RegistryError> {
     for (name, register) in STOCK {
-        if registry.get(name).is_none() {
+        if !registry.contains(name) {
             register(registry)?;
         }
     }
@@ -153,13 +153,9 @@ mod tests {
     fn the_registry_holds_the_builtins_and_every_stock_type() {
         let registry = registry();
         for name in names() {
-            assert!(registry.get(name).is_some(), "{name}");
+            assert!(registry.contains(name), "{name}");
         }
-        assert!(registry.get("recorder").is_some());
-        assert!(
-            Registry::with_builtins()
-                .get(names().next().unwrap())
-                .is_none()
-        );
+        assert!(registry.contains("recorder"));
+        assert!(!Registry::with_builtins().contains(names().next().unwrap()));
     }
 }

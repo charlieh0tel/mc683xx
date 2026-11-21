@@ -613,22 +613,14 @@ enum Builds {
 }
 
 /// A registered peripheral type.
-///
-/// Not part of the semver API: the loader builds peripherals with it, and
-/// a host's tests of its constructors reach it through `Registry::get`.
-#[doc(hidden)]
-pub struct PeripheralType {
+struct PeripheralType {
     /// How it builds its peripherals.
     builds: Builds,
 }
 
 impl PeripheralType {
     /// A peripheral of this type, with its ports.
-    ///
-    /// # Errors
-    ///
-    /// What the type's constructor refuses in `context`'s parameters.
-    pub fn construct(&self, context: &Context<'_>) -> Result<Constructed, ParameterError> {
+    fn construct(&self, context: &Context<'_>) -> Result<Constructed, ParameterError> {
         match &self.builds {
             Builds::Fixed(ports, constructor) => Ok(Constructed {
                 peripheral: constructor(context)?,
@@ -639,8 +631,7 @@ impl PeripheralType {
     }
 
     /// Its ports, if they do not depend on its parameters.
-    #[must_use]
-    pub fn ports(&self) -> Option<&[PortSpec]> {
+    fn ports(&self) -> Option<&[PortSpec]> {
         match &self.builds {
             Builds::Fixed(ports, _) => Some(ports),
             Builds::Ported(_) => None,
@@ -754,14 +745,37 @@ impl Registry {
         Ok(())
     }
 
-    /// The type `name`, if registered.
-    ///
-    /// Not part of the semver API: the loader's, and a host's tests' of
-    /// its constructors.
-    #[doc(hidden)]
+    /// Whether a type `name` is registered.
     #[must_use]
-    pub fn get(&self, name: &str) -> Option<&PeripheralType> {
-        self.types.get(name)
+    pub fn contains(&self, name: &str) -> bool {
+        self.types.contains_key(name)
+    }
+
+    /// The ports of type `name`: [`None`] if no such type is registered
+    /// ([`Registry::contains`]), or if its ports depend on its parameters
+    /// ([`Registry::register_ported`]), which only construction gives.
+    #[must_use]
+    pub fn ports(&self, name: &str) -> Option<&[PortSpec]> {
+        self.types.get(name)?.ports()
+    }
+
+    /// A peripheral of type `name`, with its ports, built from `context`
+    /// as a load builds it: for a host's tests of its constructors.  A
+    /// load also refuses a parameter the constructor left unread
+    /// ([`Parameters::unread`]) and a port name used twice.
+    ///
+    /// [`None`] if no type `name` is registered.
+    ///
+    /// # Errors
+    ///
+    /// What the type's constructor refuses in `context`'s parameters.
+    #[must_use]
+    pub fn construct(
+        &self,
+        name: &str,
+        context: &Context<'_>,
+    ) -> Option<Result<Constructed, ParameterError>> {
+        Some(self.types.get(name)?.construct(context))
     }
 
     /// The registered names, in order.
@@ -776,6 +790,7 @@ mod tests {
     use std::path::Path;
     use std::path::PathBuf;
 
+    use super::Constructed;
     use super::Context;
     use super::Environment;
     use super::ParameterError;
@@ -862,6 +877,35 @@ mod tests {
             })
         );
         assert!(registry.names().any(|name| name == "divider"));
+    }
+
+    #[test]
+    fn a_host_reaches_a_type_by_its_name() {
+        let mut registry = Registry::with_builtins();
+        let fixed = || Ok(Box::new(Fixed::default()) as _);
+        let ports = vec![PortSpec::output("out", Kind::Logic)];
+        registry
+            .register("mine", ports.clone(), move |_| fixed())
+            .unwrap();
+        registry
+            .register_ported("ported", move |_| {
+                Ok(Constructed::new(
+                    fixed()?,
+                    vec![PortSpec::input("in", Kind::Logic)],
+                ))
+            })
+            .unwrap();
+        assert!(registry.contains("mine"));
+        assert!(!registry.contains("absent"));
+        assert_eq!(registry.ports("mine"), Some(ports.as_slice()));
+        assert_eq!(registry.ports("ported"), None);
+        assert_eq!(registry.ports("absent"), None);
+        let parameters = Parameters::default();
+        let environment = Environment::default();
+        let context = Context::new("part", &parameters, &environment);
+        let constructed = registry.construct("ported", &context).unwrap().unwrap();
+        assert_eq!(constructed.ports, [PortSpec::input("in", Kind::Logic)]);
+        assert!(registry.construct("absent", &context).is_none());
     }
 
     #[test]

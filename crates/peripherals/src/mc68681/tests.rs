@@ -241,9 +241,7 @@ fn both_peripherals_declare_the_pins_by_their_names() {
     crate::register(&mut registry).unwrap();
     for name in [MC68681, SCC68692] {
         let ports: Vec<(String, Kind, Direction)> = registry
-            .get(name)
-            .unwrap()
-            .ports()
+            .ports(name)
             .unwrap()
             .iter()
             .map(|port| (port.name.clone(), port.kind, port.direction))
@@ -277,7 +275,7 @@ fn construct(name: &str, parameters: &str) -> Result<Box<dyn Peripheral>, Parame
     let parameters = Parameters::parse(parameters).unwrap();
     let environment = Environment::default();
     let context = Context::new("duart", &parameters, &environment);
-    let peripheral = registry.get(name).unwrap().construct(&context)?.peripheral;
+    let peripheral = registry.construct(name, &context).unwrap()?.peripheral;
     if let Some(key) = parameters.unread() {
         return Err(ParameterError::Unknown(key));
     }

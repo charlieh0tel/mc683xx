@@ -1280,17 +1280,19 @@ pub(crate) fn construct(
     environment: &Environment,
     read: &dyn Fn(&Path) -> io::Result<Vec<u8>>,
 ) -> Result<Constructed, LoadError> {
-    let kind = registry.get(&spec.kind).ok_or_else(|| LoadError::Type {
-        peripheral: spec.name.clone(),
-        kind: spec.kind.clone(),
-    })?;
     let parameters = Parameters::new(spec.parameters.clone());
     let context = Context::with_read(&spec.name, &parameters, environment, read);
     let parameter_error = |error| LoadError::Parameter {
         peripheral: spec.name.clone(),
         error,
     };
-    let constructed = kind.construct(&context).map_err(parameter_error)?;
+    let constructed = registry
+        .construct(&spec.kind, &context)
+        .ok_or_else(|| LoadError::Type {
+            peripheral: spec.name.clone(),
+            kind: spec.kind.clone(),
+        })?
+        .map_err(parameter_error)?;
     if let Some(key) = parameters.unread() {
         return Err(parameter_error(ParameterError::Unknown(key)));
     }

@@ -477,7 +477,12 @@ The contract a host's peripheral models target (rustdoc in
   table as `Parameters::parse(toml_text)?.into_table()`, and one value
   with `Options::set("PERIPHERAL.KEY=VALUE")`; the TOML parser's types are
   not in the API, so a host that parsed its own TOML passes the text.
-  `Registry::with_builtins()` starts from the types above.
+  `Registry::with_builtins()` starts from the types above.  A host's
+  tests reach a type by name: `contains(name)`, `ports(name)` (`None`
+  for a type whose ports depend on its parameters, or none registered),
+  and `construct(name, &context)` (`None` for no such type, else the
+  constructor's `Result<Constructed, ParameterError>`; the unread-key
+  check is `Parameters::unread`'s, as a load makes it).
 - `peripheral::Peripheral`: what the constructor builds.  Every method has a
   default, so a peripheral implements only the sides it is on; one with
   only net ports (an OCXO, a GPS engine, an oven) is as first-class

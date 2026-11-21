@@ -209,7 +209,7 @@ fn construct(table: &str) -> Result<Box<dyn Peripheral>, ParameterError> {
     let parameters = Parameters::parse(table).unwrap();
     let environment = Environment::default();
     let context = Context::new("acia", &parameters, &environment);
-    let peripheral = registry.get(NAME).unwrap().construct(&context)?.peripheral;
+    let peripheral = registry.construct(NAME, &context).unwrap()?.peripheral;
     if let Some(key) = parameters.unread() {
         return Err(ParameterError::Unknown(key));
     }
@@ -221,9 +221,7 @@ fn it_declares_the_pins_by_their_names() {
     let mut registry = Registry::new();
     crate::register(&mut registry).unwrap();
     let ports: Vec<(String, Kind, Direction)> = registry
-        .get(NAME)
-        .unwrap()
-        .ports()
+        .ports(NAME)
         .unwrap()
         .iter()
         .map(|port| (port.name.clone(), port.kind, port.direction))

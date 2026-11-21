@@ -187,7 +187,7 @@ fn registry(path: &Path) -> Registry {
     }
     let mut registry = mc683xx_peripherals::registry();
     for type_name in types.values() {
-        if registry.get(type_name).is_some() {
+        if registry.contains(type_name) {
             continue;
         }
         let specs: Vec<PortSpec> = ports
