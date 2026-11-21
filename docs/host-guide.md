@@ -66,8 +66,9 @@ fn main() -> Result<(), BuildError> {
 }
 ```
 
-- `Builder::new(Configuration)` takes what the SIM reads as reset
-  releases: the levels on `DATA[15:0]` (boot port width, pin
+- `Builder::new(Configuration)` (`#[non_exhaustive]`;
+  `Configuration::new(data, clock)` or `Configuration::default()`)
+  takes what the SIM reads as reset releases: the levels on `DATA[15:0]` (boot port width, pin
   assignments; MC68331UM 4.6.3) and the clock source, a synthesizer
   reference (`ClockSource::synthesizer(reference)`) or, with MODCLK
   low, an external clock (`ClockSource::external(frequency)`), each a
@@ -943,7 +944,9 @@ carries the queue entry's index (0-15), the levels on `PCS[3:0]` (four
 selects or a decoded peripheral number, as the board wires them), the bits
 out, right-aligned, MSB first, their number, the `QspiClock` they are
 shifted with (its mode, CPOL and CPHA, and SCK period) and when the
-transfer ends; `QspiClock::reset(system_clock)` is the clock out of
+transfer ends.  A `QspiClock` (`#[non_exhaustive]`) is
+`QspiClock::new(polarity, phase, period, system_clock)`;
+`QspiClock::reset(system_clock)` is the clock out of
 reset (SPCR0 $0104: CPOL clear, CPHA set, SPBR 4, QSMRM 4.3.1) at the
 system clock the caller gives, 8.388608 MHz out of reset from a
 32.768-kHz reference; `floating_miso(bits)` is MISO no peripheral drives, all

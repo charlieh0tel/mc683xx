@@ -225,12 +225,12 @@ fn a_model_needs_no_read_or_write() {
 
 /// Entry 0's transfer of `bits` of `out` with `chip_selects` on PCS.
 fn qspi_transfer(chip_selects: u8, out: u16, bits: u8) -> QspiTransfer {
-    let clock = QspiClock {
-        polarity: ClockPolarity::IdleLow,
-        phase: ClockPhase::CaptureLeading,
-        period: Cycles(8),
-        system_clock: Frequency::from_hz(16_777_216),
-    };
+    let clock = QspiClock::new(
+        ClockPolarity::IdleLow,
+        ClockPhase::CaptureLeading,
+        Cycles(8),
+        Frequency::from_hz(16_777_216),
+    );
     QspiTransfer::new(0, chip_selects, out, bits, clock, Cycles(3))
 }
 

@@ -59,6 +59,7 @@ pub const REFERENCE_MAX: Frequency = Frequency::from_hz(50_000);
 
 /// A clock source the chip cannot have.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum ClockSourceError {
     /// A frequency that is not whole hertz: the chip's clocks are, as
     /// its snapshot saves them.
@@ -85,6 +86,7 @@ const fn whole_hertz(frequency: Frequency) -> Result<Frequency, ClockSourceError
 /// (MC68331UM 4.3.1).  Its frequencies are whole hertz: build one with
 /// [`ClockSource::synthesizer`] or [`ClockSource::external`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub enum ClockSource {
     /// MODCLK high: the synthesizer multiplies the reference on EXTAL,
     /// of `reference` (25 to 50 kHz, SIMRM 4.4.1), as SYNCR sets.

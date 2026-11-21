@@ -189,7 +189,11 @@ impl ResetCause {
 
 /// The pins the SIM reads as a reset releases (SIMRM 8.6; MC68331UM
 /// 4.6.3).
+///
+/// Built with [`Configuration::new`] or [`Configuration::default`], so
+/// a field added later gets a default and no host's code changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct Configuration {
     /// DATA\[15:0\]'s levels; the weak pull-ups leave them high.
     pub data: u16,
@@ -197,12 +201,18 @@ pub struct Configuration {
     pub clock: ClockSource,
 }
 
+impl Configuration {
+    /// DATA\[15:0\] at `data`, the clock source `clock`.
+    #[must_use]
+    pub const fn new(data: u16, clock: ClockSource) -> Self {
+        Self { data, clock }
+    }
+}
+
 impl Default for Configuration {
+    /// DATA\[15:0\] high, the default clock source.
     fn default() -> Self {
-        Self {
-            data: u16::MAX,
-            clock: ClockSource::default(),
-        }
+        Self::new(u16::MAX, ClockSource::default())
     }
 }
 

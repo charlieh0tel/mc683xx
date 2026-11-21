@@ -207,7 +207,7 @@ impl ChipBuilder {
             (Some(hz), None) => ClockSource::synthesizer(Frequency::from_hz(hz.into()))?,
             (None, None) => ClockSource::default(),
         };
-        let builder = Builder::new(Configuration { data, clock });
+        let builder = Builder::new(Configuration::new(data, clock));
         let pending = Pending::new(builder.stop_request());
         Ok(Self {
             builder: Some(builder),

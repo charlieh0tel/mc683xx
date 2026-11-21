@@ -502,10 +502,7 @@ impl chip::Chip for Mc68331 {
             (None, None) => Ok(ClockSource::default()),
         }
         .map_err(|error| LoadError::Frequency { error })?;
-        let configuration = Configuration {
-            data: section.data.unwrap_or(u16::MAX),
-            clock,
-        };
+        let configuration = Configuration::new(section.data.unwrap_or(u16::MAX), clock);
         let mut builder = Builder::new(configuration);
         for &level in &section.autovector {
             let pin = IrqPin::new(level).ok_or_else(|| LoadError::Level {

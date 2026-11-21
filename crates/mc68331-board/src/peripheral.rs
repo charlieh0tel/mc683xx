@@ -908,12 +908,12 @@ mod tests {
     fn a_transfer_takes_another_clock_and_keeps_the_rest() {
         let reset = QspiClock::reset(Frequency::from_hz(8_388_608));
         let transfer = Transfer::new(1, 2, 0xe, 0xa5, 8, reset, Time(9)).continuing();
-        let fast = QspiClock {
-            polarity: ClockPolarity::IdleHigh,
-            phase: ClockPhase::CaptureLeading,
-            period: Cycles(4),
-            ..reset
-        };
+        let fast = QspiClock::new(
+            ClockPolarity::IdleHigh,
+            ClockPhase::CaptureLeading,
+            Cycles(4),
+            reset.system_clock,
+        );
         let clocked = transfer.clocked(fast);
         assert_eq!(clocked.clock, fast);
         assert_eq!(
