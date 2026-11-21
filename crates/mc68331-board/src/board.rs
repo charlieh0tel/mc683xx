@@ -683,7 +683,7 @@ impl<C: Chip> Board<C> {
             base: Cell::new(TimeBase::new(
                 Cycles::ZERO,
                 Time::ZERO,
-                builder.system_clock(),
+                builder.system_frequency(),
             )),
             peripherals: cells,
             analog_inputs,
@@ -751,9 +751,12 @@ impl<C: Chip> Board<C> {
             .iter()
             .any(|peripheral| peripheral.borrow().wants_horizon());
         chip.set_publish_output_horizon(horizon);
-        shared
-            .base
-            .set(shared.base.get().moved(Cycles::ZERO, chip.system_clock()));
+        shared.base.set(
+            shared
+                .base
+                .get()
+                .moved(Cycles::ZERO, chip.system_frequency()),
+        );
         let mut sources: BTreeMap<Source<C::Pin>, Vec<usize>> = BTreeMap::new();
         for (index, net) in nets.iter().enumerate() {
             for driver in &net.drivers {
@@ -1684,7 +1687,7 @@ impl<C: Chip> Board<C> {
         emitted.clear();
         self.emitted = emitted;
         let reset = Source::Chip(C::RESET);
-        let system_clock = self.chip.system_clock();
+        let frequency = self.chip.system_frequency();
         for event in self.chip.take_events() {
             if let Some((low, high)) = C::reset_pulse(&event)
                 && self.sources.contains_key(&reset)
@@ -1692,7 +1695,7 @@ impl<C: Chip> Board<C> {
                 // the release counts clocks of the clock after the reset
                 // (MC68331UM 4.6.6), which a reset that moves it ends the
                 // quantum at
-                let after = base.moved(low, system_clock);
+                let after = base.moved(low, frequency);
                 self.drive(&reset, base.time(low), Signal::Level(false));
                 self.drive(&reset, after.time(high), Signal::Level(true));
             }
@@ -1700,7 +1703,7 @@ impl<C: Chip> Board<C> {
         }
         let now = self.chip.now();
         self.ahead.retain(|ahead| ahead.cycles > now);
-        self.move_base(base.moved(now, system_clock));
+        self.move_base(base.moved(now, frequency));
         let moved = self.clocks.iter().any(|(&pin, clock)| {
             self.chip
                 .clock_output(pin)

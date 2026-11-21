@@ -191,7 +191,7 @@ pub trait ChipBuilder: sealed::Sealed {
     type Chip: Chip;
 
     /// The system clock's frequency out of power-on.
-    fn system_clock(&self) -> Frequency;
+    fn system_frequency(&self) -> Frequency;
 
     /// The handle by which the board's routers ask the chip's runs to
     /// stop.
@@ -352,7 +352,7 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     fn instructions(&self) -> u64;
 
     /// The system clock's frequency now.
-    fn system_clock(&self) -> Frequency;
+    fn system_frequency(&self) -> Frequency;
 
     /// A memory's bytes.
     fn memory(&self, memory: Self::Memory) -> &[u8];

@@ -472,7 +472,7 @@ impl Sealed for Mc68331Builder {}
 impl ChipBuilder for Mc68331Builder {
     type Chip = Mc68331;
 
-    fn system_clock(&self) -> Frequency {
+    fn system_frequency(&self) -> Frequency {
         self.builder.system_frequency()
     }
 
@@ -665,7 +665,7 @@ impl chip::Chip for Mc68331 {
         Self::instructions(self)
     }
 
-    fn system_clock(&self) -> Frequency {
+    fn system_frequency(&self) -> Frequency {
         self.sim().clock().frequency()
     }
 
