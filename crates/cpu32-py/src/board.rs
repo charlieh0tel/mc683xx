@@ -21,6 +21,7 @@ use mc683xx_board::board::BoardTracing;
 use mc683xx_board::board::External;
 use mc683xx_board::chip::Chip;
 use mc683xx_board::description::Options;
+use mc683xx_board::error::RunError;
 use mc683xx_board::inspect::Field;
 use mc683xx_board::inspect::Inspection;
 use mc683xx_board::inspect::Value;
@@ -1328,7 +1329,15 @@ impl BoardView {
         {
             control.set_pacing(previous).map_err(value_error)?;
         }
-        // Ctrl-C first, even with a peripheral's error waiting
+        self.finished(outcome)
+    }
+
+    /// A Python run's `outcome` as its result: Ctrl-C first, even with a
+    /// peripheral's error waiting, then that error, then the run's.
+    fn finished(
+        &self,
+        outcome: Result<Result<BoardRun, RunError>, PyErr>,
+    ) -> PyResult<BoardRunView> {
         let outcome = match outcome {
             Ok(outcome) => {
                 self.check()?;
@@ -1516,16 +1525,8 @@ impl BoardView {
             ))
         })?;
         let slice = span_of(seconds, picoseconds)?;
-        // Ctrl-C first, even with a peripheral's error waiting
-        let outcome = match control::run_frame(py, &mut self.board, wall, slice) {
-            Ok(outcome) => {
-                self.check()?;
-                outcome
-            }
-            Err(raised) => return Err(self.pending.after(raised)),
-        };
-        let run = outcome.map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-        Ok(run.into())
+        let outcome = control::run_frame(py, &mut self.board, wall, slice);
+        self.finished(outcome)
     }
 
     /// The board's control handle, for another thread (Rust's
