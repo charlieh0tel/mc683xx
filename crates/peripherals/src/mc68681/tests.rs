@@ -11,6 +11,7 @@ use mc683xx_board::peripheral::Lane;
 use mc683xx_board::peripheral::Peripheral;
 use mc683xx_board::peripheral::PeripheralAccess;
 use mc683xx_board::peripheral::Role;
+use mc683xx_board::registry::ConstructError;
 use mc683xx_board::registry::Context;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::ParameterError;
@@ -281,7 +282,11 @@ fn construct(name: &str, parameters: &str) -> Result<Box<dyn Peripheral>, Parame
     let parameters = Parameters::parse(parameters).unwrap();
     let environment = Environment::default();
     let context = Context::new("duart", &parameters, &environment);
-    let peripheral = registry.construct(name, &context).unwrap()?.peripheral;
+    let peripheral = match registry.construct(name, &context) {
+        Ok(constructed) => constructed.peripheral,
+        Err(ConstructError::Parameter(error)) => return Err(error),
+        Err(error) => panic!("{error}"),
+    };
     if let Some(key) = parameters.unread() {
         return Err(ParameterError::Unknown(key));
     }

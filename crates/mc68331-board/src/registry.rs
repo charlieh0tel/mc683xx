@@ -674,6 +674,19 @@ pub enum RegistryError {
     },
 }
 
+/// What constructing a peripheral by its type's name can get wrong
+/// ([`Registry::construct`]).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ConstructError {
+    /// No type of the name is registered.
+    #[error("no peripheral type {0:?}")]
+    Unknown(String),
+    /// What the type's constructor refuses in the parameters.
+    #[error(transparent)]
+    Parameter(#[from] ParameterError),
+}
+
 /// Peripheral types by name.
 #[derive(Debug, Default)]
 pub struct Registry {
@@ -764,18 +777,21 @@ impl Registry {
     /// load also refuses a parameter the constructor left unread
     /// ([`Parameters::unread`]) and a port name used twice.
     ///
-    /// [`None`] if no type `name` is registered.
-    ///
     /// # Errors
     ///
-    /// What the type's constructor refuses in `context`'s parameters.
-    #[must_use]
+    /// [`ConstructError::Unknown`] if no type `name` is registered,
+    /// [`ConstructError::Parameter`] for what the type's constructor
+    /// refuses in `context`'s parameters.
     pub fn construct(
         &self,
         name: &str,
         context: &Context<'_>,
-    ) -> Option<Result<Constructed, ParameterError>> {
-        Some(self.types.get(name)?.construct(context))
+    ) -> Result<Constructed, ConstructError> {
+        let peripheral_type = self
+            .types
+            .get(name)
+            .ok_or_else(|| ConstructError::Unknown(name.to_owned()))?;
+        Ok(peripheral_type.construct(context)?)
     }
 
     /// The registered names, in order.
@@ -790,6 +806,7 @@ mod tests {
     use std::path::Path;
     use std::path::PathBuf;
 
+    use super::ConstructError;
     use super::Constructed;
     use super::Context;
     use super::Environment;
@@ -904,9 +921,12 @@ mod tests {
         let parameters = Parameters::default();
         let environment = Environment::default();
         let context = Context::new("part", &parameters, &environment);
-        let constructed = registry.construct("ported", &context).unwrap().unwrap();
+        let constructed = registry.construct("ported", &context).unwrap();
         assert_eq!(constructed.ports, [PortSpec::input("in", Kind::Logic)]);
-        assert!(registry.construct("absent", &context).is_none());
+        assert_eq!(
+            registry.construct("absent", &context).err(),
+            Some(ConstructError::Unknown("absent".to_owned()))
+        );
     }
 
     #[test]

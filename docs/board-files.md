@@ -490,9 +490,10 @@ The contract a host's peripheral models target (rustdoc in
   `Registry::with_builtins()` starts from the types above.  A host's
   tests reach a type by name: `contains(name)`, `ports(name)` (`None`
   for a type whose ports depend on its parameters, or none registered),
-  and `construct(name, &context)` (`None` for no such type, else the
-  constructor's `Result<Constructed, ParameterError>`; the unread-key
-  check is `Parameters::unread`'s, as a load makes it).
+  and `construct(name, &context) -> Result<Constructed,
+  ConstructError>` (`ConstructError::Unknown` for no such type,
+  `Parameter` for what the constructor refuses; the unread-key check
+  is `Parameters::unread`'s, as a load makes it).
   `Description::check_ports(&registry, &environment)` checks a board
   file's net ends at peripherals against their types' ports (name, type,
   direction) as a load does, without building the board: a type whose

@@ -36,6 +36,7 @@ use crate::error::ParseSettingError;
 use crate::error::SyntaxError;
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
+use crate::registry::ConstructError;
 use crate::registry::Constructed;
 use crate::registry::Context;
 use crate::registry::Environment;
@@ -1447,11 +1448,13 @@ pub(crate) fn construct(
     };
     let constructed = registry
         .construct(&spec.kind, &context)
-        .ok_or_else(|| LoadError::Type {
-            peripheral: spec.name.clone(),
-            kind: spec.kind.clone(),
-        })?
-        .map_err(parameter_error)?;
+        .map_err(|error| match error {
+            ConstructError::Unknown(kind) => LoadError::Type {
+                peripheral: spec.name.clone(),
+                kind,
+            },
+            ConstructError::Parameter(error) => parameter_error(error),
+        })?;
     if let Some(key) = parameters.unread() {
         return Err(parameter_error(ParameterError::Unknown(key)));
     }
