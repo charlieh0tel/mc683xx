@@ -362,31 +362,17 @@ impl Firmware {
                 offset: start,
             })
         };
-        let rom = Page {
-            read: backing(ROM),
-            write: None,
-            port: PortSize::Bits16,
-            clocks: CLOCKS,
-        };
-        let page = |start| Page {
-            read: backing(start),
-            write: backing(start),
-            ..rom
-        };
+        let rom = Page::BUS
+            .reading(backing(ROM))
+            .timed(PortSize::Bits16, CLOCKS);
+        let page = |start| rom.reading(backing(start)).writing(backing(start));
         // The return page is read only: a call writes no code.
         let regions = [
             (ROM, ROM_BYTES, rom),
             (RAM, RAM_BYTES, page(RAM)),
             (EEPROM, EEPROM_BYTES, page(EEPROM)),
             (STACK, STACK_BYTES, page(STACK)),
-            (
-                RETURN,
-                RETURN_BYTES,
-                Page {
-                    read: backing(RETURN),
-                    ..rom
-                },
-            ),
+            (RETURN, RETURN_BYTES, rom.reading(backing(RETURN))),
         ];
         for (start, length, page) in regions {
             for space in [Space::User, Space::Supervisor] {

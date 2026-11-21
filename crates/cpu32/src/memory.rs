@@ -27,7 +27,10 @@ const FASTEST_CLOCKS: u8 = 2;
 
 /// Whether the CPU may write a memory a host wires in: the chip's
 /// builder's (`mc683xx_mc68331::chip::Builder::memory`) and a board's.
+/// Non-exhaustive: a kind may be added (a write-once memory, say), and
+/// [`writable`](Self::writable) answers for each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum MemoryKind {
     /// Read-only: a write is ignored, as a ROM ignores one.
     Rom,
@@ -146,8 +149,14 @@ pub struct Backing {
 ///
 /// It also says what a cycle there costs.  A read or write with no
 /// backing goes to the [`Bus`](crate::bus::Bus); ROM is a page that
-/// reads from a region and writes to the bus.
+/// reads from a region and writes to the bus.  A host that lays out a
+/// bare CPU's memory itself ([`Memory::map`]) builds one from
+/// [`Page::BUS`]: `Page::BUS.reading(backing).writing(backing)`, then
+/// [`timed`](Self::timed) for a memory slower or narrower than the
+/// fastest 16-bit one.  Non-exhaustive, so a field added later gets a
+/// default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct Page {
     /// Where reads go.
     pub read: Option<Backing>,
@@ -167,6 +176,29 @@ impl Page {
         port: PortSize::Bits16,
         clocks: FASTEST_CLOCKS,
     };
+
+    /// The page, its reads going to `read`, or to the bus if `None`.
+    #[must_use]
+    pub const fn reading(self, read: Option<Backing>) -> Self {
+        Self { read, ..self }
+    }
+
+    /// The page, its writes going to `write`, or to the bus if `None`.
+    #[must_use]
+    pub const fn writing(self, write: Option<Backing>) -> Self {
+        Self { write, ..self }
+    }
+
+    /// The page, the memory behind it `port` wide, each of its bus
+    /// cycles `clocks` long, wait states included.
+    #[must_use]
+    pub const fn timed(self, port: PortSize, clocks: u8) -> Self {
+        Self {
+            port,
+            clocks,
+            ..self
+        }
+    }
 }
 
 /// What can go wrong building the page tables.

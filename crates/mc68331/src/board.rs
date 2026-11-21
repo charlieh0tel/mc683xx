@@ -1388,12 +1388,10 @@ impl Board {
                 let Some((_, timing)) = read.or(write) else {
                     continue;
                 };
-                let page = Page {
-                    read: read.map(|(backing, _)| backing),
-                    write: write.map(|(backing, _)| backing),
-                    port: timing.0,
-                    clocks: timing.1,
-                };
+                let page = Page::BUS
+                    .reading(read.map(|(backing, _)| backing))
+                    .writing(write.map(|(backing, _)| backing))
+                    .timed(timing.0, timing.1);
                 memory
                     .map(space, Address(address), PAGE_BYTES, page)
                     .expect("a whole page inside its region");

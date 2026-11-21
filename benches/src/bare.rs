@@ -4,7 +4,6 @@
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
 use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::Read;
 use mc683xx_cpu32::cpu::Cpu;
 use mc683xx_cpu32::cycles::Cycles;
@@ -28,8 +27,6 @@ use crate::kernel::sled;
 const ADDRESS_LINES: u32 = 24;
 /// Bytes of RAM from zero.
 const RAM_BYTES: u32 = 256 << 10;
-/// Clocks in a zero-wait bus cycle (CPU32RM 8.1.5).
-const FASTEST_CLOCKS: u8 = 2;
 /// Where the sled starts.
 pub const CODE: u32 = 0x1000;
 /// Where the sled ends and A0's buffer starts.
@@ -83,12 +80,7 @@ pub fn machine(kernel: &Kernel) -> Cpu {
     let mut memory = Memory::new(ADDRESS_LINES).expect("24 address lines");
     let region = memory.add_region(vec![0; RAM_BYTES as usize]);
     let backing = Some(Backing { region, offset: 0 });
-    let page = Page {
-        read: backing,
-        write: backing,
-        port: PortSize::Bits16,
-        clocks: FASTEST_CLOCKS,
-    };
+    let page = Page::BUS.reading(backing).writing(backing);
     for space in [Space::User, Space::Supervisor] {
         memory
             .map(space, Address(0), RAM_BYTES, page)

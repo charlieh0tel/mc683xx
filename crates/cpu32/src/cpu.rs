@@ -345,11 +345,7 @@ impl Cpu {
     /// let mut memory = Memory::new(24)?;
     /// let region = memory.add_region(vec![0; PAGE_BYTES as usize]);
     /// let backing = Some(Backing { region, offset: 0 });
-    /// let ram = Page {
-    ///     read: backing,
-    ///     write: backing,
-    ///     ..Page::BUS
-    /// };
+    /// let ram = Page::BUS.reading(backing).writing(backing);
     /// for space in [Space::User, Space::Supervisor] {
     ///     memory.map(space, Address(0), PAGE_BYTES, ram)?;
     /// }
