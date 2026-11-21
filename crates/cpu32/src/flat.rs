@@ -489,55 +489,26 @@ impl Machine {
         Ok(())
     }
 
-    /// The region and offset of mapped byte `address`.
-    fn locate(&self, address: Address) -> Result<(Backing, usize), Unserved> {
-        let page = self.cpu.memory.entry(Space::Supervisor, address);
-        let backing = page.read.ok_or(Unserved(address))?;
-        Ok((backing, (address.0 % PAGE_BYTES) as usize))
-    }
-
     /// Fills `bytes` from mapped memory at `address`, whatever its
-    /// permissions, with no bus cycle.
+    /// permissions, with no bus cycle ([`Memory::read_bytes`]).
     ///
     /// # Errors
     ///
-    /// [`Unserved`], with the first address not mapped, if any is not.
+    /// [`Unserved`], with the first address not mapped, if any is not;
+    /// `bytes` is then filled up to it.
     pub fn read(&self, address: Address, bytes: &mut [u8]) -> Result<(), Unserved> {
-        let mut done = 0;
-        while done < bytes.len() {
-            let at = address.offset(done as u32);
-            let (backing, within) = self.locate(at)?;
-            let count = (PAGE_BYTES as usize - within).min(bytes.len() - done);
-            let from = backing.offset as usize + within;
-            bytes[done..done + count]
-                .copy_from_slice(&self.cpu.memory.region(backing.region)[from..from + count]);
-            done += count;
-        }
-        Ok(())
+        self.cpu.memory.read_bytes(address, bytes)
     }
 
     /// Writes `bytes` to mapped memory at `address`, as
-    /// [`read`](Self::read).  On an error nothing is written.
+    /// [`read`](Self::read) reads it ([`Memory::write_bytes`]).  On an
+    /// error nothing is written.
     ///
     /// # Errors
     ///
     /// As [`Machine::read`].
     pub fn write(&mut self, address: Address, bytes: &[u8]) -> Result<(), Unserved> {
-        let mut spans = Vec::new();
-        let mut done = 0;
-        while done < bytes.len() {
-            let at = address.offset(done as u32);
-            let (backing, within) = self.locate(at)?;
-            let count = (PAGE_BYTES as usize - within).min(bytes.len() - done);
-            spans.push((backing, within, done, count));
-            done += count;
-        }
-        for (backing, within, done, count) in spans {
-            let from = backing.offset as usize + within;
-            self.cpu.memory.region_mut(backing.region)[from..from + count]
-                .copy_from_slice(&bytes[done..done + count]);
-        }
-        Ok(())
+        self.cpu.memory.write_bytes(address, bytes)
     }
 
     /// Puts `peripheral` at `range`, which no other peripheral's overlaps: it

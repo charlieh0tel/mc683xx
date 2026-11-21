@@ -119,7 +119,8 @@ in step with its decode, nor runs the core apart from the chip.
 cycle, as a debugger does and as the bare `Machine::write` does, a
 ROM's included, and `read(address, bytes)` reads them, as
 `Machine::read` does (`memory::Unserved` for a byte the core does
-not serve).
+not serve a read of).  Both go to the bytes a page reads, so a read
+gives back what a write wrote (PLAN.md, Memory).
 
 ### Fixed memory
 

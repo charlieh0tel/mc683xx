@@ -8,9 +8,6 @@
 
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::memory::Memory;
-use mc683xx_cpu32::memory::PAGE_BYTES;
-use mc683xx_cpu32::memory::RegionId;
-use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::memory::Unserved;
 use mc683xx_modules::module;
 use mc683xx_modules::module::Peek;
@@ -131,48 +128,32 @@ impl Mc68331 {
     /// Fills `data` from `address` up, with no bus cycle, a debugger's
     /// read: from the memories the core serves in supervisor space, as
     /// the decode now maps them, whatever the pages' permissions; as the
-    /// bare machine's [`Machine::read`](mc683xx_cpu32::flat::Machine::read).
+    /// bare machine's [`Machine::read`](mc683xx_cpu32::flat::Machine::read)
+    /// ([`Memory::read_bytes`](mc683xx_cpu32::memory::Memory::read_bytes)).
     /// [`peek`](Self::peek) reads the modules' registers too.
     ///
     /// # Errors
     ///
-    /// [`Unserved`] for the first byte the core does not serve (a
-    /// peripheral's, or one a peripheral shares); `data` is then filled
+    /// [`Unserved`] for the first byte the core does not serve a read of
+    /// (a peripheral's, or one a peripheral shares); `data` is then filled
     /// up to it.
     pub fn read(&self, address: Address, data: &mut [u8]) -> Result<(), Unserved> {
-        let memory = &self.cpu.memory;
-        let mut done = 0;
-        while done < data.len() {
-            let (region, from, count) = locate(memory, address, done, data.len(), false)?;
-            data[done..done + count].copy_from_slice(&memory.region(region)[from..from + count]);
-            done += count;
-        }
-        Ok(())
+        self.cpu.memory.read_bytes(address, data)
     }
 
     /// Writes `data` at `address` up, with no bus cycle, a debugger's
-    /// write: into the memories the core serves in supervisor space, as
-    /// the decode now maps them, a ROM's included, whatever the pages'
-    /// permissions; as the bare machine's
-    /// [`Machine::write`](mc683xx_cpu32::flat::Machine::write).
+    /// write: into the bytes [`read`](Self::read) reads, a ROM's
+    /// included, whatever the pages' permissions, so a read gives back
+    /// what was written; as the bare machine's
+    /// [`Machine::write`](mc683xx_cpu32::flat::Machine::write)
+    /// ([`Memory::write_bytes`](mc683xx_cpu32::memory::Memory::write_bytes)).
     ///
     /// # Errors
     ///
-    /// [`Unserved`] for a byte the core does not serve (a peripheral's,
-    /// or one a peripheral shares); then nothing is written.
+    /// [`Unserved`] for a byte the core does not serve a read of (a
+    /// peripheral's, or one a peripheral shares); then nothing is written.
     pub fn write(&mut self, address: Address, data: &[u8]) -> Result<(), Unserved> {
-        let mut spans = Vec::new();
-        let mut done = 0;
-        while done < data.len() {
-            let span = locate(&self.cpu.memory, address, done, data.len(), true)?;
-            spans.push((span, done));
-            done += span.2;
-        }
-        for ((region, from, count), done) in spans {
-            self.cpu.memory.region_mut(region)[from..from + count]
-                .copy_from_slice(&data[done..done + count]);
-        }
-        Ok(())
+        self.cpu.memory.write_bytes(address, data)
     }
 
     /// The byte or word cycles of an access, each on the address lines
@@ -304,31 +285,6 @@ impl Board {
             None => Err(AccessError::Unpeekable),
         }
     }
-}
-
-/// Where a debugger's access of `length` bytes from `address` finds its
-/// bytes from `done` on, within one page of the memories the core serves
-/// in supervisor space: the region, the index in it, and how many bytes
-/// the page holds of those left.  A read takes the page's read backing;
-/// a write its write backing, else its read one, as a ROM's.
-fn locate(
-    memory: &Memory,
-    address: Address,
-    done: usize,
-    length: usize,
-    write: bool,
-) -> Result<(RegionId, usize, usize), Unserved> {
-    let at = address.offset(done as u32);
-    let page = memory.entry(Space::Supervisor, at);
-    let backing = if write {
-        page.write.or(page.read)
-    } else {
-        page.read
-    };
-    let backing = backing.ok_or(Unserved(at))?;
-    let within = memory.mask(at).0 % PAGE_BYTES;
-    let count = ((PAGE_BYTES - within) as usize).min(length - done);
-    Ok((backing.region, (backing.offset + within) as usize, count))
 }
 
 #[cfg(test)]

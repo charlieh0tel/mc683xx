@@ -2182,6 +2182,16 @@ Adversarial review (2026-11-01):
   does not say what a write to an already-prefetched word does; this
   is our choice.  It serves only what the fast table serves, so a
   hooked or protected page still fetches through the slow path.
+- A debugger's cycle-free read and write (`Memory::read_bytes`,
+  `write_bytes`; the bare `Machine::read` and `write` and the chip's
+  `Mc68331::read` and `write` are both these) go to the bytes a
+  supervisor page reads, whatever its permissions, and a page that
+  reads from the `Bus` is `Unserved`, both ways.  So a write then a read
+  give back what was written, and what the CPU reads and runs is what
+  the debugger wrote: a ROM's bytes, where its page writes to the bus,
+  and a ROM's, not the RAM's, where a page reads one memory and writes
+  another.  A page that writes host memory but reads a peripheral is
+  `Unserved`: the debugger could not read back what it wrote there.
 
 ### Interrupts
 

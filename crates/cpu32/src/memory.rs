@@ -839,6 +839,65 @@ impl Memory {
             .map(|(value, _)| value)
     }
 
+    /// Fills `bytes` from `address` up with no bus cycle, a debugger's
+    /// read: from the bytes the pages of supervisor space read,
+    /// whatever their permissions.
+    ///
+    /// # Errors
+    ///
+    /// [`Unserved`] for the first byte whose page reads from the bus;
+    /// `bytes` is then filled up to it.
+    pub fn read_bytes(&self, address: Address, bytes: &mut [u8]) -> Result<(), Unserved> {
+        let mut done = 0;
+        while done < bytes.len() {
+            let (region, from, count) = self.span(address, done, bytes.len())?;
+            bytes[done..done + count].copy_from_slice(&self.region(region)[from..from + count]);
+            done += count;
+        }
+        Ok(())
+    }
+
+    /// Writes `bytes` at `address` up with no bus cycle, a debugger's
+    /// write: into the bytes the pages of supervisor space read, as
+    /// [`read_bytes`](Self::read_bytes) does, so that a read gives back
+    /// what was written, a ROM's included; where a page writes to other
+    /// bytes than it reads, the write backing is left as it was.
+    ///
+    /// # Errors
+    ///
+    /// [`Unserved`] for the first byte whose page reads from the bus;
+    /// then nothing is written.
+    pub fn write_bytes(&mut self, address: Address, bytes: &[u8]) -> Result<(), Unserved> {
+        let mut spans = Vec::new();
+        let mut done = 0;
+        while done < bytes.len() {
+            let span = self.span(address, done, bytes.len())?;
+            spans.push((span, done));
+            done += span.2;
+        }
+        for ((region, from, count), done) in spans {
+            self.region_mut(region)[from..from + count].copy_from_slice(&bytes[done..done + count]);
+        }
+        Ok(())
+    }
+
+    /// Where a debugger's access of `length` bytes from `address` finds
+    /// its bytes from `done` on, within one page of supervisor space: the
+    /// region of the page's read backing, the index in it, and how many
+    /// of the bytes left the page holds.
+    fn span(
+        &self,
+        address: Address,
+        done: usize,
+        length: usize,
+    ) -> Result<(RegionId, usize, usize), Unserved> {
+        let at = address.offset(done as u32);
+        let backing = self.entry(Space::Supervisor, at).read.ok_or(Unserved(at))?;
+        let within = self.mask(at).0 % PAGE_BYTES;
+        let count = ((PAGE_BYTES - within) as usize).min(length - done);
+        Ok((backing.region, (backing.offset + within) as usize, count))
+    }
+
     /// A byte or word read the fast path serves, with its stall, or
     /// [`None`] if it takes the slow path or goes to the bus.  A word is
     /// aligned, so it never leaves a page.
@@ -1006,6 +1065,7 @@ mod tests {
     use super::PAGE_BYTES;
     use super::Page;
     use super::Space;
+    use super::Unserved;
     use crate::bus::PortSize;
     use crate::cycles::Cycles;
     use mc683xx_target::address::Address;
@@ -1041,6 +1101,42 @@ mod tests {
         assert_eq!(memory.fetch(Space::Supervisor, at), Some((0, Cycles::ZERO)));
         memory.clear();
         assert_eq!(memory.fetch(Space::Supervisor, at), None);
+    }
+
+    #[test]
+    fn a_debugger_write_lands_where_its_read_reads() {
+        let mut memory = Memory::new(24).unwrap();
+        let rom = memory.add_region(vec![0; PAGE_BYTES as usize]);
+        let ram = memory.add_region(vec![0; PAGE_BYTES as usize]);
+        let backing = |region| Some(Backing { region, offset: 0 });
+        // a ROM that reads, the RAM under it that takes the writes
+        let page = Page::BUS.reading(backing(rom)).writing(backing(ram));
+        memory
+            .map(Space::Supervisor, Address(0), PAGE_BYTES, page)
+            .unwrap();
+        let only_writes = Page::BUS.writing(backing(ram));
+        memory
+            .map(
+                Space::Supervisor,
+                Address(PAGE_BYTES),
+                PAGE_BYTES,
+                only_writes,
+            )
+            .unwrap();
+        memory.write_bytes(Address(0x10), &[0x4e, 0x71]).unwrap();
+        let mut read = [0; 2];
+        memory.read_bytes(Address(0x10), &mut read).unwrap();
+        assert_eq!(read, [0x4e, 0x71]);
+        assert_eq!(memory.region(rom)[0x10..0x12], [0x4e, 0x71]);
+        assert_eq!(memory.region(ram)[0x10..0x12], [0, 0]);
+        // a page whose reads go to the bus has no bytes to read back
+        let at = Address(PAGE_BYTES);
+        assert_eq!(memory.write_bytes(at, &[1]), Err(Unserved(at)));
+        assert_eq!(memory.read_bytes(at, &mut read), Err(Unserved(at)));
+        // a write crossing into it writes nothing
+        let last = Address(PAGE_BYTES - 1);
+        assert_eq!(memory.write_bytes(last, &[1, 2]), Err(Unserved(at)));
+        assert_eq!(memory.region(rom)[PAGE_BYTES as usize - 1], 0);
     }
 
     #[test]
