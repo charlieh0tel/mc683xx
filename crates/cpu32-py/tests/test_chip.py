@@ -1,6 +1,7 @@
 """The chip from Python: a ROM on CSBOOT, RAM on CS0, a Python peripheral
 on CS1, and small programs that reach them."""
 
+import re
 import struct
 
 import pytest
@@ -751,6 +752,7 @@ def test_a_code_hook_stops_before_its_instruction():
         return True
 
     hook = chip.add_code_hook(at, AFTER_WIRING, AFTER_WIRING)
+    assert re.fullmatch(r"hook \d+", repr(hook))
     run = chip.run_for(2000)
     assert run.stop == mc683xx.Stop.Hook(hook)
     assert chip.read_register("PC") == AFTER_WIRING

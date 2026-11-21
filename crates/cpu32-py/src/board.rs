@@ -490,7 +490,7 @@ pub(crate) struct ObserverIdView(ObserverId);
 #[pymethods]
 impl ObserverIdView {
     fn __repr__(&self) -> String {
-        format!("{:?}", self.0)
+        self.0.to_string()
     }
 }
 

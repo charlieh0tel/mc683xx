@@ -273,17 +273,9 @@ impl TryFrom<End> for EndView {
             End::Fault(fault) => Self::Fault {
                 fault: FaultStopView(fault),
             },
-            End::Steps => return Err(Error::RunEnd("steps".to_owned())),
-            End::Intercepted(_) => return Err(Error::RunEnd("intercepted".to_owned())),
-            other => return Err(unknown(&other)),
+            other => return Err(Error::RunEnd(other.to_string())),
         })
     }
-}
-
-/// [`Error::RunEnd`] for an `end` the bindings do not know.
-fn unknown(end: &End) -> Error {
-    // `End` has no `Display`: its Rust form is the only name it has.
-    Error::RunEnd(format!("{end:?}"))
 }
 
 #[pymethods]
@@ -1101,7 +1093,7 @@ impl Target for Debugged<'_, '_> {
             End::Stop(stop) => stop.into(),
             End::Until | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
-            other => return Err(unknown(&other).into()),
+            other => return Err(Error::RunEnd(other.to_string()).into()),
         })
     }
 

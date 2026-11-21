@@ -77,8 +77,11 @@ def board(directory: Path) -> mc683xx.Board:
 def test_an_observer_sees_what_a_sink_sees(tmp_path: Path) -> None:
     observed = board(tmp_path)
     seen: list[tuple[str, int, object]] = []
-    for net in NETS:
+    ids = [
         observed.observe(net, lambda net, at, value: seen.append((net, at, value)))
+        for net in NETS
+    ]
+    assert repr(ids[0]) == "observer 0"
     observed.run_for(seconds=0.0005)
     observed.send("switch", True, kind="logic")
     observed.run_for(seconds=0.0005)

@@ -40,7 +40,7 @@ pub(crate) struct HookIdView(pub(crate) HookId);
 #[pymethods]
 impl HookIdView {
     fn __repr__(&self) -> String {
-        format!("{:?}", self.0)
+        self.0.to_string()
     }
 }
 
