@@ -441,7 +441,7 @@ fn a_fetch_from_a_page_without_execute_is_a_bus_error() {
 /// least wall-clock time of several tries, against a loaded host.
 fn time_nops(cpu: &mut Cpu, instructions: usize) -> Duration {
     /// Cycles in each run: the cost of fewer than 1000 NOPs.
-    const BUDGET: Cycles = Cycles(1500);
+    const BUDGET: Cycles = Cycles::from_clocks(1500);
     /// Tries.
     const TRIES: usize = 20;
     (0..TRIES)

@@ -107,7 +107,7 @@ impl Row {
 
     /// The clocks `self` takes beyond `base`, for a charge.
     const fn beyond(self, base: Self) -> Cycles {
-        Cycles(self.cycles.saturating_sub(base.cycles) as u64)
+        Cycles::from_clocks(self.cycles.saturating_sub(base.cycles) as u64)
     }
 
     /// The clocks `self` takes more or fewer than `base`.
@@ -130,9 +130,9 @@ impl Adjustment {
     /// `clocks` more, or fewer if negative.
     const fn of(clocks: i32) -> Self {
         if clocks >= 0 {
-            Self::More(Cycles(clocks.unsigned_abs() as u64))
+            Self::More(Cycles::from_clocks(clocks.unsigned_abs() as u64))
         } else {
-            Self::Fewer(Cycles(clocks.unsigned_abs() as u64))
+            Self::Fewer(Cycles::from_clocks(clocks.unsigned_abs() as u64))
         }
     }
 }
@@ -291,13 +291,13 @@ pub(crate) const fn shift_count(opcode: u16, count: u32) -> Cycles {
     } else {
         rows::shift::register_clocks(count)
     };
-    Cycles((clocks - rows::shift::MINIMUM_CLOCKS) as u64)
+    Cycles::from_clocks((clocks - rows::shift::MINIMUM_CLOCKS) as u64)
 }
 
 /// MOVEM beyond its no-register cost: four clocks a register in each
 /// of its rows (CPU32RM 8.3.4, "n * 4").
 pub(crate) const fn movem(registers: u32) -> Cycles {
-    Cycles(registers as u64 * rows::special::MOVEM_CLOCKS_PER_REGISTER)
+    Cycles::from_clocks(registers as u64 * rows::special::MOVEM_CLOCKS_PER_REGISTER)
 }
 
 /// MUL.L beyond the quad-product cost the table charges, by its

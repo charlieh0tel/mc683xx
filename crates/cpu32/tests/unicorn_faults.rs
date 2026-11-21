@@ -84,7 +84,7 @@ const SUPERVISOR: u16 = status::S | status::INTERRUPT_MASK;
 /// The most instructions a case runs before it is taken to be stuck.
 const STEP_LIMIT: usize = 100;
 /// A run's budget for a case a hook stops: more than any case needs.
-const BUDGET: Cycles = Cycles(1000);
+const BUDGET: Cycles = Cycles::from_clocks(1000);
 
 /// MOVE #0, CCR (CPU32RM 4.4, MOVE to CCR).
 const CLEAR_CODES: [u16; 2] = [0x44fc, 0x0000];
@@ -282,7 +282,7 @@ impl Machine {
             &mut NoBus,
             &mut Request(InterruptLevel::NONE),
             Cycles::ZERO,
-            Cycles(1),
+            Cycles::from_clocks(1),
         )
     }
 
@@ -777,7 +777,7 @@ fn fault_5_stop_waits_for_an_interrupt() {
     /// Supervisor state, mask 0.
     const LOADED: u16 = status::S;
     /// A whole run's budget: more than one instruction.
-    const BUDGET: Cycles = Cycles(1000);
+    const BUDGET: Cycles = Cycles::from_clocks(1000);
     let level = InterruptLevel::new(1).expect("a level");
     let mut machine = Machine::new(&[STOP, LOADED, NOP]);
     let run = machine.cpu.run_for(
@@ -789,9 +789,12 @@ fn fault_5_stop_waits_for_an_interrupt() {
     assert_eq!(run.stop, Stop::Stopped);
     assert_eq!(machine.cpu.registers.sr(), LOADED);
     assert_eq!(machine.cpu.registers.pc.0, START + 4);
-    machine
-        .cpu
-        .run_for(&mut NoBus, &mut Request(level), Cycles::ZERO, Cycles(1));
+    machine.cpu.run_for(
+        &mut NoBus,
+        &mut Request(level),
+        Cycles::ZERO,
+        Cycles::from_clocks(1),
+    );
     assert_eq!(
         machine.cpu.registers.pc.0,
         handler(Vector::autovector(level))

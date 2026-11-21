@@ -60,7 +60,7 @@ const BGND: [u8; 2] = [0x4a, 0xfa];
 const PC: usize = 17;
 /// System clocks the chip runs each time the stub asks whether it has
 /// stopped.
-const LOOK: Cycles = Cycles(1000);
+const LOOK: Cycles = Cycles::from_clocks(1000);
 
 /// The chip as silicon behind a pod: it runs on its own, here a little
 /// each time the stub looks.  The second field counts register writes;

@@ -75,7 +75,7 @@ fn example_2_branch_not_taken_and_taken() {
     // MOVEQ #7, D1; CMP.L D1, D0; BLE.B; MOVE.L D1, (A0): 14 clocks
     // not taken (CPU32RM 8.2.2, Figure 8-6).
     assert_eq!(sequence(&[0x7207, 0xb081, 0x6f04, 0x2081]), 14);
-    let taken = sequence(&[0x7207, 0xb081, 0x6f04]) + branch_taken(Size::Byte).0;
+    let taken = sequence(&[0x7207, 0xb081, 0x6f04]) + branch_taken(Size::Byte).clocks();
     assert_eq!(taken, 2 + 2 + 8);
 }
 
@@ -83,14 +83,14 @@ fn example_2_branch_not_taken_and_taken() {
 fn the_run_loop_charges_the_table_and_the_overlap() {
     // NOP, MOVEQ #1, D0
     let mut cpu = machine(&[0x4e71, 0x7001]);
-    assert_eq!(step(&mut cpu, 1).cycles, Cycles(2));
-    assert_eq!(step(&mut cpu, 1).cycles, Cycles(2));
+    assert_eq!(step(&mut cpu, 1).cycles, Cycles::from_clocks(2));
+    assert_eq!(step(&mut cpu, 1).cycles, Cycles::from_clocks(2));
     // MOVE.L D0, (A0) (tail 4); MOVE.L D1, -(A1) (head 2, 8 cycles).
     let mut cpu = machine(&[0x2080, 0x2301]);
     cpu.registers.set_address(0, 0x2000);
     cpu.registers.set_address(1, 0x3000);
-    assert_eq!(step(&mut cpu, 1).cycles, Cycles(6));
-    assert_eq!(step(&mut cpu, 1).cycles, Cycles(8 - 2));
+    assert_eq!(step(&mut cpu, 1).cycles, Cycles::from_clocks(6));
+    assert_eq!(step(&mut cpu, 1).cycles, Cycles::from_clocks(8 - 2));
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn move_memory_to_indexed_memory_runs_its_table_cost() {
     let mut cpu = machine(&[0x2398, 0x2408]);
     cpu.registers.set_address(0, 0x2000);
     cpu.registers.set_address(1, 0x3000);
-    assert_eq!(step(&mut cpu, 1).cycles, Cycles(18));
+    assert_eq!(step(&mut cpu, 1).cycles, Cycles::from_clocks(18));
 }
 
 #[test]
@@ -209,9 +209,9 @@ fn shift_counts_match_the_manuals_table() {
 fn shift_rows() {
     // CPU32RM 8.3.9.
     assert_eq!(cost(0xe3a8), costs(4, 0, 6)); // LSL.L D1, D0
-    assert_eq!(shift_count(0xe3a8, 63), Cycles(22 - 6));
+    assert_eq!(shift_count(0xe3a8, 63), Cycles::from_clocks(22 - 6));
     // ROXL.L D1, D0 by 8: max(3 + 8 + 1, 6) (note 2).
-    assert_eq!(shift_count(0xe3b0, 8), Cycles(12 - 6));
+    assert_eq!(shift_count(0xe3b0, 8), Cycles::from_clocks(12 - 6));
     assert_eq!(cost(0xe150), costs(8, 0, 10)); // ROXL.W #8, D0 (note 3)
     assert_eq!(cost(0xe210), costs(4, 0, 6)); // ROXR.B #1, D0
     assert_eq!(cost(0xe3d0), costs(1, 2, 9)); // LSL.W (A0)
@@ -225,13 +225,19 @@ fn branch_rows() {
     assert_eq!(cost(0x6700), costs(0, 0, 4)); // BEQ.W, not taken
     assert_eq!(cost(0x67ff), costs(0, 0, 6)); // BEQ.L, not taken
     assert_eq!(cost(0x61ff), costs(1, 0, 13)); // BSR.L
-    assert_eq!(branch_taken(Size::Byte), Cycles(4));
-    assert_eq!(branch_taken(Size::Word), Cycles(4));
-    assert_eq!(branch_taken(Size::Long), Cycles(2));
+    assert_eq!(branch_taken(Size::Byte), Cycles::from_clocks(4));
+    assert_eq!(branch_taken(Size::Word), Cycles::from_clocks(4));
+    assert_eq!(branch_taken(Size::Long), Cycles::from_clocks(2));
     assert_eq!(cost(0x51c8), costs(1, 1, 4)); // DBF D0
     assert_eq!(decrement_and_branch(Decrement::ConditionTrue), Cycles::ZERO);
-    assert_eq!(decrement_and_branch(Decrement::Expired), Cycles(2));
-    assert_eq!(decrement_and_branch(Decrement::Taken), Cycles(6));
+    assert_eq!(
+        decrement_and_branch(Decrement::Expired),
+        Cycles::from_clocks(2)
+    );
+    assert_eq!(
+        decrement_and_branch(Decrement::Taken),
+        Cycles::from_clocks(6)
+    );
 }
 
 #[test]
@@ -239,12 +245,17 @@ fn loop_mode_dbcc_rows() {
     // CPU32RM 8.3.11, "in loop mode": (T) 4, 0, 6; (F, -1) 6, 0, 8;
     // (F, not -1) 6, 0, 10; against (T) 1, 1, 4, each overlapping the
     // last tail by its own head.
-    let more = |clocks| Adjustment::More(Cycles(clocks));
+    let more = |clocks| Adjustment::More(Cycles::from_clocks(clocks));
     for (last_tail, true_, expired, taken) in [
         (0, more(2), more(4), more(6)),
         (2, more(1), more(3), more(5)),
         // 6 - 4 against 4 - 1, and so on.
-        (4, Adjustment::Fewer(Cycles(1)), more(1), more(3)),
+        (
+            4,
+            Adjustment::Fewer(Cycles::from_clocks(1)),
+            more(1),
+            more(3),
+        ),
     ] {
         assert_eq!(
             decrement_and_branch_looping(Decrement::ConditionTrue, last_tail),
@@ -266,7 +277,7 @@ fn special_move_rows() {
     // CPU32RM 8.3.4.
     // MOVEM.L D0-D7, -(A7): 2 + 10 plus 8 * 4.
     assert_eq!(cost(0x48e7), costs(2, 2, 12));
-    assert_eq!(movem(8), Cycles(32));
+    assert_eq!(movem(8), Cycles::from_clocks(32));
     assert_eq!(cost(0x4cdf), costs(1, 0, 14)); // MOVEM.L (A7)+, RL
     assert_eq!(cost(0x48d8), cost(0x4afc)); // MOVEM to (A0)+: illegal
     assert_eq!(cost(0x4e7a), costs(10, 0, 14)); // MOVEC Cr, Rn
@@ -276,7 +287,7 @@ fn special_move_rows() {
     // MOVES.W (A0), Rn: save 3, CEA 2, op 11, less min(1, 1).
     assert_eq!(cost(0x0e50), costs(1, 1, 15));
     assert_eq!(moves(0), Cycles::ZERO);
-    assert_eq!(moves(extension::REGISTER_TO_MEMORY), Cycles(1));
+    assert_eq!(moves(extension::REGISTER_TO_MEMORY), Cycles::from_clocks(1));
 }
 
 #[test]
@@ -286,10 +297,10 @@ fn multiply_divide_and_table_rows() {
     assert_eq!(cost(0x81d0), costs(1, 0, 45)); // DIVS.W (A0), D0
     // MULU.L (A0), D0: save 3, FEA long 5, op 46: 3 - 1 + 5 - 2 + 46.
     assert_eq!(cost(0x4c10), costs(1, 0, 51));
-    assert_eq!(multiply_long(0), Cycles(6));
+    assert_eq!(multiply_long(0), Cycles::from_clocks(6));
     assert_eq!(multiply_long(extension::QUAD), Cycles::ZERO);
     assert_eq!(cost(0x4c41), costs(2, 0, 46)); // DIVS.L D1, D0: no save
-    assert_eq!(divide_long(extension::SIGNED), Cycles(16));
+    assert_eq!(divide_long(extension::SIGNED), Cycles::from_clocks(16));
     assert_eq!(divide_long(0), Cycles::ZERO);
     // CMP2.W (A0), Rn: save 3, FEA 3, op 18: 3 - 1 + 3 - 1 + 18.
     assert_eq!(cost(0x02d0), costs(1, 0, 22));
@@ -299,9 +310,12 @@ fn multiply_divide_and_table_rows() {
     let signed_unrounded_long = extension::SIGNED | extension::UNROUNDED | 0b10 << 6;
     assert_eq!(
         table_lookup(0xf810, signed_unrounded_long),
-        Cycles(39 + 4 - 35)
+        Cycles::from_clocks(39 + 4 - 35)
     );
-    assert_eq!(table_lookup(0xf801, extension::UNROUNDED), Cycles(40 - 30));
+    assert_eq!(
+        table_lookup(0xf801, extension::UNROUNDED),
+        Cycles::from_clocks(40 - 30)
+    );
     assert_eq!(table_lookup(0xf801, extension::SIGNED), Cycles::ZERO);
 }
 
@@ -319,10 +333,13 @@ fn control_and_exception_rows() {
     assert_eq!(cost(0x484f), costs(0, 0, 14)); // BKPT #7
     assert_eq!(cost(0x4180), costs(2, 0, 8)); // CHK.W D0, D0
     assert_eq!(return_from_exception(0), Cycles::ZERO);
-    assert_eq!(return_from_exception(exception::SIX_WORD_FORMAT), Cycles(2));
+    assert_eq!(
+        return_from_exception(exception::SIX_WORD_FORMAT),
+        Cycles::from_clocks(2)
+    );
     assert_eq!(
         return_from_exception(exception::BUS_ERROR_FORMAT),
-        Cycles(26)
+        Cycles::from_clocks(26)
     );
     for illegal in [0x4afc, 0x4afa, 0x4e7c, 0x7100, 0x8140] {
         assert_eq!(cost(illegal), exception::ILLEGAL, "{illegal:#06x}");
@@ -335,12 +352,12 @@ fn control_and_exception_rows() {
 #[test]
 fn traps_add_their_exception_rows() {
     // CPU32RM 8.3.12, 8.3.13.
-    assert_eq!(trap_taken(0x4180), Cycles(42 - 8)); // CHK.W
-    assert_eq!(trap_taken(0x41b9), Cycles(42 - 8)); // CHK.W (xxx).L
-    assert_eq!(trap_taken(0x00d0), Cycles(52 - 18)); // CHK2.B (A0)
-    assert_eq!(trap_taken(0x4e76), Cycles(38 - 4)); // TRAPV
-    assert_eq!(trap_taken(0x51fb), Cycles(38 - 6)); // TRAPF.L
-    assert_eq!(trap_taken(0x50fc), Cycles(38 - 4)); // TRAPT
+    assert_eq!(trap_taken(0x4180), Cycles::from_clocks(42 - 8)); // CHK.W
+    assert_eq!(trap_taken(0x41b9), Cycles::from_clocks(42 - 8)); // CHK.W (xxx).L
+    assert_eq!(trap_taken(0x00d0), Cycles::from_clocks(52 - 18)); // CHK2.B (A0)
+    assert_eq!(trap_taken(0x4e76), Cycles::from_clocks(38 - 4)); // TRAPV
+    assert_eq!(trap_taken(0x51fb), Cycles::from_clocks(38 - 6)); // TRAPF.L
+    assert_eq!(trap_taken(0x50fc), Cycles::from_clocks(38 - 4)); // TRAPT
     assert_eq!(trap_taken(0x4e71), Cycles::ZERO);
 }
 
@@ -377,8 +394,8 @@ fn exception_costs() {
 fn full_extension_words_against_the_brief_format() {
     // CPU32RM 8.3.1 against (d8, An, Xn)'s 8: BS, IS, BD SIZE.  BD SIZE
     // 00 is reserved and charged as 11.
-    let fewer = |clocks| Adjustment::Fewer(Cycles(clocks));
-    let more = |clocks| Adjustment::More(Cycles(clocks));
+    let fewer = |clocks| Adjustment::Fewer(Cycles::from_clocks(clocks));
+    let more = |clocks| Adjustment::More(Cycles::from_clocks(clocks));
     let cases = [
         (0x01d0, fewer(2)), // (0)
         (0x01e0, fewer(1)), // (d16)
@@ -428,7 +445,10 @@ fn the_run_loop_charges_full_extension_words() {
     ] {
         let mut cpu = machine(words);
         cpu.registers.set_address(0, 0x2000);
-        assert_eq!(step(&mut cpu, 1).cycles, Cycles(u64::from(cycles)));
+        assert_eq!(
+            step(&mut cpu, 1).cycles,
+            Cycles::from_clocks(u64::from(cycles))
+        );
     }
 }
 
@@ -456,10 +476,14 @@ fn calculated_addresses_take_the_calculate_tables_full_format() {
             cpu.registers.set_address(1, 0x2000);
             step(&mut cpu, 1).cycles
         };
-        assert_eq!(u64::from(cost(brief[0]).cycles), run(brief).0, "{brief:x?}");
+        assert_eq!(
+            u64::from(cost(brief[0]).cycles),
+            run(brief).clocks(),
+            "{brief:x?}"
+        );
         assert_eq!(
             run(full),
-            Cycles(run(brief).0 - u64::from(fewer)),
+            Cycles::from_clocks(run(brief).clocks() - u64::from(fewer)),
             "{full:x?}"
         );
     }
@@ -470,10 +494,13 @@ fn lpstop_takes_back_tbls_cost() {
     // TBL Dym:Dyn (26, 0, 30) against LPSTOP (3, -2, 25), CPU32RM 8.3.5,
     // 8.3.13: 5 clocks fewer, less the overlap past LPSTOP's head of 3.
     assert_eq!(cost(0xf800), costs(26, 0, 30));
-    assert_eq!(lpstop(0), Adjustment::Fewer(Cycles(5)));
-    assert_eq!(lpstop(2), Adjustment::Fewer(Cycles(5)));
-    assert_eq!(lpstop(4), Adjustment::Fewer(Cycles(5 - 1)));
-    assert_eq!(lpstop(10), Adjustment::More(Cycles(10 - 3 - 5)));
+    assert_eq!(lpstop(0), Adjustment::Fewer(Cycles::from_clocks(5)));
+    assert_eq!(lpstop(2), Adjustment::Fewer(Cycles::from_clocks(5)));
+    assert_eq!(lpstop(4), Adjustment::Fewer(Cycles::from_clocks(5 - 1)));
+    assert_eq!(
+        lpstop(10),
+        Adjustment::More(Cycles::from_clocks(10 - 3 - 5))
+    );
 }
 
 #[test]

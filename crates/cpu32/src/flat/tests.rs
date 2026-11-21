@@ -107,7 +107,7 @@ fn a_call_at_a_high_address_runs_until_it_returns() {
     assert_eq!(machine.cpu.registers.data[0], 1);
     assert_eq!(machine.cpu.registers.pc.0, RETURN);
     assert_eq!(machine.cpu.instructions(), 2);
-    assert!(run.cycles.0 > 0);
+    assert!(run.cycles.clocks() > 0);
 }
 
 #[test]

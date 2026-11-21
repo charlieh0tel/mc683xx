@@ -802,7 +802,7 @@ impl Mc68331 {
                 continue;
             }
             let next = self.board.next_event().map_or(end, |next| next.min(end));
-            let quantum = self.now.until(next).max(Cycles(1));
+            let quantum = self.now.until(next).max(Cycles::from_clocks(1));
             if let Some(idle) = self.cpu.idle() {
                 // time passes without the CPU
                 stop = idle;

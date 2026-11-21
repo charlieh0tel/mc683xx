@@ -45,7 +45,7 @@ fn short_runs(criterion: &mut Criterion) {
                     &mut bare::NoBus,
                     &mut bare::NoInterrupts,
                     Cycles::ZERO,
-                    black_box(Cycles(1)),
+                    black_box(Cycles::from_clocks(1)),
                 );
             }
         });

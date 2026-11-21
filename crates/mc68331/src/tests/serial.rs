@@ -236,7 +236,7 @@ fn go_leaves_background_mode_and_a_transfer_then_is_a_breakpoint() {
     let mut chip = chip(&[MOVEQ_1_D0, BRANCH_TO_SELF]);
     assert_eq!(chip.bdm_exchange(u32::from(GO)), NOT_READY);
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
-    chip.run_for(Cycles(1000));
+    chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(chip.bdm_exchange(u32::from(RDREG)), NOT_IN_BACKGROUND);
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Breakpoint)));
     assert_eq!(

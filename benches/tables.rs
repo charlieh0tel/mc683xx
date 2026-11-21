@@ -38,7 +38,7 @@ fn first_fetch() {
         &mut bare::NoBus,
         &mut bare::NoInterrupts,
         Cycles::ZERO,
-        Cycles(1),
+        Cycles::from_clocks(1),
     );
 }
 
@@ -49,7 +49,7 @@ fn first_instruction() {
         &mut bare::NoBus,
         &mut bare::NoInterrupts,
         Cycles::ZERO,
-        Cycles(1),
+        Cycles::from_clocks(1),
     );
 }
 

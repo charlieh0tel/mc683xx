@@ -90,7 +90,7 @@ pub fn capture(registers: &Registers) -> State {
 
 /// Runs one instruction: a budget of one cycle runs exactly one.
 pub fn step(cpu: &mut Cpu, bus: &mut dyn Bus) -> Ended {
-    let run = cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
+    let run = cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1));
     // The exception first: taking it may halt the core, as on a stack
     // the case does not map.
     match (cpu.exception_taken(), run.stop) {

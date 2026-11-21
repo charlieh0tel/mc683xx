@@ -82,7 +82,7 @@ mod planted;
 
 /// System clocks an emulated target runs between looks for gdb's
 /// Ctrl-C: about 6 ms of a 16.78 MHz chip.
-const QUANTUM: Cycles = Cycles(100_000);
+const QUANTUM: Cycles = Cycles::from_clocks(100_000);
 
 /// Serves gdb on `connection` over `target`: [`crate::serve`].
 pub(crate) fn serve<T, C>(
@@ -303,7 +303,7 @@ impl<T: Target> Session<'_, T> {
     fn clean_up<C>(&mut self) -> Result<(), SessionError<T::Error, C>> {
         let mut first = Ok(());
         if self.going.is_some() && !self.emulated {
-            let ran = match self.target.run_for(Cycles(0), &|| false) {
+            let ran = match self.target.run_for(Cycles::from_clocks(0), &|| false) {
                 Ok(ran @ TargetRun::Background(_)) => Ok(ran),
                 _ => self.target.halt(),
             };

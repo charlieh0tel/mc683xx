@@ -407,7 +407,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         // as the clock now runs (a SYNCR write moves it), and a turn
         // always moves time on.
         let until = arguments.cycles.map_or(until, |cycles| {
-            let at = board.system_clock().time(Cycles(cycles));
+            let at = board.system_clock().time(Cycles::from_clocks(cycles));
             until.min(at.max(board.now() + Span::from_picos(1)))
         });
         let outcome = board.run_until(until)?;
@@ -415,7 +415,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         let done = board.now() >= end
             || arguments
                 .cycles
-                .is_some_and(|cycles| board.chip().now() >= Cycles(cycles));
+                .is_some_and(|cycles| board.chip().now() >= Cycles::from_clocks(cycles));
         if outcome.stop != Stop::Budget || done {
             break outcome;
         }

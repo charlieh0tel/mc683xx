@@ -95,7 +95,7 @@ fn ending(program: &[&[u16]]) -> Vec<u16> {
 fn reset_code_runs_in_a_fixed_memory_with_no_select_programmed() {
     let program = ending(&[&store_word(DATA + 2, 0x1234), &load_word(DATA, 1)]);
     let (mut chip, _, data) = fixed(&program, ResetScope::NONE);
-    chip.run_for(Cycles(500));
+    chip.run_for(Cycles::from_clocks(500));
     assert_eq!(&chip.memory(data)[0..4], [0x5a, 0x5a, 0x12, 0x34]);
     assert_eq!(chip.cpu().registers.data[1] & 0xffff, 0x5a5a);
     let pc = chip.cpu().registers.pc;
@@ -175,7 +175,7 @@ fn a_chip_select_matching_a_cycle_wins_over_a_fixed_memory() {
 fn a_read_only_fixed_memory_ignores_writes() {
     let program = ending(&[&store_word(CODE + 0x100, 0x1234)]);
     let (mut chip, code, _) = fixed(&program, ResetScope::NONE);
-    chip.run_for(Cycles(500));
+    chip.run_for(Cycles::from_clocks(500));
     assert_eq!(chip.cpu().halted(), None);
     assert_eq!(chip.memory(code)[0x100..0x102], [0, 0]);
     assert_eq!(
@@ -199,7 +199,7 @@ fn a_fixed_memory_survives_resets_unless_reloaded() {
     // the watchdog's reset is not in its scope
     cycle(&mut reloaded, DATA, Size::Word, Some(0x1234)).unwrap();
     reloaded.take_events();
-    reloaded.run_for(Cycles(2 * 512 * 256));
+    reloaded.run_for(Cycles::from_clocks(2 * 512 * 256));
     assert!(watchdog_reset(&mut reloaded));
     assert_eq!(reloaded.memory(reloaded_data)[0..2], [0x12, 0x34]);
 }
@@ -222,7 +222,7 @@ fn the_watchdogs_reset_reloads_a_memory_in_its_scope() {
     let (mut chip, _, data) = fixed(&[BRANCH_TO_SELF], ResetScope::ALL);
     cycle(&mut chip, DATA, Size::Word, Some(0x1234)).unwrap();
     chip.take_events();
-    chip.run_for(Cycles(2 * 512 * 256));
+    chip.run_for(Cycles::from_clocks(2 * 512 * 256));
     assert!(watchdog_reset(&mut chip));
     assert_eq!(chip.memory(data)[0..2], [0x5a, 0x5a]);
 }
@@ -234,7 +234,7 @@ fn the_reset_instruction_reloads_before_the_next_instruction() {
     let (mut reloaded, _, _) = fixed(&program, system);
     let (mut kept, _, _) = fixed(&program, ResetScope::NONE);
     for chip in [&mut reloaded, &mut kept] {
-        chip.run_for(Cycles(2000));
+        chip.run_for(Cycles::from_clocks(2000));
         assert_eq!(chip.cpu().halted(), None);
     }
     assert_eq!(reloaded.cpu().registers.data[0] & 0xffff, 0x5a5a);
@@ -334,7 +334,7 @@ fn nops_reached(timing: Option<(PortSize, Termination)>) -> u32 {
         builder.set_fixed_timing(code, port, termination).unwrap();
     }
     let mut chip = builder.build();
-    chip.run_for(Cycles(4_000));
+    chip.run_for(Cycles::from_clocks(4_000));
     chip.cpu().registers.pc.0 - CODE
 }
 

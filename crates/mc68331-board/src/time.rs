@@ -776,9 +776,9 @@ impl TimeBase {
         let hz = u128::from(self.frequency.hz().max(1));
         let whole = |picoseconds: u128| Span(u64::try_from(picoseconds).unwrap_or(u64::MAX));
         if at >= self.cycles {
-            self.time + whole(picoseconds(at.0 - self.cycles.0) / hz)
+            self.time + whole(picoseconds(at.clocks() - self.cycles.clocks()) / hz)
         } else {
-            self.time - whole(picoseconds(self.cycles.0 - at.0).div_ceil(hz))
+            self.time - whole(picoseconds(self.cycles.clocks() - at.clocks()).div_ceil(hz))
         }
     }
 
@@ -789,10 +789,10 @@ impl TimeBase {
         let whole = |clocks: u128| u64::try_from(clocks).unwrap_or(u64::MAX);
         if at >= self.time {
             let clocks = scale(at.since(self.time)).div_ceil(u128::from(PICOSECONDS_PER_SECOND));
-            Cycles(self.cycles.0.saturating_add(whole(clocks)))
+            Cycles::from_clocks(self.cycles.clocks().saturating_add(whole(clocks)))
         } else {
             let clocks = scale(self.time.since(at)) / u128::from(PICOSECONDS_PER_SECOND);
-            Cycles(self.cycles.0.saturating_sub(whole(clocks)))
+            Cycles::from_clocks(self.cycles.clocks().saturating_sub(whole(clocks)))
         }
     }
 
@@ -1069,20 +1069,35 @@ mod tests {
     #[test]
     fn chip_times_round_up_to_a_clock() {
         let base = TimeBase::new(
-            Cycles(10),
+            Cycles::from_clocks(10),
             Time::from_picos(1_000),
             Frequency::from_hz(16_777_216),
         );
-        assert_eq!(base.time(Cycles(11)), Time::from_picos(1_000 + 59_604));
-        assert_eq!(base.cycles(Time::from_picos(1_000)), Cycles(10));
-        assert_eq!(base.cycles(Time::from_picos(1_001)), Cycles(11));
-        assert_eq!(base.cycles(Time::from_picos(1_000 + 59_605)), Cycles(12));
-        assert_eq!(base.cycles(base.time(Cycles(500))), Cycles(500));
-        let moved = base.moved(Cycles(20), Frequency::from_hz(8_388_608));
-        assert_eq!(moved.time, base.time(Cycles(20)));
-        assert_eq!(moved.cycles(moved.time + ps(1)), Cycles(21));
         assert_eq!(
-            base.moved(Cycles(20), Frequency::from_hz(16_777_216)),
+            base.time(Cycles::from_clocks(11)),
+            Time::from_picos(1_000 + 59_604)
+        );
+        assert_eq!(
+            base.cycles(Time::from_picos(1_000)),
+            Cycles::from_clocks(10)
+        );
+        assert_eq!(
+            base.cycles(Time::from_picos(1_001)),
+            Cycles::from_clocks(11)
+        );
+        assert_eq!(
+            base.cycles(Time::from_picos(1_000 + 59_605)),
+            Cycles::from_clocks(12)
+        );
+        assert_eq!(
+            base.cycles(base.time(Cycles::from_clocks(500))),
+            Cycles::from_clocks(500)
+        );
+        let moved = base.moved(Cycles::from_clocks(20), Frequency::from_hz(8_388_608));
+        assert_eq!(moved.time, base.time(Cycles::from_clocks(20)));
+        assert_eq!(moved.cycles(moved.time + ps(1)), Cycles::from_clocks(21));
+        assert_eq!(
+            base.moved(Cycles::from_clocks(20), Frequency::from_hz(16_777_216)),
             base,
             "no drift"
         );
@@ -1095,22 +1110,25 @@ mod tests {
             base,
             TimeBase::new(Cycles::ZERO, Time::ZERO, Frequency::from_hz(16_777_216))
         );
-        assert_eq!(base.cycles(Time::from_seconds(1)), Cycles(16_777_216));
+        assert_eq!(
+            base.cycles(Time::from_seconds(1)),
+            Cycles::from_clocks(16_777_216)
+        );
     }
 
     #[test]
     fn clocks_before_the_base_round_down_and_back() {
         let base = TimeBase::new(
-            Cycles(1_000),
+            Cycles::from_clocks(1_000),
             Time::from_picos(100_000_000),
             Frequency::from_hz(16_777_216),
         );
         assert_eq!(
-            base.time(Cycles(999)),
+            base.time(Cycles::from_clocks(999)),
             Time::from_picos(100_000_000 - 59_605)
         );
         for clocks in (0..1_000).chain(1_000..1_100) {
-            let cycles = Cycles(clocks);
+            let cycles = Cycles::from_clocks(clocks);
             assert_eq!(base.cycles(base.time(cycles)), cycles, "{clocks}");
         }
     }

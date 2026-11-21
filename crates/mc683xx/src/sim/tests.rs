@@ -99,7 +99,7 @@ fn modclk_low_prescales_the_timers() {
     assert_eq!(read(&mut sim, 0x24, Size::Word), 0x0100, "PTP");
     assert_eq!(read(&mut sim, 0x00, Size::Word), 0x08cf, "SLVEN");
     // 2^18 system clocks: EXTAL is the system clock
-    assert_eq!(sim.next_event(), Some(Cycles(1 << 18)));
+    assert_eq!(sim.next_event(), Some(Cycles::from_clocks(1 << 18)));
 }
 
 #[test]
@@ -183,15 +183,18 @@ fn the_timer_ticks_on_extal() {
     write(&mut sim, 0x04, Size::Word, 0xcf00, Cycles::ZERO);
     write(&mut sim, 0x22, Size::Word, 0x0542, Cycles::ZERO);
     write(&mut sim, 0x24, Size::Word, 0x0008, Cycles::ZERO);
-    let period = Cycles(16_777_216 / 1024);
+    let period = Cycles::from_clocks(16_777_216 / 1024);
     assert_eq!(sim.next_event(), Some(period));
-    sim.advance(Cycles(period.0 - 1));
+    sim.advance(Cycles::from_clocks(period.clocks() - 1));
     assert_eq!(sim.timer_request(), None);
     sim.advance(period);
     assert_eq!(sim.timer_request(), InterruptLevel::new(5));
     assert_eq!(sim.acknowledge_timer(), Vector(0x42));
     assert_eq!(sim.timer_request(), None);
-    assert_eq!(sim.next_event(), Some(Cycles(2 * period.0)));
+    assert_eq!(
+        sim.next_event(),
+        Some(Cycles::from_clocks(2 * period.clocks()))
+    );
 }
 
 /// SYNCR `from`, `from_clocks` system clocks an EXTAL period, written out
@@ -201,8 +204,9 @@ fn the_timer_ticks_on_extal() {
 /// (MC68331UM 4.2.10, 4.2.11, 4.3.2).
 fn timers_across_a_syncr_write(from: (u32, u64), to: (u32, u64)) {
     let ((from, from_clocks), (to, to_clocks)) = (from, to);
-    let half = Cycles(from_clocks / 2);
-    let at = |tick: u64| Cycles(half.0 + to_clocks / 2 + (tick - 1) * to_clocks);
+    let half = Cycles::from_clocks(from_clocks / 2);
+    let at =
+        |tick: u64| Cycles::from_clocks(half.clocks() + to_clocks / 2 + (tick - 1) * to_clocks);
     let sim = || {
         let mut sim = sim();
         write(&mut sim, 0x04, Size::Word, from, Cycles::ZERO);
@@ -215,7 +219,7 @@ fn timers_across_a_syncr_write(from: (u32, u64), to: (u32, u64)) {
     write(&mut timer, 0x04, Size::Word, to, half);
     assert_eq!(timer.clock().tick(half), 0);
     assert_eq!(timer.next_event(), Some(at(4)));
-    timer.advance(Cycles(at(4).0 - 1));
+    timer.advance(Cycles::from_clocks(at(4).clocks() - 1));
     assert_eq!(timer.timer_request(), None);
     timer.advance(at(4));
     assert_eq!(timer.timer_request(), InterruptLevel::new(5));
@@ -223,7 +227,7 @@ fn timers_across_a_syncr_write(from: (u32, u64), to: (u32, u64)) {
     let mut watchdog = sim();
     write(&mut watchdog, 0x04, Size::Word, to, half);
     assert_eq!(watchdog.next_event(), Some(at(512)));
-    watchdog.advance(Cycles(at(512).0 - 1));
+    watchdog.advance(Cycles::from_clocks(at(512).clocks() - 1));
     assert_eq!(watchdog.take_reset(), None);
     watchdog.advance(at(512));
     assert_eq!(watchdog.take_reset(), Some(ResetCause::Watchdog));
@@ -250,17 +254,32 @@ fn a_rising_multiplier_keeps_the_running_period_s_time() {
 fn the_watchdog_resets_unless_serviced() {
     let mut sim = sim();
     // 2^9 EXTAL periods at reset
-    let timeout = Cycles(512 * RESET_CLOCKS_PER_TICK);
-    sim.advance(Cycles(timeout.0 - 1));
+    let timeout = Cycles::from_clocks(512 * RESET_CLOCKS_PER_TICK);
+    sim.advance(Cycles::from_clocks(timeout.clocks() - 1));
     assert_eq!(sim.take_reset(), None);
-    write(&mut sim, 0x27, Size::Byte, 0x55, Cycles(timeout.0 - 1));
-    write(&mut sim, 0x27, Size::Byte, 0xaa, Cycles(timeout.0 - 1));
+    write(
+        &mut sim,
+        0x27,
+        Size::Byte,
+        0x55,
+        Cycles::from_clocks(timeout.clocks() - 1),
+    );
+    write(
+        &mut sim,
+        0x27,
+        Size::Byte,
+        0xaa,
+        Cycles::from_clocks(timeout.clocks() - 1),
+    );
     sim.advance(timeout);
     assert_eq!(sim.take_reset(), None);
-    sim.advance(Cycles(2 * timeout.0));
+    sim.advance(Cycles::from_clocks(2 * timeout.clocks()));
     assert_eq!(sim.take_reset(), Some(ResetCause::Watchdog));
     assert_eq!(sim.next_event(), None);
-    sim.reset(ResetCause::Watchdog, Cycles(2 * timeout.0));
+    sim.reset(
+        ResetCause::Watchdog,
+        Cycles::from_clocks(2 * timeout.clocks()),
+    );
     assert_eq!(sim.reset_status(), 0x20);
 }
 
@@ -271,7 +290,7 @@ fn the_watchdog_resets_unless_serviced() {
 #[test]
 fn a_new_swp_takes_effect_at_once() {
     let mut sim = sim();
-    let tick = |n: u64| Cycles(n * RESET_CLOCKS_PER_TICK);
+    let tick = |n: u64| Cycles::from_clocks(n * RESET_CLOCKS_PER_TICK);
     write(&mut sim, 0x21, Size::Byte, 0xcc, Cycles::ZERO);
     assert_eq!(sim.next_event(), Some(tick(1 << 18)));
     sim.advance(tick((1 << 18) - 1));
@@ -283,7 +302,7 @@ fn a_new_swp_takes_effect_at_once() {
 #[test]
 fn lpstop_stops_the_watchdog() {
     let mut sim = sim();
-    let tick = |n: u64| Cycles(n * RESET_CLOCKS_PER_TICK);
+    let tick = |n: u64| Cycles::from_clocks(n * RESET_CLOCKS_PER_TICK);
     sim.low_power_stop(InterruptLevel::NONE, tick(100));
     assert_eq!(sim.next_event(), None);
     sim.wake(tick(1000));
@@ -294,7 +313,7 @@ fn lpstop_stops_the_watchdog() {
 fn freeze_stops_the_watchdog_and_the_timer_with_frzsw_and_the_bus_monitor_with_frzbm() {
     // MC68331UM 4.2.13
     let mut sim = sim();
-    let tick = |n: u64| Cycles(n * RESET_CLOCKS_PER_TICK);
+    let tick = |n: u64| Cycles::from_clocks(n * RESET_CLOCKS_PER_TICK);
     sim.set_freeze(true, tick(100));
     assert_eq!(sim.next_event(), Some(tick(512)), "FRZSW clear: it runs");
     assert!(!sim.freezes_bus_monitor());
@@ -313,7 +332,7 @@ fn freeze_stops_the_watchdog_and_the_timer_with_frzsw_and_the_bus_monitor_with_f
 fn a_service_while_frozen_reloads_the_watchdog_s_count() {
     // MC68331UM 4.2.10: a debugger services it in background mode
     let mut sim = sim();
-    let tick = |n: u64| Cycles(n * RESET_CLOCKS_PER_TICK);
+    let tick = |n: u64| Cycles::from_clocks(n * RESET_CLOCKS_PER_TICK);
     write(&mut sim, 0x00, Size::Word, 0x40cf, tick(0));
     sim.set_freeze(true, tick(500));
     write(&mut sim, 0x27, Size::Byte, 0x55, tick(600));
@@ -329,15 +348,17 @@ fn freeze_with_frzsw_holds_the_timer_s_count() {
     write(&mut sim, 0x04, Size::Word, 0xcf00, Cycles::ZERO);
     write(&mut sim, 0x22, Size::Word, 0x0542, Cycles::ZERO);
     write(&mut sim, 0x24, Size::Word, 0x0008, Cycles::ZERO);
-    let period = Cycles(16_777_216 / 1024);
-    let half = Cycles(period.0 / 2);
+    let period = Cycles::from_clocks(16_777_216 / 1024);
+    let half = Cycles::from_clocks(period.clocks() / 2);
     sim.set_freeze(true, half);
-    sim.advance(Cycles(10 * period.0));
+    sim.advance(Cycles::from_clocks(10 * period.clocks()));
     assert_eq!(sim.timer_request(), None, "no count while frozen");
-    sim.set_freeze(false, Cycles(10 * period.0));
-    sim.advance(Cycles(10 * period.0 + half.0 - 1));
+    sim.set_freeze(false, Cycles::from_clocks(10 * period.clocks()));
+    sim.advance(Cycles::from_clocks(
+        10 * period.clocks() + half.clocks() - 1,
+    ));
     assert_eq!(sim.timer_request(), None);
-    sim.advance(Cycles(10 * period.0 + half.0));
+    sim.advance(Cycles::from_clocks(10 * period.clocks() + half.clocks()));
     assert_eq!(sim.timer_request(), InterruptLevel::new(5), "the half left");
 }
 
@@ -349,7 +370,7 @@ fn a_reset_keeps_the_port_latches_and_the_reset_instruction_all() {
     sim.system_reset();
     assert_eq!(sim.reset_status(), 0x02);
     assert_eq!(read(&mut sim, 0x4c, Size::Word), 0x1003);
-    sim.reset(ResetCause::External, Cycles(10));
+    sim.reset(ResetCause::External, Cycles::from_clocks(10));
     assert_eq!(sim.reset_status(), 0x80);
     assert_eq!(read(&mut sim, 0x4c, Size::Word), 0);
     assert_eq!(sim.port(PortName::E).latch, 0x81);
@@ -366,7 +387,7 @@ fn a_test_reset_leaves_the_clock_and_a_loss_of_clock_reset_resets_it() {
         let mut sim = sim();
         write(&mut sim, 0x04, Size::Word, 0xcf00, Cycles::ZERO);
         let fast = sim.clock().frequency();
-        sim.reset(cause, Cycles(1000));
+        sim.reset(cause, Cycles::from_clocks(1000));
         assert_eq!(read(&mut sim, 0x04, Size::Word), syncr, "{cause:?}");
         assert_eq!(sim.clock().frequency() == fast, cause == ResetCause::Test);
         assert_eq!(sim.reset_status(), cause.status());
@@ -394,10 +415,10 @@ fn port_c_drives_the_selects_assigned_as_discrete_outputs() {
     assert_eq!(read(&mut sim, 0x41, Size::Byte), 0x7f);
     assert_eq!(sim.outputs(PortName::C), PortLevels::new(0, 0));
     // CSPAR0: CS3 to CS5 %00; CSPAR1: CS6 to CS9 %00, CS10 a select
-    write(&mut sim, 0x44, Size::Word, 0x00ff, Cycles(5));
-    write(&mut sim, 0x46, Size::Word, 0x0300, Cycles(6));
+    write(&mut sim, 0x44, Size::Word, 0x00ff, Cycles::from_clocks(5));
+    write(&mut sim, 0x46, Size::Word, 0x0300, Cycles::from_clocks(6));
     assert_eq!(sim.outputs(PortName::C), PortLevels::new(0x7f, 0x7f));
-    write(&mut sim, 0x41, Size::Byte, 0xc1, Cycles(7));
+    write(&mut sim, 0x41, Size::Byte, 0xc1, Cycles::from_clocks(7));
     assert_eq!(
         sim.port(PortName::C),
         PortState {
@@ -416,9 +437,9 @@ fn port_c_drives_the_selects_assigned_as_discrete_outputs() {
     assert_eq!(
         sim.take_output_changes(),
         [
-            (Cycles(5), change(0x07, 0x07)),
-            (Cycles(6), change(0x7f, 0x7f)),
-            (Cycles(7), change(0x7f, 0x41)),
+            (Cycles::from_clocks(5), change(0x07, 0x07)),
+            (Cycles::from_clocks(6), change(0x7f, 0x7f)),
+            (Cycles::from_clocks(7), change(0x7f, 0x41)),
         ]
     );
     assert!(sim.take_output_changes().is_empty());
@@ -428,12 +449,12 @@ fn port_c_drives_the_selects_assigned_as_discrete_outputs() {
 fn a_pulse_between_quanta_is_two_changes() {
     let mut sim = sim();
     // PE0 a port pin, an output, low
-    write(&mut sim, 0x17, Size::Byte, 0xfe, Cycles(1));
-    write(&mut sim, 0x15, Size::Byte, 0x01, Cycles(2));
-    write(&mut sim, 0x11, Size::Byte, 0x01, Cycles(10));
-    write(&mut sim, 0x11, Size::Byte, 0x00, Cycles(13));
+    write(&mut sim, 0x17, Size::Byte, 0xfe, Cycles::from_clocks(1));
+    write(&mut sim, 0x15, Size::Byte, 0x01, Cycles::from_clocks(2));
+    write(&mut sim, 0x11, Size::Byte, 0x01, Cycles::from_clocks(10));
+    write(&mut sim, 0x11, Size::Byte, 0x00, Cycles::from_clocks(13));
     // an unchanged level is no change
-    write(&mut sim, 0x13, Size::Byte, 0x00, Cycles(14));
+    write(&mut sim, 0x13, Size::Byte, 0x00, Cycles::from_clocks(14));
     assert_eq!(sim.outputs(PortName::E), PortLevels::new(0x01, 0x00));
     let change = |driven, levels| Change {
         port: PortName::E,
@@ -442,36 +463,36 @@ fn a_pulse_between_quanta_is_two_changes() {
     assert_eq!(
         sim.take_output_changes(),
         [
-            (Cycles(2), change(0x01, 0x00)),
-            (Cycles(10), change(0x01, 0x01)),
-            (Cycles(13), change(0x01, 0x00)),
+            (Cycles::from_clocks(2), change(0x01, 0x00)),
+            (Cycles::from_clocks(10), change(0x01, 0x01)),
+            (Cycles::from_clocks(13), change(0x01, 0x00)),
         ]
     );
     // a reset makes the pins inputs again (SIMRM 8.8)
-    write(&mut sim, 0x1f, Size::Byte, 0x00, Cycles(20));
-    write(&mut sim, 0x1d, Size::Byte, 0x80, Cycles(20));
-    write(&mut sim, 0x19, Size::Byte, 0x80, Cycles(21));
-    sim.reset(ResetCause::External, Cycles(30));
+    write(&mut sim, 0x1f, Size::Byte, 0x00, Cycles::from_clocks(20));
+    write(&mut sim, 0x1d, Size::Byte, 0x80, Cycles::from_clocks(20));
+    write(&mut sim, 0x19, Size::Byte, 0x80, Cycles::from_clocks(21));
+    sim.reset(ResetCause::External, Cycles::from_clocks(30));
     assert_eq!(
         sim.take_output_changes(),
         [
             (
-                Cycles(20),
+                Cycles::from_clocks(20),
                 Change {
                     port: PortName::F,
                     outputs: PortLevels::new(0x80, 0),
                 }
             ),
             (
-                Cycles(21),
+                Cycles::from_clocks(21),
                 Change {
                     port: PortName::F,
                     outputs: PortLevels::new(0x80, 0x80),
                 }
             ),
-            (Cycles(30), change(0, 0)),
+            (Cycles::from_clocks(30), change(0, 0)),
             (
-                Cycles(30),
+                Cycles::from_clocks(30),
                 Change {
                     port: PortName::F,
                     outputs: PortLevels::new(0, 0),

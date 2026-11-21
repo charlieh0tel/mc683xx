@@ -130,7 +130,7 @@ pub enum Output {
 /// `None` for PCLK.
 pub(super) const fn tap_clocks(divisor: Option<u64>) -> Option<Cycles> {
     match divisor {
-        Some(divisor) => Some(Cycles(divisor)),
+        Some(divisor) => Some(Cycles::from_clocks(divisor)),
         None => None,
     }
 }

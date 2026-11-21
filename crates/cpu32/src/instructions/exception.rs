@@ -150,7 +150,7 @@ fn illegal(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
 /// and runs again from memory.  Each acknowledge costs BKPT's row and
 /// the word returned its own (CPU32RM 8.3.13).
 fn bkpt(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
-    let acknowledge_cost = Cycles(u64::from(timing::exception::BKPT.cycles));
+    let acknowledge_cost = Cycles::from_clocks(u64::from(timing::exception::BKPT.cycles));
     let mut number = opcode & BKPT_NUMBER;
     for acknowledge in 0..BKPT_CHAIN {
         if acknowledge > 0 {
@@ -178,7 +178,7 @@ fn replace(
     replacement: u16,
     acknowledge_cost: Cycles,
 ) -> Result<Flow, Exception> {
-    let entry = Cycles(u64::from(timing::table()[usize::from(replacement)].cycles));
+    let entry = Cycles::from_clocks(u64::from(timing::table()[usize::from(replacement)].cycles));
     match table()[usize::from(replacement)](core, replacement) {
         Ok(flow) => {
             core.charge_replacement(entry);
@@ -592,7 +592,7 @@ mod tests {
 
     /// One instruction, with the exceptions it raises, on `bus`.
     fn step_on(cpu: &mut Cpu, bus: &mut TestBus) -> Run {
-        cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1))
+        cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1))
     }
 
     /// One instruction on a bus with nothing on it.
@@ -1117,7 +1117,7 @@ mod tests {
 
     /// `cost`'s clocks.
     fn cycles(cost: timing::Cost) -> Cycles {
-        Cycles(u64::from(cost.cycles))
+        Cycles::from_clocks(u64::from(cost.cycles))
     }
 
     #[test]
@@ -1165,7 +1165,7 @@ mod tests {
         assert_eq!(bus.cpu_space[1].address, Address(3 << 2));
         assert_eq!(
             run.cycles,
-            Cycles(cycles(timing::exception::BKPT).0 * u64::from(BKPT_CHAIN))
+            Cycles::from_clocks(cycles(timing::exception::BKPT).clocks() * u64::from(BKPT_CHAIN))
         );
         // Then the word that ends the chain runs in BKPT's place.
         bus.breakpoint = Some(MOVEQ_5_TO_D0);

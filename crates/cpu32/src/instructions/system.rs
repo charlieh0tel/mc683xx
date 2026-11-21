@@ -441,7 +441,7 @@ mod tests {
 
     /// One instruction on `bus`.
     fn step_on(cpu: &mut Cpu, bus: &mut Recorder) -> Stop {
-        cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1))
+        cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1))
             .stop
     }
 
@@ -541,13 +541,23 @@ mod tests {
         // 0) all 25; after MOVE.L D0, (A0) (tail 4), 25 less 3.
         let mut cpu = supervisor(&[LPSTOP, LPSTOP_EXTENSION, 0x2700]);
         let mut bus = Recorder::default();
-        let run = cpu.run_for(&mut bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
-        assert_eq!(run.cycles, Cycles(25));
+        let run = cpu.run_for(
+            &mut bus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(1),
+        );
+        assert_eq!(run.cycles, Cycles::from_clocks(25));
         let mut cpu = supervisor(&[0x2080, LPSTOP, LPSTOP_EXTENSION, 0x2700]);
         cpu.registers.set_address(0, DATA);
         step_on(&mut cpu, &mut bus);
-        let run = cpu.run_for(&mut bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
-        assert_eq!(run.cycles, Cycles(25 - 3));
+        let run = cpu.run_for(
+            &mut bus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(1),
+        );
+        assert_eq!(run.cycles, Cycles::from_clocks(25 - 3));
     }
 
     #[test]

@@ -44,7 +44,7 @@ const D7: usize = 7;
 /// A loop counter for DBcc: 65536 times round.
 const LOOP_COUNT: u32 = 0xffff;
 /// Clocks one iteration runs: well inside the sled for every kernel.
-pub const BUDGET: Cycles = Cycles(20_000);
+pub const BUDGET: Cycles = Cycles::from_clocks(20_000);
 
 /// A bus with nothing on it.
 #[derive(Debug)]
@@ -122,7 +122,12 @@ pub fn iteration(cpu: &mut Cpu, budget: Cycles) -> Cycles {
 pub fn calibrate(kernel: &Kernel, budget: Cycles) -> Result<Calibration, Skip> {
     let mut cpu = machine(kernel);
     let calibration = Calibration::measure(budget, || {
-        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
+        let run = cpu.run_for(
+            &mut NoBus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(1),
+        );
         let taken = cpu.exception_taken();
         assert!(
             taken.is_none_or(crate::kernel::unimplemented),

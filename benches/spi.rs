@@ -52,7 +52,7 @@ fn transfer(number: u8) -> Transfer {
     let clock = QspiClock::new(
         mode.polarity,
         mode.phase,
-        Cycles(8),
+        Cycles::from_clocks(8),
         Frequency::from_hz(16_777_216),
     );
     Transfer::new(0, BITS, clock)

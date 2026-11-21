@@ -31,7 +31,7 @@ use crate::host::AccessError;
 /// The most system clocks a step runs: far more than any instruction
 /// with its exceptions takes, so a step that ends without stopping (a
 /// reset in it, which disables background mode) ends.
-const STEP_BUDGET: Cycles = Cycles(1 << 20);
+const STEP_BUDGET: Cycles = Cycles::from_clocks(1 << 20);
 
 /// Why a debugger's call on the chip failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

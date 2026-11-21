@@ -114,7 +114,7 @@ impl Wiring {
 
 /// System clocks a Python run goes between looks for Ctrl-C: about
 /// 6 ms of a 16.78 MHz chip, as gdb's quanta.
-const QUANTUM: Cycles = Cycles(100_000);
+const QUANTUM: Cycles = Cycles::from_clocks(100_000);
 
 /// A port's outputs as Python has them: a `(driven, levels)` pair, which
 /// unpacks as `PortLevels`' fields do.
@@ -648,7 +648,7 @@ impl TryFrom<cpu::Run> for Run {
 
     fn try_from(run: cpu::Run) -> Result<Self, Error> {
         Ok(Self {
-            cycles: run.cycles.0,
+            cycles: run.cycles.clocks(),
             stop: run.stop.try_into()?,
         })
     }
@@ -880,7 +880,7 @@ impl Event {
     pub(crate) fn of(event: event::Event) -> Result<Option<Self>, Error> {
         Ok(Some(match event {
             event::Event::Reset { now, cause, .. } => Self::Reset {
-                now: now.0,
+                now: now.clocks(),
                 cause: cause.try_into()?,
             },
             event::Event::ArbitrationTie {
@@ -889,7 +889,7 @@ impl Event {
                 arbitration,
                 ..
             } => Self::ArbitrationTie {
-                now: now.0,
+                now: now.clocks(),
                 level: level.get(),
                 arbitration,
             },
@@ -903,7 +903,7 @@ impl Event {
                 bus_error,
                 ..
             } => Self::Access {
-                now: now.0,
+                now: now.clocks(),
                 address: address.0,
                 size: size.bytes(),
                 function_code: function_code.bits(),
@@ -912,7 +912,7 @@ impl Event {
                 bus_error,
             },
             event::Event::Exception { now, entry, .. } => Self::Exception {
-                now: now.0,
+                now: now.clocks(),
                 vector: entry.vector.0,
                 pc: entry.pc.0,
                 handler: entry.handler.0,
@@ -920,7 +920,7 @@ impl Event {
                 level: entry.level.map(|level| level.get()),
             },
             event::Event::Dsack { now, fault, .. } => Self::Dsack {
-                now: now.0,
+                now: now.clocks(),
                 fault: DsackFaultView::of(fault)?,
             },
             _ => return Ok(None),
@@ -1030,7 +1030,7 @@ macro_rules! chip_methods {
             /// Now, in system clocks.
             #[getter]
             fn now(&self, py: Python<'_>) -> PyResult<u64> {
-                self.with_chip(py, |chip| Ok(chip.now().0))
+                self.with_chip(py, |chip| Ok(chip.now().clocks()))
             }
 
             /// Why the CPU halted, while it stays halted.
@@ -1287,7 +1287,9 @@ impl Chip {
     fn run_to(&mut self, py: Python<'_>, end: Cycles) -> PyResult<Run> {
         let start = self.chip.now();
         loop {
-            let target = Cycles(self.chip.now().0.saturating_add(QUANTUM.0)).min(end);
+            let target =
+                Cycles::from_clocks(self.chip.now().clocks().saturating_add(QUANTUM.clocks()))
+                    .min(end);
             // A chip halted before the quantum spends it as time passes
             // (no instruction runs), so its halt goes on to the next.
             let halted = self.chip.cpu().halted().is_some();
@@ -1385,7 +1387,7 @@ chip_methods! {
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
-        self.with_chip(py, |chip| Ok(format!("BoardChip(now={})", chip.now().0)))
+        self.with_chip(py, |chip| Ok(format!("BoardChip(now={})", chip.now().clocks())))
     }
 }
 
@@ -1408,10 +1410,10 @@ chip_methods! {
     /// cycle undriven, the bus not faulted, and stops the run once that
     /// instruction ends; it is raised here, the chip as it then is.
     fn run_for(&mut self, py: Python<'_>, budget: u64) -> PyResult<Run> {
-        let Some(end) = self.chip.now().0.checked_add(budget) else {
+        let Some(end) = self.chip.now().clocks().checked_add(budget) else {
             return Err(Error::Budget(budget).into());
         };
-        self.run_to(py, Cycles(end))
+        self.run_to(py, Cycles::from_clocks(end))
     }
 
     /// Waits for gdb at `address` (`host:port`, port 0 picks one),
@@ -1439,7 +1441,7 @@ chip_methods! {
     /// the first instruction boundary at or after it, so a series of
     /// these to rising targets is one long run.  Exceptions as `run_for`.
     fn run_until(&mut self, py: Python<'_>, target: u64) -> PyResult<Run> {
-        self.run_to(py, Cycles(target))
+        self.run_to(py, Cycles::from_clocks(target))
     }
 
     /// RESET driven by the board.
@@ -1575,7 +1577,7 @@ chip_methods! {
             .into_iter()
             .map(|change| {
                 (
-                    change.now.0,
+                    change.now.clocks(),
                     change.port.into(),
                     change.outputs.driven(),
                     change.outputs.levels(),
@@ -1604,7 +1606,7 @@ chip_methods! {
         self.chip
             .take_sci_transmitted()
             .into_iter()
-            .map(|sent| (sent.start.0, sent.frame.into()))
+            .map(|sent| (sent.start.clocks(), sent.frame.into()))
             .collect()
     }
 
@@ -1624,10 +1626,10 @@ chip_methods! {
             return Err(Error::Shift { mosi, bits }.into());
         }
         let budget = period.saturating_mul(bits.into());
-        if self.chip.now().0.checked_add(budget).is_none() {
+        if self.chip.now().clocks().checked_add(budget).is_none() {
             return Err(Error::Budget(budget).into());
         }
-        let shifted = self.chip.qspi_slave_shift(mosi, bits, Cycles(period));
+        let shifted = self.chip.qspi_slave_shift(mosi, bits, Cycles::from_clocks(period));
         self.pending.check()?;
         Ok((shifted.miso, shifted.driven))
     }
@@ -1641,7 +1643,7 @@ chip_methods! {
     /// or now if that is past; a run's quantum ends there.
     fn schedule_gpt_input(&mut self, at: u64, input: InputView, level: bool) {
         self.chip
-            .schedule_gpt_input(Cycles(at), input.into(), level);
+            .schedule_gpt_input(Cycles::from_clocks(at), input.into(), level);
     }
 
     /// The PWM pins' edges since the last call, in time order, while
@@ -1651,7 +1653,7 @@ chip_methods! {
         self.chip
             .take_pwm_changes()
             .into_iter()
-            .map(|change| (change.now.0, change.channel.into(), change.level))
+            .map(|change| (change.now.clocks(), change.channel.into(), change.level))
             .collect()
     }
 

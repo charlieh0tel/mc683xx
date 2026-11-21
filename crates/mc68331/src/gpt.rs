@@ -173,7 +173,7 @@ const CPR_LEAST_DIVISOR: u64 = 4;
 const TMSK2_CPROUT: u16 = 1 << 3;
 /// The time CPROUT's and PPROUT's clocks are high each period: one
 /// system clock (GPTRM 5.1).
-const CLOCK_OUT_HIGH: Cycles = Cycles(1);
+const CLOCK_OUT_HIGH: Cycles = Cycles::from_clocks(1);
 /// TMSK2's implemented bits: TOI, PAOVI, PAII, CPROUT, CPR.
 const TMSK2_WRITABLE: u8 = 0xbf;
 /// TFLG2 TOF, and TMSK2 TOI, in the word's lower byte (GPTRM 7.1.2.1).
@@ -686,7 +686,7 @@ impl Gpt {
         match counter.clock_high(self.prescaler.count(now)) {
             Some(high) => high,
             None => match self.pclk_rise {
-                Some(rise) => now.0 < rise.0 + CLOCK_OUT_HIGH.0,
+                Some(rise) => now.clocks() < rise.clocks() + CLOCK_OUT_HIGH.clocks(),
                 None => false,
             },
         }
@@ -1514,7 +1514,7 @@ impl Gpt {
     /// found no later.  Past [`LATEST_TIME`] a count may overflow.
     fn timing_is_valid(&self) -> bool {
         let now = self.time;
-        if now.0 > LATEST_TIME || !self.prescaler.is_valid(now) {
+        if now.clocks() > LATEST_TIME || !self.prescaler.is_valid(now) {
             return false;
         }
         let count = self.prescaler.count(now);
@@ -1522,7 +1522,7 @@ impl Gpt {
         self.counter.is_valid(count, now)
             && self.pwm.counter().is_valid(count, now)
             && self.tick <= self.counter.ticks(count)
-            && self.pclk_edges <= now.0
+            && self.pclk_edges <= now.clocks()
             && self.gated <= self.gated_count(count)
             && self.pclk_rise.is_none_or(|rise| rise <= now)
             && found(self.edges.pwm_found)

@@ -52,7 +52,7 @@ const LOG_BYTES: usize = 2048;
 /// Writes at an address that make its log worth showing.
 const LOG_SHOWN: usize = 8;
 /// Clocks run at a time while the CPU is stopped and waits.
-const STOPPED_QUANTUM: Cycles = Cycles(256);
+const STOPPED_QUANTUM: Cycles = Cycles::from_clocks(256);
 /// The select registers traced: CSBOOT and CS0 to CS10.
 const SELECTS: usize = ChipSelect::COUNT;
 
@@ -287,7 +287,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
         let hz_now = chip.sim().clock().frequency().hz();
         if budget_end.is_none() || hz_now != hz {
             // the end is a time, at the clock the firmware sets
-            let elapsed = chip.now().0;
+            let elapsed = chip.now().clocks();
             #[expect(
                 clippy::cast_possible_truncation,
                 clippy::cast_sign_loss,
@@ -298,11 +298,11 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
             budget_end = Some(end.max(elapsed));
         }
         let end = budget_end.expect("set");
-        if chip.now().0 >= end {
+        if chip.now().clocks() >= end {
             break;
         }
         let pc = chip.cpu().registers.pc;
-        let run = chip.run_for(Cycles(1));
+        let run = chip.run_for(Cycles::from_clocks(1));
         let run = if run.stop == Stop::Stopped {
             chip.run_for(STOPPED_QUANTUM)
         } else {
@@ -312,7 +312,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
         if let Some(milestone) = milestones.remove(&pc.0) {
             println!(
                 "{name}: milestone {milestone} ({pc:#x}) at clock {}",
-                chip.now().0
+                chip.now().clocks()
             );
             trace.reached.push((milestone, chip.now()));
         }
@@ -320,7 +320,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
             in_upper_flash = true;
             println!(
                 "{name}: first instruction in CS1's upper flash at {pc:#x}, clock {}",
-                chip.now().0
+                chip.now().clocks()
             );
         }
         if let Some(exception) = chip.cpu().exception_taken() {
@@ -332,7 +332,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
                 println!(
                     "{name}: exception vector {vector} at PC {pc:#x}, clock {}: {exception:?} \
                      -> {:#x}",
-                    chip.now().0,
+                    chip.now().clocks(),
                     chip.cpu().registers.pc
                 );
             }
@@ -363,7 +363,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
             vbr = chip.cpu().registers.vbr;
             println!(
                 "{name}: VBR = {vbr:#x} at PC {pc:#x}, clock {}",
-                chip.now().0
+                chip.now().clocks()
             );
         }
         for event in chip.take_events() {
@@ -376,11 +376,11 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
         if let Stop::Halted(halt) = run.stop {
             println!(
                 "{name}: halted, {halt}, at PC {pc:#x}, clock {}",
-                chip.now().0
+                chip.now().clocks()
             );
             break;
         }
-        if end.saturating_sub(chip.now().0) < end / 10 {
+        if end.saturating_sub(chip.now().clocks()) < end / 10 {
             let start = tail_start.get_or_insert(trace.instructions);
             if trace.instructions - *start < TAIL_INSTRUCTIONS as u64 {
                 *trace.tail.entry(chip.cpu().registers.pc.0).or_default() += 1;
@@ -391,7 +391,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
     println!(
         "{name}: end at clock {} ({hz} Hz at reset, {} Hz now), {} instructions, PC {:#x}, \
          SR {:#06x}, SSP {:#x}, USP {:#x}, VBR {:#x}",
-        chip.now().0,
+        chip.now().clocks(),
         chip.sim().clock().frequency().hz(),
         trace.instructions,
         registers.pc,
@@ -421,7 +421,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
                 cycle.address,
                 cycle.size,
                 cycle.function_code.bits(),
-                cycle.now.0
+                cycle.now.clocks()
             );
         }
         for (select, (reads, writes)) in &stub.counts {

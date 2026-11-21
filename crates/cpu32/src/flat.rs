@@ -594,7 +594,7 @@ impl Machine {
         let run = self
             .cpu
             .run_limited(&mut self.bus, &mut self.requests, self.now, limits);
-        self.now = Cycles(self.now.0.saturating_add(run.cycles.0));
+        self.now = Cycles::from_clocks(self.now.clocks().saturating_add(run.cycles.clocks()));
         run
     }
 

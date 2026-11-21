@@ -312,7 +312,7 @@ impl Sci {
     /// A frame time, if the baud rate generator runs.
     fn frame_time(&self) -> Option<Cycles> {
         self.bit_time()
-            .map(|bit| Cycles(bit * u64::from(self.frame_bits())))
+            .map(|bit| Cycles::from_clocks(bit * u64::from(self.frame_bits())))
     }
 
     /// SCCR0 written at `now`.
@@ -375,7 +375,7 @@ impl Sci {
                 frame,
                 start: now,
                 end,
-                bit: Cycles(self.bit_time().expect("the baud rate generator runs")),
+                bit: Cycles::from_clocks(self.bit_time().expect("the baud rate generator runs")),
             });
         }
         self.shifting = Some((sending, end));
@@ -456,7 +456,9 @@ impl Sci {
                 let shifted = u32::from(data) << (u32::BITS - self.data_bits());
                 1 + shifted.leading_ones()
             };
-            now + Cycles(bit * u64::from(self.frame_bits() - ones.min(self.frame_bits())))
+            now + Cycles::from_clocks(
+                bit * u64::from(self.frame_bits() - ones.min(self.frame_bits())),
+            )
         });
     }
 

@@ -354,7 +354,7 @@ impl Cpu {
     /// let mut cpu = Cpu::new(memory);
     /// cpu.registers.pc = Address(0x400);
     /// // A budget of one clock runs one instruction.
-    /// cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
+    /// cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1));
     /// assert_eq!(cpu.registers.data[0], 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -773,7 +773,7 @@ impl Cpu {
     fn spend(&mut self, cost: timing::Cost) -> Cycles {
         let overlap = self.last_tail.min(cost.head);
         self.last_tail = cost.tail;
-        Cycles(u64::from(cost.cycles.saturating_sub(u16::from(overlap))))
+        Cycles::from_clocks(u64::from(cost.cycles.saturating_sub(u16::from(overlap))))
     }
 }
 
@@ -842,10 +842,12 @@ fn exception_cost(vector: Vector, opcode: Option<u16>) -> ExceptionCost {
             ExceptionCost::InPlace(timing::exception::PRIVILEGE_VIOLATION)
         }
         Vector::FORMAT_ERROR => ExceptionCost::InPlace(timing::exception::FORMAT_ERROR),
-        Vector::ZERO_DIVIDE => {
-            ExceptionCost::Beyond(Cycles(u64::from(timing::exception::ZERO_DIVIDE.cycles)))
-        }
-        Vector::TRACE => ExceptionCost::Beyond(Cycles(u64::from(timing::exception::TRACE.cycles))),
+        Vector::ZERO_DIVIDE => ExceptionCost::Beyond(Cycles::from_clocks(u64::from(
+            timing::exception::ZERO_DIVIDE.cycles,
+        ))),
+        Vector::TRACE => ExceptionCost::Beyond(Cycles::from_clocks(u64::from(
+            timing::exception::TRACE.cycles,
+        ))),
         _ => ExceptionCost::Beyond(timing::trap_taken(opcode)),
     }
 }
@@ -2129,7 +2131,7 @@ mod tests {
     /// One run of budget 1: an interrupt, or an instruction with its
     /// exceptions.
     fn step(cpu: &mut Cpu, interrupts: &mut dyn Interrupts) -> Stop {
-        cpu.run_for(&mut NoBus, interrupts, Cycles::ZERO, Cycles(1))
+        cpu.run_for(&mut NoBus, interrupts, Cycles::ZERO, Cycles::from_clocks(1))
             .stop
     }
 
@@ -2180,11 +2182,16 @@ mod tests {
         let cycles = |stall| {
             let mut cpu = prepared(&[NOP], status::S);
             let mut source = Source::new(5, Acknowledge::Vector(Vector(0x40)));
-            source.stall = Cycles(stall);
-            cpu.run_for(&mut NoBus, &mut source, Cycles::ZERO, Cycles(1))
-                .cycles
+            source.stall = Cycles::from_clocks(stall);
+            cpu.run_for(
+                &mut NoBus,
+                &mut source,
+                Cycles::ZERO,
+                Cycles::from_clocks(1),
+            )
+            .cycles
         };
-        assert_eq!(cycles(5), cycles(0) + Cycles(5));
+        assert_eq!(cycles(5), cycles(0) + Cycles::from_clocks(5));
     }
 
     #[test]
@@ -2250,7 +2257,12 @@ mod tests {
         let mut cpu = prepared(&[NOP], status::S);
         let mut bus = AcknowledgeStops::default();
         let mut interrupts = AcknowledgeStops(Rc::clone(&bus.0));
-        let run = cpu.run_for(&mut bus, &mut interrupts, Cycles::ZERO, Cycles(10_000));
+        let run = cpu.run_for(
+            &mut bus,
+            &mut interrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(10_000),
+        );
         assert_eq!(run.stop, Stop::Requested);
         assert_eq!(cpu.registers.pc.0, handler(Vector(25)));
     }
@@ -2288,9 +2300,14 @@ mod tests {
     fn an_interrupt_wakes_a_stopped_cpu() {
         let mut cpu = prepared(&[NOP], status::S);
         cpu.stopped = true;
-        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(100));
+        let run = cpu.run_for(
+            &mut NoBus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(100),
+        );
         assert_eq!(run.stop, Stop::Stopped);
-        assert_eq!(run.cycles, Cycles(100));
+        assert_eq!(run.cycles, Cycles::from_clocks(100));
         assert_eq!(
             step(&mut cpu, &mut Source::new(1, Acknowledge::Autovector)),
             Stop::Budget
@@ -2539,10 +2556,15 @@ mod tests {
         step(&mut cpu, &mut NoInterrupts);
         cpu.set_breakpoint_pending(true);
         let mut bus = BreakpointResponder {
-            stall: Cycles(3),
+            stall: Cycles::from_clocks(3),
             ..BreakpointResponder::default()
         };
-        let run = cpu.run_for(&mut bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
+        let run = cpu.run_for(
+            &mut bus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(1),
+        );
         // CPU space, type 0000, BKPT #7 on A[4:2], T on A1, a word
         // (CPU32RM 5.3.1.1, 6.2.6; MC68331UM Figure 4-12)
         assert_eq!(bus.acknowledges.len(), 1);
@@ -2555,7 +2577,7 @@ mod tests {
         assert_eq!(cpu.registers.ssp.0, STACK);
         // CPU32RM 8.3.13, Breakpoint (Acknowledged), and the wait states
         let acknowledged = u64::from(crate::timing::exception::BREAKPOINT.cycles);
-        assert_eq!(run.cycles, Cycles(acknowledged + 3));
+        assert_eq!(run.cycles, Cycles::from_clocks(acknowledged + 3));
         // the next run executes the next instruction
         step(&mut cpu, &mut NoInterrupts);
         assert_eq!(cpu.registers.pc.0, CODE + 4);
@@ -2568,7 +2590,12 @@ mod tests {
         let mut cpu = prepared(&[NOP, NOP], sr);
         step(&mut cpu, &mut NoInterrupts);
         cpu.set_breakpoint_pending(true);
-        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
+        let run = cpu.run_for(
+            &mut NoBus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(1),
+        );
         assert!(!cpu.breakpoint_pending());
         assert_eq!(cpu.registers.pc.0, handler(Vector::HARDWARE_BREAKPOINT));
         assert_eq!(cpu.registers.ssp.0, STACK - 12);
@@ -2581,7 +2608,7 @@ mod tests {
         assert_eq!(cpu.registers.sr(), sr, "S set, the mask kept");
         // CPU32RM 8.3.13, Breakpoint (Bus Error)
         let cost = u64::from(crate::timing::exception::BREAKPOINT_BUS_ERROR.cycles);
-        assert_eq!(run.cycles, Cycles(cost));
+        assert_eq!(run.cycles, Cycles::from_clocks(cost));
         assert_eq!(
             cpu.exception_taken().map(|taken| taken.vector()),
             Some(Vector::HARDWARE_BREAKPOINT)
@@ -2602,7 +2629,7 @@ mod tests {
             &mut NoBus,
             &mut source,
             Cycles::ZERO,
-            Cycles(breakpoint + 1),
+            Cycles::from_clocks(breakpoint + 1),
         );
         // Table 6-2: the trace's processing first, then the
         // breakpoint's, then the interrupt's, whose handler runs first
@@ -2638,7 +2665,12 @@ mod tests {
         let mut cpu = prepared(&[NOP], status::S);
         cpu.stopped = true;
         cpu.set_breakpoint_pending(true);
-        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(100));
+        let run = cpu.run_for(
+            &mut NoBus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(100),
+        );
         assert_eq!(run.stop, Stop::Stopped);
         assert!(cpu.breakpoint_pending(), "STOP leaves it pending");
         assert_eq!(cpu.registers.ssp.0, STACK);
@@ -2659,7 +2691,12 @@ mod tests {
         let mut cpu = prepared(&[NOP], status::S);
         cpu.set_bdm_enabled(true);
         cpu.set_breakpoint_pending(true);
-        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(100));
+        let run = cpu.run_for(
+            &mut NoBus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(100),
+        );
         assert_eq!(run.stop, Stop::Background(Entry::Breakpoint));
         assert_eq!(cpu.background(), Some(Entry::Breakpoint));
         assert!(!cpu.breakpoint_pending());
@@ -2834,9 +2871,14 @@ mod tests {
 
         /// One instruction's cycles.
         fn cycles(cpu: &mut Cpu) -> u64 {
-            cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(1))
-                .cycles
-                .0
+            cpu.run_for(
+                &mut NoBus,
+                &mut NoInterrupts,
+                Cycles::ZERO,
+                Cycles::from_clocks(1),
+            )
+            .cycles
+            .clocks()
         }
 
         #[test]

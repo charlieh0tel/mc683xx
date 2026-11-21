@@ -1563,7 +1563,7 @@ impl BoardView {
     /// The chip's system clocks since power-on.
     #[getter]
     const fn cycles(&self) -> u64 {
-        self.board.chip().now().0
+        self.board.chip().now().clocks()
     }
 
     /// The chip's instructions run since power-on (`Mc68331.instructions`).

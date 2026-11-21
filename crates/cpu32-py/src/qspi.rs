@@ -86,7 +86,7 @@ impl From<peripheral::QspiClock> for QspiClock {
                 peripheral::ClockPhase::CaptureLeading => ClockPhase::CaptureLeading,
                 peripheral::ClockPhase::ChangeLeading => ClockPhase::ChangeLeading,
             },
-            period: clock.period.0,
+            period: clock.period.clocks(),
             system_clock_nanohertz: clock.system_clock.nanohertz(),
             baud_nanohertz: clock.baud().nanohertz(),
         }
@@ -136,7 +136,7 @@ impl From<peripheral::QspiTransfer> for QspiTransfer {
             out: transfer.out,
             bits: transfer.bits,
             clock: transfer.clock.into(),
-            now: transfer.now.0,
+            now: transfer.now.clocks(),
         }
     }
 }
@@ -241,7 +241,7 @@ impl SpiPeripheral for PythonSpiPeripheral {
             return;
         };
         Python::attach(|py| {
-            if let Err(error) = method.call1(py, (levels, now.0)) {
+            if let Err(error) = method.call1(py, (levels, now.clocks())) {
                 self.pending.record(error);
             }
         });
@@ -267,7 +267,7 @@ impl SpiPeripheral for PythonSpiPeripheral {
             return;
         };
         Python::attach(|py| {
-            if let Err(error) = method.call1(py, (now.0,)) {
+            if let Err(error) = method.call1(py, (now.clocks(),)) {
                 self.pending.record(error);
             }
         });
@@ -278,7 +278,7 @@ impl SpiPeripheral for PythonSpiPeripheral {
             return;
         };
         Python::attach(|py| {
-            if let Err(error) = method.call1(py, (QspiClock::from(clock), now.0)) {
+            if let Err(error) = method.call1(py, (QspiClock::from(clock), now.clocks())) {
                 self.pending.record(error);
             }
         });

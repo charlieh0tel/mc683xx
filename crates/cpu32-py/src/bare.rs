@@ -480,7 +480,7 @@ impl Budget {
         };
         let cycles = match self.cycles {
             Some(cycles) if self.spent >= cycles => return Err(End::Stop(cpu::Stop::Budget)),
-            Some(cycles) => Some(Cycles(cycles - self.spent)),
+            Some(cycles) => Some(Cycles::from_clocks(cycles - self.spent)),
             None => None,
         };
         let mut limits = Limits::default();
@@ -769,7 +769,7 @@ impl MachineView {
     /// The CPU's clock: the cycles its runs took.
     #[getter]
     const fn now(&self) -> u64 {
-        self.machine.now().0
+        self.machine.now().clocks()
     }
 
     /// Why the CPU halted, while it stays halted.
@@ -962,7 +962,7 @@ impl MachineView {
                 };
                 (run, fired, registers)
             };
-            budget.spent = budget.spent.saturating_add(run.cycles.0);
+            budget.spent = budget.spent.saturating_add(run.cycles.clocks());
             let pending = slf.borrow().pending.clone();
             pending.check()?;
             let dispatched = match registers {
@@ -1085,7 +1085,7 @@ impl Target for Debugged<'_, '_> {
         let budget = Budget {
             until: None,
             instructions: None,
-            cycles: Some(cycles.0),
+            cycles: Some(cycles.clocks()),
             spent: 0,
         };
         let (_, end) = MachineView::run_dispatching(self.0, budget, hit)?;
@@ -1181,7 +1181,7 @@ mod tests {
         let mut steps = Limits::default();
         steps.steps = Some(1);
         let mut budget = Limits::default();
-        budget.cycles = Some(Cycles(1));
+        budget.cycles = Some(Cycles::from_clocks(1));
         let ends = [
             end(&[NOP, NOP], until, |_| ()),
             end(&[NOP, NOP], instructions, |_| ()),

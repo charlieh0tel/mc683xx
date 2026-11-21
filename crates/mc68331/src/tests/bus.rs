@@ -339,7 +339,7 @@ fn the_core_leaves_a_bus_window_inside_a_fixed_memory_to_the_peripheral() {
         )
         .unwrap();
     let mut chip = builder.build();
-    chip.run_for(Cycles(200));
+    chip.run_for(Cycles::from_clocks(200));
     let data = chip.cpu().registers.data;
     assert_eq!((data[0] & 0xffff, data[1] & 0xffff), (0x1234, 0x5a5a));
 }

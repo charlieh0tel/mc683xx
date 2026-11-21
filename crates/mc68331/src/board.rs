@@ -1537,7 +1537,7 @@ const fn page(address: u32) -> usize {
 /// The clocks of a cycle of `clocks` beyond the timing tables' bus
 /// cycle: what the core adds to an instruction or interrupt.
 pub(crate) fn stall(clocks: u16) -> Cycles {
-    Cycles(u64::from(clocks.saturating_sub(TABLE_CLOCKS.into())))
+    Cycles::from_clocks(u64::from(clocks.saturating_sub(TABLE_CLOCKS.into())))
 }
 
 /// Whether `source` arbitrates with the SIM's IARB.

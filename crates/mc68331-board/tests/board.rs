@@ -735,7 +735,7 @@ parameters = { bytes = 4 }
         Record::BusCycle(peripheral).to_string(),
         format!(
             "bus-cycle cycle={} pc=0x00000420 access=write address=0x00200000 size=2 value=0x1234",
-            peripheral.cycle.0
+            peripheral.cycle.clocks()
         )
     );
     let exception = records
@@ -898,7 +898,10 @@ type = "watcher"
     board.run_until(Time::from_picos(100_000_000)).unwrap();
     let base = board.system_clock();
     assert_eq!(base.frequency().hz(), 16_777_216);
-    assert_eq!(base.cycles(base.time(Cycles(12_345))), Cycles(12_345));
+    assert_eq!(
+        base.cycles(base.time(Cycles::from_clocks(12_345))),
+        Cycles::from_clocks(12_345)
+    );
     let (asked, driven) = board
         .peripheral::<ClockWatcher>("watcher")
         .map(|watcher| (watcher.asked.borrow().clone(), watcher.driven))
@@ -1043,7 +1046,7 @@ struct Periodic {
 }
 
 /// `Periodic`'s period.
-const PERIOD: Cycles = Cycles(50_000);
+const PERIOD: Cycles = Cycles::from_clocks(50_000);
 
 mc683xx_cpu32::unsavable!(Periodic, "a periodic model");
 
@@ -1059,7 +1062,9 @@ impl MappedPeripheral for Periodic {
 
 impl Timed for Periodic {
     fn next_event(&self) -> Option<Cycles> {
-        Some(Cycles(PERIOD.0 * (self.advanced.len() as u64 + 1)))
+        Some(Cycles::from_clocks(
+            PERIOD.clocks() * (self.advanced.len() as u64 + 1),
+        ))
     }
 
     fn advance(&mut self, now: Cycles) {
@@ -1104,7 +1109,7 @@ type = "periodic"
     let cycles = board.chip().now();
     let expected = 16_777_216 / 10;
     assert!(
-        cycles.0 < expected && expected - cycles.0 < 1_000,
+        cycles.clocks() < expected && expected - cycles.clocks() < 1_000,
         "{cycles:?} clocks in 100 ms, not about {expected}"
     );
     let advanced = board
@@ -1112,9 +1117,12 @@ type = "periodic"
         .map(|peripheral| peripheral.peripheral().advanced.clone())
         .unwrap();
     // each advance at its event's clock exactly, before and after
-    assert_eq!(advanced.len() as u64, cycles.0 / PERIOD.0);
+    assert_eq!(advanced.len() as u64, cycles.clocks() / PERIOD.clocks());
     for (index, at) in advanced.iter().enumerate() {
-        assert_eq!(*at, Cycles(PERIOD.0 * (index as u64 + 1)));
+        assert_eq!(
+            *at,
+            Cycles::from_clocks(PERIOD.clocks() * (index as u64 + 1))
+        );
     }
 }
 
@@ -1364,7 +1372,7 @@ struct TimedWords {
 }
 
 /// `TimedWords`' event.
-const EVENT: Cycles = Cycles(1_000);
+const EVENT: Cycles = Cycles::from_clocks(1_000);
 
 impl MappedPeripheral for TimedWords {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
@@ -1541,7 +1549,7 @@ struct Ticker {
 }
 
 /// `Ticker`'s period.
-const TICK: Cycles = Cycles(700);
+const TICK: Cycles = Cycles::from_clocks(700);
 /// `Ticker`'s snapshot format.
 const TICKER_VERSION: u32 = 1;
 
@@ -1570,13 +1578,13 @@ impl Timed for Ticker {
 
 impl Save for Ticker {
     fn save(&self) -> Result<Vec<u8>, StateError> {
-        Ok(encode(TICKER_VERSION, &(self.ticks, self.next.0)))
+        Ok(encode(TICKER_VERSION, &(self.ticks, self.next.clocks())))
     }
 
     fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
         let (ticks, next): (u32, u64) = decode(TICKER_VERSION, snapshot)?;
         self.ticks = ticks;
-        self.next = Cycles(next);
+        self.next = Cycles::from_clocks(next);
         Ok(())
     }
 }
@@ -1708,9 +1716,12 @@ to = ["external.host"]
     let base = board.system_clock();
     let start = base.cycles(at);
     assert_eq!(base.time(start), at);
-    assert_eq!(base.cycles(serial.end(at)), start + Cycles(320));
+    assert_eq!(
+        base.cycles(serial.end(at)),
+        start + Cycles::from_clocks(320)
+    );
     // the preamble's frame went first, as TE set; this one followed it
-    assert!(start.0 >= 320, "after the preamble: {start:?}");
+    assert!(start.clocks() >= 320, "after the preamble: {start:?}");
 }
 
 #[test]

@@ -371,7 +371,7 @@ fn a_step_cut_by_the_budget_is_finished_by_a_run_of_zero_steps() {
     let mut machine = machine(&[MOVEQ_1_D1, NOP]);
     let run = machine.run_limited(Limits {
         steps: Some(1),
-        cycles: Some(Cycles(1)),
+        cycles: Some(Cycles::from_clocks(1)),
         ..Limits::default()
     });
     assert_eq!((run.end, run.steps), (End::Stop(Stop::Budget), 1));

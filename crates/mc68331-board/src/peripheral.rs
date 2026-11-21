@@ -921,7 +921,7 @@ mod tests {
         let fast = QspiClock::new(
             ClockPolarity::IdleHigh,
             ClockPhase::CaptureLeading,
-            Cycles(4),
+            Cycles::from_clocks(4),
             reset.system_clock,
         );
         let clocked = transfer.clocked(fast);

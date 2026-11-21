@@ -248,7 +248,7 @@ impl BusCycleView {
     /// When it starts, in system clocks.
     #[getter]
     const fn now(&self) -> u64 {
-        self.0.now.0
+        self.0.now.clocks()
     }
 
     fn __repr__(&self) -> String {
@@ -448,7 +448,7 @@ fn truth(value: &Bound<'_, PyAny>) -> PyResult<bool> {
 
 /// An optional time.
 fn time(value: &Bound<'_, PyAny>) -> PyResult<Option<Cycles>> {
-    Ok(value.extract::<Option<u64>>()?.map(Cycles))
+    Ok(value.extract::<Option<u64>>()?.map(Cycles::from_clocks))
 }
 
 impl MappedPeripheral for PythonMapped {
@@ -500,7 +500,7 @@ impl MappedPeripheral for PythonMapped {
     }
 
     fn reset(&mut self, now: Cycles) {
-        self.call_or(self.methods.reset.as_ref(), (now.0,), ignored, ());
+        self.call_or(self.methods.reset.as_ref(), (now.clocks(),), ignored, ());
     }
 }
 
@@ -520,7 +520,7 @@ impl Timed for PythonMapped {
     }
 
     fn advance(&mut self, now: Cycles) {
-        self.call_or(self.methods.advance.as_ref(), (now.0,), ignored, ());
+        self.call_or(self.methods.advance.as_ref(), (now.clocks(),), ignored, ());
     }
 }
 

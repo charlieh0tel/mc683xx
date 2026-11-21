@@ -50,7 +50,12 @@ fn trace(cpu: &mut Cpu, budget: u64) -> Vec<u32> {
         into.borrow_mut().push(instruction.pc.0);
         ControlFlow::Continue(())
     });
-    cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(budget));
+    cpu.run_for(
+        &mut NoBus,
+        &mut NoInterrupts,
+        Cycles::ZERO,
+        Cycles::from_clocks(budget),
+    );
     cpu.remove_hook(id);
     pcs.take()
 }
@@ -136,7 +141,12 @@ fn hooks_stay_and_permissions_come_back() {
     );
     assert_eq!(
         other
-            .run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(1000))
+            .run_for(
+                &mut NoBus,
+                &mut NoInterrupts,
+                Cycles::ZERO,
+                Cycles::from_clocks(1000)
+            )
             .stop,
         crate::cpu::Stop::Hook(id)
     );

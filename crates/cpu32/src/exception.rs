@@ -681,7 +681,7 @@ impl Core<'_> {
             return self.double_fault(&fault);
         }
         self.cpu.far = fault.address;
-        self.charge(Cycles(u64::from(
+        self.charge(Cycles::from_clocks(u64::from(
             timing::exception::BUS_ERROR_IN_EXCEPTION.cycles,
         )));
         let words = faulted.words();

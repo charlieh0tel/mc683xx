@@ -245,7 +245,7 @@ pub fn stall(size: Size, port: PortSize, clocks: u8) -> Cycles {
         (Size::Word, PortSize::Bits8) => 2,
         _ => 1,
     };
-    Cycles((cycles * u64::from(clocks)).saturating_sub(TABLE_CLOCKS))
+    Cycles::from_clocks((cycles * u64::from(clocks)).saturating_sub(TABLE_CLOCKS))
 }
 
 #[cfg(test)]
@@ -264,12 +264,12 @@ mod tests {
             Address(0x400),
             Size::Word,
             FunctionCode::SUPERVISOR_PROGRAM,
-            Cycles(7),
+            Cycles::from_clocks(7),
         );
         assert_eq!(access.address, Address(0x400));
         assert_eq!(access.size, Size::Word);
         assert_eq!(access.function_code, FunctionCode::SUPERVISOR_PROGRAM);
-        assert_eq!(access.now, Cycles(7));
+        assert_eq!(access.now, Cycles::from_clocks(7));
     }
 
     #[test]
@@ -279,7 +279,13 @@ mod tests {
 
     #[test]
     fn a_word_on_an_8_bit_port_is_two_cycles() {
-        assert_eq!(stall(Size::Word, PortSize::Bits8, 3), Cycles(4));
-        assert_eq!(stall(Size::Byte, PortSize::Bits8, 3), Cycles(1));
+        assert_eq!(
+            stall(Size::Word, PortSize::Bits8, 3),
+            Cycles::from_clocks(4)
+        );
+        assert_eq!(
+            stall(Size::Byte, PortSize::Bits8, 3),
+            Cycles::from_clocks(1)
+        );
     }
 }

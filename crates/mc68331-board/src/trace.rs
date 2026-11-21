@@ -291,7 +291,7 @@ impl fmt::Display for BusCycleRecord {
         write!(
             formatter,
             "bus-cycle cycle={} pc={} access={} address={} size={} value=",
-            self.cycle.0,
+            self.cycle.clocks(),
             self.pc,
             if self.write { "write" } else { "read" },
             self.address,
@@ -319,7 +319,9 @@ impl fmt::Display for ExceptionRecord {
         write!(
             formatter,
             "exception cycle={} vector={} pc={} sr=",
-            self.cycle.0, self.vector, self.pc
+            self.cycle.clocks(),
+            self.vector,
+            self.pc
         )?;
         match self.sr {
             Some(sr) => write!(formatter, "{sr:#06x}")?,
@@ -341,7 +343,7 @@ impl fmt::Display for PinRecord {
         write!(
             formatter,
             "pin cycle={} time={} pin={} level={}",
-            self.cycle.0,
+            self.cycle.clocks(),
             self.now.picos(),
             self.pin,
             u8::from(self.level)
@@ -358,7 +360,7 @@ impl fmt::Display for QspiRecord {
         write!(
             formatter,
             "qspi cycle={} pcs={:#x} bits={} out={:#06x} in={:#06x} cpol={} cpha={}",
-            self.cycle.0,
+            self.cycle.clocks(),
             self.chip_selects,
             self.bits,
             self.out,
@@ -378,7 +380,7 @@ impl fmt::Display for CodeRecord {
         write!(
             formatter,
             "code cycle={} pc={} sr={:#06x} d={} a={} stack={}",
-            self.cycle.0,
+            self.cycle.clocks(),
             self.pc,
             self.sr,
             longs(self.data.iter().copied().map(Some)),
@@ -397,7 +399,12 @@ impl fmt::Display for PositionRecord {
         write!(
             formatter,
             "position cycle={} pc={} sr={:#06x} vbr={} a7={} instructions={}",
-            self.cycle.0, self.pc, self.sr, self.vbr, self.a7, self.instructions
+            self.cycle.clocks(),
+            self.pc,
+            self.sr,
+            self.vbr,
+            self.a7,
+            self.instructions
         )
     }
 }
@@ -411,7 +418,7 @@ impl fmt::Display for StoppedRecord {
         write!(
             formatter,
             "stopped cycle={} instructions={} reason={}",
-            self.cycle.0,
+            self.cycle.clocks(),
             self.instructions,
             reason(self.stop)
         )
@@ -469,7 +476,7 @@ mod tests {
     #[test]
     fn records_print_as_docs_tracing_shows() {
         let peripheral = Record::BusCycle(BusCycleRecord {
-            cycle: Cycles(42),
+            cycle: Cycles::from_clocks(42),
             pc: Address(0x1_5f88),
             write: false,
             address: Address(0x20_0003),
@@ -481,7 +488,7 @@ mod tests {
             "bus-cycle cycle=42 pc=0x00015f88 access=read address=0x00200003 size=1 value=0x04"
         );
         let word = Record::BusCycle(BusCycleRecord {
-            cycle: Cycles(42),
+            cycle: Cycles::from_clocks(42),
             pc: Address(0x1_5f88),
             write: true,
             address: Address(0x20_0003),
@@ -496,7 +503,7 @@ mod tests {
             value: None,
             write: false,
             ..BusCycleRecord {
-                cycle: Cycles(1),
+                cycle: Cycles::from_clocks(1),
                 pc: Address(0),
                 write: false,
                 address: Address(0),
@@ -506,7 +513,7 @@ mod tests {
         });
         assert!(berr.to_string().ends_with("value=berr"));
         let exception = Record::Exception(ExceptionRecord {
-            cycle: Cycles(7),
+            cycle: Cycles::from_clocks(7),
             vector: Vector(66),
             pc: Address(0x100),
             sr: Some(0x2000),
@@ -517,7 +524,7 @@ mod tests {
             "exception cycle=7 vector=66 pc=0x00000100 sr=0x2000 level=5"
         );
         let pin = Record::Pin(PinRecord {
-            cycle: Cycles(1677),
+            cycle: Cycles::from_clocks(1677),
             now: Time::from_picos(100_000_037),
             pin: "PGP0",
             level: true,
@@ -527,7 +534,7 @@ mod tests {
             "pin cycle=1677 time=100000037 pin=PGP0 level=1"
         );
         let qspi = Record::Qspi(QspiRecord {
-            cycle: Cycles(90_210),
+            cycle: Cycles::from_clocks(90_210),
             chip_selects: 7,
             bits: 16,
             out: 0x8000,
@@ -540,7 +547,7 @@ mod tests {
             "qspi cycle=90210 pcs=0x7 bits=16 out=0x8000 in=0xffff cpol=1 cpha=1"
         );
         let code = Record::Code(CodeRecord {
-            cycle: Cycles(5),
+            cycle: Cycles::from_clocks(5),
             pc: Address(0x1234),
             sr: 0x2700,
             data: [0; 8],
@@ -552,7 +559,7 @@ mod tests {
              stack=00000001,--------,--------,--------,--------,--------,--------,--------"
         ));
         let position = Record::Position(PositionRecord {
-            cycle: Cycles(1),
+            cycle: Cycles::from_clocks(1),
             pc: Address(2),
             sr: 0x2700,
             vbr: Address(0),
@@ -564,7 +571,7 @@ mod tests {
             "position cycle=1 pc=0x00000002 sr=0x2700 vbr=0x00000000 a7=0x0010fffc instructions=9"
         );
         let stopped = Record::Stopped(StoppedRecord {
-            cycle: Cycles(3),
+            cycle: Cycles::from_clocks(3),
             instructions: 1,
             stop: Stop::Budget,
         });
@@ -610,7 +617,7 @@ mod tests {
     #[test]
     fn a_line_names_its_chip() {
         let stopped = Record::Stopped(StoppedRecord {
-            cycle: Cycles(3),
+            cycle: Cycles::from_clocks(3),
             instructions: 1,
             stop: Stop::Budget,
         });

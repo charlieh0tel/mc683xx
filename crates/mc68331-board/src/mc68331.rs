@@ -787,7 +787,7 @@ impl chip::Chip for Mc68331 {
         let system_clock = self.sim().clock().frequency();
         for sent in self.take_sci_transmitted() {
             let start = base.time(sent.start);
-            let baud = u128::from(system_clock.nanohertz()) / u128::from(sent.bit.0);
+            let baud = u128::from(system_clock.nanohertz()) / u128::from(sent.bit.clocks());
             let serial = Serial::timed(
                 sent.frame,
                 Frequency::from_nanohertz(u64::try_from(baud).unwrap_or(u64::MAX)),
@@ -803,7 +803,7 @@ impl chip::Chip for Mc68331 {
 
     fn reset_pulse(event: &Event) -> Option<(Cycles, Cycles)> {
         match *event {
-            Event::Reset { now, .. } => Some((now, now + Cycles(RESET_CLOCKS))),
+            Event::Reset { now, .. } => Some((now, now + Cycles::from_clocks(RESET_CLOCKS))),
             _ => None,
         }
     }

@@ -60,7 +60,7 @@ fn main() -> Result<(), BuildError> {
     // The power-on reset: SSP and PC from the vectors.
     let mut chip = builder.build();
     assert_eq!(chip.cpu().registers.pc.0, firmware::START);
-    let run = chip.run_for(Cycles(1000));
+    let run = chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(run.stop, Stop::Budget);
     assert_eq!(chip.memory(ram)[..2], [0x12, 0x34]);
     Ok(())
@@ -180,7 +180,7 @@ let (mut builder, _) = firmware::booting(firmware::rom(&firmware::store_word(cod
 let fixed = builder.fixed_memory(Address(code), vec![0; 2048], MemoryKind::Ram).unwrap();
 builder.set_reload_scope(fixed, ResetScope::ALL);
 let mut chip = builder.build();
-chip.run_for(Cycles(1000));
+chip.run_for(Cycles::from_clocks(1000));
 assert_eq!(chip.memory(fixed)[..2], [0x12, 0x34]);
 chip.reset();
 assert_eq!(chip.memory(fixed)[..2], [0, 0], "reloaded");
@@ -227,9 +227,9 @@ use mc683xx_examples::firmware;
 let program = [firmware::prologue(), firmware::stop(firmware::UNMASKED).to_vec()].concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
-let run = chip.run_for(Cycles(10_000));
+let run = chip.run_for(Cycles::from_clocks(10_000));
 assert_eq!(run.stop, Stop::Stopped);
-assert!(run.cycles >= Cycles(10_000));
+assert!(run.cycles >= Cycles::from_clocks(10_000));
 assert_eq!(chip.now(), run.cycles);
 ```
 
@@ -258,9 +258,9 @@ let chip = || {
     firmware::booting(firmware::rom(&program)).0.build()
 };
 let (mut one, mut two) = (chip(), chip());
-one.run_until(Cycles(5000));
+one.run_until(Cycles::from_clocks(5000));
 for quantum in 1..=5 {
-    two.run_until(Cycles(quantum * 1000));
+    two.run_until(Cycles::from_clocks(quantum * 1000));
 }
 assert_eq!(one.now(), two.now());
 assert_eq!(one.cpu().registers.data, two.cpu().registers.data);
@@ -319,8 +319,8 @@ let (mut builder, _) = firmware::booting(firmware::rom(&program));
 let stop = builder.stop_request();
 builder.peripheral(Breaker(stop), &[firmware::cs(1)]).unwrap();
 let mut chip = builder.build();
-assert_eq!(chip.run_for(Cycles(10_000)).stop, Stop::Requested);
-assert_eq!(chip.run_for(Cycles(100)).stop, Stop::Budget);
+assert_eq!(chip.run_for(Cycles::from_clocks(10_000)).stop, Stop::Requested);
+assert_eq!(chip.run_for(Cycles::from_clocks(100)).stop, Stop::Budget);
 ```
 
 ## Peripherals
@@ -527,7 +527,7 @@ let peripheral = builder
     .unwrap();
 builder.set_interrupt(peripheral, IrqPin::new(LEVEL).unwrap());
 let mut chip = builder.build();
-chip.run_for(Cycles(5000));
+chip.run_for(Cycles::from_clocks(5000));
 assert_eq!(chip.memory(ram)[..2], [0xbe, 0xef], "the handler ran");
 let acknowledges = &chip.peripheral::<Interrupter>(peripheral).unwrap().acknowledges;
 assert_eq!(acknowledges.len(), 1);
@@ -615,18 +615,18 @@ firmware::set_vector(&mut image, AUTOVECTOR_7, firmware::HANDLER);
 firmware::patch(&mut image, firmware::HANDLER, &[firmware::BRANCH_TO_SELF]);
 let (mut builder, _) = firmware::booting(image);
 let alarm = builder.unwired_peripheral(Alarm {
-    at: Cycles(5000),
+    at: Cycles::from_clocks(5000),
     now: Cycles::ZERO,
 });
 let seven = IrqPin::IRQ7;
 builder.set_interrupt(alarm, seven);
 builder.set_autovector(seven);
 let mut chip = builder.build();
-chip.run_for(Cycles(4000));
+chip.run_for(Cycles::from_clocks(4000));
 assert_ne!(chip.cpu().registers.pc.0, firmware::HANDLER);
 let before = chip.save().unwrap();
 let then = chip.peripheral::<Alarm>(alarm).unwrap().now;
-chip.run_for(Cycles(4000));
+chip.run_for(Cycles::from_clocks(4000));
 assert_eq!(chip.cpu().registers.pc.0, firmware::HANDLER);
 assert_eq!(chip.cpu().registers.interrupt_mask(), InterruptLevel::NONMASKABLE);
 // The alarm's time is in the chip's snapshot.
@@ -704,7 +704,7 @@ let not_watchdog = builder.unwired_peripheral(Counter::default());
 builder.set_reset_scope(not_watchdog, ResetScope::ALL.without(ResetCause::Watchdog));
 let mut chip = builder.build();
 // The watchdog's 2^9 EXTAL periods of 256 clocks (MC68331UM 4.2.10).
-chip.run_for(Cycles(512 * 256 + 100));
+chip.run_for(Cycles::from_clocks(512 * 256 + 100));
 chip.reset();
 // A panel's reset control, as the watchdog's: RSR SW (SIMRM 8.2.8).
 chip.reset_for(ResetCause::Watchdog);
@@ -792,9 +792,9 @@ let program = [
 .concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
-chip.run_for(Cycles(1000));
+chip.run_for(Cycles::from_clocks(1000));
 chip.sci_receive(Frame::Data(u16::from(b'!')));
-chip.run_for(Cycles(2000));
+chip.run_for(Cycles::from_clocks(2000));
 let sent = chip.take_sci_transmitted();
 assert_eq!(sent.len(), 1);
 assert_eq!(sent[0].frame.data(), Some(u16::from(b'!')));
@@ -856,7 +856,7 @@ let program = [
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
 chip.set_pins(Port::E, PE1, PE1).unwrap();
-chip.run_for(Cycles(1000));
+chip.run_for(Cycles::from_clocks(1000));
 assert_eq!(
     chip.outputs(Port::E),
     PortLevels::new(PE0, 0)
@@ -932,12 +932,12 @@ let program = [
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
 let ic1 = Input::PortGp(PortGpPin::new(0).unwrap());
-chip.schedule_gpt_input(Cycles(2000), ic1, false);
-chip.schedule_gpt_input(Cycles(3000), ic1, true);
-chip.run_for(Cycles(CLOCKS_PER_COUNT * 0x1000 + 100));
+chip.schedule_gpt_input(Cycles::from_clocks(2000), ic1, false);
+chip.schedule_gpt_input(Cycles::from_clocks(3000), ic1, true);
+chip.run_for(Cycles::from_clocks(CLOCKS_PER_COUNT * 0x1000 + 100));
 let changes = chip.take_port_changes();
 let last = changes.last().unwrap();
-assert_eq!(last.now, Cycles(CLOCKS_PER_COUNT * 0x1000));
+assert_eq!(last.now, Cycles::from_clocks(CLOCKS_PER_COUNT * 0x1000));
 assert_eq!(last.port, Port::Gp);
 assert_eq!(
     last.outputs,
@@ -1032,7 +1032,7 @@ let program = [
 let (mut builder, _) = firmware::booting(firmware::rom(&program));
 builder.qspi(Peripheral::default());
 let mut chip = builder.build();
-chip.run_for(Cycles(5000));
+chip.run_for(Cycles::from_clocks(5000));
 assert_eq!(chip.qspi_peripheral::<Peripheral>().unwrap().0, [(0b0101, 0x34, 8)]);
 let received = chip.peek(Address(RECEIVE_RAM), Size::Word, FunctionCode::SUPERVISOR_DATA);
 assert_eq!(received, Ok(0xef));
@@ -1070,9 +1070,9 @@ let program = [
 .concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
-chip.run_for(Cycles(1000));
+chip.run_for(Cycles::from_clocks(1000));
 chip.set_qspi_slave_select(true);
-let shifted = chip.qspi_slave_shift(0x5a, 8, Cycles(10));
+let shifted = chip.qspi_slave_shift(0x5a, 8, Cycles::from_clocks(10));
 assert_eq!((shifted.miso, shifted.driven), (0xc3, 0xff));
 chip.set_qspi_slave_select(false);
 let received = chip.peek(Address(RECEIVE_RAM), Size::Word, FunctionCode::SUPERVISOR_DATA);
@@ -1146,7 +1146,7 @@ let store = Address(firmware::START + 2 * prologue.len() as u32);
 let breakpoint = chip
     .cpu_control()
     .add_code_hook(store..=store, |_| ControlFlow::Break(()));
-assert_eq!(chip.run_for(Cycles(10_000)).stop, Stop::Hook(breakpoint));
+assert_eq!(chip.run_for(Cycles::from_clocks(10_000)).stop, Stop::Hook(breakpoint));
 assert_eq!(chip.cpu().registers.pc, store);
 chip.cpu_control().remove_hook(breakpoint);
 
@@ -1168,7 +1168,7 @@ chip.cpu_control().add_exception_hook(move |entry| {
     entered.borrow_mut().push(entry.vector.0);
     ControlFlow::Continue(())
 });
-chip.run_for(Cycles(1000));
+chip.run_for(Cycles::from_clocks(1000));
 assert_eq!(*reasons.borrow(), [Invalid::Protected]);
 assert_eq!(*vectors.borrow(), [BUS_ERROR]);
 assert_eq!(chip.memory(ram)[..2], [0, 0]);
@@ -1224,7 +1224,7 @@ let mut tracing = ChipTracing::default();
 tracing.accesses = true;
 tracing.exceptions = true;
 chip.set_tracing(tracing);
-chip.run_for(Cycles(1000));
+chip.run_for(Cycles::from_clocks(1000));
 let writes: Vec<u32> = chip
     .take_events()
     .into_iter()
@@ -1335,12 +1335,12 @@ use mc683xx_examples::firmware;
 let program = [firmware::prologue(), firmware::delay(1000).to_vec()].concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
-chip.run_for(Cycles(500));
+chip.run_for(Cycles::from_clocks(500));
 let snapshot = chip.save().unwrap();
-chip.run_for(Cycles(2000));
+chip.run_for(Cycles::from_clocks(2000));
 let (registers, now) = (chip.cpu().registers.clone(), chip.now());
 chip.restore(&snapshot).unwrap();
-chip.run_for(Cycles(2000));
+chip.run_for(Cycles::from_clocks(2000));
 assert_eq!(chip.cpu().registers, registers);
 assert_eq!(chip.now(), now);
 ```

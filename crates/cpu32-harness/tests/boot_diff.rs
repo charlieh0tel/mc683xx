@@ -81,7 +81,7 @@ const PREFIX: &str = "smartclock-emu: ";
 /// two diff line for line.
 const BUS_CYCLE: &str = "device";
 /// Clocks run at a time while the CPU is stopped and waits.
-const STOPPED_QUANTUM: Cycles = Cycles(256);
+const STOPPED_QUANTUM: Cycles = Cycles::from_clocks(256);
 
 /// The board's peripheral regions as the reference traces them (its
 /// header): the DUART on CS8, CS5's latch, switch, FPGA port and EFC
@@ -93,9 +93,9 @@ const MODULES: u32 = 0xff_f000;
 const EEPROM: std::ops::Range<u32> = 0x40_0000..0x40_2000;
 /// The EEPROM's byte load cycle time, tBLC, 150 us (AT28C64B, AC Write
 /// Characteristics), at the Z3805A's 16.777216 MHz.
-const EEPROM_LOAD: Cycles = Cycles(2517);
+const EEPROM_LOAD: Cycles = Cycles::from_clocks(2517);
 /// Its write cycle time, tWC, 5 ms.
-const EEPROM_WRITE: Cycles = Cycles(83_886);
+const EEPROM_WRITE: Cycles = Cycles::from_clocks(83_886);
 /// DATA polling's bit, I/O7.
 const IO7: u8 = 1 << 7;
 /// Toggle bit's, I/O6.
@@ -1054,14 +1054,14 @@ fn run_chip(
             reason = "seconds of a few clocks' worth"
         )]
         let budget = (seconds * chip.sim().clock().frequency().hz() as f64) as u64;
-        if chip.now().0 >= budget {
-            break format!("the time, {seconds} s, at clock {}", chip.now().0);
+        if chip.now().clocks() >= budget {
+            break format!("the time, {seconds} s, at clock {}", chip.now().clocks());
         }
-        if stop_at.is_some_and(|at| chip.now().0 >= at) {
+        if stop_at.is_some_and(|at| chip.now().clocks() >= at) {
             break format!(
                 "{} s past TBB written as the reference's, as the reference ran on, at clock {}",
                 after_port,
-                chip.now().0
+                chip.now().clocks()
             );
         }
         drive_pins(&mut chip, &pins, &mut driven);
@@ -1078,7 +1078,7 @@ fn run_chip(
             driven[GP] = Some(level);
         }
         let pc = chip.cpu().registers.pc;
-        let run = chip.run_for(Cycles(1));
+        let run = chip.run_for(Cycles::from_clocks(1));
         let run = if run.stop == Stop::Stopped {
             chip.run_for(STOPPED_QUANTUM)
         } else {
@@ -1107,7 +1107,7 @@ fn run_chip(
                     ..
                 } = record
                 {
-                    panel.control(value as u8, panel_in_flight, chip.now().0);
+                    panel.control(value as u8, panel_in_flight, chip.now().clocks());
                 }
                 if let Some((command, newqp)) = shadow.observe(record)
                     && let Some(qspi) = chip.qspi_peripheral_mut::<ReplayQspi>()
@@ -1119,7 +1119,7 @@ fn run_chip(
                     record,
                     pc: pc.0,
                     origin,
-                    cycle: chip.now().0,
+                    cycle: chip.now().clocks(),
                     split: false,
                 });
             }
@@ -1127,14 +1127,14 @@ fn run_chip(
         if let Some(qspi) = chip.qspi_peripheral_mut::<ReplayQspi>() {
             for (at, byte) in std::mem::take(&mut qspi.panel) {
                 panel_in_flight = false;
-                panel.exchange(byte, at.0);
+                panel.exchange(byte, at.clocks());
             }
         }
         if prompt_at.is_none()
             && !expected_port.written.is_empty()
             && peripheral_of(&chip, id).port == expected_port.written
         {
-            prompt_at = Some(chip.now().0);
+            prompt_at = Some(chip.now().clocks());
             #[expect(
                 clippy::cast_possible_truncation,
                 clippy::cast_sign_loss,
@@ -1142,14 +1142,17 @@ fn run_chip(
                 reason = "seconds of a few clocks' worth"
             )]
             let after = (after_port * chip.sim().clock().frequency().hz() as f64) as u64;
-            stop_at = Some(chip.now().0 + after);
+            stop_at = Some(chip.now().clocks() + after);
             println!(
                 "boot-diff: TBB written as the reference's at clock {}",
-                chip.now().0
+                chip.now().clocks()
             );
         }
         if let Stop::Halted(halt) = run.stop {
-            break format!("a halt, {halt}, at PC {pc:#x}, clock {}", chip.now().0);
+            break format!(
+                "a halt, {halt}, at PC {pc:#x}, clock {}",
+                chip.now().clocks()
+            );
         }
     };
     let qspi_unreplayed = chip

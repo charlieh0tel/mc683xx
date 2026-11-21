@@ -279,7 +279,9 @@ impl Cpu {
             self.block_start = true;
         }
         self.bare.end = None;
-        let budget = limits.cycles.unwrap_or(Cycles(u64::MAX - now.0));
+        let budget = limits
+            .cycles
+            .unwrap_or(Cycles::from_clocks(u64::MAX - now.clocks()));
         let first = self.instructions;
         self.bare.exceptions_stepped = 0;
         let run = self.run_from_boundary(bus, interrupts, now, budget, Some(limits));
