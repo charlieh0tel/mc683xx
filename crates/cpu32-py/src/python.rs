@@ -89,7 +89,9 @@ impl From<Error> for PyErr {
             Error::Unknown { .. } | Error::Range { .. } => PyIndexError::new_err(message),
             Error::Budget(_) => PyOverflowError::new_err(message),
             Error::Built => PyRuntimeError::new_err(message),
-            Error::State(StateError::Unsupported(_)) => PyNotImplementedError::new_err(message),
+            Error::State(StateError::Unsupported(_)) | Error::Unmapped(_) => {
+                PyNotImplementedError::new_err(message)
+            }
             Error::State(_) => exceptions::StateError::new_err(message),
             Error::Access(AccessError::BusError | AccessError::Unmapped) | Error::Unserved(_) => {
                 BusError::new_err(message)

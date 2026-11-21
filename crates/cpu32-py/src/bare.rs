@@ -127,14 +127,18 @@ pub(crate) enum FaultCauseKind {
     AddressError,
 }
 
-impl From<FaultCause> for FaultCauseKind {
-    fn from(cause: FaultCause) -> Self {
-        match cause {
+impl TryFrom<FaultCause> for FaultCauseKind {
+    type Error = Error;
+
+    /// The cause, or [`Error::RunEnd`] naming one the bindings do not
+    /// know.
+    fn try_from(cause: FaultCause) -> Result<Self, Error> {
+        Ok(match cause {
             FaultCause::BusError => Self::BusError,
             FaultCause::Protected => Self::Protected,
             FaultCause::AddressError => Self::AddressError,
-            _ => panic!("a fault cause the bindings do not know"),
-        }
+            other => return Err(Error::RunEnd(other.to_string())),
+        })
     }
 }
 
@@ -154,8 +158,8 @@ impl FaultStopView {
 
     /// Why.
     #[getter]
-    fn cause(&self) -> FaultCauseKind {
-        self.0.cause.into()
+    fn cause(&self) -> PyResult<FaultCauseKind> {
+        Ok(self.0.cause.try_into()?)
     }
 
     /// The cycle's address, all 32 bits.
@@ -194,7 +198,7 @@ impl FaultStopView {
         Ok(format!(
             "FaultStop(cycle={}, cause={}, address={:#010x}, size={}, function_code={}, pc={:#010x})",
             repr(py, self.cycle())?,
-            repr(py, self.cause())?,
+            repr(py, self.cause()?)?,
             self.address(),
             self.size(),
             self.function_code(),
@@ -770,8 +774,8 @@ impl MachineView {
 
     /// Why the CPU halted, while it stays halted.
     #[getter]
-    fn halted(&self) -> Option<Halt> {
-        self.machine.cpu.halted().map(Halt::from)
+    fn halted(&self) -> PyResult<Option<Halt>> {
+        Ok(self.machine.cpu.halted().map(Halt::try_from).transpose()?)
     }
 
     /// The vector of the first exception the last instruction or
@@ -1106,19 +1110,30 @@ impl Target for Debugged<'_, '_> {
 mod tests {
     use std::ops::ControlFlow;
 
+    use mc683xx_board::peripheral::Role;
     use mc683xx_cpu32::cpu;
     use mc683xx_cpu32::cpu::bare::End;
+    use mc683xx_cpu32::cpu::bare::FaultCause;
     use mc683xx_cpu32::cpu::bare::Limits;
+    use mc683xx_cpu32::cpu::hooks::Invalid;
     use mc683xx_cpu32::cycles::Cycles;
     use mc683xx_cpu32::exception::Vector;
     use mc683xx_cpu32::flat::Machine;
     use mc683xx_cpu32::memory::PAGE_BYTES;
+    use mc683xx_mc68331::gpt::pwm;
+    use mc683xx_modules::sim;
     use mc683xx_target::address::Address;
     use mc683xx_target::entry::Entry;
 
     use super::EndView;
+    use super::FaultCauseKind;
+    use crate::board::RoleView;
+    use crate::chip::Halt;
+    use crate::chip::ResetCause;
     use crate::chip::Stop;
     use crate::error::Error;
+    use crate::hooks::InvalidReason;
+    use crate::peripherals::Output;
 
     /// Where the test programs start, past the reset vectors.
     const START: u32 = 0x400;
@@ -1213,5 +1228,40 @@ mod tests {
         assert!(matches!(mapped[4], Ok(Stop::Requested())));
         assert!(matches!(mapped[5], Ok(Stop::Background { .. })));
         assert!(matches!(mapped[6], Ok(Stop::Fault())));
+    }
+
+    /// Every variant of a `non_exhaustive` enum the bindings convert
+    /// has its Python value; a variant added to one belongs here, and
+    /// in its mapping, which otherwise raises rather than panics.
+    #[test]
+    fn every_value_maps() {
+        for cause in [
+            FaultCause::BusError,
+            FaultCause::Protected,
+            FaultCause::AddressError,
+        ] {
+            assert!(FaultCauseKind::try_from(cause).is_ok());
+        }
+        assert!(Halt::try_from(cpu::Halt::DoubleBusFault).is_ok());
+        for cause in sim::ResetCause::ALL {
+            assert!(ResetCause::try_from(cause).is_ok());
+        }
+        for role in [Role::Read, Role::Write, Role::ReadWrite, Role::Iack] {
+            assert!(RoleView::try_from(role).is_ok());
+        }
+        for invalid in [Invalid::BusError, Invalid::Protected] {
+            assert!(InvalidReason::try_from(invalid).is_ok());
+        }
+        for output in [
+            pwm::Output::Level(true),
+            pwm::Output::Wave {
+                period: 256,
+                high: 1,
+                clocks: None,
+            },
+            pwm::Output::Clock { clocks: None },
+        ] {
+            assert!(Output::try_from(output).is_ok());
+        }
     }
 }

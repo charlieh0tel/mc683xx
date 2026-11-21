@@ -227,9 +227,13 @@ pub(crate) enum Output {
     },
 }
 
-impl From<pwm::Output> for Output {
-    fn from(output: pwm::Output) -> Self {
-        match output {
+impl TryFrom<pwm::Output> for Output {
+    type Error = Error;
+
+    /// The output, or [`Error::Unmapped`] for one the bindings do not
+    /// know.
+    fn try_from(output: pwm::Output) -> Result<Self, Error> {
+        Ok(match output {
             pwm::Output::Level(level) => Self::Level { level },
             pwm::Output::Wave {
                 period,
@@ -243,8 +247,8 @@ impl From<pwm::Output> for Output {
             pwm::Output::Clock { clocks } => Self::Clock {
                 clocks: clocks.map(u64::from),
             },
-            _ => panic!("a PWM output the bindings do not know"),
-        }
+            _ => return Err(Error::Unmapped("PWM output")),
+        })
     }
 }
 

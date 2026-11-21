@@ -532,7 +532,9 @@ impl TryFrom<cpu::Stop> for Stop {
         Ok(match stop {
             cpu::Stop::Budget => Self::Budget(),
             cpu::Stop::Stopped => Self::Stopped(),
-            cpu::Stop::Halted(halt) => Self::Halted { halt: halt.into() },
+            cpu::Stop::Halted(halt) => Self::Halted {
+                halt: halt.try_into()?,
+            },
             cpu::Stop::Hook(id) => Self::Hook {
                 hook: HookIdView(id),
             },
@@ -562,11 +564,15 @@ pub(crate) enum Halt {
     DoubleBusFault,
 }
 
-impl From<cpu::Halt> for Halt {
-    fn from(halt: cpu::Halt) -> Self {
+impl TryFrom<cpu::Halt> for Halt {
+    type Error = Error;
+
+    /// The halt, or [`Error::RunEnd`] naming one the bindings do not
+    /// know.
+    fn try_from(halt: cpu::Halt) -> Result<Self, Error> {
         match halt {
-            cpu::Halt::DoubleBusFault => Self::DoubleBusFault,
-            _ => panic!("a halt the bindings do not know"),
+            cpu::Halt::DoubleBusFault => Ok(Self::DoubleBusFault),
+            other => Err(Error::RunEnd(other.to_string())),
         }
     }
 }
@@ -599,9 +605,13 @@ pub(crate) enum ResetCause {
     Test,
 }
 
-impl From<sim::ResetCause> for ResetCause {
-    fn from(cause: sim::ResetCause) -> Self {
-        match cause {
+impl TryFrom<sim::ResetCause> for ResetCause {
+    type Error = Error;
+
+    /// The cause, or [`Error::Unmapped`] for one the bindings do not
+    /// know.
+    fn try_from(cause: sim::ResetCause) -> Result<Self, Error> {
+        Ok(match cause {
             sim::ResetCause::External => Self::External,
             sim::ResetCause::PowerOn => Self::PowerOn,
             sim::ResetCause::Watchdog => Self::Watchdog,
@@ -609,9 +619,8 @@ impl From<sim::ResetCause> for ResetCause {
             sim::ResetCause::System => Self::System,
             sim::ResetCause::LossOfClock => Self::LossOfClock,
             sim::ResetCause::Test => Self::Test,
-            // every cause RSR has is above (`sim::ResetCause::ALL`)
-            _ => unreachable!("a reset cause without an RSR bit"),
-        }
+            _ => return Err(Error::Unmapped("reset cause")),
+        })
     }
 }
 
@@ -874,7 +883,7 @@ impl Event {
         Some(match event {
             event::Event::Reset { now, cause, .. } => Self::Reset {
                 now: now.0,
-                cause: cause.into(),
+                cause: cause.try_into().ok()?,
             },
             event::Event::ArbitrationTie {
                 now,
@@ -1000,7 +1009,9 @@ macro_rules! chip_methods {
             /// Why the CPU halted, while it stays halted.
             #[getter]
             fn halted(&self, py: Python<'_>) -> PyResult<Option<Halt>> {
-                self.with_chip(py, |chip| Ok(chip.cpu().halted().map(Halt::from)))
+                self.with_chip(py, |chip| {
+                    Ok(chip.cpu().halted().map(Halt::try_from).transpose()?)
+                })
             }
 
             /// The `Entry` while the CPU is in background mode (CPU32RM
@@ -1073,13 +1084,13 @@ macro_rules! chip_methods {
 
             /// What PWM `channel` carries now.
             fn pwm(&self, py: Python<'_>, channel: ChannelView) -> PyResult<Output> {
-                self.with_chip(py, |chip| Ok(chip.pwm(channel.into()).into()))
+                self.with_chip(py, |chip| Ok(chip.pwm(channel.into()).try_into()?))
             }
 
             /// What OC1's pin carries now: `Output.Clock` under CPROUT,
             /// `Output.Level` otherwise.
             fn oc1(&self, py: Python<'_>) -> PyResult<Output> {
-                self.with_chip(py, |chip| Ok(chip.oc1().into()))
+                self.with_chip(py, |chip| Ok(chip.oc1().try_into()?))
             }
 
             /// Calls `callback(Instruction)` before each instruction at an

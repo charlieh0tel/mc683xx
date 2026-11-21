@@ -126,4 +126,8 @@ pub(crate) enum Error {
     /// class for (PLAN.md, Python).
     #[error("a run ended for {0}, which the bindings do not know")]
     RunEnd(String),
+    /// A value, by its kind, that the bindings have no Python value
+    /// for: a variant of a `non_exhaustive` enum newer than they are.
+    #[error("a {0} the bindings do not know")]
+    Unmapped(&'static str),
 }

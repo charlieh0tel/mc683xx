@@ -142,15 +142,19 @@ pub(crate) enum RoleView {
     Iack,
 }
 
-impl From<Role> for RoleView {
-    fn from(role: Role) -> Self {
-        match role {
+impl TryFrom<Role> for RoleView {
+    type Error = Error;
+
+    /// The role, or [`Error::Unmapped`] for one the bindings do not
+    /// know.
+    fn try_from(role: Role) -> Result<Self, Error> {
+        Ok(match role {
             Role::Read => Self::Read,
             Role::Write => Self::Write,
             Role::ReadWrite => Self::ReadWrite,
             Role::Iack => Self::Iack,
-            _ => panic!("a role the bindings do not know"),
-        }
+            _ => return Err(Error::Unmapped("role")),
+        })
     }
 }
 
@@ -207,8 +211,8 @@ impl AccessView {
 
     /// What the peripheral does with the attachment's cycles.
     #[getter]
-    fn role(&self) -> RoleView {
-        self.0.role.into()
+    fn role(&self) -> PyResult<RoleView> {
+        Ok(self.0.role.try_into()?)
     }
 
     /// The data lanes the attachment wires.
@@ -262,7 +266,7 @@ impl AccessView {
              size={}, write={}, now={}, horizon={})",
             self.attachment(),
             repr(py, self.select())?,
-            repr(py, self.role())?,
+            repr(py, self.role()?)?,
             repr(py, self.lane())?,
             self.address(),
             self.size(),

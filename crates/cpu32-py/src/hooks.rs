@@ -27,6 +27,7 @@ use pyo3::types::PyAnyMethods;
 use pyo3::types::PyDict;
 use pyo3::types::PyDictMethods;
 
+use crate::error::Error;
 use crate::mapped::Pending;
 use crate::python::repr;
 use crate::register::Register;
@@ -204,13 +205,17 @@ pub(crate) enum InvalidReason {
     Protected,
 }
 
-impl From<Invalid> for InvalidReason {
-    fn from(invalid: Invalid) -> Self {
-        match invalid {
+impl TryFrom<Invalid> for InvalidReason {
+    type Error = Error;
+
+    /// The reason, or [`Error::Unmapped`] for one the bindings do not
+    /// know.
+    fn try_from(invalid: Invalid) -> Result<Self, Error> {
+        Ok(match invalid {
             Invalid::BusError => Self::BusError,
             Invalid::Protected => Self::Protected,
-            _ => panic!("an invalid access the bindings do not know"),
-        }
+            _ => return Err(Error::Unmapped("invalid access")),
+        })
     }
 }
 
@@ -255,8 +260,8 @@ impl InvalidAccessView {
 
     /// Why it was invalid.
     #[getter]
-    fn reason(&self) -> InvalidReason {
-        self.0.reason.into()
+    fn reason(&self) -> PyResult<InvalidReason> {
+        Ok(self.0.reason.try_into()?)
     }
 
     /// The address of the instruction it is part of.
@@ -292,7 +297,7 @@ impl InvalidAccessView {
             self.function_code(),
             repr(py, self.cycle())?,
             repr(py, self.value())?,
-            repr(py, self.reason())?
+            repr(py, self.reason()?)?
         ))
     }
 }

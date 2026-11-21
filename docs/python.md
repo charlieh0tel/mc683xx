@@ -956,10 +956,14 @@ chip.run_for(500)
 - `mc683xx.TargetError` (a `RuntimeError`): a background debug control
   the CPU's state refuses (Background debug mode).
 - `mc683xx.RunError` (a `RuntimeError`): a run that could not go on, a
-  board peripheral stalling board time (Board files); or a run's end
-  this build's bindings have no class for, named, which a newer Rust
-  core could give but none does today.
-- `NotImplementedError`: a module that cannot save.
+  board peripheral stalling board time (Board files); or a run's end,
+  halt or fault cause this build's bindings have no class for, named,
+  which a newer Rust core could give but none does today.
+- `NotImplementedError`: a module that cannot save; or any other value
+  this build's bindings have no Python value for (a role, an invalid
+  access's reason, a PWM output, a reset cause), which a newer Rust
+  crate could give but none does today.  An event with such a value is
+  not reported.
 - `IndexError`: an unknown memory or peripheral number, or a memory range
   past its end.
 - `OverflowError`: a run past the end of time.
