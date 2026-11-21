@@ -479,13 +479,16 @@ impl<'a> Drive<'a> {
 
     /// Gives the drive the chip's system clock on board time, as the
     /// board gives every call.
+    ///
+    /// Not part of the semver API: the board's; a test or a host builds
+    /// its drive with [`Drive::with_system_clock`].
+    #[doc(hidden)]
     pub const fn set_system_clock(&mut self, system_clock: TimeBase) {
         self.system_clock = Some(system_clock);
     }
 
-    /// The drive with the chip's system clock on board time, as
-    /// [`Drive::set_system_clock`] gives it: for a test's or a host's
-    /// drive in one expression.
+    /// The drive with the chip's system clock on board time, as the
+    /// board gives every call: for a test's or a host's drive.
     #[must_use]
     pub const fn with_system_clock(mut self, system_clock: TimeBase) -> Self {
         self.set_system_clock(system_clock);

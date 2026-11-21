@@ -47,10 +47,10 @@ use crate::time::TimeBase;
 ///
 /// The board decodes PCS for its peripherals, so the
 /// model sees its own select as levels it can test against zero.
-pub const SELECTED_LEVELS: u8 = 0b0000;
+pub(crate) const SELECTED_LEVELS: u8 = 0b0000;
 /// The levels it is told when the decode releases it: all high, PCS's
 /// idle.
-pub const RELEASED_LEVELS: u8 = 0b1111;
+pub(crate) const RELEASED_LEVELS: u8 = 0b1111;
 
 /// An adapter's snapshot format: the model's bytes, which version
 /// themselves.
@@ -232,8 +232,8 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
 /// A [`SpiPeripheral`] model on the QSPI as a peripheral.
 ///
 /// The board decodes PCS\[3:0\]: the model's `chip_selects` hears
-/// `SELECTED_LEVELS` as its attachment's decode selects it and
-/// `RELEASED_LEVELS` as it releases it ([`Peripheral::select`], the board's
+/// levels 0b0000 as its attachment's decode selects it and 0b1111, PCS's
+/// idle, as it releases it ([`Peripheral::select`], the board's
 /// framing), and each transfer with the levels on the pins.  Its
 /// `qspi_deferrable` is the model's `deferrable`.
 #[derive(Debug, Default)]

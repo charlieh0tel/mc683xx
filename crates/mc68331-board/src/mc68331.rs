@@ -252,7 +252,7 @@ impl ChipPin for Pin {
 /// power-on, `[chip.pins]`.
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Pins {
+pub(crate) struct Pins {
     /// Ignored.
     #[serde(rename = "note")]
     _note: Option<String>,

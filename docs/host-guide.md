@@ -1623,7 +1623,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   (`CSBOOT`, `CS0`, any case), `Address` (`0x00001234`, and
   `LowerHex`), `Cycles` (`12 clocks`), `Frequency` (`16777216 Hz`),
   `Vector` and `FunctionCode` (their numbers), and on a board `Time`
-  (`1000 ps`), `Endpoint` (`chip.IRQ7`), the MC68331's `mc68331::Pin` (`IRQ7`), `signal::Kind`,
+  (`1000 ps`), the MC68331's `mc68331::Pin` (`IRQ7`), `signal::Kind`,
   `Direction`, `peripheral::Role` (`read-write`) and `Lane` (`upper`),
   as the board file names them; `PortName` (`E`) and the GPT's
   `pwm::Channel` (`A`), any case.
@@ -1632,7 +1632,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
 - Every public error enum is `#[non_exhaustive]`, and so are the
   enums that may grow: `Stop`, `Halt`, the bare run's `End` and
   `FaultCause`, `hooks::Invalid`, the GPT's `OutputChange` and
-  `pwm::Output`, and the board's `Signal`, `signal::Kind`, `Endpoint`,
+  `pwm::Output`, and the board's `Signal`, `signal::Kind`,
   `mc68331::Pin`, `peripheral::Role`, `chip::MemoryPlace` and
   `trace::Record`.  A match on one needs a wildcard arm.  Enums of
   what the hardware fixes (`Size`, `ChipSelect`, `PortName`,

@@ -16,8 +16,6 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use mc683xx_board::adapter::MappedAdapter;
-use mc683xx_board::adapter::RELEASED_LEVELS;
-use mc683xx_board::adapter::SELECTED_LEVELS;
 use mc683xx_board::adapter::SpiAdapter;
 use mc683xx_board::board::Board;
 use mc683xx_board::board::BoardRun;
@@ -83,6 +81,11 @@ use mc683xx_target::entry::Entry;
 use mc683xx_target::size::Size;
 use snapshot_golden::version_of;
 
+/// The PCS levels a `SpiAdapter`'s model hears as its decode selects
+/// it: all low.
+const SELECTED_LEVELS: u8 = 0b0000;
+/// The levels it hears as its decode releases it: all high, PCS's idle.
+const RELEASED_LEVELS: u8 = 0b1111;
 /// The initial stack pointer and program counter in the images.
 const STACK: u32 = 0x10_fffe;
 /// Where the programs start.

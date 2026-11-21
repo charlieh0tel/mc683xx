@@ -643,8 +643,7 @@ The contract a host's peripheral models target (rustdoc in
     the instruction that changes the frequency, so a peripheral never keeps
     a base past a call: it takes `Drive::system_clock` at each call, or
     the one `system_clock` last told it (the adapters do).  A test
-    gives its drive one with `Drive::set_system_clock(base)`, or in one
-    expression with `Drive::new(now).with_system_clock(base)`.
+    gives its drive one with `Drive::new(now).with_system_clock(base)`.
   - State: `save()`, `restore(bytes)`; by default it cannot, and the
     board's save fails with `StateError::Peripheral`, which names the peripheral
     (`stub: the peripheral cannot save its state`); so does a peripheral that
@@ -659,8 +658,8 @@ The contract a host's peripheral models target (rustdoc in
   `BusCycle` with the access's select and address and its start in system
   clocks, and its times converted through the board's `TimeBase`; its
   `advance` runs at its `next_event`'s time.  A `SpiAdapter`'s model
-  hears the board's framing as `chip_selects(SELECTED_LEVELS)` (0) and
-  `chip_selects(RELEASED_LEVELS)` (0xf) and each transfer as a
+  hears the board's framing as `chip_selects(0)` and
+  `chip_selects(0xf)` and each transfer as a
   `QspiTransfer`, its time in system clocks.  `peripheral()` and `peripheral_mut()` give the model
   back (`Board::peripheral::<MappedAdapter<M>>`).  An adapted peripheral drives
   no nets.  The model implements `mc683xx_cpu32::cpu::state::Save` (`save()

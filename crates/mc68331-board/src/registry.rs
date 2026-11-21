@@ -604,6 +604,10 @@ enum Builds {
 }
 
 /// A registered peripheral type.
+///
+/// Not part of the semver API: the loader builds peripherals with it, and
+/// a host's tests of its constructors reach it through `Registry::get`.
+#[doc(hidden)]
 pub struct PeripheralType {
     /// How it builds its peripherals.
     builds: Builds,
@@ -742,6 +746,10 @@ impl Registry {
     }
 
     /// The type `name`, if registered.
+    ///
+    /// Not part of the semver API: the loader's, and a host's tests' of
+    /// its constructors.
+    #[doc(hidden)]
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&PeripheralType> {
         self.types.get(name)
