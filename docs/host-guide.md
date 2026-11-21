@@ -1444,9 +1444,11 @@ outside semver.
   wall second (2.0 twice real time, 0.5 half; finite and above 0, else
   `PacingError::Factor`); it prints and parses as `unpaced`, `realtime`
   or the factor.  `Board::run_until_paced(until, quantum)` runs to
-  `until` in quanta of `quantum` of board time, a `time::Span` (a zero
-  quantum is a picosecond, so the loop always ends; `pacing::QUANTUM`,
-  5 ms, is a good one), and before each sleeps until board time is no longer ahead
+  `until` in quanta of `quantum` of board time, a `time::NonZeroSpan`
+  (never zero, so the loop always ends: `NonZeroSpan::new(span)` is
+  `None` for a zero span, and its const constructors, `from_millis` and
+  the rest, refuse zero at compile time; `pacing::QUANTUM`, 5 ms, is a
+  good one), and before each sleeps until board time is no longer ahead
   of wall time times the control's factor, waking at once for a stop or
   a change of pacing; a run that reaches `until` sleeps once more after
   its last quantum, so it never returns ahead of wall time.  The wall

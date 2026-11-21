@@ -87,6 +87,7 @@ use crate::signal::Direction;
 use crate::signal::Kind;
 use crate::signal::Signal;
 use crate::time::Clock;
+use crate::time::NonZeroSpan;
 use crate::time::Span;
 use crate::time::Time;
 use crate::time::TimeBase;
@@ -1211,8 +1212,8 @@ impl<C: Chip> Board<C> {
     /// the next quantum.  `before` returning `Break` ends the run where
     /// it is, [`Stop::Requested`].  A frame `before` runs
     /// ([`run_frame`](Self::run_frame)) leaves the pacing ended, as any
-    /// other run does.  A quantum is never empty (a zero `quantum` is a
-    /// picosecond), so the loop always comes to `until`.
+    /// other run does.  A [`NonZeroSpan`] is never zero, so the loop always
+    /// comes to `until`.
     ///
     /// # Errors
     ///
@@ -1220,7 +1221,7 @@ impl<C: Chip> Board<C> {
     pub fn run_until_quantized(
         &mut self,
         until: Time,
-        quantum: Span,
+        quantum: NonZeroSpan,
         before: impl FnMut(&mut Self) -> ControlFlow<()>,
     ) -> Result<BoardRun, RunError> {
         self.leave_frames();
@@ -1234,15 +1235,14 @@ impl<C: Chip> Board<C> {
     fn run_quantized(
         &mut self,
         until: Time,
-        quantum: Span,
+        quantum: NonZeroSpan,
         mut before: impl FnMut(&mut Self) -> ControlFlow<()>,
     ) -> Result<BoardRun, RunError> {
-        let quantum = quantum.max(Span::from_picos(1));
         loop {
             if before(self).is_break() {
                 return Ok(self.outcome(Stop::Requested));
             }
-            let target = (self.now + quantum).min(until);
+            let target = (self.now + quantum.get()).min(until);
             let idle = self.idle();
             let outcome = self.run_to(target)?;
             let quantized = outcome.stop == Stop::Budget || idle == Some(outcome.stop);
@@ -1268,7 +1268,11 @@ impl<C: Chip> Board<C> {
     /// # Errors
     ///
     /// As [`run_until`](Self::run_until).
-    pub fn run_until_paced(&mut self, until: Time, quantum: Span) -> Result<BoardRun, RunError> {
+    pub fn run_until_paced(
+        &mut self,
+        until: Time,
+        quantum: NonZeroSpan,
+    ) -> Result<BoardRun, RunError> {
         let control = self.control.clone();
         let mut pacer = Pacer::new();
         let outcome = self.run_until_quantized(until, quantum, |board| {

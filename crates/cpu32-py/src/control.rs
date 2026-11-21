@@ -21,6 +21,7 @@ use mc683xx_board::pacing::Pacing;
 use mc683xx_board::pacing::ParsePacingError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::ParseKindError;
+use mc683xx_board::time::NonZeroSpan;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
@@ -151,7 +152,7 @@ impl BoardControlView {
     }
 }
 
-/// Runs `board` to `until` in quanta of `quantum` picoseconds, paced by
+/// Runs `board` to `until` in quanta of `quantum`, paced by
 /// its control (Rust's `Board::run_until_paced`): the GIL released
 /// between quanta, paced or not, once held two switch intervals
 /// ([`Turns`]), and while it sleeps between quanta, so another thread
@@ -165,7 +166,7 @@ pub(crate) fn run_until_paced(
     py: Python<'_>,
     board: &mut Board<Mc68331>,
     until: Time,
-    quantum: Span,
+    quantum: NonZeroSpan,
 ) -> Result<Result<BoardRun, RunError>, PyErr> {
     let control = board.control();
     let mut pacer = Pacer::new();

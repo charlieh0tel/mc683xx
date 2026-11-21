@@ -192,7 +192,7 @@ fn another_thread_stops_a_paced_run_and_its_input_lands_at_a_sync_point() {
     assert!(Time::ZERO < *at && *at <= outcome.now, "{at:?}");
     // a sync point: a quantum's end, or a quantum's, at a tick's edge
     assert!(
-        (*at % QUANTUM).is_zero()
+        (*at % QUANTUM.get()).is_zero()
             || seen
                 .iter()
                 .any(|(net, edge, _)| net == "tick" && edge == at),

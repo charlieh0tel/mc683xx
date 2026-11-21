@@ -16,12 +16,13 @@ use std::time::Duration;
 use std::time::Instant;
 
 use crate::control::BoardControl;
+use crate::time::NonZeroSpan;
 use crate::time::Span;
 use crate::time::Time;
 
 /// Board time a paced run goes between looks at the wall clock and the
 /// [`BoardControl`]: 5 ms, about 84,000 clocks of a 16.78 MHz chip.
-pub const QUANTUM: Span = Span::from_millis(5);
+pub const QUANTUM: NonZeroSpan = NonZeroSpan::from_millis(5);
 
 /// The longest the host sleeps before it looks at the control again,
 /// for a stop or a change of pacing (and, in Python, for Ctrl-C).

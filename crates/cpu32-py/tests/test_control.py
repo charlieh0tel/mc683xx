@@ -309,6 +309,14 @@ def test_a_frame_s_wall_must_be_seconds(tmp_path: Path) -> None:
         loaded.run_frame(0.0)
 
 
+def test_a_quantum_is_never_zero(tmp_path: Path) -> None:
+    loaded = board(tmp_path)
+    with pytest.raises(ValueError, match="quantum"):
+        loaded.run_for(seconds=0.1, quantum_picoseconds=0)
+    with pytest.raises(ValueError, match="quantum"):
+        loaded.run_until(seconds=0.1, quantum_picoseconds=0)
+
+
 # A CPU spinning in `bra.s *` and nothing else: its quanta are far
 # shorter than Python's switch interval, as a fast board's are.
 SPINNING_BOARD = """

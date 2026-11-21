@@ -329,6 +329,104 @@ impl Sum for Span {
     }
 }
 
+/// A [`Span`] that is never zero: where no time would be a caller's
+/// error, as a quantized run's quantum
+/// ([`Board::run_until_quantized`]), whose loop then always comes to its
+/// end.
+///
+/// [`Board::run_until_quantized`]: crate::board::Board::run_until_quantized
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonZeroSpan(Span);
+
+impl NonZeroSpan {
+    /// `span`, if it is not zero.
+    #[must_use]
+    pub const fn new(span: Span) -> Option<Self> {
+        if span.is_zero() {
+            None
+        } else {
+            Some(Self(span))
+        }
+    }
+
+    /// `span`, for the const constructors.
+    const fn of(span: Span) -> Self {
+        match Self::new(span) {
+            Some(span) => span,
+            None => panic!("a NonZeroSpan is never zero"),
+        }
+    }
+
+    /// `picoseconds` picoseconds.
+    ///
+    /// # Panics
+    ///
+    /// For zero, at compile time in a const.
+    #[must_use]
+    pub const fn from_picos(picoseconds: u64) -> Self {
+        Self::of(Span::from_picos(picoseconds))
+    }
+
+    /// `nanoseconds` nanoseconds, or the longest span.
+    ///
+    /// # Panics
+    ///
+    /// For zero, at compile time in a const.
+    #[must_use]
+    pub const fn from_nanos(nanoseconds: u64) -> Self {
+        Self::of(Span::from_nanos(nanoseconds))
+    }
+
+    /// `microseconds` microseconds, or the longest span.
+    ///
+    /// # Panics
+    ///
+    /// For zero, at compile time in a const.
+    #[must_use]
+    pub const fn from_micros(microseconds: u64) -> Self {
+        Self::of(Span::from_micros(microseconds))
+    }
+
+    /// `milliseconds` milliseconds, or the longest span.
+    ///
+    /// # Panics
+    ///
+    /// For zero, at compile time in a const.
+    #[must_use]
+    pub const fn from_millis(milliseconds: u64) -> Self {
+        Self::of(Span::from_millis(milliseconds))
+    }
+
+    /// `seconds` seconds, or the longest span.
+    ///
+    /// # Panics
+    ///
+    /// For zero, at compile time in a const.
+    #[must_use]
+    pub const fn from_seconds(seconds: u64) -> Self {
+        Self::of(Span::from_seconds(seconds))
+    }
+
+    /// Its span.
+    #[must_use]
+    pub const fn get(self) -> Span {
+        self.0
+    }
+}
+
+/// Its span's: `1000 ps`.
+impl fmt::Display for NonZeroSpan {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+impl From<NonZeroSpan> for Span {
+    fn from(span: NonZeroSpan) -> Self {
+        span.0
+    }
+}
+
 /// A clock's phase: the cycles since its origin, `PHASE_UNITS` to a
 /// cycle.  A rising edge is a whole number of cycles.
 #[derive(
@@ -658,6 +756,7 @@ mod tests {
 
     use super::Clock;
     use super::ClockHistory;
+    use super::NonZeroSpan;
     use super::PHASE_UNITS;
     use super::Span;
     use super::Time;
@@ -710,6 +809,24 @@ mod tests {
         assert_eq!([ps(1), ps(2), ps(3)].into_iter().sum::<Span>(), ps(6));
         assert_eq!(Span::from_micros(5).to_string(), "5000000 ps");
         assert_eq!(Span::from(9_u64).picos(), 9);
+    }
+
+    #[test]
+    fn a_non_zero_span_is_never_zero() {
+        assert_eq!(NonZeroSpan::new(Span::ZERO), None);
+        assert_eq!(NonZeroSpan::new(ps(1)), Some(NonZeroSpan::from_picos(1)));
+        assert_eq!(NonZeroSpan::from_nanos(3).get(), Span::from_nanos(3));
+        assert_eq!(NonZeroSpan::from_micros(3).get(), Span::from_micros(3));
+        assert_eq!(NonZeroSpan::from_seconds(3).get(), Span::from_seconds(3));
+        assert_eq!(NonZeroSpan::from_millis(3).get(), Span::from_millis(3));
+        assert_eq!(NonZeroSpan::from_millis(5).to_string(), "5000000000 ps");
+        assert_eq!(Span::from(NonZeroSpan::from_picos(7)), ps(7));
+    }
+
+    #[test]
+    #[should_panic(expected = "a NonZeroSpan is never zero")]
+    fn a_zero_non_zero_span_panics() {
+        let _ = NonZeroSpan::from_millis(std::hint::black_box(0));
     }
 
     #[test]

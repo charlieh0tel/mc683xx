@@ -1124,7 +1124,8 @@ Front ends):
   dict (`scaled(1.0)` is not `REAL_TIME`).
   `run_for(seconds=..., pacing=None, quantum_picoseconds=5_000_000_000)`
   is Rust's `Board::run_until_paced`: it runs in quanta, paced by the
-  control, and sleeps between quanta with the GIL released.  Paced or
+  control (a quantum of 0, which Rust's `NonZeroSpan` cannot hold,
+  raises `ValueError`), and sleeps between quanta with the GIL released.  Paced or
   not, it releases the GIL between quanta once it has held it two of
   Python's switch intervals (`sys.getswitchinterval()`, 5 ms by
   default), so another thread waiting for it runs within about that

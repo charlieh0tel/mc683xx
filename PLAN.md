@@ -1511,8 +1511,9 @@ hand.  The keys are in `docs/board-files.md`.
   embed (smartclock-emu builds its own command on it); `send` and
   `take_received` move values through run-time endpoints between
   runs.  `Board::run_until_quantized(until, quantum, before)` runs it in quanta
-  of board time (a `Span`; a quantum of 0, which would never end, is a
-  picosecond), calling `before` before each (the Python bindings'
+  of board time (a `time::NonZeroSpan`: a quantum of 0 would never end,
+  so the type has none, and a host's zero is its own error, Python's
+  `ValueError`, not a picosecond), calling `before` before each (the Python bindings'
   Ctrl-C checks), `Break` ending it `Stop::Requested`; a board halted
   or in background mode before a quantum goes on to the next, so the
   quanta change nothing.  `run_until` on such a board runs to `until`

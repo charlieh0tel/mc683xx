@@ -45,6 +45,7 @@ use mc683xx_board::signal::ParseKindError;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Clock;
+use mc683xx_board::time::NonZeroSpan;
 use mc683xx_board::time::Phase;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
@@ -1312,10 +1313,8 @@ impl BoardView {
         pacing: Option<PacingView>,
         quantum: u64,
     ) -> PyResult<BoardRunView> {
-        if quantum == 0 {
-            return Err(PyValueError::new_err("give a quantum of 1 ps or more"));
-        }
-        let quantum = Span::from_picos(quantum);
+        let quantum = NonZeroSpan::new(Span::from_picos(quantum))
+            .ok_or_else(|| PyValueError::new_err("give a quantum of 1 ps or more"))?;
         let control = self.board.control();
         let previous = control.pacing();
         if let Some(pacing) = pacing {
@@ -1458,8 +1457,9 @@ impl BoardView {
     /// sleeps.  `pacing`, if given, paces this call alone: the
     /// control's pacing is put back when the run returns or raises,
     /// unless another thread set a pacing during the run, which then
-    /// stays.  Seconds not finite, or below 0, raise `ValueError`.
-    #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.picos()))]
+    /// stays.  Seconds not finite, or below 0, and a quantum of 0 raise
+    /// `ValueError`.
+    #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.get().picos()))]
     fn run_for(
         &mut self,
         py: Python<'_>,
@@ -1474,7 +1474,7 @@ impl BoardView {
 
     /// Runs to board time `seconds`, or `picoseconds`, as `run_for` runs
     /// for them: at once if the board is already there.
-    #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.picos()))]
+    #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.get().picos()))]
     fn run_until(
         &mut self,
         py: Python<'_>,

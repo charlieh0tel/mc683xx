@@ -40,6 +40,7 @@ use mc683xx_board::signal::Direction;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::NonZeroSpan;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
@@ -2921,7 +2922,7 @@ to = ["chip.PQS0"]
 /// A millisecond in picoseconds.
 const MILLISECOND: u64 = 1_000_000_000;
 /// A millisecond, as a quantum.
-const MILLISECOND_QUANTUM: Span = Span::from_millis(1);
+const MILLISECOND_QUANTUM: NonZeroSpan = NonZeroSpan::from_millis(1);
 
 #[test]
 fn a_run_in_quanta_is_one_run() {
@@ -3777,11 +3778,11 @@ fn a_host_reset_while_reset_is_held_does_nothing() {
 }
 
 #[test]
-fn a_zero_quantum_is_a_picosecond() {
+fn a_picosecond_quantum_calls_before_each_picosecond() {
     let mut board = reset_board();
     let mut quanta = 0;
     let outcome = board
-        .run_until_quantized(Time(100), Span::ZERO, |_| {
+        .run_until_quantized(Time(100), NonZeroSpan::from_picos(1), |_| {
             quanta += 1;
             ControlFlow::Continue(())
         })
