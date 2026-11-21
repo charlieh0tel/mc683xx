@@ -21,6 +21,21 @@ jobs:
       audit: false
       check-args: "--workspace --all-targets"
 
+  platforms:
+    # The workspace's clippy and tests on the hosts the shared ci job
+    # (Linux x86_64) does not cover: Windows x64 and Linux arm64, where
+    # a consumer's CI builds and tests these crates too.  The compiler
+    # is the one rust-toolchain.toml names.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --no-fail-fast
+
   oracle:
     # The Musashi differential runs (`make oracle`).  The fetch is one
     # pinned commit, shallow, so it is not cached.  The compiler is the

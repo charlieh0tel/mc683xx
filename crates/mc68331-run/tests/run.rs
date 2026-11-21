@@ -8,7 +8,6 @@ use std::fs;
 use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
-use std::io::ErrorKind;
 use std::io::Read;
 use std::io::Write;
 use std::net::TcpStream;
@@ -1061,7 +1060,7 @@ fn a_bdm_client_that_does_not_read_its_replies_cannot_wedge_the_runner() {
                 sent += 1;
                 full = 0;
             }
-            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 full += 1;
                 thread::sleep(Duration::from_millis(10));
             }
@@ -1089,6 +1088,7 @@ fn a_bdm_message_s_length_out_of_range_closes_the_connection() {
 }
 
 /// The echo board's RESET on a net of its own.
+#[cfg(unix)]
 const RESET_NET: &str = r#"
 [[net]]
 name = "reset"

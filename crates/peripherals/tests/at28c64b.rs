@@ -146,6 +146,10 @@ fn a_host_gives_the_peripheral_s_image_as_it_gives_a_memory_s() {
 }
 
 #[test]
+#[cfg_attr(
+    windows,
+    ignore = "a Windows lock is mandatory, and this reads the file a run holds"
+)]
 fn the_cpu_writes_a_byte_and_polls_it_to_the_end_of_its_write_cycle() {
     let directory: PathBuf =
         env::temp_dir().join(format!("mc683xx-at28c64b-board-{}", process::id()));

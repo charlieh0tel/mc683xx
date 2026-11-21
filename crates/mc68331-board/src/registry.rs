@@ -859,7 +859,8 @@ mod tests {
         let error = context.contents("missing").unwrap_err();
         assert!(
             matches!(&error, ParameterError::Invalid { key, reason }
-                if key == "missing" && reason.starts_with("reading boards/no.bin: ")),
+                if key == "missing"
+                    && reason.replace('\\', "/").starts_with("reading boards/no.bin: ")),
             "{error}"
         );
     }
