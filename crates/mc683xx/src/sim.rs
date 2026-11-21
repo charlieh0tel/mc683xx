@@ -8,6 +8,11 @@
 
 pub mod chip_selects;
 pub mod clock;
+/// The SIM's general-purpose ports.
+///
+/// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the
+/// chip with.
+#[doc(hidden)]
 pub mod ports;
 mod protection;
 pub mod reset;
