@@ -1525,13 +1525,7 @@ fn a_watched_output_change_ends_the_run() {
         "after the write: {:?}",
         run.cycles
     );
-    assert_eq!(
-        chip.outputs(Port::F),
-        PortLevels {
-            driven: 1,
-            levels: 0
-        }
-    );
+    assert_eq!(chip.outputs(Port::F), PortLevels::new(1, 0));
     assert!(
         chip.run_for(budget).cycles >= budget,
         "and on, with no change"
@@ -2002,13 +1996,7 @@ fn an_external_clock_board_uses_the_sci_and_the_gpt() {
         cycle(&mut chip, GPT + 0x22, Size::Word, None).unwrap().0,
         0x0200
     );
-    assert_eq!(
-        chip.outputs(Port::Gp),
-        PortLevels {
-            driven: 0,
-            levels: 0
-        }
-    );
+    assert_eq!(chip.outputs(Port::Gp), PortLevels::new(0, 0));
     assert_eq!(chip.gpt().arbitration(), 0);
 }
 
@@ -2317,26 +2305,14 @@ fn the_host_sees_each_port_edge_and_drives_the_inputs() {
         PortState::new(0x7d, 0x7f, 0x78, 0xff),
         "port C has no inputs"
     );
-    assert_eq!(
-        chip.outputs(Port::E),
-        PortLevels {
-            driven: 0x01,
-            levels: 0x00
-        }
-    );
-    assert_eq!(
-        chip.outputs(Port::C),
-        PortLevels {
-            driven: 0x07,
-            levels: 0x05
-        }
-    );
+    assert_eq!(chip.outputs(Port::E), PortLevels::new(0x01, 0x00));
+    assert_eq!(chip.outputs(Port::C), PortLevels::new(0x07, 0x05));
     let changes = chip.take_port_changes();
     let seen: Vec<_> = changes
         .iter()
         .map(|change| (change.port, change.outputs))
         .collect();
-    let change = |port, driven, levels| (port, PortLevels { driven, levels });
+    let change = |port, driven, levels| (port, PortLevels::new(driven, levels));
     assert_eq!(
         seen,
         [
@@ -2375,7 +2351,7 @@ fn gpt_output_edges_keep_their_times_across_quanta() {
     let gp = |at, driven, levels| PortChange {
         now: Cycles(at),
         port: Port::Gp,
-        outputs: PortLevels { driven, levels },
+        outputs: PortLevels::new(driven, levels),
     };
     let b = |at, level| PwmChange {
         now: Cycles(at),
@@ -3678,14 +3654,8 @@ fn port_qs_toggles(step: u64) -> Vec<(Cycles, PortLevels)> {
 fn port_qs_changes_keep_their_times_however_the_run_is_cut() {
     let whole = port_qs_toggles(20_000);
     assert!(whole.len() > 4, "{whole:?}");
-    let low = PortLevels {
-        driven: 0x02,
-        levels: 0x00,
-    };
-    let high = PortLevels {
-        driven: 0x02,
-        levels: 0x02,
-    };
+    let low = PortLevels::new(0x02, 0x00);
+    let high = PortLevels::new(0x02, 0x02);
     // DDRQS drives the latch's 0, then the loop toggles it
     assert!(
         whole

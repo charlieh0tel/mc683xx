@@ -57,10 +57,7 @@ impl Port {
     /// The levels the port drives on its output pins.
     pub(crate) const fn outputs(&self) -> PortLevels {
         let driven = self.direction & !self.assignment;
-        PortLevels {
-            driven,
-            levels: self.latch & driven,
-        }
+        PortLevels::new(driven, self.latch & driven)
     }
 
     /// Its registers and pins.
@@ -127,13 +124,7 @@ mod tests {
         port.direction = 0x03;
         port.pins = 0xa0;
         assert_eq!(port.data(), 0xa3);
-        assert_eq!(
-            port.outputs(),
-            PortLevels {
-                driven: 0x03,
-                levels: 0x03
-            }
-        );
+        assert_eq!(port.outputs(), PortLevels::new(0x03, 0x03));
         let port = port.reset(0xff);
         assert_eq!(port.latch, 0x0f);
         assert_eq!(port.direction, 0);

@@ -564,7 +564,7 @@ fn queue_output_changes(step: u64) -> Vec<(u64, u8, u8)> {
     }
     qsm.take_output_changes()
         .into_iter()
-        .map(|(at, outputs)| (at.0, outputs.driven, outputs.levels >> 3 & 0xf))
+        .map(|(at, outputs)| (at.0, outputs.driven(), outputs.levels() >> 3 & 0xf))
         .collect()
 }
 
@@ -918,22 +918,10 @@ fn woms_makes_txd_open_drain() {
     let mut qsm = qsm();
     // TE: TXD at mark, driven high
     write_word(&mut qsm, 0x0a, 0x0008, 0);
-    assert_eq!(
-        qsm.port_outputs(),
-        PortLevels {
-            driven: 0x80,
-            levels: 0x80
-        }
-    );
+    assert_eq!(qsm.port_outputs(), PortLevels::new(0x80, 0x80));
     // WOMS: released, to the board's level (QSMRM 5.2.2)
     write_word(&mut qsm, 0x0a, 0x2008, 0);
-    assert_eq!(
-        qsm.port_outputs(),
-        PortLevels {
-            driven: 0x00,
-            levels: 0x00
-        }
-    );
+    assert_eq!(qsm.port_outputs(), PortLevels::new(0x00, 0x00));
     qsm.set_port_pins(0x7f, Cycles::ZERO);
     assert_eq!(read(&mut qsm, 0x15, Size::Byte, 0) & 0x80, 0);
 }

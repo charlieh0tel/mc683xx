@@ -808,8 +808,9 @@ Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
   drives on the pins in `mask`, the others kept.  Port C has no inputs:
   a `NoInputsError`.
 - Outputs: `outputs(port)` gives the pins a port drives and their
-  levels, a `PortLevels { driven, levels }` (the levels zero on pins
-  not driven; `pin_levels(pins)` fills them).  Port C is the latch on
+  levels, a `PortLevels` (`#[non_exhaustive]`; `PortLevels::new(driven,
+  levels)`, read back with `driven()` and `levels()`, the levels zero on
+  pins not driven; `pin_levels(pins)` fills them).  Port C is the latch on
   the CS3-CS9 pins assigned as discrete outputs (MC68331UM 4.8.1.4);
   port GP's carries TCNT's clock on OC1 under CPROUT.
 - Registers: `port(port)` gives a `PortState { latch, direction,
@@ -856,17 +857,14 @@ chip.set_pins(Port::E, PE1, PE1).unwrap();
 chip.run_for(Cycles(1000));
 assert_eq!(
     chip.outputs(Port::E),
-    PortLevels {
-        driven: PE0,
-        levels: 0
-    }
+    PortLevels::new(PE0, 0)
 );
 assert_eq!(chip.port(Port::E).direction, PE0);
 let edges: Vec<(u8, u8)> = chip
     .take_port_changes()
     .into_iter()
     .filter(|change| change.port == Port::E)
-    .map(|change| (change.outputs.driven, change.outputs.levels))
+    .map(|change| (change.outputs.driven(), change.outputs.levels()))
     .collect();
 assert_eq!(edges, [(PE0, 0), (PE0, PE0), (PE0, 0)]);
 // PE1, an input, as PORTE reads it.
@@ -940,10 +938,7 @@ assert_eq!(last.now, Cycles(CLOCKS_PER_COUNT * 0x1000));
 assert_eq!(last.port, Port::Gp);
 assert_eq!(
     last.outputs,
-    PortLevels {
-        driven: OC2,
-        levels: OC2
-    }
+    PortLevels::new(OC2, OC2)
 );
 let captured = chip.peek(Address(TIC1), Size::Word, FunctionCode::SUPERVISOR_DATA);
 assert_eq!(u64::from(captured.unwrap()), 3000 / CLOCKS_PER_COUNT);

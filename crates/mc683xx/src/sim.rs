@@ -460,10 +460,7 @@ impl Sim {
         match port {
             PortName::C => {
                 let driven = self.chip_selects.discrete_outputs();
-                PortLevels {
-                    driven,
-                    levels: self.port_c & driven,
-                }
+                PortLevels::new(driven, self.port_c & driven)
             }
             PortName::E => self.port_e.outputs(),
             PortName::F => self.port_f.outputs(),

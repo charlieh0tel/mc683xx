@@ -3,14 +3,33 @@
 use serde::Deserialize;
 use serde::Serialize;
 
-/// A port's outputs: the pins it drives and their levels.  Its bytes
-/// in a snapshot are the two masks', `driven` first.
+/// A port's outputs: the pins it drives and their levels, never a level
+/// on a pin it does not drive.  Its bytes in a snapshot are the two
+/// masks', `driven` first.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(from = "Masks")]
+#[non_exhaustive]
 pub struct PortLevels {
     /// The pins it drives, a mask.
-    pub driven: u8,
+    driven: u8,
     /// Their levels; zero on the pins it does not drive.
-    pub levels: u8,
+    levels: u8,
+}
+
+/// [`PortLevels`] as a snapshot holds it, masked when it is read back.
+#[derive(Deserialize)]
+#[serde(rename = "PortLevels")]
+struct Masks {
+    /// The pins driven.
+    driven: u8,
+    /// Their levels.
+    levels: u8,
+}
+
+impl From<Masks> for PortLevels {
+    fn from(masks: Masks) -> Self {
+        Self::new(masks.driven, masks.levels)
+    }
 }
 
 impl PortLevels {
@@ -24,10 +43,22 @@ impl PortLevels {
         }
     }
 
+    /// The pins it drives, a mask.
+    #[must_use]
+    pub const fn driven(self) -> u8 {
+        self.driven
+    }
+
+    /// The levels of the pins it drives; zero on the others.
+    #[must_use]
+    pub const fn levels(self) -> u8 {
+        self.levels
+    }
+
     /// The level on each pin, `undriven` on the pins not driven.
     #[must_use]
     pub const fn pin_levels(self, undriven: u8) -> u8 {
-        self.levels & self.driven | undriven & !self.driven
+        self.levels | undriven & !self.driven
     }
 }
 

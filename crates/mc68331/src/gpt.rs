@@ -543,10 +543,7 @@ impl Gpt {
             pclk_rise: None,
             edges: Edges {
                 queue: Vec::new(),
-                port: PortLevels {
-                    driven: 0,
-                    levels: 0,
-                },
+                port: PortLevels::new(0, 0),
                 pwm: [None; 2],
                 pwm_found: Found::new(0, now),
                 oc1_clock: None,
@@ -630,12 +627,12 @@ impl Gpt {
         };
         let driven = self.direction | compared | clocked;
         let clock_level = if clock { clocked } else { 0 };
-        PortLevels {
+        PortLevels::new(
             driven,
-            levels: self.latch & self.direction & !compared & !clocked
+            self.latch & self.direction & !compared & !clocked
                 | self.compare_levels & compared
                 | clock_level,
-        }
+        )
     }
 
     /// Port GP's registers, PORTGP's latch and DDRGP, and the levels

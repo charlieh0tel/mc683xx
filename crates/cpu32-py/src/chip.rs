@@ -119,7 +119,7 @@ const QUANTUM: Cycles = Cycles(100_000);
 /// A port's outputs as Python has them: a `(driven, levels)` pair, which
 /// unpacks as `PortLevels`' fields do.
 const fn pair(outputs: PortLevels) -> (u8, u8) {
-    (outputs.driven, outputs.levels)
+    (outputs.driven(), outputs.levels())
 }
 
 /// Pins by name.
@@ -1544,8 +1544,8 @@ chip_methods! {
                 (
                     change.now.0,
                     change.port.into(),
-                    change.outputs.driven,
-                    change.outputs.levels,
+                    change.outputs.driven(),
+                    change.outputs.levels(),
                 )
             })
             .collect()

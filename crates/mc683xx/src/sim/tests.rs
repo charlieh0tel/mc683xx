@@ -391,23 +391,11 @@ fn port_c_drives_the_selects_assigned_as_discrete_outputs() {
     // output: reset makes each a select or its other function
     // (MC68331UM 4.8.1.1)
     assert_eq!(read(&mut sim, 0x41, Size::Byte), 0x7f);
-    assert_eq!(
-        sim.outputs(PortName::C),
-        PortLevels {
-            driven: 0,
-            levels: 0
-        }
-    );
+    assert_eq!(sim.outputs(PortName::C), PortLevels::new(0, 0));
     // CSPAR0: CS3 to CS5 %00; CSPAR1: CS6 to CS9 %00, CS10 a select
     write(&mut sim, 0x44, Size::Word, 0x00ff, Cycles(5));
     write(&mut sim, 0x46, Size::Word, 0x0300, Cycles(6));
-    assert_eq!(
-        sim.outputs(PortName::C),
-        PortLevels {
-            driven: 0x7f,
-            levels: 0x7f
-        }
-    );
+    assert_eq!(sim.outputs(PortName::C), PortLevels::new(0x7f, 0x7f));
     write(&mut sim, 0x41, Size::Byte, 0xc1, Cycles(7));
     assert_eq!(
         sim.port(PortName::C),
@@ -419,16 +407,10 @@ fn port_c_drives_the_selects_assigned_as_discrete_outputs() {
         },
         "bit 7 not implemented"
     );
-    assert_eq!(
-        sim.outputs(PortName::C),
-        PortLevels {
-            driven: 0x7f,
-            levels: 0x41
-        }
-    );
+    assert_eq!(sim.outputs(PortName::C), PortLevels::new(0x7f, 0x41));
     let change = |driven, levels| Change {
         port: PortName::C,
-        outputs: PortLevels { driven, levels },
+        outputs: PortLevels::new(driven, levels),
     };
     assert_eq!(
         sim.take_output_changes(),
@@ -451,16 +433,10 @@ fn a_pulse_between_quanta_is_two_changes() {
     write(&mut sim, 0x11, Size::Byte, 0x00, Cycles(13));
     // an unchanged level is no change
     write(&mut sim, 0x13, Size::Byte, 0x00, Cycles(14));
-    assert_eq!(
-        sim.outputs(PortName::E),
-        PortLevels {
-            driven: 0x01,
-            levels: 0x00
-        }
-    );
+    assert_eq!(sim.outputs(PortName::E), PortLevels::new(0x01, 0x00));
     let change = |driven, levels| Change {
         port: PortName::E,
-        outputs: PortLevels { driven, levels },
+        outputs: PortLevels::new(driven, levels),
     };
     assert_eq!(
         sim.take_output_changes(),
@@ -482,20 +458,14 @@ fn a_pulse_between_quanta_is_two_changes() {
                 Cycles(20),
                 Change {
                     port: PortName::F,
-                    outputs: PortLevels {
-                        driven: 0x80,
-                        levels: 0
-                    },
+                    outputs: PortLevels::new(0x80, 0),
                 }
             ),
             (
                 Cycles(21),
                 Change {
                     port: PortName::F,
-                    outputs: PortLevels {
-                        driven: 0x80,
-                        levels: 0x80
-                    },
+                    outputs: PortLevels::new(0x80, 0x80),
                 }
             ),
             (Cycles(30), change(0, 0)),
@@ -503,10 +473,7 @@ fn a_pulse_between_quanta_is_two_changes() {
                 Cycles(30),
                 Change {
                     port: PortName::F,
-                    outputs: PortLevels {
-                        driven: 0,
-                        levels: 0
-                    },
+                    outputs: PortLevels::new(0, 0),
                 }
             ),
         ]

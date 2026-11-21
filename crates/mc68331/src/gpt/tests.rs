@@ -239,56 +239,32 @@ fn compares_drive_their_pins_and_oc1_wins() {
     write(&mut gpt, 0x16, 0x0010, 0);
     write(&mut gpt, 0x18, 0x0040, 0);
     write(&mut gpt, 0x08, 0x3000, 0);
-    assert_eq!(
-        gpt.port_outputs(Cycles::ZERO),
-        PortLevels {
-            driven: 0x30,
-            levels: 0x00
-        }
-    );
+    assert_eq!(gpt.port_outputs(Cycles::ZERO), PortLevels::new(0x30, 0x00));
     // the pin actions show, so a run syncs at them
     assert_eq!(gpt.next_event(), Some(Cycles(4 * 0x10)));
     gpt.advance(Cycles(4 * 0x10));
     assert_eq!(
         gpt.port_outputs(Cycles::ZERO),
-        PortLevels {
-            driven: 0x30,
-            levels: 0x10
-        },
+        PortLevels::new(0x30, 0x10),
         "OC2 toggled"
     );
     gpt.advance(Cycles(4 * 0x40));
     assert_eq!(
         gpt.port_outputs(Cycles::ZERO),
-        PortLevels {
-            driven: 0x30,
-            levels: 0x00
-        },
+        PortLevels::new(0x30, 0x00),
         "OC1 over OC3"
     );
     // CFORC: OC3's action, no flag
     let flags = read(&mut gpt, 0x22, 4 * 0x40);
     write_byte(&mut gpt, 0x24, 0x20, 4 * 0x40);
-    assert_eq!(
-        gpt.port_outputs(Cycles::ZERO),
-        PortLevels {
-            driven: 0x30,
-            levels: 0x20
-        }
-    );
+    assert_eq!(gpt.port_outputs(Cycles::ZERO), PortLevels::new(0x30, 0x20));
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x40), flags);
     assert_eq!(read_byte(&mut gpt, 0x24, 4 * 0x40), 0, "FOC reads zero");
     // a disconnected compare's pin is PORTGP's again
     write(&mut gpt, 0x1e, 0x0000, 4 * 0x40);
     write(&mut gpt, 0x08, 0x0000, 4 * 0x40);
     write(&mut gpt, 0x06, 0x30a0, 4 * 0x40);
-    assert_eq!(
-        gpt.port_outputs(Cycles::ZERO),
-        PortLevels {
-            driven: 0x30,
-            levels: 0x20
-        }
-    );
+    assert_eq!(gpt.port_outputs(Cycles::ZERO), PortLevels::new(0x30, 0x20));
     assert_eq!(read_byte(&mut gpt, 0x07, 4 * 0x40), 0xef);
 }
 
@@ -340,19 +316,13 @@ fn a_byte_write_changes_only_its_lane_of_ddrgp_and_portgp() {
     write_byte(&mut gpt, 0x06, 0x0f, 0);
     assert_eq!(
         gpt.port_outputs(Cycles::ZERO),
-        PortLevels {
-            driven: 0x0f,
-            levels: 0x0f
-        },
+        PortLevels::new(0x0f, 0x0f),
         "the latch kept"
     );
     write_byte(&mut gpt, 0x07, 0x05, 0);
     assert_eq!(
         gpt.port_outputs(Cycles::ZERO),
-        PortLevels {
-            driven: 0x0f,
-            levels: 0x05
-        },
+        PortLevels::new(0x0f, 0x05),
         "DDRGP kept"
     );
     // OC2 clears its pin, PGP4, at its compare (GPTRM 3.3.1); the latch
@@ -360,22 +330,13 @@ fn a_byte_write_changes_only_its_lane_of_ddrgp_and_portgp() {
     write_byte(&mut gpt, 0x07, 0xff, 0);
     write(&mut gpt, 0x1e, 0x0200, 0);
     write_byte(&mut gpt, 0x06, 0x1f, 0);
-    assert_eq!(
-        gpt.port_outputs(Cycles::ZERO),
-        PortLevels {
-            driven: 0x1f,
-            levels: 0x0f
-        }
-    );
+    assert_eq!(gpt.port_outputs(Cycles::ZERO), PortLevels::new(0x1f, 0x0f));
     assert_eq!(read_byte(&mut gpt, 0x07, 0), 0x0f);
     write_byte(&mut gpt, 0x06, 0x1f, 0);
     write(&mut gpt, 0x1e, 0x0000, 0);
     assert_eq!(
         gpt.port_outputs(Cycles::ZERO),
-        PortLevels {
-            driven: 0x1f,
-            levels: 0x1f
-        },
+        PortLevels::new(0x1f, 0x1f),
         "the latch again"
     );
 }
@@ -534,7 +495,11 @@ fn a_forced_compare_is_not_captured_while_held() {
         // FOC1 drives OC1D7 high, then low again (GPTRM 3.3.4, 9.3)
         write(&mut gpt, 0x08, 0x8080, 4 * 0x10);
         write_byte(&mut gpt, 0x24, 0x08, 4 * 0x10);
-        assert_eq!(gpt.port_outputs(Cycles(4 * 0x10)).levels, 0x80, "{hold:?}");
+        assert_eq!(
+            gpt.port_outputs(Cycles(4 * 0x10)).levels(),
+            0x80,
+            "{hold:?}"
+        );
         write(&mut gpt, 0x08, 0x8000, 4 * 0x10);
         write_byte(&mut gpt, 0x24, 0x08, 4 * 0x10);
         assert_eq!(read(&mut gpt, 0x22, 4 * 0x10), 0, "{hold:?}: no I4O5F");
@@ -754,13 +719,7 @@ fn freeze_with_frz0_lets_compares_be_forced_and_pins_written() {
     write(&mut gpt, 0x1e, 0x0c00, 10);
     write_byte(&mut gpt, 0x24, 0x20, 10);
     write(&mut gpt, 0x06, 0x0101, 10);
-    assert_eq!(
-        gpt.port_outputs(Cycles(10)),
-        PortLevels {
-            driven: 0x21,
-            levels: 0x21
-        }
-    );
+    assert_eq!(gpt.port_outputs(Cycles(10)), PortLevels::new(0x21, 0x21));
 }
 
 #[test]
@@ -861,7 +820,7 @@ fn a_reset_returns_the_registers_and_keeps_the_pins() {
 
 /// Port GP driving `driven` at `levels`.
 const fn gp(driven: u8, levels: u8) -> OutputChange {
-    OutputChange::PortGp(PortLevels { driven, levels })
+    OutputChange::PortGp(PortLevels::new(driven, levels))
 }
 
 /// PWMA at `level`.
@@ -1024,20 +983,8 @@ fn cprout_drives_tcnts_clock_on_oc1() {
     );
     assert_eq!(gpt.next_event(), None);
     gpt.advance(Cycles(30));
-    assert_eq!(
-        gpt.port_outputs(Cycles(32)),
-        PortLevels {
-            driven: 0x08,
-            levels: 0x08
-        }
-    );
-    assert_eq!(
-        gpt.port_outputs(Cycles(33)),
-        PortLevels {
-            driven: 0x08,
-            levels: 0x00
-        }
-    );
+    assert_eq!(gpt.port_outputs(Cycles(32)), PortLevels::new(0x08, 0x08));
+    assert_eq!(gpt.port_outputs(Cycles(33)), PortLevels::new(0x08, 0x00));
     // unreported, the pin shows low
     assert_eq!(
         take_output_changes(&mut gpt),
@@ -1081,13 +1028,7 @@ fn cprout_edges_come_before_a_compare_at_their_time() {
     write(&mut gpt, 0x08, 0x0800, 4 * 0x10 + 2);
     gpt.advance(Cycles(100));
     assert_eq!(take_output_changes(&mut gpt), []);
-    assert_eq!(
-        gpt.port_outputs(Cycles(100)),
-        PortLevels {
-            driven: 0x18,
-            levels: 0x10
-        }
-    );
+    assert_eq!(gpt.port_outputs(Cycles(100)), PortLevels::new(0x18, 0x10));
     assert_eq!(gpt.oc1(Cycles(100)), Output::Level(false));
     // OC1D3 sets the pin at OC1's next match, TOC1 $0000
     write(&mut gpt, 0x08, 0x0808, 100);
