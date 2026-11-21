@@ -162,7 +162,7 @@ to = ["adc.ch3"]
     let mut board =
         Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
-    board.run_until(Time(10_000_000_000)).unwrap();
+    board.run_until(Time::from_picos(10_000_000_000)).unwrap();
     board
 }
 

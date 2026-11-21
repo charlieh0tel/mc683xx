@@ -249,7 +249,7 @@ impl AccessView {
     /// When its instruction started, in picoseconds.
     #[getter]
     const fn now(&self) -> u64 {
-        self.0.now.0
+        self.0.now.picos()
     }
 
     /// On a read or write of a peripheral whose `wants_horizon()` is
@@ -257,7 +257,7 @@ impl AccessView {
     /// could reach it has; `None` otherwise.
     #[getter]
     fn horizon(&self) -> Option<u64> {
-        self.0.horizon.map(|horizon| horizon.0)
+        self.0.horizon.map(|horizon| horizon.picos())
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
@@ -330,7 +330,7 @@ impl TransferView {
     /// When it ends, in picoseconds.
     #[getter]
     const fn now(&self) -> u64 {
-        self.0.now.0
+        self.0.now.picos()
     }
 
     fn __repr__(&self) -> String {
@@ -343,7 +343,7 @@ impl TransferView {
             self.0.out,
             self.0.bits,
             if self.0.starts_frame { "True" } else { "False" },
-            self.0.now.0
+            self.0.now.picos()
         )
     }
 }
@@ -408,7 +408,7 @@ impl SerialView {
 
     /// When its stop bits end, for a start bit at `start` picoseconds.
     fn end(&self, start: u64) -> u64 {
-        self.0.end(Time(start)).0
+        self.0.end(Time::from_picos(start)).picos()
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
@@ -515,7 +515,7 @@ impl Observer for PythonObserver {
     fn changed(&mut self, net: &str, at: Time, signal: Signal) {
         Python::attach(|py| {
             let called = python_value(py, signal, self.timed)
-                .and_then(|value| self.callback.call1(py, (net, at.0, value)));
+                .and_then(|value| self.callback.call1(py, (net, at.picos(), value)));
             if let Err(error) = called {
                 self.pending.record(error);
             }
@@ -532,7 +532,7 @@ impl Observer for PythonObserver {
             let called = signal
                 .map(|signal| python_value(py, signal, self.timed))
                 .transpose()
-                .and_then(|value| on_restore.call1(py, (net, at.0, value)));
+                .and_then(|value| on_restore.call1(py, (net, at.picos(), value)));
             if let Err(error) = called {
                 self.pending.hold(error);
             }
@@ -624,7 +624,8 @@ impl DriveView {
             .get(port)
             .ok_or_else(|| PyValueError::new_err(format!("no port {port}")))?;
         let signal = signal(kind, value)?;
-        self.driven.push((Time(at.max(self.now)), port, signal));
+        self.driven
+            .push((Time::from_picos(at.max(self.now)), port, signal));
         Ok(())
     }
 
@@ -664,7 +665,7 @@ pub(crate) fn signal(kind: Kind, value: &Bound<'_, PyAny>) -> PyResult<Signal> {
             let (at, frequency, phase): (u64, u64, u128) = value.extract()?;
             Signal::Clock(Clock::with_phase(
                 Frequency::from_nanohertz(frequency),
-                Time(at),
+                Time::from_picos(at),
                 Phase(phase),
             ))
         }
@@ -682,7 +683,7 @@ fn python_value(py: Python<'_>, signal: Signal, timed: bool) -> PyResult<Py<PyAn
         Signal::Analog(value) => value.into_py_any(py),
         Signal::Bus(word) => word.into_py_any(py),
         Signal::Clock(clock) => {
-            (clock.at.0, clock.frequency.nanohertz(), clock.phase.0).into_py_any(py)
+            (clock.at.picos(), clock.frequency.nanohertz(), clock.phase.0).into_py_any(py)
         }
         _ => Err(PyTypeError::new_err("no Python value for this signal")),
     }
@@ -872,7 +873,7 @@ impl PythonPeripheral {
             let view = Py::new(
                 py,
                 DriveView {
-                    now: drive.now().0,
+                    now: drive.now().picos(),
                     kinds: self.kinds.clone(),
                     driven: Vec::new(),
                     writes: Vec::new(),
@@ -1072,7 +1073,7 @@ impl Peripheral for PythonPeripheral {
         let _ = self.call(
             "reset",
             drive,
-            |py| Ok(vec![now.0.into_py_any(py)?]),
+            |py| Ok(vec![now.picos().into_py_any(py)?]),
             |_| Ok(()),
             (),
         );
@@ -1098,7 +1099,7 @@ impl Peripheral for PythonPeripheral {
             |py| {
                 Ok(vec![
                     Py::new(py, QspiClock::from(clock))?.into_any(),
-                    now.0.into_py_any(py)?,
+                    now.picos().into_py_any(py)?,
                 ])
             },
             |_| Ok(()),
@@ -1114,7 +1115,7 @@ impl Peripheral for PythonPeripheral {
                 Ok(vec![
                     attachment.into_py_any(py)?,
                     selected.into_py_any(py)?,
-                    now.0.into_py_any(py)?,
+                    now.picos().into_py_any(py)?,
                 ])
             },
             |_| Ok(()),
@@ -1139,7 +1140,7 @@ impl Peripheral for PythonPeripheral {
                 Ok(vec![
                     port.into_py_any(py)?,
                     python_value(py, signal, self.timed_serial)?,
-                    now.0.into_py_any(py)?,
+                    now.picos().into_py_any(py)?,
                 ])
             },
             |_| Ok(()),
@@ -1150,7 +1151,7 @@ impl Peripheral for PythonPeripheral {
     fn sample(&mut self, port: usize, now: Time) -> Option<f64> {
         self.ask(
             "sample",
-            |py| Ok(vec![port.into_py_any(py)?, now.0.into_py_any(py)?]),
+            |py| Ok(vec![port.into_py_any(py)?, now.picos().into_py_any(py)?]),
             |value| value.extract::<Option<f64>>(),
             None,
         )
@@ -1160,7 +1161,7 @@ impl Peripheral for PythonPeripheral {
         self.ask(
             "next_event",
             |_| Ok(Vec::new()),
-            |value| Ok(value.extract::<Option<u64>>()?.map(Time)),
+            |value| Ok(value.extract::<Option<u64>>()?.map(Time::from_picos)),
             None,
         )
     }
@@ -1169,7 +1170,7 @@ impl Peripheral for PythonPeripheral {
         let _ = self.call(
             "advance",
             drive,
-            |py| Ok(vec![now.0.into_py_any(py)?]),
+            |py| Ok(vec![now.picos().into_py_any(py)?]),
             |_| Ok(()),
             (),
         );
@@ -1260,7 +1261,7 @@ impl TryFrom<BoardRun> for BoardRunView {
     fn try_from(run: BoardRun) -> Result<Self, Error> {
         Ok(Self {
             stop: run.stop.try_into()?,
-            now: run.now.0,
+            now: run.now.picos(),
         })
     }
 }
@@ -1577,7 +1578,7 @@ impl BoardView {
     /// Board time, picoseconds.
     #[getter]
     const fn now(&self) -> u64 {
-        self.board.now().0
+        self.board.now().picos()
     }
 
     /// The chip's system clocks since power-on.
@@ -1658,7 +1659,7 @@ impl BoardView {
             .take_received(name)
             .map_err(|error| PyValueError::new_err(error.to_string()))?
             .into_iter()
-            .map(|(at, signal)| Ok((at.0, python_value(py, signal, timed)?)))
+            .map(|(at, signal)| Ok((at.picos(), python_value(py, signal, timed)?)))
             .collect()
     }
 

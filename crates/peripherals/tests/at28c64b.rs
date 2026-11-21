@@ -160,13 +160,17 @@ fn the_cpu_writes_a_byte_and_polls_it_to_the_end_of_its_write_cycle() {
     let mut board =
         Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
 
-    board.run_until(Time(WRITE_CYCLE_PS / 2)).unwrap();
+    board
+        .run_until(Time::from_picos(WRITE_CYCLE_PS / 2))
+        .unwrap();
     let data = board.chip().cpu().registers.data;
     assert_ne!(data[0] & 0xff, u32::from(VALUE), "polling: {:#x}", data[0]);
     let held = fs::read(directory.join("eeprom.bin")).unwrap();
     assert_eq!(held[(CELL & 0x1fff) as usize], 0xff, "not yet programmed");
 
-    board.run_until(Time(2 * WRITE_CYCLE_PS)).unwrap();
+    board
+        .run_until(Time::from_picos(2 * WRITE_CYCLE_PS))
+        .unwrap();
     let data = board.chip().cpu().registers.data;
     assert_eq!(data[0] & 0xff, u32::from(VALUE), "read back");
     assert!(data[1] > 100, "polled through tWC: {} reads", data[1]);

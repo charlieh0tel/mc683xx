@@ -153,15 +153,15 @@ mod tests {
         buffer.input(
             3,
             Signal::Level(false),
-            Time(1),
-            &mut Drive::new(Time(1), SYSTEM_CLOCK),
+            Time::from_picos(1),
+            &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
         );
         assert_eq!(read(&mut buffer, Size::Byte), 0xf7);
         buffer
             .write(
-                access(Size::Byte, Time(2)),
+                access(Size::Byte, Time::from_picos(2)),
                 0,
-                &mut Drive::new(Time(2), SYSTEM_CLOCK),
+                &mut Drive::new(Time::from_picos(2), SYSTEM_CLOCK),
             )
             .unwrap();
         assert_eq!(
@@ -185,15 +185,15 @@ mod tests {
         buffer.input(
             BUS,
             Signal::Bus(0x1a5),
-            Time(1),
-            &mut Drive::new(Time(1), SYSTEM_CLOCK),
+            Time::from_picos(1),
+            &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
         );
         assert_eq!(read(&mut buffer, Size::Byte), 0xa5);
         buffer.input(
             0,
             Signal::Level(false),
-            Time(2),
-            &mut Drive::new(Time(2), SYSTEM_CLOCK),
+            Time::from_picos(2),
+            &mut Drive::new(Time::from_picos(2), SYSTEM_CLOCK),
         );
         assert_eq!(read(&mut buffer, Size::Byte), 0xa4);
     }

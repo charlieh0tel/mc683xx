@@ -239,7 +239,7 @@ impl fmt::Display for Signal {
             Self::Clock(clock) => write!(
                 formatter,
                 "clock_at={} frequency={} phase={}",
-                clock.at.0,
+                clock.at.picos(),
                 clock.frequency.nanohertz(),
                 clock.phase.0
             ),

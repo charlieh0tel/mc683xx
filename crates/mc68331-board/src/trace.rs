@@ -77,7 +77,9 @@ impl fmt::Display for NetRecord {
         write!(
             formatter,
             "net time={} name={} {}",
-            self.at.0, self.net, self.signal
+            self.at.picos(),
+            self.net,
+            self.signal
         )
     }
 }
@@ -314,7 +316,7 @@ impl fmt::Display for Record {
                 formatter,
                 "pin cycle={} time={} pin={} level={}",
                 record.cycle.0,
-                record.time.0,
+                record.time.picos(),
                 record.pin,
                 u8::from(record.level)
             ),
@@ -431,7 +433,7 @@ mod tests {
         );
         let pin = Record::Pin(PinRecord {
             cycle: Cycles(1677),
-            time: Time(100_000_037),
+            time: Time::from_picos(100_000_037),
             pin: "PGP0",
             level: true,
         });
@@ -491,7 +493,7 @@ mod tests {
     fn net_lines_carry_each_signal_s_fields() {
         let line = |signal| {
             NetRecord {
-                at: Time(5),
+                at: Time::from_picos(5),
                 net: "pps".to_owned(),
                 signal,
             }
@@ -499,7 +501,10 @@ mod tests {
         };
         assert_eq!(line(Signal::Level(true)), "net time=5 name=pps level=1");
         assert_eq!(
-            line(Signal::Clock(Clock::new(Frequency::from_hz(10), Time(0)))),
+            line(Signal::Clock(Clock::new(
+                Frequency::from_hz(10),
+                Time::from_picos(0)
+            ))),
             "net time=5 name=pps clock_at=0 frequency=10000000000 phase=0"
         );
         assert_eq!(

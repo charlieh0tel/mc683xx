@@ -96,7 +96,7 @@ reload = ["external"]
     )
     .unwrap();
     fs::remove_dir_all(directory).unwrap();
-    board.run_until(Time(100_000_000)).unwrap();
+    board.run_until(Time::from_picos(100_000_000)).unwrap();
     assert_eq!(board.memory("data").unwrap()[0..2], [0x12, 0x34]);
     let pc = board.chip().cpu().registers.pc;
     assert!((CODE..CODE + 0x800).contains(&pc.0), "{pc:#x}");

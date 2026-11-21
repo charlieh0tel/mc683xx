@@ -41,7 +41,7 @@ pub const PHASE_UNITS: u128 = PICOSECONDS_PER_SECOND as u128 * NANOHERTZ_PER_HER
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
-pub struct Time(pub u64);
+pub struct Time(u64);
 
 /// The picoseconds and their unit: `1000 ps`.
 impl fmt::Display for Time {
@@ -50,23 +50,23 @@ impl fmt::Display for Time {
     }
 }
 
-impl From<u64> for Time {
-    fn from(picoseconds: u64) -> Self {
-        Self(picoseconds)
-    }
-}
-
-impl From<Time> for u64 {
-    fn from(time: Time) -> Self {
-        time.0
-    }
-}
-
 impl Time {
     /// Power-on.
     pub const ZERO: Self = Self(0);
     /// The last time there is.
     pub const MAX: Self = Self(u64::MAX);
+
+    /// `picoseconds` picoseconds since power-on.
+    #[must_use]
+    pub const fn from_picos(picoseconds: u64) -> Self {
+        Self(picoseconds)
+    }
+
+    /// Its picoseconds since power-on.
+    #[must_use]
+    pub const fn picos(self) -> u64 {
+        self.0
+    }
 
     /// `seconds` seconds, or the last time if that is past it.
     #[must_use]
@@ -259,18 +259,6 @@ impl Span {
 impl fmt::Display for Span {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{} ps", self.0)
-    }
-}
-
-impl From<u64> for Span {
-    fn from(picoseconds: u64) -> Self {
-        Self(picoseconds)
-    }
-}
-
-impl From<Span> for u64 {
-    fn from(span: Span) -> Self {
-        span.0
     }
 }
 
@@ -816,16 +804,19 @@ mod tests {
 
     #[test]
     fn time_moves_by_spans_and_divides_into_periods() {
-        let mut time = Time(2_500);
+        let mut time = Time::from_picos(2_500);
         time += ps(500);
-        assert_eq!(time, Time(3_000));
+        assert_eq!(time, Time::from_picos(3_000));
         time -= ps(4_000);
         assert_eq!(time, Time::ZERO, "saturating at power-on");
         assert_eq!(Time::MAX + ps(1), Time::MAX);
-        assert_eq!(Time(3_000) - Time(1_000), ps(2_000));
-        assert_eq!(Time(1_000) - Time(3_000), Span::ZERO);
-        assert_eq!(Time(2_500) / ps(1_000), 2);
-        assert_eq!(Time(2_500) % ps(1_000), ps(500));
+        assert_eq!(Time::from_picos(3_000) - Time::from_picos(1_000), ps(2_000));
+        assert_eq!(
+            Time::from_picos(1_000) - Time::from_picos(3_000),
+            Span::ZERO
+        );
+        assert_eq!(Time::from_picos(2_500) / ps(1_000), 2);
+        assert_eq!(Time::from_picos(2_500) % ps(1_000), ps(500));
     }
 
     #[test]
@@ -856,10 +847,10 @@ mod tests {
         );
         assert_eq!(
             Time::checked_from_seconds_f64(2.5),
-            Some(Time(2_500_000_000_000))
+            Some(Time::from_picos(2_500_000_000_000))
         );
         assert_eq!(Time::checked_from_seconds_f64(-2.5), None);
-        assert!((Time(1_500_000_000_000).seconds_f64() - 1.5).abs() < f64::EPSILON);
+        assert!((Time::from_picos(1_500_000_000_000).seconds_f64() - 1.5).abs() < f64::EPSILON);
         assert_eq!(Span::from_seconds(u64::MAX), Span::MAX);
         assert!((Span::from_millis(1_500).seconds_f64() - 1.5).abs() < f64::EPSILON);
         assert_eq!(ps(2) + ps(3), ps(5));
@@ -873,7 +864,8 @@ mod tests {
         assert_eq!(ps(7) % ps(2), ps(1));
         assert_eq!([ps(1), ps(2), ps(3)].into_iter().sum::<Span>(), ps(6));
         assert_eq!(Span::from_micros(5).to_string(), "5000000 ps");
-        assert_eq!(Span::from(9_u64).picos(), 9);
+        assert_eq!(Span::from_picos(9).picos(), 9);
+        assert_eq!(Time::from_picos(9).picos(), 9);
     }
 
     #[test]
@@ -896,11 +888,20 @@ mod tests {
 
     #[test]
     fn edges_are_counted_exactly_over_long_spans() {
-        let clock = Clock::new(TEN_MHZ, Time(123));
+        let clock = Clock::new(TEN_MHZ, Time::from_picos(123));
         let day = Time::from_seconds(86_400);
-        assert_eq!(clock.edges(Time(123), day + ps(123)), 864_000_000_000);
-        assert_eq!(clock.edge_after(Time(123), 1), Some(Time(100_123)));
-        assert_eq!(clock.edge_after(Time(124), 10), Some(Time(1_000_123)));
+        assert_eq!(
+            clock.edges(Time::from_picos(123), day + ps(123)),
+            864_000_000_000
+        );
+        assert_eq!(
+            clock.edge_after(Time::from_picos(123), 1),
+            Some(Time::from_picos(100_123))
+        );
+        assert_eq!(
+            clock.edge_after(Time::from_picos(124), 10),
+            Some(Time::from_picos(1_000_123))
+        );
     }
 
     #[test]
@@ -909,24 +910,33 @@ mod tests {
         let third = Clock::new(Frequency::from_hz(3), Time::ZERO);
         let mut clock = third;
         for step in 1..=3_000 {
-            clock = clock.retuned(Time(step * 1_000_000_000), Frequency::from_hz(3));
+            clock = clock.retuned(
+                Time::from_picos(step * 1_000_000_000),
+                Frequency::from_hz(3),
+            );
         }
         assert_eq!(clock.phase_at(Time::from_seconds(3)).0, 9 * PHASE_UNITS);
         assert_eq!(
             clock.edge_after(Time::ZERO, 1),
             third.edge_after(Time::ZERO, 1)
         );
-        assert_eq!(clock.edge_after(Time::ZERO, 1), Some(Time(333_333_333_334)));
+        assert_eq!(
+            clock.edge_after(Time::ZERO, 1),
+            Some(Time::from_picos(333_333_333_334))
+        );
     }
 
     #[test]
     fn the_phase_at_a_time_holds_its_fraction() {
         let clock = Clock::new(TEN_MHZ, Time::ZERO);
-        let phase = clock.phase_at(Time(25_000));
+        let phase = clock.phase_at(Time::from_picos(25_000));
         assert_eq!(phase.cycles(), 0);
         assert_eq!(phase.fraction(), PHASE_UNITS / 4);
-        let faster = clock.retuned(Time(25_000), Frequency::from_hz(20_000_000));
-        assert_eq!(faster.edge_after(Time(25_000), 1), Some(Time(62_500)));
+        let faster = clock.retuned(Time::from_picos(25_000), Frequency::from_hz(20_000_000));
+        assert_eq!(
+            faster.edge_after(Time::from_picos(25_000), 1),
+            Some(Time::from_picos(62_500))
+        );
     }
 
     #[test]
@@ -935,23 +945,35 @@ mod tests {
         let mut history = ClockHistory::new(Span::from_seconds(64));
         let clock = Clock::new(TEN_MHZ, Time::ZERO);
         history.push(clock);
-        let faster = clock.retuned(Time(1_000_000), Frequency::from_hz(20_000_000));
+        let faster = clock.retuned(Time::from_picos(1_000_000), Frequency::from_hz(20_000_000));
         history.push(faster);
-        assert_eq!(history.edges(Time::ZERO, Time(2_000_000)), Some(30));
-        assert_eq!(history.edge_after(Time(500_000), 5), Some(Time(1_000_000)));
-        assert_eq!(history.edge_after(Time(500_000), 6), Some(Time(1_050_000)));
+        assert_eq!(
+            history.edges(Time::ZERO, Time::from_picos(2_000_000)),
+            Some(30)
+        );
+        assert_eq!(
+            history.edge_after(Time::from_picos(500_000), 5),
+            Some(Time::from_picos(1_000_000))
+        );
+        assert_eq!(
+            history.edge_after(Time::from_picos(500_000), 6),
+            Some(Time::from_picos(1_050_000))
+        );
         assert_eq!(
             history.edge(3),
-            Some(Time(300_000)),
+            Some(Time::from_picos(300_000)),
             "found in the old segment"
         );
         assert_eq!(
-            history.to_next_edge(Time(1_010_000)),
+            history.to_next_edge(Time::from_picos(1_010_000)),
             Some((ps(40_000), PHASE_UNITS * 4 / 5))
         );
         // A push from the past replaces what it overlaps.
-        history.push(clock.retuned(Time(1_000_000), TEN_MHZ));
-        assert_eq!(history.edges(Time::ZERO, Time(2_000_000)), Some(20));
+        history.push(clock.retuned(Time::from_picos(1_000_000), TEN_MHZ));
+        assert_eq!(
+            history.edges(Time::ZERO, Time::from_picos(2_000_000)),
+            Some(20)
+        );
     }
 
     #[test]
@@ -959,7 +981,7 @@ mod tests {
         let mut history = ClockHistory::new(ps(10));
         let mut clock = Clock::new(TEN_MHZ, Time::ZERO);
         for at in 1..=100 {
-            clock = clock.retuned(Time(at), TEN_MHZ);
+            clock = clock.retuned(Time::from_picos(at), TEN_MHZ);
             history.push(clock);
         }
         assert!(history.segments.len() <= 11);
@@ -973,7 +995,7 @@ mod tests {
         const DAYS: u64 = 3;
         let seconds = DAYS * 86_400;
         let mut history = ClockHistory::new(Span::from_seconds(64));
-        let mut clock = Clock::new(TEN_MHZ, Time(7));
+        let mut clock = Clock::new(TEN_MHZ, Time::from_picos(7));
         history.push(clock);
         // The exact phase, in nanohertz-seconds: cycles x 10^9.
         let mut exact: u128 = 0;
@@ -1010,18 +1032,22 @@ mod tests {
 
     #[test]
     fn a_stopped_clock_has_no_edges() {
-        let clock = Clock::new(Frequency::from_nanohertz(0), Time(5));
-        assert_eq!(clock.edge_after(Time(5), 1), None);
-        assert_eq!(clock.edges(Time(0), Time::MAX), 0);
+        let clock = Clock::new(Frequency::from_nanohertz(0), Time::from_picos(5));
+        assert_eq!(clock.edge_after(Time::from_picos(5), 1), None);
+        assert_eq!(clock.edges(Time::from_picos(0), Time::MAX), 0);
     }
 
     #[test]
     fn chip_times_round_up_to_a_clock() {
-        let base = TimeBase::new(Cycles(10), Time(1_000), Frequency::from_hz(16_777_216));
-        assert_eq!(base.time(Cycles(11)), Time(1_000 + 59_604));
-        assert_eq!(base.cycles(Time(1_000)), Cycles(10));
-        assert_eq!(base.cycles(Time(1_001)), Cycles(11));
-        assert_eq!(base.cycles(Time(1_000 + 59_605)), Cycles(12));
+        let base = TimeBase::new(
+            Cycles(10),
+            Time::from_picos(1_000),
+            Frequency::from_hz(16_777_216),
+        );
+        assert_eq!(base.time(Cycles(11)), Time::from_picos(1_000 + 59_604));
+        assert_eq!(base.cycles(Time::from_picos(1_000)), Cycles(10));
+        assert_eq!(base.cycles(Time::from_picos(1_001)), Cycles(11));
+        assert_eq!(base.cycles(Time::from_picos(1_000 + 59_605)), Cycles(12));
         assert_eq!(base.cycles(base.time(Cycles(500))), Cycles(500));
         let moved = base.moved(Cycles(20), Frequency::from_hz(8_388_608));
         assert_eq!(moved.time, base.time(Cycles(20)));
@@ -1047,10 +1073,13 @@ mod tests {
     fn clocks_before_the_base_round_down_and_back() {
         let base = TimeBase::new(
             Cycles(1_000),
-            Time(100_000_000),
+            Time::from_picos(100_000_000),
             Frequency::from_hz(16_777_216),
         );
-        assert_eq!(base.time(Cycles(999)), Time(100_000_000 - 59_605));
+        assert_eq!(
+            base.time(Cycles(999)),
+            Time::from_picos(100_000_000 - 59_605)
+        );
         for clocks in (0..1_000).chain(1_000..1_100) {
             let cycles = Cycles(clocks);
             assert_eq!(base.cycles(base.time(cycles)), cycles, "{clocks}");

@@ -221,9 +221,9 @@ mod tests {
             levels(drive),
             (0..8).map(|bit| (bit, bit < 4)).collect::<Vec<_>>()
         );
-        let mut drive = Drive::new(Time(5), SYSTEM_CLOCK);
+        let mut drive = Drive::new(Time::from_picos(5), SYSTEM_CLOCK);
         latch
-            .write(access(Size::Byte, Time(5)), 0x1e, &mut drive)
+            .write(access(Size::Byte, Time::from_picos(5)), 0x1e, &mut drive)
             .unwrap();
         assert_eq!(levels(drive), [(0, false), (4, true)]);
     }
@@ -247,18 +247,18 @@ mod tests {
     fn oe_releases_q_to_its_pull_and_keeps_the_flip_flops() {
         let mut latch = latch(0x81);
         latch.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
-        let mut drive = Drive::new(Time(1), SYSTEM_CLOCK);
-        latch.input(OE, Signal::Level(true), Time(1), &mut drive);
+        let mut drive = Drive::new(Time::from_picos(1), SYSTEM_CLOCK);
+        latch.input(OE, Signal::Level(true), Time::from_picos(1), &mut drive);
         assert_eq!(levels(drive).len(), 6, "the six low bits go high");
         latch
             .write(
-                access(Size::Byte, Time(2)),
+                access(Size::Byte, Time::from_picos(2)),
                 0x42,
-                &mut Drive::new(Time(2), SYSTEM_CLOCK),
+                &mut Drive::new(Time::from_picos(2), SYSTEM_CLOCK),
             )
             .unwrap();
-        let mut drive = Drive::new(Time(3), SYSTEM_CLOCK);
-        latch.input(OE, Signal::Level(false), Time(3), &mut drive);
+        let mut drive = Drive::new(Time::from_picos(3), SYSTEM_CLOCK);
+        latch.input(OE, Signal::Level(false), Time::from_picos(3), &mut drive);
         assert_eq!(
             levels(drive),
             (0..8)
@@ -274,8 +274,8 @@ mod tests {
         latch.input(
             OE,
             Signal::Level(true),
-            Time(1),
-            &mut Drive::new(Time(1), SYSTEM_CLOCK),
+            Time::from_picos(1),
+            &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
         );
         let inspection = latch.inspect();
         assert_eq!(inspection.get("held"), Some(&Value::Integer(0x81)));

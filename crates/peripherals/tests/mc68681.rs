@@ -241,7 +241,7 @@ fn the_cpu_transmits_receives_and_takes_the_duarts_vectored_interrupt() {
     let mut board = board();
     // 2 ms: the program sets up and sends 'H', 260 microseconds at
     // 38.4k
-    board.run_until(Time(2_000_000_000)).unwrap();
+    board.run_until(Time::from_picos(2_000_000_000)).unwrap();
     let sent = received(&mut board);
     let [(_, serial)] = sent[..] else {
         panic!("one frame: {sent:?}");

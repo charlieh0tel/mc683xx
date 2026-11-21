@@ -36,7 +36,7 @@ const IMAGE_NAME: &str = "demo.bin";
 /// The console's run-time endpoint.
 const CONSOLE: &str = "console";
 /// Board time the boot runs for, past the banner and the prompt.
-const BOOT: Time = Time(PICOSECONDS_PER_SECOND / 10);
+const BOOT: Time = Time::from_picos(PICOSECONDS_PER_SECOND / 10);
 /// A frame's wall time, about 60 a second.
 const FRAME: Duration = Duration::from_micros(16_667);
 /// Board seconds a wall second while paced.
@@ -119,7 +119,7 @@ fn the_demo_board_runs_from_bytes_and_a_host_clock() {
         reason = "a frame's board picoseconds"
     )]
     let frame = (FRAME.as_secs_f64() * FACTOR * PICOSECONDS_PER_SECOND as f64) as u64;
-    let paced = board.now().0 - start.0;
+    let paced = board.now().picos() - start.picos();
     assert!(
         paced.abs_diff(u64::from(frames - 1) * frame) <= u64::from(frames),
         "{paced}"

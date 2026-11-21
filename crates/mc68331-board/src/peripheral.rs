@@ -901,17 +901,21 @@ mod tests {
 
     #[test]
     fn a_drive_carries_the_system_clock() {
-        let base = TimeBase::new(Cycles::ZERO, Time(5), Frequency::from_hz(16_777_216));
-        assert_eq!(Drive::new(Time(5), base).system_clock(), base);
+        let base = TimeBase::new(
+            Cycles::ZERO,
+            Time::from_picos(5),
+            Frequency::from_hz(16_777_216),
+        );
+        assert_eq!(Drive::new(Time::from_picos(5), base).system_clock(), base);
         let sampler = |_: usize, _: Time| Some(1.5);
-        let drive = Drive::with_sampler(Time(5), base, &sampler);
+        let drive = Drive::with_sampler(Time::from_picos(5), base, &sampler);
         assert_eq!((drive.system_clock(), drive.sample(0)), (base, Some(1.5)));
     }
 
     #[test]
     fn a_transfer_takes_another_clock_and_keeps_the_rest() {
         let reset = QspiClock::at_reset(Frequency::from_hz(8_388_608));
-        let transfer = Transfer::new(0xa5, 8, reset, Time(9))
+        let transfer = Transfer::new(0xa5, 8, reset, Time::from_picos(9))
             .through(1)
             .at_entry(2)
             .selecting(0xe)

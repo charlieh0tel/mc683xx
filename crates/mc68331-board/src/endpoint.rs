@@ -102,7 +102,7 @@ mod tests {
         assert!("wire".parse::<crate::signal::Kind>().is_err());
         assert_eq!("in-out".parse(), Ok(crate::signal::Direction::InOut));
         assert_eq!(crate::signal::Direction::Out.to_string(), "out");
-        assert_eq!(crate::time::Time(1_000).to_string(), "1000 ps");
+        assert_eq!(crate::time::Time::from_picos(1_000).to_string(), "1000 ps");
     }
 
     #[test]

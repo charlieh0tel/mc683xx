@@ -170,11 +170,11 @@ impl Observer for Resyncing {
 fn run(board: &mut Board<Mc68331>) {
     for (step, level) in [false, true, false].into_iter().enumerate() {
         board
-            .run_until(Time(RUN_PS / 4 * (step as u64 + 1)))
+            .run_until(Time::from_picos(RUN_PS / 4 * (step as u64 + 1)))
             .unwrap();
         board.send("switch", Signal::Level(level)).unwrap();
     }
-    board.run_until(Time(RUN_PS)).unwrap();
+    board.run_until(Time::from_picos(RUN_PS)).unwrap();
 }
 
 #[test]
@@ -193,7 +193,11 @@ fn an_observer_sees_what_a_sink_sees_when_it_sees_it() {
         log.seen()
             .iter()
             .find(|(_, _, signal)| *signal == Signal::Level(true)),
-        Some(&("pps".to_owned(), Time(100_000_037), Signal::Level(true)))
+        Some(&(
+            "pps".to_owned(),
+            Time::from_picos(100_000_037),
+            Signal::Level(true)
+        ))
     );
 }
 
@@ -252,7 +256,7 @@ fn a_restore_tells_each_observer_its_net_s_restored_value() {
     }
     let log = Log::default();
     board.observe("pps", log.observer()).unwrap();
-    board.run_until(Time(RUN_PS / 4)).unwrap();
+    board.run_until(Time::from_picos(RUN_PS / 4)).unwrap();
     let snapshot = board.save().unwrap();
     let (at, pps) = (board.now(), board.net_value("pps").unwrap());
     assert!(pps.is_some());

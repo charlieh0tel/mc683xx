@@ -35,13 +35,13 @@ pub(super) struct Crystal {
 impl Crystal {
     /// The last tick at or before `time`.
     pub(super) fn tick(self, time: Time) -> u64 {
-        (u128::from(time.0) * u128::from(self.hz) / u128::from(PICOSECONDS_PER_SECOND)) as u64
+        (u128::from(time.picos()) * u128::from(self.hz) / u128::from(PICOSECONDS_PER_SECOND)) as u64
     }
 
     /// When tick `tick` is.
     pub(super) fn time(self, tick: u64) -> Time {
         let scaled = u128::from(tick) * u128::from(PICOSECONDS_PER_SECOND);
-        Time(scaled.div_ceil(u128::from(self.hz)) as u64)
+        Time::from_picos(scaled.div_ceil(u128::from(self.hz)) as u64)
     }
 
     /// The span `ticks` ticks take, rounded down to a picosecond.

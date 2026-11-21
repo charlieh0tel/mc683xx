@@ -1021,7 +1021,7 @@ mod tests {
             panic!("a cycle running");
         };
         assert_eq!(writing.get("last"), Some(&Value::Integer(0x5a)));
-        let end = i64::try_from(done(Time::ZERO).0).unwrap();
+        let end = i64::try_from(done(Time::ZERO).picos()).unwrap();
         assert_eq!(writing.get("done"), Some(&Value::Integer(end)));
         at(&mut peripheral, done(Time::ZERO));
         let inspection = peripheral.inspect();
@@ -1041,7 +1041,7 @@ mod tests {
         let last = load(
             &mut peripheral,
             &bytes.map(|(offset, value)| (Offset(offset), value)),
-            Time(100),
+            Time::from_picos(100),
         );
         write(&mut peripheral, 0x42, 5, last + BYTE_LOAD);
         at(&mut peripheral, done(last));
@@ -1559,7 +1559,7 @@ mod tests {
         );
         let mut bytes = ENABLE.to_vec();
         bytes.extend([(Offset(0x0101), 0x5a), (Offset(0x0100), 0xa5)]);
-        load(&mut peripheral, &bytes, Time(1_000));
+        load(&mut peripheral, &bytes, Time::from_picos(1_000));
         read(&mut peripheral, 0);
         snapshot_golden::check(
             env!("CARGO_MANIFEST_DIR"),

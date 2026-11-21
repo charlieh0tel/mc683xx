@@ -165,7 +165,7 @@ impl Board {
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn now(&self) -> u64 {
-        self.board.now().0
+        self.board.now().picos()
     }
 
     /// The pacing `runFrame` keeps: `unpaced`, `realtime` or a factor,
@@ -375,7 +375,7 @@ impl From<mc683xx_board::board::BoardRun> for BoardRun {
     fn from(run: mc683xx_board::board::BoardRun) -> Self {
         Self {
             stop: run.stop,
-            now: run.now.0,
+            now: run.now.picos(),
         }
     }
 }

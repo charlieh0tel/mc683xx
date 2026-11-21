@@ -227,7 +227,7 @@ fn each_kind_of_stop_has_its_name() {
         (Stop::Fault, "fault"),
     ];
     for (stop, name) in names {
-        let run = mc683xx_board::board::BoardRun::new(stop, Time(0));
+        let run = mc683xx_board::board::BoardRun::new(stop, Time::from_picos(0));
         assert_eq!(BoardRun::from(run).stop(), name, "{stop:?}");
     }
 }

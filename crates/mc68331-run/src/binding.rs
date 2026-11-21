@@ -259,7 +259,11 @@ impl Binding {
         for (at, signal) in received {
             match signal {
                 Signal::Serial(serial) => bytes.extend(serial.frame.data().map(|data| data as u8)),
-                other => eprintln!("{CHIP}: external name={} time={} {other}", self.name, at.0),
+                other => eprintln!(
+                    "{CHIP}: external name={} time={} {other}",
+                    self.name,
+                    at.picos()
+                ),
             }
         }
         if bytes.is_empty() {

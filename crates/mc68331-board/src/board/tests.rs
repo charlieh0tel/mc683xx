@@ -71,7 +71,7 @@ fn divided() -> Board<Mc68331> {
         Environment::default(),
     )
     .unwrap();
-    board.run_until(Time(1_000_000)).unwrap();
+    board.run_until(Time::from_picos(1_000_000)).unwrap();
     board
 }
 
@@ -101,7 +101,7 @@ fn edited(snapshot: &[u8], change: impl FnOnce(&mut BoardState<Pin>)) -> Vec<u8>
 /// A change on net `net` by driver `driver`, numbered `sequence`.
 fn waiting(net: usize, driver: usize, sequence: u64) -> ((Time, u64), Change) {
     (
-        (Time(2_000_000), sequence),
+        (Time::from_picos(2_000_000), sequence),
         Change {
             net,
             driver,
@@ -165,7 +165,7 @@ fn a_state_no_run_could_save_is_refused() {
             StateError::invalid("the system clock's frequency"),
         ),
     ];
-    board.run_until(Time(2_000_000)).unwrap();
+    board.run_until(Time::from_picos(2_000_000)).unwrap();
     let before = board.save().unwrap();
     for (bytes, error) in invalid {
         assert_eq!(
@@ -186,7 +186,7 @@ fn qspi_levels_past_pcs_3_0_are_refused() {
         Environment::default(),
     )
     .unwrap();
-    board.run_until(Time(1_000_000)).unwrap();
+    board.run_until(Time::from_picos(1_000_000)).unwrap();
     let snapshot = board.save().unwrap();
     let with_levels = |levels| {
         edited(&snapshot, |state| {
@@ -204,7 +204,7 @@ fn qspi_levels_past_pcs_3_0_are_refused() {
 fn a_refused_snapshot_leaves_the_board_as_it_was() {
     let mut board = divided();
     let snapshot = board.save().unwrap();
-    board.run_until(Time(2_000_000)).unwrap();
+    board.run_until(Time::from_picos(2_000_000)).unwrap();
     let count = |board: &mut Board<Mc68331>| {
         board
             .peripheral::<EdgeCounter>("counter")
@@ -266,9 +266,9 @@ fn a_refusing_peripheral_is_not_rolled_back_and_the_ones_before_it_are() {
         .unwrap();
     let mut board =
         Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
-    board.run_until(Time(1_000_000)).unwrap();
+    board.run_until(Time::from_picos(1_000_000)).unwrap();
     let snapshot = board.save().unwrap();
-    board.run_until(Time(2_000_000)).unwrap();
+    board.run_until(Time::from_picos(2_000_000)).unwrap();
     let before = board.save().unwrap();
     assert_eq!(
         board.restore(&snapshot).unwrap_err().to_string(),

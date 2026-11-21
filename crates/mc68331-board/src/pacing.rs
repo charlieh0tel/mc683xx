@@ -319,16 +319,19 @@ mod tests {
         let start = Duration::ZERO;
         let mut pacer = Pacer::new();
         let twice = Pacing::Scaled(2.0);
-        assert_eq!(pacer.delay_at(Time(0), twice, start), Duration::ZERO);
+        assert_eq!(
+            pacer.delay_at(Time::from_picos(0), twice, start),
+            Duration::ZERO
+        );
         // 10 ms of board time is 5 ms of wall time at twice real time
         let at = |millis| start + Duration::from_millis(millis);
-        let ten = Time(10 * MILLISECOND);
+        let ten = Time::from_picos(10 * MILLISECOND);
         assert_eq!(pacer.delay_at(ten, twice, at(1)), Duration::from_millis(4));
         assert_eq!(pacer.delay_at(ten, twice, at(5)), Duration::ZERO);
         assert_eq!(pacer.delay_at(ten, twice, at(9)), Duration::ZERO, "behind");
         // a new factor starts again from where the board is
         assert_eq!(pacer.delay_at(ten, Pacing::RealTime, at(9)), Duration::ZERO);
-        let twenty = Time(20 * MILLISECOND);
+        let twenty = Time::from_picos(20 * MILLISECOND);
         assert_eq!(
             pacer.delay_at(twenty, Pacing::RealTime, at(10)),
             Duration::from_millis(9)
@@ -356,9 +359,12 @@ mod tests {
     #[test]
     fn an_unpaced_pacer_never_reads_the_clock() {
         let mut pacer = Pacer::new();
-        assert_eq!(pacer.delay(Time(0), Pacing::Unpaced), Duration::ZERO);
         assert_eq!(
-            pacer.delay(Time(MILLISECOND), Pacing::Unpaced),
+            pacer.delay(Time::from_picos(0), Pacing::Unpaced),
+            Duration::ZERO
+        );
+        assert_eq!(
+            pacer.delay(Time::from_picos(MILLISECOND), Pacing::Unpaced),
             Duration::ZERO
         );
         assert!(pacer.origin.is_none());
@@ -369,7 +375,7 @@ mod tests {
         let mut pacer = Pacer::new();
         let twice = Pacing::Scaled(2.0);
         let wall = |millis| Duration::from_millis(millis);
-        let board = |millis| Time(millis * MILLISECOND);
+        let board = |millis| Time::from_picos(millis * MILLISECOND);
         assert_eq!(pacer.due(board(0), Pacing::Unpaced, wall(0)), None);
         // the first look starts the pacing: nothing is due yet
         assert_eq!(pacer.due(board(0), twice, wall(100)), Some(board(0)));
@@ -411,7 +417,7 @@ mod tests {
     fn a_restart_drops_the_time_missed() {
         let mut pacer = Pacer::new();
         let wall = |millis| Duration::from_millis(millis);
-        let board = |millis| Time(millis * MILLISECOND);
+        let board = |millis| Time::from_picos(millis * MILLISECOND);
         pacer.due(board(0), Pacing::RealTime, wall(0));
         assert_eq!(
             pacer.due(board(0), Pacing::RealTime, wall(1000)),
@@ -430,7 +436,10 @@ mod tests {
         let start = Duration::ZERO;
         let mut pacer = Pacer::new();
         let crawl = Pacing::Scaled(f64::MIN_POSITIVE);
-        pacer.delay_at(Time(0), crawl, start);
-        assert_eq!(pacer.delay_at(Time(1), crawl, start), Duration::MAX);
+        pacer.delay_at(Time::from_picos(0), crawl, start);
+        assert_eq!(
+            pacer.delay_at(Time::from_picos(1), crawl, start),
+            Duration::MAX
+        );
     }
 }

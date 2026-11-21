@@ -296,7 +296,7 @@ pub enum RunError {
     /// `at`.
     ///
     /// [`Peripheral::advance`]: crate::peripheral::Peripheral::advance
-    #[error("{peripheral}: advanced to {} ps {repeats} times, its next event never past it", at.0)]
+    #[error("{peripheral}: advanced to {at} {repeats} times, its next event never past it")]
     Stalled {
         /// The peripheral.
         peripheral: String,

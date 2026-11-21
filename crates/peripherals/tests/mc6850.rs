@@ -211,7 +211,7 @@ fn received(board: &mut Board<Mc68331>) -> Vec<(Time, Serial)> {
 fn the_cpu_transmits_and_echoes_through_the_autovectored_interrupt() {
     let mut board = board();
     // 3 ms: the program sets up and sends 'H', 1.04 ms at 9600 baud
-    board.run_until(Time(3_000_000_000)).unwrap();
+    board.run_until(Time::from_picos(3_000_000_000)).unwrap();
     let sent = received(&mut board);
     let [(_, serial)] = sent[..] else {
         panic!("one frame: {sent:?}");

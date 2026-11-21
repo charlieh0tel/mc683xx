@@ -34,7 +34,7 @@ const CONSOLE: &str = "console";
 const TURN: Span = Span::from_millis(1);
 /// Board time before input goes in, past the firmware's enabling its
 /// receiver: 10 ms.
-const INPUT_AFTER: Time = Time(Span::from_millis(10).picos());
+const INPUT_AFTER: Time = Time::from_picos(Span::from_millis(10).picos());
 /// Board time the run ends at, past the last command's end (about
 /// 2.15 s).
 const END: Time = Time::from_seconds(3);

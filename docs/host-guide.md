@@ -1392,7 +1392,9 @@ plumbing the board runs the chip with is hidden from the docs and
 outside semver.
 
 - **Board time.** `time::Time` is a time on the board, picoseconds
-  since power-on; `time::Span` is a span of it, picoseconds too, made
+  since power-on, made by `Time::from_picos`, `from_seconds` or
+  `checked_from_seconds_f64` and read by `picos` or `seconds_f64`;
+  neither it nor a span converts to or from a bare `u64`.  `time::Span` is a span of it, picoseconds too, made
   by `Span::from_picos`, `from_nanos`, `from_micros`, `from_millis`,
   `from_seconds` or `from_seconds_f64` (saturating; `checked_from_seconds_f64`
   gives `None` out of range, as `Time::checked_from_seconds_f64` does) and read by `picos` or
@@ -1584,7 +1586,7 @@ board
     .unwrap();
 board.send("switch", Signal::Level(false)).unwrap();
 // 3 ms
-board.run_until(Time(3_000_000_000)).unwrap();
+board.run_until(Time::from_picos(3_000_000_000)).unwrap();
 assert_eq!(rises.borrow().len(), 3);
 assert_eq!(board.net_value("switch"), Ok(Some(Signal::Level(false))));
 let switches = board.inspect("switches").unwrap();
@@ -1639,7 +1641,7 @@ let ui = thread::spawn(move || {
     front_end.stop();
 });
 // an hour of board time, cut short by the stop
-let outcome = board.run_until_paced(Time(3_600_000_000_000_000), QUANTUM).unwrap();
+let outcome = board.run_until_paced(Time::from_picos(3_600_000_000_000_000), QUANTUM).unwrap();
 ui.join().unwrap();
 assert_eq!(outcome.stop, Stop::Requested);
 assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));

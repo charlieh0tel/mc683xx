@@ -525,7 +525,7 @@ fn a_board_runs_under_the_stub() {
     assert_eq!(replies[2], "S05");
     assert!(replies[3].contains("swbreak"));
     assert_eq!(replies[5], "S02");
-    assert!(board.now().0 > 0);
+    assert!(board.now().picos() > 0);
 }
 
 #[test]
