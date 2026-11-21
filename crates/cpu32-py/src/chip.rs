@@ -261,16 +261,16 @@ impl ChipBuilder {
         Ok(self.wiring.borrow_mut().add_memory(id))
     }
 
-    /// Fixed memory number `memory`'s port, `port` bits (8 or 16), and
-    /// its cycles' wait states, 0 to 13, or fast termination if `None`
-    /// (Rust's `set_fixed_timing`, which takes a `PortSize` and a
-    /// `Termination`); fast on 16 bits by default.
-    #[pyo3(signature = (memory, *, port = 16, wait_states = None))]
+    /// Fixed memory number `memory`'s port, `port` bits (8 or 16, Rust's
+    /// `PortSize`), and its cycles' `termination`, a `Termination`:
+    /// `Fast()`, the default, or `WaitStates(n)`, 0 to 13 (Rust's
+    /// `set_fixed_timing`).
+    #[pyo3(signature = (memory, *, port = 16, termination = None))]
     fn set_fixed_timing(
         &mut self,
         memory: usize,
         port: u8,
-        wait_states: Option<u8>,
+        termination: Option<TerminationView>,
     ) -> Result<(), Error> {
         let memory = self.wiring.borrow().memory(memory)?;
         let port = match port {
@@ -278,7 +278,7 @@ impl ChipBuilder {
             16 => PortSize::Bits16,
             other => return Err(Error::PortWidth(other)),
         };
-        let termination = wait_states.map_or(Termination::Fast, Termination::WaitStates);
+        let termination = termination.map_or(Termination::Fast, Termination::from);
         self.builder()?
             .set_fixed_timing(memory, port, termination)?;
         Ok(())
@@ -675,6 +675,42 @@ impl From<DsackView> for Dsack {
             DsackView::Dsack0 => Self::Dsack0,
             DsackView::Dsack1 => Self::Dsack1,
             DsackView::Both => Self::Both,
+        }
+    }
+}
+
+/// How a select would end a cycle it matches (Rust's
+/// `chip_selects::Termination`; SIMRM 7.5, 7.7), a class per variant.
+#[pyclass(
+    name = "Termination",
+    module = "mc683xx",
+    frozen,
+    eq,
+    hash,
+    from_py_object
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum TerminationView {
+    /// Internal DSACK after two clocks.
+    Fast(),
+    /// Internal DSACK after `wait_states` wait states, 0 to 13.
+    WaitStates {
+        /// The wait states.
+        wait_states: u8,
+    },
+    /// The peripheral asserts DSACK.
+    External(),
+    /// MODE set: the cycle runs on ECLK.
+    Eclk(),
+}
+
+impl From<TerminationView> for Termination {
+    fn from(termination: TerminationView) -> Self {
+        match termination {
+            TerminationView::Fast() => Self::Fast,
+            TerminationView::WaitStates { wait_states } => Self::WaitStates(wait_states),
+            TerminationView::External() => Self::External,
+            TerminationView::Eclk() => Self::Eclk,
         }
     }
 }

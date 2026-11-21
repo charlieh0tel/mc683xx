@@ -54,6 +54,7 @@ use crate::chip::ResetCause;
 use crate::chip::Run;
 use crate::chip::Space;
 use crate::chip::Stop;
+use crate::chip::TerminationView;
 use crate::control::BoardControlView;
 use crate::control::PacingView;
 use crate::error::Error;
@@ -157,6 +158,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<SyncRequestView>()?;
     module.add_class::<DiversionView>()?;
     module.add_class::<DsackView>()?;
+    module.add_class::<TerminationView>()?;
     module.add_class::<DsackFaultView>()?;
     module.add_class::<ChipBuilder>()?;
     module.add_class::<Chip>()?;

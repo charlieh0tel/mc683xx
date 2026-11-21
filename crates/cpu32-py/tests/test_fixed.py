@@ -82,7 +82,12 @@ def nops_reached(port: int | None, wait_states: int | None) -> int:
     builder.memory(rom(), ["CSBOOT"], writable=False)
     code = builder.fixed_memory(CODE, bytes(words([], PAGE, NOP)), writable=False)
     if port is not None:
-        builder.set_fixed_timing(code, port=port, wait_states=wait_states)
+        termination = (
+            mc683xx.Termination.Fast()
+            if wait_states is None
+            else mc683xx.Termination.WaitStates(wait_states)
+        )
+        builder.set_fixed_timing(code, port=port, termination=termination)
     chip = builder.build()
     chip.run_for(4000)
     return chip.read_register("PC") - CODE
@@ -97,8 +102,15 @@ def test_a_fixed_memory_takes_a_port_and_wait_states() -> None:
     code = builder.fixed_memory(CODE, bytes(PAGE))
     with pytest.raises(ValueError, match="8 or 16"):
         builder.set_fixed_timing(code, port=32)
-    with pytest.raises(ValueError, match="0 to 13 wait states"):
-        builder.set_fixed_timing(code, wait_states=14)
+    for termination in (
+        mc683xx.Termination.WaitStates(14),
+        mc683xx.Termination.External(),
+        mc683xx.Termination.Eclk(),
+    ):
+        with pytest.raises(ValueError, match="0 to 13 wait states"):
+            builder.set_fixed_timing(code, termination=termination)
+    assert mc683xx.Termination.WaitStates(3).wait_states == 3
+    assert mc683xx.Termination.WaitStates(3) == mc683xx.Termination.WaitStates(wait_states=3)
     rom_number = builder.memory(rom(), ["CSBOOT"], writable=False)
     with pytest.raises(ValueError, match="not a fixed memory"):
         builder.set_fixed_timing(rom_number)

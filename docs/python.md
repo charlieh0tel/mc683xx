@@ -221,10 +221,13 @@ assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
 - `fixed_memory(base, contents, writable=True)`: emulator-only memory
   at a fixed address on no pin, which takes the cycles there no chip
   select matches (the host guide's Fixed memory); a memory number as
-  `memory`'s.  `set_fixed_timing(memory, port=16, wait_states=None)`: its
-  port, 8 or 16 bits, and wait states, 0 to 13, `None` fast
-  termination (Rust's `set_fixed_timing` takes a `PortSize` and a
-  `Termination`; Python has neither).  `set_reload_scope(memory, scope)`: the `ResetCause`s that
+  `memory`'s.  `set_fixed_timing(memory, port=16, termination=None)`:
+  its port, 8 or 16 bits (Rust's `PortSize`), and its cycles'
+  termination, a `Termination` as Rust's, a class per variant:
+  `Termination.Fast()` (`None`, the default) or
+  `Termination.WaitStates(n)`, 0 to 13; `External()` and `Eclk()`
+  raise `ValueError`, as a fixed memory asserts no DSACK and runs on
+  no ECLK.  `set_reload_scope(memory, scope)`: the `ResetCause`s that
   put a memory's contents back as built, none by default.
 - `peripheral(object, pins)` and `unwired_peripheral(object)` (on no pin) return a
   peripheral number for `interrupt`, `set_reset_scope` and `Mc68331.peripheral`.
