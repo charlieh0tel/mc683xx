@@ -93,6 +93,7 @@ use crate::time::TimeBase;
 use crate::trace;
 use crate::trace::NetRecord;
 use crate::trace::Record;
+use crate::trace::Trace;
 use crate::wiring::BusRouter;
 use crate::wiring::DecoderRouter;
 use crate::wiring::MemoryRouter;
@@ -213,16 +214,6 @@ pub struct BoardTracing {
     pub pins: bool,
     /// Each QSPI transfer.
     pub qspi: bool,
-}
-
-/// What the board traced since the last `take_trace`.
-#[derive(Debug, Clone, Default, PartialEq)]
-#[non_exhaustive]
-pub struct Trace {
-    /// The records, in cycle order.
-    pub records: Vec<Record>,
-    /// Net changes, in time order.
-    pub nets: Vec<NetRecord>,
 }
 
 /// The chip hooks the board's tracing holds.

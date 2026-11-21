@@ -1691,7 +1691,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `ExceptionEntry`), `bus::BusAccess`, `peripheral::BusCycle`, the run
   results (`Run`, `LimitedRun`, `FaultStop`, `Intercepted`,
   `BoardRun`), the trace's record structs,
-  `board::External`, `board::Trace`, `peripheral::Driving`, `Driven`
+  `board::External`, `trace::Trace`, `peripheral::Driving`, `Driven`
   and `MemoryWrite`, `builtin::Logged`, `inspect::Inspection` and
   `Field`, and `registry::Constructed` and `Context`; and the values a
   host builds but whose fields may grow: `registry::PortSpec`,

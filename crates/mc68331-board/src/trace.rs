@@ -198,6 +198,17 @@ pub struct StoppedRecord {
     pub reason: Stop,
 }
 
+/// What the board traced since the last
+/// [`Board::take_trace`](crate::board::Board::take_trace).
+#[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
+pub struct Trace {
+    /// The records, in cycle order.
+    pub records: Vec<Record>,
+    /// Net changes, in time order.
+    pub nets: Vec<NetRecord>,
+}
+
 /// One record of a trace.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
