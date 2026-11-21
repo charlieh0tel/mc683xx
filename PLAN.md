@@ -3460,12 +3460,16 @@ checks move onto real code hooks.
   JavaScript's case, but where a method does less than Python's: its
   `sendBytes` and `takeReceivedBytes` take and give serial bytes
   alone, no other kind of value and no times, unlike Python's `send`
-  and `take_received` (decided 2026-11-21).  One layer, not a Rust core under a JavaScript
-  one: each exported method takes and returns plain Rust types (`&str`,
-  `Vec<u8>`, `u64` as `BigInt`) and fails with the crate's `Error`,
-  which `wasm-bindgen` throws as a JavaScript `Error` with its
-  `Display` message, so the same methods are tested natively (`cargo
-  test`, `make ci`, with no wasm tools) and from Node (`make npm-test`).
+  and `take_received` (decided 2026-11-21).  One layer, not a Rust
+  core under a JavaScript one: each exported method takes and returns
+  plain Rust types (`&str`, `Vec<u8>`, `u64` as `BigInt`) and fails
+  with the crate's `Error`, so the same methods are tested natively
+  (`cargo test`, `make ci`, with no wasm tools) and from Node (`make
+  npm-test`).  An `Error` is thrown as a JavaScript error with its
+  `Display` message: a `TypeError` or a `RangeError` for an argument,
+  else an `Error` whose `name` is its kind's (`LoadError`), the name
+  what a page branches on, the message's text outside semver (decided
+  2026-11-21).
   Where `wasm-bindgen` would take a JavaScript value silently wrong,
   the exported method takes the `JsValue`, checks it with `js-sys` and
   calls a Rust method of the same name the native tests call

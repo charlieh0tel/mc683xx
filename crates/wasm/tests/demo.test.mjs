@@ -196,3 +196,21 @@ test("mistakes throw the Rust error's message", () => {
   }
   assert.throws(() => board.memory("nowhere"), /no memory "nowhere"/);
 });
+
+test("mistakes throw an error named for their kind", () => {
+  const named = (name) => (error) => error instanceof Error && error.name === name;
+  assert.throws(() => new Board(text), named("LoadError"));
+  assert.throws(() => new Board(text, 5), TypeError);
+  assert.throws(() => new Board(text, { "demo.bin": [1, 2] }), TypeError);
+  const { board } = booted();
+  assert.throws(() => board.setPacing("fast"), named("PacingError"));
+  assert.throws(() => board.runFrame(Number.NaN, SLICE), RangeError);
+  assert.throws(() => board.runFor(-1n), RangeError);
+  assert.throws(() => board.runFor(5), TypeError);
+  assert.throws(() => board.sendBytes(CONSOLE, [1]), TypeError);
+  assert.throws(() => board.sendBytes("nowhere", new Uint8Array()), named("SendError"));
+  assert.throws(() => board.takeReceivedBytes("nowhere"), named("ReceiveError"));
+  assert.throws(() => board.memory("nowhere"), named("MemoryError"));
+  assert.throws(() => board.restore(new Uint8Array([1])), named("StateError"));
+  assert.throws(() => board.restore([1]), TypeError);
+});

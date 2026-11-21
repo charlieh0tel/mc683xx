@@ -18,6 +18,7 @@ use mc683xx_target::entry::Entry;
 use crate::board::Board;
 use crate::board::BoardRun;
 use crate::error::Error;
+use crate::error::Thrown;
 
 /// The demo board file.
 const TEXT: &str = include_str!("../../../examples/boards/demo.toml");
@@ -166,6 +167,50 @@ fn mistakes_are_errors() {
     ));
     assert!(matches!(board.memory("nowhere"), Err(Error::Memory(_))));
     assert!(matches!(board.restore(b"junk"), Err(Error::State(_))));
+}
+
+#[test]
+fn each_error_is_thrown_as_its_kind() {
+    let images = BTreeMap::new();
+    let load = Board::with_images(TEXT, &images, &[]).unwrap_err();
+    let (mut board, _) = booted();
+    let thrown = [
+        (load, Thrown::Named("LoadError")),
+        (
+            board.set_pacing("fast").unwrap_err(),
+            Thrown::Named("PacingError"),
+        ),
+        (board.run_frame(f64::NAN, SLICE).unwrap_err(), Thrown::Range),
+        (
+            board.send_bytes("nowhere", b"").unwrap_err(),
+            Thrown::Named("SendError"),
+        ),
+        (
+            board.take_received_bytes("nowhere").unwrap_err(),
+            Thrown::Named("ReceiveError"),
+        ),
+        (
+            board.memory("nowhere").unwrap_err(),
+            Thrown::Named("MemoryError"),
+        ),
+        (
+            board.restore(b"junk").unwrap_err(),
+            Thrown::Named("StateError"),
+        ),
+        (Error::Picoseconds("-1".to_owned()), Thrown::Range),
+        (Error::PicosecondsType("a number".to_owned()), Thrown::Type),
+        (Error::Images, Thrown::Type),
+        (
+            Error::Bytes {
+                argument: "a snapshot",
+                kind: "null".to_owned(),
+            },
+            Thrown::Type,
+        ),
+    ];
+    for (error, expected) in thrown {
+        assert_eq!(error.thrown(), expected, "{error}");
+    }
 }
 
 #[test]

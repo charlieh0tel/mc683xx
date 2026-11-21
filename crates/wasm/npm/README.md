@@ -91,8 +91,24 @@ console in xterm.js.
 
 Names are the Python package's in JavaScript's case, Rust's where
 Python has none.  Times are board time in picoseconds, as `BigInt`s
-(`1_000_000_000_000n` is a second).  An error is thrown as an `Error`
-with the Rust error's message.
+(`1_000_000_000_000n` is a second).
+
+Every failure throws an `Error`.  Its `name`, and the class it is an
+instance of, say what kind of failure it is, and a page may branch on
+them:
+
+- `TypeError`: an argument of the wrong type (images not a `Map` or an
+  object, bytes not a `Uint8Array`, picoseconds not a `bigint`);
+- `RangeError`: an argument of the right type out of its range
+  (picoseconds, a clock reading);
+- an `Error` named `LoadError` (a board file or a board that does not
+  load), `PacingError` (a pacing that does not parse), `RunError` (a
+  run that fails), `SendError` and `ReceiveError` (an endpoint no
+  serial net takes or drives), `MemoryError` (no such memory) or
+  `StateError` (a board that cannot save, or a snapshot it refuses).
+
+Its `message` is for people: its text may change in any release, and
+is not covered by semver.  The names may grow, in a minor release.
 
 The package carries its TypeScript types: Node's entry its own, which
 name no DOM or WebAssembly type (its `init` and `initSync` take any
