@@ -152,6 +152,7 @@ impl Mode {
 
 /// A slave's edges, as its datasheet gives them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct Edges {
     /// The edge it samples MOSI on.
     pub sample: Edge,

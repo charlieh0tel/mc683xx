@@ -217,6 +217,7 @@ pub struct BoardTracing {
 
 /// What the board traced since the last `take_trace`.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Trace {
     /// The records, in cycle order.
     pub records: Vec<Record>,

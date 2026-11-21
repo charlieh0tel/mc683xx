@@ -25,6 +25,7 @@ use crate::signal::Kind;
 
 /// A port a peripheral type declares: a net endpoint `peripheral.name`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct PortSpec {
     /// Its name.
     pub name: String,

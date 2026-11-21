@@ -362,6 +362,7 @@ impl Transfer {
 
 /// A value a peripheral drives on one of its ports, from a time on.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Driven {
     /// When it takes effect: never before the call that drove it.
     pub at: Time,
@@ -374,6 +375,7 @@ pub struct Driven {
 /// Bytes a peripheral writes into one of the board's memories, by name: a
 /// flash's command logic programming the array the core serves.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct MemoryWrite {
     /// The memory's name in the board file.
     pub memory: String,

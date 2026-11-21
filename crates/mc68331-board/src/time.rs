@@ -171,6 +171,7 @@ impl Phase {
 /// picosecond at or after it.  Times before `at` extrapolate back at
 /// `frequency`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Clock {
     /// When this frequency took effect.
     pub at: Time,

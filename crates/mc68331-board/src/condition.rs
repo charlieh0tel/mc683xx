@@ -27,6 +27,7 @@ use crate::wiring::Shared;
 /// A condition a peripheral offers, as `monitor stop conditions` lists
 /// it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConditionInfo {
     /// Its name, the word that arms it.
     pub name: &'static str,

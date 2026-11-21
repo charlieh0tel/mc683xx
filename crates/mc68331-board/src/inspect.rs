@@ -45,6 +45,7 @@ pub enum Value {
 
 /// A named field.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct Field {
     /// Its name.
     pub name: String,
@@ -72,6 +73,7 @@ impl Field {
 /// A peripheral's state: its fields, in the order shown.  Built by
 /// chaining, `Inspection::default().integer("count", 3)`.
 #[derive(Debug, Clone, Default, PartialEq)]
+#[non_exhaustive]
 pub struct Inspection {
     /// The fields.
     pub fields: Vec<Field>,

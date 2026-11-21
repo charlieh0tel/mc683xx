@@ -1642,10 +1642,17 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `ExceptionEntry`), `bus::BusAccess`, `peripheral::BusCycle`, the run
   results (`Run`, `LimitedRun`, `FaultStop`, `Intercepted`,
   `BoardRun`), `event::TracedAccess`, the trace's record structs,
-  `board::External`, `peripheral::Driving`, and `registry::Constructed`
-  and `Context`.  A host that must build one has a constructor:
-  `Run::new`, `BoardRun::new`, `BusCycle::new`, `Constructed::new`,
-  `Context::new` (to test a constructor).
+  `board::External`, `board::Trace`, `peripheral::Driving`, `Driven`
+  and `MemoryWrite`, `builtin::Logged`, `inspect::Inspection` and
+  `Field`, and `registry::Constructed` and `Context`; and the values a
+  host builds but whose fields may grow: `registry::PortSpec`,
+  `condition::ConditionInfo`, `spi::Edges` and `time::Clock`.  A host
+  that must build one has a constructor: `Run::new`, `BoardRun::new`,
+  `BusCycle::new`, `Constructed::new`, `Context::new` (to test a
+  constructor), `PortSpec::new` (and `input`, `output`, `in_out`),
+  `ConditionInfo::new`, `Edges::new`, `Clock::new` and
+  `Clock::with_phase`, `Field::new`, and `Inspection::default()` with
+  its builders.
 - The configuration structs (`Limits`, `Deviations`, `BoardTracing`,
   `ChipTracing`, `description::Options`, `registry::Environment`) are
   `#[non_exhaustive]` too, with every field public: build one from
