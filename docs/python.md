@@ -925,6 +925,10 @@ chip.run_for(500)
   (Board files).
 - `mc683xx.TargetError` (a `RuntimeError`): a background debug control
   the CPU's state refuses (Background debug mode).
+- `mc683xx.RunError` (a `RuntimeError`): a run that could not go on, a
+  board peripheral stalling board time (Board files); or a run's end
+  this build's bindings have no class for, named, which a newer Rust
+  core could give but none does today.
 - `NotImplementedError`: a module that cannot save.
 - `IndexError`: an unknown memory or peripheral number, or a memory range
   past its end.
@@ -1033,8 +1037,8 @@ next quantum for one raised in `next_event` and the other methods asked
 between the chip's runs, and `run_for` raises it (a `KeyboardInterrupt`
 before any other error, that error its `__context__`); a peripheral whose `advance`
 leaves its `next_event` at or before the time it was given, 1000
-times running, stalls the board, and `run_for` raises `RuntimeError`
-naming it.
+times running, stalls the board, and `run_for` raises
+`mc683xx.RunError` naming it.
 
 `run_for(seconds=...)` (finite, 0 or more, or `ValueError`) or
 `run_for(picoseconds=...)` gives a `BoardRun` (Rust's: `stop`, a `Stop`, and `now`, board time at its end), as does `run_until` with a board time (Rust's `Board::run_until`; `run_for` is `Board::run_for`); `now`

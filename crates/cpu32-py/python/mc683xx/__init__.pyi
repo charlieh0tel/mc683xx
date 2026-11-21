@@ -66,6 +66,7 @@ __all__ = [
     "UnpeekableError",
     "StateError",
     "LoadError",
+    "RunError",
     "TargetError",
 ]
 
@@ -97,6 +98,10 @@ class StateError(ValueError):
 class LoadError(ValueError):
     """Raised by Board for a board file it refuses, naming what in the
     file is wrong; a file it cannot read raises OSError instead."""
+
+class RunError(RuntimeError):
+    """Raised by a run that could not go on: a board peripheral that
+    stalls board time, or a run's end the bindings do not know."""
 
 class TargetError(RuntimeError):
     """Raised by the chip's background debug controls: halt with

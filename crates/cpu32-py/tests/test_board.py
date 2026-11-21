@@ -697,6 +697,28 @@ def test_an_unread_board_file_raises_the_os_error_its_errno_gives(tmp_path: Path
     assert not isinstance(raised.value, mc683xx.LoadError)
 
 
+class Stuck:
+    """A peripheral whose next event never passes: it stalls the board."""
+
+    PORTS: list[tuple[str, str, str]] = []
+
+    def next_event(self) -> int:
+        return 1
+
+
+def test_a_stalled_board_raises_run_error(tmp_path: Path) -> None:
+    (tmp_path / "rom.bin").write_bytes(rom([]))
+    (tmp_path / "board.toml").write_text(
+        BOARD + '[[peripheral]]\nname = "stuck"\ntype = "stuck"\n'
+    )
+    board = mc683xx.Board(
+        str(tmp_path / "board.toml"), types={"latch": Latch, "lamp": Lamp, "stuck": Stuck}
+    )
+    with pytest.raises(mc683xx.RunError, match="^stuck: advanced to") as raised:
+        board.run_for(seconds=0.001)
+    assert isinstance(raised.value, RuntimeError)
+
+
 INTERRUPTED_BOARD = """
 version = 1
 

@@ -248,20 +248,30 @@ pub(crate) enum EndView {
     Fault(FaultStopView),
 }
 
-impl From<End> for EndView {
-    fn from(end: End) -> Self {
-        match end {
-            End::Stop(stop) => Self::Stop(stop.into()),
+impl TryFrom<End> for EndView {
+    type Error = Error;
+
+    /// The end, or [`Error::RunEnd`] naming one with no Python class:
+    /// a step limit's (`run_limited` takes none), an intercepted
+    /// exception's (`run_limited` answers it within the run), or one the
+    /// bindings do not know.
+    fn try_from(end: End) -> Result<Self, Error> {
+        Ok(match end {
+            End::Stop(stop) => Self::Stop(stop.try_into()?),
             End::Until => Self::Until(),
             End::Instructions => Self::Instructions(),
             End::Fault(fault) => Self::Fault(FaultStopView(fault)),
-            End::Steps => unreachable!("run_limited takes no step limit"),
-            End::Intercepted(_) => {
-                unreachable!("run_limited answers an intercepted exception within the run")
-            }
-            _ => panic!("a limited run's end the bindings do not know"),
-        }
+            End::Steps => return Err(Error::RunEnd("steps".to_owned())),
+            End::Intercepted(_) => return Err(Error::RunEnd("intercepted".to_owned())),
+            other => return Err(unknown(&other)),
+        })
     }
+}
+
+/// [`Error::RunEnd`] for an `end` the bindings do not know.
+fn unknown(end: &End) -> Error {
+    // `End` has no `Display`: its Rust form is the only name it has.
+    Error::RunEnd(format!("{end:?}"))
 }
 
 /// A limited run's outcome (Rust's `bare::LimitedRun`).
@@ -644,7 +654,7 @@ impl MachineView {
         let (cycles, end) = run?;
         Ok(LimitedRunView {
             cycles,
-            end: end.into(),
+            end: end.try_into()?,
         })
     }
 
@@ -1063,7 +1073,7 @@ impl Target for Debugged<'_, '_> {
             End::Stop(stop) => stop.into(),
             End::Until | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
-            _ => TargetRun::Requested,
+            other => return Err(unknown(&other).into()),
         })
     }
 
@@ -1074,13 +1084,109 @@ impl Target for Debugged<'_, '_> {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::ControlFlow;
+
+    use mc683xx_cpu32::cpu;
     use mc683xx_cpu32::cpu::bare::End;
+    use mc683xx_cpu32::cpu::bare::Limits;
+    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_cpu32::exception::Vector;
+    use mc683xx_cpu32::flat::Machine;
+    use mc683xx_cpu32::memory::PAGE_BYTES;
+    use mc683xx_target::address::Address;
+    use mc683xx_target::entry::Entry;
 
     use super::EndView;
+    use crate::chip::Stop;
+    use crate::error::Error;
 
+    /// Where the test programs start, past the reset vectors.
+    const START: u32 = 0x400;
+    /// The initial SSP, the top of the page.
+    const STACK: u32 = PAGE_BYTES;
+    /// An address no page maps.
+    const UNMAPPED: u32 = 0x10_0000;
+    /// NOP (CPU32RM 4.3).
+    const NOP: u16 = 0x4E71;
+    /// TRAP #0 (CPU32RM 4.3), vector 32 (CPU32RM Table 6-1).
+    const TRAP_0: u16 = 0x4E40;
+    /// TRAP #0's vector.
+    const TRAP_0_VECTOR: Vector = Vector(32);
+    /// MOVE.L (A0),D0 (CPU32RM 4.3).
+    const MOVE_LONG_A0_TO_D0: u16 = 0x2010;
+
+    /// A machine reset into `program` at [`START`], set up by `setup`,
+    /// and how a run under `limits` ends.
+    fn end(program: &[u16], limits: Limits, setup: impl FnOnce(&mut Machine)) -> End {
+        let mut image = vec![0; PAGE_BYTES as usize];
+        image[0..4].copy_from_slice(&STACK.to_be_bytes());
+        image[4..8].copy_from_slice(&START.to_be_bytes());
+        for (index, word) in program.iter().enumerate() {
+            let at = START as usize + 2 * index;
+            image[at..at + 2].copy_from_slice(&word.to_be_bytes());
+        }
+        let mut machine = Machine::new(32).unwrap();
+        machine.map(Address(0), PAGE_BYTES, &image).unwrap();
+        machine.reset().unwrap();
+        setup(&mut machine);
+        machine.run_limited(limits).end
+    }
+
+    /// Every `End` and every `Stop` a run gives has its Python class,
+    /// or raises `RunError` naming it, the two `run_limited` never
+    /// gives; none panics or maps to another.  A variant added to
+    /// either belongs here, and in the mappings.
     #[test]
-    #[should_panic(expected = "run_limited takes no step limit")]
-    fn a_step_limit_end_is_not_reported_as_a_stop_request() {
-        drop(EndView::from(End::Steps));
+    fn every_run_end_maps_or_names_itself() {
+        let mut until = Limits::default();
+        until.until = Some(Address(START + 2));
+        let mut instructions = Limits::default();
+        instructions.instructions = Some(1);
+        let mut steps = Limits::default();
+        steps.steps = Some(1);
+        let mut budget = Limits::default();
+        budget.cycles = Some(Cycles(1));
+        let ends = [
+            end(&[NOP, NOP], until, |_| ()),
+            end(&[NOP, NOP], instructions, |_| ()),
+            end(&[NOP, NOP], steps, |_| ()),
+            end(&[NOP, NOP], budget, |_| ()),
+            end(&[MOVE_LONG_A0_TO_D0], instructions, |machine| {
+                machine.cpu.registers.set_address(0, UNMAPPED);
+                machine.cpu.set_stop_on_fault(true);
+            }),
+            end(&[TRAP_0], instructions, |machine| {
+                machine.cpu.set_intercepted(TRAP_0_VECTOR, true);
+            }),
+        ];
+        let mapped: Vec<_> = ends.into_iter().map(EndView::try_from).collect();
+        assert!(matches!(mapped[0], Ok(EndView::Until())));
+        assert!(matches!(mapped[1], Ok(EndView::Instructions())));
+        assert!(matches!(&mapped[2], Err(Error::RunEnd(name)) if name == "steps"));
+        assert!(matches!(mapped[3], Ok(EndView::Stop(Stop::Budget()))));
+        assert!(matches!(mapped[4], Ok(EndView::Fault(_))));
+        assert!(matches!(&mapped[5], Err(Error::RunEnd(name)) if name == "intercepted"));
+
+        let mut machine = Machine::new(32).unwrap();
+        let hook = machine
+            .cpu
+            .add_code_hook(Address(0)..=Address(0), |_| ControlFlow::Continue(()));
+        let stops = [
+            cpu::Stop::Budget,
+            cpu::Stop::Stopped,
+            cpu::Stop::Halted(cpu::Halt::DoubleBusFault),
+            cpu::Stop::Hook(hook),
+            cpu::Stop::Requested,
+            cpu::Stop::Background(Entry::Breakpoint),
+            cpu::Stop::Fault,
+        ];
+        let mapped: Vec<_> = stops.into_iter().map(Stop::try_from).collect();
+        assert!(matches!(mapped[0], Ok(Stop::Budget())));
+        assert!(matches!(mapped[1], Ok(Stop::Stopped())));
+        assert!(matches!(mapped[2], Ok(Stop::Halted(_))));
+        assert!(matches!(mapped[3], Ok(Stop::Hook(_))));
+        assert!(matches!(mapped[4], Ok(Stop::Requested())));
+        assert!(matches!(mapped[5], Ok(Stop::Background(_))));
+        assert!(matches!(mapped[6], Ok(Stop::Fault())));
     }
 }

@@ -485,17 +485,22 @@ impl From<entry::Entry> for Entry {
     }
 }
 
-impl From<cpu::Stop> for Stop {
-    fn from(stop: cpu::Stop) -> Self {
-        match stop {
+impl TryFrom<cpu::Stop> for Stop {
+    type Error = Error;
+
+    /// The stop, or [`Error::RunEnd`] naming one the bindings do not
+    /// know.
+    fn try_from(stop: cpu::Stop) -> Result<Self, Error> {
+        Ok(match stop {
             cpu::Stop::Budget => Self::Budget(),
             cpu::Stop::Stopped => Self::Stopped(),
             cpu::Stop::Halted(halt) => Self::Halted(halt.into()),
             cpu::Stop::Hook(id) => Self::Hook(HookIdView(id)),
+            cpu::Stop::Requested => Self::Requested(),
             cpu::Stop::Background(entry) => Self::Background(entry.into()),
             cpu::Stop::Fault => Self::Fault(),
-            _ => Self::Requested(),
-        }
+            other => return Err(Error::RunEnd(other.to_string())),
+        })
     }
 }
 
@@ -592,12 +597,14 @@ pub(crate) struct Run {
     stop: Stop,
 }
 
-impl From<cpu::Run> for Run {
-    fn from(run: cpu::Run) -> Self {
-        Self {
+impl TryFrom<cpu::Run> for Run {
+    type Error = Error;
+
+    fn try_from(run: cpu::Run) -> Result<Self, Error> {
+        Ok(Self {
             cycles: run.cycles.0,
-            stop: run.stop.into(),
-        }
+            stop: run.stop.try_into()?,
+        })
     }
 }
 
@@ -1171,7 +1178,7 @@ impl Chip {
                 && (matches!(run.stop, cpu::Stop::Budget | cpu::Stop::Stopped)
                     || (halted && matches!(run.stop, cpu::Stop::Halted(_))));
             if !quantized || now >= end {
-                return Ok(cpu::Run::new(now - start, run.stop).into());
+                return Ok(cpu::Run::new(now - start, run.stop).try_into()?);
             }
             py.check_signals()?;
         }

@@ -2,6 +2,7 @@
 //! exception.
 
 use mc683xx_board::error::LoadError;
+use mc683xx_board::error::RunError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::flat::MapError;
 use mc683xx_cpu32::interrupt::NoIrqPin;
@@ -118,4 +119,11 @@ pub(crate) enum Error {
     /// A board file refused, or not read.
     #[error(transparent)]
     Load(#[from] LoadError),
+    /// A board's run that could not go on.
+    #[error(transparent)]
+    Run(#[from] RunError),
+    /// A run's end, by its Rust name, that the bindings have no Python
+    /// class for (PLAN.md, Python).
+    #[error("a run ended for {0}, which the bindings do not know")]
+    RunEnd(String),
 }

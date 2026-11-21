@@ -85,6 +85,14 @@ mod exceptions {
 
     pyo3::create_exception!(
         mc683xx,
+        RunError,
+        PyRuntimeError,
+        "Raised by a run that could not go on: a board peripheral that \
+         stalls board time, or a run's end the bindings do not know."
+    );
+
+    pyo3::create_exception!(
+        mc683xx,
         TargetError,
         PyRuntimeError,
         "Raised by the chip's background debug controls: halt with \

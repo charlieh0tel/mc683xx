@@ -95,6 +95,7 @@ impl From<Error> for PyErr {
             Error::Target(_) => exceptions::TargetError::new_err(message),
             Error::Load(LoadError::Read { path, error }) => os_error(&path, error),
             Error::Load(_) => exceptions::LoadError::new_err(message),
+            Error::Run(_) | Error::RunEnd(_) => exceptions::RunError::new_err(message),
             Error::Select(_)
             | Error::Input(_)
             | Error::Frame(_)
@@ -202,6 +203,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
         module.py().get_type::<exceptions::StateError>(),
     )?;
     module.add("LoadError", module.py().get_type::<exceptions::LoadError>())?;
+    module.add("RunError", module.py().get_type::<exceptions::RunError>())?;
     module.add(
         "TargetError",
         module.py().get_type::<exceptions::TargetError>(),

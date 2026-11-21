@@ -71,7 +71,6 @@ use pyo3::PyTraverseError;
 use pyo3::PyVisit;
 use pyo3::Python;
 use pyo3::exceptions::PyOverflowError;
-use pyo3::exceptions::PyRuntimeError;
 use pyo3::exceptions::PyTypeError;
 use pyo3::exceptions::PyValueError;
 use pyo3::pyclass;
@@ -1246,12 +1245,14 @@ impl BoardRunView {
     }
 }
 
-impl From<BoardRun> for BoardRunView {
-    fn from(run: BoardRun) -> Self {
-        Self {
-            stop: run.stop.into(),
+impl TryFrom<BoardRun> for BoardRunView {
+    type Error = Error;
+
+    fn try_from(run: BoardRun) -> Result<Self, Error> {
+        Ok(Self {
+            stop: run.stop.try_into()?,
             now: run.now.0,
-        }
+        })
     }
 }
 
@@ -1345,8 +1346,7 @@ impl BoardView {
             }
             Err(raised) => return Err(self.pending.after(raised)),
         };
-        let run = outcome.map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-        Ok(run.into())
+        Ok(outcome.map_err(Error::from)?.try_into()?)
     }
 }
 
