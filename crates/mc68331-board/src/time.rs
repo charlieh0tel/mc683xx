@@ -696,8 +696,9 @@ impl ClockHistory {
 /// time and the mapping never drifts.  The clock moves (an MC68331 runs
 /// at 8.388608 MHz from the 32.768 kHz reference until SYNCR is written,
 /// MC68331UM 4.3), so a peripheral that converts must not keep a base it was given
-/// before: it takes [`Drive::system_clock`] at each call, or keeps what
-/// [`Peripheral::system_clock`] tells it at each change.
+/// before: each call that has a time gives it one, in its drive
+/// ([`Drive::system_clock`]) or as an argument
+/// ([`Peripheral::next_event`]).
 ///
 /// The rounding rule, the scheduled input rule's ([PLAN.md,
 /// Peripherals][plan-peripherals]): toward the chip a time rounds up, to
@@ -707,7 +708,7 @@ impl ClockHistory {
 ///
 /// [`ChipBuilder::build`]: crate::chip::ChipBuilder::build
 /// [`Drive::system_clock`]: crate::peripheral::Drive::system_clock
-/// [`Peripheral::system_clock`]: crate::peripheral::Peripheral::system_clock
+/// [`Peripheral::next_event`]: crate::peripheral::Peripheral::next_event
 /// [plan-peripherals]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#peripherals
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeBase {

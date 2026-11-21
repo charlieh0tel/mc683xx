@@ -206,6 +206,8 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), RegistryError> {
 mod tests {
     use mc683xx_board::inspect::Value;
     use mc683xx_board::peripheral::Drive;
+
+    use crate::SYSTEM_CLOCK;
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::registry::Context;
     use mc683xx_board::registry::Environment;
@@ -262,7 +264,7 @@ mod tests {
         words: &[u16],
         bits: u8,
     ) -> (Vec<u16>, Vec<(usize, Signal)>) {
-        let mut drive = Drive::new(Time::ZERO);
+        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
         dac.select(0, true, Time::ZERO, &mut drive);
         let back = words
             .iter()
@@ -321,7 +323,7 @@ mod tests {
     #[test]
     fn nothing_latches_before_enb_rises() {
         let mut dac = peripheral("").unwrap();
-        let mut drive = Drive::new(Time::ZERO);
+        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
         dac.select(0, true, Time::ZERO, &mut drive);
         dac.transfer(spi_mode::transfer(2).shifting(0xfff, 12), &mut drive);
         assert!(drive.finish().driven.is_empty());
@@ -392,7 +394,7 @@ mod tests {
     #[test]
     fn power_on_drives_every_output_at_vss() {
         let mut dac = peripheral("vss = -1").unwrap();
-        let mut drive = Drive::new(Time::ZERO);
+        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
         dac.power_on(&mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven.len(), 6);

@@ -994,7 +994,10 @@ the board is built: whether its QSPI calls may come in a batch, as
 access, drive) -> int` and
 `memory_write(memory, access, value, drive)` (a memory it took),
 `save() -> bytes` and `restore(snapshot)`.  Times are
-board time in picoseconds; a `PeripheralAccess` carries `attachment`,
+board time in picoseconds, and none of these takes the chip's system
+clock base the Rust calls do (`system_clock`, a `TimeBase` Python does
+not have): a deliberate difference, since a Python peripheral counts
+board time; a `PeripheralAccess` carries `attachment`,
 `select` (the chip select's name), `role` (a `Role`), `lane` (a
 `Lane`), `address`, `size`, `function_code`, `write` (as a
 `BusCycle`'s), `now` and `horizon` (`None` but on a read or write of

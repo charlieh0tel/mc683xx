@@ -807,7 +807,6 @@ impl<C: Chip> Board<C> {
         };
         board.stop_at_outputs();
         board.power_on();
-        board.tell_system_clock();
         Ok(board)
     }
 
@@ -1322,12 +1321,13 @@ impl<C: Chip> Board<C> {
 
     /// The earliest change waiting or peripheral's next event.
     fn next_event(&self) -> Option<Time> {
+        let base = self.shared.base.get();
         let change = self.first_change();
         let peripheral = self
             .shared
             .peripherals
             .iter()
-            .filter_map(|peripheral| peripheral.borrow().next_event())
+            .filter_map(|peripheral| peripheral.borrow().next_event(base))
             .min();
         change.into_iter().chain(peripheral).min()
     }
@@ -1351,13 +1351,14 @@ impl<C: Chip> Board<C> {
                 .first_key_value()
                 .map(|(&key, _)| key)
                 .filter(|&(at, _)| at <= self.now);
+            let base = self.shared.base.get();
             let peripheral = self
                 .shared
                 .peripherals
                 .iter()
                 .enumerate()
                 .filter_map(|(index, peripheral)| {
-                    peripheral.borrow().next_event().map(|at| (at, index))
+                    peripheral.borrow().next_event(base).map(|at| (at, index))
                 })
                 .filter(|&(at, _)| at <= self.now)
                 .min();
@@ -1576,7 +1577,6 @@ impl<C: Chip> Board<C> {
                 let cycles = self.chip.now();
                 let at = at.max(base.time(cycles));
                 self.move_base(TimeBase::new(cycles, at, base.frequency()));
-                self.tell_system_clock();
                 if breakpoint {
                     self.chip.reset_with_breakpoint();
                 } else {
@@ -1695,9 +1695,6 @@ impl<C: Chip> Board<C> {
         let now = self.chip.now();
         self.ahead.retain(|ahead| ahead.cycles > now);
         self.move_base(base.moved(now, system_clock));
-        if system_clock != base.frequency() {
-            self.tell_system_clock();
-        }
         let moved = self.clocks.iter().any(|(&pin, clock)| {
             self.chip
                 .clock_output(pin)
@@ -1705,17 +1702,6 @@ impl<C: Chip> Board<C> {
         });
         if moved {
             self.drive_clocks();
-        }
-    }
-
-    /// Every peripheral learns the system clock's base
-    /// ([`Peripheral::system_clock`]).
-    ///
-    /// [`Peripheral::system_clock`]: crate::peripheral::Peripheral::system_clock
-    fn tell_system_clock(&self) {
-        let base = self.shared.base.get();
-        for peripheral in &self.shared.peripherals {
-            peripheral.borrow_mut().system_clock(base);
         }
     }
 
@@ -2275,7 +2261,6 @@ impl<C: Chip> Board<C> {
         })?;
         self.now = state.now;
         self.shared.base.set(state.base);
-        self.tell_system_clock();
         self.queue = state.queue.into_iter().collect();
         self.sequence = state.sequence;
         self.outputs = state.outputs.into_iter().collect();

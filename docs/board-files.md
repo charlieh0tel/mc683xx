@@ -511,7 +511,8 @@ The contract a host's peripheral models target (rustdoc in
     keeps its armed conditions out of `save`, and `restore` leaves them
     armed.
   - Bus: `read(access, drive)`, `write(access, value, drive)`,
-    `wait_states(access)` for an external DSACK, and `dsack_port(access)`
+    `wait_states(access, system_clock)` for an external DSACK, and
+    `dsack_port(access, system_clock)`
     for a peripheral whose DSACK pins differ cycle by cycle (`Some(PortSize)`,
     16 bits on DSACK1, 8 on DSACK0 alone; `None` by default, its `dsack`
     saying), both asked of the peripheral that takes the cycle's
@@ -570,7 +571,7 @@ The contract a host's peripheral models target (rustdoc in
     `QspiClock::at_reset(system_clock)`, SPCR0's out of reset), and `now`, when it ends) returns the bits in, all ones by
     default (`mc683xx_modules::peripheral::floating_miso`),
     `select(attachment, selected, now, drive)`, `set_qspi_clock(clock,
-    now)`.  Framing: the board decodes PCS[3:0] by each attachment's
+    now, system_clock)`.  Framing: the board decodes PCS[3:0] by each attachment's
     `qspi` code and `mask`, and a peripheral sees `select` only when its own
     decode changes, true as a frame starts and false as it ends; that
     is the canonical framing for a board peripheral.  Fan-out: a transfer
@@ -640,7 +641,7 @@ The contract a host's peripheral models target (rustdoc in
   - Nets: `input(port, signal, now, drive)` for each value arriving on
     an input; `sample(port, now)` for an analog output a sink reads at
     its time.  Ports are indices in the declared list.
-  - Time: `next_event()`, `advance(now, drive)`: `advance` must move
+  - Time: `next_event(system_clock)`, `advance(now, drive)`: `advance` must move
     `next_event` past `now` or to `None`.  A peripheral advanced to one time
     1000 times running without that stalls the board, and `Board::run_until`
     fails with `RunError::Stalled`, naming it, rather than spin; several
@@ -650,15 +651,16 @@ The contract a host's peripheral models target (rustdoc in
     `next_event` before the run's end ends the chip's run after that
     instruction, and the board settles there: the drive reaches the
     chip by the next instruction, and a run is the same however the
-    host quanta `Board::run_until`.  Each such call costs a sync.  `system_clock(base)`,
-    the chip's system clock on board time (`time::TimeBase`), told at
-    load, at each change of its frequency and after a restore, for a
-    peripheral that converts outside a call.  The chip runs at 8.388608 MHz
-    until the firmware writes SYNCR, and the base moves right after
-    the instruction that changes the frequency, so a peripheral never keeps
-    a base past a call: it takes `Drive::system_clock` at each call, or
-    the one `system_clock` last told it (the adapters do).  A test
-    gives its drive one with `Drive::new(now).with_system_clock(base)`.
+    host quanta `Board::run_until`.  Each such call costs a sync.
+  - The chip's system clock on board time (`time::TimeBase`) comes with
+    every call that has a time: in its `Drive` (`Drive::system_clock`),
+    or, in a call without one (`next_event`, `wait_states`,
+    `dsack_port`, `set_qspi_clock`), as its `system_clock` argument.
+    The chip runs at 8.388608 MHz until the firmware writes SYNCR, and
+    the base moves right after the instruction that changes the
+    frequency, so a peripheral keeps no base past a call.  A test
+    builds its drive with one: `Drive::new(now, system_clock)`, or
+    `Drive::with_sampler(now, system_clock, sampler)`.
   - State: `save()`, `restore(bytes)`; by default it cannot, and the
     board's save fails with `StateError::Peripheral`, which names the peripheral
     (`stub: the peripheral cannot save its state`); so does a peripheral that
@@ -707,7 +709,7 @@ The contract a host's peripheral models target (rustdoc in
   baud, bits)`, `Serial::timed(frame, baud, length)` or
   `Serial::untimed(frame)`, and `end(start)` gives its end.
 - `time::TimeBase`: the chip's system clock on board time, `cycles(time)`
-  and `time(cycles)`, and `hz()`.  Toward the chip a time rounds up, to
+  and `time(cycles)`, and `frequency()`.  Toward the chip a time rounds up, to
   the first clock at or after it; toward the board a clock rounds down,
   to its picosecond or the one before; so `cycles(time(c))` is `c`.  The
   board moves its base only where the frequency changes, so one base

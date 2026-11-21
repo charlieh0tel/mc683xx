@@ -425,6 +425,8 @@ impl Peripheral for Adc0838 {
 mod tests {
     use mc683xx_board::inspect::Value;
     use mc683xx_board::peripheral::Drive;
+
+    use crate::SYSTEM_CLOCK;
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::peripheral::Transfer;
     use mc683xx_board::registry::Context;
@@ -504,7 +506,7 @@ mod tests {
     /// `frame` in SPI mode `mode`.
     fn frame_in(mode: u8, adc: &mut Adc0838, inputs: Inputs, transfers: &[(u16, u8)]) -> Vec<u16> {
         let sampler = move |port: usize, _: Time| inputs.get(port).copied().flatten();
-        let mut drive = Drive::with_sampler(Time(0), &sampler);
+        let mut drive = Drive::with_sampler(Time(0), SYSTEM_CLOCK, &sampler);
         adc.select(0, true, Time(0), &mut drive);
         let replies = transfers
             .iter()
@@ -686,10 +688,10 @@ mod tests {
         let mut inputs: Inputs = [None; CHANNELS + 1];
         inputs[1] = Some(code_volts(0b1010_0101));
         let mut adc = adc();
-        let mut drive = Drive::new(Time(0));
+        let mut drive = Drive::new(Time(0), SYSTEM_CLOCK);
         adc.input(SHIFT_ENABLE, Signal::Level(true), Time(0), &mut drive);
         let sampler = move |port: usize, _: Time| inputs.get(port).copied().flatten();
-        let mut drive = Drive::with_sampler(Time(0), &sampler);
+        let mut drive = Drive::with_sampler(Time(0), SYSTEM_CLOCK, &sampler);
         adc.select(0, true, Time(0), &mut drive);
         // the start bit, channel 1, the leading zero, MSB first
         let first = adc.transfer(transfer(mode, 0, 0b1_1100 << 9, 14), &mut drive);
@@ -780,7 +782,7 @@ mod tests {
         inputs[2] = Some(1.7);
         let sampler = move |port: usize, _: Time| inputs.get(port).copied().flatten();
         let mut first = built("noise_volts = 0.05", 3).unwrap();
-        let mut drive = Drive::with_sampler(Time(0), &sampler);
+        let mut drive = Drive::with_sampler(Time(0), SYSTEM_CLOCK, &sampler);
         for _ in 0..5 {
             frame(&mut first, inputs, &[(command(0b1001), 16)]);
         }
@@ -789,7 +791,7 @@ mod tests {
         let snapshot = first.save().unwrap();
         let mut second = built("noise_volts = 0.05", 99).unwrap();
         second.restore(&snapshot).unwrap();
-        let mut drive_second = Drive::with_sampler(Time(0), &sampler);
+        let mut drive_second = Drive::with_sampler(Time(0), SYSTEM_CLOCK, &sampler);
         assert_eq!(
             rest(&mut first, inputs, &mut drive),
             rest(&mut second, inputs, &mut drive_second)

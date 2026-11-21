@@ -1422,8 +1422,14 @@ hand.  The keys are in `docs/board-files.md`.
   which the frequency changed (SYNCR, a reset), so it never drifts;
   toward the chip a time rounds up to the first clock at or after it
   (Peripherals, GPT input edges), toward the board a clock rounds
-  down.  A peripheral gets the anchor in every `Drive` and, at load and at
-  each change, through `Peripheral::system_clock`.  A part the chip
+  down.  A peripheral gets the anchor with every call that has a time:
+  in its `Drive` (`Drive::system_clock`), and as an argument to those
+  without one (`next_event`, `wait_states`, `dsack_port`,
+  `set_qspi_clock`): a part keeps no base between calls and unwraps
+  none, and no notification of a change is needed, since the board
+  asks `next_event` again whenever it needs it (decided 2026-11, for
+  0.8.0).  `sample` and `interrupt_request` take none: a value on
+  board time, not a conversion.  A part the chip
   does not clock (an oscillator, an oven, a GPS engine) that counts in
   cycles counts on `TimeBase::steady(frequency)`, clock zero at
   power-on and never moved: on the chip's base it would fall behind

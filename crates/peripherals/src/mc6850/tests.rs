@@ -2,6 +2,8 @@
 
 use mc683xx_board::inspect::Value;
 use mc683xx_board::peripheral::Drive;
+
+use crate::SYSTEM_CLOCK;
 use mc683xx_board::peripheral::Driven;
 use mc683xx_board::peripheral::Lane;
 use mc683xx_board::peripheral::Peripheral;
@@ -102,7 +104,7 @@ impl Bench {
     fn new() -> Self {
         let clock = Clock { hz: CLOCK_HZ };
         let mut acia = Acia::new(clock, clock);
-        acia.power_on(&mut Drive::new(Time::ZERO));
+        acia.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
         Self { acia }
     }
 
@@ -129,7 +131,7 @@ impl Bench {
 
     /// `register` written `value` at `now`: what it drove.
     fn write(&mut self, register: u8, value: u8, now: Time) -> Vec<Driven> {
-        let mut drive = Drive::new(now);
+        let mut drive = Drive::new(now, SYSTEM_CLOCK);
         self.acia
             .write(
                 Self::access(register, Role::ReadWrite, now),
@@ -142,7 +144,7 @@ impl Bench {
 
     /// `register` read at `now`.
     fn read(&mut self, register: u8, now: Time) -> u8 {
-        let mut drive = Drive::new(now);
+        let mut drive = Drive::new(now, SYSTEM_CLOCK);
         self.acia
             .read(Self::access(register, Role::ReadWrite, now), &mut drive)
             .unwrap() as u8
@@ -150,7 +152,7 @@ impl Bench {
 
     /// `signal` into `port` at `now`: what it drove.
     fn input(&mut self, port: usize, signal: Signal, now: Time) -> Vec<Driven> {
-        let mut drive = Drive::new(now);
+        let mut drive = Drive::new(now, SYSTEM_CLOCK);
         self.acia.input(port, signal, now, &mut drive);
         drive.finish().driven
     }
@@ -158,12 +160,16 @@ impl Bench {
     /// Advances through every event up to `until`: what it drove.
     fn run(&mut self, until: Time) -> Vec<Driven> {
         let mut driven = Vec::new();
-        while let Some(next) = self.acia.next_event().filter(|&next| next <= until) {
-            let mut drive = Drive::new(next);
+        while let Some(next) = self
+            .acia
+            .next_event(SYSTEM_CLOCK)
+            .filter(|&next| next <= until)
+        {
+            let mut drive = Drive::new(next, SYSTEM_CLOCK);
             self.acia.advance(next, &mut drive);
             driven.extend(drive.finish().driven);
         }
-        let mut drive = Drive::new(until);
+        let mut drive = Drive::new(until, SYSTEM_CLOCK);
         self.acia.advance(until, &mut drive);
         driven.extend(drive.finish().driven);
         driven
@@ -262,7 +268,7 @@ fn the_clocks_are_required_parameters() {
 fn it_powers_on_in_its_first_master_reset() {
     let clock = Clock { hz: CLOCK_HZ };
     let mut acia = Acia::new(clock, clock);
-    let mut drive = Drive::new(Time::ZERO);
+    let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
     acia.power_on(&mut drive);
     assert_eq!(levels(&drive.finish().driven), [(RTS, true), (IRQ, true)]);
     let mut bench = Bench { acia };
@@ -500,7 +506,7 @@ fn dcd_latches_its_rise_until_a_status_and_a_data_read() {
     assert!(other.acia.interrupt_request());
     // after the status read, the data read clears it
     let driven_read = {
-        let mut drive = Drive::new(now);
+        let mut drive = Drive::new(now, SYSTEM_CLOCK);
         bench
             .acia
             .read(Bench::access(DATA, Role::ReadWrite, now), &mut drive)
@@ -586,10 +592,12 @@ fn the_interrupts_follow_their_enables() {
     // the ACIA gives no vector
     let iack = Bench::access(0, Role::Iack, Time::ZERO);
     assert_eq!(
-        bench.acia.read(iack, &mut Drive::new(Time::ZERO)),
+        bench
+            .acia
+            .read(iack, &mut Drive::new(Time::ZERO, SYSTEM_CLOCK)),
         Err(BusError)
     );
-    assert_eq!(bench.acia.wait_states(iack), None);
+    assert_eq!(bench.acia.wait_states(iack, SYSTEM_CLOCK), None);
 }
 
 /// CR6:5: RTS low but with `10`; `11` sends a break, frames a character
@@ -745,7 +753,7 @@ fn a_word_cycle_carries_the_register_on_data_15_8() {
         FunctionCode::SUPERVISOR_DATA,
         Time::ZERO,
     );
-    let mut drive = Drive::new(Time::ZERO);
+    let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
     bench.acia.write(access, 0x1500, &mut drive).unwrap();
     assert_eq!(
         bench.acia.state.control, RUN,

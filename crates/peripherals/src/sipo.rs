@@ -269,6 +269,8 @@ impl Peripheral for Sipo {
 mod tests {
     use mc683xx_board::inspect::Value;
     use mc683xx_board::peripheral::Drive;
+
+    use crate::SYSTEM_CLOCK;
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::registry::Context;
     use mc683xx_board::registry::Environment;
@@ -322,7 +324,7 @@ mod tests {
 
     /// `shift` in SPI mode `mode`.
     fn shift_in(mode: u8, sipo: &mut Sipo, word: u16, bits: u8) -> (u16, Vec<(usize, Signal)>) {
-        let mut drive = Drive::new(Time::ZERO);
+        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
         let back = sipo.transfer(spi_mode::transfer(mode).shifting(word, bits), &mut drive);
         let driven = drive
             .finish()
@@ -423,7 +425,7 @@ mod tests {
     fn clr_low_clears_and_holds_every_stage() {
         let mut sipo = peripheral("cascade = 2").unwrap();
         shift(&mut sipo, 0xffff, 16);
-        let mut drive = Drive::new(Time::ZERO);
+        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
         sipo.input(CLR, Signal::Level(false), Time::ZERO, &mut drive);
         assert_eq!(drive.finish().driven[0].signal, Signal::Bus(0));
         assert_eq!(shift(&mut sipo, 0x1234, 16), (0, vec![]));
@@ -431,7 +433,7 @@ mod tests {
             CLR,
             Signal::Level(true),
             Time::ZERO,
-            &mut Drive::new(Time::ZERO),
+            &mut Drive::new(Time::ZERO, SYSTEM_CLOCK),
         );
         assert_eq!(shift(&mut sipo, 0x1234, 16).1, [(Q, Signal::Bus(0x1234))]);
         let mut tied = peripheral("clr = \"low\"").unwrap();

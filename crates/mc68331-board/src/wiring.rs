@@ -135,8 +135,8 @@ impl Shared {
         call: impl FnOnce(&mut dyn Peripheral, &mut Drive<'_>) -> R,
     ) -> R {
         let sampler = |port: usize, at: Time| self.sample(peripheral, port, at);
-        let mut drive = Drive::with_sampler(now, &sampler);
-        drive.set_system_clock(self.base.get());
+        let base = self.base.get();
+        let mut drive = Drive::with_sampler(now, base, &sampler);
         let result = call(
             self.peripherals[peripheral].borrow_mut().as_mut(),
             &mut drive,
@@ -152,7 +152,7 @@ impl Shared {
                 || !driving.writes.is_empty()
                 || self.peripherals[peripheral]
                     .borrow()
-                    .next_event()
+                    .next_event(base)
                     .is_some_and(|next| next < quantum_end))
         {
             self.requests.sync();
@@ -210,13 +210,14 @@ impl Shared {
     /// chip's sensed outputs' next change.
     fn horizon(&self, peripheral: usize, now: Time) -> Option<Time> {
         let run = self.run_horizon.get()?;
+        let base = self.base.get();
         let events = self
             .peripherals
             .iter()
             .enumerate()
             .filter(|&(index, _)| index != peripheral)
             .filter_map(|(_, other)| match other.try_borrow() {
-                Ok(other) => other.next_event(),
+                Ok(other) => other.next_event(base),
                 Err(_) => Some(now),
             });
         let outbox = self.outbox.borrow();
@@ -415,7 +416,7 @@ impl Routes {
         let access = Self::access(shared, route, cycle, size);
         shared.peripherals[route.peripheral]
             .borrow_mut()
-            .dsack_port(access)
+            .dsack_port(access, shared.base.get())
     }
 
     /// The wait states of the first peripheral to take the cycle, in
@@ -427,7 +428,7 @@ impl Routes {
         let access = Self::access(shared, route, cycle, size);
         shared.peripherals[route.peripheral]
             .borrow_mut()
-            .wait_states(access)
+            .wait_states(access, shared.base.get())
     }
 }
 
@@ -824,7 +825,7 @@ impl SpiPeripheral for QspiRouter {
                 told.push(target.peripheral);
                 self.shared.peripherals[target.peripheral]
                     .borrow_mut()
-                    .set_qspi_clock(clock, now);
+                    .set_qspi_clock(clock, now, self.shared.base.get());
             }
         }
     }

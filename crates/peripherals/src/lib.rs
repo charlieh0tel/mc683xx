@@ -76,6 +76,12 @@ mod sipo;
 #[cfg(test)]
 mod spi_mode;
 
+/// The chip's system clock a test's drives carry: 16.777216 MHz from
+/// power-on.  No stock part is on the chip's clocks.
+#[cfg(test)]
+const SYSTEM_CLOCK: mc683xx_board::time::TimeBase =
+    mc683xx_board::time::TimeBase::steady(mc683xx_cpu32::frequency::Frequency::from_hz(16_777_216));
+
 use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;
 

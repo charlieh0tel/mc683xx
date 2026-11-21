@@ -123,6 +123,8 @@ mod tests {
     use mc683xx_board::inspect::Radix;
     use mc683xx_board::inspect::Value;
     use mc683xx_board::peripheral::Drive;
+
+    use crate::SYSTEM_CLOCK;
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::signal::Signal;
     use mc683xx_board::time::Time;
@@ -137,7 +139,10 @@ mod tests {
     /// What a read of `size` gives.
     fn read(buffer: &mut Buffer, size: Size) -> u32 {
         buffer
-            .read(access(size, Time::ZERO), &mut Drive::new(Time::ZERO))
+            .read(
+                access(size, Time::ZERO),
+                &mut Drive::new(Time::ZERO, SYSTEM_CLOCK),
+            )
             .unwrap()
     }
 
@@ -145,10 +150,19 @@ mod tests {
     fn it_reads_its_inputs_and_ignores_writes() {
         let mut buffer = Buffer { inputs: OPEN };
         assert_eq!(read(&mut buffer, Size::Byte), 0xff);
-        buffer.input(3, Signal::Level(false), Time(1), &mut Drive::new(Time(1)));
+        buffer.input(
+            3,
+            Signal::Level(false),
+            Time(1),
+            &mut Drive::new(Time(1), SYSTEM_CLOCK),
+        );
         assert_eq!(read(&mut buffer, Size::Byte), 0xf7);
         buffer
-            .write(access(Size::Byte, Time(2)), 0, &mut Drive::new(Time(2)))
+            .write(
+                access(Size::Byte, Time(2)),
+                0,
+                &mut Drive::new(Time(2), SYSTEM_CLOCK),
+            )
             .unwrap();
         assert_eq!(
             read(&mut buffer, Size::Byte),
@@ -168,9 +182,19 @@ mod tests {
     #[test]
     fn its_bus_input_sets_every_line() {
         let mut buffer = Buffer { inputs: OPEN };
-        buffer.input(BUS, Signal::Bus(0x1a5), Time(1), &mut Drive::new(Time(1)));
+        buffer.input(
+            BUS,
+            Signal::Bus(0x1a5),
+            Time(1),
+            &mut Drive::new(Time(1), SYSTEM_CLOCK),
+        );
         assert_eq!(read(&mut buffer, Size::Byte), 0xa5);
-        buffer.input(0, Signal::Level(false), Time(2), &mut Drive::new(Time(2)));
+        buffer.input(
+            0,
+            Signal::Level(false),
+            Time(2),
+            &mut Drive::new(Time(2), SYSTEM_CLOCK),
+        );
         assert_eq!(read(&mut buffer, Size::Byte), 0xa4);
     }
 

@@ -33,6 +33,7 @@ use mc683xx_board::signal::Signal;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
+use mc683xx_board::time::TimeBase;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
@@ -768,7 +769,7 @@ impl Peripheral for Acia {
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
         (access.role != Role::Iack).then_some(0)
     }
 
@@ -799,7 +800,7 @@ impl Peripheral for Acia {
         self.sync(drive);
     }
 
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         self.next_internal()
     }
 

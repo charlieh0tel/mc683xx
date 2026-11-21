@@ -414,8 +414,8 @@ pub struct Drive<'a> {
     fired: Vec<ConditionToken>,
     /// The peripheral's analog inputs, if the board gives them.
     sampler: Option<Sampler<'a>>,
-    /// The chip's system clock on board time, if the board gives it.
-    system_clock: Option<TimeBase>,
+    /// The chip's system clock on board time.
+    system_clock: TimeBase,
     /// The memories taken (`true`) or released, in order.
     memories: Vec<(String, bool)>,
 }
@@ -449,9 +449,10 @@ pub struct Driving {
 }
 
 impl<'a> Drive<'a> {
-    /// A drive for a call at `now`, with no analog inputs.
+    /// A drive for a call at `now`, the chip's system clock on board time
+    /// `system_clock`, with no analog inputs.
     #[must_use]
-    pub const fn new(now: Time) -> Self {
+    pub const fn new(now: Time, system_clock: TimeBase) -> Self {
         Self {
             now,
             driven: Vec::new(),
@@ -459,14 +460,15 @@ impl<'a> Drive<'a> {
             stop: false,
             fired: Vec::new(),
             sampler: None,
-            system_clock: None,
+            system_clock,
             memories: Vec::new(),
         }
     }
 
-    /// A drive for a call at `now` whose analog inputs `sampler` reads.
+    /// A drive for a call at `now`, the chip's system clock on board time
+    /// `system_clock`, whose analog inputs `sampler` reads.
     #[must_use]
-    pub const fn with_sampler(now: Time, sampler: Sampler<'a>) -> Self {
+    pub const fn with_sampler(now: Time, system_clock: TimeBase, sampler: Sampler<'a>) -> Self {
         Self {
             now,
             driven: Vec::new(),
@@ -474,24 +476,9 @@ impl<'a> Drive<'a> {
             stop: false,
             fired: Vec::new(),
             sampler: Some(sampler),
-            system_clock: None,
+            system_clock,
             memories: Vec::new(),
         }
-    }
-
-    /// Gives the drive the chip's system clock on board time, as the
-    /// board gives every call; a test or a host builds its drive with
-    /// [`Drive::with_system_clock`].
-    pub(crate) const fn set_system_clock(&mut self, system_clock: TimeBase) {
-        self.system_clock = Some(system_clock);
-    }
-
-    /// The drive with the chip's system clock on board time, as the
-    /// board gives every call: for a test's or a host's drive.
-    #[must_use]
-    pub const fn with_system_clock(mut self, system_clock: TimeBase) -> Self {
-        self.set_system_clock(system_clock);
-        self
     }
 
     /// The time of the call.
@@ -500,11 +487,11 @@ impl<'a> Drive<'a> {
         self.now
     }
 
-    /// The chip's system clock on board time, for converting between
-    /// board time and the chip's clocks ([`TimeBase`]); always given by
-    /// the board, [`None`] in a drive built without one.
+    /// The chip's system clock on board time, as of the call: for
+    /// converting between board time and the chip's clocks
+    /// ([`TimeBase`]).
     #[must_use]
-    pub const fn system_clock(&self) -> Option<TimeBase> {
+    pub const fn system_clock(&self) -> TimeBase {
         self.system_clock
     }
 
@@ -663,9 +650,10 @@ pub trait Peripheral: Any {
 
     /// On a select whose DSACK field is external (%1111, SIMRM
     /// 7.10.3), the wait states before the peripheral asserts DSACK, or
-    /// [`None`] if it never does.  Asked before the cycle's `read` or
-    /// `write`.  By default it answers at once.
-    fn wait_states(&mut self, access: PeripheralAccess) -> Option<u8> {
+    /// [`None`] if it never does, the chip's system clock on board time
+    /// `system_clock`.  Asked before the cycle's `read` or `write`.  By
+    /// default it answers at once.
+    fn wait_states(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<u8> {
         Some(0)
     }
 
@@ -674,7 +662,7 @@ pub trait Peripheral: Any {
     /// DSACK1, 8 on DSACK0 alone (SIMRM Table 5-2).  Asked with
     /// `wait_states`.  By default [`None`]: its `dsack` in the board
     /// file says.
-    fn dsack_port(&mut self, access: PeripheralAccess) -> Option<PortSize> {
+    fn dsack_port(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<PortSize> {
         None
     }
 
@@ -721,11 +709,12 @@ pub trait Peripheral: Any {
     /// [`SpiPeripheral::set_chip_selects`]: mc683xx_modules::peripheral::SpiPeripheral::set_chip_selects
     fn select(&mut self, attachment: usize, selected: bool, now: Time, drive: &mut Drive<'_>) {}
 
-    /// The QSPI's serial clock from `now` ([`SpiPeripheral::set_clock`]).  By
-    /// default nothing changes.
+    /// The QSPI's serial clock from `now` ([`SpiPeripheral::set_clock`]),
+    /// the chip's system clock on board time `system_clock`.  By default
+    /// nothing changes.
     ///
     /// [`SpiPeripheral::set_clock`]: mc683xx_modules::peripheral::SpiPeripheral::set_clock
-    fn set_qspi_clock(&mut self, clock: QspiClock, now: Time) {}
+    fn set_qspi_clock(&mut self, clock: QspiClock, now: Time, system_clock: TimeBase) {}
 
     /// Whether its QSPI calls (`transfer`, `select`, `set_qspi_clock`) may
     /// come late, in a batch ([`SpiPeripheral::deferrable`]).  Asked once,
@@ -768,9 +757,12 @@ pub trait Peripheral: Any {
     }
 
     /// When it next changes on its own, if it will: the board calls
-    /// `advance` then.  A time already past is advanced to at once.  By
-    /// default never.
-    fn next_event(&self) -> Option<Time> {
+    /// `advance` then.  A time already past is advanced to at once.
+    /// `system_clock` is the chip's system clock on board time now, for
+    /// a peripheral whose events fall on the chip's clocks: asked again
+    /// whenever the board needs it, so a part keeps no base between
+    /// calls.  By default never.
+    fn next_event(&self, system_clock: TimeBase) -> Option<Time> {
         None
     }
 
@@ -782,15 +774,6 @@ pub trait Peripheral: Any {
     ///
     /// [`RunError::Stalled`]: crate::error::RunError::Stalled
     fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {}
-
-    /// The chip's system clock on board time from now on: told once
-    /// the board is loaded, at each change of its frequency (SYNCR, a
-    /// reset; right after the instruction that made it), and after a
-    /// restore.  A peripheral that converts times outside a call (in
-    /// `next_event`) keeps it, and keeps no other: the clock runs at
-    /// 8.388608 MHz only until SYNCR is written.  By default it is
-    /// ignored.
-    fn system_clock(&mut self, clock: TimeBase) {}
 
     /// Its state as a front end shows it: registers, FIFOs, levels,
     /// named ([`inspect::Inspection`]).  Read-only: it must change
@@ -894,11 +877,12 @@ mod tests {
     }
 
     #[test]
-    fn a_drive_takes_the_system_clock_in_one_expression() {
+    fn a_drive_carries_the_system_clock() {
         let base = TimeBase::new(Cycles::ZERO, Time(5), Frequency::from_hz(16_777_216));
-        let drive = Drive::new(Time(5)).with_system_clock(base);
-        assert_eq!(drive.system_clock(), Some(base));
-        assert_eq!(Drive::new(Time(5)).system_clock(), None);
+        assert_eq!(Drive::new(Time(5), base).system_clock(), base);
+        let sampler = |_: usize, _: Time| Some(1.5);
+        let drive = Drive::with_sampler(Time(5), base, &sampler);
+        assert_eq!((drive.system_clock(), drive.sample(0)), (base, Some(1.5)));
     }
 
     #[test]

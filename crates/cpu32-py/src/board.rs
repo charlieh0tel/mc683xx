@@ -49,6 +49,7 @@ use mc683xx_board::time::NonZeroSpan;
 use mc683xx_board::time::Phase;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
+use mc683xx_board::time::TimeBase;
 use mc683xx_board::trace::Line;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::PortSize;
@@ -983,7 +984,7 @@ impl Peripheral for PythonPeripheral {
         .unwrap_or(Err(BusError))
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
         self.ask(
             "wait_states",
             |py| Ok(vec![access_argument(py, access)?]),
@@ -992,7 +993,7 @@ impl Peripheral for PythonPeripheral {
         )
     }
 
-    fn dsack_port(&mut self, access: PeripheralAccess) -> Option<PortSize> {
+    fn dsack_port(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<PortSize> {
         self.ask(
             "dsack_port",
             |py| Ok(vec![access_argument(py, access)?]),
@@ -1086,7 +1087,7 @@ impl Peripheral for PythonPeripheral {
         }
     }
 
-    fn set_qspi_clock(&mut self, clock: peripheral::QspiClock, now: Time) {
+    fn set_qspi_clock(&mut self, clock: peripheral::QspiClock, now: Time, _: TimeBase) {
         self.ask(
             "set_qspi_clock",
             |py| {
@@ -1150,7 +1151,7 @@ impl Peripheral for PythonPeripheral {
         )
     }
 
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         self.ask(
             "next_event",
             |_| Ok(Vec::new()),

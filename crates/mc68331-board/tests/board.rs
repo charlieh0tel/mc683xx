@@ -5,6 +5,7 @@
 use std::any::Any;
 use std::cell::Cell;
 use std::cell::Ref;
+use std::cell::RefCell;
 use std::env;
 use std::fs;
 use std::ops::ControlFlow;
@@ -355,11 +356,11 @@ parameters = { value = 0x5a }
 struct Silent;
 
 impl Peripheral for Silent {
-    fn wait_states(&mut self, _: PeripheralAccess) -> Option<u8> {
+    fn wait_states(&mut self, _: PeripheralAccess, _: TimeBase) -> Option<u8> {
         None
     }
 
-    fn dsack_port(&mut self, _: PeripheralAccess) -> Option<PortSize> {
+    fn dsack_port(&mut self, _: PeripheralAccess, _: TimeBase) -> Option<PortSize> {
         Some(PortSize::Bits16)
     }
 }
@@ -386,12 +387,12 @@ impl Peripheral for WriteLatch {
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
         self.asked.push(access.write);
         Some(1)
     }
 
-    fn dsack_port(&mut self, access: PeripheralAccess) -> Option<PortSize> {
+    fn dsack_port(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<PortSize> {
         self.asked.push(access.write);
         Some(PortSize::Bits8)
     }
@@ -803,12 +804,12 @@ const SYNCR: u32 = SIM + 0x04;
 /// D.3.3).
 const SYNCR_FAST: u16 = 0xcf00;
 
-/// A peripheral that keeps the system clocks it is told and the one its
-/// drives carry.
+/// A peripheral that keeps each system clock base `next_event` is
+/// given and the one its drives carry.
 #[derive(Debug, Default)]
 struct ClockWatcher {
-    /// Each `system_clock` call's base.
-    told: Vec<TimeBase>,
+    /// Each base `next_event` was given that differs from the one before.
+    asked: RefCell<Vec<TimeBase>>,
     /// The base a drive carried at the last advance.
     driven: Option<TimeBase>,
     /// When it next advances.
@@ -816,16 +817,16 @@ struct ClockWatcher {
 }
 
 impl Peripheral for ClockWatcher {
-    fn system_clock(&mut self, clock: TimeBase) {
-        self.told.push(clock);
-    }
-
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, system_clock: TimeBase) -> Option<Time> {
+        let mut asked = self.asked.borrow_mut();
+        if asked.last() != Some(&system_clock) {
+            asked.push(system_clock);
+        }
         self.next
     }
 
     fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
-        self.driven = drive.system_clock();
+        self.driven = Some(drive.system_clock());
         self.next = Some(now + Span::from_micros(1));
     }
 }
@@ -864,12 +865,16 @@ type = "watcher"
     let base = board.system_clock();
     assert_eq!(base.frequency().hz(), 16_777_216);
     assert_eq!(base.cycles(base.time(Cycles(12_345))), Cycles(12_345));
-    let (told, driven) = board
+    let (asked, driven) = board
         .peripheral::<ClockWatcher>("watcher")
-        .map(|watcher| (watcher.told.clone(), watcher.driven))
+        .map(|watcher| (watcher.asked.borrow().clone(), watcher.driven))
         .unwrap();
-    let hz: Vec<u64> = told.iter().map(|base| base.frequency().hz()).collect();
-    assert_eq!(hz, [8_388_608, 16_777_216], "at load and at the change");
+    let hz: Vec<u64> = asked.iter().map(|base| base.frequency().hz()).collect();
+    assert_eq!(
+        hz,
+        [8_388_608, 16_777_216],
+        "out of reset and from the change"
+    );
     assert_eq!(driven, Some(base));
 }
 
@@ -2026,7 +2031,7 @@ impl Peripheral for Flash {
         Ok(status)
     }
 
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         match self.state {
             FlashState::Busy { until, .. } => Some(until),
             _ => None,
@@ -2130,7 +2135,7 @@ struct Overwriter {
 }
 
 impl Peripheral for Overwriter {
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         (!self.done).then_some(OVERWRITE_AT)
     }
 
@@ -2320,7 +2325,7 @@ struct Events {
 const AT: Time = Time(1_000_000);
 
 impl Peripheral for Events {
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         (self.events > 0 || !self.moves).then_some(AT)
     }
 
@@ -2387,7 +2392,7 @@ struct Stopper {
 }
 
 impl Peripheral for Stopper {
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         self.timed.then_some(AT)
     }
 
@@ -4026,7 +4031,7 @@ struct Ahead {
 }
 
 impl Peripheral for Ahead {
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         (!self.driven).then_some(Time(AHEAD_DRIVES_PS))
     }
 
@@ -4084,7 +4089,7 @@ impl Peripheral for Sampled {
         self.wants
     }
 
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         (!self.advanced).then_some(Time(SAMPLED_EVENT_PS))
     }
 
