@@ -234,18 +234,25 @@ impl InterceptedView {
 
 /// How a limited run ended (Rust's `bare::End`).  No run ends for an
 /// intercepted exception: `run_limited` answers it through the intercept
-/// callback, or the CPU takes it natively.
+/// callback, or the CPU takes it natively.  A variant's value is a field
+/// named for it, not Rust's `_0`.
 #[pyclass(name = "End", module = "mc683xx", frozen, eq)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum EndView {
     /// As a chip's run ends: its `Stop`.
-    Stop(Stop),
+    Stop {
+        /// The stop.
+        stop: Stop,
+    },
     /// PC reached `until`.
     Until(),
     /// It ran `instructions`.
     Instructions(),
     /// A fault, with `set_stop_on_fault`.
-    Fault(FaultStopView),
+    Fault {
+        /// The fault.
+        fault: FaultStopView,
+    },
 }
 
 impl TryFrom<End> for EndView {
@@ -257,10 +264,14 @@ impl TryFrom<End> for EndView {
     /// bindings do not know.
     fn try_from(end: End) -> Result<Self, Error> {
         Ok(match end {
-            End::Stop(stop) => Self::Stop(stop.try_into()?),
+            End::Stop(stop) => Self::Stop {
+                stop: stop.try_into()?,
+            },
             End::Until => Self::Until(),
             End::Instructions => Self::Instructions(),
-            End::Fault(fault) => Self::Fault(FaultStopView(fault)),
+            End::Fault(fault) => Self::Fault {
+                fault: FaultStopView(fault),
+            },
             End::Steps => return Err(Error::RunEnd("steps".to_owned())),
             End::Intercepted(_) => return Err(Error::RunEnd("intercepted".to_owned())),
             other => return Err(unknown(&other)),
@@ -1163,8 +1174,13 @@ mod tests {
         assert!(matches!(mapped[0], Ok(EndView::Until())));
         assert!(matches!(mapped[1], Ok(EndView::Instructions())));
         assert!(matches!(&mapped[2], Err(Error::RunEnd(name)) if name == "steps"));
-        assert!(matches!(mapped[3], Ok(EndView::Stop(Stop::Budget()))));
-        assert!(matches!(mapped[4], Ok(EndView::Fault(_))));
+        assert!(matches!(
+            mapped[3],
+            Ok(EndView::Stop {
+                stop: Stop::Budget()
+            })
+        ));
+        assert!(matches!(mapped[4], Ok(EndView::Fault { .. })));
         assert!(matches!(&mapped[5], Err(Error::RunEnd(name)) if name == "intercepted"));
 
         let mut machine = Machine::new(32).unwrap();

@@ -965,8 +965,9 @@ chip beside `Mc68331`.
   `request_interrupt(pin, vector)`, `clear_interrupt`, `reset`,
   `save`, `restore`.  `run_limited` gives a `LimitedRun(cycles, end)`,
   its `End` Rust's (`End.Stop(stop)`, `End.Until()`,
-  `End.Instructions()`, `End.Fault(fault)`) less `End::Intercepted`,
-  which the run answers within it.  Its hooks may write the
+  `End.Instructions()`, `End.Fault(fault)`, their values the fields
+  `stop` and `fault`) less `End::Intercepted`, which the run answers
+  within it.  Its hooks may write the
   CPU (decided 2026-10-23; the chip keeps the copy model):
   a Rust hook only queues what it saw and stops the core's run, and
   `run_limited` calls the Python callables with nothing borrowed, then runs

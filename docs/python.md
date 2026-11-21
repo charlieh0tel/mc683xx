@@ -1331,7 +1331,8 @@ assert bare.read_register("D0") == 6
   hooks at `begin` fire even if the last run stopped there.  `end`,
   an `End` as Rust's, says why it ended: `End.Until()`,
   `End.Instructions()`, `End.Fault(fault)` (a `FaultStop`), or
-  `End.Stop(stop)` with a chip's `Stop`: `Budget()` (cycles),
+  `End.Stop(stop)` with a chip's `Stop` (the value a field named for
+  it, `end.fault` and `end.stop`, not Rust's `_0`): `Budget()` (cycles),
   `Hook(hook)`, `Requested()` (`stop_request().request()`, from a
   callable or a peripheral), `Stopped()` (a `stop` or `lpstop`
   instruction: with no `cycles` it ends the run at once), or
