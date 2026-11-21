@@ -155,7 +155,7 @@ impl TryFrom<Role> for RoleView {
             Role::Write => Self::Write,
             Role::ReadWrite => Self::ReadWrite,
             Role::Iack => Self::Iack,
-            _ => return Err(Error::Unmapped("role")),
+            _ => return Err(Error::unmapped("role")),
         })
     }
 }

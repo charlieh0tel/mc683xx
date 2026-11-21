@@ -122,12 +122,39 @@ pub(crate) enum Error {
     /// A board's run that could not go on.
     #[error(transparent)]
     Run(#[from] RunError),
-    /// A run's end, by its Rust name, that the bindings have no Python
-    /// class for (PLAN.md, Python).
-    #[error("a run ended for {0}, which the bindings do not know")]
-    RunEnd(String),
-    /// A value, by its kind, that the bindings have no Python value
-    /// for: a variant of a `non_exhaustive` enum newer than they are.
-    #[error("a {0} the bindings do not know")]
-    Unmapped(&'static str),
+    /// A value the bindings have no Python value for, by its kind and,
+    /// where it prints, its Rust name: a variant of a `non_exhaustive`
+    /// enum newer than they are, or a run's end with no Python class
+    /// (PLAN.md, Python).  A run's end ([`RUN_END`]) raises `RunError`,
+    /// any other `NotImplementedError`.
+    #[error("a {kind}{} the bindings do not know", named(name.as_deref()))]
+    Unmapped {
+        /// What it is: `reset cause`, [`RUN_END`].
+        kind: &'static str,
+        /// Its Rust name, if it has a printed form.
+        name: Option<String>,
+    },
+}
+
+/// A run's end as an [`Error::Unmapped`] names its kind.
+pub(crate) const RUN_END: &str = "run end";
+
+impl Error {
+    /// A value of `kind` with no Python value, unnamed.
+    pub(crate) const fn unmapped(kind: &'static str) -> Self {
+        Self::Unmapped { kind, name: None }
+    }
+
+    /// A run's end with no Python class, `name` its Rust name.
+    pub(crate) fn run_end(name: impl ToString) -> Self {
+        Self::Unmapped {
+            kind: RUN_END,
+            name: Some(name.to_string()),
+        }
+    }
+}
+
+/// ` (name)`, or nothing for no name.
+fn named(name: Option<&str>) -> String {
+    name.map(|name| format!(" ({name})")).unwrap_or_default()
 }

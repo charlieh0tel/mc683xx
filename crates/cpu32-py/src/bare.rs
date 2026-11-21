@@ -130,14 +130,14 @@ pub(crate) enum FaultCauseKind {
 impl TryFrom<FaultCause> for FaultCauseKind {
     type Error = Error;
 
-    /// The cause, or [`Error::RunEnd`] naming one the bindings do not
+    /// The cause, or [`Error::Unmapped`] naming one the bindings do not
     /// know.
     fn try_from(cause: FaultCause) -> Result<Self, Error> {
         Ok(match cause {
             FaultCause::BusError => Self::BusError,
             FaultCause::Protected => Self::Protected,
             FaultCause::AddressError => Self::AddressError,
-            other => return Err(Error::RunEnd(other.to_string())),
+            other => return Err(Error::run_end(other)),
         })
     }
 }
@@ -263,7 +263,7 @@ pub(crate) enum EndView {
 impl TryFrom<End> for EndView {
     type Error = Error;
 
-    /// The end, or [`Error::RunEnd`] naming one with no Python class:
+    /// The end, or [`Error::Unmapped`] naming one with no Python class:
     /// a step limit's (`run_limited` takes none), an intercepted
     /// exception's (`run_limited` answers it within the run), or one the
     /// bindings do not know.
@@ -277,7 +277,7 @@ impl TryFrom<End> for EndView {
             End::Fault(fault) => Self::Fault {
                 fault: FaultStopView(fault),
             },
-            other => return Err(Error::RunEnd(other.to_string())),
+            other => return Err(Error::run_end(other)),
         })
     }
 }
@@ -1097,7 +1097,7 @@ impl Target for Debugged<'_, '_> {
             End::Stop(stop) => stop.into(),
             End::Until | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
-            other => return Err(Error::RunEnd(other.to_string()).into()),
+            other => return Err(Error::run_end(other).into()),
         })
     }
 
@@ -1132,6 +1132,7 @@ mod tests {
     use crate::chip::ResetCause;
     use crate::chip::Stop;
     use crate::error::Error;
+    use crate::error::RUN_END;
     use crate::hooks::InvalidReason;
     use crate::peripherals::Output;
 
@@ -1197,7 +1198,9 @@ mod tests {
         let mapped: Vec<_> = ends.into_iter().map(EndView::try_from).collect();
         assert!(matches!(mapped[0], Ok(EndView::Until())));
         assert!(matches!(mapped[1], Ok(EndView::Instructions())));
-        assert!(matches!(&mapped[2], Err(Error::RunEnd(name)) if name == "steps"));
+        assert!(
+            matches!(&mapped[2], Err(Error::Unmapped { kind: RUN_END, name: Some(name) }) if name == "steps")
+        );
         assert!(matches!(
             mapped[3],
             Ok(EndView::Stop {
@@ -1205,7 +1208,9 @@ mod tests {
             })
         ));
         assert!(matches!(mapped[4], Ok(EndView::Fault { .. })));
-        assert!(matches!(&mapped[5], Err(Error::RunEnd(name)) if name == "intercepted"));
+        assert!(
+            matches!(&mapped[5], Err(Error::Unmapped { kind: RUN_END, name: Some(name) }) if name == "intercepted")
+        );
 
         let mut machine = Machine::new(32).unwrap();
         let hook = machine

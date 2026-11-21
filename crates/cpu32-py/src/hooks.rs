@@ -214,7 +214,7 @@ impl TryFrom<Invalid> for InvalidReason {
         Ok(match invalid {
             Invalid::BusError => Self::BusError,
             Invalid::Protected => Self::Protected,
-            _ => return Err(Error::Unmapped("invalid access")),
+            _ => return Err(Error::unmapped("invalid access")),
         })
     }
 }

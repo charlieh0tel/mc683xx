@@ -247,7 +247,7 @@ impl TryFrom<pwm::Output> for Output {
             pwm::Output::Clock { clocks } => Self::Clock {
                 clocks: clocks.map(u64::from),
             },
-            _ => return Err(Error::Unmapped("PWM output")),
+            _ => return Err(Error::unmapped("PWM output")),
         })
     }
 }

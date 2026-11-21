@@ -58,6 +58,7 @@ use crate::chip::TerminationView;
 use crate::control::BoardControlView;
 use crate::control::PacingView;
 use crate::error::Error;
+use crate::error::RUN_END;
 use crate::exceptions;
 use crate::exceptions::BusError;
 use crate::gdb::Ending;
@@ -89,7 +90,10 @@ impl From<Error> for PyErr {
             Error::Unknown { .. } | Error::Range { .. } => PyIndexError::new_err(message),
             Error::Budget(_) => PyOverflowError::new_err(message),
             Error::Built => PyRuntimeError::new_err(message),
-            Error::State(StateError::Unsupported(_)) | Error::Unmapped(_) => {
+            Error::Unmapped { kind: RUN_END, .. } | Error::Run(_) => {
+                exceptions::RunError::new_err(message)
+            }
+            Error::State(StateError::Unsupported(_)) | Error::Unmapped { .. } => {
                 PyNotImplementedError::new_err(message)
             }
             Error::State(_) => exceptions::StateError::new_err(message),
@@ -102,7 +106,6 @@ impl From<Error> for PyErr {
                 os_error(&path, error)
             }
             Error::Load(_) => exceptions::LoadError::new_err(message),
-            Error::Run(_) | Error::RunEnd(_) => exceptions::RunError::new_err(message),
             Error::Select(_)
             | Error::Input(_)
             | Error::Frame(_)

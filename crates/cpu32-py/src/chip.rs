@@ -521,7 +521,7 @@ impl Stop {
 impl TryFrom<cpu::Stop> for Stop {
     type Error = Error;
 
-    /// The stop, or [`Error::RunEnd`] naming one the bindings do not
+    /// The stop, or [`Error::Unmapped`] naming one the bindings do not
     /// know.
     fn try_from(stop: cpu::Stop) -> Result<Self, Error> {
         Ok(match stop {
@@ -538,7 +538,7 @@ impl TryFrom<cpu::Stop> for Stop {
                 entry: entry.into(),
             },
             cpu::Stop::Fault => Self::Fault(),
-            other => return Err(Error::RunEnd(other.to_string())),
+            other => return Err(Error::run_end(other)),
         })
     }
 }
@@ -562,12 +562,12 @@ pub(crate) enum Halt {
 impl TryFrom<cpu::Halt> for Halt {
     type Error = Error;
 
-    /// The halt, or [`Error::RunEnd`] naming one the bindings do not
+    /// The halt, or [`Error::Unmapped`] naming one the bindings do not
     /// know.
     fn try_from(halt: cpu::Halt) -> Result<Self, Error> {
         match halt {
             cpu::Halt::DoubleBusFault => Ok(Self::DoubleBusFault),
-            other => Err(Error::RunEnd(other.to_string())),
+            other => Err(Error::run_end(other)),
         }
     }
 }
@@ -614,7 +614,7 @@ impl TryFrom<sim::ResetCause> for ResetCause {
             sim::ResetCause::System => Self::System,
             sim::ResetCause::LossOfClock => Self::LossOfClock,
             sim::ResetCause::Test => Self::Test,
-            _ => return Err(Error::Unmapped("reset cause")),
+            _ => return Err(Error::unmapped("reset cause")),
         })
     }
 }
@@ -803,7 +803,7 @@ impl DsackFaultView {
             DsackFault::BusUnassigned { peripheral } => Ok(Self::BusUnassigned {
                 peripheral: peripheral.into(),
             }),
-            _ => Err(Error::Unmapped("DSACK fault")),
+            _ => Err(Error::unmapped("DSACK fault")),
         }
     }
 }
