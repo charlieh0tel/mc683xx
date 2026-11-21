@@ -220,6 +220,24 @@ pub enum LoadError {
     Build(Box<dyn std::error::Error + Send + Sync>),
 }
 
+/// Why a [`Description`] edit was refused.
+///
+/// [`Description`]: crate::description::Description
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum EditError {
+    /// The description has no peripheral of that name.
+    #[error("no peripheral {0:?}")]
+    Peripheral(String),
+    /// An endpoint that is not `peripheral.port` of a peripheral on the
+    /// board.
+    #[error("{0:?} is no peripheral's port on the board")]
+    Port(String),
+    /// An endpoint that is not `external.name`.
+    #[error("{0:?} is not an external endpoint, external.name")]
+    External(String),
+}
+
 /// Why a board file's TOML does not parse, or does not fit the schema:
 /// its line, column and what is wrong, as the message says.  Opaque:
 /// the parser is not part of the API.

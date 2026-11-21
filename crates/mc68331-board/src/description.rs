@@ -30,6 +30,7 @@ use mc683xx_modules::sim::reset::ResetScope;
 use mc683xx_target::address::Address;
 
 use crate::endpoint::Endpoint;
+use crate::error::EditError;
 use crate::error::LoadError;
 use crate::error::SyntaxError;
 use crate::peripheral::Lane;
@@ -288,26 +289,118 @@ pub struct Description {
 }
 
 impl Description {
+    /// Peripheral `name`'s entry, to edit.
+    fn peripheral_mut(&mut self, name: &str) -> Result<&mut PeripheralSpec, EditError> {
+        self.peripherals
+            .iter_mut()
+            .find(|spec| spec.name == name)
+            .ok_or_else(|| EditError::Peripheral(name.to_owned()))
+    }
+
+    /// The parameters of `peripheral`, the run's (`Options::parameters`)
+    /// merged over the file's, if the description has it.
+    #[must_use]
+    pub fn parameters(&self, peripheral: &str) -> Option<&ParameterTable> {
+        self.peripherals
+            .iter()
+            .find(|spec| spec.name == peripheral)
+            .map(|spec| &spec.parameters)
+    }
+
     /// Sets parameter `key` of `peripheral` to `value`, as
     /// [`Options::set_parameter`] does before the file is read: checked
     /// by the type's constructor when the board loads.
     ///
     /// # Errors
     ///
-    /// A description with no peripheral `peripheral` ([`LoadError::Peripheral`]).
+    /// A description with no peripheral `peripheral` ([`EditError::Peripheral`]).
     pub fn set_parameter(
         &mut self,
         peripheral: &str,
         key: impl Into<String>,
         value: impl Into<ParameterValue>,
-    ) -> Result<(), LoadError> {
-        let spec = self
-            .peripherals
-            .iter_mut()
-            .find(|spec| spec.name == peripheral)
-            .ok_or_else(|| LoadError::Peripheral(peripheral.to_owned()))?;
-        spec.parameters.insert(key.into(), value.into());
+    ) -> Result<(), EditError> {
+        self.peripheral_mut(peripheral)?
+            .parameters
+            .insert(key.into(), value.into());
         Ok(())
+    }
+
+    /// Removes parameter `key` of `peripheral`, giving its value if it
+    /// had one.
+    ///
+    /// # Errors
+    ///
+    /// A description with no peripheral `peripheral` ([`EditError::Peripheral`]).
+    pub fn remove_parameter(
+        &mut self,
+        peripheral: &str,
+        key: &str,
+    ) -> Result<Option<ParameterValue>, EditError> {
+        Ok(self.peripheral_mut(peripheral)?.parameters.remove(key))
+    }
+
+    /// Removes peripheral `name` from the board, as an option off would
+    /// leave it off: its net ends go, and a net left with no driver or no
+    /// sink goes with them.  An end to keep is rebound first
+    /// ([`Description::rebind`]).
+    ///
+    /// # Errors
+    ///
+    /// A description with no peripheral `name` ([`EditError::Peripheral`]).
+    pub fn remove_peripheral(&mut self, name: &str) -> Result<(), EditError> {
+        let index = self
+            .peripherals
+            .iter()
+            .position(|spec| spec.name == name)
+            .ok_or_else(|| EditError::Peripheral(name.to_owned()))?;
+        self.peripherals.remove(index);
+        let of_other = |end: &Endpoint| !matches!(end, Endpoint::Peripheral { peripheral, .. } if peripheral == name);
+        for net in &mut self.nets {
+            net.from.retain(of_other);
+            net.to.retain(of_other);
+        }
+        self.nets
+            .retain(|net| !net.from.is_empty() && !net.to.is_empty());
+        Ok(())
+    }
+
+    /// Moves every net end at `endpoint`, a peripheral's port
+    /// (`peripheral.port`), to `external`, a run-time endpoint
+    /// (`external.name`) the host binds: a part the host stands in for
+    /// (a real GPS engine for a modeled one), whose peripheral it then
+    /// removes ([`Description::remove_peripheral`]).  The ends moved,
+    /// none for a port on no net.  The board's load checks the external
+    /// endpoint against its nets as it checks the file's.
+    ///
+    /// # Errors
+    ///
+    /// An `endpoint` that is not a port of a peripheral the description
+    /// has ([`EditError::Port`]), or an `external` that is not
+    /// `external.name` ([`EditError::External`]).
+    pub fn rebind(&mut self, endpoint: &str, external: &str) -> Result<usize, EditError> {
+        let from = Endpoint::parse(endpoint)
+            .filter(|parsed| match parsed {
+                Endpoint::Peripheral { peripheral, .. } => {
+                    self.peripherals.iter().any(|spec| spec.name == *peripheral)
+                }
+                Endpoint::Chip(_) | Endpoint::External(_) => false,
+            })
+            .ok_or_else(|| EditError::Port(endpoint.to_owned()))?;
+        let to = Endpoint::parse(external)
+            .filter(|parsed| matches!(parsed, Endpoint::External(_)))
+            .ok_or_else(|| EditError::External(external.to_owned()))?;
+        let mut moved = 0;
+        for end in self
+            .nets
+            .iter_mut()
+            .flat_map(|net| net.from.iter_mut().chain(&mut net.to))
+            .filter(|end| **end == from)
+        {
+            end.clone_from(&to);
+            moved += 1;
+        }
+        Ok(moved)
     }
 
     /// The board file at `path`, its images read and every name

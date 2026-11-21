@@ -1365,7 +1365,16 @@ is the load's `LoadError::Image`.  `Board::load_with(&description,
 &registry, environment, read)` is `Board::load` with each peripheral
 path parameter's bytes (`Context::contents`) from the same kind of
 `read`, an error the load's `LoadError::Parameter`: a closure over the
-host's bytes passes to both, `&read` to the first.  `board.chip()` is the chip itself, an `&Mc68331` with
+host's bytes passes to both, `&read` to the first.  A parsed
+`Description` is edited before it loads, so a host need not rewrite
+the file's TOML: `parameters(peripheral)`, `set_parameter(peripheral,
+key, value)` and `remove_parameter(peripheral, key)`;
+`rebind("gps.rx", "external.gps")` moves every net end at a
+peripheral's port to a run-time endpoint the host binds (the ends
+moved, none for a port on no net); `remove_peripheral(name)` takes a
+part off as an option off would, its net ends and any net left with no
+driver or no sink going with it.  Each refuses a name the description
+lacks (`error::EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
 every method of the chip's.  `Chip` is sealed: a host names it in a
 bound (`Board<C: Chip>`) and calls its methods (`cpu`, `now`,
 `memory`, `halted`, the resets, `save`), but cannot implement it, nor

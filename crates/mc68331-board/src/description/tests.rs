@@ -23,6 +23,7 @@ use super::Target;
 use crate::board::Board;
 use crate::builtin::Fixed;
 use crate::endpoint::Endpoint;
+use crate::error::EditError;
 use crate::error::LoadError;
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
@@ -221,10 +222,21 @@ fn a_run_sets_parameters_over_the_files() {
         description.peripherals[0].parameters["value"],
         ParameterValue::Integer(3)
     );
-    assert!(matches!(
+    assert_eq!(
         description.set_parameter("z", "value", 3),
-        Err(LoadError::Peripheral(peripheral)) if peripheral == "z"
-    ));
+        Err(EditError::Peripheral("z".to_owned()))
+    );
+    assert_eq!(
+        description.remove_parameter("d", "keep"),
+        Ok(Some(ParameterValue::from("k")))
+    );
+    assert_eq!(description.remove_parameter("d", "keep"), Ok(None));
+    assert!(!description.parameters("d").unwrap().contains_key("keep"));
+    assert_eq!(description.parameters("z"), None);
+    assert_eq!(
+        description.remove_parameter("z", "keep"),
+        Err(EditError::Peripheral("z".to_owned()))
+    );
     options.set("z.value=1").unwrap();
     assert!(matches!(
         Description::parse(text, Path::new("."), &options),
@@ -300,6 +312,63 @@ fn net_ends_are_checked_against_the_registry_s_ports() {
         probed("port = \"tip\", stray = 1"),
         Err(LoadError::Parameter { peripheral, .. }) if peripheral == "p"
     ));
+}
+
+#[test]
+fn a_host_stands_in_for_a_peripheral_through_an_external_endpoint() {
+    let mut description = parse(&with(
+        "[[peripheral]]\nname = \"osc\"\ntype = \"clock\"\nparameters = { hz = 10 }\n\
+         [[peripheral]]\nname = \"div\"\ntype = \"divider\"\nparameters = { divide = 2 }\n\
+         [[peripheral]]\nname = \"count\"\ntype = \"edge-counter\"\n\
+         [[net]]\nname = \"c\"\ntype = \"clock\"\nfrom = \"osc.out\"\nto = [\"div.in\"]\n\
+         [[net]]\nname = \"e\"\ntype = \"edge\"\nfrom = \"div.out\"\nto = [\"count.in\", \"external.scope\"]\n",
+    ))
+    .unwrap();
+    assert_eq!(description.rebind("div.out", "external.divided"), Ok(1));
+    assert_eq!(description.rebind("div.unwired", "external.divided"), Ok(0));
+    description.remove_peripheral("div").unwrap();
+    assert_eq!(
+        description
+            .nets
+            .iter()
+            .map(|net| net.name.as_str())
+            .collect::<Vec<_>>(),
+        ["e"],
+        "net c, its sink gone, goes"
+    );
+    assert_eq!(
+        description.nets[0].from,
+        [Endpoint::External("divided".to_owned())]
+    );
+    assert_eq!(
+        description
+            .peripherals()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>(),
+        ["osc", "count"]
+    );
+    Board::<Mc68331>::load(
+        &description,
+        &Registry::with_builtins(),
+        Environment::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        description.remove_peripheral("div"),
+        Err(EditError::Peripheral("div".to_owned()))
+    );
+    assert_eq!(
+        description.rebind("div.out", "external.x"),
+        Err(EditError::Port("div.out".to_owned()))
+    );
+    assert_eq!(
+        description.rebind("chip.PGP0", "external.x"),
+        Err(EditError::Port("chip.PGP0".to_owned()))
+    );
+    assert_eq!(
+        description.rebind("count.in", "osc.out"),
+        Err(EditError::External("osc.out".to_owned()))
+    );
 }
 
 #[test]
