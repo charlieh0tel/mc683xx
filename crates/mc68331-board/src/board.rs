@@ -33,7 +33,6 @@ use mc683xx_cpu32::cpu::state::decode_layer;
 use mc683xx_cpu32::cpu::state::encode_layer;
 use mc683xx_cpu32::cpu::state::restore_each;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
@@ -718,11 +717,7 @@ impl<C: Chip> Board<C> {
             };
             let plan = MemoryPlan {
                 bytes: memory.bytes.clone(),
-                kind: if memory.writable {
-                    MemoryKind::Ram
-                } else {
-                    MemoryKind::Rom
-                },
+                kind: memory.kind,
                 place,
                 reload: memory.reload,
             };

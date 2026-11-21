@@ -21,6 +21,7 @@ use serde::de::DeserializeOwned;
 
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::interrupt::IrqPin;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
@@ -152,8 +153,8 @@ pub(crate) struct MemorySpec {
     pub(crate) name: String,
     /// Its contents.
     pub(crate) bytes: Vec<u8>,
-    /// Whether writes reach it.
-    pub(crate) writable: bool,
+    /// ROM or RAM: whether writes reach it.
+    pub(crate) kind: MemoryKind,
     /// Its selects; none at a fixed address.
     pub(crate) pins: Vec<ChipSelect>,
     /// Its fixed address, emulator-only, in place of selects.
@@ -1005,7 +1006,7 @@ fn read_memory(
         return Ok(MemorySpec {
             name: name.clone(),
             bytes,
-            writable: entry.writable,
+            kind: entry.kind(),
             pins: Vec::new(),
             base: Some(base),
             timing: (port, termination),
@@ -1064,7 +1065,7 @@ fn read_memory(
     Ok(MemorySpec {
         name: name.clone(),
         bytes,
-        writable: entry.writable,
+        kind: entry.kind(),
         pins,
         base: None,
         timing: (PortSize::Bits16, Termination::Fast),

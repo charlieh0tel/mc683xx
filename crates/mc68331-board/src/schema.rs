@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use mc683xx_cpu32::memory::MemoryKind;
 use serde::Deserialize;
 
 use crate::peripheral::Lane;
@@ -115,6 +116,17 @@ pub(crate) struct Memory {
     pub(crate) wait_states: Option<u8>,
     /// The resets that reload its contents, none if absent.
     pub(crate) reload: Option<Vec<Cause>>,
+}
+
+impl Memory {
+    /// RAM if writes reach it, else ROM.
+    pub(crate) const fn kind(&self) -> MemoryKind {
+        if self.writable {
+            MemoryKind::Ram
+        } else {
+            MemoryKind::Rom
+        }
+    }
 }
 
 /// The address lines of an attachment: a count from ADDR0, or a list,
