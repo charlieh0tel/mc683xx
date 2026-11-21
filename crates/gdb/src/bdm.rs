@@ -34,11 +34,19 @@ use crate::target::TargetRun;
 const POLL_TICK: Duration = Duration::from_millis(1);
 
 /// A [`Cpu32Target`] as the stub's [`Target`], borrowed for a session:
-/// `serve(&mut Bdm(&mut pod), connection)`.
+/// `serve(&mut Bdm::new(&mut pod), connection)`.
 #[derive(Debug)]
-pub struct Bdm<'t, T>(pub &'t mut T);
+pub struct Bdm<'t, T> {
+    /// The target.
+    target: &'t mut T,
+}
 
-impl<T: Cpu32Target> Bdm<'_, T> {
+impl<'t, T: Cpu32Target> Bdm<'t, T> {
+    /// `target` as the stub's [`Target`].
+    pub fn new(target: &'t mut T) -> Self {
+        Self { target }
+    }
+
     /// The size to move `length` bytes at `address` in: words if both
     /// are even, else bytes.
     fn size(address: Address, length: usize) -> Size {
@@ -54,7 +62,9 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
     type Error = T::Error;
 
     fn read_register(&mut self, register: Register) -> Result<u32, AccessError<T::Error>> {
-        self.0.read_register(register).map_err(AccessError::Target)
+        self.target
+            .read_register(register)
+            .map_err(AccessError::Target)
     }
 
     fn write_register(
@@ -62,7 +72,7 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
         register: Register,
         value: u32,
     ) -> Result<(), AccessError<T::Error>> {
-        self.0
+        self.target
             .write_register(register, value)
             .map_err(AccessError::Target)
     }
@@ -71,7 +81,7 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
         &mut self,
         register: SystemRegister,
     ) -> Result<u32, AccessError<T::Error>> {
-        self.0
+        self.target
             .read_system_register(register)
             .map_err(AccessError::Target)
     }
@@ -81,7 +91,7 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
         register: SystemRegister,
         value: u32,
     ) -> Result<(), AccessError<T::Error>> {
-        self.0
+        self.target
             .write_system_register(register, value)
             .map_err(AccessError::Target)
     }
@@ -95,7 +105,7 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
         data: &mut [u8],
     ) -> Result<usize, AccessError<T::Error>> {
         let size = Self::size(address, data.len());
-        self.0
+        self.target
             .read_memory(address, function_code, size, data)
             .map_err(AccessError::Target)?;
         Ok(data.len())
@@ -109,17 +119,17 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
         data: &[u8],
     ) -> Result<(), AccessError<T::Error>> {
         let size = Self::size(address, data.len());
-        self.0
+        self.target
             .write_memory(address, function_code, size, data)
             .map_err(AccessError::Target)
     }
 
     fn resume(&mut self) -> Result<(), T::Error> {
-        self.0.go()
+        self.target.go()
     }
 
     fn run_for(&mut self, _cycles: Cycles, _hit: &dyn Fn() -> bool) -> Result<TargetRun, T::Error> {
-        if let Some(entry) = self.0.halted()? {
+        if let Some(entry) = self.target.halted()? {
             return Ok(TargetRun::Background(entry));
         }
         thread::sleep(POLL_TICK);
@@ -127,7 +137,7 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
     }
 
     fn halt(&mut self) -> Result<TargetRun, T::Error> {
-        self.0.halt().map(TargetRun::Background)
+        self.target.halt().map(TargetRun::Background)
     }
 
     fn native_step(&mut self) -> Option<&mut dyn NativeStep<Error = T::Error>> {
@@ -135,7 +145,7 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
     }
 
     fn reset(&mut self) -> Result<bool, T::Error> {
-        self.0.reset_halted().map(|_| true)
+        self.target.reset_halted().map(|_| true)
     }
 }
 
@@ -143,6 +153,6 @@ impl<T: Cpu32Target> NativeStep for Bdm<'_, T> {
     type Error = T::Error;
 
     fn step(&mut self) -> Result<TargetRun, T::Error> {
-        self.0.step().map(TargetRun::Background)
+        self.target.step().map(TargetRun::Background)
     }
 }

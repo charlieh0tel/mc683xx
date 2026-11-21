@@ -164,7 +164,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   ends the session as a `Protocol` error.  With the `board` feature, `conditions` gives
   the target's stop conditions (`mc683xx_board::condition::Conditions`,
   a board's; none by default), for `monitor stop`.
-- `bdm::Bdm(&mut target)` is any `mc683xx_target::Cpu32Target` as a
+- `bdm::Bdm::new(&mut target)` is any `mc683xx_target::Cpu32Target` as a
   `Target`: no `with_cpu`, its own registers, memory, run control and
   step.  What a target gives decides what gdb gets:
 
@@ -354,7 +354,7 @@ peripherals).
 
 ## Over BDM
 
-`serve(&mut Bdm(&mut target), connection)` serves gdb over a
+`serve(&mut Bdm::new(&mut target), connection)` serves gdb over a
 `mc683xx_target::Cpu32Target`: what a debugger has of a CPU32 through
 its background debug mode.  A host that drives a 68331 through a BDM
 pod implements the trait and serves gdb this way; the emulated chip

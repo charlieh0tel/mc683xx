@@ -187,7 +187,7 @@ fn session(
     Vec<String>,
 ) {
     let output = Rc::new(RefCell::new(Vec::new()));
-    let ending = serve(&mut Bdm(target), Wire::new(script, &output));
+    let ending = serve(&mut Bdm::new(target), Wire::new(script, &output));
     let replies = replies(&output.borrow());
     (ending, replies)
 }
@@ -522,7 +522,7 @@ fn a_target_that_cannot_step_is_offered_no_step() {
     let output = Rc::new(RefCell::new(Vec::new()));
     let script = vec![packet("vCont?"), packet("s")];
     let ending = serve(
-        &mut unsteppable::Unsteppable(Bdm(&mut target)),
+        &mut unsteppable::Unsteppable(Bdm::new(&mut target)),
         Wire::new(script, &output),
     );
     let replies = replies(&output.borrow());

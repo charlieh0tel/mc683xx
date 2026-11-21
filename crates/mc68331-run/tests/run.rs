@@ -1467,7 +1467,7 @@ fn gdb_over(
     Vec<String>,
 ) {
     let output = Rc::new(RefCell::new(Vec::new()));
-    let ending = serve(&mut Bdm(cable), Wire::new(script, &output));
+    let ending = serve(&mut Bdm::new(cable), Wire::new(script, &output));
     let replies = replies(&output.borrow());
     (ending, replies)
 }
