@@ -1326,7 +1326,7 @@ impl BoardView {
     ) -> PyResult<BoardRunView> {
         let quantum = NonZeroSpan::new(Span::from_picos(quantum))
             .ok_or_else(|| PyValueError::new_err("give a quantum of 1 ps or more"))?;
-        let pacing = pacing.map(PacingView::pacing).transpose()?;
+        let pacing = pacing.map(PacingView::pacing);
         let control = self.board.control();
         let previous = control.pacing();
         if let Some(pacing) = pacing {

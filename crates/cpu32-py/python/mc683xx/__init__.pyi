@@ -1342,8 +1342,8 @@ class Pacing:
 
     @final
     class Scaled(Pacing):
-        """`factor` board seconds a wall second: finite and above 0, or a
-        run or `set_pacing` given it raises `ValueError`."""
+        """`factor` board seconds a wall second: finite and above 0, or
+        building it raises `ValueError`."""
 
         __match_args__ = ("factor",)
         def __new__(cls, factor: float) -> Pacing.Scaled: ...

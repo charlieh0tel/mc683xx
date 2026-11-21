@@ -65,7 +65,7 @@ def observed(loaded: mc683xx.Board) -> list[tuple[str, int, object]]:
     return seen
 
 
-def test_pacing_names_and_factors(tmp_path: Path) -> None:
+def test_pacing_names_and_factors() -> None:
     assert mc683xx.Pacing.Unpaced().factor is None
     assert mc683xx.Pacing.RealTime().factor == 1.0
     assert mc683xx.Pacing.Scaled(2.0).factor == 2.0
@@ -75,14 +75,11 @@ def test_pacing_names_and_factors(tmp_path: Path) -> None:
     assert str(mc683xx.Pacing.Scaled(0.5)) == "0.5"
     assert repr(mc683xx.Pacing.Scaled(2.0)) == "Pacing.Scaled(2.0)"
     assert repr(mc683xx.Pacing.Unpaced()) == "Pacing.Unpaced()"
-    loaded = board(tmp_path)
-    for factor in [0.0, -1.0, float("inf"), float("nan")]:
+    for factor in [0.0, -0.0, -1.0, float("inf"), float("nan")]:
         with pytest.raises(ValueError, match="pacing factor"):
             mc683xx.Pacing.parse(str(factor))
         with pytest.raises(ValueError, match="pacing factor"):
-            loaded.control().set_pacing(mc683xx.Pacing.Scaled(factor))
-        with pytest.raises(ValueError, match="pacing factor"):
-            loaded.run_for(seconds=0.001, pacing=mc683xx.Pacing.Scaled(factor))
+            mc683xx.Pacing.Scaled(factor)
     with pytest.raises(ValueError, match="no pacing"):
         mc683xx.Pacing.parse("fast")
 
@@ -106,6 +103,13 @@ def test_a_pacing_matches_by_its_variant() -> None:
 def test_a_pacing_hashes_as_it_compares() -> None:
     assert hash(mc683xx.Pacing.parse("realtime")) == hash(mc683xx.Pacing.RealTime())
     assert hash(mc683xx.Pacing.parse("0.5")) == hash(mc683xx.Pacing.Scaled(0.5))
+    for one, other in [
+        (mc683xx.Pacing.Scaled(2.0), mc683xx.Pacing.Scaled(2)),
+        (mc683xx.Pacing.Scaled(0.5), mc683xx.Pacing.parse("0.5")),
+        (mc683xx.Pacing.RealTime(), mc683xx.Pacing.parse("realtime")),
+    ]:
+        assert one == other
+        assert hash(one) == hash(other)
     pacings = {
         mc683xx.Pacing.Unpaced(),
         mc683xx.Pacing.RealTime(),

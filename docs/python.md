@@ -1179,8 +1179,9 @@ Front ends):
 - `Pacing` is Rust's `pacing::Pacing`, a class per variant, matched as
   `Stop` is: `Pacing.Unpaced()` (the default), `Pacing.RealTime()`,
   `Pacing.Scaled(factor)` (board seconds a wall second; one not finite
-  or not above 0 raises `ValueError` where a run or `set_pacing` takes
-  it), or `Pacing.parse(text)` from `unpaced`, `realtime` or a factor,
+  or not above 0, -0.0 among them, raises `ValueError`, so equal
+  pacings hash equal), or `Pacing.parse(text)` from `unpaced`,
+  `realtime` or a factor,
   the runner's `--pace` (its `str` is that text); `factor` is `None`
   unpaced, 1.0 at real time.  It compares and hashes by value, so it
   may key a dict (`Scaled(1.0)` is not `RealTime()`).
