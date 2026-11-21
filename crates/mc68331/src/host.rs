@@ -10,6 +10,7 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Space;
+use mc683xx_cpu32::memory::Unserved;
 use mc683xx_modules::module;
 use mc683xx_modules::module::Peek;
 use mc683xx_modules::sim::BLOCK;
@@ -25,11 +26,6 @@ use crate::chip::Mc68331;
 
 /// Bits in a word cycle, the most a cycle carries: a long is two.
 const WORD_BITS: u32 = 16;
-
-/// A byte a debugger's write cannot reach: not memory the core serves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("{0} is not memory the core serves")]
-pub struct Unserved(pub Address);
 
 /// Why a host's cycle or peek did not give a value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]

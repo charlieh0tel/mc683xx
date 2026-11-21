@@ -5,7 +5,6 @@ use std::rc::Rc;
 
 use super::Machine;
 use super::MapError;
-use super::Unmapped;
 use crate::bus::BusError;
 use crate::cpu::Stop;
 use crate::cpu::bare::End;
@@ -26,6 +25,7 @@ use crate::memory::PAGE_BYTES;
 use crate::memory::Page;
 use crate::memory::Permissions;
 use crate::memory::Space;
+use crate::memory::Unserved;
 use crate::peripheral::BusCycle;
 use crate::peripheral::MappedPeripheral;
 use crate::registers::status;
@@ -156,18 +156,18 @@ fn maps_do_not_overlap_and_unmapped_bytes_are_refused() {
     let mut buffer = [0; 4];
     assert_eq!(
         machine.read(Address(RAM - 2), &mut buffer),
-        Err(Unmapped(Address(RAM)))
+        Err(Unserved(Address(RAM)))
     );
     assert_eq!(
         machine.write(Address(RAM - 2), &[1; 4]),
-        Err(Unmapped(Address(RAM)))
+        Err(Unserved(Address(RAM)))
     );
     machine.read(Address(RAM - 4), &mut buffer).unwrap();
     assert_eq!(buffer, [0; 4], "a refused write writes nothing");
     machine.unmap(Address(0), RAM).unwrap();
     assert_eq!(
         machine.read(Address(0), &mut buffer),
-        Err(Unmapped(Address(0)))
+        Err(Unserved(Address(0)))
     );
     machine.map(Address(0), PAGE_BYTES, &[7]).unwrap();
     machine.read(Address(0), &mut buffer[..1]).unwrap();
@@ -352,7 +352,7 @@ fn unmap_leaves_the_bytes_of_a_region_the_host_mapped() {
     assert_eq!(spare_pages(&machine), [Some(0), Some(1), Some(2), Some(3)]);
     assert_eq!(
         machine.read(host_page(0), &mut byte),
-        Err(Unmapped(host_page(0)))
+        Err(Unserved(host_page(0)))
     );
 }
 

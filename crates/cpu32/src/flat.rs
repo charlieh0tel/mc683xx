@@ -42,6 +42,7 @@ use crate::memory::Page;
 use crate::memory::Permissions;
 use crate::memory::RegionId;
 use crate::memory::Space;
+use crate::memory::Unserved;
 use crate::peripheral::BusCycle;
 use crate::peripheral::MappedPeripheral;
 use crate::peripheral::PeripheralId;
@@ -86,11 +87,6 @@ pub enum MapError {
     #[error("peripherals overlap at {0:#x}")]
     Overlap(Address),
 }
-
-/// Host access to memory no map covers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("{0:#x} is not mapped")]
-pub struct Unmapped(pub Address);
 
 /// A peripheral with the addresses it covers.
 struct Wired {
@@ -493,9 +489,9 @@ impl Machine {
     }
 
     /// The region and offset of mapped byte `address`.
-    fn locate(&self, address: Address) -> Result<(Backing, usize), Unmapped> {
+    fn locate(&self, address: Address) -> Result<(Backing, usize), Unserved> {
         let page = self.cpu.memory.entry(Space::Supervisor, address);
-        let backing = page.read.ok_or(Unmapped(address))?;
+        let backing = page.read.ok_or(Unserved(address))?;
         Ok((backing, (address.0 % PAGE_BYTES) as usize))
     }
 
@@ -504,8 +500,8 @@ impl Machine {
     ///
     /// # Errors
     ///
-    /// [`Unmapped`], with the first address not mapped, if any is not.
-    pub fn read(&self, address: Address, bytes: &mut [u8]) -> Result<(), Unmapped> {
+    /// [`Unserved`], with the first address not mapped, if any is not.
+    pub fn read(&self, address: Address, bytes: &mut [u8]) -> Result<(), Unserved> {
         let mut done = 0;
         while done < bytes.len() {
             let at = address.offset(done as u32);
@@ -525,7 +521,7 @@ impl Machine {
     /// # Errors
     ///
     /// As [`Machine::read`].
-    pub fn write(&mut self, address: Address, bytes: &[u8]) -> Result<(), Unmapped> {
+    pub fn write(&mut self, address: Address, bytes: &[u8]) -> Result<(), Unserved> {
         let mut spans = Vec::new();
         let mut done = 0;
         while done < bytes.len() {

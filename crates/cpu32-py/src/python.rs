@@ -81,7 +81,7 @@ impl From<Error> for PyErr {
             Error::Built => PyRuntimeError::new_err(message),
             Error::State(StateError::Unsupported(_)) => PyNotImplementedError::new_err(message),
             Error::State(_) => exceptions::StateError::new_err(message),
-            Error::Access(AccessError::BusError | AccessError::Unmapped) | Error::Unmapped(_) => {
+            Error::Access(AccessError::BusError | AccessError::Unmapped) | Error::Unserved(_) => {
                 BusError::new_err(message)
             }
             Error::Access(AccessError::Unpeekable) => exceptions::UnpeekableError::new_err(message),

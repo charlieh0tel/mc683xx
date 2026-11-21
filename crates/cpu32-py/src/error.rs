@@ -3,9 +3,9 @@
 
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::flat::MapError;
-use mc683xx_cpu32::flat::Unmapped;
 use mc683xx_cpu32::interrupt::NoIrqPin;
 use mc683xx_cpu32::memory::MemoryError;
+use mc683xx_cpu32::memory::Unserved;
 use mc683xx_mc68331::chip::BuildError;
 use mc683xx_mc68331::debug::TargetError;
 use mc683xx_mc68331::host::AccessError;
@@ -105,9 +105,9 @@ pub(crate) enum Error {
     /// The bare CPU refused a map or a peripheral.
     #[error(transparent)]
     Map(#[from] MapError),
-    /// Host access to bytes no map covers.
+    /// Host access to bytes that are not memory the core serves.
     #[error(transparent)]
-    Unmapped(#[from] Unmapped),
+    Unserved(#[from] Unserved),
     /// The chip could not save, or refused a snapshot.
     #[error(transparent)]
     State(#[from] StateError),
