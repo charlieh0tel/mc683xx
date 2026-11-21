@@ -53,7 +53,6 @@ use crate::registry::repeated_port;
 use crate::registry::table_from_toml;
 use crate::schema;
 use crate::schema::Attachment;
-use crate::schema::Cause;
 use crate::schema::Dsack;
 use crate::schema::Endpoints;
 use crate::schema::FileRole;
@@ -1146,18 +1145,10 @@ fn check_fixed(memories: &[MemorySpec]) -> Result<(), LoadError> {
 }
 
 /// The resets `causes` name.
-fn scope(causes: &[Cause]) -> ResetScope {
-    causes.iter().fold(ResetScope::NONE, |scope, cause| {
-        scope.with(match cause {
-            Cause::External => ResetCause::External,
-            Cause::PowerOn => ResetCause::PowerOn,
-            Cause::Watchdog => ResetCause::Watchdog,
-            Cause::HaltMonitor => ResetCause::HaltMonitor,
-            Cause::System => ResetCause::System,
-            Cause::LossOfClock => ResetCause::LossOfClock,
-            Cause::Test => ResetCause::Test,
-        })
-    })
+fn scope(causes: &[ResetCause]) -> ResetScope {
+    causes
+        .iter()
+        .fold(ResetScope::NONE, |scope, &cause| scope.with(cause))
 }
 
 /// A decoder.

@@ -78,13 +78,16 @@ impl Time {
     /// there is such a time: [`None`] for a negative number, a NaN or one
     /// past the last time.
     #[must_use]
-    pub fn checked_from_seconds_f64(seconds: f64) -> Option<Self> {
-        Span::checked_from_seconds_f64(seconds).map(|span| Self(span.0))
+    pub const fn checked_from_seconds_f64(seconds: f64) -> Option<Self> {
+        match Span::checked_from_seconds_f64(seconds) {
+            Some(span) => Some(Self(span.0)),
+            None => None,
+        }
     }
 
     /// Its seconds since power-on, to an `f64`'s precision.
     #[must_use]
-    pub fn seconds_f64(self) -> f64 {
+    pub const fn seconds_f64(self) -> f64 {
         Span(self.0).seconds_f64()
     }
 
@@ -217,7 +220,7 @@ impl Span {
         clippy::cast_sign_loss,
         reason = "the cast saturates, and takes a NaN to zero"
     )]
-    pub fn from_seconds_f64(seconds: f64) -> Self {
+    pub const fn from_seconds_f64(seconds: f64) -> Self {
         Self((seconds * PICOSECONDS_PER_SECOND as f64) as u64)
     }
 
@@ -230,10 +233,14 @@ impl Span {
         clippy::cast_sign_loss,
         reason = "the picoseconds are checked to be in range first"
     )]
-    pub fn checked_from_seconds_f64(seconds: f64) -> Option<Self> {
+    pub const fn checked_from_seconds_f64(seconds: f64) -> Option<Self> {
         let picoseconds = seconds * PICOSECONDS_PER_SECOND as f64;
         // u64::MAX rounds up to 2^64, the first value past the range
-        (picoseconds >= 0.0 && picoseconds < u64::MAX as f64).then_some(Self(picoseconds as u64))
+        if picoseconds >= 0.0 && picoseconds < u64::MAX as f64 {
+            Some(Self(picoseconds as u64))
+        } else {
+            None
+        }
     }
 
     /// Its picoseconds.
@@ -244,7 +251,7 @@ impl Span {
 
     /// Its seconds, to an `f64`'s precision.
     #[must_use]
-    pub fn seconds_f64(self) -> f64 {
+    pub const fn seconds_f64(self) -> f64 {
         self.0 as f64 / PICOSECONDS_PER_SECOND as f64
     }
 

@@ -162,8 +162,11 @@ pub struct PeripheralAccess {
     /// Its lane: a peripheral on one lane sees byte accesses only, at the
     /// cycle's address on its lines.
     pub lane: Lane,
-    /// The attachment's `offset` plus the address on the peripheral's own
-    /// address pins: the ADDR lines its `lines` wire to them, in order.
+    /// The address the peripheral sees, local to it, not the CPU's: the
+    /// attachment's `offset` plus the address on the peripheral's own
+    /// address pins, the ADDR lines its `lines` wire to them, in order.
+    /// For a taken memory ([`Peripheral::memory_read`]), the offset in
+    /// the memory.
     pub address: u32,
     /// Byte or word, after dynamic bus sizing to the port: the select's
     /// field, or with an external DSACK the peripheral's DSACK pins'.
@@ -273,10 +276,10 @@ impl PeripheralAccess {
     /// DATA\[15:8\] for a word cycle (SIMRM 5.3.3), the lower byte not
     /// driven, as `written_byte` takes it.
     #[must_use]
-    pub fn read_byte(&self, byte: u8) -> u32 {
+    pub const fn read_byte(&self, byte: u8) -> u32 {
         match self.size {
-            Size::Byte => u32::from(byte),
-            Size::Word | Size::Long => u32::from(byte) << 8,
+            Size::Byte => byte as u32,
+            Size::Word | Size::Long => (byte as u32) << 8,
         }
     }
 }

@@ -167,6 +167,24 @@ impl fmt::Display for PortPin {
     }
 }
 
+/// The port pin its name, as it displays, names: `PE0`.
+impl FromStr for PortPin {
+    type Err = ParsePortPinError;
+
+    fn from_str(name: &str) -> Result<Self, ParsePortPinError> {
+        Port::ALL
+            .into_iter()
+            .flat_map(Self::all)
+            .find(|pin| pin.name() == name)
+            .ok_or_else(|| ParsePortPinError(name.to_owned()))
+    }
+}
+
+/// Text that names no MC68331 port pin.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no MC68331 port pin {0:?}")]
+pub struct ParsePortPinError(String);
+
 /// The pins `port` has.
 const fn port_pins(port: Port) -> u8 {
     match port {
@@ -819,6 +837,7 @@ mod tests {
 
     use super::PORT_C_PINS;
     use super::PORT_PINS;
+    use super::ParsePortPinError;
     use super::Pin;
     use super::PortPin;
     use crate::chip::ChipPin;
@@ -840,6 +859,18 @@ mod tests {
         for bad in ["IRQ0", "PC7", "PE8", "PE05", "NMI", ""] {
             assert!(bad.parse::<Pin>().is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn port_pins_show_as_they_parse() {
+        for pin in Port::ALL.into_iter().flat_map(PortPin::all) {
+            assert_eq!(pin.to_string().parse(), Ok(pin));
+        }
+        assert_eq!("PE0".parse(), Ok(PortPin::new(Port::E, 0).unwrap()));
+        assert_eq!(
+            "IRQ7".parse::<PortPin>(),
+            Err(ParsePortPinError("IRQ7".to_owned()))
+        );
     }
 
     #[test]

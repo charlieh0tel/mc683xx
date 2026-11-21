@@ -1144,7 +1144,7 @@ impl<C: Chip> Board<C> {
 
     /// The run's end after `outcome`, as a `stopped` record.
     #[must_use]
-    pub fn stopped(&self, outcome: BoardRun) -> StoppedRecord {
+    pub fn stopped_record(&self, outcome: BoardRun) -> StoppedRecord {
         StoppedRecord {
             cycle: self.chip.now(),
             instructions: self.chip.instructions(),

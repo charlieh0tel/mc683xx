@@ -665,10 +665,10 @@ pub enum RegistryError {
     #[error("peripheral type {0:?} is already registered")]
     Duplicate(String),
     /// Two ports of one type with one name.
-    #[error("peripheral type {kind:?} declares port {port:?} twice")]
+    #[error("peripheral type {peripheral_type:?} declares port {port:?} twice")]
     Port {
-        /// The type.
-        kind: String,
+        /// The type's name.
+        peripheral_type: String,
         /// The port.
         port: String,
     },
@@ -727,7 +727,7 @@ impl Registry {
         let name = name.into();
         if let Some(port) = repeated_port(&ports) {
             return Err(RegistryError::Port {
-                kind: name,
+                peripheral_type: name,
                 port: port.to_owned(),
             });
         }
@@ -890,7 +890,7 @@ mod tests {
         assert_eq!(
             registry.register("twice", ports, move |_| fixed()),
             Err(RegistryError::Port {
-                kind: "twice".to_owned(),
+                peripheral_type: "twice".to_owned(),
                 port: "a".to_owned()
             })
         );

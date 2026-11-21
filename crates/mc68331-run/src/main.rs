@@ -391,7 +391,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         let killed = ending == Ending::Killed;
         if killed || interrupted.load(Ordering::SeqCst) {
             let outcome = BoardRun::new(Stop::Requested, board.now());
-            eprintln!("{}", Line::new(CHIP, &board.stopped(outcome)));
+            eprintln!("{}", Line::new(CHIP, &board.stopped_record(outcome)));
             if let Some(saving) = saving.filter(|_| !killed) {
                 saving.save(&board)?;
             }
@@ -420,7 +420,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
             break outcome;
         }
     };
-    eprintln!("{}", Line::new(CHIP, &board.stopped(outcome)));
+    eprintln!("{}", Line::new(CHIP, &board.stopped_record(outcome)));
     if let Some(fault) = board.chip().cpu().fault_stop() {
         eprintln!("mc683xx-run: stopped at {fault}");
     }

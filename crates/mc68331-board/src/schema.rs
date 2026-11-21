@@ -9,7 +9,10 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use mc683xx_cpu32::memory::MemoryKind;
+use mc683xx_modules::sim::ResetCause;
 use serde::Deserialize;
+use serde::Deserializer;
+use serde::de::Error;
 
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
@@ -115,7 +118,8 @@ pub(crate) struct Memory {
     /// absent.
     pub(crate) wait_states: Option<u8>,
     /// The resets that reload its contents, none if absent.
-    pub(crate) reload: Option<Vec<Cause>>,
+    #[serde(default, deserialize_with = "causes")]
+    pub(crate) reload: Option<Vec<ResetCause>>,
 }
 
 impl Memory {
@@ -272,24 +276,17 @@ pub(crate) struct Alias {
     pub(crate) codes: BTreeMap<String, u32>,
 }
 
-/// A reset cause as the file names it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum Cause {
-    /// External.
-    External,
-    /// Power-on.
-    PowerOn,
-    /// Watchdog.
-    Watchdog,
-    /// Halt monitor.
-    HaltMonitor,
-    /// The `reset` instruction.
-    System,
-    /// Loss of clock.
-    LossOfClock,
-    /// The test submodule.
-    Test,
+/// Reset causes as the file names them, each as [`ResetCause`] parses
+/// it (`power-on`, `watchdog`).
+fn causes<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Vec<ResetCause>>, D::Error> {
+    Option::<Vec<String>>::deserialize(deserializer)?
+        .map(|names| {
+            names
+                .iter()
+                .map(|name| name.parse().map_err(D::Error::custom))
+                .collect()
+        })
+        .transpose()
 }
 
 /// The DSACK pins an externally terminated peripheral drives.
@@ -335,7 +332,8 @@ pub(crate) struct Peripheral {
     /// Its IRQ pin.
     pub(crate) irq: Option<u8>,
     /// The resets that reach it.
-    pub(crate) reset: Option<Vec<Cause>>,
+    #[serde(default, deserialize_with = "causes")]
+    pub(crate) reset: Option<Vec<ResetCause>>,
     /// The DSACK pins it drives.
     pub(crate) dsack: Option<Dsack>,
 }

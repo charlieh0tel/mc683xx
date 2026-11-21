@@ -170,7 +170,7 @@ impl Inspection {
 
     /// Whether it has no fields.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.fields.is_empty()
     }
 }
