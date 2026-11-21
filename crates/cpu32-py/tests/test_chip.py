@@ -534,6 +534,8 @@ def test_a_qspi_transfer_reaches_the_peripheral():
         clock.period,
     )
     chip.set_pins(mc683xx.Port.QS, 0xFF, 0xFF)
+    with pytest.raises(ValueError, match="port C has no inputs"):
+        chip.set_pins(mc683xx.Port.C, 0xFF, 0xFF)
     with pytest.raises(TypeError):
         mc683xx.Builder().qspi(object())
 

@@ -1991,8 +1991,8 @@ fn an_external_clock_board_uses_the_sci_and_the_gpt() {
     let tcnt = |chip: &mut Mc68331| cycle(chip, GPT + 0x0a, Size::Word, None).unwrap().0;
     let before = tcnt(&mut chip);
     chip.run_for(Cycles(16 * 100));
-    chip.set_pins(Port::Gp, 0, 1 << 1);
-    chip.set_pins(Port::Gp, 0xff, 0xff);
+    chip.set_pins(Port::Gp, 0, 1 << 1).unwrap();
+    chip.set_pins(Port::Gp, 0xff, 0xff).unwrap();
     let captured = cycle(&mut chip, GPT + 0x10, Size::Word, None).unwrap().0;
     assert!(
         captured >= before + 100 && captured <= before + 102,
@@ -2302,9 +2302,13 @@ fn the_host_sees_each_port_edge_and_drives_the_inputs() {
     program.extend(load_word(SIM + 0x10, 0));
     program.push(BRANCH_TO_SELF);
     let (mut chip, _) = booting(&program);
-    chip.set_pins(Port::E, 0x00, 0xff);
-    chip.set_pins(Port::E, 0x02, 0x02);
-    chip.set_pins(Port::C, 0x00, 0xff);
+    chip.set_pins(Port::E, 0x00, 0xff).unwrap();
+    chip.set_pins(Port::E, 0x02, 0x02).unwrap();
+    assert_eq!(
+        chip.set_pins(Port::C, 0x00, 0xff)
+            .map_err(|error| error.port()),
+        Err(Port::C)
+    );
     chip.run_for(Cycles(2000));
     assert_eq!(chip.cpu().registers.data[0] & 0xff, 0x02);
     assert_eq!(

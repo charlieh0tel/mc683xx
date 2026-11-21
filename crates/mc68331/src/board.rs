@@ -59,6 +59,7 @@ use crate::event::ChipTracing;
 use crate::event::DsackFault;
 use crate::event::Event;
 use crate::gpt::Gpt;
+use crate::port::NoInputsError;
 use crate::port::Port;
 use crate::port::PortChange;
 use mc683xx_cpu32::bus::StopRequest;
@@ -357,11 +358,17 @@ impl Board {
     }
 
     /// The board drives the pins of `port` in `mask` to their levels in
-    /// `value` at `now`, the others as they were.
-    pub(crate) fn set_pins(&mut self, port: Port, value: u8, mask: u8, now: Cycles) {
+    /// `value` at `now`, the others as they were; port C has no inputs.
+    pub(crate) fn set_pins(
+        &mut self,
+        port: Port,
+        value: u8,
+        mask: u8,
+        now: Cycles,
+    ) -> Result<(), NoInputsError> {
         let pins = self.port(port).pins & !mask | value & mask;
         match port {
-            Port::C => {}
+            Port::C => return Err(NoInputsError { port }),
             Port::E => {
                 self.modules_changed();
                 self.sim.set_pins(PortName::E, value, mask);
@@ -373,6 +380,7 @@ impl Board {
             Port::Gp => self.module_mut::<Gpt>(GPT).set_port_pins(pins, now),
             Port::Qs => self.module_mut::<Qsm>(QSM).set_port_pins(pins, now),
         }
+        Ok(())
     }
 
     /// The changes in what each port drives since the last call, in

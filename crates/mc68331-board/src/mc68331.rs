@@ -464,7 +464,7 @@ impl ChipBuilder for Mc68331Builder {
             (Port::Gp, pins.gp),
         ] {
             if let Some(levels) = levels {
-                chip.set_pins(port, levels, u8::MAX);
+                chip.set_pins(port, levels, u8::MAX).expect("an input port");
             }
         }
         if let Some(pai) = pins.pai {
@@ -638,7 +638,8 @@ impl chip::Chip for Mc68331 {
             }
             (Pin::PortE(_) | Pin::PortF(_) | Pin::PortQs(_), Signal::Level(level)) => {
                 if let Some((port, bit)) = pin.port() {
-                    self.set_pins(port, if level { u8::MAX } else { 0 }, 1 << bit);
+                    self.set_pins(port, if level { u8::MAX } else { 0 }, 1 << bit)
+                        .expect("an input port");
                 }
             }
             (Pin::Irq(irq), Signal::Level(level)) => self.set_interrupt_pin(irq, !level),

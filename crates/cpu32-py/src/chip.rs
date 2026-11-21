@@ -42,6 +42,7 @@ use pyo3::PyResult;
 use pyo3::PyTraverseError;
 use pyo3::PyVisit;
 use pyo3::Python;
+use pyo3::exceptions::PyValueError;
 use pyo3::pybacked::PyBackedBytes;
 use pyo3::pyclass;
 use pyo3::pymethods;
@@ -1425,9 +1426,12 @@ chip_methods! {
     }
 
     /// The board drives the pins of `port` in `mask` to their levels in
-    /// `value` now, the others as they were; port C has no inputs.
+    /// `value` now, the others as they were; port C, with no inputs,
+    /// raises `ValueError`.
     fn set_pins(&mut self, port: PortView, value: u8, mask: u8) -> PyResult<()> {
-        self.chip.set_pins(port.into(), value, mask);
+        self.chip
+            .set_pins(port.into(), value, mask)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
         self.pending.check()
     }
 

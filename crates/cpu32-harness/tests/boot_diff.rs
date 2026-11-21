@@ -1072,7 +1072,8 @@ fn run_chip(
             // takes it (GPTRM 6.1)
             captures.pop_front();
             let level = driven[GP].unwrap_or_default();
-            chip.set_pins(ChipPort::Gp, level | IC1, u8::MAX);
+            chip.set_pins(ChipPort::Gp, level | IC1, u8::MAX)
+                .expect("an input port");
             driven[GP] = Some(level);
         }
         let pc = chip.cpu().registers.pc;
@@ -1083,7 +1084,8 @@ fn run_chip(
             run
         };
         if capture {
-            chip.set_pins(ChipPort::Gp, driven[GP].unwrap_or_default(), u8::MAX);
+            chip.set_pins(ChipPort::Gp, driven[GP].unwrap_or_default(), u8::MAX)
+                .expect("an input port");
         }
         let origin = chip.instructions();
         for event in chip.take_events() {
@@ -1216,9 +1218,15 @@ fn drive_pins(
         }
         driven[port] = Some(level);
         match port {
-            0 => chip.set_pins(ChipPort::E, level, u8::MAX),
-            1 => chip.set_pins(ChipPort::F, level, u8::MAX),
-            GP => chip.set_pins(ChipPort::Gp, level, u8::MAX),
+            0 => chip
+                .set_pins(ChipPort::E, level, u8::MAX)
+                .expect("an input port"),
+            1 => chip
+                .set_pins(ChipPort::F, level, u8::MAX)
+                .expect("an input port"),
+            GP => chip
+                .set_pins(ChipPort::Gp, level, u8::MAX)
+                .expect("an input port"),
             _ => {
                 chip.set_pai(level & PACTL_PAIS != 0);
                 chip.set_pclk(level & PACTL_PCLKS != 0);

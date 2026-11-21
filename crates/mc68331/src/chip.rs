@@ -76,6 +76,7 @@ use crate::gpt::Input;
 use crate::gpt::PwmChange;
 use crate::gpt::pwm::Channel;
 use crate::gpt::pwm::Output;
+use crate::port::NoInputsError;
 use crate::port::Port;
 use crate::port::PortChange;
 use mc683xx_modules::sim::chip_selects::Dsack;
@@ -1228,11 +1229,15 @@ impl Mc68331 {
 
     /// The board drives the pins of `port` in `mask` to their levels in
     /// `value` now, the others as they were: an input capture on port
-    /// GP takes a selected edge (GPTRM 3.2).  Port C has no inputs;
-    /// driving it does nothing.
-    pub fn set_pins(&mut self, port: Port, value: u8, mask: u8) {
+    /// GP takes a selected edge (GPTRM 3.2).
+    ///
+    /// # Errors
+    ///
+    /// [`NoInputsError`] for port C, which has no inputs, driving
+    /// nothing.
+    pub fn set_pins(&mut self, port: Port, value: u8, mask: u8) -> Result<(), NoInputsError> {
         let now = self.now;
-        self.board.set_pins(port, value, mask, now);
+        self.board.set_pins(port, value, mask, now)
     }
 
     /// The changes in what each port drives since the last call, in time
