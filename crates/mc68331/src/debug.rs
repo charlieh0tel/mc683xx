@@ -212,7 +212,7 @@ impl Mc68331 {
         };
         let sp = self.read_register(Register::A7)?.wrapping_sub(4);
         let rpc = self.read_system_register(SystemRegister::Rpc)?;
-        self.write_memory(Address(sp), space, Size::Long, &rpc.to_be_bytes())?;
+        self.write_memory(Address(sp), Size::Long, space, &rpc.to_be_bytes())?;
         self.write_register(Register::A7, sp)?;
         self.write_system_register(SystemRegister::Rpc, address.0)?;
         self.go()
@@ -323,8 +323,8 @@ impl Cpu32Target for Mc68331 {
     fn read_memory(
         &mut self,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<(), TargetError> {
         self.command()?;
@@ -341,8 +341,8 @@ impl Cpu32Target for Mc68331 {
     fn write_memory(
         &mut self,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         data: &[u8],
     ) -> Result<(), TargetError> {
         self.command()?;

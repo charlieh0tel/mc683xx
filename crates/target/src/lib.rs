@@ -162,8 +162,8 @@ pub trait Cpu32Target {
     fn read_memory(
         &mut self,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<(), Self::Error>;
 
@@ -177,8 +177,8 @@ pub trait Cpu32Target {
     fn write_memory(
         &mut self,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         data: &[u8],
     ) -> Result<(), Self::Error>;
 }

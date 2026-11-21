@@ -131,18 +131,18 @@ impl Cpu32Target for Running {
     fn read_memory(
         &mut self,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<(), TargetError> {
-        self.0.read_memory(address, function_code, size, data)
+        self.0.read_memory(address, size, function_code, data)
     }
 
     fn write_memory(
         &mut self,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         data: &[u8],
     ) -> Result<(), TargetError> {
         if self.2 == Some(address.0) && data != BGND {
@@ -154,10 +154,10 @@ impl Cpu32Target for Running {
         {
             self.4 = None;
             self.0
-                .write_memory(address, function_code, Size::Byte, &data[..1])?;
+                .write_memory(address, Size::Byte, function_code, &data[..1])?;
             return Err(TargetError::NotHalted);
         }
-        self.0.write_memory(address, function_code, size, data)
+        self.0.write_memory(address, size, function_code, data)
     }
 }
 
@@ -203,8 +203,8 @@ fn word(target: &mut Running, address: u32) -> [u8; 2] {
     target
         .read_memory(
             Address(address),
-            FunctionCode::SUPERVISOR_DATA,
             Size::Word,
+            FunctionCode::SUPERVISOR_DATA,
             &mut word,
         )
         .unwrap();

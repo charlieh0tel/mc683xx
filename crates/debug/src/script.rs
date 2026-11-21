@@ -684,7 +684,7 @@ fn read<T: Cpu32Target>(
 ) -> Result<u32, CommandError<T::Error>> {
     let (mut buffer, start) = big_endian(0, size);
     target
-        .read_memory(address, function_code, size, &mut buffer[start..])
+        .read_memory(address, size, function_code, &mut buffer[start..])
         .map_err(CommandError::Target)?;
     Ok(u32::from_be_bytes(buffer))
 }
@@ -706,7 +706,7 @@ impl Command {
             } => {
                 let (buffer, start) = big_endian(value, size);
                 target
-                    .write_memory(address, function_code, size, &buffer[start..])
+                    .write_memory(address, size, function_code, &buffer[start..])
                     .map_err(CommandError::Target)
             }
             Self::WriteRegister { register, value } => target

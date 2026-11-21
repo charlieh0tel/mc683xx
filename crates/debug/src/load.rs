@@ -241,8 +241,8 @@ impl Image {
             target
                 .write_memory(
                     access.address,
-                    options.function_code,
                     access.size,
+                    options.function_code,
                     access.data,
                 )
                 .map_err(|error| LoadError::Write {
@@ -256,7 +256,7 @@ impl Image {
             for access in &planned {
                 let read = &mut read[..access.data.len()];
                 target
-                    .read_memory(access.address, options.function_code, access.size, read)
+                    .read_memory(access.address, access.size, options.function_code, read)
                     .map_err(|error| LoadError::Read {
                         address: access.address,
                         bytes: access.data.len(),

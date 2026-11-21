@@ -167,8 +167,8 @@ impl Cpu32Target for Mock {
     fn read_memory(
         &mut self,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<(), MockError> {
         let range = self.check(Call {
@@ -191,8 +191,8 @@ impl Cpu32Target for Mock {
     fn write_memory(
         &mut self,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         data: &[u8],
     ) -> Result<(), MockError> {
         let range = self.check(Call {

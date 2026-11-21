@@ -63,8 +63,8 @@ fn read(chip: &mut Mc68331, address: u32, length: usize) -> Vec<u8> {
     let mut data = vec![0; length];
     chip.read_memory(
         Address(address),
-        FunctionCode::SUPERVISOR_DATA,
         Size::Byte,
+        FunctionCode::SUPERVISOR_DATA,
         &mut data,
     )
     .unwrap();

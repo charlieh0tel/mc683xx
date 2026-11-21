@@ -108,7 +108,7 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
     ) -> Result<usize, AccessError<T::Error>> {
         let size = Self::size(address, data.len());
         self.target
-            .read_memory(address, function_code, size, data)
+            .read_memory(address, size, function_code, data)
             .map_err(AccessError::Target)?;
         Ok(data.len())
     }
@@ -122,7 +122,7 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
     ) -> Result<(), AccessError<T::Error>> {
         let size = Self::size(address, data.len());
         self.target
-            .write_memory(address, function_code, size, data)
+            .write_memory(address, size, function_code, data)
             .map_err(AccessError::Target)
     }
 

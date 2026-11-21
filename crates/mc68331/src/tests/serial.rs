@@ -205,8 +205,8 @@ fn memory_through_read_write_dump_and_fill() {
     let mut back = [0; 6];
     chip.read_memory(
         Address(RAM),
-        FunctionCode::SUPERVISOR_DATA,
         Size::Byte,
+        FunctionCode::SUPERVISOR_DATA,
         &mut back,
     )
     .unwrap();

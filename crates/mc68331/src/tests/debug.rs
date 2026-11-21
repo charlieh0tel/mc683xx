@@ -99,18 +99,18 @@ fn registers_and_memory_through_the_target() {
     );
     let data = [1, 2, 3, 4, 5, 6, 7, 8];
     for size in [Size::Byte, Size::Word, Size::Long] {
-        chip.write_memory(Address(RAM), FunctionCode::SUPERVISOR_DATA, size, &data)
+        chip.write_memory(Address(RAM), size, FunctionCode::SUPERVISOR_DATA, &data)
             .unwrap();
         let mut back = [0; 8];
-        chip.read_memory(Address(RAM), FunctionCode::SUPERVISOR_DATA, size, &mut back)
+        chip.read_memory(Address(RAM), size, FunctionCode::SUPERVISOR_DATA, &mut back)
             .unwrap();
         assert_eq!(back, data, "{size:?}");
     }
     let mut word = [0; 2];
     chip.read_memory(
         Address(START),
-        FunctionCode::SUPERVISOR_PROGRAM,
         Size::Word,
+        FunctionCode::SUPERVISOR_PROGRAM,
         &mut word,
     )
     .unwrap();
@@ -118,8 +118,8 @@ fn registers_and_memory_through_the_target() {
     assert!(matches!(
         chip.read_memory(
             Address(RAM),
-            FunctionCode::SUPERVISOR_DATA,
             Size::Long,
+            FunctionCode::SUPERVISOR_DATA,
             &mut [0; 3]
         ),
         Err(TargetError::Length { .. })
@@ -127,8 +127,8 @@ fn registers_and_memory_through_the_target() {
     assert!(matches!(
         chip.read_memory(
             Address(RAM + 1),
-            FunctionCode::SUPERVISOR_DATA,
             Size::Word,
+            FunctionCode::SUPERVISOR_DATA,
             &mut word
         ),
         Err(TargetError::Access { .. })
@@ -179,12 +179,12 @@ fn a_fault_on_go_s_first_fetch_is_its_own_exception() {
         .unwrap();
     chip.write_memory(
         Address(RAM + Vector::ADDRESS_ERROR.offset()),
-        space,
         Size::Long,
+        space,
         &handler.to_be_bytes(),
     )
     .unwrap();
-    chip.write_memory(Address(handler), space, Size::Word, &BGND.to_be_bytes())
+    chip.write_memory(Address(handler), Size::Word, space, &BGND.to_be_bytes())
         .unwrap();
     chip.write_system_register(SystemRegister::Ssp, RAM + 0x400)
         .unwrap();
@@ -208,8 +208,8 @@ fn a_step_stops_at_the_next_boundary_before_any_handler() {
         .unwrap();
     chip.write_memory(
         Address(RAM + Vector::trap(0).offset()),
-        space,
         Size::Long,
+        space,
         &handler.to_be_bytes(),
     )
     .unwrap();
@@ -253,8 +253,8 @@ const QSM: u32 = 0xff_fc00;
 fn store(chip: &mut Mc68331, address: u32, value: u16) {
     chip.write_memory(
         Address(address),
-        FunctionCode::SUPERVISOR_DATA,
         Size::Word,
+        FunctionCode::SUPERVISOR_DATA,
         &value.to_be_bytes(),
     )
     .unwrap();
@@ -275,8 +275,8 @@ fn a_stepped_lpstop_takes_a_module_interrupt_it_unmasks() {
         .unwrap();
     chip.write_memory(
         Address(RAM + Vector(0x40).offset()),
-        FunctionCode::SUPERVISOR_DATA,
         Size::Long,
+        FunctionCode::SUPERVISOR_DATA,
         &handler.to_be_bytes(),
     )
     .unwrap();
@@ -362,8 +362,8 @@ fn load(chip: &mut Mc68331, address: u32) -> u16 {
     let mut word = [0; 2];
     chip.read_memory(
         Address(address),
-        FunctionCode::SUPERVISOR_DATA,
         Size::Word,
+        FunctionCode::SUPERVISOR_DATA,
         &mut word,
     )
     .unwrap();
@@ -473,8 +473,8 @@ fn slow_access(chip: &mut Mc68331) -> (bool, bool) {
     let mut word = [0; 2];
     let read = chip.read_memory(
         Address(SLOW),
-        FunctionCode::SUPERVISOR_DATA,
         Size::Word,
+        FunctionCode::SUPERVISOR_DATA,
         &mut word,
     );
     assert!(
@@ -537,14 +537,14 @@ fn freeze_stops_the_bus_monitor_with_frzbm() {
         .iter()
         .flat_map(|word| word.to_be_bytes())
         .collect();
-    chip.write_memory(Address(program), space, Size::Word, &code)
+    chip.write_memory(Address(program), Size::Word, space, &code)
         .unwrap();
-    chip.write_memory(Address(handler), space, Size::Word, &BGND.to_be_bytes())
+    chip.write_memory(Address(handler), Size::Word, space, &BGND.to_be_bytes())
         .unwrap();
     chip.write_memory(
         Address(RAM + Vector::BUS_ERROR.offset()),
-        space,
         Size::Long,
+        space,
         &handler.to_be_bytes(),
     )
     .unwrap();
