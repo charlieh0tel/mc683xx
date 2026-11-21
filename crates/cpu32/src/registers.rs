@@ -65,7 +65,7 @@ impl Registers {
 
     /// Address register `number`, 0 to 7.
     #[must_use]
-    pub fn address(&self, number: usize) -> u32 {
+    pub const fn address(&self, number: usize) -> u32 {
         match number {
             Self::STACK_POINTER if self.is_supervisor() => self.ssp.0,
             Self::STACK_POINTER => self.usp.0,
@@ -74,7 +74,7 @@ impl Registers {
     }
 
     /// Sets address register `number`, 0 to 7.
-    pub fn set_address(&mut self, number: usize, value: u32) {
+    pub const fn set_address(&mut self, number: usize, value: u32) {
         match number {
             Self::STACK_POINTER if self.is_supervisor() => self.ssp = Address(value),
             Self::STACK_POINTER => self.usp = Address(value),

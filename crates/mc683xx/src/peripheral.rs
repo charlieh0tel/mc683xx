@@ -18,8 +18,8 @@ const IACK_LEVEL_SHIFT: u32 = 1;
 
 /// The address of an interrupt acknowledge cycle at `level`.
 #[must_use]
-pub fn iack_address(level: InterruptLevel) -> Address {
-    Address(IACK_ADDRESS | u32::from(level.get()) << IACK_LEVEL_SHIFT)
+pub const fn iack_address(level: InterruptLevel) -> Address {
+    Address(IACK_ADDRESS | (level.get() as u32) << IACK_LEVEL_SHIFT)
 }
 
 /// The cycles a peripheral on no chip select takes by its own decode of
