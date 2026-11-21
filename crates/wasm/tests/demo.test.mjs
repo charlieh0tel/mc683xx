@@ -153,6 +153,7 @@ test("a restore goes back", () => {
 
 test("mistakes throw the Rust error's message", () => {
   assert.throws(() => new Board(text, new Map()), /demo\.bin/);
+  assert.throws(() => new Board(text), /demo\.bin/);
   assert.throws(() => new Board(text, { "demo.bin": [1, 2] }), /not a Uint8Array/);
   assert.throws(
     () => new Board(text, new Map([[1, image]])),

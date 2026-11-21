@@ -106,13 +106,13 @@ package under `"module": "nodenext"`, which models Node's `require` of
 an ES module (TypeScript 5.8 and later); under `node16` it is an error
 (TS1479), and `await import("mc683xx")` is the way there.
 
-- `new Board(text, images, enabled = [])`: the board file `text`
+- `new Board(text, images = null, enabled = [])`: the board file `text`
   describes, through its power-on reset, built around the MC68331; its
   peripheral types the built-in ones and the stock peripherals'.
   `images` gives each image's bytes, a `[[memory]]`'s or a
   peripheral's (an AT28C64B's `image`), a `Map` or an object
   from the path the file names (as it names it), a string, to a
-  `Uint8Array`, `null` or `undefined` for none; the `Map` and the
+  `Uint8Array`, `null`, `undefined` or none given for none; the `Map` and the
   arrays of any realm, an iframe's too.  A file a peripheral keeps (an
   AT28C64B's `file`) is one the module cannot open, so such a board
   throws; `enabled` the board file's options to turn on.

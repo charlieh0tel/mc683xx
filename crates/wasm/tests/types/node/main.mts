@@ -10,6 +10,8 @@ const sameOutput: InitOutput = initSync(new Uint8Array() satisfies SyncInitInput
 
 function run(text: string, image: Uint8Array): [string, bigint, Uint8Array] {
   using board = new Board(text, new Map([["demo.bin", image]]), ["option"]);
+  // images may be left out.
+  new Board(text).free();
   const ran: BoardRun = board.runFor(1n);
   const framed: BoardRun = board.runFrame(performance.now(), 1_000_000_000n);
   board.send("console", new Uint8Array([0x0d]));
