@@ -701,6 +701,17 @@ impl FromStr for Script {
     }
 }
 
+/// The commands as a script writes them, one a line, which parses back
+/// to the same commands; comments and blank lines are not kept, so the
+/// line numbers then run from 1 with no gaps.
+impl fmt::Display for Script {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.lines
+            .iter()
+            .try_for_each(|line| writeln!(formatter, "{}", line.command))
+    }
+}
+
 impl Script {
     /// The commands, in order, with their lines.
     #[must_use]

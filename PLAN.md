@@ -1995,7 +1995,9 @@ the emulator.
   expected value outside its mask, a word or long access at an odd
   address, a function code past 7.  A parse error carries its line; a
   run error its line, the command (printed back as a script writes
-  it) and the target's error, the value read or the timeout.
+  it) and the target's error, the value read or the timeout.  A
+  script prints as its commands, a line each, which parse back to
+  the same commands.
 - **Host time:** `poll_memory` alone takes host time
   (`std::time::Instant`), the one use of it outside a runner's pacing:
   a peripheral on silicon settles in real time.  The first read is

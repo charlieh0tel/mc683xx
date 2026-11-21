@@ -366,6 +366,32 @@ fn a_script_skips_comments_and_blank_lines_and_numbers_its_lines() {
 }
 
 #[test]
+fn a_script_prints_its_commands_a_line_each() {
+    let script: Script = "# Chip selects\n\
+         write_memory.w 0xfffa44 0x3fff   # CSPAR0\n\
+         \n\
+         read_memory.w 0xfffa44 expect 0x3fff fc 6\n"
+        .parse()
+        .unwrap();
+    let printed = script.to_string();
+    assert_eq!(
+        printed,
+        "write_memory.w 0x00fffa44 0x3fff\n\
+         read_memory.w 0x00fffa44 expect 0x3fff fc 6\n"
+    );
+    let reparsed: Script = printed.parse().unwrap();
+    let commands = |script: &Script| {
+        script
+            .lines()
+            .iter()
+            .map(|line| line.command.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(commands(&reparsed), commands(&script));
+    assert_eq!("".parse::<Script>().unwrap().to_string(), "");
+}
+
+#[test]
 fn a_bad_line_names_its_number() {
     let error = "write_register d0 1\n\nwrite_register d9 1\n"
         .parse::<Script>()
