@@ -263,7 +263,7 @@ impl Exception {
 /// word above a ten-word type IV frame, the faulted frame's SR, which
 /// is always zero on the CPU32 (CPU32RM Figure 2-3), so no SR reads as
 /// this revision.
-pub const MICROCODE_REVISION: u8 = 0xc8;
+pub(crate) const MICROCODE_REVISION: u8 = 0xc8;
 
 /// MOVEM's transfer count: a format $C frame stacks it less the
 /// transfers attempted (CPU32RM 6.3.1.3).
