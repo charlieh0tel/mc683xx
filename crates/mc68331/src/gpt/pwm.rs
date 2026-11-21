@@ -48,8 +48,7 @@ pub enum Channel {
 
 impl Channel {
     /// Its name, `A` or `B`, its pin `PWMA` or `PWMB` less `PWM`.
-    #[must_use]
-    pub const fn name(self) -> &'static str {
+    const fn name(self) -> &'static str {
         match self {
             Self::A => "A",
             Self::B => "B",
@@ -57,13 +56,15 @@ impl Channel {
     }
 }
 
+/// Its name, `A` or `B`, its pin `PWMA` or `PWMB` less `PWM`.
 impl fmt::Display for Channel {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.name())
     }
 }
 
-/// The PWM channel [`Channel::name`] names, in any case.
+/// The PWM channel the text names, as [`Channel`]'s `Display` does, in
+/// any case.
 impl FromStr for Channel {
     type Err = ParseChannelError;
 

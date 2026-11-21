@@ -86,8 +86,7 @@ impl PortName {
     pub const ALL: [Self; 3] = [Self::C, Self::E, Self::F];
 
     /// Its name, `C`, `E` or `F`.
-    #[must_use]
-    pub const fn name(self) -> &'static str {
+    const fn name(self) -> &'static str {
         match self {
             Self::C => "C",
             Self::E => "E",
@@ -96,13 +95,15 @@ impl PortName {
     }
 }
 
+/// Its name, `C`, `E` or `F`.
 impl fmt::Display for PortName {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(self.name())
     }
 }
 
-/// The SIM port [`PortName::name`] names, in any case.
+/// The SIM port the text names, as [`PortName`]'s `Display` does, in
+/// any case.
 impl FromStr for PortName {
     type Err = ParsePortNameError;
 
