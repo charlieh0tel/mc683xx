@@ -74,6 +74,9 @@ deploy replaces it.
 - Semantic versioning from 0.1.0.  Before 1.0, a breaking change to a
   public API (Rust or Python) bumps the minor version; anything else
   the patch.
+- CI's `semver` job checks the published crates' APIs against their
+  last release (cargo-semver-checks).  Before 1.0 it reports a break
+  without failing, since the version is bumped only at release.
 - A release is an annotated tag `vX.Y.Z` on a commit of `main` that
   has passed every check (AGENTS.md).  Its notes, breaking changes
   first, are its GitHub release's.
