@@ -275,6 +275,142 @@ const fn reason(stop: Stop) -> &'static str {
     }
 }
 
+/// `bus-cycle key=value ...`, after a [`Line`]'s prefix
+/// ([`docs/tracing.md`][tracing]).
+///
+/// [tracing]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md
+impl fmt::Display for BusCycleRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "bus-cycle cycle={} pc={} access={} address={} size={} value=",
+            self.cycle.0,
+            self.pc,
+            if self.write { "write" } else { "read" },
+            self.address,
+            self.size.bytes()
+        )?;
+        match self.value {
+            Some(value) => {
+                write!(
+                    formatter,
+                    "{value:#0width$x}",
+                    width = 2 + 2 * self.size.bytes() as usize
+                )
+            }
+            None => formatter.write_str("berr"),
+        }
+    }
+}
+
+/// `exception key=value ...`, after a [`Line`]'s prefix
+/// ([`docs/tracing.md`][tracing]).
+///
+/// [tracing]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md
+impl fmt::Display for ExceptionRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "exception cycle={} vector={} pc={} sr=",
+            self.cycle.0, self.vector, self.pc
+        )?;
+        match self.sr {
+            Some(sr) => write!(formatter, "{sr:#06x}")?,
+            None => formatter.write_str("------")?,
+        }
+        if let Some(level) = self.level {
+            write!(formatter, " level={}", level.get())?;
+        }
+        Ok(())
+    }
+}
+
+/// `pin key=value ...`, after a [`Line`]'s prefix
+/// ([`docs/tracing.md`][tracing]).
+///
+/// [tracing]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md
+impl fmt::Display for PinRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "pin cycle={} time={} pin={} level={}",
+            self.cycle.0,
+            self.now.picos(),
+            self.pin,
+            u8::from(self.level)
+        )
+    }
+}
+
+/// `qspi key=value ...`, after a [`Line`]'s prefix
+/// ([`docs/tracing.md`][tracing]).
+///
+/// [tracing]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md
+impl fmt::Display for QspiRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "qspi cycle={} pcs={:#x} bits={} out={:#06x} in={:#06x} cpol={} cpha={}",
+            self.cycle.0,
+            self.pcs,
+            self.bits,
+            self.out,
+            self.input,
+            u8::from(self.polarity == ClockPolarity::IdleHigh),
+            u8::from(self.phase == ClockPhase::ChangeLeading)
+        )
+    }
+}
+
+/// `code key=value ...`, after a [`Line`]'s prefix
+/// ([`docs/tracing.md`][tracing]).
+///
+/// [tracing]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md
+impl fmt::Display for CodeRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "code cycle={} pc={} sr={:#06x} d={} a={} stack={}",
+            self.cycle.0,
+            self.pc,
+            self.sr,
+            longs(self.data.iter().copied().map(Some)),
+            longs(self.address.iter().copied().map(Some)),
+            longs(self.stack.iter().copied())
+        )
+    }
+}
+
+/// `position key=value ...`, after a [`Line`]'s prefix
+/// ([`docs/tracing.md`][tracing]).
+///
+/// [tracing]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md
+impl fmt::Display for PositionRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "position cycle={} pc={} sr={:#06x} vbr={} a7={} instructions={}",
+            self.cycle.0, self.pc, self.sr, self.vbr, self.a7, self.instructions
+        )
+    }
+}
+
+/// `stopped key=value ...`, after a [`Line`]'s prefix
+/// ([`docs/tracing.md`][tracing]).
+///
+/// [tracing]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md
+impl fmt::Display for StoppedRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "stopped cycle={} instructions={} reason={}",
+            self.cycle.0,
+            self.instructions,
+            reason(self.reason)
+        )
+    }
+}
+
 /// `KIND key=value ...`, after a [`Line`]'s prefix
 /// ([`docs/tracing.md`][tracing]).
 ///
@@ -282,83 +418,13 @@ const fn reason(stop: Stop) -> &'static str {
 impl fmt::Display for Record {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::BusCycle(record) => {
-                write!(
-                    formatter,
-                    "bus-cycle cycle={} pc={} access={} address={} size={} value=",
-                    record.cycle.0,
-                    record.pc,
-                    if record.write { "write" } else { "read" },
-                    record.address,
-                    record.size.bytes()
-                )?;
-                match record.value {
-                    Some(value) => {
-                        write!(
-                            formatter,
-                            "{value:#0width$x}",
-                            width = 2 + 2 * record.size.bytes() as usize
-                        )
-                    }
-                    None => formatter.write_str("berr"),
-                }
-            }
-            Self::Exception(record) => {
-                write!(
-                    formatter,
-                    "exception cycle={} vector={} pc={} sr=",
-                    record.cycle.0, record.vector, record.pc
-                )?;
-                match record.sr {
-                    Some(sr) => write!(formatter, "{sr:#06x}")?,
-                    None => formatter.write_str("------")?,
-                }
-                if let Some(level) = record.level {
-                    write!(formatter, " level={}", level.get())?;
-                }
-                Ok(())
-            }
-            Self::Pin(record) => write!(
-                formatter,
-                "pin cycle={} time={} pin={} level={}",
-                record.cycle.0,
-                record.now.picos(),
-                record.pin,
-                u8::from(record.level)
-            ),
-            Self::Qspi(record) => write!(
-                formatter,
-                "qspi cycle={} pcs={:#x} bits={} out={:#06x} in={:#06x} cpol={} cpha={}",
-                record.cycle.0,
-                record.pcs,
-                record.bits,
-                record.out,
-                record.input,
-                u8::from(record.polarity == ClockPolarity::IdleHigh),
-                u8::from(record.phase == ClockPhase::ChangeLeading)
-            ),
-            Self::Code(record) => write!(
-                formatter,
-                "code cycle={} pc={} sr={:#06x} d={} a={} stack={}",
-                record.cycle.0,
-                record.pc,
-                record.sr,
-                longs(record.data.iter().copied().map(Some)),
-                longs(record.address.iter().copied().map(Some)),
-                longs(record.stack.iter().copied())
-            ),
-            Self::Position(record) => write!(
-                formatter,
-                "position cycle={} pc={} sr={:#06x} vbr={} a7={} instructions={}",
-                record.cycle.0, record.pc, record.sr, record.vbr, record.a7, record.instructions
-            ),
-            Self::Stopped(record) => write!(
-                formatter,
-                "stopped cycle={} instructions={} reason={}",
-                record.cycle.0,
-                record.instructions,
-                reason(record.reason)
-            ),
+            Self::BusCycle(record) => record.fmt(formatter),
+            Self::Exception(record) => record.fmt(formatter),
+            Self::Pin(record) => record.fmt(formatter),
+            Self::Qspi(record) => record.fmt(formatter),
+            Self::Code(record) => record.fmt(formatter),
+            Self::Position(record) => record.fmt(formatter),
+            Self::Stopped(record) => record.fmt(formatter),
         }
     }
 }
