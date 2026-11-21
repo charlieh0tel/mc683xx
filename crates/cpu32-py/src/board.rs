@@ -61,6 +61,7 @@ use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::peripheral;
 use mc683xx_modules::peripheral::floating_miso;
 use mc683xx_modules::qsm::sci::Frame;
+use mc683xx_target::address::Address;
 use pyo3::Bound;
 use pyo3::IntoPyObjectExt;
 use pyo3::Py;
@@ -1737,7 +1738,7 @@ impl BoardView {
     /// Traces each time the instruction at `pc` is about to run, through
     /// a hook the chip's `remove_hook` removes.
     fn watch_code(&mut self, pc: u32) -> HookIdView {
-        HookIdView(self.board.watch_code(pc))
+        HookIdView(self.board.watch_code(Address(pc)))
     }
 
     /// The board's chip: its registers, hooks, bus cycles and the

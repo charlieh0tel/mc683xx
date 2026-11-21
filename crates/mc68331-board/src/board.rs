@@ -1115,11 +1115,11 @@ impl<C: Chip> Board<C> {
 
     /// Traces each time the instruction at `pc` is about to run: the
     /// run stops there, records it and goes on.
-    pub fn watch_code(&mut self, pc: u32) -> HookId {
+    pub fn watch_code(&mut self, pc: Address) -> HookId {
         let id = self
             .chip
             .cpu_control()
-            .add_code_hook(Address(pc)..=Address(pc), |_| ControlFlow::Break(()));
+            .add_code_hook(pc..=pc, |_| ControlFlow::Break(()));
         self.hooks.watches.insert(id);
         id
     }

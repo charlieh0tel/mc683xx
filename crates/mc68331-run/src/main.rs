@@ -63,6 +63,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_gdb::Ending;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
+use mc683xx_target::address::Address;
 
 use crate::binding::Binding;
 use crate::binding::Escape;
@@ -360,7 +361,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
     tracing.qspi = traced(Traced::Qspi);
     board.set_tracing(tracing);
     for &pc in &arguments.watch_code {
-        board.watch_code(pc);
+        board.watch_code(Address(pc));
     }
     let tracing = !arguments.trace.is_empty()
         || !arguments.watch_code.is_empty()

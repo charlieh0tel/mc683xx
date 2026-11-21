@@ -714,7 +714,7 @@ parameters = { bytes = 4 }
     tracing.bus_cycles = true;
     tracing.exceptions = true;
     board.set_tracing(tracing);
-    board.watch_code(START);
+    board.watch_code(Address(START));
     board.run_until(Time::from_picos(100_000_000)).unwrap();
     let records = board.take_trace().records;
     let Record::Code(code) = records[0] else {
