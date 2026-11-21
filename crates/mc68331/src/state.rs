@@ -252,56 +252,49 @@ impl Mc68331 {
     }
 }
 
+/// `snapshot` with `change` made to its state.
+#[cfg(test)]
+fn changed(snapshot: &[u8], change: impl FnOnce(&mut ChipState)) -> Vec<u8> {
+    let mut state: ChipState = decode(VERSION, snapshot).expect("a chip's snapshot");
+    change(&mut state);
+    encode(VERSION, &state)
+}
+
 /// `snapshot` with `change` made to its diversions.
 #[cfg(test)]
 pub(crate) fn with_diverted(
     snapshot: &[u8],
     change: impl FnOnce(&mut Vec<(RegionId, usize)>),
 ) -> Vec<u8> {
-    let mut state: ChipState = decode(VERSION, snapshot).expect("a chip's snapshot");
-    change(&mut state.diverted);
-    encode(VERSION, &state)
+    changed(snapshot, |state| change(&mut state.diverted))
 }
 
 /// `snapshot` with the core's snapshot `cpu`.
 #[cfg(test)]
 pub(crate) fn with_cpu(snapshot: &[u8], cpu: Vec<u8>) -> Vec<u8> {
-    let state: ChipState = decode(VERSION, snapshot).expect("a chip's snapshot");
-    encode(VERSION, &ChipState { cpu, ..state })
+    changed(snapshot, |state| state.cpu = cpu)
 }
 
 /// `snapshot` with module `index`'s snapshot `module`.
 #[cfg(test)]
 pub(crate) fn with_module(snapshot: &[u8], index: usize, module: Vec<u8>) -> Vec<u8> {
-    let mut state: ChipState = decode(VERSION, snapshot).expect("a chip's snapshot");
-    state.modules[index] = module;
-    encode(VERSION, &state)
+    changed(snapshot, |state| state.modules[index] = module)
 }
 
 /// `snapshot` with peripheral `index`'s snapshot `peripheral`.
 #[cfg(test)]
 pub(crate) fn with_peripheral(snapshot: &[u8], index: usize, peripheral: Vec<u8>) -> Vec<u8> {
-    let mut state: ChipState = decode(VERSION, snapshot).expect("a chip's snapshot");
-    state.peripherals[index] = peripheral;
-    encode(VERSION, &state)
+    changed(snapshot, |state| state.peripherals[index] = peripheral)
 }
 
 /// `snapshot` with the QSPI's peripheral's snapshot `qspi`.
 #[cfg(test)]
 pub(crate) fn with_qspi(snapshot: &[u8], qspi: Option<Vec<u8>>) -> Vec<u8> {
-    let state: ChipState = decode(VERSION, snapshot).expect("a chip's snapshot");
-    encode(VERSION, &ChipState { qspi, ..state })
+    changed(snapshot, |state| state.qspi = qspi)
 }
 
 /// `snapshot` with the `DsackFault`s told `dsack_told`.
 #[cfg(test)]
 pub(crate) fn with_dsack_told(snapshot: &[u8], dsack_told: Vec<u8>) -> Vec<u8> {
-    let state: ChipState = decode(VERSION, snapshot).expect("a chip's snapshot");
-    encode(
-        VERSION,
-        &ChipState {
-            dsack_told,
-            ..state
-        },
-    )
+    changed(snapshot, |state| state.dsack_told = dsack_told)
 }
