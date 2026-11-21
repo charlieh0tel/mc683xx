@@ -368,7 +368,7 @@ impl Board {
         now: Cycles,
     ) -> Result<(), NoInputsError> {
         match port {
-            Port::C => return Err(NoInputsError { port }),
+            Port::C => return Err(NoInputsError(port)),
             Port::E => {
                 self.modules_changed();
                 self.sim.set_port_pins(PortName::E, value, mask);

@@ -64,6 +64,7 @@ use crate::gpt::Input;
 use crate::gpt::PortGpPin;
 use crate::gpt::PwmChange;
 use crate::gpt::pwm::Channel;
+use crate::port::NoInputsError;
 use crate::port::Port;
 use crate::port::PortChange;
 use crate::state;
@@ -2333,9 +2334,8 @@ fn the_host_sees_each_port_edge_and_drives_the_inputs() {
     chip.set_pins(Port::E, 0x00, 0xff).unwrap();
     chip.set_pins(Port::E, 0x02, 0x02).unwrap();
     assert_eq!(
-        chip.set_pins(Port::C, 0x00, 0xff)
-            .map_err(|error| error.port()),
-        Err(Port::C)
+        chip.set_pins(Port::C, 0x00, 0xff),
+        Err(NoInputsError(Port::C))
     );
     chip.run_for(Cycles::from_clocks(2000));
     assert_eq!(chip.cpu().registers.data[0] & 0xff, 0x02);

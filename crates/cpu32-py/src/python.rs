@@ -98,9 +98,8 @@ impl From<Error> for PyErr {
                 PyNotImplementedError::new_err(message)
             }
             Error::State(_) => exceptions::StateError::new_err(message),
-            Error::Access(AccessError::BusError | AccessError::Unmapped) | Error::Unserved(_) => {
-                BusError::new_err(message)
-            }
+            Error::Access(AccessError::BusError | AccessError::Unmapped(_))
+            | Error::Unserved(_) => BusError::new_err(message),
             Error::Access(AccessError::Unpeekable) => exceptions::UnpeekableError::new_err(message),
             Error::Target(_) => exceptions::TargetError::new_err(message),
             Error::Load(LoadError::Read { path, error } | LoadError::Image { path, error, .. }) => {

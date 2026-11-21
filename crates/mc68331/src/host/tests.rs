@@ -345,25 +345,21 @@ fn the_host_sees_errors_by_kind() {
     );
     // CSBOOT down to 64 Kbytes: past it nothing answers
     write(&mut chip, CSBARBT, Size::Word, BLOCK_64K.into());
+    let nowhere = AccessError::Unmapped(Address(0x40_0000));
+    assert_eq!(read(&mut chip, 0x40_0000, Size::Word), Err(nowhere));
+    assert_eq!(peek(&chip, 0x40_0000, Size::Byte), Err(nowhere));
+    assert_eq!(nowhere.to_string(), "nothing answers at 0x00400000");
+    // a long's second word, past the end
     assert_eq!(
-        read(&mut chip, 0x40_0000, Size::Word),
-        Err(AccessError::Unmapped)
-    );
-    assert_eq!(
-        peek(&chip, 0x40_0000, Size::Byte),
-        Err(AccessError::Unmapped)
+        read(&mut chip, 0xfffe, Size::Long),
+        Err(AccessError::Unmapped(Address(0x1_0000)))
     );
     // a supervisor-only SIM register from user space goes external,
     // where nothing answers now (QSMRM 3.3; PLAN.md)
     let user = FunctionCode::USER_DATA;
-    assert_eq!(
-        chip.peek(Address(SYPCR), Size::Word, user),
-        Err(AccessError::Unmapped)
-    );
-    assert_eq!(
-        chip.bus_read(Address(SYPCR), Size::Word, user),
-        Err(AccessError::Unmapped)
-    );
+    let sypcr = AccessError::Unmapped(Address(SYPCR));
+    assert_eq!(chip.peek(Address(SYPCR), Size::Word, user), Err(sypcr));
+    assert_eq!(chip.bus_read(Address(SYPCR), Size::Word, user), Err(sypcr));
 }
 
 #[test]

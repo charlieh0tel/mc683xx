@@ -30,9 +30,10 @@ const WORD_BITS: u32 = 16;
 #[non_exhaustive]
 pub enum AccessError {
     /// No module acknowledged the cycle and no chip select matched it:
-    /// nothing answers there.
-    #[error("nothing answers there")]
-    Unmapped,
+    /// nothing answers at the address, the cycle's on the address
+    /// lines.
+    #[error("nothing answers at {0}")]
+    Unmapped(Address),
     /// The cycle ended in a bus error: a peripheral's BERR, a select
     /// waiting for a DSACK that never comes, the bus monitor.
     #[error("bus error")]
@@ -255,7 +256,7 @@ impl Board {
     /// matched it, or something answered it so.
     fn unanswered(&self, request: DecodeRequest) -> AccessError {
         if self.sim.chip_selects().matches(request).next().is_none() {
-            AccessError::Unmapped
+            AccessError::Unmapped(Address(request.address))
         } else {
             AccessError::BusError
         }
@@ -280,7 +281,7 @@ impl Board {
             None if self.sim.chip_selects().matches(request).next().is_none()
                 && !self.bus_takes(address, function_code) =>
             {
-                Err(AccessError::Unmapped)
+                Err(AccessError::Unmapped(Address(address)))
             }
             None => Err(AccessError::Unpeekable),
         }

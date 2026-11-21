@@ -1290,7 +1290,7 @@ assert_eq!(chip.peek(Address(CSOR0), Size::Word, SUPERVISOR), Ok(option));
 let boot = firmware::BLOCK_64K.into();
 chip.bus_write(Address(CSBARBT), Size::Word, SUPERVISOR, boot).unwrap();
 let nowhere = Address(0x40_0000);
-assert_eq!(chip.peek(nowhere, Size::Word, SUPERVISOR), Err(AccessError::Unmapped));
+assert_eq!(chip.peek(nowhere, Size::Word, SUPERVISOR), Err(AccessError::Unmapped(nowhere)));
 assert_eq!(chip.now(), Cycles::ZERO);
 ```
 
@@ -1668,8 +1668,9 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
 - `MemoryError`, from `protect`: a range not of whole pages, or past
   the address lines.
 - `AccessError`, from the host's bus cycles and peeks: nothing
-  answers (`Unmapped`), a bus error (`BusError`: a peripheral's BERR, no
-  DSACK, the bus monitor), a word or long at an odd address
+  answers (`Unmapped`, at the address the cycle put out), a bus error
+  (`BusError`: a peripheral's BERR, no DSACK, the bus monitor), a word
+  or long at an odd address
   (`Misaligned`), a value wider than its cycle (`Width`), or a peek
   only a cycle can answer (`Unpeekable`).
 - `BusError` is a peripheral's answer, not a host error: the CPU takes the

@@ -89,19 +89,8 @@ pub struct ParsePortError(String);
 /// A port with no inputs for the board to drive: port C, outputs
 /// only (MC68331UM 4.8.1.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("port {port} has no inputs")]
-pub struct NoInputsError {
-    /// The port.
-    pub(crate) port: Port,
-}
-
-impl NoInputsError {
-    /// The port.
-    #[must_use]
-    pub const fn port(&self) -> Port {
-        self.port
-    }
-}
+#[error("port {0} has no inputs")]
+pub struct NoInputsError(pub Port);
 
 /// A change in what a port drives: from its time on, the pins it drives
 /// and their levels.
