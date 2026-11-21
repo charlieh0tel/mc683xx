@@ -21,7 +21,6 @@ use std::str::FromStr;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Halt;
 use mc683xx_cpu32::cpu::Run;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::state::Save;
@@ -319,9 +318,6 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     /// budget.  A run that starts halted spends its budget as time
     /// passes.
     fn run_for(&mut self, budget: Cycles) -> Run;
-
-    /// Why the CPU halted, while it stays halted.
-    fn halted(&self) -> Option<Halt>;
 
     /// A reset now for `cause`, as its source makes it:
     /// [`ResetCause::External`] is RESET driven by the board.

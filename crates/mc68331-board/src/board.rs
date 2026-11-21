@@ -1047,10 +1047,10 @@ impl<C: Chip> Board<C> {
     /// Why the CPU executes nothing, if it does not: halted, or in
     /// background mode.
     fn idle(&self) -> Option<Stop> {
-        self.chip
-            .halted()
+        let cpu = self.chip.cpu();
+        cpu.halted()
             .map(Stop::Halted)
-            .or_else(|| self.chip.cpu().background().map(Stop::Background))
+            .or_else(|| cpu.background().map(Stop::Background))
     }
 
     /// Whether a peripheral or the host asked the run to stop; withdraws the

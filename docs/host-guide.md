@@ -1390,7 +1390,7 @@ an external endpoint left on no net.  Each refuses a name the description
 lacks (`error::EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
 every method of the chip's.  `Chip` is sealed: a host names it in a
 bound (`Board<C: Chip>`) and calls its methods (`cpu`, `now`,
-`memory`, `halted`, the resets, `save`), but cannot implement it, nor
+`memory`, the resets, `save`; a halt is `cpu().halted()`), but cannot implement it, nor
 `ChipBuilder` or `ChipPin`; a new part is added inside mc683xx.  The
 plumbing the board runs the chip with is hidden from the docs and
 outside semver.

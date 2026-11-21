@@ -14,7 +14,6 @@ use std::str::FromStr;
 
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Halt;
 use mc683xx_cpu32::cpu::Run;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::state::StateError;
@@ -634,10 +633,6 @@ impl chip::Chip for Mc68331 {
 
     fn run_for(&mut self, budget: Cycles) -> Run {
         Self::run_for(self, budget)
-    }
-
-    fn halted(&self) -> Option<Halt> {
-        self.cpu().halted()
     }
 
     fn reset_for(&mut self, cause: ResetCause) {
