@@ -624,7 +624,8 @@ def test_a_gpt_output_compare_toggles_its_pin():
     chip.run_for(300)
     assert isinstance(chip.pwm(mc683xx.Channel.A), mc683xx.Output)
     assert isinstance(chip.oc1(), mc683xx.Output.Level)
-    chip.set_pins(mc683xx.Port.GP, 0xFF, 0xFF)
+    chip.set_pins(mc683xx.Port.GP, 0xFF)
+    assert chip.port(mc683xx.Port.GP).pins == 0xFF
     chip.set_pai(True)
     chip.set_pclk(True)
 

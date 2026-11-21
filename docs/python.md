@@ -590,8 +590,8 @@ what the chip drives within a run comes back as timed changes.
   start bit.  A frame is the data bits
   as on the line, LSB first, parity included (`frame._0`).
 - Ports, by `Port.C`, `E`, `F`, `GP` or `QS`: `set_pins(port, value,
-  mask)` drives the pins in `mask` (port C has none to drive:
-  `ValueError`);
+  mask=0xFF)` drives the pins in `mask`, all by default (port C has
+  none to drive: `ValueError`);
   `outputs(port)` as `(driven, levels)` masks, Rust's `PortLevels` as
   a pair Python unpacks; `port(port)`, a `PortState` (`latch`,
   `direction`, `assignment`, `pins`); `take_port_changes() -> [(now,
