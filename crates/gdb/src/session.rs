@@ -15,7 +15,6 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use gdbstub::common::Signal;
-
 use gdbstub::stub::DisconnectReason;
 use gdbstub::stub::GdbStub;
 use gdbstub::stub::SingleThreadStopReason;

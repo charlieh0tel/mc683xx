@@ -43,6 +43,7 @@ pub struct Bdm<'t, T> {
 
 impl<'t, T: Cpu32Target> Bdm<'t, T> {
     /// `target` as the stub's [`Target`].
+    #[must_use]
     pub fn new(target: &'t mut T) -> Self {
         Self { target }
     }
