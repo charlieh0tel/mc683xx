@@ -36,6 +36,18 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --no-fail-fast
 
+  msrv:
+    # The workspace builds on the minimum supported Rust, the
+    # workspace's `rust-version` (docs/releasing.md): a check, not the
+    # tests.  `+` overrides rust-toolchain.toml's pin.
+    runs-on: ubuntu-latest
+    env:
+      MSRV: "1.99.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup toolchain install "$MSRV" --profile minimal
+      - run: cargo +"$MSRV" check --workspace --all-targets
+
   oracle:
     # The Musashi differential runs (`make oracle`).  The fetch is one
     # pinned commit, shallow, so it is not cached.  The compiler is the

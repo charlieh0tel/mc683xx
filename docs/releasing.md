@@ -128,8 +128,8 @@ Dependencies and platforms:
   serde 1 is stable; a move to another major version of it would be a
   breaking release.  The bytes it writes, the snapshots, stay outside
   semver (above).
-- The minimum supported Rust is 1.99 (`rust-version`); raising it is
-  a minor release.
+- The minimum supported Rust is 1.99 (`rust-version`), which CI's
+  `msrv` job builds the workspace with; raising it is a minor release.
 - The Python package supports Python 3.12 and later (abi3 wheels).
   Dropping a Python or Node release past its end of life is a minor
   release.
