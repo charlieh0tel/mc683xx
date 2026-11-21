@@ -423,7 +423,8 @@ fn every_mistake_names_what_is_wrong() {
         ),
     ];
     for (extra, expected) in cases {
-        let message = error(extra);
+        // Paths print with the host's separator.
+        let message = error(extra).replace('\\', "/");
         assert!(message.contains(expected), "{extra}: {message}");
     }
 }
