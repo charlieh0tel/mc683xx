@@ -17,10 +17,10 @@ use super::START;
 use super::image;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
+use crate::debug::serial::NOT_IN_BACKGROUND;
 use mc683xx_target::serial::BUS_ERROR;
 use mc683xx_target::serial::COMPLETE;
 use mc683xx_target::serial::ILLEGAL;
-use mc683xx_target::serial::NOT_IN_BACKGROUND;
 use mc683xx_target::serial::NOT_READY;
 use mc683xx_target::serial::STATUS;
 

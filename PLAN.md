@@ -2460,7 +2460,9 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   chip's: `Mc68331::bdm_exchange` is one 17-bit transfer, bit 16 of
   the word in ignored (Table 7-3), the 17 bits shifted out returned.
   Table 7-3's response codes are `mc683xx_target::serial`'s, shared
-  with a pod's host.
+  with a pod's host; what a transfer reads outside background mode,
+  which the chip does not model (IPIPE on DSO, 7.2.6), is the chip's
+  own `NOT_IN_BACKGROUND`, equal to "illegal command".
   The output shift register reloads with "not ready" at each transfer
   (7.2.7.1), and a command runs as soon as its last word is in and is
   done before the next transfer, as no time passes in background

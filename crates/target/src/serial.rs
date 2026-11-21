@@ -12,7 +12,3 @@ pub const BUS_ERROR: u32 = STATUS | 0x0001;
 pub const ILLEGAL: u32 = STATUS | 0xFFFF;
 /// "Command complete; status OK" (CPU32RM Table 7-3).
 pub const COMPLETE: u32 = 0xFFFF;
-/// What the emulated chip's transfer reads while the CPU is not in
-/// background mode.  DSO is then IPIPE (CPU32RM 7.2.6), which the
-/// chip does not model, so the line reads high; silicon's reads vary.
-pub const NOT_IN_BACKGROUND: u32 = STATUS | 0xFFFF;

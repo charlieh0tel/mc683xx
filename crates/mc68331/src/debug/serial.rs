@@ -15,8 +15,8 @@ use mc683xx_target::register::SystemRegister;
 use mc683xx_target::serial::BUS_ERROR;
 use mc683xx_target::serial::COMPLETE;
 use mc683xx_target::serial::ILLEGAL;
-use mc683xx_target::serial::NOT_IN_BACKGROUND;
 use mc683xx_target::serial::NOT_READY;
+use mc683xx_target::serial::STATUS;
 use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
@@ -25,6 +25,12 @@ use crate::chip::Mc68331;
 
 /// A transfer's 16 data bits.
 const DATA: u32 = 0xFFFF;
+
+/// What this chip's transfer reads while the CPU is not in background
+/// mode.  DSO is then IPIPE (CPU32RM 7.2.6), which the chip does not
+/// model, so the line reads high; silicon's reads vary.  Not a
+/// response of CPU32RM Table 7-3, so not in `mc683xx_target::serial`.
+pub const NOT_IN_BACKGROUND: u32 = STATUS | DATA;
 
 /// The fixed bits of each command word (CPU32RM 7.2.8.4-7.2.8.15).
 mod command {
