@@ -127,11 +127,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   target is halted first and stays where it is until gdb continues or
   steps it; an emulated one runs only inside `serve`.  Detach leaves
   an emulated target to its host and resumes one under BDM control;
-  kill leaves either halted.  Any `gdbstub::conn::ConnectionExt`
-  serves, a `TcpStream` or the tests' in-memory one.  It is the one
-  foreign type in the stub's API, deliberately: a connection is
-  gdbstub's to drive, and an own trait would only forward to it, so
-  the crate's major version follows gdbstub's.
+  kill leaves either halted.  Any `connection::Connection` serves: a
+  `TcpStream`, a `connection::Polled` one, a borrowed one (`&mut`),
+  or a host's own, the tests' in-memory one among them.  A connection
+  gives `write_all`, `flush`, `read` (the next byte, waiting for it),
+  `peek` (the next byte if one has come, not waiting: the stub looks
+  for gdb's Ctrl-C between a run's quanta) and `start` (called as the
+  session starts; a `TcpStream` turns off Nagle's delay).  The stub's
+  API names no type of the `gdbstub` crate it is built on.
 - `SessionError`: a call on the target failed (`Target`, a board's
   peripheral that stalled, a pod's lost link), the connection did
   (`Connection`, gdb gone without detaching), or gdb sent what the stub

@@ -8,8 +8,7 @@ use std::io;
 use std::iter;
 use std::rc::Rc;
 
-use gdbstub::conn::Connection;
-use gdbstub::conn::ConnectionExt;
+use mc683xx_gdb::connection::Connection;
 
 /// What the test sends: a packet once the last is answered, or bytes
 /// at once.
@@ -67,17 +66,15 @@ impl Wire {
 impl Connection for Wire {
     type Error = io::Error;
 
-    fn write(&mut self, byte: u8) -> io::Result<()> {
-        self.output.borrow_mut().push(byte);
+    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.output.borrow_mut().extend_from_slice(bytes);
         Ok(())
     }
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
-}
 
-impl ConnectionExt for Wire {
     fn read(&mut self) -> io::Result<u8> {
         self.refill();
         self.input

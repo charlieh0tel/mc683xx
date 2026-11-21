@@ -1,4 +1,5 @@
-//! gdb's connection: a TCP listener for one gdb, and a connection whose
+//! gdb's connection: what [`serve`](crate::serve) drives
+//! ([`Connection`]), a TCP listener for one gdb, and a connection whose
 //! waits keep a host responsive ([`Polled`]).
 
 use std::io;
@@ -11,8 +12,115 @@ use std::net::ToSocketAddrs;
 use std::thread;
 use std::time::Duration;
 
-use gdbstub::conn::Connection;
-use gdbstub::conn::ConnectionExt;
+/// gdb's end of a connection, as [`serve`](crate::serve) drives it: a
+/// [`TcpStream`], a [`Polled`] one, or a host's own, an in-memory one
+/// for a test among them.
+pub trait Connection {
+    /// Why the connection failed, gdb gone among them.
+    type Error;
+
+    /// Writes all of `bytes`.
+    ///
+    /// # Errors
+    ///
+    /// The connection's, which ends the session.
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error>;
+
+    /// Sends what was written.
+    ///
+    /// # Errors
+    ///
+    /// The connection's, which ends the session.
+    fn flush(&mut self) -> Result<(), Self::Error>;
+
+    /// The next byte, waiting for it.
+    ///
+    /// # Errors
+    ///
+    /// The connection's, gdb gone among them, which ends the session.
+    fn read(&mut self) -> Result<u8, Self::Error>;
+
+    /// The next byte if one has come, without waiting for it, left for
+    /// [`read`](Self::read): the stub looks between a run's quanta for
+    /// gdb's Ctrl-C.
+    ///
+    /// # Errors
+    ///
+    /// The connection's, gdb gone among them, which ends the session.
+    fn peek(&mut self) -> Result<Option<u8>, Self::Error>;
+
+    /// Called once, as the session starts; by default nothing.
+    ///
+    /// # Errors
+    ///
+    /// The connection's, which ends the session.
+    fn start(&mut self) -> Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+/// A connection borrowed for a session: `serve(target, &mut wire)`.
+impl<C: Connection + ?Sized> Connection for &mut C {
+    type Error = C::Error;
+
+    fn write_all(&mut self, bytes: &[u8]) -> Result<(), C::Error> {
+        (**self).write_all(bytes)
+    }
+
+    fn flush(&mut self) -> Result<(), C::Error> {
+        (**self).flush()
+    }
+
+    fn read(&mut self) -> Result<u8, C::Error> {
+        (**self).read()
+    }
+
+    fn peek(&mut self) -> Result<Option<u8>, C::Error> {
+        (**self).peek()
+    }
+
+    fn start(&mut self) -> Result<(), C::Error> {
+        (**self).start()
+    }
+}
+
+/// Blocking but for [`peek`](Connection::peek), and without Nagle's
+/// delay once the session starts: gdb's packets are small, and each
+/// waits for its answer.
+impl Connection for TcpStream {
+    type Error = io::Error;
+
+    fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
+        Write::write_all(self, bytes)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Write::flush(self)
+    }
+
+    fn read(&mut self) -> io::Result<u8> {
+        let mut byte = [0];
+        Read::read_exact(self, &mut byte)?;
+        Ok(byte[0])
+    }
+
+    fn peek(&mut self) -> io::Result<Option<u8>> {
+        self.set_nonblocking(true)?;
+        let mut byte = [0];
+        let peeked = TcpStream::peek(self, &mut byte);
+        self.set_nonblocking(false)?;
+        match peeked {
+            Ok(0) => Err(io::ErrorKind::UnexpectedEof.into()),
+            Ok(_) => Ok(Some(byte[0])),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn start(&mut self) -> io::Result<()> {
+        self.set_nodelay(true)
+    }
+}
 
 /// The longest a [`Polled`] connection waits for gdb before it calls
 /// its host's [`Waiter::idle`].
@@ -109,10 +217,6 @@ fn waiting(error: &io::Error) -> bool {
 impl<W: Waiter> Connection for Polled<W> {
     type Error = PollError<W::Error>;
 
-    fn write(&mut self, byte: u8) -> Result<(), Self::Error> {
-        Ok(Write::write_all(&mut self.stream, &[byte])?)
-    }
-
     fn write_all(&mut self, bytes: &[u8]) -> Result<(), Self::Error> {
         Ok(Write::write_all(&mut self.stream, bytes)?)
     }
@@ -121,12 +225,6 @@ impl<W: Waiter> Connection for Polled<W> {
         Ok(Write::flush(&mut self.stream)?)
     }
 
-    fn on_session_start(&mut self) -> Result<(), Self::Error> {
-        Ok(self.stream.set_nodelay(true)?)
-    }
-}
-
-impl<W: Waiter> ConnectionExt for Polled<W> {
     fn read(&mut self) -> Result<u8, Self::Error> {
         let stream = &self.stream;
         loop {
@@ -159,6 +257,10 @@ impl<W: Waiter> ConnectionExt for Polled<W> {
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
             Err(error) => Err(error.into()),
         }
+    }
+
+    fn start(&mut self) -> Result<(), Self::Error> {
+        Ok(self.stream.set_nodelay(true)?)
     }
 }
 

@@ -1755,8 +1755,10 @@ Adversarial review of the board layer (2026-10-23):
 
 `mc683xx-gdb` serves gdb's remote serial protocol through the
 `gdbstub` crate (MIT OR Apache-2.0, a Cargo dependency like any other,
-so not in `third_party/NOTICE`): one session, `serve`, over one trait,
-`target::Target`.  An emulated target gives `with_cpu` (registers and
+so not in `third_party/NOTICE`, and named nowhere in the public API):
+one session, `serve`, over one trait, `target::Target`, on a
+`connection::Connection`, the stub's own trait, which it adapts to
+gdbstub's.  An emulated target gives `with_cpu` (registers and
 hooks), `read_memory` and `write_memory` (memory with no bus cycle, in
 a function code's space), `run_for(cycles, hit)` (a quantum) and
 `reset`; the trait's other methods (registers, `resume`, `halt`)
@@ -3344,7 +3346,7 @@ checks move onto real code hooks.
 | abi3 wheels and the crates published by the `release` workflow, both by trusted publishing | One wheel per platform covers every Python from 3.10; no token is stored.  crates.io's trusted publishing needs the crate to exist first, so only the first release is published by hand (decided 2026-10-24). |
 | A GDB stub on the gdbstub crate, generic over a small `Target` trait, its breakpoints and steps hooks | Decided 2026-10-24; gdbstub is MIT OR Apache-2.0.  Hooks cost nothing until installed and never touch memory; one trait serves the bare CPU, the chip, a board and hosts with run loops of their own. |
 | gdb's memory access without bus cycles | A debugger's look must not clear a flag or feed a peripheral (the reason `Module::peek` exists); real cycles stay the host's (`bus_read`, `bus_write`). |
-| The public API names no foreign type but gdbstub's `ConnectionExt` and serde 1's traits (below) | A dependency's major release must not break ours: board parameters are `registry::ParameterValue`, a syntax error a `SyntaxError`, a snapshot that does not decode a `DecodeError`, each opaque or ours.  `serve` keeps gdbstub's connection trait, which an own trait would only forward to (decided 2026-10-24). |
+| The public API names no foreign type but serde 1's traits (below) | A dependency's major release must not break ours: board parameters are `registry::ParameterValue`, a syntax error a `SyntaxError`, a snapshot that does not decode a `DecodeError`, each opaque or ours.  `serve` takes the stub's own `connection::Connection` (write, flush, a blocking read and a peek that does not wait), adapted to gdbstub's inside the crate, so gdbstub's major version is not ours (decided 2026-11-21, reversing 2026-10-24's keeping of gdbstub's `ConnectionExt`). |
 | serde 1 in the public API, an accepted exception | The state types derive `Serialize` and `Deserialize` (`mc683xx-target`'s behind its `serde` feature), which is how the snapshot layers encode them; hiding the derives would mean a second set of types to keep in step.  serde 1 is stable, so a host is not broken by our dependency; the snapshot bytes stay outside semver (`docs/releasing.md`, Semver scope) (decided 2026-11-21, before 1.0). |
 | `Cpu::registers` and `Cpu::memory` stay public fields | The programming model is the host's to read and write as it likes (a test's setup, a harness's comparison); no invariant spans them that a setter would guard, and hosts reach them a thousand times as fields (decided 2026-10-24). |
 | A fixed memory on no select, emulator-only; a matching select wins | A host's hybrid boot maps rewritten code beside an image it must not change, where the only alternative was patching the reset code to program a select the firmware leaves unused.  A select winning keeps the firmware's decode as on hardware wherever it decodes; fast termination and no DSACK by default, as the chip has nothing to model, a select's internal timing (port, wait states) on request so code runs at its original bus speed; contents survive resets as RAM's unless a reload scope says (decided 2026-10-24). |
