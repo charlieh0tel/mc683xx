@@ -7,6 +7,7 @@
 
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::MemoryId;
+use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 
@@ -219,10 +220,10 @@ pub fn acknowledge_select(number: u8, level: u8) -> Vec<u16> {
 pub fn booting(image: Vec<u8>) -> (Builder, MemoryId) {
     let mut builder = Builder::default();
     builder
-        .memory(image, false, &[ChipSelect::Boot])
+        .memory(image, MemoryKind::Rom, &[ChipSelect::Boot])
         .expect("a ROM of whole pages");
     let ram = builder
-        .memory(vec![0; RAM_BYTES], true, &[cs(0)])
+        .memory(vec![0; RAM_BYTES], MemoryKind::Ram, &[cs(0)])
         .expect("CS0 is free");
     (builder, ram)
 }

@@ -27,6 +27,7 @@ use super::store_word;
 use super::write_register;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
+use crate::chip::MemoryKind;
 use crate::debug::TargetError;
 
 /// An odd address, which a word access faults at (CPU32RM 6.2.3).
@@ -90,9 +91,11 @@ fn sleeping() -> Mc68331 {
     let entry = 4 * PIT_VECTOR as usize;
     rom[entry..entry + 4].copy_from_slice(&HANDLER.to_be_bytes());
     let mut builder = Builder::default();
-    builder.memory(rom, false, &[ChipSelect::Boot]).unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], true)
+        .memory(rom, MemoryKind::Rom, &[ChipSelect::Boot])
+        .unwrap();
+    builder
+        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     builder.build()
 }
@@ -150,7 +153,9 @@ fn lpstop_with_an_interrupt_already_pending_stays_asleep_when_it_faults() {
     let entry = 4 * PIT_VECTOR as usize;
     rom[entry..entry + 4].copy_from_slice(&HANDLER.to_be_bytes());
     let mut builder = Builder::default();
-    builder.memory(rom, false, &[ChipSelect::Boot]).unwrap();
+    builder
+        .memory(rom, MemoryKind::Rom, &[ChipSelect::Boot])
+        .unwrap();
     let mut chip = builder.build();
     chip.cpu_control().set_stop_on_fault(true);
     let run = loop {
@@ -196,7 +201,7 @@ fn a_stop_asked_in_a_faulting_instruction_is_taken_with_the_fault() {
     builder
         .memory(
             image(&[0x33f9, 0, 0, 0, ODD as u16, NOP, NOP, NOP], ROM_BYTES),
-            false,
+            MemoryKind::Rom,
             &[ChipSelect::Boot],
         )
         .unwrap();
@@ -223,7 +228,7 @@ fn a_stop_asked_with_a_hook_stop_is_taken_with_it() {
     builder
         .memory(
             image(&[0x33f9, 0, 0, 0, 0x2000, NOP, NOP, NOP], ROM_BYTES),
-            false,
+            MemoryKind::Rom,
             &[ChipSelect::Boot],
         )
         .unwrap();

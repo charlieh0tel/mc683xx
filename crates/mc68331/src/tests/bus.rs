@@ -31,6 +31,7 @@ use super::write_register;
 use crate::chip::BuildError;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
+use crate::chip::MemoryKind;
 use crate::event::DsackFault;
 use crate::event::Event;
 use crate::host::AccessError;
@@ -51,7 +52,11 @@ fn decoding<D: MappedPeripheral + Timed + Stateless + 'static>(
 ) -> (Mc68331, PeripheralId) {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let id = builder
         .bus_peripheral(
@@ -181,7 +186,11 @@ fn dsack0_and_dsack1_at_once_are_a_16_bit_port_in_either_order() {
     ] {
         let mut builder = Builder::default();
         builder
-            .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+            .memory(
+                image(&[NOP], ROM_BYTES),
+                MemoryKind::Rom,
+                &[ChipSelect::Boot],
+            )
             .unwrap();
         for pin in pins {
             builder
@@ -208,10 +217,14 @@ fn dsack0_and_dsack1_at_once_are_a_16_bit_port_in_either_order() {
 fn a_bus_peripheral_takes_a_fixed_memorys_cycles() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let fixed = builder
-        .fixed_memory(Address(WINDOW), vec![0x5a; 2048], true)
+        .fixed_memory(Address(WINDOW), vec![0x5a; 2048], MemoryKind::Ram)
         .unwrap();
     let id = builder
         .bus_peripheral(
@@ -306,10 +319,14 @@ fn the_core_leaves_a_bus_window_inside_a_fixed_memory_to_the_peripheral() {
     let program = [load_word(WINDOW + 0x10, 0), load_word(WINDOW, 1)].concat();
     let mut builder = Builder::default();
     builder
-        .memory(image(&program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder
-        .fixed_memory(Address(WINDOW), vec![0x5a; 2048], true)
+        .fixed_memory(Address(WINDOW), vec![0x5a; 2048], MemoryKind::Ram)
         .unwrap();
     builder
         .bus_peripheral(

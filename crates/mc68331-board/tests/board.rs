@@ -61,6 +61,7 @@ use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_mc68331::debug::TargetError;
 use mc683xx_mc68331::event::DsackFault;
 use mc683xx_mc68331::event::Event;
@@ -273,7 +274,7 @@ parameters = { bytes = 4 }
     );
     let mut builder = Builder::default();
     builder
-        .memory(image(&program), false, &[ChipSelect::Boot])
+        .memory(image(&program), MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     builder.peripheral(Words::default(), &[cs(1)]).unwrap();
     let mut chip = builder.build();
@@ -1393,7 +1394,7 @@ attach = [{ select = "CS1" }]
     fs::remove_dir_all(directory).unwrap();
     let mut builder = Builder::default();
     builder
-        .memory(image(&program), false, &[ChipSelect::Boot])
+        .memory(image(&program), MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     let id = builder.peripheral(TimedWords::default(), &[cs(1)]).unwrap();
     let mut chip = builder.build();

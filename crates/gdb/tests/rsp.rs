@@ -41,6 +41,7 @@ use mc683xx_gdb::serve;
 use mc683xx_gdb::target::Target;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_mc68331::event::Event;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::sim::ResetCause;
@@ -388,7 +389,9 @@ fn chip() -> Mc68331 {
     let program = bytes(&PROGRAM);
     rom[START as usize..START as usize + program.len()].copy_from_slice(&program);
     let mut builder = Builder::default();
-    builder.memory(rom, false, &[ChipSelect::Boot]).unwrap();
+    builder
+        .memory(rom, MemoryKind::Rom, &[ChipSelect::Boot])
+        .unwrap();
     builder.build()
 }
 

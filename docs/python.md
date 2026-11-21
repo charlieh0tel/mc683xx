@@ -51,7 +51,9 @@ rename renames the Python name with it.  The deliberate differences:
   `add_code_hook(range, hook)`; `bus_write(address, size, value,
   function_code=5)`, Rust's `(address, size, function_code, value)`;
   `Builder.memory(contents, pins, writable=True)`, Rust's `(bytes,
-  writable, pins)`.  The bare `Machine`'s `map` takes the pages'
+  kind, pins)`, a `MemoryKind` (`Ram` or `Rom`) where Python takes a
+  keyword's bool; `fixed_memory(base, contents, writable=True)`
+  likewise.  The bare `Machine`'s `map` takes the pages'
   `permissions` too, Rust's `map` then `protect`.
 - **Builtins:** an argument Rust names `id` or `bytes`, Python
   builtins, is named for what it holds: `remove_hook(hook)`,

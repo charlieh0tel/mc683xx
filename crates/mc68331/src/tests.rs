@@ -52,6 +52,7 @@ use crate::chip::Builder;
 use crate::chip::Diversion;
 use crate::chip::Mc68331;
 use crate::chip::MemoryId;
+use crate::chip::MemoryKind;
 use crate::chip::OutputHorizon;
 use crate::chip::OutputStop;
 use crate::chip::SyncRequest;
@@ -260,7 +261,11 @@ impl Timed for Faulting {}
 fn booting(program: &[u16]) -> (Mc68331, MemoryId) {
     let mut builder = Builder::default();
     let rom = builder
-        .memory(image(program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     (builder.build(), rom)
 }
@@ -495,13 +500,15 @@ fn wired_patched(program: &[u16], patches: &[(u32, &[u16])]) -> Wired {
     }
     let upper = 0x2222_u16.to_be_bytes().repeat(ROM_BANK_BYTES / 2);
     let mut builder = Builder::default();
-    builder.memory(lower, false, &[ChipSelect::Boot]).unwrap();
-    builder.memory(upper, false, &[cs(1)]).unwrap();
+    builder
+        .memory(lower, MemoryKind::Rom, &[ChipSelect::Boot])
+        .unwrap();
+    builder.memory(upper, MemoryKind::Rom, &[cs(1)]).unwrap();
     let flash_writes = builder
         .peripheral(Recorder::default(), &[cs(6), cs(7)])
         .unwrap();
     let ram = builder
-        .memory(vec![0; 128 << 10], true, &[cs(0), cs(2), cs(3)])
+        .memory(vec![0; 128 << 10], MemoryKind::Ram, &[cs(0), cs(2), cs(3)])
         .unwrap();
     let shared = builder
         .peripheral(Recorder::answering(0xab), &[cs(4)])
@@ -632,9 +639,15 @@ fn another_board() {
     let configuration = Configuration::new(!1, ClockSource::default());
     let mut builder = Builder::new(configuration);
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
-    let ram = builder.memory(vec![0; 32 << 10], true, &[cs(1)]).unwrap();
+    let ram = builder
+        .memory(vec![0; 32 << 10], MemoryKind::Ram, &[cs(1)])
+        .unwrap();
     builder.autovector(IrqPin::new(3).unwrap());
     let mut chip = builder.build();
     // a word fetch is two 16-clock byte cycles
@@ -678,7 +691,11 @@ fn another_board() {
 fn overlapping_selects_end_at_the_first_dsack() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let slow = builder
         .peripheral(Recorder::answering(0x1200), &[cs(0)])
@@ -705,7 +722,11 @@ fn overlapping_selects_end_at_the_first_dsack() {
 fn overlapping_selects_dsack_at_once_on_both_pins() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder
         .peripheral(Recorder::answering(0x1234), &[cs(0)])
@@ -733,7 +754,11 @@ fn overlapping_selects_dsack_at_once_on_both_pins() {
 fn an_external_dsack_waits_on_the_peripheral_and_the_bus_monitor() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let peripheral = builder
         .peripheral(
@@ -777,7 +802,11 @@ const CS2_INTERNAL: u16 = 0x7830;
 fn externally_terminated(pins: Dsack) -> (Mc68331, PeripheralId) {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let peripheral = builder
         .peripheral(Recorder::answering(0x1234), &[cs(2)])
@@ -953,10 +982,14 @@ fn a_peripheral_diverts_a_memory_off_the_fast_path_within_a_quantum() {
     program.extend(load_word(0x20_0000, 2));
     let mut builder = Builder::default();
     builder
-        .memory(image(&program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let memory = builder
-        .memory([0x11; 2048].to_vec(), false, &[cs(1)])
+        .memory([0x11; 2048].to_vec(), MemoryKind::Rom, &[cs(1)])
         .unwrap();
     let peripheral = builder.unwired_peripheral(Recorder::answering(0xbeef));
     let diversion = builder.diversion();
@@ -1002,10 +1035,14 @@ fn a_peripheral_diverts_a_memory_off_the_fast_path_within_a_quantum() {
 fn a_diversion_to_no_peripheral_is_refused() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let memory = builder
-        .memory([0x11; 2048].to_vec(), false, &[cs(1)])
+        .memory([0x11; 2048].to_vec(), MemoryKind::Rom, &[cs(1)])
         .unwrap();
     let peripheral = builder.unwired_peripheral(Recorder::answering(0xbeef));
     let mut chip = builder.build();
@@ -1089,7 +1126,11 @@ fn the_periodic_timer_interrupts_on_time() {
 fn the_format_matches_its_golden() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder.unwired_peripheral(Fixed);
     builder.qspi(Selected::default());
@@ -1116,7 +1157,11 @@ fn the_format_matches_its_golden() {
 fn a_run_syncs_at_the_next_event() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let advanced = Rc::new(Cell::new(None));
     let at = Cycles(1000);
@@ -1189,7 +1234,11 @@ fn a_host_watchdog_reset_leaves_the_chip_as_a_timeout_does() {
     let watched = || {
         let mut builder = Builder::default();
         builder
-            .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+            .memory(
+                image(&[NOP], ROM_BYTES),
+                MemoryKind::Rom,
+                &[ChipSelect::Boot],
+            )
             .unwrap();
         let not_watchdog = builder.unwired_peripheral(Recorder::default());
         builder.reset_scope(not_watchdog, ResetScope::ALL.without(ResetCause::Watchdog));
@@ -1538,7 +1587,11 @@ fn two_entries(scope: ResetScope) -> Mc68331 {
     program.extend(store_word(QSM + 0x1a, 0x8000));
     let mut builder = Builder::default();
     builder
-        .memory(image(&program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder.qspi(Framed::default());
     builder.qspi_reset_scope(scope);
@@ -1580,7 +1633,11 @@ fn the_firmware_talks_on_the_sci_and_the_qspi() {
     program.extend(store_word(QSM + 0x1a, 0x8000));
     let mut builder = Builder::default();
     builder
-        .memory(image(&program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder.qspi(Selected::default());
     let mut chip = builder.build();
@@ -1636,7 +1693,11 @@ impl SpiPeripheral for Clocked {
 fn the_qspi_peripheral_sees_syncr_in_the_baud() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder.qspi(Clocked::default());
     let mut chip = builder.build();
@@ -1875,7 +1936,11 @@ fn an_external_clock_board_uses_the_sci_and_the_gpt() {
     );
     let mut builder = Builder::new(configuration);
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let mut chip = builder.build();
     assert_eq!(chip.sim().clock().frequency().hz(), 16_000_000);
@@ -2058,8 +2123,12 @@ fn duart_board(wait: u8, protection: Option<u16>) -> (Mc68331, MemoryId, Periphe
         .collect();
     patch(&mut rom, HANDLER, &handler);
     let mut builder = Builder::default();
-    builder.memory(rom, false, &[ChipSelect::Boot]).unwrap();
-    let ram = builder.memory(vec![0; 64 << 10], true, &[cs(0)]).unwrap();
+    builder
+        .memory(rom, MemoryKind::Rom, &[ChipSelect::Boot])
+        .unwrap();
+    let ram = builder
+        .memory(vec![0; 64 << 10], MemoryKind::Ram, &[cs(0)])
+        .unwrap();
     let duart = builder
         .peripheral(Duart::new(wait), &[cs(8), cs(10)])
         .unwrap();
@@ -2148,7 +2217,11 @@ fn a_duart_too_slow_for_the_bus_monitor_is_spurious() {
 fn a_reset_reaches_only_the_peripherals_in_its_scope() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let everything = builder.unwired_peripheral(Recorder::default());
     // a board whose DUART sees no watchdog reset, as smartclock's
@@ -2303,7 +2376,11 @@ fn with_peripheral<D: MappedPeripheral + Timed + Save + 'static>(
 ) -> (Mc68331, MemoryId, PeripheralId) {
     let mut builder = Builder::default();
     let rom = builder
-        .memory(image(program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let peripheral = peripheral(builder.stop_request());
     let id = builder.peripheral(peripheral, &[cs(1)]).unwrap();
@@ -2398,7 +2475,11 @@ fn a_request_the_host_moves_between_runs_is_seen() {
     let line = Rc::new(Cell::new(false));
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let peripheral = builder
         .peripheral(Line(Rc::clone(&line)), &[cs(1)])
@@ -2452,7 +2533,7 @@ fn a_peripheral_ends_the_run_early_after_its_instruction() {
     builder
         .memory(
             image(&load_word(CS1_BASE, 0), ROM_BYTES),
-            false,
+            MemoryKind::Rom,
             &[ChipSelect::Boot],
         )
         .unwrap();
@@ -2509,7 +2590,11 @@ fn horizons(
 ) -> (Mc68331, Rc<Cell<Option<Option<Cycles>>>>) {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let seen = Rc::new(Cell::new(None));
     let horizons = Horizons {
@@ -2648,7 +2733,11 @@ impl Timed for StopAt {
 fn a_model_stops_the_run_between_quanta() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let stop = builder.stop_request();
     builder.unwired_peripheral(StopAt {
@@ -2720,9 +2809,15 @@ fn copying_with(more: impl FnOnce(&mut Builder)) -> (Mc68331, MemoryId, Peripher
     ];
     let mut builder = Builder::default();
     builder
-        .memory(image(&program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
-    let ram = builder.memory(vec![0; 64 << 10], true, &[cs(0)]).unwrap();
+    let ram = builder
+        .memory(vec![0; 64 << 10], MemoryKind::Ram, &[cs(0)])
+        .unwrap();
     let counter = builder.peripheral(Counter::default(), &[cs(1)]).unwrap();
     more(&mut builder);
     let mut chip = builder.build();
@@ -2850,7 +2945,7 @@ fn a_snapshot_of_fixed_memories_elsewhere_is_refused_and_changes_nothing() {
     let at = |base: u32| {
         copying_with(|builder| {
             builder
-                .fixed_memory(Address(base), vec![0; 64 << 10], true)
+                .fixed_memory(Address(base), vec![0; 64 << 10], MemoryKind::Ram)
                 .unwrap();
         })
         .0
@@ -2876,9 +2971,15 @@ fn a_restore_rebuilds_the_page_tables_from_the_chips_own_wiring() {
     let wired = |ram: u8, counter: u8| {
         let mut builder = Builder::default();
         builder
-            .memory(image(&[0x60fe], ROM_BYTES), false, &[ChipSelect::Boot])
+            .memory(
+                image(&[0x60fe], ROM_BYTES),
+                MemoryKind::Rom,
+                &[ChipSelect::Boot],
+            )
             .unwrap();
-        builder.memory(vec![0; 64 << 10], true, &[cs(ram)]).unwrap();
+        builder
+            .memory(vec![0; 64 << 10], MemoryKind::Ram, &[cs(ram)])
+            .unwrap();
         builder
             .peripheral(Counter::default(), &[cs(counter)])
             .unwrap();
@@ -3292,7 +3393,7 @@ fn new_code_runs_however_the_host_writes_it() {
     let code = builder
         .memory(
             image(&[moveq_to_d0(0), 0x60fc], ROM_BYTES),
-            true,
+            MemoryKind::Ram,
             &[ChipSelect::Boot],
         )
         .unwrap();
@@ -3334,7 +3435,11 @@ fn code_the_cpu_writes_runs_at_once() {
         .collect();
     let mut builder = Builder::default();
     builder
-        .memory(image(&program, ROM_BYTES), true, &[ChipSelect::Boot])
+        .memory(
+            image(&program, ROM_BYTES),
+            MemoryKind::Ram,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let mut chip = builder.build();
     chip.run_for(Cycles(500));
@@ -3345,10 +3450,10 @@ fn code_the_cpu_writes_runs_at_once() {
 fn a_pin_wired_twice_is_named_as_the_manual_names_it() {
     let mut builder = Builder::default();
     builder
-        .memory(vec![0; 2048], false, &[ChipSelect::Boot])
+        .memory(vec![0; 2048], MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     let error = builder
-        .memory(vec![0; 2048], false, &[ChipSelect::Boot])
+        .memory(vec![0; 2048], MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap_err();
     assert_eq!(error.to_string(), "CSBOOT is already wired");
 }

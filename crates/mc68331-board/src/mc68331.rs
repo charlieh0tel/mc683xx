@@ -26,6 +26,7 @@ use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Diversion;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::chip::MemoryId;
+use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_mc68331::chip::OutputHorizon;
 use mc683xx_mc68331::chip::OutputStop;
 use mc683xx_mc68331::chip::SyncRequest;
@@ -382,6 +383,11 @@ impl ChipBuilder for Mc68331Builder {
         plan: MemoryPlan<'_>,
         router: R,
     ) -> Result<MemoryId, LoadError> {
+        let kind = if plan.writable {
+            MemoryKind::Ram
+        } else {
+            MemoryKind::Rom
+        };
         let id = match plan.place {
             MemoryPlace::Fixed {
                 base,
@@ -389,13 +395,13 @@ impl ChipBuilder for Mc68331Builder {
                 termination,
             } => self
                 .builder
-                .fixed_memory(Address(base), plan.bytes, plan.writable)
+                .fixed_memory(Address(base), plan.bytes, kind)
                 .and_then(|id| {
                     self.builder
                         .fixed_timing(id, port, termination)
                         .map(|()| id)
                 }),
-            MemoryPlace::Selects(pins) => self.builder.memory(plan.bytes, plan.writable, pins),
+            MemoryPlace::Selects(pins) => self.builder.memory(plan.bytes, kind, pins),
         }
         .map_err(built)?;
         self.builder.reload_scope(id, plan.reload);

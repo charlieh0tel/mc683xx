@@ -15,6 +15,7 @@
 //! use mc683xx_cpu32::cycles::Cycles;
 //! use mc683xx_mc68331::chip::BuildError;
 //! use mc683xx_mc68331::chip::Builder;
+//! use mc683xx_mc68331::chip::MemoryKind;
 //! use mc683xx_modules::chip_select::ChipSelect;
 //! use mc683xx_modules::sim::Configuration;
 //!
@@ -31,7 +32,7 @@
 //!     rom[START as usize..][..STOP.len()].copy_from_slice(&STOP);
 //!     // DATA[15:0] high (a 16-bit boot port), the 32.768 kHz crystal.
 //!     let mut builder = Builder::new(Configuration::default());
-//!     builder.memory(rom, false, &[ChipSelect::Boot])?;
+//!     builder.memory(rom, MemoryKind::Rom, &[ChipSelect::Boot])?;
 //!     // The power-on reset: SSP and PC from the vectors.
 //!     let mut chip = builder.build();
 //!     assert_eq!(chip.cpu().registers.pc.0, START);

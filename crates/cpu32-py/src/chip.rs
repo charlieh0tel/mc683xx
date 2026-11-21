@@ -15,6 +15,7 @@ use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::chip::MemoryId;
+use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_mc68331::event;
 use mc683xx_mc68331::event::ChipTracing;
 use mc683xx_mc68331::event::DsackFault;
@@ -124,6 +125,15 @@ fn pins(names: &[String]) -> Result<Vec<ChipSelect>, Error> {
     names.iter().map(|name| select::parse(name)).collect()
 }
 
+/// A memory's kind as Python gives it, `writable` or not.
+const fn memory_kind(writable: bool) -> MemoryKind {
+    if writable {
+        MemoryKind::Ram
+    } else {
+        MemoryKind::Rom
+    }
+}
+
 /// The resets `causes`: a `ResetScope` as Python gives one.
 fn scope(causes: &[ResetCause]) -> ResetScope {
     causes
@@ -226,7 +236,9 @@ impl ChipBuilder {
         writable: bool,
     ) -> Result<usize, Error> {
         let pins = self::pins(&pins)?;
-        let id = self.builder()?.memory(contents.to_vec(), writable, &pins)?;
+        let id = self
+            .builder()?
+            .memory(contents.to_vec(), memory_kind(writable), &pins)?;
         Ok(self.wiring.borrow_mut().add_memory(id))
     }
 
@@ -240,9 +252,11 @@ impl ChipBuilder {
         contents: PyBackedBytes,
         writable: bool,
     ) -> Result<usize, Error> {
-        let id = self
-            .builder()?
-            .fixed_memory(Address(base), contents.to_vec(), writable)?;
+        let id = self.builder()?.fixed_memory(
+            Address(base),
+            contents.to_vec(),
+            memory_kind(writable),
+        )?;
         Ok(self.wiring.borrow_mut().add_memory(id))
     }
 

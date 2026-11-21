@@ -17,6 +17,7 @@ use super::START;
 use super::image;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
+use crate::chip::MemoryKind;
 use crate::debug::serial::NOT_IN_BACKGROUND;
 use mc683xx_target::serial::BUS_ERROR;
 use mc683xx_target::serial::COMPLETE;
@@ -69,10 +70,14 @@ const ATEMP: u16 = 0x8;
 fn chip(program: &[u16]) -> Mc68331 {
     let mut builder = Builder::default();
     builder
-        .memory(image(program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], true)
+        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     let mut chip = builder.build();
     chip.reset_halted().unwrap();

@@ -10,6 +10,7 @@ use mc683xx_debug::script::CommandError;
 use mc683xx_debug::script::Script;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_mc68331::debug::TargetError;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_target::Cpu32Target;
@@ -39,18 +40,18 @@ const CSPAR0: u32 = 0xff_fa44;
 /// CSPAR0's bit 1, which always reads one.
 const CSPAR0_ONE: u32 = 0x0002;
 
-/// The chip reset halted: boot memory on CSBOOT, writable or not,
+/// The chip reset halted: boot memory on CSBOOT, ROM or RAM,
 /// its reset vectors pointing into RAM.
-fn chip(writable_boot: bool) -> Mc68331 {
+fn chip(boot_kind: MemoryKind) -> Mc68331 {
     let mut boot = vec![0xff; BOOT_BYTES];
     boot[..4].copy_from_slice(&STACK.to_be_bytes());
     boot[4..8].copy_from_slice(&RAM.to_be_bytes());
     let mut builder = Builder::default();
     builder
-        .memory(boot, writable_boot, &[ChipSelect::Boot])
+        .memory(boot, boot_kind, &[ChipSelect::Boot])
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], true)
+        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
@@ -81,7 +82,7 @@ fn the_demo_elf_is_its_binary_entering_at_its_entry() {
 
 #[test]
 fn the_demo_loads_over_bdm_and_runs_from_its_entry() {
-    let mut chip = chip(true);
+    let mut chip = chip(MemoryKind::Ram);
     let image = Image::from_elf(DEMO_ELF).unwrap();
     let report = image.load(&mut chip, &LoadOptions::default()).unwrap();
     assert_eq!(report.bytes, DEMO_BIN.len());
@@ -101,7 +102,7 @@ fn the_demo_loads_over_bdm_and_runs_from_its_entry() {
 
 #[test]
 fn srecords_load_into_ram_with_odd_edges_in_bytes() {
-    let mut chip = chip(false);
+    let mut chip = chip(MemoryKind::Rom);
     // S3: four bytes at RAM + 1; S7: the entry, RAM + 0x100.
     let image = Image::from_srecords("S30900200001DEADBEEF9D\nS70500200100D9\n").unwrap();
     assert!(matches!(
@@ -120,7 +121,7 @@ fn srecords_load_into_ram_with_odd_edges_in_bytes() {
 
 #[test]
 fn a_load_into_rom_fails_verification() {
-    let mut chip = chip(false);
+    let mut chip = chip(MemoryKind::Rom);
     let error = Image::from_binary(Address(0x100), vec![0x4e, 0x71])
         .unwrap()
         .load(&mut chip, &LoadOptions::default())
@@ -140,7 +141,7 @@ fn a_load_into_rom_fails_verification() {
 
 #[test]
 fn a_load_where_nothing_answers_fails_its_write() {
-    let mut chip = chip(false);
+    let mut chip = chip(MemoryKind::Rom);
     let error = Image::from_binary(Address(0x50_0000), vec![0; 4])
         .unwrap()
         .load(&mut chip, &LoadOptions::default())
@@ -160,7 +161,7 @@ fn a_load_where_nothing_answers_fails_its_write() {
 
 #[test]
 fn an_init_script_programs_the_sim_and_registers() {
-    let mut chip = chip(false);
+    let mut chip = chip(MemoryKind::Rom);
     let script: Script = format!(
         "# CS0 to CS5 as 16-bit selects\n\
          write_memory.w {CSPAR0:#x} 0x3fff\n\

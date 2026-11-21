@@ -91,6 +91,23 @@ fn index(id: PeripheralId) -> usize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MemoryId(pub(crate) RegionId);
 
+/// Whether the CPU may write a memory the host wires in
+/// ([`Builder::memory`], [`Builder::fixed_memory`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemoryKind {
+    /// Read-only: a write is ignored, as a ROM ignores one.
+    Rom,
+    /// Read and written.
+    Ram,
+}
+
+impl MemoryKind {
+    /// Whether the CPU writes it.
+    const fn writable(self) -> bool {
+        matches!(self, Self::Ram)
+    }
+}
+
 /// A handle by which the host's peripherals end the chip's run early.
 ///
 /// After the instruction whose cycle asked, or at the sync point if no
@@ -396,7 +413,7 @@ impl Builder {
         Ok(())
     }
 
-    /// Memory of `bytes`, writable or not, on `pins`: every cycle
+    /// Memory of `bytes`, ROM or RAM by `kind`, on `pins`: every cycle
     /// those selects take, in any space, reads or writes it, its
     /// address pins on ADDR from bit 0 up (a block larger than it
     /// repeats it).  The core serves it itself wherever no peripheral
@@ -410,7 +427,7 @@ impl Builder {
     pub fn memory(
         &mut self,
         bytes: Vec<u8>,
-        writable: bool,
+        kind: MemoryKind,
         pins: &[ChipSelect],
     ) -> Result<MemoryId, BuildError> {
         let length = pages(&bytes)?;
@@ -419,13 +436,13 @@ impl Builder {
             region,
             base: 0,
             length,
-            writable,
+            writable: kind.writable(),
         };
         self.wire(Wire::Memory(wired), pins)?;
         Ok(MemoryId(region))
     }
 
-    /// Memory of `bytes`, writable or not, at `base` up: every program
+    /// Memory of `bytes`, ROM or RAM by `kind`, at `base` up: every program
     /// and data cycle there that no chip select matches, in any space,
     /// reads or writes it, at once, with no wait states and no DSACK
     /// (a 16-bit port costing nothing beyond the timing tables, as an
@@ -451,7 +468,7 @@ impl Builder {
         &mut self,
         base: Address,
         bytes: Vec<u8>,
-        writable: bool,
+        kind: MemoryKind,
     ) -> Result<MemoryId, BuildError> {
         let length = pages(&bytes)?;
         let placement = BuildError::Placement {
@@ -484,7 +501,7 @@ impl Builder {
                 region,
                 base: base.0,
                 length,
-                writable,
+                writable: kind.writable(),
             },
             timing: FIXED_TIMING,
         });

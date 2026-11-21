@@ -12,6 +12,7 @@ use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::MemoryId;
+use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::peripheral::Timed;
@@ -40,10 +41,14 @@ pub(crate) fn board<D: MappedPeripheral + Timed + Save + Any>(
     flash.resize(FLASH_BYTES, 0xff);
     let mut builder = Builder::default();
     builder
-        .memory(flash, false, &[ChipSelect::Boot, select(1)])
+        .memory(flash, MemoryKind::Rom, &[ChipSelect::Boot, select(1)])
         .expect("flash");
     let ram = builder
-        .memory(vec![0; RAM_BYTES], true, &[select(0), select(2), select(3)])
+        .memory(
+            vec![0; RAM_BYTES],
+            MemoryKind::Ram,
+            &[select(0), select(2), select(3)],
+        )
         .expect("RAM");
     let pins: Vec<ChipSelect> = PERIPHERAL_PINS
         .iter()

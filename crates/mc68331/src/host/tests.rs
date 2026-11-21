@@ -26,6 +26,7 @@ use super::AccessError;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::chip::MemoryId;
+use crate::chip::MemoryKind;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::peripheral::PeripheralId;
 
@@ -208,9 +209,11 @@ struct Board {
 fn board(program: &[u16], ticker: Option<Cycles>) -> Board {
     let mut builder = Builder::default();
     builder
-        .memory(rom(program), false, &[ChipSelect::Boot])
+        .memory(rom(program), MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
-    let ram = builder.memory(vec![0; RAM_BYTES], true, &[cs(0)]).unwrap();
+    let ram = builder
+        .memory(vec![0; RAM_BYTES], MemoryKind::Ram, &[cs(0)])
+        .unwrap();
     let recorder = builder
         .peripheral(
             Recorder {
@@ -564,7 +567,7 @@ fn a_stop_a_peripheral_asks_for_in_a_host_cycle_stops_no_run() {
 
     let mut builder = Builder::default();
     builder
-        .memory(rom(&[BRANCH_TO_SELF]), false, &[ChipSelect::Boot])
+        .memory(rom(&[BRANCH_TO_SELF]), MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     let stop = builder.stop_request();
     builder.peripheral(Stopper(stop.clone()), &[cs(1)]).unwrap();

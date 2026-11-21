@@ -27,6 +27,7 @@ use crate::chip::BuildError;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::chip::MemoryId;
+use crate::chip::MemoryKind;
 use crate::event::Event;
 use crate::state;
 use mc683xx_modules::sim::reset::ResetScope;
@@ -69,13 +70,13 @@ fn code(program: &[u16]) -> Vec<u8> {
 fn fixed(program: &[u16], reload: ResetScope) -> (Mc68331, MemoryId, MemoryId) {
     let mut builder = Builder::default();
     builder
-        .memory(jumping(), false, &[ChipSelect::Boot])
+        .memory(jumping(), MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     let code = builder
-        .fixed_memory(Address(CODE), code(program), false)
+        .fixed_memory(Address(CODE), code(program), MemoryKind::Rom)
         .unwrap();
     let data = builder
-        .fixed_memory(Address(DATA), vec![0x5a; FIXED_BYTES], true)
+        .fixed_memory(Address(DATA), vec![0x5a; FIXED_BYTES], MemoryKind::Ram)
         .unwrap();
     builder.reload_scope(data, reload);
     (builder.build(), code, data)
@@ -132,11 +133,17 @@ fn reset_code_runs_in_a_fixed_memory_with_no_select_programmed() {
 fn a_chip_select_matching_a_cycle_wins_over_a_fixed_memory() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
-    let selected = builder.memory(vec![0x11; 2048], true, &[cs(1)]).unwrap();
+    let selected = builder
+        .memory(vec![0x11; 2048], MemoryKind::Ram, &[cs(1)])
+        .unwrap();
     let fixed = builder
-        .fixed_memory(Address(CODE), vec![0x22; FIXED_BYTES], true)
+        .fixed_memory(Address(CODE), vec![0x22; FIXED_BYTES], MemoryKind::Ram)
         .unwrap();
     let mut chip = builder.build();
     assert_eq!(cycle(&mut chip, CODE, Size::Word, None), Ok((0x2222, 2)));
@@ -234,13 +241,15 @@ fn a_fixed_memory_is_in_the_snapshot_and_never_diverted() {
     builder
         .memory(
             image(&[BRANCH_TO_SELF], ROM_BYTES),
-            false,
+            MemoryKind::Rom,
             &[ChipSelect::Boot],
         )
         .unwrap();
-    let selected = builder.memory(vec![0x11; 2048], false, &[cs(1)]).unwrap();
+    let selected = builder
+        .memory(vec![0x11; 2048], MemoryKind::Rom, &[cs(1)])
+        .unwrap();
     let fixed = builder
-        .fixed_memory(Address(DATA), vec![0x5a; FIXED_BYTES], true)
+        .fixed_memory(Address(DATA), vec![0x5a; FIXED_BYTES], MemoryKind::Ram)
         .unwrap();
     let peripheral = builder.unwired_peripheral(Recorder::answering(0xbeef));
     let mut chip = builder.build();
@@ -269,35 +278,35 @@ fn a_fixed_memory_must_fit_on_pages_and_not_overlap() {
     let mut builder = Builder::default();
     let page = vec![0; 2048];
     assert_eq!(
-        builder.fixed_memory(Address(CODE + 2), page.clone(), true),
+        builder.fixed_memory(Address(CODE + 2), page.clone(), MemoryKind::Ram),
         Err(BuildError::Placement {
             base: Address(CODE + 2),
             length: 2048
         })
     );
     assert_eq!(
-        builder.fixed_memory(Address(0xff_f800), vec![0; 4096], true),
+        builder.fixed_memory(Address(0xff_f800), vec![0; 4096], MemoryKind::Ram),
         Err(BuildError::Placement {
             base: Address(0xff_f800),
             length: 4096
         })
     );
     assert_eq!(
-        builder.fixed_memory(Address(CODE), vec![0; 100], true),
+        builder.fixed_memory(Address(CODE), vec![0; 100], MemoryKind::Ram),
         Err(BuildError::Length(100))
     );
     builder
-        .fixed_memory(Address(CODE), vec![0; 4096], true)
+        .fixed_memory(Address(CODE), vec![0; 4096], MemoryKind::Ram)
         .unwrap();
     assert_eq!(
-        builder.fixed_memory(Address(CODE + 2048), page.clone(), true),
+        builder.fixed_memory(Address(CODE + 2048), page.clone(), MemoryKind::Ram),
         Err(BuildError::Overlap {
             base: Address(CODE + 2048),
             other: Address(CODE)
         })
     );
     builder
-        .fixed_memory(Address(CODE + 4096), page, true)
+        .fixed_memory(Address(CODE + 4096), page, MemoryKind::Ram)
         .unwrap();
 }
 
@@ -306,10 +315,14 @@ fn a_fixed_memory_must_fit_on_pages_and_not_overlap() {
 fn nops_reached(timing: Option<(PortSize, Termination)>) -> u32 {
     let mut builder = Builder::default();
     builder
-        .memory(jumping(), false, &[ChipSelect::Boot])
+        .memory(jumping(), MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     let code = builder
-        .fixed_memory(Address(CODE), code(&[NOP; FIXED_BYTES / 2]), false)
+        .fixed_memory(
+            Address(CODE),
+            code(&[NOP; FIXED_BYTES / 2]),
+            MemoryKind::Rom,
+        )
         .unwrap();
     if let Some((port, termination)) = timing {
         builder.fixed_timing(code, port, termination).unwrap();
@@ -339,10 +352,10 @@ fn a_fixed_memory_runs_at_the_port_and_wait_states_it_is_given() {
 fn fixed_timing_takes_only_fixed_memories_and_internal_terminations() {
     let mut builder = Builder::default();
     let rom = builder
-        .memory(jumping(), false, &[ChipSelect::Boot])
+        .memory(jumping(), MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     let code = builder
-        .fixed_memory(Address(CODE), code(&[NOP]), false)
+        .fixed_memory(Address(CODE), code(&[NOP]), MemoryKind::Rom)
         .unwrap();
     assert_eq!(
         builder.fixed_timing(rom, PortSize::Bits16, Termination::Fast),

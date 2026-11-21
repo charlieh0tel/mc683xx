@@ -44,6 +44,7 @@ use mc683xx_modules::sim::Configuration;
 use mc683xx_examples::firmware;
 use mc683xx_mc68331::chip::BuildError;
 use mc683xx_mc68331::chip::Builder;
+use mc683xx_mc68331::chip::MemoryKind;
 
 fn main() -> Result<(), BuildError> {
     // CS0 at RAM_BASE, then a word into it.
@@ -54,8 +55,8 @@ fn main() -> Result<(), BuildError> {
     .concat();
     // DATA[15:0] high (a 16-bit boot port), the 32.768 kHz crystal.
     let mut builder = Builder::new(Configuration::default());
-    builder.memory(firmware::rom(&program), false, &[ChipSelect::Boot])?;
-    let ram = builder.memory(vec![0; firmware::RAM_BYTES], true, &[firmware::cs(0)])?;
+    builder.memory(firmware::rom(&program), MemoryKind::Rom, &[ChipSelect::Boot])?;
+    let ram = builder.memory(vec![0; firmware::RAM_BYTES], MemoryKind::Ram, &[firmware::cs(0)])?;
     // The power-on reset: SSP and PC from the vectors.
     let mut chip = builder.build();
     assert_eq!(chip.cpu().registers.pc.0, firmware::START);
@@ -81,12 +82,12 @@ fn main() -> Result<(), BuildError> {
   system clock out of reset, `sim().clock().frequency()` as SYNCR sets
   it.
   `Builder::default()` is DATA high and the 32.768 kHz crystal.
-- `memory(bytes, writable, pins)`: RAM or ROM, a whole number of
+- `memory(bytes, kind, pins)`: RAM or ROM by `MemoryKind`, a whole number of
   2-Kbyte pages, on one or more pins.  A select's block larger than
   the memory repeats it.  The core serves memory itself, fast, except
   where a peripheral shares the cycle.  `memory` and `memory_mut` give
   the bytes back by `MemoryId`.
-- `fixed_memory(base, bytes, writable)`: memory at a fixed address on
+- `fixed_memory(base, bytes, kind)`: memory at a fixed address on
   no pin, emulator-only, and `fixed_timing(memory, port, termination)`
   its port and wait states (see Fixed memory).
 - `reload_scope(memory, ResetScope)` says which resets put a memory's
@@ -120,7 +121,7 @@ does not serve).
 
 ### Fixed memory
 
-`Builder::fixed_memory(base, bytes, writable)` maps memory at `base`
+`Builder::fixed_memory(base, bytes, kind)` maps memory at `base`
 (an `Address` on a 2-Kbyte page boundary, the memory inside
 ADDR[23:0]) up to its size, on no chip select.  **It is emulator-only:
 the chip has no such decode.**  It is for code and data the host maps
@@ -149,8 +150,8 @@ the reset code to program a select the firmware leaves unused.
 - Two fixed memories may not overlap (`BuildError::Overlap`); a base
   off a page boundary or a memory past ADDR[23:0] is
   `BuildError::Placement`.
-- Written when `writable`; a read-only one ignores writes, as ROM on
-  a select does.  It is never diverted: `Diversion::divert` and
+- Written when `MemoryKind::Ram`; a `MemoryKind::Rom` one ignores
+  writes, as ROM on a select does.  It is never diverted: `Diversion::divert` and
   `divert_memory` leave it as it is.
 - `memory` and `memory_mut` reach its bytes by its `MemoryId`, and a
   snapshot holds them as every memory's.
@@ -167,12 +168,13 @@ pins too; reloading is emulator-only as well.
 use mc683xx_target::address::Address;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_examples::firmware;
+use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_modules::sim::reset::ResetScope;
 
 // No select programmed: the boot code stores straight into it.
 let code = 0x60_0000;
 let (mut builder, _) = firmware::booting(firmware::rom(&firmware::store_word(code, 0x1234)));
-let fixed = builder.fixed_memory(Address(code), vec![0; 2048], true).unwrap();
+let fixed = builder.fixed_memory(Address(code), vec![0; 2048], MemoryKind::Ram).unwrap();
 builder.reload_scope(fixed, ResetScope::ALL);
 let mut chip = builder.build();
 chip.run_for(Cycles(1000));
@@ -1687,15 +1689,16 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_mc68331::chip::BuildError;
 use mc683xx_mc68331::chip::Builder;
+use mc683xx_mc68331::chip::MemoryKind;
 
 let mut builder = Builder::default();
-builder.memory(vec![0; 2048], false, &[ChipSelect::Boot]).unwrap();
+builder.memory(vec![0; 2048], MemoryKind::Rom, &[ChipSelect::Boot]).unwrap();
 assert_eq!(
-    builder.memory(vec![0; 2048], true, &[ChipSelect::Boot]),
+    builder.memory(vec![0; 2048], MemoryKind::Ram, &[ChipSelect::Boot]),
     Err(BuildError::Wired(ChipSelect::Boot))
 );
 assert_eq!(
-    builder.memory(vec![0; 100], true, &[]),
+    builder.memory(vec![0; 100], MemoryKind::Ram, &[]),
     Err(BuildError::Length(100))
 );
 let mut chip = builder.build();

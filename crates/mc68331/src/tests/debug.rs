@@ -28,6 +28,7 @@ use super::on;
 use super::write_register;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
+use crate::chip::MemoryKind;
 use crate::debug::TargetError;
 use crate::debug::serial::NOT_IN_BACKGROUND;
 
@@ -49,10 +50,14 @@ const RAM_BYTES: usize = 2048;
 fn chip_and_stop(program: &[u16]) -> (Mc68331, StopRequest) {
     let mut builder = Builder::default();
     builder
-        .memory(image(program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], true)
+        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     let request = builder.stop_request();
     (builder.build(), request)
@@ -491,15 +496,15 @@ fn freeze_stops_the_bus_monitor_with_frzbm() {
     builder
         .memory(
             image(&[BRANCH_TO_SELF], ROM_BYTES),
-            false,
+            MemoryKind::Rom,
             &[ChipSelect::Boot],
         )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], true)
+        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     let slow = builder
-        .fixed_memory(Address(SLOW), vec![SLOW_BYTE; RAM_BYTES], true)
+        .fixed_memory(Address(SLOW), vec![SLOW_BYTE; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     builder
         .fixed_timing(
@@ -590,10 +595,14 @@ const BREAKPOINT_STACK: u32 = 0x400;
 fn breakpoint_chip(program: &[u16], answered: bool) -> (Mc68331, Option<PeripheralId>) {
     let mut builder = Builder::default();
     builder
-        .memory(image(program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], true)
+        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     let responder = answered.then(|| {
         builder

@@ -16,6 +16,7 @@ use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::status;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::peripheral::QspiTransfer;
@@ -338,10 +339,10 @@ impl Board {
 
         let mut builder = Builder::default();
         builder
-            .memory(flash, false, &[ChipSelect::Boot])
+            .memory(flash, MemoryKind::Rom, &[ChipSelect::Boot])
             .expect("CSBOOT is free");
         builder
-            .memory(vec![0; RAM_BYTES], true, &[cs(0), cs(2), cs(3)])
+            .memory(vec![0; RAM_BYTES], MemoryKind::Ram, &[cs(0), cs(2), cs(3)])
             .expect("RAM's selects are free");
         builder
             .peripheral(Latch(0x5a5a), &[cs(5)])

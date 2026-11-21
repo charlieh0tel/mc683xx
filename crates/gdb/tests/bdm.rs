@@ -13,6 +13,7 @@ use mc683xx_gdb::bdm::Bdm;
 use mc683xx_gdb::serve;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::chip::MemoryKind;
 use mc683xx_mc68331::debug::TargetError;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_target::Cpu32Target;
@@ -170,8 +171,12 @@ fn chip() -> Running {
     let at = (START - RAM) as usize;
     ram[at..at + program.len()].copy_from_slice(&program);
     let mut builder = Builder::default();
-    builder.memory(rom, false, &[ChipSelect::Boot]).unwrap();
-    builder.fixed_memory(Address(RAM), ram, true).unwrap();
+    builder
+        .memory(rom, MemoryKind::Rom, &[ChipSelect::Boot])
+        .unwrap();
+    builder
+        .fixed_memory(Address(RAM), ram, MemoryKind::Ram)
+        .unwrap();
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
     chip.write_register(Register::A0, STORE).unwrap();
