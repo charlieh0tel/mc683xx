@@ -39,6 +39,16 @@ impl TryFrom<Frame> for sci::Frame {
     }
 }
 
+#[pymethods]
+impl Frame {
+    fn __repr__(&self) -> String {
+        match self {
+            Self::Data(data) => format!("Frame.Data({data:#x})"),
+            Self::Break() => "Frame.Break()".to_owned(),
+        }
+    }
+}
+
 impl From<sci::Frame> for Frame {
     fn from(frame: sci::Frame) -> Self {
         match frame {

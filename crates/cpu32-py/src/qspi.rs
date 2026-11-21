@@ -23,6 +23,7 @@ use crate::mapped::PYTHON_PERIPHERAL;
 use crate::mapped::Pending;
 use crate::mapped::python_restore;
 use crate::mapped::python_save;
+use crate::python::repr;
 
 /// SCK's level between transfers (QSMRM 4.3.1, CPOL).
 #[pyclass(
@@ -94,16 +95,16 @@ impl From<peripheral::QspiClock> for QspiClock {
 
 #[pymethods]
 impl QspiClock {
-    fn __repr__(&self) -> String {
-        format!(
-            "QspiClock(polarity={:?}, phase={:?}, period={}, system_clock_nanohertz={}, \
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "QspiClock(polarity={}, phase={}, period={}, system_clock_nanohertz={}, \
              baud_nanohertz={})",
-            self.polarity,
-            self.phase,
+            repr(py, self.polarity)?,
+            repr(py, self.phase)?,
             self.period,
             self.system_clock_nanohertz,
             self.baud_nanohertz
-        )
+        ))
     }
 }
 

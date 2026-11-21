@@ -180,7 +180,9 @@ pub(crate) fn serve<T: Target<Error = PyErr>>(
         Err(SessionError::Target { error }) => Err(error),
         Err(SessionError::Connection { error }) => Err(raised(error)),
         Err(SessionError::Protocol(text)) => Err(PyRuntimeError::new_err(text)),
-        Ok(ending) => Err(PyRuntimeError::new_err(format!("{ending:?}"))),
+        Ok(_) => Err(PyRuntimeError::new_err(
+            "the gdb session ended in a way the bindings do not know",
+        )),
         Err(error) => Err(PyRuntimeError::new_err(error.to_string())),
     }
 }

@@ -73,6 +73,7 @@ use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::PythonMapped;
 use crate::permissions;
+use crate::python::repr;
 use crate::register::Register;
 use crate::requests::StopRequestView;
 
@@ -189,16 +190,16 @@ impl FaultStopView {
         hooks::register_dictionary(py, &self.0.registers)
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "FaultStop(cycle={:?}, cause={:?}, address={:#010x}, size={}, function_code={}, pc={:#010x})",
-            self.cycle(),
-            self.cause(),
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "FaultStop(cycle={}, cause={}, address={:#010x}, size={}, function_code={}, pc={:#010x})",
+            repr(py, self.cycle())?,
+            repr(py, self.cause())?,
             self.address(),
             self.size(),
             self.function_code(),
             self.pc()
-        )
+        ))
     }
 }
 
@@ -285,6 +286,18 @@ fn unknown(end: &End) -> Error {
     Error::RunEnd(format!("{end:?}"))
 }
 
+#[pymethods]
+impl EndView {
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(match self {
+            Self::Stop { stop } => format!("End.Stop({})", repr(py, *stop)?),
+            Self::Until() => "End.Until()".to_owned(),
+            Self::Instructions() => "End.Instructions()".to_owned(),
+            Self::Fault { fault } => format!("End.Fault({})", repr(py, fault.clone())?),
+        })
+    }
+}
+
 /// A limited run's outcome (Rust's `bare::LimitedRun`).
 #[pyclass(name = "LimitedRun", module = "mc683xx", frozen, eq, get_all)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -297,8 +310,12 @@ pub(crate) struct LimitedRunView {
 
 #[pymethods]
 impl LimitedRunView {
-    fn __repr__(&self) -> String {
-        format!("LimitedRun(cycles={}, end={:?})", self.cycles, self.end)
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "LimitedRun(cycles={}, end={})",
+            self.cycles,
+            repr(py, self.end.clone())?
+        ))
     }
 }
 

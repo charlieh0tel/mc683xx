@@ -28,6 +28,7 @@ use pyo3::types::PyDict;
 use pyo3::types::PyDictMethods;
 
 use crate::mapped::Pending;
+use crate::python::repr;
 use crate::register::Register;
 
 /// A hook, as `add_*_hook` returns it and `Stop.Hook` carries it (Rust's
@@ -81,12 +82,12 @@ impl InstructionView {
         self.0.stack_top
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "Instruction(pc={:#08x}, stack_top={:?})",
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "Instruction(pc={:#08x}, stack_top={})",
             self.0.pc.0,
-            self.stack_top()
-        )
+            repr(py, self.stack_top())?
+        ))
     }
 }
 
@@ -282,17 +283,17 @@ impl InvalidAccessView {
             .transpose()
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "InvalidAccess(address={:#08x}, size={}, function_code={}, cycle={:?}, value={:?}, \
-             reason={:?})",
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "InvalidAccess(address={:#08x}, size={}, function_code={}, cycle={}, value={}, \
+             reason={})",
             self.address(),
             self.size(),
             self.function_code(),
-            self.cycle(),
-            self.value(),
-            self.reason()
-        )
+            repr(py, self.cycle())?,
+            repr(py, self.value())?,
+            repr(py, self.reason())?
+        ))
     }
 }
 
@@ -333,15 +334,15 @@ impl ExceptionView {
         self.0.level.map(|level| level.get())
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "ExceptionEntry(vector={}, pc={:#08x}, handler={:#08x}, stack={:#08x}, level={:?})",
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "ExceptionEntry(vector={}, pc={:#08x}, handler={:#08x}, stack={:#08x}, level={})",
             self.vector(),
             self.pc(),
             self.handler(),
             self.stack(),
-            self.level()
-        )
+            repr(py, self.level())?
+        ))
     }
 }
 

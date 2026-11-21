@@ -64,6 +64,7 @@ use crate::peripherals::Output;
 use crate::peripherals::PortStateView;
 use crate::peripherals::PortView;
 use crate::permissions;
+use crate::python::repr;
 use crate::qspi::PythonSpiPeripheral;
 use crate::register::Register;
 use crate::requests::DiversionView;
@@ -485,6 +486,33 @@ impl From<entry::Entry> for Entry {
     }
 }
 
+#[pymethods]
+impl Entry {
+    fn __repr__(&self) -> String {
+        match self {
+            Self::Breakpoint() => "Entry.Breakpoint()".to_owned(),
+            Self::Background() => "Entry.Background()".to_owned(),
+            Self::DoubleBusFault { ssw } => format!("Entry.DoubleBusFault(ssw={ssw:#06x})"),
+            Self::Unknown { atemp } => format!("Entry.Unknown(atemp={atemp:#010x})"),
+        }
+    }
+}
+
+#[pymethods]
+impl Stop {
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(match self {
+            Self::Budget() => "Stop.Budget()".to_owned(),
+            Self::Stopped() => "Stop.Stopped()".to_owned(),
+            Self::Halted(halt) => format!("Stop.Halted({})", repr(py, *halt)?),
+            Self::Hook(hook) => format!("Stop.Hook({})", repr(py, *hook)?),
+            Self::Requested() => "Stop.Requested()".to_owned(),
+            Self::Background(entry) => format!("Stop.Background({})", entry.__repr__()),
+            Self::Fault() => "Stop.Fault()".to_owned(),
+        })
+    }
+}
+
 impl TryFrom<cpu::Stop> for Stop {
     type Error = Error;
 
@@ -610,8 +638,12 @@ impl TryFrom<cpu::Run> for Run {
 
 #[pymethods]
 impl Run {
-    fn __repr__(&self) -> String {
-        format!("Run(cycles={}, stop={:?})", self.cycles, self.stop)
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "Run(cycles={}, stop={})",
+            self.cycles,
+            self.stop.__repr__(py)?
+        ))
     }
 }
 

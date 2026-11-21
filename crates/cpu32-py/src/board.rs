@@ -110,6 +110,7 @@ use crate::mapped::python_method;
 use crate::mapped::python_restore;
 use crate::mapped::python_save;
 use crate::peripherals::Frame as FrameView;
+use crate::python::repr;
 use crate::qspi::QspiClock;
 use crate::qspi::shifted_in;
 
@@ -255,21 +256,20 @@ impl AccessView {
         self.0.horizon.map(|horizon| horizon.0)
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "PeripheralAccess(attachment={}, select={}, role={:?}, lane={:?}, address={:#x}, \
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "PeripheralAccess(attachment={}, select={}, role={}, lane={}, address={:#x}, \
              size={}, write={}, now={}, horizon={})",
             self.attachment(),
-            self.select().as_deref().unwrap_or("None"),
-            self.role(),
-            self.lane(),
+            repr(py, self.select())?,
+            repr(py, self.role())?,
+            repr(py, self.lane())?,
             self.address(),
             self.size(),
-            if self.write() { "True" } else { "False" },
+            repr(py, self.write())?,
             self.now(),
-            self.horizon()
-                .map_or_else(|| "None".to_owned(), |horizon| horizon.to_string())
-        )
+            repr(py, self.horizon())?
+        ))
     }
 }
 
@@ -407,13 +407,13 @@ impl SerialView {
         self.0.end(Time(start)).0
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "Serial(frame={:?}, baud_nanohertz={}, length={})",
-            self.0.frame,
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "Serial(frame={}, baud_nanohertz={}, length={})",
+            repr(py, self.frame())?,
             self.baud_nanohertz(),
             self.length()
-        )
+        ))
     }
 
     /// Its frame's, rate's and length's, so that equal ones hash alike.
@@ -1241,8 +1241,12 @@ pub(crate) struct BoardRunView {
 
 #[pymethods]
 impl BoardRunView {
-    fn __repr__(&self) -> String {
-        format!("BoardRun(stop={:?}, now={})", self.stop, self.now)
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "BoardRun(stop={}, now={})",
+            repr(py, self.stop)?,
+            self.now
+        ))
     }
 }
 

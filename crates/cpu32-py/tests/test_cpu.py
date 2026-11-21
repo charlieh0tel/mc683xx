@@ -78,6 +78,13 @@ def test_limits_and_begin():
     end = cpu.run_limited(cycles=1).end
     assert end == mc683xx.End.Stop(mc683xx.Stop.Budget())
     assert isinstance(end, mc683xx.End.Stop) and end.stop == mc683xx.Stop.Budget()
+    assert repr(end) == "End.Stop(Stop.Budget())"
+    run = machine(NOP, RTS).run_limited(instructions=1)
+    assert repr(run) == f"LimitedRun(cycles={run.cycles}, end=End.Instructions())"
+    halted = mc683xx.Stop.Halted(mc683xx.Halt.DOUBLE_BUS_FAULT)
+    assert repr(halted) == "Stop.Halted(Halt.DOUBLE_BUS_FAULT)"
+    entry = mc683xx.Stop.Background(mc683xx.Entry.DoubleBusFault(0x1234))
+    assert repr(entry) == "Stop.Background(Entry.DoubleBusFault(ssw=0x1234))"
     assert cpu.run_limited(begin=CODE, until=RETURN).end == mc683xx.End.Until()
 
 
