@@ -29,6 +29,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::IrqPin;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
@@ -157,7 +158,7 @@ pub struct MemoryPlan<'a> {
     /// Its contents.
     pub bytes: Vec<u8>,
     /// Whether writes reach it.
-    pub writable: bool,
+    pub kind: MemoryKind,
     /// Where it answers.
     pub place: MemoryPlace<'a>,
     /// The resets that put its contents back.

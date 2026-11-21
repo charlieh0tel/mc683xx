@@ -21,7 +21,6 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::IrqPin;
-use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Diversion;
@@ -394,11 +393,6 @@ impl ChipBuilder for Mc68331Builder {
         plan: MemoryPlan<'_>,
         router: R,
     ) -> Result<MemoryId, LoadError> {
-        let kind = if plan.writable {
-            MemoryKind::Ram
-        } else {
-            MemoryKind::Rom
-        };
         let id = match plan.place {
             MemoryPlace::Fixed {
                 base,
@@ -406,13 +400,13 @@ impl ChipBuilder for Mc68331Builder {
                 termination,
             } => self
                 .builder
-                .fixed_memory(Address(base), plan.bytes, kind)
+                .fixed_memory(Address(base), plan.bytes, plan.kind)
                 .and_then(|id| {
                     self.builder
                         .set_fixed_timing(id, port, termination)
                         .map(|()| id)
                 }),
-            MemoryPlace::Selects(pins) => self.builder.memory(plan.bytes, kind, pins),
+            MemoryPlace::Selects(pins) => self.builder.memory(plan.bytes, plan.kind, pins),
         }
         .map_err(built)?;
         self.builder.set_reload_scope(id, plan.reload);
