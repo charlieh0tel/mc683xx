@@ -712,6 +712,14 @@ def test_an_unread_board_file_raises_the_os_error_its_errno_gives(tmp_path: Path
     assert not isinstance(raised.value, mc683xx.LoadError)
 
 
+def test_an_unread_image_raises_the_os_error_its_errno_gives(tmp_path: Path) -> None:
+    (tmp_path / "board.toml").write_text(BOARD)
+    with pytest.raises(FileNotFoundError) as raised:
+        mc683xx.Board(str(tmp_path / "board.toml"), types={"latch": Latch, "lamp": Lamp})
+    assert raised.value.filename == str(tmp_path / "rom.bin")
+    assert not isinstance(raised.value, mc683xx.LoadError)
+
+
 class Stuck:
     """A peripheral whose next event never passes: it stalls the board."""
 

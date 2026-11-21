@@ -98,7 +98,9 @@ impl From<Error> for PyErr {
             }
             Error::Access(AccessError::Unpeekable) => exceptions::UnpeekableError::new_err(message),
             Error::Target(_) => exceptions::TargetError::new_err(message),
-            Error::Load(LoadError::Read { path, error }) => os_error(&path, error),
+            Error::Load(LoadError::Read { path, error } | LoadError::Image { path, error, .. }) => {
+                os_error(&path, error)
+            }
             Error::Load(_) => exceptions::LoadError::new_err(message),
             Error::Run(_) | Error::RunEnd(_) => exceptions::RunError::new_err(message),
             Error::Select(_)
@@ -129,7 +131,8 @@ pub(crate) fn repr<'py>(py: Python<'py>, value: impl IntoPyObject<'py>) -> PyRes
     Ok(value.into_bound_py_any(py)?.repr()?.to_string())
 }
 
-/// A file `path` that could not be read, as the `OSError` subclass
+/// A file `path` that could not be read, a board file or a memory's
+/// image, as the `OSError` subclass
 /// Python gives the error's errno (`FileNotFoundError` for `ENOENT`),
 /// with `filename`; one with no errno as the bindings map its kind.
 fn os_error(path: &Path, error: io::Error) -> PyErr {

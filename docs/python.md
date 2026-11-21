@@ -971,7 +971,8 @@ chip.run_for(500)
   bare `Machine`'s hook calling `run_limited` or `serve_gdb`, or gdb sending what
   the stub cannot take.
 - `OSError`: `serve_gdb` could not listen, or gdb's connection failed
-  or closed without a detach; `Board` could not read its file.
+  or closed without a detach; `Board` could not read its file or a
+  memory's image.
 - `TypeError`: a peripheral without `read` and `write`, a QSPI peripheral
   without `transfer`, a hook that is not callable.
 
@@ -1012,7 +1013,8 @@ as they are; `types`, `images` and `parameters` take any mapping, a
 `Board<Mc68331>`): a file whose `[chip] type` names another chip raises
 `mc683xx.LoadError`, as does any file the load refuses (Rust's
 `LoadError`, its message naming what is wrong; a `ValueError`); a file
-it cannot read raises the `OSError` its errno gives
+it cannot read, the board file or a memory's image, raises the
+`OSError` its errno gives
 (`FileNotFoundError`, `PermissionError`), with its `filename`.  Its peripheral types
 are the built-in ones and `types`' classes, by the name the file's
 `type` gives.  A class declares its ports in `PORTS`, a list of

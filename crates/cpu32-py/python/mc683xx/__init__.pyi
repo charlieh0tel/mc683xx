@@ -141,7 +141,8 @@ class StateError(ValueError):
 
 class LoadError(ValueError):
     """Raised by Board for a board file it refuses, naming what in the
-    file is wrong; a file it cannot read raises OSError instead."""
+    file is wrong; a file it cannot read, the board file or a memory's
+    image, raises OSError instead."""
 
 class RunError(RuntimeError):
     """Raised by a run that could not go on: a board peripheral that
