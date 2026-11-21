@@ -137,8 +137,8 @@ pub(crate) fn get(registers: &Registers, location: Location) -> u32 {
             SystemRegister::Usp => registers.usp.0,
             SystemRegister::Ssp => registers.ssp.0,
             SystemRegister::Vbr => registers.vbr.0,
-            SystemRegister::Sfc => registers.sfc.bits().into(),
-            SystemRegister::Dfc => registers.dfc.bits().into(),
+            SystemRegister::Sfc => registers.sfc.get().into(),
+            SystemRegister::Dfc => registers.dfc.get().into(),
             SystemRegister::Pcc | SystemRegister::Atemp | SystemRegister::Far => 0,
         },
     }

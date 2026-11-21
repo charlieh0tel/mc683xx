@@ -238,7 +238,7 @@ impl AccessView {
     /// FC[2:0].
     #[getter]
     const fn function_code(&self) -> u8 {
-        self.0.function_code.bits()
+        self.0.function_code.get()
     }
 
     /// Whether it is a write, R/W low; set for `wait_states` and

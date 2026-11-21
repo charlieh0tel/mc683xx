@@ -564,8 +564,8 @@ impl<T: Target> Session<'_, T> {
     /// commands.
     fn monitor(&mut self, words: &[&str], out: &mut ConsoleOutput<'_>) -> Result<(), T::Error> {
         match words {
-            ["fc"] => outputln!(out, "fc {}", self.function_code.bits()),
-            ["fc", code] => match code.parse().ok().and_then(FunctionCode::from_bits) {
+            ["fc"] => outputln!(out, "fc {}", self.function_code.get()),
+            ["fc", code] => match code.parse().ok().and_then(FunctionCode::new) {
                 Some(function_code) => {
                     self.function_code = function_code;
                     outputln!(out, "fc {function_code}");

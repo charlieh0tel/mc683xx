@@ -49,10 +49,10 @@ impl InterruptLevel {
         self.0
     }
 
-    /// The level in the low three bits of `bits`, as SR's I\[2:0\]
-    /// holds one.
-    pub(crate) const fn from_low_bits(bits: u8) -> Self {
-        Self(bits & Self::NONMASKABLE.0)
+    /// The level in the low three bits of `value`, as SR's I\[2:0\]
+    /// holds one; the rest are ignored.
+    pub(crate) const fn from_low_bits(value: u32) -> Self {
+        Self(value as u8 & Self::NONMASKABLE.0)
     }
 }
 

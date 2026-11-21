@@ -491,7 +491,7 @@ const fn operand_bits(fault: &Fault) -> u16 {
         Size::Word => ssw::SIZ_WORD,
     };
     let long = if fault.long { ssw::LG } else { 0 };
-    long | size << ssw::SIZ_SHIFT | fault.function_code.bits() as u16 & ssw::FUNC
+    long | size << ssw::SIZ_SHIFT | fault.function_code.get() as u16 & ssw::FUNC
 }
 
 /// The SSW of a double bus fault's second fault, for ATEMP: its

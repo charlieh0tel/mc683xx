@@ -157,8 +157,8 @@ impl Mc68331 {
             SystemRegister::Sr => u32::from(registers.sr()),
             SystemRegister::Usp => registers.usp.0,
             SystemRegister::Ssp => registers.ssp.0,
-            SystemRegister::Sfc => u32::from(registers.sfc.bits()),
-            SystemRegister::Dfc => u32::from(registers.dfc.bits()),
+            SystemRegister::Sfc => u32::from(registers.sfc.get()),
+            SystemRegister::Dfc => u32::from(registers.dfc.get()),
         }
     }
 

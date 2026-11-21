@@ -174,7 +174,7 @@ impl MappedPeripheral for Stub {
             .reads
             .entry((select_of(cycle), cycle.address.0))
             .or_default() += 1;
-        let space = cycle.function_code.bits();
+        let space = cycle.function_code.get();
         Ok((0..cycle.size.bytes()).fold(0, |value, byte| {
             let at = cycle.address.0.wrapping_add(byte);
             let fixed = FIXED_READS
@@ -207,7 +207,7 @@ impl MappedPeripheral for Stub {
         if log.len() < LOG_BYTES {
             log.push(value as u8);
         }
-        let space = cycle.function_code.bits();
+        let space = cycle.function_code.get();
         let bytes = cycle.size.bytes();
         for byte in 0..bytes {
             let shift = 8 * (bytes - 1 - byte);
@@ -420,7 +420,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
                 if *write { "write" } else { "read" },
                 cycle.address,
                 cycle.size,
-                cycle.function_code.bits(),
+                cycle.function_code.get(),
                 cycle.now.clocks()
             );
         }

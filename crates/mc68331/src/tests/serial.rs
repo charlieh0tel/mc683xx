@@ -81,7 +81,7 @@ fn chip(program: &[u16]) -> Mc68331 {
         .unwrap();
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
-    let data = u32::from(FunctionCode::SUPERVISOR_DATA.bits());
+    let data = u32::from(FunctionCode::SUPERVISOR_DATA.get());
     chip.write_system_register(SystemRegister::Sfc, data)
         .unwrap();
     chip.write_system_register(SystemRegister::Dfc, data)

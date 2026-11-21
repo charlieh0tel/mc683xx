@@ -91,7 +91,7 @@ impl Register {
         match self {
             Self::Sr => u16::MAX as u32,
             Self::Ccr => u8::MAX as u32,
-            Self::Sfc | Self::Dfc => FunctionCode::CPU_SPACE.bits() as u32,
+            Self::Sfc | Self::Dfc => FunctionCode::CPU_SPACE.get() as u32,
             _ => u32::MAX,
         }
     }
@@ -107,8 +107,8 @@ impl Register {
             Self::Usp => registers.usp.0,
             Self::Ssp => registers.ssp.0,
             Self::Vbr => registers.vbr.0,
-            Self::Sfc => registers.sfc.bits().into(),
-            Self::Dfc => registers.dfc.bits().into(),
+            Self::Sfc => registers.sfc.get().into(),
+            Self::Dfc => registers.dfc.get().into(),
         }
     }
 

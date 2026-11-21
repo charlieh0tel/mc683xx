@@ -324,8 +324,8 @@ fn movec(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
     }
     let registers = &mut core.cpu.registers;
     let value = match code {
-        control::SFC => u32::from(registers.sfc.bits()),
-        control::DFC => u32::from(registers.dfc.bits()),
+        control::SFC => u32::from(registers.sfc.get()),
+        control::DFC => u32::from(registers.dfc.get()),
         control::USP => registers.usp.0,
         _ => registers.vbr.0,
     };

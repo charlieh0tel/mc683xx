@@ -155,7 +155,7 @@ const fn cycle_size(bytes: u32) -> Result<Size, Error> {
 
 /// FC[2:0] as `bits`.
 fn function_code(bits: u8) -> Result<FunctionCode, Error> {
-    FunctionCode::from_bits(bits).ok_or(Error::FunctionCode(bits))
+    FunctionCode::new(bits).ok_or(Error::FunctionCode(bits))
 }
 
 /// The board as the host wires it, before the power-on reset.
@@ -906,7 +906,7 @@ impl Event {
                 now: now.clocks(),
                 address: address.0,
                 size: size.bytes(),
-                function_code: function_code.bits(),
+                function_code: function_code.get(),
                 write,
                 value,
                 bus_error,

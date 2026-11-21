@@ -122,7 +122,7 @@ impl Registers {
     #[must_use]
     pub const fn interrupt_mask(&self) -> InterruptLevel {
         InterruptLevel::from_low_bits(
-            ((self.sr & status::INTERRUPT_MASK) >> status::INTERRUPT_SHIFT) as u8,
+            ((self.sr & status::INTERRUPT_MASK) >> status::INTERRUPT_SHIFT) as u32,
         )
     }
 

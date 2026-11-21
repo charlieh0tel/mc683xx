@@ -427,7 +427,7 @@ fn function_code(value: Option<u32>) -> Result<FunctionCode, ParseCommandError> 
         None => Ok(FunctionCode::SUPERVISOR_DATA),
         Some(value) => u8::try_from(value)
             .ok()
-            .and_then(FunctionCode::from_bits)
+            .and_then(FunctionCode::new)
             .ok_or(ParseCommandError::FunctionCode { value }),
     }
 }
