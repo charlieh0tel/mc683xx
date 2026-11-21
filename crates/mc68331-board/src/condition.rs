@@ -162,7 +162,7 @@ impl FromStr for NetChange {
 /// Text that names no net change.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no net change {0:?}; one of rise, fall, change, high, low")]
-pub struct ParseNetChangeError(pub String);
+pub struct ParseNetChangeError(String);
 
 /// What a condition stops for.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

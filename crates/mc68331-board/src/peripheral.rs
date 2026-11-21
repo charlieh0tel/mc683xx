@@ -143,7 +143,7 @@ impl FromStr for Lane {
 /// Text that names no data lane.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no data lane {0:?}")]
-pub struct ParseLaneError(pub String);
+pub struct ParseLaneError(String);
 
 /// A bus cycle as a peripheral sees it, through one of its attachments.
 /// Built with [`PeripheralAccess::new`], so a field added later gets a default.
