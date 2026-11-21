@@ -155,12 +155,7 @@ const fn cycle_size(bytes: u32) -> Result<Size, Error> {
 
 /// FC[2:0] as `bits`.
 fn function_code(bits: u8) -> Result<FunctionCode, Error> {
-    let function_code = FunctionCode::from_low_bits(bits.into());
-    if function_code.bits() == bits {
-        Ok(function_code)
-    } else {
-        Err(Error::FunctionCode(bits))
-    }
+    FunctionCode::from_bits(bits).ok_or(Error::FunctionCode(bits))
 }
 
 /// The board as the host wires it, before the power-on reset.
