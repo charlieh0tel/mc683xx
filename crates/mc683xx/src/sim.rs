@@ -43,6 +43,9 @@ const MODULE_BASE_LOW: u32 = 0x7f_f000;
 /// The module space's base with MM set.
 const MODULE_BASE_HIGH: u32 = 0xff_f000;
 /// The SIM's register block, $YFFA00 to $YFFA7F (MC68331UM Table D-1).
+///
+/// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+#[doc(hidden)]
 pub const BLOCK: Block = Block {
     offset: 0xa00,
     length: 0x80,
@@ -306,6 +309,9 @@ impl Sim {
     /// module too unless the cause leaves CLKRST alone, as the test
     /// submodule's does (SIMRM 8.1, Table 8-1).  For the `reset`
     /// instruction use `system_reset`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn reset(&mut self, cause: ResetCause, now: Cycles) {
         let before = self.all_outputs();
         let output_changes = mem::take(&mut self.output_changes);
@@ -368,6 +374,9 @@ impl Sim {
 
     /// The `reset` instruction: RSR to SYS; the SIM's configuration
     /// stays (SIMRM 8.2.6).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub const fn system_reset(&mut self) {
         self.reset_status = ResetCause::System.status();
     }
@@ -484,16 +493,25 @@ impl Sim {
     /// The changes in what ports C, E and F drive since the last call,
     /// each with its time: a firmware pulse shorter than a quantum
     /// is both its edges.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn take_output_changes(&mut self) -> Vec<(Cycles, Change)> {
         mem::take(&mut self.output_changes)
     }
 
     /// The board drives port E's pins to `pins`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub const fn set_port_e_pins(&mut self, pins: u8) {
         self.port_e.pins = pins;
     }
 
     /// The board drives port F's pins to `pins`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub const fn set_port_f_pins(&mut self, pins: u8) {
         self.port_f.pins = pins;
     }

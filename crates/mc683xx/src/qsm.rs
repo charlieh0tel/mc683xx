@@ -35,6 +35,9 @@ use crate::pins::PortLevels;
 
 /// The QSM's register block and RAM, $YFFC00 to $YFFDFF (MC68331UM
 /// Table D-1).
+///
+/// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+#[doc(hidden)]
 pub const BLOCK: Block = Block {
     offset: 0xc00,
     length: 0x200,
@@ -152,6 +155,9 @@ impl Qsm {
     /// the pins' changes wait for the clock ([PLAN.md], LPSTOP).
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn stop_clock(&mut self, now: Cycles) {
         self.advance(now);
         self.low_power.get_or_insert(now);
@@ -182,6 +188,9 @@ impl Qsm {
     /// A wake turns its clock on at `now`: the SCI and the QSPI go on
     /// from where they stopped, every time they were waiting for later
     /// by the clock's time off, and see the pins as they are.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn start_clock(&mut self, now: Cycles) {
         if let Some(stopped) = self.low_power.take() {
             let off = stopped.until(now);
@@ -201,6 +210,9 @@ impl Qsm {
     /// The board's system clock is now at `frequency`, as SYNCR sets
     /// it: the QSPI's peripheral learns its SCK rate from it (QSMRM
     /// 4.3.1).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub const fn set_system_clock(&mut self, frequency: Frequency) {
         self.qspi.set_system_clock(frequency);
     }
@@ -210,11 +222,17 @@ impl Qsm {
     ///
     /// The QSM's own reset does not: the chip calls this for the resets
     /// the board wires to the peripheral.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn reset_peripheral(&mut self, now: Cycles) {
         self.qspi.reset_peripheral(now);
     }
 
     /// The host wires `peripheral` to the QSPI's pins, replacing any.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn attach(&mut self, peripheral: Box<dyn AnySpiPeripheral>) {
         self.qspi.attach(peripheral);
     }
@@ -227,6 +245,9 @@ impl Qsm {
     }
 
     /// The QSPI peripheral, to change, if it is a `D`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn peripheral_mut<D: AnySpiPeripheral>(&mut self) -> Option<&mut D> {
         let peripheral: &mut dyn Any = self.attached_mut()?;
         peripheral.downcast_mut()
@@ -240,12 +261,18 @@ impl Qsm {
     }
 
     /// The QSPI peripheral, whatever it is, to change.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn attached_mut(&mut self) -> Option<&mut (dyn AnySpiPeripheral + 'static)> {
         self.qspi.peripheral_mut()
     }
 
     /// The host sends `frame` on RXD at `now`, after any it sent before
     /// that have not yet arrived.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn receive(&mut self, frame: Frame, now: Cycles) {
         self.advance(now);
         if !self.clock_off() {
@@ -255,6 +282,9 @@ impl Qsm {
 
     /// The frames the SCI sent on TXD since the last call, each as its
     /// start bit goes out, with its start, end and bit time.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn take_transmitted(&mut self) -> Vec<Transmitted> {
         self.sci.take_transmitted()
     }
@@ -266,6 +296,9 @@ impl Qsm {
     }
 
     /// The board drives port QS's input pins to `pins` at `now`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn set_port_pins(&mut self, pins: u8, now: Cycles) {
         self.advance(now);
         self.port.pins = pins;
@@ -279,6 +312,9 @@ impl Qsm {
     /// An external SPI master drives PCS0/SS, the board's pin, low if
     /// `asserted`, else high, at `now`: it selects the QSPI as a slave,
     /// or faults a master (QSMRM 4.4.2, 4.3.5).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn set_slave_select(&mut self, asserted: bool, now: Cycles) {
         let pin = 1 << port::PCS0_PIN;
         let pins = if asserted {
@@ -294,6 +330,9 @@ impl Qsm {
     /// drives one (QSMRM 4.4.2.1).  The QSPI takes the bit only while
     /// it is a slave the master selects, with SCK and MOSI its inputs
     /// (MC68331UM Table 6-1).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn clock_slave(&mut self, mosi: bool, now: Cycles) -> Option<bool> {
         self.advance(now);
         if self.clock_off() {
@@ -320,6 +359,9 @@ impl Qsm {
     /// The changes in what port QS drives since the last call, each
     /// with its time, in time order: a PCS pulse the QSPI makes within
     /// a quantum, or one the firmware writes, is both its edges.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn take_output_changes(&mut self) -> Vec<(Cycles, PortLevels)> {
         mem::take(&mut self.output_changes)
     }
