@@ -393,11 +393,7 @@ impl Board {
         let sim = self.sim.take_output_changes();
         let gp = self.module_mut::<Gpt>(GPT).take_port_changes();
         let qs = self.module_mut::<Qsm>(QSM).take_output_changes();
-        let sources = [sim.is_empty(), gp.is_empty(), qs.is_empty()]
-            .into_iter()
-            .filter(|empty| !empty)
-            .count();
-        if sources == 0 {
+        if sim.is_empty() && gp.is_empty() && qs.is_empty() {
             return Vec::new();
         }
         let of = |port| move |(at, outputs)| (at, PortChange { port, outputs });
@@ -407,12 +403,13 @@ impl Board {
             .chain(gp.into_iter().map(of(Port::Gp)))
             .chain(qs.into_iter().map(of(Port::Qs)))
             .collect();
-        // each source is in time order, the SIM's ports at one time in
-        // their order: a stable sort of several merges their runs
-        if sources > 1 {
-            changes.sort_by_key(|&(at, change)| (at, change.port));
+        // each source is in time order, but the SIM's ports at one time
+        // are in the order they were written (one MOVEM can write port F
+        // before port E): sort, stably, unless already in order
+        let order = |&(at, change): &(Cycles, PortChange)| (at, change.port);
+        if !changes.is_sorted_by_key(order) {
+            changes.sort_by_key(order);
         }
-        debug_assert!(changes.is_sorted_by_key(|&(at, change)| (at, change.port)));
         changes
     }
 

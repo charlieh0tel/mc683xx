@@ -1499,3 +1499,24 @@ def test_a_fault_stop_ends_the_chip_s_run_with_the_instruction_undone():
     chip.set_stop_on_fault(False)
     assert chip.run_for(1000).stop != mc683xx.Stop.Fault()
     assert chip.fault_stop is None
+
+
+def test_port_changes_written_in_one_instruction_come_in_port_order() -> None:
+    # MOVEM.W D0-D5,-(A0) from the SIM's port block writes its registers
+    # downward in one instruction: port F's before port E's, all stamped
+    # with the instruction's start, so the SIM records F first
+    image = bytearray(2048)
+    struct.pack_into(">II", image, 0, 0x800, 0x400)
+    struct.pack_into(">HHH", image, 0x400, 0x48A0, 0xFC00, 0x4E71)
+    builder = mc683xx.Builder()
+    builder.memory(bytes(image), ["CSBOOT"])
+    chip = builder.build()
+    chip.take_port_changes()
+    chip.write_register("A0", 0xFFFA20)
+    for i in range(6):
+        chip.write_register(f"D{i}", 0xFF if i in (0, 4) else 0)
+    chip.run_for(1)
+    order = [mc683xx.Port.C, mc683xx.Port.E, mc683xx.Port.F, mc683xx.Port.GP, mc683xx.Port.QS]
+    keys = [(change[0], order.index(change[1])) for change in chip.take_port_changes()]
+    assert len({port for _, port in keys}) > 1
+    assert keys == sorted(keys)
