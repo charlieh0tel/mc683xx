@@ -8,7 +8,13 @@ configured, never what a peripheral does.
 
 Version 1 is frozen from the first release, 0.1.0: a change that
 would make a version 1 file mean something else, or refuse one this
-reference accepts, is version 2.
+reference accepts, is version 2.  A minor release may add keys to
+version 1, each marked here as added within it; a file without one
+means what it did, and a file that uses one needs at least the release
+that added it, as an earlier one refuses the key as unknown.  Every
+1.x release reads every version 1 file.  The built-in types below and
+the stock types (`docs/peripherals.md`) are under the same freeze:
+their names, parameters and ports (docs/releasing.md, Semver scope).
 
 Two words, used one way throughout: a **peripheral** is anything
 outside the chip that the board wires to it (a memory's command

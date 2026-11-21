@@ -1430,6 +1430,9 @@ bare.set_stop_on_fault(False)
 (`deviations`), Rust's `bare::Deviations`: odd word and long data
 accesses as byte cycles, and T1 and T0 tracing nothing, for parity
 runs against Unicorn only: not CPU32 behavior, off by default.
+`Deviations`, `set_intercepted` and `set_intercept_callback`, for
+parity with Unicorn, are outside semver (docs/releasing.md, Semver
+scope): a minor release may change them.
 
 ### From Unicorn
 

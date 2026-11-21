@@ -6,6 +6,12 @@ and Python's `Board` register them after the host's own types.  Each
 cites its datasheet, in `third_party/datasheets/`.  Board-file keys are
 in `docs/board-files.md`.
 
+The types' names, parameters and ports are under board files' version
+1 freeze (docs/board-files.md; docs/releasing.md, Semver scope): a
+change that makes a board file using one mean something else, or
+refuses it, is a breaking change.  Adding a type is not: a host type
+of the same name, registered first, takes precedence.
+
 The peripherals on the bus are 8-bit peripherals, and follow the board's one rule
 for them (docs/board-files.md, attachments; SIMRM 5.3.3): on an 8-bit
 port, or on one lane of a 16-bit port, each cycle is a byte; a word
