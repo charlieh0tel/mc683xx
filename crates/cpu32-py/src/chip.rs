@@ -57,9 +57,9 @@ use crate::hooks;
 use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::PythonMapped;
-use crate::peripherals;
 use crate::peripherals::ChannelView;
 use crate::peripherals::Frame;
+use crate::peripherals::InputView;
 use crate::peripherals::Output;
 use crate::peripherals::PortStateView;
 use crate::peripherals::PortView;
@@ -1612,20 +1612,16 @@ chip_methods! {
         Ok((shifted.miso, shifted.driven))
     }
 
-    /// The board drives GPT input `input`, `PGP0` to `PGP7`, `PAI` or
-    /// `PCLK`, to `level` now.
-    fn set_gpt_input(&mut self, input: &str, level: bool) -> Result<(), Error> {
-        self.chip.set_gpt_input(peripherals::input(input)?, level);
-        Ok(())
+    /// The board drives GPT input `input` to `level` now.
+    fn set_gpt_input(&mut self, input: InputView, level: bool) {
+        self.chip.set_gpt_input(input.into(), level);
     }
 
-    /// The board will drive GPT input `input`, `PGP0` to `PGP7`, `PAI`
-    /// or `PCLK`, to `level` at time `at`, or now if that is past; a
-    /// run's quantum ends there.
-    fn schedule_gpt_input(&mut self, at: u64, input: &str, level: bool) -> Result<(), Error> {
+    /// The board will drive GPT input `input` to `level` at time `at`,
+    /// or now if that is past; a run's quantum ends there.
+    fn schedule_gpt_input(&mut self, at: u64, input: InputView, level: bool) {
         self.chip
-            .schedule_gpt_input(Cycles(at), peripherals::input(input)?, level);
-        Ok(())
+            .schedule_gpt_input(Cycles(at), input.into(), level);
     }
 
     /// The PWM pins' edges since the last call, in time order, while

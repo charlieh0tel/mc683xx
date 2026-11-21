@@ -2,6 +2,7 @@
 //! PWM channels and outputs, and the ports.
 
 use mc683xx_mc68331::gpt::Input;
+use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm;
 use mc683xx_mc68331::gpt::pwm::Channel;
 use mc683xx_mc68331::port::Port;
@@ -194,9 +195,61 @@ impl From<PortState> for PortStateView {
     }
 }
 
-/// GPT input pin `name`: `PGP0` to `PGP7`, `PAI` or `PCLK`.
-pub(crate) fn input(name: &str) -> Result<Input, Error> {
-    name.parse().map_err(|_| Error::Input(name.to_owned()))
+/// A GPT input pin (Rust's `gpt::Input`), a member per pin: Rust's
+/// `PortGp(pin)` is `PGP0` to `PGP7` here, as the pins are named.
+#[pyclass(
+    name = "Input",
+    module = "mc683xx",
+    eq,
+    hash,
+    eq_int,
+    frozen,
+    from_py_object
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[expect(
+    clippy::upper_case_acronyms,
+    reason = "the members are the pins' names, as Python shows them"
+)]
+pub(crate) enum InputView {
+    /// PGP0, IC1.
+    PGP0,
+    /// PGP1, IC2.
+    PGP1,
+    /// PGP2, IC3.
+    PGP2,
+    /// PGP3, OC1.
+    PGP3,
+    /// PGP4, OC2.
+    PGP4,
+    /// PGP5, OC3.
+    PGP5,
+    /// PGP6, OC4.
+    PGP6,
+    /// PGP7, IC4/OC5.
+    PGP7,
+    /// PAI, the pulse accumulator's input.
+    PAI,
+    /// PCLK, the external clock.
+    PCLK,
+}
+
+impl From<InputView> for Input {
+    fn from(input: InputView) -> Self {
+        let port_gp = |bit| Self::PortGp(PortGpPin::new(bit).expect("a port GP pin"));
+        match input {
+            InputView::PGP0 => port_gp(0),
+            InputView::PGP1 => port_gp(1),
+            InputView::PGP2 => port_gp(2),
+            InputView::PGP3 => port_gp(3),
+            InputView::PGP4 => port_gp(4),
+            InputView::PGP5 => port_gp(5),
+            InputView::PGP6 => port_gp(6),
+            InputView::PGP7 => port_gp(7),
+            InputView::PAI => Self::Pai,
+            InputView::PCLK => Self::Pclk,
+        }
+    }
 }
 
 /// What a PWM pin or OC1's carries.
@@ -258,9 +311,8 @@ mod tests {
     use mc683xx_mc68331::gpt::PortGpPin;
     use mc683xx_mc68331::port::Port;
 
+    use super::InputView;
     use super::PortView;
-    use super::input;
-    use crate::error::Error;
 
     #[test]
     fn ports_convert_both_ways() {
@@ -270,16 +322,18 @@ mod tests {
     }
 
     #[test]
-    fn input_pin_names() {
-        let pgp7 = Input::PortGp(PortGpPin::new(7).unwrap());
-        assert_eq!(input("PGP7").unwrap(), pgp7);
-        assert_eq!(input("PAI").unwrap(), Input::Pai);
-        assert_eq!(input("PCLK").unwrap(), Input::Pclk);
-        for name in ["PGP8", "PGP07", "PGP", "PWMA"] {
-            assert_eq!(
-                input(name).unwrap_err().to_string(),
-                Error::Input(name.to_owned()).to_string()
-            );
+    fn inputs_are_named_as_their_pins() {
+        for (view, name) in [
+            (InputView::PGP0, "PGP0"),
+            (InputView::PGP7, "PGP7"),
+            (InputView::PAI, "PAI"),
+            (InputView::PCLK, "PCLK"),
+        ] {
+            assert_eq!(Input::from(view).to_string(), name);
         }
+        assert_eq!(
+            Input::from(InputView::PGP7),
+            Input::PortGp(PortGpPin::new(7).unwrap())
+        );
     }
 }

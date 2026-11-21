@@ -19,10 +19,6 @@ pub(crate) enum Error {
     /// A chip-select pin name that is none of `CSBOOT`, `CS0`-`CS10`.
     #[error("no chip select {0:?}")]
     Select(String),
-    /// A GPT input pin name that is none of `PGP0`-`PGP7`, `PAI`,
-    /// `PCLK`.
-    #[error("no GPT input pin {0:?}")]
-    Input(String),
     /// An SCI frame wider than nine data bits (QSMRM 5.2.4).
     #[error("{0:#x} does not fit an SCI frame")]
     Frame(u16),

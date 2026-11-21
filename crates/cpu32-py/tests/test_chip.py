@@ -623,10 +623,10 @@ def test_a_gpt_output_compare_toggles_its_pin():
     assert chip.take_pwm_changes() == []
     with pytest.raises(TypeError):
         chip.set_report_pwm_edges("B", True)  # type: ignore[arg-type]
-    chip.schedule_gpt_input(chip.now + 100, "PAI", False)
-    chip.schedule_gpt_input(chip.now + 200, "PCLK", False)
-    with pytest.raises(ValueError):
-        chip.schedule_gpt_input(0, "PGP8", True)
+    chip.schedule_gpt_input(chip.now + 100, mc683xx.Input.PAI, False)
+    chip.schedule_gpt_input(chip.now + 200, mc683xx.Input.PCLK, False)
+    with pytest.raises(TypeError):
+        chip.schedule_gpt_input(0, "PGP7", True)  # type: ignore[arg-type]
     chip.run_for(300)
     assert isinstance(chip.pwm(mc683xx.Channel.A), mc683xx.Output)
     oc1 = chip.oc1()
@@ -634,8 +634,8 @@ def test_a_gpt_output_compare_toggles_its_pin():
     assert oc1 == mc683xx.Output.Level(level=oc1.level)
     chip.set_pins(mc683xx.Port.GP, 0xFF)
     assert chip.port(mc683xx.Port.GP).pins == 0xFF
-    chip.set_gpt_input("PAI", True)
-    chip.set_gpt_input("PCLK", True)
+    chip.set_gpt_input(mc683xx.Input.PAI, True)
+    chip.set_gpt_input(mc683xx.Input.PCLK, True)
 
 
 # TMSK2 in the lower byte of its word; CPROUT with CPR %011, TCNT's

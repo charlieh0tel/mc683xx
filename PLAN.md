@@ -942,8 +942,9 @@ chip beside `Mc68331`.
   `Output.Clock`), `oc1()` (the same `Output`), `take_pwm_changes()`
   (`(now, Channel, level)`),
   `set_report_pwm_edges(channel, on)`, `set_report_oc1_clock_edges(on)` and
-  `schedule_gpt_input(time, input, level)` (input `"PGP0"`-`"PGP7"`,
-  `"PAI"` or `"PCLK"`, `gpt::Input`'s `FromStr`).  The modules' registers are the firmware's,
+  `schedule_gpt_input(time, input, level)` (input an `Input`:
+  `Input.PGP0`-`Input.PGP7`, `Input.PAI` or `Input.PCLK`, Rust's
+  `gpt::Input`).  The modules' registers are the firmware's,
   through the bus; the host reads their pins, and their registers
   only through `bus_read` and `peek`.
 - **Type stubs:** `crates/cpu32-py/python/mc683xx/__init__.pyi`,

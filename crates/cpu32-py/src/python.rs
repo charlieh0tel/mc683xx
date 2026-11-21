@@ -72,6 +72,7 @@ use crate::hooks::MemoryAccessView;
 use crate::mapped::BusCycleView;
 use crate::peripherals::ChannelView;
 use crate::peripherals::Frame;
+use crate::peripherals::InputView;
 use crate::peripherals::Output;
 use crate::peripherals::PortStateView;
 use crate::peripherals::PortView;
@@ -107,7 +108,6 @@ impl From<Error> for PyErr {
             }
             Error::Load(_) => exceptions::LoadError::new_err(message),
             Error::Select(_)
-            | Error::Input(_)
             | Error::Frame(_)
             | Error::Shift { .. }
             | Error::Register(_)
@@ -190,6 +190,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<ChannelView>()?;
     module.add_class::<PortStateView>()?;
     module.add_class::<PortView>()?;
+    module.add_class::<InputView>()?;
     module.add_class::<QspiClock>()?;
     module.add_class::<QspiTransfer>()?;
     module.add_class::<ClockPolarity>()?;

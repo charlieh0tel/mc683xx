@@ -622,7 +622,10 @@ what the chip drives within a run comes back as timed changes.
   clock in port GP's while `set_report_oc1_clock_edges(True)` asks (a
   host with no board takes them, or they gather in the chip).
 - GPT: `set_gpt_input(input, level)` now and
-  `schedule_gpt_input(at, input, level)` ahead, `input` `"PGP0"`-`"PGP7"`, `"PAI"` or `"PCLK"`; `pwm(Channel.A |
+  `schedule_gpt_input(at, input, level)` ahead, `input` an `Input`,
+  `Input.PGP0`-`Input.PGP7`, `Input.PAI` or `Input.PCLK` (Rust's
+  `gpt::Input`, its `PortGp(pin)` a member per pin, as the pins are
+  named: a deliberate difference); `pwm(Channel.A |
   B)` (`Output.Level(level)`, `Output.Wave`, `Output.Clock`); `oc1()`
   (`Output.Clock` under CPROUT, else `Output.Level`);
   `take_pwm_changes() -> [(now, Channel, level)]` while
@@ -650,8 +653,8 @@ program = (
     + store_word(TOC2, 0x1000)
 )
 chip = booting(program)[0].build()
-chip.schedule_gpt_input(2000, "PGP0", False)
-chip.schedule_gpt_input(3000, "PGP0", True)
+chip.schedule_gpt_input(2000, mc683xx.Input.PGP0, False)
+chip.schedule_gpt_input(3000, mc683xx.Input.PGP0, True)
 chip.run_for(4 * 0x1000 + 100)  # TCNT counts the system clock / 4
 assert [frame for _, frame in chip.take_sci_transmitted()] == [mc683xx.Frame.Data(ord("H"))]
 E, GP = mc683xx.Port.E, mc683xx.Port.GP
