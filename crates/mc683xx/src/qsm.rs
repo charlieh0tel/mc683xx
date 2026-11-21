@@ -33,6 +33,7 @@ use crate::module::Peek;
 use crate::module::RegisterAccess;
 use crate::peripheral::Timed;
 use crate::pins::PortLevels;
+use crate::pins::PortState;
 
 /// The QSM's register block and RAM, $YFFC00 to $YFFDFF (MC68331UM
 /// Table D-1).
@@ -349,13 +350,22 @@ impl Qsm {
         miso
     }
 
-    /// The levels the board drives on port QS's input pins.
+    /// Port QS's registers and the levels the board drives on its
+    /// pins.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a host reads the chip's ports.
+    #[doc(hidden)]
     #[must_use]
-    pub const fn port_pins(&self) -> u8 {
-        self.port.pins
+    pub const fn port_state(&self) -> PortState {
+        self.port.state(self.sci.txd())
     }
 
     /// The pins port QS drives and their levels.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a host reads the chip's ports.
+    #[doc(hidden)]
     #[must_use]
     pub const fn port_outputs(&self) -> PortLevels {
         self.port.outputs(self.qspi.code(), self.sci.txd())

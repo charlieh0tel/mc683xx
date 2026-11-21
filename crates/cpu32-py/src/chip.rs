@@ -60,8 +60,8 @@ use crate::peripherals;
 use crate::peripherals::ChannelView;
 use crate::peripherals::Frame;
 use crate::peripherals::Output;
-use crate::peripherals::OutputChangeView;
-use crate::peripherals::PortNameView;
+use crate::peripherals::PortStateView;
+use crate::peripherals::PortView;
 use crate::permissions;
 use crate::qspi::PythonSpiPeripheral;
 use crate::register::Register;
@@ -958,29 +958,15 @@ macro_rules! chip_methods {
                 self.with_chip(py, |chip| hooks::register_dictionary(py, &chip.cpu().registers))
             }
 
-            /// Port C's output pins, PC0 to PC6 on CS3 to CS9, and their
-            /// levels, as two masks (MC68331UM 4.8.1.4).
-            fn port_c_outputs(&self, py: Python<'_>) -> PyResult<(u8, u8)> {
-                self.with_chip(py, |chip| Ok(pair(chip.port_c_outputs())))
+            /// `port`'s output pins and their levels now, as two masks.
+            fn outputs(&self, py: Python<'_>, port: PortView) -> PyResult<(u8, u8)> {
+                self.with_chip(py, |chip| Ok(pair(chip.outputs(port.into()))))
             }
 
-            /// Port E's output pins and their levels, as two masks
-            /// (MC68331UM 4.9).
-            fn port_e_outputs(&self, py: Python<'_>) -> PyResult<(u8, u8)> {
-                self.with_chip(py, |chip| Ok(pair(chip.port_e_outputs())))
-            }
-
-            /// Port F's output pins and their levels, as two masks
-            /// (MC68331UM 4.9).
-            fn port_f_outputs(&self, py: Python<'_>) -> PyResult<(u8, u8)> {
-                self.with_chip(py, |chip| Ok(pair(chip.port_f_outputs())))
-            }
-
-            /// PORTC, the latch for the chip-select pins assigned as
-            /// discrete outputs (SIMRM 7.10.4).
-            #[getter]
-            fn port_c(&self, py: Python<'_>) -> PyResult<u8> {
-                self.with_chip(py, |chip| Ok(chip.sim().port_c()))
+            /// `port`'s registers and the levels the board drives on its
+            /// pins.
+            fn port(&self, py: Python<'_>, port: PortView) -> PyResult<PortStateView> {
+                self.with_chip(py, |chip| Ok(chip.port(port.into()).into()))
             }
 
             /// The system clock's frequency in hertz, as SYNCR sets it.
@@ -989,20 +975,10 @@ macro_rules! chip_methods {
                 self.with_chip(py, |chip| Ok(chip.sim().clock().frequency().hz()))
             }
 
-            /// Port QS's output pins and their levels, as two masks.
-            fn port_qs_outputs(&self, py: Python<'_>) -> PyResult<(u8, u8)> {
-                self.with_chip(py, |chip| Ok(pair(chip.port_qs_outputs())))
-            }
-
             /// The levels on PCS[3:0].
             #[getter]
             fn qspi_chip_selects(&self, py: Python<'_>) -> PyResult<u8> {
                 self.with_chip(py, |chip| Ok(chip.qsm().chip_selects()))
-            }
-
-            /// Port GP's output pins and their levels, as two masks.
-            fn port_gp_outputs(&self, py: Python<'_>) -> PyResult<(u8, u8)> {
-                self.with_chip(py, |chip| Ok(pair(chip.port_gp_outputs())))
             }
 
             /// What PWM `channel` carries now.
@@ -1448,20 +1424,19 @@ chip_methods! {
         Ok(())
     }
 
-    /// The board drives port E's input pins to `pins`.
-    const fn set_port_e_pins(&mut self, pins: u8) {
-        self.chip.set_port_e_pins(pins);
+    /// The board drives the pins of `port` in `mask` to their levels in
+    /// `value` now, the others as they were; port C has no inputs.
+    fn set_pins(&mut self, port: PortView, value: u8, mask: u8) -> PyResult<()> {
+        self.chip.set_pins(port.into(), value, mask);
+        self.pending.check()
     }
 
-    /// The board drives port F's input pins to `pins`.
-    const fn set_port_f_pins(&mut self, pins: u8) {
-        self.chip.set_port_f_pins(pins);
-    }
-
-    /// The changes in what ports C, E and F drive since the last call:
-    /// `(now, port, driven, levels)`, a `PortName`, its output pins and
-    /// their levels as two masks (Rust's `ports::Change`, flattened).
-    fn take_port_changes(&mut self) -> Vec<(u64, PortNameView, u8, u8)> {
+    /// The changes in what each port drives since the last call, in time
+    /// order: `(now, port, driven, levels)`, a `Port`, its output pins
+    /// and their levels as two masks (Rust's `PortChange`, flattened).
+    /// A host with no board takes them, or they gather in the chip and
+    /// its snapshot.
+    fn take_port_changes(&mut self) -> Vec<(u64, PortView, u8, u8)> {
         self.chip
             .take_port_changes()
             .into_iter()
@@ -1473,18 +1448,6 @@ chip_methods! {
                     change.outputs.levels,
                 )
             })
-            .collect()
-    }
-
-    /// The changes in what port QS drives since the last call, in time
-    /// order: `(now, driven, levels)` (Rust's `take_qsm_changes`).  A
-    /// host with no board takes them, or they gather in the chip and
-    /// its snapshot.
-    fn take_qsm_changes(&mut self) -> Vec<(u64, u8, u8)> {
-        self.chip
-            .take_qsm_changes()
-            .into_iter()
-            .map(|(now, outputs)| (now.0, outputs.driven, outputs.levels))
             .collect()
     }
 
@@ -1512,13 +1475,6 @@ chip_methods! {
             .collect()
     }
 
-    /// The board drives port QS's input pins to `pins` now (MC68331UM
-    /// D.4.8).
-    fn set_port_qs_pins(&mut self, pins: u8) -> PyResult<()> {
-        self.chip.set_port_qs_pins(pins);
-        self.pending.check()
-    }
-
     /// The host, as an external SPI master, drives PCS0/SS low now if
     /// `asserted`, else high (QSMRM 4.4.2).
     fn set_qspi_slave_select(&mut self, asserted: bool) -> PyResult<()> {
@@ -1543,12 +1499,6 @@ chip_methods! {
         Ok((shifted.miso, shifted.driven))
     }
 
-    /// The board drives port GP's input pins, IC1 to IC4/OC5, to `pins`
-    /// now (GPTRM 3.2).
-    fn set_port_gp_pins(&mut self, pins: u8) {
-        self.chip.set_port_gp_pins(pins);
-    }
-
     /// The board drives PAI to `level` now (GPTRM 4).
     fn set_pai(&mut self, level: bool) {
         self.chip.set_pai(level);
@@ -1568,15 +1518,14 @@ chip_methods! {
         Ok(())
     }
 
-    /// The changes in what the GPT drives since the last call, in time
-    /// order: `(now, OutputChange)`, port GP's, and PWMA's or PWMB's
-    /// while `set_report_pwm_edges` asks for them; OC1's CPROUT clock in
-    /// port GP's while `set_report_oc1_clock_edges` does.
-    fn take_gpt_changes(&mut self) -> Vec<(u64, OutputChangeView)> {
+    /// The PWM pins' edges since the last call, in time order, while
+    /// `set_report_pwm_edges` asks for them: `(now, channel, level)`
+    /// (Rust's `PwmChange`, flattened).
+    fn take_pwm_changes(&mut self) -> Vec<(u64, ChannelView, bool)> {
         self.chip
-            .take_gpt_changes()
+            .take_pwm_changes()
             .into_iter()
-            .map(|(now, change)| (now.0, change.into()))
+            .map(|(now, change)| (now.0, change.channel.into(), change.level))
             .collect()
     }
 

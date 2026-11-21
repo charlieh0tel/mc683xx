@@ -27,6 +27,7 @@ use mc683xx_modules::module::Peek;
 use mc683xx_modules::module::RegisterAccess;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::pins::PortLevels;
+use mc683xx_modules::pins::PortState;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::Error;
@@ -317,13 +318,22 @@ impl FromStr for Input {
 #[error("no GPT input {0:?}")]
 pub struct ParseInputError(String);
 
-/// A change in what the GPT drives on its outputs, in the shape of the
-/// SIM ports' changes ([PLAN.md], Peripherals).
+/// A change in what the PWM unit drives on a PWM pin, while the host
+/// asks for its edges ([PLAN.md], Peripherals).
 ///
 /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PwmChange {
+    /// The pin.
+    pub channel: Channel,
+    /// Its level from the change's time on.
+    pub level: bool,
+}
+
+/// A change in what the GPT drives on its outputs, as its queue holds
+/// them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[non_exhaustive]
-pub enum OutputChange {
+enum OutputChange {
     /// Port GP's pins: those it drives, the output compares' and
     /// PORTGP's outputs, and their levels.
     PortGp(PortLevels),
@@ -609,8 +619,7 @@ impl Gpt {
     /// the output compares' on the pins they have, TCNT's clock on OC1's
     /// under CPROUT, PORTGP's on other outputs (GPTRM 3.3.1, 8.1, Table
     /// B-1).
-    #[must_use]
-    pub const fn port_outputs(&self, now: Cycles) -> PortLevels {
+    pub(crate) const fn port_outputs(&self, now: Cycles) -> PortLevels {
         self.port_outputs_with(self.compare_clock_out() && self.clock_high(self.counter, now))
     }
 
@@ -630,6 +639,24 @@ impl Gpt {
             levels: self.latch & self.direction & !compared & !clocked
                 | self.compare_levels & compared
                 | clock_level,
+        }
+    }
+
+    /// Port GP's registers, PORTGP's latch and DDRGP, and the levels
+    /// the board drives on its pins; its assignment the pins the output
+    /// compares, or CPROUT's clock on OC1, take from PORTGP (MC68331UM
+    /// 7.6; GPTRM Table B-1).
+    pub(crate) const fn port_state(&self) -> PortState {
+        let clocked = if self.compare_clock_out() {
+            1 << OC1_PIN
+        } else {
+            0
+        };
+        PortState {
+            latch: self.latch,
+            direction: self.direction,
+            assignment: self.compared_pins() | clocked,
+            pins: self.inputs.port,
         }
     }
 
@@ -723,14 +750,41 @@ impl Gpt {
         pwm_edges.chain(oc1).min()
     }
 
-    /// The output changes since the last call, each at the time it
-    /// happened, in time order ([PLAN.md], Peripherals).
+    /// The changes in what port GP drives since the last call, each at
+    /// the time it happened, in time order ([PLAN.md], Peripherals).
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
-    pub(crate) fn take_output_changes(&mut self) -> Vec<(Cycles, OutputChange)> {
-        let mut changes = mem::take(&mut self.edges.queue);
-        changes.sort_by_key(|&(at, _)| at);
-        changes
+    pub(crate) fn take_port_changes(&mut self) -> Vec<(Cycles, PortLevels)> {
+        self.take_changes(|change| match change {
+            OutputChange::PortGp(outputs) => Some(outputs),
+            OutputChange::Pwm { .. } => None,
+        })
+    }
+
+    /// The PWM pins' reported edges since the last call, each at the
+    /// time it happened, in time order.
+    pub(crate) fn take_pwm_changes(&mut self) -> Vec<(Cycles, PwmChange)> {
+        self.take_changes(|change| match change {
+            OutputChange::Pwm { channel, level } => Some(PwmChange { channel, level }),
+            OutputChange::PortGp(_) => None,
+        })
+    }
+
+    /// The queued changes `select` takes, in time order, those at one
+    /// time in the order found; the others stay queued.
+    fn take_changes<T>(&mut self, select: impl Fn(OutputChange) -> Option<T>) -> Vec<(Cycles, T)> {
+        let mut taken = Vec::new();
+        self.edges
+            .queue
+            .retain(|&(at, change)| match select(change) {
+                Some(change) => {
+                    taken.push((at, change));
+                    false
+                }
+                None => true,
+            });
+        taken.sort_by_key(|&(at, _)| at);
+        taken
     }
 
     /// Port GP's driven pins and their levels, and the PWM pins' levels

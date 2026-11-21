@@ -28,14 +28,17 @@ rename renames the Python name with it.  The deliberate differences:
   port direction (`"in-out"`), a `Pacing` from its text.  Registers are
   by name, Python's own (`"D0"`, `"SR"`).  Any other Rust enum is a
   Python class whose members are its variants (`Channel.A`,
-  `PortName.E`, `Role.READ_WRITE`, `Lane.UPPER`, `ResetCause.WATCHDOG`,
-  `Space.USER`), and is never taken as a string; one whose variants
-  carry data has a class for each (`Event.Reset(now, cause)`,
-  `Frame.Data(bits)`, `OutputChange.PortGp(driven, levels)`).
+  `Port.E`, `Port.GP`, `Role.READ_WRITE`, `Lane.UPPER`,
+  `ResetCause.WATCHDOG`, `Space.USER`), and is never taken as a
+  string; one whose variants carry data has a class for each
+  (`Event.Reset(now, cause)`, `Frame.Data(bits)`).
 - **Tuples:** a struct of plain values a call returns is a tuple of its
   fields, in order: `PortLevels` as `(driven, levels)`, a port's change
-  as `(now, port, driven, levels)`, a transmitted frame as `(start,
-  frame)`, a QSPI slave shift's `Shifted` as `(miso, driven)`.
+  as `(now, port, driven, levels)`, a PWM pin's as `(now, channel,
+  level)`, a transmitted frame as `(start, frame)`, a QSPI slave
+  shift's `Shifted` as `(miso, driven)`.  A struct of registers a host
+  reads by name is a class with a property for each field
+  (`PortState`'s `latch`, `direction`, `assignment`, `pins`).
 - **Units:** a frequency Rust gives in whole hertz (`Frequency::hz`) is
   an `int` named `_hz` (`system_hz`, `baud_hz`); one it keeps in
   nanohertz (`Frequency` itself: a serial frame's baud, a clock net's
@@ -61,12 +64,12 @@ rename renames the Python name with it.  The deliberate differences:
   data)`.
 - **Properties:** a Rust accessor of plain state, with no arguments, is
   a read-only property (`now`, `halted`, `instructions`,
-  `exception_taken`, `port_c`, `system_hz`, `qspi_chip_selects`,
+  `exception_taken`, `system_hz`, `qspi_chip_selects`,
   `stops_on_fault`, `deviations`, `pacing`, `stopping`); one that takes
   arguments or computes its value is a method (`registers()`,
-  `port_c_outputs()`, `port_gp_outputs()`, `port_qs_outputs()`, the
-  levels a port's pins resolve to; `pwm(channel)`, `oc1()`, an output
-  worked out from the GPT's registers).  A setter is `set_*`, never a
+  `outputs(port)`, the levels a port's pins resolve to, `port(port)`;
+  `pwm(channel)`, `oc1()`, an output worked out from the GPT's
+  registers).  A setter is `set_*`, never a
   writable property.
 - **Background debug:** the chip's `Cpu32Target` calls `halt`, `go`
   and `step`, and `assert_breakpoint`, are `Mc68331` methods; its `halted`, an `Entry`, is the
@@ -579,22 +582,21 @@ what the chip drives within a run comes back as timed changes.
   `take_sci_transmitted() -> [(start, Frame)]`, each frame at its
   start bit.  A frame is the data bits
   as on the line, LSB first, parity included (`frame._0`).
-- Ports: `set_port_e_pins`, `set_port_f_pins`, `set_port_qs_pins`;
-  `port_c_outputs()`, `port_e_outputs()`, `port_f_outputs()` and
-  `port_qs_outputs()` as
-  `(driven, levels)` masks, Rust's `PortLevels` as a pair Python
-  unpacks; `take_port_changes() -> [(now, PortName, driven,
-  levels)]`; `take_qsm_changes() -> [(now, driven, levels)]` for port
-  QS (a host with no board takes them, or they gather in the chip).
-- GPT: `set_port_gp_pins`, `set_pai`, `set_pclk`; `schedule_gpt_input(at,
-  input, level)` with `input` `"PGP0"`-`"PGP7"`, `"PAI"` or `"PCLK"`;
-  `port_gp_outputs()`; `pwm(Channel.A | B)` (`Output.Level`,
-  `Output.Wave`, `Output.Clock`); `oc1()` (`Output.Clock` under CPROUT,
-  else `Output.Level`); `take_gpt_changes() -> [(now, OutputChange)]`,
-  `OutputChange.PortGp(driven, levels)` and, while
-  `set_report_pwm_edges(channel, True)` asks, `OutputChange.Pwm(channel,
-  level)` (PPROUT's clock included), OC1's CPROUT clock in port GP's
-  while `set_report_oc1_clock_edges(True)` does.
+- Ports, by `Port.C`, `E`, `F`, `GP` or `QS`: `set_pins(port, value,
+  mask)` drives the pins in `mask` (port C has none to drive);
+  `outputs(port)` as `(driven, levels)` masks, Rust's `PortLevels` as
+  a pair Python unpacks; `port(port)`, a `PortState` (`latch`,
+  `direction`, `assignment`, `pins`); `take_port_changes() -> [(now,
+  Port, driven, levels)]`, every port's in time order, OC1's CPROUT
+  clock in port GP's while `set_report_oc1_clock_edges(True)` asks (a
+  host with no board takes them, or they gather in the chip).
+- GPT: `set_pai`, `set_pclk`; `schedule_gpt_input(at, input, level)`
+  with `input` `"PGP0"`-`"PGP7"`, `"PAI"` or `"PCLK"`; `pwm(Channel.A |
+  B)` (`Output.Level`, `Output.Wave`, `Output.Clock`); `oc1()`
+  (`Output.Clock` under CPROUT, else `Output.Level`);
+  `take_pwm_changes() -> [(now, Channel, level)]` while
+  `set_report_pwm_edges(channel, True)` asks (PPROUT's clock
+  included).
 
 ```python
 SCCR0, SCCR1, SCSR, SCDR = QSM + 0x08, QSM + 0x0A, QSM + 0x0C, QSM + 0x0E  # QSMRM 5.2
@@ -621,13 +623,15 @@ chip.schedule_gpt_input(2000, "PGP0", False)
 chip.schedule_gpt_input(3000, "PGP0", True)
 chip.run_for(4 * 0x1000 + 100)  # TCNT counts the system clock / 4
 assert [frame for _, frame in chip.take_sci_transmitted()] == [mc683xx.Frame.Data(ord("H"))]
-E = mc683xx.PortName.E
-assert [change[1:] for change in chip.take_port_changes() if change[1] == E] == [
+E, GP = mc683xx.Port.E, mc683xx.Port.GP
+changes = chip.take_port_changes()
+assert [change[1:] for change in changes if change[1] == E] == [
     (E, PE0, 0),
     (E, PE0, PE0),
     (E, PE0, 0),
 ]
-assert chip.take_gpt_changes()[-1] == (4 * 0x1000, mc683xx.OutputChange.PortGp(OC2, OC2))
+assert [change for change in changes if change[1] == GP][-1] == (4 * 0x1000, GP, OC2, OC2)
+assert chip.port(E).direction == PE0
 assert chip.peek(TIC1, 2) == 3000 // 4  # the capture, as a read finds it
 assert chip.pwm(mc683xx.Channel.A) == mc683xx.Output.Level(False)
 assert isinstance(chip.oc1(), mc683xx.Output.Level)

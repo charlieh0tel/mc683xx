@@ -56,6 +56,7 @@ pub mod debug;
 pub mod event;
 pub mod gpt;
 pub mod host;
+pub mod port;
 pub mod state;
 
 #[cfg(test)]

@@ -797,29 +797,37 @@ assert_eq!(sent[0].frame.data(), Some(u16::from(b'!')));
 assert!(sent[0].start < sent[0].end);
 ```
 
-### Ports C, E, F and QS
+### Ports
 
-- Inputs: `set_port_e_pins`, `set_port_f_pins`, `set_port_qs_pins`
-  set the levels the board drives.
-- Outputs: `port_c_outputs()`, `port_e_outputs()`,
-  `port_f_outputs()` and `port_qs_outputs()` (and the GPT's
-  `port_gp_outputs()`) give the pins a port drives and their levels, a
-  `PortLevels { driven, levels }` (the levels zero on pins not driven;
-  `pin_levels(pins)` fills them).  Port C is the latch on the CS3-CS9 pins assigned as discrete
-  outputs (MC68331UM 4.8.1.4).
-- Changes: `take_port_changes()` gives `(time, Change { port,
-  outputs })`, `outputs` a `PortLevels`, for ports C, E and F, each at its write cycle's start.
-  `take_qsm_changes()` gives `(time, PortLevels)` for port QS, a
-  register write's at its instruction's start, the QSPI's PCS and the
-  SCI's TXD at the entry's or frame's own time.
+Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
+`F` (the SIM's), `Gp` (the GPT's) and `Qs` (the QSM's).
+
+- Inputs: `set_pins(port, value, mask)` sets the levels the board
+  drives on the pins in `mask`, the others kept.  Port C has no inputs.
+- Outputs: `outputs(port)` gives the pins a port drives and their
+  levels, a `PortLevels { driven, levels }` (the levels zero on pins
+  not driven; `pin_levels(pins)` fills them).  Port C is the latch on
+  the CS3-CS9 pins assigned as discrete outputs (MC68331UM 4.8.1.4);
+  port GP's carries TCNT's clock on OC1 under CPROUT.
+- Registers: `port(port)` gives a `PortState { latch, direction,
+  assignment, pins }`: the data latch, the data direction, the pin
+  assignment (a set bit the pin's module function) and the board's
+  levels.  Port C's pins are all outputs, assigned where they keep
+  their chip select; port GP's assignment is the pins the output
+  compares take from PORTGP; port QS's is PQSPAR's, TXD's while the
+  transmitter has it.
+- Changes: `take_port_changes()` gives `(time, PortChange { port,
+  outputs })`, every port's in time order: a register write's at its
+  instruction's start, the compares' at their match, the QSPI's PCS and
+  the SCI's TXD at the entry's or frame's own time.
 
 ```rust
 use mc683xx_target::address::Address;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
+use mc683xx_mc68331::port::Port;
 use mc683xx_modules::pins::PortLevels;
-use mc683xx_modules::sim::ports::PortName;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
 
@@ -841,19 +849,20 @@ let program = [
 .concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
-chip.set_port_e_pins(PE1);
+chip.set_pins(Port::E, PE1, PE1);
 chip.run_for(Cycles(1000));
 assert_eq!(
-    chip.port_e_outputs(),
+    chip.outputs(Port::E),
     PortLevels {
         driven: PE0,
         levels: 0
     }
 );
+assert_eq!(chip.port(Port::E).direction, PE0);
 let edges: Vec<(u8, u8)> = chip
     .take_port_changes()
     .into_iter()
-    .filter(|(_, change)| change.port == PortName::E)
+    .filter(|(_, change)| change.port == Port::E)
     .map(|(_, change)| (change.outputs.driven, change.outputs.levels))
     .collect();
 assert_eq!(edges, [(PE0, 0), (PE0, PE0), (PE0, 0)]);
@@ -864,7 +873,7 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
 
 ### GPT
 
-- Inputs now: `set_port_gp_pins` (IC1 to IC4/OC5), `set_pai`,
+- Inputs now: `set_pins(Port::Gp, ..)` (IC1 to IC4/OC5), `set_pai`,
   `set_pclk`.
 - Inputs ahead: `schedule_gpt_input(at, Input, level)` for an edge a
   board model times itself (an FPGA's 1 PPS on IC1): the GPT captures,
@@ -873,18 +882,18 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
   clocks; a model with a finer phase rounds up.
   `unschedule_gpt_inputs()` withdraws those past now, for a host whose
   time base moved (a SYNCR write) to schedule again.
-- Outputs: `port_gp_outputs()` (a `PortLevels`, TCNT's clock on OC1
+- Outputs: `outputs(Port::Gp)` (a `PortLevels`, TCNT's clock on OC1
   under CPROUT); `pwm(Channel)` gives what a PWM pin carries as an
   `Output`: `Level`, `Wave { period, high, clocks }` or `Clock`
   (PPROUT); `oc1()` gives OC1's pin as an `Output` too, `Clock` under
   CPROUT unless OC1M3 takes the pin back, `Level` otherwise.
-- Changes: `take_gpt_changes()` gives `(time, OutputChange)` in time
-  order, `PortGp(PortLevels)` always and `Pwm { channel, level }`
-  for a channel `set_report_pwm_edges(channel, true)` asks for, PPROUT's
-  clock edges included.  A compare's edge has the time TCNT matched.
-  CPROUT's clock edges on OC1 come in `PortGp` only while
-  `set_report_oc1_clock_edges(true)` asks; otherwise the changes show the
-  pin low.
+- Changes: port GP's come in `take_port_changes()`; a compare's edge
+  has the time TCNT matched.  CPROUT's clock edges on OC1 come there
+  only while `set_report_oc1_clock_edges(true)` asks; otherwise the
+  changes show the pin low.  `take_pwm_changes()` gives `(time,
+  PwmChange { channel, level })` in time order for a channel
+  `set_report_pwm_edges(channel, true)` asks for, PPROUT's clock edges
+  included.
 
 ```rust
 use mc683xx_target::address::Address;
@@ -894,10 +903,11 @@ use mc683xx_target::size::Size;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::GPT;
 use mc683xx_mc68331::gpt::Input;
-use mc683xx_mc68331::gpt::OutputChange;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm::Channel;
 use mc683xx_mc68331::gpt::pwm::Output;
+use mc683xx_mc68331::port::Port;
+use mc683xx_mc68331::port::PortChange;
 use mc683xx_modules::pins::PortLevels;
 
 // TCTL1:TCTL2, TOC2, TIC1 (GPTRM 3).  OM2:OL2 01 toggles OC2, PGP4,
@@ -922,15 +932,18 @@ let ic1 = Input::PortGp(PortGpPin::new(0).unwrap());
 chip.schedule_gpt_input(Cycles(2000), ic1, false);
 chip.schedule_gpt_input(Cycles(3000), ic1, true);
 chip.run_for(Cycles(CLOCKS_PER_COUNT * 0x1000 + 100));
-let changes = chip.take_gpt_changes();
+let changes = chip.take_port_changes();
 let last = changes.last().unwrap();
 assert_eq!(last.0, Cycles(CLOCKS_PER_COUNT * 0x1000));
 assert_eq!(
     last.1,
-    OutputChange::PortGp(PortLevels {
-        driven: OC2,
-        levels: OC2
-    })
+    PortChange {
+        port: Port::Gp,
+        outputs: PortLevels {
+            driven: OC2,
+            levels: OC2
+        }
+    }
 );
 let captured = chip.peek(Address(TIC1), Size::Word, FunctionCode::SUPERVISOR_DATA);
 assert_eq!(u64::from(captured.unwrap()), 3000 / CLOCKS_PER_COUNT);
@@ -1182,9 +1195,9 @@ SYNCR write, a reset) then ends `run_for` right after its instruction,
 `Stop::Budget` with budget left, so the host moves its base there and
 not at the end of the run.  Off by default, `run_for` spends its budget.
 Likewise `set_output_stop(OutputStop)` names the outputs (port pins
-by mask, PWMA and PWMB, TXD, RESET) whose change ends `run_for`, after
-the instruction that changed one or at the sync point where a
-compare, a PWM edge or a frame's start did: for a host whose peripherals
+by mask, `OutputStop::set_port(port, mask)`; PWMA and PWMB, TXD,
+RESET) whose change ends `run_for`, after the instruction that changed
+one or at the sync point where a compare, a PWM edge or a frame's start did: for a host whose peripherals
 sense them and may answer within the run.  None by default.
 `set_publish_output_horizon(true)` has the chip set its
 `OutputHorizon` (the handle `Builder::output_horizon` gives) before
@@ -1648,19 +1661,19 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `Vector` and `FunctionCode` (their numbers), and on a board `Time`
   (`1000 ps`), the MC68331's `mc68331::Pin` (`IRQ7`), `signal::Kind`,
   `Direction`, `peripheral::Role` (`read-write`) and `Lane` (`upper`),
-  as the board file names them; `PortName` (`E`) and the GPT's
-  `pwm::Channel` (`A`), any case.
+  as the board file names them; `port::Port` (`E`, `GP`) and the
+  GPT's `pwm::Channel` (`A`), any case.
   The newtypes convert `From` and into what they
   wrap.
 - Every public error enum is `#[non_exhaustive]`, and so are the
   enums that may grow: `Stop`, `Halt`, the bare run's `End` and
-  `FaultCause`, `hooks::Invalid`, the GPT's `OutputChange` and
-  `pwm::Output`, and the board's `Signal`, `signal::Kind`,
+  `FaultCause`, `hooks::Invalid`, the GPT's `pwm::Output`, and the
+  board's `Signal`, `signal::Kind`,
   `mc68331::Pin`, `peripheral::Role`, `chip::MemoryPlace` and
   `trace::Record`.  A match on one needs a wildcard arm.  The chip's
   `Event` is, and so is each of its variants, a struct variant with
   its time (`now`): a pattern on one needs `..`.  Enums of
-  what the hardware fixes (`Size`, `ChipSelect`, `PortName`,
+  what the hardware fixes (`Size`, `ChipSelect`, `port::Port`,
   `pwm::Channel`, `Lane`, `Direction`) are not.
 - So are the structs a host reads but does not build: the hook
   payloads (`hooks::Instruction`, `MemoryAccess`, `InvalidAccess`,

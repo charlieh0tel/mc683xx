@@ -35,12 +35,11 @@ use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::clock::ClockSource;
-use mc683xx_modules::sim::ports::Change;
-use mc683xx_modules::sim::ports::PortName;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
@@ -60,10 +59,12 @@ use crate::event::ChipTracing;
 use crate::event::DsackFault;
 use crate::event::Event;
 use crate::gpt::Input;
-use crate::gpt::OutputChange;
 use crate::gpt::PortGpPin;
+use crate::gpt::PwmChange;
 use crate::gpt::pwm::Channel;
 use crate::host::Unserved;
+use crate::port::Port;
+use crate::port::PortChange;
 use crate::state;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::peripheral::PeripheralId;
@@ -1505,10 +1506,9 @@ fn a_watched_output_change_ends_the_run() {
     let budget = Cycles(100_000);
     let watching = |port_f: u8| {
         let (mut chip, _) = booting(&program);
-        chip.set_output_stop(OutputStop {
-            port_f,
-            ..OutputStop::default()
-        });
+        let mut stop = OutputStop::default();
+        stop.set_port(Port::F, port_f);
+        chip.set_output_stop(stop);
         chip
     };
     let mut chip = watching(0);
@@ -1525,7 +1525,7 @@ fn a_watched_output_change_ends_the_run() {
         run.cycles
     );
     assert_eq!(
-        chip.port_f_outputs(),
+        chip.outputs(Port::F),
         PortLevels {
             driven: 1,
             levels: 0
@@ -1541,10 +1541,9 @@ fn a_watched_output_change_ends_the_run() {
 fn the_reset_instruction_ends_a_run_watching_reset_from_fast_memory() {
     // the boot ROM's pages are the core's: no cycle reaches the chip
     let (mut chip, _) = booting(&[RESET]);
-    chip.set_output_stop(OutputStop {
-        reset: true,
-        ..OutputStop::default()
-    });
+    let mut stop = OutputStop::default();
+    stop.reset = true;
+    chip.set_output_stop(stop);
     let run = chip.run_for(Cycles(100_000));
     assert_eq!(run.stop, Stop::Budget);
     // RESET asserts it for 512 clocks (CPU32RM 4, RESET)
@@ -1991,8 +1990,8 @@ fn an_external_clock_board_uses_the_sci_and_the_gpt() {
     let tcnt = |chip: &mut Mc68331| cycle(chip, GPT + 0x0a, Size::Word, None).unwrap().0;
     let before = tcnt(&mut chip);
     chip.run_for(Cycles(16 * 100));
-    chip.set_port_gp_pins(0xfd);
-    chip.set_port_gp_pins(0xff);
+    chip.set_pins(Port::Gp, 0, 1 << 1);
+    chip.set_pins(Port::Gp, 0xff, 0xff);
     let captured = cycle(&mut chip, GPT + 0x10, Size::Word, None).unwrap().0;
     assert!(
         captured >= before + 100 && captured <= before + 102,
@@ -2003,7 +2002,7 @@ fn an_external_clock_board_uses_the_sci_and_the_gpt() {
         0x0200
     );
     assert_eq!(
-        chip.port_gp_outputs(),
+        chip.outputs(Port::Gp),
         PortLevels {
             driven: 0,
             levels: 0
@@ -2302,37 +2301,58 @@ fn the_host_sees_each_port_edge_and_drives_the_inputs() {
     program.extend(load_word(SIM + 0x10, 0));
     program.push(BRANCH_TO_SELF);
     let (mut chip, _) = booting(&program);
-    chip.set_port_e_pins(0x02);
+    chip.set_pins(Port::E, 0x00, 0xff);
+    chip.set_pins(Port::E, 0x02, 0x02);
+    chip.set_pins(Port::C, 0x00, 0xff);
     chip.run_for(Cycles(2000));
     assert_eq!(chip.cpu().registers.data[0] & 0xff, 0x02);
     assert_eq!(
-        chip.port_e_outputs(),
+        chip.port(Port::E),
+        PortState {
+            latch: 0x00,
+            direction: 0x01,
+            assignment: 0xfe,
+            pins: 0x02
+        }
+    );
+    assert_eq!(
+        chip.port(Port::C),
+        PortState {
+            latch: 0x7d,
+            direction: 0x7f,
+            assignment: 0x78,
+            pins: 0xff
+        },
+        "port C has no inputs"
+    );
+    assert_eq!(
+        chip.outputs(Port::E),
         PortLevels {
             driven: 0x01,
             levels: 0x00
         }
     );
     assert_eq!(
-        chip.port_c_outputs(),
+        chip.outputs(Port::C),
         PortLevels {
             driven: 0x07,
             levels: 0x05
         }
     );
     let changes = chip.take_port_changes();
-    let seen: Vec<Change> = changes.iter().map(|&(_, change)| change).collect();
-    let change = |port, driven, levels| Change {
+    let seen: Vec<PortChange> = changes.iter().map(|&(_, change)| change).collect();
+    let change = |port, driven, levels| PortChange {
         port,
         outputs: PortLevels { driven, levels },
     };
     assert_eq!(
         seen,
         [
-            change(PortName::E, 0x01, 0x00),
-            change(PortName::E, 0x01, 0x01),
-            change(PortName::E, 0x01, 0x00),
-            change(PortName::C, 0x07, 0x07),
-            change(PortName::C, 0x07, 0x05),
+            change(Port::E, 0x01, 0x00),
+            change(Port::E, 0x01, 0x01),
+            change(Port::E, 0x01, 0x00),
+            change(Port::C, 0x07, 0x07),
+            change(Port::C, 0x07, 0x05),
         ]
     );
     // each at the time of its write, within one quantum
@@ -2353,23 +2373,33 @@ fn gpt_output_edges_keep_their_times_across_quanta() {
     chip.set_report_pwm_edges(Channel::B, true);
     // PWMB $01: high for 2 of every 512 clocks from 512
     write_register(&mut chip, GPT + 0x26, 0x0001);
-    let mut changes = Vec::new();
+    let mut ports = Vec::new();
+    let mut pwm = Vec::new();
     while chip.now() < Cycles(1100) {
         chip.run_for(Cycles(37));
-        changes.extend(chip.take_gpt_changes());
+        ports.extend(chip.take_port_changes());
+        pwm.extend(chip.take_pwm_changes());
     }
-    let gp = |driven, levels| OutputChange::PortGp(PortLevels { driven, levels });
-    let b = |level| OutputChange::Pwm {
+    let gp = |driven, levels| PortChange {
+        port: Port::Gp,
+        outputs: PortLevels { driven, levels },
+    };
+    let b = |level| PwmChange {
         channel: Channel::B,
         level,
     };
     assert_eq!(
-        changes,
+        ports,
         [
             (Cycles(0), gp(0x30, 0x00)),
             (Cycles(4 * 0x10), gp(0x30, 0x10)),
             (Cycles(4 * 0x30), gp(0x30, 0x30)),
             (Cycles(4 * 0x50), gp(0x30, 0x10)),
+        ]
+    );
+    assert_eq!(
+        pwm,
+        [
             (Cycles(512), b(true)),
             (Cycles(514), b(false)),
             (Cycles(1024), b(true)),
@@ -2659,11 +2689,9 @@ fn a_peripheral_learns_when_a_watched_output_may_next_change() {
         write_register(chip, GPT + 0x1e, 0x0d00);
         write_register(chip, GPT + 0x16, 0x0010);
     };
-    let pgp4 = OutputStop {
-        port_gp: 1 << 4,
-        port_f: 1,
-        ..OutputStop::default()
-    };
+    let mut pgp4 = OutputStop::default();
+    pgp4.set_port(Port::Gp, 1 << 4);
+    pgp4.set_port(Port::F, 1);
     let (mut chip, seen) = horizons(compare, pgp4, false);
     assert_eq!(horizon_seen(&mut chip, &seen), None, "not published");
     let (mut chip, seen) = horizons(compare, OutputStop::default(), true);
@@ -2680,10 +2708,8 @@ fn a_peripheral_learns_when_a_watched_output_may_next_change() {
 
 #[test]
 fn a_reported_pwm_edge_bounds_the_output_horizon() {
-    let pwm_b = OutputStop {
-        pwm_b: true,
-        ..OutputStop::default()
-    };
+    let mut pwm_b = OutputStop::default();
+    pwm_b.pwm_b = true;
     // PWMB $01: high for 2 of every 512 clocks from 512, no event marking
     // its edges
     let duty = |chip: &mut Mc68331| write_register(chip, GPT + 0x26, 0x0001);
@@ -3597,10 +3623,9 @@ fn a_stop_asked_in_an_instruction_that_also_syncs_is_kept() {
     let (mut chip, _, _) = with_peripheral(&program, OnesStopper);
     // PQSPAR: all general-purpose; DDRQS: all outputs (QSMRM 3.3.2, 3.3.3)
     write_register(&mut chip, QSM + 0x16, 0x00ff);
-    chip.set_output_stop(OutputStop {
-        port_qs: 0xff,
-        ..OutputStop::default()
-    });
+    let mut stop = OutputStop::default();
+    stop.set_port(Port::Qs, 0xff);
+    chip.set_output_stop(stop);
     let run = chip.run_for(Cycles(10_000));
     assert_eq!(run.stop, Stop::Requested);
 }
@@ -3632,7 +3657,12 @@ fn port_qs_toggles(step: u64) -> Vec<(Cycles, PortLevels)> {
     let mut changes = Vec::new();
     for target in (step..=20_000).step_by(step as usize) {
         chip.run_until(Cycles(target));
-        changes.extend(chip.take_qsm_changes());
+        changes.extend(
+            chip.take_port_changes()
+                .into_iter()
+                .filter(|(_, change)| change.port == Port::Qs)
+                .map(|(at, change)| (at, change.outputs)),
+        );
     }
     changes
 }

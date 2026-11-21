@@ -43,6 +43,7 @@ use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::chip::MemoryId;
 use mc683xx_mc68331::event::Event;
+use mc683xx_mc68331::port::Port as ChipPort;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
@@ -1071,7 +1072,7 @@ fn run_chip(
             // takes it (GPTRM 6.1)
             captures.pop_front();
             let level = driven[GP].unwrap_or_default();
-            chip.set_port_gp_pins(level | IC1);
+            chip.set_pins(ChipPort::Gp, level | IC1, u8::MAX);
             driven[GP] = Some(level);
         }
         let pc = chip.cpu().registers.pc;
@@ -1082,7 +1083,7 @@ fn run_chip(
             run
         };
         if capture {
-            chip.set_port_gp_pins(driven[GP].unwrap_or_default());
+            chip.set_pins(ChipPort::Gp, driven[GP].unwrap_or_default(), u8::MAX);
         }
         let origin = chip.instructions();
         for event in chip.take_events() {
@@ -1215,9 +1216,9 @@ fn drive_pins(
         }
         driven[port] = Some(level);
         match port {
-            0 => chip.set_port_e_pins(level),
-            1 => chip.set_port_f_pins(level),
-            GP => chip.set_port_gp_pins(level),
+            0 => chip.set_pins(ChipPort::E, level, u8::MAX),
+            1 => chip.set_pins(ChipPort::F, level, u8::MAX),
+            GP => chip.set_pins(ChipPort::Gp, level, u8::MAX),
             _ => {
                 chip.set_pai(level & PACTL_PAIS != 0);
                 chip.set_pclk(level & PACTL_PCLKS != 0);

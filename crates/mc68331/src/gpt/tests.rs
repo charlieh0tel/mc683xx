@@ -1,3 +1,5 @@
+use std::mem;
+
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
@@ -14,6 +16,7 @@ use super::Gpt;
 use super::Input;
 use super::OutputChange;
 use super::PortGpPin;
+use super::PwmChange;
 use super::STATE_VERSION;
 use super::pwm::Channel;
 use super::pwm::Output;
@@ -869,6 +872,60 @@ const fn pwma(level: bool) -> OutputChange {
     }
 }
 
+/// Every queued change, port GP's and the PWM pins' together, in time
+/// order.
+fn take_output_changes(gpt: &mut Gpt) -> Vec<(Cycles, OutputChange)> {
+    let mut changes = mem::take(&mut gpt.edges.queue);
+    changes.sort_by_key(|&(at, _)| at);
+    changes
+}
+
+#[test]
+fn port_and_pwm_changes_are_taken_apart_each_in_time_order() {
+    let mut gpt = gpt();
+    gpt.set_report_pwm_edges(Channel::A, true, Cycles::ZERO);
+    // PWMA $80, fast: high at 512 (GPTRM 6.2); OC3 sets PGP5 by CFORC
+    write(&mut gpt, 0x26, 0x8000, 10);
+    write(&mut gpt, 0x1e, 0x0c00, 20);
+    write_byte(&mut gpt, 0x24, 0x20, 1000);
+    gpt.advance(Cycles(1100));
+    assert_eq!(
+        gpt.take_port_changes(),
+        [
+            (Cycles(20), PortLevels::new(0x20, 0x00)),
+            (Cycles(1000), PortLevels::new(0x20, 0x20)),
+        ]
+    );
+    assert_eq!(
+        gpt.take_pwm_changes(),
+        [
+            (
+                Cycles(512),
+                PwmChange {
+                    channel: Channel::A,
+                    level: true
+                }
+            ),
+            (
+                Cycles(768),
+                PwmChange {
+                    channel: Channel::A,
+                    level: false
+                }
+            ),
+            (
+                Cycles(1024),
+                PwmChange {
+                    channel: Channel::A,
+                    level: true
+                }
+            ),
+        ]
+    );
+    assert_eq!(gpt.take_port_changes(), []);
+    assert_eq!(gpt.take_pwm_changes(), []);
+}
+
 #[test]
 fn compare_edges_come_at_their_own_times() {
     let mut gpt = gpt();
@@ -879,14 +936,14 @@ fn compare_edges_come_at_their_own_times() {
     let period = 4 * 0x1_0000;
     gpt.advance(Cycles(period + 4 * 0x10 + 50));
     assert_eq!(
-        gpt.take_output_changes(),
+        take_output_changes(&mut gpt),
         [
             (Cycles(0), gp(0x10, 0x00)),
             (Cycles(4 * 0x10), gp(0x10, 0x10)),
             (Cycles(period + 4 * 0x10), gp(0x10, 0x00)),
         ]
     );
-    assert_eq!(gpt.take_output_changes(), []);
+    assert_eq!(take_output_changes(&mut gpt), []);
 }
 
 #[test]
@@ -899,7 +956,7 @@ fn cforc_and_a_reset_make_edges_at_once() {
     write(&mut gpt, 0x06, 0x0101, 1200);
     gpt.reset(Cycles(2000));
     assert_eq!(
-        gpt.take_output_changes(),
+        take_output_changes(&mut gpt),
         [
             (Cycles(10), gp(0x20, 0x00)),
             (Cycles(1000), gp(0x20, 0x20)),
@@ -924,7 +981,7 @@ fn pwm_edges_follow_the_duty_a_period_late() {
     write_byte(&mut gpt, 0x26, 0x00, 1700);
     gpt.advance(Cycles(1 << 24));
     assert_eq!(
-        gpt.take_output_changes(),
+        take_output_changes(&mut gpt),
         [
             (Cycles(512), pwma(true)),
             (Cycles(768), pwma(false)),
@@ -937,10 +994,10 @@ fn pwm_edges_follow_the_duty_a_period_late() {
     // FPWMA with F1A: high at once
     let now = (1 << 24) + 3;
     write(&mut gpt, 0x24, 0x0202, now);
-    assert_eq!(gpt.take_output_changes(), [(Cycles(now), pwma(true))]);
+    assert_eq!(take_output_changes(&mut gpt), [(Cycles(now), pwma(true))]);
     gpt.set_report_pwm_edges(Channel::A, false, Cycles(now));
     write(&mut gpt, 0x24, 0x0200, now);
-    assert_eq!(gpt.take_output_changes(), []);
+    assert_eq!(take_output_changes(&mut gpt), []);
 }
 
 /// The clock edges of a tap of `divisor` from `first` to `last`, each a
@@ -988,7 +1045,10 @@ fn cprout_drives_tcnts_clock_on_oc1() {
         }
     );
     // unreported, the pin shows low
-    assert_eq!(gpt.take_output_changes(), [(Cycles(10), gp(0x08, 0x00))]);
+    assert_eq!(
+        take_output_changes(&mut gpt),
+        [(Cycles(10), gp(0x08, 0x00))]
+    );
     gpt.set_report_oc1_clock_edges(true, Cycles(30));
     assert_eq!(
         read(&mut gpt, 0x06, 56) & 0x08,
@@ -1002,7 +1062,7 @@ fn cprout_drives_tcnts_clock_on_oc1() {
     gpt.advance(Cycles(100));
     let mut expected = clock_edges(8, 31, 59, |high| gp(0x08, u8::from(high) << 3));
     expected.push((Cycles(60), gp(0x00, 0x00)));
-    assert_eq!(gpt.take_output_changes(), expected);
+    assert_eq!(take_output_changes(&mut gpt), expected);
 }
 
 #[test]
@@ -1014,7 +1074,7 @@ fn cprout_edges_come_before_a_compare_at_their_time() {
     write(&mut gpt, 0x16, 0x0010, 0);
     write(&mut gpt, 0x20, 0x0008, 0);
     gpt.advance(Cycles(4 * 0x10 + 1));
-    let changes = gpt.take_output_changes();
+    let changes = take_output_changes(&mut gpt);
     assert_eq!(
         changes[changes.len() - 3..],
         [
@@ -1026,7 +1086,7 @@ fn cprout_edges_come_before_a_compare_at_their_time() {
     // OC1M3 gives OC1's pin to the compare (GPTRM Table B-1)
     write(&mut gpt, 0x08, 0x0800, 4 * 0x10 + 2);
     gpt.advance(Cycles(100));
-    assert_eq!(gpt.take_output_changes(), []);
+    assert_eq!(take_output_changes(&mut gpt), []);
     assert_eq!(
         gpt.port_outputs(Cycles(100)),
         PortLevels {
@@ -1065,11 +1125,11 @@ fn pprout_drives_pwmcnts_clock_on_pwma() {
     gpt.advance(Cycles(100));
     let mut expected = clock_edges(8, 11, 29, pwma);
     expected.extend(clock_edges(2, 30, 41, pwma));
-    assert_eq!(gpt.take_output_changes(), expected);
+    assert_eq!(take_output_changes(&mut gpt), expected);
     // FPWMA drives F1A whatever PPROUT (GPTRM 6.3.1)
     write(&mut gpt, 0x24, 0x0282, 100);
     gpt.advance(Cycles(200));
-    assert_eq!(gpt.take_output_changes(), [(Cycles(100), pwma(true))]);
+    assert_eq!(take_output_changes(&mut gpt), [(Cycles(100), pwma(true))]);
 }
 
 #[test]
@@ -1086,7 +1146,7 @@ fn pprout_on_pclk_is_high_a_system_clock_from_each_rise() {
     assert_eq!(gpt.next_event(), Some(Cycles(300)));
     gpt.advance(Cycles(500));
     assert_eq!(
-        gpt.take_output_changes(),
+        take_output_changes(&mut gpt),
         [
             (Cycles(200), pwma(true)),
             (Cycles(201), pwma(false)),

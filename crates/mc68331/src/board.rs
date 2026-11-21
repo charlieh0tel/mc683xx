@@ -35,6 +35,7 @@ use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::peripheral::iack_address;
 use mc683xx_modules::pins::PortLevels;
+use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::sim::BLOCK;
 use mc683xx_modules::sim::MODULE_SPACE_BYTES;
@@ -58,6 +59,8 @@ use crate::event::ChipTracing;
 use crate::event::DsackFault;
 use crate::event::Event;
 use crate::gpt::Gpt;
+use crate::port::Port;
+use crate::port::PortChange;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::reset::ResetScope;
@@ -191,8 +194,8 @@ pub(crate) enum Source {
 /// What the outputs an [`OutputStop`] watches showed, each masked by it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Seen {
-    /// Ports C, E, F, GP and QS's levels, an undriven pin high.
-    ports: [u8; 5],
+    /// Each port's levels, by [`Port::index`], an undriven pin high.
+    ports: [u8; Port::ALL.len()],
     /// PWMA's and PWMB's levels, bits 0 and 1.
     pwm: u8,
     /// The frames sent on TXD the host has not taken.
@@ -331,6 +334,71 @@ impl fmt::Debug for Board {
 type Ended = Result<(u32, u16), BusError>;
 
 impl Board {
+    /// The pins `port` drives and their levels at `now`.
+    pub(crate) fn outputs(&self, port: Port, now: Cycles) -> PortLevels {
+        match port {
+            Port::C => self.sim.outputs(PortName::C),
+            Port::E => self.sim.outputs(PortName::E),
+            Port::F => self.sim.outputs(PortName::F),
+            Port::Gp => self.module::<Gpt>(GPT).port_outputs(now),
+            Port::Qs => self.module::<Qsm>(QSM).port_outputs(),
+        }
+    }
+
+    /// `port`'s registers and the levels the board drives on its pins.
+    pub(crate) fn port(&self, port: Port) -> PortState {
+        match port {
+            Port::C => self.sim.port(PortName::C),
+            Port::E => self.sim.port(PortName::E),
+            Port::F => self.sim.port(PortName::F),
+            Port::Gp => self.module::<Gpt>(GPT).port_state(),
+            Port::Qs => self.module::<Qsm>(QSM).port_state(),
+        }
+    }
+
+    /// The board drives the pins of `port` in `mask` to their levels in
+    /// `value` at `now`, the others as they were.
+    pub(crate) fn set_pins(&mut self, port: Port, value: u8, mask: u8, now: Cycles) {
+        let pins = self.port(port).pins & !mask | value & mask;
+        match port {
+            Port::C => {}
+            Port::E => {
+                self.modules_changed();
+                self.sim.set_pins(PortName::E, value, mask);
+            }
+            Port::F => {
+                self.modules_changed();
+                self.sim.set_pins(PortName::F, value, mask);
+            }
+            Port::Gp => self.module_mut::<Gpt>(GPT).set_port_pins(pins, now),
+            Port::Qs => self.module_mut::<Qsm>(QSM).set_port_pins(pins, now),
+        }
+    }
+
+    /// The changes in what each port drives since the last call, in
+    /// time order, those at one time in [`Port::ALL`]'s order.
+    pub(crate) fn take_port_changes(&mut self) -> Vec<(Cycles, PortChange)> {
+        let sim = self
+            .sim
+            .take_output_changes()
+            .into_iter()
+            .map(|(at, change)| {
+                let port = Port::from_sim(change.port);
+                (at, port, change.outputs)
+            });
+        let gp = self.module_mut::<Gpt>(GPT).take_port_changes();
+        let qs = self.module_mut::<Qsm>(QSM).take_output_changes();
+        let mut changes: Vec<_> = sim
+            .chain(gp.into_iter().map(|(at, outputs)| (at, Port::Gp, outputs)))
+            .chain(qs.into_iter().map(|(at, outputs)| (at, Port::Qs, outputs)))
+            .collect();
+        changes.sort_by_key(|&(at, port, _)| (at, port));
+        changes
+            .into_iter()
+            .map(|(at, port, outputs)| (at, PortChange { port, outputs }))
+            .collect()
+    }
+
     /// The module at `index`, which is an `M`.
     pub(crate) fn module<M: Any>(&self, index: usize) -> &M {
         let module: &dyn Any = self.modules[index].as_ref();
@@ -413,14 +481,15 @@ impl Board {
         let qsm = self.module::<Qsm>(QSM);
         let (port_gp, pwm) = self.module::<Gpt>(GPT).reported_outputs();
         let pwm_mask = u8::from(stop.pwm_a) | u8::from(stop.pwm_b) << 1;
+        let outputs = |port| match port {
+            Port::C => self.sim.outputs(PortName::C),
+            Port::E => self.sim.outputs(PortName::E),
+            Port::F => self.sim.outputs(PortName::F),
+            Port::Gp => port_gp,
+            Port::Qs => qsm.port_outputs(),
+        };
         Seen {
-            ports: [
-                level(self.sim.outputs(PortName::C)) & stop.port_c,
-                level(self.sim.outputs(PortName::E)) & stop.port_e,
-                level(self.sim.outputs(PortName::F)) & stop.port_f,
-                level(port_gp) & stop.port_gp,
-                level(qsm.port_outputs()) & stop.port_qs,
-            ],
+            ports: Port::ALL.map(|port| level(outputs(port)) & stop.port(port)),
             pwm: pwm & pwm_mask,
             frames: if stop.txd { qsm.untaken_frames() } else { 0 },
         }
@@ -452,7 +521,7 @@ impl Board {
         let pwm = u8::from(stop.pwm_a) | u8::from(stop.pwm_b) << 1;
         let fast = self
             .module::<Gpt>(GPT)
-            .next_fast_edge(now, pwm, stop.port_gp);
+            .next_fast_edge(now, pwm, stop.port(Port::Gp));
         self.modules_next().into_iter().chain(fast).min()
     }
 
@@ -846,7 +915,7 @@ impl Board {
                 None => return field,
             },
         };
-        let assigned = self.sim.port_e_assignment();
+        let assigned = self.sim.port(PortName::E).assignment;
         let dsack0 = pins.drives_dsack0() && assigned & PEPA_DSACK0 != 0;
         let dsack1 = pins.drives_dsack1() && assigned & PEPA_DSACK1 != 0;
         if !dsack0 && !dsack1 {

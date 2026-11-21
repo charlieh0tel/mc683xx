@@ -31,6 +31,22 @@ impl PortLevels {
     }
 }
 
+/// A port's registers and the levels the board drives on its pins, in
+/// one form for every module's ports.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct PortState {
+    /// The data latch: what the firmware last wrote to the port's data
+    /// register.
+    pub latch: u8,
+    /// The data direction register: a set bit makes the pin an output.
+    pub direction: u8,
+    /// The pin assignment: a set bit gives the pin its module function
+    /// rather than general-purpose I/O.
+    pub assignment: u8,
+    /// The levels the board drives on the pins.
+    pub pins: u8,
+}
+
 #[cfg(test)]
 mod tests {
     use super::PortLevels;

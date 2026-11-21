@@ -42,6 +42,7 @@ use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::pins::PortLevels;
+use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::qsm::qspi::AnySpiPeripheral;
 use mc683xx_modules::qsm::qspi::MOST_BITS;
@@ -51,8 +52,6 @@ use mc683xx_modules::qsm::sci::Transmitted;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::Sim;
-use mc683xx_modules::sim::ports::Change;
-use mc683xx_modules::sim::ports::PortName;
 use mc683xx_target::address::Address;
 
 use crate::board::ADDRESS_LINES;
@@ -73,9 +72,11 @@ use crate::event::ChipTracing;
 use crate::event::Event;
 use crate::gpt::Gpt;
 use crate::gpt::Input;
-use crate::gpt::OutputChange;
+use crate::gpt::PwmChange;
 use crate::gpt::pwm::Channel;
 use crate::gpt::pwm::Output;
+use crate::port::Port;
+use crate::port::PortChange;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::reset::ResetScope;
@@ -175,16 +176,10 @@ impl OutputHorizon {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct OutputStop {
-    /// Port C's pins, a mask: chip selects as discrete outputs.
-    pub port_c: u8,
-    /// Port E's.
-    pub port_e: u8,
-    /// Port F's.
-    pub port_f: u8,
-    /// Port GP's, as [`Mc68331::take_gpt_changes`] reports them.
-    pub port_gp: u8,
-    /// Port QS's, PCS\[3:0\] and TXD among them as levels.
-    pub port_qs: u8,
+    /// Each port's pins, a mask, by [`Port::index`]: port GP's as
+    /// [`Mc68331::take_port_changes`] reports them, port QS's PCS\[3:0\]
+    /// and TXD among them as levels.
+    ports: [u8; Port::ALL.len()],
     /// PWMA, while its edges are reported (`set_report_pwm_edges`).
     pub pwm_a: bool,
     /// PWMB, likewise.
@@ -194,6 +189,19 @@ pub struct OutputStop {
     /// A reset the chip drives on RESET: a `reset` instruction's, the
     /// watchdog's or the halt monitor's.
     pub reset: bool,
+}
+
+impl OutputStop {
+    /// The pins of `port` watched, a mask.
+    #[must_use]
+    pub const fn port(&self, port: Port) -> u8 {
+        self.ports[port.index()]
+    }
+
+    /// Watches the pins of `port` in `mask`, and no others of it.
+    pub const fn set_port(&mut self, port: Port, mask: u8) {
+        self.ports[port.index()] = mask;
+    }
 }
 
 /// A handle by which the host's peripherals divert a memory's cycles to a
@@ -1084,13 +1092,6 @@ impl Mc68331 {
         self.board.module_mut::<Qsm>(QSM).take_transmitted()
     }
 
-    /// The board drives port QS's input pins to `pins` (MC68331UM
-    /// D.4.8).
-    pub fn set_port_qs_pins(&mut self, pins: u8) {
-        let now = self.now;
-        self.board.module_mut::<Qsm>(QSM).set_port_pins(pins, now);
-    }
-
     /// The host, as an external SPI master, drives PCS0/SS low now if
     /// `asserted`, else high: it selects the QSPI as a slave (QSMRM
     /// 4.4.2), or faults it as a master (4.3.5).
@@ -1144,13 +1145,6 @@ impl Mc68331 {
         self.board.module(GPT)
     }
 
-    /// The board drives port GP's input pins, IC1 to IC4/OC5, to `pins`
-    /// now: an input capture takes a selected edge (GPTRM 3.2).
-    pub fn set_port_gp_pins(&mut self, pins: u8) {
-        let now = self.now;
-        self.board.module_mut::<Gpt>(GPT).set_port_pins(pins, now);
-    }
-
     /// The board drives PAI to `level` now: the pulse accumulator's
     /// input (GPTRM 4).
     pub fn set_pai(&mut self, level: bool) {
@@ -1186,12 +1180,6 @@ impl Mc68331 {
         self.board.module_mut::<Gpt>(GPT).unschedule_inputs(now);
     }
 
-    /// The pins of port GP the GPT drives and their levels.
-    #[must_use]
-    pub fn port_gp_outputs(&self) -> PortLevels {
-        self.gpt().port_outputs(self.now)
-    }
-
     /// What `channel`'s PWM pin carries now.
     #[must_use]
     pub fn pwm(&self, channel: Channel) -> Output {
@@ -1205,24 +1193,13 @@ impl Mc68331 {
         self.gpt().oc1(self.now)
     }
 
-    /// The changes in what the GPT drives since the last call, in time
-    /// order, each at the time it happened, as `take_port_changes`
-    /// gives the SIM's: port GP's always, OC1's CPROUT clock's while
-    /// `set_report_oc1_clock_edges` asks for them, the PWM pins' while
-    /// `set_report_pwm_edges` does ([PLAN.md], Peripherals).
+    /// The PWM pins' edges since the last call, in time order, each at
+    /// the time it happened, while `set_report_pwm_edges` asks for them
+    /// ([PLAN.md], Peripherals).
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
-    pub fn take_gpt_changes(&mut self) -> Vec<(Cycles, OutputChange)> {
-        self.board.module_mut::<Gpt>(GPT).take_output_changes()
-    }
-
-    /// The changes in what port QS drives since the last call, in time
-    /// order, each at the time it happened, as `take_port_changes`
-    /// gives the SIM's: a register write's at its instruction's start,
-    /// the QSPI's PCS and the SCI's TXD at their entries' and frames'
-    /// times.
-    pub fn take_qsm_changes(&mut self) -> Vec<(Cycles, PortLevels)> {
-        self.board.module_mut::<Qsm>(QSM).take_output_changes()
+    pub fn take_pwm_changes(&mut self) -> Vec<(Cycles, PwmChange)> {
+        self.board.module_mut::<Gpt>(GPT).take_pwm_changes()
     }
 
     /// Whether `channel`'s PWM edges are reported from now on, from the
@@ -1245,51 +1222,45 @@ impl Mc68331 {
             .set_report_oc1_clock_edges(report, now);
     }
 
-    /// The board drives port E's input pins to `pins`.
-    pub const fn set_port_e_pins(&mut self, pins: u8) {
-        self.board.modules_changed();
-        self.board.sim.set_port_e_pins(pins);
-    }
-
-    /// The board drives port F's input pins to `pins`.
-    pub const fn set_port_f_pins(&mut self, pins: u8) {
-        self.board.modules_changed();
-        self.board.sim.set_port_f_pins(pins);
-    }
-
-    /// The pins of port C, PC0 to PC6 on CS3 to CS9, the SIM drives and
-    /// their levels (MC68331UM 4.8.1.4).
+    /// The pins `port` drives and their levels now: port C's the
+    /// chip-select pins assigned as discrete outputs (MC68331UM
+    /// 4.8.1.4), port GP's TCNT's clock on OC1's under CPROUT.
     #[must_use]
-    pub fn port_c_outputs(&self) -> PortLevels {
-        self.board.sim.outputs(PortName::C)
+    pub fn outputs(&self, port: Port) -> PortLevels {
+        self.board.outputs(port, self.now)
     }
 
-    /// The pins of port E the SIM drives and their levels (MC68331UM
-    /// 4.9).
+    /// `port`'s registers and the levels the board drives on its pins
+    /// ([`PortState`]).  Port C's pins are all outputs, those with their
+    /// chip-select function assigned; it has no inputs, its pins read
+    /// high.  Port GP has no pin assignment register: its assignment is
+    /// the pins the output compares, or CPROUT's clock on OC1, take
+    /// from PORTGP.  Port QS's is PQSPAR's, TXD's while the SCI's
+    /// transmitter has it.
     #[must_use]
-    pub fn port_e_outputs(&self) -> PortLevels {
-        self.board.sim.outputs(PortName::E)
+    pub fn port(&self, port: Port) -> PortState {
+        self.board.port(port)
     }
 
-    /// The pins of port F the SIM drives and their levels (MC68331UM
-    /// 4.9).
-    #[must_use]
-    pub fn port_f_outputs(&self) -> PortLevels {
-        self.board.sim.outputs(PortName::F)
+    /// The board drives the pins of `port` in `mask` to their levels in
+    /// `value` now, the others as they were: an input capture on port
+    /// GP takes a selected edge (GPTRM 3.2).  Port C has no inputs;
+    /// driving it does nothing.
+    pub fn set_pins(&mut self, port: Port, value: u8, mask: u8) {
+        let now = self.now;
+        self.board.set_pins(port, value, mask, now);
     }
 
-    /// The pins of port QS the QSM drives and their levels (MC68331UM
-    /// D.4.8).
-    #[must_use]
-    pub fn port_qs_outputs(&self) -> PortLevels {
-        self.qsm().port_outputs()
-    }
-
-    /// The changes in what ports C, E and F drive since the last call,
-    /// each with the time of the write that made it: a pin the firmware
-    /// pulses within a quantum is both its edges.
-    pub fn take_port_changes(&mut self) -> Vec<(Cycles, Change)> {
-        self.board.sim.take_output_changes()
+    /// The changes in what each port drives since the last call, in time
+    /// order, each at the time it happened, those at one time in
+    /// [`Port::ALL`]'s order: a firmware write's at its instruction's
+    /// start, so a pin the firmware pulses within a quantum is both its
+    /// edges; the output compares' at their compares, OC1's CPROUT
+    /// clock's while `set_report_oc1_clock_edges` asks for them; the
+    /// QSPI's PCS and the SCI's TXD at their entries' and frames'
+    /// times.
+    pub fn take_port_changes(&mut self) -> Vec<(Cycles, PortChange)> {
+        self.board.take_port_changes()
     }
 
     /// The host asserts or negates `pin`.

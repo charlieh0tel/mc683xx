@@ -1,13 +1,14 @@
 //! The chip's pins as Python sees them: SCI frames, GPT pin names,
-//! PWM channels and outputs, and the SIM's ports.
+//! PWM channels and outputs, and the ports.
 
 use mc683xx_mc68331::gpt::Input;
-use mc683xx_mc68331::gpt::OutputChange;
 use mc683xx_mc68331::gpt::pwm;
 use mc683xx_mc68331::gpt::pwm::Channel;
+use mc683xx_mc68331::port::Port;
+use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::sci;
-use mc683xx_modules::sim::ports::PortName;
 use pyo3::pyclass;
+use pyo3::pymethods;
 
 use crate::error::Error;
 
@@ -83,9 +84,9 @@ impl From<Channel> for ChannelView {
     }
 }
 
-/// One of the SIM's general-purpose ports (Rust's `ports::PortName`).
+/// One of the chip's general-purpose ports (Rust's `port::Port`).
 #[pyclass(
-    name = "PortName",
+    name = "Port",
     module = "mc683xx",
     eq,
     hash,
@@ -94,68 +95,87 @@ impl From<Channel> for ChannelView {
     from_py_object
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum PortNameView {
+pub(crate) enum PortView {
     /// Port C: the chip-select pins CS3 to CS9 as discrete outputs.
     C,
     /// Port E.
     E,
     /// Port F.
     F,
+    /// Port GP.
+    #[pyo3(name = "GP")]
+    Gp,
+    /// Port QS.
+    #[pyo3(name = "QS")]
+    Qs,
 }
 
-impl From<PortNameView> for PortName {
-    fn from(port: PortNameView) -> Self {
+impl From<PortView> for Port {
+    fn from(port: PortView) -> Self {
         match port {
-            PortNameView::C => Self::C,
-            PortNameView::E => Self::E,
-            PortNameView::F => Self::F,
+            PortView::C => Self::C,
+            PortView::E => Self::E,
+            PortView::F => Self::F,
+            PortView::Gp => Self::Gp,
+            PortView::Qs => Self::Qs,
         }
     }
 }
 
-impl From<PortName> for PortNameView {
-    fn from(port: PortName) -> Self {
+impl From<Port> for PortView {
+    fn from(port: Port) -> Self {
         match port {
-            PortName::C => Self::C,
-            PortName::E => Self::E,
-            PortName::F => Self::F,
+            Port::C => Self::C,
+            Port::E => Self::E,
+            Port::F => Self::F,
+            Port::Gp => Self::Gp,
+            Port::Qs => Self::Qs,
         }
     }
 }
 
-/// A change in what the GPT drives (Rust's `gpt::OutputChange`), its
-/// `PortLevels` as `driven` and `levels`.
-#[pyclass(name = "OutputChange", module = "mc683xx", frozen, eq, hash)]
+/// A port's registers and the levels the board drives on its pins
+/// (Rust's `pins::PortState`).
+#[pyclass(name = "PortState", module = "mc683xx", frozen, eq, hash, get_all)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum OutputChangeView {
-    /// Port GP's pins and their levels, as two masks.
-    PortGp {
-        /// Its output pins.
-        driven: u8,
-        /// Their levels.
-        levels: u8,
-    },
-    /// A PWM pin's level, while its edges are reported.
-    Pwm {
-        /// Which.
-        channel: ChannelView,
-        /// Its level.
-        level: bool,
-    },
+pub(crate) struct PortStateView {
+    /// The data latch.
+    latch: u8,
+    /// The data direction: a set bit makes the pin an output.
+    direction: u8,
+    /// The pin assignment: a set bit gives the pin its module function.
+    assignment: u8,
+    /// The levels the board drives on the pins.
+    pins: u8,
 }
 
-impl From<OutputChange> for OutputChangeView {
-    fn from(change: OutputChange) -> Self {
-        match change {
-            OutputChange::PortGp(outputs) => Self::PortGp {
-                driven: outputs.driven,
-                levels: outputs.levels,
-            },
-            OutputChange::Pwm { channel, level } => Self::Pwm {
-                channel: channel.into(),
-                level,
-            },
-            _ => panic!("a GPT output change the bindings do not know"),
+#[pymethods]
+impl PortStateView {
+    #[new]
+    const fn new(latch: u8, direction: u8, assignment: u8, pins: u8) -> Self {
+        Self {
+            latch,
+            direction,
+            assignment,
+            pins,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PortState(latch={:#04x}, direction={:#04x}, assignment={:#04x}, pins={:#04x})",
+            self.latch, self.direction, self.assignment, self.pins
+        )
+    }
+}
+
+impl From<PortState> for PortStateView {
+    fn from(state: PortState) -> Self {
+        Self {
+            latch: state.latch,
+            direction: state.direction,
+            assignment: state.assignment,
+            pins: state.pins,
         }
     }
 }
@@ -214,40 +234,18 @@ impl From<pwm::Output> for Output {
 #[cfg(test)]
 mod tests {
     use mc683xx_mc68331::gpt::Input;
-    use mc683xx_mc68331::gpt::OutputChange;
     use mc683xx_mc68331::gpt::PortGpPin;
-    use mc683xx_mc68331::gpt::pwm::Channel;
-    use mc683xx_modules::pins::PortLevels;
+    use mc683xx_mc68331::port::Port;
 
-    use super::ChannelView;
-    use super::OutputChangeView;
+    use super::PortView;
     use super::input;
     use crate::error::Error;
 
     #[test]
-    fn gpt_changes_keep_their_port_and_channel() {
-        let port = OutputChange::PortGp(PortLevels {
-            driven: 0x30,
-            levels: 0x10,
-        });
-        assert_eq!(
-            OutputChangeView::from(port),
-            OutputChangeView::PortGp {
-                driven: 0x30,
-                levels: 0x10
-            }
-        );
-        let pwm = OutputChange::Pwm {
-            channel: Channel::B,
-            level: true,
-        };
-        assert_eq!(
-            OutputChangeView::from(pwm),
-            OutputChangeView::Pwm {
-                channel: ChannelView::B,
-                level: true
-            }
-        );
+    fn ports_convert_both_ways() {
+        for port in Port::ALL {
+            assert_eq!(Port::from(PortView::from(port)), port);
+        }
     }
 
     #[test]

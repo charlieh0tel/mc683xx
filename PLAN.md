@@ -420,7 +420,7 @@ surrounds the SoC with its board peripherals through:
   The board tells the QSM the system clock after a SYNCR write and at
   reset.  With MSTR clear the QSPI is a slave and the host is the
   external master: `set_qspi_slave_select` drives PCS0/SS (the board's
-  pin, as `set_port_qs_pins` does), and `qspi_slave_shift(mosi, bits,
+  pin, as `set_pins(Port::Qs, ..)` does), and `qspi_slave_shift(mosi, bits,
   period)` clocks up to 16 bits in, one an SCK period of system
   clocks, running the chip between them, and returns what the QSPI
   drove on MISO (`Shifted`: levels and a driven mask).  The QSM's
@@ -438,21 +438,36 @@ surrounds the SoC with its board peripherals through:
   board receiver a character late and a frame driven into RXD arrive
   a frame after its time (2026-10-23).
 - **Pins:** port and module pins in and out, including GPT input
-  capture and pulse accumulator inputs (1 PPS-style signals): the host
-  sets the levels it drives (`set_port_qs_pins`, `set_port_gp_pins`,
-  `set_pai`, `set_pclk`, `set_port_e_pins`, `set_port_f_pins`) and
-  reads the levels the chip drives (`port_c_outputs`,
-  `port_e_outputs`, `port_f_outputs`, `port_qs_outputs`,
-  `port_gp_outputs`, `pwm`).  An
-  edge the host makes takes effect at the chip's time between `run_for`
-  calls.  `take_port_changes` gives each change in what ports C, E
-  and F drive with its time, as `take_sci_transmitted` gives frames,
-  so a pin the firmware pulses within a quantum is both its edges;
-  `take_qsm_changes` gives port QS's the same way, the QSM brought up
-  to date change by change (each SCI event and QSPI phase end) so
-  PCS pulses in a batch of QSPI entries keep their times.
-  Port C is the latch on the CS3-CS9 pins CSPARx assigns as discrete
-  outputs (MC68331UM 4.8.1.4).
+  capture and pulse accumulator inputs (1 PPS-style signals).  Every
+  general-purpose port is keyed by one `port::Port { C, E, F, Gp, Qs }`,
+  the manual's port names: the host sets the levels it drives
+  (`set_pins(port, value, mask)`, and `set_pai`, `set_pclk`), reads
+  the levels the chip drives (`outputs(port)`, `pwm`) and the port's
+  registers (`port(port)`, a `PortState`: latch, direction, assignment,
+  the board's levels).  An edge the host makes takes effect at the
+  chip's time between `run_for` calls.  `take_port_changes` gives each
+  change in what any port drives with its time, as
+  `take_sci_transmitted` gives frames, so a pin the firmware pulses
+  within a quantum is both its edges; the QSM is brought up to date
+  change by change (each SCI event and QSPI phase end) so PCS pulses
+  in a batch of QSPI entries keep their times.  Port C is the latch on
+  the CS3-CS9 pins CSPARx assigns as discrete outputs (MC68331UM
+  4.8.1.4); it has no inputs.
+  `Port` lives in `mc683xx-mc68331`, not `mc683xx-modules`: it spans
+  the SIM and QSM, which are the modules crate's and shared by 683xx
+  parts, and the GPT, which is this chip's, so only the chip crate
+  sees all five; another 683xx part has other ports.  The modules
+  crate keeps the per-module plumbing (`Sim::outputs(PortName)`,
+  `Sim::port`, `Qsm::port_state`, hidden), and `PortState` and
+  `PortLevels` in `pins`, the shapes every module's ports share.
+  Port C has no direction or assignment register: its direction reads
+  all outputs and its assignment the pins CSPARx keeps as chip selects.
+  Port GP has no assignment register: its assignment is the pins the
+  output compares, or CPROUT's clock on OC1, take from PORTGP.  Port
+  QS's is PQSPAR's, TXD's too while the transmitter has it.  One
+  stream replaced three of one shape (the SIM's, the QSM's and the
+  GPT's, 0.8.0): a host that wanted one order merged them by time
+  itself; the chip now does, those at one time in `Port::ALL`'s order.
 - **GPT input edges:** board models clocked apart from the quanta (an
   FPGA's 1 PPS on IC1, a GPS engine's on PAI, an INIT line on PCLK,
   read through PCLKS) schedule edges ahead:
@@ -474,17 +489,13 @@ surrounds the SoC with its board peripherals through:
   the first clock at or after it (rounding up).
 - **GPT output edges:** a peripheral may react to an edge between run
   quanta, so the host sees each with the time it happened, not only
-  the level at a sync point: `take_gpt_changes` returns
-  `(time, OutputChange)` in time order, in the shape of the SIM's
-  `take_port_changes`: `PortGp(PortLevels)`, the whole port as a SIM
-  port's `Change` (both carry a `PortLevels`), or `Pwm { channel, level }`.  The two
-  stay separate streams of one shape rather than one: the SIM's
-  `Change` lives in `mc683xx-modules`, shared by 683xx parts, and port GP
-  and the PWM pins are the MC68331's GPT's, so one stream would need
-  a chip-level wrapper around both and change the SIM's API; a host
-  that wants one order merges the two by time.  A port change takes
-  its write cycle's start; a GPT change takes the time it happened,
-  which is the cycle's for a write.  A compare's edge takes the time TCNT matched (GPTRM 3.3),
+  the level at a sync point: port GP's come in `take_port_changes`
+  with every port's, and the PWM pins' in `take_pwm_changes`,
+  `(time, PwmChange { channel, level })` in time order.  The PWM pins
+  are no port's, so they keep a stream of their own; the GPT holds
+  both in one queue (its snapshot unchanged) and each take draws its
+  own.  A change takes the time it happened, which is the cycle's
+  start for a write.  A compare's edge takes the time TCNT matched (GPTRM 3.3),
   a write's (CFORC, PORTGP, DDRGP, TCTL1, OC1M) and a reset's the
   cycle's, whenever the GPT catches up; quanta still end at the
   compares with pin actions, for their flags.  Port GP's edges are
@@ -509,7 +520,7 @@ surrounds the SoC with its board peripherals through:
   port GP changes at their own times, ahead of a compare at the same
   time (OC1's clock rises at every TCNT count); without it the
   changes show OC1's pin driven low under CPROUT.  The level queries
-  (`port_gp_outputs`, PORTGP, `pwm_level`, PWMC's F1A) show the clock
+  (`outputs(Port::Gp)`, PORTGP, `pwm_level`, PWMC's F1A) show the clock
   either way.  Like the PWM edges they are found as the GPT catches
   up, never as events: the next event is untouched and no quantum ends
   at one.  The queue grows until taken, as the SCI's does.
@@ -756,9 +767,9 @@ chip beside `Mc68331`.
   `now`, `halted`, `exception_taken` (a vector), `read_register`,
   `write_register`, `registers()`, `memory`, `read_memory`,
   `write_memory` (a memory's own bytes, by offset), `peripheral(n)` (the
-  object back), `set_interrupt_pin`, `set_port_e_pins`,
-  `set_port_f_pins`, `port_c`, `port_outputs(PortName)`,
-  `take_port_changes()` (`(now, PortName, driven, levels)`),
+  object back), `set_interrupt_pin`, `set_pins(Port, value, mask)`,
+  `outputs(Port)`, `port(Port)` (a `PortState`),
+  `take_port_changes()` (`(now, Port, driven, levels)`, every port's),
   `system_hz`, `take_events()` (`Event.Reset`, `Event.ArbitrationTie`,
   `Event.Dsack`, and with `set_tracing(accesses=, exceptions=)` `Event.Access` and
   `Event.Exception`), `instructions`.
@@ -897,13 +908,12 @@ chip beside `Mc68331`.
   adds `qspi_peripheral()`, `qspi_chip_selects`, `set_qspi_slave_select`,
   `qspi_slave_shift(mosi, bits, period) -> (miso, driven)` (a word
   wider than its bits, or more than 16, is a `ValueError`),
-  `set_port_qs_pins`, `port_qs_outputs`, `sci_receive(frame)` and
+  `sci_receive(frame)` and
   `take_sci_transmitted()` (`Frame.Data(bits)`, `Frame.Break()`, with
-  the time each ended), `set_port_gp_pins`, `set_pai`, `set_pclk`,
-  `port_gp_outputs`, `pwm(Channel)` (`Output.Level`, `Output.Wave`,
-  `Output.Clock`), `oc1()` (the same `Output`), `take_gpt_changes()`
-  (`(now, OutputChange)`, `OutputChange.PortGp(driven, levels)` or
-  `OutputChange.Pwm(channel, level)`),
+  the time each ended), `set_pai`, `set_pclk`,
+  `pwm(Channel)` (`Output.Level`, `Output.Wave`,
+  `Output.Clock`), `oc1()` (the same `Output`), `take_pwm_changes()`
+  (`(now, Channel, level)`),
   `set_report_pwm_edges(channel, on)`, `set_report_oc1_clock_edges(on)` and
   `schedule_gpt_input(time, input, level)` (input `"PGP0"`-`"PGP7"`,
   `"PAI"` or `"PCLK"`, `gpt::Input`'s `FromStr`).  The modules' registers are the firmware's,
@@ -1437,8 +1447,8 @@ hand.  The keys are in `docs/board-files.md`.
   in 10 ms runs and never in 100 ms ones.  Each such call costs a
   quantum (docs/performance.md, Board peripherals).  Chip outputs reach the
   nets after the quantum in which they changed, each at its own
-  converted time (`take_port_changes`, `take_gpt_changes`,
-  `take_sci_transmitted`, `take_qsm_changes`; a port QS pulse within
+  converted time (`take_port_changes`, `take_pwm_changes`,
+  `take_sci_transmitted`; a port QS pulse within
   a quantum is both its edges:
   `port_qs_edges_keep_their_times_however_the_run_is_cut`).  An output on a net that a peripheral, the chip or an
   observer (Front ends) senses

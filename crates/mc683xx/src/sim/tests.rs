@@ -1,4 +1,5 @@
 use crate::pins::PortLevels;
+use crate::pins::PortState;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
@@ -150,13 +151,14 @@ fn user_mode_reaches_only_unrestricted_registers() {
 #[test]
 fn ports_read_their_pins_on_inputs() {
     let mut sim = sim();
-    sim.set_port_f_pins(0x5a);
+    sim.set_pins(PortName::F, 0x5a, 0xff);
+    sim.set_pins(PortName::F, 0x00, 0x00);
     write(&mut sim, 0x19, Size::Byte, 0x0f, Cycles::ZERO);
     write(&mut sim, 0x1d, Size::Byte, 0x03, Cycles::ZERO);
     assert_eq!(read(&mut sim, 0x19, Size::Byte), 0x5b);
     assert_eq!(read(&mut sim, 0x1b, Size::Byte), 0x5b, "PORTF1 is PORTF0");
     write(&mut sim, 0x13, Size::Byte, 0x40, Cycles::ZERO);
-    assert_eq!(sim.port_e().latch, 0x40);
+    assert_eq!(sim.port(PortName::E).latch, 0x40);
 }
 
 #[test]
@@ -350,7 +352,7 @@ fn a_reset_keeps_the_port_latches_and_the_reset_instruction_all() {
     sim.reset(ResetCause::External, Cycles(10));
     assert_eq!(sim.reset_status(), 0x80);
     assert_eq!(read(&mut sim, 0x4c, Size::Word), 0);
-    assert_eq!(sim.port_e().latch, 0x81);
+    assert_eq!(sim.port(PortName::E).latch, 0x81);
 }
 
 #[test]
@@ -408,7 +410,16 @@ fn port_c_drives_the_selects_assigned_as_discrete_outputs() {
         }
     );
     write(&mut sim, 0x41, Size::Byte, 0xc1, Cycles(7));
-    assert_eq!(sim.port_c(), 0x41, "bit 7 not implemented");
+    assert_eq!(
+        sim.port(PortName::C),
+        PortState {
+            latch: 0x41,
+            direction: 0x7f,
+            assignment: 0,
+            pins: 0xff
+        },
+        "bit 7 not implemented"
+    );
     assert_eq!(
         sim.outputs(PortName::C),
         PortLevels {

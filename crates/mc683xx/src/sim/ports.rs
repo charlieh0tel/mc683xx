@@ -1,25 +1,23 @@
 //! The SIM's general-purpose I/O (SIMRM 9; MC68331UM 4.9): ports E and
 //! F, and port C's discrete outputs on chip-select pins.
 
-use std::fmt;
-use std::str::FromStr;
-
 use crate::pins::PortLevels;
+use crate::pins::PortState;
 
 /// One of ports E and F: its data latch, data direction and pin
 /// assignment registers, and the levels the board drives on its pins.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct Port {
+pub(crate) struct Port {
     /// The data latch, `PORTE` or `PORTF`.
-    pub latch: u8,
+    pub(crate) latch: u8,
     /// The data direction register, `DDRE` or `DDRF`: a set bit makes the
     /// pin an output.
-    pub direction: u8,
+    pub(crate) direction: u8,
     /// The pin assignment register, `PEPAR` or `PFPAR`: a set bit gives
     /// the pin its bus or interrupt function.
-    pub assignment: u8,
+    pub(crate) assignment: u8,
     /// The levels the board drives on its input pins.
-    pub pins: u8,
+    pub(crate) pins: u8,
 }
 
 impl Port {
@@ -52,23 +50,35 @@ impl Port {
 
     /// The data register as read: the latch on outputs, the pin on
     /// inputs (MC68331UM 4.9.3).
-    #[must_use]
-    pub const fn data(&self) -> u8 {
+    pub(crate) const fn data(&self) -> u8 {
         self.latch & self.direction | self.pins & !self.direction
     }
 
     /// The levels the port drives on its output pins.
-    #[must_use]
-    pub const fn outputs(&self) -> PortLevels {
+    pub(crate) const fn outputs(&self) -> PortLevels {
         let driven = self.direction & !self.assignment;
         PortLevels {
             driven,
             levels: self.latch & driven,
         }
     }
+
+    /// Its registers and pins.
+    pub(crate) const fn state(&self) -> PortState {
+        PortState {
+            latch: self.latch,
+            direction: self.direction,
+            assignment: self.assignment,
+            pins: self.pins,
+        }
+    }
 }
 
-/// One of the SIM's general-purpose ports.
+/// One of the SIM's general-purpose ports: the key of its port
+/// plumbing, the chip's port key's SIM part.
+///
+/// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum PortName {
     /// Port C: the chip-select pins CS3 to CS9 assigned as discrete
@@ -84,44 +94,13 @@ impl PortName {
     /// All three, in the order the SIM reports their changes at one
     /// time.
     pub const ALL: [Self; 3] = [Self::C, Self::E, Self::F];
-
-    /// Its name, `C`, `E` or `F`.
-    const fn name(self) -> &'static str {
-        match self {
-            Self::C => "C",
-            Self::E => "E",
-            Self::F => "F",
-        }
-    }
 }
-
-/// Its name, `C`, `E` or `F`.
-impl fmt::Display for PortName {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.name())
-    }
-}
-
-/// The SIM port the text names, as [`PortName`]'s `Display` does, in
-/// any case.
-impl FromStr for PortName {
-    type Err = ParsePortNameError;
-
-    fn from_str(name: &str) -> Result<Self, ParsePortNameError> {
-        Self::ALL
-            .into_iter()
-            .find(|candidate| candidate.name().eq_ignore_ascii_case(name))
-            .ok_or_else(|| ParsePortNameError(name.to_owned()))
-    }
-}
-
-/// Text that names no SIM port.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("no SIM port {0:?}")]
-pub struct ParsePortNameError(String);
 
 /// A change in what a port drives: from its time on, the pins it
 /// drives and their levels.
+///
+/// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Change {
     /// The port.
@@ -139,9 +118,7 @@ pub(crate) const PORTC_RESET: u8 = 0x7f;
 mod tests {
     use crate::pins::PortLevels;
 
-    use super::ParsePortNameError;
     use super::Port;
-    use super::PortName;
 
     #[test]
     fn inputs_read_the_pins_and_outputs_the_latch() {
@@ -161,17 +138,5 @@ mod tests {
         assert_eq!(port.latch, 0x0f);
         assert_eq!(port.direction, 0);
         assert_eq!(port.pins, 0xa0);
-    }
-
-    #[test]
-    fn port_names_print_as_their_letters_and_parse_back_in_any_case() {
-        for port in PortName::ALL {
-            assert_eq!(port.to_string().parse(), Ok(port));
-        }
-        assert_eq!("f".parse(), Ok(PortName::F));
-        assert_eq!(
-            "?".parse::<PortName>(),
-            Err(ParsePortNameError("?".to_owned()))
-        );
     }
 }

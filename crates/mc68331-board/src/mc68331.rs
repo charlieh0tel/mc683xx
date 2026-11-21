@@ -32,9 +32,9 @@ use mc683xx_mc68331::chip::OutputStop;
 use mc683xx_mc68331::chip::SyncRequest;
 use mc683xx_mc68331::event::Event;
 use mc683xx_mc68331::gpt::Input;
-use mc683xx_mc68331::gpt::OutputChange;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm::Channel;
+use mc683xx_mc68331::port::Port;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
@@ -42,7 +42,6 @@ use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::clock::ClockSource;
-use mc683xx_modules::sim::ports::PortName;
 use mc683xx_modules::sim::reset::ResetScope;
 use mc683xx_target::address::Address;
 use serde::Deserialize;
@@ -190,6 +189,18 @@ impl Pin {
             }
         };
         Some(pin)
+    }
+
+    /// The port it is a pin of and its bit, if it is one.
+    const fn port(self) -> Option<(Port, u8)> {
+        match self {
+            Self::PortC(bit) => Some((Port::C, bit)),
+            Self::PortE(bit) => Some((Port::E, bit)),
+            Self::PortF(bit) => Some((Port::F, bit)),
+            Self::PortGp(bit) => Some((Port::Gp, bit)),
+            Self::PortQs(bit) => Some((Port::Qs, bit)),
+            _ => None,
+        }
     }
 
     /// The GPT input it is, if it is one.
@@ -452,17 +463,15 @@ impl ChipBuilder for Mc68331Builder {
         let mut chip = self.builder.build();
         chip.set_clock_stop(true);
         let pins = &self.pins;
-        if let Some(e) = pins.e {
-            chip.set_port_e_pins(e);
-        }
-        if let Some(f) = pins.f {
-            chip.set_port_f_pins(f);
-        }
-        if let Some(qs) = pins.qs {
-            chip.set_port_qs_pins(qs);
-        }
-        if let Some(gp) = pins.gp {
-            chip.set_port_gp_pins(gp);
+        for (port, levels) in [
+            (Port::E, pins.e),
+            (Port::F, pins.f),
+            (Port::Qs, pins.qs),
+            (Port::Gp, pins.gp),
+        ] {
+            if let Some(levels) = levels {
+                chip.set_pins(port, levels, u8::MAX);
+            }
         }
         if let Some(pai) = pins.pai {
             chip.set_pai(pai);
@@ -471,15 +480,6 @@ impl ChipBuilder for Mc68331Builder {
             chip.set_pclk(pclk);
         }
         chip
-    }
-}
-
-/// `byte` with `bit` at `level`.
-const fn with_bit(byte: u8, bit: u8, level: bool) -> u8 {
-    if level {
-        byte | 1 << bit
-    } else {
-        byte & !(1 << bit)
     }
 }
 
@@ -605,19 +605,28 @@ impl chip::Chip for Mc68331 {
     fn stop_at_outputs(&mut self, sensed: &[Pin]) {
         let mut stop = OutputStop::default();
         for &pin in sensed {
+            if let Some((port, bit)) = pin.port() {
+                stop.set_port(port, stop.port(port) | 1 << bit);
+                continue;
+            }
             match pin {
-                Pin::PortC(bit) => stop.port_c |= 1 << bit,
-                Pin::PortE(bit) => stop.port_e |= 1 << bit,
-                Pin::PortF(bit) => stop.port_f |= 1 << bit,
-                Pin::PortGp(bit) => stop.port_gp |= 1 << bit,
-                Pin::PortQs(bit) => stop.port_qs |= 1 << bit,
                 Pin::PwmA => stop.pwm_a = true,
                 Pin::PwmB => stop.pwm_b = true,
                 Pin::Txd => stop.txd = true,
                 Pin::Reset => stop.reset = true,
                 // ECLK changes with the clock, which ends the run itself
-                // (`set_clock_stop`); the rest are inputs
-                Pin::Eclk | Pin::Pai | Pin::Pclk | Pin::Irq(_) | Pin::Rxd => {}
+                // (`set_clock_stop`); the rest are inputs, or ports' pins
+                // watched above
+                Pin::Eclk
+                | Pin::Pai
+                | Pin::Pclk
+                | Pin::Irq(_)
+                | Pin::Rxd
+                | Pin::PortC(_)
+                | Pin::PortE(_)
+                | Pin::PortF(_)
+                | Pin::PortGp(_)
+                | Pin::PortQs(_) => {}
             }
         }
         self.set_output_stop(stop);
@@ -633,17 +642,10 @@ impl chip::Chip for Mc68331 {
                 let input = pin.gpt_input().expect("a GPT input");
                 self.schedule_gpt_input(at, input, level);
             }
-            (Pin::PortE(bit), Signal::Level(level)) => {
-                let pins = with_bit(self.sim().port_e().pins, bit, level);
-                self.set_port_e_pins(pins);
-            }
-            (Pin::PortF(bit), Signal::Level(level)) => {
-                let pins = with_bit(self.sim().port_f().pins, bit, level);
-                self.set_port_f_pins(pins);
-            }
-            (Pin::PortQs(bit), Signal::Level(level)) => {
-                let pins = with_bit(self.qsm().port_pins(), bit, level);
-                self.set_port_qs_pins(pins);
+            (Pin::PortE(_) | Pin::PortF(_) | Pin::PortQs(_), Signal::Level(level)) => {
+                if let Some((port, bit)) = pin.port() {
+                    self.set_pins(port, if level { u8::MAX } else { 0 }, 1 << bit);
+                }
             }
             (Pin::Irq(irq), Signal::Level(level)) => self.set_interrupt_pin(irq, !level),
             (Pin::Rxd, Signal::Serial(serial)) => self.sci_receive(serial.frame),
@@ -665,29 +667,21 @@ impl chip::Chip for Mc68331 {
     fn collect<F: FnMut(Time, Pin, Signal)>(&mut self, base: TimeBase, mut emit: F) {
         for (at, change) in self.take_port_changes() {
             let (pins, pin): (u8, fn(u8) -> Pin) = match change.port {
-                PortName::C => (PORT_C_PINS, Pin::PortC),
-                PortName::E => (PORT_PINS, Pin::PortE),
-                PortName::F => (PORT_PINS, Pin::PortF),
+                Port::C => (PORT_C_PINS, Pin::PortC),
+                Port::E => (PORT_PINS, Pin::PortE),
+                Port::F => (PORT_PINS, Pin::PortF),
+                Port::Gp => (PORT_PINS, Pin::PortGp),
+                Port::Qs => (PORT_PINS, Pin::PortQs),
             };
             emit_port(&mut emit, base.time(at), pins, pin, change.outputs);
         }
-        for (at, change) in self.take_gpt_changes() {
-            let at = base.time(at);
-            match change {
-                OutputChange::PortGp(outputs) => {
-                    emit_port(&mut emit, at, PORT_PINS, Pin::PortGp, outputs);
-                }
-                OutputChange::Pwm { channel, level } => {
-                    let pin = if channel == Channel::A {
-                        Pin::PwmA
-                    } else {
-                        Pin::PwmB
-                    };
-                    emit(at, pin, Signal::Level(level));
-                }
-                // a change on no pin a board net reaches
-                _ => {}
-            }
+        for (at, change) in self.take_pwm_changes() {
+            let pin = if change.channel == Channel::A {
+                Pin::PwmA
+            } else {
+                Pin::PwmB
+            };
+            emit(base.time(at), pin, Signal::Level(change.level));
         }
         let system_clock = self.sim().clock().frequency();
         for sent in self.take_sci_transmitted() {
@@ -699,9 +693,6 @@ impl chip::Chip for Mc68331 {
                 base.time(sent.end).since(start),
             );
             emit(start, Pin::Txd, Signal::Serial(serial));
-        }
-        for (at, outputs) in self.take_qsm_changes() {
-            emit_port(&mut emit, base.time(at), PORT_PINS, Pin::PortQs, outputs);
         }
     }
 

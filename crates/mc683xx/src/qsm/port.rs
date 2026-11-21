@@ -3,6 +3,7 @@
 //! and to the SCI by TE.
 
 use crate::pins::PortLevels;
+use crate::pins::PortState;
 
 /// PQS0, MISO (MC68331UM Table D-14).
 const MISO_PIN: u8 = 1;
@@ -188,6 +189,17 @@ impl PortQs {
     /// outputs, the board's on inputs (QSMRM 3.3.1).
     pub(super) const fn levels(self, code: Option<u8>, txd: Txd) -> u8 {
         self.outputs(code, txd).pin_levels(self.pins)
+    }
+
+    /// Its registers and pins: PQSPAR's assignment, TXD's too while
+    /// the transmitter has it (QSMRM 5.3).
+    pub(super) const fn state(self, txd: Txd) -> PortState {
+        PortState {
+            latch: self.latch,
+            direction: self.direction,
+            assignment: self.assignment | if txd.transmitter { TXD_PIN } else { 0 },
+            pins: self.pins,
+        }
     }
 
     /// The levels on PCS\[3:0\].

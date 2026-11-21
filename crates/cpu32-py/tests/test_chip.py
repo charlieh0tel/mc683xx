@@ -518,7 +518,7 @@ def test_a_qspi_transfer_reaches_the_peripheral():
     assert peripheral.transfers == [(0b0101, 0x34, 8)]
     assert 0b0101 in peripheral.levels
     assert chip.read_register("D2") & 0xFFFF == 0xEF
-    driven, _ = chip.port_qs_outputs()
+    driven, _ = chip.outputs(mc683xx.Port.QS)
     assert driven & 0x78 == 0x78
     assert chip.qspi_chip_selects == peripheral.levels[-1]
     # CPOL and CPHA clear, SPBR 2: an SCK period of 4 clocks (QSMRM 4.3.1)
@@ -533,7 +533,7 @@ def test_a_qspi_transfer_reaches_the_peripheral():
         clock.phase,
         clock.period,
     )
-    chip.set_port_qs_pins(0xFF)
+    chip.set_pins(mc683xx.Port.QS, 0xFF, 0xFF)
     with pytest.raises(TypeError):
         mc683xx.Builder().qspi(object())
 
@@ -598,17 +598,21 @@ def test_a_gpt_output_compare_toggles_its_pin():
     program = store_word(TCTL1, TCTL1_OC2_TOGGLE) + store_word(TOC2, 0x1000)
     chip = booting(program).build()
     chip.run_for(4 * 0x1000 - 1000)
-    assert chip.port_gp_outputs() == (OC2_PIN, 0)
+    assert chip.outputs(mc683xx.Port.GP) == (OC2_PIN, 0)
     chip.set_report_pwm_edges(mc683xx.Channel.B, True)
     chip.run_for(2000)
-    assert chip.port_gp_outputs() == (OC2_PIN, OC2_PIN)
-    changes = chip.take_gpt_changes()
-    assert [change for _, change in changes] == [
-        mc683xx.OutputChange.PortGp(OC2_PIN, 0),
-        mc683xx.OutputChange.PortGp(OC2_PIN, OC2_PIN),
+    assert chip.outputs(mc683xx.Port.GP) == (OC2_PIN, OC2_PIN)
+    # the compare takes OC2's pin from PORTGP
+    assert chip.port(mc683xx.Port.GP).assignment == OC2_PIN
+    changes = [change for change in chip.take_port_changes() if change[1] == mc683xx.Port.GP]
+    assert [change[1:] for change in changes] == [
+        (mc683xx.Port.GP, OC2_PIN, 0),
+        (mc683xx.Port.GP, OC2_PIN, OC2_PIN),
     ]
     assert changes[-1][0] == 4 * 0x1000
-    assert chip.take_gpt_changes() == []
+    assert chip.take_port_changes() == []
+    # PWMB's duty out of reset is 0: low, no edge
+    assert chip.take_pwm_changes() == []
     with pytest.raises(TypeError):
         chip.set_report_pwm_edges("B", True)  # type: ignore[arg-type]
     chip.schedule_gpt_input(chip.now + 100, "PAI", False)
@@ -618,7 +622,7 @@ def test_a_gpt_output_compare_toggles_its_pin():
     chip.run_for(300)
     assert isinstance(chip.pwm(mc683xx.Channel.A), mc683xx.Output)
     assert isinstance(chip.oc1(), mc683xx.Output.Level)
-    chip.set_port_gp_pins(0xFF)
+    chip.set_pins(mc683xx.Port.GP, 0xFF, 0xFF)
     chip.set_pai(True)
     chip.set_pclk(True)
 
@@ -634,15 +638,14 @@ OC1_PIN = 0x08
 def test_cprout_edges_come_at_tcnts_clock():
     chip = booting(store_word(TMSK, TMSK2_CPROUT_CPR_32)).build()
     chip.run_for(1000)
-    assert chip.take_gpt_changes()[-1][1] == mc683xx.OutputChange.PortGp(OC1_PIN, 0)
+    assert chip.take_port_changes()[-1][1:] == (mc683xx.Port.GP, OC1_PIN, 0)
     chip.set_report_oc1_clock_edges(True)
     chip.run_for(10 * CPR_32_DIVISOR)
-    changes = chip.take_gpt_changes()
-    ports = [(now, change) for now, change in changes if isinstance(change, mc683xx.OutputChange.PortGp)]
-    assert len(ports) == len(changes)
-    assert {change.driven for _, change in ports} == {OC1_PIN}
-    rises = [now for now, change in ports if change.levels]
-    falls = [now for now, change in ports if not change.levels]
+    ports = chip.take_port_changes()
+    assert {(port, driven) for _, port, driven, _ in ports} == {(mc683xx.Port.GP, OC1_PIN)}
+    assert chip.take_pwm_changes() == []
+    rises = [now for now, _, _, levels in ports if levels]
+    falls = [now for now, _, _, levels in ports if not levels]
     assert len(rises) >= 9
     assert all(now % CPR_32_DIVISOR == rises[0] % CPR_32_DIVISOR for now in rises)
     assert falls[: len(rises)] == [now + 1 for now in rises][: len(falls)]
@@ -703,14 +706,15 @@ def test_the_host_sees_a_pulse_on_a_port_pin():
     )
     chip = board(program, Recorder())[0].build()
     chip.run_for(1000)
-    assert chip.port_e_outputs() == (PE0, 0)
-    assert chip.port_c_outputs() == (0, 0)
-    assert chip.port_f_outputs() == (0, 0)
+    assert chip.outputs(mc683xx.Port.E) == (PE0, 0)
+    assert chip.outputs(mc683xx.Port.C) == (0, 0)
+    assert chip.outputs(mc683xx.Port.F) == (0, 0)
+    assert chip.port(mc683xx.Port.E) == mc683xx.PortState(0, PE0, 0xFF & ~PE0, 0xFF)
     changes = chip.take_port_changes()
     assert [change[1:] for change in changes] == [
-        (mc683xx.PortName.E, PE0, 0),
-        (mc683xx.PortName.E, PE0, PE0),
-        (mc683xx.PortName.E, PE0, 0),
+        (mc683xx.Port.E, PE0, 0),
+        (mc683xx.Port.E, PE0, PE0),
+        (mc683xx.Port.E, PE0, 0),
     ]
     assert changes[0][0] < changes[1][0] < changes[2][0]
     assert chip.take_port_changes() == []
@@ -1221,8 +1225,8 @@ def test_enums_and_values_hash_as_they_compare() -> None:
             mc683xx.Output.Level(True),
             mc683xx.Serial(mc683xx.Frame.Data(0x41), 9600, 10),
             mc683xx.Channel.A,
-            mc683xx.PortName.F,
-            mc683xx.OutputChange.PortGp(1, 0),
+            mc683xx.Port.F,
+            mc683xx.PortState(1, 2, 3, 4),
             mc683xx.Role.IACK,
             mc683xx.Lane.UPPER,
             mc683xx.Deviations(misaligned=True),
@@ -1403,9 +1407,10 @@ def test_a_host_with_no_board_takes_port_qs_changes() -> None:
     chip.bus_write(QSM + 0x17, 1, 0x02)
     chip.bus_write(QSM + 0x15, 1, 0x00)
     chip.bus_write(QSM + 0x15, 1, 0x02)
-    changes = chip.take_qsm_changes()
-    assert [levels & 0x02 for (_, driven, levels) in changes if driven & 0x02][-2:] == [0, 2]
-    assert chip.take_qsm_changes() == []
+    changes = chip.take_port_changes()
+    qs = mc683xx.Port.QS
+    assert [levels & 0x02 for (_, port, driven, levels) in changes if port == qs and driven & 0x02][-2:] == [0, 2]
+    assert chip.take_port_changes() == []
 
 
 class Narrow(Recorder):

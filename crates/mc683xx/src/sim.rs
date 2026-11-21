@@ -38,6 +38,7 @@ use crate::module::Block;
 use crate::module::RegisterAccess;
 use crate::peripheral::Timed;
 use crate::pins::PortLevels;
+use crate::pins::PortState;
 
 /// The module space's bytes, at $7FF000 or $FFF000 by MM (SIMRM 1.1).
 pub const MODULE_SPACE_BYTES: u32 = 0x1000;
@@ -449,27 +450,11 @@ impl Sim {
         self.protection.halt_monitor()
     }
 
-    /// Port E.
-    #[must_use]
-    pub const fn port_e(&self) -> &Port {
-        &self.port_e
-    }
-
-    /// Port F.
-    #[must_use]
-    pub const fn port_f(&self) -> &Port {
-        &self.port_f
-    }
-
-    /// PORTC, the latch: the levels of the chip-select pins assigned as
-    /// discrete outputs, PC6 to PC0 on CS9 to CS3 (SIMRM 7.10.4).
-    /// `outputs(PortName::C)` gives the pins it drives.
-    #[must_use]
-    pub const fn port_c(&self) -> u8 {
-        self.port_c
-    }
-
     /// The pins `port` drives and their levels.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a host reads the chip's ports.
+    #[doc(hidden)]
     #[must_use]
     pub fn outputs(&self, port: PortName) -> PortLevels {
         match port {
@@ -483,6 +468,43 @@ impl Sim {
             PortName::E => self.port_e.outputs(),
             PortName::F => self.port_f.outputs(),
         }
+    }
+
+    /// `port`'s registers and the levels the board drives on its pins.
+    /// Port C's pins are all outputs, those not assigned as discrete
+    /// outputs carrying their chip selects (SIMRM 7.10.4); it has no
+    /// inputs, its pins read high.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a host reads the chip's ports.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn port(&self, port: PortName) -> PortState {
+        match port {
+            PortName::C => PortState {
+                latch: self.port_c,
+                direction: PORTC_IMPLEMENTED,
+                assignment: PORTC_IMPLEMENTED & !self.chip_selects.discrete_outputs(),
+                pins: u8::MAX,
+            },
+            PortName::E => self.port_e.state(),
+            PortName::F => self.port_f.state(),
+        }
+    }
+
+    /// The board drives the pins of `port` in `mask` to their levels
+    /// in `value`, the others as they were.  Port C has no inputs.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a host drives the chip's ports.
+    #[doc(hidden)]
+    pub const fn set_pins(&mut self, port: PortName, value: u8, mask: u8) {
+        let registers = match port {
+            PortName::C => return,
+            PortName::E => &mut self.port_e,
+            PortName::F => &mut self.port_f,
+        };
+        registers.pins = registers.pins & !mask | value & mask;
     }
 
     /// What each port drives, in [`PortName::ALL`]'s order.
@@ -511,35 +533,11 @@ impl Sim {
         mem::take(&mut self.output_changes)
     }
 
-    /// The board drives port E's pins to `pins`.
-    ///
-    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
-    #[doc(hidden)]
-    pub const fn set_port_e_pins(&mut self, pins: u8) {
-        self.port_e.pins = pins;
-    }
-
-    /// The board drives port F's pins to `pins`.
-    ///
-    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
-    #[doc(hidden)]
-    pub const fn set_port_f_pins(&mut self, pins: u8) {
-        self.port_f.pins = pins;
-    }
-
     /// Whether IRQ`level`'s pin has its interrupt function (PFPAR,
     /// MC68331UM Table D-5).
     #[must_use]
     pub const fn interrupt_pin(&self, pin: IrqPin) -> bool {
         self.port_f.assignment & 1 << pin.get() != 0
-    }
-
-    /// PEPAR: a set bit assigns its port E pin its bus control
-    /// function, PE0 DSACK0 and PE1 DSACK1 among them (SIMRM 9.1,
-    /// Table 9-1).
-    #[must_use]
-    pub const fn port_e_assignment(&self) -> u8 {
-        self.port_e.assignment
     }
 
     /// Whether PE2 is the AVEC input (PEPAR, MC68331UM Table D-4).
