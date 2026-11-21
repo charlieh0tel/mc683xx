@@ -214,15 +214,15 @@ assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
 - `fixed_memory(base, contents, writable=True)`: emulator-only memory
   at a fixed address on no pin, which takes the cycles there no chip
   select matches (the host guide's Fixed memory); a memory number as
-  `memory`'s.  `fixed_timing(memory, port=16, wait_states=None)`: its
+  `memory`'s.  `set_fixed_timing(memory, port=16, wait_states=None)`: its
   port, 8 or 16 bits, and wait states, 0 to 13, `None` fast
-  termination (Rust's `fixed_timing` takes a `PortSize` and a
-  `Termination`; Python has neither).  `reload_scope(memory, scope)`: the `ResetCause`s that
+  termination (Rust's `set_fixed_timing` takes a `PortSize` and a
+  `Termination`; Python has neither).  `set_reload_scope(memory, scope)`: the `ResetCause`s that
   put a memory's contents back as built, none by default.
 - `peripheral(object, pins)` and `unwired_peripheral(object)` (on no pin) return a
-  peripheral number for `interrupt`, `reset_scope` and `Mc68331.peripheral`.
+  peripheral number for `interrupt`, `set_reset_scope` and `Mc68331.peripheral`.
 - `interrupt(peripheral, pin)` (IRQ1 to IRQ7 as 1 to 7), `autovector(pin)`,
-  `reset_scope(peripheral, scope)`, `qspi(object)`: as in Rust.
+  `set_reset_scope(peripheral, scope)`, `qspi(object)`: as in Rust.
 - `dsack(peripheral, Dsack.DSACK0 | DSACK1 | BOTH)`: the DSACK pins a
   peripheral drives on an externally terminated select, checked
   against PEPAR at each such cycle (a disagreement is an
@@ -235,7 +235,7 @@ assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
   `bus_peripheral` takes `BusDecode`s, which Python has not: each
   window is a `BusDecode::Window`, each level a
   `BusDecode::Acknowledge`.  Its cycles' `select` is `None`; a PEPAR
-  disagreement is `DsackFault.BusUnassigned(peripheral)`.  `qspi_reset_scope(scope)`: the resets that reach the QSPI's
+  disagreement is `DsackFault.BusUnassigned(peripheral)`.  `set_qspi_reset_scope(scope)`: the resets that reach the QSPI's
   peripheral, every one by default.
 - `stop_request()`, `sync_request()` and `diversion()` are the handles a
   peripheral holds, as in Rust: a `StopRequest` whose `request()` ends
@@ -500,7 +500,7 @@ builder.memory(rom([BRANCH_TO_SELF]), ["CSBOOT"], writable=False)
 everything, not_watchdog = Counter(), Counter()
 builder.unwired_peripheral(everything)
 causes = [mc683xx.ResetCause.POWER_ON, mc683xx.ResetCause.EXTERNAL]
-builder.reset_scope(builder.unwired_peripheral(not_watchdog), causes)
+builder.set_reset_scope(builder.unwired_peripheral(not_watchdog), causes)
 chip = builder.build()
 chip.run_for(512 * 256 + 100)  # the watchdog's 2^9 EXTAL periods
 chip.reset()
@@ -644,7 +644,7 @@ period; `now`, when it ends, in system clocks), returns the bits in;
 optionally
 `set_chip_selects(levels, now)` (every change of the PCS levels),
 `set_clock(QspiClock, now)`, `reset(now)` (each reset in
-`Builder.qspi_reset_scope`, every one by default) and `deferrable() -> bool` (whether its
+`Builder.set_qspi_reset_scope`, every one by default) and `deferrable() -> bool` (whether its
 calls may come in a batch where the CPU next sees the QSPI).  As a slave
 (MSTR clear) the host is the master: `set_qspi_slave_select(asserted)`
 and `qspi_slave_shift(mosi, bits, period) -> (miso, driven)`.

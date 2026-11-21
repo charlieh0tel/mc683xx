@@ -398,13 +398,13 @@ impl ChipBuilder for Mc68331Builder {
                 .fixed_memory(Address(base), plan.bytes, kind)
                 .and_then(|id| {
                     self.builder
-                        .fixed_timing(id, port, termination)
+                        .set_fixed_timing(id, port, termination)
                         .map(|()| id)
                 }),
             MemoryPlace::Selects(pins) => self.builder.memory(plan.bytes, kind, pins),
         }
         .map_err(built)?;
-        self.builder.reload_scope(id, plan.reload);
+        self.builder.set_reload_scope(id, plan.reload);
         let router = self.builder.unwired_peripheral(router);
         self.handles.memories.borrow_mut().push((id, router));
         Ok(id)
@@ -437,7 +437,7 @@ impl ChipBuilder for Mc68331Builder {
 
     fn unwired<R: BoardMapped>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>) {
         let id = self.builder.unwired_peripheral(pins);
-        self.builder.reset_scope(id, reset);
+        self.builder.set_reset_scope(id, reset);
         if let Some(level) = irq {
             self.builder.interrupt(id, level);
         }

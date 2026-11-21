@@ -88,9 +88,9 @@ fn main() -> Result<(), BuildError> {
   where a peripheral shares the cycle.  `memory` and `memory_mut` give
   the bytes back by `MemoryId`.
 - `fixed_memory(base, bytes, kind)`: memory at a fixed address on
-  no pin, emulator-only, and `fixed_timing(memory, port, termination)`
+  no pin, emulator-only, and `set_fixed_timing(memory, port, termination)`
   its port and wait states (see Fixed memory).
-- `reload_scope(memory, ResetScope)` says which resets put a memory's
+- `set_reload_scope(memory, ResetScope)` says which resets put a memory's
   contents back as built; none do by default (see Fixed memory).
 - `peripheral(peripheral, pins)` puts a `MappedPeripheral + Timed + Save` on pins; a peripheral on
   several (separate read and write selects, a register select and an
@@ -102,7 +102,7 @@ fn main() -> Result<(), BuildError> {
   IRQ pin, an `IrqPin` (levels 1 to 7; `IrqPin::new(level)`);
   `autovector(pin)` ties AVEC for every acknowledge of its level, as
   decode logic does (SIMRM 6.4).
-- `reset_scope(peripheral, ResetScope)` says which reset causes reach a
+- `set_reset_scope(peripheral, ResetScope)` says which reset causes reach a
   peripheral; all do by default (see Reset).
 - `qspi(peripheral)` puts a `SpiPeripheral` on the QSPI's pins (see QSPI).
 - `stop_request()` gives a handle a peripheral can hold to stop the run,
@@ -139,7 +139,7 @@ the reset code to program a select the firmware leaves unused.
   MC68331UM Table 4-24).
 - Its cycles end at once by default: a 16-bit port with fast
   termination, costing nothing beyond the timing tables, as an
-  internal module's, with no DSACK.  `fixed_timing(memory, port,
+  internal module's, with no DSACK.  `set_fixed_timing(memory, port,
   termination)` times it as a select's DSACK field would (MC68331UM
   D.3.26): `Termination::Fast` or `Termination::WaitStates(0..=13)`
   on `PortSize::Bits8` or `Bits16`, a word on 8 bits two cycles; any
@@ -157,11 +157,11 @@ the reset code to program a select the firmware leaves unused.
   snapshot holds them as every memory's.
 
 Its contents survive every reset, as RAM's do, unless
-`reload_scope(memory, scope)` says otherwise: each reset in `scope`
+`set_reload_scope(memory, scope)` says otherwise: each reset in `scope`
 puts them back to the bytes it was built with, before the CPU fetches
 the reset vectors, so a warm restart finds the code fresh.  The
 `reset` instruction's reload (`ResetCause::System`) comes after the
-instruction, before the next.  `reload_scope` takes any memory, one on
+instruction, before the next.  `set_reload_scope` takes any memory, one on
 pins too; reloading is emulator-only as well.
 
 ```rust
@@ -175,7 +175,7 @@ use mc683xx_modules::sim::reset::ResetScope;
 let code = 0x60_0000;
 let (mut builder, _) = firmware::booting(firmware::rom(&firmware::store_word(code, 0x1234)));
 let fixed = builder.fixed_memory(Address(code), vec![0; 2048], MemoryKind::Ram).unwrap();
-builder.reload_scope(fixed, ResetScope::ALL);
+builder.set_reload_scope(fixed, ResetScope::ALL);
 let mut chip = builder.build();
 chip.run_for(Cycles(1000));
 assert_eq!(chip.memory(fixed)[..2], [0x12, 0x34]);
@@ -696,7 +696,7 @@ mc683xx_cpu32::unsavable!(Counter, "a reset counter");
 let (mut builder, _) = firmware::booting(firmware::rom(&[firmware::BRANCH_TO_SELF]));
 let everything = builder.unwired_peripheral(Counter::default());
 let not_watchdog = builder.unwired_peripheral(Counter::default());
-builder.reset_scope(not_watchdog, ResetScope::ALL.without(ResetCause::Watchdog));
+builder.set_reset_scope(not_watchdog, ResetScope::ALL.without(ResetCause::Watchdog));
 let mut chip = builder.build();
 // The watchdog's 2^9 EXTAL periods of 256 clocks (MC68331UM 4.2.10).
 chip.run_for(Cycles(512 * 256 + 100));
@@ -961,7 +961,7 @@ when the serial clock changes (CPOL, CPHA, the SCK period,
 `baud()`, a `Frequency`).  The one peripheral is the board's whole QSPI side: it
 sees every transfer and every level change, whatever they select.
 `reset(now)` is
-RESET, for the causes `Builder::qspi_reset_scope` names (all by
+RESET, for the causes `Builder::set_qspi_reset_scope` names (all by
 default).  `qspi_peripheral::<D>()` gives the peripheral back.  A run
 quanta at each call, so the peripheral is called in time with the
 CPU's cycles to the other peripherals; one that shares nothing with them

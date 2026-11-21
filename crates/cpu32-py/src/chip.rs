@@ -262,10 +262,10 @@ impl ChipBuilder {
 
     /// Fixed memory number `memory`'s port, `port` bits (8 or 16), and
     /// its cycles' wait states, 0 to 13, or fast termination if `None`
-    /// (Rust's `fixed_timing`, which takes a `PortSize` and a
+    /// (Rust's `set_fixed_timing`, which takes a `PortSize` and a
     /// `Termination`); fast on 16 bits by default.
     #[pyo3(signature = (memory, *, port = 16, wait_states = None))]
-    fn fixed_timing(
+    fn set_fixed_timing(
         &mut self,
         memory: usize,
         port: u8,
@@ -278,15 +278,17 @@ impl ChipBuilder {
             other => return Err(Error::PortWidth(other)),
         };
         let termination = wait_states.map_or(Termination::Fast, Termination::WaitStates);
-        self.builder()?.fixed_timing(memory, port, termination)?;
+        self.builder()?
+            .set_fixed_timing(memory, port, termination)?;
         Ok(())
     }
 
     /// Only the resets in `scope`, `ResetCause`s, put memory number
     /// `memory`'s contents back as built; by default none do.
-    fn reload_scope(&mut self, memory: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
+    fn set_reload_scope(&mut self, memory: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
         let memory = self.wiring.borrow().memory(memory)?;
-        self.builder()?.reload_scope(memory, self::scope(&scope));
+        self.builder()?
+            .set_reload_scope(memory, self::scope(&scope));
         Ok(())
     }
 
@@ -361,8 +363,8 @@ impl ChipBuilder {
 
     /// Only the resets in `scope`, `ResetCause`s, reach the QSPI's
     /// peripheral (its `reset(now)`); by default every one does.
-    fn qspi_reset_scope(&mut self, scope: Vec<ResetCause>) -> Result<(), Error> {
-        self.builder()?.qspi_reset_scope(self::scope(&scope));
+    fn set_qspi_reset_scope(&mut self, scope: Vec<ResetCause>) -> Result<(), Error> {
+        self.builder()?.set_qspi_reset_scope(self::scope(&scope));
         Ok(())
     }
 
@@ -399,9 +401,10 @@ impl ChipBuilder {
 
     /// Only the resets in `scope`, `ResetCause`s, reach peripheral number
     /// `peripheral`'s reset; by default every one does (SIMRM 8.2).
-    fn reset_scope(&mut self, peripheral: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
+    fn set_reset_scope(&mut self, peripheral: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
-        self.builder()?.reset_scope(peripheral, self::scope(&scope));
+        self.builder()?
+            .set_reset_scope(peripheral, self::scope(&scope));
         Ok(())
     }
 

@@ -307,7 +307,7 @@ surrounds the SoC with its board peripherals through:
   or none, for the bus monitor.  A peripheral can drive an IRQ pin
   (`MappedPeripheral::interrupt_request`) and sees RESET (`MappedPeripheral::reset`).
   Every reset source drives RESET (SIMRM Table 8-1), but a board need
-  not wire every peripheral to it: `Builder::reset_scope` names the
+  not wire every peripheral to it: `Builder::set_reset_scope` names the
   causes that reach a peripheral (a `ResetScope`), all by default.
   smartclock's DUART, for one, sees no watchdog reset.
 - **Fixed memory (emulator-only):** `Builder::fixed_memory(base,
@@ -323,7 +323,7 @@ surrounds the SoC with its board peripherals through:
   4-24), so it answers at once above that.  CPU-space cycles never
   reach it.  Its cycles end at once by default, a 16-bit port with
   fast termination costing nothing beyond the timing tables, as an
-  internal module's, with no DSACK.  `Builder::fixed_timing(memory,
+  internal module's, with no DSACK.  `Builder::set_fixed_timing(memory,
   PortSize, Termination)` (board file `port`, `wait_states`) gives it
   a select's internal timing instead, fast or 0 to 13 wait states, on
   8 or 16 bits, so code it holds runs at the bus speed of the memory
@@ -332,7 +332,7 @@ surrounds the SoC with its board peripherals through:
   fixed memory is never diverted (no select carries its cycles).  Its
   bytes are a region of the core's memory, in the snapshot as every
   memory's: no format changed.  Contents survive every reset unless
-  `Builder::reload_scope(memory, ResetScope)` names the causes that
+  `Builder::set_reload_scope(memory, ResetScope)` names the causes that
   put them back as built (for any memory, emulator-only too): before
   the reset vectors are fetched, the `reset` instruction's after the
   instruction (the core asks the bus for a stop after it, as after a
@@ -358,7 +358,7 @@ surrounds the SoC with its board peripherals through:
   It is the one peripheral, so it sees every level change; on a board
   of `mc683xx-board` peripherals the board's PCS decode is it, and each peripheral
   sees only its own select (`Peripheral::select`), the canonical framing
-  there.  `reset` is RESET by `Builder::qspi_reset_scope`
+  there.  `reset` is RESET by `Builder::set_qspi_reset_scope`
   (all causes by default; smartclock's DACs clear on RESET).
   Each queue entry takes the time SPCR0's baud and SPCR1's delays give
   it (QSMRM 4.3.1, 4.3.2).  A run syncs only where the queue shows:
@@ -739,8 +739,8 @@ chip beside `Mc68331`.
   reference_hz= | external_hz=)` wires `memory(contents, pins,
   writable=)`, `peripheral(object, pins)`, `unwired_peripheral(object)`,
   `interrupt(peripheral, pin)`, `autovector(pin)` and
-  `reset_scope(peripheral, [ResetCause])`, `dsack(peripheral, Dsack)`,
-  `qspi_reset_scope([ResetCause])`, and the handles a peripheral holds,
+  `set_reset_scope(peripheral, [ResetCause])`, `dsack(peripheral, Dsack)`,
+  `set_qspi_reset_scope([ResetCause])`, and the handles a peripheral holds,
   `stop_request()`, `sync_request()` and `diversion()` (a `Diversion`
   by memory and peripheral numbers); `build()` gives
   an `Mc68331` through its power-on reset.  Pins are the manual's

@@ -653,7 +653,7 @@ def test_every_rsr_cause_is_a_reset_cause():
         mc683xx.ResetCause.TEST,
     ]
     assert len(set(causes)) == 7
-    builder.reset_scope(0, causes)
+    builder.set_reset_scope(0, causes)
 
 
 def test_a_reset_scope_keeps_a_peripheral_out_of_the_watchdog_reset():
@@ -664,9 +664,9 @@ def test_a_reset_scope_keeps_a_peripheral_out_of_the_watchdog_reset():
         mc683xx.ResetCause.POWER_ON,
         mc683xx.ResetCause.EXTERNAL,
     ]
-    builder.reset_scope(number, causes)
+    builder.set_reset_scope(number, causes)
     with pytest.raises(IndexError):
-        builder.reset_scope(9, causes)
+        builder.set_reset_scope(9, causes)
     chip = builder.build()
     # the watchdog's 2^9 EXTAL periods at 256 clocks
     chip.run_for(512 * 256 + 100)
@@ -1286,7 +1286,7 @@ def test_the_qspi_reset_scope_limits_the_qspi_peripheral_s_resets():
         peripheral = Reset()
         builder.qspi(peripheral)
         if scope is not None:
-            builder.qspi_reset_scope(scope)
+            builder.set_qspi_reset_scope(scope)
         chip = builder.build()
         chip.reset()
         return len(peripheral.resets)

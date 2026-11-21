@@ -216,7 +216,7 @@ pub trait SpiPeripheral {
     fn transfer(&mut self, transfer: QspiTransfer) -> u16;
 
     /// RESET reaches it at `now`, as the chip's QSPI reset scope says
-    /// (`Builder::qspi_reset_scope`; every reset by default, SIMRM 8.2).
+    /// (`Builder::set_qspi_reset_scope`; every reset by default, SIMRM 8.2).
     /// By default nothing changes.
     fn reset(&mut self, now: Cycles) {
         let _ = now;

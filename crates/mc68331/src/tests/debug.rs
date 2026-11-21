@@ -507,7 +507,7 @@ fn freeze_stops_the_bus_monitor_with_frzbm() {
         .fixed_memory(Address(SLOW), vec![SLOW_BYTE; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     builder
-        .fixed_timing(
+        .set_fixed_timing(
             slow,
             PortSize::Bits16,
             Termination::WaitStates(Termination::MOST_WAIT_STATES),

@@ -1241,9 +1241,9 @@ fn a_host_watchdog_reset_leaves_the_chip_as_a_timeout_does() {
             )
             .unwrap();
         let not_watchdog = builder.unwired_peripheral(Recorder::default());
-        builder.reset_scope(not_watchdog, ResetScope::ALL.without(ResetCause::Watchdog));
+        builder.set_reset_scope(not_watchdog, ResetScope::ALL.without(ResetCause::Watchdog));
         let watchdog = builder.unwired_peripheral(Recorder::default());
-        builder.reset_scope(watchdog, ResetScope::of(&[ResetCause::Watchdog]));
+        builder.set_reset_scope(watchdog, ResetScope::of(&[ResetCause::Watchdog]));
         let mut chip = builder.build();
         chip.take_events();
         (chip, [not_watchdog, watchdog])
@@ -1594,7 +1594,7 @@ fn two_entries(scope: ResetScope) -> Mc68331 {
         )
         .unwrap();
     builder.qspi(Framed::default());
-    builder.qspi_reset_scope(scope);
+    builder.set_qspi_reset_scope(scope);
     let mut chip = builder.build();
     chip.run_for(Cycles(4000));
     chip
@@ -2226,11 +2226,11 @@ fn a_reset_reaches_only_the_peripherals_in_its_scope() {
     let everything = builder.unwired_peripheral(Recorder::default());
     // a board whose DUART sees no watchdog reset, as smartclock's
     let not_watchdog = builder.unwired_peripheral(Recorder::default());
-    builder.reset_scope(not_watchdog, ResetScope::ALL.without(ResetCause::Watchdog));
+    builder.set_reset_scope(not_watchdog, ResetScope::ALL.without(ResetCause::Watchdog));
     let power_on = builder.unwired_peripheral(Recorder::default());
-    builder.reset_scope(power_on, ResetScope::of(&[ResetCause::PowerOn]));
+    builder.set_reset_scope(power_on, ResetScope::of(&[ResetCause::PowerOn]));
     let none = builder.unwired_peripheral(Recorder::default());
-    builder.reset_scope(none, ResetScope::NONE);
+    builder.set_reset_scope(none, ResetScope::NONE);
     let mut chip = builder.build();
     let resets = |chip: &Mc68331| {
         [everything, not_watchdog, power_on, none]

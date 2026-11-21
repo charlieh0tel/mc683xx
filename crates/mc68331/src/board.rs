@@ -147,7 +147,7 @@ impl HostMemory {
 }
 
 /// A memory whose contents go back to an image at some resets
-/// ([`Builder::reload_scope`](crate::chip::Builder::reload_scope)).
+/// ([`Builder::set_reload_scope`](crate::chip::Builder::set_reload_scope)).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Reload {
     /// The core's region holding it.

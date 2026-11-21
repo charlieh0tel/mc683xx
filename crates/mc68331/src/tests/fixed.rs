@@ -78,7 +78,7 @@ fn fixed(program: &[u16], reload: ResetScope) -> (Mc68331, MemoryId, MemoryId) {
     let data = builder
         .fixed_memory(Address(DATA), vec![0x5a; FIXED_BYTES], MemoryKind::Ram)
         .unwrap();
-    builder.reload_scope(data, reload);
+    builder.set_reload_scope(data, reload);
     (builder.build(), code, data)
 }
 
@@ -325,7 +325,7 @@ fn nops_reached(timing: Option<(PortSize, Termination)>) -> u32 {
         )
         .unwrap();
     if let Some((port, termination)) = timing {
-        builder.fixed_timing(code, port, termination).unwrap();
+        builder.set_fixed_timing(code, port, termination).unwrap();
     }
     let mut chip = builder.build();
     chip.run_for(Cycles(4_000));
@@ -358,7 +358,7 @@ fn fixed_timing_takes_only_fixed_memories_and_internal_terminations() {
         .fixed_memory(Address(CODE), code(&[NOP]), MemoryKind::Rom)
         .unwrap();
     assert_eq!(
-        builder.fixed_timing(rom, PortSize::Bits16, Termination::Fast),
+        builder.set_fixed_timing(rom, PortSize::Bits16, Termination::Fast),
         Err(BuildError::NotFixed)
     );
     for termination in [
@@ -367,12 +367,12 @@ fn fixed_timing_takes_only_fixed_memories_and_internal_terminations() {
         Termination::WaitStates(Termination::MOST_WAIT_STATES + 1),
     ] {
         assert_eq!(
-            builder.fixed_timing(code, PortSize::Bits8, termination),
+            builder.set_fixed_timing(code, PortSize::Bits8, termination),
             Err(BuildError::Termination)
         );
     }
     assert_eq!(
-        builder.fixed_timing(
+        builder.set_fixed_timing(
             code,
             PortSize::Bits8,
             Termination::WaitStates(Termination::MOST_WAIT_STATES)

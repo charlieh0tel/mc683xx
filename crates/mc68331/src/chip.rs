@@ -455,7 +455,7 @@ impl Builder {
     /// Emulator-only: the chip has no such decode.  It is for code and
     /// data the host maps without repurposing a select (a rewritten
     /// routine, a test stub), the firmware's image left as it is.  Its
-    /// contents survive every reset unless `reload_scope` says.
+    /// contents survive every reset unless `set_reload_scope` says.
     ///
     /// # Errors
     ///
@@ -523,7 +523,7 @@ impl Builder {
     /// [`BuildError::Termination`] for a termination other than fast or
     /// 0 to 13 wait states: a fixed memory asserts no DSACK and runs on
     /// no ECLK.
-    pub fn fixed_timing(
+    pub fn set_fixed_timing(
         &mut self,
         memory: MemoryId,
         port: PortSize,
@@ -554,7 +554,7 @@ impl Builder {
     /// vectors, the `reset` instruction's after the instruction: code a
     /// warm restart must find as built.  Emulator-only, as no memory
     /// reloads itself; for any memory, a fixed one or one on pins.
-    pub fn reload_scope(&mut self, memory: MemoryId, scope: ResetScope) {
+    pub fn set_reload_scope(&mut self, memory: MemoryId, scope: ResetScope) {
         self.board
             .reloads
             .retain(|reload| reload.region != memory.0);
@@ -567,7 +567,7 @@ impl Builder {
         }
     }
 
-    /// Adds `peripheral`, which every reset reaches until `reset_scope`
+    /// Adds `peripheral`, which every reset reaches until `set_reset_scope`
     /// says otherwise.
     fn add<D: MappedPeripheral + Timed + Save + Any>(&mut self, peripheral: D) -> PeripheralId {
         self.board.peripherals.push(Box::new(peripheral));
@@ -652,7 +652,7 @@ impl Builder {
     /// The resets that reach `peripheral`'s reset input ([`MappedPeripheral::reset`]):
     /// all by default, as on the RESET pin; a board that wires it
     /// elsewhere says which (SIMRM 8.2).
-    pub fn reset_scope(&mut self, peripheral: PeripheralId, scope: ResetScope) {
+    pub fn set_reset_scope(&mut self, peripheral: PeripheralId, scope: ResetScope) {
         self.board.reset_scopes[index(peripheral)] = scope;
     }
 
@@ -679,9 +679,9 @@ impl Builder {
     }
 
     /// The resets that reach the QSPI's peripheral
-    /// ([`SpiPeripheral::reset`]): all by default, as `reset_scope` for a
+    /// ([`SpiPeripheral::reset`]): all by default, as `set_reset_scope` for a
     /// peripheral.
-    pub const fn qspi_reset_scope(&mut self, scope: ResetScope) {
+    pub const fn set_qspi_reset_scope(&mut self, scope: ResetScope) {
         self.board.qspi_reset_scope = scope;
     }
 
