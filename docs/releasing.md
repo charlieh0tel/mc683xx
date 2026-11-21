@@ -34,10 +34,10 @@ copies, not links, for checkouts on Windows; `make licenses`, part of
 `make ci` and of CI, checks that they match the root's byte for byte.
 A change to a license text is made at the root and copied.
 
-The wheels are abi3 (Python 3.10 and later), one per platform: Linux
+The wheels are abi3 (Python 3.12 and later), one per platform: Linux
 manylinux x86_64 and aarch64, macOS x86_64 and arm64, Windows x64, and
 an sdist.  Wheels the runner can load run the Python tests on Python
-3.10 first; the cross-built ones (Linux aarch64, macOS x86_64) are only
+3.12 first; the cross-built ones (Linux aarch64, macOS x86_64) are only
 built.  The package is a maturin `python-source` layout
 (`crates/cpu32-py/python/mc683xx`), so the sdist carries the stubs and
 `py.typed`; the `sdist` job builds a wheel from the sdist, as pip does
@@ -130,7 +130,7 @@ Dependencies and platforms:
   semver (above).
 - The minimum supported Rust is 1.99 (`rust-version`); raising it is
   a minor release.
-- The Python package supports Python 3.10 and later (abi3 wheels).
+- The Python package supports Python 3.12 and later (abi3 wheels).
   Dropping a Python or Node release past its end of life is a minor
   release.
 

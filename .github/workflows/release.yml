@@ -17,13 +17,13 @@ permissions:
 
 env:
   # The bindings' crate; its pyproject.toml sets the features (abi3
-  # from Python 3.10), as `make python` builds it.
+  # from Python 3.12), as `make python` builds it.
   PYTHON_MANIFEST: crates/cpu32-py/Cargo.toml
   # The Makefile's pin (PYTHON_TOOLS).
   MATURIN_VERSION: "1.15.0"
   PYTEST_VERSION: "9.1.1"
   # The oldest Python the abi3 wheel claims, so the tests check it.
-  TEST_PYTHON: "3.10"
+  TEST_PYTHON: "3.12"
   # The Node CI's `wasm` job tests the npm package with, and the npm
   # that publishes it: trusted publishing needs npm 11.5.1 or later,
   # and Node 22 comes with npm 10.

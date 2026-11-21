@@ -95,7 +95,7 @@ make python                # builds .venv, the module, and runs the tests
 ```
 
 The package is built with maturin from `crates/cpu32-py` (abi3, Python
-3.10 and later) and ships type stubs (`python/mc683xx/__init__.pyi`,
+3.12 and later) and ships type stubs (`python/mc683xx/__init__.pyi`,
 `py.typed`), so mypy and pyright see every class, method and argument.
 
 Released versions are on PyPI as `mc683xx`, abi3 wheels for Linux,

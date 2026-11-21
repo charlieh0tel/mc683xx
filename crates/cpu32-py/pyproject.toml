@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "mc683xx"
 description = "The Motorola MC68331 (CPU32) emulator, for Python hosts"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = "MIT OR Apache-2.0"
 # Copies of the root's, so the wheel and sdist carry them.
 license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
@@ -36,8 +36,8 @@ Documentation = "https://github.com/charlieh0tel/mc683xx/blob/main/docs/python.m
 python-source = "python"
 module-name = "mc683xx.mc683xx"
 # `python` builds the bindings (Cargo.toml); abi3 makes one module for
-# every Python from 3.10.
-features = ["python", "pyo3/extension-module", "pyo3/abi3-py310"]
+# every Python from 3.12.
+features = ["python", "pyo3/extension-module", "pyo3/abi3-py312"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

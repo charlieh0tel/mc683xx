@@ -718,7 +718,7 @@ silent are in `docs/peripherals.md`; the datasheets are in
 ### Python
 
 `cpu32-py` builds the Python module `mc683xx` with PyO3 and maturin
-(`crates/cpu32-py/pyproject.toml`, abi3 from Python 3.10).  The
+(`crates/cpu32-py/pyproject.toml`, abi3 from Python 3.12).  The
 module is named for the family, not the part: a 68332 would add its
 chip beside `Mc68331`.
 
@@ -3334,7 +3334,7 @@ checks move onto real code hooks.
 | A bare CPU (`mc683xx_cpu32::flat`, `mc683xx.Machine`) beside the chip, 32 address lines by default | Function-level firmware tests map code and stubs at addresses no 68331 decodes (smartclock's harness uses $31400000); a chip-select decode would only get in the way. |
 | Bare-host stops (faults, intercepts) and parity deviations opt-in, off by default | The default stays the CPU32's behavior; a host porting from Unicorn asks for what it relied on, by name. |
 | Published to crates.io and PyPI, one semver version for the workspace from 0.1.0, notes in GitHub releases | Decided 2026-10-24, with the repository public.  One version keeps the crates and the wheel in step; a release is tagged only on a commit that has passed every check (`docs/releasing.md`). |
-| abi3 wheels and the crates published by the `release` workflow, both by trusted publishing | One wheel per platform covers every Python from 3.10; no token is stored.  crates.io's trusted publishing needs the crate to exist first, so only the first release is published by hand (decided 2026-10-24). |
+| abi3 wheels and the crates published by the `release` workflow, both by trusted publishing | One wheel per platform covers every Python from 3.12; no token is stored.  crates.io's trusted publishing needs the crate to exist first, so only the first release is published by hand (decided 2026-10-24). |
 | A GDB stub on the gdbstub crate, generic over a small `Target` trait, its breakpoints and steps hooks | Decided 2026-10-24; gdbstub is MIT OR Apache-2.0.  Hooks cost nothing until installed and never touch memory; one trait serves the bare CPU, the chip, a board and hosts with run loops of their own. |
 | gdb's memory access without bus cycles | A debugger's look must not clear a flag or feed a peripheral (the reason `Module::peek` exists); real cycles stay the host's (`bus_read`, `bus_write`). |
 | The public API names no foreign type but serde 1's traits (below) | A dependency's major release must not break ours: board parameters are `registry::ParameterValue`, a syntax error a `SyntaxError`, a snapshot that does not decode a `DecodeError`, each opaque or ours.  `serve` takes the stub's own `connection::Connection` (write, flush, a blocking read and a peek that does not wait), adapted to gdbstub's inside the crate, so gdbstub's major version is not ours (decided 2026-11-21, reversing 2026-10-24's keeping of gdbstub's `ConnectionExt`). |
