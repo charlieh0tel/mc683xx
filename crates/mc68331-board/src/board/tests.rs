@@ -213,7 +213,7 @@ fn a_refused_snapshot_leaves_the_board_as_it_was() {
     let before = board.save().unwrap();
     // the counter's snapshot taken, then the divider's refused
     let other_ratio = edited(&snapshot, |state| {
-        state.peripherals[2] = Divider::with_ratio(3, 1).save().unwrap();
+        state.peripherals[2] = Divider::new(3, 1).unwrap().save().unwrap();
     });
     assert_eq!(
         board.restore(&other_ratio).unwrap_err().to_string(),

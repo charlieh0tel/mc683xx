@@ -113,7 +113,7 @@ pub(crate) fn register(registry: &mut Registry) {
         (
             "edge-counter",
             vec![PortSpec::input("in", Kind::Edge)],
-            |_| Ok(Box::new(EdgeCounter::default())),
+            |_| Ok(Box::new(EdgeCounter::new())),
         ),
         (
             "dc-source",
@@ -489,15 +489,20 @@ impl Divider {
     /// Its output.
     const OUT: usize = 1;
 
-    /// A divider by `divide`, high `high` input cycles, not yet driven.
-    #[cfg(test)]
-    pub(crate) const fn with_ratio(divide: u128, high: u128) -> Self {
-        Self {
-            divide,
-            high,
+    /// A divider by `divide`, high `high` input cycles, its input not
+    /// yet driven; [`None`] unless `divide` is at least 2 and `high` 1 to
+    /// `divide` - 1.
+    #[must_use]
+    pub const fn new(divide: u64, high: u64) -> Option<Self> {
+        if divide < 2 || high == 0 || high >= divide {
+            return None;
+        }
+        Some(Self {
+            divide: divide as u128,
+            high: high as u128,
             clock: None,
             pending: None,
-        }
+        })
     }
 
     /// From `divide` (at least 2) and `high` (1 to `divide` - 1, half
@@ -508,17 +513,8 @@ impl Divider {
             return Err(ParameterError::invalid("divide", "it must be at least 2"));
         }
         let high: u64 = context.parameters.integer("high")?.unwrap_or(divide / 2);
-        if high == 0 || high >= divide {
-            return Err(ParameterError::invalid(
-                "high",
-                format!("it must be 1 to {}", divide - 1),
-            ));
-        }
-        Ok(Self {
-            divide: u128::from(divide),
-            high: u128::from(high),
-            clock: None,
-            pending: None,
+        Self::new(divide, high).ok_or_else(|| {
+            ParameterError::invalid("high", format!("it must be 1 to {}", divide - 1))
         })
     }
 
@@ -614,6 +610,16 @@ pub struct EdgeCounter {
 }
 
 impl EdgeCounter {
+    /// One that has seen no edge, its input low.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            level: false,
+            count: 0,
+            last: None,
+        }
+    }
+
     /// Rising edges seen.
     #[must_use]
     pub const fn count(&self) -> u64 {
@@ -758,6 +764,16 @@ mod tests {
     /// The chip's system clock a test's drives carry: none of these parts
     /// is on it.
     const SYSTEM_CLOCK: TimeBase = TimeBase::steady(Frequency::from_hz(16_777_216));
+
+    #[test]
+    fn a_divider_is_built_only_with_a_ratio_it_can_divide_by() {
+        assert_eq!(Divider::new(1, 1), None);
+        assert_eq!(Divider::new(4, 0), None);
+        assert_eq!(Divider::new(4, 4), None);
+        let divider = Divider::new(4, 3).unwrap();
+        assert_eq!((divider.divide, divider.high), (4, 3));
+        assert_eq!(EdgeCounter::new(), EdgeCounter::default());
+    }
 
     #[test]
     fn a_divider_drives_each_change_one_ahead_at_its_exact_edge() {
@@ -998,7 +1014,7 @@ mod tests {
         let oscillator = Oscillator::new(clock).inspect();
         shows_clock(&oscillator);
         assert_eq!(oscillator.get("driven"), Some(&Value::Boolean(false)));
-        let mut divider = Divider::with_ratio(10, 3);
+        let mut divider = Divider::new(10, 3).unwrap();
         assert_eq!(
             divider.inspect().get("pending"),
             Some(&Value::Text("none".to_owned()))
@@ -1018,7 +1034,7 @@ mod tests {
         };
         assert_eq!(pending.get("edge"), Some(&Value::Integer(3)));
         assert_eq!(pending.get("at"), Some(&Value::Integer(37 + 300_000)));
-        let mut counter = EdgeCounter::default();
+        let mut counter = EdgeCounter::new();
         assert_eq!(
             counter.inspect().get("last"),
             Some(&Value::Text("none".to_owned()))
@@ -1054,7 +1070,7 @@ mod tests {
             Time(50),
             &mut Drive::new(Time(50), SYSTEM_CLOCK),
         );
-        let mut counter = EdgeCounter::default();
+        let mut counter = EdgeCounter::new();
         for (level, at) in [(true, 10), (false, 20), (true, 30)] {
             counter.input(
                 0,

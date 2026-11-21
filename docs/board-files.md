@@ -442,6 +442,12 @@ input `edge` it follows and its time, `at`); `edge-counter` its input's
 `level`, `count` and `last` edge's time; `dc-source` its `volts`.  What has no value yet shows
 as the text `none`.
 
+A host builds one itself with its type's constructor, `None` for
+parameters the file would refuse: `builtin::Fixed::new(value)`,
+`RegisterFile::new(bytes, vector)`, `Recorder::new(value)`,
+`Oscillator::new(clock)`, `Divider::new(divide, high)`,
+`EdgeCounter::new()` and `DcSource::new(volts)`.
+
 ## The Rust API for peripheral types
 
 The contract a host's peripheral models target (rustdoc in
