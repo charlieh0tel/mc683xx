@@ -33,7 +33,7 @@ use mc683xx_gdb::Ending;
 use mc683xx_gdb::SessionError;
 use mc683xx_gdb::connection;
 use mc683xx_gdb::connection::Connection;
-use mc683xx_gdb::connection::POLL;
+use mc683xx_gdb::connection::POLL_INTERVAL;
 use mc683xx_gdb::connection::PollError;
 use mc683xx_gdb::connection::Waiter;
 use mc683xx_gdb::connection::accept_polled;
@@ -744,9 +744,9 @@ fn a_polled_connection_reads_between_idles() {
     let client = thread::spawn(move || {
         let port: u16 = port.recv().unwrap();
         let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        thread::sleep(POLL * 3);
+        thread::sleep(POLL_INTERVAL * 3);
         io::Write::write_all(&mut stream, b"+").unwrap();
-        thread::sleep(POLL * 3);
+        thread::sleep(POLL_INTERVAL * 3);
     });
     let waiter = Counting {
         waits: 0,
@@ -791,7 +791,7 @@ fn a_polled_peek_fails_once_gdb_has_gone() {
     client.join().unwrap();
     let peeked = loop {
         match connection.peek() {
-            Ok(None) => thread::sleep(POLL),
+            Ok(None) => thread::sleep(POLL_INTERVAL),
             other => break other,
         }
     };

@@ -962,7 +962,7 @@ chip beside `Mc68331`.
   `ready(port)` is called once it listens, before the target is
   held, so a test starts its client then (port 0 picks one) and may
   look at the target.  It waits for gdb (to connect, or for its next
-  packet) in waits of `connection::POLL`, 20 ms, through the stub's
+  packet) in waits of `connection::POLL_INTERVAL`, 20 ms, through the stub's
   `Waiter` (`accept_polled`, a `Polled` connection): the GIL released
   during each, so another thread (an in-process client) runs, and
   `check_signals` between them.  Between a continue's quanta it
