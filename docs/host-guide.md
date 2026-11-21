@@ -1684,8 +1684,10 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `Pin::Port(PortPin)`, `PortPin::new(Port::E, 0)` refusing a bit the
   port lacks, and a `PortPin` itself `PE0`), `signal::Kind`,
   `Direction`, `peripheral::Role` (`read-write`) and `Lane` (`upper`),
-  as the board file names them; `port::Port` (`E`, `GP`) and the
-  GPT's `pwm::Channel` (`A`), any case.
+  as the board file names them; `port::Port` (`E`, `GP`), the GPT's
+  `pwm::Channel` (`A`) and `gpt::Input` (`PGP0`, `PAI`), and the SIM's
+  `ResetCause` (`power-on`, as a board file's reset scope names it),
+  any case.
   The newtypes convert `From` and into what they
   wrap.
 - Every public error enum is `#[non_exhaustive]`, and so are the

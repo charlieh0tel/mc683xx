@@ -1197,16 +1197,17 @@ fn scheduled_pclk_edges_clock_and_show_in_pclks() {
 }
 
 #[test]
-fn inputs_are_named_as_their_pins() {
+fn inputs_are_named_as_their_pins_in_any_case() {
     for name in ["PGP0", "PGP7", "PAI", "PCLK"] {
         let input: Input = name.parse().unwrap();
         assert_eq!(input.to_string(), name);
+        assert_eq!(name.to_lowercase().parse(), Ok(input));
     }
     assert_eq!(
-        "PGP3".parse(),
+        "pGp3".parse(),
         Ok(Input::PortGp(PortGpPin::new(3).unwrap()))
     );
-    for bad in ["PGP8", "PGP07", "pai", "OC1"] {
+    for bad in ["PGP8", "PGP07", "PG", "PG\u{e9}0", "OC1"] {
         assert!(bad.parse::<Input>().is_err(), "{bad}");
     }
 }

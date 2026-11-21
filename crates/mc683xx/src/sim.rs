@@ -197,14 +197,12 @@ impl ResetCause {
     const fn resets_clock(self) -> bool {
         !matches!(self, Self::Test | Self::System)
     }
-}
 
-/// Its name as a board file's reset scope gives it: `external`,
-/// `power-on`, `watchdog`, `halt-monitor`, `system`, `loss-of-clock`,
-/// `test`.
-impl fmt::Display for ResetCause {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
+    /// Its name as a board file's reset scope gives it: `external`,
+    /// `power-on`, `watchdog`, `halt-monitor`, `system`, `loss-of-clock`,
+    /// `test`.
+    const fn name(self) -> &'static str {
+        match self {
             Self::External => "external",
             Self::PowerOn => "power-on",
             Self::Watchdog => "watchdog",
@@ -212,17 +210,28 @@ impl fmt::Display for ResetCause {
             Self::System => "system",
             Self::LossOfClock => "loss-of-clock",
             Self::Test => "test",
-        })
+        }
     }
 }
 
+/// Its name as a board file's reset scope gives it: `external`,
+/// `power-on`, `watchdog`, `halt-monitor`, `system`, `loss-of-clock`,
+/// `test`.
+impl fmt::Display for ResetCause {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
+
+/// The cause the text names, as [`ResetCause`]'s `Display` does, in any
+/// case.
 impl FromStr for ResetCause {
     type Err = ParseResetCauseError;
 
     fn from_str(name: &str) -> Result<Self, ParseResetCauseError> {
         Self::ALL
             .into_iter()
-            .find(|cause| cause.to_string() == name)
+            .find(|candidate| candidate.name().eq_ignore_ascii_case(name))
             .ok_or_else(|| ParseResetCauseError(name.to_owned()))
     }
 }

@@ -482,9 +482,10 @@ fn a_pulse_between_quanta_is_two_changes() {
 }
 
 #[test]
-fn reset_causes_print_as_board_files_name_them_and_parse_back() {
+fn reset_causes_print_as_board_files_name_them_and_parse_back_in_any_case() {
     for cause in ResetCause::ALL {
         assert_eq!(cause.to_string().parse(), Ok(cause));
+        assert_eq!(cause.to_string().to_uppercase().parse(), Ok(cause));
     }
     assert_eq!(ResetCause::PowerOn.to_string(), "power-on");
     assert_eq!(ResetCause::HaltMonitor.to_string(), "halt-monitor");

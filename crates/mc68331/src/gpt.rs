@@ -274,6 +274,14 @@ impl PortGpPin {
     }
 }
 
+/// The prefix of port GP's pins' names, `PGP0` to `PGP7` (MC68331UM
+/// Figure 7-1).
+const PGP: &str = "PGP";
+/// PAI's pin's name.
+const PAI: &str = "PAI";
+/// PCLK's pin's name.
+const PCLK: &str = "PCLK";
+
 /// An input pin of the GPT the host can schedule an edge on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Input {
@@ -291,29 +299,34 @@ pub enum Input {
 impl fmt::Display for Input {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PortGp(pin) => write!(formatter, "PGP{}", pin.get()),
-            Self::Pai => formatter.write_str("PAI"),
-            Self::Pclk => formatter.write_str("PCLK"),
+            Self::PortGp(pin) => write!(formatter, "{PGP}{}", pin.get()),
+            Self::Pai => formatter.write_str(PAI),
+            Self::Pclk => formatter.write_str(PCLK),
         }
     }
 }
 
-/// The input whose pin is named so, as `Display` writes it.
+/// The input whose pin is named so, as `Display` writes it, in any
+/// case.
 impl FromStr for Input {
     type Err = ParseInputError;
 
     fn from_str(name: &str) -> Result<Self, ParseInputError> {
-        match name {
-            "PAI" => Ok(Self::Pai),
-            "PCLK" => Ok(Self::Pclk),
-            _ => name
-                .strip_prefix("PGP")
-                .filter(|bit| bit.len() == 1)
-                .and_then(|bit| bit.parse().ok())
-                .and_then(PortGpPin::new)
-                .map(Self::PortGp)
-                .ok_or_else(|| ParseInputError(name.to_owned())),
+        let named = |pin: &str| pin.eq_ignore_ascii_case(name);
+        if named(PAI) {
+            return Ok(Self::Pai);
         }
+        if named(PCLK) {
+            return Ok(Self::Pclk);
+        }
+        name.get(..PGP.len())
+            .filter(|prefix| prefix.eq_ignore_ascii_case(PGP))
+            .and_then(|_| name.get(PGP.len()..))
+            .filter(|bit| bit.len() == 1)
+            .and_then(|bit| bit.parse().ok())
+            .and_then(PortGpPin::new)
+            .map(Self::PortGp)
+            .ok_or_else(|| ParseInputError(name.to_owned()))
     }
 }
 
