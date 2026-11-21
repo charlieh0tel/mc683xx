@@ -39,7 +39,7 @@ use self::timer::PRESCALER_SPAN;
 use self::timer::Prescaler;
 
 /// The GPT's register block, $YFF900 to $YFF93F (MC68331UM Table D-1).
-pub const BLOCK: Block = Block {
+pub(crate) const BLOCK: Block = Block {
     offset: 0x900,
     length: 0x40,
 };
@@ -552,7 +552,7 @@ impl Gpt {
     }
 
     /// The board drives port GP's input pins to `pins` at `now`.
-    pub fn set_port_pins(&mut self, pins: u8, now: Cycles) {
+    pub(crate) fn set_port_pins(&mut self, pins: u8, now: Cycles) {
         self.advance(now);
         self.inputs.port = pins;
         self.input_changed(now);
@@ -560,14 +560,14 @@ impl Gpt {
     }
 
     /// The board drives PAI to `level` at `now`.
-    pub fn set_pai(&mut self, level: bool, now: Cycles) {
+    pub(crate) fn set_pai(&mut self, level: bool, now: Cycles) {
         self.advance(now);
         self.drive(Input::Pai, level, now);
         self.refresh();
     }
 
     /// The board drives PCLK to `level` at `now`.
-    pub fn set_pclk(&mut self, level: bool, now: Cycles) {
+    pub(crate) fn set_pclk(&mut self, level: bool, now: Cycles) {
         self.advance(now);
         self.drive(Input::Pclk, level, now);
         self.refresh();
@@ -576,7 +576,7 @@ impl Gpt {
     /// The board will drive `input` to `level` at `at`, or at once if
     /// that is past: the GPT captures, counts and clocks at that time,
     /// and `next_event` ends a quantum there.  A reset keeps it.
-    pub fn schedule_input(&mut self, at: Cycles, input: Input, level: bool) {
+    pub(crate) fn schedule_input(&mut self, at: Cycles, input: Input, level: bool) {
         let at = at.max(self.time);
         let index = self.scheduled.partition_point(|&(when, _, _)| when <= at);
         self.scheduled.insert(index, (at, input, level));
@@ -586,7 +586,7 @@ impl Gpt {
     /// Withdraws the inputs `schedule_input` scheduled past `now`, those
     /// up to it taking effect first: for a board whose clocks moved
     /// against its own time, to schedule them again at their new clocks.
-    pub fn unschedule_inputs(&mut self, now: Cycles) {
+    pub(crate) fn unschedule_inputs(&mut self, now: Cycles) {
         self.advance(now);
         self.scheduled.clear();
         self.refresh();
@@ -727,7 +727,7 @@ impl Gpt {
     /// happened, in time order ([PLAN.md], Peripherals).
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
-    pub fn take_output_changes(&mut self) -> Vec<(Cycles, OutputChange)> {
+    pub(crate) fn take_output_changes(&mut self) -> Vec<(Cycles, OutputChange)> {
         let mut changes = mem::take(&mut self.edges.queue);
         changes.sort_by_key(|&(at, _)| at);
         changes
@@ -747,7 +747,7 @@ impl Gpt {
     /// Whether `channel`'s PWM edges are reported from `now`, from the
     /// level its pin has then, PPROUT's clock's included.  Off out of
     /// power-on.
-    pub fn set_report_pwm_edges(&mut self, channel: Channel, report: bool, now: Cycles) {
+    pub(crate) fn set_report_pwm_edges(&mut self, channel: Channel, report: bool, now: Cycles) {
         self.advance(now);
         self.edges.pwm[channel.index()] = report.then(|| self.pwm_level(channel, now));
     }
@@ -755,7 +755,7 @@ impl Gpt {
     /// Whether the edges of TCNT's clock on OC1's pin under CPROUT are
     /// reported from `now`, in port GP's changes; while they are not,
     /// the changes show the pin low.  Off out of power-on.
-    pub fn set_report_oc1_clock_edges(&mut self, report: bool, now: Cycles) {
+    pub(crate) fn set_report_oc1_clock_edges(&mut self, report: bool, now: Cycles) {
         self.advance(now);
         self.edges.oc1_clock = report.then(|| self.clock_high(self.counter, now));
         self.edges.oc1_found = Found::new(self.prescaler.count(now), now);
