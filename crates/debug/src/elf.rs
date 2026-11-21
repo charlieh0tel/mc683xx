@@ -3,6 +3,7 @@
 //! generic ABI, "ELF Header" and "Program Header"), with `EM_68K` the
 //! machine.
 
+use std::fmt;
 use std::ops::Range;
 
 use mc683xx_target::address::Address;
@@ -53,6 +54,27 @@ const P_PADDR: usize = 12;
 /// `p_filesz`'s.
 const P_FILESZ: usize = 16;
 
+/// The part of an ELF file a short file ends inside
+/// ([`ParseElfError::Truncated`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ElfPart {
+    /// The ELF header.
+    Header,
+    /// The program headers.
+    ProgramHeaders,
+}
+
+/// The part as an error names it.
+impl fmt::Display for ElfPart {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Header => "ELF header",
+            Self::ProgramHeaders => "program headers",
+        })
+    }
+}
+
 /// Why a file does not make an image.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
@@ -63,8 +85,8 @@ pub enum ParseElfError {
     /// The file ends inside its header or its program headers.
     #[error("the file ends inside its {what}")]
     Truncated {
-        /// The ELF header, or the program headers.
-        what: &'static str,
+        /// Which.
+        what: ElfPart,
     },
     /// Not a 32-bit file.
     #[error("ELF class {class}, not 32-bit (ELFCLASS32, 1)")]
@@ -157,7 +179,9 @@ impl Image {
             return Err(ParseElfError::NotElf);
         }
         if file.len() < HEADER_BYTES {
-            return Err(ParseElfError::Truncated { what: "ELF header" });
+            return Err(ParseElfError::Truncated {
+                what: ElfPart::Header,
+            });
         }
         let class = file[EI_CLASS];
         if class != ELFCLASS32 {
@@ -186,7 +210,7 @@ impl Image {
             file.len(),
         )
         .ok_or(ParseElfError::Truncated {
-            what: "program headers",
+            what: ElfPart::ProgramHeaders,
         })?;
         // each loadable segment's address and file bytes, checked before
         // any is copied: a small file's headers can name its bytes many
@@ -238,6 +262,7 @@ impl Image {
 mod tests {
     use mc683xx_target::address::Address;
 
+    use super::ElfPart;
     use super::ParseElfError;
     use crate::image::Image;
     use crate::image::ImageError;
@@ -331,12 +356,14 @@ mod tests {
         assert_eq!(
             changed(45, 2),
             Err(ParseElfError::Truncated {
-                what: "program headers"
+                what: ElfPart::ProgramHeaders
             })
         );
         assert_eq!(
             Image::from_elf(&file[..40]),
-            Err(ParseElfError::Truncated { what: "ELF header" })
+            Err(ParseElfError::Truncated {
+                what: ElfPart::Header
+            })
         );
         assert_eq!(
             Image::from_elf(&file[..file.len() - 1]),

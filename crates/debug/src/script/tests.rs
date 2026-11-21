@@ -8,8 +8,10 @@ use mc683xx_target::register::Register;
 use mc683xx_target::register::SystemRegister;
 use mc683xx_target::size::Size;
 
+use super::Clause;
 use super::Command;
 use super::Line;
+use super::Operand;
 use super::ParseCommandError;
 use super::ParseScriptError;
 use super::Script;
@@ -193,18 +195,33 @@ fn words_that_name_nothing() {
 #[test]
 fn missing_operands_and_clauses() {
     for (line, what) in [
-        ("write_memory.w", "address"),
-        ("write_memory.w 0x100", "value"),
-        ("write_register", "register"),
-        ("write_register d0", "value"),
-        ("write_system_register vbr", "value"),
-        ("read_memory.w 0x100", "expect"),
-        ("read_memory.w 0x100 mask 0xff", "expect"),
-        ("read_memory.w 0x100 expect", "expect"),
-        ("poll_memory.w 0x100 expect 0 timeout_ms 5", "mask"),
-        ("poll_memory.w 0x100 mask 1 timeout_ms 5", "expect"),
-        ("poll_memory.w 0x100 mask 1 expect 1", "timeout_ms"),
-        ("write_memory.w 0x100 1 fc", "fc"),
+        ("write_memory.w", Operand::Address),
+        ("write_memory.w 0x100", Operand::Value),
+        ("write_register", Operand::Register),
+        ("write_register d0", Operand::Value),
+        ("write_system_register vbr", Operand::Value),
+        ("read_memory.w 0x100", Operand::Clause(Clause::Expect)),
+        (
+            "read_memory.w 0x100 mask 0xff",
+            Operand::Clause(Clause::Expect),
+        ),
+        (
+            "read_memory.w 0x100 expect",
+            Operand::Clause(Clause::Expect),
+        ),
+        (
+            "poll_memory.w 0x100 expect 0 timeout_ms 5",
+            Operand::Clause(Clause::Mask),
+        ),
+        (
+            "poll_memory.w 0x100 mask 1 timeout_ms 5",
+            Operand::Clause(Clause::Expect),
+        ),
+        (
+            "poll_memory.w 0x100 mask 1 expect 1",
+            Operand::Clause(Clause::TimeoutMs),
+        ),
+        ("write_memory.w 0x100 1 fc", Operand::Clause(Clause::Fc)),
     ] {
         assert_eq!(error(line), ParseCommandError::Missing { what }, "{line}");
     }
@@ -232,7 +249,9 @@ fn unexpected_and_repeated_words() {
     );
     assert_eq!(
         error("read_memory.w 0x100 expect 1 expect 1"),
-        ParseCommandError::Repeated { clause: "expect" }
+        ParseCommandError::Repeated {
+            clause: Clause::Expect
+        }
     );
 }
 
@@ -338,6 +357,15 @@ fn errors_say_what_is_wrong() {
         error("write_memory.b 0 0x1ff").to_string(),
         "0x1ff does not fit in 8 bits"
     );
+    assert_eq!(
+        error("poll_memory.w 0x100 mask 1 expect 1").to_string(),
+        "missing timeout_ms"
+    );
+    assert_eq!(
+        error("read_memory.w 0x100 expect 1 fc 1 fc 2").to_string(),
+        "`fc` given twice"
+    );
+    assert_eq!(error("write_memory.w").to_string(), "missing address");
 }
 
 #[test]
