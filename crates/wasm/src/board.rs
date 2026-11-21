@@ -225,8 +225,7 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// [`Error::Data`] for data not a `Uint8Array` (wasm-bindgen would
-    /// take a string or an array of numbers as bytes), and
+    /// [`Error::Bytes`] for data not a `Uint8Array`, and
     /// [`Error::Send`] for an endpoint that drives no serial net.
     #[wasm_bindgen(js_name = send)]
     pub fn send_js(
@@ -234,8 +233,7 @@ impl Board {
         name: &str,
         #[wasm_bindgen(unchecked_param_type = "Uint8Array")] data: &JsValue,
     ) -> Result<(), Error> {
-        let data = uint8_array(data).ok_or_else(|| Error::Data(described(data)))?;
-        self.send(name, &data.to_vec())
+        self.send(name, &bytes(data, "data to send")?.to_vec())
     }
 
     /// The data bytes of the serial frames that reached the run-time
@@ -384,6 +382,19 @@ fn image_bytes(images: &JsValue) -> Result<BTreeMap<String, Vec<u8>>, Error> {
             Ok((name, bytes.to_vec()))
         })
         .collect()
+}
+
+/// `value` as a `Uint8Array`, the `argument` [`Error::Bytes`] names
+/// otherwise: wasm-bindgen would take a string or an array of numbers as
+/// bytes.
+fn bytes<'value>(
+    value: &'value JsValue,
+    argument: &'static str,
+) -> Result<&'value Uint8Array, Error> {
+    uint8_array(value).ok_or_else(|| Error::Bytes {
+        argument,
+        kind: described(value),
+    })
 }
 
 /// `value` if it is a `Uint8Array`, from this realm or another (an

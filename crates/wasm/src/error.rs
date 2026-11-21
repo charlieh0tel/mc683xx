@@ -41,10 +41,14 @@ pub enum Error {
     /// Picoseconds that are a `bigint` out of a `u64`'s range.
     #[error("{0}n picoseconds is out of range: give 0n to 2n ** 64n - 1n")]
     Picoseconds(String),
-    /// Data to send that is not a `Uint8Array`: what it is (`an
-    /// Array`, `null`).
-    #[error("data to send is not a Uint8Array but {0}")]
-    Data(String),
+    /// Bytes that are not a `Uint8Array`.
+    #[error("{argument} is not a Uint8Array but {kind}")]
+    Bytes {
+        /// What the bytes are for (`data to send`).
+        argument: &'static str,
+        /// What they are (`an Array`, `null`).
+        kind: String,
+    },
     /// A wall clock reading that is no time.
     #[error("{0} ms is no clock reading: give a finite time, 0 or more")]
     Wall(f64),
