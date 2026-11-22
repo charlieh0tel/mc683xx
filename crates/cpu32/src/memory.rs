@@ -209,7 +209,7 @@ pub enum MemoryError {
     #[error("{0} address bits: must be {min} to 32", min = PAGE_SHIFT + 1)]
     AddressBits(u32),
     /// A range that does not start and end on a page.
-    #[error("{start:#x}, {length:#x} bytes: not whole pages")]
+    #[error("{start}, {length:#x} bytes: not whole pages")]
     Unaligned {
         /// Its start.
         start: Address,
@@ -217,7 +217,7 @@ pub enum MemoryError {
         length: u32,
     },
     /// A range past the end of the address space or of its region.
-    #[error("{start:#x}, {length:#x} bytes: out of range")]
+    #[error("{start}, {length:#x} bytes: out of range")]
     OutOfRange {
         /// Its start.
         start: Address,
@@ -1146,6 +1146,18 @@ mod tests {
         assert_eq!(memory.region(rom)[PAGE_BYTES as usize - 1], 0xaa);
         assert_eq!(memory.region(ram)[0], 0xbb);
         assert_eq!(memory.region(ram)[PAGE_BYTES as usize - 1], 0);
+    }
+
+    #[test]
+    fn a_range_refused_prints_its_start_as_an_address() {
+        let unaligned = MemoryError::Unaligned {
+            start: Address(0x10),
+            length: 0x20,
+        };
+        assert_eq!(
+            unaligned.to_string(),
+            "0x00000010, 0x20 bytes: not whole pages"
+        );
     }
 
     #[test]

@@ -152,9 +152,11 @@ fn until_is_checked_before_the_code_hooks_there() {
 #[test]
 fn maps_do_not_overlap_and_unmapped_bytes_are_refused() {
     let mut machine = machine(&[NOP]);
+    let mapped = machine.map(Address(RAM - PAGE_BYTES), 2 * PAGE_BYTES, &[]);
+    assert_eq!(mapped, Err(MapError::Mapped(Address(RAM - PAGE_BYTES))));
     assert_eq!(
-        machine.map(Address(RAM - PAGE_BYTES), 2 * PAGE_BYTES, &[]),
-        Err(MapError::Mapped(Address(RAM - PAGE_BYTES)))
+        mapped.unwrap_err().to_string(),
+        format!("{} is mapped already", Address(RAM - PAGE_BYTES))
     );
     let mut buffer = [0; 4];
     assert_eq!(

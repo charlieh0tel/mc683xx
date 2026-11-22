@@ -74,7 +74,7 @@ pub enum MapError {
     #[error(transparent)]
     Memory(#[from] MemoryError),
     /// Memory where some is mapped already.
-    #[error("{0:#x} is mapped already")]
+    #[error("{0} is mapped already")]
     Mapped(Address),
     /// Contents longer than the memory.
     #[error("{contents:#x} bytes of contents in {length:#x} bytes")]
@@ -85,7 +85,7 @@ pub enum MapError {
         length: u32,
     },
     /// A peripheral range that overlaps another peripheral's, or is empty.
-    #[error("peripherals overlap at {0:#x}")]
+    #[error("peripherals overlap at {0}")]
     Overlap(Address),
 }
 
