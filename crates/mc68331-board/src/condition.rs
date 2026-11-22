@@ -55,7 +55,21 @@ impl ConditionInfo {
 ///
 /// [`Peripheral::arm`]: crate::peripheral::Peripheral::arm
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ConditionToken(pub u32);
+pub struct ConditionToken(u32);
+
+impl ConditionToken {
+    /// The token numbered `token`, in whatever scheme the peripheral keeps.
+    #[must_use]
+    pub const fn new(token: u32) -> Self {
+        Self(token)
+    }
+
+    /// Its number.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
 
 impl From<u32> for ConditionToken {
     fn from(token: u32) -> Self {

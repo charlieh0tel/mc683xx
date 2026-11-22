@@ -71,7 +71,7 @@ impl Peripheral for Probe {
             return Err(ArmError::Arguments("`high` takes none".to_owned()));
         }
         self.given += 1;
-        let token = ConditionToken(self.given);
+        let token = ConditionToken::new(self.given);
         self.armed.push(token);
         Ok(token)
     }
