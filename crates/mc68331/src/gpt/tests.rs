@@ -12,6 +12,7 @@ use mc683xx_target::size::Size;
 
 use super::Gpt;
 use super::Input;
+use super::NoPortGpPin;
 use super::ParsePortGpPinError;
 use super::PortGpPin;
 use super::PwmChange;
@@ -1365,6 +1366,9 @@ fn port_gp_pins_are_named_pgp0_to_pgp7_in_any_case() {
         assert_eq!(pin.to_string().parse(), Ok(pin));
     }
     assert_eq!("pgp7".parse(), Ok(PortGpPin::new(7).unwrap()));
+    assert_eq!(PortGpPin::try_from(7), Ok(PortGpPin::new(7).unwrap()));
+    assert_eq!(PortGpPin::try_from(8), Err(NoPortGpPin(8)));
+    assert_eq!(u8::from(PortGpPin::new(7).unwrap()), 7);
     for bad in ["PGP8", "PGP07", "PGP", "PG\u{e9}0", "PAI", "PGP+1"] {
         assert_eq!(
             bad.parse::<PortGpPin>(),

@@ -274,6 +274,25 @@ impl PortGpPin {
     }
 }
 
+impl TryFrom<u8> for PortGpPin {
+    type Error = NoPortGpPin;
+
+    fn try_from(bit: u8) -> Result<Self, NoPortGpPin> {
+        Self::new(bit).ok_or(NoPortGpPin(bit))
+    }
+}
+
+impl From<PortGpPin> for u8 {
+    fn from(pin: PortGpPin) -> Self {
+        pin.0
+    }
+}
+
+/// A bit port GP lacks: past PGP7.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no port GP pin at bit {0}")]
+pub struct NoPortGpPin(pub u8);
+
 /// The prefix of port GP's pins' names, `PGP0` to `PGP7` (MC68331UM
 /// Figure 7-1).
 const PGP: &str = "PGP";

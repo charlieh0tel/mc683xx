@@ -119,6 +119,19 @@ impl FromStr for FunctionCode {
 #[non_exhaustive]
 pub struct ParseFunctionCodeError {}
 
+impl TryFrom<u8> for FunctionCode {
+    type Error = NoFunctionCode;
+
+    fn try_from(bits: u8) -> Result<Self, NoFunctionCode> {
+        Self::new(bits).ok_or(NoFunctionCode(bits))
+    }
+}
+
+/// A value past FC\[2:0\]: above 7.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no function code {0}")]
+pub struct NoFunctionCode(pub u8);
+
 impl From<FunctionCode> for u8 {
     fn from(function_code: FunctionCode) -> Self {
         function_code.0
@@ -130,6 +143,7 @@ mod tests {
     use std::string::ToString;
 
     use super::FunctionCode;
+    use super::NoFunctionCode;
     use super::ParseFunctionCodeError;
 
     #[test]
@@ -141,6 +155,8 @@ mod tests {
         assert_eq!(FunctionCode::new(7), Some(FunctionCode::CPU_SPACE));
         assert_eq!(FunctionCode::new(8), None);
         assert_eq!(FunctionCode::CPU_SPACE.get(), 7);
+        assert_eq!(FunctionCode::try_from(7), Ok(FunctionCode::CPU_SPACE));
+        assert_eq!(FunctionCode::try_from(8), Err(NoFunctionCode(8)));
     }
 
     #[cfg(feature = "serde")]

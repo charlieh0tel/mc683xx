@@ -168,6 +168,25 @@ impl FromStr for IrqPin {
 #[error("no IRQ pin {0:?}")]
 pub struct ParseIrqPinError(String);
 
+impl TryFrom<u8> for InterruptLevel {
+    type Error = NoInterruptLevel;
+
+    fn try_from(level: u8) -> Result<Self, NoInterruptLevel> {
+        Self::new(level).ok_or(NoInterruptLevel(level))
+    }
+}
+
+impl From<InterruptLevel> for u8 {
+    fn from(level: InterruptLevel) -> Self {
+        level.0
+    }
+}
+
+/// A value past the levels: above 7.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no interrupt level {0}")]
+pub struct NoInterruptLevel(pub u8);
+
 impl From<IrqPin> for InterruptLevel {
     fn from(pin: IrqPin) -> Self {
         pin.0
@@ -179,6 +198,12 @@ impl TryFrom<InterruptLevel> for IrqPin {
 
     fn try_from(level: InterruptLevel) -> Result<Self, NoIrqPin> {
         Self::new(level.get()).ok_or(NoIrqPin(level.get()))
+    }
+}
+
+impl From<IrqPin> for u8 {
+    fn from(pin: IrqPin) -> Self {
+        pin.get()
     }
 }
 
@@ -267,6 +292,7 @@ pub trait Interrupts {
 mod tests {
     use super::InterruptLevel;
     use super::IrqPin;
+    use super::NoInterruptLevel;
     use super::NoIrqPin;
     use super::ParseInterruptLevelError;
     use super::ParseIrqPinError;
@@ -284,6 +310,9 @@ mod tests {
     fn levels_stop_at_7() {
         assert_eq!(InterruptLevel::new(7), Some(InterruptLevel::NONMASKABLE));
         assert_eq!(InterruptLevel::new(8), None);
+        assert_eq!(InterruptLevel::try_from(7), Ok(InterruptLevel::NONMASKABLE));
+        assert_eq!(InterruptLevel::try_from(8), Err(NoInterruptLevel(8)));
+        assert_eq!(u8::from(InterruptLevel::NONMASKABLE), 7);
     }
 
     #[test]
@@ -292,6 +321,7 @@ mod tests {
         assert_eq!(IrqPin::new(1).map(IrqPin::get), Some(1));
         assert_eq!(IrqPin::new(7), Some(IrqPin::IRQ7));
         assert_eq!(IrqPin::try_from(8), Err(NoIrqPin(8)));
+        assert_eq!(u8::from(IrqPin::IRQ7), 7);
         assert_eq!(IrqPin::try_from(InterruptLevel::NONE), Err(NoIrqPin(0)));
         assert_eq!(
             InterruptLevel::from(IrqPin::IRQ7),
