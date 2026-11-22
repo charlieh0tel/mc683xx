@@ -725,6 +725,23 @@ pub enum ConstructError {
     Parameter(#[from] ParameterError),
 }
 
+impl ConstructError {
+    /// The parameter error, if that is what it is, else the error
+    /// itself: for a host's helper that maps a construction to its
+    /// constructor's [`ParameterError`], with no wildcard arm for the
+    /// variants to come, and the error still in hand when it is not one.
+    ///
+    /// # Errors
+    ///
+    /// The error itself, when it is no parameter error.
+    pub fn into_parameter(self) -> Result<ParameterError, Self> {
+        match self {
+            Self::Parameter(error) => Ok(error),
+            Self::Unknown(_) => Err(self),
+        }
+    }
+}
+
 /// Peripheral types by name.
 #[derive(Debug, Default)]
 pub struct Registry {
@@ -982,6 +999,17 @@ mod tests {
             registry.construct("absent", &context).err(),
             Some(ConstructError::Unknown("absent".to_owned()))
         );
+    }
+
+    #[test]
+    fn a_construct_error_gives_its_parameter_error() {
+        let missing = ParameterError::Missing("rate".to_owned());
+        assert_eq!(
+            ConstructError::Parameter(missing.clone()).into_parameter(),
+            Ok(missing)
+        );
+        let unknown = ConstructError::Unknown("absent".to_owned());
+        assert_eq!(unknown.clone().into_parameter(), Err(unknown));
     }
 
     #[test]

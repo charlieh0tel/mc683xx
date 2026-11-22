@@ -496,7 +496,9 @@ The contract a host's peripheral models target (rustdoc in
   for a type whose ports depend on its parameters, or none registered),
   and `construct(name, &context) -> Result<Constructed,
   ConstructError>` (`ConstructError::Unknown` for no such type,
-  `Parameter` for what the constructor refuses; the unread-key check
+  `Parameter` for what the constructor refuses, which `into_parameter()`
+  gives as `Ok`, the error itself `Err` otherwise, with no wildcard arm
+  for the variants `#[non_exhaustive]` leaves room for; the unread-key check
   is `Parameters::unread`'s, as a load makes it).
   `Description::check_ports(&registry, &environment)` checks a board
   file's net ends at peripherals against their types' ports (name, type,
