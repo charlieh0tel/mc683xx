@@ -513,8 +513,12 @@ surrounds the SoC with its board peripherals through:
   `PwmChange { now, channel, level }` in time order.  The PWM pins
   are no port's, so they keep a stream of their own; the GPT holds
   each in its own queue, so each take drains exactly what it gives and
-  leaves nothing of the other's behind (a single queue drained
-  selectively kept, and saved, whatever its host never took).  Two
+  leaves the other's queue as it was.  A queue keeps, and a snapshot
+  saves, what its host has not yet taken, as any queue does; what the
+  split removes is one take draining selectively and leaving the
+  other kind to pile up in the queue it shares.  A restore refuses a
+  queued order no run could leave (sequences repeated, out of order,
+  or at the next change's place).  Two
   streams lose the order of a port GP change and a PWM change at one
   time (one MOVEM can force PWMA and write PORTGP), which a peripheral
   clocked by one and fed by the other sees, so each queued change

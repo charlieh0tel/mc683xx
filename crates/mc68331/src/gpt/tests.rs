@@ -14,6 +14,7 @@ use super::Gpt;
 use super::Input;
 use super::PortGpPin;
 use super::PwmChange;
+use super::Queued;
 use super::STATE_VERSION;
 use super::pwm::Channel;
 use super::pwm::Output;
@@ -133,7 +134,7 @@ fn a_state_no_run_could_save_is_refused() {
         change(&mut saved);
         encode(STATE_VERSION, &saved)
     };
-    let invalid: [(Vec<u8>, &str); 9] = [
+    let invalid: [(Vec<u8>, &str); 12] = [
         (edited(|saved| saved.icr = 0xffff), "GPT registers"),
         // CPR 1 with TCNT still on the reset tap
         (edited(|saved| saved.tmsk = 1), "GPT prescaler taps"),
@@ -168,6 +169,23 @@ fn a_state_no_run_could_save_is_refused() {
             edited(|saved| saved.pclk_rise = Some(Cycles::from_clocks(1 << 40))),
             "GPT counts",
         ),
+        // the next change's place, with nothing queued, short of 0
+        (edited(|saved| saved.edges.sequence = 5), "GPT output order"),
+        (
+            edited(|saved| saved.edges.sequence = u64::MAX),
+            "GPT output order",
+        ),
+        // a queued change at or past the next change's place
+        (
+            edited(|saved| {
+                saved.edges.port_queue.push(Queued {
+                    sequence: 0,
+                    at: Cycles::ZERO,
+                    change: PortLevels::new(1, 0),
+                });
+            }),
+            "GPT output order",
+        ),
     ];
     let mut other = self::gpt();
     let before = other.save().unwrap();
@@ -178,6 +196,21 @@ fn a_state_no_run_could_save_is_refused() {
         ));
     }
     assert_eq!(other.save().unwrap(), before, "unchanged by the refusals");
+    // a port change and a PWM edge queued in order, the next after both
+    let queued = edited(|saved| {
+        saved.edges.port_queue.push(Queued {
+            sequence: 0,
+            at: Cycles::ZERO,
+            change: PortLevels::new(1, 0),
+        });
+        saved.edges.pwm_queue.push(Queued {
+            sequence: 1,
+            at: Cycles::ZERO,
+            change: (Channel::A, true),
+        });
+        saved.edges.sequence = 2;
+    });
+    other.restore(&queued).unwrap();
     let pin = |bit: u8| decode::<PortGpPin>(STATE_VERSION, &encode(STATE_VERSION, &bit));
     assert_eq!(pin(7).unwrap(), PortGpPin::new(7).unwrap());
     assert!(matches!(pin(8), Err(StateError::Decode(_))));

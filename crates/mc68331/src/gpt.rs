@@ -445,6 +445,31 @@ impl Edges {
         }
     }
 
+    /// Whether the queues' order is one a run could leave: each queue's
+    /// sequences rising, none shared, all before the next, which is 0
+    /// once both are empty ([`Self::settle`]) and far from overflowing.
+    fn order_is_valid(&self) -> bool {
+        let rising = |sequences: &[u64]| sequences.windows(2).all(|pair| pair[0] < pair[1]);
+        let port: Vec<u64> = self
+            .port_queue
+            .iter()
+            .map(|queued| queued.sequence)
+            .collect();
+        let pwm: Vec<u64> = self
+            .pwm_queue
+            .iter()
+            .map(|queued| queued.sequence)
+            .collect();
+        let mut all = [port.as_slice(), pwm.as_slice()].concat();
+        all.sort_unstable();
+        rising(&port)
+            && rising(&pwm)
+            && rising(&all)
+            && all.last().is_none_or(|&last| last < self.sequence)
+            && (!all.is_empty() || self.sequence == 0)
+            && self.sequence < u64::MAX
+    }
+
     /// The order found starts again once both queues are empty.
     const fn settle(&mut self) {
         if self.port_queue.is_empty() && self.pwm_queue.is_empty() {
@@ -1555,6 +1580,9 @@ impl Gpt {
             .all(|(earlier, later)| earlier.0 <= later.0)
         {
             return Err(StateError::invalid("GPT scheduled inputs"));
+        }
+        if !self.edges.order_is_valid() {
+            return Err(StateError::invalid("GPT output order"));
         }
         Ok(())
     }
