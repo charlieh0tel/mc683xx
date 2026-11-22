@@ -1,6 +1,7 @@
 //! The chip's pins as Python sees them: SCI frames, GPT pin names,
 //! PWM channels and outputs, and the ports.
 
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_mc68331::gpt::Input;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm;
@@ -295,10 +296,10 @@ impl TryFrom<pwm::Output> for Output {
             } => Self::Wave {
                 period,
                 high,
-                clocks: clocks.map(u64::from),
+                clocks: clocks.map(Cycles::clocks),
             },
             pwm::Output::Clock { clocks } => Self::Clock {
-                clocks: clocks.map(u64::from),
+                clocks: clocks.map(Cycles::clocks),
             },
             _ => return Err(Error::unmapped("PWM output")),
         })

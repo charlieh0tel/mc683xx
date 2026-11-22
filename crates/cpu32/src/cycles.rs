@@ -74,18 +74,6 @@ impl fmt::Display for Cycles {
     }
 }
 
-impl From<u64> for Cycles {
-    fn from(clocks: u64) -> Self {
-        Self(clocks)
-    }
-}
-
-impl From<Cycles> for u64 {
-    fn from(cycles: Cycles) -> Self {
-        cycles.0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::Cycles;
@@ -105,6 +93,6 @@ mod tests {
     #[test]
     fn cycles_show_their_unit() {
         assert_eq!(Cycles::from_clocks(12).to_string(), "12 clocks");
-        assert_eq!(u64::from(Cycles::from(3)), 3);
+        assert_eq!(Cycles::from_clocks(3).clocks(), 3);
     }
 }

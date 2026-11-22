@@ -203,7 +203,11 @@ Crates:
   shorten match arms.
 - Use the newtype idiom as appropriate (addresses, function codes,
   interrupt levels, cycles), with `From` conversions to and from the
-  value it wraps where every value is valid.
+  value it wraps where every value is valid, except unit-bearing
+  quantities (time, frequency, clock counts: `Cycles`, `Time`, `Span`,
+  `Frequency`), which have named constructors and accessors only
+  (`Cycles::from_clocks`, `clocks`), so a bare number never silently
+  takes a unit.
 - Method names: `with_*` is a constructor (`Registry::with_builtins`);
   a mutator is `set_*`; an accessor is the noun, `_mut` for the
   mutable one (`Board::peripheral`, `peripheral_mut`); a state reads
