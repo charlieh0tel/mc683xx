@@ -633,7 +633,11 @@ what the chip drives within a run comes back as timed changes.
   (`Output.Clock` under CPROUT, else `Output.Level`);
   `take_pwm_changes() -> [(now, Channel, level)]` while
   `set_report_pwm_edges(channel, True)` asks (PPROUT's clock
-  included).
+  included); `take_output_changes()` both in one stream, in the order
+  they happened, each the tuple the other two give, told apart by a
+  `Port` or a `Channel` second (Rust's `OutputChange`, flattened as
+  they are), for a peripheral clocked by a PWM pin that reads a port GP
+  pin.  Each of the three takes what it gives and leaves the rest.
 
 ```python
 SCCR0, SCCR1, SCSR, SCDR = QSM + 0x08, QSM + 0x0A, QSM + 0x0C, QSM + 0x0E  # QSMRM 5.2

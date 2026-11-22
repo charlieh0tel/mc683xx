@@ -20,6 +20,7 @@ use mc683xx_mc68331::event;
 use mc683xx_mc68331::event::ChipTracing;
 use mc683xx_mc68331::event::DsackFault;
 use mc683xx_mc68331::gpt::PwmChange;
+use mc683xx_mc68331::port::OutputChange;
 use mc683xx_mc68331::port::PortChange;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
@@ -38,6 +39,7 @@ use mc683xx_target::size::Size;
 
 use mc683xx_modules::sim::reset::ResetScope;
 use pyo3::Bound;
+use pyo3::IntoPyObject;
 use pyo3::Py;
 use pyo3::PyAny;
 use pyo3::PyResult;
@@ -719,6 +721,32 @@ fn port_change(change: PortChange) -> PortChangeView {
 /// `change` as Python takes it.
 fn pwm_change(change: PwmChange) -> PwmChangeView {
     (change.now.clocks(), change.channel.into(), change.level)
+}
+
+/// A port change or a PWM pin's edge as Python takes it from
+/// `take_output_changes`: the tuple `take_port_changes` or
+/// `take_pwm_changes` gives, told apart by its length and by a `Port` or
+/// a `Channel` second (Rust's `OutputChange`, flattened).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoPyObject)]
+enum OutputChangeView {
+    /// A port's.
+    Port(PortChangeView),
+    /// A PWM pin's.
+    Pwm(PwmChangeView),
+}
+
+impl TryFrom<OutputChange> for OutputChangeView {
+    type Error = Error;
+
+    /// The change, or [`Error::Unmapped`] for one the bindings do not
+    /// know.
+    fn try_from(change: OutputChange) -> Result<Self, Error> {
+        match change {
+            OutputChange::Port(change) => Ok(Self::Port(port_change(change))),
+            OutputChange::Pwm(change) => Ok(Self::Pwm(pwm_change(change))),
+            _ => Err(Error::unmapped("output change")),
+        }
+    }
 }
 
 /// Addresses `begin` to `end`, both included.
@@ -1660,6 +1688,20 @@ chip_methods! {
             .take_pwm_changes()
             .into_iter()
             .map(pwm_change)
+            .collect()
+    }
+
+    /// Both, taken in one stream, in time order, those at one time in
+    /// `Port`'s order, a PWM pin's in port `GP`'s place, port `GP`'s and
+    /// the PWM pins' in the order they happened: each a port change's
+    /// `(now, port, driven, levels)` or a PWM edge's `(now, channel,
+    /// level)` (Rust's `take_output_changes`).  Each of the three takes
+    /// what it gives and leaves the rest.
+    fn take_output_changes(&mut self) -> Result<Vec<OutputChangeView>, Error> {
+        self.chip
+            .take_output_changes()
+            .into_iter()
+            .map(OutputChangeView::try_from)
             .collect()
     }
 

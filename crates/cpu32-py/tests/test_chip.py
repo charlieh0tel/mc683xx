@@ -659,6 +659,49 @@ def test_a_gpt_output_compare_toggles_its_pin():
     chip.set_gpt_input(mc683xx.Input.PCLK, True)
 
 
+# PORTGP in the lower byte of DDRGP's word, PGP0 an output; PWMC with
+# F1A, FPWMA set forcing PWMA high (GPTRM 3.3.4, 6.3.1).
+PORTGP_WORD = GPT + 0x06
+DDRGP_PGP0_HIGH = 0x0101
+DDRGP_PGP0_LOW = 0x0100
+PWMC_WORD = GPT + 0x24
+PWMC_F1A = 0x0200
+PWMC_F1A_FPWMA = 0x0202
+PGP0 = 0x01
+
+
+@pytest.mark.parametrize("pwm_first", [True, False])
+def test_output_changes_keep_the_order_of_a_pwm_edge_and_a_port_gp_change(pwm_first):
+    chip = mc683xx.Builder().build()
+    chip.set_report_pwm_edges(mc683xx.Channel.A, True)
+    chip.bus_write(PORTGP_WORD, 2, DDRGP_PGP0_HIGH)
+    chip.bus_write(PWMC_WORD, 2, PWMC_F1A)
+    chip.take_output_changes()
+    writes = [(PWMC_WORD, PWMC_F1A_FPWMA), (PORTGP_WORD, DDRGP_PGP0_LOW)]
+    for address, value in writes if pwm_first else reversed(writes):
+        chip.bus_write(address, 2, value)
+    now = chip.now
+    pwm = (now, mc683xx.Channel.A, True)
+    port = (now, mc683xx.Port.GP, PGP0, 0)
+    assert chip.take_output_changes() == ([pwm, port] if pwm_first else [port, pwm])
+    assert chip.take_port_changes() == []
+    assert chip.take_pwm_changes() == []
+
+
+def test_each_take_leaves_what_the_others_give():
+    chip = mc683xx.Builder().build()
+    chip.set_report_pwm_edges(mc683xx.Channel.A, True)
+    chip.bus_write(PORTGP_WORD, 2, DDRGP_PGP0_HIGH)
+    chip.bus_write(PWMC_WORD, 2, PWMC_F1A)
+    chip.take_output_changes()
+    chip.bus_write(PWMC_WORD, 2, PWMC_F1A_FPWMA)
+    chip.bus_write(PORTGP_WORD, 2, DDRGP_PGP0_LOW)
+    now = chip.now
+    assert chip.take_port_changes() == [(now, mc683xx.Port.GP, PGP0, 0)]
+    assert chip.take_pwm_changes() == [(now, mc683xx.Channel.A, True)]
+    assert chip.take_output_changes() == []
+
+
 # TMSK2 in the lower byte of its word; CPROUT with CPR %011, TCNT's
 # clock, the system clock / 32, on OC1, PGP3 (GPTRM 5.1, 7.1.3.1).
 TMSK = GPT + 0x20

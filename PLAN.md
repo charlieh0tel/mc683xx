@@ -950,7 +950,8 @@ chip beside `Mc68331`.
   the time each ended), `set_gpt_input(input, level)`,
   `pwm(Channel)` (`Output.Level`, `Output.Wave`,
   `Output.Clock`), `oc1()` (the same `Output`), `take_pwm_changes()`
-  (`(now, Channel, level)`),
+  (`(now, Channel, level)`), `take_output_changes()` (both streams in
+  one, each the tuple its own take gives),
   `set_report_pwm_edges(channel, on)`, `set_report_oc1_clock_edges(on)` and
   `schedule_gpt_input(time, input, level)` (input an `Input`:
   `Input.PGP0`-`Input.PGP7`, `Input.PAI` or `Input.PCLK`, Rust's
