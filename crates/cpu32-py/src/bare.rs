@@ -130,16 +130,22 @@ pub(crate) enum FaultCauseKind {
 impl TryFrom<FaultCause> for FaultCauseKind {
     type Error = Error;
 
-    /// The cause, or [`Error::Unmapped`] naming one the bindings do not
+    /// The cause, or [`unknown_fault_cause`] for one the bindings do not
     /// know.
     fn try_from(cause: FaultCause) -> Result<Self, Error> {
         Ok(match cause {
             FaultCause::BusError => Self::BusError,
             FaultCause::Protected => Self::Protected,
             FaultCause::AddressError => Self::AddressError,
-            other => return Err(Error::run_end(other)),
+            other => return Err(unknown_fault_cause(other)),
         })
     }
+}
+
+/// A fault cause the bindings do not know, [`Error::Unmapped`] naming
+/// it: a value, not a run's end, so `NotImplementedError`.
+fn unknown_fault_cause(cause: FaultCause) -> Error {
+    Error::named("fault cause", cause)
 }
 
 /// A fault that stopped a run (`set_stop_on_fault`), as `End.Fault`
@@ -1124,15 +1130,20 @@ mod tests {
     use mc683xx_modules::sim;
     use mc683xx_target::address::Address;
     use mc683xx_target::entry::Entry;
+    use pyo3::PyErr;
+    use pyo3::Python;
+    use pyo3::exceptions::PyNotImplementedError;
 
     use super::EndView;
     use super::FaultCauseKind;
+    use super::unknown_fault_cause;
     use crate::board::RoleView;
     use crate::chip::Halt;
     use crate::chip::ResetCause;
     use crate::chip::Stop;
     use crate::error::Error;
     use crate::error::RUN_END;
+    use crate::exceptions::RunError;
     use crate::hooks::InvalidReason;
     use crate::peripherals::Output;
 
@@ -1166,6 +1177,18 @@ mod tests {
         machine.reset().unwrap();
         setup(&mut machine);
         machine.run_limited(limits).end
+    }
+
+    /// An unknown fault cause is a value, not a run's end: it raises
+    /// `NotImplementedError`, not `RunError`.
+    #[test]
+    fn an_unknown_fault_cause_is_not_implemented() {
+        Python::initialize();
+        let error = PyErr::from(unknown_fault_cause(FaultCause::BusError));
+        Python::attach(|py| {
+            assert!(error.is_instance_of::<PyNotImplementedError>(py));
+            assert!(!error.is_instance_of::<RunError>(py));
+        });
     }
 
     /// Every `End` and every `Stop` a run gives has its Python class,

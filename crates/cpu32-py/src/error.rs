@@ -144,12 +144,17 @@ impl Error {
         Self::Unmapped { kind, name: None }
     }
 
-    /// A run's end with no Python class, `name` its Rust name.
-    pub(crate) fn run_end(name: impl ToString) -> Self {
+    /// A value of `kind` with no Python value, `name` its Rust name.
+    pub(crate) fn named(kind: &'static str, name: impl ToString) -> Self {
         Self::Unmapped {
-            kind: RUN_END,
+            kind,
             name: Some(name.to_string()),
         }
+    }
+
+    /// A run's end with no Python class, `name` its Rust name.
+    pub(crate) fn run_end(name: impl ToString) -> Self {
+        Self::named(RUN_END, name)
     }
 }
 

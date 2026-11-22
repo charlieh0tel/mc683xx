@@ -962,12 +962,13 @@ chip.run_for(500)
 - `mc683xx.TargetError` (a `RuntimeError`): a background debug control
   the CPU's state refuses (Background debug mode).
 - `mc683xx.RunError` (a `RuntimeError`): a run that could not go on, a
-  board peripheral stalling board time (Board files); or a run's end,
-  halt or fault cause this build's bindings have no class for, named,
-  which a newer Rust core could give but none does today.
+  board peripheral stalling board time (Board files); or a run's end
+  or halt this build's bindings have no class for, named, which a newer
+  Rust core could give but none does today.
 - `NotImplementedError`: a module that cannot save; or any other value
-  this build's bindings have no Python value for (a role, an invalid
-  access's reason, a PWM output), which a newer Rust crate could give
+  this build's bindings have no Python value for (a fault cause, a
+  role, an invalid access's reason, a PWM output), named where it
+  prints, which a newer Rust crate could give
   but none does today.  `take_events()` never raises and always takes
   every event: one it cannot convert (a kind the bindings lack, or a
   DSACK fault they do not know) is `Event.Unknown(now, text)`, `text`
