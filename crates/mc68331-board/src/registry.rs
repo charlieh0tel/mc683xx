@@ -468,6 +468,13 @@ impl Environment {
     pub fn set_board_dir(&mut self, board_dir: impl Into<PathBuf>) {
         self.board_dir = board_dir.into();
     }
+
+    /// The directory a constructor's paths are relative to: the board
+    /// file's, in a load.
+    #[must_use]
+    pub fn board_dir(&self) -> &Path {
+        &self.board_dir
+    }
 }
 
 /// `SplitMix64`'s finalizer: spreads a seed's bits.
@@ -550,7 +557,7 @@ impl<'a> Context<'a> {
         Ok(self
             .parameters
             .string(key)?
-            .map(|path| self.environment.board_dir.join(path)))
+            .map(|path| self.environment.board_dir().join(path)))
     }
 
     /// The contents of the file path parameter `key` names, if given: a
@@ -804,7 +811,6 @@ impl Registry {
 mod tests {
     use std::io;
     use std::path::Path;
-    use std::path::PathBuf;
 
     use super::ConstructError;
     use super::Constructed;
@@ -932,10 +938,9 @@ mod tests {
     #[test]
     fn contents_come_from_the_host_relative_to_the_board_file() {
         let parameters = Parameters::parse("image = \"cells.bin\"\nmissing = \"no.bin\"").unwrap();
-        let environment = Environment {
-            board_dir: PathBuf::from("boards"),
-            ..Environment::default()
-        };
+        let mut environment = Environment::default();
+        environment.set_board_dir("boards");
+        assert_eq!(environment.board_dir(), Path::new("boards"));
         let read = |path: &Path| {
             if path == Path::new("boards/cells.bin") {
                 Ok(vec![1, 2, 3])

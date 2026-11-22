@@ -475,7 +475,8 @@ The contract a host's peripheral models target (rustdoc in
   (that path, for a file the peripheral itself opens), and the run's
   `environment` (`seed`,
   `seed_for(name)`, `work_dir`; a test of a constructor through
-  `Context::new` gives it the board directory with `set_board_dir`,
+  `Context::new` gives it the board directory with `set_board_dir`, read
+  back by `board_dir()`,
   which a load sets itself).  `Parameters::unread()`
   is the first key no getter read, the load's unknown-parameter error,
   for a host's tests of its constructors, which build their `Parameters`
