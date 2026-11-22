@@ -19,6 +19,8 @@ use mc683xx_mc68331::chip::MemoryId;
 use mc683xx_mc68331::event;
 use mc683xx_mc68331::event::ChipTracing;
 use mc683xx_mc68331::event::DsackFault;
+use mc683xx_mc68331::gpt::PwmChange;
+use mc683xx_mc68331::port::PortChange;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
@@ -694,6 +696,29 @@ impl From<Space> for memory::Space {
             Space::Supervisor => Self::Supervisor,
         }
     }
+}
+
+/// A port change as Python takes it: `(now, port, driven, levels)`
+/// (Rust's `PortChange`, flattened).
+type PortChangeView = (u64, PortView, u8, u8);
+
+/// A PWM pin's edge as Python takes it: `(now, channel, level)` (Rust's
+/// `PwmChange`, flattened).
+type PwmChangeView = (u64, ChannelView, bool);
+
+/// `change` as Python takes it.
+fn port_change(change: PortChange) -> PortChangeView {
+    (
+        change.now.clocks(),
+        change.port.into(),
+        change.outputs.driven(),
+        change.outputs.levels(),
+    )
+}
+
+/// `change` as Python takes it.
+fn pwm_change(change: PwmChange) -> PwmChangeView {
+    (change.now.clocks(), change.channel.into(), change.level)
 }
 
 /// Addresses `begin` to `end`, both included.
@@ -1559,18 +1584,11 @@ chip_methods! {
     /// and their levels as two masks (Rust's `PortChange`, flattened).
     /// A host with no board takes them, or they gather in the chip and
     /// its snapshot.
-    fn take_port_changes(&mut self) -> Vec<(u64, PortView, u8, u8)> {
+    fn take_port_changes(&mut self) -> Vec<PortChangeView> {
         self.chip
             .take_port_changes()
             .into_iter()
-            .map(|change| {
-                (
-                    change.now.clocks(),
-                    change.port.into(),
-                    change.outputs.driven(),
-                    change.outputs.levels(),
-                )
-            })
+            .map(port_change)
             .collect()
     }
 
@@ -1637,11 +1655,11 @@ chip_methods! {
     /// The PWM pins' edges since the last call, in time order, while
     /// `set_report_pwm_edges` asks for them: `(now, channel, level)`
     /// (Rust's `PwmChange`, flattened).
-    fn take_pwm_changes(&mut self) -> Vec<(u64, ChannelView, bool)> {
+    fn take_pwm_changes(&mut self) -> Vec<PwmChangeView> {
         self.chip
             .take_pwm_changes()
             .into_iter()
-            .map(|change| (change.now.clocks(), change.channel.into(), change.level))
+            .map(pwm_change)
             .collect()
     }
 
