@@ -97,7 +97,6 @@ use crate::chip::Entry;
 use crate::chip::Event;
 use crate::chip::ResetCause;
 use crate::chip::Stop;
-use crate::chip::take_events;
 use crate::control;
 use crate::control::BoardControlView;
 use crate::control::PacingView;
@@ -1735,7 +1734,7 @@ impl BoardView {
     /// driven on the board's nets for it.  Nothing while the board holds
     /// RESET low.
     fn reset_for(&mut self, cause: ResetCause) -> PyResult<()> {
-        self.board.reset_for(cause.into());
+        self.board.reset_for(cause.try_into()?);
         self.check()
     }
 
@@ -1781,10 +1780,12 @@ impl BoardView {
 
     /// What the chip did since the last call (Rust's
     /// `Board::take_events`), as `Mc68331.take_events` gives it.
-    fn take_events(&mut self) -> Result<Vec<Event>, Error> {
-        take_events(&mut self.board, Board::events, |board| {
-            board.take_events();
-        })
+    fn take_events(&mut self) -> Vec<Event> {
+        self.board
+            .take_events()
+            .into_iter()
+            .map(Event::of)
+            .collect()
     }
 
     /// The trace since the last call, a line each (docs/tracing.md).

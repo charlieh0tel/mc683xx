@@ -137,10 +137,10 @@ const fn memory_kind(writable: bool) -> MemoryKind {
 }
 
 /// The resets `causes`: a `ResetScope` as Python gives one.
-fn scope(causes: &[ResetCause]) -> ResetScope {
-    causes
-        .iter()
-        .fold(ResetScope::NONE, |scope, &cause| scope.with(cause.into()))
+fn scope(causes: &[ResetCause]) -> Result<ResetScope, Error> {
+    causes.iter().try_fold(ResetScope::NONE, |scope, &cause| {
+        Ok(scope.with(cause.try_into()?))
+    })
 }
 
 /// A host cycle of `bytes`, 1, 2 or 4.
@@ -285,7 +285,7 @@ impl ChipBuilder {
     fn set_reload_scope(&mut self, memory: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
         let memory = self.wiring.borrow().memory(memory)?;
         self.builder()?
-            .set_reload_scope(memory, self::scope(&scope));
+            .set_reload_scope(memory, self::scope(&scope)?);
         Ok(())
     }
 
@@ -361,7 +361,7 @@ impl ChipBuilder {
     /// Only the resets in `scope`, `ResetCause`s, reach the QSPI's
     /// peripheral (its `reset(now)`); by default every one does.
     fn set_qspi_reset_scope(&mut self, scope: Vec<ResetCause>) -> Result<(), Error> {
-        self.builder()?.set_qspi_reset_scope(self::scope(&scope));
+        self.builder()?.set_qspi_reset_scope(self::scope(&scope)?);
         Ok(())
     }
 
@@ -401,7 +401,7 @@ impl ChipBuilder {
     fn set_reset_scope(&mut self, peripheral: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
         self.builder()?
-            .set_reset_scope(peripheral, self::scope(&scope));
+            .set_reset_scope(peripheral, self::scope(&scope)?);
         Ok(())
     }
 
@@ -598,15 +598,14 @@ pub(crate) enum ResetCause {
     LossOfClock,
     /// The test submodule.
     Test,
+    /// A cause newer than the bindings, in an `Event.Reset`: never one
+    /// to ask for.
+    Unknown,
 }
 
-impl TryFrom<sim::ResetCause> for ResetCause {
-    type Error = Error;
-
-    /// The cause, or [`Error::Unmapped`] for one the bindings do not
-    /// know.
-    fn try_from(cause: sim::ResetCause) -> Result<Self, Error> {
-        Ok(match cause {
+impl From<sim::ResetCause> for ResetCause {
+    fn from(cause: sim::ResetCause) -> Self {
+        match cause {
             sim::ResetCause::External => Self::External,
             sim::ResetCause::PowerOn => Self::PowerOn,
             sim::ResetCause::Watchdog => Self::Watchdog,
@@ -614,14 +613,17 @@ impl TryFrom<sim::ResetCause> for ResetCause {
             sim::ResetCause::System => Self::System,
             sim::ResetCause::LossOfClock => Self::LossOfClock,
             sim::ResetCause::Test => Self::Test,
-            _ => return Err(Error::unmapped("reset cause")),
-        })
+            _ => Self::Unknown,
+        }
     }
 }
 
-impl From<ResetCause> for sim::ResetCause {
-    fn from(cause: ResetCause) -> Self {
-        match cause {
+impl TryFrom<ResetCause> for sim::ResetCause {
+    type Error = Error;
+
+    /// The cause, or [`Error::UnknownResetCause`] for `UNKNOWN`.
+    fn try_from(cause: ResetCause) -> Result<Self, Error> {
+        Ok(match cause {
             ResetCause::External => Self::External,
             ResetCause::PowerOn => Self::PowerOn,
             ResetCause::Watchdog => Self::Watchdog,
@@ -629,7 +631,8 @@ impl From<ResetCause> for sim::ResetCause {
             ResetCause::System => Self::System,
             ResetCause::LossOfClock => Self::LossOfClock,
             ResetCause::Test => Self::Test,
-        }
+            ResetCause::Unknown => return Err(Error::UnknownResetCause),
+        })
     }
 }
 
@@ -792,18 +795,18 @@ pub(crate) enum DsackFaultView {
 }
 
 impl DsackFaultView {
-    /// `fault` as Python sees it, or [`Error::Unmapped`] for one the
-    /// bindings do not know.
-    fn of(fault: DsackFault) -> Result<Self, Error> {
+    /// `fault` as Python sees it, `None` for one the bindings do not
+    /// know.
+    fn of(fault: DsackFault) -> Option<Self> {
         match fault {
-            DsackFault::Unassigned { select } => Ok(Self::Unassigned {
+            DsackFault::Unassigned { select } => Some(Self::Unassigned {
                 select: select.to_string(),
             }),
             // Python numbers the chip's peripherals as it adds them
-            DsackFault::BusUnassigned { peripheral } => Ok(Self::BusUnassigned {
+            DsackFault::BusUnassigned { peripheral } => Some(Self::BusUnassigned {
                 peripheral: peripheral.into(),
             }),
-            _ => Err(Error::unmapped("DSACK fault")),
+            _ => None,
         }
     }
 }
@@ -871,17 +874,29 @@ pub(crate) enum Event {
         /// How.
         fault: DsackFaultView,
     },
+    /// An event the bindings cannot convert: a kind newer than they
+    /// are, or a DSACK fault they do not know.
+    Unknown {
+        /// When, in system clocks.
+        now: u64,
+        /// What happened, as Rust prints it (its `Display`).
+        text: String,
+    },
 }
 
 impl Event {
-    /// `event` as Python sees it, `None` for a kind of event Python
-    /// lacks, or [`Error::Unmapped`] for a value in it (a reset cause,
-    /// a DSACK fault) the bindings do not know.
-    pub(crate) fn of(event: event::Event) -> Result<Option<Self>, Error> {
-        Ok(Some(match event {
+    /// `event` as Python sees it, [`Event::Unknown`] for one it cannot
+    /// convert; a reset cause the bindings do not know is
+    /// [`ResetCause::Unknown`].
+    pub(crate) fn of(event: event::Event) -> Self {
+        let unknown = || Self::Unknown {
+            now: event.now().clocks(),
+            text: event.to_string(),
+        };
+        match event {
             event::Event::Reset { now, cause, .. } => Self::Reset {
                 now: now.clocks(),
-                cause: cause.try_into()?,
+                cause: cause.into(),
             },
             event::Event::ArbitrationTie {
                 now,
@@ -919,42 +934,15 @@ impl Event {
                 stack: entry.stack.0,
                 level: entry.level.map(|level| level.get()),
             },
-            event::Event::Dsack { now, fault, .. } => Self::Dsack {
-                now: now.clocks(),
-                fault: DsackFaultView::of(fault)?,
-            },
-            _ => return Ok(None),
-        }))
+            event::Event::Dsack { now, fault, .. } => {
+                DsackFaultView::of(fault).map_or_else(unknown, |fault| Self::Dsack {
+                    now: now.clocks(),
+                    fault,
+                })
+            }
+            _ => unknown(),
+        }
     }
-}
-
-/// The events `source` holds, as Python sees them, those of a kind
-/// Python lacks left out: `queued` gives them and `take` takes them,
-/// only once every one has converted, so a value in one the bindings do
-/// not know ([`Error::Unmapped`]) leaves them all to take.
-pub(crate) fn take_events<S>(
-    source: &mut S,
-    queued: impl Fn(&S) -> &[event::Event],
-    take: impl FnOnce(&mut S),
-) -> Result<Vec<Event>, Error> {
-    take_converted(source, queued, Event::of, take)
-}
-
-/// What `queued` gives of `source`, each through `convert`, those it
-/// gives none for left out, taken by `take` only once every one has
-/// converted.
-fn take_converted<S, E: Copy, T>(
-    source: &mut S,
-    queued: impl Fn(&S) -> &[E],
-    convert: impl Fn(E) -> Result<Option<T>, Error>,
-    take: impl FnOnce(&mut S),
-) -> Result<Vec<T>, Error> {
-    let converted = queued(source)
-        .iter()
-        .filter_map(|&value| convert(value).transpose())
-        .collect::<Result<_, _>>()?;
-    take(source);
-    Ok(converted)
 }
 
 /// The `Mc68331` methods a board's chip has too, for `Chip` and
@@ -1455,7 +1443,7 @@ chip_methods! {
     /// `reset` instruction's, resets all but the CPU; `EXTERNAL` is
     /// `reset()`.
     fn reset_for(&mut self, cause: ResetCause) -> PyResult<()> {
-        self.chip.reset_for(cause.into());
+        self.chip.reset_for(cause.try_into()?);
         self.pending.check()
     }
 
@@ -1669,10 +1657,8 @@ chip_methods! {
     }
 
     /// What happened since the last call.
-    fn take_events(&mut self) -> Result<Vec<Event>, Error> {
-        take_events(&mut self.chip, Mc68331::events, |chip| {
-            chip.take_events();
-        })
+    fn take_events(&mut self) -> Vec<Event> {
+        self.chip.take_events().into_iter().map(Event::of).collect()
     }
 
     /// Whether the events trace each bus cycle that reaches the chip
@@ -1704,35 +1690,5 @@ chip_methods! {
         let restored = self.chip.restore(&snapshot);
         self.pending.check()?;
         Ok(restored.map_err(Error::from)?)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::take_converted;
-    use crate::error::Error;
-
-    #[test]
-    fn a_value_the_bindings_do_not_know_leaves_every_one_to_take() {
-        let convert = |value: u8| match value {
-            0 => Ok(None),
-            9 => Err(Error::unmapped("test value")),
-            _ => Ok(Some(value)),
-        };
-        let take = |queue: &mut Vec<u8>| queue.clear();
-        let mut queue = vec![1, 9, 2];
-        let taken = take_converted(&mut queue, Vec::as_slice, convert, take);
-        assert!(matches!(
-            taken,
-            Err(Error::Unmapped {
-                kind: "test value",
-                name: None
-            })
-        ));
-        assert_eq!(queue, [1, 9, 2]);
-        let mut queue = vec![1, 0, 2];
-        let taken = take_converted(&mut queue, Vec::as_slice, convert, take);
-        assert_eq!(taken.ok(), Some(vec![1, 2]));
-        assert!(queue.is_empty());
     }
 }

@@ -1249,7 +1249,9 @@ mod tests {
         }
         assert!(Halt::try_from(cpu::Halt::DoubleBusFault).is_ok());
         for cause in sim::ResetCause::ALL {
-            assert!(ResetCause::try_from(cause).is_ok());
+            let mapped = ResetCause::from(cause);
+            assert_ne!(mapped, ResetCause::Unknown);
+            assert_eq!(sim::ResetCause::try_from(mapped).ok(), Some(cause));
         }
         for role in [Role::Read, Role::Write, Role::ReadWrite, Role::Iack] {
             assert!(RoleView::try_from(role).is_ok());

@@ -280,6 +280,27 @@ def test_resets_are_events():
     assert chip.take_events() == []
 
 
+def test_an_event_the_bindings_cannot_convert_is_unknown():
+    event = mc683xx.Event.Unknown(5, "reset (power-on)")
+    assert isinstance(event, mc683xx.Event)
+    assert (event.now, event.text) == (5, "reset (power-on)")
+    match event:
+        case mc683xx.Event.Unknown(now, text):
+            assert (now, text) == (5, "reset (power-on)")
+        case _:
+            raise AssertionError(event)
+
+
+def test_an_unknown_reset_cause_is_no_reset_to_ask_for():
+    builder, _, peripheral = board([NOP], Recorder())
+    with pytest.raises(ValueError, match="UNKNOWN"):
+        builder.set_reset_scope(peripheral, [mc683xx.ResetCause.UNKNOWN])
+    chip = builder.build()
+    with pytest.raises(ValueError, match="UNKNOWN"):
+        chip.reset_for(mc683xx.ResetCause.UNKNOWN)
+    assert [type(event) for event in chip.take_events()] == [mc683xx.Event.Reset]
+
+
 def test_a_reset_with_breakpoint_enters_background_mode_before_the_first_instruction():
     builder, _, _ = board([NOP], Recorder())
     chip = builder.build()

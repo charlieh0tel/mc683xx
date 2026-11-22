@@ -1,5 +1,7 @@
 //! What the chip tells the host of as it runs.
 
+use std::fmt;
+
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -84,6 +86,58 @@ pub enum Event {
     },
 }
 
+impl Event {
+    /// When it happened.
+    #[must_use]
+    pub const fn now(&self) -> Cycles {
+        match *self {
+            Self::Reset { now, .. }
+            | Self::ArbitrationTie { now, .. }
+            | Self::Access { now, .. }
+            | Self::Exception { now, .. }
+            | Self::Dsack { now, .. } => now,
+        }
+    }
+}
+
+/// What happened, without its time: `reset (power-on)`.
+impl fmt::Display for Event {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Reset { cause, .. } => write!(formatter, "reset ({cause})"),
+            Self::ArbitrationTie {
+                level, arbitration, ..
+            } => write!(
+                formatter,
+                "arbitration tie at level {}, IARB {arbitration}",
+                level.get()
+            ),
+            Self::Access {
+                address,
+                size,
+                function_code,
+                write,
+                value,
+                ..
+            } => {
+                let direction = if *write { "write" } else { "read" };
+                write!(
+                    formatter,
+                    "{size} {direction} at {address}, FC {function_code}"
+                )?;
+                match value {
+                    Some(value) => write!(formatter, ": {value:#x}"),
+                    None => formatter.write_str(": bus error"),
+                }
+            }
+            Self::Exception { entry, .. } => {
+                write!(formatter, "exception, vector {}", entry.vector)
+            }
+            Self::Dsack { fault, .. } => write!(formatter, "DSACK fault: {fault}"),
+        }
+    }
+}
+
 /// How a peripheral's DSACK pins disagree with the chip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -103,6 +157,23 @@ pub enum DsackFault {
     },
 }
 
+/// The fault: `PEPAR assigns no DSACK pin of CS3's peripheral`.
+impl fmt::Display for DsackFault {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unassigned { select } => {
+                write!(
+                    formatter,
+                    "PEPAR assigns no DSACK pin of {select}'s peripheral"
+                )
+            }
+            Self::BusUnassigned { .. } => {
+                formatter.write_str("PEPAR assigns no DSACK pin of a bus peripheral")
+            }
+        }
+    }
+}
+
 /// What the chip adds to its events beyond resets and IARB ties, all
 /// off by default: each costs a little on every cycle or exception.
 ///
@@ -115,4 +186,52 @@ pub struct ChipTracing {
     pub accesses: bool,
     /// Each exception entered ([`Event::Exception`]).
     pub exceptions: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_modules::chip_select::ChipSelect;
+    use mc683xx_modules::sim::ResetCause;
+    use mc683xx_target::address::Address;
+    use mc683xx_target::function_code::FunctionCode;
+    use mc683xx_target::size::Size;
+
+    use super::DsackFault;
+    use super::Event;
+
+    #[test]
+    fn an_event_prints_what_happened_and_tells_when() {
+        let now = Cycles::from_clocks(7);
+        let reset = Event::Reset {
+            now,
+            cause: ResetCause::PowerOn,
+        };
+        assert_eq!(reset.now(), now);
+        assert_eq!(reset.to_string(), "reset (power-on)");
+        let access = Event::Access {
+            now,
+            address: Address(0x10),
+            size: Size::Word,
+            function_code: FunctionCode::SUPERVISOR_DATA,
+            write: false,
+            value: None,
+            bus_error: true,
+        };
+        assert_eq!(access.now(), now);
+        assert_eq!(
+            access.to_string(),
+            "word read at 0x00000010, FC 5: bus error"
+        );
+        let dsack = Event::Dsack {
+            now,
+            fault: DsackFault::Unassigned {
+                select: ChipSelect::Boot,
+            },
+        };
+        assert_eq!(
+            dsack.to_string(),
+            "DSACK fault: PEPAR assigns no DSACK pin of CSBOOT's peripheral"
+        );
+    }
 }

@@ -35,6 +35,10 @@ rename renames the Python name with it.  The deliberate differences:
   `Pacing`, though it has `Display` and `FromStr`: its factor is a
   number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`
   the text.
+- **Unknown values:** Python has two members Rust lacks:
+  `Event.Unknown(now, text)`, an event the bindings cannot convert,
+  and `ResetCause.UNKNOWN`, a reset for a cause they do not know, so
+  that `take_events()` hands every event over (Exceptions, below).
 - **Tuples:** a struct of plain values a call returns is a tuple of its
   fields, in order: `PortLevels` as `(driven, levels)`, a port's change
   as `(now, port, driven, levels)`, a PWM pin's as `(now, channel,
@@ -963,11 +967,13 @@ chip.run_for(500)
   which a newer Rust core could give but none does today.
 - `NotImplementedError`: a module that cannot save; or any other value
   this build's bindings have no Python value for (a role, an invalid
-  access's reason, a PWM output, a reset cause, a DSACK fault), which a
-  newer Rust crate could give but none does today.  `take_events()`
-  raises it for an event holding such a value, taking none of the
-  events, which stay for a later take; a kind of event the
-  bindings lack is left out.
+  access's reason, a PWM output), which a newer Rust crate could give
+  but none does today.  `take_events()` never raises and always takes
+  every event: one it cannot convert (a kind the bindings lack, or a
+  DSACK fault they do not know) is `Event.Unknown(now, text)`, `text`
+  what happened as Rust prints it, and a reset for a cause they do not
+  know is an `Event.Reset` whose cause is `ResetCause.UNKNOWN`, which
+  `reset_for` and the reset scopes refuse with `ValueError`.
 - `IndexError`: an unknown memory or peripheral number, or a memory range
   past its end.
 - `OverflowError`: a run past the end of time.

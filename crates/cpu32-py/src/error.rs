@@ -87,6 +87,9 @@ pub(crate) enum Error {
     /// A function code wider than FC[2:0].
     #[error("no function code {0}: FC[2:0] is 0 to 7")]
     FunctionCode(u8),
+    /// `ResetCause.UNKNOWN` given as a reset to make or reach.
+    #[error("ResetCause.UNKNOWN is no reset to ask for")]
+    UnknownResetCause,
     /// Page permissions that are not `r`, `w` and `x`, each at most
     /// once.
     #[error("no permissions {0:?}: give r, w and x, each at most once")]

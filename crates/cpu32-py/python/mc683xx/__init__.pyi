@@ -294,6 +294,7 @@ class ResetCause:
     SYSTEM: ClassVar[ResetCause]
     LOSS_OF_CLOCK: ClassVar[ResetCause]
     TEST: ClassVar[ResetCause]
+    UNKNOWN: ClassVar[ResetCause]
     def __hash__(self) -> int: ...
     def __int__(self) -> int: ...
 
@@ -795,6 +796,18 @@ class Event:
         def now(self) -> int: ...
         @property
         def fault(self) -> DsackFault: ...
+
+    @final
+    class Unknown(Event):
+        """An event the bindings cannot convert, at `now`: `text` is what
+        happened, as Rust prints it."""
+
+        __match_args__ = ("now", "text")
+        def __new__(cls, now: int, text: str) -> Event.Unknown: ...
+        @property
+        def now(self) -> int: ...
+        @property
+        def text(self) -> str: ...
 
 @final
 class Builder:
