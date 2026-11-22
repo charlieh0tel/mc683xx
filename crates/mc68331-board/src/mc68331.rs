@@ -167,7 +167,7 @@ impl fmt::Display for PortPin {
     }
 }
 
-/// The port pin its name, as it displays, names: `PE0`.
+/// The port pin its name, as it displays, names, in any case: `PE0`, `pe0`.
 impl FromStr for PortPin {
     type Err = ParsePortPinError;
 
@@ -175,7 +175,7 @@ impl FromStr for PortPin {
         Port::ALL
             .into_iter()
             .flat_map(Self::all)
-            .find(|pin| pin.name() == name)
+            .find(|pin| pin.name().eq_ignore_ascii_case(name))
             .ok_or_else(|| ParsePortPinError(name.to_owned()))
     }
 }
@@ -872,6 +872,12 @@ mod tests {
             assert_eq!(pin.to_string().parse(), Ok(pin));
         }
         assert_eq!("PE0".parse(), Ok(PortPin::new(Port::E, 0).unwrap()));
+        assert_eq!("pgp7".parse(), Ok(PortPin::new(Port::Gp, 7).unwrap()));
+        assert_eq!("PQs3".parse(), Ok(PortPin::new(Port::Qs, 3).unwrap()));
+        assert_eq!(
+            "pe05".parse::<PortPin>(),
+            Err(ParsePortPinError("pe05".to_owned()))
+        );
         assert_eq!(
             "IRQ7".parse::<PortPin>(),
             Err(ParsePortPinError("IRQ7".to_owned()))

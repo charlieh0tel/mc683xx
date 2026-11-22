@@ -1685,7 +1685,8 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `Vector` and `FunctionCode` (their numbers), and on a board `Time`
   (`1000 ps`), the MC68331's `mc68331::Pin` (`IRQ7`; a port's pin is
   `Pin::Port(PortPin)`, `PortPin::new(Port::E, 0)` refusing a bit the
-  port lacks, and a `PortPin` itself `PE0`), `signal::Kind`,
+  port lacks, and a `PortPin` itself `PE0`, any case; a `Pin` exactly, as
+  a board file names it), `signal::Kind`,
   `Direction`, `peripheral::Role` (`read-write`) and `Lane` (`upper`),
   as the board file names them; `port::Port` (`E`, `GP`), the GPT's
   `pwm::Channel` (`A`) and `gpt::Input` (`PGP0`, `PAI`), and the SIM's
