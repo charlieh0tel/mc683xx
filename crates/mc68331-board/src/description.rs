@@ -451,7 +451,7 @@ impl Description {
             .filter(|parsed| matches!(parsed, Endpoint::Peripheral { .. }))
             .ok_or_else(|| EditError::Port(endpoint.to_owned()))?;
         if external.is_empty() {
-            return Err(EditError::External(external.to_owned()));
+            return Err(EditError::External);
         }
         let to = Endpoint::External(external.to_owned());
         let ends: Vec<_> = self

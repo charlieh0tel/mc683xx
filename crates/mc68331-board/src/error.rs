@@ -238,9 +238,9 @@ pub enum EditError {
     /// the board's nets.
     #[error("{0:?} is no peripheral's port on the board's nets")]
     Port(String),
-    /// An external endpoint's name that names none: an empty one.
-    #[error("{0:?} names no external endpoint")]
-    External(String),
+    /// An empty external endpoint's name, which names none.
+    #[error("an empty name names no external endpoint")]
+    External,
 }
 
 /// Why a board file's TOML does not parse, or does not fit the schema:

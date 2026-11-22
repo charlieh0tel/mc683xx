@@ -426,10 +426,7 @@ fn a_host_stands_in_for_a_peripheral_through_an_external_endpoint() {
         description.rebind("chip.PGP0", "x"),
         Err(EditError::Port("chip.PGP0".to_owned()))
     );
-    assert_eq!(
-        description.rebind("count.in", ""),
-        Err(EditError::External(String::new()))
-    );
+    assert_eq!(description.rebind("count.in", ""), Err(EditError::External));
 }
 
 #[test]
