@@ -112,7 +112,6 @@ impl From<Pacing> for PacingView {
             // a pacing the bindings do not know, by its factor
             other => other
                 .factor()
-                .and_then(|factor| pacing::Factor::new(factor).ok())
                 .map_or(Self::Unpaced(), |factor| Self::Scaled {
                     factor: Factor(factor),
                 }),
@@ -134,8 +133,8 @@ impl PacingView {
     /// Board seconds a wall second, `None` unpaced (Rust's
     /// `Pacing::factor`).
     #[getter]
-    const fn factor(&self) -> Option<f64> {
-        self.pacing().factor()
+    fn factor(&self) -> Option<f64> {
+        self.pacing().factor().map(pacing::Factor::get)
     }
 
     /// As `==` compares: the variant and the factor.

@@ -36,12 +36,15 @@ const SLICE: Duration = Duration::from_millis(20);
 pub struct Factor(f64);
 
 impl Factor {
+    /// A board second a wall second, [`Pacing::RealTime`]'s.
+    pub const REAL_TIME: Self = Self(1.0);
+
     /// `factor`, if it is finite and above 0.
     ///
     /// # Errors
     ///
     /// [`PacingError::Factor`] for any other.
-    pub fn new(factor: f64) -> Result<Self, PacingError> {
+    pub const fn new(factor: f64) -> Result<Self, PacingError> {
         if factor.is_finite() && factor > 0.0 {
             Ok(Self(factor))
         } else {
@@ -103,11 +106,11 @@ pub enum Pacing {
 impl Pacing {
     /// Board seconds a wall second, [`None`] unpaced.
     #[must_use]
-    pub const fn factor(self) -> Option<f64> {
+    pub const fn factor(self) -> Option<Factor> {
         match self {
             Self::Unpaced => None,
-            Self::RealTime => Some(1.0),
-            Self::Scaled(factor) => Some(factor.get()),
+            Self::RealTime => Some(Factor::REAL_TIME),
+            Self::Scaled(factor) => Some(factor),
         }
     }
 }
@@ -194,7 +197,7 @@ struct Anchor {
     /// Board time.
     board: Time,
     /// Board seconds a wall second.
-    factor: f64,
+    factor: Factor,
 }
 
 impl Pacer {
@@ -226,7 +229,7 @@ impl Pacer {
             return Duration::ZERO;
         };
         let board = now.since(anchor.board).seconds_f64();
-        Duration::try_from_secs_f64(board / factor)
+        Duration::try_from_secs_f64(board / factor.get())
             .ok()
             .and_then(|elapsed| anchor.wall.checked_add(elapsed))
             .map_or(Duration::MAX, |due| due.saturating_sub(wall))
@@ -257,7 +260,7 @@ impl Pacer {
             return Some(now);
         };
         let elapsed = wall.saturating_sub(anchor.wall).as_secs_f64();
-        let board = Span::from_seconds_f64(elapsed * factor);
+        let board = Span::from_seconds_f64(elapsed * factor.get());
         Some((anchor.board + board).max(now))
     }
 
@@ -275,7 +278,7 @@ impl Pacer {
     /// The pacing's start at `factor`, or [`None`] if it starts again
     /// here: at the first look, a change of factor, or a board time
     /// behind the start (a restore).
-    fn anchored(&mut self, now: Time, factor: f64, wall: Duration) -> Option<Anchor> {
+    fn anchored(&mut self, now: Time, factor: Factor, wall: Duration) -> Option<Anchor> {
         match self.anchor {
             Some(anchor) if anchor.factor == factor && anchor.board <= now => Some(anchor),
             _ => {
@@ -286,7 +289,7 @@ impl Pacer {
     }
 
     /// Starts the pacing at `factor` from `now` and `wall`.
-    const fn start(&mut self, now: Time, factor: f64, wall: Duration) {
+    const fn start(&mut self, now: Time, factor: Factor, wall: Duration) {
         self.anchor = Some(Anchor {
             wall,
             board: now,
@@ -345,6 +348,10 @@ mod tests {
     #[test]
     fn a_factor_is_finite_and_above_0() {
         assert_eq!(Factor::new(0.5).map(f64::from), Ok(0.5));
+        assert_eq!(Pacing::RealTime.factor(), Some(Factor::REAL_TIME));
+        assert_eq!(Factor::new(1.0), Ok(Factor::REAL_TIME));
+        assert_eq!(Pacing::Unpaced.factor(), None);
+        assert_eq!(scaled(2.0).factor().map(Factor::get), Some(2.0));
         for factor in [0.0, -0.0, -1.0, f64::INFINITY, f64::NAN] {
             assert!(Factor::new(factor).is_err(), "{factor}");
         }

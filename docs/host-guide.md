@@ -1476,7 +1476,9 @@ outside semver.
   it, the default), `RealTime`, or `Scaled(factor)`, board seconds a
   wall second (2.0 twice real time, 0.5 half), a `pacing::Factor`
   (`Factor::new(f64)`, finite and above 0, else `PacingError::Factor`,
-  so every `Pacing` can be kept, and it is `Eq` and `Hash`); it prints and parses as `unpaced`, `realtime`
+  so every `Pacing` can be kept, and it is `Eq` and `Hash`;
+  `Factor::REAL_TIME` is 1.0, and `Pacing::factor()` the factor,
+  `None` unpaced); it prints and parses as `unpaced`, `realtime`
   or the factor.  `Board::run_until_paced(until, quantum)` runs to
   `until` in quanta of `quantum` of board time, a `time::NonZeroSpan`
   (never zero, so the loop always ends: `NonZeroSpan::new(span)` is
