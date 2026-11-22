@@ -83,12 +83,12 @@ const NOTE: &str = "note";
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
 pub struct Options {
-    /// The options enabled: entries `when` names are on the board only
-    /// if their option is here.
+    /// The options enabled: an entry with an `option` is on the board
+    /// only if its option is here.
     pub enabled: BTreeSet<String>,
     /// Every option the file declares enabled, as if each were in
-    /// `enabled`: the board with every option fitted, whatever the file
-    /// declares.
+    /// `enabled`: the board with every option fitted, whatever `enabled`
+    /// holds (each name in it is still checked against the file's).
     pub all_enabled: bool,
     /// The firmware image to run, one of `[board] images` or another:
     /// it replaces every memory's image that is one of them.
