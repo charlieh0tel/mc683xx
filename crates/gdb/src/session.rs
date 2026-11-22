@@ -303,7 +303,7 @@ impl<T: Target> Session<'_, T> {
     fn clean_up<C>(&mut self) -> Result<(), SessionError<T::Error, C>> {
         let mut first = Ok(());
         if self.going.is_some() && !self.emulated {
-            let ran = match self.target.run_for(Cycles::from_clocks(0), &|| false) {
+            let ran = match self.target.run_for(Cycles::ZERO, &|| false) {
                 Ok(ran @ TargetRun::Background(_)) => Ok(ran),
                 _ => self.target.halt(),
             };
