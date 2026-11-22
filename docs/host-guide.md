@@ -812,7 +812,7 @@ Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
   drives on the pins in `mask`, the others kept.  Port C has no inputs:
   a `NoInputsError`.
 - Outputs: `outputs(port)` gives the pins a port drives and their
-  levels, a `PortLevels` (`#[non_exhaustive]`; `PortLevels::new(driven,
+  levels, a `PortLevels` (its fields private; `PortLevels::new(driven,
   levels)`, read back with `driven()` and `levels()`, the levels zero on
   pins not driven; `pin_levels(pins)` fills them).  Port C is the latch on
   the CS3-CS9 pins assigned as discrete outputs (MC68331UM 4.8.1.4);

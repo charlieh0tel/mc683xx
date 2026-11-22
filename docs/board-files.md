@@ -518,7 +518,7 @@ The contract a host's peripheral models target (rustdoc in
     what it offers (`condition::ConditionInfo::new(name, arguments,
     help)`, a `const fn` for a static list; none by default), `arm(condition, arguments)` arms one and gives
     its own `condition::ConditionToken` (`ConditionToken::new(number)`,
-    `get()` its number; or a `condition::ArmError`),
+    `number()` its number, as a `ConditionId`'s; or a `condition::ArmError`),
     and `disarm(token)` disarms it.  Each time an armed condition
     holds the peripheral calls `drive.fire(token)`, which stops the run
     as `drive.stop()` does and names the condition to the board.  It

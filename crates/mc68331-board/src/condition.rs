@@ -58,15 +58,16 @@ impl ConditionInfo {
 pub struct ConditionToken(u32);
 
 impl ConditionToken {
-    /// The token numbered `token`, in whatever scheme the peripheral keeps.
+    /// The token numbered `number`, in whatever scheme the peripheral
+    /// keeps.
     #[must_use]
-    pub const fn new(token: u32) -> Self {
-        Self(token)
+    pub const fn new(number: u32) -> Self {
+        Self(number)
     }
 
     /// Its number.
     #[must_use]
-    pub const fn get(self) -> u32 {
+    pub const fn number(self) -> u32 {
         self.0
     }
 }

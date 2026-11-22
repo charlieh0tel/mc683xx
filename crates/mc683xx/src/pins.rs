@@ -8,7 +8,6 @@ use serde::Serialize;
 /// masks', `driven` first.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "Masks")]
-#[non_exhaustive]
 pub struct PortLevels {
     /// The pins it drives, a mask.
     driven: u8,
