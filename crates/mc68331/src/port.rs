@@ -137,10 +137,37 @@ impl OutputChange {
     }
 }
 
+/// What changed, without its time: `port E drives 0x0f at 0x05`,
+/// `PWMA high`.
+impl fmt::Display for OutputChange {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Port(change) => write!(
+                formatter,
+                "port {} drives {:#04x} at {:#04x}",
+                change.port,
+                change.outputs.driven(),
+                change.outputs.levels()
+            ),
+            Self::Pwm(change) => {
+                let level = if change.level { "high" } else { "low" };
+                write!(formatter, "PWM{} {level}", change.channel)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_modules::pins::PortLevels;
+
+    use super::OutputChange;
     use super::ParsePortError;
     use super::Port;
+    use super::PortChange;
+    use crate::gpt::PwmChange;
+    use crate::gpt::pwm::Channel;
 
     #[test]
     fn ports_print_as_their_names_and_parse_back_in_any_case() {
@@ -151,5 +178,21 @@ mod tests {
         assert_eq!("qs".parse(), Ok(Port::Qs));
         assert_eq!(Port::Gp.to_string(), "GP");
         assert_eq!("?".parse::<Port>(), Err(ParsePortError("?".to_owned())));
+    }
+
+    #[test]
+    fn an_output_change_prints_what_changed() {
+        let port = OutputChange::Port(PortChange {
+            now: Cycles::ZERO,
+            port: Port::E,
+            outputs: PortLevels::new(0x0f, 0x05),
+        });
+        assert_eq!(port.to_string(), "port E drives 0x0f at 0x05");
+        let pwm = OutputChange::Pwm(PwmChange {
+            now: Cycles::ZERO,
+            channel: Channel::A,
+            level: true,
+        });
+        assert_eq!(pwm.to_string(), "PWMA high");
     }
 }

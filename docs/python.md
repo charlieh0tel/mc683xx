@@ -40,7 +40,9 @@ rename renames the Python name with it.  The deliberate differences:
 - **Unknown values:** Python has two members Rust lacks:
   `Event.Unknown(now, text)`, an event the bindings cannot convert,
   and `ResetCause.UNKNOWN`, a reset for a cause they do not know, so
-  that `take_events()` hands every event over (Exceptions, below).
+  that `take_events()` hands every event over (Exceptions, below);
+  `take_output_changes()` likewise hands a change it cannot convert
+  over as `(now, None, text)`.
 - **Tuples:** a struct of plain values a call returns is a tuple of its
   fields, in order: `PortLevels` as `(driven, levels)`, a port's change
   as `(now, port, driven, levels)`, a PWM pin's as `(now, channel,
@@ -639,7 +641,9 @@ what the chip drives within a run comes back as timed changes.
   they happened, each the tuple the other two give, told apart by a
   `Port` or a `Channel` second (Rust's `OutputChange`, flattened as
   they are), for a peripheral clocked by a PWM pin that reads a port GP
-  pin.  Each of the three takes what it gives and leaves the rest.
+  pin; a change of a kind the bindings do not know is `(now, None,
+  text)`, `text` what changed as Rust prints it, so none is lost.  Each
+  of the three takes what it gives and leaves the rest.
 
 ```python
 SCCR0, SCCR1, SCSR, SCDR = QSM + 0x08, QSM + 0x0A, QSM + 0x0C, QSM + 0x0E  # QSMRM 5.2

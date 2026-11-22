@@ -723,28 +723,34 @@ fn pwm_change(change: PwmChange) -> PwmChangeView {
     (change.now.clocks(), change.channel.into(), change.level)
 }
 
+/// A change the bindings do not know as Python takes it: `(now, None,
+/// text)`, `text` what changed as Rust prints it (its `Display`).  The
+/// second is always `None`.
+type UnknownChangeView = (u64, Option<()>, String);
+
 /// A port change or a PWM pin's edge as Python takes it from
 /// `take_output_changes`: the tuple `take_port_changes` or
 /// `take_pwm_changes` gives, told apart by its length and by a `Port` or
-/// a `Channel` second (Rust's `OutputChange`, flattened).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoPyObject)]
+/// a `Channel` second (Rust's `OutputChange`, flattened), or one the
+/// bindings do not know, with `None` second.
+#[derive(Debug, Clone, PartialEq, Eq, IntoPyObject)]
 enum OutputChangeView {
     /// A port's.
     Port(PortChangeView),
     /// A PWM pin's.
     Pwm(PwmChangeView),
+    /// One of a kind newer than the bindings.
+    Unknown(UnknownChangeView),
 }
 
-impl TryFrom<OutputChange> for OutputChangeView {
-    type Error = Error;
-
-    /// The change, or [`Error::Unmapped`] for one the bindings do not
-    /// know.
-    fn try_from(change: OutputChange) -> Result<Self, Error> {
+impl From<OutputChange> for OutputChangeView {
+    /// The change, [`OutputChangeView::Unknown`] for one the bindings
+    /// do not know, so that none drained is lost.
+    fn from(change: OutputChange) -> Self {
         match change {
-            OutputChange::Port(change) => Ok(Self::Port(port_change(change))),
-            OutputChange::Pwm(change) => Ok(Self::Pwm(pwm_change(change))),
-            _ => Err(Error::unmapped("output change")),
+            OutputChange::Port(change) => Self::Port(port_change(change)),
+            OutputChange::Pwm(change) => Self::Pwm(pwm_change(change)),
+            _ => Self::Unknown((change.now().clocks(), None, change.to_string())),
         }
     }
 }
@@ -1695,13 +1701,14 @@ chip_methods! {
     /// `Port`'s order, a PWM pin's in port `GP`'s place, port `GP`'s and
     /// the PWM pins' in the order they happened: each a port change's
     /// `(now, port, driven, levels)` or a PWM edge's `(now, channel,
-    /// level)` (Rust's `take_output_changes`).  Each of the three takes
-    /// what it gives and leaves the rest.
-    fn take_output_changes(&mut self) -> Result<Vec<OutputChangeView>, Error> {
+    /// level)` (Rust's `take_output_changes`); one of a kind the
+    /// bindings do not know is `(now, None, text)`, so none is lost.
+    /// Each of the three takes what it gives and leaves the rest.
+    fn take_output_changes(&mut self) -> Vec<OutputChangeView> {
         self.chip
             .take_output_changes()
             .into_iter()
-            .map(OutputChangeView::try_from)
+            .map(OutputChangeView::from)
             .collect()
     }
 
