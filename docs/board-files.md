@@ -482,7 +482,8 @@ The contract a host's peripheral models target (rustdoc in
   for a host's tests of its constructors, which build their `Parameters`
   with `Parameters::parse(toml_text)` (text that is not a TOML table an
   `error::SyntaxError`, its `line()` and `column()` from 1, as a board
-  file's `LoadError::Syntax` carries).  A host holding TOML that sets
+  file's `LoadError::Syntax` carries; boxed, so a `LoadError`, and a
+  host's error holding one, stays small).  A host holding TOML that sets
   a peripheral's parameters (`description::Options::parameters`) takes the
   table as `Parameters::parse(toml_text)?.into_table()`, and one value
   with `Options::set("PERIPHERAL.KEY=VALUE".parse()?)` (a

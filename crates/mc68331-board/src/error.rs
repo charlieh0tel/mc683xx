@@ -245,10 +245,15 @@ pub enum EditError {
 
 /// Why a board file's TOML does not parse, or does not fit the schema:
 /// its line, column and what is wrong, as the message says.  Opaque:
-/// the parser is not part of the API.
+/// the parser is not part of the API.  Boxed, so a [`LoadError`], and a
+/// host's error holding one, stays small.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{error}")]
-pub struct SyntaxError {
+#[error("{}", .0.error)]
+pub struct SyntaxError(Box<SyntaxErrorInner>);
+
+/// What a [`SyntaxError`] holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SyntaxErrorInner {
     /// The parser's error.
     error: toml::de::Error,
     /// Where in the text it is, line and column from 1, if the parser
@@ -269,26 +274,26 @@ impl SyntaxError {
                     before[line_start..].chars().count() + 1,
                 )
             });
-        Self { error, place }
+        Self(Box::new(SyntaxErrorInner { error, place }))
     }
 
     /// The parser's `error` in a table the text does not hold, as an
     /// absent one read as empty: no place.
-    pub(crate) const fn unplaced(error: toml::de::Error) -> Self {
-        Self { error, place: None }
+    pub(crate) fn unplaced(error: toml::de::Error) -> Self {
+        Self(Box::new(SyntaxErrorInner { error, place: None }))
     }
 
     /// The line it is on, from 1, if the parser placed it.
     #[must_use]
     pub fn line(&self) -> Option<usize> {
-        self.place.map(|(line, _)| line)
+        self.0.place.map(|(line, _)| line)
     }
 
     /// The column it is at on its line, in characters from 1, if the
     /// parser placed it.
     #[must_use]
     pub fn column(&self) -> Option<usize> {
-        self.place.map(|(_, column)| column)
+        self.0.place.map(|(_, column)| column)
     }
 }
 
@@ -384,4 +389,25 @@ pub enum ConditionError {
         /// Why.
         error: ArmError,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LoadError;
+    use super::SyntaxError;
+
+    /// The most a [`LoadError`] may take, in bytes: its size before
+    /// [`SyntaxError`] held a place, well under clippy's
+    /// `result_large_err` limit (128) for a host's error that holds one.
+    const LOAD_ERROR_BOUND: usize = 88;
+
+    #[test]
+    fn a_load_error_stays_small() {
+        assert_eq!(size_of::<SyntaxError>(), size_of::<usize>(), "boxed");
+        assert!(
+            size_of::<LoadError>() <= LOAD_ERROR_BOUND,
+            "LoadError is {} bytes",
+            size_of::<LoadError>()
+        );
+    }
 }
