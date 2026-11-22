@@ -691,19 +691,20 @@ impl ClockHistory {
     }
 }
 
-/// The chip's system clock on board time: from `cycles`, which fell at
-/// `time`, each clock lasts 1 / `frequency` seconds.
+/// A clock on board time: from `cycles`, which fell at `time`, each
+/// clock lasts 1 / `frequency` seconds.
 ///
-/// The board moves it only
+/// The chip's system clock is one.  The board moves that base only
 /// where the frequency changes (SYNCR, a reset), right after the
-/// instruction that changed it (the chip's run ends there,
-/// [`ChipBuilder::build`]), so between changes one base maps every
-/// time and the mapping never drifts.  The clock moves (an MC68331 runs
-/// at 8.388608 MHz from the 32.768 kHz reference until SYNCR is written,
-/// MC68331UM 4.3), so a peripheral that converts must not keep a base it was given
-/// before: each call that has a time gives it one, in its drive
-/// ([`Drive::system_clock`]) or as an argument
-/// ([`Peripheral::next_event`]).
+/// instruction that changed it (the chip's run ends there), so between
+/// changes one base maps every time and the mapping never drifts.  The
+/// clock moves (an MC68331 runs at 8.388608 MHz from the 32.768 kHz
+/// reference until SYNCR is written, MC68331UM 4.3), so a peripheral that
+/// converts must not keep a base it was given before: each call that
+/// has a time gives it one, in its drive ([`Drive::system_clock`]) or as
+/// an argument ([`Peripheral::next_event`]).  A part the chip does not
+/// clock keeps a base of its own that never moves
+/// ([`steady`](Self::steady)).
 ///
 /// The rounding rule, the scheduled input rule's ([PLAN.md,
 /// Peripherals][plan-peripherals]): toward the chip a time rounds up, to
@@ -711,23 +712,22 @@ impl ClockHistory {
 /// rounds down, to the last picosecond at or before it (`time`).  So
 /// `cycles(time(c))` is `c`.
 ///
-/// [`ChipBuilder::build`]: crate::chip::ChipBuilder::build
 /// [`Drive::system_clock`]: crate::peripheral::Drive::system_clock
 /// [`Peripheral::next_event`]: crate::peripheral::Peripheral::next_event
 /// [plan-peripherals]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#peripherals
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeBase {
-    /// The system clock it starts at.
+    /// The clock it starts at.
     cycles: Cycles,
     /// Its time.
     time: Time,
-    /// The system clock's frequency from then, saved as its hertz.
+    /// The clock's frequency from then, saved as its hertz.
     #[serde(with = "mc683xx_cpu32::frequency::hertz")]
     frequency: Frequency,
 }
 
 impl TimeBase {
-    /// A base: system clock `cycles` falls at `time`, and the clock runs
+    /// A base: clock `cycles` falls at `time`, and the clock runs
     /// at `frequency`, whole hertz, from there.
     #[must_use]
     pub const fn new(cycles: Cycles, time: Time, frequency: Frequency) -> Self {
@@ -751,7 +751,7 @@ impl TimeBase {
         Self::new(Cycles::ZERO, Time::ZERO, frequency)
     }
 
-    /// The system clock's frequency.
+    /// The clock's frequency.
     #[must_use]
     pub const fn frequency(&self) -> Frequency {
         self.frequency
@@ -770,7 +770,7 @@ impl TimeBase {
         }
     }
 
-    /// The first system clock at or after `at`, before the base too.
+    /// The first clock at or after `at`, before the base too.
     #[must_use]
     pub fn cycles(&self, at: Time) -> Cycles {
         let scale = |span: Span| u128::from(span.0) * u128::from(self.frequency.hz());
