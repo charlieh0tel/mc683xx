@@ -71,7 +71,6 @@ impl Mc68331 {
         function_code: FunctionCode,
     ) -> Result<u32, AccessError> {
         self.words(address, size)?
-            .into_iter()
             .try_fold(0, |value, (at, size, shift)| {
                 Ok(value | self.cycle(at, size, function_code, None)? << shift)
             })
@@ -120,7 +119,6 @@ impl Mc68331 {
         function_code: FunctionCode,
     ) -> Result<u32, AccessError> {
         self.words(address, size)?
-            .into_iter()
             .try_fold(0, |value, (at, size, shift)| {
                 Ok(value | self.peek_cycle(at, size, function_code)? << shift)
             })
@@ -162,15 +160,21 @@ impl Mc68331 {
 
     /// The byte or word cycles of an access, each on the address lines
     /// with its place in the value.
-    fn words(&self, address: Address, size: Size) -> Result<Vec<(u32, Size, u32)>, AccessError> {
+    fn words(
+        &self,
+        address: Address,
+        size: Size,
+    ) -> Result<impl Iterator<Item = (u32, Size, u32)> + use<>, AccessError> {
         if size != Size::Byte && address.is_odd() {
             return Err(AccessError::Misaligned);
         }
         let at = |by| self.cpu.memory.mask(address.offset(by)).0;
-        Ok(match size {
-            Size::Long => vec![(at(0), Size::Word, WORD_BITS), (at(2), Size::Word, 0)],
-            _ => vec![(at(0), size, 0)],
-        })
+        let first = (at(0), size, 0);
+        let (words, count) = match size {
+            Size::Long => ([(at(0), Size::Word, WORD_BITS), (at(2), Size::Word, 0)], 2),
+            _ => ([first, first], 1),
+        };
+        Ok(words.into_iter().take(count))
     }
 
     /// One byte or word cycle, now, leaving the stop request as it was.
