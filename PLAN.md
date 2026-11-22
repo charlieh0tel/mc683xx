@@ -1450,7 +1450,8 @@ hand.  The keys are in `docs/board-files.md`.
   too, its field private (`from_picos`, `from_nanos`, `from_micros`,
   `from_millis`, `from_seconds`, `from_seconds_f64`, `checked_from_seconds_f64`; `picos`,
   `seconds_f64`), so a time and a span cannot be mixed up: `Time +
-  Span` and `Time - Span` are times, `Time - Time` a `Span`, `Span`s
+  Span` and `Time - Span` are times, `Time - Time` a `Span` (and
+  `Time::since_power_on` a time's own, not `time - Time::ZERO`), `Span`s
   add and scale by counts, all saturating as `Time` does.  Every API
   taking or giving a span takes a `Span` (`Board::run_for`,
   `run_frame`, a quantum, `Serial::length`, `ClockHistory`'s span);

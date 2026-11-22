@@ -103,6 +103,13 @@ impl Time {
     pub const fn since(self, earlier: Self) -> Span {
         Span(self.0.saturating_sub(earlier.0))
     }
+
+    /// The span from power-on ([`Time::ZERO`]) to this: its offset, as a
+    /// [`Span`] to add to another time.
+    #[must_use]
+    pub const fn since_power_on(self) -> Span {
+        Span(self.0)
+    }
 }
 
 impl Add<Span> for Time {
@@ -841,6 +848,9 @@ mod tests {
         );
         assert_eq!(Time::from_picos(2_500) / ps(1_000), 2);
         assert_eq!(Time::from_picos(2_500) % ps(1_000), ps(500));
+        assert_eq!(Time::from_picos(2_500).since_power_on(), ps(2_500));
+        assert_eq!(Time::ZERO.since_power_on(), Span::ZERO);
+        assert_eq!(Time::MAX.since_power_on(), Span::MAX);
     }
 
     #[test]

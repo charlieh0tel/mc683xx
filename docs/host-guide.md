@@ -1401,7 +1401,9 @@ outside semver.
   `from_seconds` or `from_seconds_f64` (saturating; `checked_from_seconds_f64`
   gives `None` out of range, as `Time::checked_from_seconds_f64` does) and read by `picos` or
   `seconds_f64`.  `Time + Span` and `Time - Span` are times, `Time -
-  Time` (`since`) the `Span` between them, and spans add, subtract and
+  Time` (`since`) the `Span` between them, `since_power_on` a time's
+  span from power-on (to carry a time from one board to another:
+  `board.now() + epoch.since_power_on()`), and spans add, subtract and
   scale by a count, all saturating.  A run for a while
   (`Board::run_for(Span::from_millis(10))`), a frame's bound, a
   quantum and a serial frame's length are `Span`s.
