@@ -74,9 +74,16 @@ impl Time {
         Self(Span::from_seconds(seconds).0)
     }
 
+    /// `seconds` seconds since power-on, rounded down to a picosecond:
+    /// power-on for a negative number or a NaN, the last time past it.
+    #[must_use]
+    pub const fn from_seconds_f64(seconds: f64) -> Self {
+        Self(Span::from_seconds_f64(seconds).0)
+    }
+
     /// `seconds` seconds since power-on, rounded down to a picosecond, if
     /// there is such a time: [`None`] for a negative number, a NaN or one
-    /// past the last time.
+    /// past the last time, where [`Time::from_seconds_f64`] saturates.
     #[must_use]
     pub const fn checked_from_seconds_f64(seconds: f64) -> Option<Self> {
         match Span::checked_from_seconds_f64(seconds) {
@@ -867,6 +874,13 @@ mod tests {
             Some(Time::from_picos(2_500_000_000_000))
         );
         assert_eq!(Time::checked_from_seconds_f64(-2.5), None);
+        assert_eq!(
+            Time::from_seconds_f64(2.5),
+            Time::from_picos(2_500_000_000_000)
+        );
+        assert_eq!(Time::from_seconds_f64(-2.5), Time::ZERO);
+        assert_eq!(Time::from_seconds_f64(f64::NAN), Time::ZERO);
+        assert_eq!(Time::from_seconds_f64(1e300), Time::MAX);
         assert!((Time::from_picos(1_500_000_000_000).seconds_f64() - 1.5).abs() < f64::EPSILON);
         assert_eq!(Span::from_seconds(u64::MAX), Span::MAX);
         assert!((Span::from_millis(1_500).seconds_f64() - 1.5).abs() < f64::EPSILON);

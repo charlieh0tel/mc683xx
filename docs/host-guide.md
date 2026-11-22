@@ -1389,8 +1389,8 @@ plumbing the board runs the chip with is hidden from the docs and
 outside semver.
 
 - **Board time.** `time::Time` is a time on the board, picoseconds
-  since power-on, made by `Time::from_picos`, `from_seconds` or
-  `checked_from_seconds_f64` and read by `picos` or `seconds_f64`;
+  since power-on, made by `Time::from_picos`, `from_seconds`, `from_seconds_f64`
+  (saturating) or `checked_from_seconds_f64` and read by `picos` or `seconds_f64`;
   neither it nor a span converts to or from a bare `u64`.  `time::Span` is a span of it, picoseconds too, made
   by `Span::from_picos`, `from_nanos`, `from_micros`, `from_millis`,
   `from_seconds` or `from_seconds_f64` (saturating; `checked_from_seconds_f64`
