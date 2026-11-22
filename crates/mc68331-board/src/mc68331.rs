@@ -43,7 +43,6 @@ use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::clock::ClockSource;
 use mc683xx_modules::sim::reset::ResetScope;
-use mc683xx_target::address::Address;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -515,7 +514,7 @@ impl ChipBuilder for Mc68331Builder {
                 termination,
             } => self
                 .builder
-                .fixed_memory(Address(base), plan.bytes, plan.kind)
+                .fixed_memory(base, plan.bytes, plan.kind)
                 .and_then(|id| {
                     self.builder
                         .set_fixed_timing(id, port, termination)

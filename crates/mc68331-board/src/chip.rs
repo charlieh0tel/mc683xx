@@ -38,6 +38,7 @@ use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_target::address::Address;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -140,7 +141,7 @@ pub enum MemoryPlace<'a> {
     /// At a fixed address on no pin, emulator-only.
     Fixed {
         /// Its first byte's address.
-        base: u32,
+        base: Address,
         /// Its port's width.
         port: PortSize,
         /// How its cycles end: fast termination or wait states.

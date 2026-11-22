@@ -710,7 +710,7 @@ impl<C: Chip> Board<C> {
             })?;
             let place = match memory.base {
                 Some(base) => MemoryPlace::Fixed {
-                    base,
+                    base: Address(base),
                     port: memory.timing.0,
                     termination: memory.timing.1,
                 },
