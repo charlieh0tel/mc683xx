@@ -328,10 +328,14 @@ fn put_back(
 /// writing to a vector cannot fail.
 #[must_use]
 pub fn encode<T: Serialize>(version: u32, value: &T) -> Vec<u8> {
-    let mut bytes = version.to_le_bytes().to_vec();
+    encode_after(Vec::new(), version, value)
+}
+
+/// `bytes`, then [`encode`]'s, written into them.
+fn encode_after<T: Serialize>(mut bytes: Vec<u8>, version: u32, value: &T) -> Vec<u8> {
+    bytes.extend(version.to_le_bytes());
     // Writing to a vector cannot fail; nor can our types' serializers.
-    bytes.extend(postcard::to_allocvec(value).expect("serializes"));
-    bytes
+    postcard::to_extend(value, bytes).expect("serializes")
 }
 
 /// `value` as `layer`'s snapshot of format `version`: [`encode`]'s,
@@ -348,8 +352,7 @@ pub fn encode<T: Serialize>(version: u32, value: &T) -> Vec<u8> {
 pub fn encode_layer<T: Serialize>(layer: Layer, version: u32, value: &T) -> Vec<u8> {
     let mut bytes = MAGIC.to_vec();
     bytes.push(layer.tag());
-    bytes.extend(encode(version, value));
-    bytes
+    encode_after(bytes, version, value)
 }
 
 /// The value `layer`'s snapshot of format `version` holds.
