@@ -134,7 +134,7 @@ const IC4_PIN: u8 = 7;
 /// Input captures 1 to 3 on PGP0 to PGP2.
 const CAPTURES: u8 = 3;
 /// The format of the GPT's snapshot ([`Module::save`]).
-const STATE_VERSION: u32 = 6;
+const STATE_VERSION: u32 = 7;
 /// Output compares 1 to 4, TOC1 to TOC4; OC5 is TI4/O5.
 const COMPARES: usize = 4;
 /// PACTL PAIS, the PAI pin (GPTRM 4.1.1).
@@ -350,20 +350,44 @@ pub struct PwmChange {
     pub level: bool,
 }
 
-/// A change in what the GPT drives on its outputs, as its queue holds
-/// them.
+/// A change in what the GPT drives on an output, `change`, as its
+/// queues hold them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-enum Queued {
-    /// Port GP's pins: those it drives, the output compares' and
-    /// PORTGP's outputs, and their levels.
-    PortGp(PortLevels),
-    /// A PWM pin's level, while the host asks for its edges.
-    Pwm {
-        /// The pin.
-        channel: Channel,
-        /// Its level.
-        level: bool,
-    },
+struct Queued<T> {
+    /// Its place in the order the changes of both queues were found, so
+    /// that those at one time merge in the order they happened.
+    sequence: u64,
+    /// When it happened.
+    at: Cycles,
+    /// What changed.
+    change: T,
+}
+
+/// The changes `queue` holds, emptied, in time order, those at one time
+/// in the order found.
+fn drain_in_order<T>(queue: &mut Vec<Queued<T>>) -> Vec<Queued<T>> {
+    let mut taken = mem::take(queue);
+    taken.sort_by_key(|queued| (queued.at, queued.sequence));
+    taken
+}
+
+/// A queued change of port GP as the host takes it.
+const fn port_change(queued: Queued<PortLevels>) -> PortChange {
+    PortChange {
+        now: queued.at,
+        port: Port::Gp,
+        outputs: queued.change,
+    }
+}
+
+/// A queued PWM edge as the host takes it.
+const fn pwm_change(queued: Queued<(Channel, bool)>) -> PwmChange {
+    let (channel, level) = queued.change;
+    PwmChange {
+        now: queued.at,
+        channel,
+        level,
+    }
 }
 
 /// How far a fast output's edges have been found.
@@ -386,9 +410,15 @@ impl Found {
 /// Peripherals).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Edges {
-    /// Changes the host has not taken, each with its time, in the order
-    /// found.
-    queue: Vec<(Cycles, Queued)>,
+    /// Port GP's changes the host has not taken, its pins: those the GPT
+    /// drives, the output compares' and PORTGP's outputs, and their
+    /// levels; in the order found.
+    port_queue: Vec<Queued<PortLevels>>,
+    /// The PWM pins' edges the host has not taken, while it asks for
+    /// them: the pin and its level; in the order found.
+    pwm_queue: Vec<Queued<(Channel, bool)>>,
+    /// The [`Queued::sequence`] of the next change found.
+    sequence: u64,
     /// Port GP's driven pins and their levels, as last reported.
     port: PortLevels,
     /// Each PWM pin's level as last reported, while the host asks for
@@ -401,6 +431,26 @@ struct Edges {
     oc1_clock: Option<bool>,
     /// How far OC1's clock edges are found.
     oc1_found: Found,
+}
+
+impl Edges {
+    /// `change`, found now, at `at`, queued in its order.
+    fn queued<T>(&mut self, at: Cycles, change: T) -> Queued<T> {
+        let sequence = self.sequence;
+        self.sequence += 1;
+        Queued {
+            sequence,
+            at,
+            change,
+        }
+    }
+
+    /// The order found starts again once both queues are empty.
+    const fn settle(&mut self) {
+        if self.port_queue.is_empty() && self.pwm_queue.is_empty() {
+            self.sequence = 0;
+        }
+    }
 }
 
 /// The levels on the GPT's input pins.
@@ -559,7 +609,9 @@ impl Gpt {
             levels: inputs.port,
             pclk_rise: None,
             edges: Edges {
-                queue: Vec::new(),
+                port_queue: Vec::new(),
+                pwm_queue: Vec::new(),
+                sequence: 0,
                 port: PortLevels::new(0, 0),
                 pwm: [None; 2],
                 pwm_found: Found::new(0, now),
@@ -763,57 +815,55 @@ impl Gpt {
         pwm_edges.chain(oc1).min()
     }
 
-    /// The changes in what port GP drives since the last call, and with
-    /// `pwm` the PWM pins' reported edges, each at the time it happened,
-    /// in time order, those at one time in the order they happened
-    /// ([PLAN.md], Peripherals).  Without `pwm` the PWM pins' stay
-    /// queued.
+    /// The changes in what port GP drives since the last call, each at
+    /// the time it happened, in time order, those at one time in the
+    /// order they happened ([PLAN.md], Peripherals).  The PWM pins'
+    /// edges are queued apart, for [`take_pwm_changes`](Self::take_pwm_changes).
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
-    pub(crate) fn take_output_changes(&mut self, pwm: bool) -> Vec<OutputChange> {
-        self.take_changes(|now, change| match change {
-            Queued::PortGp(outputs) => Some(OutputChange::Port(PortChange {
-                now,
-                port: Port::Gp,
-                outputs,
-            })),
-            Queued::Pwm { channel, level } => pwm.then_some(OutputChange::Pwm(PwmChange {
-                now,
-                channel,
-                level,
-            })),
-        })
+    pub(crate) fn take_port_changes(&mut self) -> Vec<PortChange> {
+        let taken = drain_in_order(&mut self.edges.port_queue);
+        self.edges.settle();
+        taken.into_iter().map(port_change).collect()
     }
 
-    /// The PWM pins' reported edges since the last call, in time order;
-    /// port GP's stay queued.
+    /// The PWM pins' reported edges since the last call, as
+    /// [`take_port_changes`](Self::take_port_changes) gives port GP's,
+    /// which stay queued.
     pub(crate) fn take_pwm_changes(&mut self) -> Vec<PwmChange> {
-        self.take_changes(|now, change| match change {
-            Queued::Pwm { channel, level } => Some(PwmChange {
-                now,
-                channel,
-                level,
-            }),
-            Queued::PortGp(_) => None,
-        })
+        let taken = drain_in_order(&mut self.edges.pwm_queue);
+        self.edges.settle();
+        taken.into_iter().map(pwm_change).collect()
     }
 
-    /// The queued changes `select` takes, given each one's time, in time
-    /// order, those at one time in the order found; the others stay
-    /// queued.
-    fn take_changes<T>(&mut self, select: impl Fn(Cycles, Queued) -> Option<T>) -> Vec<T> {
-        let mut taken = Vec::new();
-        self.edges
-            .queue
-            .retain(|&(at, change)| match select(at, change) {
-                Some(change) => {
-                    taken.push((at, change));
-                    false
-                }
-                None => true,
-            });
-        taken.sort_by_key(|&(at, _)| at);
-        taken.into_iter().map(|(_, change)| change).collect()
+    /// Both: what [`take_port_changes`](Self::take_port_changes) and
+    /// [`take_pwm_changes`](Self::take_pwm_changes) would give, merged in
+    /// time order, those at one time in the order they happened.
+    pub(crate) fn take_output_changes(&mut self) -> Vec<OutputChange> {
+        let mut taken: Vec<_> = drain_in_order(&mut self.edges.port_queue)
+            .into_iter()
+            .map(|queued| {
+                (
+                    queued.at,
+                    queued.sequence,
+                    OutputChange::Port(port_change(queued)),
+                )
+            })
+            .chain(
+                drain_in_order(&mut self.edges.pwm_queue)
+                    .into_iter()
+                    .map(|queued| {
+                        (
+                            queued.at,
+                            queued.sequence,
+                            OutputChange::Pwm(pwm_change(queued)),
+                        )
+                    }),
+            )
+            .collect();
+        self.edges.settle();
+        taken.sort_by_key(|&(at, sequence, _)| (at, sequence));
+        taken.into_iter().map(|(_, _, change)| change).collect()
     }
 
     /// Port GP's driven pins and their levels, and the PWM pins' levels
@@ -1032,7 +1082,8 @@ impl Gpt {
         let outputs = self.port_outputs_with(self.edges.oc1_clock == Some(true));
         if outputs != self.edges.port {
             self.edges.port = outputs;
-            self.edges.queue.push((at, Queued::PortGp(outputs)));
+            let queued = self.edges.queued(at, outputs);
+            self.edges.port_queue.push(queued);
         }
     }
 
@@ -1101,8 +1152,8 @@ impl Gpt {
         let reported = &mut self.edges.pwm[channel.index()];
         if *reported != Some(level) {
             *reported = Some(level);
-            let change = Queued::Pwm { channel, level };
-            self.edges.queue.push((at, change));
+            let queued = self.edges.queued(at, (channel, level));
+            self.edges.pwm_queue.push(queued);
         }
     }
 

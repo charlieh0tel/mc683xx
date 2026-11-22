@@ -512,13 +512,18 @@ surrounds the SoC with its board peripherals through:
   with every port's, and the PWM pins' in `take_pwm_changes`,
   `PwmChange { now, channel, level }` in time order.  The PWM pins
   are no port's, so they keep a stream of their own; the GPT holds
-  both in one queue (its snapshot unchanged) and each take draws its
-  own.  Two streams lose the order of a port GP change and a PWM
-  change at one time (one MOVEM can force PWMA and write PORTGP), which
-  a peripheral clocked by one and fed by the other sees, so
-  `take_output_changes` gives both in one stream of `OutputChange`, a
-  PWM pin's in port GP's place among the ports at one time, the GPT's
-  in their queue's order; the board takes that.  A change takes the time it happened, which is the cycle's
+  each in its own queue, so each take drains exactly what it gives and
+  leaves nothing of the other's behind (a single queue drained
+  selectively kept, and saved, whatever its host never took).  Two
+  streams lose the order of a port GP change and a PWM change at one
+  time (one MOVEM can force PWMA and write PORTGP), which a peripheral
+  clocked by one and fed by the other sees, so each queued change
+  carries its place in the order both were found, and
+  `take_output_changes` drains both into one stream of `OutputChange`,
+  a PWM pin's in port GP's place among the ports at one time, the
+  GPT's in the order found; the board takes that.  A host takes either
+  or both streams, or the merged one: what one take gives, no other
+  gives again (decided 2026-11-21, round 5).  A change takes the time it happened, which is the cycle's
   start for a write.  A compare's edge takes the time TCNT matched (GPTRM 3.3),
   a write's (CFORC, PORTGP, DDRGP, TCTL1, OC1M) and a reset's the
   cycle's, whenever the GPT catches up; quanta still end at the

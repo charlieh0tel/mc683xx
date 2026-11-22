@@ -1186,7 +1186,8 @@ impl Mc68331 {
 
     /// The PWM pins' edges since the last call, in time order, each at
     /// the time it happened, while `set_report_pwm_edges` asks for them
-    /// ([PLAN.md], Peripherals).
+    /// ([PLAN.md], Peripherals).  It takes only these: port changes stay
+    /// for [`take_port_changes`](Self::take_port_changes).
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
     pub fn take_pwm_changes(&mut self) -> Vec<PwmChange> {
@@ -1253,27 +1254,23 @@ impl Mc68331 {
     /// edges; the output compares' at their compares, OC1's CPROUT
     /// clock's while `set_report_oc1_clock_edges` asks for them; the
     /// QSPI's PCS and the SCI's TXD at their entries' and frames'
-    /// times.
+    /// times.  It takes only these: the PWM pins' edges stay for
+    /// [`take_pwm_changes`](Self::take_pwm_changes).
     pub fn take_port_changes(&mut self) -> Vec<PortChange> {
-        self.board
-            .take_output_changes(false)
-            .into_iter()
-            .filter_map(|change| match change {
-                OutputChange::Port(change) => Some(change),
-                OutputChange::Pwm(_) => None,
-            })
-            .collect()
+        self.board.take_port_changes()
     }
 
     /// The changes [`take_port_changes`](Self::take_port_changes) and
-    /// [`take_pwm_changes`](Self::take_pwm_changes) give, in one stream,
-    /// in time order, those at one time in [`Port::ALL`]'s order, a PWM
-    /// pin's in port GP's place, port GP's and the PWM pins' in the order
-    /// they happened: for a host that drives one thing from both, a
-    /// peripheral clocked by PWMA that takes its data from a port GP pin,
-    /// as the firmware may change both in one instruction.
+    /// [`take_pwm_changes`](Self::take_pwm_changes) give, taking both, in
+    /// one stream, in time order, those at one time in [`Port::ALL`]'s
+    /// order, a PWM pin's in port GP's place, port GP's and the PWM pins'
+    /// in the order they happened: for a host that drives one thing from
+    /// both, a peripheral clocked by PWMA that takes its data from a port
+    /// GP pin, as the firmware may change both in one instruction.  Each
+    /// of the three takes what it gives and leaves the rest: a host
+    /// calls this alone, or either or both of the other two.
     pub fn take_output_changes(&mut self) -> Vec<OutputChange> {
-        self.board.take_output_changes(true)
+        self.board.take_output_changes()
     }
 
     /// The host asserts or negates `pin`.

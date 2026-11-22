@@ -383,31 +383,50 @@ impl Board {
         Ok(())
     }
 
-    /// The changes in what each port drives since the last call, and
-    /// with `pwm` the PWM pins' reported edges, in time order, those at
-    /// one time in [`Port::ALL`]'s order, a PWM pin's in port GP's
-    /// place, the GPT's in the order they happened.  Without `pwm` the
-    /// PWM pins' stay queued.
-    pub(crate) fn take_output_changes(&mut self, pwm: bool) -> Vec<OutputChange> {
+    /// The changes in what each port drives since the last call, in time
+    /// order, those at one time in [`Port::ALL`]'s order, port GP's in
+    /// the order they happened.  The PWM pins' edges stay queued.
+    pub(crate) fn take_port_changes(&mut self) -> Vec<PortChange> {
+        let gpt = self.module_mut::<Gpt>(GPT).take_port_changes();
+        self.merge_port_changes(gpt, |change| change, |change| (change.now, change.port))
+    }
+
+    /// [`take_port_changes`](Self::take_port_changes)'s and the PWM pins'
+    /// reported edges, taking both, in one stream: a PWM pin's in port
+    /// GP's place, the GPT's in the order they happened.
+    pub(crate) fn take_output_changes(&mut self) -> Vec<OutputChange> {
+        let gpt = self.module_mut::<Gpt>(GPT).take_output_changes();
+        self.merge_port_changes(gpt, OutputChange::Port, |change| {
+            (change.now(), change.place())
+        })
+    }
+
+    /// The SIM's and QSM's port changes since the last call, as `port`
+    /// makes them, merged with `gpt`'s by `order`, a time and a place.
+    fn merge_port_changes<T>(
+        &mut self,
+        gpt: Vec<T>,
+        port: impl Fn(PortChange) -> T,
+        order: impl Fn(&T) -> (Cycles, Port),
+    ) -> Vec<T> {
         let sim = self.sim.take_output_changes();
-        let gpt = self.module_mut::<Gpt>(GPT).take_output_changes(pwm);
         let qs = self.module_mut::<Qsm>(QSM).take_output_changes();
-        if sim.is_empty() && gpt.is_empty() && qs.is_empty() {
-            return Vec::new();
+        if sim.is_empty() && qs.is_empty() {
+            return gpt;
         }
-        let of = |port| move |(now, outputs)| OutputChange::Port(PortChange { now, port, outputs });
+        let of = |port| move |(now, outputs)| PortChange { now, port, outputs };
         let mut changes: Vec<_> = sim
             .into_iter()
             .map(|(at, change)| of(Port::from_sim(change.port))((at, change.outputs)))
+            .map(&port)
             .chain(gpt)
-            .chain(qs.into_iter().map(of(Port::Qs)))
+            .chain(qs.into_iter().map(of(Port::Qs)).map(&port))
             .collect();
         // each source is in time order, but the SIM's ports at one time
         // are in the order they were written (one MOVEM can write port F
         // before port E): sort, stably, unless already in order, which
         // keeps the GPT's port GP and PWM changes at one time in theirs
-        let order = |change: &OutputChange| (change.now(), change.place());
-        if !changes.is_sorted_by_key(order) {
+        if !changes.is_sorted_by_key(&order) {
             changes.sort_by_key(order);
         }
         changes

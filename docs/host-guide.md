@@ -899,7 +899,10 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
   included.  `take_output_changes()` gives both in one stream of
   `OutputChange::Port` and `OutputChange::Pwm`, those at one time in
   the order they happened, for a host that drives one thing from both
-  (a peripheral clocked by PWMA, its data on a port GP pin).
+  (a peripheral clocked by PWMA, its data on a port GP pin).  Each of
+  the three takes what it gives and leaves the rest: `take_port_changes`
+  leaves the PWM edges, `take_pwm_changes` the port changes, and
+  `take_output_changes` takes both.
 
 ```rust
 use mc683xx_target::address::Address;
