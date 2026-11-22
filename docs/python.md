@@ -23,12 +23,11 @@ methods, properties and arguments, UPPER_CASE enum members.  A Rust
 rename renames the Python name with it.  The deliberate differences:
 
 - **Enums:** a Rust type with `Display` and `FromStr` crosses as its
-  string, in and out: a chip select (`"CSBOOT"`, `"CS0"`), a GPT input
-  (`"PGP0"`-`"PGP7"`, `"PAI"`, `"PCLK"`), a net type (`"serial"`), a
-  port direction (`"in-out"`).  Registers are
+  string, in and out: a chip select (`"CSBOOT"`, `"CS0"`), a net type
+  (`"serial"`), a port direction (`"in-out"`).  Registers are
   by name, Python's own (`"D0"`, `"SR"`).  Any other Rust enum is a
   Python class whose members are its variants (`Channel.A`,
-  `Port.E`, `Port.GP`, `Role.READ_WRITE`, `Lane.UPPER`,
+  `Port.E`, `Port.GP`, `Input.PAI`, `Role.READ_WRITE`, `Lane.UPPER`,
   `ResetCause.WATCHDOG`, `Space.USER`), and is never taken as a
   string (its members' `int` values are their order in the class, not
   the hardware's encoding, and outside semver); one whose variants carry data has a class for each

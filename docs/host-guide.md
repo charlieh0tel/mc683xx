@@ -967,8 +967,8 @@ reset (SPCR0 $0104: CPOL clear, CPHA set, SPBR 4, QSMRM 4.3.1) at the
 system clock the caller gives, 8.388608 MHz out of reset from a
 32.768-kHz reference; `floating_miso(bits)` is MISO no peripheral drives, all
 ones.  Optional:
-`chip_selects(levels, now)` whenever `PCS[3:0]` change, so a peripheral
-framed by its select sees the frame end, and `clock(QspiClock, now)`
+`set_chip_selects(levels, now)` whenever `PCS[3:0]` change, so a peripheral
+framed by its select sees the frame end, and `set_clock(QspiClock, now)`
 when the serial clock changes (CPOL, CPHA, the SCK period,
 `baud()`, a `Frequency`).  The one peripheral is the board's whole QSPI side: it
 sees every transfer and every level change, whatever they select.
