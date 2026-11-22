@@ -458,18 +458,6 @@ impl From<NonZeroSpan> for Span {
 )]
 pub struct Phase(u128);
 
-impl From<u128> for Phase {
-    fn from(units: u128) -> Self {
-        Self(units)
-    }
-}
-
-impl From<Phase> for u128 {
-    fn from(phase: Phase) -> Self {
-        phase.0
-    }
-}
-
 impl Phase {
     /// The phase `units` [`PHASE_UNITS`] past the origin.
     #[must_use]
