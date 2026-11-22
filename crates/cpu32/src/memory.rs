@@ -850,7 +850,7 @@ impl Memory {
     pub fn read_bytes(&self, address: Address, bytes: &mut [u8]) -> Result<(), Unserved> {
         let mut done = 0;
         while done < bytes.len() {
-            let (region, from, count) = self.span(address, done, bytes.len())?;
+            let (region, from, count) = self.span(address, done, bytes.len(), |page| page.read)?;
             bytes[done..done + count].copy_from_slice(&self.region(region)[from..from + count]);
             done += count;
         }
@@ -871,7 +871,7 @@ impl Memory {
         let mut spans = Vec::new();
         let mut done = 0;
         while done < bytes.len() {
-            let span = self.span(address, done, bytes.len())?;
+            let span = self.span(address, done, bytes.len(), |page| page.read)?;
             spans.push((span, done));
             done += span.2;
         }
@@ -883,16 +883,17 @@ impl Memory {
 
     /// Where a debugger's access of `length` bytes from `address` finds
     /// its bytes from `done` on, within one page of supervisor space: the
-    /// region of the page's read backing, the index in it, and how many
-    /// of the bytes left the page holds.
+    /// region of the backing `backing` picks of the page, the index in
+    /// it, and how many of the bytes left the page holds.
     fn span(
         &self,
         address: Address,
         done: usize,
         length: usize,
+        backing: fn(&Page) -> Option<Backing>,
     ) -> Result<(RegionId, usize, usize), Unserved> {
         let at = address.offset(done as u32);
-        let backing = self.entry(Space::Supervisor, at).read.ok_or(Unserved(at))?;
+        let backing = backing(&self.entry(Space::Supervisor, at)).ok_or(Unserved(at))?;
         let within = self.mask(at).0 % PAGE_BYTES;
         let count = ((PAGE_BYTES - within) as usize).min(length - done);
         Ok((backing.region, (backing.offset + within) as usize, count))
