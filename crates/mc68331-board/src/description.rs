@@ -12,6 +12,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::fs;
 use std::io;
 use std::mem;
@@ -166,6 +167,17 @@ impl Setting {
     #[must_use]
     pub const fn value(&self) -> &ParameterValue {
         &self.value
+    }
+}
+
+/// `PERIPHERAL.KEY=VALUE`, its value as TOML writes it.  A setting
+/// `FromStr` parsed reads back the same; one built by [`Setting::new`]
+/// does too while its names are non-empty, the peripheral's holds no
+/// `.` and neither an `=` (a datetime TOML would not write is written
+/// as a string).
+impl fmt::Display for Setting {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}.{}={}", self.peripheral, self.key, self.value)
     }
 }
 

@@ -1684,17 +1684,25 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   bus error exception, as the firmware sees it.
 - Nothing in a run returns an error: a halt is a `Stop`, a reset an
   event.
-- Types print with `Display` and parse with `FromStr`: `ChipSelect`
-  (`CSBOOT`, `CS0`, any case), `Address` (`0x00001234`, and
+- Types print with `Display`: `Address` (`0x00001234`, and
   `LowerHex`), `Cycles` (`12 clocks`), `Frequency` (`16777216 Hz`),
-  `Vector` and `FunctionCode` (their numbers), and on a board `Time`
-  (`1000 ps`), the MC68331's `mc68331::Pin` (`IRQ7`; a port's pin is
+  `Vector` (its number), and on a board `Time` (`1000 ps`).  Those
+  with a name also parse with `FromStr`, the name printed: `ChipSelect`
+  (`CSBOOT`, `CS0`, any case), `FunctionCode` (its number, `0` to
+  `7`), `InterruptLevel` (`level 7`, as CPU32RM Table 6-1 names it)
+  and `IrqPin` (`IRQ7`), any case, the snapshot's `state::Layer`
+  (`chip`, any case), and on a board the MC68331's `mc68331::Pin`
+  (`IRQ7`; a port's pin is
   `Pin::Port(PortPin)`, `PortPin::new(Port::E, 0)` refusing a bit the
   port lacks, and a `PortPin` itself `PE0`, any case; a `Pin` exactly, as
   a board file names it), `signal::Kind`,
   `Direction`, `peripheral::Role` (`read-write`) and `Lane` (`upper`),
-  as the board file names them; `port::Port` (`E`, `GP`), the GPT's
-  `pwm::Channel` (`A`) and `gpt::Input` (`PGP0`, `PAI`), and the SIM's
+  as the board file names them; `pacing::Pacing` and `pacing::Factor`
+  (`2.5`); a `description::Setting` (`dac.value=16`, its value as TOML
+  writes it, a `registry::ParameterValue` printing so too);
+  `port::Port` (`E`, `GP`), the GPT's
+  `pwm::Channel` (`A`), `gpt::Input` (`PGP0`, `PAI`) and `PortGpPin`
+  (`PGP0`), and the SIM's
   `ResetCause` (`power-on`, as a board file's reset scope names it),
   any case.
   The newtypes convert `From` and into what they

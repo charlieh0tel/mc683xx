@@ -277,6 +277,35 @@ impl PortGpPin {
 /// The prefix of port GP's pins' names, `PGP0` to `PGP7` (MC68331UM
 /// Figure 7-1).
 const PGP: &str = "PGP";
+
+/// Its name: `PGP0`.
+impl fmt::Display for PortGpPin {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{PGP}{}", self.0)
+    }
+}
+
+/// The pin named so, as `Display` writes it, in any case: `PGP0`,
+/// `pgp0`.
+impl FromStr for PortGpPin {
+    type Err = ParsePortGpPinError;
+
+    fn from_str(name: &str) -> Result<Self, ParsePortGpPinError> {
+        name.get(..PGP.len())
+            .filter(|prefix| prefix.eq_ignore_ascii_case(PGP))
+            .and_then(|_| name.get(PGP.len()..))
+            .and_then(|bit| match bit.as_bytes() {
+                [digit @ b'0'..=b'9'] => Self::new(digit - b'0'),
+                _ => None,
+            })
+            .ok_or_else(|| ParsePortGpPinError(name.to_owned()))
+    }
+}
+
+/// Text that names no port GP pin.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no port GP pin {0:?}")]
+pub struct ParsePortGpPinError(String);
 /// PAI's pin's name.
 const PAI: &str = "PAI";
 /// PCLK's pin's name.
@@ -299,7 +328,7 @@ pub enum Input {
 impl fmt::Display for Input {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PortGp(pin) => write!(formatter, "{PGP}{}", pin.get()),
+            Self::PortGp(pin) => write!(formatter, "{pin}"),
             Self::Pai => formatter.write_str(PAI),
             Self::Pclk => formatter.write_str(PCLK),
         }
@@ -319,14 +348,9 @@ impl FromStr for Input {
         if named(PCLK) {
             return Ok(Self::Pclk);
         }
-        name.get(..PGP.len())
-            .filter(|prefix| prefix.eq_ignore_ascii_case(PGP))
-            .and_then(|_| name.get(PGP.len()..))
-            .filter(|bit| bit.len() == 1)
-            .and_then(|bit| bit.parse().ok())
-            .and_then(PortGpPin::new)
+        name.parse()
             .map(Self::PortGp)
-            .ok_or_else(|| ParseInputError(name.to_owned()))
+            .map_err(|_| ParseInputError(name.to_owned()))
     }
 }
 

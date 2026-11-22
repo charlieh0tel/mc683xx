@@ -5,6 +5,7 @@ use std::rc::Rc;
 use super::CpuState;
 use super::Layer;
 use super::MAGIC;
+use super::ParseLayerError;
 use super::StateError;
 use super::VERSION;
 use super::decode_layer;
@@ -305,5 +306,18 @@ fn a_reason_may_be_built_at_run_time() {
     assert_eq!(
         StateError::mismatch("a fixed reason").to_string(),
         "snapshot of other hardware: a fixed reason"
+    );
+}
+
+#[test]
+fn a_layer_parses_from_its_name_in_any_case() {
+    for layer in Layer::ALL {
+        assert_eq!(layer.to_string().parse(), Ok(layer));
+        assert_eq!(layer.to_string().to_uppercase().parse(), Ok(layer));
+    }
+    assert_eq!("cpu".parse(), Ok(Layer::Cpu));
+    assert_eq!(
+        "flat".parse::<Layer>(),
+        Err(ParseLayerError("flat".to_owned()))
     );
 }

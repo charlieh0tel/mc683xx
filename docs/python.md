@@ -24,7 +24,9 @@ rename renames the Python name with it.  The deliberate differences:
 
 - **Enums:** a Rust type with `Display` and `FromStr` crosses as its
   string, in and out: a chip select (`"CSBOOT"`, `"CS0"`), a net type
-  (`"serial"`), a port direction (`"in-out"`).  Registers are
+  (`"serial"`), a port direction (`"in-out"`).  A newtype of a number
+  that also parses (`FunctionCode`, `InterruptLevel`, `IrqPin`,
+  `pacing::Factor`) crosses as its number.  Registers are
   by name, Python's own (`"D0"`, `"SR"`).  Any other Rust enum is a
   Python class whose members are its variants (`Channel.A`,
   `Port.E`, `Port.GP`, `Input.PAI`, `Role.READ_WRITE`, `Lane.UPPER`,

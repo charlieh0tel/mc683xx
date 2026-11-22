@@ -259,6 +259,18 @@ fn a_run_sets_parameters_over_the_files() {
         (setting.peripheral(), setting.key(), setting.value()),
         ("d", "value", &ParameterValue::Integer(0x10))
     );
+    assert_eq!(setting.to_string(), "d.value=16");
+    for text in [
+        "d.value=0x10",
+        "d.name=bare text",
+        "d.name=\"quoted\"",
+        "d.list=[1, 2.5, true]",
+        "d.table={ a = 1 }",
+        "d.at=1979-05-27T07:32:00Z",
+    ] {
+        let setting: Setting = text.parse().unwrap();
+        assert_eq!(setting.to_string().parse(), Ok(setting), "{text}");
+    }
     for malformed in ["d.value", "value=1", ".value=1", "d.=1"] {
         assert!(matches!(
             malformed.parse::<Setting>(),

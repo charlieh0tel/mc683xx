@@ -107,11 +107,7 @@ impl fmt::Display for Event {
             Self::Reset { cause, .. } => write!(formatter, "reset ({cause})"),
             Self::ArbitrationTie {
                 level, arbitration, ..
-            } => write!(
-                formatter,
-                "arbitration tie at level {}, IARB {arbitration}",
-                level.get()
-            ),
+            } => write!(formatter, "arbitration tie at {level}, IARB {arbitration}"),
             Self::Access {
                 address,
                 size,

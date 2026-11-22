@@ -1,6 +1,7 @@
 //! Function codes: the address space of each bus cycle.
 
 use core::fmt;
+use core::str::FromStr;
 
 /// The function code FC\[2:0\] a bus cycle carries, naming its address
 /// space (CPU32RM 5.3, Table 5-1).  Codes 0, 3 and 4 are reserved;
@@ -98,6 +99,26 @@ impl fmt::Display for FunctionCode {
     }
 }
 
+/// The function code its number, as `Display` writes it, names: `0`
+/// to `7`.
+impl FromStr for FunctionCode {
+    type Err = ParseFunctionCodeError;
+
+    fn from_str(text: &str) -> Result<Self, ParseFunctionCodeError> {
+        match text.as_bytes() {
+            [digit @ b'0'..=b'7'] => Ok(Self(digit - b'0')),
+            _ => Err(ParseFunctionCodeError {}),
+        }
+    }
+}
+
+/// Text that names no function code; without the text, as
+/// [`ParseRegisterError`](crate::register::ParseRegisterError).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("not a function code, 0 to 7")]
+#[non_exhaustive]
+pub struct ParseFunctionCodeError {}
+
 impl From<FunctionCode> for u8 {
     fn from(function_code: FunctionCode) -> Self {
         function_code.0
@@ -109,6 +130,7 @@ mod tests {
     use std::string::ToString;
 
     use super::FunctionCode;
+    use super::ParseFunctionCodeError;
 
     #[test]
     fn only_three_bits() {
@@ -146,5 +168,16 @@ mod tests {
     fn a_function_code_shows_as_its_number() {
         assert_eq!(FunctionCode::SUPERVISOR_DATA.to_string(), "5");
         assert_eq!(u8::from(FunctionCode::CPU_SPACE), 7);
+    }
+
+    #[test]
+    fn a_function_code_parses_from_its_number() {
+        for bits in 0..=7 {
+            let code = FunctionCode::from_low_bits(bits);
+            assert_eq!(code.to_string().parse(), Ok(code));
+        }
+        for text in ["8", "", "05", "+5", "-1", "5 "] {
+            assert_eq!(text.parse::<FunctionCode>(), Err(ParseFunctionCodeError {}));
+        }
     }
 }

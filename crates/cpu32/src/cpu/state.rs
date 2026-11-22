@@ -13,6 +13,7 @@
 
 use std::borrow::Cow;
 use std::fmt;
+use std::str::FromStr;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -84,18 +85,41 @@ impl Layer {
     fn from_tag(tag: u8) -> Option<Self> {
         Self::ALL.into_iter().find(|layer| layer.tag() == tag)
     }
-}
 
-impl fmt::Display for Layer {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
+    /// Its name.
+    const fn name(self) -> &'static str {
+        match self {
             Self::Cpu => "CPU",
             Self::Machine => "machine",
             Self::Chip => "chip",
             Self::Board => "board",
-        })
+        }
     }
 }
+
+/// Its name: `CPU`, `machine`, `chip`, `board`.
+impl fmt::Display for Layer {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
+
+/// The layer named so, as `Display` writes it, in any case.
+impl FromStr for Layer {
+    type Err = ParseLayerError;
+
+    fn from_str(name: &str) -> Result<Self, ParseLayerError> {
+        Self::ALL
+            .into_iter()
+            .find(|layer| layer.name().eq_ignore_ascii_case(name))
+            .ok_or_else(|| ParseLayerError(name.to_owned()))
+    }
+}
+
+/// Text that names no snapshot layer.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no snapshot layer {0:?}")]
+pub struct ParseLayerError(String);
 
 /// Why a snapshot could not be restored, or a state saved.
 ///

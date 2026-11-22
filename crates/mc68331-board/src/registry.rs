@@ -211,6 +211,37 @@ impl ParameterValue {
     }
 }
 
+impl ParameterValue {
+    /// It as the file's TOML holds it; a date or time that is not
+    /// TOML's is a string.
+    fn to_toml(&self) -> toml::Value {
+        match self {
+            Self::String(text) => toml::Value::String(text.clone()),
+            Self::Integer(integer) => toml::Value::Integer(*integer),
+            Self::Float(float) => toml::Value::Float(*float),
+            Self::Boolean(boolean) => toml::Value::Boolean(*boolean),
+            Self::Datetime(text) => text
+                .parse()
+                .map_or_else(|_| toml::Value::String(text.clone()), toml::Value::Datetime),
+            Self::Array(values) => toml::Value::Array(values.iter().map(Self::to_toml).collect()),
+            Self::Table(table) => toml::Value::Table(
+                table
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.to_toml()))
+                    .collect(),
+            ),
+        }
+    }
+}
+
+/// It as a board file's TOML writes it: `3`, `2.5`, `"text"`, `[1, 2]`,
+/// `{ a = true }`.
+impl fmt::Display for ParameterValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.to_toml())
+    }
+}
+
 /// `table`, from the file's TOML.
 pub(crate) fn table_from_toml(table: toml::Table) -> ParameterTable {
     table
@@ -826,6 +857,22 @@ mod tests {
     use super::RegistryError;
     use crate::builtin::Fixed;
     use crate::signal::Kind;
+
+    #[test]
+    fn a_value_prints_as_toml_writes_it() {
+        let parameters =
+            Parameters::parse("a = [1, 2.5]\nb = { c = true }\nd = 1979-05-27\ne = \"x\\\"y\"")
+                .unwrap();
+        let table = parameters.table();
+        assert_eq!(table["a"].to_string(), "[1, 2.5]");
+        assert_eq!(table["b"].to_string(), "{ c = true }");
+        assert_eq!(table["d"].to_string(), "1979-05-27");
+        assert_eq!(table["e"].to_string(), "'x\"y'");
+        assert_eq!(
+            ParameterValue::Datetime("not a date".to_owned()).to_string(),
+            "\"not a date\""
+        );
+    }
 
     #[test]
     fn a_table_parses_into_the_board_s_own_values() {

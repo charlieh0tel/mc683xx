@@ -12,6 +12,7 @@ use mc683xx_target::size::Size;
 
 use super::Gpt;
 use super::Input;
+use super::ParsePortGpPinError;
 use super::PortGpPin;
 use super::PwmChange;
 use super::Queued;
@@ -1353,5 +1354,21 @@ fn inputs_are_named_as_their_pins_in_any_case() {
     );
     for bad in ["PGP8", "PGP07", "PG", "PG\u{e9}0", "OC1"] {
         assert!(bad.parse::<Input>().is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn port_gp_pins_are_named_pgp0_to_pgp7_in_any_case() {
+    for bit in 0..8 {
+        let pin = PortGpPin::new(bit).unwrap();
+        assert_eq!(pin.to_string(), format!("PGP{bit}"));
+        assert_eq!(pin.to_string().parse(), Ok(pin));
+    }
+    assert_eq!("pgp7".parse(), Ok(PortGpPin::new(7).unwrap()));
+    for bad in ["PGP8", "PGP07", "PGP", "PG\u{e9}0", "PAI", "PGP+1"] {
+        assert_eq!(
+            bad.parse::<PortGpPin>(),
+            Err(ParsePortGpPinError(bad.to_owned()))
+        );
     }
 }

@@ -486,7 +486,9 @@ The contract a host's peripheral models target (rustdoc in
   a peripheral's parameters (`description::Options::parameters`) takes the
   table as `Parameters::parse(toml_text)?.into_table()`, and one value
   with `Options::set("PERIPHERAL.KEY=VALUE".parse()?)` (a
-  `description::Setting`, its parse error a `ParseSettingError`); the TOML parser's types are
+  `description::Setting`, its parse error a `ParseSettingError`,
+  printing back as `PERIPHERAL.KEY=VALUE` with the value as TOML writes
+  it); the TOML parser's types are
   not in the API, so a host that parsed its own TOML passes the text.
   `Registry::with_builtins()` starts from the types above.  A host's
   tests reach a type by name: `contains(name)`, `ports(name)` (`None`

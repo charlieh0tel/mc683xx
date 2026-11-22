@@ -89,6 +89,30 @@ impl fmt::Display for Factor {
     }
 }
 
+/// The factor a number, as `Display` writes it, gives: `2`, `0.5`.
+impl FromStr for Factor {
+    type Err = ParseFactorError;
+
+    fn from_str(text: &str) -> Result<Self, ParseFactorError> {
+        let factor: f64 = text
+            .parse()
+            .map_err(|_| ParseFactorError::Number(text.to_owned()))?;
+        Self::new(factor).map_err(ParseFactorError::Factor)
+    }
+}
+
+/// Text that gives no pacing factor.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ParseFactorError {
+    /// Not a number.
+    #[error("no pacing factor {0:?}: give a number of board seconds a wall second")]
+    Number(String),
+    /// A number that is not a factor.
+    #[error(transparent)]
+    Factor(PacingError),
+}
+
 /// How fast a paced run's board time may go against wall time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
@@ -138,14 +162,10 @@ impl FromStr for Pacing {
         match text {
             UNPACED => Ok(Self::Unpaced),
             REAL_TIME => Ok(Self::RealTime),
-            _ => {
-                let factor: f64 = text
-                    .parse()
-                    .map_err(|_| ParsePacingError::Unknown(text.to_owned()))?;
-                Factor::new(factor)
-                    .map(Self::Scaled)
-                    .map_err(ParsePacingError::Factor)
-            }
+            _ => text.parse().map(Self::Scaled).map_err(|error| match error {
+                ParseFactorError::Number(_) => ParsePacingError::Unknown(text.to_owned()),
+                ParseFactorError::Factor(error) => ParsePacingError::Factor(error),
+            }),
         }
     }
 }
@@ -359,6 +379,22 @@ mod tests {
         for factor in [0.0, -0.0, -1.0, f64::INFINITY, f64::NAN] {
             assert!(Factor::new(factor).is_err(), "{factor}");
         }
+    }
+
+    #[test]
+    fn a_factor_reads_as_it_prints() {
+        for factor in [0.5, 1.0, 2.5, 1e-9] {
+            let factor = Factor::new(factor).unwrap();
+            assert_eq!(factor.to_string().parse(), Ok(factor));
+        }
+        assert_eq!(
+            "fast".parse::<Factor>(),
+            Err(ParseFactorError::Number("fast".to_owned()))
+        );
+        assert_eq!(
+            "0".parse::<Factor>(),
+            Err(ParseFactorError::Factor(PacingError::Factor(0.0)))
+        );
     }
 
     #[test]
