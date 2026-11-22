@@ -2519,6 +2519,126 @@ fn a_write_writes_rom_and_refuses_what_the_core_does_not_serve() {
     assert_eq!(chip.write(simcr, &[0]), Err(Unserved(simcr)));
 }
 
+/// CSOR for CS0 or CS1: as [`CS1_FAST`], R/W (bits 12:11) reads only
+/// (SIMRM 7.10.3).
+const CS_READS_FAST: u16 = 0x6bb0;
+/// CSOR for CS0 or CS1: as [`CS1_FAST`], R/W writes only.
+const CS_WRITES_FAST: u16 = 0x73b0;
+
+/// A chip running `program` from its boot ROM, RAM on CS0 that only
+/// takes writes, at [`CS0_BASE`], and the same RAM on CS1, which only
+/// reads it, at [`CS1_BASE`]; the chip and the RAM.
+fn write_only_ram(program: &[u16]) -> (Mc68331, MemoryId) {
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    let ram = builder
+        .memory(vec![0; 64 << 10], MemoryKind::Ram, &[cs(0), cs(1)])
+        .unwrap();
+    let mut chip = builder.build();
+    write_register(&mut chip, SIM + 0x4c, CS0_BAR);
+    write_register(&mut chip, SIM + 0x4e, CS_WRITES_FAST);
+    write_register(&mut chip, SIM + 0x50, CS1_BAR);
+    write_register(&mut chip, SIM + 0x52, CS_READS_FAST);
+    (chip, ram)
+}
+
+#[test]
+fn a_write_to_write_only_ram_lands_in_it_for_the_firmware_to_read() {
+    let offset = 0x10;
+    let read_back = CS1_BASE + offset;
+    let (mut chip, ram) = write_only_ram(&[
+        MOVE_WORD_FROM_ABSOLUTE,
+        (read_back >> 16) as u16,
+        read_back as u16,
+        BRANCH_TO_SELF,
+    ]);
+    let at = Address(CS0_BASE + offset);
+    chip.write(at, &[0x12, 0x34]).unwrap();
+    assert_eq!(chip.memory(ram)[offset as usize..][..2], [0x12, 0x34]);
+    // the page's reads go to the bus: nothing to read back there
+    let mut read = [0; 2];
+    assert_eq!(chip.read(at, &mut read), Err(Unserved(at)));
+    // the firmware reads it through the select that reads it
+    chip.run_for(Cycles::from_clocks(100));
+    assert_eq!(chip.cpu().registers.data[0] & 0xffff, 0x1234);
+}
+
+#[test]
+fn a_write_to_a_page_reading_rom_and_writing_ram_patches_the_rom() {
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    let rom = builder
+        .memory(vec![0; 64 << 10], MemoryKind::Rom, &[cs(1)])
+        .unwrap();
+    let ram = builder
+        .memory(vec![0; 64 << 10], MemoryKind::Ram, &[cs(0)])
+        .unwrap();
+    let mut chip = builder.build();
+    // both on one block: the ROM reads, the RAM takes the writes
+    write_register(&mut chip, SIM + 0x4c, CS0_BAR);
+    write_register(&mut chip, SIM + 0x4e, CS_WRITES_FAST);
+    write_register(&mut chip, SIM + 0x50, CS0_BAR);
+    write_register(&mut chip, SIM + 0x52, CS_READS_FAST);
+    let offset = 0x10;
+    let at = CS0_BASE + offset;
+    chip.write(Address(at), &[0x4e, 0x75]).unwrap();
+    assert_eq!(chip.memory(rom)[offset as usize..][..2], [0x4e, 0x75]);
+    assert_eq!(chip.memory(ram)[offset as usize..][..2], [0, 0]);
+    assert_eq!(
+        chip.peek(Address(at), Size::Word, FunctionCode::SUPERVISOR_DATA),
+        Ok(0x4e75)
+    );
+    // the CPU's write still goes to the RAM
+    cycle(&mut chip, at, Size::Word, Some(0x1234)).unwrap();
+    assert_eq!(chip.memory(ram)[offset as usize..][..2], [0x12, 0x34]);
+    assert_eq!(chip.memory(rom)[offset as usize..][..2], [0x4e, 0x75]);
+}
+
+#[test]
+fn a_write_to_a_page_reading_a_peripheral_and_writing_ram_lands_in_the_ram() {
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    let ram = builder
+        .memory(vec![0; 64 << 10], MemoryKind::Ram, &[cs(0)])
+        .unwrap();
+    builder.peripheral(Counter::default(), &[cs(1)]).unwrap();
+    let mut chip = builder.build();
+    write_register(&mut chip, SIM + 0x4c, CS0_BAR);
+    write_register(&mut chip, SIM + 0x4e, CS_WRITES_FAST);
+    write_register(&mut chip, SIM + 0x50, CS0_BAR);
+    write_register(&mut chip, SIM + 0x52, CS_READS_FAST);
+    let at = Address(CS0_BASE);
+    chip.write(at, &[0xab]).unwrap();
+    assert_eq!(chip.memory(ram)[0], 0xab);
+    let mut read = [0; 1];
+    assert_eq!(chip.read(at, &mut read), Err(Unserved(at)));
+}
+
+#[test]
+fn a_write_to_a_peripheral_is_unserved() {
+    let (mut chip, _, _) = with_peripheral(&[NOP], |_| Counter::default());
+    let at = Address(CS1_BASE);
+    assert_eq!(chip.write(at, &[1]), Err(Unserved(at)));
+}
+
 #[test]
 fn a_read_reads_rom_and_refuses_what_the_core_does_not_serve() {
     let (mut chip, _) = booting(&[NOP, NOP]);

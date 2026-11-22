@@ -858,20 +858,24 @@ impl Memory {
     }
 
     /// Writes `bytes` at `address` up with no bus cycle, a debugger's
-    /// write: into the bytes the pages of supervisor space read, as
-    /// [`read_bytes`](Self::read_bytes) does, so that a read gives back
-    /// what was written, a ROM's included; where a page writes to other
-    /// bytes than it reads, the write backing is left as it was.
+    /// write: into the bytes each page of supervisor space reads, as
+    /// [`read_bytes`](Self::read_bytes) does, a ROM's included, so a read
+    /// gives back what was written and the CPU runs it; where a page
+    /// reads from the bus, into the bytes it writes (write-only RAM).
+    /// Where a page writes to other bytes than it reads, its write
+    /// backing is left as it was ([PLAN.md, Memory]).
     ///
     /// # Errors
     ///
-    /// [`Unserved`] for the first byte whose page reads from the bus;
-    /// then nothing is written.
+    /// [`Unserved`] for the first byte whose page neither reads nor
+    /// writes host memory; then nothing is written.
+    ///
+    /// [PLAN.md, Memory]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#memory
     pub fn write_bytes(&mut self, address: Address, bytes: &[u8]) -> Result<(), Unserved> {
         let mut spans = Vec::new();
         let mut done = 0;
         while done < bytes.len() {
-            let span = self.span(address, done, bytes.len(), |page| page.read)?;
+            let span = self.span(address, done, bytes.len(), |page| page.read.or(page.write))?;
             spans.push((span, done));
             done += span.2;
         }
@@ -1130,14 +1134,34 @@ mod tests {
         assert_eq!(read, [0x4e, 0x71]);
         assert_eq!(memory.region(rom)[0x10..0x12], [0x4e, 0x71]);
         assert_eq!(memory.region(ram)[0x10..0x12], [0, 0]);
-        // a page whose reads go to the bus has no bytes to read back
+        // a page whose reads go to the bus takes it in the bytes it
+        // writes, with none to read back
+        let at = Address(PAGE_BYTES);
+        memory.write_bytes(at.offset(0x20), &[0x12, 0x34]).unwrap();
+        assert_eq!(memory.region(ram)[0x20..0x22], [0x12, 0x34]);
+        assert_eq!(memory.read_bytes(at, &mut read), Err(Unserved(at)));
+        // one crossing from the split page into it takes each page's
+        let last = Address(PAGE_BYTES - 1);
+        memory.write_bytes(last, &[0xaa, 0xbb]).unwrap();
+        assert_eq!(memory.region(rom)[PAGE_BYTES as usize - 1], 0xaa);
+        assert_eq!(memory.region(ram)[0], 0xbb);
+        assert_eq!(memory.region(ram)[PAGE_BYTES as usize - 1], 0);
+    }
+
+    #[test]
+    fn a_debugger_write_to_a_page_all_on_the_bus_writes_nothing() {
+        let mut memory = Memory::new(24).unwrap();
+        ram(&mut memory, 0, PAGE_BYTES);
         let at = Address(PAGE_BYTES);
         assert_eq!(memory.write_bytes(at, &[1]), Err(Unserved(at)));
+        let mut read = [0; 1];
         assert_eq!(memory.read_bytes(at, &mut read), Err(Unserved(at)));
-        // a write crossing into it writes nothing
+        // one crossing into it writes nothing, the served page's
+        // byte included
         let last = Address(PAGE_BYTES - 1);
         assert_eq!(memory.write_bytes(last, &[1, 2]), Err(Unserved(at)));
-        assert_eq!(memory.region(rom)[PAGE_BYTES as usize - 1], 0);
+        memory.read_bytes(last, &mut read).unwrap();
+        assert_eq!(read, [0]);
     }
 
     #[test]

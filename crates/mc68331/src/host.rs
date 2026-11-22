@@ -145,14 +145,17 @@ impl Mc68331 {
     /// Writes `data` at `address` up, with no bus cycle, a debugger's
     /// write: into the bytes [`read`](Self::read) reads, a ROM's
     /// included, whatever the pages' permissions, so a read gives back
-    /// what was written; as the bare machine's
+    /// what was written; where the core serves a page's writes but not
+    /// its reads (a write-only select), into the memory it writes.  As
+    /// the bare machine's
     /// [`Machine::write`](mc683xx_cpu32::flat::Machine::write)
     /// ([`Memory::write_bytes`](mc683xx_cpu32::memory::Memory::write_bytes)).
     ///
     /// # Errors
     ///
-    /// [`Unserved`] for a byte the core does not serve a read of (a
-    /// peripheral's, or one a peripheral shares); then nothing is written.
+    /// [`Unserved`] for a byte the core serves neither a read nor a
+    /// write of (a peripheral's, or one a peripheral shares); then
+    /// nothing is written.
     pub fn write(&mut self, address: Address, data: &[u8]) -> Result<(), Unserved> {
         self.cpu.memory.write_bytes(address, data)
     }

@@ -120,7 +120,9 @@ cycle, as a debugger does and as the bare `Machine::write` does, a
 ROM's included, and `read(address, bytes)` reads them, as
 `Machine::read` does (`memory::Unserved` for a byte the core does
 not serve a read of).  Both go to the bytes a page reads, so a read
-gives back what a write wrote (PLAN.md, Memory).
+gives back what a write wrote; a write to a page the core serves only
+writes of (write-only RAM) goes to the bytes it writes, and one to a
+page it serves neither way is `Unserved` (PLAN.md, Memory).
 
 ### Fixed memory
 
