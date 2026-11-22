@@ -602,6 +602,13 @@ impl<'a> Drive<'a> {
 /// host reaches its own peripheral's state by its type, with no
 /// `as_any` of its own: `Board::peripheral::<T>(name)`, or a
 /// `Box<dyn Peripheral>` upcast to `Box<dyn Any>` and downcast.
+///
+/// A call's time: one given a [`Drive`] takes it from [`Drive::now`]
+/// and has no time argument (`read`, `write`, `memory_read`,
+/// `memory_write`, `power_on`, `reset`, `transfer`, `select`, `input`,
+/// `advance`); one without a drive takes it as an argument (`sample`'s
+/// and `set_qspi_clock`'s `now`), or in its access
+/// ([`PeripheralAccess::now`], for `wait_states` and `dsack_port`).
 #[expect(
     unused_variables,
     reason = "the defaults ignore their arguments, and the names document them"

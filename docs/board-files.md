@@ -512,7 +512,10 @@ The contract a host's peripheral models target (rustdoc in
   `inspect()` gives what a front end shows of it, an
   `inspect::Inspection` of named fields (empty by default;
   `Board::inspect(name)`).  A call that takes a `peripheral::Drive`
-  takes its time from it, `drive.now()`, and no time of its own.
+  takes its time from it, `drive.now()`, and no time of its own; one
+  without a drive takes its time as an argument (`sample(port, now)`,
+  `set_qspi_clock(clock, now, system_clock)`) or in its access
+  (`PeripheralAccess::now`, for `wait_states` and `dsack_port`).
   - Stop conditions, for a debugger and the emulator's alone
     ([docs/gdb.md](gdb.md), Stop conditions): `conditions()` lists
     what it offers (`condition::ConditionInfo::new(name, arguments,

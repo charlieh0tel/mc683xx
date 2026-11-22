@@ -395,6 +395,15 @@ Neither has a default: a peripheral gives both, is `Stateless`, or is
 `mc683xx_cpu32::unsavable!(X, "its role")`, whose both refuse with
 `StateError::unsupported("its role")`.
 
+A peripheral on a board file implements `mc683xx_board::peripheral::Peripheral`
+instead (`docs/board-files.md`), on board time.  A call's time there: one
+given a `Drive` takes it from `drive.now()` and has no time argument
+(`read`, `write`, `memory_read`, `memory_write`, `power_on`, `reset`,
+`transfer`, `select`, `input`, `advance`); one without a drive takes it
+as an argument (`sample(port, now)`, `set_qspi_clock(clock, now,
+system_clock)`) or in its access (`PeripheralAccess::now`, for
+`wait_states` and `dsack_port`).
+
 ### Bus peripherals: on no chip select
 
 Board logic often decodes addresses the selects do not: a PAL on the

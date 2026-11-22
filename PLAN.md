@@ -1474,7 +1474,14 @@ hand.  The keys are in `docs/board-files.md`.
   none, and no notification of a change is needed, since the board
   asks `next_event` again whenever it needs it (decided 2026-11, for
   0.8.0).  `sample` and `interrupt_request` take none: a value on
-  board time, not a conversion.  A part the chip
+  board time, not a conversion.  A call's own time follows the same
+  rule: one given a `Drive` takes it from `drive.now()` and has no time
+  argument (`read`, `write`, `memory_read`, `memory_write`, `power_on`,
+  `reset`, `transfer`, `select`, `input`, `advance`); one without takes
+  it as an argument (`sample(port, now)`, `set_qspi_clock(clock, now,
+  system_clock)`) or in its access (`PeripheralAccess::now`, for
+  `wait_states` and `dsack_port`), so no call has two times to
+  disagree.  A part the chip
   does not clock (an oscillator, an oven, a GPS engine) that counts in
   cycles counts on `TimeBase::steady(frequency)`, clock zero at
   power-on and never moved: on the chip's base it would fall behind
