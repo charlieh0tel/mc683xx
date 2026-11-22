@@ -203,14 +203,18 @@ struct Anchor {
 impl Pacer {
     /// A pacer that starts at its first look.
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+    pub const fn new() -> Self {
+        Self {
+            origin: None,
+            anchor: None,
+        }
     }
 
     /// How long to wait before running past `now` under `pacing`, zero
     /// if not ahead.  The first look, a change of factor and a board
     /// time behind the last (a restore) start the pacing again from
     /// `now`.  It reads the host's clock ([`Instant`]) only when paced.
+    #[must_use]
     pub fn delay(&mut self, now: Time, pacing: Pacing) -> Duration {
         let wall = match pacing.factor() {
             Some(_) => self.origin.get_or_insert_with(Instant::now).elapsed(),

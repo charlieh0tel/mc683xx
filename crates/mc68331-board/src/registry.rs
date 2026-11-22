@@ -592,7 +592,7 @@ pub struct Constructed {
 impl Constructed {
     /// `peripheral` with `ports`.
     #[must_use]
-    pub fn new(peripheral: Box<dyn Peripheral>, ports: Vec<PortSpec>) -> Self {
+    pub const fn new(peripheral: Box<dyn Peripheral>, ports: Vec<PortSpec>) -> Self {
         Self { peripheral, ports }
     }
 }
@@ -704,8 +704,10 @@ pub struct Registry {
 impl Registry {
     /// A registry with no types.
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+    pub const fn new() -> Self {
+        Self {
+            types: BTreeMap::new(),
+        }
     }
 
     /// A registry with the built-in generic types (`fixed`,
