@@ -218,9 +218,9 @@ pub enum LoadError {
 }
 
 /// A parameter setting not of the form `PERIPHERAL.KEY=VALUE`
-/// ([`Options::parse_setting`]).
+/// ([`Setting`]'s `FromStr`).
 ///
-/// [`Options::parse_setting`]: crate::description::Options::parse_setting
+/// [`Setting`]: crate::description::Setting
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{0:?}: give PERIPHERAL.KEY=VALUE")]
 pub struct ParseSettingError(pub(crate) String);

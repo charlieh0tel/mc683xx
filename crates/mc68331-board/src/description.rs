@@ -17,6 +17,7 @@ use std::io;
 use std::mem;
 use std::path::Path;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -115,14 +116,64 @@ impl Options {
             .insert(key.into(), value.into());
     }
 
-    /// Sets a parameter from `assignment`, `PERIPHERAL.KEY=VALUE` (the
-    /// runner's `--set`): `VALUE` a TOML value (`3`, `0x10`, `true`,
-    /// `"text"`, `[1, 2]`), or else taken as a bare string.
-    ///
-    /// # Errors
-    ///
-    /// An `assignment` not of that form, its peripheral or key empty.
-    pub fn parse_setting(&mut self, assignment: &str) -> Result<(), ParseSettingError> {
+    /// Sets the parameter `setting` names to its value.
+    pub fn set(&mut self, setting: Setting) {
+        self.set_parameter(setting.peripheral, setting.key, setting.value);
+    }
+}
+
+/// One parameter of one peripheral and its value, as the runner's
+/// `--set` gives it: `PERIPHERAL.KEY=VALUE`, `VALUE` a TOML value (`3`,
+/// `0x10`, `true`, `"text"`, `[1, 2]`), or else taken as a bare string.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Setting {
+    /// The peripheral's name.
+    peripheral: String,
+    /// The parameter's key.
+    key: String,
+    /// Its value.
+    value: ParameterValue,
+}
+
+impl Setting {
+    /// Parameter `key` of `peripheral` set to `value`.
+    #[must_use]
+    pub fn new(
+        peripheral: impl Into<String>,
+        key: impl Into<String>,
+        value: impl Into<ParameterValue>,
+    ) -> Self {
+        Self {
+            peripheral: peripheral.into(),
+            key: key.into(),
+            value: value.into(),
+        }
+    }
+
+    /// The peripheral's name.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// The parameter's key.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// Its value.
+    #[must_use]
+    pub const fn value(&self) -> &ParameterValue {
+        &self.value
+    }
+}
+
+impl FromStr for Setting {
+    type Err = ParseSettingError;
+
+    /// `PERIPHERAL.KEY=VALUE`, its peripheral and key not empty.
+    fn from_str(assignment: &str) -> Result<Self, Self::Err> {
         let malformed = || ParseSettingError(assignment.to_owned());
         let (path, text) = assignment.split_once('=').ok_or_else(malformed)?;
         let (peripheral, key) = path.split_once('.').ok_or_else(malformed)?;
@@ -133,8 +184,7 @@ impl Options {
             .ok()
             .and_then(|mut table| table.remove("value"))
             .map_or_else(|| ParameterValue::from(text), ParameterValue::from_toml);
-        self.set_parameter(peripheral, key, value);
-        Ok(())
+        Ok(Self::new(peripheral, key, value))
     }
 }
 

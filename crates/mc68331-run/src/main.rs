@@ -277,7 +277,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
     options.firmware.clone_from(&arguments.firmware);
     options.images = arguments.images.iter().cloned().collect();
     for setting in &arguments.settings {
-        options.parse_setting(setting)?;
+        options.set(setting.parse()?);
     }
     let mut environment = Environment::default();
     environment.seed = arguments.seed;

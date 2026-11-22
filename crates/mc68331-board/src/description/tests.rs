@@ -19,6 +19,7 @@ use mc683xx_modules::sim::reset::ResetScope;
 
 use super::Description;
 use super::Options;
+use super::Setting;
 use super::Target;
 use crate::board::Board;
 use crate::builtin::Fixed;
@@ -213,9 +214,9 @@ fn an_option_puts_its_entries_on_the_board() {
 fn a_run_sets_parameters_over_the_files() {
     let text = "version = 1\n[chip]\ntype = \"mc68331\"\n[board]\noptions = [\"x\"]\n[[peripheral]]\nname = \"d\"\ntype = \"fixed\"\nparameters = { value = 1, keep = \"k\" }\n[[peripheral]]\nname = \"e\"\ntype = \"fixed\"\noption = \"x\"\n";
     let mut options = Options::default();
-    options.parse_setting("d.value=0x10").unwrap();
-    options.parse_setting("d.name=eeprom.bin").unwrap();
-    options.parse_setting("e.value=2").unwrap();
+    options.set("d.value=0x10".parse().unwrap());
+    options.set("d.name=eeprom.bin".parse().unwrap());
+    options.set("e.value=2".parse().unwrap());
     options.set_parameter("d", "on", true);
     let mut description = Description::parse(text, Path::new("."), &options).unwrap();
     let parameters = &description.peripherals[0].parameters;
@@ -247,14 +248,20 @@ fn a_run_sets_parameters_over_the_files() {
         description.remove_parameter("z", "keep"),
         Err(EditError::Peripheral("z".to_owned()))
     );
-    options.parse_setting("z.value=1").unwrap();
+    options.set("z.value=1".parse().unwrap());
     assert!(matches!(
         Description::parse(text, Path::new("."), &options),
         Err(LoadError::Peripheral(peripheral)) if peripheral == "z"
     ));
+    let setting: Setting = "d.value=0x10".parse().unwrap();
+    assert_eq!(setting, Setting::new("d", "value", 0x10));
+    assert_eq!(
+        (setting.peripheral(), setting.key(), setting.value()),
+        ("d", "value", &ParameterValue::Integer(0x10))
+    );
     for malformed in ["d.value", "value=1", ".value=1", "d.=1"] {
         assert!(matches!(
-            Options::default().parse_setting(malformed),
+            malformed.parse::<Setting>(),
             Err(ParseSettingError(setting)) if setting == malformed
         ));
     }
