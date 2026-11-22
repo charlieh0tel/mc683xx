@@ -338,11 +338,16 @@ type Ended = Result<(u32, u16), BusError>;
 impl Board {
     /// The pins `port` drives and their levels at `now`.
     pub(crate) fn outputs(&self, port: Port, now: Cycles) -> PortLevels {
+        self.outputs_with(port, |gpt| gpt.port_outputs(now))
+    }
+
+    /// What `port` drives now, port GP's as `port_gp` reads it of the GPT.
+    fn outputs_with(&self, port: Port, port_gp: impl FnOnce(&Gpt) -> PortLevels) -> PortLevels {
         match port {
             Port::C => self.sim.outputs(PortName::C),
             Port::E => self.sim.outputs(PortName::E),
             Port::F => self.sim.outputs(PortName::F),
-            Port::Gp => self.module::<Gpt>(GPT).port_outputs(now),
+            Port::Gp => port_gp(self.module::<Gpt>(GPT)),
             Port::Qs => self.module::<Qsm>(QSM).port_outputs(),
         }
     }
@@ -514,13 +519,8 @@ impl Board {
         let qsm = self.module::<Qsm>(QSM);
         let (port_gp, pwm) = self.module::<Gpt>(GPT).reported_outputs();
         let pwm_mask = u8::from(stop.pwm_a) | u8::from(stop.pwm_b) << 1;
-        let outputs = |port| match port {
-            Port::C => self.sim.outputs(PortName::C),
-            Port::E => self.sim.outputs(PortName::E),
-            Port::F => self.sim.outputs(PortName::F),
-            Port::Gp => port_gp,
-            Port::Qs => qsm.port_outputs(),
-        };
+        // port GP as the output changes last reported it
+        let outputs = |port| self.outputs_with(port, |_| port_gp);
         Seen {
             ports: Port::ALL.map(|port| level(outputs(port)) & stop.port(port)),
             pwm: pwm & pwm_mask,
