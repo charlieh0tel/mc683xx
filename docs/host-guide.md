@@ -27,6 +27,12 @@ peripherals, `docs/peripherals.md`), `mc683xx-gdb` (the GDB remote
 stub, `docs/gdb.md`) and `mc683xx-debug` (loading images and running
 init scripts over a `Cpu32Target`).
 
+The shared types are `mc683xx-target`'s alone (`Address`, `Size`,
+`FunctionCode`, `Register`, `SystemRegister`): no other crate re-exports
+them, so a host that names one (`Board::watch_code(Address(...))`, a
+bus cycle's size, a register) depends on `mc683xx-target` itself, at the
+release of the other crates.
+
 ## Building a chip
 
 The host wires memory and peripherals to chip-select pins, as the board
