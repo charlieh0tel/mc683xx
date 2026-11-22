@@ -40,7 +40,8 @@ struct Probe {
 }
 
 impl Peripheral for Probe {
-    fn input(&mut self, port: usize, signal: Signal, now: Time, _drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
+        let now = drive.now();
         self.seen.push((PROBED[port].to_owned(), now, signal));
     }
 }
@@ -118,7 +119,7 @@ to = ["external.lamp"{switch}]
             |_| Ok(Box::new(Probe::default())),
         )
         .unwrap();
-    Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap()
+    Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap()
 }
 
 /// A log observers share.
@@ -170,11 +171,11 @@ impl Observer for Resyncing {
 fn run(board: &mut Board<Mc68331>) {
     for (step, level) in [false, true, false].into_iter().enumerate() {
         board
-            .run_until(Time(RUN_PS / 4 * (step as u64 + 1)))
+            .run_until(Time::from_picos(RUN_PS / 4 * (step as u64 + 1)))
             .unwrap();
         board.send("switch", Signal::Level(level)).unwrap();
     }
-    board.run_until(Time(RUN_PS)).unwrap();
+    board.run_until(Time::from_picos(RUN_PS)).unwrap();
 }
 
 #[test]
@@ -193,7 +194,11 @@ fn an_observer_sees_what_a_sink_sees_when_it_sees_it() {
         log.seen()
             .iter()
             .find(|(_, _, signal)| *signal == Signal::Level(true)),
-        Some(&("pps".to_owned(), Time(100_000_037), Signal::Level(true)))
+        Some(&(
+            "pps".to_owned(),
+            Time::from_picos(100_000_037),
+            Signal::Level(true)
+        ))
     );
 }
 
@@ -219,6 +224,10 @@ fn an_observer_is_detached_by_its_id() {
     let pps = board.observe("pps", log.observer()).unwrap();
     let switch = board.observe("switch", log.observer()).unwrap();
     assert_ne!(pps, switch);
+    assert_eq!(
+        (pps.to_string(), switch.to_string()),
+        ("observer 0".to_owned(), "observer 1".to_owned())
+    );
     assert!(board.unobserve(pps).is_some());
     assert!(board.unobserve(pps).is_none());
     run(&mut board);
@@ -248,7 +257,7 @@ fn a_restore_tells_each_observer_its_net_s_restored_value() {
     }
     let log = Log::default();
     board.observe("pps", log.observer()).unwrap();
-    board.run_until(Time(RUN_PS / 4)).unwrap();
+    board.run_until(Time::from_picos(RUN_PS / 4)).unwrap();
     let snapshot = board.save().unwrap();
     let (at, pps) = (board.now(), board.net_value("pps").unwrap());
     assert!(pps.is_some());

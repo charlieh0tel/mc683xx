@@ -211,7 +211,7 @@ impl Runner {
             Ended::Exception(exception) => {
                 Outcome::Failed(vec![format!("the core raised {exception:?}")])
             }
-            Ended::Halted(halt) => Outcome::Failed(vec![format!("the core halted: {halt:?}")]),
+            Ended::Halted(halt) => Outcome::Failed(vec![format!("the core halted: {halt}")]),
         };
         self.unmap(&pages);
         outcome
@@ -231,12 +231,10 @@ impl Runner {
                 region: self.region,
                 offset: start,
             });
-            let page = Page {
-                read: backing,
-                write: backing,
-                port: PortSize::Bits16,
-                clocks: RAM_CLOCKS,
-            };
+            let page = Page::BUS
+                .reading(backing)
+                .writing(backing)
+                .timed(PortSize::Bits16, RAM_CLOCKS);
             for space in [Space::User, Space::Supervisor] {
                 memory
                     .map(space, Address(start), PAGE_BYTES, page)

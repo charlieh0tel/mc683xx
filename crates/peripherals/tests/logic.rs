@@ -148,7 +148,7 @@ to = ["u2.A"]
     }
     let description = Description::parse(&text, &directory, &Options::default()).unwrap();
     let registry = mc683xx_peripherals::registry();
-    let board = Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+    let board = Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board
 }
@@ -157,7 +157,7 @@ to = ["u2.A"]
 fn the_cpu_writes_the_latch_onto_nets_and_reads_the_buffer() {
     let mut board = board();
     board.send("switch0", Signal::Level(true)).unwrap();
-    board.run_until(Time(100_000_000)).unwrap();
+    board.run_until(Time::from_picos(100_000_000)).unwrap();
     for bit in 0..8 {
         let received = board.take_received(&format!("q{bit}")).unwrap();
         let high = WRITTEN & 1 << bit != 0;
@@ -193,7 +193,7 @@ fn the_cpu_writes_the_latch_onto_nets_and_reads_the_buffer() {
 fn a_latch_and_buffer_on_no_select_decode_the_bus_themselves() {
     let mut board = board_on(true);
     board.send("switch0", Signal::Level(true)).unwrap();
-    board.run_until(Time(100_000_000)).unwrap();
+    board.run_until(Time::from_picos(100_000_000)).unwrap();
     let q0 = board.take_received("q0").unwrap();
     assert_eq!(
         q0.iter().map(|(_, signal)| *signal).collect::<Vec<_>>(),
@@ -207,6 +207,6 @@ fn a_latch_and_buffer_on_no_select_decode_the_bus_themselves() {
 fn a_host_sets_the_whole_switch_bank_through_one_external() {
     let mut board = board();
     board.send("switches", Signal::Bus(0x3c)).unwrap();
-    board.run_until(Time(100_000_000)).unwrap();
+    board.run_until(Time::from_picos(100_000_000)).unwrap();
     assert_eq!(board.chip().cpu().registers.data[0] & 0xff, 0x3c);
 }

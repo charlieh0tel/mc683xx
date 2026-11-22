@@ -21,13 +21,12 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::chip_select::ChipSelect;
-use mc683xx_modules::peripheral::ClockPhase;
-use mc683xx_modules::peripheral::ClockPolarity;
 use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::peripheral::floating_miso;
+use mc683xx_target::address::Address;
 use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
@@ -39,6 +38,7 @@ use crate::description::PCS_MASK;
 use crate::peripheral::Drive;
 use crate::peripheral::Driven;
 use crate::peripheral::Lane;
+use crate::peripheral::MemoryClaim;
 use crate::peripheral::MemoryWrite;
 use crate::peripheral::Peripheral;
 use crate::peripheral::PeripheralAccess;
@@ -94,7 +94,7 @@ pub(crate) struct Shared {
     pub(crate) trace_qspi: Cell<bool>,
     /// The PC of the instruction running, while peripheral cycles are
     /// traced: a code hook sets it.
-    pub(crate) pc: Rc<Cell<u32>>,
+    pub(crate) pc: Rc<Cell<Address>>,
     /// The peripheral and QSPI records, until the board takes them.
     pub(crate) records: RefCell<Vec<Record>>,
     /// The board's memories, in file order, as peripherals take them.
@@ -135,8 +135,8 @@ impl Shared {
         call: impl FnOnce(&mut dyn Peripheral, &mut Drive<'_>) -> R,
     ) -> R {
         let sampler = |port: usize, at: Time| self.sample(peripheral, port, at);
-        let mut drive = Drive::with_sampler(now, &sampler);
-        drive.set_system_clock(self.base.get());
+        let base = self.base.get();
+        let mut drive = Drive::with_sampler(now, base, &sampler);
         let result = call(
             self.peripherals[peripheral].borrow_mut().as_mut(),
             &mut drive,
@@ -152,7 +152,7 @@ impl Shared {
                 || !driving.writes.is_empty()
                 || self.peripherals[peripheral]
                     .borrow()
-                    .next_event()
+                    .next_event(base)
                     .is_some_and(|next| next < quantum_end))
         {
             self.requests.sync();
@@ -164,8 +164,8 @@ impl Shared {
                 .map(|driven| (peripheral, driven)),
         );
         self.writes.borrow_mut().extend(driving.writes);
-        for (name, take) in driving.memories {
-            self.take_memory(peripheral, &name, take);
+        for claim in driving.memories {
+            self.claim_memory(peripheral, &claim);
         }
         self.fired.borrow_mut().extend(
             driving
@@ -185,21 +185,24 @@ impl Shared {
         self.chip_stop.request();
     }
 
-    /// `peripheral` takes the memory `name`, or releases it.
-    fn take_memory(&self, peripheral: usize, name: &str, take: bool) {
+    /// `peripheral` takes a memory, or releases it, as `claim` says.
+    fn claim_memory(&self, peripheral: usize, claim: &MemoryClaim) {
+        let (MemoryClaim::Taken(name) | MemoryClaim::Released(name)) = claim;
         let mut memories = self.memories.borrow_mut();
-        let Some(index) = memories.iter().position(|memory| memory.name == name) else {
+        let Some(index) = memories.iter().position(|memory| &memory.name == name) else {
             return;
         };
         let memory = &mut memories[index];
-        if take {
-            memory.taker = Some(peripheral);
-            self.requests.divert(index);
-        } else if memory.taker == Some(peripheral) {
-            memory.taker = None;
-            self.requests.release(index);
-        } else {
-            return;
+        match claim {
+            MemoryClaim::Taken(_) => {
+                memory.taker = Some(peripheral);
+                self.requests.divert(index);
+            }
+            MemoryClaim::Released(_) if memory.taker == Some(peripheral) => {
+                memory.taker = None;
+                self.requests.release(index);
+            }
+            MemoryClaim::Released(_) => return,
         }
         self.diverted.set(true);
     }
@@ -210,13 +213,14 @@ impl Shared {
     /// chip's sensed outputs' next change.
     fn horizon(&self, peripheral: usize, now: Time) -> Option<Time> {
         let run = self.run_horizon.get()?;
+        let base = self.base.get();
         let events = self
             .peripherals
             .iter()
             .enumerate()
             .filter(|&(index, _)| index != peripheral)
             .filter_map(|(_, other)| match other.try_borrow() {
-                Ok(other) => other.next_event(),
+                Ok(other) => other.next_event(base),
                 Err(_) => Some(now),
             });
         let outbox = self.outbox.borrow();
@@ -307,7 +311,7 @@ impl Routes {
             return vec![(route, cycle.size, Lane::Both)];
         }
         let lanes: &[Lane] = match cycle.size {
-            Size::Byte if cycle.address & 1 == 0 => &[Lane::Upper],
+            Size::Byte if cycle.address.0 & 1 == 0 => &[Lane::Upper],
             Size::Byte => &[Lane::Lower],
             _ => &[Lane::Upper, Lane::Lower],
         };
@@ -323,11 +327,14 @@ impl Routes {
 
     /// `route`'s access for a piece of `cycle`.
     fn access(shared: &Shared, route: &Route, cycle: BusCycle, size: Size) -> PeripheralAccess {
-        let address = route.address(cycle.address);
+        let address = route.address(cycle.address.0);
         let now = shared.time(cycle.now);
-        match cycle.select.and_then(ChipSelect::from_select) {
+        match cycle
+            .select
+            .and_then(|select| ChipSelect::try_from(select).ok())
+        {
             Some(select) => PeripheralAccess::new(select, address, size, cycle.function_code, now),
-            None => PeripheralAccess::on_no_select(address, size, cycle.function_code, now),
+            None => PeripheralAccess::unselected(address, size, cycle.function_code, now),
         }
         .through(route.attachment, route.role, route.lane)
         .writing(cycle.write)
@@ -354,7 +361,7 @@ impl Routes {
                     pc: shared.pc.get(),
                     write: cycle.write,
                     address: cycle.address,
-                    size: cycle.size.bytes(),
+                    size: cycle.size,
                     value,
                 }));
         }
@@ -412,7 +419,7 @@ impl Routes {
         let access = Self::access(shared, route, cycle, size);
         shared.peripherals[route.peripheral]
             .borrow_mut()
-            .dsack_port(access)
+            .dsack_port(access, shared.base.get())
     }
 
     /// The wait states of the first peripheral to take the cycle, in
@@ -424,7 +431,7 @@ impl Routes {
         let access = Self::access(shared, route, cycle, size);
         shared.peripherals[route.peripheral]
             .borrow_mut()
-            .wait_states(access)
+            .wait_states(access, shared.base.get())
     }
 }
 
@@ -504,26 +511,26 @@ impl DecoderRouter {
 
 impl MappedPeripheral for DecoderRouter {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, BusError> {
-        match self.routes(cycle.address) {
+        match self.routes(cycle.address.0) {
             Some(routes) => routes.read(&self.shared, cycle),
             None => self.undecoded().map(|()| 0),
         }
     }
 
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
-        match self.routes(cycle.address) {
+        match self.routes(cycle.address.0) {
             Some(routes) => routes.write(&self.shared, cycle, value),
             None => self.undecoded(),
         }
     }
 
     fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
-        self.routes(cycle.address)
+        self.routes(cycle.address.0)
             .map_or(Some(0), |routes| routes.wait_states(&self.shared, cycle))
     }
 
     fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
-        self.routes(cycle.address)
+        self.routes(cycle.address.0)
             .and_then(|routes| routes.dsack_port(&self.shared, cycle))
     }
 }
@@ -585,7 +592,7 @@ impl MemoryRouter {
             .unwrap_or(0);
         let access = PeripheralAccess::new(
             select_of(cycle),
-            cycle.address % memory.length,
+            cycle.address.0 % memory.length,
             cycle.size,
             cycle.function_code,
             self.shared.time(cycle.now),
@@ -646,7 +653,7 @@ impl MappedPeripheral for PeripheralPins {
     fn reset(&mut self, now: Cycles) {
         let now = self.shared.time(now);
         self.shared.call(self.peripheral, now, |peripheral, drive| {
-            peripheral.reset(now, drive)
+            peripheral.reset(drive)
         });
     }
 }
@@ -745,15 +752,10 @@ impl SpiPeripheral for QspiRouter {
             if !target.selected(chip_selects) {
                 continue;
             }
-            let transfer = Transfer::new(
-                target.attachment,
-                entry,
-                chip_selects,
-                out,
-                bits,
-                clock,
-                now,
-            );
+            let transfer = Transfer::new(out, bits, clock)
+                .through(target.attachment)
+                .at_entry(entry)
+                .selecting(chip_selects);
             let framing = self
                 .shared
                 .qspi
@@ -777,18 +779,18 @@ impl SpiPeripheral for QspiRouter {
                 .borrow_mut()
                 .push(Record::Qspi(trace::QspiRecord {
                     cycle,
-                    pcs: chip_selects,
+                    chip_selects,
                     bits,
                     out,
                     input,
-                    cpol: clock.polarity == ClockPolarity::IdleHigh,
-                    cpha: clock.phase == ClockPhase::ChangeLeading,
+                    polarity: clock.polarity,
+                    phase: clock.phase,
                 }));
         }
         input
     }
 
-    fn chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
         let now = self.shared.time(now);
         let was = self
             .shared
@@ -804,7 +806,7 @@ impl SpiPeripheral for QspiRouter {
                 }
                 self.shared
                     .call(target.peripheral, now, |peripheral, drive| {
-                        peripheral.select(target.attachment, after, now, drive);
+                        peripheral.select(target.attachment, after, drive);
                     });
             }
         }
@@ -813,7 +815,7 @@ impl SpiPeripheral for QspiRouter {
         }
     }
 
-    fn clock(&mut self, clock: QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, now: Cycles) {
         let now = self.shared.time(now);
         let mut told: Vec<usize> = Vec::new();
         for target in &self.targets {
@@ -821,7 +823,7 @@ impl SpiPeripheral for QspiRouter {
                 told.push(target.peripheral);
                 self.shared.peripherals[target.peripheral]
                     .borrow_mut()
-                    .qspi_clock(clock, now);
+                    .set_qspi_clock(clock, now, self.shared.base.get());
             }
         }
     }
@@ -837,6 +839,6 @@ impl SpiPeripheral for QspiRouter {
 fn select_of(cycle: BusCycle) -> ChipSelect {
     cycle
         .select
-        .and_then(ChipSelect::from_select)
+        .and_then(|select| ChipSelect::try_from(select).ok())
         .expect("a chip's cycle carries its select")
 }

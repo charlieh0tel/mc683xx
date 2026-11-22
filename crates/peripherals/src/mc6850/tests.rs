@@ -2,11 +2,14 @@
 
 use mc683xx_board::inspect::Value;
 use mc683xx_board::peripheral::Drive;
+
+use crate::SYSTEM_CLOCK;
 use mc683xx_board::peripheral::Driven;
 use mc683xx_board::peripheral::Lane;
 use mc683xx_board::peripheral::Peripheral;
 use mc683xx_board::peripheral::PeripheralAccess;
 use mc683xx_board::peripheral::Role;
+use mc683xx_board::registry::ConstructError;
 use mc683xx_board::registry::Context;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::ParameterError;
@@ -16,6 +19,7 @@ use mc683xx_board::signal::Direction;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
@@ -85,6 +89,11 @@ const CHARACTER: u64 = 1_041_666_666;
 /// Start bit to the center of the stop bit: nine and a half bits.
 const TO_STOP_CENTER: u64 = 989_583_333;
 
+/// `picoseconds` picoseconds.
+const fn ps(picoseconds: u64) -> Span {
+    Span::from_picos(picoseconds)
+}
+
 /// An ACIA under test.
 struct Bench {
     /// The peripheral.
@@ -96,7 +105,7 @@ impl Bench {
     fn new() -> Self {
         let clock = Clock { hz: CLOCK_HZ };
         let mut acia = Acia::new(clock, clock);
-        acia.power_on(&mut Drive::new(Time::ZERO));
+        acia.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
         Self { acia }
     }
 
@@ -123,7 +132,7 @@ impl Bench {
 
     /// `register` written `value` at `now`: what it drove.
     fn write(&mut self, register: u8, value: u8, now: Time) -> Vec<Driven> {
-        let mut drive = Drive::new(now);
+        let mut drive = Drive::new(now, SYSTEM_CLOCK);
         self.acia
             .write(
                 Self::access(register, Role::ReadWrite, now),
@@ -136,7 +145,7 @@ impl Bench {
 
     /// `register` read at `now`.
     fn read(&mut self, register: u8, now: Time) -> u8 {
-        let mut drive = Drive::new(now);
+        let mut drive = Drive::new(now, SYSTEM_CLOCK);
         self.acia
             .read(Self::access(register, Role::ReadWrite, now), &mut drive)
             .unwrap() as u8
@@ -144,21 +153,25 @@ impl Bench {
 
     /// `signal` into `port` at `now`: what it drove.
     fn input(&mut self, port: usize, signal: Signal, now: Time) -> Vec<Driven> {
-        let mut drive = Drive::new(now);
-        self.acia.input(port, signal, now, &mut drive);
+        let mut drive = Drive::new(now, SYSTEM_CLOCK);
+        self.acia.input(port, signal, &mut drive);
         drive.finish().driven
     }
 
     /// Advances through every event up to `until`: what it drove.
     fn run(&mut self, until: Time) -> Vec<Driven> {
         let mut driven = Vec::new();
-        while let Some(next) = self.acia.next_event().filter(|&next| next <= until) {
-            let mut drive = Drive::new(next);
-            self.acia.advance(next, &mut drive);
+        while let Some(next) = self
+            .acia
+            .next_event(SYSTEM_CLOCK)
+            .filter(|&next| next <= until)
+        {
+            let mut drive = Drive::new(next, SYSTEM_CLOCK);
+            self.acia.advance(&mut drive);
             driven.extend(drive.finish().driven);
         }
-        let mut drive = Drive::new(until);
-        self.acia.advance(until, &mut drive);
+        let mut drive = Drive::new(until, SYSTEM_CLOCK);
+        self.acia.advance(&mut drive);
         driven.extend(drive.finish().driven);
         driven
     }
@@ -203,7 +216,11 @@ fn construct(table: &str) -> Result<Box<dyn Peripheral>, ParameterError> {
     let parameters = Parameters::parse(table).unwrap();
     let environment = Environment::default();
     let context = Context::new("acia", &parameters, &environment);
-    let peripheral = registry.get(NAME).unwrap().construct(&context)?.peripheral;
+    let peripheral = match registry.construct(NAME, &context) {
+        Ok(constructed) => constructed.peripheral,
+        Err(ConstructError::Parameter(error)) => return Err(error),
+        Err(error) => panic!("{error}"),
+    };
     if let Some(key) = parameters.unread() {
         return Err(ParameterError::Unknown(key));
     }
@@ -215,9 +232,7 @@ fn it_declares_the_pins_by_their_names() {
     let mut registry = Registry::new();
     crate::register(&mut registry).unwrap();
     let ports: Vec<(String, Kind, Direction)> = registry
-        .get(NAME)
-        .unwrap()
-        .ports()
+        .ports(NAME)
         .unwrap()
         .iter()
         .map(|port| (port.name.clone(), port.kind, port.direction))
@@ -258,7 +273,7 @@ fn the_clocks_are_required_parameters() {
 fn it_powers_on_in_its_first_master_reset() {
     let clock = Clock { hz: CLOCK_HZ };
     let mut acia = Acia::new(clock, clock);
-    let mut drive = Drive::new(Time::ZERO);
+    let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
     acia.power_on(&mut drive);
     assert_eq!(levels(&drive.finish().driven), [(RTS, true), (IRQ, true)]);
     let mut bench = Bench { acia };
@@ -282,7 +297,7 @@ fn a_master_reset_clears_the_status_and_holds_irq_high() {
     bench.input(RX_DATA, character(b'a'), Time::ZERO);
     bench.input(RX_DATA, character(b'b'), Time::ZERO);
     bench.input(CTS, Signal::Level(true), Time::ZERO);
-    let now = Time(3 * CHARACTER);
+    let now = Time::from_picos(3 * CHARACTER);
     bench.run(now);
     assert!(bench.acia.interrupt_request());
     assert_eq!(bench.read(STATUS, now), IRQ_BIT | CTS_BIT | RDRF);
@@ -301,7 +316,7 @@ fn a_master_reset_clears_the_status_and_holds_irq_high() {
     bench.write(DATA, b'y', now);
     bench.write(STATUS, RESET, now);
     assert!(frames(&bench.write(DATA, b'z', now)).is_empty());
-    let after = now + CHARACTER;
+    let after = now + ps(CHARACTER);
     assert!(frames(&bench.run(after)).is_empty());
     let sent = frames(&bench.write(STATUS, RUN, after));
     assert!(sent.is_empty(), "nothing held across the reset: {sent:?}");
@@ -330,7 +345,11 @@ fn each_word_select_frames_its_character() {
         };
         assert_eq!(at, Time::ZERO);
         assert_eq!(serial.frame, Frame::Data(line), "{word:03b}");
-        assert_eq!(serial.length, bits * 1_000_000_000_000 / 9600, "{word:03b}");
+        assert_eq!(
+            serial.length,
+            ps(bits * 1_000_000_000_000 / 9600),
+            "{word:03b}"
+        );
         assert_eq!(serial.baud, Frequency::from_hz(9600));
     }
 }
@@ -342,7 +361,7 @@ fn the_counter_divide_gives_the_bit_rate() {
         let mut bench = Bench::started(0x14 | divide);
         let sent = frames(&bench.write(DATA, b'd', Time::ZERO));
         assert_eq!(sent[0].1.baud, Frequency::from_hz(baud));
-        assert_eq!(sent[0].1.length, 10_000_000_000_000 / baud);
+        assert_eq!(sent[0].1.length, ps(10_000_000_000_000 / baud));
     }
 }
 
@@ -356,11 +375,14 @@ fn the_transmitter_is_double_buffered() {
     assert_eq!(bench.read(STATUS, Time::ZERO) & TDRE, TDRE);
     assert!(frames(&bench.write(DATA, b'2', Time::ZERO)).is_empty());
     assert_eq!(bench.read(STATUS, Time::ZERO) & TDRE, 0);
-    let sent = frames(&bench.run(Time(2 * CHARACTER)));
+    let sent = frames(&bench.run(Time::from_picos(2 * CHARACTER)));
     assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0].0, Time(CHARACTER));
+    assert_eq!(sent[0].0, Time::from_picos(CHARACTER));
     assert_eq!(sent[0].1.frame, Frame::Data(u16::from(b'2')));
-    assert_eq!(bench.read(STATUS, Time(2 * CHARACTER)) & TDRE, TDRE);
+    assert_eq!(
+        bench.read(STATUS, Time::from_picos(2 * CHARACTER)) & TDRE,
+        TDRE
+    );
 }
 
 /// A character is transferred at its stop bit's center; reading the
@@ -370,10 +392,13 @@ fn the_transmitter_is_double_buffered() {
 fn a_character_is_received_at_its_stop_bit_and_read_once() {
     let mut bench = Bench::started(RUN);
     bench.input(RX_DATA, character(b'r'), Time::ZERO);
-    bench.run(Time(TO_STOP_CENTER - 1));
-    assert_eq!(bench.read(STATUS, Time(TO_STOP_CENTER - 1)) & RDRF, 0);
-    bench.run(Time(TO_STOP_CENTER));
-    let now = Time(TO_STOP_CENTER);
+    bench.run(Time::from_picos(TO_STOP_CENTER - 1));
+    assert_eq!(
+        bench.read(STATUS, Time::from_picos(TO_STOP_CENTER - 1)) & RDRF,
+        0
+    );
+    bench.run(Time::from_picos(TO_STOP_CENTER));
+    let now = Time::from_picos(TO_STOP_CENTER);
     assert_eq!(bench.read(STATUS, now), RDRF | TDRE);
     assert_eq!(bench.read(DATA, now), b'r');
     assert_eq!(bench.read(STATUS, now), TDRE);
@@ -387,20 +412,20 @@ fn the_receiver_does_not_check_the_senders_baud() {
     let mut bench = Bench::started(RUN);
     let slow = Serial::new(Frame::Data(u16::from(b's')), Frequency::from_hz(4800), 10);
     bench.input(RX_DATA, Signal::Serial(slow), Time::ZERO);
-    bench.run(Time(TO_STOP_CENTER));
-    assert_eq!(bench.read(DATA, Time(TO_STOP_CENTER)), b's');
+    bench.run(Time::from_picos(TO_STOP_CENTER));
+    assert_eq!(bench.read(DATA, Time::from_picos(TO_STOP_CENTER)), b's');
     // an untimed frame is a character long at the receiver's rate
     let mut bench = Bench::started(RUN);
     let untimed = Serial::untimed(Frame::Data(u16::from(b'u')));
     bench.input(RX_DATA, Signal::Serial(untimed), Time::ZERO);
     bench.input(RX_DATA, Signal::Serial(untimed), Time::ZERO);
-    bench.run(Time(CHARACTER + TO_STOP_CENTER - 1));
-    assert_eq!(bench.read(DATA, Time(CHARACTER)), b'u');
-    let now = Time(CHARACTER + TO_STOP_CENTER - 1);
+    bench.run(Time::from_picos(CHARACTER + TO_STOP_CENTER - 1));
+    assert_eq!(bench.read(DATA, Time::from_picos(CHARACTER)), b'u');
+    let now = Time::from_picos(CHARACTER + TO_STOP_CENTER - 1);
     assert_eq!(bench.read(STATUS, now) & RDRF, 0, "the second not yet");
-    bench.run(Time(CHARACTER + TO_STOP_CENTER));
+    bench.run(Time::from_picos(CHARACTER + TO_STOP_CENTER));
     assert_eq!(
-        bench.read(STATUS, Time(CHARACTER + TO_STOP_CENTER)) & RDRF,
+        bench.read(STATUS, Time::from_picos(CHARACTER + TO_STOP_CENTER)) & RDRF,
         RDRF
     );
 }
@@ -414,7 +439,7 @@ fn errors_go_with_their_character() {
     let mut bench = Bench::started(0x09);
     let wrong = Serial::new(Frame::Data(0x41 | 0x80), Frequency::from_hz(9600), 10);
     bench.input(RX_DATA, Signal::Serial(wrong), Time::ZERO);
-    let now = Time(CHARACTER);
+    let now = Time::from_picos(CHARACTER);
     bench.run(now);
     assert_eq!(bench.read(STATUS, now), RDRF | TDRE | PE);
     assert_eq!(bench.read(DATA, now), 0x41);
@@ -424,7 +449,7 @@ fn errors_go_with_their_character() {
         Signal::Serial(Serial::untimed(Frame::Data(0x41))),
         now,
     );
-    let now = Time(2 * CHARACTER);
+    let now = Time::from_picos(2 * CHARACTER);
     bench.run(now);
     assert_eq!(bench.read(STATUS, now), RDRF | TDRE);
     // a break: all zeros and no stop bit; back to back, one character
@@ -432,7 +457,7 @@ fn errors_go_with_their_character() {
     let brk = Signal::Serial(Serial::new(Frame::Break, Frequency::from_hz(9600), 10));
     bench.input(RX_DATA, brk, Time::ZERO);
     bench.input(RX_DATA, brk, Time::ZERO);
-    let now = Time(3 * CHARACTER);
+    let now = Time::from_picos(3 * CHARACTER);
     bench.run(now);
     assert_eq!(bench.read(STATUS, now), RDRF | TDRE | FE);
     assert_eq!(bench.read(DATA, now), 0);
@@ -448,7 +473,7 @@ fn an_overrun_shows_after_the_character_before_it_is_read() {
     for byte in *b"abc" {
         bench.input(RX_DATA, character(byte), Time::ZERO);
     }
-    let now = Time(3 * CHARACTER);
+    let now = Time::from_picos(3 * CHARACTER);
     bench.run(now);
     assert_eq!(bench.read(STATUS, now), IRQ_BIT | RDRF | TDRE);
     assert_eq!(bench.read(DATA, now), b'a');
@@ -456,13 +481,13 @@ fn an_overrun_shows_after_the_character_before_it_is_read() {
     assert!(bench.acia.interrupt_request());
     // characters keep being lost while it shows
     bench.input(RX_DATA, character(b'd'), now);
-    let now = now + CHARACTER;
+    let now = now + ps(CHARACTER);
     bench.run(now);
     assert_eq!(bench.read(DATA, now), b'a', "the lost ones never arrive");
     assert_eq!(bench.read(STATUS, now), TDRE);
     assert!(!bench.acia.interrupt_request());
     bench.input(RX_DATA, character(b'e'), now);
-    let now = now + CHARACTER;
+    let now = now + ps(CHARACTER);
     bench.run(now);
     assert_eq!(bench.read(DATA, now), b'e');
 }
@@ -476,7 +501,7 @@ fn an_overrun_shows_after_the_character_before_it_is_read() {
 fn dcd_latches_its_rise_until_a_status_and_a_data_read() {
     let mut bench = Bench::started(RUN | RIE);
     bench.input(RX_DATA, character(b'k'), Time::ZERO);
-    let now = Time(CHARACTER);
+    let now = Time::from_picos(CHARACTER);
     bench.run(now);
     let driven = bench.input(DCD, Signal::Level(true), now);
     assert!(levels(&driven).is_empty(), "IRQ already low for RDRF");
@@ -492,7 +517,7 @@ fn dcd_latches_its_rise_until_a_status_and_a_data_read() {
     assert!(other.acia.interrupt_request());
     // after the status read, the data read clears it
     let driven_read = {
-        let mut drive = Drive::new(now);
+        let mut drive = Drive::new(now, SYSTEM_CLOCK);
         bench
             .acia
             .read(Bench::access(DATA, Role::ReadWrite, now), &mut drive)
@@ -510,7 +535,7 @@ fn dcd_latches_its_rise_until_a_status_and_a_data_read() {
     assert!(!bench.acia.interrupt_request());
     // frames are lost while it is high
     bench.input(RX_DATA, character(b'l'), now);
-    let later = now + CHARACTER;
+    let later = now + ps(CHARACTER);
     bench.run(later);
     assert_eq!(bench.read(STATUS, later) & RDRF, 0);
     bench.input(DCD, Signal::Level(false), later);
@@ -560,28 +585,30 @@ fn the_interrupts_follow_their_enables() {
     assert!(bench.acia.interrupt_request());
     let driven = bench.write(DATA, b'2', Time::ZERO);
     assert_eq!(levels(&driven), [(IRQ, true)]);
-    let driven = bench.run(Time(CHARACTER));
+    let driven = bench.run(Time::from_picos(CHARACTER));
     assert_eq!(levels(&driven), [(IRQ, false)]);
-    bench.write(STATUS, RUN, Time(CHARACTER));
+    bench.write(STATUS, RUN, Time::from_picos(CHARACTER));
     assert!(!bench.acia.interrupt_request());
     // the receiver's, cleared by the data read
-    bench.write(STATUS, RUN | RIE, Time(CHARACTER));
-    bench.input(RX_DATA, character(b'i'), Time(CHARACTER));
-    let driven = bench.run(Time(2 * CHARACTER));
+    bench.write(STATUS, RUN | RIE, Time::from_picos(CHARACTER));
+    bench.input(RX_DATA, character(b'i'), Time::from_picos(CHARACTER));
+    let driven = bench.run(Time::from_picos(2 * CHARACTER));
     assert_eq!(levels(&driven), [(IRQ, false)]);
     assert_eq!(
-        bench.read(STATUS, Time(2 * CHARACTER)),
+        bench.read(STATUS, Time::from_picos(2 * CHARACTER)),
         IRQ_BIT | RDRF | TDRE
     );
-    bench.read(DATA, Time(2 * CHARACTER));
+    bench.read(DATA, Time::from_picos(2 * CHARACTER));
     assert!(!bench.acia.interrupt_request());
     // the ACIA gives no vector
     let iack = Bench::access(0, Role::Iack, Time::ZERO);
     assert_eq!(
-        bench.acia.read(iack, &mut Drive::new(Time::ZERO)),
+        bench
+            .acia
+            .read(iack, &mut Drive::new(Time::ZERO, SYSTEM_CLOCK)),
         Err(BusError)
     );
-    assert_eq!(bench.acia.wait_states(iack), None);
+    assert_eq!(bench.acia.wait_states(iack, SYSTEM_CLOCK), None);
 }
 
 /// CR6:5: RTS low but with `10`; `11` sends a break, frames a character
@@ -598,23 +625,23 @@ fn the_transmitter_control_sets_rts_and_sends_a_break() {
         levels(&bench.write(STATUS, RUN | BREAK, Time::ZERO)),
         [(RTS, false)]
     );
-    let sent = frames(&bench.run(Time(2 * CHARACTER + 1)));
+    let sent = frames(&bench.run(Time::from_picos(2 * CHARACTER + 1)));
     let breaks: Vec<_> = sent
         .iter()
-        .map(|(at, serial)| (at.0, serial.frame))
+        .map(|(at, serial)| (at.picos(), serial.frame))
         .collect();
     // the first break went out at the control write
     assert_eq!(
         breaks,
         [(CHARACTER, Frame::Break), (2 * CHARACTER, Frame::Break)]
     );
-    bench.write(STATUS, RUN, Time(2 * CHARACTER + 1));
-    bench.write(DATA, b'z', Time(2 * CHARACTER + 1));
-    let sent = frames(&bench.run(Time(4 * CHARACTER)));
+    bench.write(STATUS, RUN, Time::from_picos(2 * CHARACTER + 1));
+    bench.write(DATA, b'z', Time::from_picos(2 * CHARACTER + 1));
+    let sent = frames(&bench.run(Time::from_picos(4 * CHARACTER)));
     let [(at, serial)] = sent[..] else {
         panic!("one character: {sent:?}");
     };
-    assert_eq!(at, Time(3 * CHARACTER + BIT));
+    assert_eq!(at, Time::from_picos(3 * CHARACTER + BIT));
     assert_eq!(serial.frame, Frame::Data(u16::from(b'z')));
 }
 
@@ -643,9 +670,9 @@ fn a_snapshot_restores_mid_character() {
     let snapshot = bench.acia.save().unwrap();
     let mut other = Bench::new();
     other.acia.restore(&snapshot).unwrap();
-    other.run(Time(CHARACTER));
+    other.run(Time::from_picos(CHARACTER));
     assert!(other.acia.interrupt_request());
-    assert_eq!(other.read(DATA, Time(CHARACTER)), b's');
+    assert_eq!(other.read(DATA, Time::from_picos(CHARACTER)), b's');
     let mut wrong = snapshot;
     wrong[0] ^= 1;
     assert!(other.acia.restore(&wrong).is_err());
@@ -711,13 +738,13 @@ fn the_format_matches_its_golden() {
         bench.input(
             RX_DATA,
             Signal::Serial(Serial::untimed(Frame::Data(u16::from(byte)))),
-            Time(3),
+            Time::from_picos(3),
         );
     }
-    bench.input(DCD, Signal::Level(true), Time(5));
-    bench.input(DCD, Signal::Level(false), Time(6));
-    bench.input(RX_DATA, character(b'k'), Time(7));
-    bench.run(Time(CHARACTER + 5));
+    bench.input(DCD, Signal::Level(true), Time::from_picos(5));
+    bench.input(DCD, Signal::Level(false), Time::from_picos(6));
+    bench.input(RX_DATA, character(b'k'), Time::from_picos(7));
+    bench.run(Time::from_picos(CHARACTER + 5));
     let snapshot = bench.acia.save().unwrap();
     snapshot_golden::check(
         env!("CARGO_MANIFEST_DIR"),
@@ -737,7 +764,7 @@ fn a_word_cycle_carries_the_register_on_data_15_8() {
         FunctionCode::SUPERVISOR_DATA,
         Time::ZERO,
     );
-    let mut drive = Drive::new(Time::ZERO);
+    let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
     bench.acia.write(access, 0x1500, &mut drive).unwrap();
     assert_eq!(
         bench.acia.state.control, RUN,

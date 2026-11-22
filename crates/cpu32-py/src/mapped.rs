@@ -208,7 +208,7 @@ impl BusCycleView {
     fn select(&self) -> Option<String> {
         self.0
             .select
-            .and_then(ChipSelect::from_select)
+            .and_then(|select| ChipSelect::try_from(select).ok())
             .map(|select| select.to_string())
     }
 
@@ -222,7 +222,7 @@ impl BusCycleView {
     /// The address: on a chip ADDR, on a bare `Machine` all 32 bits.
     #[getter]
     const fn address(&self) -> u32 {
-        self.0.address
+        self.0.address.0
     }
 
     /// Bytes in the cycle: 1 or 2, or 4 on a bare `Machine` for a long the
@@ -235,7 +235,7 @@ impl BusCycleView {
     /// FC[2:0].
     #[getter]
     const fn function_code(&self) -> u8 {
-        self.0.function_code.bits()
+        self.0.function_code.get()
     }
 
     /// Whether it is a write, R/W low; set for `wait_states` and
@@ -248,7 +248,7 @@ impl BusCycleView {
     /// When it starts, in system clocks.
     #[getter]
     const fn now(&self) -> u64 {
-        self.0.now.0
+        self.0.now.clocks()
     }
 
     fn __repr__(&self) -> String {
@@ -448,7 +448,7 @@ fn truth(value: &Bound<'_, PyAny>) -> PyResult<bool> {
 
 /// An optional time.
 fn time(value: &Bound<'_, PyAny>) -> PyResult<Option<Cycles>> {
-    Ok(value.extract::<Option<u64>>()?.map(Cycles))
+    Ok(value.extract::<Option<u64>>()?.map(Cycles::from_clocks))
 }
 
 impl MappedPeripheral for PythonMapped {
@@ -500,7 +500,7 @@ impl MappedPeripheral for PythonMapped {
     }
 
     fn reset(&mut self, now: Cycles) {
-        self.call_or(self.methods.reset.as_ref(), (now.0,), ignored, ());
+        self.call_or(self.methods.reset.as_ref(), (now.clocks(),), ignored, ());
     }
 }
 
@@ -520,7 +520,7 @@ impl Timed for PythonMapped {
     }
 
     fn advance(&mut self, now: Cycles) {
-        self.call_or(self.methods.advance.as_ref(), (now.0,), ignored, ());
+        self.call_or(self.methods.advance.as_ref(), (now.clocks(),), ignored, ());
     }
 }
 

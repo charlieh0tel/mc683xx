@@ -17,6 +17,7 @@ use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::Interrupts;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::registers::Registers;
+use mc683xx_target::address::Address;
 
 /// The 68331's address lines, ADDR[23:0] (MC68331UM 4.4.1.1).
 pub const ADDRESS_BITS: u32 = 24;
@@ -69,9 +70,9 @@ pub fn load(registers: &mut Registers, state: &State) {
     for (number, value) in state.address.iter().enumerate() {
         registers.set_address(number, *value);
     }
-    registers.usp = state.usp;
-    registers.ssp = state.ssp;
-    registers.pc = state.pc;
+    registers.usp = Address(state.usp);
+    registers.ssp = Address(state.ssp);
+    registers.pc = Address(state.pc);
 }
 
 /// The core's registers as a `State`.
@@ -80,16 +81,16 @@ pub fn capture(registers: &Registers) -> State {
     State {
         data: registers.data,
         address: std::array::from_fn(|number| registers.address(number)),
-        usp: registers.usp,
-        ssp: registers.ssp,
+        usp: registers.usp.0,
+        ssp: registers.ssp.0,
         sr: registers.sr(),
-        pc: registers.pc,
+        pc: registers.pc.0,
     }
 }
 
 /// Runs one instruction: a budget of one cycle runs exactly one.
 pub fn step(cpu: &mut Cpu, bus: &mut dyn Bus) -> Ended {
-    let run = cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
+    let run = cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1));
     // The exception first: taking it may halt the core, as on a stack
     // the case does not map.
     match (cpu.exception_taken(), run.stop) {

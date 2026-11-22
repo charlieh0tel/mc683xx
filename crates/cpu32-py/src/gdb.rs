@@ -17,6 +17,7 @@ use mc683xx_gdb::connection::Polled;
 use mc683xx_gdb::connection::Waiter;
 use mc683xx_gdb::target::AccessError;
 use mc683xx_gdb::target::Target;
+use mc683xx_gdb::target::TargetReset;
 use mc683xx_gdb::target::TargetRun;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
@@ -67,8 +68,8 @@ where
 {
     type Error = PyErr;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
-        self.target.with_cpu(call)
+    fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+        self.target.cpu_scope(call)
     }
 
     fn read_memory(
@@ -103,7 +104,7 @@ where
 
     /// A reset, its Python peripherals' exceptions raised as a run's
     /// are.
-    fn reset(&mut self) -> PyResult<bool> {
+    fn reset(&mut self) -> PyResult<TargetReset> {
         let reset = self.target.reset();
         self.pending.check()?;
         let reset = reset.map_err(raised_from)?;
@@ -179,7 +180,9 @@ pub(crate) fn serve<T: Target<Error = PyErr>>(
         Err(SessionError::Target { error }) => Err(error),
         Err(SessionError::Connection { error }) => Err(raised(error)),
         Err(SessionError::Protocol(text)) => Err(PyRuntimeError::new_err(text)),
-        Ok(ending) => Err(PyRuntimeError::new_err(format!("{ending:?}"))),
+        Ok(_) => Err(PyRuntimeError::new_err(
+            "the gdb session ended in a way the bindings do not know",
+        )),
         Err(error) => Err(PyRuntimeError::new_err(error.to_string())),
     }
 }

@@ -3,10 +3,14 @@ use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use super::CpuState;
+use super::Layer;
+use super::MAGIC;
+use super::ParseLayerError;
 use super::StateError;
 use super::VERSION;
-use super::decode;
+use super::decode_layer;
 use super::encode;
+use super::encode_layer;
 use super::restore_each;
 use crate::cpu::Cpu;
 use crate::cycles::Cycles;
@@ -47,21 +51,26 @@ fn trace(cpu: &mut Cpu, budget: u64) -> Vec<u32> {
         into.borrow_mut().push(instruction.pc.0);
         ControlFlow::Continue(())
     });
-    cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(budget));
+    cpu.run_for(
+        &mut NoBus,
+        &mut NoInterrupts,
+        Cycles::ZERO,
+        Cycles::from_clocks(budget),
+    );
     cpu.remove_hook(id);
     pcs.take()
 }
 
 /// What a run leaves that the next could see.
 fn observed(cpu: &Cpu) -> (Vec<u8>, u64) {
-    (cpu.save(), cpu.instructions())
+    (cpu.save().unwrap(), cpu.instructions())
 }
 
 #[test]
 fn a_snapshot_mid_run_reproduces_the_run() {
     let mut cpu = looping();
     trace(&mut cpu, 333);
-    let snapshot = cpu.save();
+    let snapshot = cpu.save().unwrap();
     let first = trace(&mut cpu, 1000);
     let after = observed(&cpu);
     assert!(
@@ -89,7 +98,7 @@ fn a_snapshot_mid_run_reproduces_the_run() {
 fn a_pending_breakpoint_is_saved() {
     let mut cpu = looping();
     cpu.set_breakpoint_pending(true);
-    let snapshot = cpu.save();
+    let snapshot = cpu.save().unwrap();
     let mut other = looping();
     other.restore(&snapshot).unwrap();
     assert!(other.breakpoint_pending());
@@ -99,7 +108,7 @@ fn a_pending_breakpoint_is_saved() {
 fn a_pending_trace_is_saved() {
     let mut cpu = looping();
     cpu.bare.trace_pending = Some(Address(DATA));
-    let snapshot = cpu.save();
+    let snapshot = cpu.save().unwrap();
     let mut other = looping();
     other.restore(&snapshot).unwrap();
     assert_eq!(other.bare.trace_pending, Some(Address(DATA)));
@@ -113,7 +122,7 @@ fn the_format_matches_its_golden() {
         env!("CARGO_MANIFEST_DIR"),
         "cpu",
         &[("cpu", VERSION)],
-        &cpu.save(),
+        &cpu.save().unwrap(),
     );
 }
 
@@ -123,7 +132,7 @@ fn hooks_stay_and_permissions_come_back() {
     cpu.memory
         .protect(Space::User, Address(0), PAGE_BYTES, Permissions::READ)
         .unwrap();
-    let snapshot = cpu.save();
+    let snapshot = cpu.save().unwrap();
     let mut other = machine(&LOOP);
     let id = other.add_write_hook(Address(DATA)..=Address(DATA), |_| ControlFlow::Break(()));
     other.restore(&snapshot).unwrap();
@@ -133,7 +142,12 @@ fn hooks_stay_and_permissions_come_back() {
     );
     assert_eq!(
         other
-            .run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(1000))
+            .run_for(
+                &mut NoBus,
+                &mut NoInterrupts,
+                Cycles::ZERO,
+                Cycles::from_clocks(1000)
+            )
             .stop,
         crate::cpu::Stop::Hook(id)
     );
@@ -142,17 +156,19 @@ fn hooks_stay_and_permissions_come_back() {
 #[test]
 fn another_format_is_refused() {
     let mut cpu = looping();
-    let mut snapshot = cpu.save();
-    snapshot[0] ^= 0xff;
+    let mut snapshot = cpu.save().unwrap();
+    snapshot[MAGIC.len() + 1] ^= 0xff;
     assert!(matches!(
         cpu.restore(&snapshot),
         Err(StateError::Version { found, expected }) if (found, expected) == (VERSION ^ 0xff, VERSION)
     ));
-    assert!(matches!(
-        cpu.restore(&snapshot[..2]),
-        Err(StateError::Truncated)
-    ));
-    let good = looping().save();
+    for length in [2, MAGIC.len(), MAGIC.len() + 2] {
+        assert!(matches!(
+            cpu.restore(&snapshot[..length]),
+            Err(StateError::Truncated)
+        ));
+    }
+    let good = looping().save().unwrap();
     assert!(matches!(
         cpu.restore(&good[..good.len() / 2]),
         Err(StateError::Decode(_))
@@ -168,8 +184,36 @@ fn another_format_is_refused() {
 }
 
 #[test]
+fn another_layers_snapshot_is_refused_as_such() {
+    let mut cpu = looping();
+    let snapshot = cpu.save().unwrap();
+    let board = encode_layer(Layer::Board, VERSION, &());
+    let error = cpu.restore(&board).unwrap_err();
+    assert!(matches!(
+        error,
+        StateError::Layer {
+            found: Layer::Board,
+            expected: Layer::Cpu
+        }
+    ));
+    assert_eq!(error.to_string(), "a board snapshot, not a CPU snapshot");
+    let mut unnamed = snapshot.clone();
+    unnamed[MAGIC.len()] = 0;
+    assert!(matches!(
+        cpu.restore(&unnamed),
+        Err(StateError::Invalid(reason)) if reason == "snapshot layer 0"
+    ));
+    // a part's snapshot, or one from before the magic
+    assert!(matches!(
+        cpu.restore(&encode(VERSION, &())),
+        Err(StateError::NotSnapshot)
+    ));
+    assert_eq!(cpu.registers.data[0], 40);
+}
+
+#[test]
 fn other_hardware_is_refused() {
-    let snapshot = looping().save();
+    let snapshot = looping().save().unwrap();
     let mut small = Cpu::new(Memory::new(24).unwrap());
     small.registers.set_sr(status::S);
     assert!(matches!(
@@ -186,14 +230,14 @@ fn other_hardware_is_refused() {
 
 /// `snapshot` with `change` made to what it holds.
 fn edited(snapshot: &[u8], change: impl FnOnce(&mut CpuState)) -> Vec<u8> {
-    let mut state: CpuState = decode(VERSION, snapshot).unwrap();
+    let mut state: CpuState = decode_layer(Layer::Cpu, VERSION, snapshot).unwrap();
     change(&mut state);
-    encode(VERSION, &state)
+    encode_layer(Layer::Cpu, VERSION, &state)
 }
 
 #[test]
 fn a_state_no_run_could_save_is_refused() {
-    let snapshot = looping().save();
+    let snapshot = looping().save().unwrap();
     let invalid: [(Vec<u8>, &str); 3] = [
         (
             edited(&snapshot, |state| {
@@ -214,7 +258,7 @@ fn a_state_no_run_could_save_is_refused() {
     for (bytes, what) in invalid {
         assert!(matches!(cpu.restore(&bytes), Err(StateError::Invalid(reason)) if reason == what));
     }
-    assert_eq!(cpu.save(), snapshot, "unchanged by the refusals");
+    assert_eq!(cpu.save().unwrap(), snapshot, "unchanged by the refusals");
 }
 
 #[test]
@@ -262,5 +306,18 @@ fn a_reason_may_be_built_at_run_time() {
     assert_eq!(
         StateError::mismatch("a fixed reason").to_string(),
         "snapshot of other hardware: a fixed reason"
+    );
+}
+
+#[test]
+fn a_layer_parses_from_its_name_in_any_case() {
+    for layer in Layer::ALL {
+        assert_eq!(layer.to_string().parse(), Ok(layer));
+        assert_eq!(layer.to_string().to_uppercase().parse(), Ok(layer));
+    }
+    assert_eq!("cpu".parse(), Ok(Layer::Cpu));
+    assert_eq!(
+        "flat".parse::<Layer>(),
+        Err(ParseLayerError("flat".to_owned()))
     );
 }

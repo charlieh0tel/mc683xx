@@ -18,8 +18,8 @@ const IACK_LEVEL_SHIFT: u32 = 1;
 
 /// The address of an interrupt acknowledge cycle at `level`.
 #[must_use]
-pub fn iack_address(level: InterruptLevel) -> u32 {
-    IACK_ADDRESS | u32::from(level.get()) << IACK_LEVEL_SHIFT
+pub const fn iack_address(level: InterruptLevel) -> Address {
+    Address(IACK_ADDRESS | (level.get() as u32) << IACK_LEVEL_SHIFT)
 }
 
 /// The cycles a peripheral on no chip select takes by its own decode of
@@ -44,10 +44,10 @@ pub enum BusDecode {
 impl BusDecode {
     /// Whether it takes a cycle at `address` in `function_code`'s space.
     #[must_use]
-    pub fn takes(self, address: u32, function_code: FunctionCode) -> bool {
+    pub fn takes(self, address: Address, function_code: FunctionCode) -> bool {
         match self {
             Self::Window { base, length } => {
-                function_code.is_memory_space() && address.wrapping_sub(base.0) < length
+                function_code.is_memory_space() && address.0.wrapping_sub(base.0) < length
             }
             Self::Acknowledge(pin) => {
                 function_code.is_cpu_space() && address == iack_address(pin.level())
@@ -96,7 +96,7 @@ pub enum ClockPhase {
 /// The QSPI's serial clock as SPCR0 and the system clock set it
 /// (QSMRM 4.3.1).
 ///
-/// Built with [`QspiClock::new`] or [`QspiClock::reset`], so a field
+/// Built with [`QspiClock::new`] or [`QspiClock::at_reset`], so a field
 /// added later gets a default and no host's code changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
@@ -134,7 +134,7 @@ impl QspiClock {
     /// 4-1), rounded down.
     #[must_use]
     pub const fn baud(self) -> Frequency {
-        Frequency(self.system_clock.0 / self.period.0)
+        Frequency::from_nanohertz(self.system_clock.nanohertz() / self.period.clocks())
     }
 }
 
@@ -174,25 +174,32 @@ pub struct QspiTransfer {
 }
 
 impl QspiTransfer {
-    /// Queue entry `entry`'s transfer of `bits` of `out` with
-    /// `chip_selects` on PCS\[3:0\], shifted with `clock`, ending at
-    /// `now`.
+    /// A transfer of `bits` of `out`, shifted with `clock`, ending at
+    /// `now`: queue entry 0, PCS\[3:0\] all low.
     #[must_use]
-    pub const fn new(
-        entry: u8,
-        chip_selects: u8,
-        out: u16,
-        bits: u8,
-        clock: QspiClock,
-        now: Cycles,
-    ) -> Self {
+    pub const fn new(out: u16, bits: u8, clock: QspiClock, now: Cycles) -> Self {
         Self {
-            entry,
-            chip_selects,
+            entry: 0,
+            chip_selects: 0,
             out,
             bits,
             clock,
             now,
+        }
+    }
+
+    /// The transfer of queue entry `entry`.
+    #[must_use]
+    pub const fn at_entry(self, entry: u8) -> Self {
+        Self { entry, ..self }
+    }
+
+    /// The transfer with `chip_selects` on PCS\[3:0\].
+    #[must_use]
+    pub const fn selecting(self, chip_selects: u8) -> Self {
+        Self {
+            chip_selects,
+            ..self
         }
     }
 }
@@ -216,7 +223,7 @@ pub trait SpiPeripheral {
     fn transfer(&mut self, transfer: QspiTransfer) -> u16;
 
     /// RESET reaches it at `now`, as the chip's QSPI reset scope says
-    /// (`Builder::qspi_reset_scope`; every reset by default, SIMRM 8.2).
+    /// (`Builder::set_qspi_reset_scope`; every reset by default, SIMRM 8.2).
     /// By default nothing changes.
     fn reset(&mut self, now: Cycles) {
         let _ = now;
@@ -228,7 +235,7 @@ pub trait SpiPeripheral {
     /// framed by its select sees the frame start and end here, as the
     /// levels it decodes go to its code and away.  Levels that do not
     /// change are not told.  By default nothing changes.
-    fn chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
         let _ = (levels, now);
     }
 
@@ -237,7 +244,7 @@ pub trait SpiPeripheral {
     /// CPOL, CPHA or SPBR, or the system clock, changed.  A peripheral
     /// that checks its SPI mode or its fastest SCK does it here.  By
     /// default nothing changes.
-    fn clock(&mut self, clock: QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, now: Cycles) {
         let _ = (clock, now);
     }
 

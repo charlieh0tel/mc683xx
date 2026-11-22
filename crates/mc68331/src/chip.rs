@@ -32,6 +32,7 @@ use mc683xx_cpu32::interrupt::Interrupts;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::MemoryError;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
@@ -42,6 +43,7 @@ use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::pins::PortLevels;
+use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::qsm::qspi::AnySpiPeripheral;
 use mc683xx_modules::qsm::qspi::MOST_BITS;
@@ -51,8 +53,6 @@ use mc683xx_modules::qsm::sci::Transmitted;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::Sim;
-use mc683xx_modules::sim::ports::Change;
-use mc683xx_modules::sim::ports::PortName;
 use mc683xx_target::address::Address;
 
 use crate::board::ADDRESS_LINES;
@@ -69,14 +69,17 @@ use crate::board::Wire;
 use crate::board::chip_memory;
 use crate::board::stall;
 use crate::debug::serial::Serial;
-use crate::event;
 use crate::event::ChipTracing;
 use crate::event::Event;
 use crate::gpt::Gpt;
 use crate::gpt::Input;
-use crate::gpt::OutputChange;
+use crate::gpt::PwmChange;
 use crate::gpt::pwm::Channel;
 use crate::gpt::pwm::Output;
+use crate::port::NoInputsError;
+use crate::port::OutputChange;
+use crate::port::Port;
+use crate::port::PortChange;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::reset::ResetScope;
@@ -133,6 +136,9 @@ impl SyncRequest {
 /// OC1's next reported edge, the cycle's start for one carrying a
 /// clock.  [`None`] while no output is watched, or none will change.
 /// Clones share one value.
+///
+/// Not part of the semver API: plumbing `mc683xx-board` runs the chip with.
+#[doc(hidden)]
 #[derive(Debug, Clone, Default)]
 pub struct OutputHorizon(Rc<Cell<Option<Cycles>>>);
 
@@ -159,16 +165,10 @@ impl OutputHorizon {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct OutputStop {
-    /// Port C's pins, a mask: chip selects as discrete outputs.
-    pub port_c: u8,
-    /// Port E's.
-    pub port_e: u8,
-    /// Port F's.
-    pub port_f: u8,
-    /// Port GP's, as [`Mc68331::take_gpt_changes`] reports them.
-    pub port_gp: u8,
-    /// Port QS's, PCS\[3:0\] and TXD among them as levels.
-    pub port_qs: u8,
+    /// Each port's pins, a mask, by [`Port::index`]: port GP's as
+    /// [`Mc68331::take_port_changes`] reports them, port QS's PCS\[3:0\]
+    /// and TXD among them as levels.
+    ports: [u8; Port::ALL.len()],
     /// PWMA, while its edges are reported (`set_report_pwm_edges`).
     pub pwm_a: bool,
     /// PWMB, likewise.
@@ -178,6 +178,19 @@ pub struct OutputStop {
     /// A reset the chip drives on RESET: a `reset` instruction's, the
     /// watchdog's or the halt monitor's.
     pub reset: bool,
+}
+
+impl OutputStop {
+    /// The pins of `port` watched, a mask.
+    #[must_use]
+    pub const fn port(&self, port: Port) -> u8 {
+        self.ports[port.index()]
+    }
+
+    /// Watches the pins of `port` in `mask`, and no others of it.
+    pub const fn set_port(&mut self, port: Port, mask: u8) {
+        self.ports[port.index()] = mask;
+    }
 }
 
 /// A handle by which the host's peripherals divert a memory's cycles to a
@@ -191,12 +204,12 @@ pub struct OutputStop {
 pub struct Diversion(Rc<RefCell<Vec<Diverted>>>);
 
 /// A diversion asked for: a memory's region, and the peripheral's index or
-/// `None` to restore it.
+/// `None` to release it.
 type Diverted = (RegionId, Option<usize>);
 
 impl Diversion {
     /// Every cycle that reaches `memory` reaches `peripheral` instead, as a
-    /// cycle on the select that carried it, until `restore`; the core
+    /// cycle on the select that carried it, until `release`; the core
     /// serves none of its pages meanwhile.
     pub fn divert(&self, memory: MemoryId, peripheral: PeripheralId) {
         self.0
@@ -377,6 +390,9 @@ impl Builder {
 
     /// The handle by which the host's peripherals learn when a watched
     /// output may next change ([`OutputHorizon`]), for them to hold.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-board` runs the chip with.
+    #[doc(hidden)]
     #[must_use]
     pub fn output_horizon(&self) -> OutputHorizon {
         self.board.output_horizon.clone()
@@ -396,7 +412,7 @@ impl Builder {
         Ok(())
     }
 
-    /// Memory of `bytes`, writable or not, on `pins`: every cycle
+    /// Memory of `bytes`, ROM or RAM by `kind`, on `pins`: every cycle
     /// those selects take, in any space, reads or writes it, its
     /// address pins on ADDR from bit 0 up (a block larger than it
     /// repeats it).  The core serves it itself wherever no peripheral
@@ -410,7 +426,7 @@ impl Builder {
     pub fn memory(
         &mut self,
         bytes: Vec<u8>,
-        writable: bool,
+        kind: MemoryKind,
         pins: &[ChipSelect],
     ) -> Result<MemoryId, BuildError> {
         let length = pages(&bytes)?;
@@ -419,13 +435,13 @@ impl Builder {
             region,
             base: 0,
             length,
-            writable,
+            writable: kind.writable(),
         };
         self.wire(Wire::Memory(wired), pins)?;
         Ok(MemoryId(region))
     }
 
-    /// Memory of `bytes`, writable or not, at `base` up: every program
+    /// Memory of `bytes`, ROM or RAM by `kind`, at `base` up: every program
     /// and data cycle there that no chip select matches, in any space,
     /// reads or writes it, at once, with no wait states and no DSACK
     /// (a 16-bit port costing nothing beyond the timing tables, as an
@@ -438,7 +454,7 @@ impl Builder {
     /// Emulator-only: the chip has no such decode.  It is for code and
     /// data the host maps without repurposing a select (a rewritten
     /// routine, a test stub), the firmware's image left as it is.  Its
-    /// contents survive every reset unless `reload_scope` says.
+    /// contents survive every reset unless `set_reload_scope` says.
     ///
     /// # Errors
     ///
@@ -451,7 +467,7 @@ impl Builder {
         &mut self,
         base: Address,
         bytes: Vec<u8>,
-        writable: bool,
+        kind: MemoryKind,
     ) -> Result<MemoryId, BuildError> {
         let length = pages(&bytes)?;
         let placement = BuildError::Placement {
@@ -484,7 +500,7 @@ impl Builder {
                 region,
                 base: base.0,
                 length,
-                writable,
+                writable: kind.writable(),
             },
             timing: FIXED_TIMING,
         });
@@ -506,7 +522,7 @@ impl Builder {
     /// [`BuildError::Termination`] for a termination other than fast or
     /// 0 to 13 wait states: a fixed memory asserts no DSACK and runs on
     /// no ECLK.
-    pub fn fixed_timing(
+    pub fn set_fixed_timing(
         &mut self,
         memory: MemoryId,
         port: PortSize,
@@ -537,7 +553,7 @@ impl Builder {
     /// vectors, the `reset` instruction's after the instruction: code a
     /// warm restart must find as built.  Emulator-only, as no memory
     /// reloads itself; for any memory, a fixed one or one on pins.
-    pub fn reload_scope(&mut self, memory: MemoryId, scope: ResetScope) {
+    pub fn set_reload_scope(&mut self, memory: MemoryId, scope: ResetScope) {
         self.board
             .reloads
             .retain(|reload| reload.region != memory.0);
@@ -550,7 +566,7 @@ impl Builder {
         }
     }
 
-    /// Adds `peripheral`, which every reset reaches until `reset_scope`
+    /// Adds `peripheral`, which every reset reaches until `set_reset_scope`
     /// says otherwise.
     fn add<D: MappedPeripheral + Timed + Save + Any>(&mut self, peripheral: D) -> PeripheralId {
         self.board.peripherals.push(Box::new(peripheral));
@@ -582,7 +598,7 @@ impl Builder {
     /// give by its own decode of the address bus, as board logic does:
     /// an address window, an interrupt acknowledge, or both.  It drives
     /// DSACK `pins` itself, as a peripheral on an externally terminated
-    /// select does ([`Builder::dsack`]): its `wait_states` time each
+    /// select does ([`Builder::set_dsack`]): its `wait_states` time each
     /// cycle, the pins' port sizes it (or its `dsack_port`, cycle by
     /// cycle), and with none of them assigned as DSACK by PEPAR the bus
     /// monitor ends it ([`DsackFault::BusUnassigned`](crate::event::DsackFault::BusUnassigned)).  It takes a cycle
@@ -635,7 +651,7 @@ impl Builder {
     /// The resets that reach `peripheral`'s reset input ([`MappedPeripheral::reset`]):
     /// all by default, as on the RESET pin; a board that wires it
     /// elsewhere says which (SIMRM 8.2).
-    pub fn reset_scope(&mut self, peripheral: PeripheralId, scope: ResetScope) {
+    pub fn set_reset_scope(&mut self, peripheral: PeripheralId, scope: ResetScope) {
         self.board.reset_scopes[index(peripheral)] = scope;
     }
 
@@ -657,19 +673,19 @@ impl Builder {
     /// Table 5-2: DSACK0 8 bits, DSACK1 or both 16) sizes the cycle,
     /// not the select's port field (SIMRM 5.3.3).  Unstated by default:
     /// unchecked, and the select's field sizes it.
-    pub fn dsack(&mut self, peripheral: PeripheralId, pins: Dsack) {
+    pub fn set_dsack(&mut self, peripheral: PeripheralId, pins: Dsack) {
         self.board.dsack_pins[index(peripheral)] = Some(pins);
     }
 
     /// The resets that reach the QSPI's peripheral
-    /// ([`SpiPeripheral::reset`]): all by default, as `reset_scope` for a
+    /// ([`SpiPeripheral::reset`]): all by default, as `set_reset_scope` for a
     /// peripheral.
-    pub const fn qspi_reset_scope(&mut self, scope: ResetScope) {
+    pub const fn set_qspi_reset_scope(&mut self, scope: ResetScope) {
         self.board.qspi_reset_scope = scope;
     }
 
     /// `peripheral`'s interrupt output wired to `pin`.
-    pub fn interrupt(&mut self, peripheral: PeripheralId, pin: IrqPin) {
+    pub fn set_interrupt(&mut self, peripheral: PeripheralId, pin: IrqPin) {
         self.board
             .interrupt_wires
             .push((index(peripheral), pin.level()));
@@ -677,7 +693,7 @@ impl Builder {
 
     /// The board asserts AVEC (PE2) at every acknowledge of `pin`'s
     /// level, as a pin tied low or decode logic does (SIMRM 6.4).
-    pub const fn autovector(&mut self, pin: IrqPin) {
+    pub const fn set_autovector(&mut self, pin: IrqPin) {
         self.board.autovector_levels |= 1 << pin.get();
     }
 
@@ -786,7 +802,7 @@ impl Mc68331 {
                 continue;
             }
             let next = self.board.next_event().map_or(end, |next| next.min(end));
-            let quantum = self.now.until(next).max(Cycles(1));
+            let quantum = self.now.until(next).max(Cycles::from_clocks(1));
             if let Some(idle) = self.cpu.idle() {
                 // time passes without the CPU
                 stop = idle;
@@ -964,7 +980,7 @@ impl Mc68331 {
         self.board.clock_changed();
         self.board.reset_others(now, cause);
         self.board.reload(&mut self.cpu.memory, cause);
-        self.board.events.push(Event::Reset(now, cause));
+        self.board.events.push(Event::Reset { now, cause });
         // the modules reset unfrozen, the serial interface off
         self.board.frozen = false;
         self.serial = Serial::default();
@@ -974,10 +990,10 @@ impl Mc68331 {
         // a double bus fault fetching the vectors leaves the CPU halted,
         // or in background mode
         let _ = self.cpu.reset(&mut Connection(&board), now);
-        if breakpoint && self.cpu.background().is_none() && self.cpu.breakpoint() {
+        if breakpoint && self.cpu.background().is_none() && self.cpu.assert_breakpoint() {
             // BKPT tags the first fetch: acknowledged before it, PCC
             // where it would have begun (PLAN.md, Background debug mode)
-            let pc = Address(self.cpu.registers.pc);
+            let pc = self.cpu.registers.pc;
             self.cpu.set_pcc(pc);
         }
         self.sync_freeze();
@@ -1040,12 +1056,6 @@ impl Mc68331 {
         CpuControl::new(&mut self.cpu)
     }
 
-    /// Why the CPU halted, while it stays halted.
-    #[must_use]
-    pub const fn halted(&self) -> Option<Halt> {
-        self.cpu.halted()
-    }
-
     /// The SIM: its registers, ports, clock and chip selects.
     #[must_use]
     pub const fn sim(&self) -> &Sim {
@@ -1072,13 +1082,6 @@ impl Mc68331 {
     pub fn take_sci_transmitted(&mut self) -> Vec<Transmitted> {
         self.board.output_seen.frames = 0;
         self.board.module_mut::<Qsm>(QSM).take_transmitted()
-    }
-
-    /// The board drives port QS's input pins to `pins` (MC68331UM
-    /// D.4.8).
-    pub fn set_port_qs_pins(&mut self, pins: u8) {
-        let now = self.now;
-        self.board.module_mut::<Qsm>(QSM).set_port_pins(pins, now);
     }
 
     /// The host, as an external SPI master, drives PCS0/SS low now if
@@ -1134,25 +1137,14 @@ impl Mc68331 {
         self.board.module(GPT)
     }
 
-    /// The board drives port GP's input pins, IC1 to IC4/OC5, to `pins`
-    /// now: an input capture takes a selected edge (GPTRM 3.2).
-    pub fn set_port_gp_pins(&mut self, pins: u8) {
+    /// The board drives the GPT's `input` to `level` now: a pin of port
+    /// GP (GPTRM 3.2, 8.1), PAI, the pulse accumulator's input (GPTRM
+    /// 4), or PCLK, its external clock (GPTRM 2.7).
+    pub fn set_gpt_input(&mut self, input: Input, level: bool) {
         let now = self.now;
-        self.board.module_mut::<Gpt>(GPT).set_port_pins(pins, now);
-    }
-
-    /// The board drives PAI to `level` now: the pulse accumulator's
-    /// input (GPTRM 4).
-    pub fn set_pai(&mut self, level: bool) {
-        let now = self.now;
-        self.board.module_mut::<Gpt>(GPT).set_pai(level, now);
-    }
-
-    /// The board drives PCLK to `level` now: the GPT's external clock
-    /// (GPTRM 2.7).
-    pub fn set_pclk(&mut self, level: bool) {
-        let now = self.now;
-        self.board.module_mut::<Gpt>(GPT).set_pclk(level, now);
+        self.board
+            .module_mut::<Gpt>(GPT)
+            .set_input(input, level, now);
     }
 
     /// The board will drive the GPT's `input` to `level` at `at`, or
@@ -1171,15 +1163,12 @@ impl Mc68331 {
     /// those up to now taking effect first: for a host whose time base
     /// moved (a SYNCR write, a reset held), to schedule them again at
     /// their new clocks.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-board` runs the chip with.
+    #[doc(hidden)]
     pub fn unschedule_gpt_inputs(&mut self) {
         let now = self.now;
         self.board.module_mut::<Gpt>(GPT).unschedule_inputs(now);
-    }
-
-    /// The pins of port GP the GPT drives and their levels.
-    #[must_use]
-    pub fn port_gp_outputs(&self) -> PortLevels {
-        self.gpt().port_outputs(self.now)
     }
 
     /// What `channel`'s PWM pin carries now.
@@ -1195,24 +1184,14 @@ impl Mc68331 {
         self.gpt().oc1(self.now)
     }
 
-    /// The changes in what the GPT drives since the last call, in time
-    /// order, each at the time it happened, as `take_port_changes`
-    /// gives the SIM's: port GP's always, OC1's CPROUT clock's while
-    /// `set_report_oc1_clock_edges` asks for them, the PWM pins' while
-    /// `set_report_pwm_edges` does ([PLAN.md], Peripherals).
+    /// The PWM pins' edges since the last call, in time order, each at
+    /// the time it happened, while `set_report_pwm_edges` asks for them
+    /// ([PLAN.md], Peripherals).  It takes only these: port changes stay
+    /// for [`take_port_changes`](Self::take_port_changes).
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
-    pub fn take_gpt_changes(&mut self) -> Vec<(Cycles, OutputChange)> {
-        self.board.module_mut::<Gpt>(GPT).take_output_changes()
-    }
-
-    /// The changes in what port QS drives since the last call, in time
-    /// order, each at the time it happened, as `take_port_changes`
-    /// gives the SIM's: a register write's at its instruction's start,
-    /// the QSPI's PCS and the SCI's TXD at their entries' and frames'
-    /// times.
-    pub fn take_qsm_changes(&mut self) -> Vec<(Cycles, PortLevels)> {
-        self.board.module_mut::<Qsm>(QSM).take_output_changes()
+    pub fn take_pwm_changes(&mut self) -> Vec<PwmChange> {
+        self.board.module_mut::<Gpt>(GPT).take_pwm_changes()
     }
 
     /// Whether `channel`'s PWM edges are reported from now on, from the
@@ -1235,51 +1214,63 @@ impl Mc68331 {
             .set_report_oc1_clock_edges(report, now);
     }
 
-    /// The board drives port E's input pins to `pins`.
-    pub const fn set_port_e_pins(&mut self, pins: u8) {
-        self.board.modules_changed();
-        self.board.sim.set_port_e_pins(pins);
-    }
-
-    /// The board drives port F's input pins to `pins`.
-    pub const fn set_port_f_pins(&mut self, pins: u8) {
-        self.board.modules_changed();
-        self.board.sim.set_port_f_pins(pins);
-    }
-
-    /// The pins of port C, PC0 to PC6 on CS3 to CS9, the SIM drives and
-    /// their levels (MC68331UM 4.8.1.4).
+    /// The pins `port` drives and their levels now: port C's the
+    /// chip-select pins assigned as discrete outputs (MC68331UM
+    /// 4.8.1.4), port GP's TCNT's clock on OC1's under CPROUT.
     #[must_use]
-    pub fn port_c_outputs(&self) -> PortLevels {
-        self.board.sim.outputs(PortName::C)
+    pub fn outputs(&self, port: Port) -> PortLevels {
+        self.board.outputs(port, self.now)
     }
 
-    /// The pins of port E the SIM drives and their levels (MC68331UM
-    /// 4.9).
+    /// `port`'s registers and the levels the board drives on its pins
+    /// ([`PortState`]).  Port C's pins are all outputs, those with their
+    /// chip-select function assigned; it has no inputs, its pins read
+    /// high.  Port GP has no pin assignment register: its assignment is
+    /// the pins the output compares, or CPROUT's clock on OC1, take
+    /// from PORTGP.  Port QS's is PQSPAR's, TXD's while the SCI's
+    /// transmitter has it.
     #[must_use]
-    pub fn port_e_outputs(&self) -> PortLevels {
-        self.board.sim.outputs(PortName::E)
+    pub fn port(&self, port: Port) -> PortState {
+        self.board.port(port)
     }
 
-    /// The pins of port F the SIM drives and their levels (MC68331UM
-    /// 4.9).
-    #[must_use]
-    pub fn port_f_outputs(&self) -> PortLevels {
-        self.board.sim.outputs(PortName::F)
+    /// The board drives the pins of `port` in `mask` to their levels in
+    /// `value` now, the others as they were: an input capture on port
+    /// GP takes a selected edge (GPTRM 3.2).
+    ///
+    /// # Errors
+    ///
+    /// [`NoInputsError`] for port C, which has no inputs, driving
+    /// nothing.
+    pub fn set_pins(&mut self, port: Port, value: u8, mask: u8) -> Result<(), NoInputsError> {
+        let now = self.now;
+        self.board.set_pins(port, value, mask, now)
     }
 
-    /// The pins of port QS the QSM drives and their levels (MC68331UM
-    /// D.4.8).
-    #[must_use]
-    pub fn port_qs_outputs(&self) -> PortLevels {
-        self.qsm().port_outputs()
+    /// The changes in what each port drives since the last call, in time
+    /// order, each at the time it happened, those at one time in
+    /// [`Port::ALL`]'s order: a firmware write's at its instruction's
+    /// start, so a pin the firmware pulses within a quantum is both its
+    /// edges; the output compares' at their compares, OC1's CPROUT
+    /// clock's while `set_report_oc1_clock_edges` asks for them; the
+    /// QSPI's PCS and the SCI's TXD at their entries' and frames'
+    /// times.  It takes only these: the PWM pins' edges stay for
+    /// [`take_pwm_changes`](Self::take_pwm_changes).
+    pub fn take_port_changes(&mut self) -> Vec<PortChange> {
+        self.board.take_port_changes()
     }
 
-    /// The changes in what ports C, E and F drive since the last call,
-    /// each with the time of the write that made it: a pin the firmware
-    /// pulses within a quantum is both its edges.
-    pub fn take_port_changes(&mut self) -> Vec<(Cycles, Change)> {
-        self.board.sim.take_output_changes()
+    /// The changes [`take_port_changes`](Self::take_port_changes) and
+    /// [`take_pwm_changes`](Self::take_pwm_changes) give, taking both, in
+    /// one stream, in time order, those at one time in [`Port::ALL`]'s
+    /// order, a PWM pin's in port GP's place, port GP's and the PWM pins'
+    /// in the order they happened: for a host that drives one thing from
+    /// both, a peripheral clocked by PWMA that takes its data from a port
+    /// GP pin, as the firmware may change both in one instruction.  Each
+    /// of the three takes what it gives and leaves the rest: a host
+    /// calls this alone, or either or both of the other two.
+    pub fn take_output_changes(&mut self) -> Vec<OutputChange> {
+        self.board.take_output_changes()
     }
 
     /// The host asserts or negates `pin`.
@@ -1310,6 +1301,10 @@ impl Mc68331 {
     /// `memory`'s cycles go to `peripheral` from now on, or with `None`
     /// back to the memory ([`Diversion`], which a peripheral holds to do it
     /// within a cycle).
+    ///
+    /// Not part of the semver API: a host's peripherals divert through
+    /// their [`Diversion`].
+    #[doc(hidden)]
     pub fn divert_memory(&mut self, memory: MemoryId, peripheral: Option<PeripheralId>) {
         match peripheral {
             Some(peripheral) => self.board.diversion.divert(memory, peripheral),
@@ -1358,6 +1353,9 @@ impl Mc68331 {
     /// Whether the chip sets its [`OutputHorizon`] before each external
     /// cycle, for a host whose peripheral asks.  Off by default, which
     /// costs nothing.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-board` runs the chip with.
+    #[doc(hidden)]
     pub const fn set_publish_output_horizon(&mut self, publish: bool) {
         self.board.publish_output_horizon = publish;
     }
@@ -1397,7 +1395,7 @@ impl Connection<'_, '_> {
             write,
         );
         if board.tracing.accesses {
-            board.events.push(Event::Access(event::TracedAccess {
+            board.events.push(Event::Access {
                 now: access.now,
                 address: access.address,
                 size: access.size,
@@ -1405,7 +1403,7 @@ impl Connection<'_, '_> {
                 write: write.is_some(),
                 value: write.or(ended.ok().map(|(value, _)| value)),
                 bus_error: ended.is_err(),
-            }));
+            });
         }
         let (value, clocks) = ended?;
         Ok((value, stall(clocks)))
@@ -1449,7 +1447,7 @@ impl Bus for Connection<'_, '_> {
     fn exception_entered(&mut self, entry: &ExceptionEntry, now: Cycles) {
         let mut board = self.0.borrow_mut();
         if board.tracing.exceptions {
-            board.events.push(Event::Exception(now, *entry));
+            board.events.push(Event::Exception { now, entry: *entry });
         }
     }
 

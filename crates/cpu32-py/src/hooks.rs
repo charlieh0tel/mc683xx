@@ -27,7 +27,9 @@ use pyo3::types::PyAnyMethods;
 use pyo3::types::PyDict;
 use pyo3::types::PyDictMethods;
 
+use crate::error::Error;
 use crate::mapped::Pending;
+use crate::python::repr;
 use crate::register::Register;
 
 /// A hook, as `add_*_hook` returns it and `Stop.Hook` carries it (Rust's
@@ -39,7 +41,7 @@ pub(crate) struct HookIdView(pub(crate) HookId);
 #[pymethods]
 impl HookIdView {
     fn __repr__(&self) -> String {
-        format!("{:?}", self.0)
+        self.0.to_string()
     }
 }
 
@@ -77,15 +79,16 @@ impl InstructionView {
     /// The long word at A7, in data space, if memory serves it; `None`
     /// if a peripheral would.
     #[getter]
-    const fn stack_top(&self) -> Option<u32> {
+    fn stack_top(&self) -> Option<u32> {
         self.0.stack_top
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "Instruction(pc={:#08x}, stack_top={:?})",
-            self.0.pc.0, self.0.stack_top
-        )
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "Instruction(pc={:#08x}, stack_top={})",
+            self.0.pc.0,
+            repr(py, self.stack_top())?
+        ))
     }
 }
 
@@ -111,7 +114,7 @@ impl MemoryAccessView {
     /// FC[2:0].
     #[getter]
     const fn function_code(&self) -> u8 {
-        self.0.function_code.bits()
+        self.0.function_code.get()
     }
 
     /// The value read or written, right-aligned.
@@ -202,13 +205,17 @@ pub(crate) enum InvalidReason {
     Protected,
 }
 
-impl From<Invalid> for InvalidReason {
-    fn from(invalid: Invalid) -> Self {
-        match invalid {
+impl TryFrom<Invalid> for InvalidReason {
+    type Error = Error;
+
+    /// The reason, or [`Error::Unmapped`] for one the bindings do not
+    /// know.
+    fn try_from(invalid: Invalid) -> Result<Self, Error> {
+        Ok(match invalid {
             Invalid::BusError => Self::BusError,
             Invalid::Protected => Self::Protected,
-            _ => panic!("an invalid access the bindings do not know"),
-        }
+            _ => return Err(Error::unmapped("invalid access")),
+        })
     }
 }
 
@@ -236,7 +243,7 @@ impl InvalidAccessView {
     /// FC[2:0].
     #[getter]
     const fn function_code(&self) -> u8 {
-        self.0.function_code.bits()
+        self.0.function_code.get()
     }
 
     /// Fetch, read or write.
@@ -253,8 +260,8 @@ impl InvalidAccessView {
 
     /// Why it was invalid.
     #[getter]
-    fn reason(&self) -> InvalidReason {
-        self.0.reason.into()
+    fn reason(&self) -> PyResult<InvalidReason> {
+        Ok(self.0.reason.try_into()?)
     }
 
     /// The address of the instruction it is part of.
@@ -281,17 +288,17 @@ impl InvalidAccessView {
             .transpose()
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "InvalidAccess(address={:#08x}, size={}, function_code={}, cycle={:?}, value={:?}, \
-             reason={:?})",
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "InvalidAccess(address={:#08x}, size={}, function_code={}, cycle={}, value={}, \
+             reason={})",
             self.address(),
             self.size(),
             self.function_code(),
-            self.cycle(),
-            self.value(),
-            self.reason()
-        )
+            repr(py, self.cycle())?,
+            repr(py, self.value())?,
+            repr(py, self.reason()?)?
+        ))
     }
 }
 
@@ -323,7 +330,7 @@ impl ExceptionView {
     /// SSP: its frame's lowest address.
     #[getter]
     const fn stack(&self) -> u32 {
-        self.0.stack
+        self.0.stack.0
     }
 
     /// The interrupt level, for an interrupt.
@@ -332,15 +339,15 @@ impl ExceptionView {
         self.0.level.map(|level| level.get())
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "ExceptionEntry(vector={}, pc={:#08x}, handler={:#08x}, stack={:#08x}, level={:?})",
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "ExceptionEntry(vector={}, pc={:#08x}, handler={:#08x}, stack={:#08x}, level={})",
             self.vector(),
             self.pc(),
             self.handler(),
             self.stack(),
-            self.level()
-        )
+            repr(py, self.level())?
+        ))
     }
 }
 

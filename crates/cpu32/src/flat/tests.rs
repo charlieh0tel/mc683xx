@@ -5,7 +5,6 @@ use std::rc::Rc;
 
 use super::Machine;
 use super::MapError;
-use super::Unmapped;
 use crate::bus::BusError;
 use crate::cpu::Stop;
 use crate::cpu::bare::End;
@@ -13,11 +12,14 @@ use crate::cpu::bare::Limits;
 use crate::cpu::hooks::Instruction;
 use crate::cpu::hooks::MemoryAccess;
 use crate::cpu::state;
+use crate::cpu::state::Layer;
 use crate::cpu::state::Save;
 use crate::cpu::state::StateError;
 use crate::cpu::state::Stateless;
 use crate::cpu::state::decode;
+use crate::cpu::state::decode_layer;
 use crate::cpu::state::encode;
+use crate::cpu::state::encode_layer;
 use crate::cycles::Cycles;
 use crate::exception::Vector;
 use crate::interrupt::IrqPin;
@@ -26,6 +28,7 @@ use crate::memory::PAGE_BYTES;
 use crate::memory::Page;
 use crate::memory::Permissions;
 use crate::memory::Space;
+use crate::memory::Unserved;
 use crate::peripheral::BusCycle;
 use crate::peripheral::MappedPeripheral;
 use crate::registers::status;
@@ -81,8 +84,8 @@ fn machine(code: &[u16]) -> Machine {
         .write(Address(STACK - 4), &RETURN.to_be_bytes())
         .unwrap();
     machine.cpu.registers.set_sr(status::S);
-    machine.cpu.registers.ssp = STACK - 4;
-    machine.cpu.registers.pc = CODE;
+    machine.cpu.registers.ssp = Address(STACK - 4);
+    machine.cpu.registers.pc = Address(CODE);
     machine
 }
 
@@ -102,9 +105,9 @@ fn a_call_at_a_high_address_runs_until_it_returns() {
     let run = machine.run_limited(until_return());
     assert_eq!(run.end, End::Until);
     assert_eq!(machine.cpu.registers.data[0], 1);
-    assert_eq!(machine.cpu.registers.pc, RETURN);
+    assert_eq!(machine.cpu.registers.pc.0, RETURN);
     assert_eq!(machine.cpu.instructions(), 2);
-    assert!(run.cycles.0 > 0);
+    assert!(run.cycles.clocks() > 0);
 }
 
 #[test]
@@ -115,7 +118,7 @@ fn an_instruction_limit_stops_the_run() {
         ..until_return()
     });
     assert_eq!(run.end, End::Instructions);
-    assert_eq!(machine.cpu.registers.pc, CODE + 4);
+    assert_eq!(machine.cpu.registers.pc.0, CODE + 4);
 }
 
 #[test]
@@ -149,20 +152,28 @@ fn until_is_checked_before_the_code_hooks_there() {
 #[test]
 fn maps_do_not_overlap_and_unmapped_bytes_are_refused() {
     let mut machine = machine(&[NOP]);
+    let mapped = machine.map(Address(RAM - PAGE_BYTES), 2 * PAGE_BYTES, &[]);
+    assert_eq!(mapped, Err(MapError::Mapped(Address(RAM - PAGE_BYTES))));
     assert_eq!(
-        machine.map(Address(RAM - PAGE_BYTES), 2 * PAGE_BYTES, &[]),
-        Err(MapError::Mapped(RAM - PAGE_BYTES))
+        mapped.unwrap_err().to_string(),
+        format!("{} is mapped already", Address(RAM - PAGE_BYTES))
     );
     let mut buffer = [0; 4];
     assert_eq!(
         machine.read(Address(RAM - 2), &mut buffer),
-        Err(Unmapped(RAM))
+        Err(Unserved(Address(RAM)))
     );
-    assert_eq!(machine.write(Address(RAM - 2), &[1; 4]), Err(Unmapped(RAM)));
+    assert_eq!(
+        machine.write(Address(RAM - 2), &[1; 4]),
+        Err(Unserved(Address(RAM)))
+    );
     machine.read(Address(RAM - 4), &mut buffer).unwrap();
     assert_eq!(buffer, [0; 4], "a refused write writes nothing");
     machine.unmap(Address(0), RAM).unwrap();
-    assert_eq!(machine.read(Address(0), &mut buffer), Err(Unmapped(0)));
+    assert_eq!(
+        machine.read(Address(0), &mut buffer),
+        Err(Unserved(Address(0)))
+    );
     machine.map(Address(0), PAGE_BYTES, &[7]).unwrap();
     machine.read(Address(0), &mut buffer[..1]).unwrap();
     assert_eq!(buffer[0], 7);
@@ -293,8 +304,8 @@ fn code_mapped_again_where_it_was_unmapped_is_fetched_anew() {
     machine
         .write(Address(STACK - 4), &RETURN.to_be_bytes())
         .unwrap();
-    machine.cpu.registers.ssp = STACK - 4;
-    machine.cpu.registers.pc = CODE;
+    machine.cpu.registers.ssp = Address(STACK - 4);
+    machine.cpu.registers.pc = Address(CODE);
     assert_eq!(machine.run_limited(until_return()).end, End::Until);
     assert_eq!(machine.cpu.registers.data[0], 2);
 }
@@ -346,7 +357,7 @@ fn unmap_leaves_the_bytes_of_a_region_the_host_mapped() {
     assert_eq!(spare_pages(&machine), [Some(0), Some(1), Some(2), Some(3)]);
     assert_eq!(
         machine.read(host_page(0), &mut byte),
-        Err(Unmapped(host_page(0).0))
+        Err(Unserved(host_page(0)))
     );
 }
 
@@ -377,7 +388,7 @@ crate::unsavable!(Logger, "a logger");
 impl MappedPeripheral for Logger {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, BusError> {
         self.cycles.borrow_mut().push((cycle, None));
-        Ok(cycle.address)
+        Ok(cycle.address.0)
     }
 
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
@@ -428,7 +439,7 @@ fn a_word_past_a_peripheral_s_end_is_a_bus_error() {
             Address(0)..=Address(PERIPHERAL),
             Box::new(Logger::default())
         ),
-        Err(MapError::Overlap(PERIPHERAL))
+        Err(MapError::Overlap(Address(PERIPHERAL)))
     );
 }
 
@@ -449,7 +460,7 @@ fn lpstop_stops_with_no_peripheral_seeing_its_broadcast() {
     assert_eq!(run.end, End::Stop(Stop::Stopped));
     assert_eq!(machine.cpu.exception_taken(), None);
     assert_eq!(machine.cpu.registers.sr(), 0x2700);
-    assert_eq!(machine.cpu.registers.pc, CODE + 6);
+    assert_eq!(machine.cpu.registers.pc.0, CODE + 6);
     assert!(cycles.borrow().is_empty());
 }
 
@@ -475,10 +486,10 @@ fn bkpt_with_no_cpu_space_responder_is_illegal() {
             &handler.to_be_bytes(),
         )
         .unwrap();
-    machine.cpu.registers.vbr = vbr;
+    machine.cpu.registers.vbr = Address(vbr);
     machine.cpu.registers.set_sr(status::S);
-    machine.cpu.registers.ssp = vbr + RAM;
-    machine.cpu.registers.pc = CODE;
+    machine.cpu.registers.ssp = Address(vbr + RAM);
+    machine.cpu.registers.pc = Address(CODE);
     machine.run_limited(Limits {
         instructions: Some(1),
         ..Limits::default()
@@ -487,7 +498,7 @@ fn bkpt_with_no_cpu_space_responder_is_illegal() {
         machine.cpu.exception_taken().map(|taken| taken.vector()),
         Some(Vector::ILLEGAL_INSTRUCTION)
     );
-    assert_eq!(machine.cpu.registers.pc, handler);
+    assert_eq!(machine.cpu.registers.pc.0, handler);
     assert!(cycles.borrow().is_empty());
 }
 
@@ -498,14 +509,14 @@ fn a_requested_interrupt_is_taken_through_its_vector() {
         .write(Address(u32::from(USER_VECTOR) * 4), &HANDLER.to_be_bytes())
         .unwrap();
     machine.write(Address(HANDLER), &bytes(&STOP)).unwrap();
-    machine.request_interrupt(IrqPin::new(3).unwrap(), Some(USER_VECTOR));
+    machine.request_interrupt(IrqPin::new(3).unwrap(), Some(Vector(USER_VECTOR)));
     let run = machine.run_limited(Limits {
         until: Some(Address(HANDLER)),
         ..Limits::default()
     });
     assert_eq!(run.end, End::Until);
     assert_eq!(machine.cpu.instructions(), 0, "taken before the first");
-    assert_eq!(machine.cpu.registers.interrupt_mask(), 3);
+    assert_eq!(machine.cpu.registers.interrupt_mask().get(), 3);
     machine.clear_interrupt(IrqPin::new(3).unwrap());
     // With no budget, a stop does not wait.
     let run = machine.run_limited(Limits::default());
@@ -516,7 +527,7 @@ fn a_requested_interrupt_is_taken_through_its_vector() {
 fn the_format_matches_its_golden() {
     let mut machine = machine(&[MOVEQ_1_D0, RTS]);
     machine.run_limited(until_return());
-    machine.request_interrupt(IrqPin::new(3).unwrap(), Some(0x40));
+    machine.request_interrupt(IrqPin::new(3).unwrap(), Some(Vector(0x40)));
     machine
         .add_peripheral(Address(PERIPHERAL)..=Address(PERIPHERAL), Box::new(Fixed))
         .unwrap();
@@ -539,7 +550,7 @@ fn a_snapshot_restores_memory_registers_and_requests() {
     machine.run_limited(until_return());
     machine.write(Address(0x100), &[9]).unwrap();
     machine.restore(&snapshot).unwrap();
-    assert_eq!(machine.cpu.registers.pc, CODE);
+    assert_eq!(machine.cpu.registers.pc.0, CODE);
     assert_eq!(machine.cpu.registers.data[0], 0);
     let mut byte = [0];
     machine.read(Address(0x100), &mut byte).unwrap();
@@ -626,7 +637,7 @@ fn peripheral_at(machine: &mut Machine, address: u32) -> (&mut dyn MappedPeriphe
         .find(|wired| *wired.range.start() == address)
         .unwrap();
     let cycle = BusCycle::new(
-        address,
+        Address(address),
         Size::Long,
         FunctionCode::SUPERVISOR_DATA,
         Cycles::ZERO,
@@ -655,7 +666,8 @@ fn a_snapshot_holds_each_peripheral_in_the_order_added() {
     machine.restore(&snapshot).unwrap();
     assert_eq!(latch(&mut machine, PERIPHERAL), 1);
     assert_eq!(latch(&mut machine, SECOND), 2);
-    let state: super::MachineState = decode(super::VERSION, &snapshot).unwrap();
+    let state: super::MachineState =
+        decode_layer(Layer::Machine, super::VERSION, &snapshot).unwrap();
     let held: Vec<Option<u32>> = state
         .peripherals
         .iter()
@@ -710,12 +722,14 @@ fn a_restore_into_another_count_of_peripheral_is_refused_and_changes_nothing() {
 fn a_peripheral_or_core_that_refuses_its_snapshot_leaves_every_peripheral_as_it_was() {
     let mut machine = latched();
     let good = machine.save().unwrap();
-    let mut state: super::MachineState = decode(super::VERSION, &good).unwrap();
+    let mut state: super::MachineState =
+        decode_layer(Layer::Machine, super::VERSION, &good).unwrap();
     state.peripherals[1] = encode(LATCH_VERSION + 1, &5_u32);
-    let bad_peripheral = encode(super::VERSION, &state);
-    let mut state: super::MachineState = decode(super::VERSION, &good).unwrap();
+    let bad_peripheral = encode_layer(Layer::Machine, super::VERSION, &state);
+    let mut state: super::MachineState =
+        decode_layer(Layer::Machine, super::VERSION, &good).unwrap();
     state.cpu.truncate(2);
-    let bad_cpu = encode(super::VERSION, &state);
+    let bad_cpu = encode_layer(Layer::Machine, super::VERSION, &state);
     set_latch(&mut machine, PERIPHERAL, 10);
     set_latch(&mut machine, SECOND, 20);
     let refused = machine.restore(&bad_peripheral).unwrap_err();
@@ -833,8 +847,8 @@ fn a_reset_reads_the_vectors() {
     machine.write(Address(0), &STACK.to_be_bytes()).unwrap();
     machine.write(Address(4), &CODE.to_be_bytes()).unwrap();
     machine.reset().unwrap();
-    assert_eq!(machine.cpu.registers.pc, CODE);
-    assert_eq!(machine.cpu.registers.ssp, STACK);
+    assert_eq!(machine.cpu.registers.pc.0, CODE);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK);
 }
 
 /// Where a long operand lands in the tests of what the memory hooks

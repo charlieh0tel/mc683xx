@@ -27,6 +27,7 @@ use mc683xx_target::size::Size;
 use crate::target::AccessError;
 use crate::target::NativeStep;
 use crate::target::Target;
+use crate::target::TargetReset;
 use crate::target::TargetRun;
 
 /// How long a look at a target still running waits before the stub
@@ -44,7 +45,7 @@ pub struct Bdm<'t, T> {
 impl<'t, T: Cpu32Target> Bdm<'t, T> {
     /// `target` as the stub's [`Target`].
     #[must_use]
-    pub fn new(target: &'t mut T) -> Self {
+    pub const fn new(target: &'t mut T) -> Self {
         Self { target }
     }
 
@@ -107,7 +108,7 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
     ) -> Result<usize, AccessError<T::Error>> {
         let size = Self::size(address, data.len());
         self.target
-            .read_memory(address, function_code, size, data)
+            .read_memory(address, size, function_code, data)
             .map_err(AccessError::Target)?;
         Ok(data.len())
     }
@@ -121,7 +122,7 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
     ) -> Result<(), AccessError<T::Error>> {
         let size = Self::size(address, data.len());
         self.target
-            .write_memory(address, function_code, size, data)
+            .write_memory(address, size, function_code, data)
             .map_err(AccessError::Target)
     }
 
@@ -145,8 +146,8 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
         Some(self)
     }
 
-    fn reset(&mut self) -> Result<bool, T::Error> {
-        self.target.reset_halted().map(|_| true)
+    fn reset(&mut self) -> Result<TargetReset, T::Error> {
+        self.target.reset_halted().map(|_| TargetReset::Done)
     }
 }
 

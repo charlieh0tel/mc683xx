@@ -34,10 +34,10 @@ copies, not links, for checkouts on Windows; `make licenses`, part of
 `make ci` and of CI, checks that they match the root's byte for byte.
 A change to a license text is made at the root and copied.
 
-The wheels are abi3 (Python 3.10 and later), one per platform: Linux
+The wheels are abi3 (Python 3.12 and later), one per platform: Linux
 manylinux x86_64 and aarch64, macOS x86_64 and arm64, Windows x64, and
 an sdist.  Wheels the runner can load run the Python tests on Python
-3.10 first; the cross-built ones (Linux aarch64, macOS x86_64) are only
+3.12 first; the cross-built ones (Linux aarch64, macOS x86_64) are only
 built.  The package is a maturin `python-source` layout
 (`crates/cpu32-py/python/mc683xx`), so the sdist carries the stubs and
 `py.typed`; the `sdist` job builds a wheel from the sdist, as pip does
@@ -94,7 +94,8 @@ means a change to:
 - the Python API: the names `__init__.pyi` declares, their arguments,
   enum members, the exception classes, their bases and which errors
   raise which, and the methods the module calls on a host's objects
-  (a peripheral's, a hook's callable);
+  (a peripheral's, as the protocol classes `MappedPeripheral`,
+  `SpiPeripheral` and `Peripheral` list them; a hook's callable);
 - the npm package's JavaScript and TypeScript API, through its
   `exports`, but `InitOutput`, the module's own exports, which is
   opaque;
@@ -114,13 +115,14 @@ Not covered, so a minor or patch release may change them:
   `#[doc(hidden)]` ("Not part of the semver API");
 - npm package files outside its `exports`;
 - the Unicorn-parity Python items, for parity runs against Unicorn
-  only: `Deviations`, `Machine.set_intercepted` and
-  `Machine.set_intercept_callback`;
-- snapshot formats: a restore needs the versions that saved it
-  (PLAN.md, State), so a snapshot is read by the release that wrote
-  it.  A minor release may change one, and its notes say so; a patch
-  release never does;
-- the `--bdm` protocol, which follows the BDM pod's, not this
+  only: `Deviations` (with `Machine.set_deviations` and `deviations`),
+  `Intercepted`, `Machine.set_intercepted` and
+  `Machine.set_intercept_callback`, so marked in the stubs;
+- snapshot formats: a snapshot restores only into a build with the
+  format versions that saved it (PLAN.md, State), so it is read by the
+  release that wrote it.  Any release may bump one, and its notes say
+  so.  A snapshot handed to the wrong layer's `restore` (a chip's to a
+  board's) is refused as such (`StateError::Layer`), whatever its
   version.
 
 Dependencies and platforms:
@@ -132,9 +134,9 @@ Dependencies and platforms:
   serde 1 is stable; a move to another major version of it would be a
   breaking release.  The bytes it writes, the snapshots, stay outside
   semver (above).
-- The minimum supported Rust is 1.99 (`rust-version`); raising it is
-  a minor release.
-- The Python package supports Python 3.10 and later (abi3 wheels).
+- The minimum supported Rust is 1.99 (`rust-version`), which CI's
+  `msrv` job builds the workspace with; raising it is a minor release.
+- The Python package supports Python 3.12 and later (abi3 wheels).
   Dropping a Python or Node release past its end of life is a minor
   release.
 

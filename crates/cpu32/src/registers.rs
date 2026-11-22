@@ -1,6 +1,9 @@
 //! The CPU32 programming model (CPU32RM 2.1, 2.3.1).
 
+use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
+
+use crate::interrupt::InterruptLevel;
 
 /// Status register bits (CPU32RM 2.3.1.3, Figure 2-3).
 pub mod status {
@@ -39,15 +42,15 @@ pub struct Registers {
     /// A0-A6.
     address: [u32; 7],
     /// The user stack pointer.
-    pub usp: u32,
+    pub usp: Address,
     /// The supervisor stack pointer.
-    pub ssp: u32,
+    pub ssp: Address,
     /// The program counter.
-    pub pc: u32,
+    pub pc: Address,
     /// The status register, its unimplemented bits clear.
     sr: u16,
     /// The vector base register.
-    pub vbr: u32,
+    pub vbr: Address,
     /// The source function code register, for `moves`.
     pub sfc: FunctionCode,
     /// The destination function code register, for `moves`.
@@ -62,19 +65,19 @@ impl Registers {
 
     /// Address register `number`, 0 to 7.
     #[must_use]
-    pub fn address(&self, number: usize) -> u32 {
+    pub const fn address(&self, number: usize) -> u32 {
         match number {
-            Self::STACK_POINTER if self.is_supervisor() => self.ssp,
-            Self::STACK_POINTER => self.usp,
+            Self::STACK_POINTER if self.is_supervisor() => self.ssp.0,
+            Self::STACK_POINTER => self.usp.0,
             _ => self.address[number],
         }
     }
 
     /// Sets address register `number`, 0 to 7.
-    pub fn set_address(&mut self, number: usize, value: u32) {
+    pub const fn set_address(&mut self, number: usize, value: u32) {
         match number {
-            Self::STACK_POINTER if self.is_supervisor() => self.ssp = value,
-            Self::STACK_POINTER => self.usp = value,
+            Self::STACK_POINTER if self.is_supervisor() => self.ssp = Address(value),
+            Self::STACK_POINTER => self.usp = Address(value),
             _ => self.address[number] = value,
         }
     }
@@ -115,10 +118,12 @@ impl Registers {
         self.sr & status::S != 0
     }
 
-    /// The interrupt priority mask, 0 to 7.
+    /// The interrupt priority mask.
     #[must_use]
-    pub const fn interrupt_mask(&self) -> u8 {
-        ((self.sr & status::INTERRUPT_MASK) >> status::INTERRUPT_SHIFT) as u8
+    pub const fn interrupt_mask(&self) -> InterruptLevel {
+        InterruptLevel::from_low_bits(
+            ((self.sr & status::INTERRUPT_MASK) >> status::INTERRUPT_SHIFT) as u32,
+        )
     }
 
     /// Whether condition code `flag` is set.
@@ -159,6 +164,8 @@ impl Registers {
 
 #[cfg(test)]
 mod tests {
+    use mc683xx_target::address::Address;
+
     use super::Registers;
     use super::status;
 
@@ -168,7 +175,10 @@ mod tests {
         registers.set_address(7, 0x100);
         registers.set_sr(status::S);
         registers.set_address(7, 0x200);
-        assert_eq!((registers.usp, registers.ssp), (0x100, 0x200));
+        assert_eq!(
+            (registers.usp, registers.ssp),
+            (Address(0x100), Address(0x200))
+        );
         assert_eq!(registers.address(7), 0x200);
     }
 

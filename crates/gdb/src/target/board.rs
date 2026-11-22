@@ -4,6 +4,7 @@
 use mc683xx_board::board::Board;
 use mc683xx_board::condition::Conditions;
 use mc683xx_board::error::RunError;
+use mc683xx_board::time::Span;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
@@ -14,13 +15,14 @@ use mc683xx_target::function_code::FunctionCode;
 
 use super::AccessError;
 use super::Target;
+use super::TargetReset;
 use super::TargetRun;
 use super::widen;
 
 impl Target for Board<Mc68331> {
     type Error = RunError;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+    fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
         Some(call(&mut self.chip_mut().cpu_control()))
     }
 
@@ -47,7 +49,10 @@ impl Target for Board<Mc68331> {
     /// time with the chip.
     fn run_for(&mut self, cycles: Cycles, _hit: &dyn Fn() -> bool) -> Result<TargetRun, RunError> {
         let chip = self.chip().now() + cycles;
-        let until = self.system_clock().time(chip).max(self.now() + 1);
+        let until = self
+            .system_clock()
+            .time(chip)
+            .max(self.now() + Span::from_picos(1));
         let stop = Self::run_until(self, until)?.stop;
         Ok(match stop {
             Stop::Requested if !self.fired().is_empty() => TargetRun::Condition,
@@ -59,9 +64,9 @@ impl Target for Board<Mc68331> {
     /// ([`Board::reset_for`]): the chip's reset and the RESET it then
     /// drives on the board's nets, now.  Nothing while the board holds
     /// RESET low.
-    fn reset(&mut self) -> Result<bool, RunError> {
+    fn reset(&mut self) -> Result<TargetReset, RunError> {
         self.reset_for(ResetCause::External);
-        Ok(true)
+        Ok(TargetReset::Done)
     }
 
     fn conditions(&mut self) -> Option<&mut dyn Conditions> {

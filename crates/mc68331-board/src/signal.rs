@@ -12,6 +12,7 @@ use serde::Serialize;
 
 use crate::time::Clock;
 use crate::time::PICOSECONDS_PER_SECOND;
+use crate::time::Span;
 use crate::time::Time;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::frequency::NANOHERTZ_PER_HERTZ;
@@ -91,9 +92,9 @@ pub struct Serial {
     pub frame: Frame,
     /// The sender's bit rate; zero if it gave none (an untimed frame).
     pub baud: Frequency,
-    /// Picoseconds from the start bit's leading edge to the end of the
-    /// stop bits; zero for an untimed frame.
-    pub length: u64,
+    /// From the start bit's leading edge to the end of the stop bits;
+    /// zero for an untimed frame.
+    pub length: Span,
 }
 
 impl Serial {
@@ -103,18 +104,18 @@ impl Serial {
     #[must_use]
     pub const fn new(frame: Frame, baud: Frequency, bits: u32) -> Self {
         let scale = PICOSECONDS_PER_SECOND as u128 * NANOHERTZ_PER_HERTZ as u128;
-        let length = if baud.0 == 0 {
+        let length = if baud.nanohertz() == 0 {
             0
         } else {
-            bits as u128 * scale / baud.0 as u128
+            bits as u128 * scale / baud.nanohertz() as u128
         };
-        Self::timed(frame, baud, length as u64)
+        Self::timed(frame, baud, Span::from_picos(length as u64))
     }
 
-    /// `frame` at `baud`, `length` picoseconds from start bit to the end
-    /// of its stop bits (one and a half stop bits, say).
+    /// `frame` at `baud`, `length` from start bit to the end of its stop
+    /// bits (one and a half stop bits, say).
     #[must_use]
-    pub const fn timed(frame: Frame, baud: Frequency, length: u64) -> Self {
+    pub const fn timed(frame: Frame, baud: Frequency, length: Span) -> Self {
         Self {
             frame,
             baud,
@@ -126,7 +127,7 @@ impl Serial {
     /// takes whole at its time.
     #[must_use]
     pub const fn untimed(frame: Frame) -> Self {
-        Self::timed(frame, Frequency(0), 0)
+        Self::timed(frame, Frequency::from_nanohertz(0), Span::ZERO)
     }
 
     /// When the frame's stop bits end, for a frame whose start bit
@@ -160,7 +161,7 @@ impl FromStr for Kind {
 /// Text that names no net type.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no net type {0:?}")]
-pub struct ParseKindError(pub String);
+pub struct ParseKindError(String);
 
 /// Which way a port faces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -223,7 +224,7 @@ impl FromStr for Direction {
 /// Text that names no direction.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no direction {0:?}")]
-pub struct ParseDirectionError(pub String);
+pub struct ParseDirectionError(String);
 
 /// The value as the trace writes it, `key=value` fields
 /// ([`docs/tracing.md`][tracing]): `level=1`; `clock_at=PS frequency=NHZ
@@ -238,7 +239,9 @@ impl fmt::Display for Signal {
             Self::Clock(clock) => write!(
                 formatter,
                 "clock_at={} frequency={} phase={}",
-                clock.at.0, clock.frequency.0, clock.phase.0
+                clock.at.picos(),
+                clock.frequency.nanohertz(),
+                clock.phase.units()
             ),
             Self::Serial(serial) => {
                 match serial.frame {
@@ -248,7 +251,8 @@ impl fmt::Display for Signal {
                 write!(
                     formatter,
                     " baud={} length={}",
-                    serial.baud.0, serial.length
+                    serial.baud.nanohertz(),
+                    serial.length.picos()
                 )
             }
             Self::Analog(value) => write!(formatter, "analog={value}"),

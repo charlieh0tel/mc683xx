@@ -3,11 +3,11 @@
 //! Python thread may hold, and a paced run that releases the GIL while
 //! it sleeps.
 
+use std::convert::Infallible;
 use std::hash::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::mem;
-use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::time::Duration;
 use std::time::Instant;
@@ -17,14 +17,20 @@ use mc683xx_board::board::Board;
 use mc683xx_board::board::BoardRun;
 use mc683xx_board::control::BoardControl;
 use mc683xx_board::error::RunError;
+use mc683xx_board::pacing;
 use mc683xx_board::pacing::Pacer;
 use mc683xx_board::pacing::Pacing;
 use mc683xx_board::pacing::ParsePacingError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::ParseKindError;
+use mc683xx_board::time::NonZeroSpan;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
+use pyo3::Borrowed;
 use pyo3::Bound;
+use pyo3::FromPyObject;
+use pyo3::IntoPyObject;
 use pyo3::PyAny;
 use pyo3::PyErr;
 use pyo3::PyResult;
@@ -34,67 +40,122 @@ use pyo3::marker::Ungil;
 use pyo3::pyclass;
 use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
+use pyo3::types::PyFloat;
 
 use crate::board::signal;
+use crate::python::repr;
 
 /// How fast a paced run's board time may go against wall time (Rust's
-/// `pacing::Pacing`).
+/// `pacing::Pacing`), a class per variant.
 #[pyclass(name = "Pacing", module = "mc683xx", frozen, eq, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct PacingView(pub(crate) Pacing);
-
-#[pymethods]
-impl PacingView {
+pub(crate) enum PacingView {
     /// As fast as the host runs it, the default.
-    #[classattr]
-    const UNPACED: Self = Self(Pacing::Unpaced);
-
+    Unpaced(),
     /// A board second a wall second.
-    #[classattr]
-    const REAL_TIME: Self = Self(Pacing::RealTime);
-
-    /// `unpaced`, `realtime` or a factor, as text.
-    #[new]
-    fn new(text: &str) -> PyResult<Self> {
-        text.parse()
-            .map(Self)
-            .map_err(|error: ParsePacingError| PyValueError::new_err(error.to_string()))
-    }
-
+    RealTime(),
     /// `factor` board seconds a wall second: 2.0 twice real time, 0.5
-    /// half.  A factor not finite and above 0 raises `ValueError`.
-    #[staticmethod]
-    fn scaled(factor: f64) -> PyResult<Self> {
-        Pacing::Scaled(factor)
-            .checked()
+    /// half.  Finite and above 0, or building it raises `ValueError`.
+    Scaled {
+        /// Board seconds a wall second.
+        factor: Factor,
+    },
+}
+
+/// A scaled pacing's factor, Rust's `pacing::Factor` (finite and above
+/// 0) as a Python float: so no `Pacing.Scaled` holds a NaN or a signed
+/// zero, and `==` and `hash` agree.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Factor(pacing::Factor);
+
+impl<'a, 'py> FromPyObject<'a, 'py> for Factor {
+    type Error = PyErr;
+
+    /// A factor not finite and above 0 raises `ValueError`.
+    fn extract(object: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
+        pacing::Factor::new(object.extract()?)
             .map(Self)
             .map_err(|error| PyValueError::new_err(error.to_string()))
     }
+}
 
-    /// Board seconds a wall second, `None` unpaced.
+impl<'py> IntoPyObject<'py> for Factor {
+    type Target = PyFloat;
+    type Output = Bound<'py, PyFloat>;
+    type Error = Infallible;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        self.0.get().into_pyobject(py)
+    }
+}
+
+impl PacingView {
+    /// Rust's pacing.
+    pub(crate) const fn pacing(self) -> Pacing {
+        match self {
+            Self::Unpaced() => Pacing::Unpaced,
+            Self::RealTime() => Pacing::RealTime,
+            Self::Scaled { factor } => Pacing::Scaled(factor.0),
+        }
+    }
+}
+
+impl From<Pacing> for PacingView {
+    /// A Rust pacing.
+    fn from(pacing: Pacing) -> Self {
+        match pacing {
+            Pacing::Unpaced => Self::Unpaced(),
+            Pacing::RealTime => Self::RealTime(),
+            Pacing::Scaled(factor) => Self::Scaled {
+                factor: Factor(factor),
+            },
+            // a pacing the bindings do not know, by its factor
+            other => other
+                .factor()
+                .map_or(Self::Unpaced(), |factor| Self::Scaled {
+                    factor: Factor(factor),
+                }),
+        }
+    }
+}
+
+#[pymethods]
+impl PacingView {
+    /// `unpaced`, `realtime` or a factor, as text (Rust's `FromStr`, the
+    /// runner's `--pace`).
+    #[staticmethod]
+    fn parse(text: &str) -> PyResult<Self> {
+        text.parse()
+            .map(|pacing: Pacing| pacing.into())
+            .map_err(|error: ParsePacingError| PyValueError::new_err(error.to_string()))
+    }
+
+    /// Board seconds a wall second, `None` unpaced (Rust's
+    /// `Pacing::factor`).
     #[getter]
-    const fn factor(&self) -> Option<f64> {
-        self.0.factor()
+    fn factor(&self) -> Option<f64> {
+        self.pacing().factor().map(pacing::Factor::get)
     }
 
     /// As `==` compares: the variant and the factor.
     fn __hash__(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
-        mem::discriminant(&self.0).hash(&mut hasher);
-        self.0.factor().map(f64::to_bits).hash(&mut hasher);
+        mem::discriminant(self).hash(&mut hasher);
+        self.factor().map(f64::to_bits).hash(&mut hasher);
         hasher.finish()
     }
 
+    /// Its text, as `parse` takes it.
     fn __str__(&self) -> String {
-        self.0.to_string()
+        self.pacing().to_string()
     }
 
-    fn __repr__(&self) -> String {
-        match self.0 {
-            Pacing::RealTime => "Pacing.REAL_TIME".to_owned(),
-            Pacing::Scaled(factor) => format!("Pacing.scaled({factor:?})"),
-            _ => "Pacing.UNPACED".to_owned(),
-        }
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(match self {
+            Self::Unpaced() => "Pacing.Unpaced()".to_owned(),
+            Self::RealTime() => "Pacing.RealTime()".to_owned(),
+            Self::Scaled { factor } => format!("Pacing.Scaled({})", repr(py, factor.0.get())?),
+        })
     }
 }
 
@@ -134,16 +195,14 @@ impl BoardControlView {
     }
 
     /// Paces the board's runs from their next quantum.
-    fn set_pacing(&self, pacing: PacingView) -> PyResult<()> {
-        self.0
-            .set_pacing(pacing.0)
-            .map_err(|error| PyValueError::new_err(error.to_string()))
+    fn set_pacing(&self, pacing: PacingView) {
+        self.0.set_pacing(pacing.pacing());
     }
 
-    /// The pacing, `Pacing.UNPACED` until set.
+    /// The pacing, `Pacing.Unpaced()` until set.
     #[getter]
     fn pacing(&self) -> PacingView {
-        PacingView(self.0.pacing())
+        self.0.pacing().into()
     }
 
     fn __repr__(&self) -> String {
@@ -151,7 +210,7 @@ impl BoardControlView {
     }
 }
 
-/// Runs `board` to `until` in quanta of `quantum` picoseconds, paced by
+/// Runs `board` to `until` in quanta of `quantum`, paced by
 /// its control (Rust's `Board::run_until_paced`): the GIL released
 /// between quanta, paced or not, once held two switch intervals
 /// ([`Turns`]), and while it sleeps between quanta, so another thread
@@ -165,7 +224,7 @@ pub(crate) fn run_until_paced(
     py: Python<'_>,
     board: &mut Board<Mc68331>,
     until: Time,
-    quantum: NonZeroU64,
+    quantum: NonZeroSpan,
 ) -> Result<Result<BoardRun, RunError>, PyErr> {
     let control = board.control();
     let mut pacer = Pacer::new();
@@ -189,16 +248,16 @@ pub(crate) fn run_until_paced(
 
 /// Runs a frame of `board` (Rust's `Board::run_frame`): to the board
 /// time due by `wall` under its control's pacing, but no more than
-/// `picoseconds`, the GIL released between quanta and Python's
+/// `bound`, the GIL released between quanta and Python's
 /// signal handlers run, as [`run_until_paced`] does, but never sleeping.
 pub(crate) fn run_frame(
     py: Python<'_>,
     board: &mut Board<Mc68331>,
     wall: Duration,
-    picoseconds: u64,
+    bound: Span,
 ) -> Result<Result<BoardRun, RunError>, PyErr> {
     let mut turns = Turns::new(py)?;
-    let outcome = board.run_frame_with(wall, picoseconds, |_| turns.turn());
+    let outcome = board.run_frame_with(wall, bound, |_| turns.turn());
     turns.ended(outcome)
 }
 

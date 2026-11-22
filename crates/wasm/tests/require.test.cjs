@@ -13,5 +13,5 @@ test("require gives the ES module's Board", async () => {
 test("the demo boots from CommonJS", () => {
   const board = new Board(text, { "demo.bin": image });
   board.runFor(BOOT);
-  assert.match(new TextDecoder().decode(board.takeReceived(CONSOLE)), /MC68331 demo/);
+  assert.match(new TextDecoder().decode(board.takeReceivedBytes(CONSOLE)), /MC68331 demo/);
 });

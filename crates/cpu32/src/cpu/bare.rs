@@ -126,7 +126,7 @@ impl fmt::Display for FaultStop {
             self.size.bytes(),
             self.address,
             self.function_code,
-            Address(self.registers.pc)
+            self.registers.pc
         )
     }
 }
@@ -158,6 +158,23 @@ pub enum End {
     Fault(FaultStop),
     /// An intercepted exception.
     Intercepted(Intercepted),
+}
+
+/// A short lowercase name for each way a limited run ends, as
+/// [`Stop`]'s: its stop's name, or `until`, `instructions`, `steps`,
+/// `fault` or `intercepted`.  The detail a variant holds (the fault, the
+/// exception) is not part of it.
+impl fmt::Display for End {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Stop(stop) => stop.fmt(formatter),
+            Self::Until => formatter.write_str("until"),
+            Self::Instructions => formatter.write_str("instructions"),
+            Self::Steps => formatter.write_str("steps"),
+            Self::Fault(_) => formatter.write_str("fault"),
+            Self::Intercepted(_) => formatter.write_str("intercepted"),
+        }
+    }
 }
 
 /// A limited run's outcome.
@@ -258,15 +275,17 @@ impl Cpu {
         now: Cycles,
         limits: Limits,
     ) -> LimitedRun {
-        if self.registers.pc != self.left_pc.0 {
+        if self.registers.pc != self.left_pc {
             self.block_start = true;
         }
         self.bare.end = None;
-        let budget = limits.cycles.unwrap_or(Cycles(u64::MAX - now.0));
+        let budget = limits
+            .cycles
+            .unwrap_or(Cycles::from_clocks(u64::MAX - now.clocks()));
         let first = self.instructions;
         self.bare.exceptions_stepped = 0;
         let run = self.run_from_boundary(bus, interrupts, now, budget, Some(limits));
-        self.left_pc = Address(self.registers.pc);
+        self.left_pc = self.registers.pc;
         let end = self.bare.end.clone().unwrap_or(End::Stop(run.stop));
         LimitedRun {
             cycles: run.cycles,
@@ -344,24 +363,30 @@ impl Cpu {
         }
     }
 
-    /// BKPT acknowledged between instructions: with background mode
+    /// BKPT asserted between instructions: with background mode
     /// enabled the CPU enters it for a breakpoint, PCC the last
-    /// instruction executed, and this is true (CPU32RM 7.2.2.1).
-    /// Disabled, nothing happens and this is false: BKPT then asks for
-    /// a hardware breakpoint exception, which
+    /// instruction executed, out of STOP or LPSTOP too, and this is true
+    /// (CPU32RM 7.2.2.1).  Disabled, BKPT asks for a hardware breakpoint
+    /// exception, left pending for the next run as
     /// [`set_breakpoint_pending`](Self::set_breakpoint_pending) leaves
-    /// for the next run.  In background mode already, true with nothing
-    /// changed.
-    pub fn breakpoint(&mut self) -> bool {
-        if self.background().is_some() {
-            return true;
+    /// it, and this is false.  In background mode already, true with
+    /// nothing changed.  Halted, nothing happens, nothing is left
+    /// pending, and this is false, background mode enabled or not: only
+    /// RESET restarts a halted processor (CPU32RM 5.1, 6.2.2).
+    pub fn assert_breakpoint(&mut self) -> bool {
+        match self.idle {
+            Some(Idle::Background(_)) => true,
+            Some(Idle::Halted(_)) => false,
+            None if !self.bdm_enabled => {
+                self.bare.breakpoint_pending = true;
+                false
+            }
+            None => {
+                let pcc = self.instruction_pc;
+                self.enter_background(Entry::Breakpoint, pcc);
+                true
+            }
         }
-        if !self.bdm_enabled || self.idle.is_some() {
-            return false;
-        }
-        let pcc = self.instruction_pc;
-        self.enter_background(Entry::Breakpoint, pcc);
-        true
     }
 
     /// Whether a hardware breakpoint is pending.
@@ -383,7 +408,7 @@ impl Cpu {
     /// ends STOP or LPSTOP, after whose exception processing it is
     /// acknowledged (PLAN.md, Background debug mode).  Reset drops it.
     /// With background mode enabled the next run enters it, as
-    /// [`breakpoint`](Self::breakpoint).
+    /// [`assert_breakpoint`](Self::assert_breakpoint).
     pub const fn set_breakpoint_pending(&mut self, pending: bool) {
         self.bare.breakpoint_pending = pending;
     }
@@ -484,7 +509,7 @@ impl Cpu {
     /// Lets the instruction at PC take an intercepted exception
     /// natively, once, the next time it runs.
     pub const fn take_natively_once(&mut self) {
-        self.bare.native_once = Some((Address(self.registers.pc), self.instructions));
+        self.bare.native_once = Some((self.registers.pc, self.instructions));
     }
 
     /// Whether a long operand is one access: offered to the bus whole
@@ -547,7 +572,7 @@ impl Cpu {
             return None;
         }
         mem::take(&mut self.altered).undo(&mut self.registers);
-        self.registers.pc = instruction_pc.0;
+        self.registers.pc = instruction_pc;
         self.resume = Some((instruction_pc, Resume::Code));
         Some(End::Intercepted(Intercepted {
             vector,
@@ -569,7 +594,7 @@ impl Cpu {
         self.registers.clone_from(&self.began);
         self.released = None;
         self.movem = None;
-        self.resume = Some((Address(self.registers.pc), Resume::Code));
+        self.resume = Some((self.registers.pc, Resume::Code));
         End::Fault(FaultStop {
             cycle: fault.cycle,
             cause,

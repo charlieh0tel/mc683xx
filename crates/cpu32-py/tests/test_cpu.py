@@ -75,7 +75,23 @@ def test_limits_and_begin():
     cpu = machine(NOP, NOP, NOP, RTS)
     assert cpu.run_limited(instructions=2).end == mc683xx.End.Instructions()
     assert cpu.read_register("PC") == CODE + 4
-    assert cpu.run_limited(cycles=1).end == mc683xx.End.Stop(mc683xx.Stop.Budget())
+    end = cpu.run_limited(cycles=1).end
+    assert end == mc683xx.End.Stop(mc683xx.Stop.Budget())
+    assert isinstance(end, mc683xx.End.Stop) and end.stop == mc683xx.Stop.Budget()
+    assert repr(end) == "End.Stop(Stop.Budget())"
+    run = machine(NOP, RTS).run_limited(instructions=1)
+    assert repr(run) == f"LimitedRun(cycles={run.cycles}, end=End.Instructions())"
+    halted = mc683xx.Stop.Halted(mc683xx.Halt.DOUBLE_BUS_FAULT)
+    assert repr(halted) == "Stop.Halted(Halt.DOUBLE_BUS_FAULT)"
+    entry = mc683xx.Stop.Background(mc683xx.Entry.DoubleBusFault(0x1234))
+    assert repr(entry) == "Stop.Background(Entry.DoubleBusFault(ssw=0x1234))"
+    assert halted.halt == mc683xx.Halt.DOUBLE_BUS_FAULT
+    assert entry.entry == mc683xx.Entry.DoubleBusFault(0x1234)
+    match entry:
+        case mc683xx.Stop.Background(background):
+            assert background == entry.entry
+        case _:
+            pytest.fail("Stop.Background did not match positionally")
     assert cpu.run_limited(begin=CODE, until=RETURN).end == mc683xx.End.Until()
 
 
@@ -123,7 +139,7 @@ def test_a_code_hook_may_unmap_what_the_instruction_reads():
     cpu.add_code_hook(lambda instruction: cpu.unmap(PERIPHERAL, PAGE), CODE, CODE)
     run = cpu.run_limited(until=RETURN)
     assert isinstance(run.end, mc683xx.End.Fault)
-    assert run.end._0.address == PERIPHERAL
+    assert run.end.fault.address == PERIPHERAL
 
 
 def test_a_code_hook_s_pc_write_redirects_before_the_instruction():
@@ -291,22 +307,24 @@ def test_a_write_to_read_only_code_is_protected():
     cpu.write_register("A0", CODE)
     end = cpu.run_limited(until=RETURN).end
     assert isinstance(end, mc683xx.End.Fault)
-    assert (end._0.cycle, end._0.cause) == (mc683xx.CycleKind.WRITE, mc683xx.FaultCause.PROTECTED)
-    assert end == mc683xx.End.Fault(end._0)
+    fault = end.fault
+    assert (fault.cycle, fault.cause) == (mc683xx.CycleKind.WRITE, mc683xx.FaultCause.PROTECTED)
+    assert end == mc683xx.End.Fault(fault=fault)
 
 
-class Register:
-    """A peripheral: a long register, and a log of its cycles."""
+class Register(mc683xx.MappedPeripheral):
+    """A peripheral, typed by the protocol it subclasses: a long
+    register, and a log of its cycles."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.value = 0x11223344
-        self.cycles = []
+        self.cycles: list[tuple[str, int, int]] = []
 
-    def read(self, cycle):
+    def read(self, cycle: mc683xx.BusCycle, /) -> int:
         self.cycles.append(("read", cycle.address, cycle.size))
         return self.value if cycle.size == 4 else self.value & 0xFFFF
 
-    def write(self, cycle, value):
+    def write(self, cycle: mc683xx.BusCycle, value: int, /) -> None:
         self.cycles.append(("write", cycle.address, cycle.size))
         self.value = value
 

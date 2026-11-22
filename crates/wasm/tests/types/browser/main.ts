@@ -2,12 +2,14 @@
 // (web/mc683xx.d.ts): compiled, not run, by `make npm-types`.
 
 import init, { Board, BoardRun, initSync } from "mc683xx";
-import type { InitInput, InitOutput, SyncInitInput } from "mc683xx";
+import type { InitInput, InitOutput, StopKind, SyncInitInput } from "mc683xx";
 
 const input: InitInput = new URL("./mc683xx_bg.wasm", import.meta.url);
 const output: InitOutput = await init({ module_or_path: input });
 const memory: WebAssembly.Memory = output.memory;
 const sameOutput: InitOutput = initSync({ module: new Uint8Array() satisfies SyncInitInput });
+// @ts-expect-error the bindings' internals are no API
+output.__wbindgen_start();
 
 function run(text: string, image: Uint8Array): [string, bigint, Uint8Array] {
   using board = new Board(text, { "demo.bin": image }, null);
@@ -15,9 +17,11 @@ function run(text: string, image: Uint8Array): [string, bigint, Uint8Array] {
   new Board(text).free();
   const ran: BoardRun = board.runFor(1n);
   const framed: BoardRun = board.runFrame(performance.now(), 1_000_000_000n);
-  board.send("console", new Uint8Array([0x0d]));
+  board.sendBytes("console", new Uint8Array([0x0d]));
   board.setPacing("realtime");
   board.restore(board.save());
+  // @ts-expect-error a snapshot is a Uint8Array
+  board.restore([...board.save()]);
   // @ts-expect-error picoseconds are a bigint
   board.runFor(1);
   // @ts-expect-error board time is read-only
@@ -27,9 +31,13 @@ function run(text: string, image: Uint8Array): [string, bigint, Uint8Array] {
   // @ts-expect-error a stop is a string
   const code: number = ran.stop;
   const stop: string = ran.stop;
+  // a known kind, or any other a later release adds
+  const kind: StopKind = ran.stop === "budget" ? "budget" : "a later kind";
+  // @ts-expect-error a kind is a string
+  const notKind: StopKind = 0;
   const now: bigint = board.now + framed.now;
   const pacing: string = board.pacing;
-  return [stop + pacing, now, board.takeReceived("console")];
+  return [stop + kind + notKind + pacing, now, board.takeReceivedBytes("console")];
 }
 
 export { memory, output, run, sameOutput };

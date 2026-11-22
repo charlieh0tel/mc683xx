@@ -33,6 +33,7 @@ use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_target::address::Address;
 
 use crate::inspect::Inspection;
 use crate::peripheral::Drive;
@@ -86,33 +87,11 @@ fn inspect<D>(inspector: Option<Inspector<D>>, peripheral: &D) -> Inspection {
     inspector.map_or_else(Inspection::default, |inspect| inspect(peripheral))
 }
 
-/// The system clock a call gives, kept for the calls that have none.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct Clock(Option<TimeBase>);
-
-impl Clock {
-    /// The base, from `drive` if it carries one.
-    fn update(&mut self, drive: &Drive<'_>) -> TimeBase {
-        if let Some(base) = drive.system_clock() {
-            self.0 = Some(base);
-        }
-        self.base()
-    }
-
-    /// The base last given.
-    fn base(&self) -> TimeBase {
-        self.0
-            .expect("the board gives a peripheral the system clock before any call")
-    }
-}
-
 /// A [`MappedPeripheral`] and [`Timed`] model on the bus as a peripheral.
 #[derive(Debug, Default)]
 pub struct MappedAdapter<D> {
     /// The model.
     peripheral: D,
-    /// The board's system clock.
-    clock: Clock,
     /// Its inspection, if it shows one.
     inspector: Option<Inspector<D>>,
 }
@@ -122,7 +101,6 @@ impl<D> MappedAdapter<D> {
     pub const fn new(peripheral: D) -> Self {
         Self {
             peripheral,
-            clock: Clock(None),
             inspector: None,
         }
     }
@@ -148,19 +126,23 @@ impl<D> MappedAdapter<D> {
     pub const fn peripheral_mut(&mut self) -> &mut D {
         &mut self.peripheral
     }
-
-    /// The cycle the model sees for `access`.
-    fn cycle(&mut self, access: PeripheralAccess, drive: &Drive<'_>) -> BusCycle {
-        let base = self.clock.update(drive);
-        carried(access, base.cycles(access.now))
-    }
 }
 
-/// The cycle a model sees for `access` at `now`, through its select if
-/// one carried it.
-fn carried(access: PeripheralAccess, now: Cycles) -> BusCycle {
-    let cycle =
-        BusCycle::new(access.address, access.size, access.function_code, now).writing(access.write);
+/// The time of `drive`'s call in the chip's system clocks.
+fn cycles(drive: &Drive<'_>) -> Cycles {
+    drive.system_clock().cycles(drive.now())
+}
+
+/// The cycle a model sees for `access`, its time in system clocks on
+/// `base`, through its select if one carried it.
+fn carried(access: PeripheralAccess, base: TimeBase) -> BusCycle {
+    let cycle = BusCycle::new(
+        Address(access.address),
+        access.size,
+        access.function_code,
+        base.cycles(access.now),
+    )
+    .writing(access.write);
     match access.select {
         Some(select) => cycle.through(select.into()),
         None => cycle,
@@ -169,8 +151,7 @@ fn carried(access: PeripheralAccess, now: Cycles) -> BusCycle {
 
 impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<D> {
     fn read(&mut self, access: PeripheralAccess, drive: &mut Drive<'_>) -> Result<u32, BusError> {
-        let cycle = self.cycle(access, drive);
-        self.peripheral.read(cycle)
+        self.peripheral.read(carried(access, drive.system_clock()))
     }
 
     fn write(
@@ -179,41 +160,32 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
         value: u32,
         drive: &mut Drive<'_>,
     ) -> Result<(), BusError> {
-        let cycle = self.cycle(access, drive);
-        self.peripheral.write(cycle, value)
+        self.peripheral
+            .write(carried(access, drive.system_clock()), value)
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess) -> Option<u8> {
-        let cycle = carried(access, self.clock.base().cycles(access.now));
-        self.peripheral.wait_states(cycle)
+    fn wait_states(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<u8> {
+        self.peripheral.wait_states(carried(access, system_clock))
     }
 
-    fn dsack_port(&mut self, access: PeripheralAccess) -> Option<PortSize> {
-        let cycle = carried(access, self.clock.base().cycles(access.now));
-        self.peripheral.dsack_port(cycle)
+    fn dsack_port(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<PortSize> {
+        self.peripheral.dsack_port(carried(access, system_clock))
     }
 
     fn interrupt_request(&self) -> bool {
         self.peripheral.interrupt_request()
     }
 
-    fn reset(&mut self, now: Time, drive: &mut Drive<'_>) {
-        let base = self.clock.update(drive);
-        self.peripheral.reset(base.cycles(now));
+    fn reset(&mut self, drive: &mut Drive<'_>) {
+        self.peripheral.reset(cycles(drive));
     }
 
-    fn system_clock(&mut self, clock: TimeBase) {
-        self.clock.0 = Some(clock);
+    fn next_event(&self, system_clock: TimeBase) -> Option<Time> {
+        self.peripheral.next_event().map(|at| system_clock.time(at))
     }
 
-    fn next_event(&self) -> Option<Time> {
-        let base = self.clock.0?;
-        self.peripheral.next_event().map(|at| base.time(at))
-    }
-
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
-        let base = self.clock.update(drive);
-        self.peripheral.advance(base.cycles(now));
+    fn advance(&mut self, drive: &mut Drive<'_>) {
+        self.peripheral.advance(cycles(drive));
     }
 
     fn inspect(&self) -> Inspection {
@@ -240,8 +212,6 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
 pub struct SpiAdapter<D> {
     /// The model.
     peripheral: D,
-    /// The board's system clock.
-    clock: Clock,
     /// Its inspection, if it shows one.
     inspector: Option<Inspector<D>>,
 }
@@ -251,7 +221,6 @@ impl<D> SpiAdapter<D> {
     pub const fn new(peripheral: D) -> Self {
         Self {
             peripheral,
-            clock: Clock(None),
             inspector: None,
         }
     }
@@ -277,52 +246,36 @@ impl<D> SpiAdapter<D> {
     pub const fn peripheral_mut(&mut self) -> &mut D {
         &mut self.peripheral
     }
-
-    /// `now` in system clocks.
-    fn cycles(&mut self, now: Time, drive: &Drive<'_>) -> Cycles {
-        self.clock.update(drive).cycles(now)
-    }
 }
 
 impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
-    fn reset(&mut self, now: Time, drive: &mut Drive<'_>) {
-        let now = self.cycles(now, drive);
-        self.peripheral.reset(now);
+    fn reset(&mut self, drive: &mut Drive<'_>) {
+        self.peripheral.reset(cycles(drive));
     }
 
     fn transfer(&mut self, transfer: Transfer, drive: &mut Drive<'_>) -> u16 {
-        let now = self.cycles(transfer.now, drive);
-        self.peripheral.transfer(QspiTransfer::new(
-            transfer.entry,
-            transfer.chip_selects,
-            transfer.out,
-            transfer.bits,
-            transfer.clock,
-            now,
-        ))
+        self.peripheral.transfer(
+            QspiTransfer::new(transfer.out, transfer.bits, transfer.clock, cycles(drive))
+                .at_entry(transfer.entry)
+                .selecting(transfer.chip_selects),
+        )
     }
 
-    fn select(&mut self, _: usize, selected: bool, now: Time, drive: &mut Drive<'_>) {
-        let now = self.cycles(now, drive);
+    fn select(&mut self, _: usize, selected: bool, drive: &mut Drive<'_>) {
         let levels = if selected {
             SELECTED_LEVELS
         } else {
             RELEASED_LEVELS
         };
-        self.peripheral.chip_selects(levels, now);
+        self.peripheral.set_chip_selects(levels, cycles(drive));
     }
 
-    fn qspi_clock(&mut self, clock: QspiClock, now: Time) {
-        let now = self.clock.base().cycles(now);
-        self.peripheral.clock(clock, now);
+    fn set_qspi_clock(&mut self, clock: QspiClock, now: Time, system_clock: TimeBase) {
+        self.peripheral.set_clock(clock, system_clock.cycles(now));
     }
 
     fn qspi_deferrable(&self) -> bool {
         self.peripheral.deferrable()
-    }
-
-    fn system_clock(&mut self, clock: TimeBase) {
-        self.clock.0 = Some(clock);
     }
 
     fn inspect(&self) -> Inspection {

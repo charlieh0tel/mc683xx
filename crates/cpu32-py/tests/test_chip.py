@@ -1,6 +1,7 @@
 """The chip from Python: a ROM on CSBOOT, RAM on CS0, a Python peripheral
 on CS1, and small programs that reach them."""
 
+import re
 import struct
 
 import pytest
@@ -227,6 +228,11 @@ def test_tracing_sees_peripheral_cycles_and_exceptions():
     exceptions = [e for e in events if isinstance(e, mc683xx.Event.Exception)]
     assert exceptions[0].vector == BUS_ERROR
     assert exceptions[0].handler == BUS_ERROR_HANDLER
+    match exceptions[0]:
+        case mc683xx.Event.Exception(_, _, _, _, stack, level):
+            assert (stack, level) == (chip.read_register("SSP"), None)
+        case other:
+            pytest.fail(f"not an exception: {other}")
     assert chip.instructions > 5
 
 
@@ -234,8 +240,8 @@ def test_a_model_interrupts_on_time():
     builder, _, _ = board(WIRING, Recorder())
     alarm = Alarm(5000)
     number = builder.unwired_peripheral(alarm)
-    builder.interrupt(number, 7)
-    builder.autovector(7)
+    builder.set_interrupt(number, 7)
+    builder.set_autovector(7)
     chip = builder.build()
     chip.run_for(4000)
     assert chip.read_register("PC") < LEVEL_7_HANDLER
@@ -247,12 +253,15 @@ def test_a_model_interrupts_on_time():
 
 def test_the_irq_pins():
     builder, _, _ = board(WIRING, Recorder())
-    builder.autovector(7)
+    builder.set_autovector(7)
     chip = builder.build()
     chip.run_for(1000)
+    chip.set_tracing(exceptions=True)
     chip.set_interrupt_pin(7, True)
     chip.run_for(1000)
     assert chip.read_register("PC") > LEVEL_7_HANDLER
+    levels = [e.level for e in chip.take_events() if isinstance(e, mc683xx.Event.Exception)]
+    assert levels[0] == 7
     with pytest.raises(ValueError):
         chip.set_interrupt_pin(0, True)
 
@@ -269,6 +278,27 @@ def test_resets_are_events():
     assert events[1].cause == mc683xx.ResetCause.EXTERNAL
     assert peripheral.resets == [0, events[1].now]
     assert chip.take_events() == []
+
+
+def test_an_event_the_bindings_cannot_convert_is_unknown():
+    event = mc683xx.Event.Unknown(5, "reset (power-on)")
+    assert isinstance(event, mc683xx.Event)
+    assert (event.now, event.text) == (5, "reset (power-on)")
+    match event:
+        case mc683xx.Event.Unknown(now, text):
+            assert (now, text) == (5, "reset (power-on)")
+        case _:
+            raise AssertionError(event)
+
+
+def test_an_unknown_reset_cause_is_no_reset_to_ask_for():
+    builder, _, peripheral = board([NOP], Recorder())
+    with pytest.raises(ValueError, match="UNKNOWN"):
+        builder.set_reset_scope(peripheral, [mc683xx.ResetCause.UNKNOWN])
+    chip = builder.build()
+    with pytest.raises(ValueError, match="UNKNOWN"):
+        chip.reset_for(mc683xx.ResetCause.UNKNOWN)
+    assert [type(event) for event in chip.take_events()] == [mc683xx.Event.Reset]
 
 
 def test_a_reset_with_breakpoint_enters_background_mode_before_the_first_instruction():
@@ -382,7 +412,7 @@ def test_wiring_mistakes():
     with pytest.raises(TypeError):
         builder.peripheral(object(), ["CS2"])
     with pytest.raises(IndexError):
-        builder.interrupt(3, 1)
+        builder.set_interrupt(3, 1)
     with pytest.raises(ValueError):
         mc683xx.Builder(reference_hz=32768, external_hz=16_000_000)
     with pytest.raises(ValueError):
@@ -459,6 +489,11 @@ def test_the_sci_echoes_what_the_host_sends():
     chip.run_for(2000)
     sent = chip.take_sci_transmitted()
     assert [frame for _, frame in sent] == [mc683xx.Frame.Data(0x21)]
+    match sent[0][1]:
+        case mc683xx.Frame.Data(data):
+            assert data == sent[0][1].data == 0x21
+        case _:
+            pytest.fail("Frame.Data did not match positionally")
     assert sent[0][0] <= chip.now
     with pytest.raises(ValueError):
         chip.sci_receive(mc683xx.Frame.Data(0x200))
@@ -480,10 +515,10 @@ class Peripheral:
         self.transfer_clocks.append(transfer.clock)
         return self.value
 
-    def chip_selects(self, levels, now):
+    def set_chip_selects(self, levels, now):
         self.levels.append(levels)
 
-    def clock(self, clock, now):
+    def set_clock(self, clock, now):
         self.clocks.append(clock)
 
 
@@ -510,22 +545,24 @@ def test_a_qspi_transfer_reaches_the_peripheral():
     assert peripheral.transfers == [(0b0101, 0x34, 8)]
     assert 0b0101 in peripheral.levels
     assert chip.read_register("D2") & 0xFFFF == 0xEF
-    driven, _ = chip.port_qs_outputs()
+    driven, _ = chip.outputs(mc683xx.Port.QS)
     assert driven & 0x78 == 0x78
     assert chip.qspi_chip_selects == peripheral.levels[-1]
     # CPOL and CPHA clear, SPBR 2: an SCK period of 4 clocks (QSMRM 4.3.1)
     [clock] = peripheral.clocks
     assert clock.polarity == mc683xx.ClockPolarity.IDLE_LOW
     assert clock.phase == mc683xx.ClockPhase.CAPTURE_LEADING
-    assert (clock.period, clock.system_clock_hz) == (4, chip.system_hz)
-    assert clock.baud_hz == chip.system_hz // 4
+    assert (clock.period, clock.system_clock_nanohertz) == (4, chip.system_hz * 1_000_000_000)
+    assert clock.baud_nanohertz == chip.system_hz * 1_000_000_000 // 4
     [carried] = peripheral.transfer_clocks
     assert (carried.polarity, carried.phase, carried.period) == (
         clock.polarity,
         clock.phase,
         clock.period,
     )
-    chip.set_port_qs_pins(0xFF)
+    chip.set_pins(mc683xx.Port.QS, 0xFF, 0xFF)
+    with pytest.raises(ValueError, match="port C has no inputs"):
+        chip.set_pins(mc683xx.Port.C, 0xFF, 0xFF)
     with pytest.raises(TypeError):
         mc683xx.Builder().qspi(object())
 
@@ -590,29 +627,79 @@ def test_a_gpt_output_compare_toggles_its_pin():
     program = store_word(TCTL1, TCTL1_OC2_TOGGLE) + store_word(TOC2, 0x1000)
     chip = booting(program).build()
     chip.run_for(4 * 0x1000 - 1000)
-    assert chip.port_gp_outputs() == (OC2_PIN, 0)
+    assert chip.outputs(mc683xx.Port.GP) == (OC2_PIN, 0)
     chip.set_report_pwm_edges(mc683xx.Channel.B, True)
     chip.run_for(2000)
-    assert chip.port_gp_outputs() == (OC2_PIN, OC2_PIN)
-    changes = chip.take_gpt_changes()
-    assert [change for _, change in changes] == [
-        mc683xx.OutputChange.PortGp(OC2_PIN, 0),
-        mc683xx.OutputChange.PortGp(OC2_PIN, OC2_PIN),
+    assert chip.outputs(mc683xx.Port.GP) == (OC2_PIN, OC2_PIN)
+    # the compare takes OC2's pin from PORTGP
+    assert chip.port(mc683xx.Port.GP).assignment == OC2_PIN
+    changes = [change for change in chip.take_port_changes() if change[1] == mc683xx.Port.GP]
+    assert [change[1:] for change in changes] == [
+        (mc683xx.Port.GP, OC2_PIN, 0),
+        (mc683xx.Port.GP, OC2_PIN, OC2_PIN),
     ]
     assert changes[-1][0] == 4 * 0x1000
-    assert chip.take_gpt_changes() == []
+    assert chip.take_port_changes() == []
+    # PWMB's duty out of reset is 0: low, no edge
+    assert chip.take_pwm_changes() == []
     with pytest.raises(TypeError):
         chip.set_report_pwm_edges("B", True)  # type: ignore[arg-type]
-    chip.schedule_gpt_input(chip.now + 100, "PAI", False)
-    chip.schedule_gpt_input(chip.now + 200, "PCLK", False)
-    with pytest.raises(ValueError):
-        chip.schedule_gpt_input(0, "PGP8", True)
+    chip.schedule_gpt_input(chip.now + 100, mc683xx.Input.PAI, False)
+    chip.schedule_gpt_input(chip.now + 200, mc683xx.Input.PCLK, False)
+    with pytest.raises(TypeError):
+        chip.schedule_gpt_input(0, "PGP7", True)  # type: ignore[arg-type]
     chip.run_for(300)
     assert isinstance(chip.pwm(mc683xx.Channel.A), mc683xx.Output)
-    assert isinstance(chip.oc1(), mc683xx.Output.Level)
-    chip.set_port_gp_pins(0xFF)
-    chip.set_pai(True)
-    chip.set_pclk(True)
+    oc1 = chip.oc1()
+    assert isinstance(oc1, mc683xx.Output.Level)
+    assert oc1 == mc683xx.Output.Level(level=oc1.level)
+    chip.set_pins(mc683xx.Port.GP, 0xFF)
+    assert chip.port(mc683xx.Port.GP).pins == 0xFF
+    chip.set_gpt_input(mc683xx.Input.PAI, True)
+    chip.set_gpt_input(mc683xx.Input.PCLK, True)
+
+
+# PORTGP in the lower byte of DDRGP's word, PGP0 an output; PWMC with
+# F1A, FPWMA set forcing PWMA high (GPTRM 3.3.4, 6.3.1).
+PORTGP_WORD = GPT + 0x06
+DDRGP_PGP0_HIGH = 0x0101
+DDRGP_PGP0_LOW = 0x0100
+PWMC_WORD = GPT + 0x24
+PWMC_F1A = 0x0200
+PWMC_F1A_FPWMA = 0x0202
+PGP0 = 0x01
+
+
+@pytest.mark.parametrize("pwm_first", [True, False])
+def test_output_changes_keep_the_order_of_a_pwm_edge_and_a_port_gp_change(pwm_first):
+    chip = mc683xx.Builder().build()
+    chip.set_report_pwm_edges(mc683xx.Channel.A, True)
+    chip.bus_write(PORTGP_WORD, 2, DDRGP_PGP0_HIGH)
+    chip.bus_write(PWMC_WORD, 2, PWMC_F1A)
+    chip.take_output_changes()
+    writes = [(PWMC_WORD, PWMC_F1A_FPWMA), (PORTGP_WORD, DDRGP_PGP0_LOW)]
+    for address, value in writes if pwm_first else reversed(writes):
+        chip.bus_write(address, 2, value)
+    now = chip.now
+    pwm = (now, mc683xx.Channel.A, True)
+    port = (now, mc683xx.Port.GP, PGP0, 0)
+    assert chip.take_output_changes() == ([pwm, port] if pwm_first else [port, pwm])
+    assert chip.take_port_changes() == []
+    assert chip.take_pwm_changes() == []
+
+
+def test_each_take_leaves_what_the_others_give():
+    chip = mc683xx.Builder().build()
+    chip.set_report_pwm_edges(mc683xx.Channel.A, True)
+    chip.bus_write(PORTGP_WORD, 2, DDRGP_PGP0_HIGH)
+    chip.bus_write(PWMC_WORD, 2, PWMC_F1A)
+    chip.take_output_changes()
+    chip.bus_write(PWMC_WORD, 2, PWMC_F1A_FPWMA)
+    chip.bus_write(PORTGP_WORD, 2, DDRGP_PGP0_LOW)
+    now = chip.now
+    assert chip.take_port_changes() == [(now, mc683xx.Port.GP, PGP0, 0)]
+    assert chip.take_pwm_changes() == [(now, mc683xx.Channel.A, True)]
+    assert chip.take_output_changes() == []
 
 
 # TMSK2 in the lower byte of its word; CPROUT with CPR %011, TCNT's
@@ -626,15 +713,14 @@ OC1_PIN = 0x08
 def test_cprout_edges_come_at_tcnts_clock():
     chip = booting(store_word(TMSK, TMSK2_CPROUT_CPR_32)).build()
     chip.run_for(1000)
-    assert chip.take_gpt_changes()[-1][1] == mc683xx.OutputChange.PortGp(OC1_PIN, 0)
+    assert chip.take_port_changes()[-1][1:] == (mc683xx.Port.GP, OC1_PIN, 0)
     chip.set_report_oc1_clock_edges(True)
     chip.run_for(10 * CPR_32_DIVISOR)
-    changes = chip.take_gpt_changes()
-    ports = [(now, change) for now, change in changes if isinstance(change, mc683xx.OutputChange.PortGp)]
-    assert len(ports) == len(changes)
-    assert {change.driven for _, change in ports} == {OC1_PIN}
-    rises = [now for now, change in ports if change.levels]
-    falls = [now for now, change in ports if not change.levels]
+    ports = chip.take_port_changes()
+    assert {(port, driven) for _, port, driven, _ in ports} == {(mc683xx.Port.GP, OC1_PIN)}
+    assert chip.take_pwm_changes() == []
+    rises = [now for now, _, _, levels in ports if levels]
+    falls = [now for now, _, _, levels in ports if not levels]
     assert len(rises) >= 9
     assert all(now % CPR_32_DIVISOR == rises[0] % CPR_32_DIVISOR for now in rises)
     assert falls[: len(rises)] == [now + 1 for now in rises][: len(falls)]
@@ -653,7 +739,7 @@ def test_every_rsr_cause_is_a_reset_cause():
         mc683xx.ResetCause.TEST,
     ]
     assert len(set(causes)) == 7
-    builder.reset_scope(0, causes)
+    builder.set_reset_scope(0, causes)
 
 
 def test_a_reset_scope_keeps_a_peripheral_out_of_the_watchdog_reset():
@@ -664,9 +750,9 @@ def test_a_reset_scope_keeps_a_peripheral_out_of_the_watchdog_reset():
         mc683xx.ResetCause.POWER_ON,
         mc683xx.ResetCause.EXTERNAL,
     ]
-    builder.reset_scope(number, causes)
+    builder.set_reset_scope(number, causes)
     with pytest.raises(IndexError):
-        builder.reset_scope(9, causes)
+        builder.set_reset_scope(9, causes)
     chip = builder.build()
     # the watchdog's 2^9 EXTAL periods at 256 clocks
     chip.run_for(512 * 256 + 100)
@@ -695,14 +781,15 @@ def test_the_host_sees_a_pulse_on_a_port_pin():
     )
     chip = board(program, Recorder())[0].build()
     chip.run_for(1000)
-    assert chip.port_e_outputs() == (PE0, 0)
-    assert chip.port_c_outputs() == (0, 0)
-    assert chip.port_f_outputs() == (0, 0)
+    assert chip.outputs(mc683xx.Port.E) == (PE0, 0)
+    assert chip.outputs(mc683xx.Port.C) == (0, 0)
+    assert chip.outputs(mc683xx.Port.F) == (0, 0)
+    assert chip.port(mc683xx.Port.E) == mc683xx.PortState(0, PE0, 0xFF & ~PE0, 0xFF)
     changes = chip.take_port_changes()
     assert [change[1:] for change in changes] == [
-        (mc683xx.PortName.E, PE0, 0),
-        (mc683xx.PortName.E, PE0, PE0),
-        (mc683xx.PortName.E, PE0, 0),
+        (mc683xx.Port.E, PE0, 0),
+        (mc683xx.Port.E, PE0, PE0),
+        (mc683xx.Port.E, PE0, 0),
     ]
     assert changes[0][0] < changes[1][0] < changes[2][0]
     assert chip.take_port_changes() == []
@@ -736,8 +823,10 @@ def test_a_code_hook_stops_before_its_instruction():
         return True
 
     hook = chip.add_code_hook(at, AFTER_WIRING, AFTER_WIRING)
+    assert re.fullmatch(r"hook \d+", repr(hook))
     run = chip.run_for(2000)
     assert run.stop == mc683xx.Stop.Hook(hook)
+    assert isinstance(run.stop, mc683xx.Stop.Hook) and run.stop.hook == hook
     assert chip.read_register("PC") == AFTER_WIRING
     (instruction,) = seen
     assert instruction.pc == AFTER_WIRING
@@ -1213,8 +1302,8 @@ def test_enums_and_values_hash_as_they_compare() -> None:
             mc683xx.Output.Level(True),
             mc683xx.Serial(mc683xx.Frame.Data(0x41), 9600, 10),
             mc683xx.Channel.A,
-            mc683xx.PortName.F,
-            mc683xx.OutputChange.PortGp(1, 0),
+            mc683xx.Port.F,
+            mc683xx.PortState(1, 2, 3, 4),
             mc683xx.Role.IACK,
             mc683xx.Lane.UPPER,
             mc683xx.Deviations(misaligned=True),
@@ -1249,9 +1338,9 @@ DSACK_BASE = 0x600000
 def test_a_peripheral_s_unassigned_dsack_is_an_event():
     builder = booting([])
     number = builder.peripheral(Recorder(0x1234), ["CS2"])
-    builder.dsack(number, mc683xx.Dsack.BOTH)
+    builder.set_dsack(number, mc683xx.Dsack.BOTH)
     with pytest.raises(IndexError):
-        builder.dsack(9, mc683xx.Dsack.DSACK0)
+        builder.set_dsack(9, mc683xx.Dsack.DSACK0)
     chip = builder.build()
     chip.bus_write(CSBAR2, 2, DSACK_BASE >> 8)
     chip.bus_write(CSOR2, 2, CSOR_EXTERNAL)
@@ -1286,7 +1375,7 @@ def test_the_qspi_reset_scope_limits_the_qspi_peripheral_s_resets():
         peripheral = Reset()
         builder.qspi(peripheral)
         if scope is not None:
-            builder.qspi_reset_scope(scope)
+            builder.set_qspi_reset_scope(scope)
         chip = builder.build()
         chip.reset()
         return len(peripheral.resets)
@@ -1395,9 +1484,10 @@ def test_a_host_with_no_board_takes_port_qs_changes() -> None:
     chip.bus_write(QSM + 0x17, 1, 0x02)
     chip.bus_write(QSM + 0x15, 1, 0x00)
     chip.bus_write(QSM + 0x15, 1, 0x02)
-    changes = chip.take_qsm_changes()
-    assert [levels & 0x02 for (_, driven, levels) in changes if driven & 0x02][-2:] == [0, 2]
-    assert chip.take_qsm_changes() == []
+    changes = chip.take_port_changes()
+    qs = mc683xx.Port.QS
+    assert [levels & 0x02 for (_, port, driven, levels) in changes if port == qs and driven & 0x02][-2:] == [0, 2]
+    assert chip.take_port_changes() == []
 
 
 class Narrow(Recorder):
@@ -1473,3 +1563,24 @@ def test_a_fault_stop_ends_the_chip_s_run_with_the_instruction_undone():
     chip.set_stop_on_fault(False)
     assert chip.run_for(1000).stop != mc683xx.Stop.Fault()
     assert chip.fault_stop is None
+
+
+def test_port_changes_written_in_one_instruction_come_in_port_order() -> None:
+    # MOVEM.W D0-D5,-(A0) from the SIM's port block writes its registers
+    # downward in one instruction: port F's before port E's, all stamped
+    # with the instruction's start, so the SIM records F first
+    image = bytearray(2048)
+    struct.pack_into(">II", image, 0, 0x800, 0x400)
+    struct.pack_into(">HHH", image, 0x400, 0x48A0, 0xFC00, 0x4E71)
+    builder = mc683xx.Builder()
+    builder.memory(bytes(image), ["CSBOOT"])
+    chip = builder.build()
+    chip.take_port_changes()
+    chip.write_register("A0", 0xFFFA20)
+    for i in range(6):
+        chip.write_register(f"D{i}", 0xFF if i in (0, 4) else 0)
+    chip.run_for(1)
+    order = [mc683xx.Port.C, mc683xx.Port.E, mc683xx.Port.F, mc683xx.Port.GP, mc683xx.Port.QS]
+    keys = [(change[0], order.index(change[1])) for change in chip.take_port_changes()]
+    assert len({port for _, port in keys}) > 1
+    assert keys == sorted(keys)

@@ -39,6 +39,7 @@ use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_gdb::target::AccessError;
 use mc683xx_gdb::target::Target;
+use mc683xx_gdb::target::TargetReset;
 use mc683xx_gdb::target::TargetRun;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
@@ -72,6 +73,7 @@ use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::PythonMapped;
 use crate::permissions;
+use crate::python::repr;
 use crate::register::Register;
 use crate::requests::StopRequestView;
 
@@ -125,15 +127,25 @@ pub(crate) enum FaultCauseKind {
     AddressError,
 }
 
-impl From<FaultCause> for FaultCauseKind {
-    fn from(cause: FaultCause) -> Self {
-        match cause {
+impl TryFrom<FaultCause> for FaultCauseKind {
+    type Error = Error;
+
+    /// The cause, or [`unknown_fault_cause`] for one the bindings do not
+    /// know.
+    fn try_from(cause: FaultCause) -> Result<Self, Error> {
+        Ok(match cause {
             FaultCause::BusError => Self::BusError,
             FaultCause::Protected => Self::Protected,
             FaultCause::AddressError => Self::AddressError,
-            _ => panic!("a fault cause the bindings do not know"),
-        }
+            other => return Err(unknown_fault_cause(other)),
+        })
     }
+}
+
+/// A fault cause the bindings do not know, [`Error::Unmapped`] naming
+/// it: a value, not a run's end, so `NotImplementedError`.
+fn unknown_fault_cause(cause: FaultCause) -> Error {
+    Error::named("fault cause", cause)
 }
 
 /// A fault that stopped a run (`set_stop_on_fault`), as `End.Fault`
@@ -152,8 +164,8 @@ impl FaultStopView {
 
     /// Why.
     #[getter]
-    fn cause(&self) -> FaultCauseKind {
-        self.0.cause.into()
+    fn cause(&self) -> PyResult<FaultCauseKind> {
+        Ok(self.0.cause.try_into()?)
     }
 
     /// The cycle's address, all 32 bits.
@@ -171,13 +183,13 @@ impl FaultStopView {
     /// FC[2:0].
     #[getter]
     const fn function_code(&self) -> u8 {
-        self.0.function_code.bits()
+        self.0.function_code.get()
     }
 
     /// The faulting instruction's address.
     #[getter]
     const fn pc(&self) -> u32 {
-        self.0.registers.pc
+        self.0.registers.pc.0
     }
 
     /// The registers as the instruction, or the trace, hardware
@@ -188,16 +200,16 @@ impl FaultStopView {
         hooks::register_dictionary(py, &self.0.registers)
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "FaultStop(cycle={:?}, cause={:?}, address={:#010x}, size={}, function_code={}, pc={:#010x})",
-            self.cycle(),
-            self.cause(),
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "FaultStop(cycle={}, cause={}, address={:#010x}, size={}, function_code={}, pc={:#010x})",
+            repr(py, self.cycle())?,
+            repr(py, self.cause()?)?,
             self.address(),
             self.size(),
             self.function_code(),
             self.pc()
-        )
+        ))
     }
 }
 
@@ -233,33 +245,58 @@ impl InterceptedView {
 
 /// How a limited run ended (Rust's `bare::End`).  No run ends for an
 /// intercepted exception: `run_limited` answers it through the intercept
-/// callback, or the CPU takes it natively.
+/// callback, or the CPU takes it natively.  A variant's value is a field
+/// named for it, not Rust's `_0`.
 #[pyclass(name = "End", module = "mc683xx", frozen, eq)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum EndView {
     /// As a chip's run ends: its `Stop`.
-    Stop(Stop),
+    Stop {
+        /// The stop.
+        stop: Stop,
+    },
     /// PC reached `until`.
     Until(),
     /// It ran `instructions`.
     Instructions(),
     /// A fault, with `set_stop_on_fault`.
-    Fault(FaultStopView),
+    Fault {
+        /// The fault.
+        fault: FaultStopView,
+    },
 }
 
-impl From<End> for EndView {
-    fn from(end: End) -> Self {
-        match end {
-            End::Stop(stop) => Self::Stop(stop.into()),
+impl TryFrom<End> for EndView {
+    type Error = Error;
+
+    /// The end, or [`Error::Unmapped`] naming one with no Python class:
+    /// a step limit's (`run_limited` takes none), an intercepted
+    /// exception's (`run_limited` answers it within the run), or one the
+    /// bindings do not know.
+    fn try_from(end: End) -> Result<Self, Error> {
+        Ok(match end {
+            End::Stop(stop) => Self::Stop {
+                stop: stop.try_into()?,
+            },
             End::Until => Self::Until(),
             End::Instructions => Self::Instructions(),
-            End::Fault(fault) => Self::Fault(FaultStopView(fault)),
-            End::Steps => unreachable!("run_limited takes no step limit"),
-            End::Intercepted(_) => {
-                unreachable!("run_limited answers an intercepted exception within the run")
-            }
-            _ => panic!("a limited run's end the bindings do not know"),
-        }
+            End::Fault(fault) => Self::Fault {
+                fault: FaultStopView(fault),
+            },
+            other => return Err(Error::run_end(other)),
+        })
+    }
+}
+
+#[pymethods]
+impl EndView {
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(match self {
+            Self::Stop { stop } => format!("End.Stop({})", repr(py, *stop)?),
+            Self::Until() => "End.Until()".to_owned(),
+            Self::Instructions() => "End.Instructions()".to_owned(),
+            Self::Fault { fault } => format!("End.Fault({})", repr(py, fault.clone())?),
+        })
     }
 }
 
@@ -275,8 +312,12 @@ pub(crate) struct LimitedRunView {
 
 #[pymethods]
 impl LimitedRunView {
-    fn __repr__(&self) -> String {
-        format!("LimitedRun(cycles={}, end={:?})", self.cycles, self.end)
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "LimitedRun(cycles={}, end={})",
+            self.cycles,
+            repr(py, self.end.clone())?
+        ))
     }
 }
 
@@ -445,7 +486,7 @@ impl Budget {
         };
         let cycles = match self.cycles {
             Some(cycles) if self.spent >= cycles => return Err(End::Stop(cpu::Stop::Budget)),
-            Some(cycles) => Some(Cycles(cycles - self.spent)),
+            Some(cycles) => Some(Cycles::from_clocks(cycles - self.spent)),
             None => None,
         };
         let mut limits = Limits::default();
@@ -594,8 +635,10 @@ impl MachineView {
     /// requested until `clear_interrupt`.
     #[pyo3(signature = (pin, vector = None))]
     fn request_interrupt(&mut self, pin: u8, vector: Option<u8>) -> Result<(), Error> {
-        self.machine
-            .request_interrupt(IrqPin::try_from(pin).map_err(Error::from)?, vector);
+        self.machine.request_interrupt(
+            IrqPin::try_from(pin).map_err(Error::from)?,
+            vector.map(Vector),
+        );
         Ok(())
     }
 
@@ -624,7 +667,7 @@ impl MachineView {
         let first = {
             let mut this = running(slf)?;
             if let Some(begin) = begin {
-                this.machine.cpu.registers.pc = begin;
+                this.machine.cpu.registers.pc = Address(begin);
                 this.machine.cpu.clear_resume();
             }
             this.machine.stop_request().withdraw();
@@ -641,7 +684,7 @@ impl MachineView {
         let (cycles, end) = run?;
         Ok(LimitedRunView {
             cycles,
-            end: end.into(),
+            end: end.try_into()?,
         })
     }
 
@@ -732,13 +775,13 @@ impl MachineView {
     /// The CPU's clock: the cycles its runs took.
     #[getter]
     const fn now(&self) -> u64 {
-        self.machine.now().0
+        self.machine.now().clocks()
     }
 
     /// Why the CPU halted, while it stays halted.
     #[getter]
-    fn halted(&self) -> Option<Halt> {
-        self.machine.cpu.halted().map(Halt::from)
+    fn halted(&self) -> PyResult<Option<Halt>> {
+        Ok(self.machine.cpu.halted().map(Halt::try_from).transpose()?)
     }
 
     /// The vector of the first exception the last instruction or
@@ -925,7 +968,7 @@ impl MachineView {
                 };
                 (run, fired, registers)
             };
-            budget.spent = budget.spent.saturating_add(run.cycles.0);
+            budget.spent = budget.spent.saturating_add(run.cycles.clocks());
             let pending = slf.borrow().pending.clone();
             pending.check()?;
             let dispatched = match registers {
@@ -993,7 +1036,7 @@ impl MachineView {
         };
         if !handled {
             let mut this = slf.borrow_mut();
-            if this.machine.cpu.registers.pc == interception.pc.0 {
+            if this.machine.cpu.registers.pc == interception.pc {
                 this.machine.cpu.take_natively_once();
             }
         }
@@ -1008,7 +1051,7 @@ struct Debugged<'a, 'py>(&'a Bound<'py, MachineView>);
 impl Target for Debugged<'_, '_> {
     type Error = PyErr;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+    fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
         Some(call(&mut CpuControl::new(
             &mut self.0.borrow_mut().machine.cpu,
         )))
@@ -1048,7 +1091,7 @@ impl Target for Debugged<'_, '_> {
         let budget = Budget {
             until: None,
             instructions: None,
-            cycles: Some(cycles.0),
+            cycles: Some(cycles.clocks()),
             spent: 0,
         };
         let (_, end) = MachineView::run_dispatching(self.0, budget, hit)?;
@@ -1060,24 +1103,195 @@ impl Target for Debugged<'_, '_> {
             End::Stop(stop) => stop.into(),
             End::Until | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
-            _ => TargetRun::Requested,
+            other => return Err(Error::run_end(other).into()),
         })
     }
 
-    fn reset(&mut self) -> PyResult<bool> {
+    fn reset(&mut self) -> PyResult<TargetReset> {
         Ok(Target::reset(&mut self.0.borrow_mut().machine).unwrap_or_else(|never| match never {}))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::ops::ControlFlow;
+
+    use mc683xx_board::peripheral::Role;
+    use mc683xx_cpu32::cpu;
     use mc683xx_cpu32::cpu::bare::End;
+    use mc683xx_cpu32::cpu::bare::FaultCause;
+    use mc683xx_cpu32::cpu::bare::Limits;
+    use mc683xx_cpu32::cpu::hooks::Invalid;
+    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_cpu32::exception::Vector;
+    use mc683xx_cpu32::flat::Machine;
+    use mc683xx_cpu32::memory::PAGE_BYTES;
+    use mc683xx_mc68331::gpt::pwm;
+    use mc683xx_modules::sim;
+    use mc683xx_target::address::Address;
+    use mc683xx_target::entry::Entry;
+    use pyo3::PyErr;
+    use pyo3::Python;
+    use pyo3::exceptions::PyNotImplementedError;
 
     use super::EndView;
+    use super::FaultCauseKind;
+    use super::unknown_fault_cause;
+    use crate::board::RoleView;
+    use crate::chip::Halt;
+    use crate::chip::ResetCause;
+    use crate::chip::Stop;
+    use crate::error::Error;
+    use crate::error::RUN_END;
+    use crate::exceptions::RunError;
+    use crate::hooks::InvalidReason;
+    use crate::peripherals::Output;
 
+    /// Where the test programs start, past the reset vectors.
+    const START: u32 = 0x400;
+    /// The initial SSP, the top of the page.
+    const STACK: u32 = PAGE_BYTES;
+    /// An address no page maps.
+    const UNMAPPED: u32 = 0x10_0000;
+    /// NOP (CPU32RM 4.3).
+    const NOP: u16 = 0x4E71;
+    /// TRAP #0 (CPU32RM 4.3), vector 32 (CPU32RM Table 6-1).
+    const TRAP_0: u16 = 0x4E40;
+    /// TRAP #0's vector.
+    const TRAP_0_VECTOR: Vector = Vector(32);
+    /// MOVE.L (A0),D0 (CPU32RM 4.3).
+    const MOVE_LONG_A0_TO_D0: u16 = 0x2010;
+
+    /// A machine reset into `program` at [`START`], set up by `setup`,
+    /// and how a run under `limits` ends.
+    fn end(program: &[u16], limits: Limits, setup: impl FnOnce(&mut Machine)) -> End {
+        let mut image = vec![0; PAGE_BYTES as usize];
+        image[0..4].copy_from_slice(&STACK.to_be_bytes());
+        image[4..8].copy_from_slice(&START.to_be_bytes());
+        for (index, word) in program.iter().enumerate() {
+            let at = START as usize + 2 * index;
+            image[at..at + 2].copy_from_slice(&word.to_be_bytes());
+        }
+        let mut machine = Machine::new(32).unwrap();
+        machine.map(Address(0), PAGE_BYTES, &image).unwrap();
+        machine.reset().unwrap();
+        setup(&mut machine);
+        machine.run_limited(limits).end
+    }
+
+    /// An unknown fault cause is a value, not a run's end: it raises
+    /// `NotImplementedError`, not `RunError`.
     #[test]
-    #[should_panic(expected = "run_limited takes no step limit")]
-    fn a_step_limit_end_is_not_reported_as_a_stop_request() {
-        drop(EndView::from(End::Steps));
+    fn an_unknown_fault_cause_is_not_implemented() {
+        Python::initialize();
+        let error = PyErr::from(unknown_fault_cause(FaultCause::BusError));
+        Python::attach(|py| {
+            assert!(error.is_instance_of::<PyNotImplementedError>(py));
+            assert!(!error.is_instance_of::<RunError>(py));
+        });
+    }
+
+    /// Every `End` and every `Stop` a run gives has its Python class,
+    /// or raises `RunError` naming it, the two `run_limited` never
+    /// gives; none panics or maps to another.  A variant added to
+    /// either belongs here, and in the mappings.
+    #[test]
+    fn every_run_end_maps_or_names_itself() {
+        let mut until = Limits::default();
+        until.until = Some(Address(START + 2));
+        let mut instructions = Limits::default();
+        instructions.instructions = Some(1);
+        let mut steps = Limits::default();
+        steps.steps = Some(1);
+        let mut budget = Limits::default();
+        budget.cycles = Some(Cycles::from_clocks(1));
+        let ends = [
+            end(&[NOP, NOP], until, |_| ()),
+            end(&[NOP, NOP], instructions, |_| ()),
+            end(&[NOP, NOP], steps, |_| ()),
+            end(&[NOP, NOP], budget, |_| ()),
+            end(&[MOVE_LONG_A0_TO_D0], instructions, |machine| {
+                machine.cpu.registers.set_address(0, UNMAPPED);
+                machine.cpu.set_stop_on_fault(true);
+            }),
+            end(&[TRAP_0], instructions, |machine| {
+                machine.cpu.set_intercepted(TRAP_0_VECTOR, true);
+            }),
+        ];
+        let mapped: Vec<_> = ends.into_iter().map(EndView::try_from).collect();
+        assert!(matches!(mapped[0], Ok(EndView::Until())));
+        assert!(matches!(mapped[1], Ok(EndView::Instructions())));
+        assert!(
+            matches!(&mapped[2], Err(Error::Unmapped { kind: RUN_END, name: Some(name) }) if name == "steps")
+        );
+        assert!(matches!(
+            mapped[3],
+            Ok(EndView::Stop {
+                stop: Stop::Budget()
+            })
+        ));
+        assert!(matches!(mapped[4], Ok(EndView::Fault { .. })));
+        assert!(
+            matches!(&mapped[5], Err(Error::Unmapped { kind: RUN_END, name: Some(name) }) if name == "intercepted")
+        );
+
+        let mut machine = Machine::new(32).unwrap();
+        let hook = machine
+            .cpu
+            .add_code_hook(Address(0)..=Address(0), |_| ControlFlow::Continue(()));
+        let stops = [
+            cpu::Stop::Budget,
+            cpu::Stop::Stopped,
+            cpu::Stop::Halted(cpu::Halt::DoubleBusFault),
+            cpu::Stop::Hook(hook),
+            cpu::Stop::Requested,
+            cpu::Stop::Background(Entry::Breakpoint),
+            cpu::Stop::Fault,
+        ];
+        let mapped: Vec<_> = stops.into_iter().map(Stop::try_from).collect();
+        assert!(matches!(mapped[0], Ok(Stop::Budget())));
+        assert!(matches!(mapped[1], Ok(Stop::Stopped())));
+        assert!(matches!(mapped[2], Ok(Stop::Halted { .. })));
+        assert!(matches!(mapped[3], Ok(Stop::Hook { .. })));
+        assert!(matches!(mapped[4], Ok(Stop::Requested())));
+        assert!(matches!(mapped[5], Ok(Stop::Background { .. })));
+        assert!(matches!(mapped[6], Ok(Stop::Fault())));
+    }
+
+    /// Every variant of a `non_exhaustive` enum the bindings convert
+    /// has its Python value; a variant added to one belongs here, and
+    /// in its mapping, which otherwise raises rather than panics.
+    #[test]
+    fn every_value_maps() {
+        for cause in [
+            FaultCause::BusError,
+            FaultCause::Protected,
+            FaultCause::AddressError,
+        ] {
+            assert!(FaultCauseKind::try_from(cause).is_ok());
+        }
+        assert!(Halt::try_from(cpu::Halt::DoubleBusFault).is_ok());
+        for cause in sim::ResetCause::ALL {
+            let mapped = ResetCause::from(cause);
+            assert_ne!(mapped, ResetCause::Unknown);
+            assert_eq!(sim::ResetCause::try_from(mapped).ok(), Some(cause));
+        }
+        for role in [Role::Read, Role::Write, Role::ReadWrite, Role::Iack] {
+            assert!(RoleView::try_from(role).is_ok());
+        }
+        for invalid in [Invalid::BusError, Invalid::Protected] {
+            assert!(InvalidReason::try_from(invalid).is_ok());
+        }
+        for output in [
+            pwm::Output::Level(true),
+            pwm::Output::Wave {
+                period: 256,
+                high: 1,
+                clocks: None,
+            },
+            pwm::Output::Clock { clocks: None },
+        ] {
+            assert!(Output::try_from(output).is_ok());
+        }
     }
 }

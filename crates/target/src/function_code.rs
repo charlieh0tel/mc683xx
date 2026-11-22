@@ -1,6 +1,7 @@
 //! Function codes: the address space of each bus cycle.
 
 use core::fmt;
+use core::str::FromStr;
 
 /// The function code FC\[2:0\] a bus cycle carries, naming its address
 /// space (CPU32RM 5.3, Table 5-1).  Codes 0, 3 and 4 are reserved;
@@ -14,14 +15,12 @@ pub struct FunctionCode(u8);
 impl<'de> serde::Deserialize<'de> for FunctionCode {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let bits = u8::deserialize(deserializer)?;
-        if bits & !Self::MASK == 0 {
-            Ok(Self(bits))
-        } else {
-            Err(serde::de::Error::invalid_value(
+        Self::new(bits).ok_or_else(|| {
+            serde::de::Error::invalid_value(
                 serde::de::Unexpected::Unsigned(bits.into()),
                 &"a function code, 0 to 7",
-            ))
-        }
+            )
+        })
     }
 }
 
@@ -43,16 +42,26 @@ impl FunctionCode {
     /// LPSTOP broadcast (CPU32RM 5.3.1).
     pub const CPU_SPACE: Self = Self(7);
 
-    /// The function code in the low three bits of `bits`; the rest are
-    /// ignored, as SFC and DFC ignore them (CPU32RM 2.3.1.3).
+    /// The function code FC\[2:0\] `bits` give, if they are one: 0 to 7.
     #[must_use]
-    pub const fn new(bits: u32) -> Self {
-        Self(bits as u8 & Self::MASK)
+    pub const fn new(bits: u8) -> Option<Self> {
+        if bits & !Self::MASK == 0 {
+            Some(Self(bits))
+        } else {
+            None
+        }
     }
 
-    /// FC\[2:0\].
+    /// The function code in the low three bits of `value`; the rest are
+    /// ignored, as SFC and DFC ignore them (CPU32RM 2.3.1.3).
     #[must_use]
-    pub const fn bits(self) -> u8 {
+    pub const fn from_low_bits(value: u32) -> Self {
+        Self(value as u8 & Self::MASK)
+    }
+
+    /// FC\[2:0\], 0 to 7.
+    #[must_use]
+    pub const fn get(self) -> u8 {
         self.0
     }
 
@@ -90,6 +99,39 @@ impl fmt::Display for FunctionCode {
     }
 }
 
+/// The function code its number, as `Display` writes it, names: `0`
+/// to `7`.
+impl FromStr for FunctionCode {
+    type Err = ParseFunctionCodeError;
+
+    fn from_str(text: &str) -> Result<Self, ParseFunctionCodeError> {
+        match text.as_bytes() {
+            [digit @ b'0'..=b'7'] => Ok(Self(digit - b'0')),
+            _ => Err(ParseFunctionCodeError {}),
+        }
+    }
+}
+
+/// Text that names no function code; without the text, as
+/// [`ParseRegisterError`](crate::register::ParseRegisterError).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("not a function code, 0 to 7")]
+#[non_exhaustive]
+pub struct ParseFunctionCodeError {}
+
+impl TryFrom<u8> for FunctionCode {
+    type Error = NoFunctionCode;
+
+    fn try_from(bits: u8) -> Result<Self, NoFunctionCode> {
+        Self::new(bits).ok_or(NoFunctionCode(bits))
+    }
+}
+
+/// A value past FC\[2:0\]: above 7.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no function code {0}")]
+pub struct NoFunctionCode(pub u8);
+
 impl From<FunctionCode> for u8 {
     fn from(function_code: FunctionCode) -> Self {
         function_code.0
@@ -101,13 +143,20 @@ mod tests {
     use std::string::ToString;
 
     use super::FunctionCode;
+    use super::NoFunctionCode;
+    use super::ParseFunctionCodeError;
 
     #[test]
     fn only_three_bits() {
         assert_eq!(
-            FunctionCode::new(0xffff_fffd),
+            FunctionCode::from_low_bits(0xffff_fffd),
             FunctionCode::SUPERVISOR_DATA
         );
+        assert_eq!(FunctionCode::new(7), Some(FunctionCode::CPU_SPACE));
+        assert_eq!(FunctionCode::new(8), None);
+        assert_eq!(FunctionCode::CPU_SPACE.get(), 7);
+        assert_eq!(FunctionCode::try_from(7), Ok(FunctionCode::CPU_SPACE));
+        assert_eq!(FunctionCode::try_from(8), Err(NoFunctionCode(8)));
     }
 
     #[cfg(feature = "serde")]
@@ -127,7 +176,7 @@ mod tests {
         assert!(FunctionCode::CPU_SPACE.is_cpu_space());
         assert!(FunctionCode::USER_DATA.is_memory_space());
         for code in [0, 3, 4, 7] {
-            assert!(!FunctionCode::new(code).is_memory_space());
+            assert!(!FunctionCode::from_low_bits(code).is_memory_space());
         }
     }
 
@@ -135,5 +184,16 @@ mod tests {
     fn a_function_code_shows_as_its_number() {
         assert_eq!(FunctionCode::SUPERVISOR_DATA.to_string(), "5");
         assert_eq!(u8::from(FunctionCode::CPU_SPACE), 7);
+    }
+
+    #[test]
+    fn a_function_code_parses_from_its_number() {
+        for bits in 0..=7 {
+            let code = FunctionCode::from_low_bits(bits);
+            assert_eq!(code.to_string().parse(), Ok(code));
+        }
+        for text in ["8", "", "05", "+5", "-1", "5 "] {
+            assert_eq!(text.parse::<FunctionCode>(), Err(ParseFunctionCodeError {}));
+        }
     }
 }

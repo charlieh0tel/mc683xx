@@ -14,9 +14,11 @@ use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::Acknowledged;
 use mc683xx_cpu32::interrupt::InterruptLevel;
+use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::Backing;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::PAGE_BYTES;
@@ -33,6 +35,7 @@ use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::peripheral::iack_address;
 use mc683xx_modules::pins::PortLevels;
+use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::sim::BLOCK;
 use mc683xx_modules::sim::MODULE_SPACE_BYTES;
@@ -56,6 +59,10 @@ use crate::event::ChipTracing;
 use crate::event::DsackFault;
 use crate::event::Event;
 use crate::gpt::Gpt;
+use crate::port::NoInputsError;
+use crate::port::OutputChange;
+use crate::port::Port;
+use crate::port::PortChange;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::reset::ResetScope;
@@ -145,7 +152,7 @@ impl HostMemory {
 }
 
 /// A memory whose contents go back to an image at some resets
-/// ([`Builder::reload_scope`](crate::chip::Builder::reload_scope)).
+/// ([`Builder::set_reload_scope`](crate::chip::Builder::set_reload_scope)).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Reload {
     /// The core's region holding it.
@@ -189,8 +196,8 @@ pub(crate) enum Source {
 /// What the outputs an [`OutputStop`] watches showed, each masked by it.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Seen {
-    /// Ports C, E, F, GP and QS's levels, an undriven pin high.
-    ports: [u8; 5],
+    /// Each port's levels, by [`Port::index`], an undriven pin high.
+    ports: [u8; Port::ALL.len()],
     /// PWMA's and PWMB's levels, bits 0 and 1.
     pwm: u8,
     /// The frames sent on TXD the host has not taken.
@@ -298,7 +305,7 @@ pub(crate) struct Board {
     /// The interrupt mask LPSTOP broadcast, and when, if the last
     /// acknowledge woke the MCU from low-power stop; not saved, as
     /// `acknowledged` is not.
-    pub(crate) woke: Option<(u8, Cycles)>,
+    pub(crate) woke: Option<(InterruptLevel, Cycles)>,
     /// The earliest next event of the SIM and the modules, while
     /// `modules_next_stale` is clear: the run asks for it every quantum,
     /// and it moves only at an access to the SIM or a module, an
@@ -329,6 +336,107 @@ impl fmt::Debug for Board {
 type Ended = Result<(u32, u16), BusError>;
 
 impl Board {
+    /// The pins `port` drives and their levels at `now`.
+    pub(crate) fn outputs(&self, port: Port, now: Cycles) -> PortLevels {
+        self.outputs_with(port, |gpt| gpt.port_outputs(now))
+    }
+
+    /// What `port` drives now, port GP's as `port_gp` reads it of the GPT.
+    fn outputs_with(&self, port: Port, port_gp: impl FnOnce(&Gpt) -> PortLevels) -> PortLevels {
+        match port {
+            Port::C => self.sim.outputs(PortName::C),
+            Port::E => self.sim.outputs(PortName::E),
+            Port::F => self.sim.outputs(PortName::F),
+            Port::Gp => port_gp(self.module::<Gpt>(GPT)),
+            Port::Qs => self.module::<Qsm>(QSM).port_outputs(),
+        }
+    }
+
+    /// `port`'s registers and the levels the board drives on its pins.
+    pub(crate) fn port(&self, port: Port) -> PortState {
+        match port {
+            Port::C => self.sim.port(PortName::C),
+            Port::E => self.sim.port(PortName::E),
+            Port::F => self.sim.port(PortName::F),
+            Port::Gp => self.module::<Gpt>(GPT).port_state(),
+            Port::Qs => self.module::<Qsm>(QSM).port_state(),
+        }
+    }
+
+    /// The board drives the pins of `port` in `mask` to their levels in
+    /// `value` at `now`, the others as they were; port C has no inputs.
+    pub(crate) fn set_pins(
+        &mut self,
+        port: Port,
+        value: u8,
+        mask: u8,
+        now: Cycles,
+    ) -> Result<(), NoInputsError> {
+        match port {
+            Port::C => return Err(NoInputsError(port)),
+            Port::E => {
+                self.modules_changed();
+                self.sim.set_port_pins(PortName::E, value, mask);
+            }
+            Port::F => {
+                self.modules_changed();
+                self.sim.set_port_pins(PortName::F, value, mask);
+            }
+            Port::Gp => self.module_mut::<Gpt>(GPT).set_port_pins(value, mask, now),
+            Port::Qs => self.module_mut::<Qsm>(QSM).set_port_pins(value, mask, now),
+        }
+        Ok(())
+    }
+
+    /// The changes in what each port drives since the last call, in time
+    /// order, those at one time in [`Port::ALL`]'s order, port GP's in
+    /// the order they happened.  The PWM pins' edges stay queued.
+    pub(crate) fn take_port_changes(&mut self) -> Vec<PortChange> {
+        let gpt = self.module_mut::<Gpt>(GPT).take_port_changes();
+        self.merge_port_changes(gpt, |change| change, |change| (change.now, change.port))
+    }
+
+    /// [`take_port_changes`](Self::take_port_changes)'s and the PWM pins'
+    /// reported edges, taking both, in one stream: a PWM pin's in port
+    /// GP's place, the GPT's in the order they happened.
+    pub(crate) fn take_output_changes(&mut self) -> Vec<OutputChange> {
+        let gpt = self.module_mut::<Gpt>(GPT).take_output_changes();
+        self.merge_port_changes(gpt, OutputChange::Port, |change| {
+            (change.now(), change.place())
+        })
+    }
+
+    /// The SIM's and QSM's port changes since the last call, as `port`
+    /// makes them, merged with `gpt`'s by `order`, a time and a place.
+    fn merge_port_changes<T>(
+        &mut self,
+        gpt: Vec<T>,
+        port: impl Fn(PortChange) -> T,
+        order: impl Fn(&T) -> (Cycles, Port),
+    ) -> Vec<T> {
+        let sim = self.sim.take_output_changes();
+        let qs = self.module_mut::<Qsm>(QSM).take_output_changes();
+        if sim.is_empty() && qs.is_empty() {
+            return gpt;
+        }
+        let of = |port| move |(now, outputs)| PortChange { now, port, outputs };
+        let mut changes: Vec<_> = sim
+            .into_iter()
+            .map(|(at, change)| of(Port::from_sim(change.port))((at, change.outputs)))
+            .map(&port)
+            .chain(gpt)
+            .chain(qs.into_iter().map(of(Port::Qs)).map(&port))
+            .collect();
+        // each source is in time order, but the SIM's ports at one time
+        // are in the order they were written (one MOVEM can write port F
+        // before port E): sort, stably, unless already in order, which
+        // keeps the GPT's port GP and PWM changes at one time in theirs
+        if !changes.is_sorted_by_key(&order) {
+            changes.sort_by_key(order);
+        }
+        changes
+    }
+
     /// The module at `index`, which is an `M`.
     pub(crate) fn module<M: Any>(&self, index: usize) -> &M {
         let module: &dyn Any = self.modules[index].as_ref();
@@ -411,14 +519,10 @@ impl Board {
         let qsm = self.module::<Qsm>(QSM);
         let (port_gp, pwm) = self.module::<Gpt>(GPT).reported_outputs();
         let pwm_mask = u8::from(stop.pwm_a) | u8::from(stop.pwm_b) << 1;
+        // port GP as the output changes last reported it
+        let outputs = |port| self.outputs_with(port, |_| port_gp);
         Seen {
-            ports: [
-                level(self.sim.outputs(PortName::C)) & stop.port_c,
-                level(self.sim.outputs(PortName::E)) & stop.port_e,
-                level(self.sim.outputs(PortName::F)) & stop.port_f,
-                level(port_gp) & stop.port_gp,
-                level(qsm.port_outputs()) & stop.port_qs,
-            ],
+            ports: Port::ALL.map(|port| level(outputs(port)) & stop.port(port)),
             pwm: pwm & pwm_mask,
             frames: if stop.txd { qsm.untaken_frames() } else { 0 },
         }
@@ -450,7 +554,7 @@ impl Board {
         let pwm = u8::from(stop.pwm_a) | u8::from(stop.pwm_b) << 1;
         let fast = self
             .module::<Gpt>(GPT)
-            .next_fast_edge(now, pwm, stop.port_gp);
+            .next_fast_edge(now, pwm, stop.port(Port::Gp));
         self.modules_next().into_iter().chain(fast).min()
     }
 
@@ -512,7 +616,10 @@ impl Board {
             self.system_reload = true;
             self.sync = true;
         }
-        self.events.push(Event::Reset(now, ResetCause::System));
+        self.events.push(Event::Reset {
+            now,
+            cause: ResetCause::System,
+        });
         self.output_written();
         if self.output_stop.reset {
             self.output_moved = true;
@@ -559,7 +666,7 @@ impl Board {
                 wiring
                     .decodes
                     .iter()
-                    .any(|decode| decode.takes(address, function_code))
+                    .any(|decode| decode.takes(Address(address), function_code))
             })
             .map(|wiring| wiring.peripheral)
             .collect()
@@ -584,7 +691,7 @@ impl Board {
             wiring
                 .decodes
                 .iter()
-                .any(|decode| decode.takes(address, function_code))
+                .any(|decode| decode.takes(Address(address), function_code))
         })
     }
 
@@ -703,11 +810,14 @@ impl Board {
             if let Some(value) = write
                 && address == LPSTOP_BROADCAST.0
             {
-                self.low_power_stop((value & LPSTOP_MASK) as u8, now);
+                self.low_power_stop(
+                    InterruptLevel::new((value & LPSTOP_MASK) as u8).unwrap_or_default(),
+                    now,
+                );
                 return Ok((0, TABLE_CLOCKS.into()));
             }
         } else if let Some(offset) = address
-            .checked_sub(self.sim.module_base())
+            .checked_sub(self.sim.module_base().0)
             .filter(|&offset| offset < MODULE_SPACE_BYTES)
             && let Some(value) = self.internal(offset, size, function_code, now, write)
         {
@@ -838,11 +948,14 @@ impl Board {
                 None => return field,
             },
         };
-        let assigned = self.sim.port_e_assignment();
+        let assigned = self.sim.port(PortName::E).assignment;
         let dsack0 = pins.drives_dsack0() && assigned & PEPA_DSACK0 != 0;
         let dsack1 = pins.drives_dsack1() && assigned & PEPA_DSACK1 != 0;
         if !dsack0 && !dsack1 {
-            let fault = match cycle.select.and_then(ChipSelect::from_select) {
+            let fault = match cycle
+                .select
+                .and_then(|select| ChipSelect::try_from(select).ok())
+            {
                 Some(select) => DsackFault::Unassigned { select },
                 None => DsackFault::BusUnassigned {
                     peripheral: PeripheralId::from(peripheral as u64),
@@ -863,7 +976,7 @@ impl Board {
     fn tell_dsack(&mut self, peripheral: usize, told: u8, now: Cycles, fault: DsackFault) {
         if self.dsack_told[peripheral] & told == 0 {
             self.dsack_told[peripheral] |= told;
-            self.events.push(Event::Dsack(now, fault));
+            self.events.push(Event::Dsack { now, fault });
         }
     }
 
@@ -940,7 +1053,8 @@ impl Board {
         if self.publish_output_horizon {
             self.publish_output_horizon(now);
         }
-        let bus_cycle = BusCycle::new(address, size, function_code, now).writing(write.is_some());
+        let bus_cycle =
+            BusCycle::new(Address(address), size, function_code, now).writing(write.is_some());
         let mut first: Option<(u8, PortSize)> = None;
         for &candidate in found.iter().flatten() {
             let cycle = bus_cycle.through(candidate.select.into());
@@ -1039,9 +1153,9 @@ impl Board {
             });
         (1..=InterruptLevel::NONMASKABLE.get())
             .rev()
-            .filter_map(InterruptLevel::new)
-            .find(|&level| driven & 1 << level.get() != 0 && self.sim.interrupt_pin(level))
-            .unwrap_or(InterruptLevel::NONE)
+            .filter_map(IrqPin::new)
+            .find(|&pin| driven & 1 << pin.get() != 0 && self.sim.interrupt_pin(pin))
+            .map_or(InterruptLevel::NONE, IrqPin::level)
     }
 
     /// The highest level requested of the CPU, recomputed only when a
@@ -1129,8 +1243,11 @@ impl Board {
             .iter()
             .any(|(other, source)| *other == arbitration && is_sim(*source));
         if modules_at + usize::from(sim_at) > 1 {
-            self.events
-                .push(Event::ArbitrationTie { level, arbitration });
+            self.events.push(Event::ArbitrationTie {
+                now,
+                level,
+                arbitration,
+            });
         }
         match winner {
             Source::Timer => Acknowledge::Vector(self.sim.acknowledge_timer()).into(),
@@ -1187,7 +1304,7 @@ impl Board {
     /// Low-power stop at `now`, the interrupt mask LPSTOP broadcast
     /// `mask` (MC68331UM 4.5.4.2): the SIM's watchdog and the other
     /// modules' clocks stop (4.2.12, 4.3.4).
-    pub(crate) fn low_power_stop(&mut self, mask: u8, now: Cycles) {
+    pub(crate) fn low_power_stop(&mut self, mask: InterruptLevel, now: Cycles) {
         self.modules_changed();
         self.sim.low_power_stop(mask, now);
         self.module_mut::<Gpt>(GPT).set_low_power(true, now);
@@ -1217,7 +1334,7 @@ impl Board {
     fn external_acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged {
         let address = iack_address(level);
         let request = DecodeRequest {
-            address,
+            address: address.0,
             function_code: FunctionCode::CPU_SPACE,
             write: false,
             size: Size::Byte,
@@ -1233,14 +1350,14 @@ impl Board {
         }
         match self.external(
             None,
-            address,
+            address.0,
             Size::Byte,
             FunctionCode::CPU_SPACE,
             now,
             None,
         ) {
             Ok((vector, clocks)) => {
-                Acknowledged::new(Acknowledge::Vector(vector as u8)).stalled(stall(clocks))
+                Acknowledged::new(Acknowledge::Vector(Vector(vector as u8))).stalled(stall(clocks))
             }
             // no DSACK in time: the bus monitor's BERR ends the cycle
             // at its period (SIMRM 3.2, 6.4.3); with BME clear, a bus
@@ -1265,13 +1382,13 @@ impl Board {
         let fixed = self
             .fixed
             .iter()
-            .map(|fixed| (fixed.memory.base, fixed.memory.length));
+            .map(|fixed| (Address(fixed.memory.base), fixed.memory.length));
         for (start, length) in self.sim.chip_selects().blocks().chain(fixed) {
-            let first = (start / PAGE_BYTES) as usize;
+            let first = (start.0 / PAGE_BYTES) as usize;
             let count = (length / PAGE_BYTES) as usize;
             covered[first..(first + count).min(PAGES)].fill(true);
         }
-        let modules = self.sim.module_base();
+        let modules = self.sim.module_base().0;
         for page in (0..PAGES).filter(|&page| covered[page]) {
             let address = page as u32 * PAGE_BYTES;
             if (modules..modules + MODULE_SPACE_BYTES).contains(&address)
@@ -1290,12 +1407,10 @@ impl Board {
                 let Some((_, timing)) = read.or(write) else {
                     continue;
                 };
-                let page = Page {
-                    read: read.map(|(backing, _)| backing),
-                    write: write.map(|(backing, _)| backing),
-                    port: timing.0,
-                    clocks: timing.1,
-                };
+                let page = Page::BUS
+                    .reading(read.map(|(backing, _)| backing))
+                    .writing(write.map(|(backing, _)| backing))
+                    .timed(timing.0, timing.1);
                 memory
                     .map(space, Address(address), PAGE_BYTES, page)
                     .expect("a whole page inside its region");
@@ -1308,7 +1423,7 @@ impl Board {
     pub(crate) fn decode_pages(&mut self) {
         let chip_selects = self.sim.chip_selects();
         self.page_selects = (0..PAGES)
-            .map(|page| chip_selects.at(page as u32 * PAGE_BYTES))
+            .map(|page| chip_selects.at(Address(page as u32 * PAGE_BYTES)))
             .collect();
     }
 
@@ -1441,7 +1556,7 @@ const fn page(address: u32) -> usize {
 /// The clocks of a cycle of `clocks` beyond the timing tables' bus
 /// cycle: what the core adds to an instruction or interrupt.
 pub(crate) fn stall(clocks: u16) -> Cycles {
-    Cycles(u64::from(clocks.saturating_sub(TABLE_CLOCKS.into())))
+    Cycles::from_clocks(u64::from(clocks.saturating_sub(TABLE_CLOCKS.into())))
 }
 
 /// Whether `source` arbitrates with the SIM's IARB.

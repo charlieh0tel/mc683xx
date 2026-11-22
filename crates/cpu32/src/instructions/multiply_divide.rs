@@ -18,7 +18,6 @@ use crate::instructions::data_movement::register_field;
 use crate::registers::Registers;
 use crate::registers::status;
 use crate::timing;
-use mc683xx_target::address::Address;
 use mc683xx_target::size::Size;
 
 /// The word forms: 1x00 rrr s11 <ea> (CPU32RM 4.4, MULU, MULS, DIVU,
@@ -86,7 +85,7 @@ fn zero_divide(core: &mut Core<'_>) -> Exception {
     core.cpu.registers.set_flag(status::C, false);
     Exception::Long {
         vector: Vector::ZERO_DIVIDE,
-        pc: Address(core.cpu.registers.pc),
+        pc: core.cpu.registers.pc,
         address: core.instruction_pc(),
     }
 }

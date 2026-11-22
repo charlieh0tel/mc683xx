@@ -20,6 +20,7 @@ use mc683xx_gdb::connection::PollError;
 use mc683xx_gdb::connection::Waiter;
 use mc683xx_gdb::target::AccessError;
 use mc683xx_gdb::target::Target;
+use mc683xx_gdb::target::TargetReset;
 use mc683xx_gdb::target::TargetRun;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_target::address::Address;
@@ -62,8 +63,8 @@ impl Debugged<'_> {
 impl Target for Debugged<'_> {
     type Error = RunError;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
-        Target::with_cpu(self.board, call)
+    fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+        Target::cpu_scope(self.board, call)
     }
 
     fn read_memory(
@@ -114,7 +115,7 @@ impl Target for Debugged<'_> {
         Ok(TargetRun::Requested)
     }
 
-    fn reset(&mut self) -> Result<bool, RunError> {
+    fn reset(&mut self) -> Result<TargetReset, RunError> {
         Ok(Target::reset(self.board)?)
     }
 

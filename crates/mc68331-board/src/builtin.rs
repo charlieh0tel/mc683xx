@@ -9,6 +9,7 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
@@ -30,6 +31,7 @@ use crate::signal::Kind;
 use crate::signal::Signal;
 use crate::time::Clock;
 use crate::time::Time;
+use crate::time::TimeBase;
 use mc683xx_cpu32::frequency::Frequency;
 
 /// The format of the built-in peripherals' snapshots.
@@ -112,7 +114,7 @@ pub(crate) fn register(registry: &mut Registry) {
         (
             "edge-counter",
             vec![PortSpec::input("in", Kind::Edge)],
-            |_| Ok(Box::new(EdgeCounter::default())),
+            |_| Ok(Box::new(EdgeCounter::new())),
         ),
         (
             "dc-source",
@@ -190,7 +192,7 @@ pub struct RegisterFile {
     /// reach.
     bytes: Vec<u8>,
     /// The vector an acknowledge reads, if it answers one.
-    vector: Option<u8>,
+    vector: Option<Vector>,
 }
 
 impl RegisterFile {
@@ -198,7 +200,7 @@ impl RegisterFile {
     /// with `vector`; [`None`] unless `length` is a power of two that
     /// ADDR\[23:0\] reach.
     #[must_use]
-    pub fn new(length: usize, vector: Option<u8>) -> Option<Self> {
+    pub fn new(length: usize, vector: Option<Vector>) -> Option<Self> {
         (length.is_power_of_two() && length <= ADDRESS_SPACE).then(|| Self {
             bytes: vec![0; length],
             vector,
@@ -218,7 +220,7 @@ impl RegisterFile {
 
     /// The vector an acknowledge reads, if it answers one.
     #[must_use]
-    pub const fn vector(&self) -> Option<u8> {
+    pub const fn vector(&self) -> Option<Vector> {
         self.vector
     }
 
@@ -239,7 +241,7 @@ impl RegisterFile {
         }
         Ok(Self {
             bytes: vec![0; length as usize],
-            vector: context.parameters.integer("vector")?,
+            vector: context.parameters.integer("vector")?.map(Vector),
         })
     }
 
@@ -252,7 +254,10 @@ impl RegisterFile {
 impl Peripheral for RegisterFile {
     fn read(&mut self, access: PeripheralAccess, _: &mut Drive<'_>) -> Result<u32, BusError> {
         if access.role == Role::Iack {
-            return self.vector.map(u32::from).ok_or(BusError);
+            return self
+                .vector
+                .map(|vector| u32::from(vector.0))
+                .ok_or(BusError);
         }
         Ok(access.read_byte(self.bytes[self.index(access.address)]))
     }
@@ -272,7 +277,7 @@ impl Peripheral for RegisterFile {
     fn inspect(&self) -> Inspection {
         let shown = Inspection::default().bytes("registers", self.bytes.as_slice());
         match self.vector {
-            Some(vector) => shown.register("vector", vector),
+            Some(vector) => shown.register("vector", vector.0),
             None => shown.text("vector", "none"),
         }
     }
@@ -419,21 +424,21 @@ impl Oscillator {
 
     /// From `hz` and `phase_ps`.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
-        let hz = context.parameters.required("hz")?;
+        let hz = context.parameters.required_integer("hz")?;
         let phase = context.parameters.integer("phase_ps")?.unwrap_or(0);
         Ok(Self {
-            clock: Clock::new(Frequency::from_hz(hz), Time(phase)),
+            clock: Clock::new(Frequency::from_hz(hz), Time::from_picos(phase)),
             driven: false,
         })
     }
 }
 
 impl Peripheral for Oscillator {
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         (!self.driven).then_some(Time::ZERO)
     }
 
-    fn advance(&mut self, _: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
         drive.drive(Self::OUT, Signal::Clock(self.clock));
         self.driven = true;
     }
@@ -488,36 +493,32 @@ impl Divider {
     /// Its output.
     const OUT: usize = 1;
 
-    /// A divider by `divide`, high `high` input cycles, not yet driven.
-    #[cfg(test)]
-    pub(crate) const fn with_ratio(divide: u128, high: u128) -> Self {
-        Self {
-            divide,
-            high,
+    /// A divider by `divide`, high `high` input cycles, its input not
+    /// yet driven; [`None`] unless `divide` is at least 2 and `high` 1 to
+    /// `divide` - 1.
+    #[must_use]
+    pub const fn new(divide: u64, high: u64) -> Option<Self> {
+        if divide < 2 || high == 0 || high >= divide {
+            return None;
+        }
+        Some(Self {
+            divide: divide as u128,
+            high: high as u128,
             clock: None,
             pending: None,
-        }
+        })
     }
 
     /// From `divide` (at least 2) and `high` (1 to `divide` - 1, half
     /// by default).
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
-        let divide: u64 = context.parameters.required("divide")?;
+        let divide: u64 = context.parameters.required_integer("divide")?;
         if divide < 2 {
             return Err(ParameterError::invalid("divide", "it must be at least 2"));
         }
         let high: u64 = context.parameters.integer("high")?.unwrap_or(divide / 2);
-        if high == 0 || high >= divide {
-            return Err(ParameterError::invalid(
-                "high",
-                format!("it must be 1 to {}", divide - 1),
-            ));
-        }
-        Ok(Self {
-            divide: u128::from(divide),
-            high: u128::from(high),
-            clock: None,
-            pending: None,
+        Self::new(divide, high).ok_or_else(|| {
+            ParameterError::invalid("high", format!("it must be 1 to {}", divide - 1))
         })
     }
 
@@ -531,13 +532,13 @@ impl Divider {
         }
     }
 
-    /// Drives the change after input edge `edge`, no earlier than
-    /// `not_before`.
-    fn drive_after(&mut self, edge: u128, not_before: Time, drive: &mut Drive<'_>) {
+    /// Drives the change after input edge `edge`, no earlier than the
+    /// drive's time.
+    fn drive_after(&mut self, edge: u128, drive: &mut Drive<'_>) {
         let Some(clock) = self.clock else { return };
         let next = self.after(edge);
         self.pending = clock.edge(next).map(|at| {
-            let at = at.max(not_before);
+            let at = at.max(drive.now());
             let rising = next.is_multiple_of(self.divide);
             drive.drive_at(at, Self::OUT, Signal::Level(rising));
             Transition { edge: next, at }
@@ -546,22 +547,22 @@ impl Divider {
 }
 
 impl Peripheral for Divider {
-    fn input(&mut self, port: usize, signal: Signal, now: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
         if let (Self::IN, Signal::Clock(clock)) = (port, signal) {
             self.clock = Some(clock);
             if self.pending.is_none() {
-                self.drive_after(clock.phase_at(now).cycles(), now, drive);
+                self.drive_after(clock.phase_at(drive.now()).cycles(), drive);
             }
         }
     }
 
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         self.pending.map(|pending| pending.at)
     }
 
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
         if let Some(pending) = self.pending {
-            self.drive_after(pending.edge, now, drive);
+            self.drive_after(pending.edge, drive);
         }
     }
 
@@ -613,6 +614,16 @@ pub struct EdgeCounter {
 }
 
 impl EdgeCounter {
+    /// One that has seen no edge, its input low.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            level: false,
+            count: 0,
+            last: None,
+        }
+    }
+
     /// Rising edges seen.
     #[must_use]
     pub const fn count(&self) -> u64 {
@@ -627,11 +638,11 @@ impl EdgeCounter {
 }
 
 impl Peripheral for EdgeCounter {
-    fn input(&mut self, _: usize, signal: Signal, now: Time, _: &mut Drive<'_>) {
+    fn input(&mut self, _: usize, signal: Signal, drive: &mut Drive<'_>) {
         if let Signal::Level(level) = signal {
             if level && !self.level {
                 self.count += 1;
-                self.last = Some(now);
+                self.last = Some(drive.now());
             }
             self.level = level;
         }
@@ -727,6 +738,7 @@ impl Peripheral for DcSource {
 #[cfg(test)]
 mod tests {
     use mc683xx_cpu32::cpu::state::StateError;
+    use mc683xx_cpu32::exception::Vector;
     use mc683xx_modules::chip_select::ChipSelect;
     use mc683xx_target::function_code::FunctionCode;
     use mc683xx_target::size::Size;
@@ -751,7 +763,22 @@ mod tests {
     use crate::signal::Signal;
     use crate::time::Clock;
     use crate::time::Time;
+    use crate::time::TimeBase;
     use mc683xx_cpu32::frequency::Frequency;
+
+    /// The chip's system clock a test's drives carry: none of these parts
+    /// is on it.
+    const SYSTEM_CLOCK: TimeBase = TimeBase::steady(Frequency::from_hz(16_777_216));
+
+    #[test]
+    fn a_divider_is_built_only_with_a_ratio_it_can_divide_by() {
+        assert_eq!(Divider::new(1, 1), None);
+        assert_eq!(Divider::new(4, 0), None);
+        assert_eq!(Divider::new(4, 4), None);
+        let divider = Divider::new(4, 3).unwrap();
+        assert_eq!((divider.divide, divider.high), (4, 3));
+        assert_eq!(EdgeCounter::new(), EdgeCounter::default());
+    }
 
     #[test]
     fn a_divider_drives_each_change_one_ahead_at_its_exact_edge() {
@@ -762,19 +789,22 @@ mod tests {
             pending: None,
         };
         // 10 MHz with an edge at 37 ps: edges at 37 + 100000n.
-        let clock = Clock::new(Frequency::from_hz(10_000_000), Time(37));
-        let mut drive = Drive::new(Time(50));
-        divider.input(0, Signal::Clock(clock), Time(50), &mut drive);
+        let clock = Clock::new(Frequency::from_hz(10_000_000), Time::from_picos(37));
+        let mut drive = Drive::new(Time::from_picos(50), SYSTEM_CLOCK);
+        divider.input(0, Signal::Clock(clock), &mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven.len(), 1);
-        assert_eq!(driven[0].at, Time(37 + 300_000));
+        assert_eq!(driven[0].at, Time::from_picos(37 + 300_000));
         assert_eq!(driven[0].signal, Signal::Level(false));
-        let mut drive = Drive::new(Time(300_037));
-        divider.advance(Time(300_037), &mut drive);
+        let mut drive = Drive::new(Time::from_picos(300_037), SYSTEM_CLOCK);
+        divider.advance(&mut drive);
         let driven = drive.finish().driven;
-        assert_eq!(driven[0].at, Time(1_000_037));
+        assert_eq!(driven[0].at, Time::from_picos(1_000_037));
         assert_eq!(driven[0].signal, Signal::Level(true));
-        assert_eq!(divider.next_event(), Some(Time(1_000_037)));
+        assert_eq!(
+            divider.next_event(SYSTEM_CLOCK),
+            Some(Time::from_picos(1_000_037))
+        );
     }
 
     #[test]
@@ -792,7 +822,7 @@ mod tests {
                 Time::ZERO,
             )
         };
-        let mut drive = Drive::new(Time::ZERO);
+        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
         registers
             .write(access(2, Size::Word), 0x1234, &mut drive)
             .unwrap();
@@ -812,10 +842,10 @@ mod tests {
         assert_eq!(RegisterFile::new(3, None), None);
         assert_eq!(RegisterFile::new(0, None), None);
         assert_eq!(RegisterFile::new(super::ADDRESS_SPACE * 2, None), None);
-        let mut registers = RegisterFile::new(4, Some(0x40)).unwrap();
+        let mut registers = RegisterFile::new(4, Some(Vector(0x40))).unwrap();
         registers.bytes_mut()[1] = 0x56;
         assert_eq!(registers.bytes(), [0, 0x56, 0, 0]);
-        assert_eq!(registers.vector(), Some(0x40));
+        assert_eq!(registers.vector(), Some(Vector(0x40)));
         let mut recorder = Recorder::new(7);
         assert_eq!(recorder.value(), 7);
         assert!(recorder.take_log().is_empty());
@@ -860,19 +890,23 @@ mod tests {
             clock: None,
             pending: None,
         };
-        let clock = Clock::new(Frequency::from_hz(10_000_000), Time(37));
-        divider.input(0, Signal::Clock(clock), Time(50), &mut Drive::new(Time(50)));
-        let retuned = clock.retuned(Time(100_000), Frequency::from_hz(20_000_000));
-        let mut drive = Drive::new(Time(100_000));
-        divider.input(0, Signal::Clock(retuned), Time(100_000), &mut drive);
+        let clock = Clock::new(Frequency::from_hz(10_000_000), Time::from_picos(37));
+        divider.input(
+            0,
+            Signal::Clock(clock),
+            &mut Drive::new(Time::from_picos(50), SYSTEM_CLOCK),
+        );
+        let retuned = clock.retuned(Time::from_picos(100_000), Frequency::from_hz(20_000_000));
+        let mut drive = Drive::new(Time::from_picos(100_000), SYSTEM_CLOCK);
+        divider.input(0, Signal::Clock(retuned), &mut drive);
         assert!(drive.finish().driven.is_empty());
         assert_eq!(
-            divider.next_event(),
-            Some(Time(37 + 300_000)),
+            divider.next_event(SYSTEM_CLOCK),
+            Some(Time::from_picos(37 + 300_000)),
             "the fall driven ahead keeps the old clock's time"
         );
-        let mut drive = Drive::new(Time(300_037));
-        divider.advance(Time(300_037), &mut drive);
+        let mut drive = Drive::new(Time::from_picos(300_037), SYSTEM_CLOCK);
+        divider.advance(&mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven[0].at, retuned.edge(10).unwrap());
         assert_eq!(driven[0].signal, Signal::Level(true));
@@ -881,7 +915,7 @@ mod tests {
     #[test]
     fn a_dc_source_drives_its_voltage_and_answers_each_sample_with_it() {
         let mut source = DcSource::new(-1.25).unwrap();
-        let mut drive = Drive::new(Time::ZERO);
+        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
         source.power_on(&mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven.len(), 1);
@@ -889,7 +923,10 @@ mod tests {
             (driven[0].port, driven[0].signal),
             (DcSource::OUT, Signal::Analog(-1.25))
         );
-        assert_eq!(source.sample(DcSource::OUT, Time(1_000)), Some(-1.25));
+        assert_eq!(
+            source.sample(DcSource::OUT, Time::from_picos(1_000)),
+            Some(-1.25)
+        );
         assert_eq!(source.volts(), -1.25);
         for volts in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             assert_eq!(DcSource::new(volts), None);
@@ -934,10 +971,10 @@ mod tests {
                     0,
                     Size::Byte,
                     FunctionCode::SUPERVISOR_DATA,
-                    Time(1),
+                    Time::from_picos(1),
                 ),
                 1,
-                &mut Drive::new(Time(1)),
+                &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
             )
             .unwrap();
         recorder.restore(&saved).unwrap();
@@ -951,7 +988,7 @@ mod tests {
             Fixed::new(0x1234).inspect().get("value"),
             Some(&Value::Integer(0x1234))
         );
-        let registers = RegisterFile::new(2, Some(0x40)).unwrap().inspect();
+        let registers = RegisterFile::new(2, Some(Vector(0x40))).unwrap().inspect();
         assert_eq!(registers.get("registers"), Some(&Value::Bytes(vec![0, 0])));
         assert_eq!(registers.get("vector"), Some(&Value::Integer(0x40)));
         assert_eq!(
@@ -966,16 +1003,16 @@ mod tests {
                     0,
                     Size::Byte,
                     FunctionCode::SUPERVISOR_DATA,
-                    Time(1),
+                    Time::from_picos(1),
                 ),
                 1,
-                &mut Drive::new(Time(1)),
+                &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
             )
             .unwrap();
         let recorded = recorder.inspect();
         assert_eq!(recorded.get("value"), Some(&Value::Integer(7)));
         assert_eq!(recorded.get("accesses"), Some(&Value::Integer(1)));
-        let clock = Clock::new(Frequency::from_hz(10_000_000), Time(37));
+        let clock = Clock::new(Frequency::from_hz(10_000_000), Time::from_picos(37));
         let shows_clock = |inspection: &Inspection| {
             let Some(Value::Group(clock)) = inspection.get("clock") else {
                 panic!("a clock");
@@ -987,12 +1024,16 @@ mod tests {
         let oscillator = Oscillator::new(clock).inspect();
         shows_clock(&oscillator);
         assert_eq!(oscillator.get("driven"), Some(&Value::Boolean(false)));
-        let mut divider = Divider::with_ratio(10, 3);
+        let mut divider = Divider::new(10, 3).unwrap();
         assert_eq!(
             divider.inspect().get("pending"),
             Some(&Value::Text("none".to_owned()))
         );
-        divider.input(0, Signal::Clock(clock), Time(50), &mut Drive::new(Time(50)));
+        divider.input(
+            0,
+            Signal::Clock(clock),
+            &mut Drive::new(Time::from_picos(50), SYSTEM_CLOCK),
+        );
         let divided = divider.inspect();
         assert_eq!(divided.get("divide"), Some(&Value::Integer(10)));
         assert_eq!(divided.get("high"), Some(&Value::Integer(3)));
@@ -1002,12 +1043,16 @@ mod tests {
         };
         assert_eq!(pending.get("edge"), Some(&Value::Integer(3)));
         assert_eq!(pending.get("at"), Some(&Value::Integer(37 + 300_000)));
-        let mut counter = EdgeCounter::default();
+        let mut counter = EdgeCounter::new();
         assert_eq!(
             counter.inspect().get("last"),
             Some(&Value::Text("none".to_owned()))
         );
-        counter.input(0, Signal::Level(true), Time(10), &mut Drive::new(Time(10)));
+        counter.input(
+            0,
+            Signal::Level(true),
+            &mut Drive::new(Time::from_picos(10), SYSTEM_CLOCK),
+        );
         let counted = counter.inspect();
         assert_eq!(counted.get("level"), Some(&Value::Boolean(true)));
         assert_eq!(counted.get("count"), Some(&Value::Integer(1)));
@@ -1020,22 +1065,30 @@ mod tests {
 
     #[test]
     fn the_format_matches_its_golden() {
-        let clock = Clock::new(Frequency::from_hz(10_000_000), Time(37));
+        let clock = Clock::new(Frequency::from_hz(10_000_000), Time::from_picos(37));
         let mut divider = Divider {
             divide: 10,
             high: 3,
             clock: None,
             pending: None,
         };
-        divider.input(0, Signal::Clock(clock), Time(50), &mut Drive::new(Time(50)));
-        let mut counter = EdgeCounter::default();
+        divider.input(
+            0,
+            Signal::Clock(clock),
+            &mut Drive::new(Time::from_picos(50), SYSTEM_CLOCK),
+        );
+        let mut counter = EdgeCounter::new();
         for (level, at) in [(true, 10), (false, 20), (true, 30)] {
-            counter.input(0, Signal::Level(level), Time(at), &mut Drive::new(Time(at)));
+            counter.input(
+                0,
+                Signal::Level(level),
+                &mut Drive::new(Time::from_picos(at), SYSTEM_CLOCK),
+            );
         }
         let peripherals: [&dyn Peripheral; 5] = [
             &RegisterFile {
                 bytes: vec![1, 2, 3, 4],
-                vector: Some(0x40),
+                vector: Some(Vector(0x40)),
             },
             &Recorder {
                 value: 0x0f,

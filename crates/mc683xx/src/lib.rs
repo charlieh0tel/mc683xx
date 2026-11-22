@@ -4,23 +4,25 @@
 //!
 //! # Examples
 //!
-//! The SIM out of reset: its clock and its decode.
+//! The modules are a chip's, built with it (`mc683xx-mc68331`'s
+//! `Builder`), not on their own.  A host names their pins and says
+//! how the SIM comes out of reset.
 //!
 //! ```
-//! use mc683xx_cpu32::cycles::Cycles;
 //! use mc683xx_cpu32::frequency::Frequency;
 //! use mc683xx_modules::chip_select::ChipSelect;
 //! use mc683xx_modules::sim::Configuration;
-//! use mc683xx_modules::sim::Sim;
+//! use mc683xx_modules::sim::clock::ClockSource;
 //!
-//! // DATA[15:0] high, the 32.768 kHz crystal.
-//! let sim = Sim::new(Configuration::default(), Cycles::ZERO);
-//! // SYNCR out of reset: $3F00, 32.768 kHz x 4 (Y + 1) with Y = 63
-//! // (MC68331UM 4.3.2).
-//! assert_eq!(sim.clock().frequency(), Frequency::from_hz(32_768 * 4 * 64));
-//! // Out of reset only CSBOOT decodes, from address 0 (SIMRM 7.9.3).
-//! let selects = sim.chip_selects().at(0x400);
-//! assert!(selects.contains(ChipSelect::Boot.index()));
+//! // A chip select by its pin's name, in any case (MC68331UM 4.8).
+//! let select: ChipSelect = "cs3".parse()?;
+//! assert_eq!(select.to_string(), "CS3");
+//! // DATA[15:0] high, the clock synthesized from the 32.768 kHz
+//! // crystal (MC68331UM 4.3): the default.
+//! let reference = Frequency::from_hz(32_768);
+//! let configuration = Configuration::new(0xffff, ClockSource::synthesizer(reference)?);
+//! assert_eq!(configuration, Configuration::default());
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 // The published crates also hold these; test-only crates do not.
 #![warn(

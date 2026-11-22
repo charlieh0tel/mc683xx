@@ -3,6 +3,7 @@
 //! and to the SCI by TE.
 
 use crate::pins::PortLevels;
+use crate::pins::PortState;
 
 /// PQS0, MISO (MC68331UM Table D-14).
 const MISO_PIN: u8 = 1;
@@ -178,16 +179,24 @@ impl PortQs {
         let open_drain =
             if self.wired_or { QSPI_PINS } else { 0 } | if txd.open_drain { TXD_PIN } else { 0 };
         let floating = levels & open_drain;
-        PortLevels {
-            driven: driven & !floating,
-            levels: levels & !floating,
-        }
+        PortLevels::new(driven & !floating, levels & !floating)
     }
 
     /// The port's pins as PORTQS reads them: the driven level on
     /// outputs, the board's on inputs (QSMRM 3.3.1).
     pub(super) const fn levels(self, code: Option<u8>, txd: Txd) -> u8 {
         self.outputs(code, txd).pin_levels(self.pins)
+    }
+
+    /// Its registers and pins: PQSPAR's assignment, TXD's too while
+    /// the transmitter has it (QSMRM 5.3).
+    pub(super) const fn state(self, txd: Txd) -> PortState {
+        PortState {
+            latch: self.latch,
+            direction: self.direction,
+            assignment: self.assignment | if txd.transmitter { TXD_PIN } else { 0 },
+            pins: self.pins,
+        }
     }
 
     /// The levels on PCS\[3:0\].
@@ -233,13 +242,7 @@ mod tests {
         port.wired_or = true;
         port.pins = 0x00;
         // TXD keeps its push-pull driver
-        assert_eq!(
-            port.outputs(None, PORT_TXD),
-            PortLevels {
-                driven: 0xda,
-                levels: 0x80
-            }
-        );
+        assert_eq!(port.outputs(None, PORT_TXD), PortLevels::new(0xda, 0x80));
         assert_eq!(port.levels(None, PORT_TXD), 0x80);
         port.write_assignment(0x01);
         assert_eq!(port.miso(true), None);
@@ -257,26 +260,14 @@ mod tests {
         };
         // PORTQS high: released, to the board's level (QSMRM 5.2.2)
         port.latch = 0x80;
-        assert_eq!(
-            port.outputs(None, open_drain),
-            PortLevels {
-                driven: 0x00,
-                levels: 0x00
-            }
-        );
+        assert_eq!(port.outputs(None, open_drain), PortLevels::new(0x00, 0x00));
         assert_eq!(port.levels(None, open_drain), 0x00);
         port.pins = 0x80;
         assert_eq!(port.levels(None, open_drain), 0x80);
         // low: driven
         port.latch = 0x00;
         port.pins = 0x80;
-        assert_eq!(
-            port.outputs(None, open_drain),
-            PortLevels {
-                driven: 0x80,
-                levels: 0x00
-            }
-        );
+        assert_eq!(port.outputs(None, open_drain), PortLevels::new(0x80, 0x00));
         // the transmitter's mark floats too, and push-pull drives it
         port.direction = 0x00;
         let transmitting = Txd {
@@ -286,21 +277,12 @@ mod tests {
         port.pins = 0x00;
         assert_eq!(
             port.outputs(None, transmitting),
-            PortLevels {
-                driven: 0x00,
-                levels: 0x00
-            }
+            PortLevels::new(0x00, 0x00)
         );
         let push_pull = Txd {
             open_drain: false,
             ..transmitting
         };
-        assert_eq!(
-            port.outputs(None, push_pull),
-            PortLevels {
-                driven: 0x80,
-                levels: 0x80
-            }
-        );
+        assert_eq!(port.outputs(None, push_pull), PortLevels::new(0x80, 0x80));
     }
 }

@@ -491,7 +491,7 @@ const fn operand_bits(fault: &Fault) -> u16 {
         Size::Word => ssw::SIZ_WORD,
     };
     let long = if fault.long { ssw::LG } else { 0 };
-    long | size << ssw::SIZ_SHIFT | fault.function_code.bits() as u16 & ssw::FUNC
+    long | size << ssw::SIZ_SHIFT | fault.function_code.get() as u16 & ssw::FUNC
 }
 
 /// The SSW of a double bus fault's second fault, for ATEMP: its
@@ -670,12 +670,18 @@ impl Core<'_> {
     /// faulted instruction PC; it is ten words for a four-word frame.
     /// It goes below the space the faulted frame takes, where `rte`
     /// rewrites it.
-    fn exception_fault(&mut self, fault: Fault, top: u32, faulted: &Frame, trace_pending: bool) {
+    fn exception_fault(
+        &mut self,
+        fault: Fault,
+        top: Address,
+        faulted: &Frame,
+        trace_pending: bool,
+    ) {
         if self.cpu.fault_window {
             return self.double_fault(&fault);
         }
         self.cpu.far = fault.address;
-        self.charge(Cycles(u64::from(
+        self.charge(Cycles::from_clocks(u64::from(
             timing::exception::BUS_ERROR_IN_EXCEPTION.cycles,
         )));
         let words = faulted.words();
@@ -695,14 +701,14 @@ impl Core<'_> {
         // The pattern of 6.3.1.4, TP:MV 10 as its text and 6.4.3's say.
         let status = ssw::TP | trace_bit(trace_pending) | ssw::RW | operand_bits(&fault);
         let frame = frame.word(transfer_count(0)).word(status);
-        self.fault_frame(top.wrapping_sub(faulted.bytes()), &frame, fault.vector);
+        self.fault_frame(top.before(faulted.bytes()), &frame, fault.vector);
     }
 
     /// Stacks a format $C `frame` to end at `top` and vectors through
     /// `vector`; a fault in either is a double bus fault (CPU32RM
     /// 6.2.2).  Until the handler's first instruction is fetched, a
     /// bus or address error is one too (MC68331UM 4.5.5.2).
-    fn fault_frame(&mut self, top: u32, frame: &Frame, vector: Vector) {
+    fn fault_frame(&mut self, top: Address, frame: &Frame, vector: Vector) {
         let taken = self
             .stack(top, frame)
             .and_then(|bottom| Ok((bottom, self.vector(vector)?)));
@@ -718,8 +724,8 @@ impl Core<'_> {
     /// Writes `frame` to end at `top` in supervisor data space, a word
     /// a cycle from the highest address down, as TRAP pushes (CPU32RM
     /// 4.4, TRAP).  The frame's lowest address, the new SSP.
-    pub(crate) fn stack(&mut self, top: u32, frame: &Frame) -> Result<u32, Fault> {
-        let bottom = top.wrapping_sub(frame.bytes());
+    pub(crate) fn stack(&mut self, top: Address, frame: &Frame) -> Result<Address, Fault> {
+        let bottom = top.before(frame.bytes());
         self.set_stacking(true);
         let stacked = frame
             .words()
@@ -728,7 +734,7 @@ impl Core<'_> {
             .rev()
             .try_for_each(|(index, word)| {
                 self.access_write(
-                    Address(bottom).offset(2 * index as u32),
+                    bottom.offset(2 * index as u32),
                     Size::Word,
                     FunctionCode::SUPERVISOR_DATA,
                     u32::from(*word),
@@ -741,7 +747,7 @@ impl Core<'_> {
     /// The handler address in `vector`, read from VBR plus its offset
     /// in supervisor data space (CPU32RM 6.1.1).
     pub(crate) fn vector(&mut self, vector: Vector) -> Result<Address, Fault> {
-        let at = Address(self.cpu.registers.vbr).offset(vector.offset());
+        let at = self.cpu.registers.vbr.offset(vector.offset());
         self.access_read(
             at,
             Size::Long,

@@ -233,7 +233,7 @@ fn board_from(text: &str) -> Board<Mc68331> {
     let text = format!("{text}{nets}");
     let description = Description::parse(&text, &directory, &Options::default()).unwrap();
     let registry = mc683xx_peripherals::registry();
-    let board = Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+    let board = Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board
 }
@@ -262,7 +262,7 @@ fn a_chain_powering_on_mid_scale_starts_the_ad569_at_mid_scale() {
         "parameters = { cascade = 2, initial = 0x8000 }",
     );
     let mut board = board_from(&text);
-    board.run_until(Time(1_000_000)).unwrap();
+    board.run_until(Time::from_picos(1_000_000)).unwrap();
     let efc = board.take_received("efc").unwrap();
     let at_power_on: Vec<_> = efc.iter().filter(|(at, _)| *at == Time::ZERO).collect();
     assert_eq!(
@@ -277,7 +277,7 @@ fn queues_set_the_dacs_and_lbe_completes_the_ad569s_word() {
     let mut board = board();
     assert_eq!(board.marking("hex"), Some("U12, MC144110P"));
     assert_eq!(board.marking("chain"), None);
-    board.run_until(Time(10_000_000_000)).unwrap();
+    board.run_until(Time::from_picos(10_000_000_000)).unwrap();
     let mut latched = Time::ZERO;
     for (channel, code) in CODES.into_iter().enumerate() {
         let received = board.take_received(&format!("hex{channel}")).unwrap();
@@ -375,9 +375,9 @@ attach = [{ qspi = 0b1110 }]
     let description = Description::parse(text, &directory, &Options::default()).unwrap();
     let registry = mc683xx_peripherals::registry();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
-    board.run_until(Time(10_000_000_000)).unwrap();
+    board.run_until(Time::from_picos(10_000_000_000)).unwrap();
     // Dout read on the rise after each shifting fall (MC144110/D 4.1;
     // QSMRM 4.3.1): each word a bit up, the next word's first bit in
     // its place; the firmware shifts it back down

@@ -17,14 +17,15 @@ use mc683xx_board::board::Board;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
 use mc683xx_board::error::SendError;
+use mc683xx_board::pacing::Factor;
 use mc683xx_board::pacing::Pacing;
-use mc683xx_board::pacing::PacingError;
 use mc683xx_board::pacing::QUANTUM;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_mc68331::chip::Mc68331;
@@ -68,13 +69,18 @@ from = "external.switch"
 to = ["chip.PGP1"]
 "#;
 
+/// The pacing at `factor`.
+fn scaled(factor: f64) -> Pacing {
+    Pacing::Scaled(Factor::new(factor).unwrap())
+}
+
 /// The board.
 fn board() -> Board<Mc68331> {
     let description = Description::parse(BOARD, Path::new("."), &Options::default()).unwrap();
     Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap()
 }
@@ -99,7 +105,7 @@ fn observed(board: &mut Board<Mc68331>, nets: &[&str]) -> Rc<RefCell<Vec<Seen>>>
 #[test]
 fn inputs_queued_between_runs_are_driven_at_the_next_runs_start_in_order() {
     let mut board = board();
-    board.run_until(Time(MILLISECOND)).unwrap();
+    board.run_until(Time::from_picos(MILLISECOND)).unwrap();
     let seen = observed(&mut board, &["switch"]);
     let control = board.control();
     control.send("switch", Signal::Level(false)).unwrap();
@@ -116,8 +122,8 @@ fn inputs_queued_between_runs_are_driven_at_the_next_runs_start_in_order() {
         })
     );
     assert!(seen.borrow().is_empty(), "nothing before the run");
-    board.run_until(Time(2 * MILLISECOND)).unwrap();
-    let at = Time(MILLISECOND);
+    board.run_until(Time::from_picos(2 * MILLISECOND)).unwrap();
+    let at = Time::from_picos(MILLISECOND);
     assert_eq!(
         *seen.borrow(),
         [
@@ -133,7 +139,7 @@ fn a_direct_send_lands_after_inputs_queued_before_it() {
     let seen = observed(&mut board, &["switch"]);
     board.control().send("switch", Signal::Level(true)).unwrap();
     board.send("switch", Signal::Level(false)).unwrap();
-    board.run_until(Time(MILLISECOND)).unwrap();
+    board.run_until(Time::from_picos(MILLISECOND)).unwrap();
     let values: Vec<Signal> = seen.borrow().iter().map(|seen| seen.2).collect();
     assert_eq!(values, [Signal::Level(true), Signal::Level(false)]);
 }
@@ -142,25 +148,21 @@ fn a_direct_send_lands_after_inputs_queued_before_it() {
 fn a_stop_asked_between_runs_stops_the_next_at_its_start_once() {
     let mut board = board();
     board.control().stop();
-    let outcome = board.run_until(Time(MILLISECOND)).unwrap();
+    let outcome = board.run_until(Time::from_picos(MILLISECOND)).unwrap();
     assert_eq!((outcome.stop, outcome.now), (Stop::Requested, Time::ZERO));
-    let outcome = board.run_until(Time(MILLISECOND)).unwrap();
+    let outcome = board.run_until(Time::from_picos(MILLISECOND)).unwrap();
     assert_eq!(
         (outcome.stop, outcome.now),
-        (Stop::Budget, Time(MILLISECOND))
+        (Stop::Budget, Time::from_picos(MILLISECOND))
     );
 }
 
 #[test]
-fn a_bad_factor_is_refused_and_the_pacing_kept() {
+fn a_set_pacing_is_kept() {
     let control = board().control();
     assert_eq!(control.pacing(), Pacing::Unpaced);
-    control.set_pacing(Pacing::Scaled(0.5)).unwrap();
-    assert_eq!(
-        control.set_pacing(Pacing::Scaled(-1.0)),
-        Err(PacingError::Factor(-1.0))
-    );
-    assert_eq!(control.pacing(), Pacing::Scaled(0.5));
+    control.set_pacing(scaled(0.5));
+    assert_eq!(control.pacing(), scaled(0.5));
 }
 
 #[test]
@@ -169,7 +171,7 @@ fn another_thread_stops_a_paced_run_and_its_input_lands_at_a_sync_point() {
     let seen = observed(&mut board, &["switch", "tick"]);
     let control = board.control();
     // slow enough that the run is still going when the thread acts
-    control.set_pacing(Pacing::Scaled(0.1)).unwrap();
+    control.set_pacing(scaled(0.1));
     let front_end = control.clone();
     let thread = thread::spawn(move || {
         thread::sleep(Duration::from_millis(50));
@@ -177,7 +179,7 @@ fn another_thread_stops_a_paced_run_and_its_input_lands_at_a_sync_point() {
         thread::sleep(Duration::from_millis(50));
         front_end.stop();
     });
-    let until = Time(10 * PICOSECONDS_PER_SECOND);
+    let until = Time::from_picos(10 * PICOSECONDS_PER_SECOND);
     let outcome = board.run_until_paced(until, QUANTUM).unwrap();
     thread.join().unwrap();
     assert_eq!(outcome.stop, Stop::Requested);
@@ -191,7 +193,7 @@ fn another_thread_stops_a_paced_run_and_its_input_lands_at_a_sync_point() {
     assert!(Time::ZERO < *at && *at <= outcome.now, "{at:?}");
     // a sync point: a quantum's end, or a quantum's, at a tick's edge
     assert!(
-        at.0 % QUANTUM.get() == 0
+        (*at % QUANTUM.get()).is_zero()
             || seen
                 .iter()
                 .any(|(net, edge, _)| net == "tick" && edge == at),
@@ -202,12 +204,12 @@ fn another_thread_stops_a_paced_run_and_its_input_lands_at_a_sync_point() {
 
 #[test]
 fn a_paced_run_is_the_unpaced_run() {
-    let total = Time(50 * MILLISECOND);
+    let total = Time::from_picos(50 * MILLISECOND);
     let run = |pacing: Pacing| {
         let mut board = board();
         let seen = observed(&mut board, &["tick", "switch"]);
         let control = board.control();
-        control.set_pacing(pacing).unwrap();
+        control.set_pacing(pacing);
         control.send("switch", Signal::Level(false)).unwrap();
         let outcome = board.run_until_paced(total, QUANTUM).unwrap();
         let seen = seen.borrow().clone();
@@ -216,7 +218,7 @@ fn a_paced_run_is_the_unpaced_run() {
     let unpaced = run(Pacing::Unpaced);
     assert_eq!(unpaced.0.stop, Stop::Budget);
     assert!(unpaced.1.len() > 100, "{} changes", unpaced.1.len());
-    assert!(run(Pacing::Scaled(4.0)) == unpaced);
+    assert!(run(scaled(4.0)) == unpaced);
     let mut board = board();
     board
         .control()
@@ -228,12 +230,12 @@ fn a_paced_run_is_the_unpaced_run() {
 
 #[test]
 fn real_time_pacing_keeps_board_time_with_wall_time() {
-    let total = Time(200 * MILLISECOND);
+    let total = Time::from_picos(200 * MILLISECOND);
     let started = Instant::now();
     board().run_until(total).unwrap();
     let unpaced = started.elapsed();
     let mut board = board();
-    board.control().set_pacing(Pacing::RealTime).unwrap();
+    board.control().set_pacing(Pacing::RealTime);
     let started = Instant::now();
     let outcome = board.run_until_paced(total, QUANTUM).unwrap();
     let paced = started.elapsed();
@@ -251,10 +253,10 @@ fn real_time_pacing_keeps_board_time_with_wall_time() {
 #[test]
 fn short_paced_runs_in_a_loop_are_paced() {
     let mut board = board();
-    board.control().set_pacing(Pacing::Scaled(0.1)).unwrap();
+    board.control().set_pacing(scaled(0.1));
     let started = Instant::now();
     for _ in 0..20 {
-        let until = board.now() + 5 * MILLISECOND;
+        let until = board.now() + Span::from_millis(5);
         board.run_until_paced(until, QUANTUM).unwrap();
     }
     // 100 ms of board time at a tenth of real time
@@ -265,7 +267,7 @@ fn short_paced_runs_in_a_loop_are_paced() {
 /// Wall time between frames, a 60 Hz display's.
 const FRAME: Duration = Duration::from_micros(16_667);
 /// The most board time a frame runs.
-const SLICE: u64 = 100 * MILLISECOND;
+const SLICE: Span = Span::from_millis(100);
 
 /// Board picoseconds a frame's wall time is worth at `factor`.
 #[expect(
@@ -283,7 +285,7 @@ fn an_unpaced_frame_runs_its_slice() {
     for count in 1..=3 {
         let outcome = board.run_frame(Duration::ZERO, SLICE).unwrap();
         assert_eq!(outcome.stop, Stop::Budget);
-        assert_eq!(outcome.now, Time(count * SLICE));
+        assert_eq!(outcome.now, Time::ZERO + SLICE * count);
     }
 }
 
@@ -292,7 +294,7 @@ fn paced_frames_run_the_board_time_due_by_the_host_s_clock() {
     let factor = 4.0;
     let frame = frame_picoseconds(factor);
     let mut board = board();
-    board.control().set_pacing(Pacing::Scaled(factor)).unwrap();
+    board.control().set_pacing(scaled(factor));
     // any origin, never going back
     let mut wall = Duration::from_secs(1000);
     assert_eq!(board.run_frame(wall, SLICE).unwrap().now, Time::ZERO);
@@ -300,7 +302,7 @@ fn paced_frames_run_the_board_time_due_by_the_host_s_clock() {
         wall += FRAME;
         let outcome = board.run_frame(wall, SLICE).unwrap();
         assert!(
-            outcome.now.0.abs_diff(count * frame) <= count,
+            outcome.now.picos().abs_diff(count * frame) <= count,
             "{outcome:?}"
         );
     }
@@ -315,19 +317,19 @@ fn frames_after_one_far_behind_are_paced_from_its_end() {
     let factor = 1.0;
     let frame = frame_picoseconds(factor);
     let mut board = board();
-    board.control().set_pacing(Pacing::Scaled(factor)).unwrap();
+    board.control().set_pacing(scaled(factor));
     let mut wall = Duration::ZERO;
     board.run_frame(wall, SLICE).unwrap();
     // a minute hidden: one slice, then a frame's time each frame, not a
     // slice each until the minute is caught up
     wall += Duration::from_secs(60);
     let resumed = board.run_frame(wall, SLICE).unwrap().now;
-    assert_eq!(resumed, Time(SLICE));
+    assert_eq!(resumed, Time::ZERO + SLICE);
     for count in 1..=5 {
         wall += FRAME;
         let outcome = board.run_frame(wall, SLICE).unwrap();
         assert!(
-            (outcome.now.0 - resumed.0).abs_diff(count * frame) <= count,
+            (outcome.now.picos() - resumed.picos()).abs_diff(count * frame) <= count,
             "{outcome:?}"
         );
     }
@@ -337,7 +339,7 @@ fn frames_after_one_far_behind_are_paced_from_its_end() {
 fn a_frame_after_another_run_starts_the_pacing_again() {
     let factor = 1.0;
     let mut board = board();
-    board.control().set_pacing(Pacing::Scaled(factor)).unwrap();
+    board.control().set_pacing(scaled(factor));
     let mut wall = Duration::ZERO;
     board.run_frame(wall, SLICE).unwrap();
     wall += FRAME;
@@ -350,7 +352,7 @@ fn a_frame_after_another_run_starts_the_pacing_again() {
     wall += FRAME;
     let outcome = board.run_frame(wall, SLICE).unwrap();
     assert!(
-        (outcome.now.0 - ahead.0).abs_diff(frame_picoseconds(factor)) <= 1,
+        (outcome.now.picos() - ahead.picos()).abs_diff(frame_picoseconds(factor)) <= 1,
         "{outcome:?}"
     );
 }
@@ -370,7 +372,7 @@ fn a_frame_after_anything_else_starts_the_pacing_again() {
             board.restore(snapshot).unwrap();
         }),
         ("a run of no time", |board, _| {
-            board.run_for(0).unwrap();
+            board.run_for(Span::ZERO).unwrap();
         }),
         ("a quantized run of no time", |board, _| {
             let now = board.now();
@@ -380,13 +382,13 @@ fn a_frame_after_anything_else_starts_the_pacing_again() {
         }),
         ("unpaced and paced again", |board, _| {
             let control = board.control();
-            control.set_pacing(Pacing::Unpaced).unwrap();
-            control.set_pacing(Pacing::RealTime).unwrap();
+            control.set_pacing(Pacing::Unpaced);
+            control.set_pacing(Pacing::RealTime);
         }),
     ];
     for (case, between) in cases {
         let mut board = board();
-        board.control().set_pacing(Pacing::RealTime).unwrap();
+        board.control().set_pacing(Pacing::RealTime);
         let mut wall = Duration::ZERO;
         board.run_frame(wall, SLICE).unwrap();
         wall += FRAME;
@@ -409,7 +411,7 @@ fn assert_the_pacing_starts_again(board: &mut Board<Mc68331>, mut wall: Duration
     wall += FRAME;
     let outcome = board.run_frame(wall, SLICE).unwrap();
     assert!(
-        (outcome.now.0 - before.0).abs_diff(frame_picoseconds(1.0)) <= 1,
+        (outcome.now.picos() - before.picos()).abs_diff(frame_picoseconds(1.0)) <= 1,
         "{case}: {outcome:?}"
     );
 }
@@ -421,7 +423,7 @@ fn a_run_or_restore_in_a_frame_s_before_starts_the_pacing_again() {
             board.run_for(SLICE).unwrap();
         }),
         ("a run of no time", |board, _| {
-            board.run_for(0).unwrap();
+            board.run_for(Span::ZERO).unwrap();
         }),
         ("a restore forward", |board, ahead| {
             board.restore(ahead).unwrap();
@@ -434,7 +436,7 @@ fn a_run_or_restore_in_a_frame_s_before_starts_the_pacing_again() {
             ahead.run_for(SLICE).unwrap();
             ahead.save().unwrap()
         };
-        board.control().set_pacing(Pacing::RealTime).unwrap();
+        board.control().set_pacing(Pacing::RealTime);
         let mut wall = Duration::ZERO;
         board.run_frame(wall, SLICE).unwrap();
         wall += FRAME;
@@ -455,7 +457,7 @@ fn a_run_or_restore_in_a_frame_s_before_starts_the_pacing_again() {
 #[test]
 fn a_frame_in_a_quantized_run_s_before_leaves_the_next_frame_to_start_the_pacing() {
     let mut board = board();
-    board.control().set_pacing(Pacing::RealTime).unwrap();
+    board.control().set_pacing(Pacing::RealTime);
     let mut wall = Duration::ZERO;
     board.run_frame(wall, SLICE).unwrap();
     wall += FRAME;
@@ -476,17 +478,17 @@ fn a_frame_in_a_quantized_run_s_before_leaves_the_next_frame_to_start_the_pacing
 #[test]
 fn the_pacing_set_as_it_was_leaves_the_frames_paced() {
     let mut board = board();
-    board.control().set_pacing(Pacing::RealTime).unwrap();
+    board.control().set_pacing(Pacing::RealTime);
     let mut wall = Duration::ZERO;
     board.run_frame(wall, SLICE).unwrap();
     // a UI setting its choice every frame
     for _ in 1..=3 {
-        board.control().set_pacing(Pacing::RealTime).unwrap();
+        board.control().set_pacing(Pacing::RealTime);
         let before = board.now();
         wall += FRAME;
         let outcome = board.run_frame(wall, SLICE).unwrap();
         assert!(
-            (outcome.now.0 - before.0).abs_diff(frame_picoseconds(1.0)) <= 1,
+            (outcome.now.picos() - before.picos()).abs_diff(frame_picoseconds(1.0)) <= 1,
             "{outcome:?}"
         );
     }
@@ -495,26 +497,26 @@ fn the_pacing_set_as_it_was_leaves_the_frames_paced() {
 #[test]
 fn a_failed_restore_leaves_the_frames_paced() {
     let mut board = board();
-    board.control().set_pacing(Pacing::RealTime).unwrap();
+    board.control().set_pacing(Pacing::RealTime);
     let mut wall = Duration::ZERO;
     board.run_frame(wall, SLICE).unwrap();
     board.restore(b"junk").unwrap_err();
     wall += FRAME;
     let outcome = board.run_frame(wall, SLICE).unwrap();
     assert!(
-        outcome.now.0.abs_diff(frame_picoseconds(1.0)) <= 1,
+        outcome.now.picos().abs_diff(frame_picoseconds(1.0)) <= 1,
         "{outcome:?}"
     );
 }
 
 #[test]
 fn frames_are_one_long_run() {
-    let total = Time(50 * MILLISECOND);
+    let total = Time::from_picos(50 * MILLISECOND);
     let mut framed = board();
-    framed.control().set_pacing(Pacing::Scaled(4.0)).unwrap();
+    framed.control().set_pacing(scaled(4.0));
     let mut wall = Duration::ZERO;
     while framed.now() < total {
-        let left = total.0 - framed.now().0;
+        let left = total - framed.now();
         framed.run_frame(wall, SLICE.min(left)).unwrap();
         wall += FRAME;
     }

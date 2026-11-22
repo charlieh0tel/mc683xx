@@ -7,6 +7,7 @@ use std::mem;
 
 use mc683xx_board::inspect::Inspection;
 use mc683xx_board::signal::Serial;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_modules::qsm::sci::Frame;
@@ -429,7 +430,7 @@ impl Channel {
                 self.breaking = false;
                 if let Some(shifting) = self.shifting.filter(|shifting| shifting.breaking) {
                     // TxD high for a bit time before the next character
-                    let bit = self.bit_time(clocks).unwrap_or(0);
+                    let bit = self.bit_time(clocks).unwrap_or(Span::ZERO);
                     self.transmit_free = shifting.end + bit;
                 }
             }
@@ -507,8 +508,8 @@ impl Channel {
         }
     }
 
-    /// The transmitter's bit time in picoseconds, if it has a clock.
-    fn bit_time(&self, clocks: &Clocks) -> Option<u64> {
+    /// The transmitter's bit time, if it has a clock.
+    fn bit_time(&self, clocks: &Clocks) -> Option<Span> {
         let divisor = self.transmit_divisor(clocks)?;
         Some(clocks.crystal.span(SIXTEENTHS * divisor))
     }
@@ -621,7 +622,7 @@ impl Channel {
             if idle && self.disable_pending {
                 self.disable_pending = false;
                 if self.mr2() & MR2_TX_RTS != 0 {
-                    let bit = self.bit_time(clocks).unwrap_or(0);
+                    let bit = self.bit_time(clocks).unwrap_or(Span::ZERO);
                     self.clear_rts_at = Some(shifting.end + bit);
                 }
             }
@@ -680,7 +681,7 @@ impl Channel {
         let divisor = arrival.looped.or_else(|| self.receive_divisor(clocks));
         let own_length = divisor.map(|divisor| crystal.span(format.length() * divisor));
         let length = match arrival.serial.length {
-            0 => own_length.unwrap_or(0),
+            Span::ZERO => own_length.unwrap_or(Span::ZERO),
             length => length,
         };
         let end = start + length;

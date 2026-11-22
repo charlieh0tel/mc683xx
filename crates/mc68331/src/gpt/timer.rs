@@ -34,7 +34,7 @@ impl Prescaler {
     /// The system clocks and INCP steps it has counted by `now`.
     const fn counted(&self, now: Cycles) -> u64 {
         match self.since {
-            Some(since) => self.base + since.until(now).0,
+            Some(since) => self.base + since.until(now).clocks(),
             None => self.base,
         }
     }
@@ -78,16 +78,16 @@ impl Prescaler {
             return false;
         }
         match self.since {
-            Some(since) => since.0 <= now.0 && self.base <= since.0,
-            None => self.base <= now.0,
+            Some(since) => since.clocks() <= now.clocks() && self.base <= since.clocks(),
+            None => self.base <= now.clocks(),
         }
     }
 
     /// When its count reaches `count`, if it runs.
     pub(super) const fn when(&self, count: u64) -> Option<Cycles> {
         match self.since {
-            Some(since) => Some(Cycles(
-                since.0 + count.saturating_sub(self.base + self.phase),
+            Some(since) => Some(Cycles::from_clocks(
+                since.clocks() + count.saturating_sub(self.base + self.phase),
             )),
             None => None,
         }
@@ -138,7 +138,7 @@ impl Counter {
     /// prescaler's `count` at `now`: synchronized no later, and counted
     /// no more than the system clocks to `now`.
     pub(super) const fn is_valid(&self, count: u64, now: Cycles) -> bool {
-        self.at <= count && self.ticks <= now.0 && self.counted(count) <= now.0
+        self.at <= count && self.ticks <= now.clocks() && self.counted(count) <= now.clocks()
     }
 
     /// Synchronized at the prescaler's `count`, its count kept, as the
@@ -224,15 +224,15 @@ mod tests {
 
     #[test]
     fn a_counter_counts_its_tap_across_a_change() {
-        let prescaler = Prescaler::new(Cycles(100));
-        let count = prescaler.count(Cycles(100 + 37));
+        let prescaler = Prescaler::new(Cycles::from_clocks(100));
+        let count = prescaler.count(Cycles::from_clocks(100 + 37));
         let mut counter = Counter::new(Some(4), 0);
         assert_eq!(counter.ticks(count), 9);
         counter.set_divisor(Some(16), count);
         assert_eq!(counter.ticks(count + 10), 9);
         assert_eq!(counter.ticks(count + 11), 10, "at 48");
         assert_eq!(counter.count_at(11), Some(64));
-        assert_eq!(prescaler.when(64), Some(Cycles(164)));
+        assert_eq!(prescaler.when(64), Some(Cycles::from_clocks(164)));
     }
 
     #[test]
@@ -256,29 +256,29 @@ mod tests {
         assert_eq!(counter.ticks(11), 0xffff);
         assert_eq!(counter.ticks(12), 0x1_0000);
         assert_eq!(counter.count_at(0x1_0001), Some(16));
-        assert!(counter.is_valid(12, Cycles(12)));
+        assert!(counter.is_valid(12, Cycles::from_clocks(12)));
     }
 
     #[test]
     fn a_written_prescaler_keeps_its_phase_within_its_span() {
         let mut prescaler = Prescaler::new(Cycles::ZERO);
-        prescaler.set(0xfffd, Cycles(1000));
-        let count = prescaler.count(Cycles(1000));
+        prescaler.set(0xfffd, Cycles::from_clocks(1000));
+        let count = prescaler.count(Cycles::from_clocks(1000));
         assert_eq!(count % PRESCALER_SPAN, 0x1fd);
-        assert_eq!(prescaler.when(count + 3), Some(Cycles(1003)));
-        assert!(prescaler.is_valid(Cycles(1000)));
+        assert_eq!(prescaler.when(count + 3), Some(Cycles::from_clocks(1003)));
+        assert!(prescaler.is_valid(Cycles::from_clocks(1000)));
         prescaler.phase = PRESCALER_SPAN;
-        assert!(!prescaler.is_valid(Cycles(1000)));
+        assert!(!prescaler.is_valid(Cycles::from_clocks(1000)));
     }
 
     #[test]
     fn a_stopped_prescaler_steps() {
         let mut prescaler = Prescaler::new(Cycles::ZERO);
-        prescaler.stop(Cycles(5));
+        prescaler.stop(Cycles::from_clocks(5));
         prescaler.step();
-        assert_eq!(prescaler.count(Cycles(100)), 6);
+        assert_eq!(prescaler.count(Cycles::from_clocks(100)), 6);
         assert_eq!(prescaler.when(7), None);
-        prescaler.start(Cycles(100));
-        assert_eq!(prescaler.when(7), Some(Cycles(101)));
+        prescaler.start(Cycles::from_clocks(100));
+        assert_eq!(prescaler.when(7), Some(Cycles::from_clocks(101)));
     }
 }

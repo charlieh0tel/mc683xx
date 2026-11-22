@@ -3,6 +3,7 @@
 //! `SFC`, `DFC`.
 
 use mc683xx_cpu32::registers::Registers;
+use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 
 use crate::error::Error;
@@ -90,7 +91,7 @@ impl Register {
         match self {
             Self::Sr => u16::MAX as u32,
             Self::Ccr => u8::MAX as u32,
-            Self::Sfc | Self::Dfc => FunctionCode::CPU_SPACE.bits() as u32,
+            Self::Sfc | Self::Dfc => FunctionCode::CPU_SPACE.get() as u32,
             _ => u32::MAX,
         }
     }
@@ -100,14 +101,14 @@ impl Register {
         match self {
             Self::Data(number) => registers.data[number],
             Self::Address(number) => registers.address(number),
-            Self::Pc => registers.pc,
+            Self::Pc => registers.pc.0,
             Self::Sr => registers.sr().into(),
             Self::Ccr => registers.ccr().into(),
-            Self::Usp => registers.usp,
-            Self::Ssp => registers.ssp,
-            Self::Vbr => registers.vbr,
-            Self::Sfc => registers.sfc.bits().into(),
-            Self::Dfc => registers.dfc.bits().into(),
+            Self::Usp => registers.usp.0,
+            Self::Ssp => registers.ssp.0,
+            Self::Vbr => registers.vbr.0,
+            Self::Sfc => registers.sfc.get().into(),
+            Self::Dfc => registers.dfc.get().into(),
         }
     }
 
@@ -124,14 +125,14 @@ impl Register {
         match self {
             Self::Data(number) => registers.data[number] = value,
             Self::Address(number) => registers.set_address(number, value),
-            Self::Pc => registers.pc = value,
+            Self::Pc => registers.pc = Address(value),
             Self::Sr => registers.set_sr(value as u16),
             Self::Ccr => registers.set_ccr(value as u8),
-            Self::Usp => registers.usp = value,
-            Self::Ssp => registers.ssp = value,
-            Self::Vbr => registers.vbr = value,
-            Self::Sfc => registers.sfc = FunctionCode::new(value),
-            Self::Dfc => registers.dfc = FunctionCode::new(value),
+            Self::Usp => registers.usp = Address(value),
+            Self::Ssp => registers.ssp = Address(value),
+            Self::Vbr => registers.vbr = Address(value),
+            Self::Sfc => registers.sfc = FunctionCode::from_low_bits(value),
+            Self::Dfc => registers.dfc = FunctionCode::from_low_bits(value),
         }
         Ok(())
     }

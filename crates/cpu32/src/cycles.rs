@@ -20,11 +20,23 @@ use std::ops::Sub;
     serde::Serialize,
     serde::Deserialize,
 )]
-pub struct Cycles(pub u64);
+pub struct Cycles(u64);
 
 impl Cycles {
     /// No time.
     pub const ZERO: Self = Self(0);
+
+    /// `clocks` clock cycles.
+    #[must_use]
+    pub const fn from_clocks(clocks: u64) -> Self {
+        Self(clocks)
+    }
+
+    /// Its clock cycles.
+    #[must_use]
+    pub const fn clocks(self) -> u64 {
+        self.0
+    }
 
     /// The span until `later`, zero if it has passed.
     #[must_use]
@@ -62,31 +74,25 @@ impl fmt::Display for Cycles {
     }
 }
 
-impl From<u64> for Cycles {
-    fn from(clocks: u64) -> Self {
-        Self(clocks)
-    }
-}
-
-impl From<Cycles> for u64 {
-    fn from(cycles: Cycles) -> Self {
-        cycles.0
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::Cycles;
 
     #[test]
     fn until_a_time_passed_is_zero() {
-        assert_eq!(Cycles(10).until(Cycles(4)), Cycles::ZERO);
-        assert_eq!(Cycles(4).until(Cycles(10)), Cycles(6));
+        assert_eq!(
+            Cycles::from_clocks(10).until(Cycles::from_clocks(4)),
+            Cycles::ZERO
+        );
+        assert_eq!(
+            Cycles::from_clocks(4).until(Cycles::from_clocks(10)),
+            Cycles::from_clocks(6)
+        );
     }
 
     #[test]
     fn cycles_show_their_unit() {
-        assert_eq!(Cycles(12).to_string(), "12 clocks");
-        assert_eq!(u64::from(Cycles::from(3)), 3);
+        assert_eq!(Cycles::from_clocks(12).to_string(), "12 clocks");
+        assert_eq!(Cycles::from_clocks(3).clocks(), 3);
     }
 }

@@ -66,6 +66,7 @@ use crate::protocol::description;
 use crate::protocol::failure;
 use crate::target::AccessError;
 use crate::target::Target;
+use crate::target::TargetReset;
 use crate::target::TargetRun;
 use hooks::Hits;
 use hooks::Kind;
@@ -81,7 +82,7 @@ mod planted;
 
 /// System clocks an emulated target runs between looks for gdb's
 /// Ctrl-C: about 6 ms of a 16.78 MHz chip.
-const QUANTUM: Cycles = Cycles(100_000);
+const QUANTUM: Cycles = Cycles::from_clocks(100_000);
 
 /// Serves gdb on `connection` over `target`: [`crate::serve`].
 pub(crate) fn serve<T, C>(
@@ -97,7 +98,7 @@ where
     target
         .halt()
         .map_err(|error| SessionError::Target { error })?;
-    let emulated = target.with_cpu(|_| ()).is_some();
+    let emulated = target.cpu_scope(|_| ()).is_some();
     let mut session = Session {
         target,
         emulated,
@@ -226,7 +227,7 @@ impl<T: Target> Session<'_, T> {
         ran != TargetRun::Fault
             || self
                 .target
-                .with_cpu(|cpu| cpu.trace_pending().is_some())
+                .cpu_scope(|cpu| cpu.trace_pending().is_some())
                 .unwrap_or(false)
     }
 
@@ -302,7 +303,7 @@ impl<T: Target> Session<'_, T> {
     fn clean_up<C>(&mut self) -> Result<(), SessionError<T::Error, C>> {
         let mut first = Ok(());
         if self.going.is_some() && !self.emulated {
-            let ran = match self.target.run_for(Cycles(0), &|| false) {
+            let ran = match self.target.run_for(Cycles::ZERO, &|| false) {
                 Ok(ran @ TargetRun::Background(_)) => Ok(ran),
                 _ => self.target.halt(),
             };
@@ -563,16 +564,16 @@ impl<T: Target> Session<'_, T> {
     /// commands.
     fn monitor(&mut self, words: &[&str], out: &mut ConsoleOutput<'_>) -> Result<(), T::Error> {
         match words {
-            ["fc"] => outputln!(out, "fc {}", self.function_code.bits()),
-            ["fc", code] => match code.parse::<u32>() {
-                Ok(code) if code <= u32::from(FunctionCode::CPU_SPACE.bits()) => {
-                    self.function_code = FunctionCode::new(code);
-                    outputln!(out, "fc {code}");
+            ["fc"] => outputln!(out, "fc {}", self.function_code.get()),
+            ["fc", code] => match code.parse().ok().and_then(FunctionCode::new) {
+                Some(function_code) => {
+                    self.function_code = function_code;
+                    outputln!(out, "fc {function_code}");
                 }
-                _ => outputln!(out, "fc takes a function code, 0 to 7"),
+                None => outputln!(out, "fc takes a function code, 0 to 7"),
             },
             ["faults"] => {
-                let shown = self.target.with_cpu(|cpu| {
+                let shown = self.target.cpu_scope(|cpu| {
                     (
                         cpu.stops_on_fault(),
                         cpu.fault_stop().map(ToString::to_string),
@@ -590,18 +591,18 @@ impl<T: Target> Session<'_, T> {
             }
             ["faults", setting @ ("stop" | "take")] => {
                 let stop = *setting == "stop";
-                match self.target.with_cpu(|cpu| cpu.set_stop_on_fault(stop)) {
+                match self.target.cpu_scope(|cpu| cpu.set_stop_on_fault(stop)) {
                     Some(()) => outputln!(out, "faults {setting}"),
                     None => outputln!(out, "this target takes its faults"),
                 }
             }
-            ["reset"] if self.target.reset()? => {
-                outputln!(
+            ["reset"] => match self.target.reset()? {
+                TargetReset::Done => outputln!(
                     out,
                     "reset; `maintenance flush register-cache` to see the registers"
-                );
-            }
-            ["reset"] => outputln!(out, "this target cannot reset"),
+                ),
+                _ => outputln!(out, "this target cannot reset"),
+            },
             #[cfg(feature = "board")]
             ["stop", words @ ..] => match self.target.conditions() {
                 Some(conditions) => conditions::monitor(conditions, words, out),

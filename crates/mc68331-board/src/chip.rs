@@ -21,7 +21,6 @@ use std::str::FromStr;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Halt;
 use mc683xx_cpu32::cpu::Run;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::state::Save;
@@ -29,6 +28,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::IrqPin;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
@@ -38,6 +38,7 @@ use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_target::address::Address;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -140,7 +141,7 @@ pub enum MemoryPlace<'a> {
     /// At a fixed address on no pin, emulator-only.
     Fixed {
         /// Its first byte's address.
-        base: u32,
+        base: Address,
         /// Its port's width.
         port: PortSize,
         /// How its cycles end: fast termination or wait states.
@@ -157,7 +158,7 @@ pub struct MemoryPlan<'a> {
     /// Its contents.
     pub bytes: Vec<u8>,
     /// Whether writes reach it.
-    pub writable: bool,
+    pub kind: MemoryKind,
     /// Where it answers.
     pub place: MemoryPlace<'a>,
     /// The resets that put its contents back.
@@ -191,7 +192,7 @@ pub trait ChipBuilder: sealed::Sealed {
     type Chip: Chip;
 
     /// The system clock's frequency out of power-on.
-    fn system_clock(&self) -> Frequency;
+    fn system_frequency(&self) -> Frequency;
 
     /// The handle by which the board's routers ask the chip's runs to
     /// stop.
@@ -319,9 +320,6 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     /// passes.
     fn run_for(&mut self, budget: Cycles) -> Run;
 
-    /// Why the CPU halted, while it stays halted.
-    fn halted(&self) -> Option<Halt>;
-
     /// A reset now for `cause`, as its source makes it:
     /// [`ResetCause::External`] is RESET driven by the board.
     fn reset_for(&mut self, cause: ResetCause);
@@ -334,7 +332,7 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     /// BKPT asserted between runs (CPU32RM 7.2.2.1): with background
     /// mode enabled the CPU enters it at once, and this is true;
     /// disabled, a hardware breakpoint is left pending for the next run,
-    /// and this is false.
+    /// and this is false; halted, nothing, and false.
     fn assert_breakpoint(&mut self) -> bool;
 
     /// Makes the memory diversions the board's routers asked for
@@ -355,7 +353,7 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     fn instructions(&self) -> u64;
 
     /// The system clock's frequency now.
-    fn system_clock(&self) -> Frequency;
+    fn system_frequency(&self) -> Frequency;
 
     /// A memory's bytes.
     fn memory(&self, memory: Self::Memory) -> &[u8];

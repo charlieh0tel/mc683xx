@@ -21,6 +21,7 @@ use mc683xx_board::pacing::Pacing;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Span;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
@@ -71,38 +72,38 @@ impl Board {
         let board = mc683xx_board::board::Board::load_with(
             &description,
             &mc683xx_peripherals::registry(),
-            Environment::default(),
+            &Environment::default(),
             read,
         )?;
         Ok(Self { board })
     }
 
-    /// [`runFor`](Self::run_for_js), its picoseconds a `u64`.
+    /// [`runFor`](Self::run_for_js), its time a [`Span`].
     ///
     /// # Errors
     ///
     /// As [`run_for_js`](Self::run_for_js).
-    pub fn run_for(&mut self, picoseconds: u64) -> Result<BoardRun, Error> {
-        Ok(self.board.run_for(picoseconds)?.into())
+    pub fn run_for(&mut self, span: Span) -> Result<BoardRun, Error> {
+        Ok(self.board.run_for(span)?.into())
     }
 
-    /// [`runFrame`](Self::run_frame_js), its picoseconds a `u64`.
+    /// [`runFrame`](Self::run_frame_js), its bound a [`Span`].
     ///
     /// # Errors
     ///
     /// As [`run_frame_js`](Self::run_frame_js).
-    pub fn run_frame(&mut self, wall: f64, picoseconds: u64) -> Result<BoardRun, Error> {
+    pub fn run_frame(&mut self, wall: f64, bound: Span) -> Result<BoardRun, Error> {
         let wall = Duration::try_from_secs_f64(wall / MILLISECONDS_PER_SECOND)
             .map_err(|_| Error::Wall(wall))?;
-        Ok(self.board.run_frame(wall, picoseconds)?.into())
+        Ok(self.board.run_frame(wall, bound)?.into())
     }
 
-    /// [`send`](Self::send_js), its data bytes.
+    /// [`sendBytes`](Self::send_bytes_js), its data bytes.
     ///
     /// # Errors
     ///
-    /// As [`send_js`](Self::send_js).
-    pub fn send(&mut self, name: &str, data: &[u8]) -> Result<(), Error> {
+    /// As [`send_bytes_js`](Self::send_bytes_js).
+    pub fn send_bytes(&mut self, name: &str, data: &[u8]) -> Result<(), Error> {
         let serial = |byte: u8| Signal::Serial(Serial::untimed(Frame::Data(byte.into())));
         // the endpoint checked even for no data
         self.board.check_send(name, &serial(0))?;
@@ -110,6 +111,15 @@ impl Board {
             self.board.send(name, serial(byte))?;
         }
         Ok(())
+    }
+
+    /// [`restore`](Self::restore_js), its snapshot bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::State`] for a snapshot the board refuses.
+    pub fn restore(&mut self, snapshot: &[u8]) -> Result<(), Error> {
+        Ok(self.board.restore(snapshot)?)
     }
 
     /// The board, to reach what the bindings do not.
@@ -133,8 +143,9 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// [`Error::Images`], [`Error::ImageName`] and [`Error::Image`] for
-    /// images of another shape, and as [`with_images`](Self::with_images).
+    /// Throws a `TypeError` for images of another shape, and a
+    /// `LoadError` for a board file or a board that does not load, an
+    /// image `images` lacks among them.
     #[wasm_bindgen(constructor)]
     pub fn new(
         text: &str,
@@ -154,27 +165,29 @@ impl Board {
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn now(&self) -> u64 {
-        self.board.now().0
+        self.board.now().picos()
     }
 
-    /// The pacing [`run_frame`](Self::run_frame_js) keeps: `unpaced`,
-    /// `realtime` or a factor, board seconds a wall second.
+    /// The pacing `runFrame` keeps: `unpaced`, `realtime` or a factor,
+    /// board seconds a wall second.  On the board, as there is no
+    /// control handle here (Rust's and Python's are on the board's
+    /// control).
     #[wasm_bindgen(getter)]
     #[must_use]
     pub fn pacing(&self) -> String {
         self.board.control().pacing().to_string()
     }
 
-    /// Sets the pacing from its text, as [`pacing`](Self::pacing) gives
-    /// it.
+    /// Sets the pacing from its text, as `pacing` gives it.
     ///
     /// # Errors
     ///
-    /// [`Error::ParsePacing`] for text that names no pacing.
+    /// Throws a `PacingError` for text that names no pacing.
     #[wasm_bindgen(js_name = setPacing)]
     pub fn set_pacing(&mut self, pacing: &str) -> Result<(), Error> {
         let pacing: Pacing = pacing.parse()?;
-        Ok(self.board.control().set_pacing(pacing)?)
+        self.board.control().set_pacing(pacing);
+        Ok(())
     }
 
     /// Runs `picoseconds` of board time from now, unpaced (Rust's
@@ -182,9 +195,9 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// [`Error::PicosecondsType`] for picoseconds not a `bigint`,
-    /// [`Error::Picoseconds`] for a `bigint` out of a `u64`'s range, and
-    /// [`Error::Run`] for a run that fails.
+    /// Throws a `TypeError` for picoseconds not a `bigint`, a
+    /// `RangeError` for one out of `0n` to `2n ** 64n - 1n`, and a
+    /// `RunError` for a run that fails.
     #[wasm_bindgen(js_name = runFor)]
     pub fn run_for_js(
         &mut self,
@@ -195,21 +208,20 @@ impl Board {
 
     /// Runs a frame (Rust's `Board::run_frame`): to the board time due by
     /// the page's clock reading `wall`, in milliseconds
-    /// (`performance.now()`), under the pacing, but no more than
+    /// (`performance.now()`; Python's `run_frame` takes seconds, Rust's a
+    /// `Duration`), under the pacing, but no more than
     /// `picoseconds` of board time, a frame's bound however far behind the
     /// page is (a hidden tab), which drops the time the page missed.
     /// Unpaced it runs `picoseconds`.  Paced, the first frame, and the first
-    /// after a [`set_pacing`](Self::set_pacing) to another pacing (not to
-    /// the one it has), a [`run_for`](Self::run_for_js) (even of no time)
-    /// or a successful [`restore`](Self::restore), runs nothing: it
-    /// starts the pacing.
+    /// after a `setPacing` to another pacing (not to the one it has), a
+    /// `runFor` (even of no time) or a successful `restore`, runs
+    /// nothing: it starts the pacing.
     ///
     /// # Errors
     ///
-    /// [`Error::Wall`] for a reading that is not finite or below 0,
-    /// [`Error::PicosecondsType`] and [`Error::Picoseconds`] as for
-    /// [`run_for_js`](Self::run_for_js), and [`Error::Run`] for a run
-    /// that fails.
+    /// Throws a `RangeError` for a reading that is not finite or below
+    /// 0, a `TypeError` or a `RangeError` for picoseconds as `runFor`
+    /// does, and a `RunError` for a run that fails.
     #[wasm_bindgen(js_name = runFrame)]
     pub fn run_frame_js(
         &mut self,
@@ -220,21 +232,19 @@ impl Board {
     }
 
     /// Sends `data`, a `Uint8Array`, to the run-time endpoint `name`
-    /// now, a serial frame a byte.
+    /// now, an untimed serial frame a byte.
     ///
     /// # Errors
     ///
-    /// [`Error::Data`] for data not a `Uint8Array` (wasm-bindgen would
-    /// take a string or an array of numbers as bytes), and
-    /// [`Error::Send`] for an endpoint that drives no serial net.
-    #[wasm_bindgen(js_name = send)]
-    pub fn send_js(
+    /// Throws a `TypeError` for data not a `Uint8Array`, and a
+    /// `SendError` for an endpoint that drives no serial net.
+    #[wasm_bindgen(js_name = sendBytes)]
+    pub fn send_bytes_js(
         &mut self,
         name: &str,
         #[wasm_bindgen(unchecked_param_type = "Uint8Array")] data: &JsValue,
     ) -> Result<(), Error> {
-        let data = uint8_array(data).ok_or_else(|| Error::Data(described(data)))?;
-        self.send(name, &data.to_vec())
+        self.send_bytes(name, &bytes(data, "data to send")?.to_vec())
     }
 
     /// The data bytes of the serial frames that reached the run-time
@@ -243,9 +253,9 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// [`Error::Receive`] for an endpoint no net drives.
-    #[wasm_bindgen(js_name = takeReceived)]
-    pub fn take_received(&mut self, name: &str) -> Result<Vec<u8>, Error> {
+    /// Throws a `ReceiveError` for an endpoint no net drives.
+    #[wasm_bindgen(js_name = takeReceivedBytes)]
+    pub fn take_received_bytes(&mut self, name: &str) -> Result<Vec<u8>, Error> {
         Ok(self
             .board
             .take_received(name)?
@@ -261,7 +271,7 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// [`Error::Memory`] for a memory the board lacks.
+    /// Throws a `MemoryError` for a memory the board lacks.
     pub fn memory(&self, name: &str) -> Result<Vec<u8>, Error> {
         self.board
             .memory(name)
@@ -273,18 +283,24 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// [`Error::State`] for a peripheral that cannot save.
+    /// Throws a `StateError` for a peripheral that cannot save.
     pub fn save(&self) -> Result<Vec<u8>, Error> {
         Ok(self.board.save()?)
     }
 
-    /// Puts back the state `snapshot` holds, as Rust's `Board::restore`.
+    /// Puts back the state `snapshot`, a `Uint8Array`, holds, as Rust's
+    /// `Board::restore`.
     ///
     /// # Errors
     ///
-    /// [`Error::State`] for a snapshot the board refuses.
-    pub fn restore(&mut self, snapshot: &[u8]) -> Result<(), Error> {
-        Ok(self.board.restore(snapshot)?)
+    /// Throws a `TypeError` for a snapshot not a `Uint8Array`, and a
+    /// `StateError` for a snapshot the board refuses.
+    #[wasm_bindgen(js_name = restore)]
+    pub fn restore_js(
+        &mut self,
+        #[wasm_bindgen(unchecked_param_type = "Uint8Array")] snapshot: &JsValue,
+    ) -> Result<(), Error> {
+        self.restore(&bytes(snapshot, "a snapshot")?.to_vec())
     }
 }
 
@@ -302,8 +318,9 @@ pub struct BoardRun {
 impl BoardRun {
     /// Why it ended, the kind of Rust's `Stop`: `budget` (its time ran
     /// out), `stopped`, `halted`, `hook`, `requested`, `background` or
-    /// `fault`.
-    #[wasm_bindgen(getter)]
+    /// `fault`; `unknown` for a kind this release does not name.  A later
+    /// minor release may add a kind, so a page keeps a default branch.
+    #[wasm_bindgen(getter, unchecked_return_type = "StopKind")]
     #[must_use]
     pub fn stop(&self) -> String {
         stop_name(self.stop).to_owned()
@@ -316,6 +333,27 @@ impl BoardRun {
         self.now
     }
 }
+
+/// The TypeScript type of [`BoardRun::stop`]: the names [`stop_name`]
+/// gives, open (`string & {}`, which keeps the names' completion), as a
+/// later minor release may name a new kind.
+#[wasm_bindgen(typescript_custom_section)]
+const STOP_KIND: &str = r#"
+/**
+ * Why a run ended (`BoardRun.stop`): one of these names, or another a
+ * later minor release adds.
+ */
+export type StopKind =
+    | "budget"
+    | "stopped"
+    | "halted"
+    | "hook"
+    | "requested"
+    | "background"
+    | "fault"
+    | "unknown"
+    | (string & {});
+"#;
 
 /// JavaScript's name for the kind of `stop`: the bindings' own, not
 /// `Stop`'s `Display`, so a change there does not change what a page
@@ -338,7 +376,7 @@ impl From<mc683xx_board::board::BoardRun> for BoardRun {
     fn from(run: mc683xx_board::board::BoardRun) -> Self {
         Self {
             stop: run.stop,
-            now: run.now.0,
+            now: run.now.picos(),
         }
     }
 }
@@ -346,14 +384,16 @@ impl From<mc683xx_board::board::BoardRun> for BoardRun {
 /// `value` as picoseconds of board time: a `bigint` from 0 to 2 ** 64 - 1.
 /// wasm-bindgen would take a `bigint` modulo 2 ** 64 (so `-1n` would run
 /// for 213 days), and a `number` is no `bigint`, however exact.
-fn picoseconds_of(value: JsValue) -> Result<u64, Error> {
+fn picoseconds_of(value: JsValue) -> Result<Span, Error> {
     let Some(bigint) = value.dyn_ref::<BigInt>() else {
         return Err(Error::PicosecondsType(described(&value)));
     };
     let text = bigint
         .to_string(DECIMAL)
         .map_or_else(|_| String::new(), String::from);
-    u64::try_from(value).map_err(|_| Error::Picoseconds(text))
+    u64::try_from(value)
+        .map(Span::from_picos)
+        .map_err(|_| Error::Picoseconds(text))
 }
 
 /// The images in `images`, a `Map` or an object, by path; none for
@@ -381,6 +421,19 @@ fn image_bytes(images: &JsValue) -> Result<BTreeMap<String, Vec<u8>>, Error> {
             Ok((name, bytes.to_vec()))
         })
         .collect()
+}
+
+/// `value` as a `Uint8Array`, the `argument` [`Error::Bytes`] names
+/// otherwise: wasm-bindgen would take a string or an array of numbers as
+/// bytes.
+fn bytes<'value>(
+    value: &'value JsValue,
+    argument: &'static str,
+) -> Result<&'value Uint8Array, Error> {
+    uint8_array(value).ok_or_else(|| Error::Bytes {
+        argument,
+        kind: described(value),
+    })
 }
 
 /// `value` if it is a `Uint8Array`, from this realm or another (an

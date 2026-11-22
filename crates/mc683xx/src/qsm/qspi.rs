@@ -277,7 +277,7 @@ const fn serial_clock(spcr0: u16, spbr: u64, system_clock: Frequency) -> QspiClo
         } else {
             ClockPhase::ChangeLeading
         },
-        period: Cycles(SCK_CLOCKS_PER_SPBR * spbr),
+        period: Cycles::from_clocks(SCK_CLOCKS_PER_SPBR * spbr),
         system_clock,
     }
 }
@@ -289,7 +289,7 @@ impl QspiClock {
     /// (8.388608 MHz from a 32.768-kHz reference, MC68331UM 4.3), so the
     /// caller gives it.
     #[must_use]
-    pub const fn reset(system_clock: Frequency) -> Self {
+    pub const fn at_reset(system_clock: Frequency) -> Self {
         serial_clock(
             SPCR0_RESET,
             (SPCR0_RESET & SPCR0_SPBR_MASK) as u64,
@@ -377,7 +377,7 @@ impl Qspi {
             && let Some(peripheral) = &mut self.peripheral
         {
             self.told = Some(clock);
-            peripheral.clock(clock, now);
+            peripheral.set_clock(clock, now);
         }
     }
 
@@ -492,7 +492,7 @@ impl Qspi {
         if levels != self.selects {
             self.selects = levels;
             if let Some(peripheral) = &mut self.peripheral {
-                peripheral.chip_selects(levels, now);
+                peripheral.set_chip_selects(levels, now);
             }
         }
     }
@@ -737,7 +737,9 @@ impl Qspi {
             command,
             out,
             bits,
-            phase: Phase::Shifting(now + Cycles(self.shift_clocks(command, bits, spbr))),
+            phase: Phase::Shifting(
+                now + Cycles::from_clocks(self.shift_clocks(command, bits, spbr)),
+            ),
         };
     }
 
@@ -776,7 +778,7 @@ impl Qspi {
             .is_some_and(|peripheral| !peripheral.deferrable());
         let mut end = match phase {
             Phase::Shifting(end) if watched => return Some(end),
-            Phase::Shifting(end) => end + Cycles(self.delay_clocks(command)),
+            Phase::Shifting(end) => end + Cycles::from_clocks(self.delay_clocks(command)),
             Phase::Delay(end) => end,
         };
         let mut pointer = pointer;
@@ -823,11 +825,12 @@ impl Qspi {
             {
                 return Some(end);
             }
-            let shifted = end + Cycles(self.shift_clocks(command, self.bits(command), spbr));
+            let shifted =
+                end + Cycles::from_clocks(self.shift_clocks(command, self.bits(command), spbr));
             if watched {
                 return Some(shifted);
             }
-            end = shifted + Cycles(self.delay_clocks(command));
+            end = shifted + Cycles::from_clocks(self.delay_clocks(command));
         }
         None
     }
@@ -896,14 +899,9 @@ impl Qspi {
             .unwrap_or_else(|| self.clock(u64::from(self.spcr0 & SPCR0_SPBR_MASK)));
         let received = match &mut self.peripheral {
             Some(peripheral) if port.sck_output() => {
-                let transfer = QspiTransfer::new(
-                    pointer,
-                    self.selects,
-                    port.mosi(out, mask),
-                    bits,
-                    clock,
-                    now,
-                );
+                let transfer = QspiTransfer::new(port.mosi(out, mask), bits, clock, now)
+                    .at_entry(pointer)
+                    .selecting(self.selects);
                 let answer = peripheral.transfer(transfer);
                 if port.miso_input() { answer } else { 0 }
             }
@@ -919,7 +917,7 @@ impl Qspi {
             command,
             out,
             bits,
-            phase: Phase::Delay(now + Cycles(self.delay_clocks(command))),
+            phase: Phase::Delay(now + Cycles::from_clocks(self.delay_clocks(command))),
         };
     }
 

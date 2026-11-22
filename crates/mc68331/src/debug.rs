@@ -31,7 +31,7 @@ use crate::host::AccessError;
 /// The most system clocks a step runs: far more than any instruction
 /// with its exceptions takes, so a step that ends without stopping (a
 /// reset in it, which disables background mode) ends.
-const STEP_BUDGET: Cycles = Cycles(1 << 20);
+const STEP_BUDGET: Cycles = Cycles::from_clocks(1 << 20);
 
 /// Why a debugger's call on the chip failed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -80,28 +80,25 @@ impl Mc68331 {
     /// $00001E, reaches the selects and the bus peripherals; one that
     /// ends it with DSACK has the breakpoint ignored, and with none it
     /// ends in a bus error, which takes vector 12 (CPU32RM 6.2.6;
-    /// MC68331UM 4.5.4.1.2).
+    /// MC68331UM 4.5.4.1.2).  A halted CPU ignores it, enabled or not,
+    /// nothing left pending, and this is false: only RESET restarts it
+    /// (CPU32RM 6.2.2).
     ///
     /// [`Cpu::set_breakpoint_pending`]: mc683xx_cpu32::cpu::Cpu::set_breakpoint_pending
     pub fn assert_breakpoint(&mut self) -> bool {
-        if self.cpu.bdm_enabled() {
-            return self.breakpoint();
-        }
-        self.cpu.set_breakpoint_pending(true);
-        false
-    }
-
-    /// BKPT acknowledged between instructions, as
-    /// [`Cpu::breakpoint`](mc683xx_cpu32::cpu::Cpu::breakpoint): out of
-    /// STOP or LPSTOP too, which wakes the modules LPSTOP stopped.
-    /// Whether the CPU is in background mode.
-    fn breakpoint(&mut self) -> bool {
-        let entered = self.cpu.breakpoint();
+        let entered = self.cpu.assert_breakpoint();
         if entered {
             self.board.wake(self.now);
             self.sync_freeze();
         }
         entered
+    }
+
+    /// BKPT asserted with background mode enabled, as
+    /// [`assert_breakpoint`](Self::assert_breakpoint); disabled,
+    /// nothing, and false.  Whether the CPU is in background mode.
+    fn breakpoint(&mut self) -> bool {
+        self.cpu.bdm_enabled() && self.assert_breakpoint()
     }
 
     /// An error unless the CPU is in background mode.
@@ -152,16 +149,16 @@ impl Mc68331 {
         let cpu = &self.cpu;
         let registers = &cpu.registers;
         match register {
-            SystemRegister::Rpc => registers.pc,
+            SystemRegister::Rpc => registers.pc.0,
             SystemRegister::Pcc => cpu.pcc().0,
             SystemRegister::Atemp => cpu.atemp(),
             SystemRegister::Far => cpu.far().0,
-            SystemRegister::Vbr => registers.vbr,
+            SystemRegister::Vbr => registers.vbr.0,
             SystemRegister::Sr => u32::from(registers.sr()),
-            SystemRegister::Usp => registers.usp,
-            SystemRegister::Ssp => registers.ssp,
-            SystemRegister::Sfc => u32::from(registers.sfc.bits()),
-            SystemRegister::Dfc => u32::from(registers.dfc.bits()),
+            SystemRegister::Usp => registers.usp.0,
+            SystemRegister::Ssp => registers.ssp.0,
+            SystemRegister::Sfc => u32::from(registers.sfc.get()),
+            SystemRegister::Dfc => u32::from(registers.dfc.get()),
         }
     }
 
@@ -171,16 +168,16 @@ impl Mc68331 {
     fn set_system_register(&mut self, register: SystemRegister, value: u32) {
         let cpu = &mut self.cpu;
         match register {
-            SystemRegister::Rpc => cpu.registers.pc = value,
+            SystemRegister::Rpc => cpu.registers.pc = Address(value),
             SystemRegister::Pcc => cpu.set_pcc(Address(value)),
             SystemRegister::Atemp => cpu.set_atemp(value),
             SystemRegister::Far => {}
-            SystemRegister::Vbr => cpu.registers.vbr = value,
+            SystemRegister::Vbr => cpu.registers.vbr = Address(value),
             SystemRegister::Sr => cpu.registers.set_sr(value as u16),
-            SystemRegister::Usp => cpu.registers.usp = value,
-            SystemRegister::Ssp => cpu.registers.ssp = value,
-            SystemRegister::Sfc => cpu.registers.sfc = FunctionCode::new(value),
-            SystemRegister::Dfc => cpu.registers.dfc = FunctionCode::new(value),
+            SystemRegister::Usp => cpu.registers.usp = Address(value),
+            SystemRegister::Ssp => cpu.registers.ssp = Address(value),
+            SystemRegister::Sfc => cpu.registers.sfc = FunctionCode::from_low_bits(value),
+            SystemRegister::Dfc => cpu.registers.dfc = FunctionCode::from_low_bits(value),
         }
     }
 
@@ -217,7 +214,7 @@ impl Mc68331 {
         };
         let sp = self.read_register(Register::A7)?.wrapping_sub(4);
         let rpc = self.read_system_register(SystemRegister::Rpc)?;
-        self.write_memory(Address(sp), space, Size::Long, &rpc.to_be_bytes())?;
+        self.write_memory(Address(sp), Size::Long, space, &rpc.to_be_bytes())?;
         self.write_register(Register::A7, sp)?;
         self.write_system_register(SystemRegister::Rpc, address.0)?;
         self.go()
@@ -328,8 +325,8 @@ impl Cpu32Target for Mc68331 {
     fn read_memory(
         &mut self,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<(), TargetError> {
         self.command()?;
@@ -346,8 +343,8 @@ impl Cpu32Target for Mc68331 {
     fn write_memory(
         &mut self,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         data: &[u8],
     ) -> Result<(), TargetError> {
         self.command()?;

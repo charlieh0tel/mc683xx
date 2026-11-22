@@ -14,12 +14,12 @@ use std::str::FromStr;
 
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Halt;
 use mc683xx_cpu32::cpu::Run;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_mc68331::chip::Builder;
@@ -31,9 +31,10 @@ use mc683xx_mc68331::chip::OutputStop;
 use mc683xx_mc68331::chip::SyncRequest;
 use mc683xx_mc68331::event::Event;
 use mc683xx_mc68331::gpt::Input;
-use mc683xx_mc68331::gpt::OutputChange;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm::Channel;
+use mc683xx_mc68331::port::OutputChange;
+use mc683xx_mc68331::port::Port;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
@@ -41,11 +42,12 @@ use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::clock::ClockSource;
-use mc683xx_modules::sim::ports::PortName;
 use mc683xx_modules::sim::reset::ResetScope;
-use mc683xx_target::address::Address;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
+use serde::Serializer;
+use serde::de::Error as _;
 
 use crate::chip;
 use crate::chip::BoardMapped;
@@ -78,21 +80,130 @@ const PCS0_PIN: u8 = 3;
 /// PCS\[3:0\]'s pins.
 const PCS_PINS: u8 = 4;
 
+/// A pin of one of the MC68331's general-purpose ports, `P` and the
+/// port and its bit: `PE0`, `PGP7`, `PC6`.  Built by [`PortPin::new`],
+/// so its bit is always one the port has.  Ordered port E, F, QS, GP,
+/// then C, each by bit (see the `Ord` impl).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct PortPin {
+    /// The port.
+    port: Port,
+    /// Its bit: 0 to 7, port C's 0 to 6.
+    bit: u8,
+}
+
+impl PortPin {
+    /// Bit `bit` of `port`, if the port has it: 0 to 7, port C's 0 to 6
+    /// (MC68331UM 4.8.1.4).
+    #[must_use]
+    pub const fn new(port: Port, bit: u8) -> Option<Self> {
+        if bit < port_pins(port) {
+            Some(Self { port, bit })
+        } else {
+            None
+        }
+    }
+
+    /// The port.
+    #[must_use]
+    pub const fn port(self) -> Port {
+        self.port
+    }
+
+    /// Its bit.
+    #[must_use]
+    pub const fn bit(self) -> u8 {
+        self.bit
+    }
+
+    /// Its name: `PE0`.
+    const fn name(self) -> &'static str {
+        let names: &[&str] = match self.port {
+            Port::C => &PC,
+            Port::E => &PE,
+            Port::F => &PF,
+            Port::Gp => &PGP,
+            Port::Qs => &PQS,
+        };
+        names[self.bit as usize]
+    }
+
+    /// Every pin of `port`, by bit.
+    fn all(port: Port) -> impl Iterator<Item = Self> {
+        (0..port_pins(port)).map(move |bit| Self { port, bit })
+    }
+}
+
+/// The order the board visits pins in where several act at one time,
+/// power-on's first levels among them: port E, F, QS, GP, then C, each
+/// by bit, as the pins' variants ran before they were keyed by
+/// [`Port`].  Changing it would change which of two same-time edges a
+/// peripheral sees first, so it is kept, not derived from `Port`'s.
+impl Ord for PortPin {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        const fn rank(port: Port) -> u8 {
+            match port {
+                Port::E => 0,
+                Port::F => 1,
+                Port::Qs => 2,
+                Port::Gp => 3,
+                Port::C => 4,
+            }
+        }
+        (rank(self.port), self.bit).cmp(&(rank(other.port), other.bit))
+    }
+}
+
+impl PartialOrd for PortPin {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Its name: `PE0`.
+impl fmt::Display for PortPin {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
+
+/// The port pin its name, as it displays, names, in any case: `PE0`, `pe0`.
+impl FromStr for PortPin {
+    type Err = ParsePortPinError;
+
+    fn from_str(name: &str) -> Result<Self, ParsePortPinError> {
+        Port::ALL
+            .into_iter()
+            .flat_map(Self::all)
+            .find(|pin| pin.name().eq_ignore_ascii_case(name))
+            .ok_or_else(|| ParsePortPinError(name.to_owned()))
+    }
+}
+
+/// Text that names no MC68331 port pin.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no MC68331 port pin {0:?}")]
+pub struct ParsePortPinError(String);
+
+/// The pins `port` has.
+const fn port_pins(port: Port) -> u8 {
+    match port {
+        Port::C => PORT_C_PINS,
+        Port::E | Port::F | Port::Gp | Port::Qs => PORT_PINS,
+    }
+}
+
 /// An MC68331 pin a net reaches.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+///
+/// A snapshot holds it by its name, so a pin added or reordered here
+/// leaves the board's format as it was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum Pin {
-    /// PE`n`, a pin of port E.
-    PortE(u8),
-    /// PF`n`.
-    PortF(u8),
-    /// PQS`n`.
-    PortQs(u8),
-    /// PGP`n`: IC1 to IC3 on PGP0 to PGP2, OC1 to OC4 on PGP3 to PGP6,
-    /// IC4/OC5 on PGP7 (MC68331UM Figure 7-1).
-    PortGp(u8),
-    /// PC`n`: a chip-select pin as a discrete output.
-    PortC(u8),
+    /// A pin of a general-purpose port: on port GP, IC1 to IC3 on PGP0 to
+    /// PGP2, OC1 to OC4 on PGP3 to PGP6, IC4/OC5 on PGP7 (MC68331UM
+    /// Figure 7-1); on port C, a chip-select pin as a discrete output.
+    Port(PortPin),
     /// PAI, the pulse accumulator's input (GPTRM 4).
     Pai,
     /// PCLK, the GPT's external clock (GPTRM 2.7).
@@ -134,14 +245,31 @@ const IRQ: [&str; 7] = ["IRQ1", "IRQ2", "IRQ3", "IRQ4", "IRQ5", "IRQ6", "IRQ7"];
 /// Text that names no MC68331 pin.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no MC68331 pin {0:?}")]
-pub struct ParsePinError(pub String);
+pub struct ParsePinError(String);
 
-/// The pin named so, after `chip.`.
+/// The pin named so, after `chip.`, exactly as `Display` writes it.
 impl FromStr for Pin {
     type Err = ParsePinError;
 
     fn from_str(name: &str) -> Result<Self, ParsePinError> {
-        Self::parse(name).ok_or_else(|| ParsePinError(name.to_owned()))
+        Self::all()
+            .find(|pin| pin.name() == name)
+            .ok_or_else(|| ParsePinError(name.to_owned()))
+    }
+}
+
+/// Its name.
+impl Serialize for Pin {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.name())
+    }
+}
+
+/// The pin a snapshot names, refused if there is none.
+impl<'de> Deserialize<'de> for Pin {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let name = String::deserialize(deserializer)?;
+        name.parse().map_err(D::Error::custom)
     }
 }
 
@@ -153,48 +281,43 @@ impl fmt::Display for Pin {
 }
 
 impl Pin {
-    /// The pin named `name`, after `chip.`.
-    fn parse(name: &str) -> Option<Self> {
-        let numbered = |prefix: &str, pins: u8| {
-            name.strip_prefix(prefix)
-                .and_then(|number| number.parse::<u8>().ok())
-                .filter(|&number| number < pins)
-        };
-        if let Ok(input) = name.parse::<Input>() {
-            return Some(match input {
-                Input::PortGp(pin) => Self::PortGp(pin.get()),
-                Input::Pai => Self::Pai,
-                Input::Pclk => Self::Pclk,
-            });
+    /// Every pin.
+    fn all() -> impl Iterator<Item = Self> {
+        Port::ALL
+            .into_iter()
+            .flat_map(PortPin::all)
+            .map(Self::Port)
+            .chain(
+                (1..=InterruptLevel::NONMASKABLE.get())
+                    .filter_map(|level| IrqPin::new(level).map(Self::Irq)),
+            )
+            .chain([
+                Self::Pai,
+                Self::Pclk,
+                Self::Reset,
+                Self::PwmA,
+                Self::PwmB,
+                Self::Eclk,
+                Self::Txd,
+                Self::Rxd,
+            ])
+    }
+
+    /// The port pin it is, if it is one.
+    const fn port(self) -> Option<PortPin> {
+        match self {
+            Self::Port(pin) => Some(pin),
+            _ => None,
         }
-        let pin = match name {
-            "RESET" => Self::Reset,
-            "PWMA" => Self::PwmA,
-            "PWMB" => Self::PwmB,
-            "ECLK" => Self::Eclk,
-            "TXD" => Self::Txd,
-            "RXD" => Self::Rxd,
-            _ => {
-                if let Some(number) = numbered("PQS", PORT_PINS) {
-                    Self::PortQs(number)
-                } else if let Some(number) = numbered("PE", PORT_PINS) {
-                    Self::PortE(number)
-                } else if let Some(number) = numbered("PF", PORT_PINS) {
-                    Self::PortF(number)
-                } else if let Some(number) = numbered("PC", PORT_C_PINS) {
-                    Self::PortC(number)
-                } else {
-                    Self::Irq(IrqPin::new(numbered("IRQ", 8)?)?)
-                }
-            }
-        };
-        Some(pin)
     }
 
     /// The GPT input it is, if it is one.
     fn gpt_input(self) -> Option<Input> {
         match self {
-            Self::PortGp(bit) => PortGpPin::new(bit).map(Input::PortGp),
+            Self::Port(PortPin {
+                port: Port::Gp,
+                bit,
+            }) => PortGpPin::new(bit).map(Input::PortGp),
             Self::Pai => Some(Input::Pai),
             Self::Pclk => Some(Input::Pclk),
             _ => None,
@@ -207,11 +330,7 @@ impl Sealed for Pin {}
 impl ChipPin for Pin {
     fn name(self) -> &'static str {
         match self {
-            Self::PortE(bit) => PE[usize::from(bit)],
-            Self::PortF(bit) => PF[usize::from(bit)],
-            Self::PortQs(bit) => PQS[usize::from(bit)],
-            Self::PortGp(bit) => PGP[usize::from(bit)],
-            Self::PortC(bit) => PC[usize::from(bit)],
+            Self::Port(pin) => pin.name(),
             Self::Irq(pin) => IRQ[usize::from(pin.get() - 1)],
             Self::Pai => "PAI",
             Self::Pclk => "PCLK",
@@ -234,11 +353,13 @@ impl ChipPin for Pin {
 
     fn direction(self) -> Direction {
         match self {
-            Self::PortE(_) | Self::PortF(_) | Self::PortQs(_) | Self::PortGp(_) | Self::Reset => {
-                Direction::InOut
-            }
+            Self::Port(PortPin { port: Port::C, .. })
+            | Self::PwmA
+            | Self::PwmB
+            | Self::Eclk
+            | Self::Txd => Direction::Out,
+            Self::Port(_) | Self::Reset => Direction::InOut,
             Self::Pai | Self::Pclk | Self::Irq(_) | Self::Rxd => Direction::In,
-            Self::PortC(_) | Self::PwmA | Self::PwmB | Self::Eclk | Self::Txd => Direction::Out,
         }
     }
 
@@ -247,7 +368,11 @@ impl ChipPin for Pin {
     }
 
     fn pcs(self) -> bool {
-        matches!(self, Self::PortQs(bit) if (PCS0_PIN..PCS0_PIN + PCS_PINS).contains(&bit))
+        matches!(
+            self,
+            Self::Port(PortPin { port: Port::Qs, bit })
+                if (PCS0_PIN..PCS0_PIN + PCS_PINS).contains(&bit)
+        )
     }
 }
 
@@ -365,7 +490,7 @@ impl Sealed for Mc68331Builder {}
 impl ChipBuilder for Mc68331Builder {
     type Chip = Mc68331;
 
-    fn system_clock(&self) -> Frequency {
+    fn system_frequency(&self) -> Frequency {
         self.builder.system_frequency()
     }
 
@@ -389,16 +514,16 @@ impl ChipBuilder for Mc68331Builder {
                 termination,
             } => self
                 .builder
-                .fixed_memory(Address(base), plan.bytes, plan.writable)
+                .fixed_memory(base, plan.bytes, plan.kind)
                 .and_then(|id| {
                     self.builder
-                        .fixed_timing(id, port, termination)
+                        .set_fixed_timing(id, port, termination)
                         .map(|()| id)
                 }),
-            MemoryPlace::Selects(pins) => self.builder.memory(plan.bytes, plan.writable, pins),
+            MemoryPlace::Selects(pins) => self.builder.memory(plan.bytes, plan.kind, pins),
         }
         .map_err(built)?;
-        self.builder.reload_scope(id, plan.reload);
+        self.builder.set_reload_scope(id, plan.reload);
         let router = self.builder.unwired_peripheral(router);
         self.handles.memories.borrow_mut().push((id, router));
         Ok(id)
@@ -412,7 +537,7 @@ impl ChipBuilder for Mc68331Builder {
     ) -> Result<(), LoadError> {
         let id = self.builder.peripheral(router, &[select]).map_err(built)?;
         if let Some(pins) = dsack {
-            self.builder.dsack(id, pins);
+            self.builder.set_dsack(id, pins);
         }
         Ok(())
     }
@@ -431,9 +556,9 @@ impl ChipBuilder for Mc68331Builder {
 
     fn unwired<R: BoardMapped>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>) {
         let id = self.builder.unwired_peripheral(pins);
-        self.builder.reset_scope(id, reset);
+        self.builder.set_reset_scope(id, reset);
         if let Some(level) = irq {
-            self.builder.interrupt(id, level);
+            self.builder.set_interrupt(id, level);
         }
     }
 
@@ -446,49 +571,35 @@ impl ChipBuilder for Mc68331Builder {
         let mut chip = self.builder.build();
         chip.set_clock_stop(true);
         let pins = &self.pins;
-        if let Some(e) = pins.e {
-            chip.set_port_e_pins(e);
-        }
-        if let Some(f) = pins.f {
-            chip.set_port_f_pins(f);
-        }
-        if let Some(qs) = pins.qs {
-            chip.set_port_qs_pins(qs);
-        }
-        if let Some(gp) = pins.gp {
-            chip.set_port_gp_pins(gp);
+        for (port, levels) in [
+            (Port::E, pins.e),
+            (Port::F, pins.f),
+            (Port::Qs, pins.qs),
+            (Port::Gp, pins.gp),
+        ] {
+            if let Some(levels) = levels {
+                chip.set_pins(port, levels, u8::MAX).expect("an input port");
+            }
         }
         if let Some(pai) = pins.pai {
-            chip.set_pai(pai);
+            chip.set_gpt_input(Input::Pai, pai);
         }
         if let Some(pclk) = pins.pclk {
-            chip.set_pclk(pclk);
+            chip.set_gpt_input(Input::Pclk, pclk);
         }
         chip
     }
 }
 
-/// `byte` with `bit` at `level`.
-const fn with_bit(byte: u8, bit: u8, level: bool) -> u8 {
-    if level {
-        byte | 1 << bit
-    } else {
-        byte & !(1 << bit)
-    }
-}
-
-/// Each pin of a port of `pins` pins, at its level in `outputs`, undriven
-/// pins high.
-fn emit_port(
-    emit: &mut impl FnMut(Time, Pin, Signal),
-    at: Time,
-    pins: u8,
-    pin: impl Fn(u8) -> Pin,
-    outputs: PortLevels,
-) {
+/// Each pin of `port`, at its level in `outputs`, undriven pins high.
+fn emit_port(emit: &mut impl FnMut(Time, Pin, Signal), at: Time, port: Port, outputs: PortLevels) {
     let levels = outputs.pin_levels(u8::MAX);
-    for bit in 0..pins {
-        emit(at, pin(bit), Signal::Level(levels & 1 << bit != 0));
+    for pin in PortPin::all(port) {
+        emit(
+            at,
+            Pin::Port(pin),
+            Signal::Level(levels & 1 << pin.bit != 0),
+        );
     }
 }
 
@@ -519,7 +630,7 @@ impl chip::Chip for Mc68331 {
                 owner: "chip".to_owned(),
                 level,
             })?;
-            builder.autovector(pin);
+            builder.set_autovector(pin);
         }
         let handles = Rc::new(Handles {
             sync: builder.sync_request(),
@@ -540,10 +651,6 @@ impl chip::Chip for Mc68331 {
 
     fn run_for(&mut self, budget: Cycles) -> Run {
         Self::run_for(self, budget)
-    }
-
-    fn halted(&self) -> Option<Halt> {
-        Self::halted(self)
     }
 
     fn reset_for(&mut self, cause: ResetCause) {
@@ -576,7 +683,7 @@ impl chip::Chip for Mc68331 {
         Self::instructions(self)
     }
 
-    fn system_clock(&self) -> Frequency {
+    fn system_frequency(&self) -> Frequency {
         self.sim().clock().frequency()
     }
 
@@ -599,19 +706,19 @@ impl chip::Chip for Mc68331 {
     fn stop_at_outputs(&mut self, sensed: &[Pin]) {
         let mut stop = OutputStop::default();
         for &pin in sensed {
+            if let Some(pin) = pin.port() {
+                stop.set_port(pin.port, stop.port(pin.port) | 1 << pin.bit);
+                continue;
+            }
             match pin {
-                Pin::PortC(bit) => stop.port_c |= 1 << bit,
-                Pin::PortE(bit) => stop.port_e |= 1 << bit,
-                Pin::PortF(bit) => stop.port_f |= 1 << bit,
-                Pin::PortGp(bit) => stop.port_gp |= 1 << bit,
-                Pin::PortQs(bit) => stop.port_qs |= 1 << bit,
                 Pin::PwmA => stop.pwm_a = true,
                 Pin::PwmB => stop.pwm_b = true,
                 Pin::Txd => stop.txd = true,
                 Pin::Reset => stop.reset = true,
                 // ECLK changes with the clock, which ends the run itself
-                // (`set_clock_stop`); the rest are inputs
-                Pin::Eclk | Pin::Pai | Pin::Pclk | Pin::Irq(_) | Pin::Rxd => {}
+                // (`set_clock_stop`); the rest are inputs, or ports' pins
+                // watched above
+                Pin::Eclk | Pin::Pai | Pin::Pclk | Pin::Irq(_) | Pin::Rxd | Pin::Port(_) => {}
             }
         }
         self.set_output_stop(stop);
@@ -627,17 +734,15 @@ impl chip::Chip for Mc68331 {
                 let input = pin.gpt_input().expect("a GPT input");
                 self.schedule_gpt_input(at, input, level);
             }
-            (Pin::PortE(bit), Signal::Level(level)) => {
-                let pins = with_bit(self.sim().port_e().pins, bit, level);
-                self.set_port_e_pins(pins);
-            }
-            (Pin::PortF(bit), Signal::Level(level)) => {
-                let pins = with_bit(self.sim().port_f().pins, bit, level);
-                self.set_port_f_pins(pins);
-            }
-            (Pin::PortQs(bit), Signal::Level(level)) => {
-                let pins = with_bit(self.qsm().port_pins(), bit, level);
-                self.set_port_qs_pins(pins);
+            (
+                Pin::Port(PortPin {
+                    port: port @ (Port::E | Port::F | Port::Qs),
+                    bit,
+                }),
+                Signal::Level(level),
+            ) => {
+                self.set_pins(port, if level { u8::MAX } else { 0 }, 1 << bit)
+                    .expect("an input port");
             }
             (Pin::Irq(irq), Signal::Level(level)) => self.set_interrupt_pin(irq, !level),
             (Pin::Rxd, Signal::Serial(serial)) => self.sci_receive(serial.frame),
@@ -652,50 +757,42 @@ impl chip::Chip for Mc68331 {
     fn clock_output(&self, pin: Pin) -> Option<Frequency> {
         (pin == Pin::Eclk).then(|| {
             let clock = self.sim().clock();
-            Frequency(clock.frequency().0 / clock.eclk_divisor())
+            Frequency::from_nanohertz(clock.frequency().nanohertz() / clock.eclk_divisor())
         })
     }
 
     fn collect<F: FnMut(Time, Pin, Signal)>(&mut self, base: TimeBase, mut emit: F) {
-        for (at, change) in self.take_port_changes() {
-            let (pins, pin): (u8, fn(u8) -> Pin) = match change.port {
-                PortName::C => (PORT_C_PINS, Pin::PortC),
-                PortName::E => (PORT_PINS, Pin::PortE),
-                PortName::F => (PORT_PINS, Pin::PortF),
-            };
-            emit_port(&mut emit, base.time(at), pins, pin, change.outputs);
-        }
-        for (at, change) in self.take_gpt_changes() {
-            let at = base.time(at);
+        // one stream, so a port GP pin and a PWM pin the firmware changes
+        // in one instruction reach the nets in that order
+        for change in self.take_output_changes() {
             match change {
-                OutputChange::PortGp(outputs) => {
-                    emit_port(&mut emit, at, PORT_PINS, Pin::PortGp, outputs);
-                }
-                OutputChange::Pwm { channel, level } => {
-                    let pin = if channel == Channel::A {
+                OutputChange::Port(change) => emit_port(
+                    &mut emit,
+                    base.time(change.now),
+                    change.port,
+                    change.outputs,
+                ),
+                OutputChange::Pwm(change) => {
+                    let pin = if change.channel == Channel::A {
                         Pin::PwmA
                     } else {
                         Pin::PwmB
                     };
-                    emit(at, pin, Signal::Level(level));
+                    emit(base.time(change.now), pin, Signal::Level(change.level));
                 }
-                // a change on no pin a board net reaches
                 _ => {}
             }
         }
         let system_clock = self.sim().clock().frequency();
         for sent in self.take_sci_transmitted() {
             let start = base.time(sent.start);
-            let baud = u128::from(system_clock.0) / u128::from(sent.bit.0);
+            let baud = u128::from(system_clock.nanohertz()) / u128::from(sent.bit.clocks());
             let serial = Serial::timed(
                 sent.frame,
-                Frequency(u64::try_from(baud).unwrap_or(u64::MAX)),
+                Frequency::from_nanohertz(u64::try_from(baud).unwrap_or(u64::MAX)),
                 base.time(sent.end).since(start),
             );
             emit(start, Pin::Txd, Signal::Serial(serial));
-        }
-        for (at, outputs) in self.take_qsm_changes() {
-            emit_port(&mut emit, base.time(at), PORT_PINS, Pin::PortQs, outputs);
         }
     }
 
@@ -705,7 +802,7 @@ impl chip::Chip for Mc68331 {
 
     fn reset_pulse(event: &Event) -> Option<(Cycles, Cycles)> {
         match *event {
-            Event::Reset(at, _) => Some((at, at + Cycles(RESET_CLOCKS))),
+            Event::Reset { now, .. } => Some((now, now + Cycles::from_clocks(RESET_CLOCKS))),
             _ => None,
         }
     }
@@ -721,46 +818,101 @@ impl chip::Chip for Mc68331 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pins_keep_their_order_port_e_f_qs_gp_then_c() {
+        let pin = |port, bit| PortPin::new(port, bit).unwrap();
+        let mut pins = [
+            pin(Port::C, 0),
+            pin(Port::Gp, 0),
+            pin(Port::Qs, 0),
+            pin(Port::F, 0),
+            pin(Port::E, 7),
+            pin(Port::E, 0),
+        ];
+        pins.sort();
+        let names: Vec<String> = pins.iter().map(ToString::to_string).collect();
+        assert_eq!(names, ["PE0", "PE7", "PF0", "PQS0", "PGP0", "PC0"]);
+    }
+
+    use mc683xx_cpu32::cpu::state::StateError;
+    use mc683xx_cpu32::cpu::state::decode;
+    use mc683xx_cpu32::cpu::state::encode;
     use mc683xx_cpu32::interrupt::IrqPin;
+    use mc683xx_mc68331::port::Port;
 
     use super::PORT_C_PINS;
     use super::PORT_PINS;
+    use super::ParsePortPinError;
     use super::Pin;
+    use super::PortPin;
     use crate::chip::ChipPin;
 
     #[test]
     fn pins_show_as_they_parse() {
-        let mut pins: Vec<Pin> = (0..PORT_PINS)
-            .flat_map(|bit| {
-                [
-                    Pin::PortE(bit),
-                    Pin::PortF(bit),
-                    Pin::PortQs(bit),
-                    Pin::PortGp(bit),
-                ]
-            })
-            .chain((0..PORT_C_PINS).map(Pin::PortC))
-            .chain((1..=7).map(|level| Pin::Irq(IrqPin::new(level).unwrap())))
-            .collect();
-        pins.extend([
-            Pin::Pai,
-            Pin::Pclk,
-            Pin::Reset,
-            Pin::PwmA,
-            Pin::PwmB,
-            Pin::Eclk,
-            Pin::Txd,
-            Pin::Rxd,
-        ]);
+        let pins: Vec<Pin> = Pin::all().collect();
+        assert_eq!(pins.len(), 4 * 8 + 7 + 7 + 8);
         for pin in pins {
             assert_eq!(pin.name().parse(), Ok(pin), "{pin}");
             assert_eq!(pin.to_string(), pin.name());
         }
-        assert_eq!("PGP0".parse(), Ok(Pin::PortGp(0)));
+        assert_eq!("PGP0".parse(), Ok(gp(0)));
+        assert_eq!(
+            "PC6".parse(),
+            Ok(Pin::Port(PortPin::new(Port::C, 6).unwrap()))
+        );
         assert_eq!("IRQ7".parse(), Ok(Pin::Irq(IrqPin::IRQ7)));
-        for bad in ["IRQ0", "PC7", "PE8", "NMI", ""] {
+        for bad in ["IRQ0", "PC7", "PE8", "PE05", "NMI", ""] {
             assert!(bad.parse::<Pin>().is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn port_pins_show_as_they_parse() {
+        for pin in Port::ALL.into_iter().flat_map(PortPin::all) {
+            assert_eq!(pin.to_string().parse(), Ok(pin));
+        }
+        assert_eq!("PE0".parse(), Ok(PortPin::new(Port::E, 0).unwrap()));
+        assert_eq!("pgp7".parse(), Ok(PortPin::new(Port::Gp, 7).unwrap()));
+        assert_eq!("PQs3".parse(), Ok(PortPin::new(Port::Qs, 3).unwrap()));
+        assert_eq!(
+            "pe05".parse::<PortPin>(),
+            Err(ParsePortPinError("pe05".to_owned()))
+        );
+        assert_eq!(
+            "IRQ7".parse::<PortPin>(),
+            Err(ParsePortPinError("IRQ7".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_snapshot_holds_a_pin_by_its_name() {
+        for pin in Pin::all() {
+            assert_eq!(decode::<Pin>(1, &encode(1, &pin)).unwrap(), pin);
+        }
+        assert_eq!(encode(1, &gp(3)), encode(1, &"PGP3"));
+        assert!(matches!(
+            decode::<Pin>(1, &encode(1, &"PE8")),
+            Err(StateError::Decode(_))
+        ));
+    }
+
+    #[test]
+    fn a_port_pin_has_only_the_port_s_bits() {
+        assert_eq!(PortPin::new(Port::C, PORT_C_PINS), None);
+        assert_eq!(PortPin::new(Port::Qs, PORT_PINS), None);
+        let pin = PortPin::new(Port::Gp, 7).unwrap();
+        assert_eq!((pin.port(), pin.bit()), (Port::Gp, 7));
+        assert_eq!(pin.to_string(), "PGP7");
+    }
+
+    /// PGP`bit`.
+    fn gp(bit: u8) -> Pin {
+        Pin::Port(PortPin::new(Port::Gp, bit).unwrap())
+    }
+
+    /// PE`bit`.
+    fn pe(bit: u8) -> Pin {
+        Pin::Port(PortPin::new(Port::E, bit).unwrap())
     }
 
     #[test]
@@ -770,11 +922,18 @@ mod tests {
 
         assert_eq!(Pin::Txd.kind(), Kind::Serial);
         assert_eq!(Pin::Eclk.kind(), Kind::Clock);
-        assert_eq!(Pin::PortE(0).kind(), Kind::Logic);
+        assert_eq!(pe(0).kind(), Kind::Logic);
         assert_eq!(Pin::Pai.direction(), Direction::In);
         assert_eq!(Pin::PwmA.direction(), Direction::Out);
         assert_eq!(Pin::Reset.direction(), Direction::InOut);
-        assert!(Pin::PortGp(0).scheduled() && Pin::Pclk.scheduled());
-        assert!(!Pin::PortE(0).scheduled());
+        assert!(gp(0).scheduled() && Pin::Pclk.scheduled());
+        assert!(!pe(0).scheduled());
+        assert_eq!(pe(0).direction(), Direction::InOut);
+        assert_eq!(
+            Pin::Port(PortPin::new(Port::C, 0).unwrap()).direction(),
+            Direction::Out
+        );
+        assert!(Pin::Port(PortPin::new(Port::Qs, 3).unwrap()).pcs());
+        assert!(!Pin::Port(PortPin::new(Port::Qs, 7).unwrap()).pcs());
     }
 }

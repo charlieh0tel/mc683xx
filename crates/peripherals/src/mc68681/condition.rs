@@ -90,7 +90,7 @@ impl Watches {
         };
         let byte = byte.map(|byte| parse_byte(byte)).transpose()?;
         self.given += 1;
-        let token = ConditionToken(self.given);
+        let token = ConditionToken::new(self.given);
         self.armed.push(Watch {
             token,
             direction,

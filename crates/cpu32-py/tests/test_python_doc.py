@@ -1,7 +1,16 @@
 """docs/python.md's examples, run as the guide says they run: in order,
 in one namespace."""
 
+from importlib import metadata
+
 import doc_examples
+
+import mc683xx
+
+
+def test_the_version_is_the_package_s():
+    assert mc683xx.__version__ == metadata.version("mc683xx")
+    assert "__version__" not in mc683xx.__all__
 
 
 def test_the_guide_has_examples():

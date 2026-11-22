@@ -23,24 +23,41 @@ methods, properties and arguments, UPPER_CASE enum members.  A Rust
 rename renames the Python name with it.  The deliberate differences:
 
 - **Enums:** a Rust type with `Display` and `FromStr` crosses as its
-  string, in and out: a chip select (`"CSBOOT"`, `"CS0"`), a GPT input
-  (`"PGP0"`-`"PGP7"`, `"PAI"`, `"PCLK"`), a net type (`"serial"`), a
-  port direction (`"in-out"`), a `Pacing` from its text.  Registers are
+  string, in and out: a chip select (`"CSBOOT"`, `"CS0"`), a net type
+  (`"serial"`), a port direction (`"in-out"`).  A newtype of a number
+  that also parses (`FunctionCode`, `InterruptLevel`, `IrqPin`,
+  `pacing::Factor`) crosses as its number.  Registers are
   by name, Python's own (`"D0"`, `"SR"`).  Any other Rust enum is a
   Python class whose members are its variants (`Channel.A`,
-  `PortName.E`, `Role.READ_WRITE`, `Lane.UPPER`, `ResetCause.WATCHDOG`,
-  `Space.USER`), and is never taken as a string; one whose variants
-  carry data has a class for each (`Event.Reset(now, cause)`,
-  `Frame.Data(bits)`, `OutputChange.PortGp(driven, levels)`).
+  `Port.E`, `Port.GP`, `Input.PAI`, `Role.READ_WRITE`, `Lane.UPPER`,
+  `ResetCause.WATCHDOG`, `Space.USER`), and is never taken as a
+  string (its members' `int` values are their order in the class, not
+  the hardware's encoding, and outside semver); one whose variants carry data has a class for each
+  (`Event.Reset(now, cause)`, `Frame.Data(bits)`), and so does
+  `Pacing`, though it has `Display` and `FromStr`: its factor is a
+  number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`
+  the text.
+- **Unknown values:** Python has two members Rust lacks:
+  `Event.Unknown(now, text)`, an event the bindings cannot convert,
+  and `ResetCause.UNKNOWN`, a reset for a cause they do not know, so
+  that `take_events()` hands every event over (Exceptions, below);
+  `take_output_changes()` likewise hands a change it cannot convert
+  over as `(now, None, text)`.
 - **Tuples:** a struct of plain values a call returns is a tuple of its
   fields, in order: `PortLevels` as `(driven, levels)`, a port's change
-  as `(now, port, driven, levels)`, a transmitted frame as `(start,
-  frame)`, a QSPI slave shift's `Shifted` as `(miso, driven)`.
+  as `(now, port, driven, levels)`, a PWM pin's as `(now, channel,
+  level)`, a transmitted frame as `(start, frame)`, a QSPI slave
+  shift's `Shifted` as `(miso, driven)`.  A struct of registers a host
+  reads by name is a class with a property for each field
+  (`PortState`'s `latch`, `direction`, `assignment`, `pins`).
 - **Units:** a frequency Rust gives in whole hertz (`Frequency::hz`) is
-  an `int` named `_hz` (`system_hz`, `baud_hz`); one it keeps in
-  nanohertz (`Frequency` itself: a serial frame's baud, a clock net's
-  frequency) is an `int` named `_nanohertz`.  Times are `int`s, system
-  clocks or picoseconds.
+  an `int` named `_hz` (`system_hz`); one it keeps in nanohertz
+  (`Frequency` itself: a serial frame's baud, a clock net's frequency,
+  a `QspiClock`'s `system_clock_nanohertz` and `baud_nanohertz`) is an
+  `int` named `_nanohertz`.  Times are `int`s, system
+  clocks or picoseconds.  A board run's span, Rust's `Span` or
+  `NonZeroSpan`, is a keyword pair, `seconds=` (a `float`) or
+  `picoseconds=` (an `int`), and its quantum `quantum_picoseconds=`.
 - **Settings:** a struct of settings is keyword arguments
   (`set_tracing(accesses=, exceptions=)` for `ChipTracing`,
   `Builder(data=, reference_hz=, external_hz=)` for `Configuration`); a
@@ -51,7 +68,9 @@ rename renames the Python name with it.  The deliberate differences:
   `add_code_hook(range, hook)`; `bus_write(address, size, value,
   function_code=5)`, Rust's `(address, size, function_code, value)`;
   `Builder.memory(contents, pins, writable=True)`, Rust's `(bytes,
-  writable, pins)`.  The bare `Machine`'s `map` takes the pages'
+  kind, pins)`, a `MemoryKind` (`Ram` or `Rom`) where Python takes a
+  keyword's bool; `fixed_memory(base, contents, writable=True)`
+  likewise.  The bare `Machine`'s `map` takes the pages'
   `permissions` too, Rust's `map` then `protect`.
 - **Builtins:** an argument Rust names `id` or `bytes`, Python
   builtins, is named for what it holds: `remove_hook(hook)`,
@@ -59,29 +78,45 @@ rename renames the Python name with it.  The deliberate differences:
   data)`.
 - **Properties:** a Rust accessor of plain state, with no arguments, is
   a read-only property (`now`, `halted`, `instructions`,
-  `exception_taken`, `port_c`, `system_hz`, `qspi_chip_selects`,
+  `exception_taken`, `system_hz`, `qspi_chip_selects`,
   `stops_on_fault`, `deviations`, `pacing`, `stopping`); one that takes
   arguments or computes its value is a method (`registers()`,
-  `port_c_outputs()`, `port_gp_outputs()`, `port_qs_outputs()`, the
-  levels a port's pins resolve to; `pwm(channel)`, `oc1()`, an output
-  worked out from the GPT's registers).  A setter is `set_*`, never a
+  `outputs(port)`, the levels a port's pins resolve to, `port(port)`;
+  `pwm(channel)`, `oc1()`, an output worked out from the GPT's
+  registers).  A setter is `set_*`, never a
   writable property.
 - **Background debug:** the chip's `Cpu32Target` calls `halt`, `go`
   and `step`, and `assert_breakpoint`, are `Mc68331` methods; its `halted`, an `Entry`, is the
   `background` property (`Cpu::background`, through `Mc68331::cpu`),
-  as `halted` is the chip's `Halt`.  `reset_halted` is
+  as `halted` is the CPU's `Halt` (`Cpu::halted`, likewise).  `reset_halted` is
   `reset_with_breakpoint()` then `background`.
 - **Handles:** memories and peripherals are the numbers `Builder`
   returns, not `MemoryId` and `PeripheralId`; a Rust callback trait
   (`MappedPeripheral`, `SpiPeripheral`, `Peripheral`, `Observer`) is a
-  duck-typed object or callable.
+  duck-typed object or callable.  The protocol classes
+  `mc683xx.MappedPeripheral`, `SpiPeripheral` and `Peripheral` type the
+  first three for a type checker: each declares the methods it
+  requires (`read` and `write`, `transfer`, none) and its docstring the
+  optional ones the module calls, which are API as the classes are
+  (docs/releasing.md); a peripheral may subclass one, or only match it.
+- **Errors:** a Rust error is a Python exception (Errors, below): the
+  module's own where Python has none to match, named as Rust's error
+  is (`LoadError`, `RunError`, `StateError`, `TargetError`, `BusError`;
+  `UnpeekableError` for `AccessError::Unpeekable`), a builtin
+  (`ValueError`, `IndexError`, `OSError`) where one fits.
+- **Python's own:** names with no Rust item behind them: `BoardChip`
+  (`Board.chip`, the `Mc68331` methods over a board's chip), a board
+  peripheral class's `PORTS` and `TIMED_SERIAL` (its `PortSpec`s, and
+  whether it is told serial frames as `Serial`s), the `timed=` keyword
+  of `take_received`, `net_value` and `observe`, `External` equal to its
+  name as a string, and `__version__`.
 
 Not offered, as a Python host has another way or no use for them:
 `Machine::remove_peripheral`, `take_natively_once` (a declined
 intercept is taken natively), `clear_resume` (`run_limited(begin=)`),
 `set_long_bus` and `instruction_registers` (a hook's `registers`);
-`Mc68331::set_clock_stop`, `set_output_stop` and `divert_memory` (a
-host's own scheduler's, as the board's); the `_mut` accessors and
+`Mc68331::set_clock_stop` and `set_output_stop` (a host's own
+scheduler's, as the board's); the `_mut` accessors and
 `cpu`, `sim`, `qsm` and `gpt` (registers by name, a module's registers
 through `bus_read` and `peek`, memory through `write_memory`);
 `Builder::system_frequency`; `Board::run_until_quantized`;
@@ -95,11 +130,13 @@ make python                # builds .venv, the module, and runs the tests
 ```
 
 The package is built with maturin from `crates/cpu32-py` (abi3, Python
-3.10 and later) and ships type stubs (`python/mc683xx/__init__.pyi`,
+3.12 and later) and ships type stubs (`python/mc683xx/__init__.pyi`,
 `py.typed`), so mypy and pyright see every class, method and argument.
 
 Released versions are on PyPI as `mc683xx`, abi3 wheels for Linux,
 macOS and Windows, and an sdist (`docs/releasing.md`).
+`mc683xx.__version__` is the version, one for the crates, this package
+and the npm package.
 
 ## Firmware for the examples
 
@@ -212,16 +249,19 @@ assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
 - `fixed_memory(base, contents, writable=True)`: emulator-only memory
   at a fixed address on no pin, which takes the cycles there no chip
   select matches (the host guide's Fixed memory); a memory number as
-  `memory`'s.  `fixed_timing(memory, port=16, wait_states=None)`: its
-  port, 8 or 16 bits, and wait states, 0 to 13, `None` fast
-  termination (Rust's `fixed_timing` takes a `PortSize` and a
-  `Termination`; Python has neither).  `reload_scope(memory, scope)`: the `ResetCause`s that
+  `memory`'s.  `set_fixed_timing(memory, port=16, termination=None)`:
+  its port, 8 or 16 bits (Rust's `PortSize`), and its cycles'
+  termination, a `Termination` as Rust's, a class per variant:
+  `Termination.Fast()` (`None`, the default) or
+  `Termination.WaitStates(n)`, 0 to 13; `External()` and `Eclk()`
+  raise `ValueError`, as a fixed memory asserts no DSACK and runs on
+  no ECLK.  `set_reload_scope(memory, scope)`: the `ResetCause`s that
   put a memory's contents back as built, none by default.
 - `peripheral(object, pins)` and `unwired_peripheral(object)` (on no pin) return a
-  peripheral number for `interrupt`, `reset_scope` and `Mc68331.peripheral`.
-- `interrupt(peripheral, pin)` (IRQ1 to IRQ7 as 1 to 7), `autovector(pin)`,
-  `reset_scope(peripheral, scope)`, `qspi(object)`: as in Rust.
-- `dsack(peripheral, Dsack.DSACK0 | DSACK1 | BOTH)`: the DSACK pins a
+  peripheral number for `interrupt`, `set_reset_scope` and `Mc68331.peripheral`.
+- `set_interrupt(peripheral, pin)` (IRQ1 to IRQ7 as 1 to 7), `set_autovector(pin)`,
+  `set_reset_scope(peripheral, scope)`, `qspi(object)`: as in Rust.
+- `set_dsack(peripheral, Dsack.DSACK0 | DSACK1 | BOTH)`: the DSACK pins a
   peripheral drives on an externally terminated select, checked
   against PEPAR at each such cycle (a disagreement is an
   `Event.Dsack(now, DsackFault.Unassigned(select))`, once for each
@@ -233,7 +273,7 @@ assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
   `bus_peripheral` takes `BusDecode`s, which Python has not: each
   window is a `BusDecode::Window`, each level a
   `BusDecode::Acknowledge`.  Its cycles' `select` is `None`; a PEPAR
-  disagreement is `DsackFault.BusUnassigned(peripheral)`.  `qspi_reset_scope(scope)`: the resets that reach the QSPI's
+  disagreement is `DsackFault.BusUnassigned(peripheral)`.  `set_qspi_reset_scope(scope)`: the resets that reach the QSPI's
   peripheral, every one by default.
 - `stop_request()`, `sync_request()` and `diversion()` are the handles a
   peripheral holds, as in Rust: a `StopRequest` whose `request()` ends
@@ -259,7 +299,9 @@ it, `Stop.Requested()`, `Stop.Background(entry)` with the `Entry`
 ATEMP reports: `Entry.Breakpoint()`, `Entry.Background()`,
 `Entry.DoubleBusFault(ssw)`, `Entry.Unknown(atemp)`, `Stop.Fault()`
 for a fault stop), equal by value
-and matched by pattern (`case mc683xx.Stop.Hook(hook):`).  A run ends
+and matched by pattern (`case mc683xx.Stop.Hook(hook):`).  A
+variant's value is a field named for it, not Rust's `_0`:
+`stop.halt`, `stop.hook`, `stop.entry`.  A run ends
 at a halt or on entering background mode; one that starts so spends
 its budget as time passes for the SIM, the modules and the peripherals
 without the CPU, so the watchdog can reset the chip, and ends
@@ -398,7 +440,7 @@ handler = store_word(RAM_BASE, 0xBEEF) + [BRANCH_TO_SELF]
 builder, ram = booting(program, {**vector(VECTOR, HANDLER), HANDLER: handler})
 interrupter = Interrupter()
 number = builder.peripheral(interrupter, ["CS1", "CS10"])
-builder.interrupt(number, LEVEL)
+builder.set_interrupt(number, LEVEL)
 chip = builder.build()
 chip.run_for(5000)
 assert chip.read_memory(ram, 0, 2) == b"\xbe\xef", "the handler ran"
@@ -433,8 +475,8 @@ builder, _ = booting(
     set_sr(UNMASKED) + [BRANCH_TO_SELF],
     {**vector(AUTOVECTOR_7, HANDLER), HANDLER: [BRANCH_TO_SELF]},
 )
-builder.interrupt(builder.unwired_peripheral(Alarm(5000)), 7)
-builder.autovector(7)
+builder.set_interrupt(builder.unwired_peripheral(Alarm(5000)), 7)
+builder.set_autovector(7)
 chip = builder.build()
 chip.run_for(4000)
 assert chip.read_register("PC") != HANDLER
@@ -498,7 +540,7 @@ builder.memory(rom([BRANCH_TO_SELF]), ["CSBOOT"], writable=False)
 everything, not_watchdog = Counter(), Counter()
 builder.unwired_peripheral(everything)
 causes = [mc683xx.ResetCause.POWER_ON, mc683xx.ResetCause.EXTERNAL]
-builder.reset_scope(builder.unwired_peripheral(not_watchdog), causes)
+builder.set_reset_scope(builder.unwired_peripheral(not_watchdog), causes)
 chip = builder.build()
 chip.run_for(512 * 256 + 100)  # the watchdog's 2^9 EXTAL periods
 chip.reset()
@@ -576,23 +618,32 @@ what the chip drives within a run comes back as timed changes.
 - SCI: `sci_receive(Frame.Data(bits))` or `Frame.Break()`, and
   `take_sci_transmitted() -> [(start, Frame)]`, each frame at its
   start bit.  A frame is the data bits
-  as on the line, LSB first, parity included (`frame._0`).
-- Ports: `set_port_e_pins`, `set_port_f_pins`, `set_port_qs_pins`;
-  `port_c_outputs()`, `port_e_outputs()`, `port_f_outputs()` and
-  `port_qs_outputs()` as
-  `(driven, levels)` masks, Rust's `PortLevels` as a pair Python
-  unpacks; `take_port_changes() -> [(now, PortName, driven,
-  levels)]`; `take_qsm_changes() -> [(now, driven, levels)]` for port
-  QS (a host with no board takes them, or they gather in the chip).
-- GPT: `set_port_gp_pins`, `set_pai`, `set_pclk`; `schedule_gpt_input(at,
-  input, level)` with `input` `"PGP0"`-`"PGP7"`, `"PAI"` or `"PCLK"`;
-  `port_gp_outputs()`; `pwm(Channel.A | B)` (`Output.Level`,
-  `Output.Wave`, `Output.Clock`); `oc1()` (`Output.Clock` under CPROUT,
-  else `Output.Level`); `take_gpt_changes() -> [(now, OutputChange)]`,
-  `OutputChange.PortGp(driven, levels)` and, while
-  `set_report_pwm_edges(channel, True)` asks, `OutputChange.Pwm(channel,
-  level)` (PPROUT's clock included), OC1's CPROUT clock in port GP's
-  while `set_report_oc1_clock_edges(True)` does.
+  as on the line, LSB first, parity included (`frame.data`).
+- Ports, by `Port.C`, `E`, `F`, `GP` or `QS`: `set_pins(port, value,
+  mask=0xFF)` drives the pins in `mask`, all by default (port C has
+  none to drive: `ValueError`);
+  `outputs(port)` as `(driven, levels)` masks, Rust's `PortLevels` as
+  a pair Python unpacks; `port(port)`, a `PortState` (`latch`,
+  `direction`, `assignment`, `pins`); `take_port_changes() -> [(now,
+  Port, driven, levels)]`, every port's in time order, OC1's CPROUT
+  clock in port GP's while `set_report_oc1_clock_edges(True)` asks (a
+  host with no board takes them, or they gather in the chip).
+- GPT: `set_gpt_input(input, level)` now and
+  `schedule_gpt_input(at, input, level)` ahead, `input` an `Input`,
+  `Input.PGP0`-`Input.PGP7`, `Input.PAI` or `Input.PCLK` (Rust's
+  `gpt::Input`, its `PortGp(pin)` a member per pin, as the pins are
+  named: a deliberate difference); `pwm(Channel.A |
+  B)` (`Output.Level(level)`, `Output.Wave`, `Output.Clock`); `oc1()`
+  (`Output.Clock` under CPROUT, else `Output.Level`);
+  `take_pwm_changes() -> [(now, Channel, level)]` while
+  `set_report_pwm_edges(channel, True)` asks (PPROUT's clock
+  included); `take_output_changes()` both in one stream, in the order
+  they happened, each the tuple the other two give, told apart by a
+  `Port` or a `Channel` second (Rust's `OutputChange`, flattened as
+  they are), for a peripheral clocked by a PWM pin that reads a port GP
+  pin; a change of a kind the bindings do not know is `(now, None,
+  text)`, `text` what changed as Rust prints it, so none is lost.  Each
+  of the three takes what it gives and leaves the rest.
 
 ```python
 SCCR0, SCCR1, SCSR, SCDR = QSM + 0x08, QSM + 0x0A, QSM + 0x0C, QSM + 0x0E  # QSMRM 5.2
@@ -615,17 +666,19 @@ program = (
     + store_word(TOC2, 0x1000)
 )
 chip = booting(program)[0].build()
-chip.schedule_gpt_input(2000, "PGP0", False)
-chip.schedule_gpt_input(3000, "PGP0", True)
+chip.schedule_gpt_input(2000, mc683xx.Input.PGP0, False)
+chip.schedule_gpt_input(3000, mc683xx.Input.PGP0, True)
 chip.run_for(4 * 0x1000 + 100)  # TCNT counts the system clock / 4
 assert [frame for _, frame in chip.take_sci_transmitted()] == [mc683xx.Frame.Data(ord("H"))]
-E = mc683xx.PortName.E
-assert [change[1:] for change in chip.take_port_changes() if change[1] == E] == [
+E, GP = mc683xx.Port.E, mc683xx.Port.GP
+changes = chip.take_port_changes()
+assert [change[1:] for change in changes if change[1] == E] == [
     (E, PE0, 0),
     (E, PE0, PE0),
     (E, PE0, 0),
 ]
-assert chip.take_gpt_changes()[-1] == (4 * 0x1000, mc683xx.OutputChange.PortGp(OC2, OC2))
+assert [change for change in changes if change[1] == GP][-1] == (4 * 0x1000, GP, OC2, OC2)
+assert chip.port(E).direction == PE0
 assert chip.peek(TIC1, 2) == 3000 // 4  # the capture, as a read finds it
 assert chip.pwm(mc683xx.Channel.A) == mc683xx.Output.Level(False)
 assert isinstance(chip.oc1(), mc683xx.Output.Level)
@@ -640,9 +693,9 @@ the levels on PCS[3:0]; `out`, the bits out, right-aligned, MSB first;
 `bits`; `clock`, the `QspiClock` it is shifted with, its mode and SCK
 period; `now`, when it ends, in system clocks), returns the bits in;
 optionally
-`chip_selects(levels, now)` (every change of the PCS levels),
-`clock(QspiClock, now)`, `reset(now)` (each reset in
-`Builder.qspi_reset_scope`, every one by default) and `deferrable() -> bool` (whether its
+`set_chip_selects(levels, now)` (every change of the PCS levels),
+`set_clock(QspiClock, now)`, `reset(now)` (each reset in
+`Builder.set_qspi_reset_scope`, every one by default) and `deferrable() -> bool` (whether its
 calls may come in a batch where the CPU next sees the QSPI).  As a slave
 (MSTR clear) the host is the master: `set_qspi_slave_select(asserted)`
 and `qspi_slave_shift(mosi, bits, period) -> (miso, driven)`.
@@ -661,7 +714,7 @@ class Peripheral:
         self.transfers.append((transfer.chip_selects, transfer.out, transfer.bits))
         return 0xEF
 
-    def clock(self, clock: mc683xx.QspiClock, now: int) -> None:
+    def set_clock(self, clock: mc683xx.QspiClock, now: int) -> None:
         self.clocks.append(clock)
 
 
@@ -682,7 +735,7 @@ chip = builder.build()
 chip.run_for(5000)
 assert peripheral.transfers == [(0b0101, 0x34, 8)]
 assert chip.peek(RECEIVE_RAM, 2) == 0xEF
-assert peripheral.clocks[0].baud_hz == chip.system_hz // 4
+assert peripheral.clocks[0].baud_nanohertz == chip.system_hz * 1_000_000_000 // 4
 
 # Slave: MISO an output, MOSI and PCS0/SS inputs; 8 bits; one entry.
 slave = (
@@ -772,8 +825,10 @@ invalid hooks.
 
 `set_tracing(accesses=, exceptions=)` adds `Event.Access` for each bus
 cycle that reaches the chip (not the RAM and ROM the core serves) and
-`Event.Exception` for each exception entered; `instructions` counts
-instructions.
+`Event.Exception(now, vector, pc, handler, stack, level)` for each
+exception entered, the fields an `ExceptionEntry` has; `instructions`
+counts instructions.  Every `Event` has its time, `now`, in system
+clocks.
 
 ```python
 store = START + 2 * len(PROLOGUE)
@@ -907,13 +962,29 @@ chip.run_for(500)
   nothing answers; a bare `Machine`'s `read` or `write` of bytes no map
   covers.
 - `mc683xx.UnpeekableError`: a peek only a real cycle can answer.
-- `mc683xx.StateError` (a `ValueError`): a snapshot of another format
-  or other hardware, another count of peripherals, bytes that do not
+- `mc683xx.StateError` (a `ValueError`): a snapshot of another format,
+  of another layer (`a chip snapshot, not a board snapshot`) or of
+  other hardware, another count of peripherals, bytes that do not
   decode, or values no run could save; a peripheral that
   cannot save, named.
+- `mc683xx.LoadError` (a `ValueError`): a board file `Board` refuses
+  (Board files).
 - `mc683xx.TargetError` (a `RuntimeError`): a background debug control
   the CPU's state refuses (Background debug mode).
-- `NotImplementedError`: a module that cannot save.
+- `mc683xx.RunError` (a `RuntimeError`): a run that could not go on, a
+  board peripheral stalling board time (Board files); or a run's end
+  or halt this build's bindings have no class for, named, which a newer
+  Rust core could give but none does today.
+- `NotImplementedError`: a module that cannot save; or any other value
+  this build's bindings have no Python value for (a fault cause, a
+  role, an invalid access's reason, a PWM output), named where it
+  prints, which a newer Rust crate could give
+  but none does today.  `take_events()` never raises and always takes
+  every event: one it cannot convert (a kind the bindings lack, or a
+  DSACK fault they do not know) is `Event.Unknown(now, text)`, `text`
+  what happened as Rust prints it, and a reset for a cause they do not
+  know is an `Event.Reset` whose cause is `ResetCause.UNKNOWN`, which
+  `reset_for` and the reset scopes refuse with `ValueError`.
 - `IndexError`: an unknown memory or peripheral number, or a memory range
   past its end.
 - `OverflowError`: a run past the end of time.
@@ -921,7 +992,8 @@ chip.run_for(500)
   bare `Machine`'s hook calling `run_limited` or `serve_gdb`, or gdb sending what
   the stub cannot take.
 - `OSError`: `serve_gdb` could not listen, or gdb's connection failed
-  or closed without a detach.
+  or closed without a detach; `Board` could not read its file or a
+  memory's image.
 - `TypeError`: a peripheral without `read` and `write`, a QSPI peripheral
   without `transfer`, a hook that is not callable.
 
@@ -931,7 +1003,7 @@ builder.memory(bytes(2048), ["CSBOOT"])
 for mistake in (
     lambda: builder.memory(bytes(2048), ["CSBOOT"]),
     lambda: builder.memory(bytes(100), ["CS1"]),
-    lambda: builder.interrupt(0, 0),
+    lambda: builder.set_interrupt(0, 0),
 ):
     try:
         mistake()
@@ -948,15 +1020,23 @@ except mc683xx.StateError:
 
 ## Board files
 
-`mc683xx.Board(path, types={...}, options=[...], firmware=None,
+`mc683xx.Board(path, types={...}, enabled=[...], firmware=None,
 images=None, seed=0, work_dir=None, parameters=None)` loads a board
-file (`docs/board-files.md`) through its power-on reset, `parameters`
-(`{peripheral: {key: value}}`, values a `bool`, `int`, `float`, `str`,
-`list` or mapping) set over the file's and checked as they are;
-`types`, `images` and `parameters` take any mapping, a `dict` or
-another.  The board is built around the MC68331 (Rust's
+file (`docs/board-files.md`) through its power-on reset: `types` maps
+a peripheral type's name to the Python class that makes it (below),
+`enabled` names the file's `[board] options` to turn on (Rust's
+`Options::enabled`; `firmware`, `images` and `parameters` are
+`Options`' other fields, `seed` and `work_dir` `Environment`'s), and
+`parameters` (`{peripheral: {key: value}}`, values a `bool`, `int`,
+`float`, `str`, `list` or mapping) are set over the file's and checked
+as they are; `types`, `images` and `parameters` take any mapping, a
+`dict` or another.  The board is built around the MC68331 (Rust's
 `Board<Mc68331>`): a file whose `[chip] type` names another chip raises
-`ValueError`.  Its peripheral types
+`mc683xx.LoadError`, as does any file the load refuses (Rust's
+`LoadError`, its message naming what is wrong; a `ValueError`); a file
+it cannot read, the board file or a memory's image, raises the
+`OSError` its errno gives
+(`FileNotFoundError`, `PermissionError`), with its `filename`.  Its peripheral types
 are the built-in ones and `types`' classes, by the name the file's
 `type` gives.  A class declares its ports in `PORTS`, a list of
 `(name, kind, direction)`, as Rust's `PortSpec` (a net type; `"in"`,
@@ -968,25 +1048,29 @@ Its object has any of the peripheral's methods, each optional:
 `wants_horizon() -> bool` (asked once, as the board is built: whether
 its reads and writes carry `horizon`, as `Peripheral::wants_horizon` says,
 docs/board-files.md), `interrupt_request() -> bool`,
-`power_on(drive)`, `reset(now, drive)`, `transfer(transfer, drive) ->
+`power_on(drive)`, `reset(drive)`, `transfer(transfer, drive) ->
 int` (an `mc683xx.Transfer`: `attachment`, `entry`, `chip_selects`,
 `out`, `bits`, `clock`, the `QspiClock` it is shifted with, its mode,
-`starts_frame`, whether it is the first since its select asserted, and
-`now`, when it ends; the Rust edge walk, `mc683xx_board::spi`, is not
+and `starts_frame`, whether it is the first since its select asserted;
+it ends at the drive's `now`; the Rust edge walk, `mc683xx_board::spi`, is not
 exposed, so a Python peripheral reckons its edges from `clock.polarity` and
 `clock.phase` by the rules docs/board-files.md, SPI edges, gives),
-`qspi_clock(clock, now)` (the QSPI's serial
+`set_qspi_clock(clock, now)` (the QSPI's serial
 clock, as the QSPI tells it: at the first entry and after CPOL, CPHA,
 SPBR or the system clock change), `select(attachment,
-selected, now, drive)`, `input(port, value, now, drive)`,
+selected, drive)`, `input(port, value, drive)`,
 `sample(port, now) -> float | None`, `next_event() -> int | None`,
-`advance(now, drive)`, `qspi_deferrable() -> bool` (asked once, as
+`advance(drive)`, `qspi_deferrable() -> bool` (asked once, as
 the board is built: whether its QSPI calls may come in a batch, as
 `Peripheral::qspi_deferrable` says, docs/board-files.md), `memory_read(memory,
 access, drive) -> int` and
 `memory_write(memory, access, value, drive)` (a memory it took),
-`save() -> bytes` and `restore(snapshot)`.  Times are
-board time in picoseconds; a `PeripheralAccess` carries `attachment`,
+`save() -> bytes` and `restore(snapshot)`.  A call given a `Drive`
+takes its time from the drive's `now`, as the Rust trait does.  Times are
+board time in picoseconds, and none of these takes the chip's system
+clock base the Rust calls do (`system_clock`, a `TimeBase` Python does
+not have): a deliberate difference, since a Python peripheral counts
+board time; a `PeripheralAccess` carries `attachment`,
 `select` (the chip select's name), `role` (a `Role`), `lane` (a
 `Lane`), `address`, `size`, `function_code`, `write` (as a
 `BusCycle`'s), `now` and `horizon` (`None` but on a read or write of
@@ -1015,10 +1099,10 @@ next quantum for one raised in `next_event` and the other methods asked
 between the chip's runs, and `run_for` raises it (a `KeyboardInterrupt`
 before any other error, that error its `__context__`); a peripheral whose `advance`
 leaves its `next_event` at or before the time it was given, 1000
-times running, stalls the board, and `run_for` raises `RuntimeError`
-naming it.
+times running, stalls the board, and `run_for` raises
+`mc683xx.RunError` naming it.
 
-`run_for(seconds=...)` (finite, 0 or more, or `ValueError`) or
+`run_for(seconds=...)` (finite, 0 or more, within board time's 2**64 ps, or `ValueError`) or
 `run_for(picoseconds=...)` gives a `BoardRun` (Rust's: `stop`, a `Stop`, and `now`, board time at its end), as does `run_until` with a board time (Rust's `Board::run_until`; `run_for` is `Board::run_for`); `now`
 (board time in picoseconds), `cycles` and `instructions` (the chip's
 system clocks and instructions since power-on);
@@ -1049,7 +1133,9 @@ removes) and `take_trace()` (the
 its own `save() -> bytes` and `restore(snapshot)`, its bytes inside
 the board's snapshot, and without both the board's save raises
 `StateError` naming the peripheral (`probe: a Python peripheral cannot save its
-state`).  An exception either raises from the board's call.
+state`).  An exception either raises from the board's call.  They take
+and raise as `Mc68331`'s do: `restore` takes `bytes` or a `bytearray`,
+and a cause raises the exception it raises there (Errors).
 `send` raises `ValueError` for an endpoint that drives no net, or none
 of `kind`.  A frame sent as an `int` or `None` is untimed; one received without
 `timed` drops its baud and length.
@@ -1112,15 +1198,20 @@ Front ends):
   point: the inputs driven there in the order queued, the stop ending
   the run (`Stop.Requested()`).  An input from a live UI lands at the
   sync point after it was queued, timed by when the UI sent it.
-- `Pacing` is Rust's `pacing::Pacing`: `Pacing.UNPACED` (the default),
-  `Pacing.REAL_TIME`, `Pacing.scaled(factor)` (board seconds a wall
-  second; not finite or not above 0 raises `ValueError`), or
-  `Pacing(text)` from `unpaced`, `realtime` or a factor; `factor` is
-  `None` unpaced.  It compares and hashes by value, so it may key a
-  dict (`scaled(1.0)` is not `REAL_TIME`).
+- `Pacing` is Rust's `pacing::Pacing`, a class per variant, matched as
+  `Stop` is: `Pacing.Unpaced()` (the default), `Pacing.RealTime()`,
+  `Pacing.Scaled(factor)` (board seconds a wall second; one not finite
+  or not above 0, -0.0 among them, raises `ValueError`, so equal
+  pacings hash equal), or `Pacing.parse(text)` from `unpaced`,
+  `realtime` or a factor,
+  the runner's `--pace` (its `str` is that text); `factor` is `None`
+  unpaced, 1.0 at real time.  It compares and hashes by value, so it
+  may key a dict (`Scaled(1.0)` is not `RealTime()`).
+
   `run_for(seconds=..., pacing=None, quantum_picoseconds=5_000_000_000)`
   is Rust's `Board::run_until_paced`: it runs in quanta, paced by the
-  control, and sleeps between quanta with the GIL released.  Paced or
+  control (a quantum of 0, which Rust's `NonZeroSpan` cannot hold,
+  raises `ValueError`), and sleeps between quanta with the GIL released.  Paced or
   not, it releases the GIL between quanta once it has held it two of
   Python's switch intervals (`sys.getswitchinterval()`, 5 ms by
   default), so another thread waiting for it runs within about that
@@ -1228,7 +1319,7 @@ def ui() -> None:
 thread = threading.Thread(target=ui)
 thread.start()
 # an hour of board time at real time, cut short by the stop
-paced = front.run_for(seconds=3600.0, pacing=mc683xx.Pacing.REAL_TIME)
+paced = front.run_for(seconds=3600.0, pacing=mc683xx.Pacing.RealTime())
 thread.join()
 assert paced.stop == mc683xx.Stop.Requested()
 assert front.net_value("switch") is True
@@ -1296,7 +1387,8 @@ assert bare.read_register("D0") == 6
   hooks at `begin` fire even if the last run stopped there.  `end`,
   an `End` as Rust's, says why it ended: `End.Until()`,
   `End.Instructions()`, `End.Fault(fault)` (a `FaultStop`), or
-  `End.Stop(stop)` with a chip's `Stop`: `Budget()` (cycles),
+  `End.Stop(stop)` with a chip's `Stop` (the value a field named for
+  it, `end.fault` and `end.stop`, not Rust's `_0`): `Budget()` (cycles),
   `Hook(hook)`, `Requested()` (`stop_request().request()`, from a
   callable or a peripheral), `Stopped()` (a `stop` or `lpstop`
   instruction: with no `cycles` it ends the run at once), or
@@ -1430,8 +1522,9 @@ bare.set_stop_on_fault(False)
 (`deviations`), Rust's `bare::Deviations`: odd word and long data
 accesses as byte cycles, and T1 and T0 tracing nothing, for parity
 runs against Unicorn only: not CPU32 behavior, off by default.
-`Deviations`, `set_intercepted` and `set_intercept_callback`, for
-parity with Unicorn, are outside semver (docs/releasing.md, Semver
+`Deviations` (`set_deviations`, `deviations`), `Intercepted`,
+`set_intercepted` and `set_intercept_callback`, for parity with
+Unicorn, are outside semver (docs/releasing.md, Semver
 scope): a minor release may change them.
 
 ### From Unicorn

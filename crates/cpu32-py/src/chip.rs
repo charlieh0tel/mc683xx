@@ -11,6 +11,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
@@ -18,6 +19,9 @@ use mc683xx_mc68331::chip::MemoryId;
 use mc683xx_mc68331::event;
 use mc683xx_mc68331::event::ChipTracing;
 use mc683xx_mc68331::event::DsackFault;
+use mc683xx_mc68331::gpt::PwmChange;
+use mc683xx_mc68331::port::OutputChange;
+use mc683xx_mc68331::port::PortChange;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
@@ -35,12 +39,14 @@ use mc683xx_target::size::Size;
 
 use mc683xx_modules::sim::reset::ResetScope;
 use pyo3::Bound;
+use pyo3::IntoPyObject;
 use pyo3::Py;
 use pyo3::PyAny;
 use pyo3::PyResult;
 use pyo3::PyTraverseError;
 use pyo3::PyVisit;
 use pyo3::Python;
+use pyo3::exceptions::PyValueError;
 use pyo3::pybacked::PyBackedBytes;
 use pyo3::pyclass;
 use pyo3::pymethods;
@@ -55,13 +61,14 @@ use crate::hooks;
 use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::PythonMapped;
-use crate::peripherals;
 use crate::peripherals::ChannelView;
 use crate::peripherals::Frame;
+use crate::peripherals::InputView;
 use crate::peripherals::Output;
-use crate::peripherals::OutputChangeView;
-use crate::peripherals::PortNameView;
+use crate::peripherals::PortStateView;
+use crate::peripherals::PortView;
 use crate::permissions;
+use crate::python::repr;
 use crate::qspi::PythonSpiPeripheral;
 use crate::register::Register;
 use crate::requests::DiversionView;
@@ -111,12 +118,12 @@ impl Wiring {
 
 /// System clocks a Python run goes between looks for Ctrl-C: about
 /// 6 ms of a 16.78 MHz chip, as gdb's quanta.
-const QUANTUM: Cycles = Cycles(100_000);
+const QUANTUM: Cycles = Cycles::from_clocks(100_000);
 
 /// A port's outputs as Python has them: a `(driven, levels)` pair, which
 /// unpacks as `PortLevels`' fields do.
 const fn pair(outputs: PortLevels) -> (u8, u8) {
-    (outputs.driven, outputs.levels)
+    (outputs.driven(), outputs.levels())
 }
 
 /// Pins by name.
@@ -124,11 +131,20 @@ fn pins(names: &[String]) -> Result<Vec<ChipSelect>, Error> {
     names.iter().map(|name| select::parse(name)).collect()
 }
 
+/// A memory's kind as Python gives it, `writable` or not.
+const fn memory_kind(writable: bool) -> MemoryKind {
+    if writable {
+        MemoryKind::Ram
+    } else {
+        MemoryKind::Rom
+    }
+}
+
 /// The resets `causes`: a `ResetScope` as Python gives one.
-fn scope(causes: &[ResetCause]) -> ResetScope {
-    causes
-        .iter()
-        .fold(ResetScope::NONE, |scope, &cause| scope.with(cause.into()))
+fn scope(causes: &[ResetCause]) -> Result<ResetScope, Error> {
+    causes.iter().try_fold(ResetScope::NONE, |scope, &cause| {
+        Ok(scope.with(cause.try_into()?))
+    })
 }
 
 /// A host cycle of `bytes`, 1, 2 or 4.
@@ -143,12 +159,7 @@ const fn cycle_size(bytes: u32) -> Result<Size, Error> {
 
 /// FC[2:0] as `bits`.
 fn function_code(bits: u8) -> Result<FunctionCode, Error> {
-    let function_code = FunctionCode::new(bits.into());
-    if function_code.bits() == bits {
-        Ok(function_code)
-    } else {
-        Err(Error::FunctionCode(bits))
-    }
+    FunctionCode::new(bits).ok_or(Error::FunctionCode(bits))
 }
 
 /// The board as the host wires it, before the power-on reset.
@@ -226,7 +237,9 @@ impl ChipBuilder {
         writable: bool,
     ) -> Result<usize, Error> {
         let pins = self::pins(&pins)?;
-        let id = self.builder()?.memory(contents.to_vec(), writable, &pins)?;
+        let id = self
+            .builder()?
+            .memory(contents.to_vec(), memory_kind(writable), &pins)?;
         Ok(self.wiring.borrow_mut().add_memory(id))
     }
 
@@ -240,22 +253,24 @@ impl ChipBuilder {
         contents: PyBackedBytes,
         writable: bool,
     ) -> Result<usize, Error> {
-        let id = self
-            .builder()?
-            .fixed_memory(Address(base), contents.to_vec(), writable)?;
+        let id = self.builder()?.fixed_memory(
+            Address(base),
+            contents.to_vec(),
+            memory_kind(writable),
+        )?;
         Ok(self.wiring.borrow_mut().add_memory(id))
     }
 
-    /// Fixed memory number `memory`'s port, `port` bits (8 or 16), and
-    /// its cycles' wait states, 0 to 13, or fast termination if `None`
-    /// (Rust's `fixed_timing`, which takes a `PortSize` and a
-    /// `Termination`); fast on 16 bits by default.
-    #[pyo3(signature = (memory, *, port = 16, wait_states = None))]
-    fn fixed_timing(
+    /// Fixed memory number `memory`'s port, `port` bits (8 or 16, Rust's
+    /// `PortSize`), and its cycles' `termination`, a `Termination`:
+    /// `Fast()`, the default, or `WaitStates(n)`, 0 to 13 (Rust's
+    /// `set_fixed_timing`).
+    #[pyo3(signature = (memory, *, port = 16, termination = None))]
+    fn set_fixed_timing(
         &mut self,
         memory: usize,
         port: u8,
-        wait_states: Option<u8>,
+        termination: Option<TerminationView>,
     ) -> Result<(), Error> {
         let memory = self.wiring.borrow().memory(memory)?;
         let port = match port {
@@ -263,16 +278,18 @@ impl ChipBuilder {
             16 => PortSize::Bits16,
             other => return Err(Error::PortWidth(other)),
         };
-        let termination = wait_states.map_or(Termination::Fast, Termination::WaitStates);
-        self.builder()?.fixed_timing(memory, port, termination)?;
+        let termination = termination.map_or(Termination::Fast, Termination::from);
+        self.builder()?
+            .set_fixed_timing(memory, port, termination)?;
         Ok(())
     }
 
     /// Only the resets in `scope`, `ResetCause`s, put memory number
     /// `memory`'s contents back as built; by default none do.
-    fn reload_scope(&mut self, memory: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
+    fn set_reload_scope(&mut self, memory: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
         let memory = self.wiring.borrow().memory(memory)?;
-        self.builder()?.reload_scope(memory, self::scope(&scope));
+        self.builder()?
+            .set_reload_scope(memory, self::scope(&scope)?);
         Ok(())
     }
 
@@ -339,16 +356,16 @@ impl ChipBuilder {
     /// PEPAR at each such cycle (`Event.Dsack`), and sizing it (SIMRM
     /// Table 5-2); unstated by default: unchecked, the select's port
     /// field sizing it.
-    fn dsack(&mut self, peripheral: usize, pins: DsackView) -> Result<(), Error> {
+    fn set_dsack(&mut self, peripheral: usize, pins: DsackView) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
-        self.builder()?.dsack(peripheral, pins.into());
+        self.builder()?.set_dsack(peripheral, pins.into());
         Ok(())
     }
 
     /// Only the resets in `scope`, `ResetCause`s, reach the QSPI's
     /// peripheral (its `reset(now)`); by default every one does.
-    fn qspi_reset_scope(&mut self, scope: Vec<ResetCause>) -> Result<(), Error> {
-        self.builder()?.qspi_reset_scope(self::scope(&scope));
+    fn set_qspi_reset_scope(&mut self, scope: Vec<ResetCause>) -> Result<(), Error> {
+        self.builder()?.set_qspi_reset_scope(self::scope(&scope)?);
         Ok(())
     }
 
@@ -376,26 +393,27 @@ impl ChipBuilder {
     }
 
     /// Peripheral `peripheral`'s interrupt output to IRQ`pin`.
-    fn interrupt(&mut self, peripheral: usize, pin: u8) -> Result<(), Error> {
+    fn set_interrupt(&mut self, peripheral: usize, pin: u8) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
         let pin = IrqPin::try_from(pin)?;
-        self.builder()?.interrupt(peripheral, pin);
+        self.builder()?.set_interrupt(peripheral, pin);
         Ok(())
     }
 
     /// Only the resets in `scope`, `ResetCause`s, reach peripheral number
     /// `peripheral`'s reset; by default every one does (SIMRM 8.2).
-    fn reset_scope(&mut self, peripheral: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
+    fn set_reset_scope(&mut self, peripheral: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
-        self.builder()?.reset_scope(peripheral, self::scope(&scope));
+        self.builder()?
+            .set_reset_scope(peripheral, self::scope(&scope)?);
         Ok(())
     }
 
     /// The board asserts AVEC at every acknowledge on IRQ`pin` (SIMRM
     /// 6.4).
-    fn autovector(&mut self, pin: u8) -> Result<(), Error> {
+    fn set_autovector(&mut self, pin: u8) -> Result<(), Error> {
         let pin = IrqPin::try_from(pin)?;
-        self.builder()?.autovector(pin);
+        self.builder()?.set_autovector(pin);
         Ok(())
     }
 
@@ -411,7 +429,8 @@ impl ChipBuilder {
     }
 }
 
-/// Why a run ended (Rust's `cpu::Stop`).
+/// Why a run ended (Rust's `cpu::Stop`).  A variant's value is a field
+/// named for it, not Rust's `_0`.
 #[pyclass(module = "mc683xx", frozen, eq, hash, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Stop {
@@ -421,15 +440,24 @@ pub(crate) enum Stop {
     /// the budget passed waiting.
     Stopped(),
     /// The CPU halted; only reset restarts it.
-    Halted(Halt),
+    Halted {
+        /// Why.
+        halt: Halt,
+    },
     /// A hook stopped it: the first to, if several did at once.
-    Hook(HookIdView),
+    Hook {
+        /// The hook.
+        hook: HookIdView,
+    },
     /// The host or a peripheral asked it to stop, once the instruction
     /// whose cycle asked ended: a stop request, or a peripheral's
     /// exception, which the run raises.
     Requested(),
     /// The CPU is in background mode, for its entry source.
-    Background(Entry),
+    Background {
+        /// The entry source.
+        entry: Entry,
+    },
     /// A fault stopped it rather than being taken (`set_stop_on_fault`):
     /// `fault_stop` says which.
     Fault(),
@@ -467,17 +495,55 @@ impl From<entry::Entry> for Entry {
     }
 }
 
-impl From<cpu::Stop> for Stop {
-    fn from(stop: cpu::Stop) -> Self {
-        match stop {
+#[pymethods]
+impl Entry {
+    fn __repr__(&self) -> String {
+        match self {
+            Self::Breakpoint() => "Entry.Breakpoint()".to_owned(),
+            Self::Background() => "Entry.Background()".to_owned(),
+            Self::DoubleBusFault { ssw } => format!("Entry.DoubleBusFault(ssw={ssw:#06x})"),
+            Self::Unknown { atemp } => format!("Entry.Unknown(atemp={atemp:#010x})"),
+        }
+    }
+}
+
+#[pymethods]
+impl Stop {
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(match self {
+            Self::Budget() => "Stop.Budget()".to_owned(),
+            Self::Stopped() => "Stop.Stopped()".to_owned(),
+            Self::Halted { halt } => format!("Stop.Halted({})", repr(py, *halt)?),
+            Self::Hook { hook } => format!("Stop.Hook({})", repr(py, *hook)?),
+            Self::Requested() => "Stop.Requested()".to_owned(),
+            Self::Background { entry } => format!("Stop.Background({})", entry.__repr__()),
+            Self::Fault() => "Stop.Fault()".to_owned(),
+        })
+    }
+}
+
+impl TryFrom<cpu::Stop> for Stop {
+    type Error = Error;
+
+    /// The stop, or [`Error::Unmapped`] naming one the bindings do not
+    /// know.
+    fn try_from(stop: cpu::Stop) -> Result<Self, Error> {
+        Ok(match stop {
             cpu::Stop::Budget => Self::Budget(),
             cpu::Stop::Stopped => Self::Stopped(),
-            cpu::Stop::Halted(halt) => Self::Halted(halt.into()),
-            cpu::Stop::Hook(id) => Self::Hook(HookIdView(id)),
-            cpu::Stop::Background(entry) => Self::Background(entry.into()),
+            cpu::Stop::Halted(halt) => Self::Halted {
+                halt: halt.try_into()?,
+            },
+            cpu::Stop::Hook(id) => Self::Hook {
+                hook: HookIdView(id),
+            },
+            cpu::Stop::Requested => Self::Requested(),
+            cpu::Stop::Background(entry) => Self::Background {
+                entry: entry.into(),
+            },
             cpu::Stop::Fault => Self::Fault(),
-            _ => Self::Requested(),
-        }
+            other => return Err(Error::run_end(other)),
+        })
     }
 }
 
@@ -497,11 +563,15 @@ pub(crate) enum Halt {
     DoubleBusFault,
 }
 
-impl From<cpu::Halt> for Halt {
-    fn from(halt: cpu::Halt) -> Self {
+impl TryFrom<cpu::Halt> for Halt {
+    type Error = Error;
+
+    /// The halt, or [`Error::Unmapped`] naming one the bindings do not
+    /// know.
+    fn try_from(halt: cpu::Halt) -> Result<Self, Error> {
         match halt {
-            cpu::Halt::DoubleBusFault => Self::DoubleBusFault,
-            _ => panic!("a halt the bindings do not know"),
+            cpu::Halt::DoubleBusFault => Ok(Self::DoubleBusFault),
+            other => Err(Error::run_end(other)),
         }
     }
 }
@@ -532,6 +602,9 @@ pub(crate) enum ResetCause {
     LossOfClock,
     /// The test submodule.
     Test,
+    /// A cause newer than the bindings, in an `Event.Reset`: never one
+    /// to ask for.
+    Unknown,
 }
 
 impl From<sim::ResetCause> for ResetCause {
@@ -544,15 +617,17 @@ impl From<sim::ResetCause> for ResetCause {
             sim::ResetCause::System => Self::System,
             sim::ResetCause::LossOfClock => Self::LossOfClock,
             sim::ResetCause::Test => Self::Test,
-            // every cause RSR has is above (`sim::ResetCause::ALL`)
-            _ => unreachable!("a reset cause without an RSR bit"),
+            _ => Self::Unknown,
         }
     }
 }
 
-impl From<ResetCause> for sim::ResetCause {
-    fn from(cause: ResetCause) -> Self {
-        match cause {
+impl TryFrom<ResetCause> for sim::ResetCause {
+    type Error = Error;
+
+    /// The cause, or [`Error::UnknownResetCause`] for `UNKNOWN`.
+    fn try_from(cause: ResetCause) -> Result<Self, Error> {
+        Ok(match cause {
             ResetCause::External => Self::External,
             ResetCause::PowerOn => Self::PowerOn,
             ResetCause::Watchdog => Self::Watchdog,
@@ -560,7 +635,8 @@ impl From<ResetCause> for sim::ResetCause {
             ResetCause::System => Self::System,
             ResetCause::LossOfClock => Self::LossOfClock,
             ResetCause::Test => Self::Test,
-        }
+            ResetCause::Unknown => return Err(Error::UnknownResetCause),
+        })
     }
 }
 
@@ -574,19 +650,25 @@ pub(crate) struct Run {
     stop: Stop,
 }
 
-impl From<cpu::Run> for Run {
-    fn from(run: cpu::Run) -> Self {
-        Self {
-            cycles: run.cycles.0,
-            stop: run.stop.into(),
-        }
+impl TryFrom<cpu::Run> for Run {
+    type Error = Error;
+
+    fn try_from(run: cpu::Run) -> Result<Self, Error> {
+        Ok(Self {
+            cycles: run.cycles.clocks(),
+            stop: run.stop.try_into()?,
+        })
     }
 }
 
 #[pymethods]
 impl Run {
-    fn __repr__(&self) -> String {
-        format!("Run(cycles={}, stop={:?})", self.cycles, self.stop)
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "Run(cycles={}, stop={})",
+            self.cycles,
+            self.stop.__repr__(py)?
+        ))
     }
 }
 
@@ -614,6 +696,61 @@ impl From<Space> for memory::Space {
         match space {
             Space::User => Self::User,
             Space::Supervisor => Self::Supervisor,
+        }
+    }
+}
+
+/// A port change as Python takes it: `(now, port, driven, levels)`
+/// (Rust's `PortChange`, flattened).
+type PortChangeView = (u64, PortView, u8, u8);
+
+/// A PWM pin's edge as Python takes it: `(now, channel, level)` (Rust's
+/// `PwmChange`, flattened).
+type PwmChangeView = (u64, ChannelView, bool);
+
+/// `change` as Python takes it.
+fn port_change(change: PortChange) -> PortChangeView {
+    (
+        change.now.clocks(),
+        change.port.into(),
+        change.outputs.driven(),
+        change.outputs.levels(),
+    )
+}
+
+/// `change` as Python takes it.
+fn pwm_change(change: PwmChange) -> PwmChangeView {
+    (change.now.clocks(), change.channel.into(), change.level)
+}
+
+/// A change the bindings do not know as Python takes it: `(now, None,
+/// text)`, `text` what changed as Rust prints it (its `Display`).  The
+/// second is always `None`.
+type UnknownChangeView = (u64, Option<()>, String);
+
+/// A port change or a PWM pin's edge as Python takes it from
+/// `take_output_changes`: the tuple `take_port_changes` or
+/// `take_pwm_changes` gives, told apart by its length and by a `Port` or
+/// a `Channel` second (Rust's `OutputChange`, flattened), or one the
+/// bindings do not know, with `None` second.
+#[derive(Debug, Clone, PartialEq, Eq, IntoPyObject)]
+enum OutputChangeView {
+    /// A port's.
+    Port(PortChangeView),
+    /// A PWM pin's.
+    Pwm(PwmChangeView),
+    /// One of a kind newer than the bindings.
+    Unknown(UnknownChangeView),
+}
+
+impl From<OutputChange> for OutputChangeView {
+    /// The change, [`OutputChangeView::Unknown`] for one the bindings
+    /// do not know, so that none drained is lost.
+    fn from(change: OutputChange) -> Self {
+        match change {
+            OutputChange::Port(change) => Self::Port(port_change(change)),
+            OutputChange::Pwm(change) => Self::Pwm(pwm_change(change)),
+            _ => Self::Unknown((change.now().clocks(), None, change.to_string())),
         }
     }
 }
@@ -654,6 +791,42 @@ impl From<DsackView> for Dsack {
     }
 }
 
+/// How a select would end a cycle it matches (Rust's
+/// `chip_selects::Termination`; SIMRM 7.5, 7.7), a class per variant.
+#[pyclass(
+    name = "Termination",
+    module = "mc683xx",
+    frozen,
+    eq,
+    hash,
+    from_py_object
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum TerminationView {
+    /// Internal DSACK after two clocks.
+    Fast(),
+    /// Internal DSACK after `wait_states` wait states, 0 to 13.
+    WaitStates {
+        /// The wait states.
+        wait_states: u8,
+    },
+    /// The peripheral asserts DSACK.
+    External(),
+    /// MODE set: the cycle runs on ECLK.
+    Eclk(),
+}
+
+impl From<TerminationView> for Termination {
+    fn from(termination: TerminationView) -> Self {
+        match termination {
+            TerminationView::Fast() => Self::Fast,
+            TerminationView::WaitStates { wait_states } => Self::WaitStates(wait_states),
+            TerminationView::External() => Self::External,
+            TerminationView::Eclk() => Self::Eclk,
+        }
+    }
+}
+
 /// How a peripheral's DSACK pins disagree with the chip (Rust's
 /// `event::DsackFault`).
 #[pyclass(
@@ -681,7 +854,8 @@ pub(crate) enum DsackFaultView {
 }
 
 impl DsackFaultView {
-    /// `fault` as Python sees it, if Python has it.
+    /// `fault` as Python sees it, `None` for one the bindings do not
+    /// know.
     fn of(fault: DsackFault) -> Option<Self> {
         match fault {
             DsackFault::Unassigned { select } => Some(Self::Unassigned {
@@ -710,6 +884,8 @@ pub(crate) enum Event {
     /// Two interrupt sources of one level had the same nonzero IARB;
     /// a fixed order chose (PLAN.md, Where the manuals are silent).
     ArbitrationTie {
+        /// When the level was acknowledged, in system clocks.
+        now: u64,
         /// The level acknowledged.
         level: u8,
         /// The IARB value they shared.
@@ -743,6 +919,10 @@ pub(crate) enum Event {
         pc: u32,
         /// Its handler's address.
         handler: u32,
+        /// SSP: its frame's lowest address.
+        stack: u32,
+        /// The interrupt level, for an interrupt.
+        level: Option<u8>,
     },
     /// A peripheral's DSACK pins (`Builder.dsack`) disagree with the chip
     /// on an externally terminated cycle at `now`: told once for each
@@ -753,41 +933,74 @@ pub(crate) enum Event {
         /// How.
         fault: DsackFaultView,
     },
+    /// An event the bindings cannot convert: a kind newer than they
+    /// are, or a DSACK fault they do not know.
+    Unknown {
+        /// When, in system clocks.
+        now: u64,
+        /// What happened, as Rust prints it (its `Display`).
+        text: String,
+    },
 }
 
 impl Event {
-    /// `event` as Python sees it, if Python has it.
-    pub(crate) fn of(event: event::Event) -> Option<Self> {
-        Some(match event {
-            event::Event::Reset(now, cause) => Self::Reset {
-                now: now.0,
+    /// `event` as Python sees it, [`Event::Unknown`] for one it cannot
+    /// convert; a reset cause the bindings do not know is
+    /// [`ResetCause::Unknown`].
+    pub(crate) fn of(event: event::Event) -> Self {
+        let unknown = || Self::Unknown {
+            now: event.now().clocks(),
+            text: event.to_string(),
+        };
+        match event {
+            event::Event::Reset { now, cause, .. } => Self::Reset {
+                now: now.clocks(),
                 cause: cause.into(),
             },
-            event::Event::ArbitrationTie { level, arbitration } => Self::ArbitrationTie {
+            event::Event::ArbitrationTie {
+                now,
+                level,
+                arbitration,
+                ..
+            } => Self::ArbitrationTie {
+                now: now.clocks(),
                 level: level.get(),
                 arbitration,
             },
-            event::Event::Access(access) => Self::Access {
-                now: access.now.0,
-                address: access.address.0,
-                size: access.size.bytes(),
-                function_code: access.function_code.bits(),
-                write: access.write,
-                value: access.value,
-                bus_error: access.bus_error,
+            event::Event::Access {
+                now,
+                address,
+                size,
+                function_code,
+                write,
+                value,
+                bus_error,
+                ..
+            } => Self::Access {
+                now: now.clocks(),
+                address: address.0,
+                size: size.bytes(),
+                function_code: function_code.get(),
+                write,
+                value,
+                bus_error,
             },
-            event::Event::Exception(now, entry) => Self::Exception {
-                now: now.0,
+            event::Event::Exception { now, entry, .. } => Self::Exception {
+                now: now.clocks(),
                 vector: entry.vector.0,
                 pc: entry.pc.0,
                 handler: entry.handler.0,
+                stack: entry.stack.0,
+                level: entry.level.map(|level| level.get()),
             },
-            event::Event::Dsack(now, fault) => Self::Dsack {
-                now: now.0,
-                fault: DsackFaultView::of(fault)?,
-            },
-            _ => return None,
-        })
+            event::Event::Dsack { now, fault, .. } => {
+                DsackFaultView::of(fault).map_or_else(unknown, |fault| Self::Dsack {
+                    now: now.clocks(),
+                    fault,
+                })
+            }
+            _ => unknown(),
+        }
     }
 }
 
@@ -864,13 +1077,15 @@ macro_rules! chip_methods {
             /// Now, in system clocks.
             #[getter]
             fn now(&self, py: Python<'_>) -> PyResult<u64> {
-                self.with_chip(py, |chip| Ok(chip.now().0))
+                self.with_chip(py, |chip| Ok(chip.now().clocks()))
             }
 
             /// Why the CPU halted, while it stays halted.
             #[getter]
             fn halted(&self, py: Python<'_>) -> PyResult<Option<Halt>> {
-                self.with_chip(py, |chip| Ok(chip.halted().map(Halt::from)))
+                self.with_chip(py, |chip| {
+                    Ok(chip.cpu().halted().map(Halt::try_from).transpose()?)
+                })
             }
 
             /// The `Entry` while the CPU is in background mode (CPU32RM
@@ -918,29 +1133,15 @@ macro_rules! chip_methods {
                 self.with_chip(py, |chip| hooks::register_dictionary(py, &chip.cpu().registers))
             }
 
-            /// Port C's output pins, PC0 to PC6 on CS3 to CS9, and their
-            /// levels, as two masks (MC68331UM 4.8.1.4).
-            fn port_c_outputs(&self, py: Python<'_>) -> PyResult<(u8, u8)> {
-                self.with_chip(py, |chip| Ok(pair(chip.port_c_outputs())))
+            /// `port`'s output pins and their levels now, as two masks.
+            fn outputs(&self, py: Python<'_>, port: PortView) -> PyResult<(u8, u8)> {
+                self.with_chip(py, |chip| Ok(pair(chip.outputs(port.into()))))
             }
 
-            /// Port E's output pins and their levels, as two masks
-            /// (MC68331UM 4.9).
-            fn port_e_outputs(&self, py: Python<'_>) -> PyResult<(u8, u8)> {
-                self.with_chip(py, |chip| Ok(pair(chip.port_e_outputs())))
-            }
-
-            /// Port F's output pins and their levels, as two masks
-            /// (MC68331UM 4.9).
-            fn port_f_outputs(&self, py: Python<'_>) -> PyResult<(u8, u8)> {
-                self.with_chip(py, |chip| Ok(pair(chip.port_f_outputs())))
-            }
-
-            /// PORTC, the latch for the chip-select pins assigned as
-            /// discrete outputs (SIMRM 7.10.4).
-            #[getter]
-            fn port_c(&self, py: Python<'_>) -> PyResult<u8> {
-                self.with_chip(py, |chip| Ok(chip.sim().port_c()))
+            /// `port`'s registers and the levels the board drives on its
+            /// pins.
+            fn port(&self, py: Python<'_>, port: PortView) -> PyResult<PortStateView> {
+                self.with_chip(py, |chip| Ok(chip.port(port.into()).into()))
             }
 
             /// The system clock's frequency in hertz, as SYNCR sets it.
@@ -949,31 +1150,21 @@ macro_rules! chip_methods {
                 self.with_chip(py, |chip| Ok(chip.sim().clock().frequency().hz()))
             }
 
-            /// Port QS's output pins and their levels, as two masks.
-            fn port_qs_outputs(&self, py: Python<'_>) -> PyResult<(u8, u8)> {
-                self.with_chip(py, |chip| Ok(pair(chip.port_qs_outputs())))
-            }
-
             /// The levels on PCS[3:0].
             #[getter]
             fn qspi_chip_selects(&self, py: Python<'_>) -> PyResult<u8> {
                 self.with_chip(py, |chip| Ok(chip.qsm().chip_selects()))
             }
 
-            /// Port GP's output pins and their levels, as two masks.
-            fn port_gp_outputs(&self, py: Python<'_>) -> PyResult<(u8, u8)> {
-                self.with_chip(py, |chip| Ok(pair(chip.port_gp_outputs())))
-            }
-
             /// What PWM `channel` carries now.
             fn pwm(&self, py: Python<'_>, channel: ChannelView) -> PyResult<Output> {
-                self.with_chip(py, |chip| Ok(chip.pwm(channel.into()).into()))
+                self.with_chip(py, |chip| Ok(chip.pwm(channel.into()).try_into()?))
             }
 
             /// What OC1's pin carries now: `Output.Clock` under CPROUT,
             /// `Output.Level` otherwise.
             fn oc1(&self, py: Python<'_>) -> PyResult<Output> {
-                self.with_chip(py, |chip| Ok(chip.oc1().into()))
+                self.with_chip(py, |chip| Ok(chip.oc1().try_into()?))
             }
 
             /// Calls `callback(Instruction)` before each instruction at an
@@ -1143,10 +1334,12 @@ impl Chip {
     fn run_to(&mut self, py: Python<'_>, end: Cycles) -> PyResult<Run> {
         let start = self.chip.now();
         loop {
-            let target = Cycles(self.chip.now().0.saturating_add(QUANTUM.0)).min(end);
+            let target =
+                Cycles::from_clocks(self.chip.now().clocks().saturating_add(QUANTUM.clocks()))
+                    .min(end);
             // A chip halted before the quantum spends it as time passes
             // (no instruction runs), so its halt goes on to the next.
-            let halted = self.chip.halted().is_some();
+            let halted = self.chip.cpu().halted().is_some();
             let run = self.chip.run_until(target);
             self.pending.check()?;
             let now = self.chip.now();
@@ -1154,7 +1347,7 @@ impl Chip {
                 && (matches!(run.stop, cpu::Stop::Budget | cpu::Stop::Stopped)
                     || (halted && matches!(run.stop, cpu::Stop::Halted(_))));
             if !quantized || now >= end {
-                return Ok(cpu::Run::new(now - start, run.stop).into());
+                return Ok(cpu::Run::new(now - start, run.stop).try_into()?);
             }
             py.check_signals()?;
         }
@@ -1241,7 +1434,7 @@ chip_methods! {
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
-        self.with_chip(py, |chip| Ok(format!("BoardChip(now={})", chip.now().0)))
+        self.with_chip(py, |chip| Ok(format!("BoardChip(now={})", chip.now().clocks())))
     }
 }
 
@@ -1264,10 +1457,10 @@ chip_methods! {
     /// cycle undriven, the bus not faulted, and stops the run once that
     /// instruction ends; it is raised here, the chip as it then is.
     fn run_for(&mut self, py: Python<'_>, budget: u64) -> PyResult<Run> {
-        let Some(end) = self.chip.now().0.checked_add(budget) else {
+        let Some(end) = self.chip.now().clocks().checked_add(budget) else {
             return Err(Error::Budget(budget).into());
         };
-        self.run_to(py, Cycles(end))
+        self.run_to(py, Cycles::from_clocks(end))
     }
 
     /// Waits for gdb at `address` (`host:port`, port 0 picks one),
@@ -1295,7 +1488,7 @@ chip_methods! {
     /// the first instruction boundary at or after it, so a series of
     /// these to rising targets is one long run.  Exceptions as `run_for`.
     fn run_until(&mut self, py: Python<'_>, target: u64) -> PyResult<Run> {
-        self.run_to(py, Cycles(target))
+        self.run_to(py, Cycles::from_clocks(target))
     }
 
     /// RESET driven by the board.
@@ -1309,7 +1502,7 @@ chip_methods! {
     /// `reset` instruction's, resets all but the CPU; `EXTERNAL` is
     /// `reset()`.
     fn reset_for(&mut self, cause: ResetCause) -> PyResult<()> {
-        self.chip.reset_for(cause.into());
+        self.chip.reset_for(cause.try_into()?);
         self.pending.check()
     }
 
@@ -1326,7 +1519,8 @@ chip_methods! {
     /// with background mode enabled the CPU enters it at once, as `halt`
     /// makes it, and this is true; disabled, a hardware breakpoint is
     /// left pending for the next run, which takes vector 12 unless a
-    /// peripheral ends its acknowledge cycle, and this is false.
+    /// peripheral ends its acknowledge cycle, and this is false.  A
+    /// halted CPU ignores it, and this is false.
     fn assert_breakpoint(&mut self) -> PyResult<bool> {
         let entered = self.chip.assert_breakpoint();
         self.pending.check()?;
@@ -1408,43 +1602,27 @@ chip_methods! {
         Ok(())
     }
 
-    /// The board drives port E's input pins to `pins`.
-    const fn set_port_e_pins(&mut self, pins: u8) {
-        self.chip.set_port_e_pins(pins);
+    /// The board drives the pins of `port` in `mask` (all of them by
+    /// default) to their levels in `value` now, the others as they
+    /// were; port C, with no inputs, raises `ValueError`.
+    #[pyo3(signature = (port, value, mask = u8::MAX))]
+    fn set_pins(&mut self, port: PortView, value: u8, mask: u8) -> PyResult<()> {
+        self.chip
+            .set_pins(port.into(), value, mask)
+            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        self.pending.check()
     }
 
-    /// The board drives port F's input pins to `pins`.
-    const fn set_port_f_pins(&mut self, pins: u8) {
-        self.chip.set_port_f_pins(pins);
-    }
-
-    /// The changes in what ports C, E and F drive since the last call:
-    /// `(now, port, driven, levels)`, a `PortName`, its output pins and
-    /// their levels as two masks (Rust's `ports::Change`, flattened).
-    fn take_port_changes(&mut self) -> Vec<(u64, PortNameView, u8, u8)> {
+    /// The changes in what each port drives since the last call, in time
+    /// order: `(now, port, driven, levels)`, a `Port`, its output pins
+    /// and their levels as two masks (Rust's `PortChange`, flattened).
+    /// A host with no board takes them, or they gather in the chip and
+    /// its snapshot.
+    fn take_port_changes(&mut self) -> Vec<PortChangeView> {
         self.chip
             .take_port_changes()
             .into_iter()
-            .map(|(now, change)| {
-                (
-                    now.0,
-                    change.port.into(),
-                    change.outputs.driven,
-                    change.outputs.levels,
-                )
-            })
-            .collect()
-    }
-
-    /// The changes in what port QS drives since the last call, in time
-    /// order: `(now, driven, levels)` (Rust's `take_qsm_changes`).  A
-    /// host with no board takes them, or they gather in the chip and
-    /// its snapshot.
-    fn take_qsm_changes(&mut self) -> Vec<(u64, u8, u8)> {
-        self.chip
-            .take_qsm_changes()
-            .into_iter()
-            .map(|(now, outputs)| (now.0, outputs.driven, outputs.levels))
+            .map(port_change)
             .collect()
     }
 
@@ -1468,15 +1646,8 @@ chip_methods! {
         self.chip
             .take_sci_transmitted()
             .into_iter()
-            .map(|sent| (sent.start.0, sent.frame.into()))
+            .map(|sent| (sent.start.clocks(), sent.frame.into()))
             .collect()
-    }
-
-    /// The board drives port QS's input pins to `pins` now (MC68331UM
-    /// D.4.8).
-    fn set_port_qs_pins(&mut self, pins: u8) -> PyResult<()> {
-        self.chip.set_port_qs_pins(pins);
-        self.pending.check()
     }
 
     /// The host, as an external SPI master, drives PCS0/SS low now if
@@ -1495,48 +1666,49 @@ chip_methods! {
             return Err(Error::Shift { mosi, bits }.into());
         }
         let budget = period.saturating_mul(bits.into());
-        if self.chip.now().0.checked_add(budget).is_none() {
+        if self.chip.now().clocks().checked_add(budget).is_none() {
             return Err(Error::Budget(budget).into());
         }
-        let shifted = self.chip.qspi_slave_shift(mosi, bits, Cycles(period));
+        let shifted = self.chip.qspi_slave_shift(mosi, bits, Cycles::from_clocks(period));
         self.pending.check()?;
         Ok((shifted.miso, shifted.driven))
     }
 
-    /// The board drives port GP's input pins, IC1 to IC4/OC5, to `pins`
-    /// now (GPTRM 3.2).
-    fn set_port_gp_pins(&mut self, pins: u8) {
-        self.chip.set_port_gp_pins(pins);
+    /// The board drives GPT input `input` to `level` now.
+    fn set_gpt_input(&mut self, input: InputView, level: bool) {
+        self.chip.set_gpt_input(input.into(), level);
     }
 
-    /// The board drives PAI to `level` now (GPTRM 4).
-    fn set_pai(&mut self, level: bool) {
-        self.chip.set_pai(level);
-    }
-
-    /// The board drives PCLK to `level` now (GPTRM 2.7).
-    fn set_pclk(&mut self, level: bool) {
-        self.chip.set_pclk(level);
-    }
-
-    /// The board will drive GPT input `input`, `PGP0` to `PGP7`, `PAI`
-    /// or `PCLK`, to `level` at time `at`, or now if that is past; a
-    /// run's quantum ends there.
-    fn schedule_gpt_input(&mut self, at: u64, input: &str, level: bool) -> Result<(), Error> {
+    /// The board will drive GPT input `input` to `level` at time `at`,
+    /// or now if that is past; a run's quantum ends there.
+    fn schedule_gpt_input(&mut self, at: u64, input: InputView, level: bool) {
         self.chip
-            .schedule_gpt_input(Cycles(at), peripherals::input(input)?, level);
-        Ok(())
+            .schedule_gpt_input(Cycles::from_clocks(at), input.into(), level);
     }
 
-    /// The changes in what the GPT drives since the last call, in time
-    /// order: `(now, OutputChange)`, port GP's, and PWMA's or PWMB's
-    /// while `set_report_pwm_edges` asks for them; OC1's CPROUT clock in
-    /// port GP's while `set_report_oc1_clock_edges` does.
-    fn take_gpt_changes(&mut self) -> Vec<(u64, OutputChangeView)> {
+    /// The PWM pins' edges since the last call, in time order, while
+    /// `set_report_pwm_edges` asks for them: `(now, channel, level)`
+    /// (Rust's `PwmChange`, flattened).
+    fn take_pwm_changes(&mut self) -> Vec<PwmChangeView> {
         self.chip
-            .take_gpt_changes()
+            .take_pwm_changes()
             .into_iter()
-            .map(|(now, change)| (now.0, change.into()))
+            .map(pwm_change)
+            .collect()
+    }
+
+    /// Both, taken in one stream, in time order, those at one time in
+    /// `Port`'s order, a PWM pin's in port `GP`'s place, port `GP`'s and
+    /// the PWM pins' in the order they happened: each a port change's
+    /// `(now, port, driven, levels)` or a PWM edge's `(now, channel,
+    /// level)` (Rust's `take_output_changes`); one of a kind the
+    /// bindings do not know is `(now, None, text)`, so none is lost.
+    /// Each of the three takes what it gives and leaves the rest.
+    fn take_output_changes(&mut self) -> Vec<OutputChangeView> {
+        self.chip
+            .take_output_changes()
+            .into_iter()
+            .map(OutputChangeView::from)
             .collect()
     }
 
@@ -1553,11 +1725,7 @@ chip_methods! {
 
     /// What happened since the last call.
     fn take_events(&mut self) -> Vec<Event> {
-        self.chip
-            .take_events()
-            .into_iter()
-            .filter_map(Event::of)
-            .collect()
+        self.chip.take_events().into_iter().map(Event::of).collect()
     }
 
     /// Whether the events trace each bus cycle that reaches the chip

@@ -2,22 +2,30 @@
 //!
 //! The chip's section, the memories with their contents, the
 //! decoders, the peripherals' wiring and the nets' endpoints, every name
-//! resolved ([`docs/board-files.md`][board-files]).
+//! resolved ([`docs/board-files.md`][board-files]).  The nets' ends at
+//! peripherals are checked against a registry's ports by
+//! [`Description::check_ports`], as a load checks them.
 //!
 //! [board-files]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/board-files.md
 
+use std::borrow::Cow;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::fs;
 use std::io;
+use std::mem;
 use std::path::Path;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::interrupt::IrqPin;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
@@ -27,16 +35,26 @@ use mc683xx_modules::sim::reset::ResetScope;
 use mc683xx_target::address::Address;
 
 use crate::endpoint::Endpoint;
+use crate::error::EditError;
 use crate::error::LoadError;
+use crate::error::ParseSettingError;
 use crate::error::SyntaxError;
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
+use crate::registry::ConstructError;
+use crate::registry::Constructed;
+use crate::registry::Context;
+use crate::registry::Environment;
+use crate::registry::ParameterError;
 use crate::registry::ParameterTable;
 use crate::registry::ParameterValue;
+use crate::registry::Parameters;
+use crate::registry::PortSpec;
+use crate::registry::Registry;
+use crate::registry::repeated_port;
 use crate::registry::table_from_toml;
 use crate::schema;
 use crate::schema::Attachment;
-use crate::schema::Cause;
 use crate::schema::Dsack;
 use crate::schema::Endpoints;
 use crate::schema::FileRole;
@@ -66,9 +84,13 @@ const NOTE: &str = "note";
 #[derive(Debug, Clone, Default, PartialEq)]
 #[non_exhaustive]
 pub struct Options {
-    /// The options enabled: entries `when` names are on the board only
-    /// if their option is here.
+    /// The options enabled: an entry with an `option` is on the board
+    /// only if its option is here.
     pub enabled: BTreeSet<String>,
+    /// Every option the file declares enabled, as if each were in
+    /// `enabled`: the board with every option fitted, whatever `enabled`
+    /// holds (each name in it is still checked against the file's).
+    pub all_enabled: bool,
     /// The firmware image to run, one of `[board] images` or another:
     /// it replaces every memory's image that is one of them.
     pub firmware: Option<PathBuf>,
@@ -95,16 +117,76 @@ impl Options {
             .insert(key.into(), value.into());
     }
 
-    /// Sets a parameter from `assignment`, `PERIPHERAL.KEY=VALUE` (the
-    /// runner's `--set`): `VALUE` a TOML value (`3`, `0x10`, `true`,
-    /// `"text"`, `[1, 2]`), or else taken as a bare string.
-    ///
-    /// # Errors
-    ///
-    /// An `assignment` not of that form, its peripheral or key empty
-    /// ([`LoadError::Setting`]).
-    pub fn set(&mut self, assignment: &str) -> Result<(), LoadError> {
-        let malformed = || LoadError::Setting(assignment.to_owned());
+    /// Sets the parameter `setting` names to its value.
+    pub fn set(&mut self, setting: Setting) {
+        self.set_parameter(setting.peripheral, setting.key, setting.value);
+    }
+}
+
+/// One parameter of one peripheral and its value, as the runner's
+/// `--set` gives it: `PERIPHERAL.KEY=VALUE`, `VALUE` a TOML value (`3`,
+/// `0x10`, `true`, `"text"`, `[1, 2]`), or else taken as a bare string.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Setting {
+    /// The peripheral's name.
+    peripheral: String,
+    /// The parameter's key.
+    key: String,
+    /// Its value.
+    value: ParameterValue,
+}
+
+impl Setting {
+    /// Parameter `key` of `peripheral` set to `value`.
+    #[must_use]
+    pub fn new(
+        peripheral: impl Into<String>,
+        key: impl Into<String>,
+        value: impl Into<ParameterValue>,
+    ) -> Self {
+        Self {
+            peripheral: peripheral.into(),
+            key: key.into(),
+            value: value.into(),
+        }
+    }
+
+    /// The peripheral's name.
+    #[must_use]
+    pub fn peripheral(&self) -> &str {
+        &self.peripheral
+    }
+
+    /// The parameter's key.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// Its value.
+    #[must_use]
+    pub const fn value(&self) -> &ParameterValue {
+        &self.value
+    }
+}
+
+/// `PERIPHERAL.KEY=VALUE`, its value as TOML writes it.  A setting
+/// `FromStr` parsed reads back the same; one built by [`Setting::new`]
+/// does too while its names are non-empty, the peripheral's holds no
+/// `.` and neither an `=` (a datetime TOML would not write is written
+/// as a string).
+impl fmt::Display for Setting {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}.{}={}", self.peripheral, self.key, self.value)
+    }
+}
+
+impl FromStr for Setting {
+    type Err = ParseSettingError;
+
+    /// `PERIPHERAL.KEY=VALUE`, its peripheral and key not empty.
+    fn from_str(assignment: &str) -> Result<Self, Self::Err> {
+        let malformed = || ParseSettingError(assignment.to_owned());
         let (path, text) = assignment.split_once('=').ok_or_else(malformed)?;
         let (peripheral, key) = path.split_once('.').ok_or_else(malformed)?;
         if peripheral.is_empty() || key.is_empty() {
@@ -114,8 +196,7 @@ impl Options {
             .ok()
             .and_then(|mut table| table.remove("value"))
             .map_or_else(|| ParameterValue::from(text), ParameterValue::from_toml);
-        self.set_parameter(peripheral, key, value);
-        Ok(())
+        Ok(Self::new(peripheral, key, value))
     }
 }
 
@@ -135,8 +216,8 @@ pub(crate) struct MemorySpec {
     pub(crate) name: String,
     /// Its contents.
     pub(crate) bytes: Vec<u8>,
-    /// Whether writes reach it.
-    pub(crate) writable: bool,
+    /// ROM or RAM: whether writes reach it.
+    pub(crate) kind: MemoryKind,
     /// Its selects; none at a fixed address.
     pub(crate) pins: Vec<ChipSelect>,
     /// Its fixed address, emulator-only, in place of selects.
@@ -277,26 +358,128 @@ pub struct Description {
 }
 
 impl Description {
+    /// Peripheral `name`'s entry, to edit.
+    fn peripheral_mut(&mut self, name: &str) -> Result<&mut PeripheralSpec, EditError> {
+        self.peripherals
+            .iter_mut()
+            .find(|spec| spec.name == name)
+            .ok_or_else(|| EditError::Peripheral(name.to_owned()))
+    }
+
+    /// The parameters of `peripheral`, the run's (`Options::parameters`)
+    /// merged over the file's, if the description has it.
+    #[must_use]
+    pub fn parameters(&self, peripheral: &str) -> Option<&ParameterTable> {
+        self.peripherals
+            .iter()
+            .find(|spec| spec.name == peripheral)
+            .map(|spec| &spec.parameters)
+    }
+
     /// Sets parameter `key` of `peripheral` to `value`, as
     /// [`Options::set_parameter`] does before the file is read: checked
     /// by the type's constructor when the board loads.
     ///
     /// # Errors
     ///
-    /// A description with no peripheral `peripheral` ([`LoadError::Peripheral`]).
+    /// A description with no peripheral `peripheral` ([`EditError::Peripheral`]).
     pub fn set_parameter(
         &mut self,
         peripheral: &str,
         key: impl Into<String>,
         value: impl Into<ParameterValue>,
-    ) -> Result<(), LoadError> {
-        let spec = self
-            .peripherals
-            .iter_mut()
-            .find(|spec| spec.name == peripheral)
-            .ok_or_else(|| LoadError::Peripheral(peripheral.to_owned()))?;
-        spec.parameters.insert(key.into(), value.into());
+    ) -> Result<(), EditError> {
+        self.peripheral_mut(peripheral)?
+            .parameters
+            .insert(key.into(), value.into());
         Ok(())
+    }
+
+    /// Removes parameter `key` of `peripheral`, giving its value if it
+    /// had one.
+    ///
+    /// # Errors
+    ///
+    /// A description with no peripheral `peripheral` ([`EditError::Peripheral`]).
+    pub fn remove_parameter(
+        &mut self,
+        peripheral: &str,
+        key: &str,
+    ) -> Result<Option<ParameterValue>, EditError> {
+        Ok(self.peripheral_mut(peripheral)?.parameters.remove(key))
+    }
+
+    /// Removes peripheral `name` from the board, as an option off would
+    /// leave it off: its net ends go, and a net left with no driver or no
+    /// sink goes with them, whatever ends it had left, an `external.*` end
+    /// among them.  The names of the nets that went, in the file's order,
+    /// so that a host sees an external endpoint it binds left on no net.
+    /// An end to keep is rebound first ([`Description::rebind`]).
+    ///
+    /// # Errors
+    ///
+    /// A description with no peripheral `name` ([`EditError::Peripheral`]).
+    pub fn remove_peripheral(&mut self, name: &str) -> Result<Vec<String>, EditError> {
+        let index = self
+            .peripherals
+            .iter()
+            .position(|spec| spec.name == name)
+            .ok_or_else(|| EditError::Peripheral(name.to_owned()))?;
+        self.peripherals.remove(index);
+        let of_other = |end: &Endpoint| !matches!(end, Endpoint::Peripheral { peripheral, .. } if peripheral == name);
+        for net in &mut self.nets {
+            net.from.retain(of_other);
+            net.to.retain(of_other);
+        }
+        let (kept, removed) = mem::take(&mut self.nets)
+            .into_iter()
+            .partition(|net| !net.from.is_empty() && !net.to.is_empty());
+        self.nets = kept;
+        Ok(removed.into_iter().map(|net: NetSpec| net.name).collect())
+    }
+
+    /// Moves every net end at `endpoint`, a peripheral's port
+    /// (`peripheral.port`), to the run-time endpoint `external` the
+    /// host binds, by its bare name (`external.<name>` in the file), as
+    /// [`Board::send`] and the rest name it: a part the host stands in for
+    /// (a real GPS engine for a modeled one), whose peripheral it then
+    /// removes ([`Description::remove_peripheral`]).  The ends moved,
+    /// at least one.  The board's load checks the external endpoint
+    /// against its nets as it checks the file's.
+    ///
+    /// A description has no registry, so it cannot tell a misspelled
+    /// port from a port on no net; it refuses both, as there is nothing
+    /// to rebind.
+    ///
+    /// # Errors
+    ///
+    /// An `endpoint` that is not a peripheral's port at the end of a
+    /// net ([`EditError::Port`]), or an empty `external`
+    /// ([`EditError::External`]).
+    ///
+    /// [`Board::send`]: crate::board::Board::send
+    pub fn rebind(&mut self, endpoint: &str, external: &str) -> Result<usize, EditError> {
+        let from = Endpoint::parse(endpoint)
+            .filter(|parsed| matches!(parsed, Endpoint::Peripheral { .. }))
+            .ok_or_else(|| EditError::Port(endpoint.to_owned()))?;
+        if external.is_empty() {
+            return Err(EditError::External);
+        }
+        let to = Endpoint::External(external.to_owned());
+        let ends: Vec<_> = self
+            .nets
+            .iter_mut()
+            .flat_map(|net| net.from.iter_mut().chain(&mut net.to))
+            .filter(|end| **end == from)
+            .collect();
+        if ends.is_empty() {
+            return Err(EditError::Port(endpoint.to_owned()));
+        }
+        let moved = ends.len();
+        for end in ends {
+            end.clone_from(&to);
+        }
+        Ok(moved)
     }
 
     /// The board file at `path`, its images read and every name
@@ -346,13 +529,15 @@ impl Description {
         options: &Options,
         mut read: impl FnMut(&Path) -> io::Result<Vec<u8>>,
     ) -> Result<Self, LoadError> {
-        let versioned: schema::Versioned = toml::from_str(text).map_err(SyntaxError::from_toml)?;
+        let versioned: schema::Versioned =
+            toml::from_str(text).map_err(|error| SyntaxError::new(error, text))?;
         match versioned.version {
             Some(toml::Value::Integer(schema::VERSION)) => {}
             Some(other) => return Err(LoadError::Version(other.to_string())),
             None => return Err(LoadError::Version("missing".to_owned())),
         }
-        let file: schema::File = toml::from_str(text).map_err(SyntaxError::from_toml)?;
+        let file: schema::File =
+            toml::from_str(text).map_err(|error| SyntaxError::new(error, text))?;
         let board = file.board;
         let declared: BTreeSet<&str> = board.options.iter().map(String::as_str).collect();
         if let Some(option) = options
@@ -383,7 +568,7 @@ impl Description {
         let on = |option: &Option<String>| {
             option
                 .as_ref()
-                .is_none_or(|option| options.enabled.contains(option))
+                .is_none_or(|option| options.all_enabled || options.enabled.contains(option))
         };
         let memory: Vec<_> = file
             .memory
@@ -502,7 +687,8 @@ impl Description {
 
     /// The `[chip]` table as chip `expected`'s section, its own keys
     /// checked by its type, with the line of any that is wrong.  An
-    /// absent table is an empty one.
+    /// absent table is an empty one, an error in which has no line: the
+    /// file does not hold it.
     pub(crate) fn chip_section<S: DeserializeOwned>(
         &self,
         expected: &'static str,
@@ -519,12 +705,13 @@ impl Description {
             /// `[chip]`.
             chip: Option<S>,
         }
-        let only: ChipOnly<S> = toml::from_str(&self.text).map_err(SyntaxError::from_toml)?;
+        let only: ChipOnly<S> =
+            toml::from_str(&self.text).map_err(|error| SyntaxError::new(error, &self.text))?;
         match only.chip {
             Some(section) => Ok(section),
             None => toml::Value::Table(toml::Table::new())
                 .try_into()
-                .map_err(SyntaxError::from_toml),
+                .map_err(|error| SyntaxError::unplaced(error).into()),
         }
     }
 
@@ -562,6 +749,97 @@ impl Description {
         self.peripherals
             .iter()
             .map(|peripheral| (peripheral.name.as_str(), peripheral.kind.as_str()))
+    }
+
+    /// Whether each net end at a peripheral names a port the peripheral
+    /// has, of the net's type and facing the net's way, as a load checks
+    /// them, without building the board or its chip: for a host's tests
+    /// of its board files.  A fixed type's ports are its declared ones; a
+    /// type whose ports depend on its parameters is built, in
+    /// `environment` with the file's directory, its paths read from the
+    /// file system, to give its own.
+    ///
+    /// # Errors
+    ///
+    /// As [`Description::check_ports_with`].
+    pub fn check_ports(
+        &self,
+        registry: &Registry,
+        environment: &Environment,
+    ) -> Result<(), LoadError> {
+        self.check_ports_with(registry, environment, |path| fs::read(path))
+    }
+
+    /// [`Description::check_ports`], a type built for its ports reading
+    /// each path parameter's contents
+    /// ([`Context::contents`](crate::registry::Context::contents)) from
+    /// `read(path)` rather than the file system, as
+    /// [`Board::load_with`](crate::board::Board::load_with) does.
+    ///
+    /// # Errors
+    ///
+    /// A peripheral whose type `registry` lacks ([`LoadError::Type`]); one
+    /// built for its ports whose parameters its constructor refuses or
+    /// leaves unread ([`LoadError::Parameter`]), or whose ports repeat a
+    /// name ([`LoadError::Port`]); or a net end at a port its peripheral
+    /// does not have, or of another type or direction than its net needs
+    /// ([`LoadError::Endpoint`], [`LoadError::Kind`],
+    /// [`LoadError::Direction`]).  An error `read` returns is
+    /// [`LoadError::Parameter`].
+    pub fn check_ports_with(
+        &self,
+        registry: &Registry,
+        environment: &Environment,
+        read: impl FnMut(&Path) -> io::Result<Vec<u8>>,
+    ) -> Result<(), LoadError> {
+        let construct = self.constructor(registry, environment, read);
+        let ports = self
+            .peripherals
+            .iter()
+            .map(|spec| {
+                let ports = match registry.ports(&spec.kind) {
+                    Some(ports) => Cow::Borrowed(ports),
+                    None => Cow::Owned(construct(spec)?.ports),
+                };
+                Ok((spec.name.as_str(), ports))
+            })
+            .collect::<Result<BTreeMap<_, _>, LoadError>>()?;
+        for net in &self.nets {
+            for (ends, driving) in [(&net.from, true), (&net.to, false)] {
+                for end in ends {
+                    if let Endpoint::Peripheral { peripheral, port } = end {
+                        let declared =
+                            ports
+                                .get(peripheral.as_str())
+                                .ok_or_else(|| LoadError::Endpoint {
+                                    net: net.name.clone(),
+                                    endpoint: end.to_string(),
+                                })?;
+                        port_of(net, peripheral, port, driving, declared)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// What builds this description's peripherals by their types in
+    /// `registry`, in `environment` with the board's directory its own,
+    /// their paths' contents from `read`.
+    pub(crate) fn constructor<'a>(
+        &self,
+        registry: &'a Registry,
+        environment: &Environment,
+        read: impl FnMut(&Path) -> io::Result<Vec<u8>> + 'a,
+    ) -> impl Fn(&PeripheralSpec) -> Result<Constructed, LoadError> + 'a {
+        let mut environment = environment.clone();
+        environment.set_board_dir(self.directory.clone());
+        let read = RefCell::new(read);
+        move |spec| {
+            construct(spec, registry, &environment, &|path: &Path| {
+                (read.borrow_mut())(path)
+            })
+        }
     }
 
     /// The marking of `peripheral`, if the file gives one.
@@ -837,7 +1115,7 @@ fn read_memory(
         return Ok(MemorySpec {
             name: name.clone(),
             bytes,
-            writable: entry.writable,
+            kind: entry.kind(),
             pins: Vec::new(),
             base: Some(base),
             timing: (port, termination),
@@ -896,7 +1174,7 @@ fn read_memory(
     Ok(MemorySpec {
         name: name.clone(),
         bytes,
-        writable: entry.writable,
+        kind: entry.kind(),
         pins,
         base: None,
         timing: (PortSize::Bits16, Termination::Fast),
@@ -929,18 +1207,10 @@ fn check_fixed(memories: &[MemorySpec]) -> Result<(), LoadError> {
 }
 
 /// The resets `causes` name.
-fn scope(causes: &[Cause]) -> ResetScope {
-    causes.iter().fold(ResetScope::NONE, |scope, cause| {
-        scope.with(match cause {
-            Cause::External => ResetCause::External,
-            Cause::PowerOn => ResetCause::PowerOn,
-            Cause::Watchdog => ResetCause::Watchdog,
-            Cause::HaltMonitor => ResetCause::HaltMonitor,
-            Cause::System => ResetCause::System,
-            Cause::LossOfClock => ResetCause::LossOfClock,
-            Cause::Test => ResetCause::Test,
-        })
-    })
+fn scope(causes: &[ResetCause]) -> ResetScope {
+    causes
+        .iter()
+        .fold(ResetScope::NONE, |scope, &cause| scope.with(cause))
 }
 
 /// A decoder.
@@ -1262,6 +1532,82 @@ fn read_net(
         from,
         to,
     }))
+}
+
+/// Peripheral `spec` built by its type in `registry`, its paths' contents
+/// from `read`: each parameter read, and no port name used twice.
+fn construct(
+    spec: &PeripheralSpec,
+    registry: &Registry,
+    environment: &Environment,
+    read: &dyn Fn(&Path) -> io::Result<Vec<u8>>,
+) -> Result<Constructed, LoadError> {
+    let parameters = Parameters::new(spec.parameters.clone());
+    let context = Context::with_read(&spec.name, &parameters, environment, read);
+    let parameter_error = |error| LoadError::Parameter {
+        peripheral: spec.name.clone(),
+        error,
+    };
+    let constructed = registry
+        .construct(&spec.kind, &context)
+        .map_err(|error| match error {
+            ConstructError::Unknown(kind) => LoadError::Type {
+                peripheral: spec.name.clone(),
+                kind,
+            },
+            ConstructError::Parameter(error) => parameter_error(error),
+        })?;
+    if let Some(key) = parameters.unread() {
+        return Err(parameter_error(ParameterError::Unknown(key)));
+    }
+    if let Some(port) = repeated_port(&constructed.ports) {
+        return Err(LoadError::Port {
+            peripheral: spec.name.clone(),
+            port: port.to_owned(),
+        });
+    }
+    Ok(constructed)
+}
+
+/// The index in `ports`, peripheral `owner`'s, of `port`, an endpoint of
+/// `net`: one of the net's type, that drives if `driving`, else is driven.
+pub(crate) fn port_of(
+    net: &NetSpec,
+    owner: &str,
+    port: &str,
+    driving: bool,
+    ports: &[PortSpec],
+) -> Result<usize, LoadError> {
+    let name = format!("{owner}.{port}");
+    let (index, declared) = ports
+        .iter()
+        .enumerate()
+        .find(|(_, declared)| declared.name == port)
+        .ok_or_else(|| LoadError::Endpoint {
+            net: net.name.clone(),
+            endpoint: name.clone(),
+        })?;
+    if declared.kind != net.kind {
+        return Err(LoadError::Kind {
+            net: net.name.clone(),
+            kind: net.kind,
+            endpoint: name,
+            found: declared.kind,
+        });
+    }
+    let fits = if driving {
+        declared.direction.drives()
+    } else {
+        declared.direction.sinks()
+    };
+    if !fits {
+        return Err(LoadError::Direction {
+            net: net.name.clone(),
+            endpoint: name,
+            what: if driving { "drive" } else { "be driven" },
+        });
+    }
+    Ok(index)
 }
 
 #[cfg(test)]

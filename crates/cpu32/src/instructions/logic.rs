@@ -287,7 +287,7 @@ mod tests {
         step(&mut cpu, 1);
         assert_eq!(cpu.registers.data[1], 0xffff_ffff);
         assert_eq!(ccr(&cpu), status::N);
-        assert_eq!(cpu.registers.pc, CODE + 14);
+        assert_eq!(cpu.registers.pc.0, CODE + 14);
     }
 
     #[test]

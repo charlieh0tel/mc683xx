@@ -18,6 +18,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_modules::module::Block;
 use mc683xx_modules::module::InterruptRequest;
@@ -26,6 +27,8 @@ use mc683xx_modules::module::Peek;
 use mc683xx_modules::module::RegisterAccess;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::pins::PortLevels;
+use mc683xx_modules::pins::PortState;
+use mc683xx_modules::pins::merge_pins;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::Error;
@@ -34,9 +37,13 @@ use serde::de::Unexpected;
 use self::pwm::Channel;
 use self::pwm::Output;
 use self::pwm::Pwm;
+use self::pwm::tap_clocks;
 use self::timer::Counter;
 use self::timer::PRESCALER_SPAN;
 use self::timer::Prescaler;
+use crate::port::OutputChange;
+use crate::port::Port;
+use crate::port::PortChange;
 
 /// The GPT's register block, $YFF900 to $YFF93F (MC68331UM Table D-1).
 pub(crate) const BLOCK: Block = Block {
@@ -127,7 +134,7 @@ const IC4_PIN: u8 = 7;
 /// Input captures 1 to 3 on PGP0 to PGP2.
 const CAPTURES: u8 = 3;
 /// The format of the GPT's snapshot ([`Module::save`]).
-const STATE_VERSION: u32 = 6;
+const STATE_VERSION: u32 = 7;
 /// Output compares 1 to 4, TOC1 to TOC4; OC5 is TI4/O5.
 const COMPARES: usize = 4;
 /// PACTL PAIS, the PAI pin (GPTRM 4.1.1).
@@ -166,7 +173,7 @@ const CPR_LEAST_DIVISOR: u64 = 4;
 const TMSK2_CPROUT: u16 = 1 << 3;
 /// The time CPROUT's and PPROUT's clocks are high each period: one
 /// system clock (GPTRM 5.1).
-const CLOCK_OUT_HIGH: Cycles = Cycles(1);
+const CLOCK_OUT_HIGH: Cycles = Cycles::from_clocks(1);
 /// TMSK2's implemented bits: TOI, PAOVI, PAII, CPROUT, CPR.
 const TMSK2_WRITABLE: u8 = 0xbf;
 /// TFLG2 TOF, and TMSK2 TOI, in the word's lower byte (GPTRM 7.1.2.1).
@@ -267,6 +274,62 @@ impl PortGpPin {
     }
 }
 
+impl TryFrom<u8> for PortGpPin {
+    type Error = NoPortGpPin;
+
+    fn try_from(bit: u8) -> Result<Self, NoPortGpPin> {
+        Self::new(bit).ok_or(NoPortGpPin(bit))
+    }
+}
+
+impl From<PortGpPin> for u8 {
+    fn from(pin: PortGpPin) -> Self {
+        pin.0
+    }
+}
+
+/// A bit port GP lacks: past PGP7.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no port GP pin at bit {0}")]
+pub struct NoPortGpPin(pub u8);
+
+/// The prefix of port GP's pins' names, `PGP0` to `PGP7` (MC68331UM
+/// Figure 7-1).
+const PGP: &str = "PGP";
+
+/// Its name: `PGP0`.
+impl fmt::Display for PortGpPin {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{PGP}{}", self.0)
+    }
+}
+
+/// The pin named so, as `Display` writes it, in any case: `PGP0`,
+/// `pgp0`.
+impl FromStr for PortGpPin {
+    type Err = ParsePortGpPinError;
+
+    fn from_str(name: &str) -> Result<Self, ParsePortGpPinError> {
+        name.get(..PGP.len())
+            .filter(|prefix| prefix.eq_ignore_ascii_case(PGP))
+            .and_then(|_| name.get(PGP.len()..))
+            .and_then(|bit| match bit.as_bytes() {
+                [digit @ b'0'..=b'9'] => Self::new(digit - b'0'),
+                _ => None,
+            })
+            .ok_or_else(|| ParsePortGpPinError(name.to_owned()))
+    }
+}
+
+/// Text that names no port GP pin.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no port GP pin {0:?}")]
+pub struct ParsePortGpPinError(String);
+/// PAI's pin's name.
+const PAI: &str = "PAI";
+/// PCLK's pin's name.
+const PCLK: &str = "PCLK";
+
 /// An input pin of the GPT the host can schedule an edge on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum Input {
@@ -284,29 +347,29 @@ pub enum Input {
 impl fmt::Display for Input {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::PortGp(pin) => write!(formatter, "PGP{}", pin.get()),
-            Self::Pai => formatter.write_str("PAI"),
-            Self::Pclk => formatter.write_str("PCLK"),
+            Self::PortGp(pin) => write!(formatter, "{pin}"),
+            Self::Pai => formatter.write_str(PAI),
+            Self::Pclk => formatter.write_str(PCLK),
         }
     }
 }
 
-/// The input whose pin is named so, as `Display` writes it.
+/// The input whose pin is named so, as `Display` writes it, in any
+/// case.
 impl FromStr for Input {
     type Err = ParseInputError;
 
     fn from_str(name: &str) -> Result<Self, ParseInputError> {
-        match name {
-            "PAI" => Ok(Self::Pai),
-            "PCLK" => Ok(Self::Pclk),
-            _ => name
-                .strip_prefix("PGP")
-                .filter(|bit| bit.len() == 1)
-                .and_then(|bit| bit.parse().ok())
-                .and_then(PortGpPin::new)
-                .map(Self::PortGp)
-                .ok_or_else(|| ParseInputError(name.to_owned())),
+        let named = |pin: &str| pin.eq_ignore_ascii_case(name);
+        if named(PAI) {
+            return Ok(Self::Pai);
         }
+        if named(PCLK) {
+            return Ok(Self::Pclk);
+        }
+        name.parse()
+            .map(Self::PortGp)
+            .map_err(|_| ParseInputError(name.to_owned()))
     }
 }
 
@@ -315,23 +378,59 @@ impl FromStr for Input {
 #[error("no GPT input {0:?}")]
 pub struct ParseInputError(String);
 
-/// A change in what the GPT drives on its outputs, in the shape of the
-/// SIM ports' changes ([PLAN.md], Peripherals).
+/// A change in what the PWM unit drives on a PWM pin, while the host
+/// asks for its edges ([PLAN.md], Peripherals).
 ///
 /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum OutputChange {
-    /// Port GP's pins: those it drives, the output compares' and
-    /// PORTGP's outputs, and their levels.
-    PortGp(PortLevels),
-    /// A PWM pin's level, while the host asks for its edges.
-    Pwm {
-        /// The pin.
-        channel: Channel,
-        /// Its level.
-        level: bool,
-    },
+pub struct PwmChange {
+    /// When.
+    pub now: Cycles,
+    /// The pin.
+    pub channel: Channel,
+    /// Its level from then on.
+    pub level: bool,
+}
+
+/// A change in what the GPT drives on an output, `change`, as its
+/// queues hold them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct Queued<T> {
+    /// Its place in the order the changes of both queues were found, so
+    /// that those at one time merge in the order they happened.
+    sequence: u64,
+    /// When it happened.
+    at: Cycles,
+    /// What changed.
+    change: T,
+}
+
+/// The changes `queue` holds, emptied, in time order, those at one time
+/// in the order found.
+fn drain_in_order<T>(queue: &mut Vec<Queued<T>>) -> Vec<Queued<T>> {
+    let mut taken = mem::take(queue);
+    taken.sort_by_key(|queued| (queued.at, queued.sequence));
+    taken
+}
+
+/// A queued change of port GP as the host takes it.
+const fn port_change(queued: Queued<PortLevels>) -> PortChange {
+    PortChange {
+        now: queued.at,
+        port: Port::Gp,
+        outputs: queued.change,
+    }
+}
+
+/// A queued PWM edge as the host takes it.
+const fn pwm_change(queued: Queued<(Channel, bool)>) -> PwmChange {
+    let (channel, level) = queued.change;
+    PwmChange {
+        now: queued.at,
+        channel,
+        level,
+    }
 }
 
 /// How far a fast output's edges have been found.
@@ -354,9 +453,15 @@ impl Found {
 /// Peripherals).
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct Edges {
-    /// Changes the host has not taken, each with its time, in the order
-    /// found.
-    queue: Vec<(Cycles, OutputChange)>,
+    /// Port GP's changes the host has not taken, its pins: those the GPT
+    /// drives, the output compares' and PORTGP's outputs, and their
+    /// levels; in the order found.
+    port_queue: Vec<Queued<PortLevels>>,
+    /// The PWM pins' edges the host has not taken, while it asks for
+    /// them: the pin and its level; in the order found.
+    pwm_queue: Vec<Queued<(Channel, bool)>>,
+    /// The [`Queued::sequence`] of the next change found.
+    sequence: u64,
     /// Port GP's driven pins and their levels, as last reported.
     port: PortLevels,
     /// Each PWM pin's level as last reported, while the host asks for
@@ -369,6 +474,51 @@ struct Edges {
     oc1_clock: Option<bool>,
     /// How far OC1's clock edges are found.
     oc1_found: Found,
+}
+
+impl Edges {
+    /// `change`, found now, at `at`, queued in its order.
+    fn queued<T>(&mut self, at: Cycles, change: T) -> Queued<T> {
+        let sequence = self.sequence;
+        self.sequence += 1;
+        Queued {
+            sequence,
+            at,
+            change,
+        }
+    }
+
+    /// Whether the queues' order is one a run could leave: each queue's
+    /// sequences rising, none shared, all before the next, which is 0
+    /// once both are empty ([`Self::settle`]) and far from overflowing.
+    fn order_is_valid(&self) -> bool {
+        let rising = |sequences: &[u64]| sequences.windows(2).all(|pair| pair[0] < pair[1]);
+        let port: Vec<u64> = self
+            .port_queue
+            .iter()
+            .map(|queued| queued.sequence)
+            .collect();
+        let pwm: Vec<u64> = self
+            .pwm_queue
+            .iter()
+            .map(|queued| queued.sequence)
+            .collect();
+        let mut all = [port.as_slice(), pwm.as_slice()].concat();
+        all.sort_unstable();
+        rising(&port)
+            && rising(&pwm)
+            && rising(&all)
+            && all.last().is_none_or(|&last| last < self.sequence)
+            && (!all.is_empty() || self.sequence == 0)
+            && self.sequence < u64::MAX
+    }
+
+    /// The order found starts again once both queues are empty.
+    const fn settle(&mut self) {
+        if self.port_queue.is_empty() && self.pwm_queue.is_empty() {
+            self.sequence = 0;
+        }
+    }
 }
 
 /// The levels on the GPT's input pins.
@@ -483,14 +633,12 @@ pub struct Gpt {
     next: Option<Cycles>,
 }
 
-impl Default for Gpt {
-    fn default() -> Self {
-        Self::new(Cycles::ZERO)
-    }
-}
-
 impl Gpt {
     /// The GPT out of reset at `now`, the board's pins high.
+    ///
+    /// Not part of the semver API: the chip builds its GPT; a GPT on
+    /// its own is not a host's to build.
+    #[doc(hidden)]
     #[must_use]
     pub const fn new(now: Cycles) -> Self {
         Self::with_inputs(now, Inputs::HIGH)
@@ -529,11 +677,10 @@ impl Gpt {
             levels: inputs.port,
             pclk_rise: None,
             edges: Edges {
-                queue: Vec::new(),
-                port: PortLevels {
-                    driven: 0,
-                    levels: 0,
-                },
+                port_queue: Vec::new(),
+                pwm_queue: Vec::new(),
+                sequence: 0,
+                port: PortLevels::new(0, 0),
                 pwm: [None; 2],
                 pwm_found: Found::new(0, now),
                 oc1_clock: None,
@@ -551,25 +698,21 @@ impl Gpt {
         (self.mcr & GPTMCR_IARB_MASK) as u8
     }
 
-    /// The board drives port GP's input pins to `pins` at `now`.
-    pub(crate) fn set_port_pins(&mut self, pins: u8, now: Cycles) {
+    /// The board drives port GP's input pins in `mask` to their levels
+    /// in `value` at `now`, the others as they were: as the inputs
+    /// scheduled up to `now` left them, which it takes first, each edge
+    /// at its time (GPTRM 3.2, 3.2.3).
+    pub(crate) fn set_port_pins(&mut self, value: u8, mask: u8, now: Cycles) {
         self.advance(now);
-        self.inputs.port = pins;
+        self.inputs.port = merge_pins(self.inputs.port, value, mask);
         self.input_changed(now);
         self.refresh();
     }
 
-    /// The board drives PAI to `level` at `now`.
-    pub(crate) fn set_pai(&mut self, level: bool, now: Cycles) {
+    /// The board drives `input` to `level` at `now`.
+    pub(crate) fn set_input(&mut self, input: Input, level: bool, now: Cycles) {
         self.advance(now);
-        self.drive(Input::Pai, level, now);
-        self.refresh();
-    }
-
-    /// The board drives PCLK to `level` at `now`.
-    pub(crate) fn set_pclk(&mut self, level: bool, now: Cycles) {
-        self.advance(now);
-        self.drive(Input::Pclk, level, now);
+        self.drive(input, level, now);
         self.refresh();
     }
 
@@ -609,8 +752,7 @@ impl Gpt {
     /// the output compares' on the pins they have, TCNT's clock on OC1's
     /// under CPROUT, PORTGP's on other outputs (GPTRM 3.3.1, 8.1, Table
     /// B-1).
-    #[must_use]
-    pub const fn port_outputs(&self, now: Cycles) -> PortLevels {
+    pub(crate) const fn port_outputs(&self, now: Cycles) -> PortLevels {
         self.port_outputs_with(self.compare_clock_out() && self.clock_high(self.counter, now))
     }
 
@@ -625,12 +767,30 @@ impl Gpt {
         };
         let driven = self.direction | compared | clocked;
         let clock_level = if clock { clocked } else { 0 };
-        PortLevels {
+        PortLevels::new(
             driven,
-            levels: self.latch & self.direction & !compared & !clocked
+            self.latch & self.direction & !compared & !clocked
                 | self.compare_levels & compared
                 | clock_level,
-        }
+        )
+    }
+
+    /// Port GP's registers, PORTGP's latch and DDRGP, and the levels
+    /// the board drives on its pins; its assignment the pins the output
+    /// compares, or CPROUT's clock on OC1, take from PORTGP (MC68331UM
+    /// 7.6; GPTRM Table B-1).
+    pub(crate) const fn port_state(&self) -> PortState {
+        let clocked = if self.compare_clock_out() {
+            1 << OC1_PIN
+        } else {
+            0
+        };
+        PortState::new(
+            self.latch,
+            self.direction,
+            self.compared_pins() | clocked,
+            self.inputs.port,
+        )
     }
 
     /// Whether OC1's pin carries TCNT's clock: CPROUT, with OC1M3 clear
@@ -646,7 +806,7 @@ impl Gpt {
         match counter.clock_high(self.prescaler.count(now)) {
             Some(high) => high,
             None => match self.pclk_rise {
-                Some(rise) => now.0 < rise.0 + CLOCK_OUT_HIGH.0,
+                Some(rise) => now.clocks() < rise.clocks() + CLOCK_OUT_HIGH.clocks(),
                 None => false,
             },
         }
@@ -723,14 +883,55 @@ impl Gpt {
         pwm_edges.chain(oc1).min()
     }
 
-    /// The output changes since the last call, each at the time it
-    /// happened, in time order ([PLAN.md], Peripherals).
+    /// The changes in what port GP drives since the last call, each at
+    /// the time it happened, in time order, those at one time in the
+    /// order they happened ([PLAN.md], Peripherals).  The PWM pins'
+    /// edges are queued apart, for [`take_pwm_changes`](Self::take_pwm_changes).
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
-    pub(crate) fn take_output_changes(&mut self) -> Vec<(Cycles, OutputChange)> {
-        let mut changes = mem::take(&mut self.edges.queue);
-        changes.sort_by_key(|&(at, _)| at);
-        changes
+    pub(crate) fn take_port_changes(&mut self) -> Vec<PortChange> {
+        let taken = drain_in_order(&mut self.edges.port_queue);
+        self.edges.settle();
+        taken.into_iter().map(port_change).collect()
+    }
+
+    /// The PWM pins' reported edges since the last call, as
+    /// [`take_port_changes`](Self::take_port_changes) gives port GP's,
+    /// which stay queued.
+    pub(crate) fn take_pwm_changes(&mut self) -> Vec<PwmChange> {
+        let taken = drain_in_order(&mut self.edges.pwm_queue);
+        self.edges.settle();
+        taken.into_iter().map(pwm_change).collect()
+    }
+
+    /// Both: what [`take_port_changes`](Self::take_port_changes) and
+    /// [`take_pwm_changes`](Self::take_pwm_changes) would give, merged in
+    /// time order, those at one time in the order they happened.
+    pub(crate) fn take_output_changes(&mut self) -> Vec<OutputChange> {
+        let mut taken: Vec<_> = drain_in_order(&mut self.edges.port_queue)
+            .into_iter()
+            .map(|queued| {
+                (
+                    queued.at,
+                    queued.sequence,
+                    OutputChange::Port(port_change(queued)),
+                )
+            })
+            .chain(
+                drain_in_order(&mut self.edges.pwm_queue)
+                    .into_iter()
+                    .map(|queued| {
+                        (
+                            queued.at,
+                            queued.sequence,
+                            OutputChange::Pwm(pwm_change(queued)),
+                        )
+                    }),
+            )
+            .collect();
+        self.edges.settle();
+        taken.sort_by_key(|&(at, sequence, _)| (at, sequence));
+        taken.into_iter().map(|(_, _, change)| change).collect()
     }
 
     /// Port GP's driven pins and their levels, and the PWM pins' levels
@@ -775,7 +976,7 @@ impl Gpt {
     pub const fn oc1(&self, now: Cycles) -> Output {
         if self.compare_clock_out() {
             Output::Clock {
-                clocks: self.counter.divisor(),
+                clocks: tap_clocks(self.counter.divisor()),
             }
         } else {
             Output::Level(self.port_levels(now) & 1 << OC1_PIN != 0)
@@ -949,7 +1150,8 @@ impl Gpt {
         let outputs = self.port_outputs_with(self.edges.oc1_clock == Some(true));
         if outputs != self.edges.port {
             self.edges.port = outputs;
-            self.edges.queue.push((at, OutputChange::PortGp(outputs)));
+            let queued = self.edges.queued(at, outputs);
+            self.edges.port_queue.push(queued);
         }
     }
 
@@ -1018,8 +1220,8 @@ impl Gpt {
         let reported = &mut self.edges.pwm[channel.index()];
         if *reported != Some(level) {
             *reported = Some(level);
-            let change = OutputChange::Pwm { channel, level };
-            self.edges.queue.push((at, change));
+            let queued = self.edges.queued(at, (channel, level));
+            self.edges.pwm_queue.push(queued);
         }
     }
 
@@ -1422,6 +1624,9 @@ impl Gpt {
         {
             return Err(StateError::invalid("GPT scheduled inputs"));
         }
+        if !self.edges.order_is_valid() {
+            return Err(StateError::invalid("GPT output order"));
+        }
         Ok(())
     }
 
@@ -1431,7 +1636,7 @@ impl Gpt {
     /// found no later.  Past [`LATEST_TIME`] a count may overflow.
     fn timing_is_valid(&self) -> bool {
         let now = self.time;
-        if now.0 > LATEST_TIME || !self.prescaler.is_valid(now) {
+        if now.clocks() > LATEST_TIME || !self.prescaler.is_valid(now) {
             return false;
         }
         let count = self.prescaler.count(now);
@@ -1439,7 +1644,7 @@ impl Gpt {
         self.counter.is_valid(count, now)
             && self.pwm.counter().is_valid(count, now)
             && self.tick <= self.counter.ticks(count)
-            && self.pclk_edges <= now.0
+            && self.pclk_edges <= now.clocks()
             && self.gated <= self.gated_count(count)
             && self.pclk_rise.is_none_or(|rise| rise <= now)
             && found(self.edges.pwm_found)
@@ -1572,14 +1777,14 @@ impl Module for Gpt {
     }
 
     /// IVBA and the pending source's number, $0 for PAB's (GPTRM 7.1.1).
-    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Option<u8> {
+    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Option<Vector> {
         if level.get() != self.level() {
             return None;
         }
         let source = self.pending_source()?;
         let adjusted = (self.icr >> ICR_PAB_SHIFT) as u8;
         let number = if source == adjusted { 0 } else { source };
-        Some((self.icr & ICR_IVBA_MASK) as u8 | number)
+        Some(Vector((self.icr & ICR_IVBA_MASK) as u8 | number))
     }
 
     /// Every register to its reset value (GPTRM 9; PLAN.md, "QSM and

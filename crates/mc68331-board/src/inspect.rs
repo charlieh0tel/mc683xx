@@ -118,7 +118,7 @@ impl Inspection {
     /// saturating.
     #[must_use]
     pub fn time(self, name: impl Into<String>, value: Time) -> Self {
-        let value = i64::try_from(value.0).unwrap_or(i64::MAX);
+        let value = i64::try_from(value.picos()).unwrap_or(i64::MAX);
         self.field(Field {
             unit: Some(PICOSECONDS),
             ..Field::new(name, Value::Integer(value))
@@ -170,7 +170,7 @@ impl Inspection {
 
     /// Whether it has no fields.
     #[must_use]
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.fields.is_empty()
     }
 }

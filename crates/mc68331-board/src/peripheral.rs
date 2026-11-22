@@ -59,7 +59,7 @@ impl Role {
     /// Its name, as an attachment's `role` gives it: `read`, `write`,
     /// `read-write` or `iack`.
     #[must_use]
-    pub const fn name(self) -> &'static str {
+    const fn name(self) -> &'static str {
         match self {
             Self::Read => "read",
             Self::Write => "write",
@@ -75,7 +75,7 @@ impl fmt::Display for Role {
     }
 }
 
-/// The attachment role [`Role::name`] names.
+/// The attachment role its name, as it displays, names.
 impl FromStr for Role {
     type Err = ParseRoleError;
 
@@ -90,7 +90,7 @@ impl FromStr for Role {
 /// Text that names no attachment role.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no attachment role {0:?}")]
-pub struct ParseRoleError(pub String);
+pub struct ParseRoleError(String);
 
 /// The data lanes an attachment wires to the peripheral.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -113,7 +113,7 @@ impl Lane {
     /// Its name, as an attachment's `lane` gives it: `both`, `upper` or
     /// `lower`.
     #[must_use]
-    pub const fn name(self) -> &'static str {
+    const fn name(self) -> &'static str {
         match self {
             Self::Both => "both",
             Self::Upper => "upper",
@@ -128,7 +128,7 @@ impl fmt::Display for Lane {
     }
 }
 
-/// The data lane [`Lane::name`] names.
+/// The data lane its name, as it displays, names.
 impl FromStr for Lane {
     type Err = ParseLaneError;
 
@@ -143,7 +143,7 @@ impl FromStr for Lane {
 /// Text that names no data lane.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no data lane {0:?}")]
-pub struct ParseLaneError(pub String);
+pub struct ParseLaneError(String);
 
 /// A bus cycle as a peripheral sees it, through one of its attachments.
 /// Built with [`PeripheralAccess::new`], so a field added later gets a default.
@@ -162,8 +162,11 @@ pub struct PeripheralAccess {
     /// Its lane: a peripheral on one lane sees byte accesses only, at the
     /// cycle's address on its lines.
     pub lane: Lane,
-    /// The attachment's `offset` plus the address on the peripheral's own
-    /// address pins: the ADDR lines its `lines` wire to them, in order.
+    /// The address the peripheral sees, local to it, not the CPU's: the
+    /// attachment's `offset` plus the address on the peripheral's own
+    /// address pins, the ADDR lines its `lines` wire to them, in order.
+    /// For a taken memory ([`Peripheral::memory_read`]), the offset in
+    /// the memory.
     pub address: u32,
     /// Byte or word, after dynamic bus sizing to the port: the select's
     /// field, or with an external DSACK the peripheral's DSACK pins'.
@@ -227,7 +230,7 @@ impl PeripheralAccess {
     /// `address`, of `size` and `function_code`, at `now`, through
     /// attachment 0, read-write, on both lanes.
     #[must_use]
-    pub const fn on_no_select(
+    pub const fn unselected(
         address: u32,
         size: Size,
         function_code: FunctionCode,
@@ -273,10 +276,10 @@ impl PeripheralAccess {
     /// DATA\[15:8\] for a word cycle (SIMRM 5.3.3), the lower byte not
     /// driven, as `written_byte` takes it.
     #[must_use]
-    pub fn read_byte(&self, byte: u8) -> u32 {
+    pub const fn read_byte(&self, byte: u8) -> u32 {
         match self.size {
-            Size::Byte => u32::from(byte),
-            Size::Word | Size::Long => u32::from(byte) << 8,
+            Size::Byte => byte as u32,
+            Size::Word | Size::Long => (byte as u32) << 8,
         }
     }
 }
@@ -308,33 +311,42 @@ pub struct Transfer {
     /// transfer of a frame held selected (CONT, QSMRM 4.3.6.3) after
     /// the first is not.
     pub starts_frame: bool,
-    /// When it ends, on board time.
-    pub now: Time,
 }
 
 impl Transfer {
-    /// A transfer through `attachment` of `bits` of `out`, queue entry
-    /// `entry`'s, with `chip_selects` on PCS\[3:0\], shifted with `clock`,
-    /// ending at `now`: a frame's first.
+    /// A frame's first transfer of `bits` of `out`, shifted with
+    /// `clock`: through attachment 0, queue entry 0, PCS\[3:0\] all low.
     #[must_use]
-    pub const fn new(
-        attachment: usize,
-        entry: u8,
-        chip_selects: u8,
-        out: u16,
-        bits: u8,
-        clock: QspiClock,
-        now: Time,
-    ) -> Self {
+    pub const fn new(out: u16, bits: u8, clock: QspiClock) -> Self {
         Self {
-            attachment,
-            entry,
-            chip_selects,
+            attachment: 0,
+            entry: 0,
+            chip_selects: 0,
             out,
             bits,
             clock,
             starts_frame: true,
-            now,
+        }
+    }
+
+    /// The transfer through attachment `attachment`.
+    #[must_use]
+    pub const fn through(self, attachment: usize) -> Self {
+        Self { attachment, ..self }
+    }
+
+    /// The transfer of queue entry `entry`.
+    #[must_use]
+    pub const fn at_entry(self, entry: u8) -> Self {
+        Self { entry, ..self }
+    }
+
+    /// The transfer with `chip_selects` on PCS\[3:0\].
+    #[must_use]
+    pub const fn selecting(self, chip_selects: u8) -> Self {
+        Self {
+            chip_selects,
+            ..self
         }
     }
 
@@ -385,6 +397,16 @@ pub struct MemoryWrite {
     pub bytes: Vec<u8>,
 }
 
+/// A board memory a peripheral took or gave back during a call
+/// ([`Drive::take_memory`], [`Drive::release_memory`]), by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MemoryClaim {
+    /// It took the memory off the core's fast path.
+    Taken(String),
+    /// It gave the memory back.
+    Released(String),
+}
+
 /// The analog value on an input port now, sampled from its net's
 /// driver: given the peripheral's port and the time.
 pub type Sampler<'a> = &'a dyn Fn(usize, Time) -> Option<f64>;
@@ -414,10 +436,10 @@ pub struct Drive<'a> {
     fired: Vec<ConditionToken>,
     /// The peripheral's analog inputs, if the board gives them.
     sampler: Option<Sampler<'a>>,
-    /// The chip's system clock on board time, if the board gives it.
-    system_clock: Option<TimeBase>,
-    /// The memories taken (`true`) or released, in order.
-    memories: Vec<(String, bool)>,
+    /// The chip's system clock on board time.
+    system_clock: TimeBase,
+    /// The memories taken or released, in order.
+    memories: Vec<MemoryClaim>,
 }
 
 impl fmt::Debug for Drive<'_> {
@@ -442,16 +464,17 @@ pub struct Driving {
     pub writes: Vec<MemoryWrite>,
     /// Whether a stop was asked for.
     pub stop: bool,
-    /// The memories taken (`true`) or released, in order.
-    pub memories: Vec<(String, bool)>,
+    /// The memories taken or released, in order.
+    pub memories: Vec<MemoryClaim>,
     /// The conditions that held, by the peripheral's tokens, in order.
     pub fired: Vec<ConditionToken>,
 }
 
 impl<'a> Drive<'a> {
-    /// A drive for a call at `now`, with no analog inputs.
+    /// A drive for a call at `now`, the chip's system clock on board time
+    /// `system_clock`, with no analog inputs.
     #[must_use]
-    pub const fn new(now: Time) -> Self {
+    pub const fn new(now: Time, system_clock: TimeBase) -> Self {
         Self {
             now,
             driven: Vec::new(),
@@ -459,42 +482,19 @@ impl<'a> Drive<'a> {
             stop: false,
             fired: Vec::new(),
             sampler: None,
-            system_clock: None,
+            system_clock,
             memories: Vec::new(),
         }
     }
 
-    /// A drive for a call at `now` whose analog inputs `sampler` reads.
+    /// A drive for a call at `now`, the chip's system clock on board time
+    /// `system_clock`, whose analog inputs `sampler` reads.
     #[must_use]
-    pub const fn with_sampler(now: Time, sampler: Sampler<'a>) -> Self {
+    pub fn with_sampler(now: Time, system_clock: TimeBase, sampler: Sampler<'a>) -> Self {
         Self {
-            now,
-            driven: Vec::new(),
-            writes: Vec::new(),
-            stop: false,
-            fired: Vec::new(),
             sampler: Some(sampler),
-            system_clock: None,
-            memories: Vec::new(),
+            ..Self::new(now, system_clock)
         }
-    }
-
-    /// Gives the drive the chip's system clock on board time, as the
-    /// board gives every call.
-    ///
-    /// Not part of the semver API: the board's; a test or a host builds
-    /// its drive with [`Drive::with_system_clock`].
-    #[doc(hidden)]
-    pub const fn set_system_clock(&mut self, system_clock: TimeBase) {
-        self.system_clock = Some(system_clock);
-    }
-
-    /// The drive with the chip's system clock on board time, as the
-    /// board gives every call: for a test's or a host's drive.
-    #[must_use]
-    pub const fn with_system_clock(mut self, system_clock: TimeBase) -> Self {
-        self.set_system_clock(system_clock);
-        self
     }
 
     /// The time of the call.
@@ -503,11 +503,11 @@ impl<'a> Drive<'a> {
         self.now
     }
 
-    /// The chip's system clock on board time, for converting between
-    /// board time and the chip's clocks ([`TimeBase`]); always given by
-    /// the board, [`None`] in a drive built without one.
+    /// The chip's system clock on board time, as of the call: for
+    /// converting between board time and the chip's clocks
+    /// ([`TimeBase`]).
     #[must_use]
-    pub const fn system_clock(&self) -> Option<TimeBase> {
+    pub const fn system_clock(&self) -> TimeBase {
         self.system_clock
     }
 
@@ -558,13 +558,13 @@ impl<'a> Drive<'a> {
     /// fixed address (`base`) is never taken: no select carries its
     /// cycles, and they stay the memory's.
     pub fn take_memory(&mut self, memory: impl Into<String>) {
-        self.memories.push((memory.into(), true));
+        self.memories.push(MemoryClaim::Taken(memory.into()));
     }
 
     /// Gives the memory `memory` back to the core's fast path, if this
     /// peripheral holds it.
     pub fn release_memory(&mut self, memory: impl Into<String>) {
-        self.memories.push((memory.into(), false));
+        self.memories.push(MemoryClaim::Released(memory.into()));
     }
 
     /// Asks the board's run to stop, after the instruction running now.
@@ -602,6 +602,13 @@ impl<'a> Drive<'a> {
 /// host reaches its own peripheral's state by its type, with no
 /// `as_any` of its own: `Board::peripheral::<T>(name)`, or a
 /// `Box<dyn Peripheral>` upcast to `Box<dyn Any>` and downcast.
+///
+/// A call's time: one given a [`Drive`] takes it from [`Drive::now`]
+/// and has no time argument (`read`, `write`, `memory_read`,
+/// `memory_write`, `power_on`, `reset`, `transfer`, `select`, `input`,
+/// `advance`); one without a drive takes it as an argument (`sample`'s
+/// and `set_qspi_clock`'s `now`), or in its access
+/// ([`PeripheralAccess::now`], for `wait_states` and `dsack_port`).
 #[expect(
     unused_variables,
     reason = "the defaults ignore their arguments, and the names document them"
@@ -666,9 +673,10 @@ pub trait Peripheral: Any {
 
     /// On a select whose DSACK field is external (%1111, SIMRM
     /// 7.10.3), the wait states before the peripheral asserts DSACK, or
-    /// [`None`] if it never does.  Asked before the cycle's `read` or
-    /// `write`.  By default it answers at once.
-    fn wait_states(&mut self, access: PeripheralAccess) -> Option<u8> {
+    /// [`None`] if it never does, the chip's system clock on board time
+    /// `system_clock`.  Asked before the cycle's `read` or `write`.  By
+    /// default it answers at once.
+    fn wait_states(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<u8> {
         Some(0)
     }
 
@@ -677,7 +685,7 @@ pub trait Peripheral: Any {
     /// DSACK1, 8 on DSACK0 alone (SIMRM Table 5-2).  Asked with
     /// `wait_states`.  By default [`None`]: its `dsack` in the board
     /// file says.
-    fn dsack_port(&mut self, access: PeripheralAccess) -> Option<PortSize> {
+    fn dsack_port(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<PortSize> {
         None
     }
 
@@ -700,37 +708,38 @@ pub trait Peripheral: Any {
     /// before its first write).  By default nothing is driven.
     fn power_on(&mut self, drive: &mut Drive<'_>) {}
 
-    /// RESET reaches it at `now`, as its reset scope says.  By default
-    /// nothing changes.
-    fn reset(&mut self, now: Time, drive: &mut Drive<'_>) {}
+    /// RESET reaches it, at the drive's time, as its reset scope says.
+    /// By default nothing changes.
+    fn reset(&mut self, drive: &mut Drive<'_>) {}
 
     /// A QSPI transfer while its attachment selects it: shifts its
     /// `bits` of `out`, most significant first, in its clock's mode,
     /// and returns the bits shifted back, right-aligned (QSMRM 4.3.6;
-    /// `spi` reckons the edges).  By default MISO floats: all ones
-    /// (`floating_miso`).
+    /// `spi` reckons the edges).  It ends at the drive's time.  By
+    /// default MISO floats: all ones (`floating_miso`).
     fn transfer(&mut self, transfer: Transfer, drive: &mut Drive<'_>) -> u16 {
         floating_miso(transfer.bits)
     }
 
     /// Its QSPI attachment `attachment` becomes selected, or not, at
-    /// `now`, as the board decodes PCS\[3:0\] for it: a peripheral framed
+    /// the drive's time, as the board decodes PCS\[3:0\] for it: a peripheral framed
     /// by its select sees the frame start and end here.  The canonical
     /// framing for a board peripheral: a peripheral sees only its own select's
-    /// changes, never another peripheral's ([`SpiPeripheral::chip_selects`], every
+    /// changes, never another peripheral's ([`SpiPeripheral::set_chip_selects`], every
     /// level change, is the chip's, for a host without this crate).
     /// By default nothing changes.
     ///
-    /// [`SpiPeripheral::chip_selects`]: mc683xx_modules::peripheral::SpiPeripheral::chip_selects
-    fn select(&mut self, attachment: usize, selected: bool, now: Time, drive: &mut Drive<'_>) {}
+    /// [`SpiPeripheral::set_chip_selects`]: mc683xx_modules::peripheral::SpiPeripheral::set_chip_selects
+    fn select(&mut self, attachment: usize, selected: bool, drive: &mut Drive<'_>) {}
 
-    /// The QSPI's serial clock from `now` ([`SpiPeripheral::clock`]).  By
-    /// default nothing changes.
+    /// The QSPI's serial clock from `now` ([`SpiPeripheral::set_clock`]),
+    /// the chip's system clock on board time `system_clock`.  By default
+    /// nothing changes.
     ///
-    /// [`SpiPeripheral::clock`]: mc683xx_modules::peripheral::SpiPeripheral::clock
-    fn qspi_clock(&mut self, clock: QspiClock, now: Time) {}
+    /// [`SpiPeripheral::set_clock`]: mc683xx_modules::peripheral::SpiPeripheral::set_clock
+    fn set_qspi_clock(&mut self, clock: QspiClock, now: Time, system_clock: TimeBase) {}
 
-    /// Whether its QSPI calls (`transfer`, `select`, `qspi_clock`) may
+    /// Whether its QSPI calls (`transfer`, `select`, `set_qspi_clock`) may
     /// come late, in a batch ([`SpiPeripheral::deferrable`]).  Asked once,
     /// as the board is built; the board's PCS decode lets the QSPI
     /// batch only if every peripheral on the QSPI says so and no PCS pin
@@ -757,9 +766,9 @@ pub trait Peripheral: Any {
         false
     }
 
-    /// `signal` arrives on input `port` at `now`.  By default it is
-    /// ignored.
-    fn input(&mut self, port: usize, signal: Signal, now: Time, drive: &mut Drive<'_>) {}
+    /// `signal` arrives on input `port`, at the drive's time.  By
+    /// default it is ignored.
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {}
 
     /// The value it drives on analog output `port` at `now`, for a
     /// sink that samples it then (an ADC converting): a source whose
@@ -771,29 +780,23 @@ pub trait Peripheral: Any {
     }
 
     /// When it next changes on its own, if it will: the board calls
-    /// `advance` then.  A time already past is advanced to at once.  By
-    /// default never.
-    fn next_event(&self) -> Option<Time> {
+    /// `advance` then.  A time already past is advanced to at once.
+    /// `system_clock` is the chip's system clock on board time now, for
+    /// a peripheral whose events fall on the chip's clocks: asked again
+    /// whenever the board needs it, so a part keeps no base between
+    /// calls.  By default never.
+    fn next_event(&self, system_clock: TimeBase) -> Option<Time> {
         None
     }
 
-    /// Brings it to `now`, a time `next_event` gave.  It must move
-    /// `next_event` past `now`, or to [`None`]: a peripheral advanced to one
+    /// Brings it to the drive's time, a time `next_event` gave.  It must
+    /// move `next_event` past that, or to [`None`]: a peripheral advanced to one
     /// time over and over without that stalls the board, and the run
     /// fails ([`RunError::Stalled`]).  Several events at one time may each
     /// take an advance.
     ///
     /// [`RunError::Stalled`]: crate::error::RunError::Stalled
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {}
-
-    /// The chip's system clock on board time from now on: told once
-    /// the board is loaded, at each change of its frequency (SYNCR, a
-    /// reset; right after the instruction that made it), and after a
-    /// restore.  A peripheral that converts times outside a call (in
-    /// `next_event`) keeps it, and keeps no other: the clock runs at
-    /// 8.388608 MHz only until SYNCR is written.  By default it is
-    /// ignored.
-    fn system_clock(&mut self, clock: TimeBase) {}
+    fn advance(&mut self, drive: &mut Drive<'_>) {}
 
     /// Its state as a front end shows it: registers, FIFOs, levels,
     /// named ([`inspect::Inspection`]).  Read-only: it must change
@@ -897,21 +900,35 @@ mod tests {
     }
 
     #[test]
-    fn a_drive_takes_the_system_clock_in_one_expression() {
-        let base = TimeBase::new(Cycles::ZERO, Time(5), Frequency::from_hz(16_777_216));
-        let drive = Drive::new(Time(5)).with_system_clock(base);
-        assert_eq!(drive.system_clock(), Some(base));
-        assert_eq!(Drive::new(Time(5)).system_clock(), None);
+    fn a_drive_carries_the_system_clock() {
+        let base = TimeBase::new(
+            Cycles::ZERO,
+            Time::from_picos(5),
+            Frequency::from_hz(16_777_216),
+        );
+        assert_eq!(Drive::new(Time::from_picos(5), base).system_clock(), base);
+        let sampler = |_: usize, _: Time| Some(1.5);
+        let drive = Drive::with_sampler(Time::from_picos(5), base, &sampler);
+        assert_eq!((drive.system_clock(), drive.sample(0)), (base, Some(1.5)));
     }
 
     #[test]
     fn a_transfer_takes_another_clock_and_keeps_the_rest() {
-        let reset = QspiClock::reset(Frequency::from_hz(8_388_608));
-        let transfer = Transfer::new(1, 2, 0xe, 0xa5, 8, reset, Time(9)).continuing();
+        let reset = QspiClock::at_reset(Frequency::from_hz(8_388_608));
+        let transfer = Transfer::new(0xa5, 8, reset)
+            .through(1)
+            .at_entry(2)
+            .selecting(0xe)
+            .continuing();
+        assert_eq!(
+            (transfer.attachment, transfer.entry, transfer.chip_selects),
+            (1, 2, 0xe)
+        );
+        assert!(!transfer.starts_frame);
         let fast = QspiClock::new(
             ClockPolarity::IdleHigh,
             ClockPhase::CaptureLeading,
-            Cycles(4),
+            Cycles::from_clocks(4),
             reset.system_clock,
         );
         let clocked = transfer.clocked(fast);

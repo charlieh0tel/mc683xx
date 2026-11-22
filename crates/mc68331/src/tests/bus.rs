@@ -5,6 +5,7 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::state::Stateless;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
@@ -33,6 +34,7 @@ use crate::chip::Mc68331;
 use crate::event::DsackFault;
 use crate::event::Event;
 use crate::host::AccessError;
+use mc683xx_cpu32::memory::MemoryKind;
 
 /// Where the bus peripheral's window is: above CSBOOT's reset block,
 /// which no select decodes out of reset (MC68331UM Table 4-24).
@@ -50,7 +52,11 @@ fn decoding<D: MappedPeripheral + Timed + Stateless + 'static>(
 ) -> (Mc68331, PeripheralId) {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let id = builder
         .bus_peripheral(
@@ -65,7 +71,7 @@ fn decoding<D: MappedPeripheral + Timed + Stateless + 'static>(
             pins,
         )
         .unwrap();
-    builder.interrupt(id, IrqPin::new(4).unwrap());
+    builder.set_interrupt(id, IrqPin::new(4).unwrap());
     (builder.build(), id)
 }
 
@@ -122,10 +128,10 @@ fn a_bus_peripherals_dsack_waits_sizes_and_is_checked_against_pepar() {
     assert_eq!(cycle(&mut chip, WINDOW, Size::Byte, None), Err(BusError));
     assert_eq!(
         chip.take_events(),
-        [Event::Dsack(
-            Cycles::ZERO,
-            DsackFault::BusUnassigned { peripheral: id }
-        )]
+        [Event::Dsack {
+            now: Cycles::ZERO,
+            fault: DsackFault::BusUnassigned { peripheral: id }
+        }]
     );
 }
 
@@ -137,7 +143,7 @@ fn a_bus_peripheral_gives_the_vector_of_its_acknowledge() {
     assert_eq!(chip.board.level(), four);
     assert_eq!(
         chip.board.acknowledge(four, Cycles::ZERO).answer,
-        Acknowledge::Vector(0x48)
+        Acknowledge::Vector(Vector(0x48))
     );
     let three = IrqPin::new(3).unwrap().level();
     assert_eq!(
@@ -148,7 +154,7 @@ fn a_bus_peripheral_gives_the_vector_of_its_acknowledge() {
     let reads = &chip.peripheral::<Recorder>(id).unwrap().reads;
     assert_eq!(reads.len(), 1);
     assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
-    assert_eq!(reads[0].address, 0xff_fff9);
+    assert_eq!(reads[0].address, Address(0xff_fff9));
 }
 
 #[test]
@@ -180,7 +186,11 @@ fn dsack0_and_dsack1_at_once_are_a_16_bit_port_in_either_order() {
     ] {
         let mut builder = Builder::default();
         builder
-            .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+            .memory(
+                image(&[NOP], ROM_BYTES),
+                MemoryKind::Rom,
+                &[ChipSelect::Boot],
+            )
             .unwrap();
         for pin in pins {
             builder
@@ -207,10 +217,14 @@ fn dsack0_and_dsack1_at_once_are_a_16_bit_port_in_either_order() {
 fn a_bus_peripheral_takes_a_fixed_memorys_cycles() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     let fixed = builder
-        .fixed_memory(Address(WINDOW), vec![0x5a; 2048], true)
+        .fixed_memory(Address(WINDOW), vec![0x5a; 2048], MemoryKind::Ram)
         .unwrap();
     let id = builder
         .bus_peripheral(
@@ -254,7 +268,7 @@ impl MappedPeripheral for Mixed {
     }
 
     fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
-        Some(if cycle.address & 2 == 0 {
+        Some(if cycle.address.0 & 2 == 0 {
             PortSize::Bits8
         } else {
             PortSize::Bits16
@@ -305,10 +319,14 @@ fn the_core_leaves_a_bus_window_inside_a_fixed_memory_to_the_peripheral() {
     let program = [load_word(WINDOW + 0x10, 0), load_word(WINDOW, 1)].concat();
     let mut builder = Builder::default();
     builder
-        .memory(image(&program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder
-        .fixed_memory(Address(WINDOW), vec![0x5a; 2048], true)
+        .fixed_memory(Address(WINDOW), vec![0x5a; 2048], MemoryKind::Ram)
         .unwrap();
     builder
         .bus_peripheral(
@@ -321,7 +339,7 @@ fn the_core_leaves_a_bus_window_inside_a_fixed_memory_to_the_peripheral() {
         )
         .unwrap();
     let mut chip = builder.build();
-    chip.run_for(Cycles(200));
+    chip.run_for(Cycles::from_clocks(200));
     let data = chip.cpu().registers.data;
     assert_eq!((data[0] & 0xffff, data[1] & 0xffff), (0x1234, 0x5a5a));
 }

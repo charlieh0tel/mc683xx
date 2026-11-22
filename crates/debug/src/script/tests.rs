@@ -2,14 +2,14 @@ use std::time::Duration;
 
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::ParseRegisterError;
-use mc683xx_target::register::ParseSystemRegisterError;
 use mc683xx_target::register::Register;
 use mc683xx_target::register::SystemRegister;
 use mc683xx_target::size::Size;
 
+use super::Clause;
 use super::Command;
 use super::Line;
+use super::Operand;
 use super::ParseCommandError;
 use super::ParseScriptError;
 use super::Script;
@@ -178,14 +178,14 @@ fn words_that_name_nothing() {
         error("write_register d8 1"),
         ParseCommandError::Register {
             name: "d8".to_owned(),
-            error: ParseRegisterError,
+            error: "d8".parse::<Register>().unwrap_err(),
         }
     );
     assert_eq!(
         error("write_system_register pc 1"),
         ParseCommandError::SystemRegister {
             name: "pc".to_owned(),
-            error: ParseSystemRegisterError,
+            error: "pc".parse::<SystemRegister>().unwrap_err(),
         }
     );
 }
@@ -193,18 +193,33 @@ fn words_that_name_nothing() {
 #[test]
 fn missing_operands_and_clauses() {
     for (line, what) in [
-        ("write_memory.w", "address"),
-        ("write_memory.w 0x100", "value"),
-        ("write_register", "register"),
-        ("write_register d0", "value"),
-        ("write_system_register vbr", "value"),
-        ("read_memory.w 0x100", "expect"),
-        ("read_memory.w 0x100 mask 0xff", "expect"),
-        ("read_memory.w 0x100 expect", "expect"),
-        ("poll_memory.w 0x100 expect 0 timeout_ms 5", "mask"),
-        ("poll_memory.w 0x100 mask 1 timeout_ms 5", "expect"),
-        ("poll_memory.w 0x100 mask 1 expect 1", "timeout_ms"),
-        ("write_memory.w 0x100 1 fc", "fc"),
+        ("write_memory.w", Operand::Address),
+        ("write_memory.w 0x100", Operand::Value),
+        ("write_register", Operand::Register),
+        ("write_register d0", Operand::Value),
+        ("write_system_register vbr", Operand::Value),
+        ("read_memory.w 0x100", Operand::Clause(Clause::Expect)),
+        (
+            "read_memory.w 0x100 mask 0xff",
+            Operand::Clause(Clause::Expect),
+        ),
+        (
+            "read_memory.w 0x100 expect",
+            Operand::Clause(Clause::Expect),
+        ),
+        (
+            "poll_memory.w 0x100 expect 0 timeout_ms 5",
+            Operand::Clause(Clause::Mask),
+        ),
+        (
+            "poll_memory.w 0x100 mask 1 timeout_ms 5",
+            Operand::Clause(Clause::Expect),
+        ),
+        (
+            "poll_memory.w 0x100 mask 1 expect 1",
+            Operand::Clause(Clause::TimeoutMs),
+        ),
+        ("write_memory.w 0x100 1 fc", Operand::Clause(Clause::Fc)),
     ] {
         assert_eq!(error(line), ParseCommandError::Missing { what }, "{line}");
     }
@@ -232,7 +247,9 @@ fn unexpected_and_repeated_words() {
     );
     assert_eq!(
         error("read_memory.w 0x100 expect 1 expect 1"),
-        ParseCommandError::Repeated { clause: "expect" }
+        ParseCommandError::Repeated {
+            clause: Clause::Expect
+        }
     );
 }
 
@@ -338,6 +355,15 @@ fn errors_say_what_is_wrong() {
         error("write_memory.b 0 0x1ff").to_string(),
         "0x1ff does not fit in 8 bits"
     );
+    assert_eq!(
+        error("poll_memory.w 0x100 mask 1 expect 1").to_string(),
+        "missing timeout_ms"
+    );
+    assert_eq!(
+        error("read_memory.w 0x100 expect 1 fc 1 fc 2").to_string(),
+        "`fc` given twice"
+    );
+    assert_eq!(error("write_memory.w").to_string(), "missing address");
 }
 
 #[test]
@@ -366,6 +392,32 @@ fn a_script_skips_comments_and_blank_lines_and_numbers_its_lines() {
 }
 
 #[test]
+fn a_script_prints_its_commands_a_line_each() {
+    let script: Script = "# Chip selects\n\
+         write_memory.w 0xfffa44 0x3fff   # CSPAR0\n\
+         \n\
+         read_memory.w 0xfffa44 expect 0x3fff fc 6\n"
+        .parse()
+        .unwrap();
+    let printed = script.to_string();
+    assert_eq!(
+        printed,
+        "write_memory.w 0x00fffa44 0x3fff\n\
+         read_memory.w 0x00fffa44 expect 0x3fff fc 6\n"
+    );
+    let reparsed: Script = printed.parse().unwrap();
+    let commands = |script: &Script| {
+        script
+            .lines()
+            .iter()
+            .map(|line| line.command.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(commands(&reparsed), commands(&script));
+    assert_eq!("".parse::<Script>().unwrap().to_string(), "");
+}
+
+#[test]
 fn a_bad_line_names_its_number() {
     let error = "write_register d0 1\n\nwrite_register d9 1\n"
         .parse::<Script>()
@@ -376,12 +428,34 @@ fn a_bad_line_names_its_number() {
             line: 3,
             error: ParseCommandError::Register {
                 name: "d9".to_owned(),
-                error: ParseRegisterError,
+                error: "d9".parse::<Register>().unwrap_err(),
             },
         }
     );
     assert_eq!(
         error.to_string(),
         "line 3: \"d9\": not a data or address register"
+    );
+}
+
+#[test]
+fn clauses_and_operands_print_as_named_and_parse_back() {
+    let operands = [Operand::Address, Operand::Value, Operand::Register]
+        .into_iter()
+        .chain(Clause::ALL.map(Operand::Clause));
+    for operand in operands {
+        assert_eq!(operand.to_string().parse(), Ok(operand));
+    }
+    for clause in Clause::ALL {
+        assert_eq!(clause.to_string().parse(), Ok(clause));
+    }
+    assert_eq!("timeout_ms".parse(), Ok(Clause::TimeoutMs));
+    assert_eq!(
+        "Mask".parse::<Clause>().unwrap_err().to_string(),
+        "no clause \"Mask\""
+    );
+    assert_eq!(
+        "size".parse::<Operand>().unwrap_err().to_string(),
+        "no operand \"size\""
     );
 }

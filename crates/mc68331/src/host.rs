@@ -8,8 +8,7 @@
 
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::memory::Memory;
-use mc683xx_cpu32::memory::PAGE_BYTES;
-use mc683xx_cpu32::memory::Space;
+use mc683xx_cpu32::memory::Unserved;
 use mc683xx_modules::module;
 use mc683xx_modules::module::Peek;
 use mc683xx_modules::sim::BLOCK;
@@ -26,19 +25,15 @@ use crate::chip::Mc68331;
 /// Bits in a word cycle, the most a cycle carries: a long is two.
 const WORD_BITS: u32 = 16;
 
-/// A byte a debugger's write cannot reach: not memory the core serves.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("{0} is not memory the core serves")]
-pub struct Unserved(pub Address);
-
 /// Why a host's cycle or peek did not give a value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum AccessError {
     /// No module acknowledged the cycle and no chip select matched it:
-    /// nothing answers there.
-    #[error("nothing answers there")]
-    Unmapped,
+    /// nothing answers at the address, the cycle's on the address
+    /// lines.
+    #[error("nothing answers at {0}")]
+    Unmapped(Address),
     /// The cycle ended in a bus error: a peripheral's BERR, a select
     /// waiting for a DSACK that never comes, the bus monitor.
     #[error("bus error")]
@@ -76,7 +71,6 @@ impl Mc68331 {
         function_code: FunctionCode,
     ) -> Result<u32, AccessError> {
         self.words(address, size)?
-            .into_iter()
             .try_fold(0, |value, (at, size, shift)| {
                 Ok(value | self.cycle(at, size, function_code, None)? << shift)
             })
@@ -125,49 +119,62 @@ impl Mc68331 {
         function_code: FunctionCode,
     ) -> Result<u32, AccessError> {
         self.words(address, size)?
-            .into_iter()
             .try_fold(0, |value, (at, size, shift)| {
                 Ok(value | self.peek_cycle(at, size, function_code)? << shift)
             })
     }
 
-    /// Writes `data` at `address` up, with no bus cycle, a debugger's
-    /// write: into the memories the core serves in supervisor space, as
-    /// the decode now maps them, a ROM's included, whatever the pages'
-    /// permissions.
+    /// Fills `data` from `address` up, with no bus cycle, a debugger's
+    /// read: from the memories the core serves in supervisor space, as
+    /// the decode now maps them, whatever the pages' permissions; as the
+    /// bare machine's [`Machine::read`](mc683xx_cpu32::flat::Machine::read)
+    /// ([`Memory::read_bytes`](mc683xx_cpu32::memory::Memory::read_bytes)).
+    /// [`peek`](Self::peek) reads the modules' registers too.
     ///
     /// # Errors
     ///
-    /// [`Unserved`] for a byte the core does not serve (a peripheral's,
-    /// or one a peripheral shares); then nothing is written.
-    pub fn poke(&mut self, address: Address, data: &[u8]) -> Result<(), Unserved> {
-        let memory = &mut self.cpu.memory;
-        let places = (0..data.len() as u32)
-            .map(|offset| {
-                let at = address.offset(offset);
-                let page = memory.entry(Space::Supervisor, at);
-                let backing = page.write.or(page.read).ok_or(Unserved(at))?;
-                let within = memory.mask(at).0 % PAGE_BYTES;
-                Ok((backing.region, (backing.offset + within) as usize))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        for ((region, index), &byte) in places.into_iter().zip(data) {
-            memory.region_mut(region)[index] = byte;
-        }
-        Ok(())
+    /// [`Unserved`] for the first byte the core does not serve a read of
+    /// (a peripheral's, or one a peripheral shares); `data` is then filled
+    /// up to it.
+    pub fn read(&self, address: Address, data: &mut [u8]) -> Result<(), Unserved> {
+        self.cpu.memory.read_bytes(address, data)
+    }
+
+    /// Writes `data` at `address` up, with no bus cycle, a debugger's
+    /// write: into the bytes [`read`](Self::read) reads, a ROM's
+    /// included, whatever the pages' permissions, so a read gives back
+    /// what was written; where the core serves a page's writes but not
+    /// its reads (a write-only select), into the memory it writes.  As
+    /// the bare machine's
+    /// [`Machine::write`](mc683xx_cpu32::flat::Machine::write)
+    /// ([`Memory::write_bytes`](mc683xx_cpu32::memory::Memory::write_bytes)).
+    ///
+    /// # Errors
+    ///
+    /// [`Unserved`] for a byte the core serves neither a read nor a
+    /// write of (a peripheral's, or one a peripheral shares); then
+    /// nothing is written.
+    pub fn write(&mut self, address: Address, data: &[u8]) -> Result<(), Unserved> {
+        self.cpu.memory.write_bytes(address, data)
     }
 
     /// The byte or word cycles of an access, each on the address lines
     /// with its place in the value.
-    fn words(&self, address: Address, size: Size) -> Result<Vec<(u32, Size, u32)>, AccessError> {
+    fn words(
+        &self,
+        address: Address,
+        size: Size,
+    ) -> Result<impl Iterator<Item = (u32, Size, u32)> + use<>, AccessError> {
         if size != Size::Byte && address.is_odd() {
             return Err(AccessError::Misaligned);
         }
         let at = |by| self.cpu.memory.mask(address.offset(by)).0;
-        Ok(match size {
-            Size::Long => vec![(at(0), Size::Word, WORD_BITS), (at(2), Size::Word, 0)],
-            _ => vec![(at(0), size, 0)],
-        })
+        let first = (at(0), size, 0);
+        let (words, count) = match size {
+            Size::Long => ([(at(0), Size::Word, WORD_BITS), (at(2), Size::Word, 0)], 2),
+            _ => ([first, first], 1),
+        };
+        Ok(words.into_iter().take(count))
     }
 
     /// One byte or word cycle, now, leaving the stop request as it was.
@@ -214,7 +221,7 @@ impl Mc68331 {
         let board = &self.board;
         if !function_code.is_cpu_space()
             && let Some(offset) = address
-                .checked_sub(board.sim.module_base())
+                .checked_sub(board.sim.module_base().0)
                 .filter(|&offset| offset < MODULE_SPACE_BYTES)
         {
             let access = |block: module::Block| module::RegisterAccess {
@@ -256,7 +263,7 @@ impl Board {
     /// matched it, or something answered it so.
     fn unanswered(&self, request: DecodeRequest) -> AccessError {
         if self.sim.chip_selects().matches(request).next().is_none() {
-            AccessError::Unmapped
+            AccessError::Unmapped(Address(request.address))
         } else {
             AccessError::BusError
         }
@@ -281,7 +288,7 @@ impl Board {
             None if self.sim.chip_selects().matches(request).next().is_none()
                 && !self.bus_takes(address, function_code) =>
             {
-                Err(AccessError::Unmapped)
+                Err(AccessError::Unmapped(Address(address)))
             }
             None => Err(AccessError::Unpeekable),
         }

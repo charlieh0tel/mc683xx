@@ -588,7 +588,7 @@ pub(super) mod tests {
     /// vector at [`HANDLER`].
     pub(crate) fn prepared(code: &[u16]) -> Cpu {
         let mut cpu = machine(code);
-        cpu.registers.ssp = STACK;
+        cpu.registers.ssp = Address(STACK);
         for vector in 0..=u8::MAX {
             poke_long(&mut cpu, Vector(vector).offset(), HANDLER);
         }
@@ -660,7 +660,7 @@ pub(super) mod tests {
         step(&mut cpu, 1);
         assert_eq!(cpu.registers.address(0), 0x2004);
         assert_eq!(peek_long(&cpu, 0x3000 + 8 + 12), 0x8000_0001);
-        assert_eq!(cpu.registers.pc, CODE + 4);
+        assert_eq!(cpu.registers.pc.0, CODE + 4);
         assert_eq!(ccr(&cpu), status::N);
     }
 
@@ -753,7 +753,7 @@ pub(super) mod tests {
         cpu.registers.set_address(0, 0x3000);
         step(&mut cpu, 2);
         assert_eq!(cpu.registers.address(1), CODE + 2 + 4);
-        assert_eq!(cpu.registers.ssp, STACK - 4);
+        assert_eq!(cpu.registers.ssp.0, STACK - 4);
         assert_eq!(peek_long(&cpu, STACK - 4), 0x3008);
     }
 
@@ -765,10 +765,10 @@ pub(super) mod tests {
         step(&mut cpu, 1);
         assert_eq!(peek_long(&cpu, STACK - 4), 0x1234);
         assert_eq!(cpu.registers.address(6), STACK - 4);
-        assert_eq!(cpu.registers.ssp, STACK - 12);
+        assert_eq!(cpu.registers.ssp.0, STACK - 12);
         step(&mut cpu, 1);
         assert_eq!(cpu.registers.address(6), 0x1234);
-        assert_eq!(cpu.registers.ssp, STACK);
+        assert_eq!(cpu.registers.ssp.0, STACK);
     }
 
     #[test]
@@ -777,8 +777,8 @@ pub(super) mod tests {
         let mut cpu = prepared(&[0x480d, 0xffff, 0x0000]);
         step(&mut cpu, 1);
         assert_eq!(cpu.registers.address(5), STACK - 4);
-        assert_eq!(cpu.registers.ssp, (STACK - 4).wrapping_sub(0x1_0000));
-        assert_eq!(cpu.registers.pc, CODE + 6);
+        assert_eq!(cpu.registers.ssp.0, (STACK - 4).wrapping_sub(0x1_0000));
+        assert_eq!(cpu.registers.pc.0, CODE + 6);
     }
 
     #[test]
@@ -787,18 +787,18 @@ pub(super) mod tests {
         let mut cpu = prepared(&[0x4e57, 0xfffc, 0x4e5f]);
         step(&mut cpu, 1);
         assert_eq!(peek_long(&cpu, STACK - 4), STACK - 4);
-        assert_eq!(cpu.registers.ssp, STACK - 8);
+        assert_eq!(cpu.registers.ssp.0, STACK - 8);
         // UNLK A7: A7 is the long pulled.
-        cpu.registers.ssp = STACK - 4;
+        cpu.registers.ssp = Address(STACK - 4);
         poke_long(&mut cpu, STACK - 4, 0x4000);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.ssp, 0x4000);
+        assert_eq!(cpu.registers.ssp.0, 0x4000);
     }
 
     #[test]
     fn link_on_an_odd_stack_is_an_address_error() {
         let mut cpu = prepared(&[0x4e56, 0xfff8]);
-        cpu.registers.ssp = STACK + 1;
+        cpu.registers.ssp = Address(STACK + 1);
         step(&mut cpu, 1);
         assert_eq!(taken(&cpu), Some(Vector::ADDRESS_ERROR));
     }
@@ -926,7 +926,7 @@ pub(super) mod tests {
         let mut cpu = machine(&[0x4cba, 0x0001, 0x0004, 0x4e71, 0x8001]);
         step(&mut cpu, 1);
         assert_eq!(cpu.registers.data[0], 0xffff_8001);
-        assert_eq!(cpu.registers.pc, CODE + 6);
+        assert_eq!(cpu.registers.pc.0, CODE + 6);
     }
 
     #[test]
@@ -965,7 +965,7 @@ pub(super) mod tests {
         // returns.
         poke_long(&mut cpu, sp + 8, 0x3008);
         step(&mut cpu, 2);
-        assert_eq!(cpu.registers.pc, CODE + 4);
+        assert_eq!(cpu.registers.pc.0, CODE + 4);
         assert_eq!(peek_long(&cpu, RAM_END - 8), 0xd0);
         assert_eq!(peek_long(&cpu, RAM_END - 4), 0xd1);
         assert_eq!(peek_long(&cpu, 0x3008), 0xd2);

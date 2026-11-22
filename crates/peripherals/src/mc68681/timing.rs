@@ -2,6 +2,7 @@
 //! the baud rate generator, and the format its mode registers give.
 
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::frequency::NANOHERTZ_PER_HERTZ;
@@ -34,25 +35,27 @@ pub(super) struct Crystal {
 impl Crystal {
     /// The last tick at or before `time`.
     pub(super) fn tick(self, time: Time) -> u64 {
-        (u128::from(time.0) * u128::from(self.hz) / u128::from(PICOSECONDS_PER_SECOND)) as u64
+        (u128::from(time.picos()) * u128::from(self.hz) / u128::from(PICOSECONDS_PER_SECOND)) as u64
     }
 
     /// When tick `tick` is.
     pub(super) fn time(self, tick: u64) -> Time {
         let scaled = u128::from(tick) * u128::from(PICOSECONDS_PER_SECOND);
-        Time(scaled.div_ceil(u128::from(self.hz)) as u64)
+        Time::from_picos(scaled.div_ceil(u128::from(self.hz)) as u64)
     }
 
-    /// The picoseconds `ticks` ticks take, rounded down.
-    pub(super) fn span(self, ticks: u64) -> u64 {
-        (u128::from(ticks) * u128::from(PICOSECONDS_PER_SECOND) / u128::from(self.hz)) as u64
+    /// The span `ticks` ticks take, rounded down to a picosecond.
+    pub(super) fn span(self, ticks: u64) -> Span {
+        Span::from_picos(
+            (u128::from(ticks) * u128::from(PICOSECONDS_PER_SECOND) / u128::from(self.hz)) as u64,
+        )
     }
 
     /// The bit rate of a 16X clock of X1/CLK divided by `divisor`.
     pub(super) fn baud(self, divisor: u64) -> Frequency {
         let nanohertz = u128::from(self.hz) * u128::from(NANOHERTZ_PER_HERTZ)
             / u128::from(SIXTEENTHS * divisor);
-        Frequency(nanohertz as u64)
+        Frequency::from_nanohertz(nanohertz as u64)
     }
 }
 

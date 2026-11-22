@@ -12,6 +12,9 @@ pub(crate) enum RunError {
     /// The board file, or its loading.
     #[error(transparent)]
     Board(#[from] mc683xx_board::error::LoadError),
+    /// A `--set` not of the form `PERIPHERAL.KEY=VALUE`.
+    #[error(transparent)]
+    Setting(#[from] mc683xx_board::error::ParseSettingError),
     /// A run that could not go on: a peripheral stalled the board.
     #[error(transparent)]
     Run(#[from] mc683xx_board::error::RunError),
@@ -59,12 +62,6 @@ pub(crate) enum RunError {
     /// gdb's address: no listening there, or no connection taken.
     #[error("gdb: {0}")]
     Gdb(io::Error),
-    /// `--bdm`'s address: no listening there.
-    #[error("bdm: {0}")]
-    Bdm(io::Error),
-    /// `--pace`'s factor, refused.
-    #[error(transparent)]
-    Pacing(#[from] mc683xx_board::pacing::PacingError),
     /// Ctrl-C's handler, which could not be set.
     #[error("Ctrl-C: {0}")]
     Interrupt(ctrlc::Error),

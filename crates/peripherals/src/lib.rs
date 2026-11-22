@@ -43,8 +43,8 @@
 //! to = ["external.lamp"]
 //! "#;
 //! let description = Description::parse(text, Path::new("."), &Options::default())?;
-//! let mut board = Board::<Mc68331>::load(&description, &registry, Environment::default())?;
-//! board.run_until(Time(1))?;
+//! let mut board = Board::<Mc68331>::load(&description, &registry, &Environment::default())?;
+//! board.run_until(Time::from_picos(1))?;
 //! assert_eq!(board.take_received("lamp").unwrap(), [(Time::ZERO, Signal::Level(false))]);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
@@ -75,6 +75,12 @@ mod shift_register;
 mod sipo;
 #[cfg(test)]
 mod spi_mode;
+
+/// The chip's system clock a test's drives carry: 16.777216 MHz from
+/// power-on.  No stock part is on the chip's clocks.
+#[cfg(test)]
+const SYSTEM_CLOCK: mc683xx_board::time::TimeBase =
+    mc683xx_board::time::TimeBase::steady(mc683xx_cpu32::frequency::Frequency::from_hz(16_777_216));
 
 use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;
@@ -110,7 +116,7 @@ const STOCK: &[Stock] = &[
 /// If a type declares a port twice.
 pub fn register(registry: &mut Registry) -> Result<(), RegistryError> {
     for (name, register) in STOCK {
-        if registry.get(name).is_none() {
+        if !registry.contains(name) {
             register(registry)?;
         }
     }
@@ -153,13 +159,9 @@ mod tests {
     fn the_registry_holds_the_builtins_and_every_stock_type() {
         let registry = registry();
         for name in names() {
-            assert!(registry.get(name).is_some(), "{name}");
+            assert!(registry.contains(name), "{name}");
         }
-        assert!(registry.get("recorder").is_some());
-        assert!(
-            Registry::with_builtins()
-                .get(names().next().unwrap())
-                .is_none()
-        );
+        assert!(registry.contains("recorder"));
+        assert!(!Registry::with_builtins().contains(names().next().unwrap()));
     }
 }

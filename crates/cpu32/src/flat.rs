@@ -23,11 +23,13 @@ use crate::cpu::Cpu;
 use crate::cpu::Halt;
 use crate::cpu::bare::LimitedRun;
 use crate::cpu::bare::Limits;
+use crate::cpu::state::Layer;
 use crate::cpu::state::StateError;
-use crate::cpu::state::decode;
-use crate::cpu::state::encode;
+use crate::cpu::state::decode_layer;
+use crate::cpu::state::encode_layer;
 use crate::cpu::state::restore_each;
 use crate::cycles::Cycles;
+use crate::exception::Vector;
 use crate::interrupt::Acknowledge;
 use crate::interrupt::Acknowledged;
 use crate::interrupt::InterruptLevel;
@@ -41,6 +43,7 @@ use crate::memory::Page;
 use crate::memory::Permissions;
 use crate::memory::RegionId;
 use crate::memory::Space;
+use crate::memory::Unserved;
 use crate::peripheral::BusCycle;
 use crate::peripheral::MappedPeripheral;
 use crate::peripheral::PeripheralId;
@@ -51,7 +54,7 @@ use mc683xx_target::size::Size;
 mod tests;
 
 /// The format of [`Machine::save`]'s bytes.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 /// The address lines a machine has unless the host says otherwise:
 /// all of the CPU32's (CPU32RM 5.3), so no address aliases.
 pub const ADDRESS_BITS: u32 = 32;
@@ -71,8 +74,8 @@ pub enum MapError {
     #[error(transparent)]
     Memory(#[from] MemoryError),
     /// Memory where some is mapped already.
-    #[error("{0:#x} is mapped already")]
-    Mapped(u32),
+    #[error("{0} is mapped already")]
+    Mapped(Address),
     /// Contents longer than the memory.
     #[error("{contents:#x} bytes of contents in {length:#x} bytes")]
     Contents {
@@ -82,14 +85,9 @@ pub enum MapError {
         length: u32,
     },
     /// A peripheral range that overlaps another peripheral's, or is empty.
-    #[error("peripherals overlap at {0:#x}")]
-    Overlap(u32),
+    #[error("peripherals overlap at {0}")]
+    Overlap(Address),
 }
-
-/// Host access to memory no map covers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("{0:#x} is not mapped")]
-pub struct Unmapped(pub u32);
 
 /// A peripheral with the addresses it covers.
 struct Wired {
@@ -183,7 +181,7 @@ impl FlatBus {
             return None;
         }
         let cycle = BusCycle::new(
-            access.address.0,
+            access.address,
             access.size,
             access.function_code,
             access.now,
@@ -248,7 +246,7 @@ fn is_lpstop_broadcast(access: &BusAccess) -> bool {
 struct Requests {
     /// Levels 1 to 7's requests: their vector, [`None`] for the
     /// autovector; the outer [`None`] while not requested.
-    lines: [Option<Option<u8>>; LEVELS],
+    lines: [Option<Option<Vector>>; LEVELS],
 }
 
 impl Interrupts for Requests {
@@ -302,26 +300,26 @@ struct MachineState {
 /// use mc683xx_cpu32::registers::status;
 ///
 /// /// Where the function's caller returns to: nothing runs there.
-/// const RETURN: u32 = 0x100;
+/// const RETURN: Address = Address(0x100);
 /// /// The function.
-/// const CODE: u32 = 0x400;
+/// const CODE: Address = Address(0x400);
 /// /// The supervisor stack's top.
-/// const STACK: u32 = 0x800;
+/// const STACK: Address = Address(0x800);
 ///
 /// let mut machine = Machine::new(ADDRESS_BITS)?;
 /// machine.map(Address(0), PAGE_BYTES, &[])?;
 /// // ADD.L D1,D0; RTS
-/// machine.write(Address(CODE), &[0xd0, 0x81, 0x4e, 0x75])?;
-/// machine.write(Address(STACK - 4), &RETURN.to_be_bytes())?;
+/// machine.write(CODE, &[0xd0, 0x81, 0x4e, 0x75])?;
+/// machine.write(STACK.before(4), &RETURN.0.to_be_bytes())?;
 ///
 /// let registers = &mut machine.cpu.registers;
 /// registers.set_sr(status::S);
-/// registers.ssp = STACK - 4;
+/// registers.ssp = STACK.before(4);
 /// registers.pc = CODE;
 /// registers.data[0] = 40;
 /// registers.data[1] = 2;
 /// let mut limits = Limits::default();
-/// limits.until = Some(Address(RETURN));
+/// limits.until = Some(RETURN);
 /// let run = machine.run_limited(limits);
 /// assert_eq!(run.end, End::Until);
 /// assert_eq!(machine.cpu.registers.data[0], 42);
@@ -386,7 +384,7 @@ impl Machine {
             .clone()
             .find(|&page| self.cpu.memory.entry(Space::Supervisor, page) != Page::BUS)
         {
-            return Err(MapError::Mapped(mapped.0));
+            return Err(MapError::Mapped(mapped));
         }
         // Checked before the region is taken, so a refusal leaves none.
         self.cpu.memory.check(start, length)?;
@@ -491,55 +489,26 @@ impl Machine {
         Ok(())
     }
 
-    /// The region and offset of mapped byte `address`.
-    fn locate(&self, address: Address) -> Result<(Backing, usize), Unmapped> {
-        let page = self.cpu.memory.entry(Space::Supervisor, address);
-        let backing = page.read.ok_or(Unmapped(address.0))?;
-        Ok((backing, (address.0 % PAGE_BYTES) as usize))
-    }
-
     /// Fills `bytes` from mapped memory at `address`, whatever its
-    /// permissions, with no bus cycle.
+    /// permissions, with no bus cycle ([`Memory::read_bytes`]).
     ///
     /// # Errors
     ///
-    /// [`Unmapped`], with the first address not mapped, if any is not.
-    pub fn read(&self, address: Address, bytes: &mut [u8]) -> Result<(), Unmapped> {
-        let mut done = 0;
-        while done < bytes.len() {
-            let at = address.offset(done as u32);
-            let (backing, within) = self.locate(at)?;
-            let count = (PAGE_BYTES as usize - within).min(bytes.len() - done);
-            let from = backing.offset as usize + within;
-            bytes[done..done + count]
-                .copy_from_slice(&self.cpu.memory.region(backing.region)[from..from + count]);
-            done += count;
-        }
-        Ok(())
+    /// [`Unserved`], with the first address not mapped, if any is not;
+    /// `bytes` is then filled up to it.
+    pub fn read(&self, address: Address, bytes: &mut [u8]) -> Result<(), Unserved> {
+        self.cpu.memory.read_bytes(address, bytes)
     }
 
     /// Writes `bytes` to mapped memory at `address`, as
-    /// [`read`](Self::read).  On an error nothing is written.
+    /// [`read`](Self::read) reads it ([`Memory::write_bytes`]).  On an
+    /// error nothing is written.
     ///
     /// # Errors
     ///
     /// As [`Machine::read`].
-    pub fn write(&mut self, address: Address, bytes: &[u8]) -> Result<(), Unmapped> {
-        let mut spans = Vec::new();
-        let mut done = 0;
-        while done < bytes.len() {
-            let at = address.offset(done as u32);
-            let (backing, within) = self.locate(at)?;
-            let count = (PAGE_BYTES as usize - within).min(bytes.len() - done);
-            spans.push((backing, within, done, count));
-            done += count;
-        }
-        for (backing, within, done, count) in spans {
-            let from = backing.offset as usize + within;
-            self.cpu.memory.region_mut(backing.region)[from..from + count]
-                .copy_from_slice(&bytes[done..done + count]);
-        }
-        Ok(())
+    pub fn write(&mut self, address: Address, bytes: &[u8]) -> Result<(), Unserved> {
+        self.cpu.memory.write_bytes(address, bytes)
     }
 
     /// Puts `peripheral` at `range`, which no other peripheral's overlaps: it
@@ -556,7 +525,7 @@ impl Machine {
     ) -> Result<PeripheralId, MapError> {
         let range = range.start().0..=range.end().0;
         if range.is_empty() {
-            return Err(MapError::Overlap(*range.start()));
+            return Err(MapError::Overlap(Address(*range.start())));
         }
         let index = self
             .bus
@@ -565,7 +534,9 @@ impl Machine {
         if let Some(next) = self.bus.peripherals.get(index)
             && next.range.start() <= range.end()
         {
-            return Err(MapError::Overlap(*next.range.start().max(range.start())));
+            return Err(MapError::Overlap(Address(
+                *next.range.start().max(range.start()),
+            )));
         }
         self.bus.next += 1;
         let id = PeripheralId::from(self.bus.next);
@@ -599,7 +570,7 @@ impl Machine {
     /// Requests an interrupt on `pin`, answered at its acknowledge by
     /// `vector`, or the autovector if [`None`]; it stays requested, as a
     /// level-sensitive line does, until cleared.
-    pub fn request_interrupt(&mut self, pin: IrqPin, vector: Option<u8>) {
+    pub fn request_interrupt(&mut self, pin: IrqPin, vector: Option<Vector>) {
         self.requests.lines[usize::from(pin.get() - 1)] = Some(vector);
     }
 
@@ -623,7 +594,7 @@ impl Machine {
         let run = self
             .cpu
             .run_limited(&mut self.bus, &mut self.requests, self.now, limits);
-        self.now = Cycles(self.now.0.saturating_add(run.cycles.0));
+        self.now = Cycles::from_clocks(self.now.clocks().saturating_add(run.cycles.clocks()));
         run
     }
 
@@ -642,10 +613,11 @@ impl Machine {
     /// A peripheral that cannot save, named by its first address
     /// ([`StateError::Peripheral`]).
     pub fn save(&self) -> Result<Vec<u8>, StateError> {
-        Ok(encode(
+        Ok(encode_layer(
+            Layer::Machine,
             VERSION,
             &MachineState {
-                cpu: self.cpu.save(),
+                cpu: self.cpu.save()?,
                 now: self.now,
                 requests: self.requests,
                 peripherals: self.bus.save_peripherals()?,
@@ -667,7 +639,7 @@ impl Machine {
     /// peripheral that cannot save or refuses its snapshot, named
     /// ([`StateError::Peripheral`]).
     pub fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
-        let state: MachineState = decode(VERSION, snapshot)?;
+        let state: MachineState = decode_layer(Layer::Machine, VERSION, snapshot)?;
         if state.peripherals.len() != self.bus.peripherals.len() {
             return Err(StateError::mismatch("peripherals"));
         }

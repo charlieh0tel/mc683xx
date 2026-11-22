@@ -66,25 +66,58 @@ def observed(loaded: mc683xx.Board) -> list[tuple[str, int, object]]:
 
 
 def test_pacing_names_and_factors() -> None:
-    assert mc683xx.Pacing.UNPACED.factor is None
-    assert mc683xx.Pacing.REAL_TIME.factor == 1.0
-    assert mc683xx.Pacing.scaled(2.0).factor == 2.0
-    assert mc683xx.Pacing("realtime") == mc683xx.Pacing.REAL_TIME
-    assert mc683xx.Pacing("0.5") == mc683xx.Pacing.scaled(0.5)
-    assert str(mc683xx.Pacing.REAL_TIME) == "realtime"
-    for factor in [0.0, -1.0, float("inf"), float("nan")]:
+    assert mc683xx.Pacing.Unpaced().factor is None
+    assert mc683xx.Pacing.RealTime().factor == 1.0
+    assert mc683xx.Pacing.Scaled(2.0).factor == 2.0
+    assert mc683xx.Pacing.parse("realtime") == mc683xx.Pacing.RealTime()
+    assert mc683xx.Pacing.parse("0.5") == mc683xx.Pacing.Scaled(0.5)
+    assert str(mc683xx.Pacing.RealTime()) == "realtime"
+    assert str(mc683xx.Pacing.Scaled(0.5)) == "0.5"
+    assert repr(mc683xx.Pacing.Scaled(2.0)) == "Pacing.Scaled(2.0)"
+    assert repr(mc683xx.Pacing.Unpaced()) == "Pacing.Unpaced()"
+    for factor in [0.0, -0.0, -1.0, float("inf"), float("nan")]:
         with pytest.raises(ValueError, match="pacing factor"):
-            mc683xx.Pacing.scaled(factor)
+            mc683xx.Pacing.parse(str(factor))
+        with pytest.raises(ValueError, match="pacing factor"):
+            mc683xx.Pacing.Scaled(factor)
     with pytest.raises(ValueError, match="no pacing"):
-        mc683xx.Pacing("fast")
+        mc683xx.Pacing.parse("fast")
+
+
+def test_a_pacing_matches_by_its_variant() -> None:
+    def described(pacing: mc683xx.Pacing) -> str:
+        match pacing:
+            case mc683xx.Pacing.Unpaced():
+                return "unpaced"
+            case mc683xx.Pacing.RealTime():
+                return "real time"
+            case mc683xx.Pacing.Scaled(factor):
+                return f"x{factor}"
+        raise AssertionError(pacing)
+
+    assert described(mc683xx.Pacing.parse("unpaced")) == "unpaced"
+    assert described(mc683xx.Pacing.RealTime()) == "real time"
+    assert described(mc683xx.Pacing.parse("4")) == "x4.0"
 
 
 def test_a_pacing_hashes_as_it_compares() -> None:
-    assert hash(mc683xx.Pacing("realtime")) == hash(mc683xx.Pacing.REAL_TIME)
-    assert hash(mc683xx.Pacing("0.5")) == hash(mc683xx.Pacing.scaled(0.5))
-    pacings = {mc683xx.Pacing.UNPACED, mc683xx.Pacing.REAL_TIME, mc683xx.Pacing.scaled(1.0), mc683xx.Pacing.scaled(0.5)}
+    assert hash(mc683xx.Pacing.parse("realtime")) == hash(mc683xx.Pacing.RealTime())
+    assert hash(mc683xx.Pacing.parse("0.5")) == hash(mc683xx.Pacing.Scaled(0.5))
+    for one, other in [
+        (mc683xx.Pacing.Scaled(2.0), mc683xx.Pacing.Scaled(2)),
+        (mc683xx.Pacing.Scaled(0.5), mc683xx.Pacing.parse("0.5")),
+        (mc683xx.Pacing.RealTime(), mc683xx.Pacing.parse("realtime")),
+    ]:
+        assert one == other
+        assert hash(one) == hash(other)
+    pacings = {
+        mc683xx.Pacing.Unpaced(),
+        mc683xx.Pacing.RealTime(),
+        mc683xx.Pacing.Scaled(1.0),
+        mc683xx.Pacing.Scaled(0.5),
+    }
     assert len(pacings) == 4
-    assert mc683xx.Pacing("0.5") in pacings
+    assert mc683xx.Pacing.parse("0.5") in pacings
 
 
 def test_inputs_queued_between_runs_are_driven_at_the_next_runs_start(tmp_path: Path) -> None:
@@ -127,11 +160,11 @@ def test_a_second_thread_stops_a_paced_run_and_queues_a_key(tmp_path: Path) -> N
     thread.start()
     # slow enough that the run is still going when the thread acts; the
     # thread runs while the board sleeps, the GIL released
-    run = loaded.run_for(seconds=10.0, pacing=mc683xx.Pacing.scaled(0.1))
+    run = loaded.run_for(seconds=10.0, pacing=mc683xx.Pacing.Scaled(0.1))
     thread.join()
     assert run.stop == mc683xx.Stop.Requested()
     assert loaded.now < 10 * 10**12
-    assert control.pacing == mc683xx.Pacing.UNPACED, "this call's pacing put back"
+    assert control.pacing == mc683xx.Pacing.Unpaced(), "this call's pacing put back"
     assert not control.stopping
     switched = [at for net, at, _ in seen if net == "switch"]
     assert len(switched) == 1
@@ -149,15 +182,15 @@ def test_a_paced_run_is_the_unpaced_run(tmp_path: Path) -> None:
         loaded.run_for(seconds=0.05, pacing=pacing)
         return seen, loaded.save()
 
-    unpaced = ran(mc683xx.Pacing.UNPACED)
+    unpaced = ran(mc683xx.Pacing.Unpaced())
     assert len(unpaced[0]) > 100
-    assert ran(mc683xx.Pacing.scaled(4.0)) == unpaced
+    assert ran(mc683xx.Pacing.Scaled(4.0)) == unpaced
 
 
 def test_real_time_pacing_keeps_board_time_with_wall_time(tmp_path: Path) -> None:
     loaded = board(tmp_path)
     started = time.perf_counter()
-    loaded.run_for(seconds=0.2, pacing=mc683xx.Pacing.REAL_TIME)
+    loaded.run_for(seconds=0.2, pacing=mc683xx.Pacing.RealTime())
     paced = time.perf_counter() - started
     # never ahead of wall time, its last quantum waited out too;
     # generous above, for a loaded host
@@ -167,17 +200,17 @@ def test_real_time_pacing_keeps_board_time_with_wall_time(tmp_path: Path) -> Non
 def test_a_runs_pacing_is_put_back_even_when_it_raises(tmp_path: Path) -> None:
     loaded = board(tmp_path)
     control = loaded.control()
-    control.set_pacing(mc683xx.Pacing.scaled(3.0))
-    loaded.run_for(seconds=0.001, pacing=mc683xx.Pacing.scaled(100.0))
-    assert control.pacing == mc683xx.Pacing.scaled(3.0)
+    control.set_pacing(mc683xx.Pacing.Scaled(3.0))
+    loaded.run_for(seconds=0.001, pacing=mc683xx.Pacing.Scaled(100.0))
+    assert control.pacing == mc683xx.Pacing.Scaled(3.0)
 
     def failing(net: str, at: int, value: object) -> None:
         raise RuntimeError("seen")
 
     loaded.observe("tick", failing)
     with pytest.raises(RuntimeError, match="seen"):
-        loaded.run_for(seconds=1.0, pacing=mc683xx.Pacing.scaled(100.0))
-    assert control.pacing == mc683xx.Pacing.scaled(3.0)
+        loaded.run_for(seconds=1.0, pacing=mc683xx.Pacing.Scaled(100.0))
+    assert control.pacing == mc683xx.Pacing.Scaled(3.0)
 
 
 def test_a_pacing_another_thread_sets_during_the_run_stays(tmp_path: Path) -> None:
@@ -186,16 +219,16 @@ def test_a_pacing_another_thread_sets_during_the_run_stays(tmp_path: Path) -> No
 
     def front_end() -> None:
         time.sleep(0.05)
-        control.set_pacing(mc683xx.Pacing.REAL_TIME)
+        control.set_pacing(mc683xx.Pacing.RealTime())
         time.sleep(0.05)
         control.stop()
 
     thread = threading.Thread(target=front_end)
     thread.start()
-    run = loaded.run_for(seconds=10.0, pacing=mc683xx.Pacing.scaled(0.1))
+    run = loaded.run_for(seconds=10.0, pacing=mc683xx.Pacing.Scaled(0.1))
     thread.join()
     assert run.stop == mc683xx.Stop.Requested()
-    assert control.pacing == mc683xx.Pacing.REAL_TIME
+    assert control.pacing == mc683xx.Pacing.RealTime()
 
 
 def test_a_second_thread_stops_an_unpaced_run(tmp_path: Path) -> None:
@@ -220,7 +253,7 @@ def test_short_paced_runs_in_a_loop_are_paced(tmp_path: Path) -> None:
     loaded = board(tmp_path)
     started = time.perf_counter()
     for _ in range(100):
-        loaded.run_for(seconds=0.005, pacing=mc683xx.Pacing.scaled(0.1))
+        loaded.run_for(seconds=0.005, pacing=mc683xx.Pacing.Scaled(0.1))
     # 0.5 s of board time at a tenth of real time
     assert time.perf_counter() - started >= 5.0
 
@@ -241,7 +274,7 @@ def test_paced_frames_run_the_board_time_due_by_the_host_s_clock(tmp_path: Path)
     factor = 4.0
     frame_ps = FRAME_SECONDS * factor * 1e12
     loaded = board(tmp_path)
-    loaded.control().set_pacing(mc683xx.Pacing.scaled(factor))
+    loaded.control().set_pacing(mc683xx.Pacing.Scaled(factor))
     wall = 1000.0
     assert loaded.run_frame(wall, seconds=0.1).now == 0
     for count in range(1, 4):
@@ -254,11 +287,11 @@ def test_paced_frames_run_the_board_time_due_by_the_host_s_clock(tmp_path: Path)
 
 def test_a_frame_after_another_run_starts_the_pacing_again(tmp_path: Path) -> None:
     loaded = board(tmp_path)
-    loaded.control().set_pacing(mc683xx.Pacing.REAL_TIME)
+    loaded.control().set_pacing(mc683xx.Pacing.RealTime())
     loaded.run_frame(0.0, picoseconds=SLICE_PS)
     loaded.run_frame(FRAME_SECONDS, picoseconds=SLICE_PS)
     snapshot = loaded.save()
-    ahead = loaded.run_for(picoseconds=SLICE_PS, pacing=mc683xx.Pacing.UNPACED).now
+    ahead = loaded.run_for(picoseconds=SLICE_PS, pacing=mc683xx.Pacing.Unpaced()).now
     assert loaded.run_frame(2 * FRAME_SECONDS, picoseconds=SLICE_PS).now == ahead
     loaded.restore(snapshot)
     restored = loaded.now
@@ -307,6 +340,14 @@ def test_a_frame_s_wall_must_be_seconds(tmp_path: Path) -> None:
             loaded.run_frame(wall, seconds=0.1)
     with pytest.raises(ValueError, match="seconds or picoseconds"):
         loaded.run_frame(0.0)
+
+
+def test_a_quantum_is_never_zero(tmp_path: Path) -> None:
+    loaded = board(tmp_path)
+    with pytest.raises(ValueError, match="quantum"):
+        loaded.run_for(seconds=0.1, quantum_picoseconds=0)
+    with pytest.raises(ValueError, match="quantum"):
+        loaded.run_until(seconds=0.1, quantum_picoseconds=0)
 
 
 # A CPU spinning in `bra.s *` and nothing else: its quanta are far

@@ -10,7 +10,6 @@ use std::fmt;
 use std::hash::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
-use std::num::NonZeroU64;
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -22,6 +21,7 @@ use mc683xx_board::board::BoardTracing;
 use mc683xx_board::board::External;
 use mc683xx_board::chip::Chip;
 use mc683xx_board::description::Options;
+use mc683xx_board::error::RunError;
 use mc683xx_board::inspect::Field;
 use mc683xx_board::inspect::Inspection;
 use mc683xx_board::inspect::Value;
@@ -30,6 +30,7 @@ use mc683xx_board::observe::ObserverId;
 use mc683xx_board::pacing::QUANTUM;
 use mc683xx_board::peripheral::Drive;
 use mc683xx_board::peripheral::Lane;
+use mc683xx_board::peripheral::MemoryClaim;
 use mc683xx_board::peripheral::Peripheral;
 use mc683xx_board::peripheral::PeripheralAccess;
 use mc683xx_board::peripheral::Role;
@@ -46,9 +47,11 @@ use mc683xx_board::signal::ParseKindError;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Clock;
-use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::NonZeroSpan;
 use mc683xx_board::time::Phase;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
+use mc683xx_board::time::TimeBase;
 use mc683xx_board::trace::Line;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::PortSize;
@@ -58,6 +61,7 @@ use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::peripheral;
 use mc683xx_modules::peripheral::floating_miso;
 use mc683xx_modules::qsm::sci::Frame;
+use mc683xx_target::address::Address;
 use pyo3::Bound;
 use pyo3::IntoPyObjectExt;
 use pyo3::Py;
@@ -68,9 +72,9 @@ use pyo3::PyTraverseError;
 use pyo3::PyVisit;
 use pyo3::Python;
 use pyo3::exceptions::PyOverflowError;
-use pyo3::exceptions::PyRuntimeError;
 use pyo3::exceptions::PyTypeError;
 use pyo3::exceptions::PyValueError;
+use pyo3::pybacked::PyBackedBytes;
 use pyo3::pyclass;
 use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
@@ -107,6 +111,7 @@ use crate::mapped::python_method;
 use crate::mapped::python_restore;
 use crate::mapped::python_save;
 use crate::peripherals::Frame as FrameView;
+use crate::python::repr;
 use crate::qspi::QspiClock;
 use crate::qspi::shifted_in;
 
@@ -138,15 +143,19 @@ pub(crate) enum RoleView {
     Iack,
 }
 
-impl From<Role> for RoleView {
-    fn from(role: Role) -> Self {
-        match role {
+impl TryFrom<Role> for RoleView {
+    type Error = Error;
+
+    /// The role, or [`Error::Unmapped`] for one the bindings do not
+    /// know.
+    fn try_from(role: Role) -> Result<Self, Error> {
+        Ok(match role {
             Role::Read => Self::Read,
             Role::Write => Self::Write,
             Role::ReadWrite => Self::ReadWrite,
             Role::Iack => Self::Iack,
-            _ => panic!("a role the bindings do not know"),
-        }
+            _ => return Err(Error::unmapped("role")),
+        })
     }
 }
 
@@ -203,8 +212,8 @@ impl AccessView {
 
     /// What the peripheral does with the attachment's cycles.
     #[getter]
-    fn role(&self) -> RoleView {
-        self.0.role.into()
+    fn role(&self) -> PyResult<RoleView> {
+        Ok(self.0.role.try_into()?)
     }
 
     /// The data lanes the attachment wires.
@@ -228,7 +237,7 @@ impl AccessView {
     /// FC[2:0].
     #[getter]
     const fn function_code(&self) -> u8 {
-        self.0.function_code.bits()
+        self.0.function_code.get()
     }
 
     /// Whether it is a write, R/W low; set for `wait_states` and
@@ -241,7 +250,7 @@ impl AccessView {
     /// When its instruction started, in picoseconds.
     #[getter]
     const fn now(&self) -> u64 {
-        self.0.now.0
+        self.0.now.picos()
     }
 
     /// On a read or write of a peripheral whose `wants_horizon()` is
@@ -249,24 +258,23 @@ impl AccessView {
     /// could reach it has; `None` otherwise.
     #[getter]
     fn horizon(&self) -> Option<u64> {
-        self.0.horizon.map(|horizon| horizon.0)
+        self.0.horizon.map(|horizon| horizon.picos())
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "PeripheralAccess(attachment={}, select={}, role={:?}, lane={:?}, address={:#x}, \
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "PeripheralAccess(attachment={}, select={}, role={}, lane={}, address={:#x}, \
              size={}, write={}, now={}, horizon={})",
             self.attachment(),
-            self.select().as_deref().unwrap_or("None"),
-            self.role(),
-            self.lane(),
+            repr(py, self.select())?,
+            repr(py, self.role()?)?,
+            repr(py, self.lane())?,
             self.address(),
             self.size(),
-            if self.write() { "True" } else { "False" },
+            repr(py, self.write())?,
             self.now(),
-            self.horizon()
-                .map_or_else(|| "None".to_owned(), |horizon| horizon.to_string())
-        )
+            repr(py, self.horizon())?
+        ))
     }
 }
 
@@ -320,23 +328,16 @@ impl TransferView {
         self.0.starts_frame
     }
 
-    /// When it ends, in picoseconds.
-    #[getter]
-    const fn now(&self) -> u64 {
-        self.0.now.0
-    }
-
     fn __repr__(&self) -> String {
         format!(
             "Transfer(attachment={}, entry={}, chip_selects={:#06b}, out={:#x}, bits={}, \
-             starts_frame={}, now={})",
+             starts_frame={})",
             self.0.attachment,
             self.0.entry,
             self.0.chip_selects,
             self.0.out,
             self.0.bits,
-            if self.0.starts_frame { "True" } else { "False" },
-            self.0.now.0
+            if self.0.starts_frame { "True" } else { "False" }
         )
     }
 }
@@ -356,7 +357,7 @@ impl SerialView {
     fn new(frame: FrameView, baud_nanohertz: u64, bits: u32) -> PyResult<Self> {
         Ok(Self(Serial::new(
             Frame::try_from(frame)?,
-            Frequency(baud_nanohertz),
+            Frequency::from_nanohertz(baud_nanohertz),
             bits,
         )))
     }
@@ -368,8 +369,8 @@ impl SerialView {
     fn timed(frame: FrameView, baud_nanohertz: u64, length: u64) -> PyResult<Self> {
         Ok(Self(Serial::timed(
             Frame::try_from(frame)?,
-            Frequency(baud_nanohertz),
-            length,
+            Frequency::from_nanohertz(baud_nanohertz),
+            Span::from_picos(length),
         )))
     }
 
@@ -389,28 +390,28 @@ impl SerialView {
     /// The sender's bit rate, in nanohertz; zero if untimed.
     #[getter]
     const fn baud_nanohertz(&self) -> u64 {
-        self.0.baud.0
+        self.0.baud.nanohertz()
     }
 
     /// Picoseconds from start bit to the end of the stop bits; zero if
     /// untimed.
     #[getter]
     const fn length(&self) -> u64 {
-        self.0.length
+        self.0.length.picos()
     }
 
     /// When its stop bits end, for a start bit at `start` picoseconds.
     fn end(&self, start: u64) -> u64 {
-        self.0.end(Time(start)).0
+        self.0.end(Time::from_picos(start)).picos()
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "Serial(frame={:?}, baud_nanohertz={}, length={})",
-            self.0.frame,
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "Serial(frame={}, baud_nanohertz={}, length={})",
+            repr(py, self.frame())?,
             self.baud_nanohertz(),
             self.length()
-        )
+        ))
     }
 
     /// Its frame's, rate's and length's, so that equal ones hash alike.
@@ -487,7 +488,7 @@ pub(crate) struct ObserverIdView(ObserverId);
 #[pymethods]
 impl ObserverIdView {
     fn __repr__(&self) -> String {
-        format!("{:?}", self.0)
+        self.0.to_string()
     }
 }
 
@@ -508,7 +509,7 @@ impl Observer for PythonObserver {
     fn changed(&mut self, net: &str, at: Time, signal: Signal) {
         Python::attach(|py| {
             let called = python_value(py, signal, self.timed)
-                .and_then(|value| self.callback.call1(py, (net, at.0, value)));
+                .and_then(|value| self.callback.call1(py, (net, at.picos(), value)));
             if let Err(error) = called {
                 self.pending.record(error);
             }
@@ -525,7 +526,7 @@ impl Observer for PythonObserver {
             let called = signal
                 .map(|signal| python_value(py, signal, self.timed))
                 .transpose()
-                .and_then(|value| on_restore.call1(py, (net, at.0, value)));
+                .and_then(|value| on_restore.call1(py, (net, at.picos(), value)));
             if let Err(error) = called {
                 self.pending.hold(error);
             }
@@ -570,8 +571,8 @@ pub(crate) struct DriveView {
     /// Its analog inputs' values now, by port, sampled as the call
     /// began.
     samples: Vec<(usize, Option<f64>)>,
-    /// The memories taken (`true`) or released.
-    memories: Vec<(String, bool)>,
+    /// The memories taken or released.
+    memories: Vec<MemoryClaim>,
 }
 
 #[pymethods]
@@ -590,12 +591,12 @@ impl DriveView {
     /// come to this peripheral's `memory_read` and `memory_write` until
     /// `release_memory`.
     fn take_memory(&mut self, memory: String) {
-        self.memories.push((memory, true));
+        self.memories.push(MemoryClaim::Taken(memory));
     }
 
     /// Gives the memory `memory` back to the fast path.
     fn release_memory(&mut self, memory: String) {
-        self.memories.push((memory, false));
+        self.memories.push(MemoryClaim::Released(memory));
     }
 
     /// The call's time, in picoseconds.
@@ -617,7 +618,8 @@ impl DriveView {
             .get(port)
             .ok_or_else(|| PyValueError::new_err(format!("no port {port}")))?;
         let signal = signal(kind, value)?;
-        self.driven.push((Time(at.max(self.now)), port, signal));
+        self.driven
+            .push((Time::from_picos(at.max(self.now)), port, signal));
         Ok(())
     }
 
@@ -645,7 +647,7 @@ pub(crate) fn signal(kind: Kind, value: &Bound<'_, PyAny>) -> PyResult<Signal> {
                 Signal::Serial(serial.0)
             } else {
                 let frame = match value.extract::<Option<u16>>()? {
-                    Some(data) => Frame::try_from(FrameView::Data(data))?,
+                    Some(data) => Frame::try_from(FrameView::Data { data })?,
                     None => Frame::Break,
                 };
                 Signal::Serial(Serial::untimed(frame))
@@ -656,9 +658,9 @@ pub(crate) fn signal(kind: Kind, value: &Bound<'_, PyAny>) -> PyResult<Signal> {
         Kind::Clock => {
             let (at, frequency, phase): (u64, u64, u128) = value.extract()?;
             Signal::Clock(Clock::with_phase(
-                Frequency(frequency),
-                Time(at),
-                Phase(phase),
+                Frequency::from_nanohertz(frequency),
+                Time::from_picos(at),
+                Phase::from_units(phase),
             ))
         }
         _ => return Err(PyTypeError::new_err("no Python value for this net type")),
@@ -674,7 +676,12 @@ fn python_value(py: Python<'_>, signal: Signal, timed: bool) -> PyResult<Py<PyAn
         Signal::Serial(serial) => serial.frame.data().into_py_any(py),
         Signal::Analog(value) => value.into_py_any(py),
         Signal::Bus(word) => word.into_py_any(py),
-        Signal::Clock(clock) => (clock.at.0, clock.frequency.0, clock.phase.0).into_py_any(py),
+        Signal::Clock(clock) => (
+            clock.at.picos(),
+            clock.frequency.nanohertz(),
+            clock.phase.units(),
+        )
+            .into_py_any(py),
         _ => Err(PyTypeError::new_err("no Python value for this signal")),
     }
 }
@@ -863,7 +870,7 @@ impl PythonPeripheral {
             let view = Py::new(
                 py,
                 DriveView {
-                    now: drive.now().0,
+                    now: drive.now().picos(),
                     kinds: self.kinds.clone(),
                     driven: Vec::new(),
                     writes: Vec::new(),
@@ -890,11 +897,10 @@ impl PythonPeripheral {
             for (memory, offset, bytes) in &view.writes {
                 drive.write_memory(memory.clone(), *offset, bytes.clone());
             }
-            for (memory, take) in &view.memories {
-                if *take {
-                    drive.take_memory(memory.clone());
-                } else {
-                    drive.release_memory(memory.clone());
+            for claim in &view.memories {
+                match claim {
+                    MemoryClaim::Taken(memory) => drive.take_memory(memory.clone()),
+                    MemoryClaim::Released(memory) => drive.release_memory(memory.clone()),
                 }
             }
             if view.stop {
@@ -981,7 +987,7 @@ impl Peripheral for PythonPeripheral {
         .unwrap_or(Err(BusError))
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
         self.ask(
             "wait_states",
             |py| Ok(vec![access_argument(py, access)?]),
@@ -990,7 +996,7 @@ impl Peripheral for PythonPeripheral {
         )
     }
 
-    fn dsack_port(&mut self, access: PeripheralAccess) -> Option<PortSize> {
+    fn dsack_port(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<PortSize> {
         self.ask(
             "dsack_port",
             |py| Ok(vec![access_argument(py, access)?]),
@@ -1060,14 +1066,8 @@ impl Peripheral for PythonPeripheral {
         let _ = self.call("power_on", drive, |_| Ok(Vec::new()), |_| Ok(()), ());
     }
 
-    fn reset(&mut self, now: Time, drive: &mut Drive<'_>) {
-        let _ = self.call(
-            "reset",
-            drive,
-            |py| Ok(vec![now.0.into_py_any(py)?]),
-            |_| Ok(()),
-            (),
-        );
+    fn reset(&mut self, drive: &mut Drive<'_>) {
+        let _ = self.call("reset", drive, |_| Ok(Vec::new()), |_| Ok(()), ());
     }
 
     fn transfer(&mut self, transfer: Transfer, drive: &mut Drive<'_>) -> u16 {
@@ -1084,13 +1084,13 @@ impl Peripheral for PythonPeripheral {
         }
     }
 
-    fn qspi_clock(&mut self, clock: peripheral::QspiClock, now: Time) {
+    fn set_qspi_clock(&mut self, clock: peripheral::QspiClock, now: Time, _: TimeBase) {
         self.ask(
-            "qspi_clock",
+            "set_qspi_clock",
             |py| {
                 Ok(vec![
                     Py::new(py, QspiClock::from(clock))?.into_any(),
-                    now.0.into_py_any(py)?,
+                    now.picos().into_py_any(py)?,
                 ])
             },
             |_| Ok(()),
@@ -1098,17 +1098,11 @@ impl Peripheral for PythonPeripheral {
         );
     }
 
-    fn select(&mut self, attachment: usize, selected: bool, now: Time, drive: &mut Drive<'_>) {
+    fn select(&mut self, attachment: usize, selected: bool, drive: &mut Drive<'_>) {
         let _ = self.call(
             "select",
             drive,
-            |py| {
-                Ok(vec![
-                    attachment.into_py_any(py)?,
-                    selected.into_py_any(py)?,
-                    now.0.into_py_any(py)?,
-                ])
-            },
+            |py| Ok(vec![attachment.into_py_any(py)?, selected.into_py_any(py)?]),
             |_| Ok(()),
             (),
         );
@@ -1123,7 +1117,7 @@ impl Peripheral for PythonPeripheral {
         )
     }
 
-    fn input(&mut self, port: usize, signal: Signal, now: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
         let _ = self.call(
             "input",
             drive,
@@ -1131,7 +1125,6 @@ impl Peripheral for PythonPeripheral {
                 Ok(vec![
                     port.into_py_any(py)?,
                     python_value(py, signal, self.timed_serial)?,
-                    now.0.into_py_any(py)?,
                 ])
             },
             |_| Ok(()),
@@ -1142,29 +1135,23 @@ impl Peripheral for PythonPeripheral {
     fn sample(&mut self, port: usize, now: Time) -> Option<f64> {
         self.ask(
             "sample",
-            |py| Ok(vec![port.into_py_any(py)?, now.0.into_py_any(py)?]),
+            |py| Ok(vec![port.into_py_any(py)?, now.picos().into_py_any(py)?]),
             |value| value.extract::<Option<f64>>(),
             None,
         )
     }
 
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         self.ask(
             "next_event",
             |_| Ok(Vec::new()),
-            |value| Ok(value.extract::<Option<u64>>()?.map(Time)),
+            |value| Ok(value.extract::<Option<u64>>()?.map(Time::from_picos)),
             None,
         )
     }
 
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
-        let _ = self.call(
-            "advance",
-            drive,
-            |py| Ok(vec![now.0.into_py_any(py)?]),
-            |_| Ok(()),
-            (),
-        );
+    fn advance(&mut self, drive: &mut Drive<'_>) {
+        let _ = self.call("advance", drive, |_| Ok(Vec::new()), |_| Ok(()), ());
     }
 
     /// Its `inspect()`, a mapping; an exception waits for the board's
@@ -1237,17 +1224,23 @@ pub(crate) struct BoardRunView {
 
 #[pymethods]
 impl BoardRunView {
-    fn __repr__(&self) -> String {
-        format!("BoardRun(stop={:?}, now={})", self.stop, self.now)
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "BoardRun(stop={}, now={})",
+            repr(py, self.stop)?,
+            self.now
+        ))
     }
 }
 
-impl From<BoardRun> for BoardRunView {
-    fn from(run: BoardRun) -> Self {
-        Self {
-            stop: run.stop.into(),
-            now: run.now.0,
-        }
+impl TryFrom<BoardRun> for BoardRunView {
+    type Error = Error;
+
+    fn try_from(run: BoardRun) -> Result<Self, Error> {
+        Ok(Self {
+            stop: run.stop.try_into()?,
+            now: run.now.picos(),
+        })
     }
 }
 
@@ -1287,16 +1280,15 @@ impl BoardView {
     }
 }
 
-/// Picoseconds from `seconds` or `picoseconds`, whichever is given.
-fn picoseconds_of(seconds: Option<f64>, picoseconds: Option<u64>) -> PyResult<u64> {
+/// The span of `seconds` or `picoseconds`, whichever is given.
+fn span_of(seconds: Option<f64>, picoseconds: Option<u64>) -> PyResult<Span> {
     match (seconds, picoseconds) {
-        (Some(seconds), None) if seconds.is_finite() && seconds >= 0.0 => {
-            Ok((seconds * PICOSECONDS_PER_SECOND as f64) as u64)
-        }
-        (Some(seconds), None) => Err(PyValueError::new_err(format!(
-            "{seconds}: give a finite number of seconds, 0 or more"
-        ))),
-        (None, Some(picoseconds)) => Ok(picoseconds),
+        (Some(seconds), None) => Span::checked_from_seconds_f64(seconds).ok_or_else(|| {
+            PyValueError::new_err(format!(
+                "{seconds}: give a finite number of seconds, 0 or more, within board time"
+            ))
+        }),
+        (None, Some(picoseconds)) => Ok(Span::from_picos(picoseconds)),
         _ => Err(PyValueError::new_err("give seconds or picoseconds")),
     }
 }
@@ -1311,21 +1303,30 @@ impl BoardView {
         pacing: Option<PacingView>,
         quantum: u64,
     ) -> PyResult<BoardRunView> {
-        let quantum = NonZeroU64::new(quantum)
+        let quantum = NonZeroSpan::new(Span::from_picos(quantum))
             .ok_or_else(|| PyValueError::new_err("give a quantum of 1 ps or more"))?;
+        let pacing = pacing.map(PacingView::pacing);
         let control = self.board.control();
         let previous = control.pacing();
         if let Some(pacing) = pacing {
-            control.set_pacing(pacing.0).map_err(value_error)?;
+            control.set_pacing(pacing);
         }
         let outcome = control::run_until_paced(py, &mut self.board, until, quantum);
         // this call's pacing put back, unless another thread changed it
         if let Some(pacing) = pacing
-            && control.pacing() == pacing.0
+            && control.pacing() == pacing
         {
-            control.set_pacing(previous).map_err(value_error)?;
+            control.set_pacing(previous);
         }
-        // Ctrl-C first, even with a peripheral's error waiting
+        self.finished(outcome)
+    }
+
+    /// A Python run's `outcome` as its result: Ctrl-C first, even with a
+    /// peripheral's error waiting, then that error, then the run's.
+    fn finished(
+        &self,
+        outcome: Result<Result<BoardRun, RunError>, PyErr>,
+    ) -> PyResult<BoardRunView> {
         let outcome = match outcome {
             Ok(outcome) => {
                 self.check()?;
@@ -1333,8 +1334,7 @@ impl BoardView {
             }
             Err(raised) => return Err(self.pending.after(raised)),
         };
-        let run = outcome.map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-        Ok(run.into())
+        Ok(outcome.map_err(Error::from)?.try_into()?)
     }
 }
 
@@ -1351,9 +1351,11 @@ impl BoardView {
     }
 
     /// The board file at `path`, its peripheral types the built-in ones and
-    /// `types`' classes by name, through its power-on reset.
+    /// `types`' classes by name, through its power-on reset; `enabled`
+    /// and the rest are Rust's `Options` (`enabled` the file's options
+    /// on) and `Environment`.
     #[new]
-    #[pyo3(signature = (path, *, types = None, options = Vec::new(), firmware = None, images = None, seed = 0, work_dir = None, parameters = None))]
+    #[pyo3(signature = (path, *, types = None, enabled = Vec::new(), firmware = None, images = None, seed = 0, work_dir = None, parameters = None))]
     #[expect(
         clippy::too_many_arguments,
         reason = "Python's keyword arguments, each optional"
@@ -1361,7 +1363,7 @@ impl BoardView {
     fn new(
         path: PathBuf,
         types: Option<&Bound<'_, PyMapping>>,
-        options: Vec<String>,
+        enabled: Vec<String>,
         firmware: Option<PathBuf>,
         images: Option<&Bound<'_, PyMapping>>,
         seed: u64,
@@ -1427,7 +1429,7 @@ impl BoardView {
         };
         let options = {
             let mut built = Options::default();
-            built.enabled = options.into_iter().collect();
+            built.enabled = enabled.into_iter().collect();
             built.firmware = firmware;
             built.images = images;
             built.parameters = parameters;
@@ -1436,8 +1438,8 @@ impl BoardView {
         let mut environment = Environment::default();
         environment.seed = seed;
         environment.work_dir = work_dir;
-        let board =
-            Board::<Mc68331>::read(&path, &options, &registry, environment).map_err(value_error)?;
+        let board = Board::<Mc68331>::read(&path, &options, &registry, &environment)
+            .map_err(Error::from)?;
         pending.set_board_stop(board.stop_request());
         let view = Self { board, pending };
         view.check()?;
@@ -1455,8 +1457,9 @@ impl BoardView {
     /// sleeps.  `pacing`, if given, paces this call alone: the
     /// control's pacing is put back when the run returns or raises,
     /// unless another thread set a pacing during the run, which then
-    /// stays.  Seconds not finite, or below 0, raise `ValueError`.
-    #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.get()))]
+    /// stays.  Seconds not finite, below 0 or past board time's range
+    /// (`2**64` ps), and a quantum of 0 raise `ValueError`.
+    #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.get().picos()))]
     fn run_for(
         &mut self,
         py: Python<'_>,
@@ -1465,14 +1468,13 @@ impl BoardView {
         pacing: Option<PacingView>,
         quantum_picoseconds: u64,
     ) -> PyResult<BoardRunView> {
-        let span = picoseconds_of(seconds, picoseconds)?;
-        let until = Time(self.board.now().0.saturating_add(span));
+        let until = self.board.now() + span_of(seconds, picoseconds)?;
         self.run_until_paced(py, until, pacing, quantum_picoseconds)
     }
 
     /// Runs to board time `seconds`, or `picoseconds`, as `run_for` runs
     /// for them: at once if the board is already there.
-    #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.get()))]
+    #[pyo3(signature = (*, seconds = None, picoseconds = None, pacing = None, quantum_picoseconds = QUANTUM.get().picos()))]
     fn run_until(
         &mut self,
         py: Python<'_>,
@@ -1481,7 +1483,7 @@ impl BoardView {
         pacing: Option<PacingView>,
         quantum_picoseconds: u64,
     ) -> PyResult<BoardRunView> {
-        let until = Time(picoseconds_of(seconds, picoseconds)?);
+        let until = Time::ZERO + span_of(seconds, picoseconds)?;
         self.run_until_paced(py, until, pacing, quantum_picoseconds)
     }
 
@@ -1497,8 +1499,8 @@ impl BoardView {
     /// sleeps, for a GUI's timer, but releases the GIL between quanta
     /// and runs Python's signal handlers, as `run_for` does, so
     /// another thread's `control().stop()` ends it and Ctrl-C raises
-    /// `KeyboardInterrupt`.  A `wall` or `seconds` not finite, or
-    /// below 0, raises `ValueError`.
+    /// `KeyboardInterrupt`.  A `wall` not finite, or below 0, or
+    /// `seconds` as `run_for` refuses them, raises `ValueError`.
     #[pyo3(signature = (wall, *, seconds = None, picoseconds = None))]
     fn run_frame(
         &mut self,
@@ -1512,17 +1514,9 @@ impl BoardView {
                 "wall {wall}: give a finite number of seconds, 0 or more"
             ))
         })?;
-        let slice = picoseconds_of(seconds, picoseconds)?;
-        // Ctrl-C first, even with a peripheral's error waiting
-        let outcome = match control::run_frame(py, &mut self.board, wall, slice) {
-            Ok(outcome) => {
-                self.check()?;
-                outcome
-            }
-            Err(raised) => return Err(self.pending.after(raised)),
-        };
-        let run = outcome.map_err(|error| PyRuntimeError::new_err(error.to_string()))?;
-        Ok(run.into())
+        let slice = span_of(seconds, picoseconds)?;
+        let outcome = control::run_frame(py, &mut self.board, wall, slice);
+        self.finished(outcome)
     }
 
     /// The board's control handle, for another thread (Rust's
@@ -1562,13 +1556,13 @@ impl BoardView {
     /// Board time, picoseconds.
     #[getter]
     const fn now(&self) -> u64 {
-        self.board.now().0
+        self.board.now().picos()
     }
 
     /// The chip's system clocks since power-on.
     #[getter]
     const fn cycles(&self) -> u64 {
-        self.board.chip().now().0
+        self.board.chip().now().clocks()
     }
 
     /// The chip's instructions run since power-on (`Mc68331.instructions`).
@@ -1643,7 +1637,7 @@ impl BoardView {
             .take_received(name)
             .map_err(|error| PyValueError::new_err(error.to_string()))?
             .into_iter()
-            .map(|(at, signal)| Ok((at.0, python_value(py, signal, timed)?)))
+            .map(|(at, signal)| Ok((at.picos(), python_value(py, signal, timed)?)))
             .collect()
     }
 
@@ -1721,7 +1715,7 @@ impl BoardView {
     /// Traces each time the instruction at `pc` is about to run, through
     /// a hook the chip's `remove_hook` removes.
     fn watch_code(&mut self, pc: u32) -> HookIdView {
-        HookIdView(self.board.watch_code(pc))
+        HookIdView(self.board.watch_code(Address(pc)))
     }
 
     /// The board's chip: its registers, hooks, bus cycles and the
@@ -1740,7 +1734,7 @@ impl BoardView {
     /// driven on the board's nets for it.  Nothing while the board holds
     /// RESET low.
     fn reset_for(&mut self, cause: ResetCause) -> PyResult<()> {
-        self.board.reset_for(cause.into());
+        self.board.reset_for(cause.try_into()?);
         self.check()
     }
 
@@ -1790,7 +1784,7 @@ impl BoardView {
         self.board
             .take_events()
             .into_iter()
-            .filter_map(Event::of)
+            .map(Event::of)
             .collect()
     }
 
@@ -1815,16 +1809,15 @@ impl BoardView {
     fn save<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
         let saved = self.board.save();
         self.pending.check()?;
-        let snapshot = saved.map_err(|error| exceptions::StateError::new_err(error.to_string()))?;
-        Ok(PyBytes::new(py, &snapshot))
+        Ok(PyBytes::new(py, &saved.map_err(Error::from)?))
     }
 
     /// Restores a snapshot `save` made of a board loaded the same way,
     /// then calls each observer's `on_restore`.
-    fn restore(&mut self, snapshot: &[u8]) -> PyResult<()> {
-        let restored = self.board.restore(snapshot);
+    fn restore(&mut self, snapshot: PyBackedBytes) -> PyResult<()> {
+        let restored = self.board.restore(&snapshot);
         self.pending.check()?;
-        restored.map_err(|error| exceptions::StateError::new_err(error.to_string()))
+        Ok(restored.map_err(Error::from)?)
     }
 
     fn __repr__(&self) -> String {

@@ -27,16 +27,16 @@ function booted() {
   const run = board.runFor(BOOT);
   assert.equal(run.stop, "budget");
   assert.equal(run.now, BOOT);
-  return { board, text: decoder.decode(board.takeReceived(CONSOLE)) };
+  return { board, text: decoder.decode(board.takeReceivedBytes(CONSOLE)) };
 }
 
 test("the demo boots and answers help", () => {
   const { board, text: banner } = booted();
   assert.match(banner, /MC68331 demo/);
   assert.ok(banner.endsWith("> "), banner);
-  board.send(CONSOLE, new TextEncoder().encode("h\n"));
+  board.sendBytes(CONSOLE, new TextEncoder().encode("h\n"));
   board.runFor(BOOT);
-  const help = decoder.decode(board.takeReceived(CONSOLE));
+  const help = decoder.decode(board.takeReceivedBytes(CONSOLE));
   assert.ok(help.startsWith("h\r\n"), help);
   assert.ok(help.endsWith(HELP_END), help);
 });
@@ -44,7 +44,7 @@ test("the demo boots and answers help", () => {
 test("images may be an object", () => {
   const board = new Board(text, { "demo.bin": image });
   board.runFor(BOOT);
-  assert.match(decoder.decode(board.takeReceived(CONSOLE)), /MC68331 demo/);
+  assert.match(decoder.decode(board.takeReceivedBytes(CONSOLE)), /MC68331 demo/);
 });
 
 test("bytes and images from another realm (an iframe's, a vm context's) are taken", () => {
@@ -55,13 +55,13 @@ test("bytes and images from another realm (an iframe's, a vm context's) are take
   assert.ok(!(images instanceof Map) && !(images.get("demo.bin") instanceof Uint8Array));
   const board = new Board(text, images);
   board.runFor(BOOT);
-  assert.match(decoder.decode(board.takeReceived(CONSOLE)), /MC68331 demo/);
-  board.send(CONSOLE, foreign.bytes([...new TextEncoder().encode("h\n")]));
+  assert.match(decoder.decode(board.takeReceivedBytes(CONSOLE)), /MC68331 demo/);
+  board.sendBytes(CONSOLE, foreign.bytes([...new TextEncoder().encode("h\n")]));
   board.runFor(BOOT);
-  assert.ok(decoder.decode(board.takeReceived(CONSOLE)).endsWith(HELP_END));
+  assert.ok(decoder.decode(board.takeReceivedBytes(CONSOLE)).endsWith(HELP_END));
   // what only claims to be one, or is another typed array, is not
   for (const data of [{ [Symbol.toStringTag]: "Uint8Array" }, new Int8Array([1]), runInNewContext("new Int8Array([1])")]) {
-    assert.throws(() => board.send(CONSOLE, data), /not a Uint8Array/);
+    assert.throws(() => board.sendBytes(CONSOLE, data), /not a Uint8Array/);
   }
 });
 
@@ -151,6 +151,23 @@ test("a restore goes back", () => {
   assert.deepEqual(board.memory("rom").subarray(0, image.length), image);
 });
 
+test("a snapshot is a Uint8Array", () => {
+  const { board } = booted();
+  const saved = board.now;
+  const snapshot = board.save();
+  board.runFor(BOOT);
+  for (const [data, described] of [
+    [[...snapshot], "an Array"],
+    [snapshot.buffer, "an ArrayBuffer"],
+    [new Uint8ClampedArray(snapshot), "an Uint8ClampedArray"],
+    [null, "null"],
+  ]) {
+    assert.throws(() => board.restore(data), { message: `a snapshot is not a Uint8Array but ${described}` });
+  }
+  board.restore(runInNewContext("(data) => new Uint8Array(data)")([...snapshot]));
+  assert.equal(board.now, saved);
+});
+
 test("mistakes throw the Rust error's message", () => {
   assert.throws(() => new Board(text, new Map()), /demo\.bin/);
   assert.throws(() => new Board(text), /demo\.bin/);
@@ -163,8 +180,8 @@ test("mistakes throw the Rust error's message", () => {
   const { board } = booted();
   assert.throws(() => board.setPacing("fast"), /no pacing "fast"/);
   assert.throws(() => board.runFrame(Number.NaN, SLICE), /no clock reading/);
-  assert.throws(() => board.send("nowhere", new Uint8Array([1])), Error);
-  assert.throws(() => board.send("nowhere", new Uint8Array()), /external\.nowhere/);
+  assert.throws(() => board.sendBytes("nowhere", new Uint8Array([1])), Error);
+  assert.throws(() => board.sendBytes("nowhere", new Uint8Array()), /external\.nowhere/);
   const notBytes = [
     ["h\n", "a string"],
     [[104, 10], "an Array"],
@@ -175,7 +192,25 @@ test("mistakes throw the Rust error's message", () => {
     [undefined, "undefined"],
   ];
   for (const [data, described] of notBytes) {
-    assert.throws(() => board.send(CONSOLE, data), { message: `data to send is not a Uint8Array but ${described}` });
+    assert.throws(() => board.sendBytes(CONSOLE, data), { message: `data to send is not a Uint8Array but ${described}` });
   }
   assert.throws(() => board.memory("nowhere"), /no memory "nowhere"/);
+});
+
+test("mistakes throw an error named for their kind", () => {
+  const named = (name) => (error) => error instanceof Error && error.name === name;
+  assert.throws(() => new Board(text), named("LoadError"));
+  assert.throws(() => new Board(text, 5), TypeError);
+  assert.throws(() => new Board(text, { "demo.bin": [1, 2] }), TypeError);
+  const { board } = booted();
+  assert.throws(() => board.setPacing("fast"), named("PacingError"));
+  assert.throws(() => board.runFrame(Number.NaN, SLICE), RangeError);
+  assert.throws(() => board.runFor(-1n), RangeError);
+  assert.throws(() => board.runFor(5), TypeError);
+  assert.throws(() => board.sendBytes(CONSOLE, [1]), TypeError);
+  assert.throws(() => board.sendBytes("nowhere", new Uint8Array()), named("SendError"));
+  assert.throws(() => board.takeReceivedBytes("nowhere"), named("ReceiveError"));
+  assert.throws(() => board.memory("nowhere"), named("MemoryError"));
+  assert.throws(() => board.restore(new Uint8Array([1])), named("StateError"));
+  assert.throws(() => board.restore([1]), TypeError);
 });

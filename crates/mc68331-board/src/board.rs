@@ -18,7 +18,6 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::mem;
-use std::num::NonZeroU64;
 use std::ops::ControlFlow;
 use std::path::Path;
 use std::rc::Rc;
@@ -28,9 +27,10 @@ use std::time::Duration;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
 use mc683xx_cpu32::cpu::hooks::HookId;
+use mc683xx_cpu32::cpu::state::Layer;
 use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cpu::state::decode_layer;
+use mc683xx_cpu32::cpu::state::encode_layer;
 use mc683xx_cpu32::cpu::state::restore_each;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::memory::Space;
@@ -64,6 +64,7 @@ use crate::description::Description;
 use crate::description::NetSpec;
 use crate::description::Options;
 use crate::description::Target;
+use crate::description::port_of;
 use crate::endpoint::Endpoint;
 use crate::error::ConditionError;
 use crate::error::LoadError;
@@ -77,22 +78,24 @@ use crate::observe::Observer;
 use crate::observe::ObserverId;
 use crate::pacing::Pacer;
 use crate::pacing::QUANTUM;
-use crate::registry::Context;
 use crate::registry::Environment;
-use crate::registry::Parameters;
 use crate::registry::PortSpec;
 use crate::registry::Registry;
-use crate::registry::repeated_port;
 use crate::schema::Undecoded;
 use crate::signal::Direction;
 use crate::signal::Kind;
 use crate::signal::Signal;
 use crate::time::Clock;
+use crate::time::NonZeroSpan;
+use crate::time::Span;
 use crate::time::Time;
 use crate::time::TimeBase;
 use crate::trace;
 use crate::trace::NetRecord;
+use crate::trace::PositionRecord;
 use crate::trace::Record;
+use crate::trace::StoppedRecord;
+use crate::trace::Trace;
 use crate::wiring::BusRouter;
 use crate::wiring::DecoderRouter;
 use crate::wiring::MemoryRouter;
@@ -109,7 +112,7 @@ use crate::wiring::SharedMemory;
 
 /// The format of [`Board::save`]'s bytes.  The chip's and the peripherals'
 /// snapshots inside carry their own.
-pub const VERSION: u32 = 19;
+pub const VERSION: u32 = 22;
 
 /// The levels on PCS\[3:0\] before the QSPI drives them: high.
 const PCS_IDLE: u8 = 0xf;
@@ -213,16 +216,6 @@ pub struct BoardTracing {
     pub pins: bool,
     /// Each QSPI transfer.
     pub qspi: bool,
-}
-
-/// What the board traced since the last `take_trace`.
-#[derive(Debug, Clone, Default, PartialEq)]
-#[non_exhaustive]
-pub struct Trace {
-    /// The records, in cycle order.
-    pub records: Vec<Record>,
-    /// Net changes, in time order.
-    pub nets: Vec<NetRecord>,
 }
 
 /// The chip hooks the board's tracing holds.
@@ -462,7 +455,7 @@ enum Arming {
 
 impl<C: Chip> Conditions for Board<C> {
     fn arm(&mut self, condition: Condition) -> Result<ConditionId, ConditionError> {
-        let id = ConditionId(self.last_condition + 1);
+        let id = ConditionId::new(self.last_condition + 1);
         let arming = match &condition {
             Condition::Net { net, change } => {
                 let index = self.net_index(net)?;
@@ -499,7 +492,7 @@ impl<C: Chip> Conditions for Board<C> {
                 Arming::Peripheral(index, token)
             }
         };
-        self.last_condition = id.0;
+        self.last_condition = id.number();
         self.conditions.push(Armed {
             id,
             condition,
@@ -608,7 +601,7 @@ impl<C: Chip> Board<C> {
         path: &Path,
         options: &Options,
         registry: &Registry,
-        environment: Environment,
+        environment: &Environment,
     ) -> Result<Self, LoadError> {
         let description = Description::read(path, options)?;
         Self::load(&description, registry, environment)
@@ -630,13 +623,13 @@ impl<C: Chip> Board<C> {
     pub fn load(
         description: &Description,
         registry: &Registry,
-        environment: Environment,
+        environment: &Environment,
     ) -> Result<Self, LoadError> {
         Self::load_with(description, registry, environment, |path| fs::read(path))
     }
 
     /// [`Board::load`], each path parameter's contents
-    /// ([`Context::contents`]) from `read(path)` rather than the file
+    /// ([`Context::contents`](crate::registry::Context::contents)) from `read(path)` rather than the file
     /// system: for a host with no files (a browser), as
     /// [`Description::parse_with`] is for its images.
     ///
@@ -647,35 +640,14 @@ impl<C: Chip> Board<C> {
     pub fn load_with(
         description: &Description,
         registry: &Registry,
-        mut environment: Environment,
-        read: impl Fn(&Path) -> io::Result<Vec<u8>>,
+        environment: &Environment,
+        read: impl FnMut(&Path) -> io::Result<Vec<u8>>,
     ) -> Result<Self, LoadError> {
-        environment.set_board_dir(description.directory.clone());
+        let construct = description.constructor(registry, environment, read);
         let mut cells: Vec<PeripheralCell> = Vec::new();
         let mut peripherals = Vec::new();
         for spec in &description.peripherals {
-            let kind = registry.get(&spec.kind).ok_or_else(|| LoadError::Type {
-                peripheral: spec.name.clone(),
-                kind: spec.kind.clone(),
-            })?;
-            let parameters = Parameters::new(spec.parameters.clone());
-            let context = Context::with_read(&spec.name, &parameters, &environment, &read);
-            let parameter_error = |error| LoadError::Parameter {
-                peripheral: spec.name.clone(),
-                error,
-            };
-            let constructed = kind.construct(&context).map_err(parameter_error)?;
-            if let Some(key) = parameters.unread() {
-                return Err(parameter_error(crate::registry::ParameterError::Unknown(
-                    key,
-                )));
-            }
-            if let Some(port) = repeated_port(&constructed.ports) {
-                return Err(LoadError::Port {
-                    peripheral: spec.name.clone(),
-                    port: port.to_owned(),
-                });
-            }
+            let constructed = construct(spec)?;
             cells.push(Rc::new(RefCell::new(constructed.peripheral)));
             peripherals.push(PeripheralInfo {
                 name: spec.name.clone(),
@@ -707,7 +679,7 @@ impl<C: Chip> Board<C> {
             base: Cell::new(TimeBase::new(
                 Cycles::ZERO,
                 Time::ZERO,
-                builder.system_clock(),
+                builder.system_frequency(),
             )),
             peripherals: cells,
             analog_inputs,
@@ -738,7 +710,7 @@ impl<C: Chip> Board<C> {
             })?;
             let place = match memory.base {
                 Some(base) => MemoryPlace::Fixed {
-                    base,
+                    base: Address(base),
                     port: memory.timing.0,
                     termination: memory.timing.1,
                 },
@@ -746,7 +718,7 @@ impl<C: Chip> Board<C> {
             };
             let plan = MemoryPlan {
                 bytes: memory.bytes.clone(),
-                writable: memory.writable,
+                kind: memory.kind,
                 place,
                 reload: memory.reload,
             };
@@ -775,9 +747,12 @@ impl<C: Chip> Board<C> {
             .iter()
             .any(|peripheral| peripheral.borrow().wants_horizon());
         chip.set_publish_output_horizon(horizon);
-        shared
-            .base
-            .set(shared.base.get().moved(Cycles::ZERO, chip.system_clock()));
+        shared.base.set(
+            shared
+                .base
+                .get()
+                .moved(Cycles::ZERO, chip.system_frequency()),
+        );
         let mut sources: BTreeMap<Source<C::Pin>, Vec<usize>> = BTreeMap::new();
         for (index, net) in nets.iter().enumerate() {
             for driver in &net.drivers {
@@ -837,7 +812,6 @@ impl<C: Chip> Board<C> {
         };
         board.stop_at_outputs();
         board.power_on();
-        board.tell_system_clock();
         Ok(board)
     }
 
@@ -1072,10 +1046,10 @@ impl<C: Chip> Board<C> {
     /// Why the CPU executes nothing, if it does not: halted, or in
     /// background mode.
     fn idle(&self) -> Option<Stop> {
-        self.chip
-            .halted()
+        let cpu = self.chip.cpu();
+        cpu.halted()
             .map(Stop::Halted)
-            .or_else(|| self.chip.cpu().background().map(Stop::Background))
+            .or_else(|| cpu.background().map(Stop::Background))
     }
 
     /// Whether a peripheral or the host asked the run to stop; withdraws the
@@ -1101,14 +1075,14 @@ impl<C: Chip> Board<C> {
         for entry in entered {
             let memory = &self.chip.cpu().memory;
             let sr = memory
-                .peek(Space::Supervisor, Address(entry.stack), Size::Word)
+                .peek(Space::Supervisor, entry.stack, Size::Word)
                 .map(|sr| sr as u16);
             self.records.push(Record::Exception(trace::ExceptionRecord {
                 cycle,
-                vector: entry.vector.0,
-                pc: entry.pc.0,
+                vector: entry.vector,
+                pc: entry.pc,
                 sr,
-                level: entry.level.map(|level| level.get()),
+                level: entry.level,
             }));
         }
     }
@@ -1145,37 +1119,37 @@ impl<C: Chip> Board<C> {
 
     /// Traces each time the instruction at `pc` is about to run: the
     /// run stops there, records it and goes on.
-    pub fn watch_code(&mut self, pc: u32) -> HookId {
+    pub fn watch_code(&mut self, pc: Address) -> HookId {
         let id = self
             .chip
             .cpu_control()
-            .add_code_hook(Address(pc)..=Address(pc), |_| ControlFlow::Break(()));
+            .add_code_hook(pc..=pc, |_| ControlFlow::Break(()));
         self.hooks.watches.insert(id);
         id
     }
 
     /// Where the CPU is now, as a `position` record.
     #[must_use]
-    pub fn position(&self) -> Record {
+    pub fn position(&self) -> PositionRecord {
         let registers = &self.chip.cpu().registers;
-        Record::Position(trace::PositionRecord {
+        PositionRecord {
             cycle: self.chip.now(),
             pc: registers.pc,
             sr: registers.sr(),
             vbr: registers.vbr,
-            a7: registers.address(7),
+            a7: Address(registers.address(7)),
             instructions: self.chip.instructions(),
-        })
+        }
     }
 
     /// The run's end after `outcome`, as a `stopped` record.
     #[must_use]
-    pub fn stopped(&self, outcome: BoardRun) -> Record {
-        Record::Stopped(trace::StoppedRecord {
+    pub fn stopped_record(&self, outcome: BoardRun) -> StoppedRecord {
+        StoppedRecord {
             cycle: self.chip.now(),
             instructions: self.chip.instructions(),
-            reason: outcome.stop,
-        })
+            stop: outcome.stop,
+        }
     }
 
     /// The handle by which the host asks the run to stop.
@@ -1193,17 +1167,17 @@ impl<C: Chip> Board<C> {
         self.control.clone()
     }
 
-    /// Runs the board for `picoseconds` from now.
+    /// Runs the board for `span` from now.
     ///
     /// # Errors
     ///
     /// What [`Board::run_until`] fails with.
-    pub fn run_for(&mut self, picoseconds: u64) -> Result<BoardRun, RunError> {
-        self.run_until(self.now + picoseconds)
+    pub fn run_for(&mut self, span: Span) -> Result<BoardRun, RunError> {
+        self.run_until(self.now + span)
     }
 
     /// Runs the board to `until` as [`run_until`](Self::run_until) does, in quanta
-    /// of `quantum` picoseconds of board time, calling `before` before
+    /// of `quantum` of board time, calling `before` before
     /// each: a host's loop, for its Ctrl-C checks or its pacing.  A
     /// series of runs to rising times is one long run, so the quanta
     /// change nothing the board does.  A board halted before a quantum
@@ -1211,18 +1185,8 @@ impl<C: Chip> Board<C> {
     /// the next quantum.  `before` returning `Break` ends the run where
     /// it is, [`Stop::Requested`].  A frame `before` runs
     /// ([`run_frame`](Self::run_frame)) leaves the pacing ended, as any
-    /// other run does.  A quantum is never empty, so the loop always
-    /// comes to `until`:
-    ///
-    /// ```compile_fail
-    /// # use std::ops::ControlFlow;
-    /// # use mc683xx_board::board::Board;
-    /// # use mc683xx_board::time::Time;
-    /// # use mc683xx_mc68331::chip::Mc68331;
-    /// # fn run(board: &mut Board<Mc68331>) {
-    /// board.run_until_quantized(Time(1), 0, |_| ControlFlow::Continue(()));
-    /// # }
-    /// ```
+    /// other run does.  A [`NonZeroSpan`] is never zero, so the loop always
+    /// comes to `until`.
     ///
     /// # Errors
     ///
@@ -1230,7 +1194,7 @@ impl<C: Chip> Board<C> {
     pub fn run_until_quantized(
         &mut self,
         until: Time,
-        quantum: NonZeroU64,
+        quantum: NonZeroSpan,
         before: impl FnMut(&mut Self) -> ControlFlow<()>,
     ) -> Result<BoardRun, RunError> {
         self.leave_frames();
@@ -1244,14 +1208,14 @@ impl<C: Chip> Board<C> {
     fn run_quantized(
         &mut self,
         until: Time,
-        quantum: NonZeroU64,
+        quantum: NonZeroSpan,
         mut before: impl FnMut(&mut Self) -> ControlFlow<()>,
     ) -> Result<BoardRun, RunError> {
         loop {
             if before(self).is_break() {
                 return Ok(self.outcome(Stop::Requested));
             }
-            let target = Time(self.now.0.saturating_add(quantum.get())).min(until);
+            let target = (self.now + quantum.get()).min(until);
             let idle = self.idle();
             let outcome = self.run_to(target)?;
             let quantized = outcome.stop == Stop::Budget || idle == Some(outcome.stop);
@@ -1262,7 +1226,7 @@ impl<C: Chip> Board<C> {
     }
 
     /// Runs the board to `until` as [`run_until_quantized`](Self::run_until_quantized)
-    /// does, in quanta of `quantum` picoseconds
+    /// does, in quanta of `quantum`
     /// ([`pacing::QUANTUM`](crate::pacing::QUANTUM) is a good one), paced
     /// by its control's [`Pacing`](crate::pacing::Pacing), read before
     /// each quantum: before each, it sleeps until board time is no longer
@@ -1280,7 +1244,7 @@ impl<C: Chip> Board<C> {
     pub fn run_until_paced(
         &mut self,
         until: Time,
-        quantum: NonZeroU64,
+        quantum: NonZeroSpan,
     ) -> Result<BoardRun, RunError> {
         let control = self.control.clone();
         let mut pacer = Pacer::new();
@@ -1298,11 +1262,11 @@ impl<C: Chip> Board<C> {
     /// sleep (a browser's `requestAnimationFrame` and `performance.now()`,
     /// a GUI's timer): to the board time due by the host's clock reading
     /// `wall` under the control's pacing, but no more
-    /// than `picoseconds` of board time, a frame's bound however far
+    /// than `bound` of board time, a frame's bound however far
     /// behind the host is (a hidden page): a frame so bounded drops the
     /// time it missed, and the next frames are paced from where it
     /// ended.  Unpaced, it runs
-    /// `picoseconds`.  Paced, the first frame, and the first after the
+    /// `bound`.  Paced, the first frame, and the first after the
     /// control's [`set_pacing`](BoardControl::set_pacing) to another
     /// pacing, any other run (even of no time) or a successful
     /// [`restore`](Self::restore), runs nothing: it starts the pacing
@@ -1317,8 +1281,8 @@ impl<C: Chip> Board<C> {
     /// # Errors
     ///
     /// As [`run_until`](Self::run_until).
-    pub fn run_frame(&mut self, wall: Duration, picoseconds: u64) -> Result<BoardRun, RunError> {
-        self.run_frame_with(wall, picoseconds, |_| ControlFlow::Continue(()))
+    pub fn run_frame(&mut self, wall: Duration, bound: Span) -> Result<BoardRun, RunError> {
+        self.run_frame_with(wall, bound, |_| ControlFlow::Continue(()))
     }
 
     /// Runs a frame as [`run_frame`](Self::run_frame) does, calling
@@ -1336,12 +1300,12 @@ impl<C: Chip> Board<C> {
     pub fn run_frame_with(
         &mut self,
         wall: Duration,
-        picoseconds: u64,
+        bound: Span,
         before: impl FnMut(&mut Self) -> ControlFlow<()>,
     ) -> Result<BoardRun, RunError> {
         let (pacing, pacings) = self.control.pacing_set();
         let (mut pacer, generation) = self.frames.take(pacings);
-        let bound = Time(self.now.0.saturating_add(picoseconds));
+        let bound = self.now + bound;
         let due = pacer.due(self.now, pacing, wall);
         let until = due.map_or(bound, |due| due.min(bound));
         let outcome = self.run_quantized(until, QUANTUM, before);
@@ -1362,12 +1326,13 @@ impl<C: Chip> Board<C> {
 
     /// The earliest change waiting or peripheral's next event.
     fn next_event(&self) -> Option<Time> {
+        let base = self.shared.base.get();
         let change = self.first_change();
         let peripheral = self
             .shared
             .peripherals
             .iter()
-            .filter_map(|peripheral| peripheral.borrow().next_event())
+            .filter_map(|peripheral| peripheral.borrow().next_event(base))
             .min();
         change.into_iter().chain(peripheral).min()
     }
@@ -1391,13 +1356,14 @@ impl<C: Chip> Board<C> {
                 .first_key_value()
                 .map(|(&key, _)| key)
                 .filter(|&(at, _)| at <= self.now);
+            let base = self.shared.base.get();
             let peripheral = self
                 .shared
                 .peripherals
                 .iter()
                 .enumerate()
                 .filter_map(|(index, peripheral)| {
-                    peripheral.borrow().next_event().map(|at| (at, index))
+                    peripheral.borrow().next_event(base).map(|at| (at, index))
                 })
                 .filter(|&(at, _)| at <= self.now)
                 .min();
@@ -1418,7 +1384,7 @@ impl<C: Chip> Board<C> {
                     }
                     repeats[index] = (at, count);
                     self.shared
-                        .call(index, at, |peripheral, drive| peripheral.advance(at, drive));
+                        .call(index, at, |peripheral, drive| peripheral.advance(drive));
                 }
                 (_, None) => return Ok(()),
             }
@@ -1521,7 +1487,7 @@ impl<C: Chip> Board<C> {
         if changed {
             if self.tracing.nets {
                 self.net_trace.push(NetRecord {
-                    at,
+                    now: at,
                     net: state.name.clone(),
                     signal,
                 });
@@ -1539,7 +1505,7 @@ impl<C: Chip> Board<C> {
                 _ if !changed => {}
                 Sink::Peripheral(peripheral, port) => {
                     self.shared.call(peripheral, at, |peripheral, drive| {
-                        peripheral.input(port, signal, at, drive);
+                        peripheral.input(port, signal, drive);
                     });
                 }
                 Sink::Chip(pin) => {
@@ -1616,7 +1582,6 @@ impl<C: Chip> Board<C> {
                 let cycles = self.chip.now();
                 let at = at.max(base.time(cycles));
                 self.move_base(TimeBase::new(cycles, at, base.frequency()));
-                self.tell_system_clock();
                 if breakpoint {
                     self.chip.reset_with_breakpoint();
                 } else {
@@ -1718,7 +1683,7 @@ impl<C: Chip> Board<C> {
         emitted.clear();
         self.emitted = emitted;
         let reset = Source::Chip(C::RESET);
-        let system_clock = self.chip.system_clock();
+        let frequency = self.chip.system_frequency();
         for event in self.chip.take_events() {
             if let Some((low, high)) = C::reset_pulse(&event)
                 && self.sources.contains_key(&reset)
@@ -1726,7 +1691,7 @@ impl<C: Chip> Board<C> {
                 // the release counts clocks of the clock after the reset
                 // (MC68331UM 4.6.6), which a reset that moves it ends the
                 // quantum at
-                let after = base.moved(low, system_clock);
+                let after = base.moved(low, frequency);
                 self.drive(&reset, base.time(low), Signal::Level(false));
                 self.drive(&reset, after.time(high), Signal::Level(true));
             }
@@ -1734,10 +1699,7 @@ impl<C: Chip> Board<C> {
         }
         let now = self.chip.now();
         self.ahead.retain(|ahead| ahead.cycles > now);
-        self.move_base(base.moved(now, system_clock));
-        if system_clock != base.frequency() {
-            self.tell_system_clock();
-        }
+        self.move_base(base.moved(now, frequency));
         let moved = self.clocks.iter().any(|(&pin, clock)| {
             self.chip
                 .clock_output(pin)
@@ -1745,17 +1707,6 @@ impl<C: Chip> Board<C> {
         });
         if moved {
             self.drive_clocks();
-        }
-    }
-
-    /// Every peripheral learns the system clock's base
-    /// ([`Peripheral::system_clock`]).
-    ///
-    /// [`Peripheral::system_clock`]: crate::peripheral::Peripheral::system_clock
-    fn tell_system_clock(&self) {
-        let base = self.shared.base.get();
-        for peripheral in &self.shared.peripherals {
-            peripheral.borrow_mut().system_clock(base);
         }
     }
 
@@ -1801,7 +1752,7 @@ impl<C: Chip> Board<C> {
         {
             self.records.push(Record::Pin(trace::PinRecord {
                 cycle: self.shared.base.get().cycles(at),
-                time: at,
+                now: at,
                 pin: pin.name(),
                 level,
             }));
@@ -2093,7 +2044,7 @@ impl<C: Chip> Board<C> {
                 self.hooks.pc = Some(cpu.add_code_hook(
                     Address(0)..=Address(u32::MAX),
                     move |instruction| {
-                        pc.set(instruction.pc.0);
+                        pc.set(instruction.pc);
                         ControlFlow::Continue(())
                     },
                 ));
@@ -2178,7 +2129,7 @@ impl<C: Chip> Board<C> {
             qspi: self.shared.qspi.borrow().clone(),
             ahead: self.ahead.clone(),
         };
-        Ok(encode(VERSION, &state))
+        Ok(encode_layer(Layer::Board, VERSION, &state))
     }
 
     /// Each peripheral's snapshot, in file order; an error names the
@@ -2293,7 +2244,7 @@ impl<C: Chip> Board<C> {
     ///
     /// [`Peripheral::restore`]: crate::peripheral::Peripheral::restore
     pub fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
-        let state: BoardState<C::Pin> = decode(VERSION, snapshot)?;
+        let state: BoardState<C::Pin> = decode_layer(Layer::Board, VERSION, snapshot)?;
         self.check(&state)?;
         let backups = self.save_peripherals()?;
         let parts: Vec<&[u8]> = state
@@ -2315,7 +2266,6 @@ impl<C: Chip> Board<C> {
         })?;
         self.now = state.now;
         self.shared.base.set(state.base);
-        self.tell_system_clock();
         self.queue = state.queue.into_iter().collect();
         self.sequence = state.sequence;
         self.outputs = state.outputs.into_iter().collect();
@@ -2463,51 +2413,23 @@ fn resolve_nets<P: ChipPin>(
         .nets
         .iter()
         .map(|spec| {
-            let resolve =
-                |endpoint: &Endpoint, driving: bool| -> Result<(usize, usize), LoadError> {
-                    let Endpoint::Peripheral {
-                        peripheral: owner,
-                        port,
-                    } = endpoint
-                    else {
-                        unreachable!("only peripheral endpoints resolve here");
-                    };
-                    let name = format!("{owner}.{port}");
-                    let peripheral = peripherals
-                        .iter()
-                        .position(|peripheral| &peripheral.name == owner)
-                        .expect("the description checked the peripheral");
-                    let (index, declared) = peripherals[peripheral]
-                        .ports
-                        .iter()
-                        .enumerate()
-                        .find(|(_, declared)| &declared.name == port)
-                        .ok_or_else(|| LoadError::Endpoint {
-                            net: spec.name.clone(),
-                            endpoint: name.clone(),
-                        })?;
-                    if declared.kind != spec.kind {
-                        return Err(LoadError::Kind {
-                            net: spec.name.clone(),
-                            kind: spec.kind,
-                            endpoint: name,
-                            found: declared.kind,
-                        });
-                    }
-                    let fits = if driving {
-                        declared.direction.drives()
-                    } else {
-                        declared.direction.sinks()
-                    };
-                    if !fits {
-                        return Err(LoadError::Direction {
-                            net: spec.name.clone(),
-                            endpoint: name,
-                            what: if driving { "drive" } else { "be driven" },
-                        });
-                    }
-                    Ok((peripheral, index))
+            let resolve = |endpoint: &Endpoint,
+                           driving: bool|
+             -> Result<(usize, usize), LoadError> {
+                let Endpoint::Peripheral {
+                    peripheral: owner,
+                    port,
+                } = endpoint
+                else {
+                    unreachable!("only peripheral endpoints resolve here");
                 };
+                let peripheral = peripherals
+                    .iter()
+                    .position(|peripheral| &peripheral.name == owner)
+                    .expect("the description checked the peripheral");
+                let index = port_of(spec, owner, port, driving, &peripherals[peripheral].ports)?;
+                Ok((peripheral, index))
+            };
             let drivers = spec
                 .from
                 .iter()

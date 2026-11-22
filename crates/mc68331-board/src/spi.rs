@@ -258,7 +258,6 @@ mod tests {
     use super::Slave;
     use super::exchange;
     use crate::peripheral::Transfer;
-    use crate::time::Time;
 
     /// A transfer in SPI mode `number`, a frame's first.
     fn transfer(number: u8) -> Transfer {
@@ -266,10 +265,10 @@ mod tests {
         let clock = QspiClock::new(
             mode.polarity,
             mode.phase,
-            Cycles(8),
+            Cycles::from_clocks(8),
             Frequency::from_hz(16_777_216),
         );
-        Transfer::new(0, 0, 0, 0, 0, clock, Time::ZERO)
+        Transfer::new(0, 0, clock)
     }
 
     /// An 8-stage shift register, MISO its last stage.

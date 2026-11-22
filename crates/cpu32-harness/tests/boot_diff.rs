@@ -43,6 +43,8 @@ use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::chip::MemoryId;
 use mc683xx_mc68331::event::Event;
+use mc683xx_mc68331::gpt::Input;
+use mc683xx_mc68331::port::Port as ChipPort;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
@@ -79,7 +81,7 @@ const PREFIX: &str = "smartclock-emu: ";
 /// two diff line for line.
 const BUS_CYCLE: &str = "device";
 /// Clocks run at a time while the CPU is stopped and waits.
-const STOPPED_QUANTUM: Cycles = Cycles(256);
+const STOPPED_QUANTUM: Cycles = Cycles::from_clocks(256);
 
 /// The board's peripheral regions as the reference traces them (its
 /// header): the DUART on CS8, CS5's latch, switch, FPGA port and EFC
@@ -91,9 +93,9 @@ const MODULES: u32 = 0xff_f000;
 const EEPROM: std::ops::Range<u32> = 0x40_0000..0x40_2000;
 /// The EEPROM's byte load cycle time, tBLC, 150 us (AT28C64B, AC Write
 /// Characteristics), at the Z3805A's 16.777216 MHz.
-const EEPROM_LOAD: Cycles = Cycles(2517);
+const EEPROM_LOAD: Cycles = Cycles::from_clocks(2517);
 /// Its write cycle time, tWC, 5 ms.
-const EEPROM_WRITE: Cycles = Cycles(83_886);
+const EEPROM_WRITE: Cycles = Cycles::from_clocks(83_886);
 /// DATA polling's bit, I/O7.
 const IO7: u8 = 1 << 7;
 /// Toggle bit's, I/O6.
@@ -659,7 +661,7 @@ impl MappedPeripheral for Replay {
             ));
         }
         Ok((0..cycle.size.bytes()).fold(0, |value, byte| {
-            value << 8 | u32::from(self.read_byte(cycle.address + byte, cycle.now))
+            value << 8 | u32::from(self.read_byte(cycle.address.0 + byte, cycle.now))
         }))
     }
 
@@ -670,7 +672,7 @@ impl MappedPeripheral for Replay {
         let bytes = cycle.size.bytes();
         for byte in 0..bytes {
             let shift = 8 * (bytes - 1 - byte);
-            self.write_byte(cycle.address + byte, (value >> shift) as u8, cycle.now);
+            self.write_byte(cycle.address.0 + byte, (value >> shift) as u8, cycle.now);
         }
         Ok(())
     }
@@ -1028,7 +1030,7 @@ fn run_chip(
     if let Some(qspi) = qspi {
         builder.qspi(qspi);
     }
-    builder.interrupt(
+    builder.set_interrupt(
         id,
         mc683xx_cpu32::interrupt::IrqPin::new(DUART_LEVEL).expect("a level"),
     );
@@ -1052,14 +1054,14 @@ fn run_chip(
             reason = "seconds of a few clocks' worth"
         )]
         let budget = (seconds * chip.sim().clock().frequency().hz() as f64) as u64;
-        if chip.now().0 >= budget {
-            break format!("the time, {seconds} s, at clock {}", chip.now().0);
+        if chip.now().clocks() >= budget {
+            break format!("the time, {seconds} s, at clock {}", chip.now().clocks());
         }
-        if stop_at.is_some_and(|at| chip.now().0 >= at) {
+        if stop_at.is_some_and(|at| chip.now().clocks() >= at) {
             break format!(
                 "{} s past TBB written as the reference's, as the reference ran on, at clock {}",
                 after_port,
-                chip.now().0
+                chip.now().clocks()
             );
         }
         drive_pins(&mut chip, &pins, &mut driven);
@@ -1071,22 +1073,24 @@ fn run_chip(
             // takes it (GPTRM 6.1)
             captures.pop_front();
             let level = driven[GP].unwrap_or_default();
-            chip.set_port_gp_pins(level | IC1);
+            chip.set_pins(ChipPort::Gp, level | IC1, u8::MAX)
+                .expect("an input port");
             driven[GP] = Some(level);
         }
         let pc = chip.cpu().registers.pc;
-        let run = chip.run_for(Cycles(1));
+        let run = chip.run_for(Cycles::from_clocks(1));
         let run = if run.stop == Stop::Stopped {
             chip.run_for(STOPPED_QUANTUM)
         } else {
             run
         };
         if capture {
-            chip.set_port_gp_pins(driven[GP].unwrap_or_default());
+            chip.set_pins(ChipPort::Gp, driven[GP].unwrap_or_default(), u8::MAX)
+                .expect("an input port");
         }
         let origin = chip.instructions();
         for event in chip.take_events() {
-            if let Some(record) = chip_record(&chip, ram, pc, event) {
+            if let Some(record) = chip_record(&chip, ram, pc.0, event) {
                 if let Record::Access {
                     write: false,
                     address,
@@ -1103,7 +1107,7 @@ fn run_chip(
                     ..
                 } = record
                 {
-                    panel.control(value as u8, panel_in_flight, chip.now().0);
+                    panel.control(value as u8, panel_in_flight, chip.now().clocks());
                 }
                 if let Some((command, newqp)) = shadow.observe(record)
                     && let Some(qspi) = chip.qspi_peripheral_mut::<ReplayQspi>()
@@ -1113,9 +1117,9 @@ fn run_chip(
                 }
                 trace.push(Traced {
                     record,
-                    pc,
+                    pc: pc.0,
                     origin,
-                    cycle: chip.now().0,
+                    cycle: chip.now().clocks(),
                     split: false,
                 });
             }
@@ -1123,14 +1127,14 @@ fn run_chip(
         if let Some(qspi) = chip.qspi_peripheral_mut::<ReplayQspi>() {
             for (at, byte) in std::mem::take(&mut qspi.panel) {
                 panel_in_flight = false;
-                panel.exchange(byte, at.0);
+                panel.exchange(byte, at.clocks());
             }
         }
         if prompt_at.is_none()
             && !expected_port.written.is_empty()
             && peripheral_of(&chip, id).port == expected_port.written
         {
-            prompt_at = Some(chip.now().0);
+            prompt_at = Some(chip.now().clocks());
             #[expect(
                 clippy::cast_possible_truncation,
                 clippy::cast_sign_loss,
@@ -1138,14 +1142,17 @@ fn run_chip(
                 reason = "seconds of a few clocks' worth"
             )]
             let after = (after_port * chip.sim().clock().frequency().hz() as f64) as u64;
-            stop_at = Some(chip.now().0 + after);
+            stop_at = Some(chip.now().clocks() + after);
             println!(
                 "boot-diff: TBB written as the reference's at clock {}",
-                chip.now().0
+                chip.now().clocks()
             );
         }
         if let Stop::Halted(halt) = run.stop {
-            break format!("a halt, {halt:?}, at PC {pc:#x}, clock {}", chip.now().0);
+            break format!(
+                "a halt, {halt}, at PC {pc:#x}, clock {}",
+                chip.now().clocks()
+            );
         }
     };
     let qspi_unreplayed = chip
@@ -1215,12 +1222,18 @@ fn drive_pins(
         }
         driven[port] = Some(level);
         match port {
-            0 => chip.set_port_e_pins(level),
-            1 => chip.set_port_f_pins(level),
-            GP => chip.set_port_gp_pins(level),
+            0 => chip
+                .set_pins(ChipPort::E, level, u8::MAX)
+                .expect("an input port"),
+            1 => chip
+                .set_pins(ChipPort::F, level, u8::MAX)
+                .expect("an input port"),
+            GP => chip
+                .set_pins(ChipPort::Gp, level, u8::MAX)
+                .expect("an input port"),
             _ => {
-                chip.set_pai(level & PACTL_PAIS != 0);
-                chip.set_pclk(level & PACTL_PCLKS != 0);
+                chip.set_gpt_input(Input::Pai, level & PACTL_PAIS != 0);
+                chip.set_gpt_input(Input::Pclk, level & PACTL_PCLKS != 0);
             }
         }
     }
@@ -1234,19 +1247,22 @@ fn peripheral_of(chip: &Mc68331, id: PeripheralId) -> &Replay {
 /// `event`'s record, if the reference would trace it.
 fn chip_record(chip: &Mc68331, ram: MemoryId, pc: u32, event: Event) -> Option<Record> {
     match event {
-        Event::Access(access)
-            if traced_address(access.address.0) && !access.function_code.is_cpu_space() =>
-        {
-            Some(Record::Access {
-                write: access.write,
-                address: access.address.0,
-                size: access.size.bytes() as u8,
-                value: access.value.unwrap_or_default(),
-            })
-        }
-        Event::Exception(_, entry) => {
+        Event::Access {
+            address,
+            size,
+            function_code,
+            write,
+            value,
+            ..
+        } if traced_address(address.0) && !function_code.is_cpu_space() => Some(Record::Access {
+            write,
+            address: address.0,
+            size: size.bytes() as u8,
+            value: value.unwrap_or_default(),
+        }),
+        Event::Exception { entry, .. } => {
             let memory = chip.memory(ram);
-            let offset = entry.stack as usize & (memory.len() - 1);
+            let offset = entry.stack.0 as usize & (memory.len() - 1);
             let sr = memory
                 .get(offset..offset + 2)
                 .map_or(0, |word| u16::from_be_bytes([word[0], word[1]]));

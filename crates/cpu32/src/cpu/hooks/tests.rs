@@ -53,7 +53,7 @@ const NOWHERE: u32 = 0x0010_0000;
 /// vector to [`HANDLER`], which runs `handler`.
 fn prepared(code: &[u16], handler: &[u16]) -> Cpu {
     let mut cpu = machine(code);
-    cpu.registers.ssp = STACK;
+    cpu.registers.ssp = Address(STACK);
     for vector in 0..=u8::MAX {
         poke_long(&mut cpu, Vector(vector).offset(), HANDLER);
     }
@@ -94,15 +94,16 @@ fn a_code_hook_sees_registers_and_the_stack_and_stops_before() {
     });
     assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
     assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(id));
+    assert_eq!(id.to_string(), "hook 1");
     // Not executed.
-    assert_eq!(cpu.registers.pc, CODE + 2);
+    assert_eq!(cpu.registers.pc.0, CODE + 2);
     assert_eq!(cpu.instructions(), 1);
     // The next run executes it without the hook.
     assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
-    assert_eq!(cpu.registers.pc, CODE + 4);
+    assert_eq!(cpu.registers.pc.0, CODE + 4);
     assert_eq!(
         *seen.borrow(),
-        [(Address(CODE + 2), Some(0xdead_beef), STACK)]
+        [(Address(CODE + 2), Some(0xdead_beef), Address(STACK))]
     );
 }
 
@@ -157,7 +158,7 @@ fn stopping_at_the_second() -> (Cpu, Rc<RefCell<Vec<u32>>>) {
 #[test]
 fn a_host_jump_after_a_stop_starts_a_block() {
     let (mut cpu, starts) = stopping_at_the_second();
-    cpu.registers.pc = CODE + 4;
+    cpu.registers.pc = Address(CODE + 4);
     assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
     assert_eq!(*starts.borrow(), [CODE, CODE + 4]);
 }
@@ -165,28 +166,28 @@ fn a_host_jump_after_a_stop_starts_a_block() {
 #[test]
 fn a_resume_without_a_jump_starts_no_block() {
     let (mut cpu, starts) = stopping_at_the_second();
-    cpu.registers.pc = CODE + 2;
+    cpu.registers.pc = Address(CODE + 2);
     assert_eq!(step(&mut cpu, 2).stop, Stop::Budget);
-    assert_eq!(cpu.registers.pc, CODE + 6);
+    assert_eq!(cpu.registers.pc.0, CODE + 6);
     assert_eq!(*starts.borrow(), [CODE]);
 }
 
 #[test]
 fn a_host_jump_back_to_a_stopped_hook_runs_it_again() {
     let (mut cpu, starts) = stopping_at_the_second();
-    cpu.registers.pc = CODE;
+    cpu.registers.pc = Address(CODE);
     assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
     assert!(matches!(step(&mut cpu, 1).stop, Stop::Hook(_)));
-    assert_eq!(cpu.registers.pc, CODE + 2);
+    assert_eq!(cpu.registers.pc.0, CODE + 2);
     assert_eq!(*starts.borrow(), [CODE, CODE]);
 }
 
 #[test]
 fn a_restore_starts_a_block() {
     let (mut cpu, starts) = stopping_at_the_second();
-    let stopped = cpu.save();
+    let stopped = cpu.save().unwrap();
     assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
-    let running = cpu.save();
+    let running = cpu.save().unwrap();
     assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
     cpu.restore(&running).unwrap();
     assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
@@ -195,7 +196,7 @@ fn a_restore_starts_a_block() {
     // stay run.
     cpu.restore(&stopped).unwrap();
     assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
-    assert_eq!(cpu.registers.pc, CODE + 4);
+    assert_eq!(cpu.registers.pc.0, CODE + 4);
     assert_eq!(*starts.borrow(), [CODE, CODE + 4]);
 }
 
@@ -228,7 +229,7 @@ fn memory_hooks_see_each_word_cycle_and_stop_after_the_instruction() {
         ControlFlow::Continue(())
     });
     assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(write));
-    assert_eq!(cpu.registers.pc, CODE + 2);
+    assert_eq!(cpu.registers.pc.0, CODE + 2);
     assert_eq!(*writes.borrow(), [(DATA, 0x1234), (DATA + 2, 0x5678)]);
     step(&mut cpu, 1);
     // Fetches are not reads.
@@ -316,7 +317,7 @@ fn a_long_onto_the_bus_writes_its_high_word_then_faults_on_its_low() {
         ControlFlow::Continue(())
     });
     step(&mut cpu, 1);
-    assert_eq!(cpu.registers.pc, HANDLER);
+    assert_eq!(cpu.registers.pc.0, HANDLER);
     assert_eq!(
         *seen.borrow(),
         [(Address(RAM_BYTES), Size::Word, Some(0x5678))]
@@ -340,7 +341,7 @@ fn an_invalid_access_hook_sees_a_bus_error_then_the_exception_is_taken() {
         ControlFlow::Break(())
     });
     assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(id));
-    assert_eq!(cpu.registers.pc, HANDLER);
+    assert_eq!(cpu.registers.pc.0, HANDLER);
     assert_eq!(
         *seen.borrow(),
         [InvalidAccess {
@@ -366,14 +367,14 @@ fn an_exception_hook_sees_the_entry_and_stops_before_the_handler() {
         ControlFlow::Break(())
     });
     assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(id));
-    assert_eq!(cpu.registers.pc, HANDLER);
+    assert_eq!(cpu.registers.pc.0, HANDLER);
     assert_eq!(
         *seen.borrow(),
         [ExceptionEntry {
             vector: Vector::TRAP,
             pc: Address(CODE + 2),
             handler: Address(HANDLER),
-            stack: STACK - 8,
+            stack: Address(STACK - 8),
             level: None,
         }]
     );
@@ -399,7 +400,7 @@ fn a_write_to_a_read_only_page_is_a_bus_error() {
         ControlFlow::Continue(())
     });
     step(&mut cpu, 1);
-    assert_eq!(cpu.registers.pc, HANDLER);
+    assert_eq!(cpu.registers.pc.0, HANDLER);
     assert_eq!(*reasons.borrow(), [Invalid::Protected]);
     assert_eq!(
         cpu.memory
@@ -433,21 +434,21 @@ fn a_fetch_from_a_page_without_execute_is_a_bus_error() {
     });
     step(&mut cpu, 1);
     assert_eq!(*cycles.borrow(), [(CycleKind::Fetch, Invalid::Protected)]);
-    assert_eq!(cpu.registers.pc, HANDLER);
+    assert_eq!(cpu.registers.pc.0, HANDLER);
 }
 
 /// Runs of NOPs from [`CODE`], `instructions` of them less a few: the
 /// least wall-clock time of several tries, against a loaded host.
 fn time_nops(cpu: &mut Cpu, instructions: usize) -> Duration {
     /// Cycles in each run: the cost of fewer than 1000 NOPs.
-    const BUDGET: Cycles = Cycles(1500);
+    const BUDGET: Cycles = Cycles::from_clocks(1500);
     /// Tries.
     const TRIES: usize = 20;
     (0..TRIES)
         .map(|_| {
             let start = Instant::now();
             for _ in 0..instructions / 1000 {
-                cpu.registers.pc = CODE;
+                cpu.registers.pc = Address(CODE);
                 cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, BUDGET);
             }
             start.elapsed()

@@ -55,7 +55,22 @@ impl ConditionInfo {
 ///
 /// [`Peripheral::arm`]: crate::peripheral::Peripheral::arm
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ConditionToken(pub u32);
+pub struct ConditionToken(u32);
+
+impl ConditionToken {
+    /// The token numbered `number`, in whatever scheme the peripheral
+    /// keeps.
+    #[must_use]
+    pub const fn new(number: u32) -> Self {
+        Self(number)
+    }
+
+    /// Its number.
+    #[must_use]
+    pub const fn number(self) -> u32 {
+        self.0
+    }
+}
 
 impl From<u32> for ConditionToken {
     fn from(token: u32) -> Self {
@@ -162,7 +177,7 @@ impl FromStr for NetChange {
 /// Text that names no net change.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no net change {0:?}; one of rise, fall, change, high, low")]
-pub struct ParseNetChangeError(pub String);
+pub struct ParseNetChangeError(String);
 
 /// What a condition stops for.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -258,7 +273,21 @@ pub enum ParseConditionError {
 
 /// An armed condition's number, from 1, never reused on its board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ConditionId(pub u64);
+pub struct ConditionId(u64);
+
+impl ConditionId {
+    /// The condition numbered `number`.
+    #[must_use]
+    pub const fn new(number: u64) -> Self {
+        Self(number)
+    }
+
+    /// Its number.
+    #[must_use]
+    pub const fn number(self) -> u64 {
+        self.0
+    }
+}
 
 impl From<u64> for ConditionId {
     fn from(id: u64) -> Self {

@@ -10,13 +10,20 @@ pub const NANOHERTZ_PER_HERTZ: u64 = 1_000_000_000;
 
 /// A frequency in nanohertz: 10^-16 of a 10 MHz oscillator, finer than
 /// any oven holds it or EFC step moves it, up to 18 GHz.  The chip's
-/// clocks are whole hertz (`from_hz`, `hz`).
+/// clocks are whole hertz (`from_hz`, `hz`), a board's clocks need not
+/// be (`from_nanohertz`, `nanohertz`).
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
 )]
-pub struct Frequency(pub u64);
+pub struct Frequency(u64);
 
 impl Frequency {
+    /// `nanohertz` nanohertz.
+    #[must_use]
+    pub const fn from_nanohertz(nanohertz: u64) -> Self {
+        Self(nanohertz)
+    }
+
     /// `hz` hertz.
     #[must_use]
     pub const fn from_hz(hz: u64) -> Self {
@@ -28,12 +35,11 @@ impl Frequency {
     pub const fn hz(self) -> u64 {
         self.0 / NANOHERTZ_PER_HERTZ
     }
-}
 
-impl From<Frequency> for u64 {
     /// Its nanohertz.
-    fn from(frequency: Frequency) -> Self {
-        frequency.0
+    #[must_use]
+    pub const fn nanohertz(self) -> u64 {
+        self.0
     }
 }
 
@@ -92,13 +98,6 @@ impl fmt::Display for Frequency {
     }
 }
 
-impl From<u64> for Frequency {
-    /// `nanohertz` nanohertz.
-    fn from(nanohertz: u64) -> Self {
-        Self(nanohertz)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::Frequency;
@@ -121,6 +120,6 @@ mod tests {
         assert_eq!(Frequency::from_hz(16_777_216).to_string(), "16777216 Hz");
         assert_eq!(Frequency(3_000_000_001).to_string(), "3.000000001 Hz");
         assert_eq!(Frequency(2_500_000_000).to_string(), "2.5 Hz");
-        assert_eq!(Frequency::from(5), Frequency(5));
+        assert_eq!(Frequency::from_nanohertz(5).nanohertz(), 5);
     }
 }

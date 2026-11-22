@@ -7,6 +7,7 @@ use std::io;
 use std::rc::Rc;
 
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_gdb::Ending;
 use mc683xx_gdb::SessionError;
 use mc683xx_gdb::bdm::Bdm;
@@ -59,7 +60,7 @@ const BGND: [u8; 2] = [0x4a, 0xfa];
 const PC: usize = 17;
 /// System clocks the chip runs each time the stub asks whether it has
 /// stopped.
-const LOOK: Cycles = Cycles(1000);
+const LOOK: Cycles = Cycles::from_clocks(1000);
 
 /// The chip as silicon behind a pod: it runs on its own, here a little
 /// each time the stub looks.  The second field counts register writes;
@@ -90,7 +91,7 @@ impl Cpu32Target for Running {
     fn halted(&mut self) -> Result<Option<Entry>, TargetError> {
         if Cpu32Target::halted(&mut self.0)?.is_none() {
             if let Some((at, word)) = self.3.take() {
-                self.0.poke(Address(at), &word).unwrap();
+                self.0.write(Address(at), &word).unwrap();
             }
             self.0.run_for(LOOK);
         }
@@ -130,18 +131,18 @@ impl Cpu32Target for Running {
     fn read_memory(
         &mut self,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<(), TargetError> {
-        self.0.read_memory(address, function_code, size, data)
+        self.0.read_memory(address, size, function_code, data)
     }
 
     fn write_memory(
         &mut self,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         data: &[u8],
     ) -> Result<(), TargetError> {
         if self.2 == Some(address.0) && data != BGND {
@@ -153,10 +154,10 @@ impl Cpu32Target for Running {
         {
             self.4 = None;
             self.0
-                .write_memory(address, function_code, Size::Byte, &data[..1])?;
+                .write_memory(address, Size::Byte, function_code, &data[..1])?;
             return Err(TargetError::NotHalted);
         }
-        self.0.write_memory(address, function_code, size, data)
+        self.0.write_memory(address, size, function_code, data)
     }
 }
 
@@ -170,8 +171,12 @@ fn chip() -> Running {
     let at = (START - RAM) as usize;
     ram[at..at + program.len()].copy_from_slice(&program);
     let mut builder = Builder::default();
-    builder.memory(rom, false, &[ChipSelect::Boot]).unwrap();
-    builder.fixed_memory(Address(RAM), ram, true).unwrap();
+    builder
+        .memory(rom, MemoryKind::Rom, &[ChipSelect::Boot])
+        .unwrap();
+    builder
+        .fixed_memory(Address(RAM), ram, MemoryKind::Ram)
+        .unwrap();
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
     chip.write_register(Register::A0, STORE).unwrap();
@@ -198,8 +203,8 @@ fn word(target: &mut Running, address: u32) -> [u8; 2] {
     target
         .read_memory(
             Address(address),
-            FunctionCode::SUPERVISOR_DATA,
             Size::Word,
+            FunctionCode::SUPERVISOR_DATA,
             &mut word,
         )
         .unwrap();

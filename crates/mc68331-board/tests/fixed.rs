@@ -92,14 +92,14 @@ reload = ["external"]
     let mut board = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap();
     fs::remove_dir_all(directory).unwrap();
-    board.run_until(Time(100_000_000)).unwrap();
+    board.run_until(Time::from_picos(100_000_000)).unwrap();
     assert_eq!(board.memory("data").unwrap()[0..2], [0x12, 0x34]);
     let pc = board.chip().cpu().registers.pc;
-    assert!((CODE..CODE + 0x800).contains(&pc), "{pc:#x}");
+    assert!((CODE..CODE + 0x800).contains(&pc.0), "{pc:#x}");
     board.chip_mut().reset();
     assert_eq!(board.memory("data").unwrap()[0..2], [0x5a, 0x5a]);
 }

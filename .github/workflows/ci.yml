@@ -36,6 +36,26 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace --no-fail-fast
 
+  msrv:
+    # The workspace builds on the minimum supported Rust, the
+    # workspace's `rust-version` (docs/releasing.md), read from
+    # Cargo.toml, ".0" added to a major.minor: a check, not the tests.
+    # `+` overrides rust-toolchain.toml's pin.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read the MSRV
+        run: |
+          version=$(sed -n 's/^rust-version = "\([0-9.]*\)"$/\1/p' Cargo.toml)
+          test -n "$version"
+          case "$version" in
+            *.*.*) ;;
+            *) version="$version.0" ;;
+          esac
+          echo "MSRV=$version" >> "$GITHUB_ENV"
+      - run: rustup toolchain install "$MSRV" --profile minimal
+      - run: cargo +"$MSRV" check --workspace --all-targets
+
   oracle:
     # The Musashi differential runs (`make oracle`).  The fetch is one
     # pinned commit, shallow, so it is not cached.  The compiler is the
@@ -105,7 +125,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
-          python-version: "3.10"
+          python-version: "3.12"
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           maturin-version: ${{ env.MATURIN_VERSION }}

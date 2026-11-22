@@ -29,6 +29,7 @@ use crate::chip::Mc68331;
 use crate::chip::MemoryId;
 use crate::event::Event;
 use crate::state;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_modules::sim::reset::ResetScope;
 
 /// JMP (xxx).L (CPU32RM 4, JMP).
@@ -69,15 +70,15 @@ fn code(program: &[u16]) -> Vec<u8> {
 fn fixed(program: &[u16], reload: ResetScope) -> (Mc68331, MemoryId, MemoryId) {
     let mut builder = Builder::default();
     builder
-        .memory(jumping(), false, &[ChipSelect::Boot])
+        .memory(jumping(), MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     let code = builder
-        .fixed_memory(Address(CODE), code(program), false)
+        .fixed_memory(Address(CODE), code(program), MemoryKind::Rom)
         .unwrap();
     let data = builder
-        .fixed_memory(Address(DATA), vec![0x5a; FIXED_BYTES], true)
+        .fixed_memory(Address(DATA), vec![0x5a; FIXED_BYTES], MemoryKind::Ram)
         .unwrap();
-    builder.reload_scope(data, reload);
+    builder.set_reload_scope(data, reload);
     (builder.build(), code, data)
 }
 
@@ -94,11 +95,11 @@ fn ending(program: &[&[u16]]) -> Vec<u16> {
 fn reset_code_runs_in_a_fixed_memory_with_no_select_programmed() {
     let program = ending(&[&store_word(DATA + 2, 0x1234), &load_word(DATA, 1)]);
     let (mut chip, _, data) = fixed(&program, ResetScope::NONE);
-    chip.run_for(Cycles(500));
+    chip.run_for(Cycles::from_clocks(500));
     assert_eq!(&chip.memory(data)[0..4], [0x5a, 0x5a, 0x12, 0x34]);
     assert_eq!(chip.cpu().registers.data[1] & 0xffff, 0x5a5a);
     let pc = chip.cpu().registers.pc;
-    assert!((CODE..CODE + FIXED_BYTES as u32).contains(&pc), "{pc:#x}");
+    assert!((CODE..CODE + FIXED_BYTES as u32).contains(&pc.0), "{pc:#x}");
     // a fixed memory's cycle costs only the tables' two clocks, in any
     // space but CPU space
     assert_eq!(
@@ -132,11 +133,17 @@ fn reset_code_runs_in_a_fixed_memory_with_no_select_programmed() {
 fn a_chip_select_matching_a_cycle_wins_over_a_fixed_memory() {
     let mut builder = Builder::default();
     builder
-        .memory(image(&[NOP], ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
-    let selected = builder.memory(vec![0x11; 2048], true, &[cs(1)]).unwrap();
+    let selected = builder
+        .memory(vec![0x11; 2048], MemoryKind::Ram, &[cs(1)])
+        .unwrap();
     let fixed = builder
-        .fixed_memory(Address(CODE), vec![0x22; FIXED_BYTES], true)
+        .fixed_memory(Address(CODE), vec![0x22; FIXED_BYTES], MemoryKind::Ram)
         .unwrap();
     let mut chip = builder.build();
     assert_eq!(cycle(&mut chip, CODE, Size::Word, None), Ok((0x2222, 2)));
@@ -168,8 +175,8 @@ fn a_chip_select_matching_a_cycle_wins_over_a_fixed_memory() {
 fn a_read_only_fixed_memory_ignores_writes() {
     let program = ending(&[&store_word(CODE + 0x100, 0x1234)]);
     let (mut chip, code, _) = fixed(&program, ResetScope::NONE);
-    chip.run_for(Cycles(500));
-    assert_eq!(chip.halted(), None);
+    chip.run_for(Cycles::from_clocks(500));
+    assert_eq!(chip.cpu().halted(), None);
     assert_eq!(chip.memory(code)[0x100..0x102], [0, 0]);
     assert_eq!(
         cycle(&mut chip, CODE + 0x100, Size::Word, Some(0x55)),
@@ -192,16 +199,22 @@ fn a_fixed_memory_survives_resets_unless_reloaded() {
     // the watchdog's reset is not in its scope
     cycle(&mut reloaded, DATA, Size::Word, Some(0x1234)).unwrap();
     reloaded.take_events();
-    reloaded.run_for(Cycles(2 * 512 * 256));
+    reloaded.run_for(Cycles::from_clocks(2 * 512 * 256));
     assert!(watchdog_reset(&mut reloaded));
     assert_eq!(reloaded.memory(reloaded_data)[0..2], [0x12, 0x34]);
 }
 
 /// Whether the watchdog reset the chip since the last look.
 fn watchdog_reset(chip: &mut Mc68331) -> bool {
-    chip.take_events()
-        .iter()
-        .any(|event| matches!(event, Event::Reset(_, ResetCause::Watchdog)))
+    chip.take_events().iter().any(|event| {
+        matches!(
+            event,
+            Event::Reset {
+                cause: ResetCause::Watchdog,
+                ..
+            }
+        )
+    })
 }
 
 #[test]
@@ -209,7 +222,7 @@ fn the_watchdogs_reset_reloads_a_memory_in_its_scope() {
     let (mut chip, _, data) = fixed(&[BRANCH_TO_SELF], ResetScope::ALL);
     cycle(&mut chip, DATA, Size::Word, Some(0x1234)).unwrap();
     chip.take_events();
-    chip.run_for(Cycles(2 * 512 * 256));
+    chip.run_for(Cycles::from_clocks(2 * 512 * 256));
     assert!(watchdog_reset(&mut chip));
     assert_eq!(chip.memory(data)[0..2], [0x5a, 0x5a]);
 }
@@ -221,8 +234,8 @@ fn the_reset_instruction_reloads_before_the_next_instruction() {
     let (mut reloaded, _, _) = fixed(&program, system);
     let (mut kept, _, _) = fixed(&program, ResetScope::NONE);
     for chip in [&mut reloaded, &mut kept] {
-        chip.run_for(Cycles(2000));
-        assert_eq!(chip.halted(), None);
+        chip.run_for(Cycles::from_clocks(2000));
+        assert_eq!(chip.cpu().halted(), None);
     }
     assert_eq!(reloaded.cpu().registers.data[0] & 0xffff, 0x5a5a);
     assert_eq!(kept.cpu().registers.data[0] & 0xffff, 0x1234);
@@ -234,13 +247,15 @@ fn a_fixed_memory_is_in_the_snapshot_and_never_diverted() {
     builder
         .memory(
             image(&[BRANCH_TO_SELF], ROM_BYTES),
-            false,
+            MemoryKind::Rom,
             &[ChipSelect::Boot],
         )
         .unwrap();
-    let selected = builder.memory(vec![0x11; 2048], false, &[cs(1)]).unwrap();
+    let selected = builder
+        .memory(vec![0x11; 2048], MemoryKind::Rom, &[cs(1)])
+        .unwrap();
     let fixed = builder
-        .fixed_memory(Address(DATA), vec![0x5a; FIXED_BYTES], true)
+        .fixed_memory(Address(DATA), vec![0x5a; FIXED_BYTES], MemoryKind::Ram)
         .unwrap();
     let peripheral = builder.unwired_peripheral(Recorder::answering(0xbeef));
     let mut chip = builder.build();
@@ -269,35 +284,35 @@ fn a_fixed_memory_must_fit_on_pages_and_not_overlap() {
     let mut builder = Builder::default();
     let page = vec![0; 2048];
     assert_eq!(
-        builder.fixed_memory(Address(CODE + 2), page.clone(), true),
+        builder.fixed_memory(Address(CODE + 2), page.clone(), MemoryKind::Ram),
         Err(BuildError::Placement {
             base: Address(CODE + 2),
             length: 2048
         })
     );
     assert_eq!(
-        builder.fixed_memory(Address(0xff_f800), vec![0; 4096], true),
+        builder.fixed_memory(Address(0xff_f800), vec![0; 4096], MemoryKind::Ram),
         Err(BuildError::Placement {
             base: Address(0xff_f800),
             length: 4096
         })
     );
     assert_eq!(
-        builder.fixed_memory(Address(CODE), vec![0; 100], true),
+        builder.fixed_memory(Address(CODE), vec![0; 100], MemoryKind::Ram),
         Err(BuildError::Length(100))
     );
     builder
-        .fixed_memory(Address(CODE), vec![0; 4096], true)
+        .fixed_memory(Address(CODE), vec![0; 4096], MemoryKind::Ram)
         .unwrap();
     assert_eq!(
-        builder.fixed_memory(Address(CODE + 2048), page.clone(), true),
+        builder.fixed_memory(Address(CODE + 2048), page.clone(), MemoryKind::Ram),
         Err(BuildError::Overlap {
             base: Address(CODE + 2048),
             other: Address(CODE)
         })
     );
     builder
-        .fixed_memory(Address(CODE + 4096), page, true)
+        .fixed_memory(Address(CODE + 4096), page, MemoryKind::Ram)
         .unwrap();
 }
 
@@ -306,17 +321,21 @@ fn a_fixed_memory_must_fit_on_pages_and_not_overlap() {
 fn nops_reached(timing: Option<(PortSize, Termination)>) -> u32 {
     let mut builder = Builder::default();
     builder
-        .memory(jumping(), false, &[ChipSelect::Boot])
+        .memory(jumping(), MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     let code = builder
-        .fixed_memory(Address(CODE), code(&[NOP; FIXED_BYTES / 2]), false)
+        .fixed_memory(
+            Address(CODE),
+            code(&[NOP; FIXED_BYTES / 2]),
+            MemoryKind::Rom,
+        )
         .unwrap();
     if let Some((port, termination)) = timing {
-        builder.fixed_timing(code, port, termination).unwrap();
+        builder.set_fixed_timing(code, port, termination).unwrap();
     }
     let mut chip = builder.build();
-    chip.run_for(Cycles(4_000));
-    chip.cpu().registers.pc - CODE
+    chip.run_for(Cycles::from_clocks(4_000));
+    chip.cpu().registers.pc.0 - CODE
 }
 
 #[test]
@@ -339,13 +358,13 @@ fn a_fixed_memory_runs_at_the_port_and_wait_states_it_is_given() {
 fn fixed_timing_takes_only_fixed_memories_and_internal_terminations() {
     let mut builder = Builder::default();
     let rom = builder
-        .memory(jumping(), false, &[ChipSelect::Boot])
+        .memory(jumping(), MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     let code = builder
-        .fixed_memory(Address(CODE), code(&[NOP]), false)
+        .fixed_memory(Address(CODE), code(&[NOP]), MemoryKind::Rom)
         .unwrap();
     assert_eq!(
-        builder.fixed_timing(rom, PortSize::Bits16, Termination::Fast),
+        builder.set_fixed_timing(rom, PortSize::Bits16, Termination::Fast),
         Err(BuildError::NotFixed)
     );
     for termination in [
@@ -354,12 +373,12 @@ fn fixed_timing_takes_only_fixed_memories_and_internal_terminations() {
         Termination::WaitStates(Termination::MOST_WAIT_STATES + 1),
     ] {
         assert_eq!(
-            builder.fixed_timing(code, PortSize::Bits8, termination),
+            builder.set_fixed_timing(code, PortSize::Bits8, termination),
             Err(BuildError::Termination)
         );
     }
     assert_eq!(
-        builder.fixed_timing(
+        builder.set_fixed_timing(
             code,
             PortSize::Bits8,
             Termination::WaitStates(Termination::MOST_WAIT_STATES)

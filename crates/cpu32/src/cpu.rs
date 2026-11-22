@@ -109,6 +109,15 @@ pub enum Halt {
     DoubleBusFault,
 }
 
+/// Why it halted, in words: `double bus fault`.
+impl fmt::Display for Halt {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::DoubleBusFault => "double bus fault",
+        })
+    }
+}
+
 /// PCC after a double bus fault out of reset (CPU32RM 7.2.5.3; 7.2.3
 /// gives $FFFFFFFF instead: PLAN.md, Background debug mode).
 const PCC_RESET_DOUBLE_FAULT: u32 = 0x0000_0001;
@@ -336,20 +345,16 @@ impl Cpu {
     /// let mut memory = Memory::new(24)?;
     /// let region = memory.add_region(vec![0; PAGE_BYTES as usize]);
     /// let backing = Some(Backing { region, offset: 0 });
-    /// let ram = Page {
-    ///     read: backing,
-    ///     write: backing,
-    ///     ..Page::BUS
-    /// };
+    /// let ram = Page::BUS.reading(backing).writing(backing);
     /// for space in [Space::User, Space::Supervisor] {
     ///     memory.map(space, Address(0), PAGE_BYTES, ram)?;
     /// }
     /// memory.region_mut(region)[0x400..0x402].copy_from_slice(&0x702a_u16.to_be_bytes());
     ///
     /// let mut cpu = Cpu::new(memory);
-    /// cpu.registers.pc = 0x400;
+    /// cpu.registers.pc = Address(0x400);
     /// // A budget of one clock runs one instruction.
-    /// cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
+    /// cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1));
     /// assert_eq!(cpu.registers.data[0], 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -427,7 +432,7 @@ impl Cpu {
     pub fn reset(&mut self, bus: &mut dyn Bus, now: Cycles) -> Result<(), Halt> {
         self.registers
             .set_sr(status::S | status::INTERRUPT_MASK | (self.registers.sr() & status::CCR));
-        self.registers.vbr = 0;
+        self.registers.vbr = Address::default();
         self.stopped = false;
         self.last_tail = 0;
         self.idle = None;
@@ -453,6 +458,7 @@ impl Cpu {
                 Size::Long,
                 FunctionCode::SUPERVISOR_PROGRAM,
             )
+            .map(Address)
         };
         // SSP is loaded before PC is fetched, and the first fault ends
         // the sequence (CPU32RM 6.2.1, Figure 6-2)
@@ -462,7 +468,7 @@ impl Cpu {
         match loaded {
             Ok(pc) => {
                 self.registers.pc = pc;
-                self.left_pc = Address(pc);
+                self.left_pc = pc;
                 Ok(())
             }
             Err(exception) => {
@@ -500,12 +506,12 @@ impl Cpu {
         now: Cycles,
         budget: Cycles,
     ) -> Run {
-        if self.registers.pc != self.left_pc.0 {
+        if self.registers.pc != self.left_pc {
             self.block_start = true;
         }
         self.bare.end = None;
         let run = self.run_from_boundary(bus, interrupts, now, budget, None);
-        self.left_pc = Address(self.registers.pc);
+        self.left_pc = self.registers.pc;
         run
     }
 
@@ -676,7 +682,7 @@ impl Cpu {
     /// The end `limits` make before the next instruction, if one, the
     /// run having started at instruction count `first`.
     fn limit_reached(&self, limits: &Limits, first: u64) -> Option<bare::End> {
-        if limits.until == Some(Address(self.registers.pc)) {
+        if limits.until == Some(self.registers.pc) {
             return Some(bare::End::Until);
         }
         limits
@@ -691,7 +697,7 @@ impl Cpu {
     /// changes of flow are those trace on change of flow traces
     /// (6.2.10), writes of SR among them.
     fn loopable_after(&self, flow: Flow, instruction_pc: Address) -> Option<Address> {
-        (flow == Flow::Next && self.registers.pc == instruction_pc.offset(2).0)
+        (flow == Flow::Next && self.registers.pc == instruction_pc.offset(2))
             .then_some(instruction_pc)
     }
 
@@ -767,7 +773,7 @@ impl Cpu {
     fn spend(&mut self, cost: timing::Cost) -> Cycles {
         let overlap = self.last_tail.min(cost.head);
         self.last_tail = cost.tail;
-        Cycles(u64::from(cost.cycles.saturating_sub(u16::from(overlap))))
+        Cycles::from_clocks(u64::from(cost.cycles.saturating_sub(u16::from(overlap))))
     }
 }
 
@@ -836,10 +842,12 @@ fn exception_cost(vector: Vector, opcode: Option<u16>) -> ExceptionCost {
             ExceptionCost::InPlace(timing::exception::PRIVILEGE_VIOLATION)
         }
         Vector::FORMAT_ERROR => ExceptionCost::InPlace(timing::exception::FORMAT_ERROR),
-        Vector::ZERO_DIVIDE => {
-            ExceptionCost::Beyond(Cycles(u64::from(timing::exception::ZERO_DIVIDE.cycles)))
-        }
-        Vector::TRACE => ExceptionCost::Beyond(Cycles(u64::from(timing::exception::TRACE.cycles))),
+        Vector::ZERO_DIVIDE => ExceptionCost::Beyond(Cycles::from_clocks(u64::from(
+            timing::exception::ZERO_DIVIDE.cycles,
+        ))),
+        Vector::TRACE => ExceptionCost::Beyond(Cycles::from_clocks(u64::from(
+            timing::exception::TRACE.cycles,
+        ))),
         _ => ExceptionCost::Beyond(timing::trap_taken(opcode)),
     }
 }
@@ -1038,7 +1046,7 @@ impl Core<'_> {
     #[inline(always)]
     fn step(&mut self, tables: Tables) -> Cycles {
         let cpu = &mut *self.cpu;
-        let instruction_pc = Address(cpu.registers.pc);
+        let instruction_pc = cpu.registers.pc;
         let previous_pc = cpu.previous_pc;
         cpu.instruction_pc = instruction_pc;
         cpu.previous_pc = instruction_pc;
@@ -1115,7 +1123,7 @@ impl Core<'_> {
         };
         let instruction_cost =
             |cpu: &mut Cpu| opcode.map_or(Cycles::ZERO, |opcode| cpu.spend(tables.cost(opcode)));
-        let next_pc = Address(self.cpu.registers.pc);
+        let next_pc = self.cpu.registers.pc;
         let released = self.cpu.released.take();
         self.cpu.taken = match (step, released) {
             (_, Some(fault)) => Some(Exception::Fault(fault)),
@@ -1217,7 +1225,7 @@ impl Core<'_> {
     /// leaves the trace pending for the next run.
     fn trace_at(&mut self, address: Address) -> Processed {
         self.cpu.capture_began();
-        let pc = Address(self.cpu.registers.pc);
+        let pc = self.cpu.registers.pc;
         self.cpu.taken.get_or_insert(Exception::Long {
             vector: Vector::TRACE,
             pc,
@@ -1322,7 +1330,7 @@ impl Core<'_> {
     #[inline]
     fn interrupt(&mut self, interrupts: &mut dyn Interrupts) -> Option<Processed> {
         let level = interrupts.level();
-        let mask = self.cpu.registers.interrupt_mask();
+        let mask = self.cpu.registers.interrupt_mask().get();
         let due = if level == InterruptLevel::NONMASKABLE {
             self.cpu.sampled_level != level || self.cpu.sampled_mask == MASK_ALL && mask < MASK_ALL
         } else {
@@ -1346,14 +1354,14 @@ impl Core<'_> {
         self.bus_stop_requested();
         self.cpu.stall += acknowledged.stall;
         let vector = match acknowledged.answer {
-            Acknowledge::Vector(number) => Vector(number),
+            Acknowledge::Vector(vector) => vector,
             Acknowledge::Autovector => Vector::autovector(level),
             Acknowledge::Spurious => Vector::SPURIOUS_INTERRUPT,
         };
-        let pc = Address(self.cpu.registers.pc);
+        let pc = self.cpu.registers.pc;
         self.cpu.taken = Some(Exception::Short { vector, pc });
         let processed = self.process_after_instruction(vector, pc, None, Some(level));
-        self.cpu.sampled_mask = self.cpu.registers.interrupt_mask();
+        self.cpu.sampled_mask = self.cpu.registers.interrupt_mask().get();
         if processed == Processed::Stopped {
             interrupts.withdrawn(level);
             // not taken: a level 7 request still held is a transition
@@ -1412,7 +1420,7 @@ impl Core<'_> {
     /// after the last instruction's trace and before the interrupt
     /// sampled there, as Table 6-2 orders them (CPU32RM 6.1.5, 6.2.10):
     /// with background mode enabled the CPU enters it, as
-    /// [`Cpu::breakpoint`]; disabled, the hardware breakpoint is
+    /// [`Cpu::assert_breakpoint`]; disabled, the hardware breakpoint is
     /// acknowledged, unless the CPU is halted or stopped, which leaves
     /// it pending (PLAN.md, Background debug mode), and vector 12
     /// taken is a step.  Its clocks.
@@ -1422,7 +1430,7 @@ impl Core<'_> {
         let cpu = &mut *self.cpu;
         if cpu.bdm_enabled {
             cpu.bare.breakpoint_pending = false;
-            cpu.breakpoint();
+            cpu.assert_breakpoint();
             return Cycles::ZERO;
         }
         if cpu.idle.is_some() || cpu.stopped {
@@ -1462,7 +1470,7 @@ impl Core<'_> {
             return self.cpu.spend(timing::exception::BREAKPOINT);
         }
         let vector = Vector::HARDWARE_BREAKPOINT;
-        let pc = Address(self.cpu.registers.pc);
+        let pc = self.cpu.registers.pc;
         let address = self.instruction_pc();
         self.cpu.taken.get_or_insert(Exception::Long {
             vector,
@@ -1697,14 +1705,14 @@ impl Core<'_> {
     /// inlined, so the run loop's opcode fetch is too.
     #[inline(always)]
     fn fetch_fast(&mut self) -> Option<u16> {
-        let pc = Address(self.cpu.registers.pc);
+        let pc = self.cpu.registers.pc;
         if pc.is_odd() {
             return None;
         }
         let space = Space::of(self.cpu.registers.program_space());
         let (word, stall) = self.cpu.memory.fetch(space, pc)?;
         self.cpu.stall += stall;
-        self.cpu.registers.pc = pc.offset(2).0;
+        self.cpu.registers.pc = pc.offset(2);
         Some(word)
     }
 
@@ -1712,12 +1720,12 @@ impl Core<'_> {
     /// protected page, or the bus's.
     #[inline(never)]
     fn fetch_word_slow(&mut self) -> Result<u16, Exception> {
-        let pc = Address(self.cpu.registers.pc);
+        let pc = self.cpu.registers.pc;
         let space = self.cpu.registers.program_space();
         let word = self
             .access_read(pc, Size::Word, space, CycleKind::Fetch)
             .map_err(Exception::Fault)?;
-        self.cpu.registers.pc = pc.offset(2).0;
+        self.cpu.registers.pc = pc.offset(2);
         Ok(word as u16)
     }
 
@@ -2006,12 +2014,7 @@ impl Core<'_> {
 
     /// A bus cycle at `address`, stamped with the instruction's start.
     const fn access(&self, address: Address, size: Size, function_code: FunctionCode) -> BusAccess {
-        BusAccess {
-            address,
-            size,
-            function_code,
-            now: self.now,
-        }
+        BusAccess::new(address, size, function_code, self.now)
     }
 }
 
@@ -2117,7 +2120,7 @@ mod tests {
 
     fn prepared(code: &[u16], sr: u16) -> Cpu {
         let mut cpu = machine(code);
-        cpu.registers.ssp = STACK;
+        cpu.registers.ssp = Address(STACK);
         cpu.registers.set_sr(sr);
         for vector in 0..=u8::MAX {
             poke_long(&mut cpu, Vector(vector).offset(), handler(Vector(vector)));
@@ -2128,13 +2131,13 @@ mod tests {
     /// One run of budget 1: an interrupt, or an instruction with its
     /// exceptions.
     fn step(cpu: &mut Cpu, interrupts: &mut dyn Interrupts) -> Stop {
-        cpu.run_for(&mut NoBus, interrupts, Cycles::ZERO, Cycles(1))
+        cpu.run_for(&mut NoBus, interrupts, Cycles::ZERO, Cycles::from_clocks(1))
             .stop
     }
 
     /// The format/vector word of the frame at SSP.
     fn top_format_vector(cpu: &Cpu) -> u16 {
-        peek_long(cpu, cpu.registers.ssp + 4) as u16
+        peek_long(cpu, cpu.registers.ssp.0 + 4) as u16
     }
 
     #[test]
@@ -2144,8 +2147,8 @@ mod tests {
         step(&mut cpu, &mut source);
         assert_eq!(source.acknowledged, [InterruptLevel::new(3).unwrap()]);
         let vector = Vector::autovector(InterruptLevel::new(3).unwrap());
-        assert_eq!(cpu.registers.pc, handler(vector));
-        assert_eq!(cpu.registers.interrupt_mask(), 3);
+        assert_eq!(cpu.registers.pc.0, handler(vector));
+        assert_eq!(cpu.registers.interrupt_mask().get(), 3);
         // Figure 6-3: the PC of the instruction not yet executed.
         assert_eq!(peek_long(&cpu, STACK - 8), 0x2200_0000 | CODE >> 16);
         assert_eq!(peek_long(&cpu, STACK - 4), (CODE & 0xffff) << 16 | 0x006c);
@@ -2157,30 +2160,38 @@ mod tests {
         let mut source = Source::new(3, Acknowledge::Autovector);
         step(&mut cpu, &mut source);
         assert!(source.acknowledged.is_empty());
-        assert_eq!(cpu.registers.pc, CODE + 2);
+        assert_eq!(cpu.registers.pc.0, CODE + 2);
     }
 
     #[test]
     fn vectored_and_spurious_interrupts() {
         let mut cpu = prepared(&[NOP], status::S);
-        step(&mut cpu, &mut Source::new(5, Acknowledge::Vector(0x40)));
-        assert_eq!(cpu.registers.pc, handler(Vector(0x40)));
+        step(
+            &mut cpu,
+            &mut Source::new(5, Acknowledge::Vector(Vector(0x40))),
+        );
+        assert_eq!(cpu.registers.pc.0, handler(Vector(0x40)));
         assert_eq!(top_format_vector(&cpu), 0x0100);
         let mut cpu = prepared(&[NOP], status::S);
         step(&mut cpu, &mut Source::new(5, Acknowledge::Spurious));
-        assert_eq!(cpu.registers.pc, handler(Vector::SPURIOUS_INTERRUPT));
+        assert_eq!(cpu.registers.pc.0, handler(Vector::SPURIOUS_INTERRUPT));
     }
 
     #[test]
     fn an_acknowledges_wait_states_add_to_the_interrupt() {
         let cycles = |stall| {
             let mut cpu = prepared(&[NOP], status::S);
-            let mut source = Source::new(5, Acknowledge::Vector(0x40));
-            source.stall = Cycles(stall);
-            cpu.run_for(&mut NoBus, &mut source, Cycles::ZERO, Cycles(1))
-                .cycles
+            let mut source = Source::new(5, Acknowledge::Vector(Vector(0x40)));
+            source.stall = Cycles::from_clocks(stall);
+            cpu.run_for(
+                &mut NoBus,
+                &mut source,
+                Cycles::ZERO,
+                Cycles::from_clocks(1),
+            )
+            .cycles
         };
-        assert_eq!(cycles(5), cycles(0) + Cycles(5));
+        assert_eq!(cycles(5), cycles(0) + Cycles::from_clocks(5));
     }
 
     #[test]
@@ -2246,24 +2257,29 @@ mod tests {
         let mut cpu = prepared(&[NOP], status::S);
         let mut bus = AcknowledgeStops::default();
         let mut interrupts = AcknowledgeStops(Rc::clone(&bus.0));
-        let run = cpu.run_for(&mut bus, &mut interrupts, Cycles::ZERO, Cycles(10_000));
+        let run = cpu.run_for(
+            &mut bus,
+            &mut interrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(10_000),
+        );
         assert_eq!(run.stop, Stop::Requested);
-        assert_eq!(cpu.registers.pc, handler(Vector(25)));
+        assert_eq!(cpu.registers.pc.0, handler(Vector(25)));
     }
 
     #[test]
     fn an_interrupt_whose_stacking_fault_stops_is_withdrawn() {
         let mut cpu = prepared(&[NOP], status::S);
         cpu.set_stop_on_fault(true);
-        cpu.registers.ssp = RAM_BYTES + 0x1000;
+        cpu.registers.ssp = Address(RAM_BYTES + 0x1000);
         let mut source = Source::new(3, Acknowledge::Autovector);
         assert_eq!(step(&mut cpu, &mut source), Stop::Fault);
         let level = InterruptLevel::new(3).unwrap();
         assert_eq!(source.acknowledged, [level]);
         assert_eq!(source.withdrawn, [level], "not taken");
-        cpu.registers.ssp = STACK;
+        cpu.registers.ssp = Address(STACK);
         step(&mut cpu, &mut source);
-        assert_eq!(cpu.registers.pc, handler(Vector(27)));
+        assert_eq!(cpu.registers.pc.0, handler(Vector(27)));
         assert_eq!(source.withdrawn, [level], "taken");
     }
 
@@ -2271,28 +2287,33 @@ mod tests {
     fn a_nonmaskable_interrupt_whose_stacking_fault_stops_is_taken_on_resume() {
         let mut cpu = prepared(&[NOP, NOP], status::S);
         cpu.set_stop_on_fault(true);
-        cpu.registers.ssp = RAM_BYTES + 0x1000;
+        cpu.registers.ssp = Address(RAM_BYTES + 0x1000);
         let mut source = Source::new(7, Acknowledge::Autovector);
         assert_eq!(step(&mut cpu, &mut source), Stop::Fault);
         // IRQ7 held: its transition was not taken (CPU32RM 6.2.11)
-        cpu.registers.ssp = STACK;
+        cpu.registers.ssp = Address(STACK);
         step(&mut cpu, &mut source);
-        assert_eq!(cpu.registers.pc, handler(Vector(31)));
+        assert_eq!(cpu.registers.pc.0, handler(Vector(31)));
     }
 
     #[test]
     fn an_interrupt_wakes_a_stopped_cpu() {
         let mut cpu = prepared(&[NOP], status::S);
         cpu.stopped = true;
-        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(100));
+        let run = cpu.run_for(
+            &mut NoBus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(100),
+        );
         assert_eq!(run.stop, Stop::Stopped);
-        assert_eq!(run.cycles, Cycles(100));
+        assert_eq!(run.cycles, Cycles::from_clocks(100));
         assert_eq!(
             step(&mut cpu, &mut Source::new(1, Acknowledge::Autovector)),
             Stop::Budget
         );
         assert!(!cpu.stopped);
-        assert_eq!(cpu.registers.pc, handler(Vector(25)));
+        assert_eq!(cpu.registers.pc.0, handler(Vector(25)));
         assert_eq!(peek_long(&cpu, STACK - 6), CODE);
     }
 
@@ -2308,7 +2329,7 @@ mod tests {
         );
         assert_eq!(peek_long(&cpu, STACK - 8), (CODE + 2) << 16 | 0x2024);
         assert_eq!(peek_long(&cpu, STACK - 4), CODE);
-        assert_eq!(cpu.registers.pc, handler(Vector::TRACE));
+        assert_eq!(cpu.registers.pc.0, handler(Vector::TRACE));
         assert_eq!(cpu.registers.sr(), status::S);
     }
 
@@ -2316,14 +2337,14 @@ mod tests {
     fn t0_traces_only_a_change_of_flow() {
         let mut cpu = prepared(&[NOP], status::S | status::T0);
         step(&mut cpu, &mut NoInterrupts);
-        assert_eq!(cpu.registers.pc, CODE + 2);
+        assert_eq!(cpu.registers.pc.0, CODE + 2);
         // RTE returns: traced, its frame popped first.
         let mut cpu = prepared(&[RTE], status::S | status::T0);
-        cpu.registers.ssp = STACK - 8;
+        cpu.registers.ssp = Address(STACK - 8);
         poke_long(&mut cpu, STACK - 8, u32::from(status::S) << 16);
         poke_long(&mut cpu, STACK - 4, 0x1234_0000);
         step(&mut cpu, &mut NoInterrupts);
-        assert_eq!(cpu.registers.pc, handler(Vector::TRACE));
+        assert_eq!(cpu.registers.pc.0, handler(Vector::TRACE));
         assert_eq!(peek_long(&cpu, STACK - 8) & 0xffff, 0x2024);
     }
 
@@ -2331,8 +2352,8 @@ mod tests {
     fn an_illegal_instruction_is_not_traced() {
         let mut cpu = prepared(&[ILLEGAL], status::S | status::T1);
         step(&mut cpu, &mut NoInterrupts);
-        assert_eq!(cpu.registers.pc, handler(Vector::ILLEGAL_INSTRUCTION));
-        assert_eq!(cpu.registers.ssp, STACK - 8);
+        assert_eq!(cpu.registers.pc.0, handler(Vector::ILLEGAL_INSTRUCTION));
+        assert_eq!(cpu.registers.ssp.0, STACK - 8);
     }
 
     #[test]
@@ -2345,7 +2366,7 @@ mod tests {
         // The interrupt handler runs first, returning to the trace
         // handler, which returns to the trap handler (CPU32RM 6.1.5).
         let interrupt = STACK - 8 - 12 - 8;
-        assert_eq!(cpu.registers.ssp, interrupt);
+        assert_eq!(cpu.registers.ssp.0, interrupt);
         assert_eq!(peek_long(&cpu, interrupt + 2), handler(Vector::TRACE));
         assert_eq!(peek_long(&cpu, interrupt + 8 + 2), handler(Vector::TRAP));
         assert_eq!(peek_long(&cpu, interrupt + 8 + 8), CODE);
@@ -2358,7 +2379,7 @@ mod tests {
         poke_long(&mut cpu, handler(Vector::BUS_ERROR), u32::from(RTE) << 16);
         cpu.registers.set_address(0, 0x0001_0000);
         step(&mut cpu, &mut NoInterrupts);
-        assert_eq!(cpu.registers.ssp, STACK - 24);
+        assert_eq!(cpu.registers.ssp.0, STACK - 24);
         // SSW: TR, RR, LG, FUNC 5.
         assert_eq!(
             peek_long(&cpu, STACK - 4),
@@ -2371,8 +2392,8 @@ mod tests {
             u32::from(MICROCODE_REVISION) << 24 | 0x1025,
         );
         step(&mut cpu, &mut NoInterrupts);
-        assert_eq!(cpu.registers.pc, handler(Vector::TRACE));
-        assert_eq!(cpu.registers.ssp, STACK - 12);
+        assert_eq!(cpu.registers.pc.0, handler(Vector::TRACE));
+        assert_eq!(cpu.registers.ssp.0, STACK - 12);
         assert_eq!(peek_long(&cpu, STACK - 12 + 2), CODE + 2);
         assert_eq!(peek_long(&cpu, STACK - 12 + 8), CODE);
     }
@@ -2398,7 +2419,7 @@ mod tests {
         };
         core.instruction_fault(fault, Address(CODE));
         let sp = STACK - 24;
-        assert_eq!(cpu.registers.ssp, sp);
+        assert_eq!(cpu.registers.ssp.0, sp);
         // Figure 6-7: the next operand's address, 16 less 3 transfers,
         // SSW MV, RR, SIZ word, FUNC 5.
         assert_eq!(peek_long(&cpu, sp + 8), 0x3006);
@@ -2406,7 +2427,7 @@ mod tests {
             peek_long(&cpu, sp + 0x14),
             u32::from(MICROCODE_REVISION) << 24 | 13 << 16 | 0x4215
         );
-        cpu.registers.pc = CODE;
+        cpu.registers.pc = Address(CODE);
         step(&mut cpu, &mut NoInterrupts);
         let progress = Movem {
             attempted: 3,
@@ -2419,7 +2440,7 @@ mod tests {
                 progress
             })
         );
-        assert_eq!(cpu.registers.pc, CODE);
+        assert_eq!(cpu.registers.pc.0, CODE);
         // An instruction elsewhere leaves it; the one at its PC finds
         // it, once.
         cpu.instruction_pc = Address(CODE + 2);
@@ -2449,7 +2470,7 @@ mod tests {
         poke_long(&mut cpu, handler(autovector) + 4, 0x4cdf_0030);
         poke_long(&mut cpu, handler(autovector) + 8, u32::from(RTE) << 16);
         step(&mut cpu, &mut NoInterrupts);
-        assert_eq!(cpu.registers.pc, handler(Vector::BUS_ERROR));
+        assert_eq!(cpu.registers.pc.0, handler(Vector::BUS_ERROR));
         // The handler points the rest of the operands at RAM and
         // returns with the mask down.
         let sp = STACK - 24;
@@ -2457,26 +2478,26 @@ mod tests {
         let frame_pc = peek_long(&cpu, sp) & 0xffff;
         poke_long(&mut cpu, sp, u32::from(status::S) << 16 | frame_pc);
         step(&mut cpu, &mut NoInterrupts);
-        assert_eq!(cpu.registers.pc, CODE);
+        assert_eq!(cpu.registers.pc.0, CODE);
         let mut source = Source::new(1, Acknowledge::Autovector);
         step(&mut cpu, &mut source);
-        assert_eq!(cpu.registers.pc, handler(autovector));
-        let isr_sp = cpu.registers.ssp;
+        assert_eq!(cpu.registers.pc.0, handler(autovector));
+        let isr_sp = cpu.registers.ssp.0;
         step(&mut cpu, &mut NoInterrupts);
-        assert_eq!(cpu.registers.ssp, isr_sp - 8);
+        assert_eq!(cpu.registers.ssp.0, isr_sp - 8);
         assert_eq!(peek_long(&cpu, isr_sp - 8), 0xd4);
         assert_eq!(peek_long(&cpu, isr_sp - 4), 0xd5);
         assert!(cpu.movem_resume.is_some());
         step(&mut cpu, &mut NoInterrupts);
         step(&mut cpu, &mut NoInterrupts);
-        assert_eq!(cpu.registers.pc, CODE);
+        assert_eq!(cpu.registers.pc.0, CODE);
         // The faulted MOVEM continues from D2.
         step(&mut cpu, &mut NoInterrupts);
-        assert_eq!(cpu.registers.pc, CODE + 4);
+        assert_eq!(cpu.registers.pc.0, CODE + 4);
         assert_eq!(cpu.exception_taken(), None);
         assert_eq!(peek_long(&cpu, 0x3008), 0xd2);
         assert_eq!(peek_long(&cpu, 0x300c), 0xd3);
-        assert_eq!(cpu.registers.ssp, STACK);
+        assert_eq!(cpu.registers.ssp.0, STACK);
         assert_eq!(cpu.movem_resume, None);
     }
 
@@ -2521,7 +2542,7 @@ mod tests {
 
     /// The three long words at SSP plus `offset`.
     fn frame_at(cpu: &Cpu, offset: u32) -> [u32; 3] {
-        let at = cpu.registers.ssp + offset;
+        let at = cpu.registers.ssp.0 + offset;
         [
             peek_long(cpu, at),
             peek_long(cpu, at + 4),
@@ -2535,10 +2556,15 @@ mod tests {
         step(&mut cpu, &mut NoInterrupts);
         cpu.set_breakpoint_pending(true);
         let mut bus = BreakpointResponder {
-            stall: Cycles(3),
+            stall: Cycles::from_clocks(3),
             ..BreakpointResponder::default()
         };
-        let run = cpu.run_for(&mut bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
+        let run = cpu.run_for(
+            &mut bus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(1),
+        );
         // CPU space, type 0000, BKPT #7 on A[4:2], T on A1, a word
         // (CPU32RM 5.3.1.1, 6.2.6; MC68331UM Figure 4-12)
         assert_eq!(bus.acknowledges.len(), 1);
@@ -2547,14 +2573,14 @@ mod tests {
         assert_eq!(acknowledge.function_code, FunctionCode::CPU_SPACE);
         assert_eq!(acknowledge.size, Size::Word);
         assert!(!cpu.breakpoint_pending());
-        assert_eq!(cpu.registers.pc, CODE + 2, "nothing taken");
-        assert_eq!(cpu.registers.ssp, STACK);
+        assert_eq!(cpu.registers.pc.0, CODE + 2, "nothing taken");
+        assert_eq!(cpu.registers.ssp.0, STACK);
         // CPU32RM 8.3.13, Breakpoint (Acknowledged), and the wait states
         let acknowledged = u64::from(crate::timing::exception::BREAKPOINT.cycles);
-        assert_eq!(run.cycles, Cycles(acknowledged + 3));
+        assert_eq!(run.cycles, Cycles::from_clocks(acknowledged + 3));
         // the next run executes the next instruction
         step(&mut cpu, &mut NoInterrupts);
-        assert_eq!(cpu.registers.pc, CODE + 4);
+        assert_eq!(cpu.registers.pc.0, CODE + 4);
         assert_eq!(bus.acknowledges.len(), 1);
     }
 
@@ -2564,10 +2590,15 @@ mod tests {
         let mut cpu = prepared(&[NOP, NOP], sr);
         step(&mut cpu, &mut NoInterrupts);
         cpu.set_breakpoint_pending(true);
-        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
+        let run = cpu.run_for(
+            &mut NoBus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(1),
+        );
         assert!(!cpu.breakpoint_pending());
-        assert_eq!(cpu.registers.pc, handler(Vector::HARDWARE_BREAKPOINT));
-        assert_eq!(cpu.registers.ssp, STACK - 12);
+        assert_eq!(cpu.registers.pc.0, handler(Vector::HARDWARE_BREAKPOINT));
+        assert_eq!(cpu.registers.ssp.0, STACK - 12);
         // format $2: SR, the next PC, $2030, the instruction executing
         // when the breakpoint was sensed (CPU32RM 6.2.6, 6.4.2)
         assert_eq!(
@@ -2577,7 +2608,7 @@ mod tests {
         assert_eq!(cpu.registers.sr(), sr, "S set, the mask kept");
         // CPU32RM 8.3.13, Breakpoint (Bus Error)
         let cost = u64::from(crate::timing::exception::BREAKPOINT_BUS_ERROR.cycles);
-        assert_eq!(run.cycles, Cycles(cost));
+        assert_eq!(run.cycles, Cycles::from_clocks(cost));
         assert_eq!(
             cpu.exception_taken().map(|taken| taken.vector()),
             Some(Vector::HARDWARE_BREAKPOINT)
@@ -2598,16 +2629,16 @@ mod tests {
             &mut NoBus,
             &mut source,
             Cycles::ZERO,
-            Cycles(breakpoint + 1),
+            Cycles::from_clocks(breakpoint + 1),
         );
         // Table 6-2: the trace's processing first, then the
         // breakpoint's, then the interrupt's, whose handler runs first
         // and returns to the breakpoint's, which returns to the trace's
         // (CPU32RM 6.1.5)
         let interrupt = STACK - 12 - 12 - 8;
-        assert_eq!(cpu.registers.ssp, interrupt);
+        assert_eq!(cpu.registers.ssp.0, interrupt);
         assert_eq!(
-            cpu.registers.pc,
+            cpu.registers.pc.0,
             handler(Vector::autovector(InterruptLevel::new(4).unwrap()))
         );
         assert_eq!(
@@ -2634,19 +2665,24 @@ mod tests {
         let mut cpu = prepared(&[NOP], status::S);
         cpu.stopped = true;
         cpu.set_breakpoint_pending(true);
-        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(100));
+        let run = cpu.run_for(
+            &mut NoBus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(100),
+        );
         assert_eq!(run.stop, Stop::Stopped);
         assert!(cpu.breakpoint_pending(), "STOP leaves it pending");
-        assert_eq!(cpu.registers.ssp, STACK);
+        assert_eq!(cpu.registers.ssp.0, STACK);
         step(&mut cpu, &mut Source::new(1, Acknowledge::Autovector));
         assert!(!cpu.stopped);
         assert!(!cpu.breakpoint_pending());
         // the breakpoint's frame on the interrupt's, returning to its
         // handler (CPU32RM 6.2.6)
-        assert_eq!(cpu.registers.pc, handler(Vector::HARDWARE_BREAKPOINT));
-        assert_eq!(cpu.registers.ssp, STACK - 8 - 12);
+        assert_eq!(cpu.registers.pc.0, handler(Vector::HARDWARE_BREAKPOINT));
+        assert_eq!(cpu.registers.ssp.0, STACK - 8 - 12);
         let level_1 = Vector::autovector(InterruptLevel::new(1).unwrap());
-        assert_eq!(peek_long(&cpu, cpu.registers.ssp + 2), handler(level_1));
+        assert_eq!(peek_long(&cpu, cpu.registers.ssp.0 + 2), handler(level_1));
         assert_eq!(peek_long(&cpu, STACK - 6), CODE);
     }
 
@@ -2655,11 +2691,16 @@ mod tests {
         let mut cpu = prepared(&[NOP], status::S);
         cpu.set_bdm_enabled(true);
         cpu.set_breakpoint_pending(true);
-        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(100));
+        let run = cpu.run_for(
+            &mut NoBus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(100),
+        );
         assert_eq!(run.stop, Stop::Background(Entry::Breakpoint));
         assert_eq!(cpu.background(), Some(Entry::Breakpoint));
         assert!(!cpu.breakpoint_pending());
-        assert_eq!(cpu.registers.ssp, STACK, "no acknowledge, no exception");
+        assert_eq!(cpu.registers.ssp.0, STACK, "no acknowledge, no exception");
         cpu.set_breakpoint_pending(true);
         let _ = cpu.reset(&mut NoBus, Cycles::ZERO);
         assert!(!cpu.breakpoint_pending());
@@ -2681,6 +2722,11 @@ mod tests {
         for (stop, name) in names {
             assert_eq!(stop.to_string(), name);
         }
+    }
+
+    #[test]
+    fn a_halt_prints_why() {
+        assert_eq!(Halt::DoubleBusFault.to_string(), "double bus fault");
     }
 
     #[test]
@@ -2745,7 +2791,7 @@ mod tests {
         };
         assert_eq!(cpu.reset(&mut bus, Cycles::ZERO), Ok(()));
         assert!(cpu.background().is_some());
-        assert_eq!(cpu.registers.ssp, 0x1234_1234, "SSP loaded");
+        assert_eq!(cpu.registers.ssp.0, 0x1234_1234, "SSP loaded");
         assert_eq!(bus.reads, [0, 2, 4]);
         let mut bus = VectorBus {
             answered: 0,
@@ -2815,7 +2861,7 @@ mod tests {
         /// The loop on slow RAM, D1 counting `count`.
         fn looping(code: &[u16], count: u32) -> Cpu {
             let mut cpu = machine_with_clocks(code, CLOCKS);
-            cpu.registers.ssp = STACK;
+            cpu.registers.ssp = Address(STACK);
             cpu.registers.data[1] = count;
             for vector in 0..=u8::MAX {
                 poke_long(&mut cpu, Vector(vector).offset(), handler(Vector(vector)));
@@ -2825,9 +2871,14 @@ mod tests {
 
         /// One instruction's cycles.
         fn cycles(cpu: &mut Cpu) -> u64 {
-            cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(1))
-                .cycles
-                .0
+            cpu.run_for(
+                &mut NoBus,
+                &mut NoInterrupts,
+                Cycles::ZERO,
+                Cycles::from_clocks(1),
+            )
+            .cycles
+            .clocks()
         }
 
         #[test]
@@ -2849,7 +2900,7 @@ mod tests {
             // tail of 0 overlaps none of BEQ's head of 2.
             assert_eq!(cycles(&mut cpu), 4 + WAIT);
             assert_eq!(cpu.loop_mode, None);
-            assert_eq!(cpu.registers.pc, CODE + 8);
+            assert_eq!(cpu.registers.pc.0, CODE + 8);
         }
 
         #[test]
@@ -2863,7 +2914,7 @@ mod tests {
             // (T, not taken) in loop mode: 6(0/1/0).
             assert_eq!(cycles(&mut cpu), 6);
             assert_eq!(cpu.registers.data[1], 9);
-            assert_eq!(cpu.registers.pc, CODE + 6);
+            assert_eq!(cpu.registers.pc.0, CODE + 6);
         }
 
         #[test]
@@ -2878,9 +2929,9 @@ mod tests {
             assert_eq!(cpu.loop_mode, Some(DBCC));
             step(&mut cpu, &mut Source::new(1, Acknowledge::Autovector));
             assert_eq!(cpu.loop_mode, None);
-            assert_eq!(cpu.registers.pc, autovector);
+            assert_eq!(cpu.registers.pc.0, autovector);
             cycles(&mut cpu);
-            assert_eq!(cpu.registers.pc, CODE);
+            assert_eq!(cpu.registers.pc.0, CODE);
             // Fetched again, then entered again.
             assert_eq!(cycles(&mut cpu), 2 + WAIT);
             assert_eq!(cycles(&mut cpu), 10 + 2 * WAIT);
@@ -2898,7 +2949,7 @@ mod tests {
             cycles(&mut cpu);
             assert_eq!(cpu.loop_mode, Some(DBCC));
             cycles(&mut cpu);
-            assert_eq!(cpu.registers.pc, handler(Vector::BUS_ERROR));
+            assert_eq!(cpu.registers.pc.0, handler(Vector::BUS_ERROR));
             assert_eq!(cpu.loop_mode, None);
             assert_eq!(cpu.loopable, None);
         }
@@ -2911,7 +2962,7 @@ mod tests {
                 .set_sr(status::S | status::INTERRUPT_MASK | status::T0);
             cycles(&mut cpu);
             cycles(&mut cpu);
-            assert_eq!(cpu.registers.pc, handler(Vector::TRACE));
+            assert_eq!(cpu.registers.pc.0, handler(Vector::TRACE));
             assert_eq!(cpu.loop_mode, None);
         }
 
@@ -2924,7 +2975,7 @@ mod tests {
             assert_eq!(cpu.loop_mode, None);
             // DBF D1, *-2 back to a NOP it did not follow.
             let mut cpu = looping(&[NOP, DBF, BACK], 5);
-            cpu.registers.pc = DBCC.0;
+            cpu.registers.pc = DBCC;
             cycles(&mut cpu);
             assert_eq!(cpu.loop_mode, None);
             assert_eq!(cycles(&mut cpu), 2 + WAIT);
@@ -2937,7 +2988,7 @@ mod tests {
             let mut cpu = looping(&[ADDQ, DBF, BACK, NOP], 5);
             cycles(&mut cpu);
             cycles(&mut cpu);
-            cpu.registers.pc = CODE + 6;
+            cpu.registers.pc = Address(CODE + 6);
             assert_eq!(cycles(&mut cpu), 2 + WAIT);
             assert_eq!(cpu.loop_mode, None);
         }
@@ -2947,7 +2998,7 @@ mod tests {
             let mut cpu = looping(&[ADDQ, DBF, BACK], 5);
             cycles(&mut cpu);
             cycles(&mut cpu);
-            let snapshot = cpu.save();
+            let snapshot = cpu.save().unwrap();
             let mut restored = looping(&[ADDQ, DBF, BACK], 0);
             restored.restore(&snapshot).unwrap();
             assert_eq!(restored.loop_mode, Some(DBCC));

@@ -23,6 +23,7 @@ use mc683xx_board::registry::PortSpec;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_mc68331::chip::Mc68331;
@@ -31,9 +32,9 @@ use mc683xx_mc68331::chip::Mc68331;
 const PERIOD_PS: u64 = 100_000_000;
 /// The divided clock's first rise: input edge 1000, the clock's phase
 /// after it.
-const FIRST_RISE: Time = Time(PERIOD_PS + 37);
+const FIRST_RISE: Time = Time::from_picos(PERIOD_PS + 37);
 /// Its first fall, half a period before: its first change.
-const FIRST_FALL: Time = Time(PERIOD_PS / 2 + 37);
+const FIRST_FALL: Time = Time::from_picos(PERIOD_PS / 2 + 37);
 /// How long the runs go: ten periods.
 const RUN_PS: u64 = 10 * PERIOD_PS;
 
@@ -50,7 +51,7 @@ struct Probe {
 }
 
 impl Peripheral for Probe {
-    fn input(&mut self, _port: usize, signal: Signal, _now: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, _port: usize, signal: Signal, drive: &mut Drive<'_>) {
         if signal == Signal::Level(true) {
             for &token in &self.armed {
                 drive.fire(token);
@@ -70,7 +71,7 @@ impl Peripheral for Probe {
             return Err(ArmError::Arguments("`high` takes none".to_owned()));
         }
         self.given += 1;
-        let token = ConditionToken(self.given);
+        let token = ConditionToken::new(self.given);
         self.armed.push(token);
         Ok(token)
     }
@@ -132,7 +133,7 @@ to = ["chip.PGP0", "counter.in"{sink}]
             Ok(Box::new(Probe::default()))
         })
         .unwrap();
-    Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap()
+    Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap()
 }
 
 /// The net condition `change` on `pps`.
@@ -144,13 +145,16 @@ fn pps(change: NetChange) -> Condition {
 fn a_net_s_rise_stops_the_run_where_it_rises() {
     let mut board = board(false);
     let id = board.arm(pps(NetChange::Rise)).unwrap();
-    let run = board.run_until(Time(RUN_PS)).unwrap();
+    let run = board.run_until(Time::from_picos(RUN_PS)).unwrap();
     assert_eq!(run.stop, Stop::Requested);
     assert_eq!(board.now(), FIRST_RISE);
     assert_eq!(board.fired(), vec![id]);
-    let run = board.run_until(Time(RUN_PS)).unwrap();
+    let run = board.run_until(Time::from_picos(RUN_PS)).unwrap();
     assert_eq!(run.stop, Stop::Requested);
-    assert_eq!(board.now(), Time(FIRST_RISE.0 + PERIOD_PS));
+    assert_eq!(
+        board.now(),
+        Time::from_picos(FIRST_RISE.picos() + PERIOD_PS)
+    );
     assert_eq!(board.fired(), vec![id]);
 }
 
@@ -158,13 +162,13 @@ fn a_net_s_rise_stops_the_run_where_it_rises() {
 fn a_net_s_fall_and_change_stop_where_they_hold() {
     let mut board = board(false);
     let fall = board.arm(pps(NetChange::Fall)).unwrap();
-    board.run_until(Time(RUN_PS)).unwrap();
+    board.run_until(Time::from_picos(RUN_PS)).unwrap();
     assert_eq!(board.now(), FIRST_FALL);
     assert_eq!(board.net_value("pps").unwrap(), Some(Signal::Level(false)));
     assert_eq!(board.fired(), vec![fall]);
     assert!(board.disarm(fall));
     let change = board.arm(pps(NetChange::Change)).unwrap();
-    board.run_until(Time(RUN_PS)).unwrap();
+    board.run_until(Time::from_picos(RUN_PS)).unwrap();
     assert_eq!(board.net_value("pps").unwrap(), Some(Signal::Level(true)));
     assert_eq!(board.fired(), vec![change]);
 }
@@ -196,7 +200,7 @@ to = ["external.switch-seen"]
     Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap()
 }
@@ -205,7 +209,7 @@ to = ["external.switch-seen"]
 /// `level` and the board runs a period.
 fn drive(board: &mut Board<Mc68331>, name: &str, level: bool) -> Vec<ConditionId> {
     board.send(name, Signal::Level(level)).unwrap();
-    board.run_for(PERIOD_PS).unwrap();
+    board.run_for(Span::from_picos(PERIOD_PS)).unwrap();
     board.fired()
 }
 
@@ -244,7 +248,7 @@ fn a_disarmed_condition_stops_nothing() {
     assert!(board.disarm(id));
     assert!(!board.disarm(id));
     assert!(board.armed().is_empty());
-    let run = board.run_until(Time(RUN_PS)).unwrap();
+    let run = board.run_until(Time::from_picos(RUN_PS)).unwrap();
     assert_eq!(run.stop, Stop::Budget);
     assert!(board.fired().is_empty());
 }
@@ -293,15 +297,18 @@ fn a_peripheral_s_condition_stops_the_run_and_is_named() {
         })
     ));
     let high = board.arm("peripheral probe high".parse().unwrap()).unwrap();
-    let run = board.run_until(Time(RUN_PS)).unwrap();
+    let run = board.run_until(Time::from_picos(RUN_PS)).unwrap();
     assert_eq!(run.stop, Stop::Requested);
     assert_eq!(board.now(), FIRST_RISE);
     assert_eq!(board.fired(), vec![high]);
     let net = board.arm(pps(NetChange::Fall)).unwrap();
     assert_ne!(net, high);
     assert!(board.disarm(high));
-    board.run_until(Time(RUN_PS)).unwrap();
-    assert_eq!(board.now(), Time(FIRST_RISE.0 + PERIOD_PS / 2));
+    board.run_until(Time::from_picos(RUN_PS)).unwrap();
+    assert_eq!(
+        board.now(),
+        Time::from_picos(FIRST_RISE.picos() + PERIOD_PS / 2)
+    );
     assert_eq!(board.fired(), vec![net]);
     assert!(board.peripheral::<Probe>("probe").unwrap().armed.is_empty());
 }
@@ -310,7 +317,7 @@ fn a_peripheral_s_condition_stops_the_run_and_is_named() {
 fn a_peripheral_s_condition_disarmed_after_it_fired_is_still_named() {
     let mut board = board(true);
     let high = board.arm("peripheral probe high".parse().unwrap()).unwrap();
-    board.run_until(Time(RUN_PS)).unwrap();
+    board.run_until(Time::from_picos(RUN_PS)).unwrap();
     assert!(board.disarm(high));
     let again = board.arm("peripheral probe high".parse().unwrap()).unwrap();
     assert_eq!(board.fired(), vec![high]);
@@ -322,10 +329,10 @@ fn a_restore_keeps_conditions_armed() {
     let mut board = board(false);
     let snapshot = board.save().unwrap();
     let id = board.arm(pps(NetChange::Rise)).unwrap();
-    board.run_until(Time(RUN_PS)).unwrap();
+    board.run_until(Time::from_picos(RUN_PS)).unwrap();
     board.restore(&snapshot).unwrap();
     assert_eq!(board.armed(), vec![(id, pps(NetChange::Rise))]);
-    let run = board.run_until(Time(RUN_PS)).unwrap();
+    let run = board.run_until(Time::from_picos(RUN_PS)).unwrap();
     assert_eq!(run.stop, Stop::Requested);
     assert_eq!(board.now(), FIRST_RISE);
     assert_eq!(board.fired(), vec![id]);

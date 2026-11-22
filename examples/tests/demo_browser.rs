@@ -14,6 +14,7 @@ use std::time::Duration;
 use mc683xx_board::board::Board;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
+use mc683xx_board::pacing::Factor;
 use mc683xx_board::pacing::Pacing;
 use mc683xx_board::pacing::QUANTUM;
 use mc683xx_board::registry::Environment;
@@ -21,6 +22,7 @@ use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_mc68331::chip::Mc68331;
@@ -35,14 +37,14 @@ const IMAGE_NAME: &str = "demo.bin";
 /// The console's run-time endpoint.
 const CONSOLE: &str = "console";
 /// Board time the boot runs for, past the banner and the prompt.
-const BOOT: Time = Time(PICOSECONDS_PER_SECOND / 10);
+const BOOT: Time = Time::from_picos(PICOSECONDS_PER_SECOND / 10);
 /// A frame's wall time, about 60 a second.
 const FRAME: Duration = Duration::from_micros(16_667);
 /// Board seconds a wall second while paced.
 const FACTOR: f64 = 4.0;
 /// The most board time a frame runs, however far behind: a page's
 /// bound on a slice.
-const SLICE: u64 = PICOSECONDS_PER_SECOND / 10;
+const SLICE: Span = Span::from_millis(100);
 /// The most frames the help may take to come back.
 const FRAMES: u32 = 200;
 /// What is typed, a byte a frame: the help command.
@@ -80,7 +82,7 @@ fn the_demo_board_runs_from_bytes_and_a_host_clock() {
     let mut board = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap();
     let control = board.control();
@@ -92,7 +94,7 @@ fn the_demo_board_runs_from_bytes_and_a_host_clock() {
     assert!(text.contains(BANNER), "{text:?}");
     assert!(text.ends_with("> "), "{text:?}");
 
-    control.set_pacing(Pacing::Scaled(FACTOR)).unwrap();
+    control.set_pacing(Pacing::Scaled(Factor::new(FACTOR).unwrap()));
     let mut typed = TYPED.iter();
     let mut wall = Duration::from_secs(1000);
     let start = board.now();
@@ -118,7 +120,7 @@ fn the_demo_board_runs_from_bytes_and_a_host_clock() {
         reason = "a frame's board picoseconds"
     )]
     let frame = (FRAME.as_secs_f64() * FACTOR * PICOSECONDS_PER_SECOND as f64) as u64;
-    let paced = board.now().0 - start.0;
+    let paced = board.now().picos() - start.picos();
     assert!(
         paced.abs_diff(u64::from(frames - 1) * frame) <= u64::from(frames),
         "{paced}"

@@ -24,7 +24,7 @@ pub enum LoadError {
     },
     /// The TOML does not parse, or a key or value is not the schema's.
     #[error(transparent)]
-    Syntax(SyntaxError),
+    Syntax(#[from] SyntaxError),
     /// A version other than this build's, or none.
     #[error("board file version {0}: this build reads version 1")]
     Version(String),
@@ -128,9 +128,6 @@ pub enum LoadError {
     /// Parameters set for a peripheral the file does not name.
     #[error("parameters set for {0:?}, which the board file does not name")]
     Peripheral(String),
-    /// A parameter setting not of the form `PERIPHERAL.KEY=VALUE`.
-    #[error("{0:?}: give PERIPHERAL.KEY=VALUE")]
-    Setting(String),
     /// Both a reference and an external clock.
     #[error("chip: give reference_hz or external_hz, not both")]
     Clock,
@@ -220,17 +217,83 @@ pub enum LoadError {
     Build(Box<dyn std::error::Error + Send + Sync>),
 }
 
+/// A parameter setting not of the form `PERIPHERAL.KEY=VALUE`
+/// ([`Setting`]'s `FromStr`).
+///
+/// [`Setting`]: crate::description::Setting
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0:?}: give PERIPHERAL.KEY=VALUE")]
+pub struct ParseSettingError(pub(crate) String);
+
+/// Why a [`Description`] edit was refused.
+///
+/// [`Description`]: crate::description::Description
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum EditError {
+    /// The description has no peripheral of that name.
+    #[error("no peripheral {0:?}")]
+    Peripheral(String),
+    /// An endpoint that is not `peripheral.port` at the end of one of
+    /// the board's nets.
+    #[error("{0:?} is no peripheral's port on the board's nets")]
+    Port(String),
+    /// An empty external endpoint's name, which names none.
+    #[error("an empty name names no external endpoint")]
+    External,
+}
+
 /// Why a board file's TOML does not parse, or does not fit the schema:
 /// its line, column and what is wrong, as the message says.  Opaque:
-/// the parser is not part of the API.
+/// the parser is not part of the API.  Boxed, so a [`LoadError`], and a
+/// host's error holding one, stays small.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{0}")]
-pub struct SyntaxError(toml::de::Error);
+#[error("{}", .0.error)]
+pub struct SyntaxError(Box<SyntaxErrorInner>);
+
+/// What a [`SyntaxError`] holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SyntaxErrorInner {
+    /// The parser's error.
+    error: toml::de::Error,
+    /// Where in the text it is, line and column from 1, if the parser
+    /// placed it.
+    place: Option<(usize, usize)>,
+}
 
 impl SyntaxError {
-    /// `error`, as a load's.
-    pub(crate) const fn from_toml(error: toml::de::Error) -> LoadError {
-        LoadError::Syntax(Self(error))
+    /// The parser's `error` in `text`.
+    pub(crate) fn new(error: toml::de::Error, text: &str) -> Self {
+        let place = error
+            .span()
+            .and_then(|span| text.get(..span.start))
+            .map(|before| {
+                let line_start = before.rfind('\n').map_or(0, |newline| newline + 1);
+                (
+                    before.matches('\n').count() + 1,
+                    before[line_start..].chars().count() + 1,
+                )
+            });
+        Self(Box::new(SyntaxErrorInner { error, place }))
+    }
+
+    /// The parser's `error` in a table the text does not hold, as an
+    /// absent one read as empty: no place.
+    pub(crate) fn unplaced(error: toml::de::Error) -> Self {
+        Self(Box::new(SyntaxErrorInner { error, place: None }))
+    }
+
+    /// The line it is on, from 1, if the parser placed it.
+    #[must_use]
+    pub fn line(&self) -> Option<usize> {
+        self.0.place.map(|(line, _)| line)
+    }
+
+    /// The column it is at on its line, in characters from 1, if the
+    /// parser placed it.
+    #[must_use]
+    pub fn column(&self) -> Option<usize> {
+        self.0.place.map(|(_, column)| column)
     }
 }
 
@@ -244,7 +307,7 @@ pub enum RunError {
     /// `at`.
     ///
     /// [`Peripheral::advance`]: crate::peripheral::Peripheral::advance
-    #[error("{peripheral}: advanced to {} ps {repeats} times, its next event never past it", at.0)]
+    #[error("{peripheral}: advanced to {at} {repeats} times, its next event never past it")]
     Stalled {
         /// The peripheral.
         peripheral: String,
@@ -326,4 +389,25 @@ pub enum ConditionError {
         /// Why.
         error: ArmError,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LoadError;
+    use super::SyntaxError;
+
+    /// The most a [`LoadError`] may take, in bytes: its size before
+    /// [`SyntaxError`] held a place, well under clippy's
+    /// `result_large_err` limit (128) for a host's error that holds one.
+    const LOAD_ERROR_BOUND: usize = 88;
+
+    #[test]
+    fn a_load_error_stays_small() {
+        assert_eq!(size_of::<SyntaxError>(), size_of::<usize>(), "boxed");
+        assert!(
+            size_of::<LoadError>() <= LOAD_ERROR_BOUND,
+            "LoadError is {} bytes",
+            size_of::<LoadError>()
+        );
+    }
 }

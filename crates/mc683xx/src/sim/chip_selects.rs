@@ -3,6 +3,7 @@
 //! CSORBT and CSOR0-10, and how each would end the cycle.
 
 use mc683xx_cpu32::bus::PortSize;
+use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
@@ -293,9 +294,14 @@ impl Selects {
     /// All twelve.
     pub const ALL: Self = Self((1 << SELECTS) - 1);
 
-    /// Whether it holds the select of index `number`.
+    /// Whether it holds `select`.
     #[must_use]
-    pub const fn contains(self, number: usize) -> bool {
+    pub const fn contains(self, select: ChipSelect) -> bool {
+        self.contains_index(select.index())
+    }
+
+    /// Whether it holds the select of index `number`.
+    const fn contains_index(self, number: usize) -> bool {
         self.0 & 1 << number != 0
     }
 }
@@ -424,7 +430,7 @@ impl ChipSelects {
 
     /// The block of each enabled select outside CPU space: its first
     /// address and its length.
-    pub fn blocks(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
+    pub fn blocks(&self) -> impl Iterator<Item = (Address, u32)> + '_ {
         self.selects
             .iter()
             .filter(|registers| {
@@ -433,7 +439,10 @@ impl ChipSelects {
             })
             .map(|registers| {
                 let length = registers.length();
-                (registers.start() & !(length - 1) & ADDRESS_MASK, length)
+                (
+                    Address(registers.start() & !(length - 1) & ADDRESS_MASK),
+                    length,
+                )
             })
     }
 
@@ -460,7 +469,7 @@ impl ChipSelects {
         self.selects
             .iter()
             .enumerate()
-            .filter(move |&(number, _)| candidates.contains(number))
+            .filter(move |&(number, _)| candidates.contains_index(number))
             .filter_map(move |(number, &registers)| self.matching(number, registers, request))
     }
 
@@ -468,14 +477,14 @@ impl ChipSelects {
     /// block is at least 2 Kbytes and aligned to its size, so this is
     /// the same for every address of an aligned 2-Kbyte page.
     #[must_use]
-    pub fn at(&self, address: u32) -> Selects {
+    pub fn at(&self, address: Address) -> Selects {
         let bits = self
             .selects
             .iter()
             .enumerate()
             .filter(|(_, registers)| {
                 let mask = !(registers.length() - 1) & ADDRESS_MASK;
-                (address ^ registers.start()) & mask == 0
+                (address.0 ^ registers.start()) & mask == 0
             })
             .fold(0, |bits, (number, _)| bits | 1 << number);
         Selects(bits)
@@ -579,6 +588,8 @@ impl Dsack {
 
 #[cfg(test)]
 mod tests {
+    use mc683xx_target::address::Address;
+
     use super::ChipSelects;
     use super::DecodeRequest;
     use super::Lanes;
@@ -753,7 +764,7 @@ mod tests {
         assert!(selected(&selects, write).is_empty());
         // FC 3, reserved, is user space by FC2 (PLAN.md)
         let reserved = DecodeRequest {
-            function_code: FunctionCode::new(3),
+            function_code: FunctionCode::from_low_bits(3),
             ..user
         };
         assert_eq!(selected(&selects, reserved), [cs(1)]);
@@ -765,7 +776,10 @@ mod tests {
         selects.write_base(cs(4), 0x5000);
         selects.write_option(cs(4), 0x7830);
         let blocks: Vec<_> = selects.blocks().collect();
-        assert_eq!(blocks, [(0, 1 << 20), (0x50_0000, 2 << 10)]);
+        assert_eq!(
+            blocks,
+            [(Address(0), 1 << 20), (Address(0x50_0000), 2 << 10)]
+        );
     }
 
     #[test]
@@ -776,8 +790,8 @@ mod tests {
         selects.write_option(cs(4), 0x7830);
         selects.write_base(cs(5), 0x5103);
         selects.write_option(cs(5), 0x7830);
-        let at = selects.at(0x50_0000);
-        assert!(at.contains(cs(4).index()) && !at.contains(cs(5).index()));
+        let at = selects.at(Address(0x50_0000));
+        assert!(at.contains(cs(4)) && !at.contains(cs(5)));
         for address in [
             0, 0x7_fffe, 0x50_0000, 0x50_07fe, 0x50_0800, 0x51_8000, 0xff_fff5,
         ] {
@@ -789,7 +803,7 @@ mod tests {
                     size: Size::Word,
                 };
                 let among: Vec<_> = selects
-                    .matches_among(request, selects.at(address))
+                    .matches_among(request, selects.at(Address(address)))
                     .collect();
                 let all: Vec<_> = selects.matches(request).collect();
                 assert_eq!(among, all, "{address:#x}");

@@ -21,7 +21,7 @@
 //!   attachment, which a [`PeripheralAccess`] names by index with its
 //!   [`Role`]), the IRQ pin
 //!   (`interrupt_request`), RESET (`reset`), the QSPI (`transfer`,
-//!   `select`, `qspi_clock`, `qspi_deferrable`), its net ports (`input`,
+//!   `select`, `set_qspi_clock`, `qspi_deferrable`), its net ports (`input`,
 //!   and [`Drive`] for its outputs), its own time (`next_event`,
 //!   `advance`), its snapshot (`save`, `restore`) and what a front end
 //!   shows of it (`inspect`).
@@ -36,7 +36,7 @@
 //!   `Clock` on `clock` nets ([`Clock`]: exact phase, frequency changes
 //!   at a time, edge counting and edge times), `Serial` frames, `Analog`
 //!   values.
-//! - [`Time`]: board time, integer picoseconds.
+//! - [`Time`] and [`Span`]: board time and its spans, integer picoseconds.
 //!
 //! What a front end (a TUI, a GUI) uses, outside the board file:
 //!
@@ -83,8 +83,8 @@
 //! "#;
 //! let description = Description::parse(text, Path::new("."), &Options::default())?;
 //! let registry = Registry::with_builtins();
-//! let mut board = Board::<Mc68331>::load(&description, &registry, Environment::default())?;
-//! let until = Time(1_000_000);
+//! let mut board = Board::<Mc68331>::load(&description, &registry, &Environment::default())?;
+//! let until = Time::from_picos(1_000_000);
 //! let run = board.run_until(until)?;
 //! assert_eq!(run.stop, Stop::Budget);
 //! assert_eq!(run.now, until);
@@ -118,6 +118,7 @@
 //! [`Signal`]: signal::Signal
 //! [`Clock`]: time::Clock
 //! [`Time`]: time::Time
+//! [`Span`]: time::Span
 //! [`Observer`]: observe::Observer
 //! [`Board::observe`]: board::Board::observe
 //! [`Inspection`]: inspect::Inspection

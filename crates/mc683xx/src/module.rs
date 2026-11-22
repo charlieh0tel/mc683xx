@@ -6,6 +6,7 @@
 
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_target::size::Size;
 
@@ -173,7 +174,7 @@ pub mod sealed {
 ///     fn request(&self) -> Option<InterruptRequest> {
 ///         None
 ///     }
-///     fn acknowledge(&mut self, _: InterruptLevel, _: Cycles) -> Option<u8> {
+///     fn acknowledge(&mut self, _: InterruptLevel, _: Cycles) -> Option<Vector> {
 ///         None
 ///     }
 ///     fn reset(&mut self, _: Cycles) {}
@@ -201,7 +202,7 @@ pub trait Module: Timed + sealed::Sealed {
     fn request(&self) -> Option<InterruptRequest>;
     /// The CPU acknowledges `level` and the module won arbitration:
     /// its vector, or `None` if it has none to give.
-    fn acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Option<u8>;
+    fn acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Option<Vector>;
     /// The chip's reset, or the `reset` instruction's (SIMRM 8.2.6).
     fn reset(&mut self, now: Cycles);
 

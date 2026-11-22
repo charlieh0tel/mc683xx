@@ -36,7 +36,9 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     })
 }
 
-/// The format version a snapshot starts with.
+/// The format version a part's snapshot (a module's, a peripheral's)
+/// starts with.  A layer's (`mc683xx_cpu32::cpu::state::Layer`) starts
+/// with its header instead; a test names its `VERSION`.
 ///
 /// # Panics
 ///

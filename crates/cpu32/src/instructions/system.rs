@@ -19,6 +19,7 @@ use crate::instructions::Table;
 use crate::instructions::data_movement::low_register;
 use crate::registers::status;
 use crate::timing;
+use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
@@ -183,7 +184,7 @@ pub(super) fn lpstop(core: &mut Core<'_>) -> Result<Flow, Exception> {
         return Err(core.privilege_violation());
     }
     core.cpu.registers.set_sr(sr);
-    let mask = u32::from(core.cpu.registers.interrupt_mask());
+    let mask = u32::from(core.cpu.registers.interrupt_mask().get());
     core.write(LPSTOP_BROADCAST, Size::Word, FunctionCode::CPU_SPACE, mask)?;
     let last_tail = core.last_tail();
     core.adjust(timing::lpstop(last_tail));
@@ -277,9 +278,9 @@ fn move_usp(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
     let register = low_register(opcode);
     let registers = &mut core.cpu.registers;
     if opcode & USP_TO_ADDRESS != 0 {
-        registers.set_address(register, registers.usp);
+        registers.set_address(register, registers.usp.0);
     } else {
-        registers.usp = registers.address(register);
+        registers.usp = Address(registers.address(register));
     }
     Ok(Flow::Next)
 }
@@ -314,19 +315,19 @@ fn movec(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
         let value = general_register(core, extension);
         let registers = &mut core.cpu.registers;
         match code {
-            control::SFC => registers.sfc = FunctionCode::new(value),
-            control::DFC => registers.dfc = FunctionCode::new(value),
-            control::USP => registers.usp = value,
-            _ => registers.vbr = value,
+            control::SFC => registers.sfc = FunctionCode::from_low_bits(value),
+            control::DFC => registers.dfc = FunctionCode::from_low_bits(value),
+            control::USP => registers.usp = Address(value),
+            _ => registers.vbr = Address(value),
         }
         return Ok(Flow::Next);
     }
     let registers = &mut core.cpu.registers;
     let value = match code {
-        control::SFC => u32::from(registers.sfc.bits()),
-        control::DFC => u32::from(registers.dfc.bits()),
-        control::USP => registers.usp,
-        _ => registers.vbr,
+        control::SFC => u32::from(registers.sfc.get()),
+        control::DFC => u32::from(registers.dfc.get()),
+        control::USP => registers.usp.0,
+        _ => registers.vbr.0,
     };
     match general(extension) {
         (number, true) => registers.set_address(number, value),
@@ -434,13 +435,13 @@ mod tests {
     /// A supervisor machine with a stack.
     fn supervisor(code: &[u16]) -> Cpu {
         let mut cpu = machine(code);
-        cpu.registers.ssp = STACK;
+        cpu.registers.ssp = Address(STACK);
         cpu
     }
 
     /// One instruction on `bus`.
     fn step_on(cpu: &mut Cpu, bus: &mut Recorder) -> Stop {
-        cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1))
+        cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1))
             .stop
     }
 
@@ -499,7 +500,7 @@ mod tests {
         let mut cpu = supervisor(&[0x4e72, 0x2315]);
         assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
         assert_eq!(cpu.registers.sr(), 0x2315);
-        assert_eq!(cpu.registers.pc, CODE + 4);
+        assert_eq!(cpu.registers.pc.0, CODE + 4);
         assert_eq!(step(&mut cpu, 1).stop, Stop::Stopped);
     }
 
@@ -512,9 +513,9 @@ mod tests {
             .set_sr(status::T1 | status::S | status::INTERRUPT_MASK);
         step(&mut cpu, 1);
         assert_eq!(taken(&cpu), Some(Vector::TRACE));
-        assert_eq!(cpu.registers.pc, CODE + 4);
+        assert_eq!(cpu.registers.pc.0, CODE + 4);
         assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
-        assert_eq!(cpu.registers.pc, CODE + 6);
+        assert_eq!(cpu.registers.pc.0, CODE + 6);
     }
 
     #[test]
@@ -523,7 +524,7 @@ mod tests {
         let mut bus = Recorder::default();
         step_on(&mut cpu, &mut bus);
         assert_eq!(cpu.registers.sr(), 0x2504);
-        assert_eq!(cpu.registers.pc, CODE + 6);
+        assert_eq!(cpu.registers.pc.0, CODE + 6);
         let [(access, value)] = bus.cycles[..] else {
             panic!("one cycle: {:?}", bus.cycles);
         };
@@ -540,13 +541,23 @@ mod tests {
         // 0) all 25; after MOVE.L D0, (A0) (tail 4), 25 less 3.
         let mut cpu = supervisor(&[LPSTOP, LPSTOP_EXTENSION, 0x2700]);
         let mut bus = Recorder::default();
-        let run = cpu.run_for(&mut bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
-        assert_eq!(run.cycles, Cycles(25));
+        let run = cpu.run_for(
+            &mut bus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(1),
+        );
+        assert_eq!(run.cycles, Cycles::from_clocks(25));
         let mut cpu = supervisor(&[0x2080, LPSTOP, LPSTOP_EXTENSION, 0x2700]);
         cpu.registers.set_address(0, DATA);
         step_on(&mut cpu, &mut bus);
-        let run = cpu.run_for(&mut bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
-        assert_eq!(run.cycles, Cycles(25 - 3));
+        let run = cpu.run_for(
+            &mut bus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(1),
+        );
+        assert_eq!(run.cycles, Cycles::from_clocks(25 - 3));
     }
 
     #[test]
@@ -573,7 +584,7 @@ mod tests {
         step_on(&mut cpu, &mut bus);
         assert_eq!(bus.resets, [Cycles::ZERO]);
         let mut expected = before;
-        expected.pc = CODE + 2;
+        expected.pc = Address(CODE + 2);
         assert_eq!(cpu.registers, expected);
     }
 
@@ -595,14 +606,14 @@ mod tests {
         let registers = &cpu.registers;
         assert_eq!(registers.sfc, FunctionCode::SUPERVISOR_DATA);
         assert_eq!(registers.dfc, FunctionCode::SUPERVISOR_DATA);
-        assert_eq!(registers.usp, 0x0012_3456);
-        assert_eq!(registers.vbr, 0xffff_fffd);
+        assert_eq!(registers.usp.0, 0x0012_3456);
+        assert_eq!(registers.vbr.0, 0xffff_fffd);
         // Unimplemented bits read as zero.
         assert_eq!(registers.data[2], 5);
         assert_eq!(registers.data[3], 5);
         assert_eq!(registers.address(4), 0x0012_3456);
         // A7 in supervisor state is SSP.
-        assert_eq!(registers.ssp, 0xffff_fffd);
+        assert_eq!(registers.ssp.0, 0xffff_fffd);
     }
 
     #[test]
@@ -624,7 +635,7 @@ mod tests {
         for code in 0..=7 {
             // MOVES.W D0, (A0)
             let mut cpu = supervisor(&[0x0e50, 0x0800]);
-            let function_code = FunctionCode::new(code);
+            let function_code = FunctionCode::from_low_bits(code);
             cpu.registers.dfc = function_code;
             cpu.registers.data[0] = 0xdead_beef;
             cpu.registers.set_address(0, DATA);
@@ -715,7 +726,7 @@ mod tests {
             0x44fc, 0x0003, // MOVE #3, CCR
         ]);
         cpu.registers.set_sr(0x0004);
-        cpu.registers.usp = STACK;
+        cpu.registers.usp = Address(STACK);
         step(&mut cpu, 3);
         assert_eq!(taken(&cpu), None);
         assert_eq!(cpu.registers.sr(), 0x000e);
@@ -734,7 +745,7 @@ mod tests {
             0x027c, 0xdfff, // ANDI #$DFFF, SR
         ]);
         cpu.registers.set_sr(status::S | status::INTERRUPT_MASK);
-        cpu.registers.usp = 0x1111;
+        cpu.registers.usp = Address(0x1111);
         step(&mut cpu, 1);
         assert_eq!(cpu.registers.sr(), 0x2710);
         step(&mut cpu, 1);
@@ -764,9 +775,9 @@ mod tests {
         let mut cpu = supervisor(&[0x4e62, 0x4e6d]);
         cpu.registers.set_address(2, 0x0abc_def0);
         step(&mut cpu, 2);
-        assert_eq!(cpu.registers.usp, 0x0abc_def0);
+        assert_eq!(cpu.registers.usp.0, 0x0abc_def0);
         assert_eq!(cpu.registers.address(5), 0x0abc_def0);
-        assert_eq!(cpu.registers.ssp, STACK);
+        assert_eq!(cpu.registers.ssp.0, STACK);
     }
 
     #[test]
@@ -785,8 +796,8 @@ mod tests {
         step(&mut cpu, 1);
         assert_eq!(cpu.background(), Some(Entry::Background));
         assert_eq!(cpu.exception_taken(), None, "the trace is not taken");
-        assert_eq!(cpu.registers.pc, pc + 2, "GO resumes after the BGND");
-        assert_eq!(cpu.pcc, Address(pc));
+        assert_eq!(cpu.registers.pc, pc.offset(2), "GO resumes after the BGND");
+        assert_eq!(cpu.pcc, pc);
         assert_eq!(cpu.atemp, 1, "CPU32RM Table 7-2");
         assert_eq!(step(&mut cpu, 1).stop, Stop::Background(Entry::Background));
         assert_eq!(cpu.registers.data[0], 0, "and nothing more runs");

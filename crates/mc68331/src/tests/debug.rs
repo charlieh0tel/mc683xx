@@ -30,6 +30,7 @@ use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::debug::TargetError;
 use crate::debug::serial::NOT_IN_BACKGROUND;
+use mc683xx_cpu32::memory::MemoryKind;
 
 /// BGND (CPU32RM 4.4).
 const BGND: u16 = 0x4afa;
@@ -49,10 +50,14 @@ const RAM_BYTES: usize = 2048;
 fn chip_and_stop(program: &[u16]) -> (Mc68331, StopRequest) {
     let mut builder = Builder::default();
     builder
-        .memory(image(program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], true)
+        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     let request = builder.stop_request();
     (builder.build(), request)
@@ -70,7 +75,7 @@ fn a_reset_with_bkpt_low_halts_before_the_first_instruction() {
     assert_eq!(chip.read_system_register(SystemRegister::Rpc), Ok(START));
     assert_eq!(chip.read_system_register(SystemRegister::Pcc), Ok(START));
     assert_eq!(chip.read_system_register(SystemRegister::Atemp), Ok(0));
-    chip.run_for(Cycles(1000));
+    chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(chip.read_register(Register::D0), Ok(0), "nothing ran");
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Breakpoint)));
 }
@@ -94,18 +99,18 @@ fn registers_and_memory_through_the_target() {
     );
     let data = [1, 2, 3, 4, 5, 6, 7, 8];
     for size in [Size::Byte, Size::Word, Size::Long] {
-        chip.write_memory(Address(RAM), FunctionCode::SUPERVISOR_DATA, size, &data)
+        chip.write_memory(Address(RAM), size, FunctionCode::SUPERVISOR_DATA, &data)
             .unwrap();
         let mut back = [0; 8];
-        chip.read_memory(Address(RAM), FunctionCode::SUPERVISOR_DATA, size, &mut back)
+        chip.read_memory(Address(RAM), size, FunctionCode::SUPERVISOR_DATA, &mut back)
             .unwrap();
         assert_eq!(back, data, "{size:?}");
     }
     let mut word = [0; 2];
     chip.read_memory(
         Address(START),
-        FunctionCode::SUPERVISOR_PROGRAM,
         Size::Word,
+        FunctionCode::SUPERVISOR_PROGRAM,
         &mut word,
     )
     .unwrap();
@@ -113,8 +118,8 @@ fn registers_and_memory_through_the_target() {
     assert!(matches!(
         chip.read_memory(
             Address(RAM),
-            FunctionCode::SUPERVISOR_DATA,
             Size::Long,
+            FunctionCode::SUPERVISOR_DATA,
             &mut [0; 3]
         ),
         Err(TargetError::Length { .. })
@@ -122,8 +127,8 @@ fn registers_and_memory_through_the_target() {
     assert!(matches!(
         chip.read_memory(
             Address(RAM + 1),
-            FunctionCode::SUPERVISOR_DATA,
             Size::Word,
+            FunctionCode::SUPERVISOR_DATA,
             &mut word
         ),
         Err(TargetError::Access { .. })
@@ -136,7 +141,7 @@ fn go_runs_to_a_bgnd_and_halt_stops_a_running_cpu() {
     chip.reset_halted().unwrap();
     assert_eq!(chip.go(), Ok(()));
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
-    chip.run_for(Cycles(1000));
+    chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Background)));
     assert_eq!(chip.read_register(Register::D0), Ok(1));
     assert_eq!(
@@ -148,7 +153,7 @@ fn go_runs_to_a_bgnd_and_halt_stops_a_running_cpu() {
         Ok(START + 4)
     );
     chip.go().unwrap();
-    chip.run_for(Cycles(1000));
+    chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(
         Cpu32Target::halted(&mut chip),
         Ok(None),
@@ -174,19 +179,19 @@ fn a_fault_on_go_s_first_fetch_is_its_own_exception() {
         .unwrap();
     chip.write_memory(
         Address(RAM + Vector::ADDRESS_ERROR.offset()),
-        space,
         Size::Long,
+        space,
         &handler.to_be_bytes(),
     )
     .unwrap();
-    chip.write_memory(Address(handler), space, Size::Word, &BGND.to_be_bytes())
+    chip.write_memory(Address(handler), Size::Word, space, &BGND.to_be_bytes())
         .unwrap();
     chip.write_system_register(SystemRegister::Ssp, RAM + 0x400)
         .unwrap();
     chip.write_system_register(SystemRegister::Rpc, START + 1)
         .unwrap();
     chip.go().unwrap();
-    chip.run_for(Cycles(1000));
+    chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Background)));
     assert_eq!(chip.read_system_register(SystemRegister::Pcc), Ok(handler));
 }
@@ -203,8 +208,8 @@ fn a_step_stops_at_the_next_boundary_before_any_handler() {
         .unwrap();
     chip.write_memory(
         Address(RAM + Vector::trap(0).offset()),
-        space,
         Size::Long,
+        space,
         &handler.to_be_bytes(),
     )
     .unwrap();
@@ -248,8 +253,8 @@ const QSM: u32 = 0xff_fc00;
 fn store(chip: &mut Mc68331, address: u32, value: u16) {
     chip.write_memory(
         Address(address),
-        FunctionCode::SUPERVISOR_DATA,
         Size::Word,
+        FunctionCode::SUPERVISOR_DATA,
         &value.to_be_bytes(),
     )
     .unwrap();
@@ -270,8 +275,8 @@ fn a_stepped_lpstop_takes_a_module_interrupt_it_unmasks() {
         .unwrap();
     chip.write_memory(
         Address(RAM + Vector(0x40).offset()),
-        FunctionCode::SUPERVISOR_DATA,
         Size::Long,
+        FunctionCode::SUPERVISOR_DATA,
         &handler.to_be_bytes(),
     )
     .unwrap();
@@ -319,7 +324,7 @@ fn a_stop_the_host_asks_for_in_a_step_fails_it() {
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Breakpoint)));
     chip.go().unwrap();
     assert_ne!(
-        chip.run_for(Cycles(100)).stop,
+        chip.run_for(Cycles::from_clocks(100)).stop,
         Stop::Requested,
         "the request taken"
     );
@@ -339,7 +344,7 @@ fn a_stop_the_host_asks_for_in_a_stepped_bgnd_fails_it() {
     assert_eq!(chip.step(), Err(TargetError::Stopped));
     chip.go().unwrap();
     assert_ne!(
-        chip.run_for(Cycles(100)).stop,
+        chip.run_for(Cycles::from_clocks(100)).stop,
         Stop::Requested,
         "the request taken"
     );
@@ -357,8 +362,8 @@ fn load(chip: &mut Mc68331, address: u32) -> u16 {
     let mut word = [0; 2];
     chip.read_memory(
         Address(address),
-        FunctionCode::SUPERVISOR_DATA,
         Size::Word,
+        FunctionCode::SUPERVISOR_DATA,
         &mut word,
     )
     .unwrap();
@@ -372,18 +377,18 @@ fn freeze_holds_the_watchdog_with_frzsw_and_the_gpt_with_frz0() {
     chip.reset_halted().unwrap();
     // FRZSW clear: the watchdog, on out of reset, resets the frozen
     // CPU, which comes out of it running
-    chip.run_for(Cycles(1 << 20));
+    chip.run_for(Cycles::from_clocks(1 << 20));
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
     chip.reset_halted().unwrap();
     // FRZSW, MM as it was; GPTMCR FRZ0 and SUPV
     store(&mut chip, SIM, 0x40cf);
     store(&mut chip, GPT, 0x2080);
     let counted = load(&mut chip, TCNT);
-    chip.run_for(Cycles(1 << 20));
+    chip.run_for(Cycles::from_clocks(1 << 20));
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Breakpoint)));
     assert_eq!(load(&mut chip, TCNT), counted, "TCNT held");
     chip.go().unwrap();
-    chip.run_for(Cycles(10_000));
+    chip.run_for(Cycles::from_clocks(10_000));
     chip.halt().unwrap();
     assert_ne!(load(&mut chip, TCNT), counted, "counting once FREEZE ends");
 }
@@ -398,7 +403,7 @@ fn background_mode_writes_tcnt() {
     store(&mut chip, TCNT, 0x8000);
     assert_eq!(load(&mut chip, TCNT), 0x8000);
     chip.go().unwrap();
-    chip.run_for(Cycles(10_000));
+    chip.run_for(Cycles::from_clocks(10_000));
     chip.halt().unwrap();
     let counted = load(&mut chip, TCNT);
     assert!(counted > 0x8000, "{counted:#x}: counting on from the write");
@@ -409,7 +414,7 @@ fn a_halt_in_lpstop_wakes_the_chip() {
     let mut chip = chip(&[LPSTOP[0], LPSTOP[1], LPSTOP[2], BRANCH_TO_SELF]);
     chip.reset_halted().unwrap();
     chip.go().unwrap();
-    chip.run_for(Cycles(1000));
+    chip.run_for(Cycles::from_clocks(1000));
     assert!(chip.sim().low_power().is_some(), "in LPSTOP");
     assert_eq!(chip.halt(), Ok(Entry::Breakpoint));
     assert_eq!(chip.sim().low_power(), None);
@@ -468,8 +473,8 @@ fn slow_access(chip: &mut Mc68331) -> (bool, bool) {
     let mut word = [0; 2];
     let read = chip.read_memory(
         Address(SLOW),
-        FunctionCode::SUPERVISOR_DATA,
         Size::Word,
+        FunctionCode::SUPERVISOR_DATA,
         &mut word,
     );
     assert!(
@@ -479,7 +484,7 @@ fn slow_access(chip: &mut Mc68331) -> (bool, bool) {
     if read.is_ok() {
         assert_eq!(word, [SLOW_BYTE; 2]);
     }
-    let served = chip.poke(Address(SLOW), &[SLOW_BYTE]).is_ok();
+    let served = chip.write(Address(SLOW), &[SLOW_BYTE]).is_ok();
     (read.is_ok(), served)
 }
 
@@ -491,18 +496,18 @@ fn freeze_stops_the_bus_monitor_with_frzbm() {
     builder
         .memory(
             image(&[BRANCH_TO_SELF], ROM_BYTES),
-            false,
+            MemoryKind::Rom,
             &[ChipSelect::Boot],
         )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], true)
+        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     let slow = builder
-        .fixed_memory(Address(SLOW), vec![SLOW_BYTE; RAM_BYTES], true)
+        .fixed_memory(Address(SLOW), vec![SLOW_BYTE; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     builder
-        .fixed_timing(
+        .set_fixed_timing(
             slow,
             PortSize::Bits16,
             Termination::WaitStates(Termination::MOST_WAIT_STATES),
@@ -532,14 +537,14 @@ fn freeze_stops_the_bus_monitor_with_frzbm() {
         .iter()
         .flat_map(|word| word.to_be_bytes())
         .collect();
-    chip.write_memory(Address(program), space, Size::Word, &code)
+    chip.write_memory(Address(program), Size::Word, space, &code)
         .unwrap();
-    chip.write_memory(Address(handler), space, Size::Word, &BGND.to_be_bytes())
+    chip.write_memory(Address(handler), Size::Word, space, &BGND.to_be_bytes())
         .unwrap();
     chip.write_memory(
         Address(RAM + Vector::BUS_ERROR.offset()),
-        space,
         Size::Long,
+        space,
         &handler.to_be_bytes(),
     )
     .unwrap();
@@ -550,7 +555,7 @@ fn freeze_stops_the_bus_monitor_with_frzbm() {
     chip.write_system_register(SystemRegister::Rpc, program)
         .unwrap();
     chip.go().unwrap();
-    chip.run_for(Cycles(1000));
+    chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Background)));
     assert_eq!(
         chip.read_system_register(SystemRegister::Pcc),
@@ -590,10 +595,14 @@ const BREAKPOINT_STACK: u32 = 0x400;
 fn breakpoint_chip(program: &[u16], answered: bool) -> (Mc68331, Option<PeripheralId>) {
     let mut builder = Builder::default();
     builder
-        .memory(image(program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], true)
+        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     let responder = answered.then(|| {
         builder
@@ -607,20 +616,20 @@ fn breakpoint_chip(program: &[u16], answered: bool) -> (Mc68331, Option<Peripher
     }
     let handler = RAM + BREAKPOINT_HANDLER;
     let entry = RAM + Vector::HARDWARE_BREAKPOINT.offset();
-    chip.poke(Address(entry), &handler.to_be_bytes()).unwrap();
+    chip.write(Address(entry), &handler.to_be_bytes()).unwrap();
     let registers = chip.registers_mut();
-    registers.vbr = RAM;
-    registers.ssp = RAM + BREAKPOINT_STACK;
+    registers.vbr = Address(RAM);
+    registers.ssp = Address(RAM + BREAKPOINT_STACK);
     (chip, responder)
 }
 
 #[test]
 fn with_bdm_disabled_bkpt_runs_an_acknowledge_that_dsack_ignores() {
     let (mut chip, responder) = breakpoint_chip(&[MOVEQ_1_D0, MOVEQ_1_D0, BRANCH_TO_SELF], true);
-    chip.run_for(Cycles(1));
-    assert_eq!(chip.cpu().registers.pc, START + 2);
+    chip.run_for(Cycles::from_clocks(1));
+    assert_eq!(chip.cpu().registers.pc.0, START + 2);
     assert!(!chip.assert_breakpoint(), "no background mode");
-    chip.run_for(Cycles(1));
+    chip.run_for(Cycles::from_clocks(1));
     let reads = &chip
         .peripheral::<Recorder>(responder.unwrap())
         .unwrap()
@@ -628,31 +637,31 @@ fn with_bdm_disabled_bkpt_runs_an_acknowledge_that_dsack_ignores() {
     // CPU space $00001E: type 0000, BKPT #7, T set; a word (CPU32RM
     // 5.3.1.1, 6.2.6; MC68331UM 4.5.4.1.2, Figure 4-12)
     assert_eq!(reads.len(), 1);
-    assert_eq!(reads[0].address, 0x1e);
+    assert_eq!(reads[0].address, Address(0x1e));
     assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
     assert_eq!(reads[0].size, Size::Word);
     assert_eq!(reads[0].select, on(2));
     // the word returned is not executed, and nothing is stacked
-    assert_eq!(chip.cpu().registers.ssp, RAM + BREAKPOINT_STACK);
+    assert_eq!(chip.cpu().registers.ssp.0, RAM + BREAKPOINT_STACK);
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
-    chip.run_for(Cycles(1));
-    assert_eq!(chip.cpu().registers.pc, START + 4, "the next instruction");
+    chip.run_for(Cycles::from_clocks(1));
+    assert_eq!(chip.cpu().registers.pc.0, START + 4, "the next instruction");
 }
 
 #[test]
 fn with_bdm_disabled_bkpt_takes_vector_12_on_a_bus_error() {
     let (mut chip, _) = breakpoint_chip(&[MOVEQ_1_D0, MOVEQ_1_D0, BRANCH_TO_SELF], false);
-    chip.run_for(Cycles(1));
+    chip.run_for(Cycles::from_clocks(1));
     let sr = chip.cpu().registers.sr();
     assert!(!chip.assert_breakpoint());
     assert!(chip.cpu().breakpoint_pending(), "left for the next run");
-    chip.run_for(Cycles(1));
+    chip.run_for(Cycles::from_clocks(1));
     assert!(!chip.cpu().breakpoint_pending());
-    assert_eq!(chip.cpu().registers.pc, RAM + BREAKPOINT_HANDLER);
+    assert_eq!(chip.cpu().registers.pc.0, RAM + BREAKPOINT_HANDLER);
     // format $2 (CPU32RM 6.2.6, 6.4.2): SR, the next PC, $2030, and the
     // instruction executing when the breakpoint was sensed
     let frame = RAM + BREAKPOINT_STACK - 12;
-    assert_eq!(chip.cpu().registers.ssp, frame);
+    assert_eq!(chip.cpu().registers.ssp.0, frame);
     let words: Vec<u32> = (0..6)
         .map(|word| {
             chip.peek(
@@ -679,10 +688,10 @@ fn with_bdm_disabled_bkpt_takes_vector_12_on_a_bus_error() {
 #[test]
 fn with_bdm_disabled_a_transfer_is_bkpt_that_dsack_ignores() {
     let (mut chip, responder) = breakpoint_chip(&[MOVEQ_1_D0, MOVEQ_1_D0, BRANCH_TO_SELF], true);
-    chip.run_for(Cycles(1));
+    chip.run_for(Cycles::from_clocks(1));
     assert_eq!(chip.bdm_exchange(0), NOT_IN_BACKGROUND);
     assert!(chip.cpu().breakpoint_pending(), "left for the next run");
-    chip.run_for(Cycles(1));
+    chip.run_for(Cycles::from_clocks(1));
     let reads = &chip
         .peripheral::<Recorder>(responder.unwrap())
         .unwrap()
@@ -690,22 +699,22 @@ fn with_bdm_disabled_a_transfer_is_bkpt_that_dsack_ignores() {
     // the breakpoint acknowledge cycle (CPU32RM 6.2.6; MC68331UM
     // 4.5.4.1.2)
     assert_eq!(reads.len(), 1);
-    assert_eq!(reads[0].address, 0x1e);
+    assert_eq!(reads[0].address, Address(0x1e));
     assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
-    assert_eq!(chip.cpu().registers.ssp, RAM + BREAKPOINT_STACK);
+    assert_eq!(chip.cpu().registers.ssp.0, RAM + BREAKPOINT_STACK);
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
 }
 
 #[test]
 fn with_bdm_disabled_a_transfer_is_bkpt_that_takes_vector_12_on_a_bus_error() {
     let (mut chip, _) = breakpoint_chip(&[MOVEQ_1_D0, MOVEQ_1_D0, BRANCH_TO_SELF], false);
-    chip.run_for(Cycles(1));
+    chip.run_for(Cycles::from_clocks(1));
     assert_eq!(chip.bdm_exchange(0), NOT_IN_BACKGROUND);
     assert!(chip.cpu().breakpoint_pending(), "left for the next run");
-    chip.run_for(Cycles(1));
+    chip.run_for(Cycles::from_clocks(1));
     assert!(!chip.cpu().breakpoint_pending());
-    assert_eq!(chip.cpu().registers.pc, RAM + BREAKPOINT_HANDLER);
-    assert_eq!(chip.cpu().registers.ssp, RAM + BREAKPOINT_STACK - 12);
+    assert_eq!(chip.cpu().registers.pc.0, RAM + BREAKPOINT_HANDLER);
+    assert_eq!(chip.cpu().registers.ssp.0, RAM + BREAKPOINT_STACK - 12);
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
 }
 
@@ -722,7 +731,7 @@ fn with_bdm_enabled_bkpt_enters_background_mode_at_once() {
     let mut chip = chip(&[MOVEQ_1_D0, BRANCH_TO_SELF]);
     chip.reset_halted().unwrap();
     chip.go().unwrap();
-    chip.run_for(Cycles(100));
+    chip.run_for(Cycles::from_clocks(100));
     assert!(chip.assert_breakpoint());
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Breakpoint)));
     assert!(!chip.cpu().breakpoint_pending());

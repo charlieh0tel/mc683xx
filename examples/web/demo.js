@@ -38,7 +38,7 @@ async function start() {
   const terminal = new Terminal({ rows: 30, scrollback: 1000 });
   terminal.open(document.getElementById("terminal"));
   const encoder = new TextEncoder();
-  terminal.onData((data) => board.send(CONSOLE, encoder.encode(data)));
+  terminal.onData((data) => board.sendBytes(CONSOLE, encoder.encode(data)));
   terminal.focus();
   // For tests, and for a look from the browser's console.
   globalThis.demo = { board, terminal };
@@ -46,7 +46,7 @@ async function start() {
   function frame(wall) {
     try {
       board.runFrame(wall, SLICE);
-      const received = board.takeReceived(CONSOLE);
+      const received = board.takeReceivedBytes(CONSOLE);
       if (received.length > 0) {
         terminal.write(received);
       }

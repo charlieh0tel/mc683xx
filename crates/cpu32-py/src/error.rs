@@ -1,11 +1,13 @@
 //! What a Python host can get wrong, before it becomes a Python
 //! exception.
 
+use mc683xx_board::error::LoadError;
+use mc683xx_board::error::RunError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::flat::MapError;
-use mc683xx_cpu32::flat::Unmapped;
 use mc683xx_cpu32::interrupt::NoIrqPin;
 use mc683xx_cpu32::memory::MemoryError;
+use mc683xx_cpu32::memory::Unserved;
 use mc683xx_mc68331::chip::BuildError;
 use mc683xx_mc68331::debug::TargetError;
 use mc683xx_mc68331::host::AccessError;
@@ -17,10 +19,6 @@ pub(crate) enum Error {
     /// A chip-select pin name that is none of `CSBOOT`, `CS0`-`CS10`.
     #[error("no chip select {0:?}")]
     Select(String),
-    /// A GPT input pin name that is none of `PGP0`-`PGP7`, `PAI`,
-    /// `PCLK`.
-    #[error("no GPT input pin {0:?}")]
-    Input(String),
     /// An SCI frame wider than nine data bits (QSMRM 5.2.4).
     #[error("{0:#x} does not fit an SCI frame")]
     Frame(u16),
@@ -89,6 +87,9 @@ pub(crate) enum Error {
     /// A function code wider than FC[2:0].
     #[error("no function code {0}: FC[2:0] is 0 to 7")]
     FunctionCode(u8),
+    /// `ResetCause.UNKNOWN` given as a reset to make or reach.
+    #[error("ResetCause.UNKNOWN is no reset to ask for")]
+    UnknownResetCause,
     /// Page permissions that are not `r`, `w` and `x`, each at most
     /// once.
     #[error("no permissions {0:?}: give r, w and x, each at most once")]
@@ -105,13 +106,59 @@ pub(crate) enum Error {
     /// The bare CPU refused a map or a peripheral.
     #[error(transparent)]
     Map(#[from] MapError),
-    /// Host access to bytes no map covers.
+    /// Host access to bytes that are not memory the core serves.
     #[error(transparent)]
-    Unmapped(#[from] Unmapped),
+    Unserved(#[from] Unserved),
     /// The chip could not save, or refused a snapshot.
     #[error(transparent)]
     State(#[from] StateError),
     /// The chip refused a debugger's call.
     #[error(transparent)]
     Target(#[from] TargetError),
+    /// A board file refused, or not read.
+    #[error(transparent)]
+    Load(#[from] LoadError),
+    /// A board's run that could not go on.
+    #[error(transparent)]
+    Run(#[from] RunError),
+    /// A value the bindings have no Python value for, by its kind and,
+    /// where it prints, its Rust name: a variant of a `non_exhaustive`
+    /// enum newer than they are, or a run's end with no Python class
+    /// (PLAN.md, Python).  A run's end ([`RUN_END`]) raises `RunError`,
+    /// any other `NotImplementedError`.
+    #[error("a {kind}{} the bindings do not know", named(name.as_deref()))]
+    Unmapped {
+        /// What it is: `reset cause`, [`RUN_END`].
+        kind: &'static str,
+        /// Its Rust name, if it has a printed form.
+        name: Option<String>,
+    },
+}
+
+/// A run's end as an [`Error::Unmapped`] names its kind.
+pub(crate) const RUN_END: &str = "run end";
+
+impl Error {
+    /// A value of `kind` with no Python value, unnamed.
+    pub(crate) const fn unmapped(kind: &'static str) -> Self {
+        Self::Unmapped { kind, name: None }
+    }
+
+    /// A value of `kind` with no Python value, `name` its Rust name.
+    pub(crate) fn named(kind: &'static str, name: impl ToString) -> Self {
+        Self::Unmapped {
+            kind,
+            name: Some(name.to_string()),
+        }
+    }
+
+    /// A run's end with no Python class, `name` its Rust name.
+    pub(crate) fn run_end(name: impl ToString) -> Self {
+        Self::named(RUN_END, name)
+    }
+}
+
+/// ` (name)`, or nothing for no name.
+fn named(name: Option<&str>) -> String {
+    name.map(|name| format!(" ({name})")).unwrap_or_default()
 }

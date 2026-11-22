@@ -362,31 +362,17 @@ impl Firmware {
                 offset: start,
             })
         };
-        let rom = Page {
-            read: backing(ROM),
-            write: None,
-            port: PortSize::Bits16,
-            clocks: CLOCKS,
-        };
-        let page = |start| Page {
-            read: backing(start),
-            write: backing(start),
-            ..rom
-        };
+        let rom = Page::BUS
+            .reading(backing(ROM))
+            .timed(PortSize::Bits16, CLOCKS);
+        let page = |start| rom.reading(backing(start)).writing(backing(start));
         // The return page is read only: a call writes no code.
         let regions = [
             (ROM, ROM_BYTES, rom),
             (RAM, RAM_BYTES, page(RAM)),
             (EEPROM, EEPROM_BYTES, page(EEPROM)),
             (STACK, STACK_BYTES, page(STACK)),
-            (
-                RETURN,
-                RETURN_BYTES,
-                Page {
-                    read: backing(RETURN),
-                    ..rom
-                },
-            ),
+            (RETURN, RETURN_BYTES, rom.reading(backing(RETURN))),
         ];
         for (start, length, page) in regions {
             for space in [Space::User, Space::Supervisor] {
@@ -536,9 +522,9 @@ impl Firmware {
         machine::renew(&mut self.cpu);
         let registers = &mut self.cpu.registers;
         registers.set_sr(SUPERVISOR);
-        registers.vbr = VECTORS;
-        registers.ssp = sp;
-        registers.pc = entry;
+        registers.vbr = Address(VECTORS);
+        registers.ssp = Address(sp);
+        registers.pc = Address(entry);
         set(registers);
         let started = machine::capture(registers);
         let mut steps = 0;
@@ -546,7 +532,7 @@ impl Firmware {
             if steps == STEP_LIMIT {
                 break Stopped::StepLimit;
             }
-            let pc = self.cpu.registers.pc;
+            let pc = self.cpu.registers.pc.0;
             if pc == RETURN {
                 break Stopped::Returned;
             }
@@ -667,7 +653,7 @@ mod tests {
         let call = firmware.call(CODE, sp, |_| {});
         assert_eq!(call.stopped, Stopped::Returned);
         assert_eq!(call.d0(), 5);
-        assert_eq!(call.registers.ssp, sp + 4);
+        assert_eq!(call.registers.ssp.0, sp + 4);
     }
 
     #[test]

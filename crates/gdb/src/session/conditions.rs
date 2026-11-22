@@ -21,7 +21,7 @@ pub(super) fn monitor(
         ["conditions"] => offered(conditions, None, out),
         ["conditions", peripheral] => offered(conditions, Some(peripheral), out),
         ["delete", id] => match id.parse() {
-            Ok(id) if conditions.disarm(ConditionId(id)) => outputln!(out, "deleted {id}"),
+            Ok(id) if conditions.disarm(ConditionId::new(id)) => outputln!(out, "deleted {id}"),
             Ok(id) => outputln!(out, "no condition {id}"),
             Err(_) => outputln!(out, "not a condition's number: {id:?}"),
         },

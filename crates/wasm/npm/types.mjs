@@ -15,6 +15,10 @@
 // output stops the build, as does a DOM or WebAssembly name in them, or
 // a name the web declaration exports that node.d.ts does not, so code
 // importing a type from `mc683xx` checks in Node and a browser alike.
+//
+// The web bindings' `InitOutput` is made opaque too, its memory alone:
+// wasm-bindgen declares every export of the module, the bindings'
+// internals, which are no API.
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -70,7 +74,23 @@ export default function init(module_or_path?: InitInput): Promise<InitOutput>;
 export function initSync(module?: SyncInitInput): InitOutput;
 `;
 
-const web = readFileSync(WEB_TYPES, "utf8");
+// wasm-bindgen's `InitOutput`, the module's exports.
+const WEB_OUTPUT = /^export interface InitOutput \{\n(?: {4}readonly \w+: [^\n]+;\n)+\}\n/m;
+const OPAQUE_WEB_OUTPUT = `/**
+ * The module's exports, for the bindings alone: opaque, but for its
+ * memory.
+ */
+export interface InitOutput {
+    readonly memory: WebAssembly.Memory;
+}
+`;
+
+const bound = readFileSync(WEB_TYPES, "utf8");
+const outputs = bound.match(new RegExp(WEB_OUTPUT.source, "gm")) ?? [];
+if (outputs.length !== 1 || !outputs[0].includes("\n    readonly memory: WebAssembly.Memory;\n")) {
+  throw new Error(`${WEB_TYPES}: not one InitOutput with its memory`);
+}
+const web = bound.replace(WEB_OUTPUT, OPAQUE_WEB_OUTPUT);
 const start = web.indexOf(INITIALIZATION);
 if (start < 0 || web.indexOf(INITIALIZATION, start + 1) >= 0) {
   throw new Error(`${WEB_TYPES}: not one ${JSON.stringify(INITIALIZATION.trim())}`);

@@ -48,6 +48,7 @@ use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
+use mc683xx_board::time::TimeBase;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
@@ -759,7 +760,7 @@ impl Peripheral for Duart {
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
         // no DTACK for an acknowledge with no interrupt pending (2.11)
         (access.role != Role::Iack || self.interrupting()).then_some(0)
     }
@@ -772,13 +773,15 @@ impl Peripheral for Duart {
         self.sync(drive);
     }
 
-    fn reset(&mut self, now: Time, drive: &mut Drive<'_>) {
+    fn reset(&mut self, drive: &mut Drive<'_>) {
+        let now = drive.now();
         self.run_until(now);
         self.hardware_reset(now);
         self.sync(drive);
     }
 
-    fn input(&mut self, port: usize, signal: Signal, now: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
+        let now = drive.now();
         match (port, signal) {
             (RXDA | RXDB, Signal::Serial(serial)) => {
                 // on the line first: a frame that starts as a break ends
@@ -795,7 +798,7 @@ impl Peripheral for Duart {
         self.sync(drive);
     }
 
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         let source = self.source();
         let opcr = self.state.opcr;
         let every = opcr >> OPCR_OP3_SHIFT & OPCR_FIELD_MASK == OP3_COUNTER;
@@ -808,7 +811,8 @@ impl Peripheral for Duart {
         [self.next_internal(), counter].into_iter().flatten().min()
     }
 
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
+        let now = drive.now();
         self.run_until(now);
         self.sync(drive);
     }

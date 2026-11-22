@@ -4,11 +4,14 @@
 use mc683xx_board::inspect::Inspection;
 use mc683xx_board::inspect::Value;
 use mc683xx_board::peripheral::Drive;
+
+use crate::SYSTEM_CLOCK;
 use mc683xx_board::peripheral::Driven;
 use mc683xx_board::peripheral::Lane;
 use mc683xx_board::peripheral::Peripheral;
 use mc683xx_board::peripheral::PeripheralAccess;
 use mc683xx_board::peripheral::Role;
+use mc683xx_board::registry::ConstructError;
 use mc683xx_board::registry::Context;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::ParameterError;
@@ -18,6 +21,7 @@ use mc683xx_board::signal::Direction;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
@@ -92,6 +96,11 @@ const CHARACTER: u64 = 1_041_666_666;
 /// Start bit to the center of the stop bit: nine and a half bits.
 const TO_STOP_CENTER: u64 = 989_583_333;
 
+/// `picoseconds` picoseconds.
+const fn ps(picoseconds: u64) -> Span {
+    Span::from_picos(picoseconds)
+}
+
 /// A DUART under test.
 struct Bench {
     /// The peripheral.
@@ -107,7 +116,7 @@ impl Bench {
     /// A `variant` at 3.6864 MHz, powered on.
     fn of(variant: Variant) -> Self {
         let mut duart = Duart::new(variant, super::X1_DEFAULT_HZ);
-        duart.power_on(&mut Drive::new(Time::ZERO));
+        duart.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
         Self { duart }
     }
 
@@ -143,7 +152,7 @@ impl Bench {
 
     /// `register` written `value` at `now`: what it drove.
     fn write(&mut self, register: u8, value: u8, now: Time) -> Vec<Driven> {
-        let mut drive = Drive::new(now);
+        let mut drive = Drive::new(now, SYSTEM_CLOCK);
         self.duart
             .write(
                 Self::access(register, Role::ReadWrite, now),
@@ -161,7 +170,7 @@ impl Bench {
 
     /// `register` read at `now`, and what the read drove.
     fn read_driving(&mut self, register: u8, now: Time) -> (u8, Vec<Driven>) {
-        let mut drive = Drive::new(now);
+        let mut drive = Drive::new(now, SYSTEM_CLOCK);
         let value = self
             .duart
             .read(Self::access(register, Role::ReadWrite, now), &mut drive)
@@ -172,26 +181,30 @@ impl Bench {
     /// An interrupt acknowledge at `now`.
     fn acknowledge(&mut self, now: Time) -> Result<u32, BusError> {
         let access = Self::access(0, Role::Iack, now);
-        self.duart.read(access, &mut Drive::new(now))
+        self.duart.read(access, &mut Drive::new(now, SYSTEM_CLOCK))
     }
 
     /// `signal` into `port` at `now`: what it drove.
     fn input(&mut self, port: usize, signal: Signal, now: Time) -> Vec<Driven> {
-        let mut drive = Drive::new(now);
-        self.duart.input(port, signal, now, &mut drive);
+        let mut drive = Drive::new(now, SYSTEM_CLOCK);
+        self.duart.input(port, signal, &mut drive);
         drive.finish().driven
     }
 
     /// Advances through every event up to `until`: what it drove.
     fn run(&mut self, until: Time) -> Vec<Driven> {
         let mut driven = Vec::new();
-        while let Some(next) = self.duart.next_event().filter(|&next| next <= until) {
-            let mut drive = Drive::new(next);
-            self.duart.advance(next, &mut drive);
+        while let Some(next) = self
+            .duart
+            .next_event(SYSTEM_CLOCK)
+            .filter(|&next| next <= until)
+        {
+            let mut drive = Drive::new(next, SYSTEM_CLOCK);
+            self.duart.advance(&mut drive);
             driven.extend(drive.finish().driven);
         }
-        let mut drive = Drive::new(until);
-        self.duart.advance(until, &mut drive);
+        let mut drive = Drive::new(until, SYSTEM_CLOCK);
+        self.duart.advance(&mut drive);
         driven.extend(drive.finish().driven);
         driven
     }
@@ -235,9 +248,7 @@ fn both_peripherals_declare_the_pins_by_their_names() {
     crate::register(&mut registry).unwrap();
     for name in [MC68681, SCC68692] {
         let ports: Vec<(String, Kind, Direction)> = registry
-            .get(name)
-            .unwrap()
-            .ports()
+            .ports(name)
             .unwrap()
             .iter()
             .map(|port| (port.name.clone(), port.kind, port.direction))
@@ -271,7 +282,11 @@ fn construct(name: &str, parameters: &str) -> Result<Box<dyn Peripheral>, Parame
     let parameters = Parameters::parse(parameters).unwrap();
     let environment = Environment::default();
     let context = Context::new("duart", &parameters, &environment);
-    let peripheral = registry.get(name).unwrap().construct(&context)?.peripheral;
+    let peripheral = match registry.construct(name, &context) {
+        Ok(constructed) => constructed.peripheral,
+        Err(ConstructError::Parameter(error)) => return Err(error),
+        Err(error) => panic!("{error}"),
+    };
     if let Some(key) = parameters.unread() {
         return Err(ParameterError::Unknown(key));
     }
@@ -296,7 +311,7 @@ fn x1_clk_is_a_parameter_that_scales_every_rate() {
     bench.channel(0);
     let sent = frames(&bench.write(RBA, b'2', Time::ZERO), TXDA);
     assert_eq!(sent[0].1.baud, Frequency::from_hz(19_200));
-    assert_eq!(sent[0].1.length, CHARACTER / 2);
+    assert_eq!(sent[0].1.length, ps(CHARACTER / 2));
 }
 
 #[test]
@@ -308,11 +323,11 @@ fn the_ivr_is_0f_out_of_reset_and_answers_an_acknowledge_only_while_interrupting
     // no interrupt pending: the DUART ignores IACK (2.11)
     assert_eq!(bench.acknowledge(Time::ZERO), Err(BusError));
     let iack = Bench::access(0, Role::Iack, Time::ZERO);
-    assert_eq!(bench.duart.wait_states(iack), None);
+    assert_eq!(bench.duart.wait_states(iack, SYSTEM_CLOCK), None);
     bench.channel(0);
     bench.write(ISR, 0x01, Time::ZERO);
     assert_eq!(bench.acknowledge(Time::ZERO), Ok(0x40));
-    assert_eq!(bench.duart.wait_states(iack), Some(0));
+    assert_eq!(bench.duart.wait_states(iack, SYSTEM_CLOCK), Some(0));
 }
 
 #[test]
@@ -335,26 +350,38 @@ fn a_character_goes_out_at_its_write_and_the_next_waits_in_the_holding_register(
     let mut bench = Bench::new();
     bench.channel(MRB);
     assert_eq!(bench.read(SRB, Time::ZERO) & 0x0c, 0x0c, "TxRDY and TxEMT");
-    let sent = frames(&bench.write(RBB, b'p', Time(1000)), TXDB);
+    let sent = frames(&bench.write(RBB, b'p', Time::from_picos(1000)), TXDB);
     assert_eq!(
         sent,
         [(
-            Time(1000),
+            Time::from_picos(1000),
             Serial::timed(
                 Frame::Data(u16::from(b'p')),
                 Frequency::from_hz(9600),
-                CHARACTER
+                ps(CHARACTER)
             )
         )]
     );
-    assert_eq!(bench.read(SRB, Time(1000)) & 0x0c, 0x04, "TxRDY, not TxEMT");
-    bench.write(RBB, b'q', Time(2000));
-    assert_eq!(bench.read(SRB, Time(2000)) & 0x0c, 0x00, "holding full");
-    let sent = frames(&bench.run(Time(1000 + 2 * CHARACTER)), TXDB);
-    assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0].0, Time(1000 + CHARACTER), "back to back");
     assert_eq!(
-        bench.read(SRB, Time(1000 + 2 * CHARACTER)) & 0x0c,
+        bench.read(SRB, Time::from_picos(1000)) & 0x0c,
+        0x04,
+        "TxRDY, not TxEMT"
+    );
+    bench.write(RBB, b'q', Time::from_picos(2000));
+    assert_eq!(
+        bench.read(SRB, Time::from_picos(2000)) & 0x0c,
+        0x00,
+        "holding full"
+    );
+    let sent = frames(&bench.run(Time::from_picos(1000 + 2 * CHARACTER)), TXDB);
+    assert_eq!(sent.len(), 1);
+    assert_eq!(
+        sent[0].0,
+        Time::from_picos(1000 + CHARACTER),
+        "back to back"
+    );
+    assert_eq!(
+        bench.read(SRB, Time::from_picos(1000 + 2 * CHARACTER)) & 0x0c,
         0x0c,
         "empty"
     );
@@ -373,7 +400,7 @@ fn a_disabled_transmitter_takes_no_character_but_finishes_its_own() {
         "TxRDY and TxEMT clear"
     );
     bench.write(RBA, b'c', Time::ZERO);
-    let sent = frames(&bench.run(Time(4 * CHARACTER)), TXDA);
+    let sent = frames(&bench.run(Time::from_picos(4 * CHARACTER)), TXDA);
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].1.frame, Frame::Data(u16::from(b'b')));
 }
@@ -390,14 +417,17 @@ fn parity_and_character_length_shape_the_frame() {
     // 0x41 has two ones: odd parity sets bit 7
     assert_eq!(sent[0].1.frame, Frame::Data(0xc1));
     // start, seven data, parity: 144 sixteenths; and 25: 4056 ticks
-    assert_eq!(sent[0].1.length, 1_100_260_416);
+    assert_eq!(sent[0].1.length, ps(1_100_260_416));
     // forced low parity, five bits: 1 1/16 stop bits at code 0
     bench.write(CRA, 0x10, Time::ZERO);
     bench.write(MRA, 0x08, Time::ZERO);
     bench.write(MRA, 0x00, Time::ZERO);
-    let sent = frames(&bench.run(Time(10 * CHARACTER)), TXDA);
+    let sent = frames(&bench.run(Time::from_picos(10 * CHARACTER)), TXDA);
     assert!(sent.is_empty());
-    let sent = frames(&bench.write(RBA, 0xff, Time(10 * CHARACTER)), TXDA);
+    let sent = frames(
+        &bench.write(RBA, 0xff, Time::from_picos(10 * CHARACTER)),
+        TXDA,
+    );
     assert_eq!(sent[0].1.frame, Frame::Data(0x1f));
 }
 
@@ -410,42 +440,48 @@ fn the_receiver_checks_parity() {
     bench.write(MRA, 0x03, Time::ZERO);
     let frame = |bits| Signal::Serial(Serial::new(Frame::Data(bits), Frequency::from_hz(9600), 11));
     bench.input(RXDA, frame(0x101), Time::ZERO);
-    bench.run(Time(2 * CHARACTER));
+    bench.run(Time::from_picos(2 * CHARACTER));
     assert_eq!(
-        bench.read(SRA, Time(2 * CHARACTER)) & 0x21,
+        bench.read(SRA, Time::from_picos(2 * CHARACTER)) & 0x21,
         0x01,
         "even: no error"
     );
-    assert_eq!(bench.read(RBA, Time(2 * CHARACTER)), 0x01);
-    bench.input(RXDA, frame(0x001), Time(2 * CHARACTER));
-    bench.run(Time(4 * CHARACTER));
+    assert_eq!(bench.read(RBA, Time::from_picos(2 * CHARACTER)), 0x01);
+    bench.input(RXDA, frame(0x001), Time::from_picos(2 * CHARACTER));
+    bench.run(Time::from_picos(4 * CHARACTER));
     assert_eq!(
-        bench.read(SRA, Time(4 * CHARACTER)) & 0x21,
+        bench.read(SRA, Time::from_picos(4 * CHARACTER)) & 0x21,
         0x21,
         "parity error"
     );
     // reset error status clears it (4.2.7.2)
-    bench.write(CRA, 0x40, Time(4 * CHARACTER));
-    assert_eq!(bench.read(SRA, Time(4 * CHARACTER)) & 0x21, 0x01);
+    bench.write(CRA, 0x40, Time::from_picos(4 * CHARACTER));
+    assert_eq!(
+        bench.read(SRA, Time::from_picos(4 * CHARACTER)) & 0x21,
+        0x01
+    );
 }
 
 #[test]
 fn a_character_arrives_at_the_center_of_its_stop_bit() {
     let mut bench = Bench::new();
     bench.channel(MRB);
-    let start = Time(5000);
+    let start = Time::from_picos(5000);
     bench.input(RXDB, character(b'x'), start);
-    assert_eq!(bench.duart.next_event(), Some(start + TO_STOP_CENTER));
-    bench.run(start + TO_STOP_CENTER - 1);
-    assert_eq!(bench.read(SRB, start) & 0x01, 0, "on the line");
-    bench.run(start + TO_STOP_CENTER);
     assert_eq!(
-        bench.read(SRB, start + TO_STOP_CENTER) & 0x01,
+        bench.duart.next_event(SYSTEM_CLOCK),
+        Some(start + ps(TO_STOP_CENTER))
+    );
+    bench.run(start + ps(TO_STOP_CENTER - 1));
+    assert_eq!(bench.read(SRB, start) & 0x01, 0, "on the line");
+    bench.run(start + ps(TO_STOP_CENTER));
+    assert_eq!(
+        bench.read(SRB, start + ps(TO_STOP_CENTER)) & 0x01,
         0x01,
         "RxRDY"
     );
-    assert_eq!(bench.read(RBB, start + TO_STOP_CENTER), b'x');
-    assert_eq!(bench.read(SRB, start + TO_STOP_CENTER) & 0x01, 0);
+    assert_eq!(bench.read(RBB, start + ps(TO_STOP_CENTER)), b'x');
+    assert_eq!(bench.read(SRB, start + ps(TO_STOP_CENTER)) & 0x01, 0);
 }
 
 /// The group `name` of `inspection`.
@@ -461,9 +497,9 @@ fn it_shows_each_channel_s_fifo_and_its_registers() {
     let mut bench = Bench::new();
     bench.channel(MRB);
     bench.write(ISR, 0x20, Time::ZERO);
-    let start = Time(5000);
+    let start = Time::from_picos(5000);
     bench.input(RXDB, character(b'x'), start);
-    bench.run(start + TO_STOP_CENTER);
+    bench.run(start + ps(TO_STOP_CENTER));
     let inspection = bench.duart.inspect();
     assert_eq!(
         inspection.get("variant"),
@@ -493,7 +529,7 @@ fn a_character_past_the_fifo_and_the_shift_register_overruns() {
             Time::ZERO,
         );
     }
-    let end = Time(6 * CHARACTER);
+    let end = Time::from_picos(6 * CHARACTER);
     bench.run(end);
     // a, b and c in the FIFO; d held in the shift register and lost to
     // e's start bit, e to f's: f held (3.2)
@@ -513,10 +549,10 @@ fn a_character_arriving_while_the_receiver_is_disabled_is_lost() {
     bench.channel(0);
     bench.write(CRA, 0x02, Time::ZERO);
     bench.input(RXDA, character(b'x'), Time::ZERO);
-    bench.write(CRA, 0x01, Time(BIT));
-    bench.run(Time(4 * CHARACTER));
-    assert_eq!(bench.read(SRA, Time(4 * CHARACTER)) & 0x01, 0);
-    assert_eq!(bench.duart.next_event(), None);
+    bench.write(CRA, 0x01, Time::from_picos(BIT));
+    bench.run(Time::from_picos(4 * CHARACTER));
+    assert_eq!(bench.read(SRA, Time::from_picos(4 * CHARACTER)) & 0x01, 0);
+    assert_eq!(bench.duart.next_event(SYSTEM_CLOCK), None);
 }
 
 #[test]
@@ -530,12 +566,15 @@ fn local_loopback_receives_with_the_receiver_disabled_and_sends_nothing() {
     let mut driven = bench.write(RBA, b'L', Time::ZERO);
     // the line's characters are ignored (4.2.2.1)
     driven.extend(bench.input(RXDA, character(b'x'), Time::ZERO));
-    driven.extend(bench.run(Time(3 * CHARACTER)));
+    driven.extend(bench.run(Time::from_picos(3 * CHARACTER)));
     assert!(frames(&driven, TXDA).is_empty(), "TxDA held high");
-    assert_eq!(bench.read(SRA, Time(3 * CHARACTER)) & 0x01, 0x01);
-    assert_eq!(bench.read(RBA, Time(3 * CHARACTER)), b'L');
     assert_eq!(
-        bench.read(SRA, Time(3 * CHARACTER)) & 0x01,
+        bench.read(SRA, Time::from_picos(3 * CHARACTER)) & 0x01,
+        0x01
+    );
+    assert_eq!(bench.read(RBA, Time::from_picos(3 * CHARACTER)), b'L');
+    assert_eq!(
+        bench.read(SRA, Time::from_picos(3 * CHARACTER)) & 0x01,
         0,
         "nothing else"
     );
@@ -553,30 +592,37 @@ fn automatic_echo_retransmits_what_it_receives_and_cuts_off_the_cpu() {
         0,
         "TxRDY and TxEMT inactive"
     );
-    let echoed = frames(&bench.input(RXDB, character(b'e'), Time(7)), TXDB);
+    let echoed = frames(
+        &bench.input(RXDB, character(b'e'), Time::from_picos(7)),
+        TXDB,
+    );
     assert_eq!(
         echoed,
         [(
-            Time(7),
+            Time::from_picos(7),
             Serial::timed(
                 Frame::Data(u16::from(b'e')),
                 Frequency::from_hz(9600),
-                CHARACTER
+                ps(CHARACTER)
             )
         )]
     );
-    bench.run(Time(2 * CHARACTER));
-    assert_eq!(bench.read(RBB, Time(2 * CHARACTER)), b'e', "received too");
+    bench.run(Time::from_picos(2 * CHARACTER));
+    assert_eq!(
+        bench.read(RBB, Time::from_picos(2 * CHARACTER)),
+        b'e',
+        "received too"
+    );
     // remote loopback: echoed, not received
     let _ = bench.read(MRB, Time::ZERO);
-    bench.write(MRB, 0xc7, Time(2 * CHARACTER));
+    bench.write(MRB, 0xc7, Time::from_picos(2 * CHARACTER));
     let echoed = frames(
-        &bench.input(RXDB, character(b'r'), Time(2 * CHARACTER)),
+        &bench.input(RXDB, character(b'r'), Time::from_picos(2 * CHARACTER)),
         TXDB,
     );
     assert_eq!(echoed.len(), 1);
-    bench.run(Time(4 * CHARACTER));
-    assert_eq!(bench.read(SRB, Time(4 * CHARACTER)) & 0x01, 0);
+    bench.run(Time::from_picos(4 * CHARACTER));
+    assert_eq!(bench.read(SRB, Time::from_picos(4 * CHARACTER)) & 0x01, 0);
 }
 
 #[test]
@@ -603,15 +649,19 @@ fn the_mask_passes_status_to_irq_which_is_driven_low() {
             Time::ZERO,
         );
     }
-    bench.run(Time(3 * CHARACTER));
+    bench.run(Time::from_picos(3 * CHARACTER));
     assert_eq!(
-        bench.read(ISR, Time(3 * CHARACTER)) & 0x20,
+        bench.read(ISR, Time::from_picos(3 * CHARACTER)) & 0x20,
         0,
         "two: not full"
     );
-    bench.input(RXDB, character(b'z'), Time(3 * CHARACTER));
-    bench.run(Time(5 * CHARACTER));
-    assert_eq!(bench.read(ISR, Time(5 * CHARACTER)) & 0x20, 0x20, "FFULLB");
+    bench.input(RXDB, character(b'z'), Time::from_picos(3 * CHARACTER));
+    bench.run(Time::from_picos(5 * CHARACTER));
+    assert_eq!(
+        bench.read(ISR, Time::from_picos(5 * CHARACTER)) & 0x20,
+        0x20,
+        "FFULLB"
+    );
     assert!(bench.duart.interrupt_request());
 }
 
@@ -623,19 +673,23 @@ fn a_break_is_one_zero_character_and_a_change_at_each_end() {
     let brk = Signal::Serial(Serial::new(Frame::Break, Frequency::from_hz(9600), 10));
     // three character times of break: one character
     for at in 0..3 {
-        bench.input(RXDA, brk, Time(at * CHARACTER));
-        bench.run(Time(at * CHARACTER + TO_STOP_CENTER));
+        bench.input(RXDA, brk, Time::from_picos(at * CHARACTER));
+        bench.run(Time::from_picos(at * CHARACTER + TO_STOP_CENTER));
     }
-    let now = Time(2 * CHARACTER + TO_STOP_CENTER);
+    let now = Time::from_picos(2 * CHARACTER + TO_STOP_CENTER);
     assert_eq!(bench.read(SRA, now) & 0x81, 0x81, "RB and RxRDY");
     assert_eq!(bench.read(ISR, now) & 0x04, 0x04, "change in break");
     bench.write(CRA, 0x50, now);
     assert_eq!(bench.read(ISR, now) & 0x04, 0, "reset");
-    bench.run(Time(3 * CHARACTER));
-    assert_eq!(bench.read(ISR, Time(3 * CHARACTER)) & 0x04, 0x04, "the end");
-    assert_eq!(bench.read(RBA, Time(3 * CHARACTER)), 0);
+    bench.run(Time::from_picos(3 * CHARACTER));
     assert_eq!(
-        bench.read(SRA, Time(3 * CHARACTER)) & 0x01,
+        bench.read(ISR, Time::from_picos(3 * CHARACTER)) & 0x04,
+        0x04,
+        "the end"
+    );
+    assert_eq!(bench.read(RBA, Time::from_picos(3 * CHARACTER)), 0);
+    assert_eq!(
+        bench.read(SRA, Time::from_picos(3 * CHARACTER)) & 0x01,
         0,
         "one character"
     );
@@ -646,10 +700,10 @@ fn a_commanded_break_goes_out_as_break_frames_until_stopped() {
     let mut bench = Bench::new();
     bench.channel(0);
     let mut driven = bench.write(CRA, 0x60, Time::ZERO);
-    driven.extend(bench.run(Time(2 * CHARACTER)));
-    driven.extend(bench.write(CRA, 0x70, Time(2 * CHARACTER)));
-    driven.extend(bench.write(RBA, b'z', Time(2 * CHARACTER)));
-    driven.extend(bench.run(Time(5 * CHARACTER)));
+    driven.extend(bench.run(Time::from_picos(2 * CHARACTER)));
+    driven.extend(bench.write(CRA, 0x70, Time::from_picos(2 * CHARACTER)));
+    driven.extend(bench.write(RBA, b'z', Time::from_picos(2 * CHARACTER)));
+    driven.extend(bench.run(Time::from_picos(5 * CHARACTER)));
     let sent: Vec<(Time, Frame)> = frames(&driven, TXDA)
         .into_iter()
         .map(|(at, serial)| (at, serial.frame))
@@ -657,11 +711,14 @@ fn a_commanded_break_goes_out_as_break_frames_until_stopped() {
     assert_eq!(
         sent,
         [
-            (Time(0), Frame::Break),
-            (Time(CHARACTER), Frame::Break),
-            (Time(2 * CHARACTER), Frame::Break),
+            (Time::from_picos(0), Frame::Break),
+            (Time::from_picos(CHARACTER), Frame::Break),
+            (Time::from_picos(2 * CHARACTER), Frame::Break),
             // a bit time high after the break (4.2.7.2)
-            (Time(3 * CHARACTER + BIT), Frame::Data(u16::from(b'z'))),
+            (
+                Time::from_picos(3 * CHARACTER + BIT),
+                Frame::Data(u16::from(b'z'))
+            ),
         ]
     );
 }
@@ -682,21 +739,21 @@ fn the_counter_counts_down_from_its_start_to_terminal_count() {
     let _ = bench.read(START, Time::ZERO);
     // 16 ticks a count: 40 counts
     let tick = 1_000_000_000_000 / 3_686_400;
-    assert_eq!(count(&mut bench, Time(640 * tick + 300)), 60);
-    let terminal = bench.duart.next_event().unwrap();
+    assert_eq!(count(&mut bench, Time::from_picos(640 * tick + 300)), 60);
+    let terminal = bench.duart.next_event(SYSTEM_CLOCK).unwrap();
     assert_eq!(
         terminal,
-        Time((1600 * 1_000_000_000_000_u64).div_ceil(3_686_400))
+        Time::from_picos((1600 * 1_000_000_000_000_u64).div_ceil(3_686_400))
     );
     bench.run(terminal);
     assert_eq!(bench.read(ISR, terminal) & 0x08, 0x08, "ISR[3]");
     assert!(bench.duart.interrupt_request());
     // it rolls over to $FFFF and counts on (3.5.1)
-    assert_eq!(count(&mut bench, terminal + 16 * tick + 300), 0xffff);
-    let _ = bench.read(STOP, terminal + 32 * tick + 300);
+    assert_eq!(count(&mut bench, terminal + ps(16 * tick + 300)), 0xffff);
+    let _ = bench.read(STOP, terminal + ps(32 * tick + 300));
     assert_eq!(bench.read(ISR, terminal) & 0x08, 0, "stop clears it");
     assert_eq!(
-        count(&mut bench, Time(1_000_000_000_000)),
+        count(&mut bench, Time::from_picos(1_000_000_000_000)),
         0xfffe,
         "stopped"
     );
@@ -711,7 +768,7 @@ fn the_timer_sets_its_ready_bit_every_second_terminal_count_and_squares_op3() {
     bench.write(OPCR, 0x04, Time::ZERO);
     bench.write(ISR, 0x08, Time::ZERO);
     let (_, mut driven) = bench.read_driving(START, Time::ZERO);
-    let tick = |n: u64| Time((n * 1_000_000_000_000).div_ceil(3_686_400));
+    let tick = |n: u64| Time::from_picos((n * 1_000_000_000_000).div_ceil(3_686_400));
     driven.extend(bench.run(tick(64 * 4)));
     let edges: Vec<(Time, bool)> = driven
         .into_iter()
@@ -759,7 +816,7 @@ fn the_timer_is_a_16x_clock_for_a_channel() {
         "not started"
     );
     let _ = bench.read(START, Time::ZERO);
-    let sent = frames(&bench.run(Time(1)), TXDA);
+    let sent = frames(&bench.run(Time::from_picos(1)), TXDA);
     assert_eq!(sent[0].1.baud, Frequency::from_hz(9600));
 }
 
@@ -768,7 +825,7 @@ fn the_output_port_shows_the_complement_of_its_register() {
     let mut bench = Bench::new();
     // power-on drove every pin high and IRQ high
     let mut fresh = Duart::new(Variant::Mc68681, super::X1_DEFAULT_HZ);
-    let mut drive = Drive::new(Time::ZERO);
+    let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
     fresh.power_on(&mut drive);
     let first = levels(&drive.finish().driven);
     assert_eq!(first.len(), 9);
@@ -783,10 +840,10 @@ fn the_output_port_shows_the_complement_of_its_register() {
     bench.channel(0);
     assert!(levels(&bench.write(OPCR, 0x10, Time::ZERO)).is_empty());
     bench.input(RXDA, character(b'4'), Time::ZERO);
-    let driven = levels(&bench.run(Time(CHARACTER)));
+    let driven = levels(&bench.run(Time::from_picos(CHARACTER)));
     assert_eq!(driven, [(OP0 + 4, false)]);
     assert_eq!(
-        levels(&bench.write(OPCR, 0x50, Time(CHARACTER))),
+        levels(&bench.write(OPCR, 0x50, Time::from_picos(CHARACTER))),
         [(OP0 + 6, false)]
     );
 }
@@ -807,17 +864,17 @@ fn rts_follows_the_receivers_fifo_and_the_transmitters_disable() {
             Time::ZERO,
         );
     }
-    let driven = bench.run(Time(3 * CHARACTER + BIT));
+    let driven = bench.run(Time::from_picos(3 * CHARACTER + BIT));
     assert_eq!(levels(&driven), [(OP0, true)], "negated at d's start bit");
-    let (_, driven) = bench.read_driving(RBA, Time(4 * CHARACTER));
+    let (_, driven) = bench.read_driving(RBA, Time::from_picos(4 * CHARACTER));
     assert!(levels(&driven).is_empty(), "d took the room");
-    let _ = bench.read(RBA, Time(4 * CHARACTER));
-    assert_eq!(bench.read(SRA, Time(4 * CHARACTER)) & 0x02, 0);
+    let _ = bench.read(RBA, Time::from_picos(4 * CHARACTER));
+    assert_eq!(bench.read(SRA, Time::from_picos(4 * CHARACTER)) & 0x02, 0);
     // the transmitter: OPR[0] cleared a bit time after its last character
-    let at = Time(10 * CHARACTER);
+    let at = Time::from_picos(10 * CHARACTER);
     bench.write(RBA, b'!', at);
     bench.write(CRA, 0x08, at);
-    let driven = levels(&bench.run(at + 2 * CHARACTER));
+    let driven = levels(&bench.run(at + ps(2 * CHARACTER)));
     assert_eq!(driven, [(OP0, true)]);
     assert_eq!(bench.duart.state.opr & 1, 0);
 }
@@ -831,9 +888,16 @@ fn cts_holds_the_transmitter_until_it_goes_low() {
     bench.write(MRB, 0x17, Time::ZERO);
     // IP1 is CTSB; high from power-on
     assert!(frames(&bench.write(RBB, b'c', Time::ZERO), TXDB).is_empty());
-    assert_eq!(bench.duart.next_event(), None, "nothing to wait for");
-    let sent = frames(&bench.input(IP0 + 1, Signal::Level(false), Time(77)), TXDB);
-    assert_eq!(sent[0].0, Time(77));
+    assert_eq!(
+        bench.duart.next_event(SYSTEM_CLOCK),
+        None,
+        "nothing to wait for"
+    );
+    let sent = frames(
+        &bench.input(IP0 + 1, Signal::Level(false), Time::from_picos(77)),
+        TXDB,
+    );
+    assert_eq!(sent[0].0, Time::from_picos(77));
 }
 
 #[test]
@@ -846,12 +910,20 @@ fn the_input_port_reads_its_pins_and_its_detectors_take_25_to_50_microseconds() 
     );
     bench.write(ACR, 0x04, Time::ZERO);
     bench.write(ISR, 0x80, Time::ZERO);
-    bench.input(IP0 + 2, Signal::Level(false), Time(1_000_000));
-    assert_eq!(bench.read(OPCR, Time(1_000_000)), 0xfb, "unlatched");
-    assert_eq!(bench.read(ACR, Time(1_000_000)), 0x0b, "not yet a change");
-    let recognized = bench.duart.next_event().unwrap();
+    bench.input(IP0 + 2, Signal::Level(false), Time::from_picos(1_000_000));
+    assert_eq!(
+        bench.read(OPCR, Time::from_picos(1_000_000)),
+        0xfb,
+        "unlatched"
+    );
+    assert_eq!(
+        bench.read(ACR, Time::from_picos(1_000_000)),
+        0x0b,
+        "not yet a change"
+    );
+    let recognized = bench.duart.next_event(SYSTEM_CLOCK).unwrap();
     // two samples 96 ticks apart, 26.04 microseconds
-    assert!((26_000_000..=52_100_000).contains(&(recognized.0 - 1_000_000)));
+    assert!((26_000_000..=52_100_000).contains(&(recognized.picos() - 1_000_000)));
     bench.run(recognized);
     assert!(bench.duart.interrupt_request(), "ISR[7]");
     assert_eq!(bench.read(ACR, recognized), 0x4b, "IP2 changed");
@@ -861,13 +933,13 @@ fn the_input_port_reads_its_pins_and_its_detectors_take_25_to_50_microseconds() 
     );
     assert_eq!(bench.read(ACR, recognized), 0x0b);
     // a pulse shorter than a sample period is not seen
-    bench.input(IP0 + 2, Signal::Level(true), Time(100_000_000));
-    bench.input(IP0 + 2, Signal::Level(false), Time(101_000_000));
-    assert_eq!(bench.duart.next_event(), None);
+    bench.input(IP0 + 2, Signal::Level(true), Time::from_picos(100_000_000));
+    bench.input(IP0 + 2, Signal::Level(false), Time::from_picos(101_000_000));
+    assert_eq!(bench.duart.next_event(SYSTEM_CLOCK), None);
     // an IP4 change has no detector
-    bench.input(IP0 + 4, Signal::Level(false), Time(200_000_000));
-    assert_eq!(bench.duart.next_event(), None);
-    assert_eq!(bench.read(OPCR, Time(200_000_000)), 0xeb);
+    bench.input(IP0 + 4, Signal::Level(false), Time::from_picos(200_000_000));
+    assert_eq!(bench.duart.next_event(SYSTEM_CLOCK), None);
+    assert_eq!(bench.read(OPCR, Time::from_picos(200_000_000)), 0xeb);
 }
 
 #[test]
@@ -886,16 +958,16 @@ fn reset_clears_the_mask_the_output_port_and_the_channels() {
     bench.write(IVR, 0x55, Time::ZERO);
     bench.write(START, 0xff, Time::ZERO);
     bench.write(ACR, 0x30, Time::ZERO);
-    let mut drive = Drive::new(Time(10));
-    bench.duart.reset(Time(10), &mut drive);
+    let mut drive = Drive::new(Time::from_picos(10), SYSTEM_CLOCK);
+    bench.duart.reset(&mut drive);
     let driven = levels(&drive.finish().driven);
     assert_eq!(driven.len(), 9, "every pin high, IRQ negated");
     assert!(driven.iter().all(|&(_, level)| level));
-    assert_eq!(bench.read(IVR, Time(10)), 0x0f);
-    assert_eq!(bench.read(SRA, Time(10)), 0, "inactive");
-    assert_eq!(bench.read(ISR, Time(10)), 0);
+    assert_eq!(bench.read(IVR, Time::from_picos(10)), 0x0f);
+    assert_eq!(bench.read(SRA, Time::from_picos(10)), 0, "inactive");
+    assert_eq!(bench.read(ISR, Time::from_picos(10)), 0);
     assert_eq!(
-        bench.read(MRA, Time(10)),
+        bench.read(MRA, Time::from_picos(10)),
         MR1_8N,
         "the pointer at MR1; modes kept"
     );
@@ -918,9 +990,13 @@ fn the_scc68692s_extra_commands_are_the_mc68681s_with_bit_7_ignored() {
     // $A0: timeout mode on the SCC68692, reset receiver on the MC68681
     mc.channel(0);
     mc.input(RXDA, character(b'k'), Time::ZERO);
-    mc.run(Time(CHARACTER));
-    mc.write(CRA, 0xa0, Time(CHARACTER));
-    assert_eq!(mc.read(SRA, Time(CHARACTER)) & 0x01, 0, "the FIFO reset");
+    mc.run(Time::from_picos(CHARACTER));
+    mc.write(CRA, 0xa0, Time::from_picos(CHARACTER));
+    assert_eq!(
+        mc.read(SRA, Time::from_picos(CHARACTER)) & 0x01,
+        0,
+        "the FIFO reset"
+    );
 }
 
 #[test]
@@ -933,14 +1009,18 @@ fn the_scc68692s_timeout_mode_restarts_the_counter_at_each_character() {
     bench.write(CTLR, 0x2c, Time::ZERO);
     bench.write(ISR, 0x08, Time::ZERO);
     bench.write(CRA, 0xa0, Time::ZERO);
-    assert_eq!(bench.duart.next_event(), None, "stopped until a character");
+    assert_eq!(
+        bench.duart.next_event(SYSTEM_CLOCK),
+        None,
+        "stopped until a character"
+    );
     bench.input(RXDA, character(b'1'), Time::ZERO);
     bench.input(RXDA, character(b'2'), Time::ZERO);
-    let second = Time(CHARACTER + TO_STOP_CENTER);
+    let second = Time::from_picos(CHARACTER + TO_STOP_CENTER);
     bench.run(second);
     assert!(!bench.duart.interrupt_request());
-    let timeout = bench.duart.next_event().unwrap();
-    let span = timeout.0 - second.0;
+    let timeout = bench.duart.next_event(SYSTEM_CLOCK).unwrap();
+    let span = timeout.picos() - second.picos();
     assert!((1_301_000_000..1_303_000_000).contains(&span), "{span}");
     bench.run(timeout);
     assert!(bench.duart.interrupt_request(), "ISR[3]: the line paused");
@@ -963,19 +1043,22 @@ fn multidrop_takes_address_characters_with_the_receiver_disabled() {
     // data, then an address: the A/D bit after the eight data bits
     bench.input(RXDA, frame(0x033), Time::ZERO);
     bench.input(RXDA, frame(0x1a5), Time::ZERO);
-    bench.run(Time(3 * CHARACTER));
+    bench.run(Time::from_picos(3 * CHARACTER));
     assert_eq!(
-        bench.read(SRA, Time(3 * CHARACTER)) & 0x21,
+        bench.read(SRA, Time::from_picos(3 * CHARACTER)) & 0x21,
         0x21,
         "A/D in PE"
     );
-    assert_eq!(bench.read(RBA, Time(3 * CHARACTER)), 0xa5);
-    assert_eq!(bench.read(SRA, Time(3 * CHARACTER)) & 0x01, 0);
+    assert_eq!(bench.read(RBA, Time::from_picos(3 * CHARACTER)), 0xa5);
+    assert_eq!(bench.read(SRA, Time::from_picos(3 * CHARACTER)) & 0x01, 0);
     // the transmitter sends MR1[2] as the A/D bit
-    bench.write(CRA, 0x10, Time(3 * CHARACTER));
-    bench.write(MRA, 0x1f, Time(3 * CHARACTER));
-    bench.write(CRA, 0x05, Time(3 * CHARACTER));
-    let sent = frames(&bench.write(RBA, 0x42, Time(3 * CHARACTER)), TXDA);
+    bench.write(CRA, 0x10, Time::from_picos(3 * CHARACTER));
+    bench.write(MRA, 0x1f, Time::from_picos(3 * CHARACTER));
+    bench.write(CRA, 0x05, Time::from_picos(3 * CHARACTER));
+    let sent = frames(
+        &bench.write(RBA, 0x42, Time::from_picos(3 * CHARACTER)),
+        TXDA,
+    );
     assert_eq!(sent[0].1.frame, Frame::Data(0x142));
 }
 
@@ -989,15 +1072,18 @@ fn block_error_mode_keeps_every_characters_status_until_reset() {
     let frame = |bits| Signal::Serial(Serial::untimed(Frame::Data(bits)));
     bench.input(RXDA, frame(0x001), Time::ZERO);
     bench.input(RXDA, frame(0x101), Time::ZERO);
-    bench.run(Time(3 * CHARACTER));
-    let _ = bench.read(RBA, Time(3 * CHARACTER));
+    bench.run(Time::from_picos(3 * CHARACTER));
+    let _ = bench.read(RBA, Time::from_picos(3 * CHARACTER));
     assert_eq!(
-        bench.read(SRA, Time(3 * CHARACTER)) & 0x21,
+        bench.read(SRA, Time::from_picos(3 * CHARACTER)) & 0x21,
         0x21,
         "the first's error"
     );
-    bench.write(CRA, 0x40, Time(3 * CHARACTER));
-    assert_eq!(bench.read(SRA, Time(3 * CHARACTER)) & 0x21, 0x01);
+    bench.write(CRA, 0x40, Time::from_picos(3 * CHARACTER));
+    assert_eq!(
+        bench.read(SRA, Time::from_picos(3 * CHARACTER)) & 0x21,
+        0x01
+    );
 }
 
 #[test]
@@ -1009,9 +1095,9 @@ fn a_snapshot_restores_mid_character() {
     let snapshot = bench.duart.save().unwrap();
     let mut other = Bench::new();
     other.duart.restore(&snapshot).unwrap();
-    other.run(Time(CHARACTER));
+    other.run(Time::from_picos(CHARACTER));
     assert!(other.duart.interrupt_request());
-    assert_eq!(other.read(RBA, Time(CHARACTER)), b's');
+    assert_eq!(other.read(RBA, Time::from_picos(CHARACTER)), b's');
     let mut wrong = snapshot;
     wrong[0] ^= 1;
     assert!(other.duart.restore(&wrong).is_err());
@@ -1042,7 +1128,7 @@ fn a_restore_refuses_another_peripheral_and_a_state_no_run_holds() {
         ..before.clone()
     };
     let unchanged = State {
-        pending: [Some(Time(1)), None, None, None],
+        pending: [Some(Time::from_picos(1)), None, None, None],
         ..before.clone()
     };
     for state in [timeout, past_ip5, unchanged] {
@@ -1071,11 +1157,11 @@ fn the_format_matches_its_golden() {
         bench.input(
             RXDB,
             Signal::Serial(Serial::untimed(Frame::Data(u16::from(byte)))),
-            Time(3),
+            Time::from_picos(3),
         );
     }
-    bench.input(IP0, Signal::Level(false), Time(5));
-    bench.run(Time(2 * CHARACTER));
+    bench.input(IP0, Signal::Level(false), Time::from_picos(5));
+    bench.run(Time::from_picos(2 * CHARACTER));
     let snapshot = bench.duart.save().unwrap();
     snapshot_golden::check(
         env!("CARGO_MANIFEST_DIR"),
@@ -1095,7 +1181,7 @@ fn a_word_cycle_through_both_lanes_carries_the_register_on_data_15_8() {
         FunctionCode::SUPERVISOR_DATA,
         Time::ZERO,
     );
-    let mut drive = Drive::new(Time::ZERO);
+    let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
     bench.duart.write(access, 0x4142, &mut drive).unwrap();
     assert_eq!(bench.duart.state.ivr, 0x41, "the upper byte (SIMRM 5.3.3)");
     assert_eq!(bench.duart.read(access, &mut drive), Ok(0x4100));
@@ -1106,7 +1192,7 @@ fn a_word_cycle_through_both_lanes_carries_the_register_on_data_15_8() {
 /// command (RESETN; Counter/Timer).
 #[test]
 fn reset_runs_the_mc68681s_timer_and_stops_the_scc68692s() {
-    let tick = |n: u64| Time((n * 1_000_000_000_000).div_ceil(3_686_400));
+    let tick = |n: u64| Time::from_picos((n * 1_000_000_000_000).div_ceil(3_686_400));
     for (variant, acr, running) in [
         (Variant::Mc68681, 0x30, true),
         (Variant::Scc68692, 0x70, false),
@@ -1115,7 +1201,7 @@ fn reset_runs_the_mc68681s_timer_and_stops_the_scc68692s() {
         // X1/16, preload 4: a terminal count every 64 ticks
         bench.write(ACR, acr, Time::ZERO);
         bench.write(CTLR, 4, Time::ZERO);
-        bench.duart.reset(tick(32), &mut Drive::new(tick(32)));
+        bench.duart.reset(&mut Drive::new(tick(32), SYSTEM_CLOCK));
         assert_eq!(bench.duart.state.acr, 0x70, "{variant:?}: timer mode");
         // the second terminal count from RESET
         let second = tick(32 + 2 * 64);
@@ -1152,14 +1238,14 @@ fn a_stop_condition_fires_for_its_character_and_survives_a_restore() {
     let received = bench.duart.arm("rx", &words(&["b", "0x78"])).unwrap();
     let sent = bench.duart.arm("tx", &words(&["b"])).unwrap();
     let snapshot = bench.duart.save().unwrap();
-    let start = Time(5000);
+    let start = Time::from_picos(5000);
     let fired = |bench: &mut Bench, at: Time| {
-        let mut drive = Drive::new(at);
-        bench.duart.advance(at, &mut drive);
+        let mut drive = Drive::new(at, SYSTEM_CLOCK);
+        bench.duart.advance(&mut drive);
         drive.finish().fired
     };
     let written = |bench: &mut Bench, byte: u8, at: Time| {
-        let mut drive = Drive::new(at);
+        let mut drive = Drive::new(at, SYSTEM_CLOCK);
         let access = Bench::access(RBB, Role::ReadWrite, at);
         bench
             .duart
@@ -1169,13 +1255,13 @@ fn a_stop_condition_fires_for_its_character_and_survives_a_restore() {
     };
     bench.input(RXDB, character(b'y'), start);
     assert!(
-        fired(&mut bench, start + TO_STOP_CENTER).is_empty(),
+        fired(&mut bench, start + ps(TO_STOP_CENTER)).is_empty(),
         "not x"
     );
     bench.duart.restore(&snapshot).unwrap();
     bench.input(RXDB, character(b'x'), start);
-    assert_eq!(fired(&mut bench, start + TO_STOP_CENTER), [received]);
-    assert_eq!(written(&mut bench, b'p', start + CHARACTER), [sent]);
+    assert_eq!(fired(&mut bench, start + ps(TO_STOP_CENTER)), [received]);
+    assert_eq!(written(&mut bench, b'p', start + ps(CHARACTER)), [sent]);
     bench.duart.disarm(sent);
-    assert!(written(&mut bench, b'q', start + 3 * CHARACTER).is_empty());
+    assert!(written(&mut bench, b'q', start + ps(3 * CHARACTER)).is_empty());
 }

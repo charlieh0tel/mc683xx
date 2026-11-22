@@ -87,7 +87,7 @@ pub(super) fn register(table: &mut Table) {
 fn instruction_trap(core: &Core<'_>) -> Exception {
     Exception::Long {
         vector: Vector::TRAPCC,
-        pc: Address(core.cpu.registers.pc),
+        pc: core.cpu.registers.pc,
         address: core.instruction_pc(),
     }
 }
@@ -105,7 +105,7 @@ const fn format_error(core: &Core<'_>) -> Exception {
 fn trap(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
     Err(Exception::Short {
         vector: Vector::trap((opcode & TRAP_NUMBER) as u8),
-        pc: Address(core.cpu.registers.pc),
+        pc: core.cpu.registers.pc,
     })
 }
 
@@ -150,7 +150,7 @@ fn illegal(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
 /// and runs again from memory.  Each acknowledge costs BKPT's row and
 /// the word returned its own (CPU32RM 8.3.13).
 fn bkpt(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
-    let acknowledge_cost = Cycles(u64::from(timing::exception::BKPT.cycles));
+    let acknowledge_cost = Cycles::from_clocks(u64::from(timing::exception::BKPT.cycles));
     let mut number = opcode & BKPT_NUMBER;
     for acknowledge in 0..BKPT_CHAIN {
         if acknowledge > 0 {
@@ -165,7 +165,7 @@ fn bkpt(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
         }
         number = replacement & BKPT_NUMBER;
     }
-    core.cpu.registers.pc = core.instruction_pc().0;
+    core.cpu.registers.pc = core.instruction_pc();
     Ok(Flow::Changed)
 }
 
@@ -178,7 +178,7 @@ fn replace(
     replacement: u16,
     acknowledge_cost: Cycles,
 ) -> Result<Flow, Exception> {
-    let entry = Cycles(u64::from(timing::table()[usize::from(replacement)].cycles));
+    let entry = Cycles::from_clocks(u64::from(timing::table()[usize::from(replacement)].cycles));
     match table()[usize::from(replacement)](core, replacement) {
         Ok(flow) => {
             core.charge_replacement(entry);
@@ -206,28 +206,28 @@ fn rte(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
     if !core.cpu.registers.is_supervisor() {
         return Err(core.privilege_violation());
     }
-    let sp = Address(core.cpu.registers.ssp);
+    let sp = core.cpu.registers.ssp;
     let sr = frame_word(core, sp, frame::SR)?;
-    let pc = core.read(
+    let pc = Address(core.read(
         sp.offset(frame::PC),
         Size::Long,
         FunctionCode::SUPERVISOR_DATA,
-    )?;
+    )?);
     let format_vector = frame_word(core, sp, frame::FORMAT_VECTOR)?;
     let frame_format = format_vector >> format::SHIFT;
     core.charge(timing::return_from_exception(frame_format as u8));
     match frame_format {
         format::FOUR_WORD => Ok(restore(core, sr, pc, frame::FOUR_WORD_BYTES)),
         format::SIX_WORD => Ok(restore(core, sr, pc, frame::SIX_WORD_BYTES)),
-        format::BUS_ERROR => rte_bus_error(core, sp, sr, Address(pc)),
+        format::BUS_ERROR => rte_bus_error(core, sp, sr, pc),
         _ => Err(format_error(core)),
     }
 }
 
 /// Deallocates `bytes` of frame and returns to `pc` with `sr`.
-fn restore(core: &mut Core<'_>, sr: u16, pc: u32, bytes: u32) -> Flow {
+fn restore(core: &mut Core<'_>, sr: u16, pc: Address, bytes: u32) -> Flow {
     let registers = &mut core.cpu.registers;
-    registers.ssp = registers.ssp.wrapping_add(bytes);
+    registers.ssp = registers.ssp.offset(bytes);
     registers.set_sr(sr);
     registers.pc = pc;
     Flow::Changed
@@ -366,9 +366,9 @@ fn restore_bus_error(
             let data = load(core, frame::DATA_BUFFER, Size::Long)?;
             let current_pc = Address(load(core, frame::CURRENT_PC, Size::Long)?);
             let registers = &mut core.cpu.registers;
-            registers.ssp = sp.offset(frame::BUS_ERROR_BYTES).0;
+            registers.ssp = sp.offset(frame::BUS_ERROR_BYTES);
             registers.set_sr(sr);
-            registers.pc = return_pc.0;
+            registers.pc = return_pc;
             if status & ssw::MV != 0 {
                 // MOVEM repeats the faulted transfer itself (6.3.2.6).
                 core.cpu.movem_resume = Some(MovemResume {
@@ -408,11 +408,11 @@ fn restore_bus_error(
                 frame::FOUR_WORD_BYTES
             };
             core.cpu.registers.set_sr(sr);
-            let top = sp.offset(bytes + faulted_bytes).0;
+            let top = sp.offset(bytes + faulted_bytes);
             let bottom = core.stack(top, &faulted_frame)?;
             let handler = core.vector(vector)?;
             core.cpu.registers.ssp = bottom;
-            core.cpu.registers.pc = handler.0;
+            core.cpu.registers.pc = handler;
             Ok(requeue(status, handler, faulted.unwrap_or(return_pc)))
         }
     }
@@ -425,7 +425,7 @@ fn rerun(core: &mut Core<'_>, status: u16, address: Address, data: u32) {
     let Some(size) = rerun_size(status) else {
         return;
     };
-    let function_code = FunctionCode::new(u32::from(status & ssw::FUNC));
+    let function_code = FunctionCode::from_low_bits(u32::from(status & ssw::FUNC));
     let result = if status & ssw::RW != 0 {
         core.access_read(address, size, function_code, CycleKind::Read)
             .map(|_| ())
@@ -561,7 +561,7 @@ mod tests {
     /// each vector pointing at its own handler.
     fn prepared(code: &[u16]) -> Cpu {
         let mut cpu = machine(code);
-        cpu.registers.ssp = STACK;
+        cpu.registers.ssp = Address(STACK);
         for vector in 0..=u8::MAX {
             poke_long(&mut cpu, Vector(vector).offset(), handler(Vector(vector)));
         }
@@ -592,7 +592,7 @@ mod tests {
 
     /// One instruction, with the exceptions it raises, on `bus`.
     fn step_on(cpu: &mut Cpu, bus: &mut TestBus) -> Run {
-        cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles(1))
+        cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1))
     }
 
     /// One instruction on a bus with nothing on it.
@@ -614,27 +614,27 @@ mod tests {
         // Figure 6-3.
         let [high, low] = words(CODE + 2);
         assert_eq!(peek(&cpu, STACK - 8, 4), [sr, high, low, 0x008c]);
-        assert_eq!(cpu.registers.ssp, STACK - 8);
-        assert_eq!(cpu.registers.pc, handler(Vector::trap(3)));
+        assert_eq!(cpu.registers.ssp.0, STACK - 8);
+        assert_eq!(cpu.registers.pc.0, handler(Vector::trap(3)));
         assert_eq!(cpu.registers.sr(), sr);
     }
 
     #[test]
     fn a_user_trap_enters_supervisor_state_untraced() {
         let mut cpu = prepared(&[TRAP]);
-        cpu.registers.usp = 0x3000;
+        cpu.registers.usp = Address(0x3000);
         cpu.registers.set_sr(status::T0 | status::Z);
         step(&mut cpu);
         assert_eq!(cpu.registers.sr(), status::S | status::Z);
         assert_eq!(peek(&cpu, STACK - 8, 1), [status::T0 | status::Z]);
-        assert_eq!(cpu.registers.usp, 0x3000);
+        assert_eq!(cpu.registers.usp.0, 0x3000);
     }
 
     #[test]
     fn trapv_traps_only_on_overflow() {
         let mut cpu = prepared(&[TRAPV]);
         step(&mut cpu);
-        assert_eq!(cpu.registers.pc, CODE + 2);
+        assert_eq!(cpu.registers.pc.0, CODE + 2);
         let mut cpu = prepared(&[TRAPV]);
         let sr = status::S | status::V;
         cpu.registers.set_sr(sr);
@@ -646,7 +646,7 @@ mod tests {
             peek(&cpu, STACK - 12, 6),
             [sr, next_high, next_low, 0x201c, high, low]
         );
-        assert_eq!(cpu.registers.pc, handler(Vector::TRAPCC));
+        assert_eq!(cpu.registers.pc.0, handler(Vector::TRAPCC));
     }
 
     #[test]
@@ -663,11 +663,11 @@ mod tests {
         // TRAPF.L #data: never.
         let mut cpu = prepared(&[0x51fb, 0, 0]);
         step(&mut cpu);
-        assert_eq!(cpu.registers.pc, CODE + 6);
+        assert_eq!(cpu.registers.pc.0, CODE + 6);
         // TRAPEQ with Z clear.
         let mut cpu = prepared(&[0x57fc]);
         step(&mut cpu);
-        assert_eq!(cpu.registers.pc, CODE + 2);
+        assert_eq!(cpu.registers.pc.0, CODE + 2);
     }
 
     #[test]
@@ -684,7 +684,7 @@ mod tests {
                 peek(&cpu, STACK - 8, 4)[1..],
                 [high, low, vector.offset() as u16]
             );
-            assert_eq!(cpu.registers.pc, handler(vector));
+            assert_eq!(cpu.registers.pc.0, handler(vector));
         }
     }
 
@@ -695,7 +695,7 @@ mod tests {
         step(&mut cpu);
         let [high, low] = words(CODE);
         assert_eq!(peek(&cpu, STACK - 8, 4), [0, high, low, 0x0020]);
-        assert_eq!(cpu.registers.pc, handler(Vector::PRIVILEGE_VIOLATION));
+        assert_eq!(cpu.registers.pc.0, handler(Vector::PRIVILEGE_VIOLATION));
     }
 
     #[test]
@@ -703,12 +703,12 @@ mod tests {
         for (format_vector, bytes) in [(0x0080, 8), (0x2018, 12)] {
             let mut cpu = prepared(&[RTE]);
             let sp = STACK - bytes;
-            cpu.registers.ssp = sp;
+            cpu.registers.ssp = Address(sp);
             poke(&mut cpu, sp, &[status::N, 0x0000, 0x1234, format_vector]);
             assert_eq!(step(&mut cpu).stop, Stop::Budget);
             assert_eq!(cpu.registers.sr(), status::N);
-            assert_eq!(cpu.registers.pc, 0x1234);
-            assert_eq!(cpu.registers.ssp, STACK);
+            assert_eq!(cpu.registers.pc.0, 0x1234);
+            assert_eq!(cpu.registers.ssp.0, STACK);
         }
     }
 
@@ -720,16 +720,16 @@ mod tests {
         cpu.registers.set_sr(sr);
         step(&mut cpu);
         step(&mut cpu);
-        assert_eq!(cpu.registers.pc, CODE + 2);
+        assert_eq!(cpu.registers.pc.0, CODE + 2);
         assert_eq!(cpu.registers.sr(), sr);
-        assert_eq!(cpu.registers.ssp, STACK);
+        assert_eq!(cpu.registers.ssp.0, STACK);
     }
 
     #[test]
     fn rte_of_an_unknown_format_is_a_format_error_below_it() {
         let mut cpu = prepared(&[RTE]);
         let sp = STACK - 8;
-        cpu.registers.ssp = sp;
+        cpu.registers.ssp = Address(sp);
         let frame = [status::S, 0, 0x1234, 0x3080];
         poke(&mut cpu, sp, &frame);
         step(&mut cpu);
@@ -737,7 +737,7 @@ mod tests {
         let sr = status::S | status::INTERRUPT_MASK;
         assert_eq!(peek(&cpu, sp - 8, 4), [sr, high, low, 0x0038]);
         assert_eq!(peek(&cpu, sp, 4), frame);
-        assert_eq!(cpu.registers.pc, handler(Vector::FORMAT_ERROR));
+        assert_eq!(cpu.registers.pc.0, handler(Vector::FORMAT_ERROR));
     }
 
     #[test]
@@ -759,14 +759,14 @@ mod tests {
                 REVISION, 0x0065
             ]
         );
-        assert_eq!(cpu.registers.ssp, STACK - 24);
-        assert_eq!(cpu.registers.pc, handler(Vector::BUS_ERROR));
+        assert_eq!(cpu.registers.ssp.0, STACK - 24);
+        assert_eq!(cpu.registers.pc.0, handler(Vector::BUS_ERROR));
         // The handler repairs the fault: the operand is now in RAM.
         cpu.registers.set_address(0, 0x3000);
         poke(&mut cpu, 0x3000, &[0xdead, 0xbeef]);
         step(&mut cpu);
-        assert_eq!(cpu.registers.pc, CODE);
-        assert_eq!(cpu.registers.ssp, STACK);
+        assert_eq!(cpu.registers.pc.0, CODE);
+        assert_eq!(cpu.registers.ssp.0, STACK);
         step(&mut cpu);
         assert_eq!(cpu.registers.data[0], 0xdead_beef);
         assert_eq!(cpu.registers.address(0), 0x3004);
@@ -824,8 +824,8 @@ mod tests {
                 poke(&mut cpu, sp + 0x16, &[ssw & !0x0200]);
             }
             step(&mut cpu);
-            assert_eq!(cpu.registers.pc, CODE + 2);
-            assert_eq!(cpu.registers.ssp, STACK);
+            assert_eq!(cpu.registers.pc.0, CODE + 2);
+            assert_eq!(cpu.registers.ssp.0, STACK);
             let expected = if rerun { [0xcafe, 0xf00d] } else { [0, 0] };
             assert_eq!(peek(&cpu, 0x3000, 2), expected);
         }
@@ -835,19 +835,19 @@ mod tests {
     fn rte_of_another_revision_is_a_format_error() {
         let mut cpu = prepared(&[RTE]);
         let sp = STACK - 24;
-        cpu.registers.ssp = sp;
+        cpu.registers.ssp = Address(sp);
         poke(&mut cpu, sp, &[status::S, 0, 0x1234, 0xc008]);
         poke(&mut cpu, sp + 0x14, &[REVISION + 0x0100, 0]);
         step(&mut cpu);
-        assert_eq!(cpu.registers.pc, handler(Vector::FORMAT_ERROR));
-        assert_eq!(cpu.registers.ssp, sp - 8);
+        assert_eq!(cpu.registers.pc.0, handler(Vector::FORMAT_ERROR));
+        assert_eq!(cpu.registers.ssp.0, sp - 8);
     }
 
     #[test]
     fn a_fetch_fault_stacks_a_prefetch() {
         let mut cpu = prepared(&[]);
         let fault = 0x0001_0000;
-        cpu.registers.pc = fault;
+        cpu.registers.pc = Address(fault);
         step(&mut cpu);
         let frame = peek(&cpu, STACK - 24, 12);
         assert_eq!(frame[1..3], words(fault));
@@ -867,14 +867,14 @@ mod tests {
         assert_eq!(frame[4..6], words(0x3001));
         // RW, SIZ word, FUNC 5.
         assert_eq!(frame[11], 0x0055);
-        assert_eq!(cpu.registers.pc, handler(Vector::ADDRESS_ERROR));
+        assert_eq!(cpu.registers.pc.0, handler(Vector::ADDRESS_ERROR));
     }
 
     #[test]
     fn an_odd_pc_points_at_the_instruction_that_set_it() {
         let mut cpu = prepared(&[RTE]);
         let sp = STACK - 8;
-        cpu.registers.ssp = sp;
+        cpu.registers.ssp = Address(sp);
         poke(&mut cpu, sp, &[status::S, 0, 0x1235, 0x0000]);
         step(&mut cpu);
         step(&mut cpu);
@@ -902,7 +902,7 @@ mod tests {
     fn a_fault_stacking_a_fault_is_a_double_bus_fault() {
         let mut cpu = prepared(&[MOVE_POSTINCREMENT_TO_D0]);
         cpu.registers.set_address(0, 0x0001_0000);
-        cpu.registers.ssp = RAM_END + 0x100;
+        cpu.registers.ssp = Address(RAM_END + 0x100);
         assert_eq!(step(&mut cpu).stop, Stop::Halted(Halt::DoubleBusFault));
     }
 
@@ -911,7 +911,7 @@ mod tests {
         let mut cpu = prepared(&[MOVE_POSTINCREMENT_TO_D0]);
         cpu.set_bdm_enabled(true);
         cpu.registers.set_address(0, 0x0001_0000);
-        cpu.registers.ssp = RAM_END + 0x100;
+        cpu.registers.ssp = Address(RAM_END + 0x100);
         let pc = cpu.registers.pc;
         let stop = step(&mut cpu).stop;
         let Stop::Background(Entry::DoubleBusFault { ssw }) = stop else {
@@ -921,7 +921,7 @@ mod tests {
         // the second fault: a stacking write in supervisor data space
         assert_eq!(ssw & (1 << 6), 0, "RW clear: a write");
         assert_eq!(ssw & 0b111, 5);
-        assert_eq!(cpu.pcc, Address(pc));
+        assert_eq!(cpu.pcc, pc);
         assert!(cpu.far.0 > RAM_END, "{}", cpu.far);
     }
 
@@ -936,7 +936,7 @@ mod tests {
         cpu.registers.set_address(0, 0x0001_0000);
         step(&mut cpu);
         assert_eq!(step(&mut cpu).stop, Stop::Budget);
-        assert_eq!(cpu.registers.ssp, STACK - 48);
+        assert_eq!(cpu.registers.ssp.0, STACK - 48);
     }
 
     #[test]
@@ -944,7 +944,7 @@ mod tests {
         let mut cpu = prepared(&[TRAP]);
         // TRAP #0's vector off the RAM, bus error's in it.
         let vbr = RAM_END - 0x40;
-        cpu.registers.vbr = vbr;
+        cpu.registers.vbr = Address(vbr);
         poke_long(
             &mut cpu,
             vbr + Vector::BUS_ERROR.offset(),
@@ -965,14 +965,14 @@ mod tests {
                 0x8065
             ]
         );
-        assert_eq!(cpu.registers.ssp, base);
-        assert_eq!(cpu.registers.pc, handler(Vector::BUS_ERROR));
+        assert_eq!(cpu.registers.ssp.0, base);
+        assert_eq!(cpu.registers.pc.0, handler(Vector::BUS_ERROR));
         // The handler fixes the table; RTE rebuilds the TRAP frame.
         poke(&mut cpu, handler(Vector::BUS_ERROR), &[RTE]);
-        cpu.registers.vbr = 0;
+        cpu.registers.vbr = Address(0);
         step(&mut cpu);
-        assert_eq!(cpu.registers.ssp, STACK - 8);
-        assert_eq!(cpu.registers.pc, handler(Vector::TRAP));
+        assert_eq!(cpu.registers.ssp.0, STACK - 8);
+        assert_eq!(cpu.registers.pc.0, handler(Vector::TRAP));
         assert_eq!(peek(&cpu, STACK - 8, 4), [sr, next_high, next_low, 0x0080]);
     }
 
@@ -982,22 +982,22 @@ mod tests {
         // ten-word frame; no SR reads as the revision.
         let mut cpu = prepared(&[TRAP]);
         let vbr = RAM_END - 0x40;
-        cpu.registers.vbr = vbr;
+        cpu.registers.vbr = Address(vbr);
         poke_long(
             &mut cpu,
             vbr + Vector::BUS_ERROR.offset(),
             handler(Vector::BUS_ERROR),
         );
         poke(&mut cpu, handler(Vector::BUS_ERROR), &[RTE]);
-        cpu.registers.usp = 0x3000;
+        cpu.registers.usp = Address(0x3000);
         let sr = 0x0100 | status::Z;
         cpu.registers.set_sr(sr);
         step(&mut cpu);
         assert_eq!(peek(&cpu, STACK - 8, 1), [sr]);
-        cpu.registers.vbr = 0;
+        cpu.registers.vbr = Address(0);
         step(&mut cpu);
-        assert_eq!(cpu.registers.pc, handler(Vector::TRAP));
-        assert_eq!(cpu.registers.ssp, STACK - 8);
+        assert_eq!(cpu.registers.pc.0, handler(Vector::TRAP));
+        assert_eq!(cpu.registers.ssp.0, STACK - 8);
     }
 
     #[test]
@@ -1007,20 +1007,20 @@ mod tests {
         // frame left there: our revision and an SSW with TP clear.
         let mut cpu = prepared(&[TRAP]);
         let top = RAM_END + 4;
-        cpu.registers.ssp = top;
+        cpu.registers.ssp = Address(top);
         let faulted_base = top - 8;
         poke(&mut cpu, faulted_base, &[REVISION, 0]);
         let sr = status::S;
         cpu.registers.set_sr(sr);
         step(&mut cpu);
         let base = faulted_base - 20;
-        assert_eq!(cpu.registers.ssp, base);
+        assert_eq!(cpu.registers.ssp.0, base);
         assert_eq!(peek(&cpu, base + 0x10, 2), [REVISION, 0x8055]);
         poke(&mut cpu, handler(Vector::BUS_ERROR), &[RTE]);
         let mut bus = TestBus::memory(RAM_END, 0x10);
         step_on(&mut cpu, &mut bus);
-        assert_eq!(cpu.registers.pc, handler(Vector::TRAP));
-        assert_eq!(cpu.registers.ssp, faulted_base);
+        assert_eq!(cpu.registers.pc.0, handler(Vector::TRAP));
+        assert_eq!(cpu.registers.ssp.0, faulted_base);
         assert_eq!(peek(&cpu, faulted_base, 2), [sr, 0]);
         assert_eq!(bus.words[&RAM_END], CODE as u16 + 2);
         assert_eq!(bus.words[&(RAM_END + 2)], 0x0080);
@@ -1032,7 +1032,7 @@ mod tests {
         let sr = status::S | status::V;
         cpu.registers.set_sr(sr);
         let top = RAM_END + 4;
-        cpu.registers.ssp = top;
+        cpu.registers.ssp = Address(top);
         step(&mut cpu);
         let base = top - 12 - 24;
         let frame = peek(&cpu, base, 12);
@@ -1046,13 +1046,13 @@ mod tests {
         assert_eq!(frame[8..10], words(CODE));
         // TP, RW, SIZ word, FUNC 5.
         assert_eq!(frame[10..], [REVISION, 0x8055]);
-        assert_eq!(cpu.registers.ssp, base);
+        assert_eq!(cpu.registers.ssp.0, base);
         // RTE rewrites the six-word frame once the stack is good.
         poke(&mut cpu, handler(Vector::BUS_ERROR), &[RTE]);
         let mut bus = TestBus::memory(RAM_END, 0x10);
         step_on(&mut cpu, &mut bus);
-        assert_eq!(cpu.registers.ssp, top - 12);
-        assert_eq!(cpu.registers.pc, handler(Vector::TRAPCC));
+        assert_eq!(cpu.registers.ssp.0, top - 12);
+        assert_eq!(cpu.registers.pc.0, handler(Vector::TRAPCC));
         assert_eq!(peek(&cpu, RAM_END - 8, 4), [sr, 0, CODE as u16 + 2, 0x201c]);
         assert_eq!(bus.words[&(RAM_END + 2)], CODE as u16);
     }
@@ -1061,7 +1061,7 @@ mod tests {
     fn a_fault_loading_a_bus_error_frame_halts() {
         let mut cpu = prepared(&[RTE]);
         let sp = RAM_END;
-        cpu.registers.ssp = sp;
+        cpu.registers.ssp = Address(sp);
         let mut bus = TestBus::memory(RAM_END, 0x18);
         for (offset, word) in [(0, status::S), (6, 0xc008), (0x14, REVISION), (0x16, 0)] {
             bus.words.insert(sp + offset, word);
@@ -1077,11 +1077,11 @@ mod tests {
     fn a_fault_reading_a_frame_is_a_bus_error_and_restarts_rte() {
         let mut cpu = prepared(&[RTE]);
         let sp = RAM_END + 0x10;
-        cpu.registers.ssp = sp;
+        cpu.registers.ssp = Address(sp);
         let mut bus = TestBus::memory(RAM_END, 0x20);
         bus.faults.insert(sp + 2);
         step_on(&mut cpu, &mut bus);
-        assert_eq!(cpu.registers.pc, handler(Vector::BUS_ERROR));
+        assert_eq!(cpu.registers.pc.0, handler(Vector::BUS_ERROR));
         // A twelve-word frame below it, half in RAM, half on the bus.
         let base = sp - 24;
         assert_eq!(peek(&cpu, base, 4)[1..3], words(CODE));
@@ -1098,7 +1098,7 @@ mod tests {
         };
         step_on(&mut cpu, &mut bus);
         assert_eq!(cpu.registers.data[0], 5);
-        assert_eq!(cpu.registers.pc, CODE + 2);
+        assert_eq!(cpu.registers.pc.0, CODE + 2);
         let access = bus.cpu_space[0];
         assert_eq!(access.address, Address(5 << 2));
         assert_eq!(access.function_code, FunctionCode::CPU_SPACE);
@@ -1109,7 +1109,7 @@ mod tests {
     fn bkpt_with_a_bus_error_is_illegal() {
         let mut cpu = prepared(&[BKPT]);
         let run = step(&mut cpu);
-        assert_eq!(cpu.registers.pc, handler(Vector::ILLEGAL_INSTRUCTION));
+        assert_eq!(cpu.registers.pc.0, handler(Vector::ILLEGAL_INSTRUCTION));
         assert_eq!(peek(&cpu, STACK - 8, 4)[1..3], words(CODE));
         // CPU32RM 8.3.13, BKPT (Bus Error).
         assert_eq!(run.cycles, cycles(timing::exception::BKPT_BUS_ERROR));
@@ -1117,7 +1117,7 @@ mod tests {
 
     /// `cost`'s clocks.
     fn cycles(cost: timing::Cost) -> Cycles {
-        Cycles(u64::from(cost.cycles))
+        Cycles::from_clocks(u64::from(cost.cycles))
     }
 
     #[test]
@@ -1140,7 +1140,7 @@ mod tests {
             ..TestBus::default()
         };
         let run = step_on(&mut cpu, &mut bus);
-        assert_eq!(cpu.registers.pc, handler(Vector::ILLEGAL_INSTRUCTION));
+        assert_eq!(cpu.registers.pc.0, handler(Vector::ILLEGAL_INSTRUCTION));
         assert_eq!(
             run.cycles,
             cycles(timing::exception::BKPT) + cycles(timing::exception::ILLEGAL)
@@ -1155,7 +1155,7 @@ mod tests {
             ..TestBus::default()
         };
         let run = step_on(&mut cpu, &mut bus);
-        assert_eq!(cpu.registers.pc, CODE);
+        assert_eq!(cpu.registers.pc.0, CODE);
         assert_eq!(cpu.exception_taken(), None);
         let chain = BKPT_CHAIN as usize;
         assert_eq!(bus.cpu_space.len(), chain);
@@ -1165,12 +1165,12 @@ mod tests {
         assert_eq!(bus.cpu_space[1].address, Address(3 << 2));
         assert_eq!(
             run.cycles,
-            Cycles(cycles(timing::exception::BKPT).0 * u64::from(BKPT_CHAIN))
+            Cycles::from_clocks(cycles(timing::exception::BKPT).clocks() * u64::from(BKPT_CHAIN))
         );
         // Then the word that ends the chain runs in BKPT's place.
         bus.breakpoint = Some(MOVEQ_5_TO_D0);
         step_on(&mut cpu, &mut bus);
         assert_eq!(cpu.registers.data[0], 5);
-        assert_eq!(cpu.registers.pc, CODE + 2);
+        assert_eq!(cpu.registers.pc.0, CODE + 2);
     }
 }

@@ -4,7 +4,6 @@
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
 use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::Read;
 use mc683xx_cpu32::cpu::Cpu;
 use mc683xx_cpu32::cycles::Cycles;
@@ -28,8 +27,6 @@ use crate::kernel::sled;
 const ADDRESS_LINES: u32 = 24;
 /// Bytes of RAM from zero.
 const RAM_BYTES: u32 = 256 << 10;
-/// Clocks in a zero-wait bus cycle (CPU32RM 8.1.5).
-const FASTEST_CLOCKS: u8 = 2;
 /// Where the sled starts.
 pub const CODE: u32 = 0x1000;
 /// Where the sled ends and A0's buffer starts.
@@ -47,7 +44,7 @@ const D7: usize = 7;
 /// A loop counter for DBcc: 65536 times round.
 const LOOP_COUNT: u32 = 0xffff;
 /// Clocks one iteration runs: well inside the sled for every kernel.
-pub const BUDGET: Cycles = Cycles(20_000);
+pub const BUDGET: Cycles = Cycles::from_clocks(20_000);
 
 /// A bus with nothing on it.
 #[derive(Debug)]
@@ -83,12 +80,7 @@ pub fn machine(kernel: &Kernel) -> Cpu {
     let mut memory = Memory::new(ADDRESS_LINES).expect("24 address lines");
     let region = memory.add_region(vec![0; RAM_BYTES as usize]);
     let backing = Some(Backing { region, offset: 0 });
-    let page = Page {
-        read: backing,
-        write: backing,
-        port: PortSize::Bits16,
-        clocks: FASTEST_CLOCKS,
-    };
+    let page = Page::BUS.reading(backing).writing(backing);
     for space in [Space::User, Space::Supervisor] {
         memory
             .map(space, Address(0), RAM_BYTES, page)
@@ -106,8 +98,8 @@ pub fn machine(kernel: &Kernel) -> Cpu {
 pub fn prepare(cpu: &mut Cpu) {
     let registers = &mut cpu.registers;
     registers.set_sr(status::S | status::INTERRUPT_MASK);
-    registers.pc = CODE;
-    registers.ssp = STACK;
+    registers.pc = Address(CODE);
+    registers.ssp = Address(STACK);
     registers.data = [0; 8];
     registers.data[D7] = LOOP_COUNT;
     registers.set_address(A0, DATA);
@@ -130,7 +122,12 @@ pub fn iteration(cpu: &mut Cpu, budget: Cycles) -> Cycles {
 pub fn calibrate(kernel: &Kernel, budget: Cycles) -> Result<Calibration, Skip> {
     let mut cpu = machine(kernel);
     let calibration = Calibration::measure(budget, || {
-        let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(1));
+        let run = cpu.run_for(
+            &mut NoBus,
+            &mut NoInterrupts,
+            Cycles::ZERO,
+            Cycles::from_clocks(1),
+        );
         let taken = cpu.exception_taken();
         assert!(
             taken.is_none_or(crate::kernel::unimplemented),
@@ -139,7 +136,11 @@ pub fn calibrate(kernel: &Kernel, budget: Cycles) -> Result<Calibration, Skip> {
         );
         (run.cycles, taken)
     })?;
-    assert!(cpu.registers.pc < DATA, "{}: ran off its sled", kernel.name);
+    assert!(
+        cpu.registers.pc < Address(DATA),
+        "{}: ran off its sled",
+        kernel.name
+    );
     let mut whole = machine(kernel);
     assert_eq!(
         iteration(&mut whole, budget),

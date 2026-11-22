@@ -234,7 +234,7 @@ impl Calibration {
     /// Emulated clocks per instruction.
     #[must_use]
     pub fn clocks_per_instruction(&self) -> f64 {
-        self.clocks.0 as f64 / self.instructions as f64
+        self.clocks.clocks() as f64 / self.instructions as f64
     }
 
     /// The calibration line a benchmark prints, so emulated clock speed
@@ -244,7 +244,7 @@ impl Calibration {
         format!(
             "{name}: {} instructions, {} clocks per iteration; {:.2} clocks per instruction",
             self.instructions,
-            self.clocks.0,
+            self.clocks.clocks(),
             self.clocks_per_instruction()
         )
     }

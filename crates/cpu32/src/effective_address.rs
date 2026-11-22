@@ -346,11 +346,11 @@ impl Core<'_> {
                 // PC is the extension word's address (CPU32RM 3.4.3.1).
                 let pc = self.cpu.registers.pc;
                 let displacement = Size::Word.sign_extend(u32::from(self.fetch_word()?));
-                Operand::Program(Address(pc.wrapping_add(displacement)))
+                Operand::Program(pc.offset(displacement))
             }
             kind::PC_INDEX => {
                 let pc = self.cpu.registers.pc;
-                Operand::Program(self.indexed(pc, table)?)
+                Operand::Program(self.indexed(pc.0, table)?)
             }
             kind::IMMEDIATE => Operand::Immediate(match size {
                 // A byte is the extension word's low byte (CPU32RM 3.4.3.6).

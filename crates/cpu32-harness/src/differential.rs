@@ -121,7 +121,7 @@ impl Differential {
                 differences::differential(opcode, extension, Some(&exception))
                     .map_or(Verdict::Exception(exception), Verdict::Excluded)
             }
-            Ended::Halted(halt) => Verdict::Disagreed(vec![format!("the core halted: {halt:?}")]),
+            Ended::Halted(halt) => Verdict::Disagreed(vec![format!("the core halted: {halt}")]),
             Ended::Completed => {
                 let (expected, expected_memory) = self.musashi.step(&state, memory);
                 if let Some(reason) = differences::differential_result(expected.sr) {

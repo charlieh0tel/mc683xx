@@ -19,6 +19,7 @@ use mc683xx_board::board::Board;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
+use mc683xx_board::time::Span;
 use mc683xx_mc68331::chip::Mc68331;
 
 /// The supervisor stack and the program's start, as reset reads them.
@@ -55,7 +56,7 @@ const ADDQ_ONE_D0: u16 = 0x5240;
 /// BRA.S back over the four words before it.
 const BRA_BACK_FOUR: u16 = 0x60f6;
 /// Board time one iteration runs: 1 ms.
-const SPAN: u64 = 1_000_000_000;
+const SPAN: Span = Span::from_millis(1);
 
 /// Each case: its name, where the firmware writes, and its peripherals.  On
 /// CS1 a register file, which drives nothing, and a 74x374 whose Q0 is
@@ -158,8 +159,8 @@ fn board(name: &str, target: u32, peripherals: &str) -> Board<Mc68331> {
         Description::parse(&text, &directory, &Options::default()).expect("the board file");
     fs::remove_dir_all(&directory).expect("the scratch directory removed");
     let registry = mc683xx_peripherals::registry();
-    let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).expect("the board");
+    let mut board = Board::<Mc68331>::load(&description, &registry, &Environment::default())
+        .expect("the board");
     board.run_for(SPAN).expect("the boot");
     board
 }

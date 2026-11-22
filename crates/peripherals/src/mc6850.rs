@@ -31,7 +31,9 @@ use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
+use mc683xx_board::time::TimeBase;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
@@ -175,19 +177,19 @@ struct Clock {
 }
 
 impl Clock {
-    /// The picoseconds `sixteenths` sixteenths of a bit take at its
-    /// rate divided by `divide`, rounded down.
-    fn span(self, sixteenths: u64, divide: u64) -> u64 {
+    /// The span `sixteenths` sixteenths of a bit take at its rate
+    /// divided by `divide`, rounded down to a picosecond.
+    fn span(self, sixteenths: u64, divide: u64) -> Span {
         let picoseconds =
             u128::from(sixteenths) * u128::from(divide) * u128::from(PICOSECONDS_PER_SECOND)
                 / (u128::from(SIXTEENTHS) * u128::from(self.hz));
-        picoseconds as u64
+        Span::from_picos(picoseconds as u64)
     }
 
     /// The bit rate at its rate divided by `divide`.
     fn baud(self, divide: u64) -> Frequency {
         let nanohertz = u128::from(self.hz) * u128::from(NANOHERTZ_PER_HERTZ) / u128::from(divide);
-        Frequency(nanohertz as u64)
+        Frequency::from_nanohertz(nanohertz as u64)
     }
 }
 
@@ -375,7 +377,7 @@ impl Acia {
     /// From `tx_clk_hz` and `rx_clk_hz`.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         let clock = |key| {
-            let hz: u64 = context.parameters.required(key)?;
+            let hz: u64 = context.parameters.required_integer(key)?;
             if hz == 0 {
                 return Err(ParameterError::invalid(key, "the clock must run"));
             }
@@ -555,7 +557,7 @@ impl Acia {
         let divide = divide(state.control);
         let own_length = divide.map(|divide| self.rx_clock.span(format.length(), divide));
         let length = match serial.length {
-            0 => own_length.unwrap_or(0),
+            Span::ZERO => own_length.unwrap_or(Span::ZERO),
             length => length,
         };
         let end = start + length;
@@ -767,7 +769,7 @@ impl Peripheral for Acia {
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
         (access.role != Role::Iack).then_some(0)
     }
 
@@ -779,7 +781,8 @@ impl Peripheral for Acia {
         self.sync(drive);
     }
 
-    fn input(&mut self, port: usize, signal: Signal, now: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
+        let now = drive.now();
         match (port, signal) {
             (RX_DATA, Signal::Serial(serial)) => {
                 self.state.line.push_back(Arrival { at: now, serial });
@@ -798,11 +801,12 @@ impl Peripheral for Acia {
         self.sync(drive);
     }
 
-    fn next_event(&self) -> Option<Time> {
+    fn next_event(&self, _: TimeBase) -> Option<Time> {
         self.next_internal()
     }
 
-    fn advance(&mut self, now: Time, drive: &mut Drive<'_>) {
+    fn advance(&mut self, drive: &mut Drive<'_>) {
+        let now = drive.now();
         self.run_until(now);
         self.sync(drive);
     }

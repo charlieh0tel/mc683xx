@@ -17,7 +17,6 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::builtin;
-use crate::error::LoadError;
 use crate::error::SyntaxError;
 use crate::peripheral::Peripheral;
 use crate::signal::Direction;
@@ -212,6 +211,37 @@ impl ParameterValue {
     }
 }
 
+impl ParameterValue {
+    /// It as the file's TOML holds it; a date or time that is not
+    /// TOML's is a string.
+    fn to_toml(&self) -> toml::Value {
+        match self {
+            Self::String(text) => toml::Value::String(text.clone()),
+            Self::Integer(integer) => toml::Value::Integer(*integer),
+            Self::Float(float) => toml::Value::Float(*float),
+            Self::Boolean(boolean) => toml::Value::Boolean(*boolean),
+            Self::Datetime(text) => text
+                .parse()
+                .map_or_else(|_| toml::Value::String(text.clone()), toml::Value::Datetime),
+            Self::Array(values) => toml::Value::Array(values.iter().map(Self::to_toml).collect()),
+            Self::Table(table) => toml::Value::Table(
+                table
+                    .iter()
+                    .map(|(key, value)| (key.clone(), value.to_toml()))
+                    .collect(),
+            ),
+        }
+    }
+}
+
+/// It as a board file's TOML writes it: `3`, `2.5`, `"text"`, `[1, 2]`,
+/// `{ a = true }`.
+impl fmt::Display for ParameterValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.to_toml())
+    }
+}
+
 /// `table`, from the file's TOML.
 pub(crate) fn table_from_toml(table: toml::Table) -> ParameterTable {
     table
@@ -304,9 +334,10 @@ impl Parameters {
     ///
     /// # Errors
     ///
-    /// A `text` that is not a TOML table ([`LoadError::Syntax`]).
-    pub fn parse(text: &str) -> Result<Self, LoadError> {
-        let table: toml::Table = toml::from_str(text).map_err(SyntaxError::from_toml)?;
+    /// A `text` that is not a TOML table.
+    pub fn parse(text: &str) -> Result<Self, SyntaxError> {
+        let table: toml::Table =
+            toml::from_str(text).map_err(|error| SyntaxError::new(error, text))?;
         Ok(Self::new(table_from_toml(table)))
     }
 
@@ -360,7 +391,7 @@ impl Parameters {
     ///
     /// A `key` not given ([`ParameterError::Missing`]), or what
     /// [`Parameters::integer`] fails with.
-    pub fn required<T: TryFrom<i64>>(&self, key: &str) -> Result<T, ParameterError> {
+    pub fn required_integer<T: TryFrom<i64>>(&self, key: &str) -> Result<T, ParameterError> {
         self.integer(key)?
             .ok_or_else(|| ParameterError::Missing(key.to_owned()))
     }
@@ -468,6 +499,13 @@ impl Environment {
     pub fn set_board_dir(&mut self, board_dir: impl Into<PathBuf>) {
         self.board_dir = board_dir.into();
     }
+
+    /// The directory a constructor's paths are relative to: the board
+    /// file's, in a load.
+    #[must_use]
+    pub fn board_dir(&self) -> &Path {
+        &self.board_dir
+    }
 }
 
 /// `SplitMix64`'s finalizer: spreads a seed's bits.
@@ -550,7 +588,7 @@ impl<'a> Context<'a> {
         Ok(self
             .parameters
             .string(key)?
-            .map(|path| self.environment.board_dir.join(path)))
+            .map(|path| self.environment.board_dir().join(path)))
     }
 
     /// The contents of the file path parameter `key` names, if given: a
@@ -585,7 +623,7 @@ pub struct Constructed {
 impl Constructed {
     /// `peripheral` with `ports`.
     #[must_use]
-    pub fn new(peripheral: Box<dyn Peripheral>, ports: Vec<PortSpec>) -> Self {
+    pub const fn new(peripheral: Box<dyn Peripheral>, ports: Vec<PortSpec>) -> Self {
         Self { peripheral, ports }
     }
 }
@@ -613,22 +651,14 @@ enum Builds {
 }
 
 /// A registered peripheral type.
-///
-/// Not part of the semver API: the loader builds peripherals with it, and
-/// a host's tests of its constructors reach it through `Registry::get`.
-#[doc(hidden)]
-pub struct PeripheralType {
+struct PeripheralType {
     /// How it builds its peripherals.
     builds: Builds,
 }
 
 impl PeripheralType {
     /// A peripheral of this type, with its ports.
-    ///
-    /// # Errors
-    ///
-    /// What the type's constructor refuses in `context`'s parameters.
-    pub fn construct(&self, context: &Context<'_>) -> Result<Constructed, ParameterError> {
+    fn construct(&self, context: &Context<'_>) -> Result<Constructed, ParameterError> {
         match &self.builds {
             Builds::Fixed(ports, constructor) => Ok(Constructed {
                 peripheral: constructor(context)?,
@@ -639,8 +669,7 @@ impl PeripheralType {
     }
 
     /// Its ports, if they do not depend on its parameters.
-    #[must_use]
-    pub fn ports(&self) -> Option<&[PortSpec]> {
+    fn ports(&self) -> Option<&[PortSpec]> {
         match &self.builds {
             Builds::Fixed(ports, _) => Some(ports),
             Builds::Ported(_) => None,
@@ -674,13 +703,43 @@ pub enum RegistryError {
     #[error("peripheral type {0:?} is already registered")]
     Duplicate(String),
     /// Two ports of one type with one name.
-    #[error("peripheral type {kind:?} declares port {port:?} twice")]
+    #[error("peripheral type {peripheral_type:?} declares port {port:?} twice")]
     Port {
-        /// The type.
-        kind: String,
+        /// The type's name.
+        peripheral_type: String,
         /// The port.
         port: String,
     },
+}
+
+/// What constructing a peripheral by its type's name can get wrong
+/// ([`Registry::construct`]).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ConstructError {
+    /// No type of the name is registered.
+    #[error("no peripheral type {0:?}")]
+    Unknown(String),
+    /// What the type's constructor refuses in the parameters.
+    #[error(transparent)]
+    Parameter(#[from] ParameterError),
+}
+
+impl ConstructError {
+    /// The parameter error, if that is what it is, else the error
+    /// itself: for a host's helper that maps a construction to its
+    /// constructor's [`ParameterError`], with no wildcard arm for the
+    /// variants to come, and the error still in hand when it is not one.
+    ///
+    /// # Errors
+    ///
+    /// The error itself, when it is no parameter error.
+    pub fn into_parameter(self) -> Result<ParameterError, Self> {
+        match self {
+            Self::Parameter(error) => Ok(error),
+            Self::Unknown(_) => Err(self),
+        }
+    }
 }
 
 /// Peripheral types by name.
@@ -693,8 +752,10 @@ pub struct Registry {
 impl Registry {
     /// A registry with no types.
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+    pub const fn new() -> Self {
+        Self {
+            types: BTreeMap::new(),
+        }
     }
 
     /// A registry with the built-in generic types (`fixed`,
@@ -723,7 +784,7 @@ impl Registry {
         let name = name.into();
         if let Some(port) = repeated_port(&ports) {
             return Err(RegistryError::Port {
-                kind: name,
+                peripheral_type: name,
                 port: port.to_owned(),
             });
         }
@@ -754,14 +815,40 @@ impl Registry {
         Ok(())
     }
 
-    /// The type `name`, if registered.
-    ///
-    /// Not part of the semver API: the loader's, and a host's tests' of
-    /// its constructors.
-    #[doc(hidden)]
+    /// Whether a type `name` is registered.
     #[must_use]
-    pub fn get(&self, name: &str) -> Option<&PeripheralType> {
-        self.types.get(name)
+    pub fn contains(&self, name: &str) -> bool {
+        self.types.contains_key(name)
+    }
+
+    /// The ports of type `name`: [`None`] if no such type is registered
+    /// ([`Registry::contains`]), or if its ports depend on its parameters
+    /// ([`Registry::register_ported`]), which only construction gives.
+    #[must_use]
+    pub fn ports(&self, name: &str) -> Option<&[PortSpec]> {
+        self.types.get(name)?.ports()
+    }
+
+    /// A peripheral of type `name`, with its ports, built from `context`
+    /// as a load builds it: for a host's tests of its constructors.  A
+    /// load also refuses a parameter the constructor left unread
+    /// ([`Parameters::unread`]) and a port name used twice.
+    ///
+    /// # Errors
+    ///
+    /// [`ConstructError::Unknown`] if no type `name` is registered,
+    /// [`ConstructError::Parameter`] for what the type's constructor
+    /// refuses in `context`'s parameters.
+    pub fn construct(
+        &self,
+        name: &str,
+        context: &Context<'_>,
+    ) -> Result<Constructed, ConstructError> {
+        let peripheral_type = self
+            .types
+            .get(name)
+            .ok_or_else(|| ConstructError::Unknown(name.to_owned()))?;
+        Ok(peripheral_type.construct(context)?)
     }
 
     /// The registered names, in order.
@@ -774,8 +861,9 @@ impl Registry {
 mod tests {
     use std::io;
     use std::path::Path;
-    use std::path::PathBuf;
 
+    use super::ConstructError;
+    use super::Constructed;
     use super::Context;
     use super::Environment;
     use super::ParameterError;
@@ -786,6 +874,22 @@ mod tests {
     use super::RegistryError;
     use crate::builtin::Fixed;
     use crate::signal::Kind;
+
+    #[test]
+    fn a_value_prints_as_toml_writes_it() {
+        let parameters =
+            Parameters::parse("a = [1, 2.5]\nb = { c = true }\nd = 1979-05-27\ne = \"x\\\"y\"")
+                .unwrap();
+        let table = parameters.table();
+        assert_eq!(table["a"].to_string(), "[1, 2.5]");
+        assert_eq!(table["b"].to_string(), "{ c = true }");
+        assert_eq!(table["d"].to_string(), "1979-05-27");
+        assert_eq!(table["e"].to_string(), "'x\"y'");
+        assert_eq!(
+            ParameterValue::Datetime("not a date".to_owned()).to_string(),
+            "\"not a date\""
+        );
+    }
 
     #[test]
     fn a_table_parses_into_the_board_s_own_values() {
@@ -805,7 +909,8 @@ mod tests {
         assert_eq!(ParameterValue::from("x").as_str(), Some("x"));
         assert_eq!(ParameterValue::from(3).as_integer(), Some(3));
         assert_eq!(ParameterValue::from(3).as_float(), None);
-        assert!(Parameters::parse("a = ").is_err());
+        let error = Parameters::parse("a = 1\nb = ").unwrap_err();
+        assert_eq!((error.line(), error.column()), (Some(2), Some(5)));
     }
 
     #[test]
@@ -836,7 +941,7 @@ mod tests {
             })
         );
         assert_eq!(
-            parameters.required::<u8>("e"),
+            parameters.required_integer::<u8>("e"),
             Err(ParameterError::Missing("e".to_owned()))
         );
         assert_eq!(parameters.unread(), Some("d".to_owned()));
@@ -857,7 +962,7 @@ mod tests {
         assert_eq!(
             registry.register("twice", ports, move |_| fixed()),
             Err(RegistryError::Port {
-                kind: "twice".to_owned(),
+                peripheral_type: "twice".to_owned(),
                 port: "a".to_owned()
             })
         );
@@ -865,12 +970,54 @@ mod tests {
     }
 
     #[test]
+    fn a_host_reaches_a_type_by_its_name() {
+        let mut registry = Registry::with_builtins();
+        let fixed = || Ok(Box::new(Fixed::default()) as _);
+        let ports = vec![PortSpec::output("out", Kind::Logic)];
+        registry
+            .register("mine", ports.clone(), move |_| fixed())
+            .unwrap();
+        registry
+            .register_ported("ported", move |_| {
+                Ok(Constructed::new(
+                    fixed()?,
+                    vec![PortSpec::input("in", Kind::Logic)],
+                ))
+            })
+            .unwrap();
+        assert!(registry.contains("mine"));
+        assert!(!registry.contains("absent"));
+        assert_eq!(registry.ports("mine"), Some(ports.as_slice()));
+        assert_eq!(registry.ports("ported"), None);
+        assert_eq!(registry.ports("absent"), None);
+        let parameters = Parameters::default();
+        let environment = Environment::default();
+        let context = Context::new("part", &parameters, &environment);
+        let constructed = registry.construct("ported", &context).unwrap();
+        assert_eq!(constructed.ports, [PortSpec::input("in", Kind::Logic)]);
+        assert_eq!(
+            registry.construct("absent", &context).err(),
+            Some(ConstructError::Unknown("absent".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_construct_error_gives_its_parameter_error() {
+        let missing = ParameterError::Missing("rate".to_owned());
+        assert_eq!(
+            ConstructError::Parameter(missing.clone()).into_parameter(),
+            Ok(missing)
+        );
+        let unknown = ConstructError::Unknown("absent".to_owned());
+        assert_eq!(unknown.clone().into_parameter(), Err(unknown));
+    }
+
+    #[test]
     fn contents_come_from_the_host_relative_to_the_board_file() {
         let parameters = Parameters::parse("image = \"cells.bin\"\nmissing = \"no.bin\"").unwrap();
-        let environment = Environment {
-            board_dir: PathBuf::from("boards"),
-            ..Environment::default()
-        };
+        let mut environment = Environment::default();
+        environment.set_board_dir("boards");
+        assert_eq!(environment.board_dir(), Path::new("boards"));
         let read = |path: &Path| {
             if path == Path::new("boards/cells.bin") {
                 Ok(vec![1, 2, 3])

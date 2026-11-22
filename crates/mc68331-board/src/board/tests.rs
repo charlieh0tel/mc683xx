@@ -2,11 +2,14 @@ use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 
+use mc683xx_cpu32::cpu::state::Layer;
 use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
+use mc683xx_cpu32::cpu::state::decode_layer;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cpu::state::encode_layer;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_mc68331::port::Port;
 
 use super::Board;
 use super::BoardState;
@@ -17,6 +20,7 @@ use crate::builtin::EdgeCounter;
 use crate::description::Description;
 use crate::description::Options;
 use crate::mc68331::Pin;
+use crate::mc68331::PortPin;
 use crate::peripheral::Peripheral;
 use crate::registry::Environment;
 use crate::registry::Registry;
@@ -66,10 +70,10 @@ fn divided() -> Board<Mc68331> {
     let mut board = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap();
-    board.run_until(Time(1_000_000)).unwrap();
+    board.run_until(Time::from_picos(1_000_000)).unwrap();
     board
 }
 
@@ -91,15 +95,15 @@ attach = [{ qspi = 0b1110 }]
 
 /// `snapshot` with `change` made to the board's own state.
 fn edited(snapshot: &[u8], change: impl FnOnce(&mut BoardState<Pin>)) -> Vec<u8> {
-    let mut state: BoardState<Pin> = decode(VERSION, snapshot).unwrap();
+    let mut state: BoardState<Pin> = decode_layer(Layer::Board, VERSION, snapshot).unwrap();
     change(&mut state);
-    encode(VERSION, &state)
+    encode_layer(Layer::Board, VERSION, &state)
 }
 
 /// A change on net `net` by driver `driver`, numbered `sequence`.
 fn waiting(net: usize, driver: usize, sequence: u64) -> ((Time, u64), Change) {
     (
-        (Time(2_000_000), sequence),
+        (Time::from_picos(2_000_000), sequence),
         Change {
             net,
             driver,
@@ -119,7 +123,9 @@ fn a_state_no_run_could_save_is_refused() {
         ),
         (
             edited(&snapshot, |state| {
-                state.outputs.push((Pin::PortGp(3), true));
+                state
+                    .outputs
+                    .push((Pin::Port(PortPin::new(Port::Gp, 3).unwrap()), true));
             }),
             StateError::mismatch("chip output pins"),
         ),
@@ -158,12 +164,12 @@ fn a_state_no_run_could_save_is_refused() {
         ),
         (
             edited(&snapshot, |state| {
-                state.base = TimeBase::new(Cycles::ZERO, Time::ZERO, Frequency(0));
+                state.base = TimeBase::new(Cycles::ZERO, Time::ZERO, Frequency::from_nanohertz(0));
             }),
             StateError::invalid("the system clock's frequency"),
         ),
     ];
-    board.run_until(Time(2_000_000)).unwrap();
+    board.run_until(Time::from_picos(2_000_000)).unwrap();
     let before = board.save().unwrap();
     for (bytes, error) in invalid {
         assert_eq!(
@@ -181,10 +187,10 @@ fn qspi_levels_past_pcs_3_0_are_refused() {
     let mut board = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .unwrap();
-    board.run_until(Time(1_000_000)).unwrap();
+    board.run_until(Time::from_picos(1_000_000)).unwrap();
     let snapshot = board.save().unwrap();
     let with_levels = |levels| {
         edited(&snapshot, |state| {
@@ -202,7 +208,7 @@ fn qspi_levels_past_pcs_3_0_are_refused() {
 fn a_refused_snapshot_leaves_the_board_as_it_was() {
     let mut board = divided();
     let snapshot = board.save().unwrap();
-    board.run_until(Time(2_000_000)).unwrap();
+    board.run_until(Time::from_picos(2_000_000)).unwrap();
     let count = |board: &mut Board<Mc68331>| {
         board
             .peripheral::<EdgeCounter>("counter")
@@ -213,7 +219,7 @@ fn a_refused_snapshot_leaves_the_board_as_it_was() {
     let before = board.save().unwrap();
     // the counter's snapshot taken, then the divider's refused
     let other_ratio = edited(&snapshot, |state| {
-        state.peripherals[2] = Divider::with_ratio(3, 1).save().unwrap();
+        state.peripherals[2] = Divider::new(3, 1).unwrap().save().unwrap();
     });
     assert_eq!(
         board.restore(&other_ratio).unwrap_err().to_string(),
@@ -263,10 +269,10 @@ fn a_refusing_peripheral_is_not_rolled_back_and_the_ones_before_it_are() {
         })
         .unwrap();
     let mut board =
-        Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
-    board.run_until(Time(1_000_000)).unwrap();
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
+    board.run_until(Time::from_picos(1_000_000)).unwrap();
     let snapshot = board.save().unwrap();
-    board.run_until(Time(2_000_000)).unwrap();
+    board.run_until(Time::from_picos(2_000_000)).unwrap();
     let before = board.save().unwrap();
     assert_eq!(
         board.restore(&snapshot).unwrap_err().to_string(),

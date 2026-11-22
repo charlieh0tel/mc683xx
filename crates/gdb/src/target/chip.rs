@@ -11,6 +11,7 @@ use mc683xx_target::size::Size;
 
 use super::AccessError;
 use super::Target;
+use super::TargetReset;
 use super::TargetRun;
 use super::peek_bytes;
 
@@ -19,7 +20,7 @@ use super::peek_bytes;
 impl Target for Mc68331 {
     type Error = Infallible;
 
-    fn with_cpu<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
+    fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
         Some(call(&mut self.cpu_control()))
     }
 
@@ -50,7 +51,7 @@ impl Target for Mc68331 {
         {
             return Err(AccessError::Unserved(address));
         }
-        Self::poke(self, address, data).map_err(|unserved| AccessError::Unserved(unserved.0))
+        Self::write(self, address, data).map_err(|unserved| AccessError::Unserved(unserved.0))
     }
 
     fn run_for(
@@ -62,8 +63,8 @@ impl Target for Mc68331 {
         Ok(self.run_until(target).stop.into())
     }
 
-    fn reset(&mut self) -> Result<bool, Infallible> {
+    fn reset(&mut self) -> Result<TargetReset, Infallible> {
         Self::reset(self);
-        Ok(true)
+        Ok(TargetReset::Done)
     }
 }

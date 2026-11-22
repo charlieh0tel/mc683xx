@@ -20,7 +20,6 @@
     clippy::missing_panics_doc
 )]
 
-mod bdm;
 mod binding;
 mod error;
 mod gdb;
@@ -55,7 +54,7 @@ use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
-use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_board::trace::Line;
 use mc683xx_board::trace::header;
@@ -64,8 +63,8 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_gdb::Ending;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
+use mc683xx_target::address::Address;
 
-use crate::bdm::Server;
 use crate::binding::Binding;
 use crate::binding::Escape;
 use crate::binding::How;
@@ -74,10 +73,8 @@ use crate::error::RunError;
 
 /// The chip the runner runs, which names its trace's lines.
 const CHIP: &str = <Mc68331 as Chip>::TYPE;
-/// Picoseconds in a microsecond, `--turn-us`'s unit.
-const PICOSECONDS_PER_MICROSECOND: u64 = PICOSECONDS_PER_SECOND / 1_000_000;
-/// The longest turn, in microseconds, whose picoseconds a `u64` holds.
-const MAX_TURN_US: u64 = u64::MAX / PICOSECONDS_PER_MICROSECOND;
+/// The longest turn, in microseconds, that a [`Span`] holds.
+const MAX_TURN_US: u64 = Span::MAX.picos() / Span::from_micros(1).picos();
 /// Exit status: the board or a file could not be used.
 const EXIT_ERROR: u8 = 1;
 /// Exit status: the CPU halted.
@@ -207,14 +204,6 @@ struct Arguments {
     /// gdb detaches the run goes on to its end.
     #[arg(long, value_name = "HOST:PORT")]
     gdb: Option<String>,
-    /// Answer a BDM debugger at this address, unix:PATH or HOST:PORT,
-    /// as the mc683xx BDM pod answers on USB (its protocol, version 2):
-    /// a virtual BDM cable.  It gives full control of the CPU, so expose
-    /// it on trusted networks only.  While the CPU is in background
-    /// mode an unpaced run waits for requests, board time standing
-    /// still; a paced one keeps time going.
-    #[arg(long, value_name = "ADDRESS", conflicts_with = "gdb")]
-    bdm: Option<String>,
     /// How fast board time goes against wall time: unpaced (as fast as
     /// the host runs it), realtime, or a factor, board seconds a wall
     /// second (2 twice real time, 0.5 half).  The run is the same
@@ -265,16 +254,6 @@ fn hexadecimal(text: &str) -> Result<u32, ParseIntError> {
     u32::from_str_radix(text.trim_start_matches("0x"), 16)
 }
 
-/// Seconds as board time, picoseconds.  Floats only parse the command
-/// line; the run's time is integers.
-#[expect(
-    clippy::cast_sign_loss,
-    reason = "the flags refuse negative and non-finite seconds"
-)]
-fn picoseconds(seconds: f64) -> u64 {
-    (seconds * PICOSECONDS_PER_SECOND as f64) as u64
-}
-
 fn main() -> ExitCode {
     let arguments = Arguments::parse();
     match run(&arguments) {
@@ -298,13 +277,13 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
     options.firmware.clone_from(&arguments.firmware);
     options.images = arguments.images.iter().cloned().collect();
     for setting in &arguments.settings {
-        options.set(setting)?;
+        options.set(setting.parse()?);
     }
     let mut environment = Environment::default();
     environment.seed = arguments.seed;
     environment.work_dir = arguments.work_dir.clone();
     let registry = mc683xx_peripherals::registry();
-    let mut board = Board::<Mc68331>::read(&arguments.board, &options, &registry, environment)?;
+    let mut board = Board::<Mc68331>::read(&arguments.board, &options, &registry, &environment)?;
     board
         .chip_mut()
         .cpu_control()
@@ -382,7 +361,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
     tracing.qspi = traced(Traced::Qspi);
     board.set_tracing(tracing);
     for &pc in &arguments.watch_code {
-        board.watch_code(pc);
+        board.watch_code(Address(pc));
     }
     let tracing = !arguments.trace.is_empty()
         || !arguments.watch_code.is_empty()
@@ -391,52 +370,36 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         eprintln!("{}", header(CHIP));
     }
     let end = match (arguments.cycles, arguments.seconds) {
-        (None, Some(seconds)) if seconds.is_finite() => board.now() + picoseconds(seconds),
+        (None, Some(seconds)) if seconds.is_finite() => {
+            board.now() + Span::from_seconds_f64(seconds)
+        }
         _ => Time::MAX,
     };
-    let turn = arguments.turn_us * PICOSECONDS_PER_MICROSECOND;
+    let turn = Span::from_micros(arguments.turn_us);
     let every = arguments
         .position
-        .map(picoseconds)
-        .filter(|&every| every > 0);
+        .map(Span::from_seconds_f64)
+        .filter(|every| !every.is_zero());
     let mut turns = Turns {
         bindings,
-        input_after: board.now() + picoseconds(arguments.input_after),
+        input_after: board.now() + Span::from_seconds_f64(arguments.input_after),
         next_position: every.map(|every| (board.now() + every, every)),
     };
-    control.set_pacing(arguments.pace)?;
+    control.set_pacing(arguments.pace);
     if let Some(address) = &arguments.gdb {
         let ending = gdb::serve(&mut board, &mut turns, address, &interrupted)?;
         let killed = ending == Ending::Killed;
         if killed || interrupted.load(Ordering::SeqCst) {
             let outcome = BoardRun::new(Stop::Requested, board.now());
-            eprintln!("{}", Line::new(CHIP, &board.stopped(outcome)));
+            eprintln!("{}", Line::new(CHIP, &board.stopped_record(outcome)));
             if let Some(saving) = saving.filter(|_| !killed) {
                 saving.save(&board)?;
             }
             return Ok(outcome);
         }
     }
-    let mut server = arguments
-        .bdm
-        .as_ref()
-        .map(|address| Server::bind(address, board.chip_mut()))
-        .transpose()
-        .map_err(RunError::Bdm)?;
-    let unpaced = arguments.pace == Pacing::Unpaced;
     let mut pacer = Pacer::new();
     let outcome = loop {
-        if let Some(server) = &mut server {
-            server.poll(&mut board);
-            if unpaced && board.chip().cpu().background().is_some() {
-                // board time stands still between a debugger's requests
-                server.wait(&mut board, &interrupted);
-                if interrupted.load(Ordering::SeqCst) {
-                    break BoardRun::new(Stop::Requested, board.now());
-                }
-                continue;
-            }
-        }
         pacer.wait(board.now(), &control);
         turns.before(&mut board)?;
         let until = (board.now() + turn).min(end);
@@ -444,22 +407,20 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         // as the clock now runs (a SYNCR write moves it), and a turn
         // always moves time on.
         let until = arguments.cycles.map_or(until, |cycles| {
-            let at = board.system_clock().time(Cycles(cycles));
-            until.min(at.max(board.now() + 1))
+            let at = board.system_clock().time(Cycles::from_clocks(cycles));
+            until.min(at.max(board.now() + Span::from_picos(1)))
         });
         let outcome = board.run_until(until)?;
         turns.after(&mut board)?;
         let done = board.now() >= end
             || arguments
                 .cycles
-                .is_some_and(|cycles| board.chip().now() >= Cycles(cycles));
-        // background mode ends a run only with no debugger to resume it
-        let resumable = server.is_some() && matches!(outcome.stop, Stop::Background(_));
-        if outcome.stop != Stop::Budget && !resumable || done {
+                .is_some_and(|cycles| board.chip().now() >= Cycles::from_clocks(cycles));
+        if outcome.stop != Stop::Budget || done {
             break outcome;
         }
     };
-    eprintln!("{}", Line::new(CHIP, &board.stopped(outcome)));
+    eprintln!("{}", Line::new(CHIP, &board.stopped_record(outcome)));
     if let Some(fault) = board.chip().cpu().fault_stop() {
         eprintln!("mc683xx-run: stopped at {fault}");
     }
@@ -565,7 +526,7 @@ struct Turns {
     /// Board time before which no input goes in.
     input_after: Time,
     /// When the next position is taken, and how often.
-    next_position: Option<(Time, u64)>,
+    next_position: Option<(Time, Span)>,
 }
 
 impl Turns {

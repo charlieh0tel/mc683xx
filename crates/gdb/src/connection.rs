@@ -105,16 +105,7 @@ impl Connection for TcpStream {
     }
 
     fn peek(&mut self) -> io::Result<Option<u8>> {
-        self.set_nonblocking(true)?;
-        let mut byte = [0];
-        let peeked = TcpStream::peek(self, &mut byte);
-        self.set_nonblocking(false)?;
-        match peeked {
-            Ok(0) => Err(io::ErrorKind::UnexpectedEof.into()),
-            Ok(_) => Ok(Some(byte[0])),
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
-            Err(error) => Err(error),
-        }
+        peek_stream(self)
     }
 
     fn start(&mut self) -> io::Result<()> {
@@ -122,9 +113,25 @@ impl Connection for TcpStream {
     }
 }
 
+/// The next byte on `stream` if one has come, without waiting for it
+/// or taking it; gdb having closed the connection, an
+/// [`UnexpectedEof`](io::ErrorKind::UnexpectedEof) error.
+fn peek_stream(stream: &TcpStream) -> io::Result<Option<u8>> {
+    stream.set_nonblocking(true)?;
+    let mut byte = [0];
+    let peeked = stream.peek(&mut byte);
+    stream.set_nonblocking(false)?;
+    match peeked {
+        Ok(0) => Err(io::ErrorKind::UnexpectedEof.into()),
+        Ok(_) => Ok(Some(byte[0])),
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
 /// The longest a [`Polled`] connection waits for gdb before it calls
 /// its host's [`Waiter::idle`].
-pub const POLL: Duration = Duration::from_millis(20);
+pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 
 /// A host that must stay responsive while the stub waits for gdb.
 ///
@@ -134,7 +141,7 @@ pub trait Waiter {
     /// What ends the session from the host's side.
     type Error;
 
-    /// Runs `wait`, which blocks for at most [`POLL`].
+    /// Runs `wait`, which blocks for at most [`POLL_INTERVAL`].
     fn wait<R: Send>(&mut self, wait: impl FnOnce() -> R + Send) -> R;
 
     /// Called after each wait in which gdb sent nothing.
@@ -160,8 +167,9 @@ pub enum PollError<E> {
     Host(E),
 }
 
-/// A TCP connection to gdb whose waits for bytes are [`POLL`]s, the
-/// host's [`Waiter`] around and between them; for [`serve`](crate::serve).
+/// A TCP connection to gdb whose waits for bytes last up to
+/// [`POLL_INTERVAL`] each, the host's [`Waiter`] around and between
+/// them; for [`serve`](crate::serve).
 #[derive(Debug)]
 pub struct Polled<W> {
     /// The connection.
@@ -170,8 +178,8 @@ pub struct Polled<W> {
     waiter: W,
 }
 
-/// [`accept`], waiting for gdb in [`POLL`]s through `waiter`, and the
-/// connection a [`Polled`] one.
+/// [`accept`], waiting for gdb in waits of [`POLL_INTERVAL`] through
+/// `waiter`, and the connection a [`Polled`] one.
 ///
 /// # Errors
 ///
@@ -190,7 +198,7 @@ pub fn accept_polled<W: Waiter>(
         let accepted = waiter.wait(|| {
             let accepted = listener.accept();
             if accepted.as_ref().is_err_and(waiting) {
-                thread::sleep(POLL);
+                thread::sleep(POLL_INTERVAL);
             }
             accepted
         });
@@ -201,7 +209,7 @@ pub fn accept_polled<W: Waiter>(
         }
     };
     stream.set_nonblocking(false)?;
-    stream.set_read_timeout(Some(POLL))?;
+    stream.set_read_timeout(Some(POLL_INTERVAL))?;
     Ok(Polled { stream, waiter })
 }
 
@@ -245,18 +253,7 @@ impl<W: Waiter> Connection for Polled<W> {
     /// threads in (gdb's own client among them).
     fn peek(&mut self) -> Result<Option<u8>, Self::Error> {
         let stream = &self.stream;
-        let peeked = self.waiter.wait(|| {
-            stream.set_nonblocking(true)?;
-            let mut byte = [0];
-            let peeked = stream.peek(&mut byte);
-            stream.set_nonblocking(false)?;
-            peeked.map(|_| byte[0])
-        });
-        match peeked {
-            Ok(byte) => Ok(Some(byte)),
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(None),
-            Err(error) => Err(error.into()),
-        }
+        Ok(self.waiter.wait(|| peek_stream(stream))?)
     }
 
     fn start(&mut self) -> Result<(), Self::Error> {

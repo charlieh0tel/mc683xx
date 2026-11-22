@@ -19,15 +19,22 @@ use mc683xx_modules::sim::reset::ResetScope;
 
 use super::Description;
 use super::Options;
+use super::Setting;
 use super::Target;
 use crate::board::Board;
+use crate::builtin::Fixed;
 use crate::endpoint::Endpoint;
+use crate::error::EditError;
 use crate::error::LoadError;
+use crate::error::ParseSettingError;
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
+use crate::registry::Constructed;
 use crate::registry::Environment;
 use crate::registry::ParameterValue;
+use crate::registry::PortSpec;
 use crate::registry::Registry;
+use crate::signal::Kind;
 
 /// A board with RAM and a peripheral, for the errors to break.
 const BASE: &str = r#"
@@ -69,7 +76,7 @@ fn error(extra: &str) -> String {
         Ok(description) => Board::<Mc68331>::load(
             &description,
             &Registry::with_builtins(),
-            Environment::default(),
+            &Environment::default(),
         )
         .map(|_| ())
         .unwrap_err()
@@ -184,6 +191,15 @@ fn an_option_puts_its_entries_on_the_board() {
     };
     let description = Description::parse(text, Path::new("."), &options).unwrap();
     assert_eq!(description.peripherals.len(), 1);
+    assert_eq!(description.options(), ["x"]);
+    let all = Options {
+        all_enabled: true,
+        ..Options::default()
+    };
+    let description = Description::parse(text, Path::new("."), &all).unwrap();
+    assert_eq!(description.peripherals.len(), 1);
+    let description = Description::parse(text, Path::new("."), &Options::default()).unwrap();
+    assert!(description.peripherals.is_empty());
     let options = Options {
         enabled: ["y".to_owned()].into(),
         ..Options::default()
@@ -198,9 +214,9 @@ fn an_option_puts_its_entries_on_the_board() {
 fn a_run_sets_parameters_over_the_files() {
     let text = "version = 1\n[chip]\ntype = \"mc68331\"\n[board]\noptions = [\"x\"]\n[[peripheral]]\nname = \"d\"\ntype = \"fixed\"\nparameters = { value = 1, keep = \"k\" }\n[[peripheral]]\nname = \"e\"\ntype = \"fixed\"\noption = \"x\"\n";
     let mut options = Options::default();
-    options.set("d.value=0x10").unwrap();
-    options.set("d.name=eeprom.bin").unwrap();
-    options.set("e.value=2").unwrap();
+    options.set("d.value=0x10".parse().unwrap());
+    options.set("d.name=eeprom.bin".parse().unwrap());
+    options.set("e.value=2".parse().unwrap());
     options.set_parameter("d", "on", true);
     let mut description = Description::parse(text, Path::new("."), &options).unwrap();
     let parameters = &description.peripherals[0].parameters;
@@ -217,21 +233,233 @@ fn a_run_sets_parameters_over_the_files() {
         description.peripherals[0].parameters["value"],
         ParameterValue::Integer(3)
     );
-    assert!(matches!(
+    assert_eq!(
         description.set_parameter("z", "value", 3),
-        Err(LoadError::Peripheral(peripheral)) if peripheral == "z"
-    ));
-    options.set("z.value=1").unwrap();
+        Err(EditError::Peripheral("z".to_owned()))
+    );
+    assert_eq!(
+        description.remove_parameter("d", "keep"),
+        Ok(Some(ParameterValue::from("k")))
+    );
+    assert_eq!(description.remove_parameter("d", "keep"), Ok(None));
+    assert!(!description.parameters("d").unwrap().contains_key("keep"));
+    assert_eq!(description.parameters("z"), None);
+    assert_eq!(
+        description.remove_parameter("z", "keep"),
+        Err(EditError::Peripheral("z".to_owned()))
+    );
+    options.set("z.value=1".parse().unwrap());
     assert!(matches!(
         Description::parse(text, Path::new("."), &options),
         Err(LoadError::Peripheral(peripheral)) if peripheral == "z"
     ));
+    let setting: Setting = "d.value=0x10".parse().unwrap();
+    assert_eq!(setting, Setting::new("d", "value", 0x10));
+    assert_eq!(
+        (setting.peripheral(), setting.key(), setting.value()),
+        ("d", "value", &ParameterValue::Integer(0x10))
+    );
+    assert_eq!(setting.to_string(), "d.value=16");
+    for text in [
+        "d.value=0x10",
+        "d.name=bare text",
+        "d.name=\"quoted\"",
+        "d.list=[1, 2.5, true]",
+        "d.table={ a = 1 }",
+        "d.at=1979-05-27T07:32:00Z",
+    ] {
+        let setting: Setting = text.parse().unwrap();
+        assert_eq!(setting.to_string().parse(), Ok(setting), "{text}");
+    }
     for malformed in ["d.value", "value=1", ".value=1", "d.=1"] {
         assert!(matches!(
-            Options::default().set(malformed),
-            Err(LoadError::Setting(setting)) if setting == malformed
+            malformed.parse::<Setting>(),
+            Err(ParseSettingError(setting)) if setting == malformed
         ));
     }
+}
+
+#[test]
+fn net_ends_are_checked_against_the_registry_s_ports() {
+    let board = |net: &str| {
+        parse(&with(&format!(
+            "[[peripheral]]\nname = \"osc\"\ntype = \"clock\"\nparameters = {{ hz = 10 }}\n\
+             [[peripheral]]\nname = \"div\"\ntype = \"divider\"\n{net}"
+        )))
+        .unwrap()
+    };
+    let registry = Registry::with_builtins();
+    let environment = Environment::default();
+    let check = |net: &str| board(net).check_ports(&registry, &environment);
+    check("[[net]]\nname = \"c\"\ntype = \"clock\"\nfrom = \"osc.out\"\nto = [\"div.in\"]\n")
+        .unwrap();
+    assert!(matches!(
+        check("[[net]]\nname = \"c\"\ntype = \"clock\"\nfrom = \"osc.out\"\nto = [\"div.input\"]\n"),
+        Err(LoadError::Endpoint { endpoint, .. }) if endpoint == "div.input"
+    ));
+    assert!(matches!(
+        check("[[net]]\nname = \"c\"\ntype = \"edge\"\nfrom = \"osc.out\"\nto = [\"div.in\"]\n"),
+        Err(LoadError::Kind { endpoint, .. }) if endpoint == "osc.out"
+    ));
+    assert!(matches!(
+        check("[[net]]\nname = \"c\"\ntype = \"clock\"\nfrom = \"div.in\"\nto = [\"external.x\"]\n"),
+        Err(LoadError::Direction { endpoint, .. }) if endpoint == "div.in"
+    ));
+    assert!(matches!(
+        board("").check_ports(&Registry::new(), &environment),
+        Err(LoadError::Type { kind, .. }) if kind == "clock"
+    ));
+    let mut ported = Registry::with_builtins();
+    ported
+        .register_ported("probe", |context| {
+            let port = context
+                .parameters
+                .string("port")?
+                .unwrap_or("in")
+                .to_owned();
+            Ok(Constructed::new(
+                Box::new(Fixed::default()),
+                vec![PortSpec::input(port, Kind::Clock)],
+            ))
+        })
+        .unwrap();
+    let probed = |parameters: &str| {
+        parse(&with(&format!(
+            "[[peripheral]]\nname = \"osc\"\ntype = \"clock\"\n\
+             [[peripheral]]\nname = \"p\"\ntype = \"probe\"\nparameters = {{ {parameters} }}\n\
+             [[net]]\nname = \"c\"\ntype = \"clock\"\nfrom = \"osc.out\"\nto = [\"p.tip\"]\n"
+        )))
+        .unwrap()
+        .check_ports(&ported, &environment)
+    };
+    probed("port = \"tip\"").unwrap();
+    assert!(matches!(
+        probed(""),
+        Err(LoadError::Endpoint { endpoint, .. }) if endpoint == "p.tip"
+    ));
+    assert!(matches!(
+        probed("port = \"tip\", stray = 1"),
+        Err(LoadError::Parameter { peripheral, .. }) if peripheral == "p"
+    ));
+}
+
+#[test]
+fn a_type_built_for_its_ports_reads_its_paths_through_the_host() {
+    let mut registry = Registry::with_builtins();
+    registry
+        .register_ported("probe", |context| {
+            let port = context.contents("ports")?.unwrap_or_default();
+            Ok(Constructed::new(
+                Box::new(Fixed::default()),
+                vec![PortSpec::input(
+                    String::from_utf8_lossy(&port).into_owned(),
+                    Kind::Clock,
+                )],
+            ))
+        })
+        .unwrap();
+    let description = parse(&with(
+        "[[peripheral]]\nname = \"osc\"\ntype = \"clock\"\n\
+         [[peripheral]]\nname = \"p\"\ntype = \"probe\"\nparameters = { ports = \"no-such-file\" }\n\
+         [[net]]\nname = \"c\"\ntype = \"clock\"\nfrom = \"osc.out\"\nto = [\"p.tip\"]\n",
+    ))
+    .unwrap();
+    let environment = Environment::default();
+    let mut reads = 0;
+    description
+        .check_ports_with(&registry, &environment, |path| {
+            assert!(path.ends_with("no-such-file"));
+            reads += 1;
+            Ok(b"tip".to_vec())
+        })
+        .unwrap();
+    assert_eq!(reads, 1, "read is an FnMut");
+    assert!(matches!(
+        description.check_ports_with(&registry, &environment, |_| Err(io::ErrorKind::NotFound.into())),
+        Err(LoadError::Parameter { peripheral, .. }) if peripheral == "p"
+    ));
+}
+
+#[test]
+fn a_host_stands_in_for_a_peripheral_through_an_external_endpoint() {
+    let mut description = parse(&with(
+        "[[peripheral]]\nname = \"osc\"\ntype = \"clock\"\nparameters = { hz = 10 }\n\
+         [[peripheral]]\nname = \"div\"\ntype = \"divider\"\nparameters = { divide = 2 }\n\
+         [[peripheral]]\nname = \"count\"\ntype = \"edge-counter\"\n\
+         [[net]]\nname = \"c\"\ntype = \"clock\"\nfrom = \"osc.out\"\nto = [\"div.in\"]\n\
+         [[net]]\nname = \"e\"\ntype = \"edge\"\nfrom = \"div.out\"\nto = [\"count.in\", \"external.scope\"]\n",
+    ))
+    .unwrap();
+    assert_eq!(description.rebind("div.out", "divided"), Ok(1));
+    assert_eq!(
+        description.rebind("div.uot", "divided"),
+        Err(EditError::Port("div.uot".to_owned())),
+        "a misspelled port is on no net"
+    );
+    assert_eq!(
+        description.remove_peripheral("div"),
+        Ok(vec!["c".to_owned()])
+    );
+    assert_eq!(
+        description
+            .nets
+            .iter()
+            .map(|net| net.name.as_str())
+            .collect::<Vec<_>>(),
+        ["e"],
+        "net c, its sink gone, goes"
+    );
+    assert_eq!(
+        description.nets[0].from,
+        [Endpoint::External("divided".to_owned())]
+    );
+    assert_eq!(
+        description
+            .peripherals()
+            .map(|(name, _)| name)
+            .collect::<Vec<_>>(),
+        ["osc", "count"]
+    );
+    Board::<Mc68331>::load(
+        &description,
+        &Registry::with_builtins(),
+        &Environment::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        description.remove_peripheral("div"),
+        Err(EditError::Peripheral("div".to_owned()))
+    );
+    assert_eq!(
+        description.rebind("div.out", "x"),
+        Err(EditError::Port("div.out".to_owned()))
+    );
+    assert_eq!(
+        description.rebind("chip.PGP0", "x"),
+        Err(EditError::Port("chip.PGP0".to_owned()))
+    );
+    assert_eq!(description.rebind("count.in", ""), Err(EditError::External));
+}
+
+#[test]
+fn removing_a_peripheral_names_the_nets_that_went_an_external_end_s_among_them() {
+    let mut description = parse(&with(
+        "[[peripheral]]\nname = \"osc\"\ntype = \"clock\"\nparameters = { hz = 10 }\n\
+         [[peripheral]]\nname = \"count\"\ntype = \"edge-counter\"\n\
+         [[net]]\nname = \"scope\"\ntype = \"clock\"\nfrom = \"osc.out\"\nto = [\"external.scope\"]\n\
+         [[net]]\nname = \"in\"\ntype = \"edge\"\nfrom = \"external.edges\"\nto = [\"count.in\"]\n",
+    ))
+    .unwrap();
+    assert_eq!(
+        description.remove_peripheral("count"),
+        Ok(vec!["in".to_owned()]),
+        "external.edges is left on no net"
+    );
+    assert_eq!(
+        description.remove_peripheral("osc"),
+        Ok(vec!["scope".to_owned()])
+    );
+    assert!(description.nets.is_empty());
 }
 
 #[test]
@@ -270,6 +498,14 @@ fn unknown_keys_are_refused_with_their_line() {
     let message = error("[chip]\ncrystal = 1\n");
     assert!(message.contains("crystal"), "{message}");
     assert!(message.contains("line"), "{message}");
+    let Err(LoadError::Syntax(error)) = parse(&with("[[peripheral]]\nnome = \"d\"\n")) else {
+        panic!("an unknown key is a syntax error");
+    };
+    assert_eq!(
+        (error.line(), error.column()),
+        (Some(13), Some(1)),
+        "{error}"
+    );
 }
 
 #[test]
@@ -289,7 +525,7 @@ fn the_file_names_its_chip_and_another_chip_refuses_it() {
     let error = Board::<Mc68331>::load(
         &description,
         &Registry::with_builtins(),
-        Environment::default(),
+        &Environment::default(),
     )
     .map(|_| ())
     .unwrap_err();
@@ -303,10 +539,31 @@ fn the_file_names_its_chip_and_another_chip_refuses_it() {
         Board::<Mc68331>::load(
             &description,
             &Registry::with_builtins(),
-            Environment::default()
+            &Environment::default()
         )
         .is_ok()
     );
+}
+
+#[test]
+fn a_chip_section_the_file_lacks_reads_as_empty_and_its_error_has_no_place() {
+    /// A section with a key it requires.
+    #[derive(Debug, serde::Deserialize)]
+    struct Required {
+        /// Required.
+        #[expect(dead_code, reason = "only its absence is tested")]
+        needed: u32,
+    }
+    let mut description = parse(BASE).unwrap();
+    // a description whose text holds no [chip] table, as none parsed has
+    description.text = description
+        .text
+        .replace("[chip]\n", "")
+        .replace(CHIP_TYPE, "");
+    let Err(LoadError::Syntax(error)) = description.chip_section::<Required>("mc68331") else {
+        panic!("a missing key is a syntax error");
+    };
+    assert_eq!((error.line(), error.column()), (None, None), "{error}");
 }
 
 #[test]

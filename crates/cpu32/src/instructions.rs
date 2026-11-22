@@ -433,7 +433,7 @@ pub(crate) mod tests {
         }
         let mut cpu = Cpu::new(memory);
         cpu.registers.set_sr(status::S | status::INTERRUPT_MASK);
-        cpu.registers.pc = CODE;
+        cpu.registers.pc = Address(CODE);
         cpu
     }
 
@@ -462,7 +462,12 @@ pub(crate) mod tests {
     pub(crate) fn step(cpu: &mut Cpu, instructions: usize) -> Run {
         let mut run = None;
         for _ in 0..instructions {
-            run = Some(cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles(1)));
+            run = Some(cpu.run_for(
+                &mut NoBus,
+                &mut NoInterrupts,
+                Cycles::ZERO,
+                Cycles::from_clocks(1),
+            ));
         }
         run.expect("at least one instruction")
     }

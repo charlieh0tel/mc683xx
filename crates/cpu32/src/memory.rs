@@ -25,6 +25,27 @@ const PAGE_SHIFT: u32 = 11;
 /// Clocks in the fastest bus cycle (CPU32RM 8.1.5).
 const FASTEST_CLOCKS: u8 = 2;
 
+/// Whether the CPU may write a memory a host wires in: the chip's
+/// builder's (`mc683xx_mc68331::chip::Builder::memory`) and a board's.
+/// Non-exhaustive: a kind may be added (a write-once memory, say), and
+/// [`writable`](Self::writable) answers for each.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum MemoryKind {
+    /// Read-only: a write is ignored, as a ROM ignores one.
+    Rom,
+    /// Read and written.
+    Ram,
+}
+
+impl MemoryKind {
+    /// Whether the CPU writes it.
+    #[must_use]
+    pub const fn writable(self) -> bool {
+        matches!(self, Self::Ram)
+    }
+}
+
 /// The two address spaces outside CPU space that the chip-select
 /// decode tells apart (SIMRM 7.10.3, the SPACE field).  Program and
 /// data share one.
@@ -128,8 +149,14 @@ pub struct Backing {
 ///
 /// It also says what a cycle there costs.  A read or write with no
 /// backing goes to the [`Bus`](crate::bus::Bus); ROM is a page that
-/// reads from a region and writes to the bus.
+/// reads from a region and writes to the bus.  A host that lays out a
+/// bare CPU's memory itself ([`Memory::map`]) builds one from
+/// [`Page::BUS`]: `Page::BUS.reading(backing).writing(backing)`, then
+/// [`timed`](Self::timed) for a memory slower or narrower than the
+/// fastest 16-bit one.  Non-exhaustive, so a field added later gets a
+/// default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct Page {
     /// Where reads go.
     pub read: Option<Backing>,
@@ -149,6 +176,29 @@ impl Page {
         port: PortSize::Bits16,
         clocks: FASTEST_CLOCKS,
     };
+
+    /// The page, its reads going to `read`, or to the bus if `None`.
+    #[must_use]
+    pub const fn reading(self, read: Option<Backing>) -> Self {
+        Self { read, ..self }
+    }
+
+    /// The page, its writes going to `write`, or to the bus if `None`.
+    #[must_use]
+    pub const fn writing(self, write: Option<Backing>) -> Self {
+        Self { write, ..self }
+    }
+
+    /// The page, the memory behind it `port` wide, each of its bus
+    /// cycles `clocks` long, wait states included.
+    #[must_use]
+    pub const fn timed(self, port: PortSize, clocks: u8) -> Self {
+        Self {
+            port,
+            clocks,
+            ..self
+        }
+    }
 }
 
 /// What can go wrong building the page tables.
@@ -159,22 +209,29 @@ pub enum MemoryError {
     #[error("{0} address bits: must be {min} to 32", min = PAGE_SHIFT + 1)]
     AddressBits(u32),
     /// A range that does not start and end on a page.
-    #[error("{start:#x}, {length:#x} bytes: not whole pages")]
+    #[error("{start}, {length:#x} bytes: not whole pages")]
     Unaligned {
         /// Its start.
-        start: u32,
+        start: Address,
         /// Its length.
         length: u32,
     },
     /// A range past the end of the address space or of its region.
-    #[error("{start:#x}, {length:#x} bytes: out of range")]
+    #[error("{start}, {length:#x} bytes: out of range")]
     OutOfRange {
         /// Its start.
-        start: u32,
+        start: Address,
         /// Its length.
         length: u32,
     },
 }
+
+/// A byte a host's cycle-free read or write cannot reach, the bare
+/// machine's or the chip's: not memory the core serves (nothing mapped
+/// there, or a peripheral's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("{0} is not memory the core serves")]
+pub struct Unserved(pub Address);
 
 /// What a memory's regions hold, for tests that it frees what it
 /// unmaps.
@@ -513,10 +570,7 @@ impl Memory {
         for backing in [page.read, page.write].into_iter().flatten() {
             let end = u64::from(backing.offset) + u64::from(length);
             if end > self.regions[backing.region.0].len() as u64 {
-                return Err(MemoryError::OutOfRange {
-                    start: start.0,
-                    length,
-                });
+                return Err(MemoryError::OutOfRange { start, length });
             }
         }
         for (index, number) in pages.clone().enumerate() {
@@ -611,18 +665,12 @@ impl Memory {
     /// address space.
     fn pages(&self, start: Address, length: u32) -> Result<Range<usize>, MemoryError> {
         if !start.0.is_multiple_of(PAGE_BYTES) || !length.is_multiple_of(PAGE_BYTES) {
-            return Err(MemoryError::Unaligned {
-                start: start.0,
-                length,
-            });
+            return Err(MemoryError::Unaligned { start, length });
         }
         let first = (start.0 >> PAGE_SHIFT) as usize;
         let count = (length >> PAGE_SHIFT) as usize;
         if first + count > self.pages {
-            return Err(MemoryError::OutOfRange {
-                start: start.0,
-                length,
-            });
+            return Err(MemoryError::OutOfRange { start, length });
         }
         Ok(first..first + count)
     }
@@ -789,6 +837,70 @@ impl Memory {
         }
         self.read_backed(space, address, size)
             .map(|(value, _)| value)
+    }
+
+    /// Fills `bytes` from `address` up with no bus cycle, a debugger's
+    /// read: from the bytes the pages of supervisor space read,
+    /// whatever their permissions.
+    ///
+    /// # Errors
+    ///
+    /// [`Unserved`] for the first byte whose page reads from the bus;
+    /// `bytes` is then filled up to it.
+    pub fn read_bytes(&self, address: Address, bytes: &mut [u8]) -> Result<(), Unserved> {
+        let mut done = 0;
+        while done < bytes.len() {
+            let (region, from, count) = self.span(address, done, bytes.len(), |page| page.read)?;
+            bytes[done..done + count].copy_from_slice(&self.region(region)[from..from + count]);
+            done += count;
+        }
+        Ok(())
+    }
+
+    /// Writes `bytes` at `address` up with no bus cycle, a debugger's
+    /// write: into the bytes each page of supervisor space reads, as
+    /// [`read_bytes`](Self::read_bytes) does, a ROM's included, so a read
+    /// gives back what was written and the CPU runs it; where a page
+    /// reads from the bus, into the bytes it writes (write-only RAM).
+    /// Where a page writes to other bytes than it reads, its write
+    /// backing is left as it was ([PLAN.md, Memory]).
+    ///
+    /// # Errors
+    ///
+    /// [`Unserved`] for the first byte whose page neither reads nor
+    /// writes host memory; then nothing is written.
+    ///
+    /// [PLAN.md, Memory]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#memory
+    pub fn write_bytes(&mut self, address: Address, bytes: &[u8]) -> Result<(), Unserved> {
+        let mut spans = Vec::new();
+        let mut done = 0;
+        while done < bytes.len() {
+            let span = self.span(address, done, bytes.len(), |page| page.read.or(page.write))?;
+            spans.push((span, done));
+            done += span.2;
+        }
+        for ((region, from, count), done) in spans {
+            self.region_mut(region)[from..from + count].copy_from_slice(&bytes[done..done + count]);
+        }
+        Ok(())
+    }
+
+    /// Where a debugger's access of `length` bytes from `address` finds
+    /// its bytes from `done` on, within one page of supervisor space: the
+    /// region of the backing `backing` picks of the page, the index in
+    /// it, and how many of the bytes left the page holds.
+    fn span(
+        &self,
+        address: Address,
+        done: usize,
+        length: usize,
+        backing: fn(&Page) -> Option<Backing>,
+    ) -> Result<(RegionId, usize, usize), Unserved> {
+        let at = address.offset(done as u32);
+        let backing = backing(&self.entry(Space::Supervisor, at)).ok_or(Unserved(at))?;
+        let within = self.mask(at).0 % PAGE_BYTES;
+        let count = ((PAGE_BYTES - within) as usize).min(length - done);
+        Ok((backing.region, (backing.offset + within) as usize, count))
     }
 
     /// A byte or word read the fast path serves, with its stall, or
@@ -958,6 +1070,7 @@ mod tests {
     use super::PAGE_BYTES;
     use super::Page;
     use super::Space;
+    use super::Unserved;
     use crate::bus::PortSize;
     use crate::cycles::Cycles;
     use mc683xx_target::address::Address;
@@ -993,6 +1106,74 @@ mod tests {
         assert_eq!(memory.fetch(Space::Supervisor, at), Some((0, Cycles::ZERO)));
         memory.clear();
         assert_eq!(memory.fetch(Space::Supervisor, at), None);
+    }
+
+    #[test]
+    fn a_debugger_write_lands_where_its_read_reads() {
+        let mut memory = Memory::new(24).unwrap();
+        let rom = memory.add_region(vec![0; PAGE_BYTES as usize]);
+        let ram = memory.add_region(vec![0; PAGE_BYTES as usize]);
+        let backing = |region| Some(Backing { region, offset: 0 });
+        // a ROM that reads, the RAM under it that takes the writes
+        let page = Page::BUS.reading(backing(rom)).writing(backing(ram));
+        memory
+            .map(Space::Supervisor, Address(0), PAGE_BYTES, page)
+            .unwrap();
+        let only_writes = Page::BUS.writing(backing(ram));
+        memory
+            .map(
+                Space::Supervisor,
+                Address(PAGE_BYTES),
+                PAGE_BYTES,
+                only_writes,
+            )
+            .unwrap();
+        memory.write_bytes(Address(0x10), &[0x4e, 0x71]).unwrap();
+        let mut read = [0; 2];
+        memory.read_bytes(Address(0x10), &mut read).unwrap();
+        assert_eq!(read, [0x4e, 0x71]);
+        assert_eq!(memory.region(rom)[0x10..0x12], [0x4e, 0x71]);
+        assert_eq!(memory.region(ram)[0x10..0x12], [0, 0]);
+        // a page whose reads go to the bus takes it in the bytes it
+        // writes, with none to read back
+        let at = Address(PAGE_BYTES);
+        memory.write_bytes(at.offset(0x20), &[0x12, 0x34]).unwrap();
+        assert_eq!(memory.region(ram)[0x20..0x22], [0x12, 0x34]);
+        assert_eq!(memory.read_bytes(at, &mut read), Err(Unserved(at)));
+        // one crossing from the split page into it takes each page's
+        let last = Address(PAGE_BYTES - 1);
+        memory.write_bytes(last, &[0xaa, 0xbb]).unwrap();
+        assert_eq!(memory.region(rom)[PAGE_BYTES as usize - 1], 0xaa);
+        assert_eq!(memory.region(ram)[0], 0xbb);
+        assert_eq!(memory.region(ram)[PAGE_BYTES as usize - 1], 0);
+    }
+
+    #[test]
+    fn a_range_refused_prints_its_start_as_an_address() {
+        let unaligned = MemoryError::Unaligned {
+            start: Address(0x10),
+            length: 0x20,
+        };
+        assert_eq!(
+            unaligned.to_string(),
+            "0x00000010, 0x20 bytes: not whole pages"
+        );
+    }
+
+    #[test]
+    fn a_debugger_write_to_a_page_all_on_the_bus_writes_nothing() {
+        let mut memory = Memory::new(24).unwrap();
+        ram(&mut memory, 0, PAGE_BYTES);
+        let at = Address(PAGE_BYTES);
+        assert_eq!(memory.write_bytes(at, &[1]), Err(Unserved(at)));
+        let mut read = [0; 1];
+        assert_eq!(memory.read_bytes(at, &mut read), Err(Unserved(at)));
+        // one crossing into it writes nothing, the served page's
+        // byte included
+        let last = Address(PAGE_BYTES - 1);
+        assert_eq!(memory.write_bytes(last, &[1, 2]), Err(Unserved(at)));
+        memory.read_bytes(last, &mut read).unwrap();
+        assert_eq!(read, [0]);
     }
 
     #[test]

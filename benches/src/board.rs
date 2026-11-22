@@ -10,6 +10,7 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::Halt;
 use mc683xx_cpu32::cpu::state::Stateless;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
@@ -21,6 +22,7 @@ use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_target::address::Address;
 
 use crate::kernel::Calibration;
 use crate::kernel::Kernel;
@@ -127,7 +129,7 @@ pub const RAM: u32 = 0x10_0000;
 /// The 8-bit, 12-wait-state peripheral on CS5.
 pub const PERIPHERAL: u32 = 0x30_0000;
 /// Clocks one iteration runs: well inside the sled for every kernel.
-pub const BUDGET: Cycles = Cycles(20_000);
+pub const BUDGET: Cycles = Cycles::from_clocks(20_000);
 
 /// The board's kernels: code from flash, data from RAM through the
 /// page tables or from CS5's peripheral through the bus.
@@ -337,10 +339,10 @@ impl Board {
 
         let mut builder = Builder::default();
         builder
-            .memory(flash, false, &[ChipSelect::Boot])
+            .memory(flash, MemoryKind::Rom, &[ChipSelect::Boot])
             .expect("CSBOOT is free");
         builder
-            .memory(vec![0; RAM_BYTES], true, &[cs(0), cs(2), cs(3)])
+            .memory(vec![0; RAM_BYTES], MemoryKind::Ram, &[cs(0), cs(2), cs(3)])
             .expect("RAM's selects are free");
         builder
             .peripheral(Latch(0x5a5a), &[cs(5)])
@@ -351,9 +353,9 @@ impl Board {
         });
         let quanta = builder.unwired_peripheral(QuantumCounter::default());
         let mut chip = builder.build();
-        while chip.cpu().registers.pc != sled_start {
-            chip.run_for(Cycles(1));
-            assert_eq!(chip.halted(), None::<Halt>, "the boot code halted");
+        while chip.cpu().registers.pc != Address(sled_start) {
+            chip.run_for(Cycles::from_clocks(1));
+            assert_eq!(chip.cpu().halted(), None::<Halt>, "the boot code halted");
         }
         let mut board = Self {
             chip,
@@ -375,8 +377,8 @@ impl Board {
         };
         let registers = self.chip.registers_mut();
         registers.set_sr(status::S | mask);
-        registers.ssp = STACK;
-        registers.pc = self.sled;
+        registers.ssp = Address(STACK);
+        registers.pc = Address(self.sled);
     }
 
     /// One iteration: the sled from its start for `budget` clocks.
@@ -413,7 +415,7 @@ impl Board {
     pub fn calibrate(kernel: &Kernel, load: Load, budget: Cycles) -> Result<Calibration, Skip> {
         let mut board = Self::new(kernel, load);
         let calibration = Calibration::measure(budget, || {
-            let run = board.chip.run_for(Cycles(1));
+            let run = board.chip.run_for(Cycles::from_clocks(1));
             let taken = board.chip.cpu().exception_taken();
             assert!(
                 taken.is_none_or(|exception| crate::kernel::unimplemented(exception)
@@ -425,7 +427,7 @@ impl Board {
             (run.cycles, taken)
         })?;
         assert!(
-            board.chip.cpu().registers.pc < HANDLER + 2,
+            board.chip.cpu().registers.pc < Address(HANDLER + 2),
             "{}: ran off its sled",
             kernel.name
         );

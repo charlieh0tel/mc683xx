@@ -4,11 +4,16 @@
 //! inputs give the same run ([PLAN.md, State]).  Hooks are the host's,
 //! not state: a restore keeps the CPU's own.  The format is shared by
 //! every layer that saves ([`encode`], [`decode`]), each with its own
-//! version.
+//! version.  A snapshot a host restores whole (the core's, a bare
+//! machine's, a chip's, a board's) starts with a magic and its
+//! [`Layer`] before the version, so that one handed to the wrong
+//! layer's `restore` says so ([`StateError::Layer`]).
 //!
 //! [PLAN.md, State]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#interface
 
 use std::borrow::Cow;
+use std::fmt;
+use std::str::FromStr;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -36,10 +41,85 @@ mod tests;
 
 /// The format of [`Cpu::save`]'s bytes.  A change to what it saves
 /// changes it.
-pub const VERSION: u32 = 9;
+pub const VERSION: u32 = 10;
 
 /// Bytes of the version that starts every snapshot, little-endian.
 const VERSION_BYTES: usize = size_of::<u32>();
+
+/// What starts a [`Layer`]'s snapshot, before its tag.
+const MAGIC: [u8; 4] = *b"M683";
+
+/// A format a host restores whole, which its snapshot names after a
+/// magic: so a snapshot handed to another layer's `restore` is refused
+/// as such, not as a version mismatch.  The parts inside one (modules,
+/// peripherals) do not name theirs: each is placed by the layer that
+/// holds it, and a host's peripheral's format is the host's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Layer {
+    /// The core's ([`Cpu::save`]).
+    Cpu,
+    /// A bare machine's ([`Machine::save`](crate::flat::Machine::save)).
+    Machine,
+    /// A chip's (`Mc68331::save`).
+    Chip,
+    /// A board's (`Board::save`).
+    Board,
+}
+
+impl Layer {
+    /// Every layer.
+    const ALL: [Self; 4] = [Self::Cpu, Self::Machine, Self::Chip, Self::Board];
+
+    /// The byte that names it in a snapshot.
+    const fn tag(self) -> u8 {
+        match self {
+            Self::Cpu => 1,
+            Self::Machine => 2,
+            Self::Chip => 3,
+            Self::Board => 4,
+        }
+    }
+
+    /// The layer `tag` names, if any.
+    fn from_tag(tag: u8) -> Option<Self> {
+        Self::ALL.into_iter().find(|layer| layer.tag() == tag)
+    }
+
+    /// Its name.
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Cpu => "CPU",
+            Self::Machine => "machine",
+            Self::Chip => "chip",
+            Self::Board => "board",
+        }
+    }
+}
+
+/// Its name: `CPU`, `machine`, `chip`, `board`.
+impl fmt::Display for Layer {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
+
+/// The layer named so, as `Display` writes it, in any case.
+impl FromStr for Layer {
+    type Err = ParseLayerError;
+
+    fn from_str(name: &str) -> Result<Self, ParseLayerError> {
+        Self::ALL
+            .into_iter()
+            .find(|layer| layer.name().eq_ignore_ascii_case(name))
+            .ok_or_else(|| ParseLayerError(name.to_owned()))
+    }
+}
+
+/// Text that names no snapshot layer.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no snapshot layer {0:?}")]
+pub struct ParseLayerError(String);
 
 /// Why a snapshot could not be restored, or a state saved.
 ///
@@ -52,6 +132,18 @@ const VERSION_BYTES: usize = size_of::<u32>();
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum StateError {
+    /// Bytes that do not start as a layer's snapshot does: not a
+    /// snapshot, or one older than the header.
+    #[error("not a snapshot")]
+    NotSnapshot,
+    /// Another layer's snapshot.
+    #[error("a {found} snapshot, not a {expected} snapshot")]
+    Layer {
+        /// The layer it is.
+        found: Layer,
+        /// The layer restoring it.
+        expected: Layer,
+    },
     /// A snapshot of another format.
     #[error("snapshot format {found}, not {expected}")]
     Version {
@@ -260,10 +352,65 @@ fn put_back(
 /// writing to a vector cannot fail.
 #[must_use]
 pub fn encode<T: Serialize>(version: u32, value: &T) -> Vec<u8> {
-    let mut bytes = version.to_le_bytes().to_vec();
+    encode_after(Vec::new(), version, value)
+}
+
+/// `bytes`, then [`encode`]'s, written into them.
+fn encode_after<T: Serialize>(mut bytes: Vec<u8>, version: u32, value: &T) -> Vec<u8> {
+    bytes.extend(version.to_le_bytes());
     // Writing to a vector cannot fail; nor can our types' serializers.
-    bytes.extend(postcard::to_allocvec(value).expect("serializes"));
-    bytes
+    postcard::to_extend(value, bytes).expect("serializes")
+}
+
+/// `value` as `layer`'s snapshot of format `version`: [`encode`]'s,
+/// after the magic and `layer`'s tag.
+///
+/// Not part of the semver API: what the layers a host restores whole
+/// save with.
+///
+/// # Panics
+///
+/// As [`encode`].
+#[doc(hidden)]
+#[must_use]
+pub fn encode_layer<T: Serialize>(layer: Layer, version: u32, value: &T) -> Vec<u8> {
+    let mut bytes = MAGIC.to_vec();
+    bytes.push(layer.tag());
+    encode_after(bytes, version, value)
+}
+
+/// The value `layer`'s snapshot of format `version` holds.
+///
+/// Not part of the semver API: what the layers a host restores whole
+/// restore with.
+///
+/// # Errors
+///
+/// [`StateError::Truncated`] if it is too short to hold the magic and
+/// a tag, [`StateError::NotSnapshot`] if it does not start with the
+/// magic, [`StateError::Layer`] if it is another layer's,
+/// [`StateError::Invalid`] if it names no layer, and [`decode`]'s.
+#[doc(hidden)]
+pub fn decode_layer<T: DeserializeOwned>(
+    layer: Layer,
+    version: u32,
+    bytes: &[u8],
+) -> Result<T, StateError> {
+    let (magic, rest) = bytes
+        .split_first_chunk::<{ MAGIC.len() }>()
+        .ok_or(StateError::Truncated)?;
+    if *magic != MAGIC {
+        return Err(StateError::NotSnapshot);
+    }
+    let (&tag, body) = rest.split_first().ok_or(StateError::Truncated)?;
+    match Layer::from_tag(tag) {
+        Some(found) if found == layer => decode(version, body),
+        Some(found) => Err(StateError::Layer {
+            found,
+            expected: layer,
+        }),
+        None => Err(StateError::invalid(format!("snapshot layer {tag}"))),
+    }
 }
 
 /// The value a snapshot of format `version` holds.
@@ -428,8 +575,13 @@ impl Cpu {
     /// The core's whole state, as a snapshot: registers, the run
     /// loop's timing and exception state, and memory (its regions,
     /// ROM's included, page tables and permissions).  Not the hooks.
-    #[must_use]
-    pub fn save(&self) -> Vec<u8> {
+    ///
+    /// # Errors
+    ///
+    /// None the core gives today; a `Result` as every other layer's
+    /// `save` gives, so a state the core cannot save can be refused
+    /// later without a break.
+    pub fn save(&self) -> Result<Vec<u8>, StateError> {
         let memory = &self.memory;
         let state = CpuState {
             registers: self.registers.clone(),
@@ -464,7 +616,7 @@ impl Cpu {
             address_mask: memory.address_mask,
             memory: memory.state(),
         };
-        encode(VERSION, &state)
+        Ok(encode_layer(Layer::Cpu, VERSION, &state))
     }
 
     /// Restores a snapshot [`save`](Self::save) made of a CPU with the same
@@ -474,12 +626,14 @@ impl Cpu {
     ///
     /// # Errors
     ///
-    /// [`decode`]'s; [`StateError::Mismatch`] for a snapshot of a CPU
+    /// [`StateError::NotSnapshot`] for bytes no layer saved,
+    /// [`StateError::Layer`] for another layer's snapshot, [`decode`]'s;
+    /// [`StateError::Mismatch`] for a snapshot of a CPU
     /// with other address lines or regions of other sizes, or page tables
     /// that do not fit them; [`StateError::Invalid`] for one no run could
     /// have saved.
     pub fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
-        let state: CpuState = decode(VERSION, snapshot)?;
+        let state: CpuState = decode_layer(Layer::Cpu, VERSION, snapshot)?;
         if state.address_mask != self.memory.address_mask {
             return Err(StateError::mismatch("address lines"));
         }
@@ -517,7 +671,7 @@ impl Cpu {
         self.taken = state.taken;
         self.instructions = state.instructions;
         self.block_start = true;
-        self.left_pc = Address(self.registers.pc);
+        self.left_pc = self.registers.pc;
         self.resume = state.resume;
         self.loopable = state.loopable;
         self.loop_mode = state.loop_mode;

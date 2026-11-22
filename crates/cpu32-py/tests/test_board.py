@@ -25,6 +25,8 @@ STACK = 0x10FFFE
 START = 0x400
 NOP = 0x4E71
 MOVE_WORD_IMMEDIATE_TO_ABSOLUTE = 0x33FC
+# Nanohertz in a hertz.
+NANOHERTZ = 1_000_000_000
 
 
 def store_word(address: int, value: int) -> list[int]:
@@ -89,9 +91,9 @@ class Lamp:
     def __init__(self) -> None:
         self.changes: list[tuple[int, bool]] = []
 
-    def input(self, port: int, value: object, now: int, drive: mc683xx.Drive) -> None:
+    def input(self, port: int, value: object, drive: mc683xx.Drive) -> None:
         assert isinstance(value, bool)
-        self.changes.append((now, value))
+        self.changes.append((drive.now, value))
 
 
 def test_python_peripherals_on_a_board_file(tmp_path: Path) -> None:
@@ -226,9 +228,9 @@ class Probe:
     def next_event(self) -> int | None:
         return self.next
 
-    def advance(self, now: int, drive: mc683xx.Drive) -> None:
+    def advance(self, drive: mc683xx.Drive) -> None:
         self.readings.append(drive.sample(0))
-        self.next = now + self.PERIOD
+        self.next = drive.now + self.PERIOD
 
     def save(self) -> bytes:
         return struct.pack(">QI", self.next, len(self.readings))
@@ -261,7 +263,9 @@ def test_python_peripherals_sample_and_save(tmp_path: Path) -> None:
     snapshot = board.save()
     board.run_for(picoseconds=20_000_000)
     assert len(probe.readings) == 4
-    board.restore(snapshot)
+    with pytest.raises(mc683xx.StateError):
+        board.restore(b"\x01\x02")
+    board.restore(bytearray(snapshot))
     assert len(probe.readings) == 2 and probe.next == 30_000_000
     board.run_for(picoseconds=10_000_000)
     assert probe.readings == [20.01, 20.02, 20.03]
@@ -420,12 +424,12 @@ class ClockedFlash:
         self.told: list[tuple[mc683xx.ClockPolarity, mc683xx.ClockPhase, int]] = []
         self.transfers: list[tuple[mc683xx.ClockPolarity, mc683xx.ClockPhase, int]] = []
 
-    def qspi_clock(self, clock: mc683xx.QspiClock, now: int) -> None:
-        self.told.append((clock.polarity, clock.phase, clock.system_clock_hz))
+    def set_qspi_clock(self, clock: mc683xx.QspiClock, now: int) -> None:
+        self.told.append((clock.polarity, clock.phase, clock.system_clock_nanohertz))
 
     def transfer(self, transfer: mc683xx.Transfer, drive: mc683xx.Drive) -> int:
         clock = transfer.clock
-        self.transfers.append((clock.polarity, clock.phase, clock.system_clock_hz))
+        self.transfers.append((clock.polarity, clock.phase, clock.system_clock_nanohertz))
         return 0
 
 
@@ -437,8 +441,8 @@ def test_a_qspi_peripheral_is_told_the_clock_and_each_transfer_carries_it(tmp_pa
     flash = board.peripheral("flash")
     assert isinstance(flash, ClockedFlash)
     expected = [
-        (mc683xx.ClockPolarity.IDLE_LOW, mc683xx.ClockPhase.CAPTURE_LEADING, 8_388_608),
-        (mc683xx.ClockPolarity.IDLE_HIGH, mc683xx.ClockPhase.CHANGE_LEADING, 16_777_216),
+        (mc683xx.ClockPolarity.IDLE_LOW, mc683xx.ClockPhase.CAPTURE_LEADING, 8_388_608 * NANOHERTZ),
+        (mc683xx.ClockPolarity.IDLE_HIGH, mc683xx.ClockPhase.CHANGE_LEADING, 16_777_216 * NANOHERTZ),
     ]
     assert flash.told == expected
     assert flash.transfers == expected
@@ -459,7 +463,7 @@ class TimedFlash:
         return self.DEFERRABLE
 
     def transfer(self, transfer: mc683xx.Transfer, drive: mc683xx.Drive) -> int:
-        self.transfers.append((transfer.out, transfer.now))
+        self.transfers.append((transfer.out, drive.now))
         return 0xA5
 
 
@@ -516,7 +520,7 @@ class TimedModem:
     def __init__(self) -> None:
         self.received: list[object] = []
 
-    def input(self, port: int, value: object, now: int, drive: mc683xx.Drive) -> None:
+    def input(self, port: int, value: object, drive: mc683xx.Drive) -> None:
         self.received.append(value)
         drive.drive(1, value)
 
@@ -633,8 +637,8 @@ def test_a_peripheral_s_failed_question_stops_the_run_at_once(tmp_path: Path) ->
     assert peripheral.calls - calls < 100
 
 
-@pytest.mark.parametrize("seconds", [float("nan"), float("inf"), float("-inf"), -1e-6])
-def test_a_run_refuses_seconds_not_finite_or_negative(tmp_path: Path, seconds: float) -> None:
+@pytest.mark.parametrize("seconds", [float("nan"), float("inf"), float("-inf"), -1e-6, 1e300, 2e7])
+def test_a_run_refuses_seconds_not_finite_negative_or_out_of_range(tmp_path: Path, seconds: float) -> None:
     (tmp_path / "rom.bin").write_bytes(rom([]))
     (tmp_path / "board.toml").write_text(BOARD)
     board = mc683xx.Board(str(tmp_path / "board.toml"), types={"latch": Latch, "lamp": Lamp})
@@ -675,11 +679,67 @@ def test_the_options_are_any_mappings(tmp_path: Path) -> None:
     assert latch.width == 2
 
 
+def test_enabled_turns_a_file_s_options_on(tmp_path: Path) -> None:
+    (tmp_path / "rom.bin").write_bytes(rom([]))
+    optional = BOARD.replace("version = 1\n", 'version = 1\n[board]\noptions = ["spare"]\n')
+    optional += '[[peripheral]]\nname = "spare"\ntype = "lamp"\noption = "spare"\n'
+    (tmp_path / "board.toml").write_text(optional)
+    path = str(tmp_path / "board.toml")
+    types = {"latch": Latch, "lamp": Lamp}
+    assert mc683xx.Board(path, types=types).peripheral("spare") is None
+    assert isinstance(mc683xx.Board(path, types=types, enabled=["spare"]).peripheral("spare"), Lamp)
+
+
 def test_a_board_of_another_chip_is_refused(tmp_path: Path) -> None:
     (tmp_path / "rom.bin").write_bytes(rom([]))
     (tmp_path / "board.toml").write_text(BOARD.replace('type = "mc68331"', 'type = "mc68332"'))
-    with pytest.raises(ValueError, match="chip type \"mc68332\""):
+    with pytest.raises(mc683xx.LoadError, match="chip type \"mc68332\""):
         mc683xx.Board(str(tmp_path / "board.toml"), types={"latch": Latch, "lamp": Lamp})
+
+
+def test_a_refused_board_file_raises_load_error(tmp_path: Path) -> None:
+    (tmp_path / "board.toml").write_text("version = 2\n")
+    with pytest.raises(mc683xx.LoadError, match="board file version 2") as raised:
+        mc683xx.Board(str(tmp_path / "board.toml"))
+    assert isinstance(raised.value, ValueError)
+
+
+def test_an_unread_board_file_raises_the_os_error_its_errno_gives(tmp_path: Path) -> None:
+    missing = tmp_path / "missing.toml"
+    with pytest.raises(FileNotFoundError) as raised:
+        mc683xx.Board(str(missing))
+    assert raised.value.filename == str(missing)
+    assert not isinstance(raised.value, mc683xx.LoadError)
+
+
+def test_an_unread_image_raises_the_os_error_its_errno_gives(tmp_path: Path) -> None:
+    (tmp_path / "board.toml").write_text(BOARD)
+    with pytest.raises(FileNotFoundError) as raised:
+        mc683xx.Board(str(tmp_path / "board.toml"), types={"latch": Latch, "lamp": Lamp})
+    assert raised.value.filename == str(tmp_path / "rom.bin")
+    assert not isinstance(raised.value, mc683xx.LoadError)
+
+
+class Stuck:
+    """A peripheral whose next event never passes: it stalls the board."""
+
+    PORTS: list[tuple[str, str, str]] = []
+
+    def next_event(self) -> int:
+        return 1
+
+
+def test_a_stalled_board_raises_run_error(tmp_path: Path) -> None:
+    (tmp_path / "rom.bin").write_bytes(rom([]))
+    (tmp_path / "board.toml").write_text(
+        BOARD + '[[peripheral]]\nname = "stuck"\ntype = "stuck"\n'
+    )
+    board = mc683xx.Board(
+        str(tmp_path / "board.toml"), types={"latch": Latch, "lamp": Lamp, "stuck": Stuck}
+    )
+    with pytest.raises(mc683xx.RunError, match="^stuck: advanced to") as raised:
+        board.run_for(seconds=0.001)
+    assert isinstance(raised.value, RuntimeError)
 
 
 INTERRUPTED_BOARD = """
@@ -827,7 +887,7 @@ class FailingInput:
 
     PORTS = [("in", "logic", "in")]
 
-    def input(self, port: int, value: object, now: int, drive: mc683xx.Drive) -> None:
+    def input(self, port: int, value: object, drive: mc683xx.Drive) -> None:
         raise RuntimeError("failing")
 
 
@@ -836,7 +896,7 @@ class InterruptedInput:
 
     PORTS = [("in", "logic", "in")]
 
-    def input(self, port: int, value: object, now: int, drive: mc683xx.Drive) -> None:
+    def input(self, port: int, value: object, drive: mc683xx.Drive) -> None:
         raise KeyboardInterrupt
 
 
@@ -883,7 +943,7 @@ class Counter:
     def __init__(self) -> None:
         self.resets = 0
 
-    def reset(self, now: int, drive: mc683xx.Drive) -> None:
+    def reset(self, drive: mc683xx.Drive) -> None:
         self.resets += 1
 
 

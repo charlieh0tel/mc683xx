@@ -73,7 +73,7 @@ fn short_runs(criterion: &mut Criterion) {
         bencher.iter(|| {
             board.prepare();
             for _ in 0..SHORT_RUNS {
-                board.chip.run_for(black_box(Cycles(1)));
+                board.chip.run_for(black_box(Cycles::from_clocks(1)));
             }
         });
     });

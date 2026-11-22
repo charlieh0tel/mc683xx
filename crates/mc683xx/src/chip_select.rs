@@ -40,16 +40,25 @@ impl ChipSelect {
             _ => None,
         }
     }
+}
 
-    /// The select a cycle carries ([`BusCycle::select`]), if it is one of
-    /// these: the core numbers a select by its [`index`](Self::index).
-    ///
-    /// [`BusCycle::select`]: mc683xx_cpu32::peripheral::BusCycle::select
-    #[must_use]
-    pub fn from_select(select: Select) -> Option<Self> {
-        Self::from_index(usize::from(u8::from(select)))
+/// The select a cycle carries ([`BusCycle::select`]), if it is one of
+/// these: the core numbers a select by its [`index`](ChipSelect::index).
+///
+/// [`BusCycle::select`]: mc683xx_cpu32::peripheral::BusCycle::select
+impl TryFrom<Select> for ChipSelect {
+    type Error = NoChipSelect;
+
+    fn try_from(select: Select) -> Result<Self, NoChipSelect> {
+        let index = u8::from(select);
+        Self::from_index(usize::from(index)).ok_or(NoChipSelect(index))
     }
 }
+
+/// A [`Select`] whose index is none of the twelve chip selects'.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no chip select at index {0}")]
+pub struct NoChipSelect(pub u8);
 
 /// The select as the core's cycles carry it, by its index.
 impl From<ChipSelect> for Select {
@@ -115,6 +124,8 @@ impl Number {
 
 #[cfg(test)]
 mod tests {
+    use mc683xx_cpu32::peripheral::Select;
+
     use super::ChipSelect;
     use super::Number;
 
@@ -134,6 +145,18 @@ mod tests {
         assert_eq!(
             "CS11".parse::<ChipSelect>(),
             Err(super::ParseChipSelectError("CS11".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_select_is_a_chip_select_by_its_index() {
+        assert_eq!(
+            ChipSelect::try_from(Select::from(ChipSelect::Boot)),
+            Ok(ChipSelect::Boot)
+        );
+        assert_eq!(
+            ChipSelect::try_from(Select::from(12)),
+            Err(super::NoChipSelect(12))
         );
     }
 

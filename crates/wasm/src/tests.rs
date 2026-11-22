@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::ops::ControlFlow;
 
-use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::Cpu;
 use mc683xx_cpu32::cpu::Halt;
@@ -18,6 +18,7 @@ use mc683xx_target::entry::Entry;
 use crate::board::Board;
 use crate::board::BoardRun;
 use crate::error::Error;
+use crate::error::Thrown;
 
 /// The demo board file.
 const TEXT: &str = include_str!("../../../examples/boards/demo.toml");
@@ -26,13 +27,13 @@ const IMAGE: &[u8] = include_bytes!("../../../examples/boards/demo.bin");
 /// The console's endpoint.
 const CONSOLE: &str = "console";
 /// Board time the boot runs for, past the banner and the prompt.
-const BOOT: u64 = PICOSECONDS_PER_SECOND / 10;
+const BOOT: Span = Span::from_millis(100);
 /// The most board time a frame runs.
-const SLICE: u64 = PICOSECONDS_PER_SECOND / 10;
+const SLICE: Span = Span::from_millis(100);
 /// A frame's wall time in milliseconds, about 60 a second.
 const FRAME: f64 = 16.0;
 /// Its board time in real time.
-const FRAME_PICOSECONDS: u64 = PICOSECONDS_PER_SECOND / 1000 * 16;
+const FRAME_PICOSECONDS: u64 = Span::from_millis(16).picos();
 /// How far a frame's board time may be from its wall time's, the page's
 /// clock being a float: a nanosecond.
 const ROUNDING: u64 = 1000;
@@ -66,8 +67,8 @@ fn booted() -> (Board, String) {
     let mut board = Board::with_images(TEXT, &images, &[]).unwrap();
     let run = board.run_for(BOOT).unwrap();
     assert_eq!(run.stop(), "budget");
-    assert_eq!(run.now(), BOOT);
-    let text = String::from_utf8(board.take_received(CONSOLE).unwrap()).unwrap();
+    assert_eq!(run.now(), BOOT.picos());
+    let text = String::from_utf8(board.take_received_bytes(CONSOLE).unwrap()).unwrap();
     (board, text)
 }
 
@@ -76,9 +77,9 @@ fn the_demo_boots_and_answers_help() {
     let (mut board, text) = booted();
     assert!(text.contains("MC68331 demo"), "{text:?}");
     assert!(text.ends_with("> "), "{text:?}");
-    board.send(CONSOLE, b"h\n").unwrap();
+    board.send_bytes(CONSOLE, b"h\n").unwrap();
     board.run_for(BOOT).unwrap();
-    let help = String::from_utf8(board.take_received(CONSOLE).unwrap()).unwrap();
+    let help = String::from_utf8(board.take_received_bytes(CONSOLE).unwrap()).unwrap();
     assert!(help.starts_with("h\r\n"), "{help:?}");
     assert!(help.ends_with("h, ?    this help\r\n> "), "{help:?}");
 }
@@ -88,7 +89,10 @@ fn frames_keep_to_the_clock_and_the_slice() {
     let (mut board, _) = booted();
     assert_eq!(board.pacing(), "unpaced");
     let start = board.now();
-    assert_eq!(board.run_frame(0.0, SLICE).unwrap().now(), start + SLICE);
+    assert_eq!(
+        board.run_frame(0.0, SLICE).unwrap().now(),
+        start + SLICE.picos()
+    );
 
     board.set_pacing("realtime").unwrap();
     assert_eq!(board.pacing(), "realtime");
@@ -101,7 +105,7 @@ fn frames_keep_to_the_clock_and_the_slice() {
     // an hour behind runs one slice
     let behind = board.now();
     let run = board.run_frame(wall + 3_600_000.0, SLICE).unwrap();
-    assert_eq!(run.now(), behind + SLICE);
+    assert_eq!(run.now(), behind + SLICE.picos());
 
     board.set_pacing("2").unwrap();
     assert_eq!(board.pacing(), "2");
@@ -114,7 +118,7 @@ fn a_run_of_no_time_starts_the_frames_pacing_again() {
     let wall = 5000.0;
     board.run_frame(wall, SLICE).unwrap();
     let before = board.run_frame(wall + FRAME, SLICE).unwrap().now();
-    board.run_for(0).unwrap();
+    board.run_for(Span::ZERO).unwrap();
     let run = board.run_frame(wall + 2.0 * FRAME, SLICE).unwrap();
     assert_eq!(run.now(), before, "starts");
 }
@@ -124,12 +128,12 @@ fn a_restore_goes_back() {
     let (mut board, _) = booted();
     let snapshot = board.save().unwrap();
     let saved = board.now();
-    board.send(CONSOLE, b"h\n").unwrap();
+    board.send_bytes(CONSOLE, b"h\n").unwrap();
     board.run_for(BOOT).unwrap();
     board.restore(&snapshot).unwrap();
     assert_eq!(board.now(), saved);
     board.run_for(BOOT).unwrap();
-    assert!(board.take_received(CONSOLE).unwrap().is_empty());
+    assert!(board.take_received_bytes(CONSOLE).unwrap().is_empty());
     assert_eq!(board.memory("rom").unwrap()[..IMAGE.len()], *IMAGE);
 }
 
@@ -149,14 +153,64 @@ fn mistakes_are_errors() {
         Err(Error::Wall(_))
     ));
     assert!(matches!(board.run_frame(-1.0, SLICE), Err(Error::Wall(_))));
-    assert!(matches!(board.send("nowhere", b"h"), Err(Error::Send(_))));
-    assert!(matches!(board.send("nowhere", b""), Err(Error::Send(_))));
     assert!(matches!(
-        board.take_received("nowhere"),
+        board.send_bytes("nowhere", b"h"),
+        Err(Error::Send(_))
+    ));
+    assert!(matches!(
+        board.send_bytes("nowhere", b""),
+        Err(Error::Send(_))
+    ));
+    assert!(matches!(
+        board.take_received_bytes("nowhere"),
         Err(Error::Receive(_))
     ));
     assert!(matches!(board.memory("nowhere"), Err(Error::Memory(_))));
     assert!(matches!(board.restore(b"junk"), Err(Error::State(_))));
+}
+
+#[test]
+fn each_error_is_thrown_as_its_kind() {
+    let images = BTreeMap::new();
+    let load = Board::with_images(TEXT, &images, &[]).unwrap_err();
+    let (mut board, _) = booted();
+    let thrown = [
+        (load, Thrown::Named("LoadError")),
+        (
+            board.set_pacing("fast").unwrap_err(),
+            Thrown::Named("PacingError"),
+        ),
+        (board.run_frame(f64::NAN, SLICE).unwrap_err(), Thrown::Range),
+        (
+            board.send_bytes("nowhere", b"").unwrap_err(),
+            Thrown::Named("SendError"),
+        ),
+        (
+            board.take_received_bytes("nowhere").unwrap_err(),
+            Thrown::Named("ReceiveError"),
+        ),
+        (
+            board.memory("nowhere").unwrap_err(),
+            Thrown::Named("MemoryError"),
+        ),
+        (
+            board.restore(b"junk").unwrap_err(),
+            Thrown::Named("StateError"),
+        ),
+        (Error::Picoseconds("-1".to_owned()), Thrown::Range),
+        (Error::PicosecondsType("a number".to_owned()), Thrown::Type),
+        (Error::Images, Thrown::Type),
+        (
+            Error::Bytes {
+                argument: "a snapshot",
+                kind: "null".to_owned(),
+            },
+            Thrown::Type,
+        ),
+    ];
+    for (error, expected) in thrown {
+        assert_eq!(error.thrown(), expected, "{error}");
+    }
 }
 
 #[test]
@@ -173,7 +227,7 @@ fn each_kind_of_stop_has_its_name() {
         (Stop::Fault, "fault"),
     ];
     for (stop, name) in names {
-        let run = mc683xx_board::board::BoardRun::new(stop, Time(0));
+        let run = mc683xx_board::board::BoardRun::new(stop, Time::from_picos(0));
         assert_eq!(BoardRun::from(run).stop(), name, "{stop:?}");
     }
 }

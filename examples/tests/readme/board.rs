@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Path::new("examples/boards/echo.toml"),
         &Options::default(),
         &registry,
-        Environment::default(),
+        &Environment::default(),
     )?;
     let run = board.run_until(Time::from_seconds(1))?;
     println!("{:?} at {:?}", run.stop, run.now);

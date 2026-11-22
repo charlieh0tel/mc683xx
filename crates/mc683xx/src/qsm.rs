@@ -16,6 +16,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 
@@ -32,6 +33,8 @@ use crate::module::Peek;
 use crate::module::RegisterAccess;
 use crate::peripheral::Timed;
 use crate::pins::PortLevels;
+use crate::pins::PortState;
+use crate::pins::merge_pins;
 
 /// The QSM's register block and RAM, $YFFC00 to $YFFDFF (MC68331UM
 /// Table D-1).
@@ -134,6 +137,10 @@ pub struct Qsm {
 impl Qsm {
     /// The QSM out of reset, with no QSPI peripheral, the system clock
     /// at `system_clock`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a QSM on its own is not a host's to build.
+    #[doc(hidden)]
     #[must_use]
     pub const fn new(system_clock: Frequency) -> Self {
         let port = PortQs::new();
@@ -295,13 +302,14 @@ impl Qsm {
         self.sci.untaken_frames()
     }
 
-    /// The board drives port QS's input pins to `pins` at `now`.
+    /// The board drives port QS's input pins in `mask` to their levels
+    /// in `value` at `now`, the others as they were.
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn set_port_pins(&mut self, pins: u8, now: Cycles) {
+    pub fn set_port_pins(&mut self, value: u8, mask: u8, now: Cycles) {
         self.advance(now);
-        self.port.pins = pins;
+        self.port.pins = merge_pins(self.port.pins, value, mask);
         if !self.clock_off() {
             let before = self.port_outputs();
             self.pins_changed(now);
@@ -317,12 +325,7 @@ impl Qsm {
     #[doc(hidden)]
     pub fn set_slave_select(&mut self, asserted: bool, now: Cycles) {
         let pin = 1 << port::PCS0_PIN;
-        let pins = if asserted {
-            self.port.pins & !pin
-        } else {
-            self.port.pins | pin
-        };
-        self.set_port_pins(pins, now);
+        self.set_port_pins(if asserted { 0 } else { pin }, pin, now);
     }
 
     /// An external SPI master clocks one bit at `now`, `mosi` on MOSI:
@@ -344,13 +347,22 @@ impl Qsm {
         miso
     }
 
-    /// The levels the board drives on port QS's input pins.
+    /// Port QS's registers and the levels the board drives on its
+    /// pins.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a host reads the chip's ports.
+    #[doc(hidden)]
     #[must_use]
-    pub const fn port_pins(&self) -> u8 {
-        self.port.pins
+    pub const fn port_state(&self) -> PortState {
+        self.port.state(self.sci.txd())
     }
 
     /// The pins port QS drives and their levels.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a host reads the chip's ports.
+    #[doc(hidden)]
     #[must_use]
     pub const fn port_outputs(&self) -> PortLevels {
         self.port.outputs(self.qspi.code(), self.sci.txd())
@@ -600,12 +612,12 @@ impl Module for Qsm {
 
     /// The QSPI's vector, INTV0 set, if it requests `level`, before the
     /// SCI's at the same level (QSMRM 3.2.3, 3.2.4).
-    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Option<u8> {
+    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Option<Vector> {
         let (sci, qspi) = self.levels();
         if qspi == level {
-            Some(self.qivr | INTV0)
+            Some(Vector(self.qivr | INTV0))
         } else if sci == level {
-            Some(self.qivr)
+            Some(Vector(self.qivr))
         } else {
             None
         }

@@ -95,7 +95,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         Path::new("examples/boards/echo.toml"),
         &Options::default(),
         &registry,
-        Environment::default(),
+        &Environment::default(),
     )?;
     let run = board.run_until(Time::from_seconds(1))?;
     println!("{:?} at {:?}", run.stop, run.now);
@@ -134,10 +134,7 @@ runs the board the file describes for five seconds of board time, its
 `external.console` on standard input and output, and says on standard
 error why it stopped.  `--trace bus-cycles,exceptions,pins,qspi` traces
 the run; `--stop-on-fault` stops it at a bus or address error, before
-the firmware takes it, and says which; `--gdb 127.0.0.1:1234` waits at reset for gdb to run it, and
-`--bdm unix:/tmp/bdm.sock` answers a BDM debugger as the mc683xx BDM
-pod answers on USB, a virtual BDM cable (PLAN.md, Background debug
-mode).
+the firmware takes it, and says which; and `--gdb 127.0.0.1:1234` waits at reset for gdb to run it.
 Standard input that is a file or a pipe is read to its end when input
 first goes in and fed a byte a turn, so the run is the same each time;
 a terminal's is live.  `--bind console=tty` makes the terminal a

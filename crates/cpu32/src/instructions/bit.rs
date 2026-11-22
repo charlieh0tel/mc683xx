@@ -181,7 +181,7 @@ mod tests {
         step(&mut cpu, 1);
         assert_eq!(peek_long(&cpu, 0x2000), 0x0200_0000);
         assert_eq!(cpu.registers.sr() & status::Z, status::Z);
-        assert_eq!(cpu.registers.pc, CODE + 4);
+        assert_eq!(cpu.registers.pc.0, CODE + 4);
     }
 
     #[test]

@@ -16,6 +16,7 @@ use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_mc68331::chip::Mc68331;
@@ -217,7 +218,7 @@ fn board() -> Board<Mc68331> {
     fs::write(directory.join("rom.bin"), image()).unwrap();
     let description = Description::parse(BOARD, &directory, &Options::default()).unwrap();
     let registry = mc683xx_peripherals::registry();
-    let board = Board::<Mc68331>::load(&description, &registry, Environment::default()).unwrap();
+    let board = Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board
 }
@@ -240,7 +241,7 @@ fn the_cpu_transmits_receives_and_takes_the_duarts_vectored_interrupt() {
     let mut board = board();
     // 2 ms: the program sets up and sends 'H', 260 microseconds at
     // 38.4k
-    board.run_until(Time(2_000_000_000)).unwrap();
+    board.run_until(Time::from_picos(2_000_000_000)).unwrap();
     let sent = received(&mut board);
     let [(_, serial)] = sent[..] else {
         panic!("one frame: {sent:?}");
@@ -256,13 +257,16 @@ fn the_cpu_transmits_receives_and_takes_the_duarts_vectored_interrupt() {
             Signal::Serial(Serial::untimed(Frame::Data(u16::from(b'x')))),
         )
         .unwrap();
-    board.run_until(sent_at + 2_000_000_000).unwrap();
+    board.run_until(sent_at + Span::from_millis(2)).unwrap();
     let echoed = received(&mut board);
     let [(at, serial)] = echoed[..] else {
         panic!("one frame: {echoed:?}");
     };
     assert_eq!(serial.frame, Frame::Data(u16::from(b'x')));
     // after a character time of reception and the handler's start
-    assert!(at.since(sent_at) > 250_000_000, "{at:?} from {sent_at:?}");
+    assert!(
+        at.since(sent_at) > Span::from_micros(250),
+        "{at:?} from {sent_at:?}"
+    );
     assert_eq!(board.chip().cpu().registers.data[0] & 0xff, u32::from(b'x'));
 }

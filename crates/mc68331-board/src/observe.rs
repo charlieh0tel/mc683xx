@@ -57,6 +57,13 @@ impl<F: FnMut(&str, Time, Signal) + 'static> Observer for F {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ObserverId(pub(crate) u64);
 
+/// `observer` and its number, in attaching order from 0: `observer 3`.
+impl fmt::Display for ObserverId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "observer {}", self.0)
+    }
+}
+
 /// An attached observer.
 pub(crate) struct Attached {
     /// Its id.

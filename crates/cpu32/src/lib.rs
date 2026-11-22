@@ -28,7 +28,7 @@
 //! limits.instructions = Some(1);
 //! machine.run_limited(limits);
 //! assert_eq!(machine.cpu.registers.data[0], 42);
-//! assert_eq!(machine.cpu.registers.pc, 0x402);
+//! assert_eq!(machine.cpu.registers.pc, Address(0x402));
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 // The published crates also hold these; test-only crates do not.

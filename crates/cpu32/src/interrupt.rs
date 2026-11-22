@@ -1,11 +1,15 @@
 //! Interrupt requests and their acknowledgment.
 
+use std::fmt;
+use std::str::FromStr;
+
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::de::Error;
 use serde::de::Unexpected;
 
 use crate::cycles::Cycles;
+use crate::exception::Vector;
 
 /// An interrupt priority level: 0, none, to 7, nonmaskable (CPU32RM
 /// 6.2.11).
@@ -46,6 +50,12 @@ impl InterruptLevel {
     #[must_use]
     pub const fn get(self) -> u8 {
         self.0
+    }
+
+    /// The level in the low three bits of `value`, as SR's I\[2:0\]
+    /// holds one; the rest are ignored.
+    pub(crate) const fn from_low_bits(value: u32) -> Self {
+        Self(value as u8 & Self::NONMASKABLE.0)
     }
 }
 
@@ -91,6 +101,92 @@ impl IrqPin {
     }
 }
 
+/// The prefix of an interrupt level's name, `level 0` to `level 7`, as
+/// CPU32RM Table 6-1 names them (`Level 7 Interrupt Autovector`).
+const LEVEL: &str = "level ";
+/// The prefix of an IRQ pin's name, `IRQ1` to `IRQ7` (SIMRM 6.3).
+const IRQ: &str = "IRQ";
+
+/// The number after `prefix` in `text`, `prefix` in any case, if it is
+/// one digit.
+fn digit_after(text: &str, prefix: &str) -> Option<u8> {
+    let digit = text
+        .get(..prefix.len())
+        .filter(|head| head.eq_ignore_ascii_case(prefix))
+        .and_then(|_| text.get(prefix.len()..))?;
+    match digit.as_bytes() {
+        [digit @ b'0'..=b'9'] => Some(digit - b'0'),
+        _ => None,
+    }
+}
+
+/// Its name: `level 7`.
+impl fmt::Display for InterruptLevel {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{LEVEL}{}", self.0)
+    }
+}
+
+/// The level named so, as `Display` writes it, in any case: `level 7`,
+/// `Level 7`.
+impl FromStr for InterruptLevel {
+    type Err = ParseInterruptLevelError;
+
+    fn from_str(name: &str) -> Result<Self, ParseInterruptLevelError> {
+        digit_after(name, LEVEL)
+            .and_then(Self::new)
+            .ok_or_else(|| ParseInterruptLevelError(name.to_owned()))
+    }
+}
+
+/// Text that names no interrupt level.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no interrupt level {0:?}")]
+pub struct ParseInterruptLevelError(String);
+
+/// Its pin's name: `IRQ7`.
+impl fmt::Display for IrqPin {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{IRQ}{}", self.get())
+    }
+}
+
+/// The pin named so, as `Display` writes it, in any case: `IRQ7`,
+/// `irq7`.
+impl FromStr for IrqPin {
+    type Err = ParseIrqPinError;
+
+    fn from_str(name: &str) -> Result<Self, ParseIrqPinError> {
+        digit_after(name, IRQ)
+            .and_then(Self::new)
+            .ok_or_else(|| ParseIrqPinError(name.to_owned()))
+    }
+}
+
+/// Text that names no IRQ pin.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no IRQ pin {0:?}")]
+pub struct ParseIrqPinError(String);
+
+impl TryFrom<u8> for InterruptLevel {
+    type Error = NoInterruptLevel;
+
+    fn try_from(level: u8) -> Result<Self, NoInterruptLevel> {
+        Self::new(level).ok_or(NoInterruptLevel(level))
+    }
+}
+
+impl From<InterruptLevel> for u8 {
+    fn from(level: InterruptLevel) -> Self {
+        level.0
+    }
+}
+
+/// A value past the levels: above 7.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no interrupt level {0}")]
+pub struct NoInterruptLevel(pub u8);
+
 impl From<IrqPin> for InterruptLevel {
     fn from(pin: IrqPin) -> Self {
         pin.0
@@ -102,6 +198,12 @@ impl TryFrom<InterruptLevel> for IrqPin {
 
     fn try_from(level: InterruptLevel) -> Result<Self, NoIrqPin> {
         Self::new(level.get()).ok_or(NoIrqPin(level.get()))
+    }
+}
+
+impl From<IrqPin> for u8 {
+    fn from(pin: IrqPin) -> Self {
+        pin.get()
     }
 }
 
@@ -122,7 +224,7 @@ pub struct NoIrqPin(pub u8);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Acknowledge {
     /// A vector number from the peripheral.
-    Vector(u8),
+    Vector(Vector),
     /// AVEC: the autovector for the level, 25 to 31.
     Autovector,
     /// A bus error: the spurious interrupt vector, 24.
@@ -190,7 +292,10 @@ pub trait Interrupts {
 mod tests {
     use super::InterruptLevel;
     use super::IrqPin;
+    use super::NoInterruptLevel;
     use super::NoIrqPin;
+    use super::ParseInterruptLevelError;
+    use super::ParseIrqPinError;
 
     #[test]
     fn a_snapshot_level_stops_at_7() {
@@ -205,6 +310,9 @@ mod tests {
     fn levels_stop_at_7() {
         assert_eq!(InterruptLevel::new(7), Some(InterruptLevel::NONMASKABLE));
         assert_eq!(InterruptLevel::new(8), None);
+        assert_eq!(InterruptLevel::try_from(7), Ok(InterruptLevel::NONMASKABLE));
+        assert_eq!(InterruptLevel::try_from(8), Err(NoInterruptLevel(8)));
+        assert_eq!(u8::from(InterruptLevel::NONMASKABLE), 7);
     }
 
     #[test]
@@ -213,6 +321,7 @@ mod tests {
         assert_eq!(IrqPin::new(1).map(IrqPin::get), Some(1));
         assert_eq!(IrqPin::new(7), Some(IrqPin::IRQ7));
         assert_eq!(IrqPin::try_from(8), Err(NoIrqPin(8)));
+        assert_eq!(u8::from(IrqPin::IRQ7), 7);
         assert_eq!(IrqPin::try_from(InterruptLevel::NONE), Err(NoIrqPin(0)));
         assert_eq!(
             InterruptLevel::from(IrqPin::IRQ7),
@@ -220,5 +329,37 @@ mod tests {
         );
         assert_eq!(postcard::from_bytes::<IrqPin>(&[7]), Ok(IrqPin::IRQ7));
         assert!(postcard::from_bytes::<IrqPin>(&[0]).is_err());
+    }
+
+    #[test]
+    fn a_level_is_named_as_the_manual_names_it() {
+        assert_eq!(InterruptLevel::NONMASKABLE.to_string(), "level 7");
+        for level in 0..=7 {
+            let level = InterruptLevel::new(level).expect("a level");
+            assert_eq!(level.to_string().parse(), Ok(level));
+        }
+        assert_eq!("LEVEL 3".parse(), Ok(InterruptLevel::from_low_bits(3)));
+        for text in ["level 8", "level", "level 10", "level  1", "7", "levels 1"] {
+            assert_eq!(
+                text.parse::<InterruptLevel>(),
+                Err(ParseInterruptLevelError(text.to_owned()))
+            );
+        }
+    }
+
+    #[test]
+    fn an_irq_pin_is_named_as_the_manual_names_it() {
+        assert_eq!(IrqPin::IRQ7.to_string(), "IRQ7");
+        for level in 1..=7 {
+            let pin = IrqPin::new(level).expect("a pin");
+            assert_eq!(pin.to_string().parse(), Ok(pin));
+        }
+        assert_eq!("irq7".parse(), Ok(IrqPin::IRQ7));
+        for text in ["IRQ0", "IRQ8", "IRQ", "IRQ17", "7", "IRQ 7"] {
+            assert_eq!(
+                text.parse::<IrqPin>(),
+                Err(ParseIrqPinError(text.to_owned()))
+            );
+        }
     }
 }

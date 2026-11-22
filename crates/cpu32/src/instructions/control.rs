@@ -47,9 +47,9 @@ fn nop(_core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
 }
 
 /// The address a control mode names.
-fn control_address(core: &mut Core<'_>, opcode: u16) -> Result<u32, Exception> {
+fn control_address(core: &mut Core<'_>, opcode: u16) -> Result<Address, Exception> {
     match core.calculated_address(opcode & FIELD_MASK, Size::Long)? {
-        Operand::Data(Address(address)) | Operand::Program(Address(address)) => Ok(address),
+        Operand::Data(address) | Operand::Program(address) => Ok(address),
         _ => Err(core.illegal()),
     }
 }
@@ -77,7 +77,7 @@ fn stacked(core: &mut Core<'_>, offset: u32, size: Size) -> Result<u32, Exceptio
 }
 
 /// Pops `bytes` and more off the stack, then returns to `pc`.
-fn return_to(core: &mut Core<'_>, pc: u32, bytes: u32) -> Flow {
+fn return_to(core: &mut Core<'_>, pc: Address, bytes: u32) -> Flow {
     let registers = &mut core.cpu.registers;
     let sp = registers.address(STACK_POINTER).wrapping_add(bytes);
     registers.set_address(STACK_POINTER, sp);
@@ -87,7 +87,7 @@ fn return_to(core: &mut Core<'_>, pc: u32, bytes: u32) -> Flow {
 
 /// RTS: PC from the stack (CPU32RM 4.4, RTS).
 fn rts(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
-    let pc = stacked(core, 0, Size::Long)?;
+    let pc = Address(stacked(core, 0, Size::Long)?);
     Ok(return_to(core, pc, Size::Long.bytes()))
 }
 
@@ -95,7 +95,7 @@ fn rts(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
 /// extended (CPU32RM 4.4, RTD).
 fn rtd(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
     let displacement = Size::Word.sign_extend(u32::from(core.fetch_word()?));
-    let pc = stacked(core, 0, Size::Long)?;
+    let pc = Address(stacked(core, 0, Size::Long)?);
     Ok(return_to(
         core,
         pc,
@@ -107,7 +107,7 @@ fn rtd(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
 /// the stack; SR's upper byte unaffected (CPU32RM 4.4, RTR).
 fn rtr(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
     let ccr = stacked(core, 0, Size::Word)?;
-    let pc = stacked(core, Size::Word.bytes(), Size::Long)?;
+    let pc = Address(stacked(core, Size::Word.bytes(), Size::Long)?);
     core.cpu.registers.set_ccr(ccr as u8);
     Ok(return_to(core, pc, Size::Word.bytes() + Size::Long.bytes()))
 }
@@ -123,6 +123,7 @@ mod tests {
     use crate::instructions::tests::poke_long;
     use crate::instructions::tests::step;
     use crate::registers::status;
+    use mc683xx_target::address::Address;
 
     /// A stack in the test RAM.
     const STACK: u32 = 0x4000;
@@ -131,7 +132,7 @@ mod tests {
 
     fn stacked(code: &[u16]) -> Cpu {
         let mut cpu = machine(code);
-        cpu.registers.ssp = STACK;
+        cpu.registers.ssp = Address(STACK);
         cpu
     }
 
@@ -141,7 +142,7 @@ mod tests {
         let before = cpu.registers.clone();
         assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
         let mut expected = before;
-        expected.pc = CODE + 2;
+        expected.pc = Address(CODE + 2);
         assert_eq!(cpu.registers, expected);
     }
 
@@ -151,11 +152,11 @@ mod tests {
         let mut cpu = stacked(&[0x4ed0]);
         cpu.registers.set_address(0, TARGET);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, TARGET);
+        assert_eq!(cpu.registers.pc.0, TARGET);
         // JMP (xxx).L
         let mut cpu = stacked(&[0x4ef9, 0x0000, TARGET as u16]);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, TARGET);
+        assert_eq!(cpu.registers.pc.0, TARGET);
     }
 
     #[test]
@@ -163,7 +164,7 @@ mod tests {
         // JMP (-4, PC): from the extension word's address.
         let mut cpu = stacked(&[0x4efa, 0xfffc]);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, CODE - 2);
+        assert_eq!(cpu.registers.pc.0, CODE - 2);
     }
 
     #[test]
@@ -172,12 +173,12 @@ mod tests {
         let mut cpu = stacked(&[0x4eaf, 0x0010]);
         poke_long(&mut cpu, STACK + 0x10, 0x4e75_0000);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, STACK + 0x10);
-        assert_eq!(cpu.registers.ssp, STACK - 4);
+        assert_eq!(cpu.registers.pc.0, STACK + 0x10);
+        assert_eq!(cpu.registers.ssp.0, STACK - 4);
         assert_eq!(peek_long(&cpu, STACK - 4), CODE + 4);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, CODE + 4);
-        assert_eq!(cpu.registers.ssp, STACK);
+        assert_eq!(cpu.registers.pc.0, CODE + 4);
+        assert_eq!(cpu.registers.ssp.0, STACK);
     }
 
     #[test]
@@ -185,13 +186,13 @@ mod tests {
         let mut cpu = stacked(&[0x4e74, 0x000c]);
         poke_long(&mut cpu, STACK, TARGET);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, TARGET);
-        assert_eq!(cpu.registers.ssp, STACK + 4 + 12);
+        assert_eq!(cpu.registers.pc.0, TARGET);
+        assert_eq!(cpu.registers.ssp.0, STACK + 4 + 12);
         // A negative displacement.
         let mut cpu = stacked(&[0x4e74, 0xfffc]);
         poke_long(&mut cpu, STACK, TARGET);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.ssp, STACK);
+        assert_eq!(cpu.registers.ssp.0, STACK);
     }
 
     #[test]
@@ -200,8 +201,8 @@ mod tests {
         poke_long(&mut cpu, STACK, 0xa71f_0000 | TARGET >> 16);
         poke_long(&mut cpu, STACK + 4, TARGET << 16);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, TARGET);
-        assert_eq!(cpu.registers.ssp, STACK + 6);
+        assert_eq!(cpu.registers.pc.0, TARGET);
+        assert_eq!(cpu.registers.ssp.0, STACK + 6);
         assert_eq!(
             cpu.registers.sr(),
             status::S | status::INTERRUPT_MASK | 0x1f
@@ -212,11 +213,11 @@ mod tests {
     fn user_rts_uses_usp() {
         let mut cpu = stacked(&[0x4e75]);
         cpu.registers.set_sr(0);
-        cpu.registers.usp = STACK + 0x100;
+        cpu.registers.usp = Address(STACK + 0x100);
         poke_long(&mut cpu, STACK + 0x100, TARGET);
         step(&mut cpu, 1);
-        assert_eq!(cpu.registers.pc, TARGET);
-        assert_eq!(cpu.registers.usp, STACK + 0x104);
-        assert_eq!(cpu.registers.ssp, STACK);
+        assert_eq!(cpu.registers.pc.0, TARGET);
+        assert_eq!(cpu.registers.usp.0, STACK + 0x104);
+        assert_eq!(cpu.registers.ssp.0, STACK);
     }
 }

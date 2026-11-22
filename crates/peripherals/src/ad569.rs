@@ -24,7 +24,6 @@ use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
-use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
@@ -202,7 +201,7 @@ impl Peripheral for Ad569 {
         self.drive_output(drive);
     }
 
-    fn input(&mut self, port: usize, signal: Signal, _: Time, drive: &mut Drive<'_>) {
+    fn input(&mut self, port: usize, signal: Signal, drive: &mut Drive<'_>) {
         let controls = &mut self.state.controls;
         match (port, signal) {
             // DB15-DB0, by the cut
@@ -273,6 +272,8 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), RegistryError> {
 mod tests {
     use mc683xx_board::inspect::Value;
     use mc683xx_board::peripheral::Drive;
+
+    use crate::SYSTEM_CLOCK;
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::registry::Context;
     use mc683xx_board::registry::Environment;
@@ -304,8 +305,8 @@ mod tests {
 
     /// What `signal` on `port` drove on VOUT.
     fn input(dac: &mut Ad569, port: usize, signal: Signal) -> Vec<f64> {
-        let mut drive = Drive::new(Time::ZERO);
-        dac.input(port, signal, Time::ZERO, &mut drive);
+        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+        dac.input(port, signal, &mut drive);
         drive
             .finish()
             .driven
@@ -392,7 +393,7 @@ mod tests {
     #[test]
     fn power_on_drives_vout_at_minus_vref() {
         let mut dac = peripheral("").unwrap();
-        let mut drive = Drive::new(Time::ZERO);
+        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
         dac.power_on(&mut drive);
         assert_eq!(drive.finish().driven[0].signal, Signal::Analog(-5.0));
     }
@@ -404,12 +405,12 @@ mod tests {
             (dac.state.high, dac.state.low, dac.state.dac),
             (0x80, 0, 0x8000)
         );
-        let mut drive = Drive::new(Time::ZERO);
+        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
         dac.power_on(&mut drive);
         assert_eq!(drive.finish().driven[0].signal, Signal::Analog(0.0));
         // LDAC alone takes the latches' word, not DB's
         let mut dac = peripheral("initial = 0xc0a0\ncs = \"low\"").unwrap();
-        dac.power_on(&mut Drive::new(Time::ZERO));
+        dac.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
         assert!(strobe(&mut dac, LDAC).is_empty());
         assert!(strobe(&mut dac, HBE).is_empty());
         assert_eq!(strobe(&mut dac, LDAC), [volts(0x00a0)]);

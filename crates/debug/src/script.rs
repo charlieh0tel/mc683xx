@@ -63,8 +63,6 @@ const COMMENT: char = '#';
 const SIZE_SEPARATOR: char = '.';
 /// Hex numbers' prefix.
 const HEX_PREFIX: &str = "0x";
-/// The highest function code, FC\[2:0\] all set (CPU32RM 5.3).
-const MAX_FUNCTION_CODE: u32 = 7;
 
 /// `write_memory`.
 const WRITE_MEMORY: &str = "write_memory";
@@ -84,6 +82,113 @@ const MASK: &str = "mask";
 const TIMEOUT_MS: &str = "timeout_ms";
 /// The `fc` clause.
 const FC: &str = "fc";
+/// An address operand, as an error names it.
+const ADDRESS: &str = "address";
+/// A value operand, as an error names it.
+const VALUE: &str = "value";
+/// A register operand, as an error names it.
+const REGISTER: &str = "register";
+
+/// A memory command's clause: a keyword and a number after it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Clause {
+    /// `expect`.
+    Expect,
+    /// `mask`.
+    Mask,
+    /// `timeout_ms`.
+    TimeoutMs,
+    /// `fc`.
+    Fc,
+}
+
+impl Clause {
+    /// Every clause.
+    const ALL: [Self; 4] = [Self::Expect, Self::Mask, Self::TimeoutMs, Self::Fc];
+
+    /// The clause's keyword.
+    const fn keyword(self) -> &'static str {
+        match self {
+            Self::Expect => EXPECT,
+            Self::Mask => MASK,
+            Self::TimeoutMs => TIMEOUT_MS,
+            Self::Fc => FC,
+        }
+    }
+}
+
+/// The clause's keyword.
+impl fmt::Display for Clause {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.keyword())
+    }
+}
+
+/// The clause its keyword names, as [`Clause`]'s `Display` prints it.
+impl FromStr for Clause {
+    type Err = ParseClauseError;
+
+    fn from_str(keyword: &str) -> Result<Self, ParseClauseError> {
+        Self::ALL
+            .into_iter()
+            .find(|clause| clause.keyword() == keyword)
+            .ok_or_else(|| ParseClauseError(keyword.to_owned()))
+    }
+}
+
+/// Text that is no clause's keyword.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no clause {0:?}")]
+pub struct ParseClauseError(String);
+
+/// What a command can lack ([`ParseCommandError::Missing`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Operand {
+    /// A memory command's address.
+    Address,
+    /// The value a command writes.
+    Value,
+    /// The register a command writes.
+    Register,
+    /// A required clause, or a clause's number.
+    Clause(Clause),
+}
+
+/// The operand as an error names it: the clause's keyword for a clause.
+impl fmt::Display for Operand {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Address => formatter.write_str(ADDRESS),
+            Self::Value => formatter.write_str(VALUE),
+            Self::Register => formatter.write_str(REGISTER),
+            Self::Clause(clause) => clause.fmt(formatter),
+        }
+    }
+}
+
+/// The operand as [`Operand`]'s `Display` prints it.
+impl FromStr for Operand {
+    type Err = ParseOperandError;
+
+    fn from_str(name: &str) -> Result<Self, ParseOperandError> {
+        match name {
+            ADDRESS => Ok(Self::Address),
+            VALUE => Ok(Self::Value),
+            REGISTER => Ok(Self::Register),
+            _ => name
+                .parse()
+                .map(Self::Clause)
+                .map_err(|_| ParseOperandError(name.to_owned())),
+        }
+    }
+}
+
+/// Text that names no operand.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no operand {0:?}")]
+pub struct ParseOperandError(String);
 
 /// One command of a script.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -167,7 +272,7 @@ pub enum ParseCommandError {
     #[error("missing {what}")]
     Missing {
         /// What.
-        what: &'static str,
+        what: Operand,
     },
     /// A word where none, or no such clause, is expected.
     #[error("unexpected {word:?}")]
@@ -178,8 +283,8 @@ pub enum ParseCommandError {
     /// A clause given twice.
     #[error("`{clause}` given twice")]
     Repeated {
-        /// The clause's keyword.
-        clause: &'static str,
+        /// The clause.
+        clause: Clause,
     },
     /// A word that is not a number.
     #[error("{word:?} is not a number: hex with 0x, or decimal")]
@@ -257,12 +362,12 @@ fn number(word: &str) -> Result<u32, ParseCommandError> {
 }
 
 /// The next word, or [`ParseCommandError::Missing`] naming `what`.
-fn next<'a>(words: &mut Words<'a>, what: &'static str) -> Result<&'a str, ParseCommandError> {
+fn next<'a>(words: &mut Words<'a>, what: Operand) -> Result<&'a str, ParseCommandError> {
     words.next().ok_or(ParseCommandError::Missing { what })
 }
 
 /// The next word as a number.
-fn next_number(words: &mut Words<'_>, what: &'static str) -> Result<u32, ParseCommandError> {
+fn next_number(words: &mut Words<'_>, what: Operand) -> Result<u32, ParseCommandError> {
     number(next(words, what)?)
 }
 
@@ -285,41 +390,45 @@ fn aligned(address: u32, size: Size) -> Result<Address, ParseCommandError> {
     }
 }
 
-/// The rest of the words as clauses: a keyword of `keywords` and a
+/// The rest of the words as clauses: one of `clauses`' keywords and a
 /// number each, in any order, each once.
 fn clauses<const N: usize>(
     words: &mut Words<'_>,
-    keywords: [&'static str; N],
+    clauses: [Clause; N],
 ) -> Result<[Option<u32>; N], ParseCommandError> {
     let mut values = [None; N];
     while let Some(word) = words.next() {
-        let index = keywords
+        let index = clauses
             .iter()
-            .position(|keyword| *keyword == word)
+            .position(|clause| clause.keyword() == word)
             .ok_or_else(|| ParseCommandError::Unexpected {
                 word: word.to_owned(),
             })?;
         if values[index].is_some() {
             return Err(ParseCommandError::Repeated {
-                clause: keywords[index],
+                clause: clauses[index],
             });
         }
-        values[index] = Some(next_number(words, keywords[index])?);
+        values[index] = Some(next_number(words, Operand::Clause(clauses[index]))?);
     }
     Ok(values)
 }
 
 /// A required clause's value.
-fn required(value: Option<u32>, clause: &'static str) -> Result<u32, ParseCommandError> {
-    value.ok_or(ParseCommandError::Missing { what: clause })
+fn required(value: Option<u32>, clause: Clause) -> Result<u32, ParseCommandError> {
+    value.ok_or(ParseCommandError::Missing {
+        what: Operand::Clause(clause),
+    })
 }
 
 /// The function code in an `fc` clause, supervisor data without one.
 fn function_code(value: Option<u32>) -> Result<FunctionCode, ParseCommandError> {
     match value {
         None => Ok(FunctionCode::SUPERVISOR_DATA),
-        Some(value) if value <= MAX_FUNCTION_CODE => Ok(FunctionCode::new(value)),
-        Some(value) => Err(ParseCommandError::FunctionCode { value }),
+        Some(value) => u8::try_from(value)
+            .ok()
+            .and_then(FunctionCode::new)
+            .ok_or(ParseCommandError::FunctionCode { value }),
     }
 }
 
@@ -385,9 +494,9 @@ impl FromStr for Command {
         let command = match name {
             WRITE_MEMORY => {
                 let size = sized()?;
-                let address = aligned(next_number(&mut words, "address")?, size)?;
-                let value = fitting(next_number(&mut words, "value")?, size)?;
-                let [fc] = clauses(&mut words, [FC])?;
+                let address = aligned(next_number(&mut words, Operand::Address)?, size)?;
+                let value = fitting(next_number(&mut words, Operand::Value)?, size)?;
+                let [fc] = clauses(&mut words, [Clause::Fc])?;
                 Self::WriteMemory {
                     address,
                     size,
@@ -397,9 +506,10 @@ impl FromStr for Command {
             }
             READ_MEMORY => {
                 let size = sized()?;
-                let address = aligned(next_number(&mut words, "address")?, size)?;
-                let [expect, mask, fc] = clauses(&mut words, [EXPECT, MASK, FC])?;
-                let (expect, mask) = checked(required(expect, EXPECT)?, mask, size)?;
+                let address = aligned(next_number(&mut words, Operand::Address)?, size)?;
+                let [expect, mask, fc] =
+                    clauses(&mut words, [Clause::Expect, Clause::Mask, Clause::Fc])?;
+                let (expect, mask) = checked(required(expect, Clause::Expect)?, mask, size)?;
                 Self::ReadMemory {
                     address,
                     size,
@@ -410,35 +520,40 @@ impl FromStr for Command {
             }
             POLL_MEMORY => {
                 let size = sized()?;
-                let address = aligned(next_number(&mut words, "address")?, size)?;
-                let [mask, expect, timeout, fc] =
-                    clauses(&mut words, [MASK, EXPECT, TIMEOUT_MS, FC])?;
-                let (expect, mask) =
-                    checked(required(expect, EXPECT)?, Some(required(mask, MASK)?), size)?;
+                let address = aligned(next_number(&mut words, Operand::Address)?, size)?;
+                let [mask, expect, timeout, fc] = clauses(
+                    &mut words,
+                    [Clause::Mask, Clause::Expect, Clause::TimeoutMs, Clause::Fc],
+                )?;
+                let (expect, mask) = checked(
+                    required(expect, Clause::Expect)?,
+                    Some(required(mask, Clause::Mask)?),
+                    size,
+                )?;
                 Self::PollMemory {
                     address,
                     size,
                     expect,
                     mask,
-                    timeout: Duration::from_millis(required(timeout, TIMEOUT_MS)?.into()),
+                    timeout: Duration::from_millis(required(timeout, Clause::TimeoutMs)?.into()),
                     function_code: function_code(fc)?,
                 }
             }
             WRITE_REGISTER => {
                 no_size()?;
-                let name = next(&mut words, "register")?;
+                let name = next(&mut words, Operand::Register)?;
                 let register = name.parse().map_err(|error| ParseCommandError::Register {
                     name: name.to_owned(),
                     error,
                 })?;
                 Self::WriteRegister {
                     register,
-                    value: next_number(&mut words, "value")?,
+                    value: next_number(&mut words, Operand::Value)?,
                 }
             }
             WRITE_SYSTEM_REGISTER => {
                 no_size()?;
-                let name = next(&mut words, "register")?;
+                let name = next(&mut words, Operand::Register)?;
                 let register = name
                     .parse()
                     .map_err(|error| ParseCommandError::SystemRegister {
@@ -447,7 +562,7 @@ impl FromStr for Command {
                     })?;
                 Self::WriteSystemRegister {
                     register,
-                    value: next_number(&mut words, "value")?,
+                    value: next_number(&mut words, Operand::Value)?,
                 }
             }
             _ => return Err(unknown()),
@@ -569,7 +684,7 @@ fn read<T: Cpu32Target>(
 ) -> Result<u32, CommandError<T::Error>> {
     let (mut buffer, start) = big_endian(0, size);
     target
-        .read_memory(address, function_code, size, &mut buffer[start..])
+        .read_memory(address, size, function_code, &mut buffer[start..])
         .map_err(CommandError::Target)?;
     Ok(u32::from_be_bytes(buffer))
 }
@@ -591,7 +706,7 @@ impl Command {
             } => {
                 let (buffer, start) = big_endian(value, size);
                 target
-                    .write_memory(address, function_code, size, &buffer[start..])
+                    .write_memory(address, size, function_code, &buffer[start..])
                     .map_err(CommandError::Target)
             }
             Self::WriteRegister { register, value } => target
@@ -698,6 +813,17 @@ impl FromStr for Script {
             })
             .collect::<Result<_, _>>()?;
         Ok(Self { lines })
+    }
+}
+
+/// The commands as a script writes them, one a line, which parses back
+/// to the same commands; comments and blank lines are not kept, so the
+/// line numbers then run from 1 with no gaps.
+impl fmt::Display for Script {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.lines
+            .iter()
+            .try_for_each(|line| writeln!(formatter, "{}", line.command))
     }
 }
 

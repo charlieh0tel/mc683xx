@@ -18,6 +18,7 @@ use super::image;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::debug::serial::NOT_IN_BACKGROUND;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_target::serial::BUS_ERROR;
 use mc683xx_target::serial::COMPLETE;
 use mc683xx_target::serial::ILLEGAL;
@@ -69,14 +70,18 @@ const ATEMP: u16 = 0x8;
 fn chip(program: &[u16]) -> Mc68331 {
     let mut builder = Builder::default();
     builder
-        .memory(image(program, ROM_BYTES), false, &[ChipSelect::Boot])
+        .memory(
+            image(program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], true)
+        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
         .unwrap();
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
-    let data = u32::from(FunctionCode::SUPERVISOR_DATA.bits());
+    let data = u32::from(FunctionCode::SUPERVISOR_DATA.get());
     chip.write_system_register(SystemRegister::Sfc, data)
         .unwrap();
     chip.write_system_register(SystemRegister::Dfc, data)
@@ -200,8 +205,8 @@ fn memory_through_read_write_dump_and_fill() {
     let mut back = [0; 6];
     chip.read_memory(
         Address(RAM),
-        FunctionCode::SUPERVISOR_DATA,
         Size::Byte,
+        FunctionCode::SUPERVISOR_DATA,
         &mut back,
     )
     .unwrap();
@@ -231,7 +236,7 @@ fn go_leaves_background_mode_and_a_transfer_then_is_a_breakpoint() {
     let mut chip = chip(&[MOVEQ_1_D0, BRANCH_TO_SELF]);
     assert_eq!(chip.bdm_exchange(u32::from(GO)), NOT_READY);
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
-    chip.run_for(Cycles(1000));
+    chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(chip.bdm_exchange(u32::from(RDREG)), NOT_IN_BACKGROUND);
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Breakpoint)));
     assert_eq!(

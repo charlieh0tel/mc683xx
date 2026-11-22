@@ -12,7 +12,7 @@ use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
-use mc683xx_board::time::PICOSECONDS_PER_SECOND;
+use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_mc68331::chip::Mc68331;
@@ -24,9 +24,9 @@ const BOARD: &str = "../examples/boards/demo.toml";
 const CONSOLE: &str = "console";
 /// Board time a typed byte takes, as `mc683xx-run` types piped input:
 /// a byte a 1 ms turn.
-const TURN: u64 = PICOSECONDS_PER_SECOND / 1000;
+const TURN: Span = Span::from_millis(1);
 /// The longest the boot or a command may take to its prompt: 2 s.
-const LONGEST: u64 = 2 * PICOSECONDS_PER_SECOND;
+const LONGEST: Span = Span::from_seconds(2);
 /// What ends a command's output: the next prompt.
 const PROMPT: &[u8] = b"> ";
 /// The Mandelbrot command, its line as typed.
@@ -42,8 +42,8 @@ pub struct Demo {
     /// The command line typed.
     line: &'static [u8],
     /// Board time from the prompt to the command's next prompt, in
-    /// whole turns, picoseconds.
-    pub span: u64,
+    /// whole turns.
+    pub span: Span,
     /// Instructions the command runs, its typing among them.
     pub instructions: u64,
     /// What the console showed: the echo, the output, the prompt.
@@ -64,7 +64,7 @@ impl Demo {
             &Path::new(env!("CARGO_MANIFEST_DIR")).join(BOARD),
             &Options::default(),
             &Registry::with_builtins(),
-            Environment::default(),
+            &Environment::default(),
         )
         .expect("the demo board");
         Self::to_prompt(&mut board, b"");

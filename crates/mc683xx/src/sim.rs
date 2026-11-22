@@ -8,15 +8,25 @@
 
 pub mod chip_selects;
 pub mod clock;
+/// The SIM's general-purpose ports.
+///
+/// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the
+/// chip with.
+#[doc(hidden)]
 pub mod ports;
 mod protection;
 pub mod reset;
 
+use std::fmt;
 use std::mem;
+use std::str::FromStr;
 
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
+use mc683xx_cpu32::interrupt::IrqPin;
+use mc683xx_target::address::Address;
 use mc683xx_target::size::Size;
 
 use self::chip_selects::ChipSelects;
@@ -35,6 +45,8 @@ use crate::module::Block;
 use crate::module::RegisterAccess;
 use crate::peripheral::Timed;
 use crate::pins::PortLevels;
+use crate::pins::PortState;
+use crate::pins::merge_pins;
 
 /// The module space's bytes, at $7FF000 or $FFF000 by MM (SIMRM 1.1).
 pub const MODULE_SPACE_BYTES: u32 = 0x1000;
@@ -185,7 +197,49 @@ impl ResetCause {
     const fn resets_clock(self) -> bool {
         !matches!(self, Self::Test | Self::System)
     }
+
+    /// Its name as a board file's reset scope gives it: `external`,
+    /// `power-on`, `watchdog`, `halt-monitor`, `system`, `loss-of-clock`,
+    /// `test`.
+    const fn name(self) -> &'static str {
+        match self {
+            Self::External => "external",
+            Self::PowerOn => "power-on",
+            Self::Watchdog => "watchdog",
+            Self::HaltMonitor => "halt-monitor",
+            Self::System => "system",
+            Self::LossOfClock => "loss-of-clock",
+            Self::Test => "test",
+        }
+    }
 }
+
+/// Its name as a board file's reset scope gives it: `external`,
+/// `power-on`, `watchdog`, `halt-monitor`, `system`, `loss-of-clock`,
+/// `test`.
+impl fmt::Display for ResetCause {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
+
+/// The cause the text names, as [`ResetCause`]'s `Display` does, in any
+/// case.
+impl FromStr for ResetCause {
+    type Err = ParseResetCauseError;
+
+    fn from_str(name: &str) -> Result<Self, ParseResetCauseError> {
+        Self::ALL
+            .into_iter()
+            .find(|candidate| candidate.name().eq_ignore_ascii_case(name))
+            .ok_or_else(|| ParseResetCauseError(name.to_owned()))
+    }
+}
+
+/// Text that names no reset cause.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no reset cause {0:?}")]
+pub struct ParseResetCauseError(String);
 
 /// The pins the SIM reads as a reset releases (SIMRM 8.6; MC68331UM
 /// 4.6.3).
@@ -258,7 +312,7 @@ pub struct Sim {
     reset_request: Option<ResetCause>,
     /// The interrupt mask LPSTOP stored, while the MCU is stopped
     /// (MC68331UM 4.3.4).
-    low_power: Option<u8>,
+    low_power: Option<InterruptLevel>,
     /// Whether FREEZE is asserted: the CPU in background mode
     /// (MC68331UM 4.2.13).
     frozen: bool,
@@ -269,6 +323,10 @@ pub struct Sim {
 
 impl Sim {
     /// The SIM out of a power-on reset at `now`.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a SIM on its own is not a host's to build.
+    #[doc(hidden)]
     #[must_use]
     pub fn new(configuration: Configuration, now: Cycles) -> Self {
         let modclk = configuration.clock.modclk();
@@ -373,12 +431,6 @@ impl Sim {
         if self.port_c & !PORTC_IMPLEMENTED != 0 || !self.timer.is_valid() {
             return Err(StateError::invalid("SIM registers"));
         }
-        if self
-            .low_power
-            .is_some_and(|mask| InterruptLevel::new(mask).is_none())
-        {
-            return Err(StateError::invalid("LPSTOP's interrupt mask"));
-        }
         Ok(())
     }
 
@@ -419,12 +471,12 @@ impl Sim {
 
     /// The module space's base, by MM.
     #[must_use]
-    pub const fn module_base(&self) -> u32 {
-        if self.simcr & SIMCR_MM != 0 {
+    pub const fn module_base(&self) -> Address {
+        Address(if self.simcr & SIMCR_MM != 0 {
             MODULE_BASE_HIGH
         } else {
             MODULE_BASE_LOW
-        }
+        })
     }
 
     /// SIMCR's IARB: the SIM's arbitration priority, for the timer and
@@ -448,40 +500,58 @@ impl Sim {
         self.protection.halt_monitor()
     }
 
-    /// Port E.
-    #[must_use]
-    pub const fn port_e(&self) -> &Port {
-        &self.port_e
-    }
-
-    /// Port F.
-    #[must_use]
-    pub const fn port_f(&self) -> &Port {
-        &self.port_f
-    }
-
-    /// PORTC, the latch: the levels of the chip-select pins assigned as
-    /// discrete outputs, PC6 to PC0 on CS9 to CS3 (SIMRM 7.10.4).
-    /// `outputs(PortName::C)` gives the pins it drives.
-    #[must_use]
-    pub const fn port_c(&self) -> u8 {
-        self.port_c
-    }
-
     /// The pins `port` drives and their levels.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a host reads the chip's ports.
+    #[doc(hidden)]
     #[must_use]
     pub fn outputs(&self, port: PortName) -> PortLevels {
         match port {
             PortName::C => {
                 let driven = self.chip_selects.discrete_outputs();
-                PortLevels {
-                    driven,
-                    levels: self.port_c & driven,
-                }
+                PortLevels::new(driven, self.port_c & driven)
             }
             PortName::E => self.port_e.outputs(),
             PortName::F => self.port_f.outputs(),
         }
+    }
+
+    /// `port`'s registers and the levels the board drives on its pins.
+    /// Port C's pins are all outputs, those not assigned as discrete
+    /// outputs carrying their chip selects (SIMRM 7.10.4); it has no
+    /// inputs, its pins read high.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a host reads the chip's ports.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn port(&self, port: PortName) -> PortState {
+        match port {
+            PortName::C => PortState {
+                latch: self.port_c,
+                direction: PORTC_IMPLEMENTED,
+                assignment: PORTC_IMPLEMENTED & !self.chip_selects.discrete_outputs(),
+                pins: u8::MAX,
+            },
+            PortName::E => self.port_e.state(),
+            PortName::F => self.port_f.state(),
+        }
+    }
+
+    /// The board drives the pins of `port` in `mask` to their levels in
+    /// `value`, the others as they were.  Port C has no inputs.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
+    /// the chip with; a host drives the chip's ports.
+    #[doc(hidden)]
+    pub const fn set_port_pins(&mut self, port: PortName, value: u8, mask: u8) {
+        let port = match port {
+            PortName::C => return,
+            PortName::E => &mut self.port_e,
+            PortName::F => &mut self.port_f,
+        };
+        port.pins = merge_pins(port.pins, value, mask);
     }
 
     /// What each port drives, in [`PortName::ALL`]'s order.
@@ -510,35 +580,11 @@ impl Sim {
         mem::take(&mut self.output_changes)
     }
 
-    /// The board drives port E's pins to `pins`.
-    ///
-    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
-    #[doc(hidden)]
-    pub const fn set_port_e_pins(&mut self, pins: u8) {
-        self.port_e.pins = pins;
-    }
-
-    /// The board drives port F's pins to `pins`.
-    ///
-    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
-    #[doc(hidden)]
-    pub const fn set_port_f_pins(&mut self, pins: u8) {
-        self.port_f.pins = pins;
-    }
-
     /// Whether IRQ`level`'s pin has its interrupt function (PFPAR,
     /// MC68331UM Table D-5).
     #[must_use]
-    pub const fn interrupt_pin(&self, level: InterruptLevel) -> bool {
-        level.get() != 0 && self.port_f.assignment & 1 << level.get() != 0
-    }
-
-    /// PEPAR: a set bit assigns its port E pin its bus control
-    /// function, PE0 DSACK0 and PE1 DSACK1 among them (SIMRM 9.1,
-    /// Table 9-1).
-    #[must_use]
-    pub const fn port_e_assignment(&self) -> u8 {
-        self.port_e.assignment
+    pub const fn interrupt_pin(&self, pin: IrqPin) -> bool {
+        self.port_f.assignment & 1 << pin.get() != 0
     }
 
     /// Whether PE2 is the AVEC input (PEPAR, MC68331UM Table D-4).
@@ -561,8 +607,8 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn acknowledge_timer(&mut self) -> u8 {
-        self.timer.acknowledge()
+    pub fn acknowledge_timer(&mut self) -> Vector {
+        Vector(self.timer.acknowledge())
     }
 
     /// The timer's interrupt, acknowledged, was not taken: its request
@@ -579,7 +625,7 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn low_power_stop(&mut self, mask: u8, now: Cycles) {
+    pub fn low_power_stop(&mut self, mask: InterruptLevel, now: Cycles) {
         self.low_power = Some(mask);
         self.counters_changed(self.clock.tick(now));
     }
@@ -641,7 +687,7 @@ impl Sim {
     /// The interrupt mask LPSTOP stored, while the MCU is in low-power
     /// stop.
     #[must_use]
-    pub const fn low_power(&self) -> Option<u8> {
+    pub const fn low_power(&self) -> Option<InterruptLevel> {
         self.low_power
     }
 
