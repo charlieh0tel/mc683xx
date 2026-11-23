@@ -1000,8 +1000,8 @@ chip beside `Mc68331`.
   from Python in a release build (`test_cpu.py`), 15,000 constructions
   with 64 Kbytes mapped.
 - **gdb:** `serve_gdb(address, ready=None)` on `Mc68331`, `Board` and
-  `Machine` serves gdb (see Debugger) until it detaches or kills the
-  target (an `Ending`: `DETACHED`, `KILLED`), so a harness hands control to
+  `Machine` serves gdb (see Debugger) until it detaches, kills the
+  target or hangs up (an `Ending`: `DETACHED`, `KILLED`, `HUNG_UP`), so a harness hands control to
   gdb mid-run and gets it back.  It blocks, holding the target;
   `ready(port)` is called once it listens, before the target is
   held, so a test starts its client then (port 0 picks one) and may
@@ -1893,7 +1893,15 @@ checks the bare build.
   ends it, as a `Protocol` error: gdbstub has no reply for one.  The
   runner takes a failed session (`Connection` or `Protocol`) as a
   detach, said on standard error, so one bad packet does not cost the
-  run; a `Target` error, the board's, still ends it.
+  run; a `Target` error, the board's, still ends it.  gdb hanging up
+  (its exit, or a lost link, without a detach or a kill) is how a
+  session most often ends, so it is not an error: `Ending::HungUp`,
+  after the same cleanup, when the connection's error is one its
+  `Connection::hung_up` names (a `TcpStream`'s or a `Polled` one's at
+  its end, reset or aborted, or a broken pipe); a target under BDM
+  control is left halted, as after a failed session, and a host exits
+  as after a detach.  The runner says so on standard error and runs
+  on.
 - **Memory:** supervisor data space unless `monitor fc` names
   another, no bus cycle: memory the core
   serves (ROM too, so `load` works), module registers read through

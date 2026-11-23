@@ -58,11 +58,11 @@ impl<C: Connection> ConnectionExt for Adapted<C> {
     }
 }
 
-/// How gdbstub's session ended, as ours: gdb's detach or kill, or
-/// gdbstub's error as ours.
-pub(crate) fn ended<E: Display, C: Display>(
-    served: Result<DisconnectReason, GdbStubError<E, C>>,
-) -> Result<Ending, SessionError<E, C>> {
+/// How gdbstub's session on a `C` ended, as ours: gdb's detach or
+/// kill, gdb hanging up, or gdbstub's error as ours.
+pub(crate) fn ended<E: Display, C: Connection>(
+    served: Result<DisconnectReason, GdbStubError<E, C::Error>>,
+) -> Result<Ending, SessionError<E, C::Error>> {
     let error = match served {
         Ok(DisconnectReason::Kill) => return Ok(Ending::Killed),
         Ok(_) => return Ok(Ending::Detached),
@@ -70,11 +70,11 @@ pub(crate) fn ended<E: Display, C: Display>(
     };
     let text = error.to_string();
     if error.is_connection_error() {
-        return Err(error
-            .into_connection_error()
-            .map_or(SessionError::Protocol(text), |(error, _)| {
-                SessionError::Connection { error }
-            }));
+        return match error.into_connection_error() {
+            Some((error, _)) if C::hung_up(&error) => Ok(Ending::HungUp),
+            Some((error, _)) => Err(SessionError::Connection { error }),
+            None => Err(SessionError::Protocol(text)),
+        };
     }
     Err(error
         .into_target_error()

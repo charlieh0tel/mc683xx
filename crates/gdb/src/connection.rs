@@ -57,6 +57,18 @@ pub trait Connection {
     fn start(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
+
+    /// Whether `error` is gdb hanging up: closing the connection, on
+    /// its exit or a lost link, which ends the session as
+    /// [`Ending::HungUp`](crate::Ending::HungUp) rather than as an
+    /// error.  By default none is.
+    #[expect(
+        unused_variables,
+        reason = "the default ignores its argument, and the name documents it"
+    )]
+    fn hung_up(error: &Self::Error) -> bool {
+        false
+    }
 }
 
 /// A connection borrowed for a session: `serve(target, &mut wire)`.
@@ -81,6 +93,10 @@ impl<C: Connection + ?Sized> Connection for &mut C {
 
     fn start(&mut self) -> Result<(), C::Error> {
         (**self).start()
+    }
+
+    fn hung_up(error: &C::Error) -> bool {
+        C::hung_up(error)
     }
 }
 
@@ -111,6 +127,22 @@ impl Connection for TcpStream {
     fn start(&mut self) -> io::Result<()> {
         self.set_nodelay(true)
     }
+
+    fn hung_up(error: &io::Error) -> bool {
+        closed(error)
+    }
+}
+
+/// Whether `error` is the peer gone: the connection at its end, reset
+/// or aborted, or a write into one closed.
+fn closed(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::BrokenPipe
+    )
 }
 
 /// The next byte on `stream` if one has come, without waiting for it
@@ -258,6 +290,10 @@ impl<W: Waiter> Connection for Polled<W> {
 
     fn start(&mut self) -> Result<(), Self::Error> {
         Ok(self.stream.set_nodelay(true)?)
+    }
+
+    fn hung_up(error: &Self::Error) -> bool {
+        matches!(error, PollError::Connection(error) if closed(error))
     }
 }
 

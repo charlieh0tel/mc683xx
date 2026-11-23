@@ -908,8 +908,9 @@ assert (chip.now, chip.registers()) == after
 `ready(port)` once it does (the target not yet held, so `ready` may
 read it), takes one gdb, and lets it read and write
 registers and memory, set breakpoints and watchpoints, step, continue
-and interrupt, until it detaches (`Ending.DETACHED`) or kills the target
-(`Ending.KILLED`), an enum.  Then the harness has the target back, as gdb left it.
+and interrupt, until it detaches (`Ending.DETACHED`), kills the target
+(`Ending.KILLED`) or hangs up without either (`Ending.HUNG_UP`, as gdb
+does when it exits), an enum.  Then the harness has the target back, as gdb left it.
 `monitor stop` arms a board's stop conditions (`docs/gdb.md`, Stop
 conditions); a Python peripheral offers none yet, and the bindings have
 no API of their own for them.
@@ -997,7 +998,7 @@ chip.run_for(500)
   bare `Machine`'s hook calling `run_limited` or `serve_gdb`, or gdb sending what
   the stub cannot take.
 - `OSError`: `serve_gdb` could not listen, or gdb's connection failed
-  or closed without a detach; `Board` could not read its file or a
+  other than by gdb hanging up; `Board` could not read its file or a
   memory's image.
 - `TypeError`: a peripheral without `read` and `write`, a QSPI peripheral
   without `transfer`, a hook that is not callable.

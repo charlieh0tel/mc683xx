@@ -149,12 +149,12 @@ impl Waiter for Interruptible<'_> {
 }
 
 /// Waits for gdb at `address`, saying where on standard error, and
-/// serves it until it detaches or kills the board, or `interrupted`
-/// (Ctrl-C) is set, which ends the session as a detach does, at its
-/// next wait for gdb.  A session that fails, gdb gone or a packet the
-/// stub cannot take, is said on standard error and ends as a detach
-/// does, so the run goes on to its end; only the board's own errors end
-/// the run.
+/// serves it until it detaches, kills the board or hangs up, or
+/// `interrupted` (Ctrl-C) is set, which ends the session as a detach
+/// does, at its next wait for gdb.  A hang-up, and a session that fails
+/// (the connection, or a packet the stub cannot take), is said on
+/// standard error and ends as a detach does, so the run goes on to its
+/// end; only the board's own errors end the run.
 pub(crate) fn serve(
     board: &mut Board<Mc68331>,
     turns: &mut Turns,
@@ -187,6 +187,10 @@ pub(crate) fn serve(
         running: false,
     };
     match mc683xx_gdb::serve(&mut debugged, connection) {
+        Ok(Ending::HungUp) => {
+            eprintln!("mc683xx-run: gdb hung up; running on as if it detached");
+            Ok(Ending::Detached)
+        }
         Ok(ending) => Ok(ending),
         Err(SessionError::Target { error }) => Err(error),
         Err(SessionError::Connection {

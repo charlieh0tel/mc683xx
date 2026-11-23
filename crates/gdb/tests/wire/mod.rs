@@ -1,6 +1,7 @@
 //! gdb's end of an in-memory connection, for the stubs' tests: raw
 //! remote serial protocol packets, each sent once the stub has answered
-//! the last, as gdb waits, and the stub's replies decoded.
+//! the last, as gdb waits, and the stub's replies decoded.  Once the
+//! script is spent the connection is at its end: gdb has hung up.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -17,6 +18,9 @@ pub(crate) enum Send {
     Packet(String),
     /// Raw bytes, sent as soon as the stub reads.
     Now(Vec<u8>),
+    /// A failure of the connection, other than gdb hanging up, at the
+    /// stub's next read.
+    Fail,
 }
 
 /// A packet's body, sent once the last is answered.
@@ -34,6 +38,8 @@ pub(crate) struct Wire {
     output: Rc<RefCell<Vec<u8>>>,
     /// Packets the stub had begun when the last packet went.
     answered: Option<usize>,
+    /// Whether the connection has failed.
+    failed: bool,
 }
 
 impl Wire {
@@ -44,7 +50,7 @@ impl Wire {
         }
         let begun = self.output.borrow().iter().filter(|&&b| b == b'$').count();
         let ready = match self.script.front() {
-            Some(Send::Now(_)) => true,
+            Some(Send::Now(_) | Send::Fail) => true,
             Some(Send::Packet(_)) => self.answered.is_none_or(|before| begun > before),
             None => false,
         };
@@ -53,6 +59,7 @@ impl Wire {
         }
         match self.script.pop_front() {
             Some(Send::Now(bytes)) => self.input.extend(bytes),
+            Some(Send::Fail) => self.failed = true,
             Some(Send::Packet(body)) => {
                 let sum = body.bytes().fold(0u8, u8::wrapping_add);
                 self.input.extend(format!("${body}#{sum:02x}").bytes());
@@ -77,6 +84,9 @@ impl Connection for Wire {
 
     fn read(&mut self) -> io::Result<u8> {
         self.refill();
+        if self.failed {
+            return Err(io::Error::other("the link failed"));
+        }
         self.input
             .pop_front()
             .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))
@@ -86,10 +96,17 @@ impl Connection for Wire {
     /// spent, as gdb gone.
     fn peek(&mut self) -> io::Result<Option<u8>> {
         self.refill();
+        if self.failed {
+            return Err(io::Error::other("the link failed"));
+        }
         if self.input.is_empty() && self.script.is_empty() {
             return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
         }
         Ok(self.input.front().copied())
+    }
+
+    fn hung_up(error: &io::Error) -> bool {
+        error.kind() == io::ErrorKind::UnexpectedEof
     }
 }
 
@@ -143,6 +160,7 @@ impl Wire {
             input: VecDeque::new(),
             output: Rc::clone(output),
             answered: None,
+            failed: false,
         }
     }
 }

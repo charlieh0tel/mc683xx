@@ -92,6 +92,13 @@ def test_ctrl_c_interrupts_and_kill_ends() -> None:
     assert replies == ["S02"]
 
 
+def test_gdb_hanging_up_ends_the_session() -> None:
+    bare = cpu()
+    ending, replies = serve(bare, "?")
+    assert ending == mc683xx.Ending.HUNG_UP
+    assert replies[0].startswith("T05")
+
+
 def test_a_peripheral_s_exception_ends_the_session() -> None:
     class Failing:
         def read(self, cycle: mc683xx.BusCycle) -> int:

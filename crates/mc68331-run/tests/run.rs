@@ -757,6 +757,24 @@ fn gdb_runs_the_board_until_it_detaches() {
 }
 
 #[test]
+fn gdb_hanging_up_lets_the_run_go_on() {
+    let directory = board("gdb-hang-up", &echo::image());
+    let (child, mut gdb) = gdb_session(&directory.join("echo.toml"), &[]);
+    assert!(exchange(&mut gdb, &packet("?")).starts_with("T05"));
+    gdb.write_all(&packet("c")).unwrap();
+    drop(gdb);
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("mc683xx-run: gdb hung up; running on as if it detached\n"),
+        "{stderr}"
+    );
+    assert!(stderr.ends_with("reason=budget\n"), "{stderr}");
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn a_packet_the_stub_cannot_parse_ends_only_the_session() {
     for bad in ["M0,4:zz", "Z0,zz,2"] {
         let directory = board("gdb-bad", &echo::image());

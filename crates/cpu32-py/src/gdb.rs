@@ -50,6 +50,8 @@ pub(crate) enum Ending {
     Detached,
     /// gdb killed the target: the host should stop running it.
     Killed,
+    /// gdb hung up, without detaching or killing the target.
+    HungUp,
 }
 
 /// A Rust target whose Python peripherals' exceptions wait in `pending`:
@@ -167,7 +169,8 @@ pub(crate) fn accept<'py>(
     .map_err(raised)
 }
 
-/// Serves gdb on `connection` until it detaches or kills `target`.
+/// Serves gdb on `connection` until it detaches, kills `target` or
+/// hangs up.
 /// An exception, Ctrl-C's among them, ends the session, the stub's
 /// breakpoints and watchpoints removed, and is raised.
 pub(crate) fn serve<T: Target<Error = PyErr>>(
@@ -177,6 +180,7 @@ pub(crate) fn serve<T: Target<Error = PyErr>>(
     match mc683xx_gdb::serve(target, connection) {
         Ok(mc683xx_gdb::Ending::Detached) => Ok(Ending::Detached),
         Ok(mc683xx_gdb::Ending::Killed) => Ok(Ending::Killed),
+        Ok(mc683xx_gdb::Ending::HungUp) => Ok(Ending::HungUp),
         Err(SessionError::Target { error }) => Err(error),
         Err(SessionError::Connection { error }) => Err(raised(error)),
         Err(SessionError::Protocol(text)) => Err(PyRuntimeError::new_err(text)),

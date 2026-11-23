@@ -103,8 +103,9 @@ pub(crate) fn serve<T: Target, C: Connection>(
         action: Action::Continue,
         going: None,
     };
-    let ended =
-        ended(GdbStub::new(Adapted(connection)).run_blocking::<EventLoop<'_, T, C>>(&mut session));
+    let ended = ended::<_, C>(
+        GdbStub::new(Adapted(connection)).run_blocking::<EventLoop<'_, T, C>>(&mut session),
+    );
     let cleaned = session.clean_up();
     // a target left with BGND planted is not resumed
     let ending = match (ended, cleaned) {
