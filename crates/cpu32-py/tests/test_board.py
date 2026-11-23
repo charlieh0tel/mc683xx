@@ -696,7 +696,8 @@ def test_enabled_turns_a_file_s_options_on(tmp_path: Path) -> None:
     (tmp_path / "board.toml").write_text(optional)
     path = str(tmp_path / "board.toml")
     types = {"latch": Latch, "lamp": Lamp}
-    assert mc683xx.Board(path, types=types).peripheral("spare") is None
+    with pytest.raises(ValueError, match="spare"):
+        mc683xx.Board(path, types=types).peripheral("spare")
     assert isinstance(mc683xx.Board(path, types=types, enabled=["spare"]).peripheral("spare"), Lamp)
 
 

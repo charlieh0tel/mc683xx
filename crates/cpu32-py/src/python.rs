@@ -138,6 +138,7 @@ impl From<Error> for PyErr {
             | Error::Inputs(_)
             | Error::Interval(_)
             | Error::NoMemory(_)
+            | Error::NoPeripheral(_)
             | Error::Port(_)
             | Error::AnalogInput(_)
             | Error::Seconds(_)

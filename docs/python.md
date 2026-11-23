@@ -970,7 +970,9 @@ chip.run_for(500)
   overlapping another; a register value that does not fit; a host cycle of a
   size other than 1, 2 or 4, at an odd address, or of a value wider
   than it; a bare `Machine`'s `read` of more
-  bytes than 32 bits of addresses.
+  bytes than 32 bits of addresses; a name a `Board` lacks, a
+  peripheral's, memory's, net's or endpoint's (a number a `Mc68331`
+  never gave is an `IndexError`).
 - `mc683xx.BusCycleError`: a host cycle or peek that gave no value,
   Rust's `BusCycleError`, as one of its two subclasses:
   - `mc683xx.BusError`: a host cycle that ended in a bus error, or that
@@ -1140,7 +1142,8 @@ the nets; nothing while the board holds RESET low);
 `reset_with_breakpoint()`, `assert_breakpoint()`, `halt()` and `go()`
 BKPT on the board (Background debug mode); `take_events()`
 what the chip did, as `Mc68331.take_events`; `marking(name)` the
-peripheral's `marking`, or `None`; `memory(name)`,
+peripheral's `marking`, or `None`; `peripheral(name)` a Python
+peripheral's object, `None` for a built-in one; `memory(name)`,
 `externals()` (`External`s: `name`, `kind` the nets' type, `direction`
 `in`, `out` or `in-out`; each is its name as a string and equals it),
 `send(name, value, kind="serial")`,
@@ -1198,8 +1201,8 @@ Front ends):
   the callbacks.
 - `inspect(name)` gives what a peripheral shows (Rust's
   `Board::inspect`) as a dict, a field's name to its value, an `int`,
-  `bool`, `float`, `str`, `bytes` or, for a group, a dict; `None` for
-  a peripheral the board lacks.  Rust's unit and radix hints are
+  `bool`, `float`, `str`, `bytes` or, for a group, a dict.  Rust's
+  unit and radix hints are
   dropped.  A Python peripheral shows its own by defining `inspect()`,
   returning such a mapping (an empty one without it); an exception it
   raises, or a value of another type, raises from `inspect`, and an

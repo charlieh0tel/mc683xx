@@ -97,7 +97,17 @@ def test_a_python_peripheral_shows_its_own(tmp_path: Path) -> None:
         "keys": {"up": False},
     }
     assert shown.inspect("plain") == {}
-    assert shown.inspect("nowhere") is None
+    with pytest.raises(ValueError, match="no peripheral"):
+        shown.inspect("nowhere")
+
+
+def test_a_name_the_board_lacks_raises(tmp_path: Path) -> None:
+    shown = board(tmp_path)
+    assert shown.peripheral("switches") is None
+    assert shown.marking("switches") is None
+    for lookup in (shown.peripheral, shown.marking, shown.inspect, shown.memory):
+        with pytest.raises(ValueError, match="nowhere"):
+            lookup("nowhere")
 
 
 def test_an_inspect_s_exception_is_raised(tmp_path: Path) -> None:

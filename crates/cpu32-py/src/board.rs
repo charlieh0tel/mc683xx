@@ -1636,26 +1636,33 @@ impl BoardView {
         self.board.chip().instructions()
     }
 
-    /// The Python object of the peripheral `name`, if it is a Python peripheral.
-    fn peripheral(&self, py: Python<'_>, name: &str) -> Option<Py<PyAny>> {
-        self.board
+    /// The Python object of the peripheral `name`, `None` if it is not
+    /// a Python peripheral; `ValueError` for a peripheral the board
+    /// lacks.
+    fn peripheral(&self, py: Python<'_>, name: &str) -> PyResult<Option<Py<PyAny>>> {
+        self.board.marking(name).map_err(Error::from)?;
+        Ok(self
+            .board
             .peripheral::<PythonPeripheral>(name)
-            .and_then(|peripheral| peripheral.object.object(py).ok())
+            .and_then(|peripheral| peripheral.object.object(py).ok()))
     }
 
     /// What the peripheral `name` shows a front end, as a dict (Rust's
-    /// `Board::inspect`), or `None` if there is none.
-    fn inspect<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyDict>>> {
-        let inspection = self.board.inspect(name).ok();
+    /// `Board::inspect`); `ValueError` for a peripheral the board lacks.
+    fn inspect<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyDict>> {
+        let inspection = self.board.inspect(name);
         self.check()?;
-        inspection
-            .map(|inspection| inspection_dict(py, &inspection))
-            .transpose()
+        inspection_dict(py, &inspection.map_err(Error::from)?)
     }
 
-    /// The marking of the peripheral `name`, if its peripheral gives one.
-    fn marking(&self, name: &str) -> Option<String> {
-        self.board.marking(name).ok().flatten().map(str::to_owned)
+    /// The marking of the peripheral `name`, `None` if the file gives it
+    /// none; `ValueError` for a peripheral the board lacks.
+    fn marking(&self, name: &str) -> PyResult<Option<String>> {
+        Ok(self
+            .board
+            .marking(name)
+            .map_err(Error::from)?
+            .map(str::to_owned))
     }
 
     /// The memory `name`'s bytes.

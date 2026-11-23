@@ -5,6 +5,7 @@ use std::time::TryFromFloatSecsError;
 
 use mc683xx_board::board::NetError;
 use mc683xx_board::board::NoMemory;
+use mc683xx_board::board::NoPeripheral;
 use mc683xx_board::board::ReceiveError;
 use mc683xx_board::board::RunError;
 use mc683xx_board::board::SendError;
@@ -164,6 +165,9 @@ pub(crate) enum Error {
     /// A board memory the board does not have.
     #[error(transparent)]
     NoMemory(#[from] NoMemory),
+    /// A peripheral the board does not have.
+    #[error(transparent)]
+    NoPeripheral(#[from] NoPeripheral),
     /// A port index past a Python peripheral's ports.
     #[error("no port {0}")]
     Port(usize),
