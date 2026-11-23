@@ -216,15 +216,19 @@ def test_tracing_sees_peripheral_cycles_and_exceptions():
     ]
     builder, _, _ = board(program, Faulting())
     chip = builder.build()
-    chip.set_tracing(accesses=True, exceptions=True)
+    chip.set_tracing(bus_cycles=True, exceptions=True)
     chip.run_for(2000)
     events = chip.take_events()
-    accesses = [e for e in events if isinstance(e, mc683xx.Event.Access)]
+    cycles = [e for e in events if isinstance(e, mc683xx.Event.BusCycle)]
     # the four chip-select writes, then the peripheral's bus error
-    assert [(e.address, e.write) for e in accesses[:4]] == [
+    assert [(e.address, e.write) for e in cycles[:4]] == [
         (CSBAR0, True), (CSOR0, True), (CSBAR1, True), (CSOR1, True),
     ]
-    assert (accesses[4].address, accesses[4].bus_error) == (PERIPHERAL_BASE + 0x20, True)
+    assert (cycles[4].address, cycles[4].value, cycles[4].bus_error) == (
+        PERIPHERAL_BASE + 0x20,
+        0,
+        True,
+    )
     exceptions = [e for e in events if isinstance(e, mc683xx.Event.Exception)]
     assert exceptions[0].vector == BUS_ERROR
     assert exceptions[0].handler == BUS_ERROR_HANDLER
@@ -961,18 +965,18 @@ def counting(*models, qspi=None):
     if qspi is not None:
         builder.set_qspi(qspi)
     chip = builder.build()
-    chip.set_tracing(accesses=True, exceptions=True)
+    chip.set_tracing(bus_cycles=True, exceptions=True)
     return chip, ram
 
 
 def traced(chip, ram, budget):
     chip.run_for(budget)
-    accesses = [
+    cycles = [
         (e.now, e.address, e.write, e.value)
         for e in chip.take_events()
-        if isinstance(e, mc683xx.Event.Access)
+        if isinstance(e, mc683xx.Event.BusCycle)
     ]
-    return accesses, chip.registers(), chip.now, chip.memory(ram)
+    return cycles, chip.registers(), chip.now, chip.memory(ram)
 
 
 def test_a_restored_chip_runs_the_same():

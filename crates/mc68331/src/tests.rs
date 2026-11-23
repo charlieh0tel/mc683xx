@@ -2823,7 +2823,7 @@ fn a_request_the_host_moves_between_runs_is_seen() {
     // a stack the peripheral takes the frame's writes on
     chip.registers_mut().ssp = Address(CS1_BASE + 0x1000);
     chip.set_tracing(ChipTracing {
-        accesses: false,
+        bus_cycles: false,
         exceptions: true,
     });
     chip.run_for(Cycles::from_clocks(100));
@@ -3011,13 +3011,13 @@ fn tracing_reports_peripheral_cycles_and_exceptions() {
     chip.registers_mut().ssp = Address(CS1_BASE + 0x1000);
     chip.take_events();
     chip.set_tracing(ChipTracing {
-        accesses: true,
+        bus_cycles: true,
         exceptions: true,
     });
     let before = chip.instructions();
     chip.run_for(Cycles::from_clocks(2000));
     let events = chip.take_events();
-    let Some(&Event::Access {
+    let Some(&Event::BusCycle {
         address,
         write,
         value,
@@ -3027,7 +3027,7 @@ fn tracing_reports_peripheral_cycles_and_exceptions() {
         panic!("an access first: {events:?}");
     };
     assert_eq!(address, Address(CS1_BASE + 2));
-    assert_eq!((write, value), (false, Some(0x1234)));
+    assert_eq!((write, value), (false, 0x1234));
     assert!(events.iter().any(|event| matches!(
         event,
         Event::Exception { entry, .. }
@@ -3178,7 +3178,7 @@ fn copying_with(more: impl FnOnce(&mut Builder)) -> (Mc68331, MemoryId, Peripher
 /// The trace of `budget` clocks, and what the run leaves.
 fn traced(chip: &mut Mc68331, ram: MemoryId, budget: u64) -> (Vec<Event>, Vec<u8>, Vec<u8>) {
     chip.set_tracing(ChipTracing {
-        accesses: true,
+        bus_cycles: true,
         exceptions: true,
     });
     chip.take_events();

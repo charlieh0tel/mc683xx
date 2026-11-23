@@ -1233,8 +1233,8 @@ sense them and may answer within the run.  None by default.
 
 Tracing goes through the chip's events (`take_events`), off by
 default: `set_tracing(tracing)`, a `ChipTracing::default()` with
-`accesses` and `exceptions` set as wanted, adds an
-`Event::Access` for each bus cycle the core sends the chip (module
+`bus_cycles` and `exceptions` set as wanted, adds an
+`Event::BusCycle` for each bus cycle the core sends the chip (module
 registers, peripherals, memory a peripheral shares a select with; not the RAM
 and ROM the core serves, which memory hooks see) and an
 `Event::Exception` for each exception entered.  `instructions()`
@@ -1253,7 +1253,7 @@ let program = [firmware::prologue(), vec![firmware::BRANCH_TO_SELF]].concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
 let mut tracing = ChipTracing::default();
-tracing.accesses = true;
+tracing.bus_cycles = true;
 tracing.exceptions = true;
 chip.set_tracing(tracing);
 chip.run_for(Cycles::from_clocks(1000));
@@ -1261,7 +1261,7 @@ let writes: Vec<u32> = chip
     .take_events()
     .into_iter()
     .filter_map(|event| match event {
-        Event::Access { address, write: true, .. } => Some(address.0),
+        Event::BusCycle { address, write: true, .. } => Some(address.0),
         _ => None,
     })
     .collect();

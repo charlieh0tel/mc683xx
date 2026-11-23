@@ -1038,7 +1038,7 @@ fn run_chip(
     );
     let mut chip = builder.build();
     let mut tracing = mc683xx_mc68331::event::ChipTracing::default();
-    tracing.accesses = true;
+    tracing.bus_cycles = true;
     tracing.exceptions = true;
     chip.set_tracing(tracing);
     let mut trace = Vec::new();
@@ -1249,7 +1249,7 @@ fn peripheral_of(chip: &Mc68331, id: PeripheralId) -> &Replay {
 /// `event`'s record, if the reference would trace it.
 fn chip_record(chip: &Mc68331, ram: MemoryId, pc: u32, event: Event) -> Option<Record> {
     match event {
-        Event::Access {
+        Event::BusCycle {
             address,
             size,
             function_code,
@@ -1261,7 +1261,7 @@ fn chip_record(chip: &Mc68331, ram: MemoryId, pc: u32, event: Event) -> Option<R
                 write,
                 address: address.0,
                 size: size.bytes() as u8,
-                value: value.unwrap_or_default(),
+                value,
             })
         }
         Event::Exception { entry, .. } => {

@@ -176,8 +176,8 @@ prefix; their directories keep the short names.
   a page does not permit is a bus error, shown to the invalid access
   hooks as `Invalid::Protected`.
 - **Tracing:** peripheral accesses, exceptions taken, instruction count.
-  The chip's events carry them: `Mc68331::set_tracing(Tracing {
-  accesses, exceptions })`, both off at first, adds `Event::Access`
+  The chip's events carry them: `Mc68331::set_tracing(ChipTracing {
+  bus_cycles, exceptions })`, both off at first, adds `Event::BusCycle`
   for each bus cycle the core sends the chip (module registers,
   peripherals, memory a peripheral shares a select with; not RAM and ROM the
   core serves, which memory hooks see) and `Event::Exception` for
@@ -804,7 +804,7 @@ chip beside `Mc68331`.
   `outputs(Port)`, `port(Port)` (a `PortState`),
   `take_port_changes()` (`(now, Port, driven, levels)`, every port's),
   `system_hz`, `take_events()` (`Event.Reset`, `Event.ArbitrationTie`,
-  `Event.Dsack`, `Event.Unknown`, and with `set_tracing(accesses=, exceptions=)` `Event.Access` and
+  `Event.Dsack`, `Event.Unknown`, and with `set_tracing(bus_cycles=, exceptions=)` `Event.BusCycle` and
   `Event.Exception`), `instructions`.
   Background debug mode (below) is `reset_with_breakpoint()`,
   `assert_breakpoint() -> bool`, the

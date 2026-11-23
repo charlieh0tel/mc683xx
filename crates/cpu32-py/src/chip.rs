@@ -880,8 +880,8 @@ pub(crate) enum Event {
         /// The IARB value they shared.
         arbitration: u8,
     },
-    /// A bus cycle that reached the chip, while accesses are traced.
-    Access {
+    /// A bus cycle that reached the chip, while bus cycles are traced.
+    BusCycle {
         /// When its instruction started, in system clocks.
         now: u64,
         /// Its address.
@@ -892,9 +892,9 @@ pub(crate) enum Event {
         function_code: FunctionCode,
         /// Whether it wrote.
         write: bool,
-        /// The value read or written; `None` for a read that ended in
-        /// a bus error.
-        value: Option<u32>,
+        /// The value read or written; 0 for a read that ended in a bus
+        /// error.
+        value: u32,
         /// Whether it ended in a bus error.
         bus_error: bool,
     },
@@ -955,7 +955,7 @@ impl Event {
                 level: u8::from(level),
                 arbitration,
             },
-            event::Event::Access {
+            event::Event::BusCycle {
                 now,
                 address,
                 size,
@@ -964,7 +964,7 @@ impl Event {
                 value,
                 bus_error,
                 ..
-            } => Self::Access {
+            } => Self::BusCycle {
                 now: now.clocks(),
                 address: address.0,
                 size: size.bytes(),
@@ -1713,12 +1713,12 @@ chip_methods! {
     }
 
     /// Whether the events trace each bus cycle that reaches the chip
-    /// (`Event.Access`) and each exception entered
+    /// (`Event.BusCycle`) and each exception entered
     /// (`Event.Exception`); both off at first.
-    #[pyo3(signature = (*, accesses = false, exceptions = false))]
-    fn set_tracing(&mut self, accesses: bool, exceptions: bool) {
+    #[pyo3(signature = (*, bus_cycles = false, exceptions = false))]
+    fn set_tracing(&mut self, bus_cycles: bool, exceptions: bool) {
         let mut tracing = ChipTracing::default();
-        tracing.accesses = accesses;
+        tracing.bus_cycles = bus_cycles;
         tracing.exceptions = exceptions;
         self.chip.set_tracing(tracing);
     }

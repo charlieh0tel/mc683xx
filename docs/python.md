@@ -63,7 +63,7 @@ rename renames the Python name with it.  The deliberate differences:
   `NonZeroSpan`, is a keyword pair, `seconds=` (a `float`) or
   `picoseconds=` (an `int`), and its quantum `quantum_picoseconds=`.
 - **Settings:** a struct of settings is keyword arguments
-  (`set_tracing(accesses=, exceptions=)` for `ChipTracing`,
+  (`set_tracing(bus_cycles=, exceptions=)` for `ChipTracing`,
   `Builder(data=, reference_hz=, external_hz=)` for `Configuration`); a
   `ResetScope` is a sequence of `ResetCause`s.
 - **Ranges and defaults:** an inclusive address range is `begin, end`,
@@ -827,8 +827,9 @@ of `Space.USER` or `Space.SUPERVISOR` to a string of `r`, `w` and `x`;
 a cycle they do not permit is a bus error, `Invalid.PROTECTED` to the
 invalid hooks.
 
-`set_tracing(accesses=, exceptions=)` adds `Event.Access` for each bus
-cycle that reaches the chip (not the RAM and ROM the core serves) and
+`set_tracing(bus_cycles=, exceptions=)` adds `Event.BusCycle` for each
+bus cycle that reaches the chip (not the RAM and ROM the core serves;
+`value` 0 for a read that ended in a bus error, `bus_error` true) and
 `Event.Exception(now, vector, pc, handler, stack, level)` for each
 exception entered, the fields an `ExceptionEntry` has; `instructions`
 counts instructions.  Every `Event` has its time, `now`, in system

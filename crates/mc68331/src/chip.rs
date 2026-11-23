@@ -1421,14 +1421,14 @@ impl Connection<'_, '_> {
             access.now,
             write,
         );
-        if board.tracing.accesses {
-            board.events.push(Event::Access {
+        if board.tracing.bus_cycles {
+            board.events.push(Event::BusCycle {
                 now: access.now,
                 address: access.address,
                 size: access.size,
                 function_code: access.function_code,
                 write: write.is_some(),
-                value: write.or(ended.ok().map(|(value, _)| value)),
+                value: write.or(ended.ok().map(|(value, _)| value)).unwrap_or(0),
                 bus_error: ended.is_err(),
             });
         }
