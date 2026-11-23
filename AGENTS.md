@@ -235,7 +235,10 @@ Crates:
 - An error prints its cause in its message or exposes it as
   `source()`, never both: a wrapper that adds context keeps the cause
   in a field named `error`; one that adds none is
-  `#[error(transparent)]`.  Messages use `Display`, never `{:?}` of a
+  `#[error(transparent)]`.  So a variant's shape follows what it
+  holds: a cause is a named `error` field (`Target { error }`); a lone
+  datum may be positional (`Unserved(Address)`); a transparent wrapper
+  is a tuple (`Target(E)`).  Messages use `Display`, never `{:?}` of a
   type (a quoted string's `{:?}` is fine).
 - Public error enums, and public enums likely to grow, are
   `#[non_exhaustive]`.

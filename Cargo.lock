@@ -558,6 +558,7 @@ version = "0.8.0"
 dependencies = [
  "mc683xx-board",
  "mc683xx-cpu32",
+ "mc683xx-debug",
  "mc683xx-gdb",
  "mc683xx-mc68331",
  "mc683xx-modules",

@@ -1456,7 +1456,8 @@ chip_methods! {
 
     /// Waits for gdb at `address` (`host:port`, port 0 picks one),
     /// calls `ready(port)` once it listens, and lets gdb run the chip
-    /// until it detaches (`Ending.DETACHED`) or kills it (`Ending.KILLED`)
+    /// until it detaches (`Ending.DETACHED`), kills it (`Ending.KILLED`)
+    /// or hangs up (`Ending.HUNG_UP`)
     /// (docs/gdb.md).  Peripherals and hooks run as in `run_for`; an exception
     /// one raises ends the session and is raised here.
     #[pyo3(signature = (address = gdb::ADDRESS, ready = None))]

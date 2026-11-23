@@ -322,16 +322,16 @@ fn monitor_sets_the_function_code_and_resets() {
 }
 
 #[test]
-fn a_session_lost_while_running_halts_and_cleans_up() {
+fn a_hang_up_while_running_halts_and_cleans_up() {
     // a breakpoint the program never reaches, then a continue, then
-    // nothing: the connection ends with the target running
+    // nothing: gdb hangs up with the target running
     let mut target = chip();
     let never = START + 0x40;
     let (ending, _) = session(
         &mut target,
         vec![packet(&format!("Z0,{never:x},2")), packet("c")],
     );
-    assert!(matches!(ending, Err(SessionError::Connection { .. })));
+    assert_eq!(ending.unwrap(), Ending::HungUp);
     assert!(
         Cpu32Target::halted(&mut target.0).unwrap().is_some(),
         "halted"
@@ -624,11 +624,26 @@ fn uncleaned(ending: Vec<Send>) -> SessionError<TargetError, io::Error> {
 }
 
 #[test]
-fn a_lost_session_that_cannot_put_a_breakpoint_back_reports_both() {
-    let error = uncleaned(Vec::new());
+fn a_failed_connection_that_cannot_put_a_breakpoint_back_reports_both() {
+    let error = uncleaned(vec![Send::Fail]);
     assert!(
         matches!(error, SessionError::Connection { .. }),
         "{error:?}"
+    );
+}
+
+#[test]
+fn a_hang_up_that_cannot_put_a_breakpoint_back_reports_it() {
+    let mut target = chip();
+    target.2 = Some(STORE_PC);
+    let (ending, _) = session(&mut target, vec![packet(&format!("Z0,{STORE_PC:x},2"))]);
+    assert!(
+        matches!(&ending, Err(SessionError::Unrestored(at)) if *at == [Address(STORE_PC)]),
+        "{ending:?}"
+    );
+    assert!(
+        Cpu32Target::halted(&mut target.0).unwrap().is_some(),
+        "not resumed"
     );
 }
 

@@ -13,6 +13,8 @@ const SEPARATOR: u8 = b'_';
 /// or binary after `0b`, the prefix in lower case and the hexadecimal
 /// digits in either.  An `_` may stand between two digits.  There is
 /// no sign, and a decimal number has no leading zero but `0` itself.
+/// `T` is any type a `u64` converts to, so a number may be up to 64
+/// bits.
 ///
 /// ```
 /// use mc683xx_target::integer::ParseIntegerError;
@@ -21,13 +23,14 @@ const SEPARATOR: u8 = b'_';
 /// assert_eq!(parse_integer::<u32>("0xfff_a44"), Ok(0xfffa44));
 /// assert_eq!(parse_integer::<u8>("0b101"), Ok(5));
 /// assert_eq!(parse_integer::<u8>("256"), Err(ParseIntegerError::TooLarge));
+/// assert_eq!(parse_integer::<u64>("1_000_000_000_000"), Ok(1_000_000_000_000));
 /// assert_eq!(parse_integer::<u32>("$ff"), Err(ParseIntegerError::Invalid));
 /// ```
 ///
 /// # Errors
 /// [`ParseIntegerError::Invalid`] for text that is not a number in
 /// this syntax, [`ParseIntegerError::TooLarge`] for one past `T`.
-pub fn parse_integer<T: TryFrom<u32>>(text: &str) -> Result<T, ParseIntegerError> {
+pub fn parse_integer<T: TryFrom<u64>>(text: &str) -> Result<T, ParseIntegerError> {
     let (digits, radix) = PREFIXES
         .into_iter()
         .find_map(|(prefix, radix)| text.strip_prefix(prefix).map(|digits| (digits, radix)))
@@ -45,13 +48,13 @@ pub fn parse_integer<T: TryFrom<u32>>(text: &str) -> Result<T, ParseIntegerError
         digits
             .iter()
             .filter(|&&byte| byte != SEPARATOR)
-            .try_fold(0_u32, |value, &byte| {
+            .try_fold(0_u64, |value, &byte| {
                 let digit = char::from(byte)
                     .to_digit(radix)
                     .ok_or(ParseIntegerError::Invalid)?;
                 value
-                    .checked_mul(radix)
-                    .and_then(|value| value.checked_add(digit))
+                    .checked_mul(radix.into())
+                    .and_then(|value| value.checked_add(digit.into()))
                     .ok_or(ParseIntegerError::TooLarge)
             })?;
     T::try_from(value).map_err(|_| ParseIntegerError::TooLarge)
@@ -84,6 +87,8 @@ mod tests {
         assert_eq!(parse_integer::<u32>("0x0"), Ok(0));
         assert_eq!(parse_integer::<u32>("4294967295"), Ok(u32::MAX));
         assert_eq!(parse_integer::<u32>("0xffffffff"), Ok(u32::MAX));
+        assert_eq!(parse_integer::<u64>("18446744073709551615"), Ok(u64::MAX));
+        assert_eq!(parse_integer::<u64>("0xffff_ffff_ffff_ffff"), Ok(u64::MAX));
     }
 
     #[test]
@@ -130,5 +135,14 @@ mod tests {
             parse_integer::<u16>("0x10000"),
             Err(ParseIntegerError::TooLarge)
         );
+        assert_eq!(
+            parse_integer::<u64>("18446744073709551616"),
+            Err(ParseIntegerError::TooLarge)
+        );
+        assert_eq!(
+            parse_integer::<u64>("0x1_0000_0000_0000_0000"),
+            Err(ParseIntegerError::TooLarge)
+        );
+        assert_eq!(parse_integer::<usize>("0x10"), Ok(16));
     }
 }

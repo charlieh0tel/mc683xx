@@ -107,7 +107,7 @@ pub mod target;
 /// fn detached(ending: Ending) -> bool {
 ///     match ending {
 ///         Ending::Detached => true,
-///         Ending::Killed => false,
+///         Ending::Killed | Ending::HungUp => false,
 ///     }
 /// }
 /// ```
@@ -118,6 +118,12 @@ pub enum Ending {
     Detached,
     /// gdb killed the target: the host should stop running it.
     Killed,
+    /// gdb hung up: it closed the connection without detaching or
+    /// killing the target, as it does when it exits or its link is
+    /// lost ([`Connection::hung_up`]).  The target is left as a
+    /// session that failed leaves it: an emulated one to its host, one
+    /// under BDM control halted.
+    HungUp,
 }
 
 /// Why a session ended other than as gdb asked.
@@ -145,7 +151,8 @@ pub enum SessionError<E, C> {
         /// The target's error.
         error: E,
     },
-    /// The connection failed, or gdb closed it.
+    /// The connection failed: other than by gdb hanging up, which is
+    /// [`Ending::HungUp`].
     #[error("connection: {error}")]
     Connection {
         /// The connection's error.
@@ -186,34 +193,29 @@ fn listed(addresses: &[Address]) -> String {
         .join(", ")
 }
 
-/// Serves gdb on `connection` over `target` until gdb detaches or
-/// kills it.
+/// Serves gdb on `connection` over `target` until gdb detaches, kills
+/// it or hangs up.
 ///
 /// The target is halted first, so gdb finds it stopped, and stays
 /// where it is until gdb continues or steps it.  When the session
 /// ends, however it ends, every hook the stub installed is removed, and
 /// a target under BDM control is halted and every breakpoint still
 /// planted removed.  Detach resumes a target under BDM control and
-/// leaves an emulated one to its host; kill leaves either halted.
+/// leaves an emulated one to its host; kill leaves either halted, and
+/// so does a hang-up a target under BDM control.
 ///
 /// # Errors
 ///
 /// [`SessionError::Target`] if a call on the target fails,
-/// [`SessionError::Connection`] if the connection fails or gdb closes
-/// it, [`SessionError::Protocol`] if gdb sends what the stub cannot
+/// [`SessionError::Connection`] if the connection fails other than by
+/// gdb hanging up, [`SessionError::Protocol`] if gdb sends what the stub cannot
 /// take, and [`SessionError::Unrestored`] if a breakpoint planted
 /// cannot be put back; then a detach does not resume the target.  A
 /// session that failed and then failed to clean up reports both,
 /// [`SessionError::Uncleaned`].
-pub fn serve<T, C>(
+pub fn serve<T: Target, C: Connection>(
     target: &mut T,
     connection: C,
-) -> Result<Ending, SessionError<T::Error, C::Error>>
-where
-    T: Target,
-    T::Error: Display,
-    C: Connection,
-    C::Error: Display,
-{
+) -> Result<Ending, SessionError<T::Error, C::Error>> {
     session::serve(target, connection)
 }

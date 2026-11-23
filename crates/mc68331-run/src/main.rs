@@ -73,8 +73,6 @@ use crate::error::RunError;
 
 /// The chip the runner runs, which names its trace's lines.
 const CHIP: &str = <Mc68331 as Chip>::TYPE;
-/// The longest turn, in microseconds, that a [`Span`] holds.
-const MAX_TURN_US: u64 = Span::MAX.picos() / Span::from_micros(1).picos();
 /// Exit status: the board or a file could not be used.
 const EXIT_ERROR: u8 = 1;
 /// Exit status: the CPU halted.
@@ -88,6 +86,20 @@ const EXIT_INTERRUPTED: i32 = 130;
 const AFTER_HELP: &str = "Ctrl-C stops the run at its next sync point: the `stopped` record is \
 written and --save still saves (exit status 4).  A second Ctrl-C ends the process at once, \
 saving nothing (exit status 130).
+
+Bindings: the first stdio or tty on the command line takes standard input, and stdout leaves \
+it to another binding; bindings that share standard output each write to it.  An endpoint that drives no serial net takes no \
+input: stdio (with standard input) and pty are refused there, and stdout, a file or null \
+serves.  Standard input that is not a terminal (a file or a pipe) is read to its end when \
+input first goes in, and fed a byte a turn, so the run is the same each time: the run waits \
+there for the pipe to close.  A terminal's is live.  tty takes the terminal raw, as a serial \
+console: each key goes in as typed, with no echo or line editing, Ctrl-C and Ctrl-Z \
+included, and Ctrl-] ends the run as Ctrl-C would; the terminal is put back as it was when \
+the run ends.  It needs standard input to be a terminal.  Output a pty's buffer cannot take, with nobody reading it, is dropped, as a \
+UART's is with nothing on the line.
+
+Numbers (--cycles, --watch-code, --seed) are decimal, 0x hexadecimal or 0b binary, with _ \
+between digits allowed.
 
 Exit status: 0 the run spent its time; 1 the board or a file could not be used; 2 the \
 command line is wrong; 3 the CPU halted; 4 a hook, a peripheral, a fault (--stop-on-fault), gdb \
@@ -115,7 +127,7 @@ struct Arguments {
     /// The board file.
     board: PathBuf,
     /// Run until the chip has run this many system clocks.
-    #[arg(long, conflicts_with = "seconds")]
+    #[arg(long, conflicts_with = "seconds", value_parser = parse_integer::<u64>)]
     cycles: Option<u64>,
     /// Run this many seconds of board time; inf, the default, runs
     /// until Ctrl-C, gdb, a halt or a stop ends it.
@@ -137,39 +149,26 @@ struct Arguments {
     /// once.
     #[arg(long = "set")]
     settings: Vec<String>,
-    /// Bind a run-time endpoint, NAME=stdio|stdout|tty|pty|null|file:PATH
-    /// (tty and pty on Unix only); may be given more than once.  Unbound
-    /// endpoints are null.  stdout writes what stdio writes and reads
-    /// nothing, leaving standard input to another binding; bindings
-    /// that share standard output each write to it, and the first
-    /// stdio on the command line takes standard input.  An endpoint that drives no serial
-    /// net takes no input: stdio (with standard input) and pty are
-    /// refused there, and stdout, a file or null serves.  Output a
-    /// pty's buffer cannot take, with nobody reading it, is dropped, as
-    /// a UART's is with nothing on the line.  With stdio, standard
-    /// input that is not a terminal (a file or a pipe) is read to its
-    /// end when input first goes in, and fed a byte a turn, so the run
-    /// is the same each time: the run waits there for the pipe to
-    /// close.  A terminal's is live.  tty takes the terminal on standard
-    /// input raw, as a serial console: each key goes in as typed, with
-    /// no echo or line editing, Ctrl-C and Ctrl-Z included, and Ctrl-]
-    /// ends the run as Ctrl-C would; the terminal is put back as it was
-    /// when the run ends.  It needs standard input to be a terminal, and
-    /// to itself: the first stdio or tty on the command line takes it.
+    /// Bind a run-time endpoint, NAME=stdio|stdout|tty|pty|null|file:PATH;
+    /// may be given more than once.  Unbound endpoints are null.  stdio:
+    /// standard output, and standard input.  stdout: standard output
+    /// only.  tty: the terminal on standard input, raw.  pty: a new
+    /// pseudo-terminal.  null: nothing.  A file: output written to PATH.
+    /// tty and pty are Unix's.  Bindings, after the options, says more.
     #[arg(long = "bind", value_parser = pair::<How>)]
     bindings: Vec<(String, How)>,
     /// What to trace on standard error, comma-separated.
     #[arg(long, value_enum, value_delimiter = ',')]
     trace: Vec<Traced>,
-    /// Trace each time the instruction at this address runs: decimal,
-    /// or hexadecimal after 0x; may be given more than once.
+    /// Trace each time the instruction at this address runs; may be
+    /// given more than once.
     #[arg(long = "watch-code", value_parser = parse_integer::<u32>)]
     watch_code: Vec<u32>,
     /// Trace where the CPU is every this many seconds of board time.
     #[arg(long, value_parser = seconds)]
     position: Option<f64>,
     /// The seed every noise model draws from.
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, value_parser = parse_integer::<u64>)]
     seed: u64,
     /// Stop at a bus or address error instead of taking it as an
     /// exception, and say which (`reason=fault`); the instruction is
@@ -188,12 +187,11 @@ struct Arguments {
     /// snapshot is written beside it and renamed over it.
     #[arg(long)]
     save: Option<PathBuf>,
-    /// Microseconds of board time between the runner's turns, where
-    /// input goes in (one fed byte a turn), output comes out and
-    /// positions are taken.
-    #[arg(long, default_value_t = 1000,
-          value_parser = clap::value_parser!(u64).range(1..=MAX_TURN_US))]
-    turn_us: u64,
+    /// Seconds of board time between the runner's turns, where input
+    /// goes in (one fed byte a turn), output comes out and positions
+    /// are taken.
+    #[arg(long, value_name = "S", default_value = "0.001", value_parser = turn)]
+    turn: Span,
     /// Seconds of board time before input goes in: a frame that
     /// arrives before the firmware enables its receiver is lost, as on
     /// the board.
@@ -238,6 +236,19 @@ fn seconds(text: &str) -> Result<f64, String> {
             "{text:?}: give a finite number of seconds, 0 or more"
         ))
     }
+}
+
+/// `--turn`: as `seconds`, more than 0 and no longer than a [`Span`]
+/// holds.
+fn turn(text: &str) -> Result<Span, String> {
+    Span::checked_from_seconds_f64(seconds(text)?)
+        .filter(|turn| !turn.is_zero())
+        .ok_or_else(|| {
+            format!(
+                "{text:?}: give more than 0 seconds, and at most {}",
+                Span::MAX.seconds_f64()
+            )
+        })
 }
 
 /// `--seconds`: as `seconds`, or inf, a run without end.
@@ -370,7 +381,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         }
         _ => Time::MAX,
     };
-    let turn = Span::from_micros(arguments.turn_us);
+    let turn = arguments.turn;
     let every = arguments
         .position
         .map(Span::from_seconds_f64)
@@ -446,7 +457,7 @@ fn interruption(
         }
         control.stop();
     })
-    .map_err(RunError::Interrupt)?;
+    .map_err(|error| RunError::Interrupt { error })?;
     Ok(interrupted)
 }
 
@@ -549,7 +560,9 @@ impl Turns {
             let Ok(received) = board.take_received(&binding.name) else {
                 continue;
             };
-            binding.put_output(&received).map_err(RunError::Output)?;
+            binding
+                .put_output(&received)
+                .map_err(|error| RunError::Output { error })?;
         }
         let trace = board.take_trace();
         for record in &trace.records {

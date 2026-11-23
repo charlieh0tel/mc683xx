@@ -1000,8 +1000,8 @@ chip beside `Mc68331`.
   from Python in a release build (`test_cpu.py`), 15,000 constructions
   with 64 Kbytes mapped.
 - **gdb:** `serve_gdb(address, ready=None)` on `Mc68331`, `Board` and
-  `Machine` serves gdb (see Debugger) until it detaches or kills the
-  target (an `Ending`: `DETACHED`, `KILLED`), so a harness hands control to
+  `Machine` serves gdb (see Debugger) until it detaches, kills the
+  target or hangs up (an `Ending`: `DETACHED`, `KILLED`, `HUNG_UP`), so a harness hands control to
   gdb mid-run and gets it back.  It blocks, holding the target;
   `ready(port)` is called once it listens, before the target is
   held, so a test starts its client then (port 0 picks one) and may
@@ -1557,7 +1557,11 @@ hand.  The keys are in `docs/board-files.md`.
   `device`; boot-diff reads that dialect.
 - **Run-time endpoints stay out of the file:** the file names them,
   the runner binds them (`--bind host=stdio`, `stdout`, `pty`,
-  `null`, `file:PATH`).
+  `null`, `file:PATH`).  Its standard error holds two kinds of line:
+  records, prefixed by the chip (the trace, `external` values, where a
+  `pty` or `tty` was `bound`; docs/tracing.md, semver-covered), and
+  messages, prefixed by the runner (`mc683xx-run: ...`), which are
+  not.
   Paths for working copies (an EEPROM's), the seed and the run length
   are runner options, handed to constructors as an `Environment`;
   every noise model draws from the one seed (each peripheral its own
@@ -1738,13 +1742,14 @@ hand.  The keys are in `docs/board-files.md`.
   [--bind NAME=stdio|stdout|tty|pty|null|file:PATH]
   [--trace bus-cycles,exceptions,pins,qspi,nets] [--watch-code ADDR]
   [--position S] [--seed N] [--work-dir DIR] [--restore FILE]
-  [--save FILE] [--turn-us N] [--input-after S] [--gdb HOST:PORT]
+  [--save FILE] [--turn S] [--input-after S] [--gdb HOST:PORT]
   [--pace unpaced|realtime|FACTOR]`,
   a thin command on
   the run loop with the built-in types only: it runs in turns of
   board time, between which input goes in and output comes out, and
-  ends with a `stopped` record.  `--watch-code`'s address takes the
-  one number syntax (`parse_integer`): bare digits are decimal.
+  ends with a `stopped` record.  `--cycles`, `--watch-code` and
+  `--seed` take the one number syntax (`parse_integer`): bare digits
+  are decimal.
   Without `--seconds` (or with
   `--seconds inf`) or `--cycles` it runs until Ctrl-C, gdb, a halt
   or a stop ends it.  With `--cycles` the last turn ends at
@@ -1778,9 +1783,10 @@ hand.  The keys are in `docs/board-files.md`.
   them): Ctrl-C while waiting for gdb, or while gdb holds the board,
   ends the session and the run, with the `stopped` record and
   `--save`, at the next wait.  A wrong command
-  includes seconds (`--seconds`, `--position`, `--input-after`) that
-  are not finite or are negative, and a `--turn-us` of 0 or one longer
-  than a `Span` holds.  Piped input is read
+  includes seconds (`--seconds`, `--position`, `--input-after`,
+  `--turn`) that are not finite or are negative, and a `--turn` that
+  is zero picoseconds or longer than a `Span` holds.  Every time flag
+  is seconds of board time, `--turn` (1 ms by default) too.  Piped input is read
   whole and fed a byte a turn from `--input-after`, so a run with it
   is reproducible; a terminal's or a pty's is not.  It is read when
   input first goes in, after `--gdb` has said where it waits, and the
@@ -1859,7 +1865,9 @@ Adversarial review of the board layer (2026-10-23):
 so not in `third_party/NOTICE`, and named nowhere in the public API):
 one session, `serve`, over one trait, `target::Target`, on a
 `connection::Connection`, the stub's own trait, which it adapts to
-gdbstub's.  An emulated target gives `cpu_scope` (registers and
+gdbstub's.  `Target`, `Connection` and `Waiter` each bound their
+`Error` on `std::error::Error`, as `Cpu32Target` does, so `serve`
+needs no `where` clause to print a `SessionError`.  An emulated target gives `cpu_scope` (registers and
 hooks), `read_memory` and `write_memory` (memory with no bus cycle, in
 a function code's space), `run_for(budget, hit)` (a quantum) and
 `reset`; the trait's other methods (registers, `resume`, `halt`)
@@ -1890,7 +1898,15 @@ checks the bare build.
   ends it, as a `Protocol` error: gdbstub has no reply for one.  The
   runner takes a failed session (`Connection` or `Protocol`) as a
   detach, said on standard error, so one bad packet does not cost the
-  run; a `Target` error, the board's, still ends it.
+  run; a `Target` error, the board's, still ends it.  gdb hanging up
+  (its exit, or a lost link, without a detach or a kill) is how a
+  session most often ends, so it is not an error: `Ending::HungUp`,
+  after the same cleanup, when the connection's error is one its
+  `Connection::hung_up` names (a `TcpStream`'s or a `Polled` one's at
+  its end, reset or aborted, or a broken pipe); a target under BDM
+  control is left halted, as after a failed session, and a host exits
+  as after a detach.  The runner says so on standard error and runs
+  on.
 - **Memory:** supervisor data space unless `monitor fc` names
   another, no bus cycle: memory the core
   serves (ROM too, so `load` works), module registers read through
@@ -2059,15 +2075,16 @@ parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
   ELF `.bss` (memory past a segment's file bytes) is not written, as
   gdb's `load` leaves it.  `LoadReport` gives the segments, the bytes,
   the entry and whether it verified.
-- **Init scripts:** `script::Script`, one command a line, `#`
+- **Init scripts:** (docs/init-scripts.md, the language's guide; a
+  format under semver) `script::Script`, one command a line, `#`
   comments and blank lines: `write_memory.b|w|l ADDR VALUE [fc FC]`,
   `write_register NAME VALUE`, `write_system_register NAME VALUE`
   (names as the target crate's `FromStr` takes them),
   `read_memory.b|w|l ADDR expect V [mask M] [fc FC]` and
   `poll_memory.b|w|l ADDR mask M expect V timeout_ms N [fc FC]`; the
   clauses in any order, each once; numbers as `parse_integer` takes
-  them; a function code by name (`FunctionCode`'s `FromStr`) or
-  number, printed by name.
+  them; a function code by name or number (`parse_function_code`,
+  as gdb's `monitor fc` takes one), printed by name.
   Parsing refuses what cannot work: a value wider than its access, an
   expected value outside its mask, a word or long access at an odd
   address, a word that names no function code and is no number from
@@ -3481,7 +3498,7 @@ checks move onto real code hooks.
 | No `From` between a unit-bearing newtype and its number (`Cycles`, `Time`, `Span`, `Frequency`); named constructors and accessors only | Decided 2026-11-21 (0.8.0, round 5).  `Cycles::from(5)` or `u64::from(span)` reads as a number with no unit, and an `.into()` converts silently where a clock count, a picosecond count and hertz are all `u64`s; `Cycles::from_clocks(5)` and `span.picos()` say which.  Bit-pattern newtypes (`Address`, `Vector`) keep `From` both ways, every value valid. |
 | Unit-bearing newtypes keep private fields; bit-pattern newtypes whose every value is valid have public ones | Decided 2026-11-21 (0.8.0, round 5).  A quantity (`Cycles`, `Frequency`, `Time`, `Span`) is reached through constructors and accessors that name its unit, so its field is private.  A bit pattern (`Address`, `Vector`) is a value read off the lines, with no unit and every value valid, so `Address(0x400)` and `vector.0` read as the hardware does and its field is public.  One with values that are not valid (`InterruptLevel`, 0 to 7) keeps its field private behind `TryFrom` (below); `FunctionCode`, eight codes each with a meaning, is an enum (0.9.0). |
 | One conversion for each kind of value: `TryFrom<u8>` and `From<T> for u8` for a checked value, a named pair for an encoding, opaque received ids | Decided 2026-11-23 (0.9.0).  A checked value (`InterruptLevel`, `IrqPin`, `PortGpPin`, `chip_select::Number`, `FunctionCode`) had `new`/`get` and `TryFrom`/`From` both, or only `new`/`get`; now only `TryFrom<u8>` (`No<Type>(u8)`, so `?` carries why) and `From<T> for u8`, and `IrqPin::level()` gives way to `From<IrqPin> for InterruptLevel`.  A wire or field encoding keeps a named pair (`Register::code`/`from_code`, `Size::field`, `Entry::atemp`), as `From` would hide which encoding.  A register-order index is `index`/`from_index` (`ChipSelect`).  An id a host only receives and gives back (`PeripheralId`, `ConditionId`, `ObserverId`, `HookId`) is opaque, `Display` and no `From`, so a host cannot forge one; `PeripheralId`'s number is reachable only through hidden plumbing for the workspace's crates, and `ConditionId` parses from the number it prints, as a debugger's `monitor stop delete N` names one.  A value the host chooses (`ConditionToken`) is one `From` pair.  A `const fn` that needed `get` (`iack_address`, `Sim::interrupt_pin`, `Builder::set_autovector`, `Mc68331::set_interrupt_pin`) is no longer `const`. |
-| One number syntax for what a person types: `mc683xx_target::integer::parse_integer` | Decided 2026-11-22 (0.9.0).  Init scripts, gdb `monitor` commands, the runner's options and the numbers in board-file strings all take decimal, `0x` hexadecimal or `0b` binary, the prefix in lower case, `_` between digits, no sign, no `$`, no decimal leading zero, so a number that works in one works in all and `010` is never octal by surprise.  One `no_std` function in the target crate, generic over the result (`TryFrom<u32>`), so a pod's firmware takes the same text; its error is `Invalid` or `TooLarge`, without the text, as the crate has no `alloc`.  A board file's TOML integers keep TOML's own syntax (`0o`, `+`), which the TOML parser reads before the board sees it; gdb packets and S-records keep theirs. |
+| One number syntax for what a person types: `mc683xx_target::integer::parse_integer` | Decided 2026-11-22 (0.9.0).  Init scripts, gdb `monitor` commands, the runner's options and the numbers in board-file strings all take decimal, `0x` hexadecimal or `0b` binary, the prefix in lower case, `_` between digits, no sign, no `$`, no decimal leading zero, so a number that works in one works in all and `010` is never octal by surprise.  One `no_std` function in the target crate, generic over the result (`TryFrom<u64>`, so the runner's 64-bit `--cycles` and `--seed` take it too), so a pod's firmware takes the same text; its error is `Invalid` or `TooLarge`, without the text, as the crate has no `alloc`.  A board file's TOML integers keep TOML's own syntax (`0o`, `+`), which the TOML parser reads before the board sees it; gdb packets and S-records keep theirs. |
 | Chip time splits: `Cycle` an instant, `Cycles` a count | Decided 2026-11 (0.9.0).  `Cycles` was both a clock by number and a count of clocks, so `now + budget` and `budget + budget` read alike and a run's deadline and its budget had one type.  `Cycle` (system clocks since power-on) mirrors the board's `Time`: `ZERO`, `MAX`, `from_clocks`/`clocks`, `since`, `since_power_on`; `Cycle + Cycles` and `Cycle - Cycles` saturate at power-on and `MAX`, `Cycle - Cycle` is the `Cycles` between, zero if the second is later; Display `12 clocks`; serde as its `u64`, so snapshots keep their bytes.  `Cycles`, `Span`'s counterpart, keeps its `+` and `-` and gains `saturating_add` and `saturating_sub`; `Cycles::until` went (`Cycle::since`).  Every chip-layer instant is a `Cycle` (`now`, `at`, `next_event`, a run's deadline, a trace record's `cycle`, `TimeBase`'s anchor), every cost, budget and period `Cycles`.  "Cycle" alone means the clock; a bus transaction is a bus cycle. |
 | Loading and init scripts in `mc683xx-debug`, over `Cpu32Target` | Decided 2026-11-01 with the BDM pod's maintainer.  One loader for silicon and the emulator, tested on the chip; a crate of its own, on `mc683xx-target` alone, so a pod host links it without the emulator.  Word writes, verify by default, RPC from the entry and no SSP inference, an init script with line-numbered errors; host time in `poll_memory` only. |
 | `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels) stay exhaustive, so a match on one needs no wildcard; the Python bindings' conversions of the others never panic: a run's end or halt they do not know raises `mc683xx.RunError` naming it, any other value (a fault cause among them) `NotImplementedError` naming its kind, but an event is never refused or dropped: one they cannot convert is `Event.Unknown(now, name)`, its Rust `Display`, and an unknown reset cause in a reset is `ResetCause.UNKNOWN`, so `take_events` always takes the whole queue (decided 2026-11-21, round 5); Rust tests (`every_run_end_maps_or_names_itself`, `every_value_maps`) list every variant, so a variant added to one is added there and mapped (decided 2026-11-21). |

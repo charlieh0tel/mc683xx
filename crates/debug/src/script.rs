@@ -1,5 +1,8 @@
 //! Init scripts: the writes and checks that ready a board for a load,
-//! one command a line, run on a halted target.
+//! one command a line, run on a halted target.  [`docs/init-scripts.md`]
+//! is the language's guide.
+//!
+//! [`docs/init-scripts.md`]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/init-scripts.md
 //!
 //! ```
 //! use mc683xx_debug::script::Script;
@@ -37,8 +40,8 @@
 //! fit the size; a word or long address is even (CPU32RM 6.2.3).  `fc`
 //! takes a function code by name, in any case (`user-data`,
 //! `supervisor-program`, `cpu-space`, as [`FunctionCode`] prints it),
-//! or by number, 0 to 7; it is `supervisor-data` (5) by default, and a
-//! script prints it by name.
+//! or by number, 0 to 7 ([`parse_function_code`]); it is
+//! `supervisor-data` (5) by default, and a script prints it by name.
 //! `#` starts a comment; blank lines are skipped.
 //!
 //! `poll_memory` is the only use of host time in the workspace outside
@@ -55,6 +58,7 @@ use std::time::Instant;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::function_code::parse_function_code;
 use mc683xx_target::integer::ParseIntegerError;
 use mc683xx_target::integer::parse_integer;
 use mc683xx_target::register::ParseRegisterError;
@@ -431,16 +435,9 @@ fn function_code(word: Option<&str>) -> Result<FunctionCode, ParseCommandError> 
     let Some(word) = word else {
         return Ok(FunctionCode::SupervisorData);
     };
-    word.parse()
-        .ok()
-        .or_else(|| {
-            parse_integer::<u8>(word)
-                .ok()
-                .and_then(|code| FunctionCode::try_from(code).ok())
-        })
-        .ok_or_else(|| ParseCommandError::FunctionCode {
-            word: word.to_owned(),
-        })
+    parse_function_code(word).map_err(|_| ParseCommandError::FunctionCode {
+        word: word.to_owned(),
+    })
 }
 
 /// The mask, the default every bit of `size`, and the expected value,

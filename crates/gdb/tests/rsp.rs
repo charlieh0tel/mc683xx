@@ -373,7 +373,7 @@ fn its_hooks_go_with_the_session() {
             packet(&format!("Z2,{STORE:x},4")),
         ],
     );
-    assert!(matches!(ending, Err(SessionError::Connection { .. })));
+    assert_eq!(ending.unwrap(), Ending::HungUp);
     let mut limits = Limits::default();
     limits.instructions = Some(20);
     let run = machine.run_limited(limits);
@@ -694,18 +694,23 @@ struct Counting {
     last: usize,
 }
 
+/// The idle that ended the session.
+#[derive(Debug, thiserror::Error)]
+#[error("idle {0}")]
+struct Idled(usize);
+
 impl Waiter for Counting {
-    type Error = usize;
+    type Error = Idled;
 
     fn wait<R: marker::Send>(&mut self, wait: impl FnOnce() -> R + marker::Send) -> R {
         self.waits += 1;
         wait()
     }
 
-    fn idle(&mut self) -> Result<(), usize> {
+    fn idle(&mut self) -> Result<(), Idled> {
         self.idles += 1;
         if self.idles == self.last {
-            Err(self.idles)
+            Err(Idled(self.idles))
         } else {
             Ok(())
         }
@@ -720,7 +725,7 @@ fn a_polled_wait_ends_when_the_host_says() {
         last: 3,
     };
     let accepted = accept_polled("127.0.0.1:0", |_| Ok(()), waiter);
-    assert!(matches!(accepted, Err(PollError::Host(3))));
+    assert!(matches!(accepted, Err(PollError::Host(Idled(3)))));
 }
 
 /// A host's error that has a cause.
@@ -843,6 +848,61 @@ fn a_tcp_stream_serves_a_run_and_its_ctrl_c() {
     assert!(stopped.starts_with("$S02#"), "{stopped}");
     assert!(detached.ends_with("$OK#9a"), "{detached}");
     assert!(machine.cpu.instructions() > 4);
+}
+
+#[test]
+fn gdb_closing_a_tcp_stream_mid_run_hangs_up() {
+    let (sender, port) = mpsc::channel();
+    let client = thread::spawn(move || {
+        let port: u16 = port.recv().unwrap();
+        let mut gdb = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        io::Write::write_all(&mut gdb, b"$c#63").unwrap();
+        let mut ack = [0];
+        io::Read::read_exact(&mut gdb, &mut ack).unwrap();
+        // gdb exits without a detach or a kill
+    });
+    let mut machine = machine();
+    let stream = connection::accept("127.0.0.1:0", |at| {
+        sender.send(at.port()).unwrap();
+        Ok::<(), io::Error>(())
+    })
+    .unwrap();
+    assert_eq!(serve(&mut machine, stream).unwrap(), Ending::HungUp);
+    client.join().unwrap();
+}
+
+#[test]
+fn gdb_closing_a_polled_connection_hangs_up() {
+    let (sender, port) = mpsc::channel();
+    let client = thread::spawn(move || {
+        let port: u16 = port.recv().unwrap();
+        drop(TcpStream::connect(("127.0.0.1", port)).unwrap());
+    });
+    let waiter = Counting {
+        waits: 0,
+        idles: 0,
+        last: usize::MAX,
+    };
+    let connection = accept_polled(
+        "127.0.0.1:0",
+        |at| {
+            sender.send(at.port()).unwrap();
+            Ok(())
+        },
+        waiter,
+    )
+    .unwrap();
+    assert_eq!(serve(&mut machine(), connection).unwrap(), Ending::HungUp);
+    client.join().unwrap();
+}
+
+#[test]
+fn a_connection_that_fails_ends_the_session_with_its_error() {
+    let (ending, _) = session(&mut machine(), vec![packet("?"), Send::Fail]);
+    assert!(
+        matches!(&ending, Err(SessionError::Connection { error }) if error.kind() == io::ErrorKind::Other),
+        "{ending:?}"
+    );
 }
 
 /// An odd address, which the program's long store faults at (CPU32RM

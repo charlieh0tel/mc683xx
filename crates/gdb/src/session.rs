@@ -10,12 +10,10 @@
 //! its own.  Every hook installed and every breakpoint planted is
 //! removed when the session ends, however it ends.
 
-use std::fmt::Display;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
 use gdbstub::common::Signal;
-use gdbstub::stub::DisconnectReason;
 use gdbstub::stub::GdbStub;
 use gdbstub::stub::SingleThreadStopReason;
 use gdbstub::stub::run_blocking::BlockingEventLoop;
@@ -50,7 +48,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::integer::parse_integer;
+use mc683xx_target::function_code::parse_function_code;
 use mc683xx_target::register::SystemRegister;
 
 use crate::Ending;
@@ -64,7 +62,7 @@ use crate::protocol::EFAULT;
 use crate::protocol::EINVAL;
 use crate::protocol::EIO;
 use crate::protocol::description;
-use crate::protocol::failure;
+use crate::protocol::ended;
 use crate::target::AccessError;
 use crate::target::Target;
 use crate::target::TargetReset;
@@ -86,16 +84,10 @@ mod planted;
 const QUANTUM: Cycles = Cycles::from_clocks(100_000);
 
 /// Serves gdb on `connection` over `target`: [`crate::serve`].
-pub(crate) fn serve<T, C>(
+pub(crate) fn serve<T: Target, C: Connection>(
     target: &mut T,
     connection: C,
-) -> Result<Ending, SessionError<T::Error, C::Error>>
-where
-    T: Target,
-    T::Error: Display,
-    C: Connection,
-    C::Error: Display,
-{
+) -> Result<Ending, SessionError<T::Error, C::Error>> {
     target
         .halt()
         .map_err(|error| SessionError::Target { error })?;
@@ -111,18 +103,18 @@ where
         action: Action::Continue,
         going: None,
     };
-    let served =
-        GdbStub::new(Adapted(connection)).run_blocking::<EventLoop<'_, T, C>>(&mut session);
+    let ended = ended::<_, C>(
+        GdbStub::new(Adapted(connection)).run_blocking::<EventLoop<'_, T, C>>(&mut session),
+    );
     let cleaned = session.clean_up();
     // a target left with BGND planted is not resumed
-    let ending = match (served, cleaned) {
-        (Ok(DisconnectReason::Kill), Ok(())) => Ending::Killed,
-        (Ok(_), Ok(())) => Ending::Detached,
+    let ending = match (ended, cleaned) {
+        (Ok(ending), Ok(())) => ending,
         (Ok(_), Err(cleanup)) => return Err(cleanup),
-        (Err(error), Ok(())) => return Err(failure(error)),
+        (Err(error), Ok(())) => return Err(error),
         (Err(error), Err(cleanup)) => {
             return Err(SessionError::Uncleaned {
-                error: Box::new(failure(error)),
+                error: Box::new(error),
                 cleanup: Box::new(cleanup),
             });
         }
@@ -571,16 +563,12 @@ impl<T: Target> Session<'_, T> {
         };
         match words {
             ["fc"] => show_fc(out, self.function_code),
-            ["fc", code] => match code.parse().ok().or_else(|| {
-                parse_integer::<u8>(code)
-                    .ok()
-                    .and_then(|code| FunctionCode::try_from(code).ok())
-            }) {
-                Some(function_code) => {
+            ["fc", code] => match parse_function_code(code) {
+                Ok(function_code) => {
                     self.function_code = function_code;
                     show_fc(out, function_code);
                 }
-                None => outputln!(out, "fc takes a function code: a name or 0 to 7"),
+                Err(_) => outputln!(out, "fc takes a function code: a name or 0 to 7"),
             },
             ["faults"] => {
                 let shown = self.target.cpu_scope(|cpu| {

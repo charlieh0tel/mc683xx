@@ -64,9 +64,11 @@ at most 20 ms with a look for gdb's bytes between, so Ctrl-C in gdb
 is not kept waiting.  While gdb has the board stopped its time stands
 still, and a continue starts the pacing again from there; steps are
 never paced.  As without gdb, the wall clock decides only how long
-the runner sleeps.  A session that fails (gdb gone without detaching, or a
-packet the stub cannot parse) is said on standard error and ends as a
-detach does: the run, its trace and `--save` go on.  Ctrl-C to the
+the runner sleeps.  gdb hanging up (exiting, or its link lost,
+without a detach or a kill) and a session that fails (a packet the
+stub cannot parse) are said on standard error and end as a detach
+does: the run, its trace and `--save` go on, and the exit status is
+the run's.  Ctrl-C to the
 runner, while it waits for gdb or while gdb holds the board, ends the
 session and the run, `stopped reason=requested` and exit status 4,
 `--save` still saving.  Piped standard
@@ -79,7 +81,8 @@ free port, which the line names.
 
 `serve_gdb(address="127.0.0.1:1234", ready=None)` on `mc683xx.Machine`,
 `Mc68331` and `Board` (`docs/python.md`, Debugging with gdb) hands the
-target to gdb mid-run and returns `Ending.DETACHED` or `Ending.KILLED`; the
+target to gdb mid-run and returns `Ending.DETACHED`, `Ending.KILLED` or
+`Ending.HUNG_UP`; the
 harness then has it back, as gdb left it.  `ready(port)` is called
 once it listens.  The Python peripherals and hooks run under gdb as
 in `run_for`, and an exception from one ends the session and is raised.
@@ -123,21 +126,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   `ready` with the address it listens at (port 0 picks one), and takes
   one connection.
 - `serve(target, connection)` serves gdb until it detaches
-  (`Ending::Detached`) or kills the target (`Ending::Killed`).  The
+  (`Ending::Detached`), kills the target (`Ending::Killed`) or hangs
+  up (`Ending::HungUp`: it closed the connection without either, as
+  when it exits; a host takes it as the session's normal end).  The
   target is halted first and stays where it is until gdb continues or
   steps it; an emulated one runs only inside `serve`.  Detach leaves
   an emulated target to its host and resumes one under BDM control;
-  kill leaves either halted.  Any `connection::Connection` serves: a
+  kill leaves either halted, and a hang-up one under BDM control.  Any `connection::Connection` serves: a
   `TcpStream`, a `connection::Polled` one, a borrowed one (`&mut`),
   or a host's own, the tests' in-memory one among them.  A connection
   gives `write_all`, `flush`, `read` (the next byte, waiting for it),
   `peek` (the next byte if one has come, not waiting: the stub looks
   for gdb's Ctrl-C between a run's quanta) and `start` (called as the
-  session starts; a `TcpStream` turns off Nagle's delay).  The stub's
+  session starts; a `TcpStream` turns off Nagle's delay), and says
+  which of its errors is gdb hanging up (`hung_up`; for a `TcpStream`
+  and a `Polled` one, the connection at its end, reset or aborted, or
+  a write into a closed one; none by default).  The stub's
   API names no type of the `gdbstub` crate it is built on.
 - `SessionError`: a call on the target failed (`Target`, a board's
   peripheral that stalled, a pod's lost link), the connection did
-  (`Connection`, gdb gone without detaching), or gdb sent what the stub
+  other than by gdb hanging up (`Connection`), or gdb sent what the stub
   could not take (`Protocol`); breakpoints planted could not be put
   back (`Unrestored`); or the session failed and cleaning up after it
   failed too (`Uncleaned`, both kept).  `Ending`, `SessionError`,
@@ -392,7 +400,7 @@ it, kill leaves it halted.
   original does not read back) is the session's error,
   `SessionError::Unrestored`, naming where, and a detach then leaves
   the target halted rather than resume it over BGND.  A session that
-  failed already (gdb gone, a packet it could not take) and then
+  failed already (a connection's failure, a packet it could not take) and then
   cannot halt the target or put a breakpoint back reports both,
   `SessionError::Uncleaned`.
 - **Steps** are `Cpu32Target::step`: one instruction, or into an

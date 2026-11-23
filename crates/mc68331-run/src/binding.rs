@@ -77,9 +77,9 @@ pub(crate) enum How {
 }
 
 impl FromStr for How {
-    type Err = String;
+    type Err = ParseHowError;
 
-    fn from_str(text: &str) -> Result<Self, Self::Err> {
+    fn from_str(text: &str) -> Result<Self, ParseHowError> {
         match text {
             "stdio" => Ok(Self::Stdio),
             "stdout" => Ok(Self::Stdout),
@@ -89,12 +89,15 @@ impl FromStr for How {
             _ => text
                 .strip_prefix("file:")
                 .map(|path| Self::File(PathBuf::from(path)))
-                .ok_or_else(|| {
-                    format!("{text:?}: give stdio, stdout, tty, pty, null or file:PATH")
-                }),
+                .ok_or_else(|| ParseHowError(text.to_owned())),
         }
     }
 }
+
+/// Text that names no way to bind an endpoint.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no binding {0:?}: stdio, stdout, tty, pty, null or file:PATH")]
+pub(crate) struct ParseHowError(String);
 
 /// Where an endpoint's input comes from.
 enum Input {
@@ -201,12 +204,15 @@ impl Binding {
             How::Tty if !io::stdin().is_terminal() => return Err(RunError::NotATerminal(name)),
             How::Tty => {
                 let raw = RawTerminal::new()?;
-                eprintln!("{CHIP}: bound name={name} tty; Ctrl-] ends the run");
+                eprintln!("{CHIP}: bound name={name} tty=1");
+                eprintln!("mc683xx-run: Ctrl-] ends the run");
                 (Input::Raw(raw_input(escape.clone()), raw), Output::Stdout)
             }
             How::Pty => {
                 let (master, slave) = pty(&name)?;
-                let reader = master.try_clone().map_err(RunError::Pty)?;
+                let reader = master
+                    .try_clone()
+                    .map_err(|error| RunError::Pty { error })?;
                 (
                     Input::Pty {
                         master: reader,
@@ -349,14 +355,18 @@ impl RawTerminal {
     #[cfg(unix)]
     fn new() -> Result<Self, RunError> {
         let stdin = io::stdin();
-        let saved = tcgetattr(&stdin).map_err(|error| RunError::Terminal(error.into()))?;
+        let saved = tcgetattr(&stdin).map_err(|error| RunError::Terminal {
+            error: error.into(),
+        })?;
         let mut raw = saved.clone();
         cfmakeraw(&mut raw);
         raw.output_flags |= OutputFlags::OPOST | OutputFlags::ONLCR;
         *SAVED.lock().unwrap_or_else(PoisonError::into_inner) = Some(saved);
         tcsetattr(&stdin, SetArg::TCSANOW, &raw).map_err(|error| {
             restore_terminal();
-            RunError::Terminal(error.into())
+            RunError::Terminal {
+                error: error.into(),
+            }
         })?;
         Ok(Self(()))
     }
@@ -364,10 +374,12 @@ impl RawTerminal {
     /// None: raw terminals here are Unix's.
     #[cfg(not(unix))]
     fn new() -> Result<Self, RunError> {
-        Err(RunError::Terminal(io::Error::new(
-            io::ErrorKind::Unsupported,
-            "a raw terminal needs a Unix host",
-        )))
+        Err(RunError::Terminal {
+            error: io::Error::new(
+                io::ErrorKind::Unsupported,
+                "a raw terminal needs a Unix host",
+            ),
+        })
     }
 }
 
@@ -407,14 +419,22 @@ fn read_stdin() -> Result<Vec<u8>, RunError> {
 /// error: its master, which does not block, and its slave.
 #[cfg(unix)]
 fn pty(name: &str) -> Result<(File, PtySlave), RunError> {
-    let pair = openpty(None, None).map_err(|error| RunError::Pty(error.into()))?;
-    let mut termios = tcgetattr(&pair.slave).map_err(|error| RunError::Pty(error.into()))?;
+    let pair = openpty(None, None).map_err(|error| RunError::Pty {
+        error: error.into(),
+    })?;
+    let mut termios = tcgetattr(&pair.slave).map_err(|error| RunError::Pty {
+        error: error.into(),
+    })?;
     cfmakeraw(&mut termios);
-    tcsetattr(&pair.slave, SetArg::TCSANOW, &termios)
-        .map_err(|error| RunError::Pty(error.into()))?;
-    fcntl(&pair.master, FcntlArg::F_SETFL(OFlag::O_NONBLOCK))
-        .map_err(|error| RunError::Pty(error.into()))?;
-    let path = ttyname(&pair.slave).map_err(|error| RunError::Pty(error.into()))?;
+    tcsetattr(&pair.slave, SetArg::TCSANOW, &termios).map_err(|error| RunError::Pty {
+        error: error.into(),
+    })?;
+    fcntl(&pair.master, FcntlArg::F_SETFL(OFlag::O_NONBLOCK)).map_err(|error| RunError::Pty {
+        error: error.into(),
+    })?;
+    let path = ttyname(&pair.slave).map_err(|error| RunError::Pty {
+        error: error.into(),
+    })?;
     eprintln!("{CHIP}: bound name={name} pty={}", path.display());
     Ok((File::from(pair.master), pair.slave))
 }
@@ -422,8 +442,10 @@ fn pty(name: &str) -> Result<(File, PtySlave), RunError> {
 /// No pseudo-terminal: they are Unix's.
 #[cfg(not(unix))]
 fn pty(_: &str) -> Result<(File, PtySlave), RunError> {
-    Err(RunError::Pty(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "pseudo-terminals need a Unix host",
-    )))
+    Err(RunError::Pty {
+        error: io::Error::new(
+            io::ErrorKind::Unsupported,
+            "pseudo-terminals need a Unix host",
+        ),
+    })
 }

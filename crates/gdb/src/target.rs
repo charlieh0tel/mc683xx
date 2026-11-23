@@ -89,11 +89,10 @@ pub enum TargetRun {
     /// The host or a peripheral asked it to stop.
     Requested,
     /// A fault stopped it rather than being taken
-    /// ([`Cpu::set_stop_on_fault`]), or an intercepted exception did
-    /// (the bare CPU's [`Cpu::set_intercepted`]).
+    /// ([`Cpu::set_stop_on_fault`]), or, on the bare CPU, an exception
+    /// its host handles did.
     ///
     /// [`Cpu::set_stop_on_fault`]: mc683xx_cpu32::cpu::Cpu::set_stop_on_fault
-    /// [`Cpu::set_intercepted`]: mc683xx_cpu32::cpu::Cpu::set_intercepted
     Fault,
     /// A stop condition held ([`Target::conditions`]).
     Condition,
@@ -206,7 +205,7 @@ pub trait NativeStep {
 pub trait Target {
     /// What ends a session: an error a run cannot go on from (a host
     /// peripheral's, a pod's lost link).
-    type Error;
+    type Error: std::error::Error;
 
     /// Calls `call` with the CPU's controls, its registers and hooks to
     /// change and the rest to read: `Some` of what it returns for an

@@ -30,7 +30,7 @@ const SCRIPT: &[u8] = b"h\nm\np\nt\nc\nx 0\nf\nt\n";
 /// The console's run-time endpoint.
 const CONSOLE: &str = "console";
 /// Board time between turns, a byte of input a turn: `mc683xx-run`'s
-/// default `--turn-us`, 1 ms.
+/// default `--turn`, 1 ms.
 const TURN: Span = Span::from_millis(1);
 /// Board time before input goes in, past the firmware's enabling its
 /// receiver: 10 ms.

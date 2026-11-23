@@ -281,6 +281,7 @@ class Ending:
 
     DETACHED: ClassVar[Ending]
     KILLED: ClassVar[Ending]
+    HUNG_UP: ClassVar[Ending]
     def __hash__(self) -> int: ...
     def __int__(self) -> int: ...
 
