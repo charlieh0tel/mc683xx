@@ -4,7 +4,7 @@
 
 use mc683xx_debug::image::Image;
 use mc683xx_debug::image::Segment;
-use mc683xx_debug::load::LoadError;
+use mc683xx_debug::load::ImageLoadError;
 use mc683xx_debug::load::LoadOptions;
 use mc683xx_debug::load::OddEdges;
 use mc683xx_debug::load::Verification;
@@ -286,7 +286,7 @@ fn odd_edges_are_refused_before_any_write_or_written_in_bytes() {
     assert!(
         matches!(
             error,
-            LoadError::OddEdge {
+            ImageLoadError::OddEdge {
                 address: Address(0x201)
             }
         ),
@@ -324,7 +324,7 @@ fn odd_edges_are_refused_before_any_write_or_written_in_bytes() {
     assert!(
         matches!(
             error,
-            LoadError::OddEdge {
+            ImageLoadError::OddEdge {
                 address: Address(0x302)
             }
         ),
@@ -342,7 +342,7 @@ fn a_byte_that_does_not_take_its_write_fails_verification() {
     assert!(
         matches!(
             error,
-            LoadError::Verify {
+            ImageLoadError::Verify {
                 address: Address(0x305),
                 wrote: 6,
                 read: 0,
@@ -370,7 +370,7 @@ fn a_failed_write_or_read_back_names_its_call() {
     assert!(
         matches!(
             error,
-            LoadError::Write {
+            ImageLoadError::Write {
                 address: Address(0x200),
                 bytes: 256,
                 error: MockError::Bus(Address(0x250)),
@@ -389,7 +389,7 @@ fn a_failed_write_or_read_back_names_its_call() {
     assert!(
         matches!(
             error,
-            LoadError::Read {
+            ImageLoadError::Read {
                 address: Address(0x300),
                 bytes: 256,
                 error: MockError::Bus(Address(0x350)),

@@ -111,7 +111,7 @@ impl fmt::Display for LoadReport {
 /// Why a load failed.  `E` is the target's error.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
-pub enum LoadError<E> {
+pub enum ImageLoadError<E> {
     /// A segment has a byte at an odd edge, and the options refuse
     /// those; nothing was written.
     #[error("{address} is a segment's odd edge, which a word write cannot reach")]
@@ -177,7 +177,7 @@ fn accesses<E>(
     address: Address,
     data: &[u8],
     odd_edges: OddEdges,
-) -> Result<Vec<Access<'_>>, LoadError<E>> {
+) -> Result<Vec<Access<'_>>, ImageLoadError<E>> {
     let head = usize::from(address.is_odd());
     let tail = (data.len() - head) % 2;
     let words_end = data.len() - tail;
@@ -191,7 +191,7 @@ fn accesses<E>(
             .iter()
             .find(|(range, size)| *size == Size::Byte && !range.is_empty())
     {
-        return Err(LoadError::OddEdge {
+        return Err(ImageLoadError::OddEdge {
             address: address.offset(edge.start as u32),
         });
     }
@@ -228,7 +228,7 @@ impl Image {
         &self,
         target: &mut T,
         options: &LoadOptions,
-    ) -> Result<LoadReport, LoadError<T::Error>> {
+    ) -> Result<LoadReport, ImageLoadError<T::Error>> {
         let mut planned = Vec::new();
         for segment in self.segments() {
             planned.extend(accesses(
@@ -245,7 +245,7 @@ impl Image {
                     options.function_code,
                     access.data,
                 )
-                .map_err(|error| LoadError::Write {
+                .map_err(|error| ImageLoadError::Write {
                     address: access.address,
                     bytes: access.data.len(),
                     error,
@@ -257,7 +257,7 @@ impl Image {
                 let read = &mut read[..access.data.len()];
                 target
                     .read_memory(access.address, access.size, options.function_code, read)
-                    .map_err(|error| LoadError::Read {
+                    .map_err(|error| ImageLoadError::Read {
                         address: access.address,
                         bytes: access.data.len(),
                         error,
@@ -269,7 +269,7 @@ impl Image {
                     .enumerate()
                     .find(|(_, (wrote, read))| wrote != read)
                 {
-                    return Err(LoadError::Verify {
+                    return Err(ImageLoadError::Verify {
                         address: access.address.offset(offset as u32),
                         wrote,
                         read,
@@ -283,7 +283,7 @@ impl Image {
         if let Some(entry) = self.entry() {
             target
                 .write_system_register(SystemRegister::Rpc, entry.0)
-                .map_err(|error| LoadError::Entry { entry, error })?;
+                .map_err(|error| ImageLoadError::Entry { entry, error })?;
         }
         Ok(LoadReport {
             segments: self
