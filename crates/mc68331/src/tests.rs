@@ -2906,7 +2906,7 @@ fn a_peripheral_learns_when_a_watched_output_may_next_change() {
 #[test]
 fn a_reported_pwm_edge_bounds_the_output_horizon() {
     let mut pwm_b = OutputStop::default();
-    pwm_b.pwm_b = true;
+    pwm_b.set_pwm(Channel::B, true);
     // PWMB $01: high for 2 of every 512 clocks from 512, no event marking
     // its edges
     let duty = |chip: &mut Mc68331| write_register(chip, GPT + 0x26, 0x0001);

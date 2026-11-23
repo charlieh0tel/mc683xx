@@ -167,10 +167,9 @@ pub struct OutputStop {
     /// [`Mc68331::take_port_changes`] reports them, port QS's PCS\[3:0\]
     /// and TXD among them as levels.
     ports: [u8; Port::ALL.len()],
-    /// PWMA, while its edges are reported (`set_report_pwm_edges`).
-    pub pwm_a: bool,
-    /// PWMB, likewise.
-    pub pwm_b: bool,
+    /// PWMA and PWMB, by [`Channel`]'s index, each while its edges are
+    /// reported (`set_report_pwm_edges`).
+    pwm: [bool; Channel::BOTH.len()],
     /// A frame's start on TXD (`take_sci_transmitted`).
     pub txd: bool,
     /// A reset the chip drives on RESET: a `reset` instruction's, the
@@ -188,6 +187,22 @@ impl OutputStop {
     /// Watches the pins of `port` in `mask`, and no others of it.
     pub const fn set_port(&mut self, port: Port, mask: u8) {
         self.ports[port.index()] = mask;
+    }
+
+    /// Whether PWM `channel`'s pin is watched.
+    #[must_use]
+    pub const fn pwm(&self, channel: Channel) -> bool {
+        self.pwm[channel.index()]
+    }
+
+    /// Watches PWM `channel`'s pin, or not.
+    pub const fn set_pwm(&mut self, channel: Channel, watched: bool) {
+        self.pwm[channel.index()] = watched;
+    }
+
+    /// The PWM pins watched, a mask: PWMA bit 0, PWMB bit 1.
+    pub(crate) const fn pwm_mask(&self) -> u8 {
+        self.pwm[Channel::A.index()] as u8 | (self.pwm[Channel::B.index()] as u8) << 1
     }
 }
 

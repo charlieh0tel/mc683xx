@@ -512,12 +512,11 @@ impl Board {
         let level = |outputs: PortLevels| outputs.pin_levels(u8::MAX);
         let qsm = self.module::<Qsm>(QSM);
         let (port_gp, pwm) = self.module::<Gpt>(GPT).reported_outputs();
-        let pwm_mask = u8::from(stop.pwm_a) | u8::from(stop.pwm_b) << 1;
         // port GP as the output changes last reported it
         let outputs = |port| self.outputs_with(port, |_| port_gp);
         Seen {
             ports: Port::ALL.map(|port| level(outputs(port)) & stop.port(port)),
-            pwm: pwm & pwm_mask,
+            pwm: pwm & stop.pwm_mask(),
             frames: if stop.txd { qsm.untaken_frames() } else { 0 },
         }
     }
@@ -545,10 +544,9 @@ impl Board {
         if self.output_moved {
             return Some(now);
         }
-        let pwm = u8::from(stop.pwm_a) | u8::from(stop.pwm_b) << 1;
-        let fast = self
-            .module::<Gpt>(GPT)
-            .next_fast_edge(now, pwm, stop.port(Port::Gp));
+        let fast =
+            self.module::<Gpt>(GPT)
+                .next_fast_edge(now, stop.pwm_mask(), stop.port(Port::Gp));
         self.modules_next().into_iter().chain(fast).min()
     }
 

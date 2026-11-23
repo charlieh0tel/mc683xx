@@ -83,10 +83,10 @@ pub struct ParseChannelError(String);
 
 impl Channel {
     /// Both, A first.
-    pub(super) const BOTH: [Self; 2] = [Self::A, Self::B];
+    pub(crate) const BOTH: [Self; 2] = [Self::A, Self::B];
 
     /// Its index, 0 for A.
-    pub(super) const fn index(self) -> usize {
+    pub(crate) const fn index(self) -> usize {
         match self {
             Self::A => 0,
             Self::B => 1,

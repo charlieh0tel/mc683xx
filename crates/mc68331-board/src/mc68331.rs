@@ -712,8 +712,8 @@ impl chip::Chip for Mc68331 {
                 continue;
             }
             match pin {
-                Pin::PwmA => stop.pwm_a = true,
-                Pin::PwmB => stop.pwm_b = true,
+                Pin::PwmA => stop.set_pwm(Channel::A, true),
+                Pin::PwmB => stop.set_pwm(Channel::B, true),
                 Pin::Txd => stop.txd = true,
                 Pin::Reset => stop.reset = true,
                 // ECLK changes with the clock, which ends the run itself
