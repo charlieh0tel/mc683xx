@@ -16,6 +16,13 @@ that added it, as an earlier one refuses the key as unknown.  Every
 the stock types (`docs/peripherals.md`) are under the same freeze:
 their names, parameters and ports (docs/releasing.md, Semver scope).
 
+Version 1 keeps two oddities for ever, which a version 2, if there is
+one, would drop: an attachment's lane also spelled as its role
+(`role = "upper"` for `lane = "upper"`), and two keys for which ADDR
+lines a part sees (a decoder's `address_bits`, which takes tied
+levels too, and an attachment's `lines`), which version 2 would make
+one.  No version 2 is planned.
+
 Two words, used one way throughout: a **peripheral** is anything
 outside the chip that the board wires to it (a memory's command
 logic, a UART, a decoder's targets, an oscillator on a net), and a
