@@ -64,6 +64,7 @@ use crate::exceptions::BusError;
 use crate::function_code::FunctionCode;
 use crate::gdb::Ending;
 use crate::hooks::BusCycleKind;
+use crate::hooks::ExceptionReturnView;
 use crate::hooks::ExceptionView;
 use crate::hooks::HookIdView;
 use crate::hooks::InstructionView;
@@ -205,6 +206,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<BusCycleKind>()?;
     module.add_class::<InvalidReason>()?;
     module.add_class::<ExceptionView>()?;
+    module.add_class::<ExceptionReturnView>()?;
     module.add_class::<BoardView>()?;
     module.add_class::<AccessView>()?;
     module.add_class::<RoleView>()?;

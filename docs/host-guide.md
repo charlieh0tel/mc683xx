@@ -1133,6 +1133,10 @@ but the exception hook cover an address range, on the address lines.
   taken, with its reason, `Invalid::BusError` or `Invalid::Protected`.
 - `add_exception_hook(f(&ExceptionEntry))`: once the frame is stacked:
   vector, return PC, handler, stack, level.
+- `add_exception_return_hook(f(&ExceptionReturn))`: once `rte` has
+  restored SR and PC from an exception's frame: vector, PC, SR, and
+  the frame's address, the `stack` its `ExceptionEntry` had; a stop
+  takes effect before the instruction it returns to.
 - `remove_hook(id)`.
 
 `cpu_control().protect(space, start, length, Permissions)` sets

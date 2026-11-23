@@ -1250,6 +1250,19 @@ macro_rules! chip_methods {
                 })
             }
 
+            /// Calls `callback(ExceptionReturn)` after each exception is
+            /// returned from; a truthy result stops the run before the
+            /// instruction it returns to.
+            fn add_exception_return_hook(
+                &mut self,
+                callback: &Bound<'_, PyAny>,
+            ) -> PyResult<HookIdView> {
+                self.with_chip_mut(callback.py(), |chip, pending| {
+                    let hook = hooks::hook(callback, pending.clone(), hooks::exception_return)?;
+                    Ok(HookIdView(chip.cpu_control().add_exception_return_hook(hook)))
+                })
+            }
+
             /// Removes `hook`; whether it was installed.
             fn remove_hook(&mut self, py: Python<'_>, hook: &HookIdView) -> PyResult<bool> {
                 self.with_chip_mut(py, |chip, _| Ok(chip.cpu_control().remove_hook(hook.0)))

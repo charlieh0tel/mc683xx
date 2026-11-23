@@ -809,13 +809,16 @@ assert chip.now == 0
 
 `add_code_hook(callback, begin=0, end=0xFFFFFFFF)` and its siblings
 `add_block_hook`, `add_read_hook`, `add_write_hook`, `add_invalid_hook`
-(both ends of the range included), and `add_exception_hook(callback)`,
+(both ends of the range included), `add_exception_hook(callback)` and
+`add_exception_return_hook(callback)`,
 call a Python callable with what the Rust hook sees: an `Instruction`
 (`pc`, `registers`, `stack_top`), a `MemoryAccess` (`address`, `size`,
 `function_code`, `value`; on the chip a long operand is two word
 cycles, on the bare `Machine` one access of 4), an `InvalidAccess` (those, `cycle`, a
 `BusCycleKind`, and `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`)
-or an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`).
+an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`) or
+an `ExceptionReturn` (`vector`, `pc`, `sr`, `stack`: what `rte`
+restored, and the frame's address, its `ExceptionEntry`'s `stack`).
 Each returns a `HookId` for `remove_hook`.  A truthy result stops the
 run (`Stop.Hook(hook)`); a code hook's stop leaves its
 instruction unexecuted, and the next run goes past it.  A hook's
@@ -1429,7 +1432,8 @@ assert bare.read_register("D0") == 6
 
 The hooks are the chip's (`add_code_hook`, `add_block_hook`,
 `add_read_hook`, `add_write_hook`, `add_invalid_hook`,
-`add_exception_hook`, `remove_hook`), but on the bare `Machine` a callable
+`add_exception_hook`, `add_exception_return_hook`, `remove_hook`), but on
+the bare `Machine` a callable
 may read and write registers and memory, map, protect and stop the
 run (`stop_request().request()`), as a Unicorn hook does; a truthy
 result stops it too.  It

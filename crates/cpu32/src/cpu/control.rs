@@ -13,6 +13,7 @@ use std::ops::RangeInclusive;
 use super::Cpu;
 use super::hooks::Control;
 use super::hooks::ExceptionEntry;
+use super::hooks::ExceptionReturn;
 use super::hooks::HookId;
 use super::hooks::Instruction;
 use super::hooks::InvalidAccess;
@@ -94,6 +95,14 @@ impl<'a> CpuControl<'a> {
         hook: impl FnMut(&ExceptionEntry) -> Control + 'static,
     ) -> HookId {
         self.cpu.add_exception_hook(hook)
+    }
+
+    /// [`Cpu::add_exception_return_hook`].
+    pub fn add_exception_return_hook(
+        &mut self,
+        hook: impl FnMut(&ExceptionReturn) -> Control + 'static,
+    ) -> HookId {
+        self.cpu.add_exception_return_hook(hook)
     }
 
     /// [`Cpu::remove_hook`].

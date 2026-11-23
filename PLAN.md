@@ -165,10 +165,15 @@ prefix; their directories keep the short names.
 - **Peripherals:** see below.
 - **Hooks:** plain in-process callbacks, cheap when absent: code
   address (with registers and top of stack), block, memory read and
-  write, invalid access, exception taken.  Any hook can stop `run_for`.
+  write, invalid access, exception taken, exception returned from.  Any
+  hook can stop `run_for`.
   `Cpu::add_code_hook`, `add_block_hook`, `add_read_hook`,
   `add_write_hook`, `add_invalid_hook` (each over an address range),
-  `add_exception_hook`, `remove_hook`; the chip's through
+  `add_exception_hook`, `add_exception_return_hook` (`rte` of a four-
+  or six-word frame, or of a format $C frame of a fault in an
+  instruction; not one of a fault in exception processing, whose `rte`
+  takes the faulted exception again, CPU32RM 6.3.2.7), `remove_hook`;
+  the chip's through
   `Mc68331::cpu_control`, a `CpuControl` that lends the registers, the
   hooks and the pages' permissions and shows the rest read-only, so a
   host cannot remap the core's memory apart from the chip's decode or

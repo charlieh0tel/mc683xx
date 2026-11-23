@@ -215,13 +215,16 @@ fn rte(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
     )?);
     let format_vector = frame_word(core, sp, frame::FORMAT_VECTOR)?;
     let frame_format = format_vector >> format::SHIFT;
+    let vector = format::vector(format_vector);
     core.charge(timing::return_from_exception(frame_format as u8));
-    match frame_format {
-        format::FOUR_WORD => Ok(restore(core, sr, pc, frame::FOUR_WORD_BYTES)),
-        format::SIX_WORD => Ok(restore(core, sr, pc, frame::SIX_WORD_BYTES)),
-        format::BUS_ERROR => rte_bus_error(core, sp, sr, pc),
-        _ => Err(format_error(core)),
-    }
+    let flow = match frame_format {
+        format::FOUR_WORD => restore(core, sr, pc, frame::FOUR_WORD_BYTES),
+        format::SIX_WORD => restore(core, sr, pc, frame::SIX_WORD_BYTES),
+        format::BUS_ERROR => return rte_bus_error(core, sp, sr, pc, vector),
+        _ => return Err(format_error(core)),
+    };
+    core.returned(vector, sp);
+    Ok(flow)
 }
 
 /// Deallocates `bytes` of frame and returns to `pc` with `sr`.
@@ -322,10 +325,15 @@ fn rte_bus_error(
     sp: Address,
     sr: u16,
     return_pc: Address,
+    vector: Vector,
 ) -> Result<Flow, Exception> {
     let layout = layout(core, sp)?;
     core.cpu.untraced = true;
-    match restore_bus_error(core, sp, sr, return_pc, layout) {
+    let restored = restore_bus_error(core, sp, sr, return_pc, layout);
+    if restored.is_ok() && matches!(layout, Layout::Instruction { .. }) {
+        core.returned(vector, sp);
+    }
+    match restored {
         Ok(None) => Ok(Flow::Next),
         Ok(Some(trace)) => Err(trace),
         Err(fault) if core.cpu.bare.stop_on_fault => Err(Exception::Fault(fault)),
@@ -441,6 +449,7 @@ fn rerun(core: &mut Core<'_>, status: u16, address: Address, data: u32) {
 mod tests {
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
+    use std::ops::ControlFlow;
 
     use super::BKPT;
     use super::BKPT_CHAIN;
@@ -968,10 +977,12 @@ mod tests {
         );
         assert_eq!(cpu.registers.ssp.0, base);
         assert_eq!(cpu.registers.pc.0, handler(Vector::BUS_ERROR));
-        // The handler fixes the table; RTE rebuilds the TRAP frame.
+        // The handler fixes the table; RTE rebuilds the TRAP frame,
+        // which returns from nothing (6.3.2.7).
         poke(&mut cpu, handler(Vector::BUS_ERROR), &[RTE]);
         cpu.registers.vbr = Address(0);
-        step(&mut cpu);
+        cpu.add_exception_return_hook(|_| ControlFlow::Break(()));
+        assert_eq!(step(&mut cpu).stop, Stop::Budget);
         assert_eq!(cpu.registers.ssp.0, STACK - 8);
         assert_eq!(cpu.registers.pc.0, handler(Vector::TRAP));
         assert_eq!(peek(&cpu, STACK - 8, 4), [sr, next_high, next_low, 0x0080]);

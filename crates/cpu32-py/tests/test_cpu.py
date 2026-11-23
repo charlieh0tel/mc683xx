@@ -27,6 +27,7 @@ TRAP_0 = 32
 NOP = 0x4E71
 RTS = 0x4E75
 ILLEGAL = 0x4AFC
+RTE = 0x4E73
 MOVE_WORD_A0_TO_D0 = 0x3010
 MOVE_WORD_D0_TO_A0 = 0x3080
 MOVE_LONG_A0_TO_D0 = 0x2010
@@ -254,6 +255,22 @@ def test_an_exception_hook_may_return_from_the_handler():
     cpu.add_exception_hook(entered)
     assert cpu.run_limited(until=RETURN).end == mc683xx.End.Until()
     assert entries == [TRAP_0 + 3]
+
+
+def test_an_exception_return_hook_sees_rte_pop_the_frame():
+    cpu = machine(trap(3), RTS)
+    cpu.write(HANDLER, words(RTE))
+    entries, returns = [], []
+    cpu.add_exception_hook(lambda entry: entries.append(entry.stack))
+    hook = cpu.add_exception_return_hook(lambda back: returns.append(back) or True)
+    run = cpu.run_limited(until=RETURN)
+    # Stopped after the RTE, before the instruction it returns to.
+    assert run.end == mc683xx.End.Stop(mc683xx.Stop.Hook(hook))
+    assert cpu.read_register("PC") == CODE + 2
+    (back,) = returns
+    assert (back.vector, back.pc, back.sr, back.stack) == (TRAP_0 + 3, CODE + 2, SUPERVISOR, entries[0])
+    assert cpu.read_register("SSP") == back.stack + 8
+    assert cpu.run_limited(until=RETURN).end == mc683xx.End.Until()
 
 
 def test_an_intercept_handles_or_declines_before_stacking():

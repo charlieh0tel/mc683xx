@@ -26,6 +26,7 @@ use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::hooks::Control;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
+use mc683xx_cpu32::cpu::hooks::ExceptionReturn;
 use mc683xx_cpu32::cpu::hooks::HookId;
 use mc683xx_cpu32::cpu::hooks::Instruction;
 use mc683xx_cpu32::cpu::hooks::InvalidAccess;
@@ -93,6 +94,8 @@ enum Context {
     Invalid(InvalidAccess),
     /// An exception hook's entry.
     Exception(ExceptionEntry),
+    /// An exception return hook's return.
+    ExceptionReturn(ExceptionReturn),
 }
 
 /// A hook that fired: its callable and what it saw.
@@ -449,6 +452,9 @@ fn view(py: Python<'_>, context: Context, registers: &Registers) -> PyResult<Py<
             Py::new(py, hooks::invalid_access_with(access, registers.clone()))?.into_any()
         }
         Context::Exception(entry) => Py::new(py, hooks::exception_entry(&entry))?.into_any(),
+        Context::ExceptionReturn(exception_return) => {
+            Py::new(py, hooks::exception_return(&exception_return))?.into_any()
+        }
     })
 }
 
@@ -921,6 +927,17 @@ impl MachineView {
             callback,
             |seen: &ExceptionEntry| Context::Exception(*seen),
             |cpu, hook| cpu.add_exception_hook(hook),
+        )
+    }
+
+    /// Calls `callback(ExceptionReturn)` after each exception is
+    /// returned from, `rte` having restored SR and PC from its frame,
+    /// before the instruction it returns to runs.
+    fn add_exception_return_hook(&mut self, callback: &Bound<'_, PyAny>) -> PyResult<HookIdView> {
+        self.install(
+            callback,
+            |seen: &ExceptionReturn| Context::ExceptionReturn(*seen),
+            |cpu, hook| cpu.add_exception_return_hook(hook),
         )
     }
 

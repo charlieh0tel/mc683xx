@@ -136,6 +136,25 @@ pub struct ExceptionEntry {
     pub level: Option<InterruptLevel>,
 }
 
+/// An exception returned from: `rte` restored SR and PC from its four-
+/// or six-word frame, or from a format $C frame of a bus or address
+/// error in an instruction, and deallocated it (CPU32RM 6.2.12).  A
+/// format $C frame of a fault in exception processing (6.3.1.4) is not
+/// one: its `rte` takes the faulted exception again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ExceptionReturn {
+    /// The vector its frame's format/vector word names.
+    pub vector: Vector,
+    /// The PC it returns to.
+    pub pc: Address,
+    /// The SR it restored.
+    pub sr: u16,
+    /// Its frame's lowest address, SSP as `rte` began: an
+    /// [`ExceptionEntry`]'s `stack` for the same frame.
+    pub stack: Address,
+}
+
 /// A hook's callback, given what it hooks.
 type Callback<T> = Box<dyn FnMut(&T) -> Control>;
 /// A code or block hook.
@@ -146,6 +165,8 @@ type MemoryHook = Callback<MemoryAccess>;
 type InvalidHook = Callback<InvalidAccess>;
 /// An exception hook.
 type ExceptionHook = Callback<ExceptionEntry>;
+/// An exception return hook.
+type ExceptionReturnHook = Callback<ExceptionReturn>;
 
 /// A hook with the addresses it covers.
 struct Ranged<H> {
@@ -200,6 +221,8 @@ pub(crate) struct Hooks {
     invalid: Vec<Ranged<InvalidHook>>,
     /// After each exception is entered.
     exception: Vec<(HookId, ExceptionHook)>,
+    /// After each exception is returned from.
+    exception_return: Vec<(HookId, ExceptionReturnHook)>,
 }
 
 impl fmt::Debug for Hooks {
@@ -212,6 +235,7 @@ impl fmt::Debug for Hooks {
             .field("write", &self.write.len())
             .field("invalid", &self.invalid.len())
             .field("exception", &self.exception.len())
+            .field("exception_return", &self.exception_return.len())
             .finish_non_exhaustive()
     }
 }
@@ -250,14 +274,18 @@ impl Hooks {
             hooks.retain(|hook| hook.id != id);
             hooks.len() != before
         }
-        let before = self.exception.len();
-        self.exception.retain(|(other, _)| *other != id);
+        fn retain_unranged<H>(hooks: &mut Vec<(HookId, H)>, id: HookId) -> bool {
+            let before = hooks.len();
+            hooks.retain(|(other, _)| *other != id);
+            hooks.len() != before
+        }
         retain(&mut self.code, id)
             | retain(&mut self.block, id)
             | retain(&mut self.read, id)
             | retain(&mut self.write, id)
             | retain(&mut self.invalid, id)
-            | (self.exception.len() != before)
+            | retain_unranged(&mut self.exception, id)
+            | retain_unranged(&mut self.exception_return, id)
     }
 }
 
@@ -365,6 +393,18 @@ impl Cpu {
         id
     }
 
+    /// Calls `hook` after each exception is returned from: after `rte`
+    /// restored SR and PC from the exception's frame.  If it stops the
+    /// run, it stops with the instruction at the return PC not yet run.
+    pub fn add_exception_return_hook(
+        &mut self,
+        hook: impl FnMut(&ExceptionReturn) -> Control + 'static,
+    ) -> HookId {
+        let id = self.hooks.allocate();
+        self.hooks.exception_return.push((id, Box::new(hook)));
+        id
+    }
+
     /// Whether the hook `id` is installed.
     #[must_use]
     pub fn has_hook(&self, id: HookId) -> bool {
@@ -377,6 +417,7 @@ impl Cpu {
             || memory(&hooks.write)
             || hooks.invalid.iter().any(|hook| hook.id == id)
             || hooks.exception.iter().any(|(other, _)| *other == id)
+            || hooks.exception_return.iter().any(|(other, _)| *other == id)
     }
 
     /// Removes the hook `id`; whether it was installed.
@@ -622,6 +663,23 @@ impl Core<'_> {
         self.bus.exception_entered(&entry, self.now);
         for (id, hook) in &mut self.cpu.hooks.exception {
             if hook(&entry).is_break() {
+                self.cpu.stop_request.get_or_insert(Stop::Hook(*id));
+            }
+        }
+    }
+
+    /// An exception of `vector` returned from, its frame at `stack`
+    /// deallocated, SR and PC restored.
+    pub(crate) fn returned(&mut self, vector: Vector, stack: Address) {
+        let registers = &self.cpu.registers;
+        let exception_return = ExceptionReturn {
+            vector,
+            pc: registers.pc,
+            sr: registers.sr(),
+            stack,
+        };
+        for (id, hook) in &mut self.cpu.hooks.exception_return {
+            if hook(&exception_return).is_break() {
                 self.cpu.stop_request.get_or_insert(Stop::Hook(*id));
             }
         }
