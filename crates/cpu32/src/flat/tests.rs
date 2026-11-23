@@ -317,7 +317,7 @@ fn spare_entry(machine: &Machine, space: Space, page: u32) -> Page {
     machine
         .cpu
         .memory
-        .entry(space, Address(SPARE + page * PAGE_BYTES))
+        .page(space, Address(SPARE + page * PAGE_BYTES))
 }
 
 #[test]

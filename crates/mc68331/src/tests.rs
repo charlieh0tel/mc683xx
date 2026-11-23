@@ -3263,7 +3263,7 @@ fn a_restore_rebuilds_the_page_tables_from_the_chips_own_wiring() {
         chip
     };
     let pages = |chip: &Mc68331| {
-        [CS0_BASE, CS1_BASE].map(|base| chip.cpu().memory.entry(Space::Supervisor, Address(base)))
+        [CS0_BASE, CS1_BASE].map(|base| chip.cpu().memory.page(Space::Supervisor, Address(base)))
     };
     let chip = wired(0, 1);
     let snapshot = chip.save().unwrap();

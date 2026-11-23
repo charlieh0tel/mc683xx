@@ -2025,7 +2025,7 @@ Adversarial review (2026-10-24):
   gdb as `SIGTRAP`.  Firmware's own `bkpt` is the CPU32's (CPU32RM
   4, BKPT), never gdb's: breakpoints never touch memory.
 - *What it needs of the core.*  Nothing new: `instructions()`,
-  `add_code_hook` and the memory hooks, `Memory::entry` and
+  `add_code_hook` and the memory hooks, `Memory::page` and
   `region_mut` for pokes, `Mc68331::peek` for peeks.
 
 ### Loading
