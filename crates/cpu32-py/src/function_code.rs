@@ -1,5 +1,5 @@
 //! `FunctionCode`: a bus cycle's address space, a value a host matches
-//! on, so a class (python.md, Names).
+//! on, so a class (python.md, Names and values).
 
 use pyo3::pyclass;
 

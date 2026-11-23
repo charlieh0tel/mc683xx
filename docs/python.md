@@ -22,20 +22,25 @@ A Python name is its Rust item's: CamelCase classes, snake_case
 methods, properties and arguments, UPPER_CASE enum members.  A Rust
 rename renames the Python name with it.  The deliberate differences:
 
-- **Enums:** a Rust type with `Display` and `FromStr` crosses as its
-  string, in and out: a chip select (`"CSBOOT"`, `"CS0"`), a net type
-  (`"serial"`), a port direction (`"in-out"`).  A function code, a
-  value a host matches on, is a class, `FunctionCode.SUPERVISOR_DATA`,
-  whose `str()` is the Rust name, `"supervisor-data"`.  A newtype of a
-  number that also parses (`InterruptLevel`, `IrqPin`,
-  `pacing::Factor`) crosses as its number.  Registers are
-  by name, Python's own (`"D0"`, `"SR"`).  Any other Rust enum is a
-  Python class whose members are its variants (`Channel.A`,
-  `Port.E`, `Port.GP`, `Input.PAI`, `Role.READ_WRITE`, `Lane.UPPER`,
-  `ResetCause.WATCHDOG`, `Space.USER`), and is never taken as a
-  string nor an `int`: a member has `name`, its name in the class
+- **Names and values:** what a host *names* when it wires crosses as
+  its string, in and out, whatever the Rust type: a chip select
+  (`"CSBOOT"`, `"CS0"`), a net type (`"serial"`), a port direction
+  (`"in-out"`), a register (`"D0"`, `"SR"`, by Python's own names).
+  What a host *matches on* is a class whose members are the Rust
+  enum's variants, whatever traits the Rust type has (`Display` and
+  `FromStr` included): a kind, a cause, a port, a channel, a reason, a
+  function code (`BusCycleKind.FETCH`, `ResetCause.WATCHDOG`,
+  `Port.E`, `Port.GP`, `Channel.A`, `Input.PAI`, `Role.READ_WRITE`,
+  `Lane.UPPER`, `Space.USER`, `FunctionCode.SUPERVISOR_DATA`).  A
+  newtype of a number that also parses (`InterruptLevel`, `IrqPin`,
+  `pacing::Factor`) crosses as its number, and so, deliberately, do a
+  cycle's size (1, 2 or 4 bytes, Rust's `Size`) and a port's (8 or 16
+  bits, `PortSize`); page permissions are a string, `"rwx"`
+  (`Permissions`).  An enum class is never taken as a string nor an
+  `int`: a member has `name`, its name in the class
   (`"WATCHDOG"`), and its `str()` is Rust's `Display` where the type
-  has one (`"watchdog"`), else that name; one whose variants carry data has a class for each
+  has one (`"watchdog"`), else that name.  An enum whose variants
+  carry data has a class for each
   (`Event.Reset(now, cause)`, `Frame.Data(bits)`), and so does
   `Pacing`, though it has `Display` and `FromStr`: its factor is a
   number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`

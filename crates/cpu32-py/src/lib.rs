@@ -12,9 +12,10 @@
     expect(dead_code, reason = "the bindings use these with `python`")
 )]
 
-/// An enum class's `name` and `__str__` (python.md, Enums): `name` the
-/// member's (`FETCH`), `__str__` Rust's `Display` of the member as
-/// `$rust` where the Rust type has one (`fetch`), else the name.
+/// An enum class's `name` and `__str__` (python.md, Names and values):
+/// `name` the member's (`FETCH`), `__str__` Rust's `Display` of the
+/// member as `$rust` where the Rust type has one (`fetch`), else the
+/// name.
 #[cfg(feature = "python")]
 macro_rules! enum_names {
     ($class:ty) => {
@@ -26,7 +27,7 @@ macro_rules! enum_names {
                 crate::python::member_name(slf.as_any())
             }
 
-            /// No `int`: a member is not a number (python.md, Enums).
+            /// No `int`: a member is not a number (python.md, Names and values).
             fn __int__(&self) -> pyo3::PyResult<i64> {
                 Err(crate::python::not_a_number())
             }
@@ -46,7 +47,7 @@ macro_rules! enum_names {
                 crate::python::member_name(slf.as_any())
             }
 
-            /// No `int`: a member is not a number (python.md, Enums).
+            /// No `int`: a member is not a number (python.md, Names and values).
             fn __int__(&self) -> pyo3::PyResult<i64> {
                 Err(crate::python::not_a_number())
             }
