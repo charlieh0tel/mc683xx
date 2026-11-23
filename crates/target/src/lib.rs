@@ -1,6 +1,7 @@
 //! A CPU32 (683xx) under debug control, as the emulator and a BDM pod
 //! on silicon both present it: [`Cpu32Target`], and the registers,
-//! entry sources, addresses, operand sizes and function codes it takes.
+//! entry sources, addresses, operand sizes and function codes it takes,
+//! and the number syntax a person types for them ([`integer`]).
 //! `no_std`.
 
 #![no_std]
@@ -18,6 +19,7 @@ extern crate std;
 pub mod address;
 pub mod entry;
 pub mod function_code;
+pub mod integer;
 pub mod register;
 pub mod serial;
 pub mod size;
