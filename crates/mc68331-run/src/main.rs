@@ -241,12 +241,12 @@ fn seconds(text: &str) -> Result<f64, String> {
 /// `--turn`: as `seconds`, more than 0 and no longer than a [`Span`]
 /// holds.
 fn turn(text: &str) -> Result<Span, String> {
-    Span::checked_from_seconds_f64(seconds(text)?)
+    Span::checked_from_secs_f64(seconds(text)?)
         .filter(|turn| !turn.is_zero())
         .ok_or_else(|| {
             format!(
                 "{text:?}: give more than 0 seconds, and at most {}",
-                Span::MAX.seconds_f64()
+                Span::MAX.secs_f64()
             )
         })
 }

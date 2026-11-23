@@ -3,7 +3,7 @@
 //! A [`MappedPeripheral`] and [`Timed`] model (a DUART, an EEPROM written against
 //! [`mc683xx_modules::peripheral`]), or a [`SpiPeripheral`], registers as a
 //! peripheral without hand-mapping, its cycles and times converted
-//! through the board's system clock ([`TimeBase`]).
+//! through the board's system clock ([`TimeBase`](crate::time::TimeBase)).
 //!
 //! What the model sees: a [`BusCycle`] with the attachment's select, the
 //! address the attachment gives (`offset` plus ADDR on its `lines`, so
