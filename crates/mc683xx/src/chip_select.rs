@@ -1,9 +1,19 @@
-//! The SIM's chip-select pins, which the host wires its peripherals to.
+//! The SIM's chip-select pins, which the host wires its peripherals to,
+//! how a select ends a cycle and the DSACK pins a peripheral drives.
 
 use std::fmt;
 use std::str::FromStr;
 
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::peripheral::Select;
+
+use crate::sim::chip_selects::DSACK_FAST;
+
+/// Clocks in a bus cycle with no wait states and fast termination
+/// (SIMRM 7.5.1, 7.7; MC68331UM 4.5).
+const ZERO_WAIT_CLOCKS: u8 = 3;
+/// Clocks in a fast-termination cycle.
+const FAST_CLOCKS: u8 = 2;
 
 /// One of the SIM's 12 chip-select signals (SIMRM 7; MC68331UM 4.8).
 /// Which address, space and cycle asserts each is the firmware's, in
@@ -133,6 +143,81 @@ impl From<Number> for u8 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("no chip select CS{0}")]
 pub struct NoChipSelectNumber(pub u8);
+
+/// How a select would end a cycle it matches (SIMRM 7.5, 7.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Termination {
+    /// Internal DSACK after two clocks.
+    Fast,
+    /// Internal DSACK after this many wait states, 0 to 13.
+    WaitStates(u8),
+    /// The peripheral asserts DSACK.
+    External,
+    /// MODE set: the cycle runs on ECLK.
+    Eclk,
+}
+
+impl Termination {
+    /// The most wait states DSACK encodes: the field's values below
+    /// fast termination's.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
+    pub const MOST_WAIT_STATES: u8 = DSACK_FAST as u8 - 1;
+
+    /// The cycle's clocks, if the select ends it: ECLK cycles are
+    /// charged an ECLK period and half again, the average wait to
+    /// synchronize being half a period (our choice, [PLAN.md]).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    ///
+    /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn clocks(self, eclk_divisor: u64) -> Option<Cycles> {
+        match self {
+            Self::Fast => Some(Cycles::from_clocks(FAST_CLOCKS as u64)),
+            Self::WaitStates(wait) => Some(Cycles::from_clocks((ZERO_WAIT_CLOCKS + wait) as u64)),
+            Self::External => None,
+            Self::Eclk => Some(Cycles::from_clocks(eclk_divisor + eclk_divisor / 2)),
+        }
+    }
+
+    /// The clocks of a cycle an external DSACK ends after `wait`
+    /// states.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn external_clocks(wait: Cycles) -> Cycles {
+        Cycles::from_clocks(ZERO_WAIT_CLOCKS as u64).saturating_add(wait)
+    }
+}
+
+/// The DSACK pins a peripheral drives on an externally terminated select.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Dsack {
+    /// DSACK0: an 8-bit port (SIMRM Table 5-2).
+    Dsack0,
+    /// DSACK1: a 16-bit port.
+    Dsack1,
+    /// Both: reserved, taken as a 16-bit port.
+    Both,
+}
+
+impl Dsack {
+    /// Whether it drives DSACK0.
+    #[must_use]
+    pub const fn drives_dsack0(self) -> bool {
+        matches!(self, Self::Dsack0 | Self::Both)
+    }
+
+    /// Whether it drives DSACK1.
+    #[must_use]
+    pub const fn drives_dsack1(self) -> bool {
+        matches!(self, Self::Dsack1 | Self::Both)
+    }
+}
 
 #[cfg(test)]
 mod tests {

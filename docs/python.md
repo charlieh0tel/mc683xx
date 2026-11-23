@@ -39,9 +39,8 @@ rename renames the Python name with it.  The deliberate differences:
   `Pacing`, though it has `Display` and `FromStr`: its factor is a
   number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`
   the text.
-- **Unknown values:** Python has two members Rust lacks:
-  `Event.Unknown(now, text)`, an event the bindings cannot convert,
-  and `ResetCause.UNKNOWN`, a reset for a cause they do not know, so
+- **Unknown values:** Python has a member Rust lacks:
+  `Event.Unknown(now, text)`, an event the bindings cannot convert, so
   that `take_events()` hands every event over (Exceptions, below);
   `take_output_changes()` likewise hands a change it cannot convert
   over as `(now, None, text)`.
@@ -60,7 +59,7 @@ rename renames the Python name with it.  The deliberate differences:
   clocks or picoseconds.  A count names its unit: `Output.Wave`'s
   `period_counts` and `high_counts` are PWMCNT counts, its
   `clocks_per_count` system clocks a count, an `int | None` (`None`
-  when PCLK clocks PWMCNT).  A board run's span, Rust's `Span` or
+  when PCLK clocks PWMCNT), as is `Output.Clock`'s.  A board run's span, Rust's `Span` or
   `NonZeroSpan`, is a keyword pair, `seconds=` (a `float`) or
   `picoseconds=` (an `int`), and its quantum `quantum_picoseconds=`.
 - **Settings:** a struct of settings is keyword arguments
@@ -74,8 +73,8 @@ rename renames the Python name with it.  The deliberate differences:
   function_code=FunctionCode.SUPERVISOR_DATA)`, Rust's `(address, size, function_code, value)`;
   `Builder.memory(contents, pins, writable=True)`, Rust's `(bytes,
   kind, pins)`, a `MemoryKind` (`Ram` or `Rom`) where Python takes a
-  keyword's bool; `fixed_memory(base, contents, writable=True)`
-  likewise.  The bare `Machine`'s `map` takes the pages'
+  keyword's bool; `fixed_memory(contents, base, writable=True)`
+  likewise (Rust's `(bytes, kind, base)`).  The bare `Machine`'s `map` takes the pages'
   `permissions` too, Rust's `map` then `protect`.
 - **Builtins:** an argument Rust names `id` or `bytes`, Python
   builtins, is named for what it holds: `remove_hook(hook)`,
@@ -251,7 +250,7 @@ assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
 - `memory(contents, pins, writable=True)`: RAM or ROM, a whole number
   of 2-Kbyte pages; returns its number for `memory`, `read_memory` and
   `write_memory`.
-- `fixed_memory(base, contents, writable=True)`: emulator-only memory
+- `fixed_memory(contents, base, writable=True)`: emulator-only memory
   at a fixed address on no pin, which takes the cycles there no chip
   select matches (the host guide's Fixed memory); a memory number as
   `memory`'s.  `set_fixed_timing(memory, port=16, termination=None)`:
@@ -691,7 +690,7 @@ assert isinstance(chip.oc1(), mc683xx.Output.Level)
 
 ### QSPI
 
-`Builder.qspi(object)` puts a peripheral on the QSPI: `transfer(
+`Builder.set_qspi(object)` puts a peripheral on the QSPI: `transfer(
 transfer) -> int`, given an `mc683xx.QspiTransfer` (`entry`, the queue
 entry, 0 to 15, its index in the QSPI RAM, QSMRM 4.3.6; `chip_selects`,
 the levels on PCS[3:0]; `out`, the bits out, right-aligned, MSB first;
@@ -735,7 +734,7 @@ master = (
 )
 builder, _ = booting(master)
 peripheral = Peripheral()
-builder.qspi(peripheral)
+builder.set_qspi(peripheral)
 chip = builder.build()
 chip.run_for(5000)
 assert peripheral.transfers == [(0b0101, 0x34, 8)]
@@ -881,7 +880,7 @@ peripheral is; one without both (`save` alone, say) makes `save` and
 `restore` raise `StateError` naming it by its peripheral number (`peripheral 0:
 a Python peripheral cannot save its state`), and an exception `save` or
 `restore` raises is raised, a `KeyboardInterrupt` too, the chip
-unchanged.  The QSPI peripheral (`Builder.qspi`) is in it the
+unchanged.  The QSPI peripheral (`Builder.set_qspi`) is in it the
 same way, one without `save` and `restore` named `the QSPI peripheral`
 (`the QSPI peripheral: a Python peripheral cannot save its state`).  A snapshot
 with another count of peripherals, or with a QSPI peripheral where the chip
@@ -988,9 +987,7 @@ chip.run_for(500)
   but none does today.  `take_events()` never raises and always takes
   every event: one it cannot convert (a kind the bindings lack, or a
   DSACK fault they do not know) is `Event.Unknown(now, text)`, `text`
-  what happened as Rust prints it, and a reset for a cause they do not
-  know is an `Event.Reset` whose cause is `ResetCause.UNKNOWN`, which
-  `reset_for` and the reset scopes refuse with `ValueError`.
+  what happened as Rust prints it.
 - `IndexError`: an unknown memory or peripheral number, or a memory range
   past its end.
 - `OverflowError`: a run past the end of time.

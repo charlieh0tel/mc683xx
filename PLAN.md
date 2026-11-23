@@ -218,7 +218,7 @@ prefix; their directories keep the short names.
   its first address, `the peripheral at 0xf00000`), as the board names a
   peripheral; a snapshot with another count of peripherals is
   `StateError::Mismatch("peripherals")`.  The QSPI's peripheral
-  (`Builder::qspi`) is held the same way: `Save` is a bound of the
+  (`Builder::set_qspi`) is held the same way: `Save` is a bound of the
   attach (`AnySpiPeripheral`, in `mc683xx-modules`, since the QSM holds
   it), and the chip's snapshot, not the QSM's, holds its bytes, so the
   QSM's format stays the module's own and the chip saves and puts back
@@ -329,8 +329,8 @@ surrounds the SoC with its board peripherals through:
   not wire every peripheral to it: `Builder::set_reset_scope` names the
   causes that reach a peripheral (a `ResetScope`), all by default.
   smartclock's DUART, for one, sees no watchdog reset.
-- **Fixed memory (emulator-only):** `Builder::fixed_memory(base,
-  bytes, kind)` maps memory at a fixed, page-aligned address on no
+- **Fixed memory (emulator-only):** `Builder::fixed_memory(bytes,
+  kind, base)` maps memory at a fixed, page-aligned address on no
   select, for code and data a host maps beside an image it leaves as
   it is (a consumer's hybrid boot loads rewritten routines at $600000
   and their data at $6F0000 and diverts the image's calls there).
@@ -366,7 +366,7 @@ surrounds the SoC with its board peripherals through:
   byte of a 16-bit port; the value read is the vector, after the
   peripheral's wait states on an external DSACK.  A bus error, or a DSACK
   later than the bus monitor allows, is the spurious vector.
-- **QSPI:** the host's `SpiPeripheral` (`Builder::qspi`) sees each
+- **QSPI:** the host's `SpiPeripheral` (`Builder::set_qspi`) sees each
   transfer that DDRQS gives SCK for (QSM, below; `QspiTransfer`: the
   queue entry, the levels on PCS[3:0],
   the word and its bits, and the serial clock it is shifted with, its
@@ -846,7 +846,7 @@ chip beside `Mc68331`.
   and `restore(bytes)`, as a Python board peripheral is; one without
   them makes `save` raise `StateError` naming it (`peripheral 0: a Python
   peripheral cannot save its state`), and an exception either raises is
-  raised.  The QSPI's peripheral (`Builder.qspi`) is in it the same
+  raised.  The QSPI's peripheral (`Builder.set_qspi`) is in it the same
   way, named `the QSPI peripheral`; hooks stay across a restore.
   A snapshot of another format or other hardware, or bytes that do
   not decode, raise `mc683xx.StateError` (a `ValueError`); a module
@@ -937,7 +937,7 @@ chip beside `Mc68331`.
   python` builds a `.venv`, runs clippy and the adapter's Rust tests
   with `python` (they embed the interpreter), `maturin develop`s the
   module into the venv, and runs `pytest`, `stubtest` and mypy.
-- **QSM and GPT:** `Builder.qspi(object)` puts an object with
+- **QSM and GPT:** `Builder.set_qspi(object)` puts an object with
   `transfer(transfer) -> int` (an `mc683xx.QspiTransfer`, as the Rust
   one) and optionally
   `set_chip_selects(levels, now)`, `set_clock(clock, now)`,
@@ -3458,7 +3458,7 @@ checks move onto real code hooks.
 | Manuals kept in the repo, in Git LFS | The specification, beside the code that cites it.  NXP no longer serves them; its terms of use allow reproduction for personal non-commercial use only, a risk accepted for the public repo. |
 | Firmware images by path, not committed | Vendor images are not ours; feature-gated system tests read them from a path in an environment variable, for any board. |
 | Runs named `run_until` and `run_for` | A run to an absolute time is `run_until`, a run for a duration `run_for`, at every layer (the core, the chip, the board, gdb's targets, Python); a bare machine's run to limits is `run_limited`.  No bare `run`, whose meaning a reader must look up (decided 2026-10-24, before 0.1.0). |
-| The modules crate's assembly API sealed and hidden | `Module` and the plumbing only `mc683xx-mc68331` uses to compose the chip (register cycles, decode requests, the SIM's timer and reset handshakes, the serde helpers; from 0.7.0 the modules' blocks, chip-select decode, and the `Qsm` and `Sim` mutators a host cannot reach through the chip's `&Qsm` and `&Sim`) change with the chip; sealing `Module` and `#[doc(hidden)]` with a "Not part of the semver API" note keep them out of semver, so the chip can change them in a minor release, while what a host needs stays public (decided 2026-10-24, before 0.1.0). |
+| The modules crate's assembly API sealed and hidden | `Module` and the plumbing only `mc683xx-mc68331` uses to compose the chip (register cycles, decode requests, the SIM's timer and reset handshakes, the serde helpers; from 0.7.0 the modules' blocks, chip-select decode, and the `Qsm` and `Sim` mutators a host cannot reach through the chip's `&Qsm` and `&Sim`; from 0.9.0 the `module` module, `Lanes`, `Selects`, `ChipSelects::at` and `blocks`, `Termination::clocks`, `external_clocks` and `MOST_WAIT_STATES`, `Sim::freezes_bus_monitor`, and `SystemClock::tick`, `at` and `clocks_per_tick`) change with the chip; sealing `Module` and `#[doc(hidden)]` with a "Not part of the semver API" note keep them out of semver, so the chip can change them in a minor release, while what a host needs stays public (decided 2026-10-24, before 0.1.0). |
 | The board's chip traits sealed | `Chip`, `ChipBuilder` and `ChipPin` are what the board's run loop needs of a part, and change with it; a new chip (a 68332) is added inside mc683xx, beside `mc683xx_board::mc68331`, not by a host.  Sealing them and `#[doc(hidden)]` on the plumbing only the board calls keep them out of semver, while a host keeps `Board<Mc68331>`, `Board<C: Chip>` and the chip's methods it calls (`cpu`, `now`, `memory`, the resets, `save`).  Opening them later is not breaking (decided 2026-11-21, before 1.0). |
 | Board time with the SIM | It derives from SYNCR. |
 | Not cycle accurate, not cycle stupid | Firmware timing comes from peripherals, but timing loops and peripheral pacing need table-based estimates with wait states. |
@@ -3513,7 +3513,7 @@ checks move onto real code hooks.
 | Chip time splits: `Cycle` an instant, `Cycles` a count | Decided 2026-11 (0.9.0).  `Cycles` was both a clock by number and a count of clocks, so `now + budget` and `budget + budget` read alike and a run's deadline and its budget had one type.  `Cycle` (system clocks since power-on) mirrors the board's `Time`: `ZERO`, `MAX`, `from_clocks`/`clocks`, `since`, `since_power_on`; `Cycle + Cycles` and `Cycle - Cycles` saturate at power-on and `MAX`, `Cycle - Cycle` is the `Cycles` between, zero if the second is later; Display `12 clocks`; serde as its `u64`, so snapshots keep their bytes.  `Cycles`, `Span`'s counterpart, keeps its `+` and `-` and gains `saturating_add` and `saturating_sub`; `Cycles::until` went (`Cycle::since`).  Every chip-layer instant is a `Cycle` (`now`, `at`, `next_event`, a run's deadline, a trace record's `cycle`, `TimeBase`'s anchor), every cost, budget and period `Cycles`.  "Cycle" alone means the clock; a bus transaction is a bus cycle. |
 | One set of time words at every layer | Decided 2026-11-23 (0.9.0).  Each layer has an instant and a span: the board `Time` and `Span`, the chip `Cycle` and `Cycles`, the host std's `Instant` and `Duration`.  `now` is always the current instant in the layer's unit, never a bundle; `at` is a given instant other than now; a run's limit is a span `budget` (`run_for`) or an instant `deadline` (`run_until`), as VHDL's `wait for` and `wait until`; `since` is the span back to an earlier instant; `after` counts from one (`edge_after`); `next_event` is when a part next has work.  A conversion is named for its result and takes the instant it converts as `at` (`TimeBase::time(at: Cycle)`, `TimeBase::cycle(at: Time)`, `Clock::phase(at)`); one from a phase takes `phase` (`Clock::time(phase)`).  A board peripheral's call takes its time as a `time::Moment` (board time and the system clock then): from its `Drive`, or as `moment` last where there is none.  A chip-level callback with no cycle struct takes `now: Cycle` last (`Timed::advance`, `SpiPeripheral::set_clock`, `MappedPeripheral::reset`, `set_port_pins`); one with a struct reads its `now` field (`BusCycle`, `QspiTransfer`).  Units follow std's `Duration` (`from_secs`, `secs_f64`); names a person types carry SI symbols (`_ps`, `_us`, `_hz`). |
 | Loading and init scripts in `mc683xx-debug`, over `Cpu32Target` | Decided 2026-11-01 with the BDM pod's maintainer.  One loader for silicon and the emulator, tested on the chip; a crate of its own, on `mc683xx-target` alone, so a pod host links it without the emulator.  Word writes, verify by default, RPC from the entry and no SSP inference, an init script with line-numbered errors; host time in `poll_memory` only. |
-| `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels) stay exhaustive, so a match on one needs no wildcard; the Python bindings' conversions of the others never panic: a run's end or halt they do not know raises `mc683xx.RunError` naming it, any other value (a fault cause among them) `NotImplementedError` naming its kind, but an event is never refused or dropped: one they cannot convert is `Event.Unknown(now, name)`, its Rust `Display`, and an unknown reset cause in a reset is `ResetCause.UNKNOWN`, so `take_events` always takes the whole queue (decided 2026-11-21, round 5); Rust tests (`every_run_end_maps_or_names_itself`, `every_value_maps`) list every variant, so a variant added to one is added there and mapped (decided 2026-11-21). |
+| `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels, reset causes) stay exhaustive, so a match on one needs no wildcard; the Python bindings' conversions of the others never panic: a run's end or halt they do not know raises `mc683xx.RunError` naming it, any other value (a fault cause among them) `NotImplementedError` naming its kind, but an event is never refused or dropped: one they cannot convert is `Event.Unknown(now, name)`, its Rust `Display`, so `take_events` always takes the whole queue (decided 2026-11-21, round 5; `ResetCause`, which RSR fixes, made exhaustive and its `UNKNOWN` dropped in 0.9.0); Rust tests (`every_run_end_maps_or_names_itself`, `every_value_maps`) list every variant, so a variant added to one is added there and mapped (decided 2026-11-21). |
 
 ## Open
 

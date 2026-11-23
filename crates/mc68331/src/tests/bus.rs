@@ -14,9 +14,9 @@ use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
@@ -226,7 +226,7 @@ fn a_bus_peripheral_takes_a_fixed_memorys_cycles() {
         )
         .unwrap();
     let fixed = builder
-        .fixed_memory(Address(WINDOW), vec![0x5a; 2048], MemoryKind::Ram)
+        .fixed_memory(vec![0x5a; 2048], MemoryKind::Ram, Address(WINDOW))
         .unwrap();
     let id = builder
         .bus_peripheral(
@@ -328,7 +328,7 @@ fn the_core_leaves_a_bus_window_inside_a_fixed_memory_to_the_peripheral() {
         )
         .unwrap();
     builder
-        .fixed_memory(Address(WINDOW), vec![0x5a; 2048], MemoryKind::Ram)
+        .fixed_memory(vec![0x5a; 2048], MemoryKind::Ram, Address(WINDOW))
         .unwrap();
     builder
         .bus_peripheral(

@@ -37,11 +37,11 @@ use mc683xx_mc68331::gpt::pwm::Channel;
 use mc683xx_mc68331::port::OutputChange;
 use mc683xx_mc68331::port::Port;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_modules::sim::chip_selects::Dsack;
 use mc683xx_modules::sim::clock::ClockSource;
 use mc683xx_modules::sim::reset::ResetScope;
 use serde::Deserialize;
@@ -515,7 +515,7 @@ impl ChipBuilder for Mc68331Builder {
                 termination,
             } => self
                 .builder
-                .fixed_memory(base, plan.bytes, plan.kind)
+                .fixed_memory(plan.bytes, plan.kind, base)
                 .and_then(|id| {
                     self.builder
                         .set_fixed_timing(id, port, termination)
@@ -564,7 +564,7 @@ impl ChipBuilder for Mc68331Builder {
     }
 
     fn qspi<R: BoardSpi>(&mut self, router: R) -> Result<(), LoadError> {
-        self.builder.qspi(router);
+        self.builder.set_qspi(router);
         Ok(())
     }
 
@@ -712,8 +712,8 @@ impl chip::Chip for Mc68331 {
                 continue;
             }
             match pin {
-                Pin::PwmA => stop.pwm_a = true,
-                Pin::PwmB => stop.pwm_b = true,
+                Pin::PwmA => stop.set_pwm(Channel::A, true),
+                Pin::PwmB => stop.set_pwm(Channel::B, true),
                 Pin::Txd => stop.txd = true,
                 Pin::Reset => stop.reset = true,
                 // ECLK changes with the clock, which ends the run itself
@@ -781,7 +781,9 @@ impl chip::Chip for Mc68331 {
                     };
                     emit(base.time(change.now), pin, Signal::Level(change.level));
                 }
-                _ => {}
+                // a kind added to the chip's stream reaches no net until
+                // it is wired here
+                other => debug_assert!(false, "an output change no net carries: {other}"),
             }
         }
         let system_clock = self.sim().system_clock().frequency();

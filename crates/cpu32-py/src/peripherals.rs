@@ -277,7 +277,7 @@ pub(crate) enum Output {
     /// (CPROUT).
     Clock {
         /// System clocks a count.
-        clocks: Option<u64>,
+        clocks_per_count: Option<u64>,
     },
 }
 
@@ -298,8 +298,8 @@ impl TryFrom<pwm::Output> for Output {
                 high_counts,
                 clocks_per_count: clocks_per_count.map(Cycles::clocks),
             },
-            pwm::Output::Clock { clocks } => Self::Clock {
-                clocks: clocks.map(Cycles::clocks),
+            pwm::Output::Clock { clocks_per_count } => Self::Clock {
+                clocks_per_count: clocks_per_count.map(Cycles::clocks),
             },
             _ => return Err(Error::unmapped("PWM output")),
         })

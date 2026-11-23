@@ -93,12 +93,13 @@ fn main() -> Result<(), BuildError> {
   the memory repeats it.  The core serves memory itself, fast, except
   where a peripheral shares the cycle.  `memory` and `memory_mut` give
   the bytes back by `MemoryId`.
-- `fixed_memory(base, bytes, kind)`: memory at a fixed address on
+- `fixed_memory(bytes, kind, base)`: memory at a fixed address on
   no pin, emulator-only, and `set_fixed_timing(memory, port, termination)`
   its port and wait states (see Fixed memory).
 - `set_reload_scope(memory, ResetScope)` says which resets put a memory's
   contents back as built; none do by default (see Fixed memory).
-- `peripheral(peripheral, pins)` puts a `MappedPeripheral + Timed + Save` on pins; a peripheral on
+- `peripheral(peripheral, pins)` puts a `MappedPeripheral + Timed + Save`
+  (an `AnyMappedPeripheral`, in `mc683xx-modules`) on pins; a peripheral on
   several (separate read and write selects, a register select and an
   acknowledge select) tells them apart by `BusCycle::select`.  `unwired_peripheral`
   adds one on no pin: something that only keeps time or drives an
@@ -132,7 +133,7 @@ page it serves neither way is `Unserved` (PLAN.md, Memory).
 
 ### Fixed memory
 
-`Builder::fixed_memory(base, bytes, kind)` maps memory at `base`
+`Builder::fixed_memory(bytes, kind, base)` maps memory at `base`
 (an `Address` on a 2-Kbyte page boundary, the memory inside
 ADDR[23:0]) up to its size, on no chip select.  **It is emulator-only:
 the chip has no such decode.**  It is for code and data the host maps
@@ -185,7 +186,7 @@ use mc683xx_modules::sim::reset::ResetScope;
 // No select programmed: the boot code stores straight into it.
 let code = 0x60_0000;
 let (mut builder, _) = firmware::booting(firmware::rom(&firmware::store_word(code, 0x1234)));
-let fixed = builder.fixed_memory(Address(code), vec![0; 2048], MemoryKind::Ram).unwrap();
+let fixed = builder.fixed_memory(vec![0; 2048], MemoryKind::Ram, Address(code)).unwrap();
 builder.set_reload_scope(fixed, ResetScope::ALL);
 let mut chip = builder.build();
 chip.run_for(Cycles::from_clocks(1000));
@@ -365,7 +366,8 @@ refuses.
   its reads, or a select shared by a read-only and a write-only one,
   times each direction by its own.  Each wait state costs the
   CPU a clock, so slow peripherals cost what they do on the board.
-  `Builder::set_dsack(peripheral, Dsack)` states which DSACK pins it drives:
+  `Builder::set_dsack(peripheral, Dsack)` (`Dsack` and `Termination` are in
+  `mc683xx_modules::chip_select`) states which DSACK pins it drives:
   the chip then checks PEPAR at each such cycle (a pin assigned as
   port E ends no cycle, SIMRM 9.1, told as `Event::Dsack`; `Event` is
   `#[non_exhaustive]`), and the port size they encode sizes the cycle
@@ -979,7 +981,7 @@ assert!(matches!(chip.oc1(), Output::Level(_)));
 ### QSPI
 
 As a master the QSPI's peripheral is the host's `SpiPeripheral`
-(`Builder::qspi`).  `transfer(QspiTransfer) -> u16` shifts one queue
+(`Builder::set_qspi`).  `transfer(QspiTransfer) -> u16` shifts one queue
 entry and returns the bits in.  A `QspiTransfer` (`#[non_exhaustive]`,
 `QspiTransfer::new(out, bits, clock, now)`, queue entry 0 and
 `PCS` all low, then `.at_entry(entry)` and `.selecting(chip_selects)`)
@@ -997,7 +999,8 @@ ones.  Optional:
 `set_chip_selects(levels, now)` whenever `PCS[3:0]` change, so a peripheral
 framed by its select sees the frame end, and `set_clock(QspiClock, now)`
 when the serial clock changes (CPOL, CPHA, the SCK period,
-`baud()`, a `Frequency`).  The one peripheral is the board's whole QSPI side: it
+`baud()`, a `Frequency`, `None` only for a zero period, which the
+QSM never tells).  The one peripheral is the board's whole QSPI side: it
 sees every transfer and every level change, whatever they select.
 `reset(now)` is
 RESET, for the causes `Builder::set_qspi_reset_scope` names (all by
@@ -1057,7 +1060,7 @@ let program = [
 ]
 .concat();
 let (mut builder, _) = firmware::booting(firmware::rom(&program));
-builder.qspi(Peripheral::default());
+builder.set_qspi(Peripheral::default());
 let mut chip = builder.build();
 chip.run_for(Cycles::from_clocks(5000));
 assert_eq!(chip.qspi_peripheral::<Peripheral>().unwrap().0, [(0b0101, 0x34, 8)]);
@@ -1326,7 +1329,7 @@ assert_eq!(chip.now(), Cycle::ZERO);
 `Mc68331::save() -> Result<Vec<u8>, StateError>` snapshots the core
 (registers, memory, timing), the SIM, the modules, every peripheral and
 model the builder added, by its `Save`, in the order added, board time
-the QSPI's peripheral (`Builder::qspi`, which is `Save` too), board
+the QSPI's peripheral (`Builder::set_qspi`, which is `Save` too), board
 time and the IRQ pins; `restore(&[u8])` puts it back into a chip built
 the same way.  A peripheral that cannot save fails both, named by its place
 in that order (`peripheral 1: the peripheral cannot save its state`,

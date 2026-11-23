@@ -28,9 +28,9 @@ use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::reset::ResetScope;
 use mc683xx_target::address::Address;
 use mc683xx_target::integer::parse_integer;
@@ -310,7 +310,7 @@ pub(crate) struct PeripheralSpec {
     /// The resets that reach it.
     pub(crate) reset: ResetScope,
     /// The DSACK pins it drives, if known.
-    pub(crate) dsack: Option<mc683xx_modules::sim::chip_selects::Dsack>,
+    pub(crate) dsack: Option<mc683xx_modules::chip_select::Dsack>,
 }
 
 /// A net.
@@ -955,7 +955,7 @@ fn lanes_disagree(split: Split, other: Split) -> bool {
 
 /// The port DSACK pins encode: 16 bits with DSACK1, 8 with DSACK0 alone
 /// (SIMRM Table 5-2).
-const fn dsack_port(dsack: mc683xx_modules::sim::chip_selects::Dsack) -> PortSize {
+const fn dsack_port(dsack: mc683xx_modules::chip_select::Dsack) -> PortSize {
     if dsack.drives_dsack1() {
         PortSize::Bits16
     } else {
@@ -1402,9 +1402,9 @@ fn read_peripheral(
     users: &mut Users,
 ) -> Result<PeripheralSpec, LoadError> {
     let dsack = entry.dsack.and_then(|dsack| match dsack {
-        Dsack::Dsack0 => Some(mc683xx_modules::sim::chip_selects::Dsack::Dsack0),
-        Dsack::Dsack1 => Some(mc683xx_modules::sim::chip_selects::Dsack::Dsack1),
-        Dsack::Both => Some(mc683xx_modules::sim::chip_selects::Dsack::Both),
+        Dsack::Dsack0 => Some(mc683xx_modules::chip_select::Dsack::Dsack0),
+        Dsack::Dsack1 => Some(mc683xx_modules::chip_select::Dsack::Dsack1),
+        Dsack::Both => Some(mc683xx_modules::chip_select::Dsack::Both),
         Dsack::Open => None,
     });
     let port = dsack.map(dsack_port);

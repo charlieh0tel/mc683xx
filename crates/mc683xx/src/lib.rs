@@ -33,6 +33,7 @@
 )]
 
 pub mod chip_select;
+#[doc(hidden)]
 pub mod module;
 pub mod peripheral;
 pub mod pins;

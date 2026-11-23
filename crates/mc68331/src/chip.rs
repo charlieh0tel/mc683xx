@@ -23,7 +23,6 @@ use mc683xx_cpu32::cpu::bare::End;
 use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
-use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
@@ -36,13 +35,11 @@ use mc683xx_cpu32::memory::MemoryError;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::RegionId;
-use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::peripheral::AnyMappedPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
-use mc683xx_modules::peripheral::SpiPeripheral;
-use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::Qsm;
@@ -81,8 +78,8 @@ use crate::port::NoInputsError;
 use crate::port::OutputChange;
 use crate::port::Port;
 use crate::port::PortChange;
-use mc683xx_modules::sim::chip_selects::Dsack;
-use mc683xx_modules::sim::chip_selects::Termination;
+use mc683xx_modules::chip_select::Dsack;
+use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::sim::reset::ResetScope;
 
 /// The index in the chip's peripherals of `id`, which the chip numbers
@@ -170,10 +167,9 @@ pub struct OutputStop {
     /// [`Mc68331::take_port_changes`] reports them, port QS's PCS\[3:0\]
     /// and TXD among them as levels.
     ports: [u8; Port::ALL.len()],
-    /// PWMA, while its edges are reported (`set_report_pwm_edges`).
-    pub pwm_a: bool,
-    /// PWMB, likewise.
-    pub pwm_b: bool,
+    /// PWMA and PWMB, by [`Channel`]'s index, each while its edges are
+    /// reported (`set_report_pwm_edges`).
+    pwm: [bool; Channel::BOTH.len()],
     /// A frame's start on TXD (`take_sci_transmitted`).
     pub txd: bool,
     /// A reset the chip drives on RESET: a `reset` instruction's, the
@@ -191,6 +187,22 @@ impl OutputStop {
     /// Watches the pins of `port` in `mask`, and no others of it.
     pub const fn set_port(&mut self, port: Port, mask: u8) {
         self.ports[port.index()] = mask;
+    }
+
+    /// Whether PWM `channel`'s pin is watched.
+    #[must_use]
+    pub const fn pwm(&self, channel: Channel) -> bool {
+        self.pwm[channel.index()]
+    }
+
+    /// Watches PWM `channel`'s pin, or not.
+    pub const fn set_pwm(&mut self, channel: Channel, watched: bool) {
+        self.pwm[channel.index()] = watched;
+    }
+
+    /// The PWM pins watched, a mask: PWMA bit 0, PWMB bit 1.
+    pub(crate) const fn pwm_mask(&self) -> u8 {
+        self.pwm[Channel::A.index()] as u8 | (self.pwm[Channel::B.index()] as u8) << 1
     }
 }
 
@@ -466,9 +478,9 @@ impl Builder {
     /// [`BuildError::Memory`] if the core's memory refuses it.
     pub fn fixed_memory(
         &mut self,
-        base: Address,
         bytes: Vec<u8>,
         kind: MemoryKind,
+        base: Address,
     ) -> Result<MemoryId, BuildError> {
         let length = pages(&bytes)?;
         let placement = BuildError::Placement {
@@ -569,7 +581,7 @@ impl Builder {
 
     /// Adds `peripheral`, which every reset reaches until `set_reset_scope`
     /// says otherwise.
-    fn add<D: MappedPeripheral + Timed + Save + Any>(&mut self, peripheral: D) -> PeripheralId {
+    fn add<D: AnyMappedPeripheral>(&mut self, peripheral: D) -> PeripheralId {
         self.board.peripherals.push(Box::new(peripheral));
         self.board.reset_scopes.push(ResetScope::ALL);
         self.board.dsack_pins.push(None);
@@ -579,13 +591,13 @@ impl Builder {
 
     /// A peripheral on `pins`, which it tells apart by
     /// [`BusCycle::select`](mc683xx_cpu32::peripheral::BusCycle::select).
-    /// It says whether it saves ([`Save`]): the chip's snapshot holds
+    /// It says whether it saves ([`Save`](mc683xx_cpu32::cpu::state::Save)): the chip's snapshot holds
     /// every peripheral and model, in the order added.
     ///
     /// # Errors
     ///
     /// [`BuildError::Wired`] if one of `pins` is already wired.
-    pub fn peripheral<D: MappedPeripheral + Timed + Save + Any>(
+    pub fn peripheral<D: AnyMappedPeripheral>(
         &mut self,
         peripheral: D,
         pins: &[ChipSelect],
@@ -598,9 +610,9 @@ impl Builder {
     /// A peripheral on no chip select that takes the cycles `decodes`
     /// give by its own decode of the address bus, as board logic does:
     /// an address window, an interrupt acknowledge, or both.  It drives
-    /// DSACK `pins` itself, as a peripheral on an externally terminated
-    /// select does ([`Builder::set_dsack`]): its `wait_states` time each
-    /// cycle, the pins' port sizes it (or its `dsack_port`, cycle by
+    /// the DSACK pins `dsack` itself, as a peripheral on an externally
+    /// terminated select does ([`Builder::set_dsack`]): its `wait_states`
+    /// time each cycle, the pins' port sizes it (or its `dsack_port`, cycle by
     /// cycle), and with none of them assigned as DSACK by PEPAR the bus
     /// monitor ends it ([`DsackFault::BusUnassigned`](crate::event::DsackFault::BusUnassigned)).  It takes a cycle
     /// beside any select that matches, the first DSACK ending it, and
@@ -612,11 +624,11 @@ impl Builder {
     ///
     /// [`BuildError::Window`] for a window that is empty or runs past
     /// ADDR\[23:0\].
-    pub fn bus_peripheral<D: MappedPeripheral + Timed + Save + Any>(
+    pub fn bus_peripheral<D: AnyMappedPeripheral>(
         &mut self,
         peripheral: D,
         decodes: &[BusDecode],
-        pins: Dsack,
+        dsack: Dsack,
     ) -> Result<PeripheralId, BuildError> {
         for &decode in decodes {
             if let BusDecode::Window { base, length } = decode
@@ -631,7 +643,7 @@ impl Builder {
         }
         let id = self.add(peripheral);
         let peripheral = index(id);
-        self.board.dsack_pins[peripheral] = Some(pins);
+        self.board.dsack_pins[peripheral] = Some(dsack);
         self.board.bus.push(BusWiring {
             peripheral,
             decodes: decodes.to_vec(),
@@ -642,14 +654,11 @@ impl Builder {
 
     /// A peripheral on no pin: a model beside the CPU that only keeps time,
     /// or drives an interrupt.  In the snapshot as a peripheral is.
-    pub fn unwired_peripheral<D: MappedPeripheral + Timed + Save + Any>(
-        &mut self,
-        peripheral: D,
-    ) -> PeripheralId {
+    pub fn unwired_peripheral<D: AnyMappedPeripheral>(&mut self, peripheral: D) -> PeripheralId {
         self.add(peripheral)
     }
 
-    /// The resets that reach `peripheral`'s reset input ([`MappedPeripheral::reset`]):
+    /// The resets that reach `peripheral`'s reset input ([`MappedPeripheral::reset`](mc683xx_cpu32::peripheral::MappedPeripheral::reset)):
     /// all by default, as on the RESET pin; a board that wires it
     /// elsewhere says which (SIMRM 8.2).
     pub fn set_reset_scope(&mut self, peripheral: PeripheralId, scope: ResetScope) {
@@ -658,34 +667,35 @@ impl Builder {
 
     /// `peripheral` on the QSPI's pins, replacing any: it sees each
     /// transfer and the levels on PCS\[3:0\] (QSMRM 4).  It says
-    /// whether it saves ([`Save`]), as a peripheral does: the chip's snapshot
+    /// whether it saves ([`Save`](mc683xx_cpu32::cpu::state::Save)), as a peripheral does: the chip's snapshot
     /// holds it.
-    pub fn qspi<D: SpiPeripheral + Save + Any>(&mut self, peripheral: D) {
+    pub fn set_qspi<D: AnySpiPeripheral>(&mut self, peripheral: D) {
         self.board
             .module_mut::<Qsm>(QSM)
             .attach(Box::new(peripheral));
     }
 
-    /// The DSACK pins `peripheral` drives on an externally terminated select
-    /// (DSACK %1111, SIMRM 7.10.3).  The chip checks them against PEPAR
+    /// The DSACK pins `dsack` that `peripheral` drives on an externally
+    /// terminated select (DSACK %1111, SIMRM 7.10.3).  The chip checks them against PEPAR
     /// at each such cycle: with none assigned as DSACK, its DSACK cannot
     /// end the cycle and the bus monitor does (SIMRM 9.1, told as
     /// [`Event::Dsack`]); otherwise the port size they encode (SIMRM
     /// Table 5-2: DSACK0 8 bits, DSACK1 or both 16) sizes the cycle,
     /// not the select's port field (SIMRM 5.3.3).  Unstated by default:
     /// unchecked, and the select's field sizes it.
-    pub fn set_dsack(&mut self, peripheral: PeripheralId, pins: Dsack) {
-        self.board.dsack_pins[index(peripheral)] = Some(pins);
+    pub fn set_dsack(&mut self, peripheral: PeripheralId, dsack: Dsack) {
+        self.board.dsack_pins[index(peripheral)] = Some(dsack);
     }
 
     /// The resets that reach the QSPI's peripheral
-    /// ([`SpiPeripheral::reset`]): all by default, as `set_reset_scope` for a
+    /// ([`SpiPeripheral::reset`](mc683xx_modules::peripheral::SpiPeripheral::reset)): all by default, as `set_reset_scope` for a
     /// peripheral.
     pub const fn set_qspi_reset_scope(&mut self, scope: ResetScope) {
         self.board.qspi_reset_scope = scope;
     }
 
-    /// `peripheral`'s interrupt output wired to `pin`.
+    /// `peripheral`'s interrupt output wired to `pin`.  Each call adds a
+    /// wire: a peripheral with two interrupt outputs is wired twice.
     pub fn set_interrupt(&mut self, peripheral: PeripheralId, pin: IrqPin) {
         self.board
             .interrupt_wires
@@ -693,7 +703,8 @@ impl Builder {
     }
 
     /// The board asserts AVEC (PE2) at every acknowledge of `pin`'s
-    /// level, as a pin tied low or decode logic does (SIMRM 6.4).
+    /// level, as a pin tied low or decode logic does (SIMRM 6.4).  Each
+    /// call adds a level to those already autovectored.
     pub fn set_autovector(&mut self, pin: IrqPin) {
         self.board.autovector_levels |= 1 << u8::from(pin);
     }

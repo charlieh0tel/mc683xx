@@ -72,7 +72,7 @@ use crate::state;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::PeripheralId;
-use mc683xx_modules::sim::chip_selects::Dsack;
+use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::sim::reset::ResetScope;
 
 mod bus;
@@ -1153,7 +1153,7 @@ fn the_format_matches_its_golden() {
         )
         .unwrap();
     builder.unwired_peripheral(Fixed);
-    builder.qspi(Selected::default());
+    builder.set_qspi(Selected::default());
     let mut chip = builder.build();
     write_register(&mut chip, SIM + 0x22, 0x0650);
     write_register(&mut chip, SIM + 0x24, 0x0001);
@@ -1660,7 +1660,7 @@ fn two_entries(scope: ResetScope) -> Mc68331 {
             &[ChipSelect::Boot],
         )
         .unwrap();
-    builder.qspi(Framed::default());
+    builder.set_qspi(Framed::default());
     builder.set_qspi_reset_scope(scope);
     let mut chip = builder.build();
     chip.run_for(Cycles::from_clocks(4000));
@@ -1706,7 +1706,7 @@ fn the_firmware_talks_on_the_sci_and_the_qspi() {
             &[ChipSelect::Boot],
         )
         .unwrap();
-    builder.qspi(Selected::default());
+    builder.set_qspi(Selected::default());
     let mut chip = builder.build();
     chip.run_for(Cycles::from_clocks(2000));
     let sent = chip.take_sci_transmitted();
@@ -1766,7 +1766,7 @@ fn the_qspi_peripheral_sees_syncr_in_the_baud() {
             &[ChipSelect::Boot],
         )
         .unwrap();
-    builder.qspi(Clocked::default());
+    builder.set_qspi(Clocked::default());
     let mut chip = builder.build();
     // SYNCR $CF00: 16.78 MHz; SPBR 84: 100 kHz (QSMRM Table 4-3)
     write_register(&mut chip, SIM + 0x04, 0xcf00);
@@ -1777,7 +1777,7 @@ fn the_qspi_peripheral_sees_syncr_in_the_baud() {
     let clocks = &chip.qspi_peripheral::<Clocked>().unwrap().told;
     assert_eq!(clocks.len(), 1);
     assert_eq!(clocks[0].system_clock.hz(), 16_777_216);
-    assert_eq!(clocks[0].baud().hz(), 99_864);
+    assert_eq!(clocks[0].baud().unwrap().hz(), 99_864);
     // the entry's 8 bits at 168 clocks each, and the delays
     chip.run_for(Cycles::from_clocks(4_000));
     let clocked = chip.qspi_peripheral::<Clocked>().unwrap();
@@ -2906,7 +2906,7 @@ fn a_peripheral_learns_when_a_watched_output_may_next_change() {
 #[test]
 fn a_reported_pwm_edge_bounds_the_output_horizon() {
     let mut pwm_b = OutputStop::default();
-    pwm_b.pwm_b = true;
+    pwm_b.set_pwm(Channel::B, true);
     // PWMB $01: high for 2 of every 512 clocks from 512, no event marking
     // its edges
     let duty = |chip: &mut Mc68331| write_register(chip, GPT + 0x26, 0x0001);
@@ -3219,7 +3219,7 @@ fn a_snapshot_of_fixed_memories_elsewhere_is_refused_and_changes_nothing() {
     let at = |base: u32| {
         copying_with(|builder| {
             builder
-                .fixed_memory(Address(base), vec![0; 64 << 10], MemoryKind::Ram)
+                .fixed_memory(vec![0; 64 << 10], MemoryKind::Ram, Address(base))
                 .unwrap();
         })
         .0
@@ -3398,7 +3398,7 @@ impl SpiPeripheral for Tally {
 
 /// [`copying`]'s board with a [`Tally`] of `count` on the QSPI.
 fn tallying(count: u16) -> (Mc68331, MemoryId, PeripheralId) {
-    copying_with(|builder| builder.qspi(Tally(count)))
+    copying_with(|builder| builder.set_qspi(Tally(count)))
 }
 
 /// The count of the [`Tally`] on `chip`'s QSPI.
@@ -3439,7 +3439,7 @@ fn a_qspi_peripheral_that_cannot_save_fails_the_save_and_restore_naming_it() {
 
     let (saving, _, _) = tallying(0);
     let snapshot = saving.save().unwrap();
-    let (mut unsaving, _, _) = copying_with(|builder| builder.qspi(Unsaving));
+    let (mut unsaving, _, _) = copying_with(|builder| builder.set_qspi(Unsaving));
     let unsupported =
         StateError::unsupported("an unsaving model").of_peripheral("the QSPI peripheral");
     assert_eq!(

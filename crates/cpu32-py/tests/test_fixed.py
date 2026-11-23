@@ -46,8 +46,8 @@ def code() -> bytes:
 def test_the_reset_code_reaches_a_fixed_memory_and_a_reset_reloads_it() -> None:
     builder = mc683xx.Builder()
     builder.memory(rom(), ["CSBOOT"], writable=False)
-    builder.fixed_memory(CODE, code(), writable=False)
-    data = builder.fixed_memory(DATA, bytes([0x5A]) * PAGE)
+    builder.fixed_memory(code(), CODE, writable=False)
+    data = builder.fixed_memory(bytes([0x5A]) * PAGE, DATA)
     builder.set_reload_scope(data, [mc683xx.ResetCause.EXTERNAL])
     with pytest.raises(IndexError):
         builder.set_reload_scope(9, [])
@@ -65,22 +65,22 @@ def test_the_reset_code_reaches_a_fixed_memory_and_a_reset_reloads_it() -> None:
 
 def test_fixed_memory_mistakes() -> None:
     builder = mc683xx.Builder()
-    builder.fixed_memory(CODE, bytes(2 * PAGE))
+    builder.fixed_memory(bytes(2 * PAGE), CODE)
     with pytest.raises(ValueError, match="overlaps"):
-        builder.fixed_memory(CODE + PAGE, bytes(PAGE))
+        builder.fixed_memory(bytes(PAGE), CODE + PAGE)
     with pytest.raises(ValueError, match="does not fit"):
-        builder.fixed_memory(CODE + 2, bytes(PAGE))
+        builder.fixed_memory(bytes(PAGE), CODE + 2)
     with pytest.raises(ValueError, match="does not fit"):
-        builder.fixed_memory(0xFFF800, bytes(2 * PAGE))
+        builder.fixed_memory(bytes(2 * PAGE), 0xFFF800)
     with pytest.raises(ValueError, match="pages"):
-        builder.fixed_memory(DATA, bytes(100))
+        builder.fixed_memory(bytes(100), DATA)
 
 
 def nops_reached(port: int | None, wait_states: int | None) -> int:
     """How far NOPs from CODE get in a few thousand clocks."""
     builder = mc683xx.Builder()
     builder.memory(rom(), ["CSBOOT"], writable=False)
-    code = builder.fixed_memory(CODE, bytes(words([], PAGE, NOP)), writable=False)
+    code = builder.fixed_memory(bytes(words([], PAGE, NOP)), CODE, writable=False)
     if port is not None:
         termination = (
             mc683xx.Termination.Fast()
@@ -99,7 +99,7 @@ def test_a_fixed_memory_takes_a_port_and_wait_states() -> None:
     waiting = nops_reached(16, 1)
     assert fast > waiting > nops_reached(8, 1)
     builder = mc683xx.Builder()
-    code = builder.fixed_memory(CODE, bytes(PAGE))
+    code = builder.fixed_memory(bytes(PAGE), CODE)
     with pytest.raises(ValueError, match="8 or 16"):
         builder.set_fixed_timing(code, port=32)
     for termination in (

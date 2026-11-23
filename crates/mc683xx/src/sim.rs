@@ -146,9 +146,10 @@ const PEPAR_AVEC: u8 = 1 << 2;
 /// A reset's cause, as RSR records it (MC68331UM D.3.4).  The chip
 /// raises neither LOC nor TST: its synthesizer never loses its
 /// reference (PLAN.md, Clock synthesizer) and the test submodule is
-/// factory test only; a host's reset scopes may name them.
+/// factory test only; a host's reset scopes may name them.  RSR fixes
+/// the set, so it is exhaustive; the variants are in RSR's bit order,
+/// high to low, as [`ResetCause::ALL`] is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[non_exhaustive]
 pub enum ResetCause {
     /// RESET driven by the board: EXT.
     External,
@@ -158,10 +159,10 @@ pub enum ResetCause {
     Watchdog,
     /// The halt monitor, on a double bus fault: HLT.
     HaltMonitor,
-    /// The `reset` instruction: SYS.
-    System,
     /// Loss of the clock's reference: LOC.
     LossOfClock,
+    /// The `reset` instruction: SYS.
+    System,
     /// The test submodule, in system test: TST.
     Test,
 }
@@ -660,6 +661,9 @@ impl Sim {
 
     /// Whether FREEZE stops the bus monitor now: asserted, with FRZBM
     /// (MC68331UM 4.2.13).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     #[must_use]
     pub const fn freezes_bus_monitor(&self) -> bool {
         self.frozen && self.simcr & SIMCR_FRZBM != 0
@@ -730,8 +734,8 @@ impl Sim {
             PICR => self.timer.control,
             PITR => self.timer.timing,
             PORTC => self.port_c.into(),
-            CSPAR0 => self.chip_selects.pin_assignment(0),
-            CSPAR1 => self.chip_selects.pin_assignment(1),
+            CSPAR0 => self.chip_selects.cspar0(),
+            CSPAR1 => self.chip_selects.cspar1(),
             CSBARBT..CHIP_SELECTS_END => match Self::select_at(offset) {
                 (select, false) => self.chip_selects.base(select),
                 (select, true) => self.chip_selects.option(select),

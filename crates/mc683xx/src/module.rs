@@ -3,6 +3,8 @@
 //! A part composes its own (the MC68331's QSM and GPT, MC68331UM Table
 //! D-1) behind [`Module`], and the chip routes their register cycles
 //! and arbitrates their interrupt requests (SIMRM 6.3).
+//!
+//! Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
 
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycle;

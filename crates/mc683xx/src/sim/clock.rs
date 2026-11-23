@@ -210,6 +210,9 @@ impl SystemClock {
     }
 
     /// System clocks in an EXTAL period.
+    ///
+    /// Not part of the semver API: plumbing the SIM keeps its time with.
+    #[doc(hidden)]
     #[must_use]
     pub const fn clocks_per_tick(&self) -> u64 {
         self.clocks_per_tick
@@ -238,6 +241,9 @@ impl SystemClock {
 
     /// The EXTAL periods begun by `at`, counting from zero: before the
     /// anchor, the period the last change left running.
+    ///
+    /// Not part of the semver API: plumbing the SIM keeps its time with.
+    #[doc(hidden)]
     #[must_use]
     pub const fn tick(&self, at: Cycle) -> u64 {
         if at.clocks() < self.anchor.clocks() {
@@ -248,6 +254,9 @@ impl SystemClock {
 
     /// The system clock EXTAL period `tick` begins at, on the current
     /// multiplier; a period before the anchor's is the anchor's.
+    ///
+    /// Not part of the semver API: plumbing the SIM keeps its time with.
+    #[doc(hidden)]
     #[must_use]
     pub const fn at(&self, tick: u64) -> Cycle {
         Cycle::from_clocks(

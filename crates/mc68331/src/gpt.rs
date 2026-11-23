@@ -970,7 +970,7 @@ impl Gpt {
     pub(crate) const fn oc1(&self, now: Cycle) -> Output {
         if self.compare_clock_out() {
             Output::Clock {
-                clocks: tap_clocks(self.counter.divisor()),
+                clocks_per_count: tap_clocks(self.counter.divisor()),
             }
         } else {
             Output::Level(self.port_levels(now) & 1 << OC1_PIN != 0)

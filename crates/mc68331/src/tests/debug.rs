@@ -9,7 +9,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::ChipSelect;
-use mc683xx_modules::sim::chip_selects::Termination;
+use mc683xx_modules::chip_select::Termination;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
@@ -57,7 +57,7 @@ fn chip_and_stop(program: &[u16]) -> (Mc68331, StopRequest) {
         )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
+        .fixed_memory(vec![0; RAM_BYTES], MemoryKind::Ram, Address(RAM))
         .unwrap();
     let request = builder.stop_request();
     (builder.build(), request)
@@ -501,10 +501,10 @@ fn freeze_stops_the_bus_monitor_with_frzbm() {
         )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
+        .fixed_memory(vec![0; RAM_BYTES], MemoryKind::Ram, Address(RAM))
         .unwrap();
     let slow = builder
-        .fixed_memory(Address(SLOW), vec![SLOW_BYTE; RAM_BYTES], MemoryKind::Ram)
+        .fixed_memory(vec![SLOW_BYTE; RAM_BYTES], MemoryKind::Ram, Address(SLOW))
         .unwrap();
     builder
         .set_fixed_timing(
@@ -602,7 +602,7 @@ fn breakpoint_chip(program: &[u16], answered: bool) -> (Mc68331, Option<Peripher
         )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
+        .fixed_memory(vec![0; RAM_BYTES], MemoryKind::Ram, Address(RAM))
         .unwrap();
     let responder = answered.then(|| {
         builder

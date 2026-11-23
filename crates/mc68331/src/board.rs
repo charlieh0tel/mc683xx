@@ -11,7 +11,6 @@ use std::mem;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::LPSTOP_BROADCAST;
 use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
@@ -27,11 +26,12 @@ use mc683xx_cpu32::memory::Page;
 use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::peripheral::BusCycle;
-use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::module;
 use mc683xx_modules::module::Module;
+use mc683xx_modules::peripheral::AnyMappedPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::peripheral::iack_address;
@@ -46,7 +46,6 @@ use mc683xx_modules::sim::chip_selects::DecodeRequest;
 use mc683xx_modules::sim::chip_selects::Lanes;
 use mc683xx_modules::sim::chip_selects::Match;
 use mc683xx_modules::sim::chip_selects::Selects;
-use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::ports::PortName;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
@@ -65,7 +64,7 @@ use crate::port::OutputChange;
 use crate::port::Port;
 use crate::port::PortChange;
 use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_modules::sim::chip_selects::Dsack;
+use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::sim::reset::ResetScope;
 
 /// The 68331's address lines, ADDR\[23:0\] (MC68331UM 4.4.1.1).
@@ -97,13 +96,6 @@ const TABLE_CLOCKS: u8 = 2;
 /// decode.
 pub(crate) const FIXED_TIMING: (PortSize, Cycles) =
     (PortSize::Bits16, Cycles::from_clocks(TABLE_CLOCKS as u64));
-
-/// A host peripheral the chip holds: a peripheral on chip-select pins with its
-/// own time, in the chip's snapshot, which the host can get back by
-/// type.
-pub(crate) trait Peripheral: MappedPeripheral + Timed + Save + Any {}
-
-impl<T: MappedPeripheral + Timed + Save + Any> Peripheral for T {}
 
 /// A module the chip holds, which the host can get back by type.
 pub(crate) trait Part: Module + Any {}
@@ -214,7 +206,7 @@ pub(crate) struct Board {
     /// the QSM, then the GPT.
     pub(crate) modules: Vec<Box<dyn Part>>,
     /// The host's peripherals.
-    pub(crate) peripherals: Vec<Box<dyn Peripheral>>,
+    pub(crate) peripherals: Vec<Box<dyn AnyMappedPeripheral>>,
     /// The resets each peripheral sees, by its index in `peripherals`.
     pub(crate) reset_scopes: Vec<ResetScope>,
     /// The resets the QSPI's peripheral sees.
@@ -520,12 +512,11 @@ impl Board {
         let level = |outputs: PortLevels| outputs.pin_levels(u8::MAX);
         let qsm = self.module::<Qsm>(QSM);
         let (port_gp, pwm) = self.module::<Gpt>(GPT).reported_outputs();
-        let pwm_mask = u8::from(stop.pwm_a) | u8::from(stop.pwm_b) << 1;
         // port GP as the output changes last reported it
         let outputs = |port| self.outputs_with(port, |_| port_gp);
         Seen {
             ports: Port::ALL.map(|port| level(outputs(port)) & stop.port(port)),
-            pwm: pwm & pwm_mask,
+            pwm: pwm & stop.pwm_mask(),
             frames: if stop.txd { qsm.untaken_frames() } else { 0 },
         }
     }
@@ -553,10 +544,9 @@ impl Board {
         if self.output_moved {
             return Some(now);
         }
-        let pwm = u8::from(stop.pwm_a) | u8::from(stop.pwm_b) << 1;
-        let fast = self
-            .module::<Gpt>(GPT)
-            .next_fast_edge(now, pwm, stop.port(Port::Gp));
+        let fast =
+            self.module::<Gpt>(GPT)
+                .next_fast_edge(now, stop.pwm_mask(), stop.port(Port::Gp));
         self.modules_next().into_iter().chain(fast).min()
     }
 
