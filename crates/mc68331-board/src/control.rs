@@ -33,7 +33,7 @@ pub(crate) struct Endpoints(pub(crate) BTreeMap<String, Vec<(usize, Kind)>>);
 
 impl Endpoints {
     /// The nets the endpoint `name` drives that carry `signal`.
-    pub(crate) fn carrying(&self, name: &str, signal: &Signal) -> Result<Vec<usize>, SendError> {
+    pub(crate) fn carrying(&self, name: &str, signal: Signal) -> Result<Vec<usize>, SendError> {
         let nets = self
             .0
             .get(name)
@@ -143,7 +143,7 @@ impl BoardControl {
     /// [`SendError::Endpoint`] if it drives no net,
     /// [`SendError::Kind`] if none it drives carries `signal`.
     pub fn send(&self, name: &str, signal: Signal) -> Result<(), SendError> {
-        self.0.endpoints.carrying(name, &signal)?;
+        self.0.endpoints.carrying(name, signal)?;
         self.state().inputs.push((name.to_owned(), signal));
         self.0.pending.store(true, Ordering::Release);
         Ok(())

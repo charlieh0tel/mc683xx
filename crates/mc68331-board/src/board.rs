@@ -1912,7 +1912,7 @@ impl<C: Chip> Board<C> {
     /// # Errors
     ///
     /// As [`send`](Self::send).
-    pub fn check_send(&self, name: &str, signal: &Signal) -> Result<(), SendError> {
+    pub fn check_send(&self, name: &str, signal: Signal) -> Result<(), SendError> {
         self.control.endpoints().carrying(name, signal).map(drop)
     }
 
@@ -1920,7 +1920,7 @@ impl<C: Chip> Board<C> {
     /// without the control.
     fn drive_endpoint(&mut self, name: &str, signal: Signal) -> Result<(), SendError> {
         let source = Source::External(name.to_owned());
-        let carrying = self.control.endpoints().carrying(name, &signal)?;
+        let carrying = self.control.endpoints().carrying(name, signal)?;
         let at = self.now;
         for net in carrying {
             self.drive_net(net, &source, at, signal);

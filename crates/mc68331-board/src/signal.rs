@@ -65,7 +65,7 @@ impl Kind {
 
     /// Whether a value of `signal` belongs on a net of this kind.
     #[must_use]
-    pub const fn carries(self, signal: &Signal) -> bool {
+    pub const fn carries(self, signal: Signal) -> bool {
         matches!(
             (self, signal),
             (Self::Logic | Self::Edge, Signal::Level(_))
