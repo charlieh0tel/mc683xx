@@ -1148,7 +1148,7 @@ macro_rules! chip_methods {
             /// The system clock's frequency in hertz, as SYNCR sets it.
             #[getter]
             fn system_hz(&self, py: Python<'_>) -> PyResult<u64> {
-                self.with_chip(py, |chip| Ok(chip.sim().clock().frequency().hz()))
+                self.with_chip(py, |chip| Ok(chip.sim().system_clock().frequency().hz()))
             }
 
             /// The levels on PCS[3:0].

@@ -685,7 +685,7 @@ impl chip::Chip for Mc68331 {
     }
 
     fn system_frequency(&self) -> Frequency {
-        self.sim().clock().frequency()
+        self.sim().system_clock().frequency()
     }
 
     fn memory(&self, memory: MemoryId) -> &[u8] {
@@ -757,7 +757,7 @@ impl chip::Chip for Mc68331 {
 
     fn clock_output(&self, pin: Pin) -> Option<Frequency> {
         (pin == Pin::Eclk).then(|| {
-            let clock = self.sim().clock();
+            let clock = self.sim().system_clock();
             Frequency::from_nanohertz(clock.frequency().nanohertz() / clock.eclk_divisor())
         })
     }
@@ -784,7 +784,7 @@ impl chip::Chip for Mc68331 {
                 _ => {}
             }
         }
-        let system_clock = self.sim().clock().frequency();
+        let system_clock = self.sim().system_clock().frequency();
         for sent in self.take_sci_transmitted() {
             let start = base.time(sent.start);
             let baud = u128::from(system_clock.nanohertz()) / u128::from(sent.bit.clocks());

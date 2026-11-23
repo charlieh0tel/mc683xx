@@ -581,7 +581,7 @@ impl Board {
     /// The SIM's system clock may have changed (SYNCR, or a reset): the
     /// QSM learns it.
     pub(crate) fn clock_changed(&mut self) {
-        let frequency = self.sim.clock().frequency();
+        let frequency = self.sim.system_clock().frequency();
         self.module_mut::<Qsm>(QSM).set_system_clock(frequency);
     }
 
@@ -857,13 +857,13 @@ impl Board {
             let value = match write {
                 None => self.sim.read(access(BLOCK)),
                 Some(value) => {
-                    let frequency = self.sim.clock().frequency();
+                    let frequency = self.sim.system_clock().frequency();
                     let written = self.sim.write(access(BLOCK), value)?;
                     self.decode_changed |= written.decode;
                     if written.decode {
                         self.clock_changed();
                     }
-                    if self.clock_stop && self.sim.clock().frequency() != frequency {
+                    if self.clock_stop && self.sim.system_clock().frequency() != frequency {
                         // the quantum ends after the instruction
                         self.clock_moved = true;
                         self.sync = true;
@@ -901,7 +901,10 @@ impl Board {
     /// at its port field (SIMRM 7.6), or with an external DSACK its
     /// peripheral's (memory answers at once, at the field's size).
     fn dsack(&mut self, found: Match, cycle: BusCycle) -> Option<(Cycles, PortSize)> {
-        if let Some(clocks) = found.termination.clocks(self.sim.clock().eclk_divisor()) {
+        if let Some(clocks) = found
+            .termination
+            .clocks(self.sim.system_clock().eclk_divisor())
+        {
             return Some((clocks, found.port));
         }
         if !found.asserted {
@@ -1484,7 +1487,7 @@ impl Board {
                 })
                 .map(|fixed| (fixed.memory, fixed.timing));
         }
-        let eclk = self.sim.clock().eclk_divisor();
+        let eclk = self.sim.system_clock().eclk_divisor();
         let mut first: Option<(Cycles, PortSize)> = None;
         let mut wired = None;
         let mut lanes = Lanes {

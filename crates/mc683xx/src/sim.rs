@@ -452,9 +452,11 @@ impl Sim {
         self.reset_request.take()
     }
 
-    /// The clock and board time.
+    /// The system clock as the SIM makes it: its source, SYNCR and
+    /// frequency, counted in [`Cycle`]s.  A board's
+    /// `Board::system_clock` is the same clock on board time.
     #[must_use]
-    pub const fn clock(&self) -> &SystemClock {
+    pub const fn system_clock(&self) -> &SystemClock {
         &self.clock
     }
 

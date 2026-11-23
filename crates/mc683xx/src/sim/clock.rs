@@ -157,7 +157,9 @@ impl ClockSource {
 }
 
 /// The system clock: its source, SYNCR, and the EXTAL period and
-/// system clock it last changed at.
+/// system clock it last changed at.  It counts the chip's [`Cycle`]s;
+/// a board's `TimeBase` (`Board::system_clock`) places the same clock
+/// on board time.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SystemClock {
     /// The source MODCLK chose.

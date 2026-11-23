@@ -217,7 +217,7 @@ fn timers_across_a_syncr_write(from: (u32, u64), to: (u32, u64)) {
     write(&mut timer, 0x22, Size::Word, 0x0542, Cycle::ZERO);
     write(&mut timer, 0x24, Size::Word, 0x0001, Cycle::ZERO);
     write(&mut timer, 0x04, Size::Word, to, half);
-    assert_eq!(timer.clock().tick(half), 0);
+    assert_eq!(timer.system_clock().tick(half), 0);
     assert_eq!(timer.next_event(), Some(at(4)));
     timer.advance(Cycle::from_clocks(at(4).clocks() - 1));
     assert_eq!(timer.timer_request(), None);
@@ -384,10 +384,13 @@ fn a_test_reset_leaves_the_clock_and_a_loss_of_clock_reset_resets_it() {
     ] {
         let mut sim = sim();
         write(&mut sim, 0x04, Size::Word, 0xcf00, Cycle::ZERO);
-        let fast = sim.clock().frequency();
+        let fast = sim.system_clock().frequency();
         sim.reset(cause, Cycle::from_clocks(1000));
         assert_eq!(read(&mut sim, 0x04, Size::Word), syncr, "{cause:?}");
-        assert_eq!(sim.clock().frequency() == fast, cause == ResetCause::Test);
+        assert_eq!(
+            sim.system_clock().frequency() == fast,
+            cause == ResetCause::Test
+        );
         assert_eq!(sim.reset_status(), cause.status());
     }
 }

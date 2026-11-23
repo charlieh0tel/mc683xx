@@ -1247,11 +1247,11 @@ fn a_test_reset_keeps_the_system_clock() {
     // no CLKRST for the test submodule's reset (SIMRM Table 8-1)
     let (mut chip, _) = booting(&[NOP]);
     write_register(&mut chip, SIM + 0x04, 0xcf00);
-    let fast = chip.sim().clock().frequency();
+    let fast = chip.sim().system_clock().frequency();
     chip.reset_for(ResetCause::Test);
-    assert_eq!(chip.sim().clock().frequency(), fast);
+    assert_eq!(chip.sim().system_clock().frequency(), fast);
     chip.reset_for(ResetCause::LossOfClock);
-    assert_ne!(chip.sim().clock().frequency(), fast);
+    assert_ne!(chip.sim().system_clock().frequency(), fast);
 }
 
 #[test]
@@ -1387,7 +1387,7 @@ fn a_halt_monitor_reset_that_slows_the_clock_ends_the_run() {
         chip.run_for(Cycles::from_clocks(100_000)).stop,
         Stop::Budget
     );
-    assert_eq!(chip.sim().clock().frequency().hz(), 16_777_216);
+    assert_eq!(chip.sim().system_clock().frequency().hz(), 16_777_216);
     chip.take_events();
     let run = chip.run_for(Cycles::from_clocks(100_000));
     let events = chip.take_events();
@@ -1401,7 +1401,7 @@ fn a_halt_monitor_reset_that_slows_the_clock_ends_the_run() {
         )),
         "{events:?}"
     );
-    assert_eq!(chip.sim().clock().frequency().hz(), 8_388_608);
+    assert_eq!(chip.sim().system_clock().frequency().hz(), 8_388_608);
     assert!(
         run.cycles < Cycles::from_clocks(1_000),
         "ends at the reset: {:?}",
@@ -1497,7 +1497,7 @@ fn a_faster_clock_keeps_extal_time() {
     write_register(&mut chip, SIM + 0x04, 0xcf00);
     write_register(&mut chip, SIM + 0x22, 0x0650);
     write_register(&mut chip, SIM + 0x24, 0x0008);
-    assert_eq!(chip.sim().clock().frequency().hz(), 16_777_216);
+    assert_eq!(chip.sim().system_clock().frequency().hz(), 16_777_216);
     assert_eq!(
         chip.board.next_event(),
         Some(Cycle::from_clocks(8 * 4 * 512))
@@ -1523,7 +1523,7 @@ fn a_clock_change_can_end_the_run() {
         "after the write: {:?}",
         run.cycles
     );
-    assert_eq!(chip.sim().clock().frequency().hz(), 16_777_216);
+    assert_eq!(chip.sim().system_clock().frequency().hz(), 16_777_216);
     assert!(
         chip.run_for(budget).cycles >= budget,
         "and on, with no change"
@@ -2013,7 +2013,7 @@ fn an_external_clock_board_uses_the_sci_and_the_gpt() {
         )
         .unwrap();
     let mut chip = builder.build();
-    assert_eq!(chip.sim().clock().frequency().hz(), 16_000_000);
+    assert_eq!(chip.sim().system_clock().frequency().hz(), 16_000_000);
     write_register(&mut chip, QSM + 0x08, 52);
     write_register(&mut chip, QSM + 0x0a, 0x0004);
     chip.sci_receive(Frame::Data(0x55));

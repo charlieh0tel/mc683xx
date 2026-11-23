@@ -1462,8 +1462,11 @@ hand.  The keys are in `docs/board-files.md`.
   peripherals' next events and the drives in flight, in (time, sequence)
   order, and runs the chip with `run_for(budget)` in quanta that end at
   the earliest of them.  Chip cycles convert to board time from an
-  anchor (`TimeBase`: a chip `Cycle`, its time, the system clock), public so peripherals
-  convert as the board does, moved only at a sync point in
+  anchor (`TimeBase`: a chip `Cycle`, its time, the system clock;
+  `Board::system_clock`, the same clock the SIM makes and counts in
+  `Cycle`s as `Sim::system_clock`, each layer viewing it in its own
+  time), public so peripherals convert as the board does, moved only
+  at a sync point in
   which the frequency changed (SYNCR, a reset), so it never drifts;
   toward the chip a time rounds up to the first clock at or after it
   (Peripherals, GPT input edges), toward the board a clock rounds

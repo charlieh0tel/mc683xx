@@ -309,7 +309,7 @@ impl Builder {
     #[must_use]
     pub fn new(configuration: Configuration) -> Self {
         let sim = Sim::new(configuration, Cycle::ZERO);
-        let system_clock = sim.clock().frequency();
+        let system_clock = sim.system_clock().frequency();
         Self {
             configuration,
             memory: chip_memory(),
@@ -372,7 +372,7 @@ impl Builder {
     /// configuration's clock pins give it (MC68331UM 4.3).
     #[must_use]
     pub const fn system_frequency(&self) -> Frequency {
-        self.board.sim.clock().frequency()
+        self.board.sim.system_clock().frequency()
     }
 
     /// The handle by which the host asks the chip's runs to stop, for
@@ -916,11 +916,11 @@ impl Mc68331 {
     /// the reset changes a clock the host stops on, a peripheral it
     /// reached asks for a sync, or it reaches a watched output.
     fn reset_in_run(&mut self, cause: ResetCause) -> (Stop, bool) {
-        let frequency = self.board.sim.clock().frequency();
+        let frequency = self.board.sim.system_clock().frequency();
         self.reset_as(cause, false);
         let stop = self.cpu.idle().unwrap_or(Stop::Budget);
         let moved = self.board.outputs_moved() | self.board.output_stop.reset;
-        let ends = self.board.clock_stop && self.board.sim.clock().frequency() != frequency
+        let ends = self.board.clock_stop && self.board.sim.system_clock().frequency() != frequency
             || self.board.sync_request.take()
             || moved;
         (stop, ends)

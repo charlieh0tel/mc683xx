@@ -1712,7 +1712,8 @@ impl<C: Chip> Board<C> {
 
     /// The chip's system clock on board time, as of the last quantum's
     /// end: where a peripheral converts between board time and the chip's
-    /// clocks.
+    /// clocks.  The SIM's `Sim::system_clock` is the same clock as the
+    /// chip counts it.
     #[must_use]
     pub fn system_clock(&self) -> TimeBase {
         self.shared.base.get()

@@ -85,7 +85,7 @@ fn main() -> Result<(), BuildError> {
   with `ClockSourceError::FractionalHertz`, since the chip's snapshot
   saves its clocks as hertz, and `synthesizer` a reference outside 25
   to 50 kHz (SIMRM 4.4.1) with `ClockSourceError::ReferenceRange`.  `Builder::system_frequency()` gives the
-  system clock out of reset, `sim().clock().frequency()` as SYNCR sets
+  system clock out of reset, `sim().system_clock().frequency()` as SYNCR sets
   it.
   `Builder::default()` is DATA high and the 32.768 kHz crystal.
 - `memory(bytes, kind, pins)`: RAM or ROM by `mc683xx_cpu32::memory::MemoryKind`, a whole number of

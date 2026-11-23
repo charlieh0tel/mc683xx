@@ -1054,7 +1054,7 @@ fn run_chip(
             clippy::cast_precision_loss,
             reason = "seconds of a few clocks' worth"
         )]
-        let budget = (seconds * chip.sim().clock().frequency().hz() as f64) as u64;
+        let budget = (seconds * chip.sim().system_clock().frequency().hz() as f64) as u64;
         if chip.now().clocks() >= budget {
             break format!("the time, {seconds} s, at clock {}", chip.now().clocks());
         }
@@ -1142,7 +1142,7 @@ fn run_chip(
                 clippy::cast_precision_loss,
                 reason = "seconds of a few clocks' worth"
             )]
-            let after = (after_port * chip.sim().clock().frequency().hz() as f64) as u64;
+            let after = (after_port * chip.sim().system_clock().frequency().hz() as f64) as u64;
             stop_at = Some(chip.now().clocks() + after);
             println!(
                 "boot-diff: TBB written as the reference's at clock {}",
