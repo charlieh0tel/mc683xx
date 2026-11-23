@@ -23,7 +23,6 @@ use mc683xx_cpu32::cpu::bare::End;
 use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
-use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
@@ -36,13 +35,11 @@ use mc683xx_cpu32::memory::MemoryError;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::RegionId;
-use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::peripheral::AnyMappedPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
-use mc683xx_modules::peripheral::SpiPeripheral;
-use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::Qsm;
@@ -569,7 +566,7 @@ impl Builder {
 
     /// Adds `peripheral`, which every reset reaches until `set_reset_scope`
     /// says otherwise.
-    fn add<D: MappedPeripheral + Timed + Save + Any>(&mut self, peripheral: D) -> PeripheralId {
+    fn add<D: AnyMappedPeripheral>(&mut self, peripheral: D) -> PeripheralId {
         self.board.peripherals.push(Box::new(peripheral));
         self.board.reset_scopes.push(ResetScope::ALL);
         self.board.dsack_pins.push(None);
@@ -579,13 +576,13 @@ impl Builder {
 
     /// A peripheral on `pins`, which it tells apart by
     /// [`BusCycle::select`](mc683xx_cpu32::peripheral::BusCycle::select).
-    /// It says whether it saves ([`Save`]): the chip's snapshot holds
+    /// It says whether it saves ([`Save`](mc683xx_cpu32::cpu::state::Save)): the chip's snapshot holds
     /// every peripheral and model, in the order added.
     ///
     /// # Errors
     ///
     /// [`BuildError::Wired`] if one of `pins` is already wired.
-    pub fn peripheral<D: MappedPeripheral + Timed + Save + Any>(
+    pub fn peripheral<D: AnyMappedPeripheral>(
         &mut self,
         peripheral: D,
         pins: &[ChipSelect],
@@ -612,7 +609,7 @@ impl Builder {
     ///
     /// [`BuildError::Window`] for a window that is empty or runs past
     /// ADDR\[23:0\].
-    pub fn bus_peripheral<D: MappedPeripheral + Timed + Save + Any>(
+    pub fn bus_peripheral<D: AnyMappedPeripheral>(
         &mut self,
         peripheral: D,
         decodes: &[BusDecode],
@@ -642,14 +639,11 @@ impl Builder {
 
     /// A peripheral on no pin: a model beside the CPU that only keeps time,
     /// or drives an interrupt.  In the snapshot as a peripheral is.
-    pub fn unwired_peripheral<D: MappedPeripheral + Timed + Save + Any>(
-        &mut self,
-        peripheral: D,
-    ) -> PeripheralId {
+    pub fn unwired_peripheral<D: AnyMappedPeripheral>(&mut self, peripheral: D) -> PeripheralId {
         self.add(peripheral)
     }
 
-    /// The resets that reach `peripheral`'s reset input ([`MappedPeripheral::reset`]):
+    /// The resets that reach `peripheral`'s reset input ([`MappedPeripheral::reset`](mc683xx_cpu32::peripheral::MappedPeripheral::reset)):
     /// all by default, as on the RESET pin; a board that wires it
     /// elsewhere says which (SIMRM 8.2).
     pub fn set_reset_scope(&mut self, peripheral: PeripheralId, scope: ResetScope) {
@@ -658,9 +652,9 @@ impl Builder {
 
     /// `peripheral` on the QSPI's pins, replacing any: it sees each
     /// transfer and the levels on PCS\[3:0\] (QSMRM 4).  It says
-    /// whether it saves ([`Save`]), as a peripheral does: the chip's snapshot
+    /// whether it saves ([`Save`](mc683xx_cpu32::cpu::state::Save)), as a peripheral does: the chip's snapshot
     /// holds it.
-    pub fn qspi<D: SpiPeripheral + Save + Any>(&mut self, peripheral: D) {
+    pub fn qspi<D: AnySpiPeripheral>(&mut self, peripheral: D) {
         self.board
             .module_mut::<Qsm>(QSM)
             .attach(Box::new(peripheral));
@@ -679,7 +673,7 @@ impl Builder {
     }
 
     /// The resets that reach the QSPI's peripheral
-    /// ([`SpiPeripheral::reset`]): all by default, as `set_reset_scope` for a
+    /// ([`SpiPeripheral::reset`](mc683xx_modules::peripheral::SpiPeripheral::reset)): all by default, as `set_reset_scope` for a
     /// peripheral.
     pub const fn set_qspi_reset_scope(&mut self, scope: ResetScope) {
         self.board.qspi_reset_scope = scope;

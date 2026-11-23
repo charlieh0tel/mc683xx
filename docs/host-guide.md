@@ -98,7 +98,8 @@ fn main() -> Result<(), BuildError> {
   its port and wait states (see Fixed memory).
 - `set_reload_scope(memory, ResetScope)` says which resets put a memory's
   contents back as built; none do by default (see Fixed memory).
-- `peripheral(peripheral, pins)` puts a `MappedPeripheral + Timed + Save` on pins; a peripheral on
+- `peripheral(peripheral, pins)` puts a `MappedPeripheral + Timed + Save`
+  (an `AnyMappedPeripheral`, in `mc683xx-modules`) on pins; a peripheral on
   several (separate read and write selects, a register select and an
   acknowledge select) tells them apart by `BusCycle::select`.  `unwired_peripheral`
   adds one on no pin: something that only keeps time or drives an

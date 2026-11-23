@@ -11,7 +11,6 @@ use std::mem;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::LPSTOP_BROADCAST;
 use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
@@ -27,11 +26,11 @@ use mc683xx_cpu32::memory::Page;
 use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::peripheral::BusCycle;
-use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::module;
 use mc683xx_modules::module::Module;
+use mc683xx_modules::peripheral::AnyMappedPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::peripheral::iack_address;
@@ -97,13 +96,6 @@ const TABLE_CLOCKS: u8 = 2;
 /// decode.
 pub(crate) const FIXED_TIMING: (PortSize, Cycles) =
     (PortSize::Bits16, Cycles::from_clocks(TABLE_CLOCKS as u64));
-
-/// A host peripheral the chip holds: a peripheral on chip-select pins with its
-/// own time, in the chip's snapshot, which the host can get back by
-/// type.
-pub(crate) trait Peripheral: MappedPeripheral + Timed + Save + Any {}
-
-impl<T: MappedPeripheral + Timed + Save + Any> Peripheral for T {}
 
 /// A module the chip holds, which the host can get back by type.
 pub(crate) trait Part: Module + Any {}
@@ -214,7 +206,7 @@ pub(crate) struct Board {
     /// the QSM, then the GPT.
     pub(crate) modules: Vec<Box<dyn Part>>,
     /// The host's peripherals.
-    pub(crate) peripherals: Vec<Box<dyn Peripheral>>,
+    pub(crate) peripherals: Vec<Box<dyn AnyMappedPeripheral>>,
     /// The resets each peripheral sees, by its index in `peripherals`.
     pub(crate) reset_scopes: Vec<ResetScope>,
     /// The resets the QSPI's peripheral sees.

@@ -3,12 +3,15 @@
 //! module keeps, the cycles a peripheral on no select decodes, and the
 //! QSPI's peripherals.
 
-use mc683xx_cpu32::cycles::Cycle;
+use std::any::Any;
 
+use mc683xx_cpu32::cpu::state::Save;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
+use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 
@@ -74,6 +77,18 @@ pub trait Timed {
         let _ = now;
     }
 }
+
+/// A mapped peripheral the chip holds, which the host can get back by
+/// type (`mc683xx-mc68331`'s `Builder::peripheral`, `bus_peripheral`
+/// and `unwired_peripheral` name it as their bound).  It keeps its own
+/// time ([`Timed`]) and says whether it saves ([`Save`]): the chip's
+/// snapshot holds it.
+///
+/// Every [`MappedPeripheral`] that is [`Timed`], [`Save`] and `'static`
+/// is one: a host implements those three, never this.
+pub trait AnyMappedPeripheral: MappedPeripheral + Timed + Save + Any {}
+
+impl<T: MappedPeripheral + Timed + Save + Any> AnyMappedPeripheral for T {}
 
 /// SCK's level between transfers (QSMRM 4.3.1, CPOL).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
