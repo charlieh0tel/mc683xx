@@ -28,6 +28,7 @@ use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::module;
 use mc683xx_modules::module::Module;
 use mc683xx_modules::peripheral::AnyMappedPeripheral;
@@ -45,7 +46,6 @@ use mc683xx_modules::sim::chip_selects::DecodeRequest;
 use mc683xx_modules::sim::chip_selects::Lanes;
 use mc683xx_modules::sim::chip_selects::Match;
 use mc683xx_modules::sim::chip_selects::Selects;
-use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::ports::PortName;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
@@ -64,7 +64,7 @@ use crate::port::OutputChange;
 use crate::port::Port;
 use crate::port::PortChange;
 use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_modules::sim::chip_selects::Dsack;
+use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::sim::reset::ResetScope;
 
 /// The 68331's address lines, ADDR\[23:0\] (MC68331UM 4.4.1.1).

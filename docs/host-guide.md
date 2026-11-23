@@ -366,7 +366,8 @@ refuses.
   its reads, or a select shared by a read-only and a write-only one,
   times each direction by its own.  Each wait state costs the
   CPU a clock, so slow peripherals cost what they do on the board.
-  `Builder::set_dsack(peripheral, Dsack)` states which DSACK pins it drives:
+  `Builder::set_dsack(peripheral, Dsack)` (`Dsack` and `Termination` are in
+  `mc683xx_modules::chip_select`) states which DSACK pins it drives:
   the chip then checks PEPAR at each such cycle (a pin assigned as
   port E ends no cycle, SIMRM 9.1, told as `Event::Dsack`; `Event` is
   `#[non_exhaustive]`), and the port size they encode sizes the cycle

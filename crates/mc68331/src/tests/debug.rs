@@ -9,7 +9,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::ChipSelect;
-use mc683xx_modules::sim::chip_selects::Termination;
+use mc683xx_modules::chip_select::Termination;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;

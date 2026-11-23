@@ -25,13 +25,13 @@ use mc683xx_mc68331::gpt::PwmChange;
 use mc683xx_mc68331::port::OutputChange;
 use mc683xx_mc68331::port::PortChange;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::chip_select::Dsack;
+use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::qsm::qspi::MOST_BITS;
 use mc683xx_modules::sim;
 use mc683xx_modules::sim::Configuration;
-use mc683xx_modules::sim::chip_selects::Dsack;
-use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::clock::ClockSource;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
@@ -748,7 +748,7 @@ const fn addresses(begin: u32, end: u32) -> RangeInclusive<Address> {
     Address(begin)..=Address(end)
 }
 
-/// The DSACK pins a peripheral drives (Rust's `chip_selects::Dsack`).
+/// The DSACK pins a peripheral drives (Rust's `chip_select::Dsack`).
 #[pyclass(
     name = "Dsack",
     module = "mc683xx",
@@ -780,7 +780,7 @@ impl From<DsackView> for Dsack {
 }
 
 /// How a select would end a cycle it matches (Rust's
-/// `chip_selects::Termination`; SIMRM 7.5, 7.7), a class per variant.
+/// `chip_select::Termination`; SIMRM 7.5, 7.7), a class per variant.
 #[pyclass(
     name = "Termination",
     module = "mc683xx",

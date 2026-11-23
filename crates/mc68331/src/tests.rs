@@ -72,7 +72,7 @@ use crate::state;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::PeripheralId;
-use mc683xx_modules::sim::chip_selects::Dsack;
+use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::sim::reset::ResetScope;
 
 mod bus;

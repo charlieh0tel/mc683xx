@@ -78,8 +78,8 @@ use crate::port::NoInputsError;
 use crate::port::OutputChange;
 use crate::port::Port;
 use crate::port::PortChange;
-use mc683xx_modules::sim::chip_selects::Dsack;
-use mc683xx_modules::sim::chip_selects::Termination;
+use mc683xx_modules::chip_select::Dsack;
+use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::sim::reset::ResetScope;
 
 /// The index in the chip's peripherals of `id`, which the chip numbers
