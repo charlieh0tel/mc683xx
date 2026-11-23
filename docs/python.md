@@ -995,7 +995,8 @@ chip.run_for(500)
   Rust core could give but none does today.
 - `NotImplementedError`: a module that cannot save; or any other value
   this build's bindings have no Python value for (a fault cause, a
-  role, an invalid access's reason, a PWM output), named where it
+  role, an invalid access's reason, a PWM output, a gdb session's
+  ending), named where it
   prints, which a newer Rust crate could give
   but none does today.  `take_events()` never raises and always takes
   every event: one it cannot convert (a kind the bindings lack, or a

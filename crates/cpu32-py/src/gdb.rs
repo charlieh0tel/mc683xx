@@ -30,6 +30,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::pyclass;
 use pyo3::types::PyAnyMethods;
 
+use crate::error::Error;
 use crate::mapped::Pending;
 
 /// Where `serve_gdb` waits for gdb unless told: gdb's usual port, on
@@ -55,6 +56,24 @@ pub(crate) enum Ending {
 
 enum_names!(Ending);
 
+impl TryFrom<mc683xx_gdb::Ending> for Ending {
+    type Error = Error;
+
+    /// The ending, or [`Error::Unmapped`] for one the bindings do not
+    /// know.
+    fn try_from(ending: mc683xx_gdb::Ending) -> Result<Self, Error> {
+        Ok(match ending {
+            mc683xx_gdb::Ending::Detached => Self::Detached,
+            mc683xx_gdb::Ending::Killed => Self::Killed,
+            mc683xx_gdb::Ending::HungUp => Self::HungUp,
+            _ => return Err(Error::unmapped(GDB_ENDING)),
+        })
+    }
+}
+
+/// A gdb session's ending as an [`Error::Unmapped`] names its kind.
+const GDB_ENDING: &str = "gdb session ending";
+
 /// A Rust target whose Python peripherals' exceptions wait in `pending`:
 /// raised when the quantum they stopped ends.
 pub(crate) struct Checked<'a, T> {
@@ -64,11 +83,7 @@ pub(crate) struct Checked<'a, T> {
     pub(crate) pending: &'a Pending,
 }
 
-impl<T> Target for Checked<'_, T>
-where
-    T: Target,
-    T::Error: Display,
-{
+impl<T: Target> Target for Checked<'_, T> {
     type Error = PyErr;
 
     fn cpu_scope<R>(&mut self, call: impl FnOnce(&mut CpuControl<'_>) -> R) -> Option<R> {
@@ -179,15 +194,27 @@ pub(crate) fn serve<T: Target<Error = PyErr>>(
     connection: Connection<'_>,
 ) -> PyResult<Ending> {
     match mc683xx_gdb::serve(target, connection) {
-        Ok(mc683xx_gdb::Ending::Detached) => Ok(Ending::Detached),
-        Ok(mc683xx_gdb::Ending::Killed) => Ok(Ending::Killed),
-        Ok(mc683xx_gdb::Ending::HungUp) => Ok(Ending::HungUp),
+        Ok(ending) => Ok(ending.try_into()?),
         Err(SessionError::Target { error }) => Err(error),
         Err(SessionError::Connection { error }) => Err(raised(error)),
         Err(SessionError::Protocol(text)) => Err(PyRuntimeError::new_err(text)),
-        Ok(_) => Err(PyRuntimeError::new_err(
-            "the gdb session ended in a way the bindings do not know",
-        )),
         Err(error) => Err(PyRuntimeError::new_err(error.to_string())),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Ending;
+
+    #[test]
+    fn every_ending_maps_to_its_member() {
+        let endings = [
+            (mc683xx_gdb::Ending::Detached, Ending::Detached),
+            (mc683xx_gdb::Ending::Killed, Ending::Killed),
+            (mc683xx_gdb::Ending::HungUp, Ending::HungUp),
+        ];
+        for (ending, member) in endings {
+            assert_eq!(Ending::try_from(ending).ok(), Some(member), "{ending:?}");
+        }
     }
 }
