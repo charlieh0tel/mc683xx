@@ -1288,7 +1288,9 @@ mod tests {
                 high_counts: 1,
                 clocks_per_count: None,
             },
-            pwm::Output::Clock { clocks: None },
+            pwm::Output::Clock {
+                clocks_per_count: None,
+            },
         ] {
             assert!(Output::try_from(output).is_ok());
         }

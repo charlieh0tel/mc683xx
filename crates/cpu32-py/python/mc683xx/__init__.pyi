@@ -711,12 +711,13 @@ class Output:
     @final
     class Clock(Output):
         """A counter's clock: PWMCNT's on PWMA (PPROUT), TCNT's on OC1
-        (CPROUT)."""
+        (CPROUT); `clocks_per_count` system clocks a count, or None for
+        PCLK."""
 
-        __match_args__ = ("clocks",)
-        def __new__(cls, clocks: int | None) -> Output.Clock: ...
+        __match_args__ = ("clocks_per_count",)
+        def __new__(cls, clocks_per_count: int | None) -> Output.Clock: ...
         @property
-        def clocks(self) -> int | None: ...
+        def clocks_per_count(self) -> int | None: ...
 
 @disjoint_base
 class Event:

@@ -122,7 +122,7 @@ pub enum Output {
     /// PWMA (PPROUT), TCNT's on OC1 (CPROUT).
     Clock {
         /// System clocks a count, or `None` for PCLK.
-        clocks: Option<Cycles>,
+        clocks_per_count: Option<Cycles>,
     },
 }
 
@@ -343,12 +343,12 @@ impl Pwm {
 
     /// What `channel`'s pin carries at the prescaler's `count`.
     pub(super) const fn output(&self, channel: Channel, count: u64) -> Output {
-        let clocks = tap_clocks(Self::divisor(self.control));
+        let clocks_per_count = tap_clocks(Self::divisor(self.control));
         if self.forced(channel) {
             return Output::Level(self.control & channel.bit(PWMC_F1A) != 0);
         }
         if self.clock_out(channel) {
-            return Output::Clock { clocks };
+            return Output::Clock { clocks_per_count };
         }
         let (duty, high) = self.effective(channel, self.count(count));
         if high || duty == 0 {
@@ -358,7 +358,7 @@ impl Pwm {
         Output::Wave {
             period_counts: unit << DUTY_BITS,
             high_counts: unit * duty as u32,
-            clocks_per_count: clocks,
+            clocks_per_count,
         }
     }
 }

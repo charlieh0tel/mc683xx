@@ -850,7 +850,7 @@ fn pwm_duty_takes_effect_at_the_end_of_a_period() {
     assert_eq!(
         gpt.pwm(Channel::A, Cycle::from_clocks(2000)),
         Output::Clock {
-            clocks: Some(Cycles::from_clocks(2))
+            clocks_per_count: Some(Cycles::from_clocks(2))
         }
     );
 }
@@ -1137,7 +1137,7 @@ fn cprout_drives_tcnts_clock_on_oc1() {
     assert_eq!(
         gpt.oc1(Cycle::from_clocks(10)),
         Output::Clock {
-            clocks: Some(Cycles::from_clocks(8))
+            clocks_per_count: Some(Cycles::from_clocks(8))
         }
     );
     assert_eq!(gpt.next_event(), None);
@@ -1216,7 +1216,7 @@ fn pprout_drives_pwmcnts_clock_on_pwma() {
     assert_eq!(
         gpt.pwm(Channel::A, Cycle::from_clocks(10)),
         Output::Clock {
-            clocks: Some(Cycles::from_clocks(8))
+            clocks_per_count: Some(Cycles::from_clocks(8))
         }
     );
     assert!(gpt.pwm_level(Channel::A, Cycle::from_clocks(16)));

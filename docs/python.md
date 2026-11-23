@@ -59,7 +59,7 @@ rename renames the Python name with it.  The deliberate differences:
   clocks or picoseconds.  A count names its unit: `Output.Wave`'s
   `period_counts` and `high_counts` are PWMCNT counts, its
   `clocks_per_count` system clocks a count, an `int | None` (`None`
-  when PCLK clocks PWMCNT).  A board run's span, Rust's `Span` or
+  when PCLK clocks PWMCNT), as is `Output.Clock`'s.  A board run's span, Rust's `Span` or
   `NonZeroSpan`, is a keyword pair, `seconds=` (a `float`) or
   `picoseconds=` (an `int`), and its quantum `quantum_picoseconds=`.
 - **Settings:** a struct of settings is keyword arguments
