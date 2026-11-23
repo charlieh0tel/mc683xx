@@ -87,6 +87,17 @@ const AFTER_HELP: &str = "Ctrl-C stops the run at its next sync point: the `stop
 written and --save still saves (exit status 4).  A second Ctrl-C ends the process at once, \
 saving nothing (exit status 130).
 
+Bindings: the first stdio or tty on the command line takes standard input, and stdout leaves \
+it to another binding; bindings that share standard output each write to it.  An endpoint that drives no serial net takes no \
+input: stdio (with standard input) and pty are refused there, and stdout, a file or null \
+serves.  Standard input that is not a terminal (a file or a pipe) is read to its end when \
+input first goes in, and fed a byte a turn, so the run is the same each time: the run waits \
+there for the pipe to close.  A terminal's is live.  tty takes the terminal raw, as a serial \
+console: each key goes in as typed, with no echo or line editing, Ctrl-C and Ctrl-Z \
+included, and Ctrl-] ends the run as Ctrl-C would; the terminal is put back as it was when \
+the run ends.  It needs standard input to be a terminal.  Output a pty's buffer cannot take, with nobody reading it, is dropped, as a \
+UART's is with nothing on the line.
+
 Numbers (--cycles, --watch-code, --seed) are decimal, 0x hexadecimal or 0b binary, with _ \
 between digits allowed.
 
@@ -138,25 +149,12 @@ struct Arguments {
     /// once.
     #[arg(long = "set")]
     settings: Vec<String>,
-    /// Bind a run-time endpoint, NAME=stdio|stdout|tty|pty|null|file:PATH
-    /// (tty and pty on Unix only); may be given more than once.  Unbound
-    /// endpoints are null.  stdout writes what stdio writes and reads
-    /// nothing, leaving standard input to another binding; bindings
-    /// that share standard output each write to it, and the first
-    /// stdio on the command line takes standard input.  An endpoint that drives no serial
-    /// net takes no input: stdio (with standard input) and pty are
-    /// refused there, and stdout, a file or null serves.  Output a
-    /// pty's buffer cannot take, with nobody reading it, is dropped, as
-    /// a UART's is with nothing on the line.  With stdio, standard
-    /// input that is not a terminal (a file or a pipe) is read to its
-    /// end when input first goes in, and fed a byte a turn, so the run
-    /// is the same each time: the run waits there for the pipe to
-    /// close.  A terminal's is live.  tty takes the terminal on standard
-    /// input raw, as a serial console: each key goes in as typed, with
-    /// no echo or line editing, Ctrl-C and Ctrl-Z included, and Ctrl-]
-    /// ends the run as Ctrl-C would; the terminal is put back as it was
-    /// when the run ends.  It needs standard input to be a terminal, and
-    /// to itself: the first stdio or tty on the command line takes it.
+    /// Bind a run-time endpoint, NAME=stdio|stdout|tty|pty|null|file:PATH;
+    /// may be given more than once.  Unbound endpoints are null.  stdio:
+    /// standard output, and standard input.  stdout: standard output
+    /// only.  tty: the terminal on standard input, raw.  pty: a new
+    /// pseudo-terminal.  null: nothing.  A file: output written to PATH.
+    /// tty and pty are Unix's.  Bindings, after the options, says more.
     #[arg(long = "bind", value_parser = pair::<How>)]
     bindings: Vec<(String, How)>,
     /// What to trace on standard error, comma-separated.
