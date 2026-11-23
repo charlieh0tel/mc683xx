@@ -23,7 +23,7 @@ use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
-use super::AccessError;
+use super::BusCycleError;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::chip::MemoryId;
@@ -261,11 +261,11 @@ fn write(chip: &mut Mc68331, address: u32, size: Size, value: u32) {
         .unwrap();
 }
 
-fn read(chip: &mut Mc68331, address: u32, size: Size) -> Result<u32, AccessError> {
+fn read(chip: &mut Mc68331, address: u32, size: Size) -> Result<u32, BusCycleError> {
     chip.bus_read(Address(address), size, SUPERVISOR)
 }
 
-fn peek(chip: &Mc68331, address: u32, size: Size) -> Result<u32, AccessError> {
+fn peek(chip: &Mc68331, address: u32, size: Size) -> Result<u32, BusCycleError> {
     chip.peek(Address(address), size, SUPERVISOR)
 }
 
@@ -311,7 +311,7 @@ fn a_peripheral_sees_the_hosts_cycles_and_never_its_peeks() {
     write(&mut chip, PERIPHERAL_BASE + 1, Size::Byte, 0x56);
     assert_eq!(
         peek(&chip, PERIPHERAL_BASE, Size::Word),
-        Err(AccessError::Unpeekable)
+        Err(BusCycleError::Unpeekable)
     );
     let peripheral = chip.peripheral::<Recorder>(recorder).unwrap();
     assert_eq!(peripheral.reads.len(), 1);
@@ -330,35 +330,35 @@ fn the_host_sees_errors_by_kind() {
     let Board { mut chip, .. } = board(&[BRANCH_TO_SELF], None);
     assert_eq!(
         read(&mut chip, FAILING_BASE, Size::Word),
-        Err(AccessError::BusError)
+        Err(BusCycleError::BusError(Address(FAILING_BASE)))
     );
     assert_eq!(
         read(&mut chip, RAM_BASE + 1, Size::Word),
-        Err(AccessError::Misaligned)
+        Err(BusCycleError::Misaligned(Address(RAM_BASE + 1)))
     );
     assert_eq!(
         peek(&chip, RAM_BASE + 1, Size::Long),
-        Err(AccessError::Misaligned)
+        Err(BusCycleError::Misaligned(Address(RAM_BASE + 1)))
     );
     assert_eq!(
         chip.bus_write(Address(RAM_BASE), Size::Byte, SUPERVISOR, 0x100),
-        Err(AccessError::Width(0x100))
+        Err(BusCycleError::Width(0x100))
     );
     // CSBOOT down to 64 Kbytes: past it nothing answers
     write(&mut chip, CSBARBT, Size::Word, BLOCK_64K.into());
-    let nowhere = AccessError::Unmapped(Address(0x40_0000));
+    let nowhere = BusCycleError::Unserved(Address(0x40_0000));
     assert_eq!(read(&mut chip, 0x40_0000, Size::Word), Err(nowhere));
     assert_eq!(peek(&chip, 0x40_0000, Size::Byte), Err(nowhere));
-    assert_eq!(nowhere.to_string(), "nothing answers at 0x00400000");
+    assert_eq!(nowhere.to_string(), "0x00400000 is not served by the chip");
     // a long's second word, past the end
     assert_eq!(
         read(&mut chip, 0xfffe, Size::Long),
-        Err(AccessError::Unmapped(Address(0x1_0000)))
+        Err(BusCycleError::Unserved(Address(0x1_0000)))
     );
     // a supervisor-only SIM register from user space goes external,
     // where nothing answers now (QSMRM 3.3; PLAN.md)
     let user = FunctionCode::UserData;
-    let sypcr = AccessError::Unmapped(Address(SYPCR));
+    let sypcr = BusCycleError::Unserved(Address(SYPCR));
     assert_eq!(chip.peek(Address(SYPCR), Size::Word, user), Err(sypcr));
     assert_eq!(chip.bus_read(Address(SYPCR), Size::Word, user), Err(sypcr));
 }
@@ -445,7 +445,7 @@ fn a_module_that_cannot_peek_says_so() {
     let address = chip.sim().module_base().0 + 0x700;
     assert_eq!(
         peek(&chip, address, Size::Word),
-        Err(AccessError::Unpeekable)
+        Err(BusCycleError::Unpeekable)
     );
     assert_eq!(read(&mut chip, address, Size::Word), Ok(0));
 }

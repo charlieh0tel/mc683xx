@@ -158,8 +158,9 @@ prefix; their directories keep the short names.
   through `Module::peek` (required, as `save` is), the SIM's reads
   have none, and memory answers byte by byte where memory alone
   answers the cycle (`Board::memory_alone`, the page-table rule).  A
-  peripheral's bytes are `AccessError::Unpeekable`, never a guess.
-  Errors are typed: `Unmapped`, `BusError`, `Misaligned`, `Width`.
+  peripheral's bytes are `BusCycleError::Unpeekable`, never a guess.
+  Errors are typed: `Unserved`, `BusError`, `Misaligned` (each with
+  its address), `Width`.
 - **Interrupts:** the host sets an IPL level; the core calls the
   host's IACK callback when it accepts, for a vector or autovector.
 - **Peripherals:** see below.

@@ -27,7 +27,7 @@ use mc683xx_cpu32::registers::BackgroundOnly;
 use mc683xx_cpu32::registers::status;
 
 use crate::chip::Mc68331;
-use crate::host::AccessError;
+use crate::host::BusCycleError;
 
 /// The most system clocks a step runs: far more than any instruction
 /// with its exceptions takes, so a step that ends without stopping (a
@@ -50,14 +50,9 @@ pub enum TargetError {
     /// cannot enter it (CPU32RM 7.2.1).
     #[error("background mode is not enabled")]
     NotEnabled,
-    /// A memory access at `address` failed.
-    #[error("{address}: {error}")]
-    Access {
-        /// The access's address.
-        address: Address,
-        /// Why.
-        error: AccessError,
-    },
+    /// A memory access's bus cycle failed.
+    #[error(transparent)]
+    Access(#[from] BusCycleError),
     /// A memory call's length is not a whole number of its size.
     #[error("{length} bytes are not a whole number of {}-byte accesses", size.bytes())]
     Length {
@@ -309,7 +304,7 @@ impl Cpu32Target for Mc68331 {
         for (at, offset) in Self::accesses(address, size, data.len())? {
             let value = self
                 .bus_read(at, size, function_code)
-                .map_err(|error| TargetError::Access { address: at, error })?;
+                .map_err(TargetError::Access)?;
             data[offset..offset + bytes].copy_from_slice(&value.to_be_bytes()[4 - bytes..]);
         }
         Ok(())
@@ -329,7 +324,7 @@ impl Cpu32Target for Mc68331 {
                 .iter()
                 .fold(0, |value, &byte| value << 8 | u32::from(byte));
             self.bus_write(at, size, function_code, value)
-                .map_err(|error| TargetError::Access { address: at, error })?;
+                .map_err(TargetError::Access)?;
         }
         Ok(())
     }

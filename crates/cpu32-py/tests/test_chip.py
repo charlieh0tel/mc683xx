@@ -1253,6 +1253,8 @@ def test_the_host_reaches_memory_and_peripherals_through_the_decode():
     chip.bus_write(PERIPHERAL_BASE + 1, 1, 0x42)
     with pytest.raises(mc683xx.UnpeekableError):
         chip.peek(PERIPHERAL_BASE, 2)
+    with pytest.raises(mc683xx.BusCycleError):
+        chip.peek(PERIPHERAL_BASE, 2)
     assert peripheral.reads == [("CS1", PERIPHERAL_BASE + 4, 2)]
     assert peripheral.writes == [("CS1", PERIPHERAL_BASE + 1, 1, 0x42)]
     assert chip.now == now
@@ -1260,8 +1262,9 @@ def test_the_host_reaches_memory_and_peripherals_through_the_decode():
 
 def test_host_cycle_mistakes():
     chip, _, _ = mapped(Faulting())
-    with pytest.raises(mc683xx.BusError):
+    with pytest.raises(mc683xx.BusError, match="bus error at 0x"):
         chip.bus_read(PERIPHERAL_BASE, 2)
+    assert issubclass(mc683xx.BusError, mc683xx.BusCycleError)
     for mistake in (
         lambda: chip.bus_read(RAM_BASE + 1, 2),
         lambda: chip.bus_read(RAM_BASE, 3),

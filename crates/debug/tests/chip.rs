@@ -152,7 +152,7 @@ fn a_load_where_nothing_answers_fails_its_write() {
             LoadError::Write {
                 address: Address(0x50_0000),
                 bytes: 4,
-                error: TargetError::Access { .. },
+                error: TargetError::Access(_),
             }
         ),
         "{error}"

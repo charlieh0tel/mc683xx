@@ -131,7 +131,7 @@ fn registers_and_memory_through_the_target() {
             FunctionCode::SupervisorData,
             &mut word
         ),
-        Err(TargetError::Access { .. })
+        Err(TargetError::Access(_))
     ));
 }
 
@@ -478,7 +478,7 @@ fn slow_access(chip: &mut Mc68331) -> (bool, bool) {
         &mut word,
     );
     assert!(
-        matches!(read, Ok(()) | Err(TargetError::Access { .. })),
+        matches!(read, Ok(()) | Err(TargetError::Access(_))),
         "{read:?}"
     );
     if read.is_ok() {

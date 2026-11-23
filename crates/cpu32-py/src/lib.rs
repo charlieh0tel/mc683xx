@@ -55,8 +55,16 @@ mod exceptions {
 
     pyo3::create_exception!(
         mc683xx,
-        BusError,
+        BusCycleError,
         PyException,
+        "Raised by a host's bus cycle or peek that gave no value (Rust's \
+         BusCycleError): BusError or UnpeekableError."
+    );
+
+    pyo3::create_exception!(
+        mc683xx,
+        BusError,
+        BusCycleError,
         "Raised by a peripheral's read or write: BERR ends \
          the cycle."
     );
@@ -64,7 +72,7 @@ mod exceptions {
     pyo3::create_exception!(
         mc683xx,
         UnpeekableError,
-        PyException,
+        BusCycleError,
         "Raised by peek where only a real bus cycle can tell: a peripheral, \
          or a module register a read would change."
     );

@@ -105,8 +105,9 @@ rename renames the Python name with it.  The deliberate differences:
   (docs/releasing.md); a peripheral may subclass one, or only match it.
 - **Errors:** a Rust error is a Python exception (Errors, below): the
   module's own where Python has none to match, named as Rust's error
-  is (`LoadError`, `RunError`, `StateError`, `TargetError`, `BusError`;
-  `UnpeekableError` for `AccessError::Unpeekable`), a builtin
+  is (`LoadError`, `RunError`, `StateError`, `TargetError`,
+  `BusCycleError`, with `BusError` and `UnpeekableError` for its
+  variants), a builtin
   (`ValueError`, `IndexError`, `OSError`) where one fits.
 - **Python's own:** names with no Rust item behind them: `BoardChip`
   (`Board.chip`, the `Mc68331` methods over a board's chip), a board
@@ -969,10 +970,15 @@ chip.run_for(500)
   size other than 1, 2 or 4, at an odd address, or of a value wider
   than it; a bare `Machine`'s `read` of more
   bytes than 32 bits of addresses.
-- `mc683xx.BusError`: a host cycle that ended in a bus error, or that
-  nothing answers; a bare `Machine`'s `read` or `write` of bytes no map
-  covers.
-- `mc683xx.UnpeekableError`: a peek only a real cycle can answer.
+- `mc683xx.BusCycleError`: a host cycle or peek that gave no value,
+  Rust's `BusCycleError`, as one of its two subclasses:
+  - `mc683xx.BusError`: a host cycle that ended in a bus error, or that
+    nothing answers; a bare `Machine`'s `read` or `write` of bytes no
+    map covers.
+  - `mc683xx.UnpeekableError`: a peek only a real cycle can answer.
+
+  A host's own mistake in a cycle (`Misaligned`, `Width`) is a
+  `ValueError`, as above.
 - `mc683xx.StateError` (a `ValueError`): a snapshot of another format,
   of another layer (`a chip snapshot, not a board snapshot`) or of
   other hardware, another count of peripherals, bytes that do not

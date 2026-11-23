@@ -6,7 +6,7 @@ use std::path::Path;
 
 use mc683xx_board::description::LoadError;
 use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_mc68331::host::AccessError;
+use mc683xx_mc68331::host::BusCycleError;
 use pyo3::Bound;
 use pyo3::IntoPyObject;
 use pyo3::IntoPyObjectExt;
@@ -101,9 +101,11 @@ impl From<Error> for PyErr {
                 PyNotImplementedError::new_err(message)
             }
             Error::State(_) => exceptions::StateError::new_err(message),
-            Error::Access(AccessError::BusError | AccessError::Unmapped(_))
+            Error::Access(BusCycleError::BusError(_) | BusCycleError::Unserved(_))
             | Error::Unserved(_) => BusError::new_err(message),
-            Error::Access(AccessError::Unpeekable) => exceptions::UnpeekableError::new_err(message),
+            Error::Access(BusCycleError::Unpeekable) => {
+                exceptions::UnpeekableError::new_err(message)
+            }
             Error::Target(_) => exceptions::TargetError::new_err(message),
             Error::Load(LoadError::Read { path, error } | LoadError::Image { path, error, .. }) => {
                 os_error(&path, error)
@@ -240,6 +242,10 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<BoardControlView>()?;
     module.add_class::<BoardStopRequestView>()?;
     module.add_class::<PacingView>()?;
+    module.add(
+        "BusCycleError",
+        module.py().get_type::<exceptions::BusCycleError>(),
+    )?;
     module.add("BusError", module.py().get_type::<BusError>())?;
     module.add(
         "UnpeekableError",

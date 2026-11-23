@@ -21,7 +21,7 @@ use mc683xx_cpu32::memory::MemoryError;
 use mc683xx_cpu32::memory::Unserved;
 use mc683xx_mc68331::chip::BuildError;
 use mc683xx_mc68331::debug::TargetError;
-use mc683xx_mc68331::host::AccessError;
+use mc683xx_mc68331::host::BusCycleError;
 use mc683xx_mc68331::port::NoInputsError;
 use mc683xx_modules::sim::clock::ClockSourceError;
 
@@ -114,7 +114,7 @@ pub(crate) enum Error {
     Memory(#[from] MemoryError),
     /// A host cycle or peek gave no value.
     #[error(transparent)]
-    Access(#[from] AccessError),
+    Access(#[from] BusCycleError),
     /// The bare CPU refused a map or a peripheral.
     #[error(transparent)]
     Map(#[from] MapError),
