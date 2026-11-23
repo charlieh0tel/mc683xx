@@ -871,8 +871,8 @@ impl DsackFaultView {
 }
 
 /// Something the chip did that the host may want to know of.
-#[pyclass(module = "mc683xx", frozen)]
-#[derive(Debug, Clone)]
+#[pyclass(module = "mc683xx", frozen, eq, hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Event {
     /// The chip reset, at `now`, for `cause`.
     Reset {

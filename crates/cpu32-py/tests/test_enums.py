@@ -1,4 +1,5 @@
-"""The enum classes: each member's name and str (python.md, Enums)."""
+"""The enum classes, each member's name and str (python.md, Enums), and
+the value classes' equality and hash."""
 
 import pytest
 
@@ -49,3 +50,13 @@ def test_str_is_rust_s_display() -> None:
     assert str(mc683xx.BusCycleKind.FETCH) == "fetch"
     assert str(mc683xx.Ending.HUNG_UP) == "HUNG_UP"
     assert mc683xx.Port.GP.name == "GP"
+
+
+def test_value_classes_compare_and_hash_by_value() -> None:
+    reset = mc683xx.Event.Reset(0, mc683xx.ResetCause.POWER_ON)
+    assert reset == mc683xx.Event.Reset(0, mc683xx.ResetCause.POWER_ON)
+    assert reset != mc683xx.Event.Reset(1, mc683xx.ResetCause.POWER_ON)
+    assert len({reset, mc683xx.Event.Reset(0, mc683xx.ResetCause.POWER_ON)}) == 1
+    until = mc683xx.End.Until()
+    assert hash(until) == hash(mc683xx.End.Until())
+    assert len({until, mc683xx.End.Instructions()}) == 2

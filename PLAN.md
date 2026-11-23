@@ -837,8 +837,9 @@ chip beside `Mc68331`.
   `reset_with_breakpoint()`, `assert_breakpoint()`, `halt()` and
   `go()`, and its `chip` only `background`.
   `Stop`, `Halt` and `ResetCause` are enums; they, the other enums
-  and the value classes that compare equal (`Frame`, `Output`,
-  `Serial`) hash, so they key dicts and sets.
+  and the value classes, which compare equal by value (`Frame`,
+  `Output`, `Serial`, `Event`, `End`, `LimitedRun`, `FaultStop`), hash,
+  so they key dicts and sets.
 - **Hooks:** `add_code_hook`, `add_block_hook`, `add_read_hook`,
   `add_write_hook` and `add_invalid_hook(callback, begin=0,
   end=0xFFFFFFFF)` (both ends included) and

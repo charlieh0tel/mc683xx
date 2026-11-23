@@ -477,6 +477,8 @@ class Run:
 class End:
     """How a bare `Machine`'s limited run ended."""
 
+    def __hash__(self) -> int: ...
+
     @final
     class Stop(End):
         """As a chip's run ends."""
@@ -517,6 +519,7 @@ class End:
 class LimitedRun:
     """A bare `Machine`'s limited run's outcome."""
 
+    def __hash__(self) -> int: ...
     @property
     def cycles(self) -> int: ...
     @property
@@ -760,6 +763,8 @@ class Output:
 @disjoint_base
 class Event:
     """Something the chip did that the host may want to know of."""
+
+    def __hash__(self) -> int: ...
 
     @final
     class Reset(Event):
@@ -1070,6 +1075,7 @@ class FaultStop:
     """A fault that stopped a run (`set_stop_on_fault`), as `End.Fault`
     and a chip's `fault_stop` carry it."""
 
+    def __hash__(self) -> int: ...
     @property
     def cycle(self) -> BusCycleKind: ...
     @property
