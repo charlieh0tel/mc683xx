@@ -526,7 +526,9 @@ The contract a host's peripheral models target (rustdoc in
   `drive.now()` for the time alone), and one without a drive takes it
   as its last argument, `moment` (`wait_states`, `dsack_port`,
   `set_qspi_clock`, `analog_output`, `next_event`).  No call has two
-  times.
+  times.  A chip-level model (`adapter`) takes `now: Cycle` last
+  instead, as every chip-level callback with no cycle struct does
+  (docs/host-guide.md, Board time).
   - Stop conditions, for a debugger and the emulator's alone
     ([docs/gdb.md](gdb.md), Stop conditions): `conditions()` lists
     what it offers (`condition::ConditionInfo::new(name, arguments,

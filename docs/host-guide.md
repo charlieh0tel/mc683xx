@@ -1427,8 +1427,16 @@ outside semver.
   span from power-on (to carry a time from one board to another:
   `board.now() + epoch.since_power_on()`), and spans add, subtract and
   scale by a count, all saturating.  A run for a while
-  (`Board::run_for(Span::from_millis(10))`), a frame's bound, a
-  quantum and a serial frame's length are `Span`s.
+  (`Board::run_for(Span::from_millis(10))`), a frame's budget, a
+  quantum and a serial frame's length are `Span`s.  The words are the
+  same at every layer: `now` the current instant (`Board::now`, a
+  `Time`; the chip's `now`, a `Cycle`), `at` another, a run's limit its
+  `budget` (a span) or `deadline` (an instant), and a conversion named
+  for its result, taking the instant as `at`
+  (`board.system_clock().cycle(at)`, `time(at)`).  A board peripheral's
+  call takes its time as a `time::Moment`, from its `Drive` or as
+  `moment` last; a chip-level callback with no cycle struct takes
+  `now: Cycle` last.
 - **Nets.** `Board::observe(net, observer) -> Result<ObserverId,
   NetError>` attaches an `observe::Observer` (a closure
   `FnMut(&str, Time, Signal)` is one) to a net by name; `NetError::Unknown`
