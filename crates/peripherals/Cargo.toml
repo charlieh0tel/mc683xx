@@ -28,3 +28,7 @@ thiserror = "2.0.21"
 mc683xx-mc68331.workspace = true
 snapshot-golden = { path = "../snapshot-golden" }
 toml = "1.2.0"
+
+# docs.rs documents every feature, as `make docs` does.
+[package.metadata.docs.rs]
+all-features = true

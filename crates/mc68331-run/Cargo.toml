@@ -37,3 +37,7 @@ nix = { version = "0.31.3", features = ["term", "fs"] }
 
 [dev-dependencies]
 mc683xx-examples = { path = "../../examples" }
+
+# docs.rs documents every feature, as `make docs` does.
+[package.metadata.docs.rs]
+all-features = true

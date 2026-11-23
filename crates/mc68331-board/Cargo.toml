@@ -35,3 +35,7 @@ mc68331 = ["dep:mc683xx-mc68331"]
 [dev-dependencies]
 snapshot-golden = { path = "../snapshot-golden" }
 toml = "1.2.0"
+
+# docs.rs documents every feature, as `make docs` does.
+[package.metadata.docs.rs]
+all-features = true
