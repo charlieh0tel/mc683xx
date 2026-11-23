@@ -142,10 +142,10 @@ const fn memory_kind(writable: bool) -> MemoryKind {
 }
 
 /// The resets `causes`: a `ResetScope` as Python gives one.
-fn scope(causes: &[ResetCause]) -> Result<ResetScope, Error> {
-    causes.iter().try_fold(ResetScope::NONE, |scope, &cause| {
-        Ok(scope.with(cause.try_into()?))
-    })
+fn scope(causes: &[ResetCause]) -> ResetScope {
+    causes
+        .iter()
+        .fold(ResetScope::NONE, |scope, &cause| scope.with(cause.into()))
 }
 
 /// A host cycle of `bytes`, 1, 2 or 4.
@@ -285,7 +285,7 @@ impl ChipBuilder {
     fn set_reload_scope(&mut self, memory: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
         let memory = self.wiring.borrow().memory(memory)?;
         self.builder()?
-            .set_reload_scope(memory, self::scope(&scope)?);
+            .set_reload_scope(memory, self::scope(&scope));
         Ok(())
     }
 
@@ -361,7 +361,7 @@ impl ChipBuilder {
     /// Only the resets in `scope`, `ResetCause`s, reach the QSPI's
     /// peripheral (its `reset(now)`); by default every one does.
     fn set_qspi_reset_scope(&mut self, scope: Vec<ResetCause>) -> Result<(), Error> {
-        self.builder()?.set_qspi_reset_scope(self::scope(&scope)?);
+        self.builder()?.set_qspi_reset_scope(self::scope(&scope));
         Ok(())
     }
 
@@ -401,7 +401,7 @@ impl ChipBuilder {
     fn set_reset_scope(&mut self, peripheral: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
         self.builder()?
-            .set_reset_scope(peripheral, self::scope(&scope)?);
+            .set_reset_scope(peripheral, self::scope(&scope));
         Ok(())
     }
 
@@ -592,15 +592,12 @@ pub(crate) enum ResetCause {
     Watchdog,
     /// The halt monitor, on a double bus fault.
     HaltMonitor,
-    /// The `reset` instruction.
-    System,
     /// Loss of the clock's reference.
     LossOfClock,
+    /// The `reset` instruction.
+    System,
     /// The test submodule.
     Test,
-    /// A cause newer than the bindings, in an `Event.Reset`: never one
-    /// to ask for.
-    Unknown,
 }
 
 impl From<sim::ResetCause> for ResetCause {
@@ -610,29 +607,24 @@ impl From<sim::ResetCause> for ResetCause {
             sim::ResetCause::PowerOn => Self::PowerOn,
             sim::ResetCause::Watchdog => Self::Watchdog,
             sim::ResetCause::HaltMonitor => Self::HaltMonitor,
-            sim::ResetCause::System => Self::System,
             sim::ResetCause::LossOfClock => Self::LossOfClock,
+            sim::ResetCause::System => Self::System,
             sim::ResetCause::Test => Self::Test,
-            _ => Self::Unknown,
         }
     }
 }
 
-impl TryFrom<ResetCause> for sim::ResetCause {
-    type Error = Error;
-
-    /// The cause, or [`Error::UnknownResetCause`] for `UNKNOWN`.
-    fn try_from(cause: ResetCause) -> Result<Self, Error> {
-        Ok(match cause {
+impl From<ResetCause> for sim::ResetCause {
+    fn from(cause: ResetCause) -> Self {
+        match cause {
             ResetCause::External => Self::External,
             ResetCause::PowerOn => Self::PowerOn,
             ResetCause::Watchdog => Self::Watchdog,
             ResetCause::HaltMonitor => Self::HaltMonitor,
-            ResetCause::System => Self::System,
             ResetCause::LossOfClock => Self::LossOfClock,
+            ResetCause::System => Self::System,
             ResetCause::Test => Self::Test,
-            ResetCause::Unknown => return Err(Error::UnknownResetCause),
-        })
+        }
     }
 }
 
@@ -941,8 +933,7 @@ pub(crate) enum Event {
 
 impl Event {
     /// `event` as Python sees it, [`Event::Unknown`] for one it cannot
-    /// convert; a reset cause the bindings do not know is
-    /// [`ResetCause::Unknown`].
+    /// convert.
     pub(crate) fn of(event: event::Event) -> Self {
         let unknown = || Self::Unknown {
             now: event.now().clocks(),
@@ -1493,7 +1484,7 @@ chip_methods! {
     /// `reset` instruction's, resets all but the CPU; `EXTERNAL` is
     /// `reset()`.
     fn reset_for(&mut self, cause: ResetCause) -> PyResult<()> {
-        self.chip.reset_for(cause.try_into()?);
+        self.chip.reset_for(cause.into());
         self.pending.check()
     }
 

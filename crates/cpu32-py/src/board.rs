@@ -1740,7 +1740,7 @@ impl BoardView {
     /// driven on the board's nets for it.  Nothing while the board holds
     /// RESET low.
     fn reset_for(&mut self, cause: ResetCause) -> PyResult<()> {
-        self.board.reset_for(cause.try_into()?);
+        self.board.reset_for(cause.into());
         self.check()
     }
 

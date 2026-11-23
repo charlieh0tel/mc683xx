@@ -292,10 +292,9 @@ class ResetCause:
     POWER_ON: ClassVar[ResetCause]
     WATCHDOG: ClassVar[ResetCause]
     HALT_MONITOR: ClassVar[ResetCause]
-    SYSTEM: ClassVar[ResetCause]
     LOSS_OF_CLOCK: ClassVar[ResetCause]
+    SYSTEM: ClassVar[ResetCause]
     TEST: ClassVar[ResetCause]
-    UNKNOWN: ClassVar[ResetCause]
     def __hash__(self) -> int: ...
     def __int__(self) -> int: ...
 

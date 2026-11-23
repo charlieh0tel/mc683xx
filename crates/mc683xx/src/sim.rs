@@ -146,9 +146,10 @@ const PEPAR_AVEC: u8 = 1 << 2;
 /// A reset's cause, as RSR records it (MC68331UM D.3.4).  The chip
 /// raises neither LOC nor TST: its synthesizer never loses its
 /// reference (PLAN.md, Clock synthesizer) and the test submodule is
-/// factory test only; a host's reset scopes may name them.
+/// factory test only; a host's reset scopes may name them.  RSR fixes
+/// the set, so it is exhaustive; the variants are in RSR's bit order,
+/// high to low, as [`ResetCause::ALL`] is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[non_exhaustive]
 pub enum ResetCause {
     /// RESET driven by the board: EXT.
     External,
@@ -158,10 +159,10 @@ pub enum ResetCause {
     Watchdog,
     /// The halt monitor, on a double bus fault: HLT.
     HaltMonitor,
-    /// The `reset` instruction: SYS.
-    System,
     /// Loss of the clock's reference: LOC.
     LossOfClock,
+    /// The `reset` instruction: SYS.
+    System,
     /// The test submodule, in system test: TST.
     Test,
 }

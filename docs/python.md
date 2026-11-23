@@ -39,9 +39,8 @@ rename renames the Python name with it.  The deliberate differences:
   `Pacing`, though it has `Display` and `FromStr`: its factor is a
   number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`
   the text.
-- **Unknown values:** Python has two members Rust lacks:
-  `Event.Unknown(now, text)`, an event the bindings cannot convert,
-  and `ResetCause.UNKNOWN`, a reset for a cause they do not know, so
+- **Unknown values:** Python has a member Rust lacks:
+  `Event.Unknown(now, text)`, an event the bindings cannot convert, so
   that `take_events()` hands every event over (Exceptions, below);
   `take_output_changes()` likewise hands a change it cannot convert
   over as `(now, None, text)`.
@@ -987,9 +986,7 @@ chip.run_for(500)
   but none does today.  `take_events()` never raises and always takes
   every event: one it cannot convert (a kind the bindings lack, or a
   DSACK fault they do not know) is `Event.Unknown(now, text)`, `text`
-  what happened as Rust prints it, and a reset for a cause they do not
-  know is an `Event.Reset` whose cause is `ResetCause.UNKNOWN`, which
-  `reset_for` and the reset scopes refuse with `ValueError`.
+  what happened as Rust prints it.
 - `IndexError`: an unknown memory or peripheral number, or a memory range
   past its end.
 - `OverflowError`: a run past the end of time.
