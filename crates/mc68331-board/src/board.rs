@@ -1142,7 +1142,7 @@ impl<C: Chip> Board<C> {
 
     /// Where the CPU is now, as a `position` record.
     #[must_use]
-    pub fn position(&self) -> PositionRecord {
+    pub fn position_record(&self) -> PositionRecord {
         let registers = &self.chip.cpu().registers;
         PositionRecord {
             cycle: self.chip.now(),

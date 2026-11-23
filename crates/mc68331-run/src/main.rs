@@ -572,7 +572,7 @@ impl Turns {
         if let Some((at, every)) = self.next_position
             && board.now() >= at
         {
-            eprintln!("{}", Line::new(CHIP, &board.position()));
+            eprintln!("{}", Line::new(CHIP, &board.position_record()));
             self.next_position = Some((at + every, every));
         }
         Ok(())

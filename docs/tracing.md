@@ -134,7 +134,8 @@ mc68331: position cycle=838860 pc=0x00004e22 sr=0x2000 vbr=0x00000000 a7=0x0010f
 
 `cycle`, `pc`, `sr`, `vbr`, `a7`, and `instructions`, the instructions
 run since power-on.  The runner writes one every `--position SECONDS`
-of board time.
+of board time; a host makes one with `Board::position_record`, as
+`Board::stopped_record` makes a `stopped` one.
 
 ### `stopped`: the run ended
 
