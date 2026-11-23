@@ -173,6 +173,9 @@ impl DecodeRequest {
 }
 
 /// The data bus byte lanes a select takes part on.
+///
+/// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Lanes {
     /// DATA\[15:8\].
@@ -242,6 +245,9 @@ pub struct Match {
 }
 
 /// A set of selects, bit `n` for the select of [`ChipSelect::index`] `n`.
+///
+/// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Selects(u16);
 
@@ -385,6 +391,9 @@ impl ChipSelects {
 
     /// The block of each enabled select outside CPU space: its first
     /// address and its length.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn blocks(&self) -> impl Iterator<Item = (Address, u32)> + '_ {
         self.selects
             .iter()
@@ -431,6 +440,9 @@ impl ChipSelects {
     /// The selects whose blocks hold `address`, enabled or not.  A
     /// block is at least 2 Kbytes and aligned to its size, so this is
     /// the same for every address of an aligned 2-Kbyte page.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     #[must_use]
     pub fn at(&self, address: Address) -> Selects {
         let bits = self

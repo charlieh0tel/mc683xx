@@ -160,13 +160,19 @@ pub enum Termination {
 impl Termination {
     /// The most wait states DSACK encodes: the field's values below
     /// fast termination's.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub const MOST_WAIT_STATES: u8 = DSACK_FAST as u8 - 1;
 
     /// The cycle's clocks, if the select ends it: ECLK cycles are
     /// charged an ECLK period and half again, the average wait to
     /// synchronize being half a period (our choice, [PLAN.md]).
     ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
+    #[doc(hidden)]
     #[must_use]
     pub const fn clocks(self, eclk_divisor: u64) -> Option<Cycles> {
         match self {
@@ -179,6 +185,9 @@ impl Termination {
 
     /// The clocks of a cycle an external DSACK ends after `wait`
     /// states.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     #[must_use]
     pub const fn external_clocks(wait: Cycles) -> Cycles {
         Cycles::from_clocks(ZERO_WAIT_CLOCKS as u64).saturating_add(wait)

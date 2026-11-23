@@ -658,6 +658,9 @@ impl Sim {
 
     /// Whether FREEZE stops the bus monitor now: asserted, with FRZBM
     /// (MC68331UM 4.2.13).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     #[must_use]
     pub const fn freezes_bus_monitor(&self) -> bool {
         self.frozen && self.simcr & SIMCR_FRZBM != 0
