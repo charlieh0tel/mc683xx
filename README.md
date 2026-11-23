@@ -165,6 +165,8 @@ boards and their firmware.
   a recipe: the demo board's C firmware under gdb, source level.
 - [Tracing](https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md):
   the run trace's format.
+- [Init scripts](https://github.com/charlieh0tel/mc683xx/blob/main/docs/init-scripts.md):
+  the language that readies a target for a load.
 - [Performance](https://github.com/charlieh0tel/mc683xx/blob/main/docs/performance.md):
   measurements and the benchmarks.
 - [PLAN.md](https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md):

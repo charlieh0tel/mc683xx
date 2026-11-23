@@ -2075,7 +2075,8 @@ parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
   ELF `.bss` (memory past a segment's file bytes) is not written, as
   gdb's `load` leaves it.  `LoadReport` gives the segments, the bytes,
   the entry and whether it verified.
-- **Init scripts:** `script::Script`, one command a line, `#`
+- **Init scripts:** (docs/init-scripts.md, the language's guide; a
+  format under semver) `script::Script`, one command a line, `#`
   comments and blank lines: `write_memory.b|w|l ADDR VALUE [fc FC]`,
   `write_register NAME VALUE`, `write_system_register NAME VALUE`
   (names as the target crate's `FromStr` takes them),

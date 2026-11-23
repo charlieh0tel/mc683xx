@@ -1,5 +1,8 @@
 //! Init scripts: the writes and checks that ready a board for a load,
-//! one command a line, run on a halted target.
+//! one command a line, run on a halted target.  [`docs/init-scripts.md`]
+//! is the language's guide.
+//!
+//! [`docs/init-scripts.md`]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/init-scripts.md
 //!
 //! ```
 //! use mc683xx_debug::script::Script;

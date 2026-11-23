@@ -105,7 +105,8 @@ means a change to:
 - the runner's flags, their values and its exit statuses;
 - the trace text (`docs/tracing.md`), versioned by its first line;
 - the GDB stub's target description, monitor commands and stop
-  signals (`docs/gdb.md`).
+  signals (`docs/gdb.md`);
+- the init script language (`docs/init-scripts.md`).
 
 Not covered, so a minor or patch release may change them:
 
