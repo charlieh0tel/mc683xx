@@ -287,9 +287,9 @@ impl Mc68331 {
     /// Runs `command` with its operand `words`.
     fn serial_command(&mut self, command: Command, words: &[u16]) -> Outcome {
         match command {
-            Command::ReadRegister(register) => Outcome::Long(self.register(register)),
+            Command::ReadRegister(register) => Outcome::Long(self.cpu.registers.register(register)),
             Command::WriteRegister(register) => {
-                self.set_register(register, value(words));
+                self.cpu.registers.set_register(register, value(words));
                 Outcome::Complete
             }
             Command::ReadSystemRegister(register) => Outcome::Long(self.system_register(register)),

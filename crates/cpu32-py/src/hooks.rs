@@ -53,7 +53,7 @@ pub(crate) fn register_dictionary<'py>(
 ) -> PyResult<Bound<'py, PyDict>> {
     let dictionary = PyDict::new(py);
     for register in Register::all() {
-        dictionary.set_item(register.name(), register.read(registers))?;
+        dictionary.set_item(register.to_string(), register.read(registers))?;
     }
     Ok(dictionary)
 }

@@ -121,6 +121,12 @@ The host can also reach the core: `cpu()` gives the `Cpu` to read;
 pages' permissions (see Hooks), changes its registers and reads the
 rest.  Neither hands out the core's memory map, which the chip keeps
 in step with its decode, nor runs the core apart from the chip.
+`Registers` names its registers as `mc683xx-target` does:
+`register(Register::A0)` and `set_register`, A7 the stack pointer S
+selects; `system_register(SystemRegister::Vbr)` and
+`set_system_register`, which give `None` and `BackgroundOnly` for
+RPC, PCC, ATEMP and FAR, background mode's own (CPU32RM 7.2.5); the PC
+is the `pc` field.
 `write(address, bytes)` writes the memories the core serves without a
 cycle, as a debugger does and as the bare `Machine::write` does, a
 ROM's included, and `read(address, bytes)` reads them, as

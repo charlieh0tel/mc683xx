@@ -19,6 +19,7 @@ use mc683xx_cpu32::interrupt::Interrupts;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_target::address::Address;
+use mc683xx_target::register::Register;
 
 /// The 68331's address lines, ADDR[23:0] (MC68331UM 4.4.1.1).
 pub const ADDRESS_BITS: u32 = 24;
@@ -63,13 +64,24 @@ pub fn renew(cpu: &mut Cpu) {
     *cpu = Cpu::new(mem::replace(&mut cpu.memory, placeholder));
 }
 
+/// A0-A6, as `State::address` holds them; A7 is USP or SSP.
+const ADDRESS_REGISTERS: [Register; 7] = [
+    Register::A0,
+    Register::A1,
+    Register::A2,
+    Register::A3,
+    Register::A4,
+    Register::A5,
+    Register::A6,
+];
+
 /// Sets the core's registers to `state`, SR first so A7 lands in the
 /// right stack pointer.
 pub fn load(registers: &mut Registers, state: &State) {
     registers.set_sr(state.sr);
     registers.data = state.data;
-    for (number, value) in state.address.iter().enumerate() {
-        registers.set_address(number, *value);
+    for (&register, &value) in ADDRESS_REGISTERS.iter().zip(&state.address) {
+        registers.set_register(register, value);
     }
     registers.usp = Address(state.usp);
     registers.ssp = Address(state.ssp);
@@ -81,7 +93,7 @@ pub fn load(registers: &mut Registers, state: &State) {
 pub fn capture(registers: &Registers) -> State {
     State {
         data: registers.data,
-        address: std::array::from_fn(|number| registers.address(number)),
+        address: ADDRESS_REGISTERS.map(|register| registers.register(register)),
         usp: registers.usp.0,
         ssp: registers.ssp.0,
         sr: registers.sr(),

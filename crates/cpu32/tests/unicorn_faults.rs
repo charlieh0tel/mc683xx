@@ -61,6 +61,7 @@ use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_cpu32::registers::status;
 use mc683xx_target::address::Address;
+use mc683xx_target::register::Register;
 
 /// The address lines of the 68331, ADDR[23:0] (MC68331UM 4.4.1.1).
 const ADDRESS_BITS: u32 = 24;
@@ -681,7 +682,7 @@ fn a_code_hook_sees_the_system_byte_at_each_instruction() {
             (
                 instruction.pc,
                 registers.sr(),
-                registers.address(7),
+                registers.register(Register::A7),
                 instruction.stack_top,
             )
         })
@@ -706,7 +707,7 @@ fn a_block_hook_sees_the_status_a_trap_enters_with() {
     assert_eq!(
         (
             seen.registers.sr(),
-            seen.registers.address(7),
+            seen.registers.register(Register::A7),
             seen.stack_top
         ),
         (status::S | status::Z, frame, Some(frame_top))
@@ -766,7 +767,7 @@ fn fault_4_status_pop_into_user_state_pops_the_supervisor_stack() {
     assert_eq!(machine.cpu.registers.sr(), POPPED);
     assert_eq!(machine.cpu.registers.ssp.0, STACK_TOP);
     assert_eq!(machine.cpu.registers.usp.0, USER_STACK_TOP);
-    assert_eq!(machine.cpu.registers.address(7), USER_STACK_TOP);
+    assert_eq!(machine.cpu.registers.register(Register::A7), USER_STACK_TOP);
     assert_eq!(machine.cpu.registers.pc.0, START + 2);
 }
 

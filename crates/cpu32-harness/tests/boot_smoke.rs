@@ -29,6 +29,7 @@ use mc683xx_mc68331::event::Event;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::register::Register;
 
 use common::board;
 
@@ -405,7 +406,10 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
     println!("{name}: D {:x?}", registers.data);
     println!(
         "{name}: A {:x?}",
-        (0..8).map(|n| registers.address(n)).collect::<Vec<_>>()
+        Register::ALL[usize::from(Register::A0.code())..]
+            .iter()
+            .map(|&register| registers.register(register))
+            .collect::<Vec<_>>()
     );
     println!("{name}: exceptions by vector: {:?}", trace.exceptions);
     let mut tail: Vec<_> = trace.tail.iter().collect();

@@ -10,7 +10,6 @@ use std::array;
 use gdbstub::arch::Arch;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::register::Register;
 use mc683xx_target::register::SystemRegister;
 
@@ -124,23 +123,9 @@ const SYSTEM_LOCATIONS: [Location; SYSTEM_REGISTERS] = [
 /// which the description lacks, read zero.
 pub(crate) fn get(registers: &Registers, location: Location) -> u32 {
     match location {
-        Location::Register(register) => {
-            let number = usize::from(register.code());
-            match number {
-                0..8 => registers.data[number],
-                _ => registers.address(number - A0),
-            }
-        }
-        Location::System(register) => match register {
-            SystemRegister::Sr => registers.sr().into(),
-            SystemRegister::Rpc => registers.pc.0,
-            SystemRegister::Usp => registers.usp.0,
-            SystemRegister::Ssp => registers.ssp.0,
-            SystemRegister::Vbr => registers.vbr.0,
-            SystemRegister::Sfc => u8::from(registers.sfc).into(),
-            SystemRegister::Dfc => u8::from(registers.dfc).into(),
-            SystemRegister::Pcc | SystemRegister::Atemp | SystemRegister::Far => 0,
-        },
+        Location::Register(register) => registers.register(register),
+        Location::System(SystemRegister::Rpc) => registers.pc.0,
+        Location::System(register) => registers.system_register(register).unwrap_or(0),
     }
 }
 
@@ -149,23 +134,12 @@ pub(crate) fn get(registers: &Registers, location: Location) -> u32 {
 /// all.
 pub(crate) fn set(registers: &mut Registers, location: Location, value: u32) {
     match location {
-        Location::Register(register) => {
-            let number = usize::from(register.code());
-            match number {
-                0..8 => registers.data[number] = value,
-                _ => registers.set_address(number - A0, value),
-            }
+        Location::Register(register) => registers.set_register(register, value),
+        Location::System(SystemRegister::Rpc) => registers.pc = Address(value),
+        Location::System(register) => {
+            // PCC, ATEMP and FAR refused: not written
+            let _ = registers.set_system_register(register, value);
         }
-        Location::System(register) => match register {
-            SystemRegister::Sr => registers.set_sr(value as u16),
-            SystemRegister::Rpc => registers.pc = Address(value),
-            SystemRegister::Usp => registers.usp = Address(value),
-            SystemRegister::Ssp => registers.ssp = Address(value),
-            SystemRegister::Vbr => registers.vbr = Address(value),
-            SystemRegister::Sfc => registers.sfc = FunctionCode::from_low_bits(value),
-            SystemRegister::Dfc => registers.dfc = FunctionCode::from_low_bits(value),
-            SystemRegister::Pcc | SystemRegister::Atemp | SystemRegister::Far => {}
-        },
     }
 }
 

@@ -609,12 +609,13 @@ impl MachineView {
     /// Register `name`: `D0`-`D7`, `A0`-`A7`, `PC`, `SR`, `CCR`, `USP`,
     /// `SSP`, `VBR`, `SFC`, `DFC`.
     fn read_register(&self, name: &str) -> Result<u32, Error> {
-        Ok(Register::parse(name)?.read(&self.machine.cpu.registers))
+        Ok(name.parse::<Register>()?.read(&self.machine.cpu.registers))
     }
 
     /// Sets register `name` to `value`, which must fit it.
     fn write_register(&mut self, name: &str, value: u32) -> Result<(), Error> {
-        Register::parse(name)?.write(&mut self.machine.cpu.registers, value)
+        name.parse::<Register>()?
+            .write(&mut self.machine.cpu.registers, value)
     }
 
     /// Every register by name.
@@ -1131,6 +1132,7 @@ mod tests {
     use mc683xx_modules::sim;
     use mc683xx_target::address::Address;
     use mc683xx_target::entry::Entry;
+    use mc683xx_target::register::Register;
     use pyo3::PyErr;
     use pyo3::Python;
     use pyo3::exceptions::PyNotImplementedError;
@@ -1212,7 +1214,7 @@ mod tests {
             end(&[NOP, NOP], steps, |_| ()),
             end(&[NOP, NOP], budget, |_| ()),
             end(&[MOVE_LONG_A0_TO_D0], instructions, |machine| {
-                machine.cpu.registers.set_address(0, UNMAPPED);
+                machine.cpu.registers.set_register(Register::A0, UNMAPPED);
                 machine.cpu.set_stop_on_fault(true);
             }),
             end(&[TRAP_0], instructions, |machine| {

@@ -40,6 +40,7 @@ use mc683xx_modules::sim::ResetCause;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
+use mc683xx_target::register::Register;
 use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
@@ -1098,7 +1099,7 @@ impl<C: Chip> Board<C> {
         if self.hooks.watches.contains(&id) {
             let cpu = self.chip.cpu();
             let registers = &cpu.registers;
-            let a7 = registers.address(7);
+            let a7 = registers.register(Register::A7);
             let space = Space::of(registers.data_space());
             let stack = array::from_fn(|index| {
                 let at = Address(a7).offset(4 * index as u32);
@@ -1109,7 +1110,9 @@ impl<C: Chip> Board<C> {
                 pc: registers.pc,
                 sr: registers.sr(),
                 data: registers.data,
-                address: array::from_fn(|index| registers.address(index)),
+                address: array::from_fn(|index| {
+                    registers.register(Register::ALL[usize::from(Register::A0.code()) + index])
+                }),
                 stack,
             }));
             return true;
@@ -1137,7 +1140,7 @@ impl<C: Chip> Board<C> {
             pc: registers.pc,
             sr: registers.sr(),
             vbr: registers.vbr,
-            a7: Address(registers.address(7)),
+            a7: Address(registers.register(Register::A7)),
             instructions: self.chip.instructions(),
         }
     }

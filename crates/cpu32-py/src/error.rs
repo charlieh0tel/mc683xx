@@ -38,7 +38,7 @@ pub(crate) enum Error {
     #[error("{value:#x} does not fit {register}")]
     Width {
         /// The register's name.
-        register: &'static str,
+        register: String,
         /// The value.
         value: u32,
     },

@@ -122,7 +122,11 @@ prefix; their directories keep the short names.
 ## Interface
 
 - **Registers:** read and write every one: D0-D7, A0-A7, PC, SR, SSP,
-  USP, VBR, SFC, DFC.
+  USP, VBR, SFC, DFC.  `Registers` takes the target crate's names
+  (`register(Register)`, `system_register(SystemRegister)`), so the
+  chip's BDM, gdb and Python map none themselves; background mode's
+  RPC, PCC, ATEMP and FAR are not the programming model's and answer
+  `None` (`BackgroundOnly` to a write).
 - **Memory:** the host wires RAM, ROM and peripherals to chip-select pins
   (see Peripherals), and, emulator-only, memory at a fixed address on
   no pin (Fixed memory, below).  RAM and ROM are served in the core; peripherals get
