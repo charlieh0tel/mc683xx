@@ -119,7 +119,8 @@ fn the_example_board_echoes_its_console() {
 fn cycles_end_the_run_within_an_instruction_of_them() {
     let directory = board("cycles", &echo::image());
     let file = directory.join("echo.toml");
-    let output = runner(&[file.to_str().unwrap(), "--cycles", "100"], b"");
+    // the one number syntax: 0x64 is 100
+    let output = runner(&[file.to_str().unwrap(), "--cycles", "0x64"], b"");
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(output.status.success(), "{stderr}");
     let cycle: u64 = stderr
@@ -259,6 +260,10 @@ fn a_halt_and_a_wrong_command_have_their_status() {
         ["--pace", "fast"],
         ["--pace", "0"],
         ["--pace", "-2"],
+        ["--cycles", "0100"],
+        ["--cycles", "18446744073709551616"],
+        ["--seed", "-1"],
+        ["--watch-code", "$400"],
     ];
     for [flag, value] in wrong {
         let usage = runner(&[file.to_str().unwrap(), flag, value], b"");

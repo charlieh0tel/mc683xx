@@ -89,6 +89,9 @@ const AFTER_HELP: &str = "Ctrl-C stops the run at its next sync point: the `stop
 written and --save still saves (exit status 4).  A second Ctrl-C ends the process at once, \
 saving nothing (exit status 130).
 
+Numbers (--cycles, --watch-code, --seed) are decimal, 0x hexadecimal or 0b binary, with _ \
+between digits allowed.
+
 Exit status: 0 the run spent its time; 1 the board or a file could not be used; 2 the \
 command line is wrong; 3 the CPU halted; 4 a hook, a peripheral, a fault (--stop-on-fault), gdb \
 or Ctrl-C stopped it.";
@@ -115,7 +118,7 @@ struct Arguments {
     /// The board file.
     board: PathBuf,
     /// Run until the chip has run this many system clocks.
-    #[arg(long, conflicts_with = "seconds")]
+    #[arg(long, conflicts_with = "seconds", value_parser = parse_integer::<u64>)]
     cycles: Option<u64>,
     /// Run this many seconds of board time; inf, the default, runs
     /// until Ctrl-C, gdb, a halt or a stop ends it.
@@ -161,15 +164,15 @@ struct Arguments {
     /// What to trace on standard error, comma-separated.
     #[arg(long, value_enum, value_delimiter = ',')]
     trace: Vec<Traced>,
-    /// Trace each time the instruction at this address runs: decimal,
-    /// or hexadecimal after 0x; may be given more than once.
+    /// Trace each time the instruction at this address runs; may be
+    /// given more than once.
     #[arg(long = "watch-code", value_parser = parse_integer::<u32>)]
     watch_code: Vec<u32>,
     /// Trace where the CPU is every this many seconds of board time.
     #[arg(long, value_parser = seconds)]
     position: Option<f64>,
     /// The seed every noise model draws from.
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, default_value_t = 0, value_parser = parse_integer::<u64>)]
     seed: u64,
     /// Stop at a bus or address error instead of taking it as an
     /// exception, and say which (`reason=fault`); the instruction is
