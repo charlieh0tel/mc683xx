@@ -30,7 +30,6 @@ use std::fmt::Display;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
-use std::num::ParseIntError;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
@@ -64,6 +63,7 @@ use mc683xx_gdb::Ending;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_target::address::Address;
+use mc683xx_target::integer::parse_integer;
 
 use crate::binding::Binding;
 use crate::binding::Escape;
@@ -161,9 +161,9 @@ struct Arguments {
     /// What to trace on standard error, comma-separated.
     #[arg(long, value_enum, value_delimiter = ',')]
     trace: Vec<Traced>,
-    /// Trace each time the instruction at this address, hexadecimal,
-    /// runs; may be given more than once.
-    #[arg(long = "watch-code", value_parser = hexadecimal)]
+    /// Trace each time the instruction at this address runs: decimal,
+    /// or hexadecimal after 0x; may be given more than once.
+    #[arg(long = "watch-code", value_parser = parse_integer::<u32>)]
     watch_code: Vec<u32>,
     /// Trace where the CPU is every this many seconds of board time.
     #[arg(long, value_parser = seconds)]
@@ -247,11 +247,6 @@ fn run_seconds(text: &str) -> Result<f64, String> {
     } else {
         seconds(text)
     }
-}
-
-/// An address, hexadecimal, `0x` or not.
-fn hexadecimal(text: &str) -> Result<u32, ParseIntError> {
-    u32::from_str_radix(text.trim_start_matches("0x"), 16)
 }
 
 fn main() -> ExitCode {

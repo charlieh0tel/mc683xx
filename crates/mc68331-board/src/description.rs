@@ -33,6 +33,7 @@ use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::reset::ResetScope;
 use mc683xx_target::address::Address;
+use mc683xx_target::integer::parse_integer;
 
 use crate::endpoint::Endpoint;
 use crate::error::EditError;
@@ -1234,7 +1235,8 @@ fn read_decoder(entry: &schema::Decoder, users: &mut Users) -> Result<DecoderSpe
     let codes = 1_u32 << inputs.len();
     let mut outputs: Vec<u32> = (0..codes).collect();
     for (code, &output) in &entry.alias.codes {
-        let code = parse_integer(code)
+        let code = parse_integer::<u32>(code)
+            .ok()
             .filter(|&code| code < codes)
             .ok_or_else(|| error(format!("no code {code:?} to alias")))?;
         if output >= codes {
@@ -1251,17 +1253,6 @@ fn read_decoder(entry: &schema::Decoder, users: &mut Users) -> Result<DecoderSpe
         outputs,
         undecoded: entry.undecoded,
     })
-}
-
-/// An integer as TOML writes one in a key: decimal, `0x` or `0b`.
-fn parse_integer(text: &str) -> Option<u32> {
-    if let Some(hex) = text.strip_prefix("0x") {
-        u32::from_str_radix(hex, 16).ok()
-    } else if let Some(binary) = text.strip_prefix("0b") {
-        u32::from_str_radix(binary, 2).ok()
-    } else {
-        text.parse().ok()
-    }
 }
 
 /// A peripheral's attachment.

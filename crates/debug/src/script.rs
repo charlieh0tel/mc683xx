@@ -32,7 +32,8 @@
 //!
 //! SIZE is `b`, `w` or `l`.  The clauses after the address (`expect`,
 //! `mask`, `timeout_ms`, `fc`) come in any order, each once.  Numbers
-//! are hex with `0x` or decimal; a value, a mask and an expected value
+//! are decimal, `0x` hexadecimal or `0b` binary, with `_` between
+//! digits allowed ([`parse_integer`]); a value, a mask and an expected value
 //! fit the size; a word or long address is even (CPU32RM 6.2.3); `fc`,
 //! the function code, is 0 to 7 and supervisor data (5) by default.
 //! `#` starts a comment; blank lines are skipped.
@@ -51,6 +52,8 @@ use std::time::Instant;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::integer::ParseIntegerError;
+use mc683xx_target::integer::parse_integer;
 use mc683xx_target::register::ParseRegisterError;
 use mc683xx_target::register::ParseSystemRegisterError;
 use mc683xx_target::register::Register;
@@ -61,8 +64,6 @@ use mc683xx_target::size::Size;
 const COMMENT: char = '#';
 /// What separates a memory command's name from its size.
 const SIZE_SEPARATOR: char = '.';
-/// Hex numbers' prefix.
-const HEX_PREFIX: &str = "0x";
 
 /// `write_memory`.
 const WRITE_MEMORY: &str = "write_memory";
@@ -287,10 +288,12 @@ pub enum ParseCommandError {
         clause: Clause,
     },
     /// A word that is not a number.
-    #[error("{word:?} is not a number: hex with 0x, or decimal")]
+    #[error("{word:?}: {error}")]
     Number {
         /// The word.
         word: String,
+        /// Why.
+        error: ParseIntegerError,
     },
     /// A number too wide for its access.
     #[error("{value:#x} does not fit in {} bits", size.bytes() * 8)]
@@ -345,20 +348,12 @@ pub enum ParseCommandError {
 /// The words of a line, taken in order.
 type Words<'a> = SplitWhitespace<'a>;
 
-/// `word` as a number: hex after `0x`, otherwise decimal, digits only.
+/// `word` as a number, as [`parse_integer`] takes one.
 fn number(word: &str) -> Result<u32, ParseCommandError> {
-    let error = || ParseCommandError::Number {
+    parse_integer(word).map_err(|error| ParseCommandError::Number {
         word: word.to_owned(),
-    };
-    let (digits, radix) = match word.strip_prefix(HEX_PREFIX) {
-        Some(digits) => (digits, 16),
-        None => (word, 10),
-    };
-    // from_str_radix takes a sign, which an address or value has not.
-    if digits.is_empty() || !digits.chars().all(|digit| digit.is_digit(radix)) {
-        return Err(error());
-    }
-    u32::from_str_radix(digits, radix).map_err(|_| error())
+        error,
+    })
 }
 
 /// The next word, or [`ParseCommandError::Missing`] naming `what`.

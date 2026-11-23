@@ -1740,7 +1740,9 @@ hand.  The keys are in `docs/board-files.md`.
   a thin command on
   the run loop with the built-in types only: it runs in turns of
   board time, between which input goes in and output comes out, and
-  ends with a `stopped` record.  Without `--seconds` (or with
+  ends with a `stopped` record.  `--watch-code`'s address takes the
+  one number syntax (`parse_integer`): bare digits are decimal.
+  Without `--seconds` (or with
   `--seconds inf`) or `--cycles` it runs until Ctrl-C, gdb, a halt
   or a stop ends it.  With `--cycles` the last turn ends at
   that cycle's board time, so the run ends within an instruction of
@@ -2060,7 +2062,8 @@ parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
   (names as the target crate's `FromStr` takes them),
   `read_memory.b|w|l ADDR expect V [mask M] [fc N]` and
   `poll_memory.b|w|l ADDR mask M expect V timeout_ms N [fc N]`; the
-  clauses in any order, each once; numbers hex with `0x` or decimal.
+  clauses in any order, each once; numbers as `parse_integer` takes
+  them.
   Parsing refuses what cannot work: a value wider than its access, an
   expected value outside its mask, a word or long access at an odd
   address, a function code past 7.  A parse error carries its line; a

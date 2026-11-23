@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::integer::ParseIntegerError;
 use mc683xx_target::register::Register;
 use mc683xx_target::register::SystemRegister;
 use mc683xx_target::size::Size;
@@ -254,34 +255,38 @@ fn unexpected_and_repeated_words() {
 }
 
 #[test]
-fn numbers_hex_with_0x_or_decimal() {
-    for word in [
-        "0x",
-        "0X10",
-        "x10",
-        "+5",
-        "-1",
-        "0x+5",
-        "1_000",
-        "12a",
-        "4294967296",
-        "0x100000000",
+fn numbers_as_parse_integer_takes_them() {
+    for (word, why) in [
+        ("0x", ParseIntegerError::Invalid),
+        ("0X10", ParseIntegerError::Invalid),
+        ("x10", ParseIntegerError::Invalid),
+        ("+5", ParseIntegerError::Invalid),
+        ("-1", ParseIntegerError::Invalid),
+        ("0x+5", ParseIntegerError::Invalid),
+        ("$10", ParseIntegerError::Invalid),
+        ("010", ParseIntegerError::Invalid),
+        ("12a", ParseIntegerError::Invalid),
+        ("4294967296", ParseIntegerError::TooLarge),
+        ("0x100000000", ParseIntegerError::TooLarge),
     ] {
         assert_eq!(
             error(&format!("write_register d0 {word}")),
             ParseCommandError::Number {
-                word: word.to_owned()
+                word: word.to_owned(),
+                error: why,
             },
             "{word}"
         );
     }
-    assert_eq!(
-        command("write_register d0 0xAbC"),
-        Command::WriteRegister {
-            register: Register::D0,
-            value: 0xabc,
-        }
-    );
+    for (word, value) in [("0xAbC", 0xabc), ("1_000", 1000), ("0b101", 5)] {
+        assert_eq!(
+            command(&format!("write_register d0 {word}")),
+            Command::WriteRegister {
+                register: Register::D0,
+                value,
+            }
+        );
+    }
 }
 
 #[test]

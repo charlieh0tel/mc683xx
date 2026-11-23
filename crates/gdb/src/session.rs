@@ -50,6 +50,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::integer::parse_integer;
 use mc683xx_target::register::SystemRegister;
 
 use crate::Ending;
@@ -565,7 +566,10 @@ impl<T: Target> Session<'_, T> {
     fn monitor(&mut self, words: &[&str], out: &mut ConsoleOutput<'_>) -> Result<(), T::Error> {
         match words {
             ["fc"] => outputln!(out, "fc {}", self.function_code.get()),
-            ["fc", code] => match code.parse().ok().and_then(FunctionCode::new) {
+            ["fc", code] => match parse_integer::<u8>(code)
+                .ok()
+                .and_then(|code| FunctionCode::try_from(code).ok())
+            {
                 Some(function_code) => {
                     self.function_code = function_code;
                     outputln!(out, "fc {function_code}");
