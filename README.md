@@ -97,7 +97,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         &registry,
         &Environment::default(),
     )?;
-    let run = board.run_until(Time::from_seconds(1))?;
+    let run = board.run_until(Time::from_secs(1))?;
     println!("{:?} at {:?}", run.stop, run.now);
     Ok(())
 }

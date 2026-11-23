@@ -72,23 +72,23 @@ impl Time {
 
     /// `seconds` seconds, or the last time if that is past it.
     #[must_use]
-    pub const fn from_seconds(seconds: u64) -> Self {
-        Self(Span::from_seconds(seconds).0)
+    pub const fn from_secs(seconds: u64) -> Self {
+        Self(Span::from_secs(seconds).0)
     }
 
     /// `seconds` seconds since power-on, rounded down to a picosecond:
     /// power-on for a negative number or a NaN, the last time past it.
     #[must_use]
-    pub const fn from_seconds_f64(seconds: f64) -> Self {
-        Self(Span::from_seconds_f64(seconds).0)
+    pub const fn from_secs_f64(seconds: f64) -> Self {
+        Self(Span::from_secs_f64(seconds).0)
     }
 
     /// `seconds` seconds since power-on, rounded down to a picosecond, if
     /// there is such a time: [`None`] for a negative number, a NaN or one
-    /// past the last time, where [`Time::from_seconds_f64`] saturates.
+    /// past the last time, where [`Time::from_secs_f64`] saturates.
     #[must_use]
-    pub const fn checked_from_seconds_f64(seconds: f64) -> Option<Self> {
-        match Span::checked_from_seconds_f64(seconds) {
+    pub const fn checked_from_secs_f64(seconds: f64) -> Option<Self> {
+        match Span::checked_from_secs_f64(seconds) {
             Some(span) => Some(Self(span.0)),
             None => None,
         }
@@ -96,8 +96,8 @@ impl Time {
 
     /// Its seconds since power-on, to an `f64`'s precision.
     #[must_use]
-    pub const fn seconds_f64(self) -> f64 {
-        Span(self.0).seconds_f64()
+    pub const fn secs_f64(self) -> f64 {
+        Span(self.0).secs_f64()
     }
 
     /// The span from `earlier` to this, zero if it is later.
@@ -224,7 +224,7 @@ impl Span {
 
     /// `seconds` seconds, or the longest span.
     #[must_use]
-    pub const fn from_seconds(seconds: u64) -> Self {
+    pub const fn from_secs(seconds: u64) -> Self {
         Self(seconds.saturating_mul(PICOSECONDS_PER_SECOND))
     }
 
@@ -236,20 +236,20 @@ impl Span {
         clippy::cast_sign_loss,
         reason = "the cast saturates, and takes a NaN to zero"
     )]
-    pub const fn from_seconds_f64(seconds: f64) -> Self {
+    pub const fn from_secs_f64(seconds: f64) -> Self {
         Self((seconds * PICOSECONDS_PER_SECOND as f64) as u64)
     }
 
     /// `seconds` seconds, rounded down to a picosecond, if there is such
     /// a span: [`None`] for a negative number, a NaN or one past the
-    /// longest span, where [`Span::from_seconds_f64`] saturates.
+    /// longest span, where [`Span::from_secs_f64`] saturates.
     #[must_use]
     #[expect(
         clippy::cast_possible_truncation,
         clippy::cast_sign_loss,
         reason = "the picoseconds are checked to be in range first"
     )]
-    pub const fn checked_from_seconds_f64(seconds: f64) -> Option<Self> {
+    pub const fn checked_from_secs_f64(seconds: f64) -> Option<Self> {
         let picoseconds = seconds * PICOSECONDS_PER_SECOND as f64;
         // u64::MAX rounds up to 2^64, the first value past the range
         if picoseconds >= 0.0 && picoseconds < u64::MAX as f64 {
@@ -267,7 +267,7 @@ impl Span {
 
     /// Its seconds, to an `f64`'s precision.
     #[must_use]
-    pub const fn seconds_f64(self) -> f64 {
+    pub const fn secs_f64(self) -> f64 {
         self.0 as f64 / PICOSECONDS_PER_SECOND as f64
     }
 
@@ -443,8 +443,8 @@ impl NonZeroSpan {
     ///
     /// For zero, at compile time in a const.
     #[must_use]
-    pub const fn from_seconds(seconds: u64) -> Self {
-        Self::of(Span::from_seconds(seconds))
+    pub const fn from_secs(seconds: u64) -> Self {
+        Self::of(Span::from_secs(seconds))
     }
 
     /// Its span.
@@ -916,42 +916,42 @@ mod tests {
         assert_eq!(Span::from_nanos(3), ps(3_000));
         assert_eq!(Span::from_micros(3), Span::from_nanos(3_000));
         assert_eq!(Span::from_millis(3), Span::from_micros(3_000));
-        assert_eq!(Span::from_seconds(3), Span::from_millis(3_000));
-        assert_eq!(Span::from_seconds_f64(0.25), Span::from_millis(250));
-        assert_eq!(Span::from_seconds_f64(-1.0), Span::ZERO);
-        assert_eq!(Span::from_seconds_f64(f64::NAN), Span::ZERO);
-        assert_eq!(Span::from_seconds_f64(1e300), Span::MAX);
+        assert_eq!(Span::from_secs(3), Span::from_millis(3_000));
+        assert_eq!(Span::from_secs_f64(0.25), Span::from_millis(250));
+        assert_eq!(Span::from_secs_f64(-1.0), Span::ZERO);
+        assert_eq!(Span::from_secs_f64(f64::NAN), Span::ZERO);
+        assert_eq!(Span::from_secs_f64(1e300), Span::MAX);
         assert_eq!(
-            Span::checked_from_seconds_f64(0.25),
+            Span::checked_from_secs_f64(0.25),
             Some(Span::from_millis(250))
         );
-        assert_eq!(Span::checked_from_seconds_f64(0.0), Some(Span::ZERO));
+        assert_eq!(Span::checked_from_secs_f64(0.0), Some(Span::ZERO));
         for out_of_range in [-1e-12, -1.0, f64::NAN, f64::INFINITY, 1e300, 18_446_744.1] {
             assert_eq!(
-                Span::checked_from_seconds_f64(out_of_range),
+                Span::checked_from_secs_f64(out_of_range),
                 None,
                 "{out_of_range}"
             );
         }
         assert_eq!(
-            Span::checked_from_seconds_f64(18_446_744.0),
-            Some(Span::from_seconds(18_446_744))
+            Span::checked_from_secs_f64(18_446_744.0),
+            Some(Span::from_secs(18_446_744))
         );
         assert_eq!(
-            Time::checked_from_seconds_f64(2.5),
+            Time::checked_from_secs_f64(2.5),
             Some(Time::from_picos(2_500_000_000_000))
         );
-        assert_eq!(Time::checked_from_seconds_f64(-2.5), None);
+        assert_eq!(Time::checked_from_secs_f64(-2.5), None);
         assert_eq!(
-            Time::from_seconds_f64(2.5),
+            Time::from_secs_f64(2.5),
             Time::from_picos(2_500_000_000_000)
         );
-        assert_eq!(Time::from_seconds_f64(-2.5), Time::ZERO);
-        assert_eq!(Time::from_seconds_f64(f64::NAN), Time::ZERO);
-        assert_eq!(Time::from_seconds_f64(1e300), Time::MAX);
-        assert!((Time::from_picos(1_500_000_000_000).seconds_f64() - 1.5).abs() < f64::EPSILON);
-        assert_eq!(Span::from_seconds(u64::MAX), Span::MAX);
-        assert!((Span::from_millis(1_500).seconds_f64() - 1.5).abs() < f64::EPSILON);
+        assert_eq!(Time::from_secs_f64(-2.5), Time::ZERO);
+        assert_eq!(Time::from_secs_f64(f64::NAN), Time::ZERO);
+        assert_eq!(Time::from_secs_f64(1e300), Time::MAX);
+        assert!((Time::from_picos(1_500_000_000_000).secs_f64() - 1.5).abs() < f64::EPSILON);
+        assert_eq!(Span::from_secs(u64::MAX), Span::MAX);
+        assert!((Span::from_millis(1_500).secs_f64() - 1.5).abs() < f64::EPSILON);
         assert_eq!(ps(2) + ps(3), ps(5));
         assert_eq!(ps(2) - ps(3), Span::ZERO, "saturating at zero");
         assert_eq!(Span::MAX + ps(1), Span::MAX);
@@ -973,7 +973,7 @@ mod tests {
         assert_eq!(NonZeroSpan::new(ps(1)), Some(NonZeroSpan::from_picos(1)));
         assert_eq!(NonZeroSpan::from_nanos(3).get(), Span::from_nanos(3));
         assert_eq!(NonZeroSpan::from_micros(3).get(), Span::from_micros(3));
-        assert_eq!(NonZeroSpan::from_seconds(3).get(), Span::from_seconds(3));
+        assert_eq!(NonZeroSpan::from_secs(3).get(), Span::from_secs(3));
         assert_eq!(NonZeroSpan::from_millis(3).get(), Span::from_millis(3));
         assert_eq!(NonZeroSpan::from_millis(5).to_string(), "5000000000 ps");
         assert_eq!(Span::from(NonZeroSpan::from_picos(7)), ps(7));
@@ -988,7 +988,7 @@ mod tests {
     #[test]
     fn edges_are_counted_exactly_over_long_spans() {
         let clock = Clock::new(TEN_MHZ, Time::from_picos(123));
-        let day = Time::from_seconds(86_400);
+        let day = Time::from_secs(86_400);
         assert_eq!(
             clock.edges(Time::from_picos(123), day + ps(123)),
             864_000_000_000
@@ -1014,7 +1014,7 @@ mod tests {
                 Frequency::from_hz(3),
             );
         }
-        assert_eq!(clock.phase(Time::from_seconds(3)).0, 9 * PHASE_UNITS);
+        assert_eq!(clock.phase(Time::from_secs(3)).0, 9 * PHASE_UNITS);
         assert_eq!(
             clock.edge_after(Time::ZERO, 1),
             third.edge_after(Time::ZERO, 1)
@@ -1041,7 +1041,7 @@ mod tests {
     #[test]
     fn a_history_integrates_across_its_changes() {
         // 10 MHz, then 20 MHz from 1 us: 10 edges, then 20 a us.
-        let mut history = ClockHistory::new(Span::from_seconds(64));
+        let mut history = ClockHistory::new(Span::from_secs(64));
         let clock = Clock::new(TEN_MHZ, Time::ZERO);
         history.push(clock);
         let faster = clock.retuned(Time::from_picos(1_000_000), Frequency::from_hz(20_000_000));
@@ -1101,7 +1101,7 @@ mod tests {
     fn days_of_retunes_accumulate_no_rounding() {
         const DAYS: u64 = 3;
         let seconds = DAYS * 86_400;
-        let mut history = ClockHistory::new(Span::from_seconds(64));
+        let mut history = ClockHistory::new(Span::from_secs(64));
         let mut clock = Clock::new(TEN_MHZ, Time::from_picos(7));
         history.push(clock);
         // The exact phase, in nanohertz-seconds: cycles x 10^9.
@@ -1113,10 +1113,10 @@ mod tests {
             // drifting: 6.25 uHz is 6250 nHz.
             let step = 6_250 * (second % 7);
             frequency = Frequency::from_nanohertz(TEN_MHZ.nanohertz() + step - 6_250 * 3);
-            clock = clock.retuned(Time::from_seconds(second) + ps(7), frequency);
+            clock = clock.retuned(Time::from_secs(second) + ps(7), frequency);
             history.push(clock);
         }
-        let end = Time::from_seconds(seconds) + ps(7);
+        let end = Time::from_secs(seconds) + ps(7);
         let phase = history.phase(end).unwrap();
         // Phase units are 10^-21 cycle; a nanohertz-second is 10^-9.
         assert_eq!(phase.0, exact * 1_000_000_000_000);
@@ -1202,7 +1202,7 @@ mod tests {
             TimeBase::new(Cycle::ZERO, Time::ZERO, Frequency::from_hz(16_777_216))
         );
         assert_eq!(
-            base.cycle(Time::from_seconds(1)),
+            base.cycle(Time::from_secs(1)),
             Cycle::from_clocks(16_777_216)
         );
     }

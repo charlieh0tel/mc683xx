@@ -764,7 +764,7 @@ The contract a host's peripheral models target (rustdoc in
   a sink counts and times edges across the change with no rounding.
   A sink that queries back across changes keeps a
   `time::ClockHistory` (`new(span)`, `push(clock)` at each input;
-  `Span::from_seconds(64)` of history is plenty): `phase(at)`,
+  `Span::from_secs(64)` of history is plenty): `phase(at)`,
   `time(phase)`, `edges(from, to)`,
   `edge(number)`, `edge_after(from, n)` and `to_next_edge(at)`
   (a `Span` rounded up to a picosecond, and the exact fraction of a

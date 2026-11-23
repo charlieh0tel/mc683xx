@@ -37,7 +37,7 @@ const TURN: Span = Span::from_millis(1);
 const INPUT_AFTER: Time = Time::from_picos(Span::from_millis(10).picos());
 /// Board time the run ends at, past the last command's end (about
 /// 2.15 s).
-const END: Time = Time::from_seconds(3);
+const END: Time = Time::from_secs(3);
 /// The variable that asks a run to write the golden.
 const UPDATE: &str = "UPDATE_GOLDEN";
 /// The golden, from the crate's directory.

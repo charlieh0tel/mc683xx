@@ -4004,12 +4004,12 @@ attach = [{ select = "CSBOOT" }]
     // MOVE.W $401,D0: an odd address (CPU32RM 6.2.3)
     let mut board = board("fault-stop", text, &[MOVE_WORD_TO_D0, 0, 0x0401, NOP]);
     board.chip_mut().cpu_control().set_stop_on_fault(true);
-    let run = board.run_until(Time::from_seconds(1)).unwrap();
+    let run = board.run_until(Time::from_secs(1)).unwrap();
     assert_eq!(run.stop, Stop::Fault);
     let fault = board.chip().cpu().fault_stop().expect("a fault stop");
     assert_eq!(fault.address.0, 0x0401);
     assert_eq!(fault.registers.pc.0, START);
-    assert!(run.now < Time::from_seconds(1), "{:?}", run.now);
+    assert!(run.now < Time::from_secs(1), "{:?}", run.now);
 }
 
 #[test]
@@ -4052,7 +4052,7 @@ attach = [{ select = "CSBOOT" }]
     let mut tracing = BoardTracing::default();
     tracing.exceptions = true;
     board.set_tracing(tracing);
-    let run = board.run_until(Time::from_seconds(1)).unwrap();
+    let run = board.run_until(Time::from_secs(1)).unwrap();
     assert_eq!(run.stop, Stop::Fault);
     let vectors: Vec<u8> = board
         .take_trace()

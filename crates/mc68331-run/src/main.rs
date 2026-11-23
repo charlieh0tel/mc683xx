@@ -365,19 +365,17 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         eprintln!("{}", header(CHIP));
     }
     let end = match (arguments.cycles, arguments.seconds) {
-        (None, Some(seconds)) if seconds.is_finite() => {
-            board.now() + Span::from_seconds_f64(seconds)
-        }
+        (None, Some(seconds)) if seconds.is_finite() => board.now() + Span::from_secs_f64(seconds),
         _ => Time::MAX,
     };
     let turn = Span::from_micros(arguments.turn_us);
     let every = arguments
         .position
-        .map(Span::from_seconds_f64)
+        .map(Span::from_secs_f64)
         .filter(|every| !every.is_zero());
     let mut turns = Turns {
         bindings,
-        input_after: board.now() + Span::from_seconds_f64(arguments.input_after),
+        input_after: board.now() + Span::from_secs_f64(arguments.input_after),
         next_position: every.map(|every| (board.now() + every, every)),
     };
     control.set_pacing(arguments.pace);

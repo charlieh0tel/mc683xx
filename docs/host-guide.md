@@ -1416,13 +1416,13 @@ plumbing the board runs the chip with is hidden from the docs and
 outside semver.
 
 - **Board time.** `time::Time` is a time on the board, picoseconds
-  since power-on, made by `Time::from_picos`, `from_seconds`, `from_seconds_f64`
-  (saturating) or `checked_from_seconds_f64` and read by `picos` or `seconds_f64`;
+  since power-on, made by `Time::from_picos`, `from_secs`, `from_secs_f64`
+  (saturating) or `checked_from_secs_f64` and read by `picos` or `secs_f64`;
   neither it nor a span converts to or from a bare `u64`.  `time::Span` is a span of it, picoseconds too, made
   by `Span::from_picos`, `from_nanos`, `from_micros`, `from_millis`,
-  `from_seconds` or `from_seconds_f64` (saturating; `checked_from_seconds_f64`
-  gives `None` out of range, as `Time::checked_from_seconds_f64` does) and read by `picos` or
-  `seconds_f64`.  `Time + Span` and `Time - Span` are times, `Time -
+  `from_secs` or `from_secs_f64` (saturating; `checked_from_secs_f64`
+  gives `None` out of range, as `Time::checked_from_secs_f64` does) and read by `picos` or
+  `secs_f64`.  `Time + Span` and `Time - Span` are times, `Time -
   Time` (`since`) the `Span` between them, `since_power_on` a time's
   span from power-on (to carry a time from one board to another:
   `board.now() + epoch.since_power_on()`), and spans add, subtract and

@@ -1369,7 +1369,7 @@ impl BoardView {
 /// The span of `seconds` or `picoseconds`, whichever is given.
 fn span_of(seconds: Option<f64>, picoseconds: Option<u64>) -> PyResult<Span> {
     match (seconds, picoseconds) {
-        (Some(seconds), None) => Span::checked_from_seconds_f64(seconds).ok_or_else(|| {
+        (Some(seconds), None) => Span::checked_from_secs_f64(seconds).ok_or_else(|| {
             PyValueError::new_err(format!(
                 "{seconds}: give a finite number of seconds, 0 or more, within board time"
             ))

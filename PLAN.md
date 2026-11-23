@@ -1449,9 +1449,10 @@ hand.  The keys are in `docs/board-files.md`.
 - **Board time:** `Time`, integer picoseconds in a `u64` (213 days),
   with no floats in scheduling.  A span of it is a `Span`, picoseconds
   too, its field private (`from_picos`, `from_nanos`, `from_micros`,
-  `from_millis`, `from_seconds`, `from_seconds_f64`, `checked_from_seconds_f64`; `picos`,
-  `seconds_f64`), so a time and a span cannot be mixed up: `Time +
-  Span` and `Time - Span` are times, `Time - Time` a `Span` (and
+  `from_millis`, `from_secs`, `from_secs_f64`, `checked_from_secs_f64`; `picos`,
+  `secs_f64`: std `Duration`'s names, decided 2026-11 for 0.9.0), so a
+  time and a span cannot be mixed up: `Time + Span` and `Time - Span`
+  are times, `Time - Time` a `Span` (and
   `Time::since_power_on` a time's own, not `time - Time::ZERO`), `Span`s
   add and scale by counts, all saturating as `Time` does.  Every API
   taking or giving a span takes a `Span` (`Board::run_for`,

@@ -252,7 +252,7 @@ impl Pacer {
         let Some(anchor) = self.anchored(now, factor, wall) else {
             return Duration::ZERO;
         };
-        let board = now.since(anchor.board).seconds_f64();
+        let board = now.since(anchor.board).secs_f64();
         Duration::try_from_secs_f64(board / factor.get())
             .ok()
             .and_then(|elapsed| anchor.wall.checked_add(elapsed))
@@ -284,7 +284,7 @@ impl Pacer {
             return Some(now);
         };
         let elapsed = wall.saturating_sub(anchor.wall).as_secs_f64();
-        let board = Span::from_seconds_f64(elapsed * factor.get());
+        let board = Span::from_secs_f64(elapsed * factor.get());
         Some((anchor.board + board).max(now))
     }
 
