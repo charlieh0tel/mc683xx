@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
 
+use crate::function_code::FunctionCode;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu;
 use mc683xx_cpu32::cycles::Cycles;
@@ -34,7 +35,6 @@ use mc683xx_modules::sim::clock::ClockSource;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry;
-use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
 use mc683xx_modules::sim::reset::ResetScope;
@@ -155,11 +155,6 @@ const fn cycle_size(bytes: u32) -> Result<Size, Error> {
         4 => Ok(Size::Long),
         _ => Err(Error::CycleSize(bytes)),
     }
-}
-
-/// FC[2:0] as `bits`.
-fn function_code(bits: u8) -> Result<FunctionCode, Error> {
-    FunctionCode::new(bits).ok_or(Error::FunctionCode(bits))
 }
 
 /// The board as the host wires it, before the power-on reset.
@@ -863,7 +858,7 @@ impl DsackFaultView {
             }),
             // Python numbers the chip's peripherals as it adds them
             DsackFault::BusUnassigned { peripheral } => Some(Self::BusUnassigned {
-                peripheral: peripheral.into(),
+                peripheral: peripheral.number(),
             }),
             _ => None,
         }
@@ -899,8 +894,8 @@ pub(crate) enum Event {
         address: u32,
         /// Bytes in it: 1 or 2.
         size: u32,
-        /// FC[2:0].
-        function_code: u8,
+        /// Its function code.
+        function_code: FunctionCode,
         /// Whether it wrote.
         write: bool,
         /// The value read or written; `None` for a read that ended in
@@ -964,7 +959,7 @@ impl Event {
                 ..
             } => Self::ArbitrationTie {
                 now: now.clocks(),
-                level: level.get(),
+                level: u8::from(level),
                 arbitration,
             },
             event::Event::Access {
@@ -980,7 +975,7 @@ impl Event {
                 now: now.clocks(),
                 address: address.0,
                 size: size.bytes(),
-                function_code: function_code.get(),
+                function_code: function_code.into(),
                 write,
                 value,
                 bus_error,
@@ -991,7 +986,7 @@ impl Event {
                 pc: entry.pc.0,
                 handler: entry.handler.0,
                 stack: entry.stack.0,
-                level: entry.level.map(|level| level.get()),
+                level: entry.level.map(u8::from),
             },
             event::Event::Dsack { now, fault, .. } => {
                 DsackFaultView::of(fault).map_or_else(unknown, |fault| Self::Dsack {
@@ -1013,42 +1008,40 @@ macro_rules! chip_methods {
         #[pymethods]
         impl $type {
             /// A read cycle of `size` bytes (1, 2 or 4) at `address` in
-            /// `function_code`'s space (5, supervisor data, by default;
+            /// `function_code`'s space (supervisor data by default;
             /// CPU32RM Table 5-1), now, through the chip's decode, with its
             /// side effects: a module's register or what a chip select
             /// reaches.  Raises `BusError` if it ends in one or nothing
             /// answers, and a peripheral's exception as `run_for` does.
-            #[pyo3(signature = (address, size, function_code = 5))]
+            #[pyo3(signature = (address, size, function_code = FunctionCode::SupervisorData))]
             fn bus_read(
                 &mut self,
                 py: Python<'_>,
                 address: u32,
                 size: u32,
-                function_code: u8,
+                function_code: FunctionCode,
             ) -> PyResult<u32> {
                 let size = cycle_size(size)?;
-                let function_code = self::function_code(function_code)?;
                 self.with_chip_mut(py, |chip, pending| {
-                    let read = chip.bus_read(Address(address), size, function_code);
+                    let read = chip.bus_read(Address(address), size, function_code.into());
                     pending.check()?;
                     Ok(read.map_err(Error::from)?)
                 })
             }
 
             /// A write cycle of `value`, as `bus_read`.
-            #[pyo3(signature = (address, size, value, function_code = 5))]
+            #[pyo3(signature = (address, size, value, function_code = FunctionCode::SupervisorData))]
             fn bus_write(
                 &mut self,
                 py: Python<'_>,
                 address: u32,
                 size: u32,
                 value: u32,
-                function_code: u8,
+                function_code: FunctionCode,
             ) -> PyResult<()> {
                 let size = cycle_size(size)?;
-                let function_code = self::function_code(function_code)?;
                 self.with_chip_mut(py, |chip, pending| {
-                    let written = chip.bus_write(Address(address), size, function_code, value);
+                    let written = chip.bus_write(Address(address), size, function_code.into(), value);
                     pending.check()?;
                     Ok(written.map_err(Error::from)?)
                 })
@@ -1057,19 +1050,18 @@ macro_rules! chip_methods {
             /// What `bus_read` would return now, without a cycle: a
             /// module's register as it holds it, memory's bytes.  Raises
             /// `UnpeekableError` where only a cycle can tell (a peripheral).
-            #[pyo3(signature = (address, size, function_code = 5))]
+            #[pyo3(signature = (address, size, function_code = FunctionCode::SupervisorData))]
             fn peek(
                 &self,
                 py: Python<'_>,
                 address: u32,
                 size: u32,
-                function_code: u8,
+                function_code: FunctionCode,
             ) -> PyResult<u32> {
                 let size = cycle_size(size)?;
-                let function_code = self::function_code(function_code)?;
                 self.with_chip(py, |chip| {
                     Ok(chip
-                        .peek(Address(address), size, function_code)
+                        .peek(Address(address), size, function_code.into())
                         .map_err(Error::from)?)
                 })
             }

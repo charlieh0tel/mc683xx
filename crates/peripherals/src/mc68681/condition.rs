@@ -8,6 +8,7 @@ use std::mem;
 use mc683xx_board::condition::ArmError;
 use mc683xx_board::condition::ConditionInfo;
 use mc683xx_board::condition::ConditionToken;
+use mc683xx_target::integer::parse_integer;
 
 /// `tx CHANNEL [BYTE]`.
 const TX: ConditionInfo = ConditionInfo::new(
@@ -60,8 +61,8 @@ pub(super) struct Watches {
 
 impl Watches {
     /// Arms `condition` with `arguments`: `tx` or `rx`, the channel `a`
-    /// or `b`, and a byte, hexadecimal with `0x` or decimal, if only
-    /// one byte is wanted.
+    /// or `b`, and a byte, as [`parse_integer`] takes one, if only one
+    /// byte is wanted.
     pub(super) fn arm(
         &mut self,
         condition: &str,
@@ -90,7 +91,7 @@ impl Watches {
         };
         let byte = byte.map(|byte| parse_byte(byte)).transpose()?;
         self.given += 1;
-        let token = ConditionToken::new(self.given);
+        let token = ConditionToken::from(self.given);
         self.armed.push(Watch {
             token,
             direction,
@@ -132,14 +133,9 @@ impl Watches {
     }
 }
 
-/// A byte as `monitor stop` gives it: hexadecimal with `0x`, or
-/// decimal.
+/// A byte as `monitor stop` gives it, as [`parse_integer`] takes one.
 fn parse_byte(text: &str) -> Result<u8, ArmError> {
-    let parsed = match text.strip_prefix("0x") {
-        Some(hex) => u8::from_str_radix(hex, 16),
-        None => text.parse(),
-    };
-    parsed.map_err(|_| ArmError::Arguments(format!("not a byte: {text:?}")))
+    parse_integer(text).map_err(|error| ArmError::Arguments(format!("byte {text:?}: {error}")))
 }
 
 #[cfg(test)]

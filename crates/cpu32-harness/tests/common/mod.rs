@@ -27,7 +27,7 @@ const PERIPHERAL_PINS: [u8; 7] = [4, 5, 6, 7, 8, 9, 10];
 
 /// CS`number`.
 fn select(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).expect("CS0 to CS10"))
+    ChipSelect::Numbered(Number::try_from(number).expect("CS0 to CS10"))
 }
 
 /// The board wired as the Z3805A's, with `image` in the flash and

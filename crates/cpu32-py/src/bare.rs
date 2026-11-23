@@ -65,6 +65,7 @@ use crate::chip::Halt;
 
 use crate::chip::Stop;
 use crate::error::Error;
+use crate::function_code::FunctionCode as FunctionCodeView;
 use crate::gdb;
 use crate::held::Held;
 use crate::hooks;
@@ -180,10 +181,10 @@ impl FaultStopView {
         self.0.size.bytes()
     }
 
-    /// FC[2:0].
+    /// Its function code.
     #[getter]
-    const fn function_code(&self) -> u8 {
-        self.0.function_code.get()
+    fn function_code(&self) -> FunctionCodeView {
+        self.0.function_code.into()
     }
 
     /// The faulting instruction's address.
@@ -207,7 +208,7 @@ impl FaultStopView {
             repr(py, self.cause()?)?,
             self.address(),
             self.size(),
-            self.function_code(),
+            repr(py, self.function_code())?,
             self.pc()
         ))
     }

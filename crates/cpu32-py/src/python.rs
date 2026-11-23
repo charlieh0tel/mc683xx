@@ -61,6 +61,7 @@ use crate::error::Error;
 use crate::error::RUN_END;
 use crate::exceptions;
 use crate::exceptions::BusError;
+use crate::function_code::FunctionCode;
 use crate::gdb::Ending;
 use crate::hooks::CycleKind;
 use crate::hooks::ExceptionView;
@@ -119,7 +120,6 @@ impl From<Error> for PyErr {
             | Error::CycleSize(_)
             | Error::PortWidth(_)
             | Error::Length(_)
-            | Error::FunctionCode(_)
             | Error::Access(_)
             | Error::Build(_)
             | Error::Memory(_)
@@ -183,6 +183,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<Halt>()?;
     module.add_class::<Entry>()?;
     module.add_class::<ResetCause>()?;
+    module.add_class::<FunctionCode>()?;
     module.add_class::<Event>()?;
     module.add_class::<Ending>()?;
     module.add_class::<Frame>()?;

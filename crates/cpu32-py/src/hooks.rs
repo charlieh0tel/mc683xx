@@ -28,6 +28,7 @@ use pyo3::types::PyDict;
 use pyo3::types::PyDictMethods;
 
 use crate::error::Error;
+use crate::function_code::FunctionCode;
 use crate::mapped::Pending;
 use crate::python::repr;
 use crate::register::Register;
@@ -111,10 +112,10 @@ impl MemoryAccessView {
         self.0.size.bytes()
     }
 
-    /// FC[2:0].
+    /// Its function code.
     #[getter]
-    const fn function_code(&self) -> u8 {
-        self.0.function_code.get()
+    fn function_code(&self) -> FunctionCode {
+        self.0.function_code.into()
     }
 
     /// The value read or written, right-aligned.
@@ -147,14 +148,14 @@ impl MemoryAccessView {
             .transpose()
     }
 
-    fn __repr__(&self) -> String {
-        format!(
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
             "MemoryAccess(address={:#08x}, size={}, function_code={}, value={:#x})",
             self.address(),
             self.size(),
-            self.function_code(),
+            repr(py, self.function_code())?,
             self.value()
-        )
+        ))
     }
 }
 
@@ -240,10 +241,10 @@ impl InvalidAccessView {
         self.0.size.bytes()
     }
 
-    /// FC[2:0].
+    /// Its function code.
     #[getter]
-    const fn function_code(&self) -> u8 {
-        self.0.function_code.get()
+    fn function_code(&self) -> FunctionCode {
+        self.0.function_code.into()
     }
 
     /// Fetch, read or write.
@@ -294,7 +295,7 @@ impl InvalidAccessView {
              reason={})",
             self.address(),
             self.size(),
-            self.function_code(),
+            repr(py, self.function_code())?,
             repr(py, self.cycle())?,
             repr(py, self.value())?,
             repr(py, self.reason()?)?
@@ -336,7 +337,7 @@ impl ExceptionView {
     /// The interrupt level, for an interrupt.
     #[getter]
     fn level(&self) -> Option<u8> {
-        self.0.level.map(|level| level.get())
+        self.0.level.map(u8::from)
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {

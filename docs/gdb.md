@@ -195,7 +195,7 @@ and leaves the rest; one that ends within a register is refused with
 
 An emulated target's memory is reached with no bus cycle, so a
 debugger's look never has a peripheral's side effect.  Accesses are in
-supervisor data space unless `monitor fc N` names another: the chip
+supervisor data space unless `monitor fc FC` names another: the chip
 reads in that space through its decode and writes in supervisor space
 alone, and the bare CPU has one space whatever the code.
 
@@ -256,9 +256,12 @@ CPU has none.
 
 ## Monitor commands
 
-- `monitor fc` shows the address space memory is read and written in,
-  supervisor data (5) to begin with, and `monitor fc N` sets it (0 to
-  7).
+- `monitor fc` shows the address space memory is read and written in
+  by name and number, `fc supervisor-data (5)` to begin with, and
+  `monitor fc FC` sets it: a name, in any case (`user-data`,
+  `user-program`, `supervisor-data`, `supervisor-program`,
+  `cpu-space`, `reserved0`, `reserved3`, `reserved4`), or a number
+  from 0 to 7 (decimal, `0x` or `0b`, as `parse_integer` takes it).
 - `monitor faults` shows whether a bus or address error stops the run
   (`stop`) or is taken as an exception by the firmware (`take`, at
   first), and the fault that last stopped it; `monitor faults stop` and

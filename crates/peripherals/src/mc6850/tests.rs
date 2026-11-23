@@ -119,12 +119,12 @@ impl Bench {
 
     /// An access to `register` at `now` through `role`.
     fn access(register: u8, role: Role, now: Time) -> PeripheralAccess {
-        let select = ChipSelect::Numbered(Number::new(8).unwrap());
+        let select = ChipSelect::Numbered(Number::try_from(8).unwrap());
         PeripheralAccess::new(
             select,
             u32::from(register),
             Size::Byte,
-            FunctionCode::SUPERVISOR_DATA,
+            FunctionCode::SupervisorData,
             now,
         )
         .through(0, role, Lane::Both)
@@ -761,7 +761,7 @@ fn a_word_cycle_carries_the_register_on_data_15_8() {
         ChipSelect::Boot,
         u32::from(STATUS),
         Size::Word,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
         Time::ZERO,
     );
     let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);

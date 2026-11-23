@@ -18,8 +18,8 @@ const IACK_LEVEL_SHIFT: u32 = 1;
 
 /// The address of an interrupt acknowledge cycle at `level`.
 #[must_use]
-pub const fn iack_address(level: InterruptLevel) -> Address {
-    Address(IACK_ADDRESS | (level.get() as u32) << IACK_LEVEL_SHIFT)
+pub fn iack_address(level: InterruptLevel) -> Address {
+    Address(IACK_ADDRESS | u32::from(u8::from(level)) << IACK_LEVEL_SHIFT)
 }
 
 /// The cycles a peripheral on no chip select takes by its own decode of
@@ -50,7 +50,7 @@ impl BusDecode {
                 function_code.is_memory_space() && address.0.wrapping_sub(base.0) < length
             }
             Self::Acknowledge(pin) => {
-                function_code.is_cpu_space() && address == iack_address(pin.level())
+                function_code == FunctionCode::CpuSpace && address == iack_address(pin.into())
             }
         }
     }

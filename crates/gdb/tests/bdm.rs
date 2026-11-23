@@ -204,7 +204,7 @@ fn word(target: &mut Running, address: u32) -> [u8; 2] {
         .read_memory(
             Address(address),
             Size::Word,
-            FunctionCode::SUPERVISOR_DATA,
+            FunctionCode::SupervisorData,
             &mut word,
         )
         .unwrap();
@@ -303,7 +303,7 @@ fn monitor_sets_the_function_code_and_resets() {
         &mut target,
         vec![
             packet("s"),
-            packet(&format!("qRcmd,{}", hex("fc 6"))),
+            packet(&format!("qRcmd,{}", hex("fc Supervisor-Program"))),
             packet(&format!("qRcmd,{}", hex("fc 9"))),
             packet(&format!("qRcmd,{}", hex("reset"))),
             packet("g"),
@@ -316,8 +316,8 @@ fn monitor_sets_the_function_code_and_resets() {
             .iter()
             .any(|reply| *reply == format!("O{}", hex(text)))
     };
-    assert!(said("fc 6\n"));
-    assert!(said("fc takes a function code, 0 to 7\n"));
+    assert!(said("fc supervisor-program (6)\n"));
+    assert!(said("fc takes a function code: a name or 0 to 7\n"));
     assert_eq!(registers(replies.last().unwrap())[PC], START, "reset");
 }
 

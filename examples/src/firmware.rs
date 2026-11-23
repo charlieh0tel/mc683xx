@@ -91,7 +91,7 @@ pub const UNMASKED: u16 = 0x2000;
 /// If there is no such select.
 #[must_use]
 pub fn cs(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).expect("CS0 to CS10"))
+    ChipSelect::Numbered(Number::try_from(number).expect("CS0 to CS10"))
 }
 
 /// A ROM of NOPs: the reset vectors (STACK, START) and `program` at

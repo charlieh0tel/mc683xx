@@ -31,7 +31,7 @@ mod tests {
         assert_eq!(parse("csboot").unwrap(), ChipSelect::Boot);
         assert_eq!(
             parse("cs10").unwrap(),
-            ChipSelect::Numbered(Number::new(10).unwrap())
+            ChipSelect::Numbered(Number::try_from(10).unwrap())
         );
     }
 

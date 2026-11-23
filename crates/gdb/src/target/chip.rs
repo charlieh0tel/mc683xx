@@ -44,8 +44,8 @@ impl Target for Mc68331 {
         data: &[u8],
     ) -> Result<(), AccessError<Infallible>> {
         if ![
-            FunctionCode::SUPERVISOR_DATA,
-            FunctionCode::SUPERVISOR_PROGRAM,
+            FunctionCode::SupervisorData,
+            FunctionCode::SupervisorProgram,
         ]
         .contains(&function_code)
         {

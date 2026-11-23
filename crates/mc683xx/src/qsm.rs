@@ -420,7 +420,7 @@ impl Qsm {
     fn levels(&self) -> (InterruptLevel, InterruptLevel) {
         let level = |requesting: bool, field: u8| {
             let level = if requesting { field & LEVEL_MASK } else { 0 };
-            InterruptLevel::new(level).expect("three bits")
+            InterruptLevel::try_from(level).expect("three bits")
         };
         (
             level(self.sci.requesting(), self.qilr),

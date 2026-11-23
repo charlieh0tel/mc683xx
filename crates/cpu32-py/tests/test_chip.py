@@ -876,7 +876,8 @@ def test_memory_hooks_see_reads_and_writes():
     run = chip.run_for(2000)
     assert run.stop == mc683xx.Stop.Hook(write_hook)
     assert [(a.address, a.size, a.value) for a in writes] == [(RAM_WORD, 2, 0x1234)]
-    assert writes[0].function_code == 5
+    assert writes[0].function_code == mc683xx.FunctionCode.SUPERVISOR_DATA
+    assert str(writes[0].function_code) == "supervisor-data"
     assert reads == []
     chip.run_for(2000)
     assert [(a.address, a.size, a.value) for a in reads] == [(RAM_WORD, 2, 0x1234)]
@@ -1241,6 +1242,7 @@ def test_the_host_reaches_memory_and_peripherals_through_the_decode():
     assert chip.read_memory(ram, 0, 4) == b"\x12\x34\x56\x78"
     assert chip.bus_read(RAM_BASE, 4) == 0x12345678
     assert chip.peek(RAM_BASE + 2, 2) == 0x5678
+    assert chip.peek(RAM_BASE + 2, 2, mc683xx.FunctionCode.SUPERVISOR_PROGRAM) == 0x5678
     assert chip.peek(CSBAR1, 2) == csbar(PERIPHERAL_BASE)
     assert chip.bus_read(PERIPHERAL_BASE + 4, 2) == 0xBEEF
     chip.bus_write(PERIPHERAL_BASE + 1, 1, 0x42)
@@ -1258,11 +1260,12 @@ def test_host_cycle_mistakes():
     for mistake in (
         lambda: chip.bus_read(RAM_BASE + 1, 2),
         lambda: chip.bus_read(RAM_BASE, 3),
-        lambda: chip.peek(RAM_BASE, 2, 8),
         lambda: chip.bus_write(RAM_BASE, 1, 0x100),
     ):
         with pytest.raises(ValueError):
             mistake()
+    with pytest.raises(TypeError):
+        chip.peek(RAM_BASE, 2, 5)
 
 
 def test_a_peripheral_exception_is_raised_by_the_host_cycle():

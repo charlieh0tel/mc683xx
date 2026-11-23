@@ -491,7 +491,7 @@ const fn operand_bits(fault: &Fault) -> u16 {
         Size::Word => ssw::SIZ_WORD,
     };
     let long = if fault.long { ssw::LG } else { 0 };
-    long | size << ssw::SIZ_SHIFT | fault.function_code.get() as u16 & ssw::FUNC
+    long | size << ssw::SIZ_SHIFT | fault.function_code as u16 & ssw::FUNC
 }
 
 /// The SSW of a double bus fault's second fault, for ATEMP: its
@@ -563,7 +563,7 @@ impl Core<'_> {
         breakpoint: Breakpoint,
     ) -> Option<u16> {
         let address = Address(u32::from(number) << BREAKPOINT_NUMBER_SHIFT | breakpoint.t_bit());
-        self.read(address, Size::Word, FunctionCode::CPU_SPACE)
+        self.read(address, Size::Word, FunctionCode::CpuSpace)
             .ok()
             .map(|word| word as u16)
     }
@@ -736,7 +736,7 @@ impl Core<'_> {
                 self.access_write(
                     bottom.offset(2 * index as u32),
                     Size::Word,
-                    FunctionCode::SUPERVISOR_DATA,
+                    FunctionCode::SupervisorData,
                     u32::from(*word),
                 )
             });
@@ -751,7 +751,7 @@ impl Core<'_> {
         self.access_read(
             at,
             Size::Long,
-            FunctionCode::SUPERVISOR_DATA,
+            FunctionCode::SupervisorData,
             CycleKind::Read,
         )
         .map(Address)

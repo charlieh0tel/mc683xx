@@ -316,7 +316,7 @@ impl PeriodicTimer {
 
     /// PIRQL's level.
     fn level(&self) -> InterruptLevel {
-        InterruptLevel::new((self.control >> PICR_PIRQL_SHIFT & PICR_PIRQL_MASK) as u8)
+        InterruptLevel::try_from((self.control >> PICR_PIRQL_SHIFT & PICR_PIRQL_MASK) as u8)
             .unwrap_or(InterruptLevel::NONE)
     }
 
@@ -438,7 +438,7 @@ mod tests {
         timer.advance(31);
         assert_eq!(timer.request(), None);
         timer.advance(32);
-        assert_eq!(timer.request(), InterruptLevel::new(5));
+        assert_eq!(timer.request(), InterruptLevel::try_from(5).ok());
         assert_eq!(timer.acknowledge(), 0x42);
         assert_eq!(timer.request(), None);
         assert_eq!(timer.end(), Some(64));

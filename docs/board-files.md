@@ -26,7 +26,13 @@ the QSPI an SPI peripheral.
 Every table refuses keys it does not know, but every table takes a
 `note`, a string the loader ignores, for provenance and confidence: a
 peripheral's `parameters` and a decoder's `alias` too, where it is the
-loader's, never a parameter or a code.  Numbers may be written in hex (`0xff`) or binary (`0b1110`).  Names
+loader's, never a parameter or a code.  Numbers are TOML integers,
+with TOML's own syntax: hex (`0xff`), binary (`0b1110`), octal
+(`0o17`), a sign and `_` between digits.  A number inside a string, as
+a decoder's `alias` codes are, takes the one syntax the command line,
+init scripts and gdb take (`mc683xx_target::integer::parse_integer`):
+decimal, `0x` or `0b`, `_` between digits, no sign, no octal and no
+decimal leading zero.  Names
 (memories, decoders, peripherals, nets) are unique across the file, and
 are not `chip` or `external` and hold no `.`.  Any memory, decoder,
 peripheral, unconnected select or net may carry `option = "name"`, one of
@@ -523,8 +529,8 @@ The contract a host's peripheral models target (rustdoc in
     ([docs/gdb.md](gdb.md), Stop conditions): `conditions()` lists
     what it offers (`condition::ConditionInfo::new(name, arguments,
     help)`, a `const fn` for a static list; none by default), `arm(condition, arguments)` arms one and gives
-    its own `condition::ConditionToken` (`ConditionToken::new(number)`,
-    `number()` its number, as a `ConditionId`'s; or a `condition::ArmError`),
+    its own `condition::ConditionToken` (`ConditionToken::from(number)`,
+    `u32::from(token)` its number; or a `condition::ArmError`),
     and `disarm(token)` disarms it.  Each time an armed condition
     holds the peripheral calls `drive.fire(token)`, which stops the run
     as `drive.stop()` does and names the condition to the board.  It

@@ -27,6 +27,7 @@ use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::peripheral::floating_miso;
 use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
@@ -301,7 +302,7 @@ impl Routes {
     /// direction: the peripheral on both lanes, or a byte to the
     /// peripheral on each lane the cycle drives.
     fn pieces(&self, cycle: BusCycle) -> Vec<Piece<'_>> {
-        let cpu_space = cycle.function_code.is_cpu_space();
+        let cpu_space = cycle.function_code == FunctionCode::CpuSpace;
         let taking = || {
             self.0
                 .iter()

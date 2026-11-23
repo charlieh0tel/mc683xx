@@ -11,30 +11,34 @@
 //! read_memory.w 0xfffa44 expect 0x3fff
 //! write_register a7 0x20fffc
 //! write_system_register vbr 0x200000
-//! poll_memory.b 0x300001 mask 0x80 expect 0x80 timeout_ms 100 fc 5
+//! poll_memory.b 0x300001 mask 0x80 expect 0x80 timeout_ms 100 fc supervisor-data
 //! "
 //! .parse()?;
 //! assert_eq!(script.lines()[0].number, 3);
 //! # Ok::<(), mc683xx_debug::script::ParseScriptError>(())
 //! ```
 //!
-//! - `write_memory.SIZE ADDRESS VALUE [fc N]`
+//! - `write_memory.SIZE ADDRESS VALUE [fc FC]`
 //! - `write_register REGISTER VALUE`: `d0`-`d7`, `a0`-`a7`, in any case.
 //! - `write_system_register REGISTER VALUE`: `rpc`, `pcc`, `atemp`,
 //!   `far`, `vbr`, `sr`, `usp`, `ssp`, `sfc`, `dfc`, in any case.
-//! - `read_memory.SIZE ADDRESS expect VALUE [mask M] [fc N]`: fails
+//! - `read_memory.SIZE ADDRESS expect VALUE [mask M] [fc FC]`: fails
 //!   unless the value read, masked with M (every bit by default), is
 //!   VALUE.
-//! - `poll_memory.SIZE ADDRESS mask M expect VALUE timeout_ms N [fc N]`:
+//! - `poll_memory.SIZE ADDRESS mask M expect VALUE timeout_ms N [fc FC]`:
 //!   reads until the value read, masked with M, is VALUE, and fails if
 //!   it is not by N milliseconds of host time after the first read,
 //!   which is always made.
 //!
 //! SIZE is `b`, `w` or `l`.  The clauses after the address (`expect`,
 //! `mask`, `timeout_ms`, `fc`) come in any order, each once.  Numbers
-//! are hex with `0x` or decimal; a value, a mask and an expected value
-//! fit the size; a word or long address is even (CPU32RM 6.2.3); `fc`,
-//! the function code, is 0 to 7 and supervisor data (5) by default.
+//! are decimal, `0x` hexadecimal or `0b` binary, with `_` between
+//! digits allowed ([`parse_integer`]); a value, a mask and an expected value
+//! fit the size; a word or long address is even (CPU32RM 6.2.3).  `fc`
+//! takes a function code by name, in any case (`user-data`,
+//! `supervisor-program`, `cpu-space`, as [`FunctionCode`] prints it),
+//! or by number, 0 to 7; it is `supervisor-data` (5) by default, and a
+//! script prints it by name.
 //! `#` starts a comment; blank lines are skipped.
 //!
 //! `poll_memory` is the only use of host time in the workspace outside
@@ -51,6 +55,8 @@ use std::time::Instant;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::integer::ParseIntegerError;
+use mc683xx_target::integer::parse_integer;
 use mc683xx_target::register::ParseRegisterError;
 use mc683xx_target::register::ParseSystemRegisterError;
 use mc683xx_target::register::Register;
@@ -61,8 +67,6 @@ use mc683xx_target::size::Size;
 const COMMENT: char = '#';
 /// What separates a memory command's name from its size.
 const SIZE_SEPARATOR: char = '.';
-/// Hex numbers' prefix.
-const HEX_PREFIX: &str = "0x";
 
 /// `write_memory`.
 const WRITE_MEMORY: &str = "write_memory";
@@ -89,7 +93,7 @@ const VALUE: &str = "value";
 /// A register operand, as an error names it.
 const REGISTER: &str = "register";
 
-/// A memory command's clause: a keyword and a number after it.
+/// A memory command's clause: a keyword and a value after it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Clause {
@@ -152,7 +156,7 @@ pub enum Operand {
     Value,
     /// The register a command writes.
     Register,
-    /// A required clause, or a clause's number.
+    /// A required clause, or a clause's value.
     Clause(Clause),
 }
 
@@ -287,10 +291,12 @@ pub enum ParseCommandError {
         clause: Clause,
     },
     /// A word that is not a number.
-    #[error("{word:?} is not a number: hex with 0x, or decimal")]
+    #[error("{word:?}: {error}")]
     Number {
         /// The word.
         word: String,
+        /// Why.
+        error: ParseIntegerError,
     },
     /// A number too wide for its access.
     #[error("{value:#x} does not fit in {} bits", size.bytes() * 8)]
@@ -309,11 +315,12 @@ pub enum ParseCommandError {
         /// The access size.
         size: Size,
     },
-    /// A function code past FC\[2:0\].
-    #[error("function code {value} is not 0 to 7")]
+    /// A word that names no function code and is no number from 0 to
+    /// 7.
+    #[error("{word:?} is not a function code: a name or 0 to 7")]
     FunctionCode {
-        /// The number.
-        value: u32,
+        /// The word.
+        word: String,
     },
     /// A word that names no data or address register.
     #[error("{name:?}: {error}")]
@@ -345,20 +352,12 @@ pub enum ParseCommandError {
 /// The words of a line, taken in order.
 type Words<'a> = SplitWhitespace<'a>;
 
-/// `word` as a number: hex after `0x`, otherwise decimal, digits only.
+/// `word` as a number, as [`parse_integer`] takes one.
 fn number(word: &str) -> Result<u32, ParseCommandError> {
-    let error = || ParseCommandError::Number {
+    parse_integer(word).map_err(|error| ParseCommandError::Number {
         word: word.to_owned(),
-    };
-    let (digits, radix) = match word.strip_prefix(HEX_PREFIX) {
-        Some(digits) => (digits, 16),
-        None => (word, 10),
-    };
-    // from_str_radix takes a sign, which an address or value has not.
-    if digits.is_empty() || !digits.chars().all(|digit| digit.is_digit(radix)) {
-        return Err(error());
-    }
-    u32::from_str_radix(digits, radix).map_err(|_| error())
+        error,
+    })
 }
 
 /// The next word, or [`ParseCommandError::Missing`] naming `what`.
@@ -391,11 +390,11 @@ fn aligned(address: u32, size: Size) -> Result<Address, ParseCommandError> {
 }
 
 /// The rest of the words as clauses: one of `clauses`' keywords and a
-/// number each, in any order, each once.
-fn clauses<const N: usize>(
-    words: &mut Words<'_>,
+/// word after it each, in any order, each once.
+fn clauses<'a, const N: usize>(
+    words: &mut Words<'a>,
     clauses: [Clause; N],
-) -> Result<[Option<u32>; N], ParseCommandError> {
+) -> Result<[Option<&'a str>; N], ParseCommandError> {
     let mut values = [None; N];
     while let Some(word) = words.next() {
         let index = clauses
@@ -409,27 +408,39 @@ fn clauses<const N: usize>(
                 clause: clauses[index],
             });
         }
-        values[index] = Some(next_number(words, Operand::Clause(clauses[index]))?);
+        values[index] = Some(next(words, Operand::Clause(clauses[index]))?);
     }
     Ok(values)
 }
 
-/// A required clause's value.
-fn required(value: Option<u32>, clause: Clause) -> Result<u32, ParseCommandError> {
-    value.ok_or(ParseCommandError::Missing {
-        what: Operand::Clause(clause),
-    })
+/// A clause's number, if it was given.
+fn optional(word: Option<&str>) -> Result<Option<u32>, ParseCommandError> {
+    word.map(number).transpose()
 }
 
-/// The function code in an `fc` clause, supervisor data without one.
-fn function_code(value: Option<u32>) -> Result<FunctionCode, ParseCommandError> {
-    match value {
-        None => Ok(FunctionCode::SUPERVISOR_DATA),
-        Some(value) => u8::try_from(value)
-            .ok()
-            .and_then(FunctionCode::new)
-            .ok_or(ParseCommandError::FunctionCode { value }),
-    }
+/// A required clause's number.
+fn required(word: Option<&str>, clause: Clause) -> Result<u32, ParseCommandError> {
+    number(word.ok_or(ParseCommandError::Missing {
+        what: Operand::Clause(clause),
+    })?)
+}
+
+/// The function code in an `fc` clause, its name or its number,
+/// supervisor data without one.
+fn function_code(word: Option<&str>) -> Result<FunctionCode, ParseCommandError> {
+    let Some(word) = word else {
+        return Ok(FunctionCode::SupervisorData);
+    };
+    word.parse()
+        .ok()
+        .or_else(|| {
+            parse_integer::<u8>(word)
+                .ok()
+                .and_then(|code| FunctionCode::try_from(code).ok())
+        })
+        .ok_or_else(|| ParseCommandError::FunctionCode {
+            word: word.to_owned(),
+        })
 }
 
 /// The mask, the default every bit of `size`, and the expected value,
@@ -509,7 +520,8 @@ impl FromStr for Command {
                 let address = aligned(next_number(&mut words, Operand::Address)?, size)?;
                 let [expect, mask, fc] =
                     clauses(&mut words, [Clause::Expect, Clause::Mask, Clause::Fc])?;
-                let (expect, mask) = checked(required(expect, Clause::Expect)?, mask, size)?;
+                let (expect, mask) =
+                    checked(required(expect, Clause::Expect)?, optional(mask)?, size)?;
                 Self::ReadMemory {
                     address,
                     size,
@@ -576,12 +588,12 @@ impl FromStr for Command {
     }
 }
 
-/// ` fc N`, or nothing for supervisor data.
+/// ` fc NAME`, or nothing for supervisor data.
 struct FcClause(FunctionCode);
 
 impl fmt::Display for FcClause {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0 == FunctionCode::SUPERVISOR_DATA {
+        if self.0 == FunctionCode::SupervisorData {
             Ok(())
         } else {
             write!(formatter, " {FC} {}", self.0)

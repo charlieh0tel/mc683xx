@@ -288,8 +288,8 @@ impl Pin {
             .flat_map(PortPin::all)
             .map(Self::Port)
             .chain(
-                (1..=InterruptLevel::NONMASKABLE.get())
-                    .filter_map(|level| IrqPin::new(level).map(Self::Irq)),
+                (1..=u8::from(InterruptLevel::NONMASKABLE))
+                    .filter_map(|level| IrqPin::try_from(level).ok().map(Self::Irq)),
             )
             .chain([
                 Self::Pai,
@@ -317,7 +317,7 @@ impl Pin {
             Self::Port(PortPin {
                 port: Port::Gp,
                 bit,
-            }) => PortGpPin::new(bit).map(Input::PortGp),
+            }) => PortGpPin::try_from(bit).ok().map(Input::PortGp),
             Self::Pai => Some(Input::Pai),
             Self::Pclk => Some(Input::Pclk),
             _ => None,
@@ -331,7 +331,7 @@ impl ChipPin for Pin {
     fn name(self) -> &'static str {
         match self {
             Self::Port(pin) => pin.name(),
-            Self::Irq(pin) => IRQ[usize::from(pin.get() - 1)],
+            Self::Irq(pin) => IRQ[usize::from(u8::from(pin) - 1)],
             Self::Pai => "PAI",
             Self::Pclk => "PCLK",
             Self::Reset => "RESET",
@@ -626,7 +626,7 @@ impl chip::Chip for Mc68331 {
         let configuration = Configuration::new(section.data.unwrap_or(u16::MAX), clock);
         let mut builder = Builder::new(configuration);
         for &level in &section.autovector {
-            let pin = IrqPin::new(level).ok_or_else(|| LoadError::Level {
+            let pin = IrqPin::try_from(level).map_err(|_| LoadError::Level {
                 owner: "chip".to_owned(),
                 level,
             })?;

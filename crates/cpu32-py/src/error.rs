@@ -84,9 +84,6 @@ pub(crate) enum Error {
     /// A port width in bits that is not 8 or 16.
     #[error("no {0}-bit port: give 8 or 16")]
     PortWidth(u8),
-    /// A function code wider than FC[2:0].
-    #[error("no function code {0}: FC[2:0] is 0 to 7")]
-    FunctionCode(u8),
     /// `ResetCause.UNKNOWN` given as a reset to make or reach.
     #[error("ResetCause.UNKNOWN is no reset to ask for")]
     UnknownResetCause,

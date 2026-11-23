@@ -50,13 +50,7 @@ pub(crate) mod tests {
 
     /// A data cycle of `size` at `now`.
     pub(crate) const fn access(size: Size, now: Time) -> PeripheralAccess {
-        PeripheralAccess::new(
-            ChipSelect::Boot,
-            0,
-            size,
-            FunctionCode::SUPERVISOR_DATA,
-            now,
-        )
+        PeripheralAccess::new(ChipSelect::Boot, 0, size, FunctionCode::SupervisorData, now)
     }
 
     /// The levels `drive` drove, by port.

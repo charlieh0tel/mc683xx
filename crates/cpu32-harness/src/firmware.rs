@@ -32,6 +32,7 @@ use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_cpu32::registers::status;
 use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
 
 use crate::machine;
 use crate::machine::ADDRESS_BITS;
@@ -207,7 +208,7 @@ impl Peripherals {
     /// The addresses of a cycle's bytes, if a peripheral has them all; CPU
     /// space has none.
     fn addresses(&mut self, access: BusAccess) -> Result<Vec<u32>, BusError> {
-        if access.function_code.is_cpu_space() {
+        if access.function_code == FunctionCode::CpuSpace {
             return Err(BusError);
         }
         let addresses: Vec<u32> = (0..access.size.bytes())

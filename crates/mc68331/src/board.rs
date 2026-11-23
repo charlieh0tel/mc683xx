@@ -648,7 +648,7 @@ impl Board {
         address: u32,
         function_code: FunctionCode,
     ) -> Option<FixedMemory> {
-        if function_code.is_cpu_space() {
+        if function_code == FunctionCode::CpuSpace {
             return None;
         }
         self.fixed
@@ -806,12 +806,12 @@ impl Board {
         write: Option<u32>,
     ) -> Ended {
         self.level_stale = true;
-        if function_code.is_cpu_space() {
+        if function_code == FunctionCode::CpuSpace {
             if let Some(value) = write
                 && address == LPSTOP_BROADCAST.0
             {
                 self.low_power_stop(
-                    InterruptLevel::new((value & LPSTOP_MASK) as u8).unwrap_or_default(),
+                    InterruptLevel::try_from((value & LPSTOP_MASK) as u8).unwrap_or_default(),
                     now,
                 );
                 return Ok((0, TABLE_CLOCKS.into()));
@@ -958,7 +958,7 @@ impl Board {
             {
                 Some(select) => DsackFault::Unassigned { select },
                 None => DsackFault::BusUnassigned {
-                    peripheral: PeripheralId::from(peripheral as u64),
+                    peripheral: PeripheralId::from_number(peripheral as u64),
                 },
             };
             self.tell_dsack(peripheral, TOLD_UNASSIGNED, cycle.now, fault);
@@ -1149,13 +1149,13 @@ impl Board {
             .iter()
             .filter(|(peripheral, _)| self.peripherals[*peripheral].interrupt_request())
             .fold(self.interrupt_pins, |pins, (_, level)| {
-                pins | 1 << level.get()
+                pins | 1 << u8::from(*level)
             });
-        (1..=InterruptLevel::NONMASKABLE.get())
+        (1..=u8::from(InterruptLevel::NONMASKABLE))
             .rev()
-            .filter_map(IrqPin::new)
-            .find(|&pin| driven & 1 << pin.get() != 0 && self.sim.interrupt_pin(pin))
-            .map_or(InterruptLevel::NONE, IrqPin::level)
+            .filter_map(|level| IrqPin::try_from(level).ok())
+            .find(|&pin| driven & 1 << u8::from(pin) != 0 && self.sim.interrupt_pin(pin))
+            .map_or(InterruptLevel::NONE, InterruptLevel::from)
     }
 
     /// The highest level requested of the CPU, recomputed only when a
@@ -1335,7 +1335,7 @@ impl Board {
         let address = iack_address(level);
         let request = DecodeRequest {
             address: address.0,
-            function_code: FunctionCode::CPU_SPACE,
+            function_code: FunctionCode::CpuSpace,
             write: false,
             size: Size::Byte,
         };
@@ -1344,7 +1344,7 @@ impl Board {
             .chip_selects()
             .matches(request)
             .any(|found| found.autovector)
-            || self.sim.autovector_pin() && self.autovector_levels & 1 << level.get() != 0
+            || self.sim.autovector_pin() && self.autovector_levels & 1 << u8::from(level) != 0
         {
             return Acknowledge::Autovector.into();
         }
@@ -1352,7 +1352,7 @@ impl Board {
             None,
             address.0,
             Size::Byte,
-            FunctionCode::CPU_SPACE,
+            FunctionCode::CpuSpace,
             now,
             None,
         ) {
@@ -1397,8 +1397,8 @@ impl Board {
                 continue;
             }
             for (space, function_code) in [
-                (Space::User, FunctionCode::USER_DATA),
-                (Space::Supervisor, FunctionCode::SUPERVISOR_DATA),
+                (Space::User, FunctionCode::UserData),
+                (Space::Supervisor, FunctionCode::SupervisorData),
             ] {
                 let read = self.served(address, function_code, false);
                 let write = self

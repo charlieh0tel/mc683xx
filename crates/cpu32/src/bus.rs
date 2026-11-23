@@ -263,12 +263,12 @@ mod tests {
         let access = BusAccess::new(
             Address(0x400),
             Size::Word,
-            FunctionCode::SUPERVISOR_PROGRAM,
+            FunctionCode::SupervisorProgram,
             Cycles::from_clocks(7),
         );
         assert_eq!(access.address, Address(0x400));
         assert_eq!(access.size, Size::Word);
-        assert_eq!(access.function_code, FunctionCode::SUPERVISOR_PROGRAM);
+        assert_eq!(access.function_code, FunctionCode::SupervisorProgram);
         assert_eq!(access.now, Cycles::from_clocks(7));
     }
 

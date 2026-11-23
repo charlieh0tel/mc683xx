@@ -99,10 +99,10 @@ fn registers_and_memory_through_the_target() {
     );
     let data = [1, 2, 3, 4, 5, 6, 7, 8];
     for size in [Size::Byte, Size::Word, Size::Long] {
-        chip.write_memory(Address(RAM), size, FunctionCode::SUPERVISOR_DATA, &data)
+        chip.write_memory(Address(RAM), size, FunctionCode::SupervisorData, &data)
             .unwrap();
         let mut back = [0; 8];
-        chip.read_memory(Address(RAM), size, FunctionCode::SUPERVISOR_DATA, &mut back)
+        chip.read_memory(Address(RAM), size, FunctionCode::SupervisorData, &mut back)
             .unwrap();
         assert_eq!(back, data, "{size:?}");
     }
@@ -110,7 +110,7 @@ fn registers_and_memory_through_the_target() {
     chip.read_memory(
         Address(START),
         Size::Word,
-        FunctionCode::SUPERVISOR_PROGRAM,
+        FunctionCode::SupervisorProgram,
         &mut word,
     )
     .unwrap();
@@ -119,7 +119,7 @@ fn registers_and_memory_through_the_target() {
         chip.read_memory(
             Address(RAM),
             Size::Long,
-            FunctionCode::SUPERVISOR_DATA,
+            FunctionCode::SupervisorData,
             &mut [0; 3]
         ),
         Err(TargetError::Length { .. })
@@ -128,7 +128,7 @@ fn registers_and_memory_through_the_target() {
         chip.read_memory(
             Address(RAM + 1),
             Size::Word,
-            FunctionCode::SUPERVISOR_DATA,
+            FunctionCode::SupervisorData,
             &mut word
         ),
         Err(TargetError::Access { .. })
@@ -174,7 +174,7 @@ fn a_fault_on_go_s_first_fetch_is_its_own_exception() {
     let handler = RAM + 0x100;
     let mut chip = chip(&[BRANCH_TO_SELF]);
     chip.reset_halted().unwrap();
-    let space = FunctionCode::SUPERVISOR_DATA;
+    let space = FunctionCode::SupervisorData;
     chip.write_system_register(SystemRegister::Vbr, RAM)
         .unwrap();
     chip.write_memory(
@@ -203,7 +203,7 @@ fn a_step_stops_at_the_next_boundary_before_any_handler() {
     assert_eq!(chip.step(), Err(TargetError::NotHalted));
     chip.reset_halted().unwrap();
     let handler = RAM + 0x100;
-    let space = FunctionCode::SUPERVISOR_DATA;
+    let space = FunctionCode::SupervisorData;
     chip.write_system_register(SystemRegister::Vbr, RAM)
         .unwrap();
     chip.write_memory(
@@ -254,7 +254,7 @@ fn store(chip: &mut Mc68331, address: u32, value: u16) {
     chip.write_memory(
         Address(address),
         Size::Word,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
         &value.to_be_bytes(),
     )
     .unwrap();
@@ -276,7 +276,7 @@ fn a_stepped_lpstop_takes_a_module_interrupt_it_unmasks() {
     chip.write_memory(
         Address(RAM + Vector(0x40).offset()),
         Size::Long,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
         &handler.to_be_bytes(),
     )
     .unwrap();
@@ -363,7 +363,7 @@ fn load(chip: &mut Mc68331, address: u32) -> u16 {
     chip.read_memory(
         Address(address),
         Size::Word,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
         &mut word,
     )
     .unwrap();
@@ -474,7 +474,7 @@ fn slow_access(chip: &mut Mc68331) -> (bool, bool) {
     let read = chip.read_memory(
         Address(SLOW),
         Size::Word,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
         &mut word,
     );
     assert!(
@@ -532,7 +532,7 @@ fn freeze_stops_the_bus_monitor_with_frzbm() {
     // a BGND of its own
     let program = RAM + 0x200;
     let handler = RAM + 0x300;
-    let space = FunctionCode::SUPERVISOR_DATA;
+    let space = FunctionCode::SupervisorData;
     let code: Vec<u8> = [MOVE_W_ABSOLUTE_D0, (SLOW >> 16) as u16, SLOW as u16, BGND]
         .iter()
         .flat_map(|word| word.to_be_bytes())
@@ -638,7 +638,7 @@ fn with_bdm_disabled_bkpt_runs_an_acknowledge_that_dsack_ignores() {
     // 5.3.1.1, 6.2.6; MC68331UM 4.5.4.1.2, Figure 4-12)
     assert_eq!(reads.len(), 1);
     assert_eq!(reads[0].address, Address(0x1e));
-    assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
+    assert_eq!(reads[0].function_code, FunctionCode::CpuSpace);
     assert_eq!(reads[0].size, Size::Word);
     assert_eq!(reads[0].select, on(2));
     // the word returned is not executed, and nothing is stacked
@@ -667,7 +667,7 @@ fn with_bdm_disabled_bkpt_takes_vector_12_on_a_bus_error() {
             chip.peek(
                 Address(frame + 2 * word),
                 Size::Word,
-                FunctionCode::SUPERVISOR_DATA,
+                FunctionCode::SupervisorData,
             )
             .unwrap()
         })
@@ -700,7 +700,7 @@ fn with_bdm_disabled_a_transfer_is_bkpt_that_dsack_ignores() {
     // 4.5.4.1.2)
     assert_eq!(reads.len(), 1);
     assert_eq!(reads[0].address, Address(0x1e));
-    assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
+    assert_eq!(reads[0].function_code, FunctionCode::CpuSpace);
     assert_eq!(chip.cpu().registers.ssp.0, RAM + BREAKPOINT_STACK);
     assert_eq!(Cpu32Target::halted(&mut chip), Ok(None));
 }

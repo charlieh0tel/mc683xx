@@ -35,7 +35,7 @@ pub mod status {
 
 /// The registers of the programming model.  A7 is the stack pointer
 /// of the state S selects: USP in user state, SSP in supervisor.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Registers {
     /// D0-D7.
     pub data: [u32; 8],
@@ -55,6 +55,27 @@ pub struct Registers {
     pub sfc: FunctionCode,
     /// The destination function code register, for `moves`.
     pub dfc: FunctionCode,
+}
+
+/// Every register zero, SFC and DFC code 0 among them: reset leaves
+/// SFC and DFC undefined (CPU32RM 6.2.1 lists what it sets), so a new
+/// CPU's 0 is our choice ([PLAN.md, Where the manuals are silent]).
+///
+/// [PLAN.md, Where the manuals are silent]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#where-the-manuals-are-silent
+impl Default for Registers {
+    fn default() -> Self {
+        Self {
+            data: [0; 8],
+            address: [0; 7],
+            usp: Address(0),
+            ssp: Address(0),
+            pc: Address(0),
+            sr: 0,
+            vbr: Address(0),
+            sfc: FunctionCode::Reserved0,
+            dfc: FunctionCode::Reserved0,
+        }
+    }
 }
 
 impl Registers {
@@ -145,9 +166,9 @@ impl Registers {
     #[must_use]
     pub const fn program_space(&self) -> FunctionCode {
         if self.is_supervisor() {
-            FunctionCode::SUPERVISOR_PROGRAM
+            FunctionCode::SupervisorProgram
         } else {
-            FunctionCode::USER_PROGRAM
+            FunctionCode::UserProgram
         }
     }
 
@@ -155,9 +176,9 @@ impl Registers {
     #[must_use]
     pub const fn data_space(&self) -> FunctionCode {
         if self.is_supervisor() {
-            FunctionCode::SUPERVISOR_DATA
+            FunctionCode::SupervisorData
         } else {
-            FunctionCode::USER_DATA
+            FunctionCode::UserData
         }
     }
 }

@@ -7,6 +7,7 @@ use mc683xx_cpu32::cpu::state::Stateless;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
+use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
@@ -66,12 +67,12 @@ fn decoding<D: MappedPeripheral + Timed + Stateless + 'static>(
                     base: Address(WINDOW),
                     length: WINDOW_BYTES,
                 },
-                BusDecode::Acknowledge(IrqPin::new(4).unwrap()),
+                BusDecode::Acknowledge(IrqPin::try_from(4).unwrap()),
             ],
             pins,
         )
         .unwrap();
-    builder.set_interrupt(id, IrqPin::new(4).unwrap());
+    builder.set_interrupt(id, IrqPin::try_from(4).unwrap());
     (builder.build(), id)
 }
 
@@ -94,11 +95,11 @@ fn a_bus_peripheral_takes_its_window_and_nothing_else() {
     assert_eq!(recorder.writes[0].1, 0xabcd);
     // CPU space at the window's address is not its window
     assert_eq!(
-        cycle_in(&mut chip, FunctionCode::CPU_SPACE, WINDOW, Size::Byte, None),
+        cycle_in(&mut chip, FunctionCode::CpuSpace, WINDOW, Size::Byte, None),
         Err(BusError)
     );
     assert_eq!(
-        chip.peek(Address(WINDOW), Size::Word, FunctionCode::SUPERVISOR_DATA),
+        chip.peek(Address(WINDOW), Size::Word, FunctionCode::SupervisorData),
         Err(AccessError::Unpeekable),
         "a peripheral answers there"
     );
@@ -139,13 +140,13 @@ fn a_bus_peripherals_dsack_waits_sizes_and_is_checked_against_pepar() {
 fn a_bus_peripheral_gives_the_vector_of_its_acknowledge() {
     let (mut chip, id) = decoding(Recorder::answering(0x48), Dsack::Dsack1);
     chip.peripheral_mut::<Recorder>(id).unwrap().interrupt = true;
-    let four = IrqPin::new(4).unwrap().level();
+    let four = InterruptLevel::from(IrqPin::try_from(4).unwrap());
     assert_eq!(chip.board.level(), four);
     assert_eq!(
         chip.board.acknowledge(four, Cycles::ZERO).answer,
         Acknowledge::Vector(Vector(0x48))
     );
-    let three = IrqPin::new(3).unwrap().level();
+    let three = InterruptLevel::from(IrqPin::try_from(3).unwrap());
     assert_eq!(
         chip.board.acknowledge(three, Cycles::ZERO).answer,
         Acknowledge::Spurious,
@@ -153,7 +154,7 @@ fn a_bus_peripheral_gives_the_vector_of_its_acknowledge() {
     );
     let reads = &chip.peripheral::<Recorder>(id).unwrap().reads;
     assert_eq!(reads.len(), 1);
-    assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
+    assert_eq!(reads[0].function_code, FunctionCode::CpuSpace);
     assert_eq!(reads[0].address, Address(0xff_fff9));
 }
 

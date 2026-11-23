@@ -50,6 +50,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::integer::parse_integer;
 use mc683xx_target::register::SystemRegister;
 
 use crate::Ending;
@@ -102,7 +103,7 @@ where
     let mut session = Session {
         target,
         emulated,
-        function_code: FunctionCode::SUPERVISOR_DATA,
+        function_code: FunctionCode::SupervisorData,
         hit: Rc::default(),
         hooked: Vec::new(),
         watchpoints: Vec::new(),
@@ -557,20 +558,29 @@ impl<T: Target> MonitorCmd for Session<'_, T> {
 
 impl<T: Target> Session<'_, T> {
     /// gdb's `monitor` command, in words: `fc` shows the address space
-    /// memory is read and written in and `fc N` sets it; `faults` shows
+    /// memory is read and written in and `fc FC` sets it, by name or
+    /// number; `faults` shows
     /// whether faults stop the run and the last one that did, `faults
     /// stop` and `faults take` set it; `reset` resets the target; `stop`
     /// lists, arms and disarms stop conditions; `help` lists the
     /// commands.
     fn monitor(&mut self, words: &[&str], out: &mut ConsoleOutput<'_>) -> Result<(), T::Error> {
+        // `fc supervisor-data (5)`.
+        let show_fc = |out: &mut ConsoleOutput<'_>, function_code: FunctionCode| {
+            outputln!(out, "fc {function_code} ({})", u8::from(function_code));
+        };
         match words {
-            ["fc"] => outputln!(out, "fc {}", self.function_code.get()),
-            ["fc", code] => match code.parse().ok().and_then(FunctionCode::new) {
+            ["fc"] => show_fc(out, self.function_code),
+            ["fc", code] => match code.parse().ok().or_else(|| {
+                parse_integer::<u8>(code)
+                    .ok()
+                    .and_then(|code| FunctionCode::try_from(code).ok())
+            }) {
                 Some(function_code) => {
                     self.function_code = function_code;
-                    outputln!(out, "fc {function_code}");
+                    show_fc(out, function_code);
                 }
-                None => outputln!(out, "fc takes a function code, 0 to 7"),
+                None => outputln!(out, "fc takes a function code: a name or 0 to 7"),
             },
             ["faults"] => {
                 let shown = self.target.cpu_scope(|cpu| {
@@ -609,7 +619,10 @@ impl<T: Target> Session<'_, T> {
                 None => outputln!(out, "this target has no stop conditions"),
             },
             ["help"] => {
-                outputln!(out, "fc [N]: show or set the function code memory goes to");
+                outputln!(
+                    out,
+                    "fc [FC]: show or set the function code memory goes to, by name or 0 to 7"
+                );
                 outputln!(
                     out,
                     "faults [stop|take]: show or set whether a bus or address error stops the run"

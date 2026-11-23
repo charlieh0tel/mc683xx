@@ -886,7 +886,7 @@ mod tests {
             ChipSelect::Boot,
             0,
             size,
-            FunctionCode::SUPERVISOR_DATA,
+            FunctionCode::SupervisorData,
             Time::ZERO,
         )
     }

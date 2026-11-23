@@ -443,16 +443,16 @@ fn monitor_fc_names_the_space_memory_goes_to() {
             .iter()
             .any(|reply| *reply == format!("O{}", hex(text)))
     };
-    assert!(said(&replies, "fc 5\n"));
-    assert!(said(&replies, "fc 6\n"));
+    assert!(said(&replies, "fc supervisor-data (5)\n"));
+    assert!(said(&replies, "fc supervisor-program (6)\n"));
     assert!(replies.iter().any(|reply| reply == "7005"));
     let mut chip = chip();
     let (ending, replies) = session(
         &mut chip,
         vec![
-            packet(&format!("qRcmd,{}", hex("fc 7"))),
+            packet(&format!("qRcmd,{}", hex("fc cpu-space"))),
             packet(&format!("M{STORE:x},2:abcd")),
-            packet(&format!("qRcmd,{}", hex("fc 6"))),
+            packet(&format!("qRcmd,{}", hex("fc 0x6"))),
             packet(&format!("M{STORE:x},2:abcd")),
             packet("D"),
         ],
@@ -885,7 +885,7 @@ where
     assert_eq!(
         said[2],
         format!(
-            "faults stop\nstopped at address error: write of 4 bytes at {}, fc 5, pc {}\n",
+            "faults stop\nstopped at address error: write of 4 bytes at {} in supervisor-data, pc {}\n",
             Address(ODD),
             Address(STORE_PC)
         )
