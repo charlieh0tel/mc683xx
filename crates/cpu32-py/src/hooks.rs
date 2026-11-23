@@ -31,6 +31,7 @@ use pyo3::types::PyDictMethods;
 use crate::error::Error;
 use crate::function_code::FunctionCode;
 use crate::mapped::Pending;
+use crate::python::opaque_repr;
 use crate::python::repr;
 use crate::register::Register;
 
@@ -42,8 +43,9 @@ pub(crate) struct HookIdView(pub(crate) HookId);
 
 #[pymethods]
 impl HookIdView {
+    /// `HookId(3)`, from Rust's `Display`, `hook 3`.
     fn __repr__(&self) -> String {
-        self.0.to_string()
+        opaque_repr("HookId", &self.0)
     }
 }
 

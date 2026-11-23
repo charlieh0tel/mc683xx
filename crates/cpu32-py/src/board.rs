@@ -114,6 +114,7 @@ use crate::mapped::python_method;
 use crate::mapped::python_restore;
 use crate::mapped::python_save;
 use crate::peripherals::Frame as FrameView;
+use crate::python::opaque_repr;
 use crate::python::repr;
 use crate::qspi::QspiClock;
 use crate::qspi::shifted_in;
@@ -556,8 +557,9 @@ pub(crate) struct ObserverIdView(ObserverId);
 
 #[pymethods]
 impl ObserverIdView {
+    /// `ObserverId(2)`, from Rust's `Display`, `observer 2`.
     fn __repr__(&self) -> String {
-        self.0.to_string()
+        opaque_repr("ObserverId", &self.0)
     }
 }
 

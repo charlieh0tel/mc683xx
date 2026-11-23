@@ -1,6 +1,7 @@
 //! The Python module `mc683xx`, and the bindings' errors as Python
 //! exceptions.
 
+use std::fmt;
 use std::io;
 use std::path::Path;
 
@@ -167,6 +168,16 @@ pub(crate) fn member_name(member: &Bound<'_, PyAny>) -> PyResult<String> {
 /// What `int()` of an enum class's member raises: it is no number.
 pub(crate) fn not_a_number() -> PyErr {
     PyTypeError::new_err("an enum member is not a number: use its name")
+}
+
+/// An opaque id's `repr`, `class(number)`, from its Rust `Display`,
+/// `kind number` (`hook 3`).
+pub(crate) fn opaque_repr(class: &str, id: &impl fmt::Display) -> String {
+    let shown = id.to_string();
+    let number = shown
+        .rsplit_once(' ')
+        .map_or(shown.as_str(), |(_, number)| number);
+    format!("{class}({number})")
 }
 
 /// `value`'s Python `repr`, for a class's own: a value as Python
