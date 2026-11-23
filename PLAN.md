@@ -2492,15 +2492,18 @@ and `mc683xx.Machine` in Python (see Python).
   - A trace RTE requeues from a format $C frame's TR (6.3.2.2) is
     kept as any trace is: a fault stacking it keeps the RTE, its
     rerun cycle not made again, and leaves the trace pending.
-- **Intercepts:** `set_intercepted(vector)`: an exception an
-  instruction raises (traps, illegal, line A and F, privilege, zero
-  divide, CHK, TRAPV, format error; not faults, trace or interrupts)
-  ends the run before anything is stacked (`End::Intercepted`), its
-  (An)+ and -(An) undone, PC at the instruction; flags it set (CHK's
-  N) stay.  `take_natively_once` lets the instruction at PC take it
-  natively when it runs again, which the host uses for an exception it
-  declines: the instruction reruns, exactly, as its effects were
-  undone.
+- **Intercepts (host-handled exceptions):** `set_intercepted(vector)`:
+  an exception an instruction raises (traps, illegal, line A and F,
+  privilege, zero divide, CHK, TRAPV, format error; not faults, trace
+  or interrupts) ends the run before anything is stacked
+  (`End::Intercepted`), its (An)+ and -(An) undone, PC at the
+  instruction; flags it set (CHK's N) stay.  `take_natively_once` lets
+  the instruction at PC take it natively when it runs again, which the
+  host uses for an exception it declines: the instruction reruns,
+  exactly, as its effects were undone.  A general host feature (a
+  stubbed kernel call, an emulated instruction, a stop at any
+  exception), under semver like the rest of the API (decided for
+  0.9.0); Python answers it with an intercept callback within the run.
 - **Hook context:** memory and invalid access hooks see the
   instruction's address (`pc`) and whether the cycle stacks a frame
   (`stacking`); `Cpu::instruction_registers` holds the registers as

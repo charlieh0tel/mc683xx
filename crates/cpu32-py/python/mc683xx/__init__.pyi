@@ -1063,9 +1063,8 @@ class FaultStop:
 
 @final
 class Intercepted:
-    """An exception an instruction raised, before anything is stacked,
-    for parity runs against Unicorn only.  Outside semver
-    (docs/releasing.md)."""
+    """An exception an instruction raised that the host handles, before
+    anything is stacked."""
 
     @property
     def vector(self) -> int: ...
@@ -1208,10 +1207,8 @@ class Machine:
     def serve_gdb(
         self, address: str = ..., ready: Callable[[int], object] | None = None
     ) -> Ending: ...
-    def set_intercepted(self, vector: int, intercepted: bool) -> None:
-        """For parity runs against Unicorn only; outside semver."""
-    def set_intercept_callback(self, callback: Callable[[Intercepted], object] | None) -> None:
-        """For parity runs against Unicorn only; outside semver."""
+    def set_intercepted(self, vector: int, intercepted: bool) -> None: ...
+    def set_intercept_callback(self, callback: Callable[[Intercepted], object] | None) -> None: ...
     def set_stop_on_fault(self, stop: bool) -> None: ...
     @property
     def stops_on_fault(self) -> bool: ...

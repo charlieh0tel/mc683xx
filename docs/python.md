@@ -1487,10 +1487,12 @@ bare.remove_hook(stubbed)
 
 ### Exceptions and faults
 
-`set_intercepted(vector, True)` intercepts the exceptions an
-instruction raises with `vector` (traps, illegal, line A and F,
-privilege, divide by zero, CHK, TRAPV, format error) before anything
-is stacked, and `set_intercept_callback(callback)` answers them:
+A host-handled exception: `set_intercepted(vector, True)` intercepts
+the exceptions an instruction raises with `vector` (traps, illegal,
+line A and F, privilege, divide by zero, CHK, TRAPV, format error)
+before anything is stacked, for the host to handle (a stubbed kernel
+call, an emulated instruction, a stop), and
+`set_intercept_callback(callback)` answers them:
 `callback(Intercepted)` gets the `vector` and the instruction's `pc`,
 where PC is, its (An)+ and -(An) undone.  A truthy result means it
 handled it, and the run goes on from PC as the callable left it;
@@ -1541,9 +1543,32 @@ match bare.run_limited(begin=CALL, until=CALL_RETURN).end:
 bare.set_stop_on_fault(False)
 ```
 
-`Intercepted`, `set_intercepted` and `set_intercept_callback`, for
-parity with Unicorn, are outside semver (docs/releasing.md, Semver
-scope): a minor release may change them.
+To stop at any exception an instruction raises, with its vector and
+PC: intercept each such vector, and have the callback record
+`intercepted.vector` and `intercepted.pc`, call
+`stop_request().request()` and return `True`.  Nothing is stacked, PC
+is at the instruction, and the run ends `End.Stop(Stop.Requested())`.
+Faults are not intercepted: `set_stop_on_fault(True)` stops at them.
+
+```python
+stops: list[tuple[int, int]] = []
+
+
+def stop_at(intercepted: mc683xx.Intercepted) -> bool:
+    stops.append((intercepted.vector, intercepted.pc))
+    bare.stop_request().request()
+    return True
+
+
+bare.write(CALL, struct.pack(">2H", TRAP_7, RTS))
+bare.set_intercepted(32 + 7, True)
+bare.set_intercept_callback(stop_at)
+run = bare.run_limited(begin=CALL, until=CALL_RETURN)
+assert run.end == mc683xx.End.Stop(mc683xx.Stop.Requested())
+assert stops == [(32 + 7, CALL)] and bare.read_register("PC") == CALL
+bare.set_intercept_callback(None)
+bare.set_intercepted(32 + 7, False)
+```
 
 ### From Unicorn
 

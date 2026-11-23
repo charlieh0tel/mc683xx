@@ -133,7 +133,7 @@ impl fmt::Display for FaultStop {
     }
 }
 
-/// An exception an instruction raised that the host intercepts
+/// An exception an instruction raised that the host handles
 /// ([`Cpu::set_intercepted`]): nothing stacked, PC at the instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -375,9 +375,12 @@ impl Cpu {
 
     /// Whether `vector`, raised by an instruction (a trap, an illegal
     /// instruction, a divide by zero, but not a fault, a trace or an
-    /// interrupt), ends a limited run before anything is stacked
-    /// ([`End::Intercepted`]): its (An)+ and -(An) undone and PC at the
-    /// instruction.  None at first.
+    /// interrupt), is a host-handled exception: it ends a limited run
+    /// before anything is stacked ([`End::Intercepted`]), its (An)+ and
+    /// -(An) undone and PC at the instruction, for the host to handle (a
+    /// stubbed kernel call, an emulated instruction) and run on from PC,
+    /// or to decline ([`take_natively_once`](Self::take_natively_once)).
+    /// None at first.
     pub fn set_intercepted(&mut self, vector: Vector, intercepted: bool) {
         self.bare.intercepted.set(vector, intercepted);
     }
