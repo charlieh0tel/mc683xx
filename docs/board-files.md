@@ -376,7 +376,7 @@ driven.  A peripheral on DATA7-0 of a 16-bit port states `lane = "lower"`.
 | `name` | string | required | Its name. |
 | `type` | `"logic"`, `"edge"`, `"clock"`, `"serial"`, `"analog"`, `"bus"`, `"wired-and"` | required | What it carries: a level whose state matters; a level whose changes' times matter (1 PPS); a clock (frequency and exact phase, re-driven at each change of frequency); UART frames; a value; parallel lines as one word; or an open-drain logic net, pulled up. |
 | `from` | endpoint, or array of endpoints | required | Its driver; several only on a `wired-and` net, whose level is the AND of theirs (a driver not driving is high). |
-| `to` | array of endpoints | required | Its sinks. |
+| `to` | endpoint, or array of endpoints | required | Its sinks. |
 
 A net goes one way: a serial link is two nets, one each way.  On a
 `wired-and` net an `in-out` port, or a chip port pin, may be both a

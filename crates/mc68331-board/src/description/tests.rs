@@ -90,6 +90,26 @@ fn cs(number: u8) -> ChipSelect {
 }
 
 #[test]
+fn a_nets_sink_may_be_one_endpoint_as_its_driver_may() {
+    let net = |to: &str| {
+        parse(&with(&format!(
+            "[[peripheral]]\nname = \"pps\"\ntype = \"divider\"\n\
+             [[net]]\nname = \"one-pps\"\ntype = \"edge\"\n\
+             from = \"pps.out\"\nto = {to}\n"
+        )))
+        .unwrap()
+        .nets
+        .remove(0)
+        .to
+    };
+    assert_eq!(
+        net("\"chip.PGP0\""),
+        vec![Endpoint::Chip("PGP0".to_owned())]
+    );
+    assert_eq!(net("\"chip.PGP0\""), net("[\"chip.PGP0\"]"));
+}
+
+#[test]
 fn a_board_resolves() {
     let description = parse(&format!(
         "{BASE}{}",

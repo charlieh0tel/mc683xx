@@ -423,5 +423,5 @@ pub(crate) struct Net {
     /// Its drivers.
     pub(crate) from: Endpoints,
     /// Its sinks.
-    pub(crate) to: Vec<String>,
+    pub(crate) to: Endpoints,
 }

@@ -1473,12 +1473,13 @@ fn read_net(
         reason: reason.to_owned(),
     };
     let from = entry.from.into_vec();
-    if from.is_empty() || entry.to.is_empty() {
+    let to = entry.to.into_vec();
+    if from.is_empty() || to.is_empty() {
         return Err(net_error("a net needs a driver and a sink"));
     }
     let present = |name: &String| !matches!(Endpoint::parse(name), Some(Endpoint::Peripheral { peripheral, .. }) if absent.contains(&peripheral));
     let from: Vec<String> = from.into_iter().filter(present).collect();
-    let sinks: Vec<String> = entry.to.into_iter().filter(present).collect();
+    let sinks: Vec<String> = to.into_iter().filter(present).collect();
     if from.is_empty() || sinks.is_empty() {
         return Ok(None);
     }
