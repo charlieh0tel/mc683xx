@@ -1095,7 +1095,7 @@ hand.  The keys are in `docs/board-files.md`.
   each peripheral's IRQ output and reset scope on no pin, the QSPI's
   PCS decode), running for a budget with its sync and stop requests
   (`chip::Requests`, the stop the core's `StopRequest`), the system
-  clock and the clock outputs, its pins (`ChipPin`: name, kind,
+  clock and the clock outputs, its pins (`ChipPin`: printed and parsed by name, kind,
   direction, and whether it takes a level ahead at its time), the
   outputs it watches, its events and the RESET pulse each reset
   drives, the CPU, and its snapshot.  The board's generic code names
@@ -1116,7 +1116,7 @@ hand.  The keys are in `docs/board-files.md`.
   `Board<Mc68331>`, or is generic over `Board<C: Chip>`, and calls the
   chip's methods, but implements none of them; the plumbing only the
   board calls (`Chip::builder`, `input`, `collect`, the output watches,
-  the diversions, `ChipPin::pcs` and `scheduled`, `Requests`, the
+  the diversions, `ChipPin::name`, `pcs` and `scheduled`, `Requests`, the
   memory plans, `Mc68331Builder`) is
   `#[doc(hidden)]`, outside semver (decided 2026-11-21).  The board's snapshot holds the chip's pins (its outputs'
   last levels, its clock outputs' clocks) in the chip's own pin

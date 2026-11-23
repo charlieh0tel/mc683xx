@@ -57,13 +57,26 @@ pub(crate) mod sealed {
 }
 
 /// A chip pin a net reaches, `chip.NAME` in a board file: the chip's own
-/// set, each with what it carries and which way it faces.
+/// set, each with what it carries and which way it faces.  It prints
+/// as its name after `chip.` (`PE0`, `RESET`), and parses from it.
 ///
 /// Sealed: a host cannot implement it.
 pub trait ChipPin:
-    Copy + Ord + fmt::Debug + FromStr + Serialize + DeserializeOwned + sealed::Sealed + 'static
+    Copy
+    + Ord
+    + fmt::Debug
+    + fmt::Display
+    + FromStr
+    + Serialize
+    + DeserializeOwned
+    + sealed::Sealed
+    + 'static
 {
-    /// Its name after `chip.`: `PE0`, `RESET`.
+    /// Its name after `chip.`, as `Display` writes it, for a record
+    /// that holds it ([`PinRecord::pin`](crate::trace::PinRecord::pin)).
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn name(self) -> &'static str;
 
     /// What it carries: [`Kind::Logic`] for a level (an `edge` net
