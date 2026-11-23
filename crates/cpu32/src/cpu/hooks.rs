@@ -461,14 +461,7 @@ impl Core<'_> {
         if cycle != BusCycleKind::Fetch {
             self.watch(
                 watch::READ,
-                MemoryAccess {
-                    address,
-                    size,
-                    function_code,
-                    value,
-                    pc: self.cpu.instruction_pc,
-                    stacking: self.cpu.stacking,
-                },
+                self.memory_access(address, size, function_code, value),
             );
         }
         Some(value)
@@ -500,14 +493,7 @@ impl Core<'_> {
         self.paged_write(address, size, function_code, value)?;
         self.watch(
             watch::WRITE,
-            MemoryAccess {
-                address,
-                size,
-                function_code,
-                value,
-                pc: self.cpu.instruction_pc,
-                stacking: self.cpu.stacking,
-            },
+            self.memory_access(address, size, function_code, value),
         );
         Some(())
     }
@@ -558,15 +544,26 @@ impl Core<'_> {
     ) {
         self.watch(
             bit,
-            MemoryAccess {
-                address,
-                size: Size::Long,
-                function_code,
-                value,
-                pc: self.cpu.instruction_pc,
-                stacking: self.cpu.stacking,
-            },
+            self.memory_access(address, Size::Long, function_code, value),
         );
+    }
+
+    /// A cycle that ended well, as the read and write hooks see it.
+    const fn memory_access(
+        &self,
+        address: Address,
+        size: Size,
+        function_code: FunctionCode,
+        value: u32,
+    ) -> MemoryAccess {
+        MemoryAccess {
+            address,
+            size,
+            function_code,
+            value,
+            pc: self.cpu.instruction_pc,
+            stacking: self.cpu.stacking,
+        }
     }
 
     /// A cycle that ended in a bus error, as the invalid access hooks
