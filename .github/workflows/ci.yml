@@ -142,7 +142,11 @@ jobs:
     # package (`make wasm`), the package packed, installed and run in
     # Node and in headless Chrome (`make npm-test`), and its TypeScript
     # declarations compiled by consumers in Node, a browser and
-    # CommonJS (`make npm-types`, which fetches TypeScript).  The wasm32
+    # CommonJS (`make npm-types`, which fetches TypeScript), and the demo
+    # page's site checked in headless Chrome under its subpath (`make
+    # pages-test`, which fetches xterm.js from jsDelivr), as pages.yml
+    # checks it before a deploy, so a change that breaks the page fails
+    # here rather than at a tag.  The wasm32
     # target goes on the toolchain rust-toolchain.toml names, installed
     # by the first cargo; the wasm-bindgen CLI is the release's prebuilt
     # binary at the crate's exact version, checked against its SHA-256
@@ -164,6 +168,7 @@ jobs:
       - run: make wasm
       - run: make npm-test
       - run: make npm-types
+      - run: make pages-test
 
   deny:
     # The dependencies' licenses and advisories against deny.toml, the
