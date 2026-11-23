@@ -135,7 +135,7 @@ const IC4_PIN: u8 = 7;
 /// Input captures 1 to 3 on PGP0 to PGP2.
 const CAPTURES: u8 = 3;
 /// The format of the GPT's snapshot ([`Module::save`]).
-const STATE_VERSION: u32 = 7;
+const VERSION: u32 = 7;
 /// Output compares 1 to 4, TOC1 to TOC4; OC5 is TI4/O5.
 const COMPARES: usize = 4;
 /// PACTL PAIS, the PAI pin (GPTRM 4.1.1).
@@ -1802,11 +1802,11 @@ impl Module for Gpt {
 
     /// Its registers, timers, PWM and the pins as last seen.
     fn save(&self) -> Result<Vec<u8>, StateError> {
-        Ok(encode(STATE_VERSION, self))
+        Ok(encode(VERSION, self))
     }
 
     fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
-        let mut saved: Self = decode(STATE_VERSION, snapshot)?;
+        let mut saved: Self = decode(VERSION, snapshot)?;
         saved.validate()?;
         saved.refresh();
         *self = saved;

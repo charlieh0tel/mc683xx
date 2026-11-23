@@ -59,16 +59,16 @@ pub(crate) const RELEASED_LEVELS: u8 = 0b1111;
 
 /// An adapter's snapshot format: the model's bytes, which version
 /// themselves.
-const SNAPSHOT_VERSION: u32 = 1;
+const VERSION: u32 = 1;
 
 /// `peripheral`'s snapshot: its own bytes in the adapter's.
 fn save<D: Save>(peripheral: &D) -> Result<Vec<u8>, StateError> {
-    Ok(encode(SNAPSHOT_VERSION, &peripheral.save()?))
+    Ok(encode(VERSION, &peripheral.save()?))
 }
 
 /// `peripheral` restored from `snapshot`.
 fn restore<D: Save>(peripheral: &mut D, snapshot: &[u8]) -> Result<(), StateError> {
-    let bytes: Vec<u8> = decode(SNAPSHOT_VERSION, snapshot)?;
+    let bytes: Vec<u8> = decode(VERSION, snapshot)?;
     peripheral.restore(&bytes)
 }
 
@@ -349,8 +349,8 @@ mod tests {
 
     use super::Inspect;
     use super::MappedAdapter;
-    use super::SNAPSHOT_VERSION;
     use super::SpiAdapter;
+    use super::VERSION;
     use super::save;
     use crate::inspect::Inspection;
     use crate::inspect::Value;
@@ -433,7 +433,7 @@ mod tests {
         snapshot_golden::check(
             env!("CARGO_MANIFEST_DIR"),
             "adapter",
-            &[("adapter", SNAPSHOT_VERSION)],
+            &[("adapter", VERSION)],
             &save(&Fixed).unwrap(),
         );
     }
