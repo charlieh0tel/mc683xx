@@ -91,7 +91,7 @@ impl From<Error> for PyErr {
         match error {
             Error::Unknown { .. } | Error::Range { .. } => PyIndexError::new_err(message),
             Error::Budget(_) => PyOverflowError::new_err(message),
-            Error::Built => PyRuntimeError::new_err(message),
+            Error::Built | Error::Take(_) => PyRuntimeError::new_err(message),
             Error::Unmapped { kind: RUN_END, .. } | Error::Run(_) => {
                 exceptions::RunError::new_err(message)
             }
@@ -113,6 +113,7 @@ impl From<Error> for PyErr {
             | Error::Register(_)
             | Error::Width { .. }
             | Error::Level(_)
+            | Error::Mask(_)
             | Error::Clock
             | Error::Frequency(_)
             | Error::Permissions(_)

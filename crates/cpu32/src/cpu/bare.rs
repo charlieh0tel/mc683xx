@@ -11,6 +11,7 @@
 use std::fmt;
 use std::mem;
 
+use super::Core;
 use super::Cpu;
 use super::Halt;
 use super::Idle;
@@ -25,6 +26,7 @@ use crate::exception::Exception;
 use crate::exception::Fault;
 use crate::exception::Vector;
 use crate::instructions::Flow;
+use crate::interrupt::InterruptLevel;
 use crate::interrupt::Interrupts;
 use crate::registers::Registers;
 use crate::registers::status;
@@ -141,6 +143,21 @@ pub struct Intercepted {
     pub vector: Vector,
     /// The instruction's address, where PC is.
     pub pc: Address,
+}
+
+/// Why [`Cpu::take_exception`] took nothing.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum TakeExceptionError {
+    /// The CPU executes nothing: halted, or in background mode, the
+    /// stop a run ends in at once.
+    #[error("the CPU executes nothing: {0}")]
+    Idle(Stop),
+    /// Stacking the frame or reading the vector faulted, with
+    /// [`Cpu::set_stop_on_fault`]: nothing stacked, the registers as
+    /// before.
+    #[error("stopped at a fault: {0}")]
+    Fault(FaultStop),
 }
 
 /// How a limited run ended.
@@ -291,6 +308,62 @@ impl Cpu {
             end,
             steps: self.instructions - first + self.bare.exceptions_stepped,
         }
+    }
+
+    /// Takes the exception of `vector` now, between instructions, as
+    /// the host asks: exception processing as the CPU's own (CPU32RM
+    /// 6.1.3), SR copied, S set, T1 and T0 cleared, then a four-word
+    /// format $0 frame (6.4.1) with SR and PC, and PC from the vector,
+    /// at VBR plus its offset (6.1.1).  With `level`, as interrupt
+    /// processing does, the interrupt mask is set to it (6.2.11),
+    /// whatever the mask was: the mask does not hold it off.  It ends
+    /// STOP and LPSTOP, as an interrupt does (4.4), and leaves loop
+    /// mode.  The exception hooks and [`Bus::exception_entered`] see it
+    /// as an exception the CPU takes; a hook's stop has no run to stop,
+    /// nor has a stop a peripheral asks for in its cycles.  No clocks
+    /// are charged.
+    ///
+    /// A fault stacking the frame or reading the vector is taken as one
+    /// in exception processing is: a type IV bus error (6.3.1.4), or a
+    /// double bus fault while a bus or address error is being taken
+    /// (6.2.2).
+    ///
+    /// # Errors
+    ///
+    /// [`TakeExceptionError::Idle`] for a halted CPU, or one in
+    /// background mode, which takes nothing, and
+    /// [`TakeExceptionError::Fault`] for a fault that stops rather than
+    /// being taken ([`Cpu::set_stop_on_fault`]): the registers as
+    /// before, nothing stacked.
+    pub fn take_exception(
+        &mut self,
+        bus: &mut dyn Bus,
+        now: Cycle,
+        vector: Vector,
+        level: Option<InterruptLevel>,
+    ) -> Result<(), TakeExceptionError> {
+        if let Some(idle) = self.idle {
+            return Err(TakeExceptionError::Idle(idle.stop()));
+        }
+        self.bare.end = None;
+        self.began.clone_from(&self.registers);
+        self.leave_loop_mode();
+        let resume = self.resume;
+        let pc = self.registers.pc;
+        Core {
+            cpu: self,
+            bus,
+            now,
+        }
+        .process(vector, pc, None, level, false);
+        self.stop_request = None;
+        if let Some(End::Fault(fault)) = self.bare.end.take() {
+            // the instruction at PC not begun: its hooks still to run
+            self.resume = resume;
+            return Err(TakeExceptionError::Fault(fault));
+        }
+        self.stopped = false;
+        Ok(())
     }
 
     /// Forgets that a hook stopped the last run at PC, so the next run

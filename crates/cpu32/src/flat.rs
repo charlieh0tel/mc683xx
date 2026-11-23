@@ -21,6 +21,7 @@ use crate::bus::StopRequest;
 use crate::cpu::Cpu;
 use crate::cpu::bare::LimitedRun;
 use crate::cpu::bare::Limits;
+use crate::cpu::bare::TakeExceptionError;
 use crate::cpu::state::Layer;
 use crate::cpu::state::StateError;
 use crate::cpu::state::decode_layer;
@@ -576,6 +577,22 @@ impl Machine {
     /// [`Cpu::reset`] says.
     pub fn reset(&mut self) {
         self.cpu.reset(&mut self.bus, self.now);
+    }
+
+    /// Takes the exception of `vector` now, the interrupt mask set to
+    /// `level` if given, whatever it was ([`Cpu::take_exception`]): the
+    /// frame stacked, PC at the handler, the clock unmoved.
+    ///
+    /// # Errors
+    ///
+    /// As [`Cpu::take_exception`].
+    pub fn take_exception(
+        &mut self,
+        vector: Vector,
+        level: Option<InterruptLevel>,
+    ) -> Result<(), TakeExceptionError> {
+        self.cpu
+            .take_exception(&mut self.bus, self.now, vector, level)
     }
 
     /// Runs until `limits` or a stop ([`Cpu::run_limited`]).

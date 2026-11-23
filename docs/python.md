@@ -1405,6 +1405,18 @@ assert bare.read_register("D0") == 6
 - **Interrupts:** `request_interrupt(pin, vector=None)` requests IRQ1
   to IRQ7 as 1 to 7, answered by `vector` or the autovector; it stays
   requested, as a level-sensitive line does, until `clear_interrupt(pin)`.
+- **Exceptions now:** `take_exception(vector, level=None)` (Rust's
+  `Machine::take_exception`) takes exception `vector` between runs, as
+  the CPU takes its own (CPU32RM 6.1.3): a four-word frame with SR and
+  PC, S set, T1 and T0 clear, PC at the handler.  `level`, 0 to 7,
+  sets the interrupt mask, as an interrupt does, whatever it was: no
+  mask holds it off, so a host stacks an interrupt where it wants one.
+  No clocks pass.  The exception hooks, and the write hooks on the
+  stack, are called before it returns, their results stopping nothing.
+  A halted CPU, or one in background mode, raises `RuntimeError`, as
+  does a fault stacking the frame with `set_stop_on_fault(True)`,
+  nothing stacked; without it, the fault is a bus error the CPU takes,
+  as in its own exception processing.
 - **Also:** `reset()` (the reset exception from the vectors at zero),
   `read_register`, `write_register`, `registers()`, `instructions`,
   `now`, `halted`, `exception_taken`, `save()` and `restore(snapshot)`

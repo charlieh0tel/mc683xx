@@ -3,8 +3,10 @@
 
 use mc683xx_board::error::LoadError;
 use mc683xx_board::error::RunError;
+use mc683xx_cpu32::cpu::bare::TakeExceptionError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::flat::MapError;
+use mc683xx_cpu32::interrupt::NoInterruptLevel;
 use mc683xx_cpu32::interrupt::NoIrqPin;
 use mc683xx_cpu32::memory::MemoryError;
 use mc683xx_cpu32::memory::Unserved;
@@ -45,6 +47,12 @@ pub(crate) enum Error {
     /// An interrupt level that is not an IRQ pin's, 1 to 7.
     #[error(transparent)]
     Level(#[from] NoIrqPin),
+    /// An interrupt mask that is not a level, 0 to 7.
+    #[error(transparent)]
+    Mask(#[from] NoInterruptLevel),
+    /// An exception the CPU could not take for the host.
+    #[error(transparent)]
+    Take(#[from] TakeExceptionError),
     /// The clock given both as a reference and as an external clock.
     #[error("give reference_hz or external_hz, not both")]
     Clock,

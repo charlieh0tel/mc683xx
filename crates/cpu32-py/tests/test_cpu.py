@@ -395,6 +395,37 @@ def test_an_interrupt_request_is_taken_through_its_vector():
         cpu.request_interrupt(0)
 
 
+def test_a_host_exception_is_stacked_and_entered_now():
+    cpu = machine(NOP, RTS)
+    entries = []
+    cpu.add_exception_hook(lambda entry: entries.append((entry.vector, entry.level)) or True)
+    cpu.write_register("SR", SUPERVISOR | 0x0700)
+    cpu.take_exception(64, level=3)
+    # CPU32RM 6.2.11: the mask takes the level; 6.4.1: SR, PC, format $0
+    assert cpu.read_register("SR") == SUPERVISOR | 0x0300
+    assert cpu.read_register("PC") == HANDLER
+    sp = cpu.read_register("SSP")
+    assert sp == STACK - 4 - 8
+    assert struct.unpack(">HIH", cpu.read(sp, 8)) == (SUPERVISOR | 0x0700, CODE, 64 * 4)
+    assert entries == [(64, 3)]
+    assert cpu.now == 0
+    with pytest.raises(ValueError):
+        cpu.take_exception(64, level=8)
+
+
+def test_a_host_exception_refused():
+    cpu = machine(NOP, RTS)
+    cpu.set_stop_on_fault(True)
+    cpu.write_register("SSP", 0x90000000)
+    with pytest.raises(RuntimeError, match="stopped at a fault: bus error: write"):
+        cpu.take_exception(TRAP_0)
+    assert (cpu.read_register("SSP"), cpu.read_register("PC")) == (0x90000000, CODE)
+    halted = mc683xx.Machine()
+    halted.reset()
+    with pytest.raises(RuntimeError, match="executes nothing: halted"):
+        halted.take_exception(TRAP_0)
+
+
 def test_the_parity_switches():
     cpu = machine(MOVE_WORD_A0_TO_D0, RTS)
     cpu.write_register("A0", 0x2001)

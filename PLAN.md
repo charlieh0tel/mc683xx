@@ -2395,6 +2395,18 @@ and `mc683xx.Machine` in Python (see Python).
   processing is stacking (`Bus::stacking`).
 - **Interrupts:** a request line per level 1 to 7 that the host sets
   with a vector or the autovector, level-sensitive until it clears it.
+- **Host exceptions:** `Cpu::take_exception(vector, level)` (and
+  `Machine`'s, Python's `take_exception(vector, level=None)`), between
+  runs: the core's own exception processing (`process`, CPU32RM
+  6.1.3), a four-word format $0 frame of SR and PC, the mask set to
+  `level` whatever it was, the exception hooks and
+  `Bus::exception_entered` called; STOP ended, no clocks charged.  A
+  hook's or peripheral's stop asked for in it has no run to end and is
+  dropped.  A fault in it is taken as in any exception processing
+  (type IV, or a double bus fault in a bus error's window), or with
+  stop on fault returned as `TakeExceptionError::Fault`, the registers
+  and the hooks at PC as before.  Not on the chip, whose interrupts
+  come from its modules and pins.
 - **Runs:** `Cpu::run_limited(limits)`: `until` (checked at each
   instruction boundary before an interrupt is taken or a hook called
   there), `instructions`, and an optional cycle budget; with none, a

@@ -34,6 +34,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::flat;
 use mc683xx_cpu32::flat::Machine;
+use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::registers::Registers;
@@ -641,6 +642,35 @@ impl MachineView {
             vector.map(Vector),
         );
         Ok(())
+    }
+
+    /// Takes the exception of `vector` now, as the CPU takes its own: a
+    /// four-word frame with SR and PC stacked, S set, T1 and T0 clear,
+    /// PC at the handler.  `level`, 0 to 7, sets the interrupt mask, as
+    /// an interrupt does, whatever it was.  No clocks pass.  The hooks
+    /// it fires are called before it returns, their results stopping
+    /// nothing.  A halted CPU, or a fault that stops
+    /// (`set_stop_on_fault`), raises `RuntimeError`, nothing stacked.
+    #[pyo3(signature = (vector, level = None))]
+    fn take_exception(slf: &Bound<'_, Self>, vector: u8, level: Option<u8>) -> PyResult<()> {
+        let level = level
+            .map(InterruptLevel::try_from)
+            .transpose()
+            .map_err(Error::from)?;
+        let (taken, fired, registers) = {
+            let mut this = running(slf)?;
+            let taken = this.machine.take_exception(Vector(vector), level);
+            let fired = mem::take(&mut *this.queue.borrow_mut());
+            let registers = this.machine.cpu.instruction_registers().clone();
+            (taken, fired, registers)
+        };
+        let pending = slf.borrow().pending.clone();
+        let dispatched = pending
+            .check()
+            .and_then(|()| Self::dispatch(slf, slf.py(), fired, &registers));
+        slf.borrow_mut().running = false;
+        dispatched?;
+        Ok(taken.map_err(Error::from)?)
     }
 
     /// Withdraws the request on IRQ`pin`.
