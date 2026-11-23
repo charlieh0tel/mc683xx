@@ -17,7 +17,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::builtin;
-use crate::error::SyntaxError;
+use crate::description::SyntaxError;
 use crate::peripheral::Peripheral;
 use crate::signal::Direction;
 use crate::signal::Kind;

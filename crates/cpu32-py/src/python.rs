@@ -4,7 +4,7 @@
 use std::io;
 use std::path::Path;
 
-use mc683xx_board::error::LoadError;
+use mc683xx_board::description::LoadError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_mc68331::host::AccessError;
 use pyo3::Bound;

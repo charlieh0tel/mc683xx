@@ -53,6 +53,7 @@ use crate::chip::MemoryPlace;
 use crate::chip::MemoryPlan;
 use crate::chip::takes;
 use crate::condition::Condition;
+use crate::condition::ConditionError;
 use crate::condition::ConditionId;
 use crate::condition::ConditionInfo;
 use crate::condition::ConditionToken;
@@ -63,17 +64,12 @@ use crate::condition::level;
 use crate::control::BoardControl;
 use crate::control::Endpoints;
 use crate::description::Description;
+use crate::description::LoadError;
 use crate::description::NetSpec;
 use crate::description::Options;
 use crate::description::Target;
 use crate::description::port_of;
 use crate::endpoint::Endpoint;
-use crate::error::ConditionError;
-use crate::error::LoadError;
-use crate::error::NetError;
-use crate::error::ReceiveError;
-use crate::error::RunError;
-use crate::error::SendError;
 use crate::inspect::Inspection;
 use crate::observe::Attached;
 use crate::observe::Observer;
@@ -2470,6 +2466,70 @@ fn resolve_nets<P: ChipPin>(
             })
         })
         .collect()
+}
+
+/// Why a run could not go on.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum RunError {
+    /// A peripheral whose `advance` left its `next_event` at or before the
+    /// time it was advanced to, `repeats` times running: it breaks
+    /// [`Peripheral::advance`]'s contract, and the board would never get past
+    /// `at`.
+    ///
+    /// [`Peripheral::advance`]: crate::peripheral::Peripheral::advance
+    #[error("{peripheral}: advanced to {at} {repeats} times, its next event never past it")]
+    Stalled {
+        /// The peripheral.
+        peripheral: String,
+        /// The time it was advanced to.
+        at: Time,
+        /// The advances.
+        repeats: u32,
+    },
+}
+
+/// Why a run-time endpoint could not drive a value ([`Board::send`]).
+///
+/// [`Board::send`]: crate::board::Board::send
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SendError {
+    /// The board has no `external.name` that drives a net.
+    #[error("external.{0} drives no net")]
+    Endpoint(String),
+    /// It drives only nets of `kinds`, none of which carries the value.
+    #[error("external.{endpoint} drives {} nets only, which do not carry the value", kinds.iter().map(ToString::to_string).collect::<Vec<_>>().join(" and "))]
+    Kind {
+        /// The endpoint's name.
+        endpoint: String,
+        /// The types of the nets it drives.
+        kinds: Vec<Kind>,
+    },
+}
+
+/// Why [`Board::take_received`] took nothing.
+///
+/// [`Board::take_received`]: crate::board::Board::take_received
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ReceiveError {
+    /// The board has no `external.name` that a net drives.
+    #[error("no net drives external.{0}")]
+    Endpoint(String),
+}
+
+/// Why a net could not be observed or read ([`Board::observe`],
+/// [`Board::net_value`]).
+///
+/// [`Board::observe`]: crate::board::Board::observe
+/// [`Board::net_value`]: crate::board::Board::net_value
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum NetError {
+    /// The board has no net of that name.
+    #[error("no net {0:?}")]
+    Unknown(String),
 }
 
 #[cfg(test)]

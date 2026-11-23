@@ -3,11 +3,11 @@
 
 use std::time::TryFromFloatSecsError;
 
-use mc683xx_board::error::LoadError;
-use mc683xx_board::error::NetError;
-use mc683xx_board::error::ReceiveError;
-use mc683xx_board::error::RunError;
-use mc683xx_board::error::SendError;
+use mc683xx_board::board::NetError;
+use mc683xx_board::board::ReceiveError;
+use mc683xx_board::board::RunError;
+use mc683xx_board::board::SendError;
+use mc683xx_board::description::LoadError;
 use mc683xx_board::pacing::PacingError;
 use mc683xx_board::pacing::ParsePacingError;
 use mc683xx_board::registry::RegistryError;

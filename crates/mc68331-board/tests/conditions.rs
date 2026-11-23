@@ -5,8 +5,10 @@
 use std::env;
 
 use mc683xx_board::board::Board;
+use mc683xx_board::board::NetError;
 use mc683xx_board::condition::ArmError;
 use mc683xx_board::condition::Condition;
+use mc683xx_board::condition::ConditionError;
 use mc683xx_board::condition::ConditionId;
 use mc683xx_board::condition::ConditionInfo;
 use mc683xx_board::condition::ConditionToken;
@@ -14,8 +16,6 @@ use mc683xx_board::condition::Conditions;
 use mc683xx_board::condition::NetChange;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
-use mc683xx_board::error::ConditionError;
-use mc683xx_board::error::NetError;
 use mc683xx_board::peripheral::Drive;
 use mc683xx_board::peripheral::Peripheral;
 use mc683xx_board::registry::Environment;

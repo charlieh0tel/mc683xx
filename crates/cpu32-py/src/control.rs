@@ -15,8 +15,8 @@ use std::time::Instant;
 use mc683xx_board::board::Board;
 
 use mc683xx_board::board::BoardRun;
+use mc683xx_board::board::RunError;
 use mc683xx_board::control::BoardControl;
-use mc683xx_board::error::RunError;
 use mc683xx_board::pacing;
 use mc683xx_board::pacing::Pacer;
 use mc683xx_board::pacing::Pacing;

@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::error::SendError;
+use crate::board::SendError;
 use crate::pacing::Pacing;
 use crate::signal::Kind;
 use crate::signal::Signal;

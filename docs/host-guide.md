@@ -1424,7 +1424,7 @@ part off as an option off would, its net ends and any net left with no
 driver or no sink going with it, an `external.*` end it had left
 among them; it gives the names of the nets that went, so a host sees
 an external endpoint left on no net.  Each refuses a name the description
-lacks (`error::EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
+lacks (`description::EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
 every method of the chip's.  `Chip` is sealed: a host names it in a
 bound (`Board<C: Chip>`) and uses its items (`TYPE`, the name a
 board file's `[chip] type` gives, `"mc68331"`; `cpu`, `cpu_control`,

@@ -31,15 +31,12 @@ use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::ResetCause;
+use mc683xx_modules::sim::clock::ClockSourceError;
 use mc683xx_modules::sim::reset::ResetScope;
 use mc683xx_target::address::Address;
 use mc683xx_target::integer::parse_integer;
 
 use crate::endpoint::Endpoint;
-use crate::error::EditError;
-use crate::error::LoadError;
-use crate::error::ParseSettingError;
-use crate::error::SyntaxError;
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
 use crate::registry::ConstructError;
@@ -1601,6 +1598,293 @@ pub(crate) fn port_of(
         });
     }
     Ok(index)
+}
+
+/// Why a board file was refused, each naming what in the file is wrong.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum LoadError {
+    /// The file could not be read.
+    #[error("{}: {error}", path.display())]
+    Read {
+        /// The file.
+        path: PathBuf,
+        /// Why.
+        error: io::Error,
+    },
+    /// The TOML does not parse, or a key or value is not the schema's.
+    #[error(transparent)]
+    Syntax(#[from] SyntaxError),
+    /// A version other than this build's, or none.
+    #[error("board file version {0}: this build reads version 1")]
+    Version(String),
+    /// A name used twice.
+    #[error("{0:?} is named twice")]
+    Duplicate(String),
+    /// A name that cannot name a peripheral: empty, holding a `.`, or `chip`
+    /// or `external`, which name endpoints.
+    #[error("{0:?} cannot be a name")]
+    Name(String),
+    /// A chip-select pin name that is none of CSBOOT, CS0 to CS10.
+    #[error("{owner}: no chip select {pin:?}")]
+    Pin {
+        /// What names it.
+        owner: String,
+        /// The name.
+        pin: String,
+    },
+    /// Two users of one select, or of one decoder output, that do not
+    /// split it.
+    #[error("{point}: {first} and {second} both take its cycles")]
+    Shared {
+        /// The select or decoder output.
+        point: String,
+        /// One user.
+        first: String,
+        /// The other.
+        second: String,
+    },
+    /// Two peripherals on one select's or decoder output's two lanes
+    /// whose DSACK pins encode different ports.
+    #[error(
+        "{point}: {first} and {second} share its lanes but their DSACK pins give different ports"
+    )]
+    LanePorts {
+        /// The select or decoder output.
+        point: String,
+        /// One peripheral.
+        first: String,
+        /// The other.
+        second: String,
+    },
+    /// A memory's image that could not be read.
+    #[error("{memory}: image {}: {error}", path.display())]
+    Image {
+        /// The memory.
+        memory: String,
+        /// Its path.
+        path: PathBuf,
+        /// Why.
+        error: io::Error,
+    },
+    /// A memory's size that is no whole number of 2-Kbyte pages, or is
+    /// less than its image.
+    #[error("{memory}: {reason}")]
+    Size {
+        /// The memory.
+        memory: String,
+        /// What is wrong.
+        reason: String,
+    },
+    /// A fixed memory's base off a page boundary, putting it past
+    /// ADDR\[23:0\], or overlapping another's.
+    #[error("{memory}: {reason}")]
+    Base {
+        /// The memory.
+        memory: String,
+        /// What is wrong.
+        reason: String,
+    },
+    /// An attachment that is not one of the forms, or that its owner
+    /// cannot take.
+    #[error("{owner}: attachment {index}: {reason}")]
+    Attachment {
+        /// Its memory or peripheral.
+        owner: String,
+        /// Its index.
+        index: usize,
+        /// What is wrong.
+        reason: String,
+    },
+    /// A decoder whose inputs, outputs or aliases are wrong.
+    #[error("decoder {decoder}: {reason}")]
+    Decoder {
+        /// The decoder.
+        decoder: String,
+        /// What is wrong.
+        reason: String,
+    },
+    /// An interrupt level that is no IRQ pin's, 1 to 7.
+    #[error("{owner}: no IRQ pin at level {level}")]
+    Level {
+        /// What names it.
+        owner: String,
+        /// The level.
+        level: u8,
+    },
+    /// An option `[board] options` does not declare.
+    #[error("no board option {0:?}")]
+    Option(String),
+    /// Parameters set for a peripheral the file does not name.
+    #[error("parameters set for {0:?}, which the board file does not name")]
+    Peripheral(String),
+    /// Both a reference and an external clock.
+    #[error("chip: give reference_hz or external_hz, not both")]
+    Clock,
+    /// A clock frequency the chip cannot have.
+    #[error("chip: {error}")]
+    Frequency {
+        /// Why.
+        error: ClockSourceError,
+    },
+    /// A peripheral type the registry does not know.
+    #[error("{peripheral}: no peripheral type {kind:?}")]
+    Type {
+        /// The peripheral.
+        peripheral: String,
+        /// The type.
+        kind: String,
+    },
+    /// A parameter the peripheral's constructor refused.
+    #[error("{peripheral}: {error}")]
+    Parameter {
+        /// The peripheral.
+        peripheral: String,
+        /// Why.
+        error: ParameterError,
+    },
+    /// A constructor that gave two ports one name.
+    #[error("{peripheral}: port {port:?} declared twice")]
+    Port {
+        /// The peripheral.
+        peripheral: String,
+        /// The port.
+        port: String,
+    },
+    /// An endpoint that does not parse, or names nothing on the board.
+    #[error("net {net}: no endpoint {endpoint:?}")]
+    Endpoint {
+        /// The net.
+        net: String,
+        /// The endpoint.
+        endpoint: String,
+    },
+    /// An endpoint of another type than its net's.
+    #[error("net {net} ({kind}): {endpoint} is {found}")]
+    Kind {
+        /// The net.
+        net: String,
+        /// The net's type.
+        kind: Kind,
+        /// The endpoint.
+        endpoint: String,
+        /// What the endpoint is.
+        found: Kind,
+    },
+    /// An endpoint on the wrong side: a driver that cannot drive, a sink
+    /// that cannot be driven.
+    #[error("net {net}: {endpoint} cannot {what}")]
+    Direction {
+        /// The net.
+        net: String,
+        /// The endpoint.
+        endpoint: String,
+        /// "drive" or "be driven".
+        what: &'static str,
+    },
+    /// Several drivers on a net that is not wired, a wired net that is
+    /// not logic, or an endpoint on two nets in one role.
+    #[error("net {net}: {reason}")]
+    Net {
+        /// The net.
+        net: String,
+        /// What is wrong.
+        reason: String,
+    },
+    /// A file with no `[chip] type`: every board file names its chip.
+    #[error("chip: give its type, `[chip] type = \"...\"`")]
+    NoChip,
+    /// A `[chip] type` other than the chip the board is loaded with.
+    #[error("chip type {found:?}: this board is loaded as {expected:?}")]
+    ChipType {
+        /// The file's.
+        found: String,
+        /// The chip's.
+        expected: &'static str,
+    },
+    /// The chip refused the wiring: its own error.
+    #[error(transparent)]
+    Build(Box<dyn std::error::Error + Send + Sync>),
+}
+
+/// A parameter setting not of the form `PERIPHERAL.KEY=VALUE`
+/// ([`Setting`]'s `FromStr`).
+///
+/// [`Setting`]: crate::description::Setting
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{0:?}: give PERIPHERAL.KEY=VALUE")]
+pub struct ParseSettingError(pub(crate) String);
+
+/// Why a [`Description`] edit was refused.
+///
+/// [`Description`]: crate::description::Description
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum EditError {
+    /// The description has no peripheral of that name.
+    #[error("no peripheral {0:?}")]
+    Peripheral(String),
+    /// An endpoint that is not `peripheral.port` at the end of one of
+    /// the board's nets.
+    #[error("{0:?} is no peripheral's port on the board's nets")]
+    Port(String),
+    /// An empty external endpoint's name, which names none.
+    #[error("an empty name names no external endpoint")]
+    External,
+}
+
+/// Why a board file's TOML does not parse, or does not fit the schema:
+/// its line, column and what is wrong, as the message says.  Opaque:
+/// the parser is not part of the API.  Boxed, so a [`LoadError`], and a
+/// host's error holding one, stays small.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("{}", .0.error)]
+pub struct SyntaxError(Box<SyntaxErrorInner>);
+
+/// What a [`SyntaxError`] holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SyntaxErrorInner {
+    /// The parser's error.
+    error: toml::de::Error,
+    /// Where in the text it is, line and column from 1, if the parser
+    /// placed it.
+    place: Option<(usize, usize)>,
+}
+
+impl SyntaxError {
+    /// The parser's `error` in `text`.
+    pub(crate) fn new(error: toml::de::Error, text: &str) -> Self {
+        let place = error
+            .span()
+            .and_then(|span| text.get(..span.start))
+            .map(|before| {
+                let line_start = before.rfind('\n').map_or(0, |newline| newline + 1);
+                (
+                    before.matches('\n').count() + 1,
+                    before[line_start..].chars().count() + 1,
+                )
+            });
+        Self(Box::new(SyntaxErrorInner { error, place }))
+    }
+
+    /// The parser's `error` in a table the text does not hold, as an
+    /// absent one read as empty: no place.
+    pub(crate) fn unplaced(error: toml::de::Error) -> Self {
+        Self(Box::new(SyntaxErrorInner { error, place: None }))
+    }
+
+    /// The line it is on, from 1, if the parser placed it.
+    #[must_use]
+    pub fn line(&self) -> Option<usize> {
+        self.0.place.map(|(line, _)| line)
+    }
+
+    /// The column it is at on its line, in characters from 1, if the
+    /// parser placed it.
+    #[must_use]
+    pub fn column(&self) -> Option<usize> {
+        self.0.place.map(|(_, column)| column)
+    }
 }
 
 #[cfg(test)]

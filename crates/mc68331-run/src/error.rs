@@ -11,16 +11,16 @@ use mc683xx_cpu32::cpu::state::StateError;
 pub(crate) enum RunError {
     /// The board file, or its loading.
     #[error(transparent)]
-    Board(#[from] mc683xx_board::error::LoadError),
+    Board(#[from] mc683xx_board::description::LoadError),
     /// A `--set` not of the form `PERIPHERAL.KEY=VALUE`.
     #[error(transparent)]
-    Setting(#[from] mc683xx_board::error::ParseSettingError),
+    Setting(#[from] mc683xx_board::description::ParseSettingError),
     /// A run that could not go on: a peripheral stalled the board.
     #[error(transparent)]
-    Run(#[from] mc683xx_board::error::RunError),
+    Run(#[from] mc683xx_board::board::RunError),
     /// Input a binding's endpoint could not drive.
     #[error(transparent)]
-    Send(#[from] mc683xx_board::error::SendError),
+    Send(#[from] mc683xx_board::board::SendError),
     /// A file the runner reads or writes.
     #[error("{}: {error}", path.display())]
     Io {

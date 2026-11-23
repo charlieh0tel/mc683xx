@@ -40,7 +40,7 @@ use mc683xx_target::address::Address;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::error::LoadError;
+use crate::description::LoadError;
 use crate::signal::Direction;
 use crate::signal::Kind;
 use crate::signal::Signal;
