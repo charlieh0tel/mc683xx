@@ -1080,7 +1080,7 @@ drive (`now`, and `moment`), one without takes an `mc683xx.Moment` last
 `system_clock`, an `mc683xx.TimeBase`, and `cycle()`, the chip's
 clock at it, rounded up).  A `TimeBase` (Rust's `time::TimeBase`) has
 `frequency_hz`, `time(at)`, the picosecond clock `at` falls at, rounded
-down, and `cycles(at)`, the first clock at or after picosecond `at`.  A
+down, and `cycle(at)`, the first clock at or after picosecond `at`.  A
 `PeripheralAccess` carries `attachment`,
 `select` (the chip select's name), `role` (a `Role`), `lane` (a
 `Lane`), `address`, `size`, `function_code`, `write` (as a

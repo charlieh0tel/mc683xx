@@ -551,7 +551,7 @@ impl Peripheral for Divider {
         if let (Self::IN, Signal::Clock(clock)) = (port, signal) {
             self.clock = Some(clock);
             if self.pending.is_none() {
-                self.drive_after(clock.phase_at(drive.now()).cycles(), drive);
+                self.drive_after(clock.phase(drive.now()).cycles(), drive);
             }
         }
     }

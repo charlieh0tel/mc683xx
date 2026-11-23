@@ -901,7 +901,7 @@ type = "watcher"
     let base = board.system_clock();
     assert_eq!(base.frequency().hz(), 16_777_216);
     assert_eq!(
-        base.cycles(base.time(Cycle::from_clocks(12_345))),
+        base.cycle(base.time(Cycle::from_clocks(12_345))),
         Cycle::from_clocks(12_345)
     );
     let (asked, driven) = board
@@ -1716,12 +1716,9 @@ to = ["external.host"]
     // 8.388608 MHz out of reset: 262144 baud, ten bits a frame
     assert_eq!(serial.baud, Frequency::from_hz(262_144));
     let base = board.system_clock();
-    let start = base.cycles(at);
+    let start = base.cycle(at);
     assert_eq!(base.time(start), at);
-    assert_eq!(
-        base.cycles(serial.end(at)),
-        start + Cycles::from_clocks(320)
-    );
+    assert_eq!(base.cycle(serial.end(at)), start + Cycles::from_clocks(320));
     // the preamble's frame went first, as TE set; this one followed it
     assert!(start.clocks() >= 320, "after the preamble: {start:?}");
 }

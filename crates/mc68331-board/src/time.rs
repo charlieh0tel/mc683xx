@@ -539,17 +539,17 @@ impl Clock {
         }
     }
 
-    /// Its phase at `time`.
+    /// Its phase at `at`.
     #[must_use]
-    pub const fn phase_at(&self, time: Time) -> Phase {
+    pub const fn phase(&self, at: Time) -> Phase {
         let frequency = self.frequency.nanohertz() as u128;
-        if time.0 >= self.at.0 {
-            Phase(self.phase.0 + frequency * (time.0 - self.at.0) as u128)
+        if at.0 >= self.at.0 {
+            Phase(self.phase.0 + frequency * (at.0 - self.at.0) as u128)
         } else {
             Phase(
                 self.phase
                     .0
-                    .saturating_sub(frequency * (self.at.0 - time.0) as u128),
+                    .saturating_sub(frequency * (self.at.0 - at.0) as u128),
             )
         }
     }
@@ -557,28 +557,29 @@ impl Clock {
     /// Its rising edges after `from` and at or before `to`.
     #[must_use]
     pub const fn edges(&self, from: Time, to: Time) -> u128 {
-        self.phase_at(to)
+        self.phase(to)
             .cycles()
-            .saturating_sub(self.phase_at(from).cycles())
+            .saturating_sub(self.phase(from).cycles())
     }
 
     /// The `n`th rising edge after `from` (the first is `n` 1), if it
     /// has one: none at zero frequency, or past the last time.
     #[must_use]
     pub fn edge_after(&self, from: Time, n: u64) -> Option<Time> {
-        self.edge(self.phase_at(from).cycles() + u128::from(n))
+        self.edge(self.phase(from).cycles() + u128::from(n))
     }
 
     /// The time of rising edge `number`, where its phase is `number`
     /// whole cycles, if it has one.
     #[must_use]
     pub fn edge(&self, number: u128) -> Option<Time> {
-        self.when(Phase(number.checked_mul(PHASE_UNITS)?))
+        self.time(Phase(number.checked_mul(PHASE_UNITS)?))
     }
 
-    /// The first picosecond at which its phase is at least `phase`.
+    /// The first picosecond at which its phase is at least `phase`, if
+    /// there is one: none at zero frequency, or past the last time.
     #[must_use]
-    pub fn when(&self, phase: Phase) -> Option<Time> {
+    pub fn time(&self, phase: Phase) -> Option<Time> {
         let frequency = u128::from(self.frequency.nanohertz());
         if frequency == 0 {
             return None;
@@ -597,7 +598,7 @@ impl Clock {
         Self {
             at,
             frequency,
-            phase: self.phase_at(at),
+            phase: self.phase(at),
         }
     }
 }
@@ -652,28 +653,28 @@ impl ClockHistory {
         self.segments.back().copied()
     }
 
-    /// The segment that holds `time`: the newest from at or before
-    /// it, or the oldest for a time before every segment.
-    fn segment(&self, time: Time) -> Option<&Clock> {
+    /// The segment that holds `at`: the newest from at or before it, or
+    /// the oldest for a time before every segment.
+    fn segment(&self, at: Time) -> Option<&Clock> {
         self.segments
             .iter()
-            .rfind(|segment| segment.at <= time)
+            .rfind(|segment| segment.at <= at)
             .or_else(|| self.segments.front())
     }
 
-    /// The phase at `time`.
+    /// The phase at `at`.
     #[must_use]
-    pub fn phase_at(&self, time: Time) -> Option<Phase> {
-        self.segment(time).map(|segment| segment.phase_at(time))
+    pub fn phase(&self, at: Time) -> Option<Phase> {
+        self.segment(at).map(|segment| segment.phase(at))
     }
 
     /// Rising edges after `from` and at or before `to`.
     #[must_use]
     pub fn edges(&self, from: Time, to: Time) -> Option<u128> {
         Some(
-            self.phase_at(to)?
+            self.phase(to)?
                 .cycles()
-                .saturating_sub(self.phase_at(from)?.cycles()),
+                .saturating_sub(self.phase(from)?.cycles()),
         )
     }
 
@@ -681,29 +682,35 @@ impl ClockHistory {
     /// after it, found in the segment it falls in.
     #[must_use]
     pub fn edge(&self, number: u128) -> Option<Time> {
-        let target = Phase(number.checked_mul(PHASE_UNITS)?);
+        self.time(Phase(number.checked_mul(PHASE_UNITS)?))
+    }
+
+    /// The first picosecond at which the phase is at least `phase`,
+    /// found in the segment it falls in.
+    #[must_use]
+    pub fn time(&self, phase: Phase) -> Option<Time> {
         let index = self
             .segments
             .iter()
-            .rposition(|segment| segment.phase <= target)
+            .rposition(|segment| segment.phase <= phase)
             .unwrap_or(0);
-        self.segments.get(index)?.when(target)
+        self.segments.get(index)?.time(phase)
     }
 
     /// The `n`th rising edge after `from` (the first is `n` 1).
     #[must_use]
     pub fn edge_after(&self, from: Time, n: u64) -> Option<Time> {
-        self.edge(self.phase_at(from)?.cycles() + u128::from(n))
+        self.edge(self.phase(from)?.cycles() + u128::from(n))
     }
 
-    /// From `time` to the next rising edge after it, rounded up to a
+    /// From `at` to the next rising edge after it, rounded up to a
     /// picosecond, and exactly, in the cycle's `PHASE_UNITS` still to
     /// run: the interpolator's measure.
     #[must_use]
-    pub fn to_next_edge(&self, time: Time) -> Option<(Span, u128)> {
-        let phase = self.phase_at(time)?;
+    pub fn to_next_edge(&self, at: Time) -> Option<(Span, u128)> {
+        let phase = self.phase(at)?;
         let next = self.edge(phase.cycles() + 1)?;
-        Some((next.since(time), PHASE_UNITS - phase.fraction()))
+        Some((next.since(at), PHASE_UNITS - phase.fraction()))
     }
 }
 
@@ -724,9 +731,9 @@ impl ClockHistory {
 ///
 /// The rounding rule, the scheduled input rule's ([PLAN.md,
 /// Peripherals][plan-peripherals]): toward the chip a time rounds up, to
-/// the first clock at or after it (`cycles`); toward the board a clock
+/// the first clock at or after it (`cycle`); toward the board a clock
 /// rounds down, to the last picosecond at or before it (`time`).  So
-/// `cycles(time(c))` is `c`.
+/// `cycle(time(c))` is `c`.
 ///
 /// [`Drive::moment`]: crate::peripheral::Drive::moment
 /// [`Peripheral::next_event`]: crate::peripheral::Peripheral::next_event
@@ -788,7 +795,7 @@ impl TimeBase {
 
     /// The first clock at or after `at`, before the base too.
     #[must_use]
-    pub fn cycles(&self, at: Time) -> Cycle {
+    pub fn cycle(&self, at: Time) -> Cycle {
         let scale = |span: Span| u128::from(span.0) * u128::from(self.frequency.hz());
         let whole = |clocks: u128| u64::try_from(clocks).unwrap_or(u64::MAX);
         if at >= self.time {
@@ -854,10 +861,10 @@ impl Moment {
     }
 
     /// The chip's system clock at it: the first clock at or after `now`,
-    /// rounded up toward the chip as [`TimeBase::cycles`] rounds.
+    /// rounded up toward the chip as [`TimeBase::cycle`] rounds.
     #[must_use]
     pub fn cycle(self) -> Cycle {
-        self.system_clock.cycles(self.now)
+        self.system_clock.cycle(self.now)
     }
 }
 
@@ -870,6 +877,7 @@ mod tests {
     use super::Moment;
     use super::NonZeroSpan;
     use super::PHASE_UNITS;
+    use super::Phase;
     use super::Span;
     use super::Time;
     use super::TimeBase;
@@ -1006,7 +1014,7 @@ mod tests {
                 Frequency::from_hz(3),
             );
         }
-        assert_eq!(clock.phase_at(Time::from_seconds(3)).0, 9 * PHASE_UNITS);
+        assert_eq!(clock.phase(Time::from_seconds(3)).0, 9 * PHASE_UNITS);
         assert_eq!(
             clock.edge_after(Time::ZERO, 1),
             third.edge_after(Time::ZERO, 1)
@@ -1020,7 +1028,7 @@ mod tests {
     #[test]
     fn the_phase_at_a_time_holds_its_fraction() {
         let clock = Clock::new(TEN_MHZ, Time::ZERO);
-        let phase = clock.phase_at(Time::from_picos(25_000));
+        let phase = clock.phase(Time::from_picos(25_000));
         assert_eq!(phase.cycles(), 0);
         assert_eq!(phase.fraction(), PHASE_UNITS / 4);
         let faster = clock.retuned(Time::from_picos(25_000), Frequency::from_hz(20_000_000));
@@ -1054,6 +1062,14 @@ mod tests {
             history.edge(3),
             Some(Time::from_picos(300_000)),
             "found in the old segment"
+        );
+        assert_eq!(
+            history.time(Phase(3 * PHASE_UNITS + PHASE_UNITS / 2)),
+            Some(Time::from_picos(350_000))
+        );
+        assert_eq!(
+            clock.time(Phase(PHASE_UNITS / 4)),
+            Some(Time::from_picos(25_000))
         );
         assert_eq!(
             history.to_next_edge(Time::from_picos(1_010_000)),
@@ -1101,7 +1117,7 @@ mod tests {
             history.push(clock);
         }
         let end = Time::from_seconds(seconds) + ps(7);
-        let phase = history.phase_at(end).unwrap();
+        let phase = history.phase(end).unwrap();
         // Phase units are 10^-21 cycle; a nanohertz-second is 10^-9.
         assert_eq!(phase.0, exact * 1_000_000_000_000);
         // The next edge after the end, exactly: the remaining fraction
@@ -1139,19 +1155,19 @@ mod tests {
             base.time(Cycle::from_clocks(11)),
             Time::from_picos(1_000 + 59_604)
         );
-        assert_eq!(base.cycles(Time::from_picos(1_000)), Cycle::from_clocks(10));
-        assert_eq!(base.cycles(Time::from_picos(1_001)), Cycle::from_clocks(11));
+        assert_eq!(base.cycle(Time::from_picos(1_000)), Cycle::from_clocks(10));
+        assert_eq!(base.cycle(Time::from_picos(1_001)), Cycle::from_clocks(11));
         assert_eq!(
-            base.cycles(Time::from_picos(1_000 + 59_605)),
+            base.cycle(Time::from_picos(1_000 + 59_605)),
             Cycle::from_clocks(12)
         );
         assert_eq!(
-            base.cycles(base.time(Cycle::from_clocks(500))),
+            base.cycle(base.time(Cycle::from_clocks(500))),
             Cycle::from_clocks(500)
         );
         let moved = base.moved(Cycle::from_clocks(20), Frequency::from_hz(8_388_608));
         assert_eq!(moved.time, base.time(Cycle::from_clocks(20)));
-        assert_eq!(moved.cycles(moved.time + ps(1)), Cycle::from_clocks(21));
+        assert_eq!(moved.cycle(moved.time + ps(1)), Cycle::from_clocks(21));
         assert_eq!(
             base.moved(Cycle::from_clocks(20), Frequency::from_hz(16_777_216)),
             base,
@@ -1186,7 +1202,7 @@ mod tests {
             TimeBase::new(Cycle::ZERO, Time::ZERO, Frequency::from_hz(16_777_216))
         );
         assert_eq!(
-            base.cycles(Time::from_seconds(1)),
+            base.cycle(Time::from_seconds(1)),
             Cycle::from_clocks(16_777_216)
         );
     }
@@ -1204,7 +1220,7 @@ mod tests {
         );
         for clocks in (0..1_000).chain(1_000..1_100) {
             let cycles = Cycle::from_clocks(clocks);
-            assert_eq!(base.cycles(base.time(cycles)), cycles, "{clocks}");
+            assert_eq!(base.cycle(base.time(cycles)), cycles, "{clocks}");
         }
     }
 }

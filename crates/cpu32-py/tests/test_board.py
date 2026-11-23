@@ -453,9 +453,9 @@ def test_a_qspi_peripheral_is_told_the_clock_and_each_transfer_carries_it(tmp_pa
     assert hertz == [8_388_608, 16_777_216]
     for moment in flash.moments:
         clock = moment.system_clock
-        assert moment.cycle() == clock.cycles(moment.now)
+        assert moment.cycle() == clock.cycle(moment.now)
         assert clock.time(moment.cycle()) >= moment.now
-        assert clock.cycles(clock.time(moment.cycle())) == moment.cycle()
+        assert clock.cycle(clock.time(moment.cycle())) == moment.cycle()
 
 
 class TimedFlash:

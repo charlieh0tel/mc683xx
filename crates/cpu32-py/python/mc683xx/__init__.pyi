@@ -1312,7 +1312,7 @@ class TimeBase:
     def time(self, at: int) -> int:
         """The board time clock `at` falls at, in picoseconds, rounded
         down."""
-    def cycles(self, at: int) -> int:
+    def cycle(self, at: int) -> int:
         """The first clock at or after board time `at` picoseconds."""
 
 @final

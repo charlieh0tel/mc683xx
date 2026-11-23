@@ -1006,7 +1006,7 @@ impl<C: Chip> Board<C> {
                 self.now = self.now.max(next);
                 continue;
             }
-            let target = self.shared.base.get().cycles(next);
+            let target = self.shared.base.get().cycle(next);
             let idle = self.idle();
             let stop = if target > self.chip.now() {
                 self.shared.quantum_end.set(Some(next));
@@ -1521,7 +1521,7 @@ impl<C: Chip> Board<C> {
     /// `signal` on [`ChipPin::scheduled`] input `pin` from `at`, at its
     /// clock, kept until it comes in case the clocks move first.
     fn schedule(&mut self, pin: C::Pin, signal: Signal, at: Time) {
-        let cycle = self.shared.base.get().cycles(at);
+        let cycle = self.shared.base.get().cycle(at);
         self.chip.input(pin, signal, cycle);
         if cycle > self.chip.now() {
             self.ahead.push(Ahead {
@@ -1553,7 +1553,7 @@ impl<C: Chip> Board<C> {
     /// `signal` on chip input `pin` from `at`.
     fn apply(&mut self, pin: C::Pin, signal: Signal, at: Time) {
         if pin != C::RESET {
-            let at_cycle = self.shared.base.get().cycles(at);
+            let at_cycle = self.shared.base.get().cycle(at);
             self.chip.input(pin, signal, at_cycle);
             return;
         }
@@ -1745,7 +1745,7 @@ impl<C: Chip> Board<C> {
             && let Signal::Level(level) = signal
         {
             self.records.push(Record::Pin(trace::PinRecord {
-                cycle: self.shared.base.get().cycles(at),
+                cycle: self.shared.base.get().cycle(at),
                 now: at,
                 pin: pin.name(),
                 level,

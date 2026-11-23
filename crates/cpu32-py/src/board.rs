@@ -295,8 +295,8 @@ impl TimeBaseView {
     }
 
     /// The first clock at or after board time `at` picoseconds.
-    fn cycles(&self, at: u64) -> u64 {
-        self.0.cycles(Time::from_picos(at)).clocks()
+    fn cycle(&self, at: u64) -> u64 {
+        self.0.cycle(Time::from_picos(at)).clocks()
     }
 
     fn __repr__(&self) -> String {
