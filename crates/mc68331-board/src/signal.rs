@@ -84,7 +84,9 @@ impl Kind {
 /// leading edge, and it carries its bit rate and length, so a receiver
 /// times its start or its end (`end`) as its own logic wants.  Built
 /// with `new`, `timed` or `untimed`, so a field added later gets a
-/// default.
+/// default.  An untimed frame (a host's character) has `baud` and
+/// `length` zero, a sentinel, not a rate: a receiver that times frames
+/// tests `baud` for zero and takes such a frame whole at its time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Serial {

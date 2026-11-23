@@ -1370,7 +1370,10 @@ hand.  The keys are in `docs/board-files.md`.
   exactly, so a consumer counts and times edges across it with no
   rounding), `serial` (UART frames, `signal::Serial`: an `sci::Frame`
   timed from its start bit, with its baud and length, so a receiver
-  times either edge; one direction, so a link is two nets), `analog` (an `f64`; data only, never time; a
+  times either edge, both zero for an untimed frame, a host's
+  character, kept as a documented sentinel over an `Option` of the
+  pair, which every receiver would unwrap alike (decided 2026-11, for
+  0.9.0); one direction, so a link is two nets), `analog` (an `f64`; data only, never time; a
   sink samples it at its own time, which asks the driver's
   `Peripheral::analog_output` then, so a value that moves continuously, a warming
   oven, need not be driven at every change), `bus` (parallel lines as
