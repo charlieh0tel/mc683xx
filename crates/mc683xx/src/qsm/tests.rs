@@ -699,7 +699,7 @@ fn the_peripheral_learns_the_mode_and_baud_when_they_change() {
     qsm.advance(Cycle::from_clocks(2 * ENTRY_2));
     let fast = sck(ClockPolarity::IdleHigh, ClockPhase::ChangeLeading, 2);
     assert_eq!(clocks(&seen), [(fast, 0)], "told once");
-    assert_eq!(fast.baud().hz(), 4_194_304);
+    assert_eq!(fast.baud().unwrap().hz(), 4_194_304);
     // the same clock again: not told
     write_word(&mut qsm, 0x1a, 0x8000, 2 * ENTRY_2);
     qsm.advance(Cycle::from_clocks(4 * ENTRY_2));
@@ -714,7 +714,12 @@ fn the_peripheral_learns_the_mode_and_baud_when_they_change() {
         ..sck(ClockPolarity::IdleLow, ClockPhase::CaptureLeading, 8)
     };
     assert_eq!(clocks(&seen), [(fast, 0), (slow, now)]);
-    assert_eq!(slow.baud().hz(), 524_288);
+    assert_eq!(slow.baud().unwrap().hz(), 524_288);
+    let stopped = QspiClock {
+        period: Cycles::ZERO,
+        ..slow
+    };
+    assert_eq!(stopped.baud(), None);
 }
 
 #[test]

@@ -998,7 +998,8 @@ ones.  Optional:
 `set_chip_selects(levels, now)` whenever `PCS[3:0]` change, so a peripheral
 framed by its select sees the frame end, and `set_clock(QspiClock, now)`
 when the serial clock changes (CPOL, CPHA, the SCK period,
-`baud()`, a `Frequency`).  The one peripheral is the board's whole QSPI side: it
+`baud()`, a `Frequency`, `None` only for a zero period, which the
+QSM never tells).  The one peripheral is the board's whole QSPI side: it
 sees every transfer and every level change, whatever they select.
 `reset(now)` is
 RESET, for the causes `Builder::set_qspi_reset_scope` names (all by

@@ -5,6 +5,7 @@
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_modules::peripheral;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use pyo3::Bound;
@@ -71,7 +72,8 @@ pub(crate) struct QspiClock {
     period: u64,
     /// The system clock's frequency, nanohertz.
     system_clock_nanohertz: u64,
-    /// SCK's frequency (QSMRM equation 4-1), nanohertz, rounded down.
+    /// SCK's frequency (QSMRM equation 4-1), nanohertz, rounded down:
+    /// 0 for a zero period, which the QSM never tells.
     baud_nanohertz: u64,
 }
 
@@ -88,7 +90,7 @@ impl From<peripheral::QspiClock> for QspiClock {
             },
             period: clock.period.clocks(),
             system_clock_nanohertz: clock.system_clock.nanohertz(),
-            baud_nanohertz: clock.baud().nanohertz(),
+            baud_nanohertz: clock.baud().map_or(0, Frequency::nanohertz),
         }
     }
 }

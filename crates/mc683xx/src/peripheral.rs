@@ -148,10 +148,18 @@ impl QspiClock {
     }
 
     /// SCK's frequency, the system clock / (2 x SPBR) (QSMRM equation
-    /// 4-1), rounded down.
+    /// 4-1), rounded down; `None` for a zero period, which the QSM never
+    /// tells (it stops its baud rate generator below SPBR 2).
     #[must_use]
-    pub const fn baud(self) -> Frequency {
-        Frequency::from_nanohertz(self.system_clock.nanohertz() / self.period.clocks())
+    pub const fn baud(self) -> Option<Frequency> {
+        match self
+            .system_clock
+            .nanohertz()
+            .checked_div(self.period.clocks())
+        {
+            Some(nanohertz) => Some(Frequency::from_nanohertz(nanohertz)),
+            None => None,
+        }
     }
 }
 

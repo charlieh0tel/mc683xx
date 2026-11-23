@@ -1777,7 +1777,7 @@ fn the_qspi_peripheral_sees_syncr_in_the_baud() {
     let clocks = &chip.qspi_peripheral::<Clocked>().unwrap().told;
     assert_eq!(clocks.len(), 1);
     assert_eq!(clocks[0].system_clock.hz(), 16_777_216);
-    assert_eq!(clocks[0].baud().hz(), 99_864);
+    assert_eq!(clocks[0].baud().unwrap().hz(), 99_864);
     // the entry's 8 bits at 168 clocks each, and the delays
     chip.run_for(Cycles::from_clocks(4_000));
     let clocked = chip.qspi_peripheral::<Clocked>().unwrap();
