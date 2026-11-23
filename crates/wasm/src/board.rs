@@ -276,7 +276,7 @@ impl Board {
         self.board
             .memory(name)
             .map(<[u8]>::to_vec)
-            .ok_or_else(|| Error::Memory(name.to_owned()))
+            .map_err(Error::from)
     }
 
     /// The board's state, as Rust's `Board::save`.

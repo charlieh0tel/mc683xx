@@ -1646,7 +1646,7 @@ impl BoardView {
     /// What the peripheral `name` shows a front end, as a dict (Rust's
     /// `Board::inspect`), or `None` if there is none.
     fn inspect<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyDict>>> {
-        let inspection = self.board.inspect(name);
+        let inspection = self.board.inspect(name).ok();
         self.check()?;
         inspection
             .map(|inspection| inspection_dict(py, &inspection))
@@ -1655,15 +1655,12 @@ impl BoardView {
 
     /// The marking of the peripheral `name`, if its peripheral gives one.
     fn marking(&self, name: &str) -> Option<String> {
-        self.board.marking(name).map(str::to_owned)
+        self.board.marking(name).ok().flatten().map(str::to_owned)
     }
 
     /// The memory `name`'s bytes.
     fn memory<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyBytes>> {
-        let bytes = self
-            .board
-            .memory(name)
-            .ok_or_else(|| Error::BoardMemory(name.to_owned()))?;
+        let bytes = self.board.memory(name).map_err(Error::from)?;
         Ok(PyBytes::new(py, bytes))
     }
 

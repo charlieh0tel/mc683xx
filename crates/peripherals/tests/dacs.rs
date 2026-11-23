@@ -11,6 +11,8 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use mc683xx_board::board::Board;
+use mc683xx_board::board::NoMemory;
+use mc683xx_board::board::NoPeripheral;
 
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
@@ -279,8 +281,13 @@ fn a_chain_powering_on_mid_scale_starts_the_ad569_at_mid_scale() {
 #[test]
 fn queues_set_the_dacs_and_lbe_completes_the_ad569s_word() {
     let mut board = board();
-    assert_eq!(board.marking("hex"), Some("U12, MC144110P"));
-    assert_eq!(board.marking("chain"), None);
+    assert_eq!(board.marking("hex"), Ok(Some("U12, MC144110P")));
+    assert_eq!(board.marking("chain"), Ok(None));
+    let nowhere = NoPeripheral("nowhere".to_owned());
+    assert_eq!(board.marking("nowhere"), Err(nowhere.clone()));
+    assert_eq!(board.inspect("nowhere").map(|_| ()), Err(nowhere));
+    let memory = board.memory("nowhere").map(|_| ());
+    assert_eq!(memory, Err(NoMemory("nowhere".to_owned())));
     board.run_until(Time::from_picos(10_000_000_000)).unwrap();
     let mut latched = Time::ZERO;
     for (channel, code) in CODES.into_iter().enumerate() {

@@ -1813,36 +1813,61 @@ impl<C: Chip> Board<C> {
             .position(|peripheral| peripheral.name == name)
     }
 
+    /// The index of the peripheral `name`, or [`NoPeripheral`].
+    fn named_peripheral(&self, name: &str) -> Result<usize, NoPeripheral> {
+        self.peripheral_index(name)
+            .ok_or_else(|| NoPeripheral(name.to_owned()))
+    }
+
     /// What the peripheral `name` shows a front end
-    /// ([`Peripheral::inspect`]), if there is one.
+    /// ([`Peripheral::inspect`]).
+    ///
+    /// # Errors
+    ///
+    /// [`NoPeripheral`] if the board has no peripheral `name`.
     ///
     /// [`Peripheral::inspect`]: crate::peripheral::Peripheral::inspect
-    #[must_use]
-    pub fn inspect(&self, name: &str) -> Option<Inspection> {
-        let cell = &self.shared.peripherals[self.peripheral_index(name)?];
-        Some(cell.borrow().inspect())
+    pub fn inspect(&self, name: &str) -> Result<Inspection, NoPeripheral> {
+        let cell = &self.shared.peripherals[self.named_peripheral(name)?];
+        Ok(cell.borrow().inspect())
     }
 
-    /// The marking of the peripheral `name`, if its peripheral gives one.
-    #[must_use]
-    pub fn marking(&self, name: &str) -> Option<&str> {
-        self.peripherals
-            .iter()
-            .find(|peripheral| peripheral.name == name)?
+    /// The marking of the peripheral `name`, `None` if the file gives it
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// [`NoPeripheral`] if the board has no peripheral `name`.
+    pub fn marking(&self, name: &str) -> Result<Option<&str>, NoPeripheral> {
+        Ok(self.peripherals[self.named_peripheral(name)?]
             .marking
-            .as_deref()
+            .as_deref())
     }
 
-    /// The memory `name`'s bytes, if there is one.
-    #[must_use]
-    pub fn memory(&self, name: &str) -> Option<&[u8]> {
-        self.memories.get(name).map(|&id| self.chip.memory(id))
+    /// The memory `name`'s bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`NoMemory`] if the board has no memory `name`.
+    pub fn memory(&self, name: &str) -> Result<&[u8], NoMemory> {
+        let id = *self
+            .memories
+            .get(name)
+            .ok_or_else(|| NoMemory(name.to_owned()))?;
+        Ok(self.chip.memory(id))
     }
 
-    /// The memory `name`'s bytes, to change, if there is one.
-    pub fn memory_mut(&mut self, name: &str) -> Option<&mut [u8]> {
-        let id = *self.memories.get(name)?;
-        Some(self.chip.memory_mut(id))
+    /// The memory `name`'s bytes, to change.
+    ///
+    /// # Errors
+    ///
+    /// [`NoMemory`] if the board has no memory `name`.
+    pub fn memory_mut(&mut self, name: &str) -> Result<&mut [u8], NoMemory> {
+        let id = *self
+            .memories
+            .get(name)
+            .ok_or_else(|| NoMemory(name.to_owned()))?;
+        Ok(self.chip.memory_mut(id))
     }
 
     /// The run-time endpoints the nets name, by name and then type:
@@ -2467,6 +2492,17 @@ fn resolve_nets<P: ChipPin>(
         })
         .collect()
 }
+
+/// A peripheral name the board does not have ([`Board::inspect`],
+/// [`Board::marking`]).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no peripheral {0:?}")]
+pub struct NoPeripheral(pub String);
+
+/// A memory name the board does not have ([`Board::memory`]).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no memory {0:?}")]
+pub struct NoMemory(pub String);
 
 /// Why a run could not go on.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
