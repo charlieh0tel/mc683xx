@@ -57,7 +57,6 @@ use crate::registry::table_from_toml;
 use crate::schema;
 use crate::schema::Attachment;
 use crate::schema::Dsack;
-use crate::schema::Endpoints;
 use crate::schema::FileRole;
 use crate::schema::Input;
 use crate::schema::Lines;
@@ -1473,10 +1472,7 @@ fn read_net(
         net: net.clone(),
         reason: reason.to_owned(),
     };
-    let from = match entry.from {
-        Endpoints::One(one) => vec![one],
-        Endpoints::Many(many) => many,
-    };
+    let from = entry.from.into_vec();
     if from.is_empty() || entry.to.is_empty() {
         return Err(net_error("a net needs a driver and a sink"));
     }

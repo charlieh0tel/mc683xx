@@ -396,6 +396,16 @@ pub(crate) enum Endpoints {
     Many(Vec<String>),
 }
 
+impl Endpoints {
+    /// The endpoints, one or several.
+    pub(crate) fn into_vec(self) -> Vec<String> {
+        match self {
+            Self::One(one) => vec![one],
+            Self::Many(many) => many,
+        }
+    }
+}
+
 /// `[[net]]`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
