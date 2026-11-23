@@ -787,16 +787,9 @@ impl Mc68331 {
         self.board.output_moved = false;
         while self.now < end {
             if let Some(cause) = self.board.sim.take_reset() {
-                let frequency = self.board.sim.clock().frequency();
-                self.reset_as(cause, false);
-                stop = self.cpu.idle().unwrap_or(Stop::Budget);
-                // or a peripheral the reset reached asks, or the reset
-                // reaches a watched output
-                let moved = self.board.outputs_moved() | self.board.output_stop.reset;
-                if self.board.clock_stop && self.board.sim.clock().frequency() != frequency
-                    || self.board.sync_request.take()
-                    || moved
-                {
+                let ends;
+                (stop, ends) = self.reset_in_run(cause);
+                if ends {
                     break;
                 }
                 continue;
@@ -874,16 +867,10 @@ impl Mc68331 {
             match stop {
                 Stop::Halted(halt) => {
                     if halt == Halt::DoubleBusFault && self.board.sim.halt_monitor() {
-                        let frequency = self.board.sim.clock().frequency();
-                        self.reset_as(ResetCause::HaltMonitor, false);
-                        stop = self.cpu.idle().unwrap_or(Stop::Budget);
-                        // as the SIM's own resets: a clock the reset
-                        // changes ends the run there
-                        let moved = self.board.outputs_moved() | self.board.output_stop.reset;
-                        if self.board.clock_stop && self.board.sim.clock().frequency() != frequency
-                            || self.board.sync_request.take()
-                            || moved
-                        {
+                        // as the SIM's own resets
+                        let ends;
+                        (stop, ends) = self.reset_in_run(ResetCause::HaltMonitor);
+                        if ends {
                             break;
                         }
                     } else {
@@ -921,6 +908,21 @@ impl Mc68331 {
             limited: limited_end,
             asked,
         }
+    }
+
+    /// A reset for `cause` taken in a run: the stop the CPU's state
+    /// after it gives, and whether the run ends there, as it does if
+    /// the reset changes a clock the host stops on, a peripheral it
+    /// reached asks for a sync, or it reaches a watched output.
+    fn reset_in_run(&mut self, cause: ResetCause) -> (Stop, bool) {
+        let frequency = self.board.sim.clock().frequency();
+        self.reset_as(cause, false);
+        let stop = self.cpu.idle().unwrap_or(Stop::Budget);
+        let moved = self.board.outputs_moved() | self.board.output_stop.reset;
+        let ends = self.board.clock_stop && self.board.sim.clock().frequency() != frequency
+            || self.board.sync_request.take()
+            || moved;
+        (stop, ends)
     }
 
     /// Runs whole instructions until now is `target` or past it, as
