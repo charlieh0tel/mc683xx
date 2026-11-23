@@ -58,6 +58,8 @@ const MOVEQ_2_D0: u16 = 0x7002;
 const MOVE_LONG_A0_TO_D0: u16 = 0x2010;
 /// MOVE.L D0,(A0).
 const MOVE_LONG_D0_TO_A0: u16 = 0x2080;
+/// MOVE.L D0,(A1).
+const MOVE_LONG_D0_TO_A1: u16 = 0x2280;
 /// MOVE.W (A0),D0.
 const MOVE_WORD_A0_TO_D0: u16 = 0x3010;
 /// STOP #$2000.
@@ -413,6 +415,40 @@ fn a_peripheral_takes_a_long_in_one_access() {
     assert_eq!(cycles[1], (cycles[1].0, Some(PERIPHERAL + 1)));
     assert_eq!(cycles[1].0.size, Size::Long);
     assert!(!cycles[1].0.stacking);
+}
+
+#[test]
+fn a_write_hook_sees_a_long_s_previous_value_but_not_a_peripheral_s() {
+    let mut machine = machine(&[MOVE_LONG_D0_TO_A0, MOVE_LONG_D0_TO_A1, RTS]);
+    machine
+        .add_peripheral(
+            Address(PERIPHERAL)..=Address(PERIPHERAL + 0xff),
+            Box::new(Logger::default()),
+        )
+        .unwrap();
+    machine
+        .write(Address(DATA), &0x1122_3344_u32.to_be_bytes())
+        .unwrap();
+    machine.cpu.registers.data[0] = 0x1234_5678;
+    machine.cpu.registers.set_address(0, DATA);
+    machine.cpu.registers.set_address(1, PERIPHERAL + 1);
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let into = Rc::clone(&seen);
+    machine
+        .cpu
+        .add_write_hook(Address(0)..=Address(u32::MAX), move |access| {
+            into.borrow_mut()
+                .push((access.address.0, access.size, access.previous));
+            ControlFlow::Continue(())
+        });
+    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(
+        *seen.borrow(),
+        [
+            (DATA, Size::Long, Some(0x1122_3344)),
+            (PERIPHERAL + 1, Size::Long, None),
+        ]
+    );
 }
 
 #[test]

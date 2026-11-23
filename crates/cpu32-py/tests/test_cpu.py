@@ -191,14 +191,20 @@ def test_a_memory_hook_sees_a_long_once_and_not_one_that_faults():
     cpu.set_stop_on_fault(True)
     cpu.write_register("D0", 0x12345678)
     cpu.write_register("A0", RAM_BYTES - 2)
+    cpu.write(STACK - 8, struct.pack(">I", 0xCAFEF00D))
     seen = []
     for kind, add in (("read", cpu.add_read_hook), ("write", cpu.add_write_hook)):
-        add(lambda access, kind=kind: seen.append((kind, access.address, access.size, access.value)))
+        add(
+            lambda access, kind=kind: seen.append(
+                (kind, access.address, access.size, access.value, access.previous)
+            )
+        )
     run = cpu.run_limited(until=RETURN)
     assert isinstance(run.end, mc683xx.End.Fault)
+    # A write sees what it replaced; a read, nothing.
     assert seen == [
-        ("write", STACK - 8, 4, 0x12345678),
-        ("read", STACK - 8, 4, 0x12345678),
+        ("write", STACK - 8, 4, 0x12345678, 0xCAFEF00D),
+        ("read", STACK - 8, 4, 0x12345678, None),
     ]
 
 

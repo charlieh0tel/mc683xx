@@ -1128,7 +1128,9 @@ but the exception hook cover an address range, on the address lines.
   when the instruction ends.  The chip's long is two word cycles; a
   bare `Cpu` with `set_long_bus` (`flat::Machine`'s default) shows a
   long operand once, size `Long` at its address, and a long that
-  faults midway not at all.
+  faults midway not at all.  A write's `previous` is what it
+  replaced, read with no cycle before it; `None` for a read, and for
+  a write the core's memory does not serve (a peripheral's).
 - `add_invalid_hook(range, f(&InvalidAccess))`: before a bus error is
   taken, with its reason, `Invalid::BusError` or `Invalid::Protected`.
 - `add_exception_hook(f(&ExceptionEntry))`: once the frame is stacked:

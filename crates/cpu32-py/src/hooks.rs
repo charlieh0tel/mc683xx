@@ -125,6 +125,13 @@ impl MemoryAccessView {
         self.0.value
     }
 
+    /// For a write, the value it replaced, read with no cycle; `None`
+    /// for a read, and for a write to a peripheral.
+    #[getter]
+    const fn previous(&self) -> Option<u32> {
+        self.0.previous
+    }
+
     /// The address of the instruction it is part of.
     #[getter]
     const fn pc(&self) -> u32 {

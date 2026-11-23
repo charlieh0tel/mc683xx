@@ -77,6 +77,11 @@ pub struct MemoryAccess {
     pub function_code: FunctionCode,
     /// The value read or written, right-aligned.
     pub value: u32,
+    /// For a write, the value it replaced, right-aligned, read with no
+    /// cycle before it was written: [`None`] for a read, and for a
+    /// write the core's memory does not serve (a peripheral's: a read
+    /// there would be a cycle of its own).
+    pub previous: Option<u32>,
     /// The address of the instruction it is part of.
     pub pc: Address,
     /// Whether it is exception processing stacking a frame.
@@ -502,7 +507,7 @@ impl Core<'_> {
         if cycle != BusCycleKind::Fetch {
             self.watch(
                 watch::READ,
-                self.memory_access(address, size, function_code, value),
+                self.memory_access(address, size, function_code, value, None),
             );
         }
         Some(value)
@@ -531,10 +536,11 @@ impl Core<'_> {
             });
             return None;
         }
+        let previous = self.previous(address, size, function_code);
         self.paged_write(address, size, function_code, value)?;
         self.watch(
             watch::WRITE,
-            self.memory_access(address, size, function_code, value),
+            self.memory_access(address, size, function_code, value, previous),
         );
         Some(())
     }
@@ -575,18 +581,39 @@ impl Core<'_> {
     }
 
     /// The read or write hooks, `bit`, for a long operand seen once
-    /// ([`Cpu::set_long_bus`]).
+    /// ([`Cpu::set_long_bus`]), a write's `previous` value as
+    /// [`previous`](Self::previous) found it.
     pub(super) fn watch_long(
         &mut self,
         bit: u8,
         address: Address,
         function_code: FunctionCode,
         value: u32,
+        previous: Option<u32>,
     ) {
         self.watch(
             bit,
-            self.memory_access(address, Size::Long, function_code, value),
+            self.memory_access(address, Size::Long, function_code, value, previous),
         );
+    }
+
+    /// What a write of `size` at `address` is to replace, for the write
+    /// hooks: the bytes the core's memory holds there, read with no
+    /// cycle, while a write hook watches the page and the cycle is not
+    /// part of a long operand seen once.  [`None`] otherwise, and where
+    /// the memory does not serve the address.
+    pub(super) fn previous(
+        &self,
+        address: Address,
+        size: Size,
+        function_code: FunctionCode,
+    ) -> Option<u32> {
+        if self.cpu.long_operand || self.cpu.memory.watched(address) & watch::WRITE == 0 {
+            return None;
+        }
+        self.cpu
+            .memory
+            .peek(Space::of(function_code), address, size)
     }
 
     /// A cycle that ended well, as the read and write hooks see it.
@@ -596,12 +623,14 @@ impl Core<'_> {
         size: Size,
         function_code: FunctionCode,
         value: u32,
+        previous: Option<u32>,
     ) -> MemoryAccess {
         MemoryAccess {
             address,
             size,
             function_code,
             value,
+            previous,
             pc: self.cpu.instruction_pc,
             stacking: self.cpu.stacking,
         }

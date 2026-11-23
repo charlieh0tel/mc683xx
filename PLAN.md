@@ -166,7 +166,10 @@ prefix; their directories keep the short names.
 - **Hooks:** plain in-process callbacks, cheap when absent: code
   address (with registers and top of stack), block, memory read and
   write, invalid access, exception taken, exception returned from.  Any
-  hook can stop `run_for`.
+  hook can stop `run_for`.  A write hook sees the value the write
+  replaced (`MemoryAccess::previous`), peeked before it on the slow
+  path a watched page already takes; `None` for a peripheral's, where
+  a read is a cycle.
   `Cpu::add_code_hook`, `add_block_hook`, `add_read_hook`,
   `add_write_hook`, `add_invalid_hook` (each over an address range),
   `add_exception_hook`, `add_exception_return_hook` (`rte` of a four-

@@ -241,6 +241,35 @@ fn memory_hooks_see_each_word_cycle_and_stop_after_the_instruction() {
 }
 
 #[test]
+fn a_write_hook_sees_what_each_write_replaced_and_a_read_hook_none() {
+    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT, MOVE_INDIRECT_TO_D1], &[]);
+    cpu.registers.set_address(0, DATA);
+    cpu.registers.data[0] = 0x1234_5678;
+    poke_long(&mut cpu, DATA, 0xdead_beef);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_write_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push((access.value, access.previous));
+        ControlFlow::Continue(())
+    });
+    let into = Rc::clone(&seen);
+    cpu.add_read_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push((access.value, access.previous));
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 2);
+    assert_eq!(
+        *seen.borrow(),
+        [
+            (0x1234, Some(0xdead)),
+            (0x5678, Some(0xbeef)),
+            (0x1234, None),
+            (0x5678, None),
+        ]
+    );
+}
+
+#[test]
 fn memory_hooks_slow_only_their_pages() {
     let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT], &[]);
     cpu.registers.set_address(0, DATA);

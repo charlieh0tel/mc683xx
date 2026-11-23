@@ -1547,7 +1547,7 @@ impl Core<'_> {
             self.cpu.long_operand = false;
             if let Ok(value) = read {
                 let address = self.cpu.memory.mask(address);
-                self.watch_long(watch::READ, address, function_code, value);
+                self.watch_long(watch::READ, address, function_code, value, None);
             }
             return read;
         }
@@ -1605,12 +1605,13 @@ impl Core<'_> {
         value: u32,
     ) -> Result<(), Fault> {
         if self.whole_long(size) {
+            let at = self.cpu.memory.mask(address);
+            let previous = self.previous(at, size, function_code);
             self.cpu.long_operand = true;
             let written = self.access_write(address, size, function_code, value);
             self.cpu.long_operand = false;
             if written.is_ok() {
-                let address = self.cpu.memory.mask(address);
-                self.watch_long(watch::WRITE, address, function_code, value);
+                self.watch_long(watch::WRITE, at, function_code, value, previous);
             }
             return written;
         }

@@ -813,9 +813,11 @@ assert chip.now == 0
 `add_exception_return_hook(callback)`,
 call a Python callable with what the Rust hook sees: an `Instruction`
 (`pc`, `registers`, `stack_top`), a `MemoryAccess` (`address`, `size`,
-`function_code`, `value`; on the chip a long operand is two word
-cycles, on the bare `Machine` one access of 4), an `InvalidAccess` (those, `cycle`, a
-`BusCycleKind`, and `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`)
+`function_code`, `value`, and `previous`, what a write replaced, read
+with no cycle, `None` for a read or a peripheral's write; on the chip a
+long operand is two word cycles, on the bare `Machine` one access of
+4), an `InvalidAccess` (those, `cycle`, a
+`BusCycleKind`, and `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`),
 an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`) or
 an `ExceptionReturn` (`vector`, `pc`, `sr`, `stack`: what `rte`
 restored, and the frame's address, its `ExceptionEntry`'s `stack`).
