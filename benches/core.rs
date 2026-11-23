@@ -9,6 +9,7 @@ use criterion::criterion_group;
 use criterion::criterion_main;
 use mc683xx_bench::bare;
 use mc683xx_bench::kernel;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 
 /// Runs of one instruction each per iteration of `short_runs`.
@@ -44,7 +45,7 @@ fn short_runs(criterion: &mut Criterion) {
                 cpu.run_for(
                     &mut bare::NoBus,
                     &mut bare::NoInterrupts,
-                    Cycles::ZERO,
+                    Cycle::ZERO,
                     black_box(Cycles::from_clocks(1)),
                 );
             }

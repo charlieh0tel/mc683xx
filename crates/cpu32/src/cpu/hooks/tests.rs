@@ -11,6 +11,7 @@ use super::InvalidAccess;
 use super::MemoryAccess;
 use crate::cpu::Cpu;
 use crate::cpu::Stop;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::exception::CycleKind;
 use crate::exception::Vector;
@@ -205,7 +206,7 @@ fn a_reset_starts_a_block() {
     let (mut cpu, starts) = stopping_at_the_second();
     poke_long(&mut cpu, Vector::RESET_STACK_POINTER.offset(), STACK);
     poke_long(&mut cpu, Vector::RESET_PROGRAM_COUNTER.offset(), CODE + 2);
-    cpu.reset(&mut NoBus, Cycles::ZERO).unwrap();
+    cpu.reset(&mut NoBus, Cycle::ZERO).unwrap();
     // The stop's skip is gone: the code hook stops again.
     assert!(matches!(step(&mut cpu, 1).stop, Stop::Hook(_)));
     assert_eq!(*starts.borrow(), [CODE, CODE + 2]);
@@ -449,7 +450,7 @@ fn time_nops(cpu: &mut Cpu, instructions: usize) -> Duration {
             let start = Instant::now();
             for _ in 0..instructions / 1000 {
                 cpu.registers.pc = Address(CODE);
-                cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, BUDGET);
+                cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycle::ZERO, BUDGET);
             }
             start.elapsed()
         })

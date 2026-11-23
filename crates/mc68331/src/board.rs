@@ -13,6 +13,7 @@ use mc683xx_cpu32::bus::LPSTOP_BROADCAST;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
@@ -260,7 +261,7 @@ pub(crate) struct Board {
     /// The host's peripherals' request to end the run early.
     pub(crate) sync_request: SyncRequest,
     /// Where the run's quantum in progress ends.
-    pub(crate) quantum_end: Cycles,
+    pub(crate) quantum_end: Cycle,
     /// Whether an access to the SIM or a module moved its next event
     /// before `quantum_end`, so the quantum ends after the instruction.
     pub(crate) sync: bool,
@@ -305,7 +306,7 @@ pub(crate) struct Board {
     /// The interrupt mask LPSTOP broadcast, and when, if the last
     /// acknowledge woke the MCU from low-power stop; not saved, as
     /// `acknowledged` is not.
-    pub(crate) woke: Option<(InterruptLevel, Cycles)>,
+    pub(crate) woke: Option<(InterruptLevel, Cycle)>,
     /// The earliest next event of the SIM and the modules, while
     /// `modules_next_stale` is clear: the run asks for it every quantum,
     /// and it moves only at an access to the SIM or a module, an
@@ -313,7 +314,7 @@ pub(crate) struct Board {
     /// or an advance that reaches it (an advance short of a next event
     /// finds nothing to move it).  The peripherals' are the host's, asked
     /// every quantum.
-    pub(crate) modules_next: Option<Cycles>,
+    pub(crate) modules_next: Option<Cycle>,
     /// Whether `modules_next` needs recomputing.
     pub(crate) modules_next_stale: bool,
 }
@@ -337,7 +338,7 @@ type Ended = Result<(u32, u16), BusError>;
 
 impl Board {
     /// The pins `port` drives and their levels at `now`.
-    pub(crate) fn outputs(&self, port: Port, now: Cycles) -> PortLevels {
+    pub(crate) fn outputs(&self, port: Port, now: Cycle) -> PortLevels {
         self.outputs_with(port, |gpt| gpt.port_outputs(now))
     }
 
@@ -370,7 +371,7 @@ impl Board {
         port: Port,
         value: u8,
         mask: u8,
-        now: Cycles,
+        now: Cycle,
     ) -> Result<(), NoInputsError> {
         match port {
             Port::C => return Err(NoInputsError(port)),
@@ -412,7 +413,7 @@ impl Board {
         &mut self,
         gpt: Vec<T>,
         port: impl Fn(PortChange) -> T,
-        order: impl Fn(&T) -> (Cycles, Port),
+        order: impl Fn(&T) -> (Cycle, Port),
     ) -> Vec<T> {
         let sim = self.sim.take_output_changes();
         let qs = self.module_mut::<Qsm>(QSM).take_output_changes();
@@ -460,7 +461,7 @@ impl Board {
     /// The earliest next event of the SIM, the modules and the peripherals,
     /// the SIM's and the modules' recomputed only when they may have
     /// moved.
-    pub(crate) fn next_event(&mut self) -> Option<Cycles> {
+    pub(crate) fn next_event(&mut self) -> Option<Cycle> {
         let modules = self.modules_next();
         let peripherals = self
             .peripherals
@@ -471,7 +472,7 @@ impl Board {
 
     /// The earliest next event of the SIM and the modules, recomputed
     /// only when it may have moved.
-    fn modules_next(&mut self) -> Option<Cycles> {
+    fn modules_next(&mut self) -> Option<Cycle> {
         if self.modules_next_stale {
             self.modules_next = self.modules_next_event();
             self.modules_next_stale = false;
@@ -485,7 +486,7 @@ impl Board {
     }
 
     /// The earliest next event of the SIM and the modules.
-    fn modules_next_event(&self) -> Option<Cycles> {
+    fn modules_next_event(&self) -> Option<Cycle> {
         let modules = self.modules.iter().filter_map(|module| module.next_event());
         self.sim.next_event().into_iter().chain(modules).min()
     }
@@ -497,7 +498,7 @@ impl Board {
     }
 
     /// Brings everything to `now`, the SIM first.
-    pub(crate) fn advance(&mut self, now: Cycles) {
+    pub(crate) fn advance(&mut self, now: Cycle) {
         self.level_stale = true;
         if self.modules_next.is_some_and(|next| next <= now) {
             self.modules_next_stale = true;
@@ -543,7 +544,7 @@ impl Board {
     /// The earliest a watched output may change after `now`, a cycle's
     /// start ([`OutputHorizon`]): `now` if a write in its instruction
     /// changed one already, as the quantum then ends after it.
-    fn output_horizon_at(&mut self, now: Cycles) -> Option<Cycles> {
+    fn output_horizon_at(&mut self, now: Cycle) -> Option<Cycle> {
         let stop = self.output_stop;
         if stop == OutputStop::default() {
             return None;
@@ -562,7 +563,7 @@ impl Board {
     /// path of the boards that do not ask.
     #[cold]
     #[inline(never)]
-    fn publish_output_horizon(&mut self, now: Cycles) {
+    fn publish_output_horizon(&mut self, now: Cycle) {
         let horizon = self.output_horizon_at(now);
         self.output_horizon.set(horizon);
     }
@@ -585,7 +586,7 @@ impl Board {
 
     /// The modules, and the peripherals `cause` reaches, see RESET at
     /// `now`.
-    pub(crate) fn reset_others(&mut self, now: Cycles, cause: ResetCause) {
+    pub(crate) fn reset_others(&mut self, now: Cycle, cause: ResetCause) {
         self.modules_changed();
         for module in &mut self.modules {
             module.reset(now);
@@ -604,7 +605,7 @@ impl Board {
     /// reloads is reloaded after the instruction, its quantum ending
     /// there, as it ends if the modules' resets move a next event before
     /// the sync point.
-    pub(crate) fn reset_instruction(&mut self, now: Cycles) {
+    pub(crate) fn reset_instruction(&mut self, now: Cycle) {
         self.sim.system_reset();
         self.reset_others(now, ResetCause::System);
         self.sync_at(self.modules_next_event());
@@ -717,7 +718,7 @@ impl Board {
         address: u32,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
         write: Option<u32>,
     ) -> Ended {
         let ended = self.decoded_cycle(
@@ -802,7 +803,7 @@ impl Board {
         address: u32,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
         write: Option<u32>,
     ) -> Ended {
         self.level_stale = true;
@@ -841,7 +842,7 @@ impl Board {
         offset: u32,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
         write: Option<u32>,
     ) -> Option<u32> {
         self.modules_changed();
@@ -890,7 +891,7 @@ impl Board {
     /// the quantum ends after the instruction, so the run syncs there
     /// as it would have had the event been known at the quantum's start
     /// (PLAN.md, Peripherals).
-    fn sync_at(&mut self, next: Option<Cycles>) {
+    fn sync_at(&mut self, next: Option<Cycle>) {
         self.sync |= next.is_some_and(|next| next < self.quantum_end);
     }
 
@@ -973,7 +974,7 @@ impl Board {
     }
 
     /// `fault` of `peripheral` at `now`, if not yet told.
-    fn tell_dsack(&mut self, peripheral: usize, told: u8, now: Cycles, fault: DsackFault) {
+    fn tell_dsack(&mut self, peripheral: usize, told: u8, now: Cycle, fault: DsackFault) {
         if self.dsack_told[peripheral] & told == 0 {
             self.dsack_told[peripheral] |= told;
             self.events.push(Event::Dsack { now, fault });
@@ -994,7 +995,7 @@ impl Board {
         address: u32,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
         write: Option<u32>,
     ) -> Ended {
         let request = DecodeRequest {
@@ -1204,7 +1205,7 @@ impl Board {
     /// the sources requesting it (SIMRM 6.3), the SIM's timer before
     /// its IRQ pins (MC68331UM 4.7.3).  No contender is a spurious
     /// interrupt.
-    pub(crate) fn acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged {
+    pub(crate) fn acknowledge(&mut self, level: InterruptLevel, now: Cycle) -> Acknowledged {
         self.modules_changed();
         self.woke = self.sim.low_power().map(|mask| (mask, now));
         self.wake(now);
@@ -1288,7 +1289,7 @@ impl Board {
     /// the SIM, the GPT and the QSM told, their next events found anew.
     /// Whether it changed, so the decode, which the bus monitor's
     /// period shapes, wants a rebuild.
-    pub(crate) fn set_freeze(&mut self, frozen: bool, now: Cycles) -> bool {
+    pub(crate) fn set_freeze(&mut self, frozen: bool, now: Cycle) -> bool {
         if self.frozen == frozen {
             return false;
         }
@@ -1304,7 +1305,7 @@ impl Board {
     /// Low-power stop at `now`, the interrupt mask LPSTOP broadcast
     /// `mask` (MC68331UM 4.5.4.2): the SIM's watchdog and the other
     /// modules' clocks stop (4.2.12, 4.3.4).
-    pub(crate) fn low_power_stop(&mut self, mask: InterruptLevel, now: Cycles) {
+    pub(crate) fn low_power_stop(&mut self, mask: InterruptLevel, now: Cycle) {
         self.modules_changed();
         self.sim.low_power_stop(mask, now);
         self.module_mut::<Gpt>(GPT).set_low_power(true, now);
@@ -1316,7 +1317,7 @@ impl Board {
     /// (MC68331UM 4.2.12, 4.3.4), their next events found anew, before
     /// the sync point ending the quantum.  A reset ends it by resetting
     /// them.
-    pub(crate) fn wake(&mut self, now: Cycles) {
+    pub(crate) fn wake(&mut self, now: Cycle) {
         if self.sim.low_power().is_some() {
             self.sim.wake(now);
             self.module_mut::<Gpt>(GPT).set_low_power(false, now);
@@ -1331,7 +1332,7 @@ impl Board {
     /// peripheral's vector costs its cycle's clocks, a bus monitor time-out
     /// its period; an autovector costs none beyond the interrupt's
     /// (PLAN.md).
-    fn external_acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged {
+    fn external_acknowledge(&mut self, level: InterruptLevel, now: Cycle) -> Acknowledged {
         let address = iack_address(level);
         let request = DecodeRequest {
             address: address.0,

@@ -7,6 +7,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::Stateless;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::frequency::Frequency;
@@ -44,7 +45,7 @@ fn access(offset: u32, size: Size, now: u64) -> RegisterAccess {
         offset,
         size,
         supervisor: true,
-        now: Cycles::from_clocks(now),
+        now: Cycle::from_clocks(now),
     }
 }
 
@@ -94,13 +95,13 @@ impl SpiPeripheral for Echo {
         !transfer.out
     }
 
-    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycle) {
         self.0
             .borrow_mut()
             .push(Seen::Selects(levels, now.clocks()));
     }
 
-    fn set_clock(&mut self, clock: QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, now: Cycle) {
         self.0.borrow_mut().push(Seen::Clock(clock, now.clocks()));
     }
 }
@@ -229,7 +230,7 @@ fn a_character_goes_a_frame_after_the_preamble() {
     assert_eq!(read_word(&mut qsm, 0x0c, 100) & 0x0180, 0x0100, "TC clear");
     write_word(&mut qsm, 0x0e, u32::from(b'A'), 100);
     assert_eq!(read_word(&mut qsm, 0x0c, 100) & 0x0100, 0, "TDRE clear");
-    assert_eq!(qsm.next_event(), Some(Cycles::from_clocks(100 + FRAME_55)));
+    assert_eq!(qsm.next_event(), Some(Cycle::from_clocks(100 + FRAME_55)));
     assert!(
         qsm.take_transmitted().is_empty(),
         "the preamble is no frame"
@@ -253,7 +254,7 @@ fn the_format_matches_its_golden() {
     transmitting(&mut qsm, 100);
     read_word(&mut qsm, 0x0c, 100);
     write_word(&mut qsm, 0x0e, u32::from(b'A'), 100);
-    qsm.advance(Cycles::from_clocks(100 + FRAME_55 + 1));
+    qsm.advance(Cycle::from_clocks(100 + FRAME_55 + 1));
     snapshot_golden::check(
         env!("CARGO_MANIFEST_DIR"),
         "qsm",
@@ -292,9 +293,9 @@ fn a_state_no_run_could_save_is_refused() {
 fn tdr_written_without_reading_scsr_is_not_sent() {
     let mut qsm = qsm();
     transmitting(&mut qsm, 0);
-    qsm.advance(Cycles::from_clocks(FRAME_55));
+    qsm.advance(Cycle::from_clocks(FRAME_55));
     write_word(&mut qsm, 0x0e, 0x55, FRAME_55);
-    qsm.advance(Cycles::from_clocks(3 * FRAME_55));
+    qsm.advance(Cycle::from_clocks(3 * FRAME_55));
     assert!(qsm.take_transmitted().is_empty());
     assert_eq!(read_word(&mut qsm, 0x0c, 3 * FRAME_55) & 0x0180, 0x0180);
     // a byte write to SCDR's upper half starts nothing either
@@ -310,13 +311,13 @@ fn tdre_and_tc_interrupt_through_the_sci_vector() {
     let three = InterruptLevel::new(3).unwrap();
     assert_eq!(qsm.request().unwrap().level, three);
     assert_eq!(qsm.request().unwrap().arbitration, 9);
-    assert_eq!(qsm.acknowledge(three, Cycles::ZERO), Some(Vector(0x40)));
+    assert_eq!(qsm.acknowledge(three, Cycle::ZERO), Some(Vector(0x40)));
     read_word(&mut qsm, 0x0c, 0);
     write_word(&mut qsm, 0x0e, 0x31, 0);
     assert_eq!(qsm.request(), None);
     // TCIE: TC once the frame is gone
     write_word(&mut qsm, 0x0a, 0x0048, 0);
-    qsm.advance(Cycles::from_clocks(2 * FRAME_55));
+    qsm.advance(Cycle::from_clocks(2 * FRAME_55));
     assert_eq!(qsm.request().unwrap().level, three);
 }
 
@@ -330,14 +331,14 @@ fn parity_and_nine_bit_frames_go_as_on_the_line() {
     read_word(&mut qsm, 0x0c, 0);
     // three ones: odd parity needs a zero
     write_word(&mut qsm, 0x0e, 0x107, 0);
-    qsm.advance(Cycles::from_clocks(2 * frame));
+    qsm.advance(Cycle::from_clocks(2 * frame));
     assert_eq!(
         sent_frames(&mut qsm),
         [(Frame::Data(0x007), frame, 2 * frame, 32 * 55)]
     );
     // a break while SBK is set
     write_word(&mut qsm, 0x0a, 0x0e09, 2 * frame);
-    qsm.advance(Cycles::from_clocks(3 * frame));
+    qsm.advance(Cycle::from_clocks(3 * frame));
     // the next break starts as the first ends, SBK still set
     assert_eq!(
         sent_frames(&mut qsm),
@@ -357,10 +358,10 @@ fn receiving(qsm: &mut Qsm) {
 fn a_character_arriving_sets_rdrf_a_frame_later() {
     let mut qsm = qsm();
     receiving(&mut qsm);
-    qsm.receive(Frame::Data(u16::from(b'*')), Cycles::from_clocks(10));
+    qsm.receive(Frame::Data(u16::from(b'*')), Cycle::from_clocks(10));
     assert_eq!(read_word(&mut qsm, 0x0c, 11) & 0x0060, 0x0020, "RAF");
-    assert_eq!(qsm.next_event(), Some(Cycles::from_clocks(10 + FRAME_55)));
-    qsm.advance(Cycles::from_clocks(10 + FRAME_55));
+    assert_eq!(qsm.next_event(), Some(Cycle::from_clocks(10 + FRAME_55)));
+    qsm.advance(Cycle::from_clocks(10 + FRAME_55));
     let three = InterruptLevel::new(3).unwrap();
     assert_eq!(qsm.request().unwrap().level, three);
     assert_eq!(read_word(&mut qsm, 0x0c, 10 + FRAME_55) & 0x0060, 0x0040);
@@ -373,16 +374,16 @@ fn a_character_arriving_sets_rdrf_a_frame_later() {
 fn frames_arrive_back_to_back_and_overrun() {
     let mut qsm = qsm();
     receiving(&mut qsm);
-    qsm.receive(Frame::Data(1), Cycles::ZERO);
-    qsm.receive(Frame::Data(2), Cycles::ZERO);
-    qsm.receive(Frame::Data(3), Cycles::ZERO);
-    qsm.advance(Cycles::from_clocks(2 * FRAME_55));
+    qsm.receive(Frame::Data(1), Cycle::ZERO);
+    qsm.receive(Frame::Data(2), Cycle::ZERO);
+    qsm.receive(Frame::Data(3), Cycle::ZERO);
+    qsm.advance(Cycle::from_clocks(2 * FRAME_55));
     let status = read_word(&mut qsm, 0x0c, 2 * FRAME_55);
     assert_eq!(status & 0x0048, 0x0048, "RDRF and OR");
     // the read of SCDR clears both; the first character stays
     assert_eq!(read_word(&mut qsm, 0x0e, 2 * FRAME_55), 1);
     assert_eq!(read_word(&mut qsm, 0x0c, 2 * FRAME_55) & 0x0048, 0);
-    qsm.advance(Cycles::from_clocks(3 * FRAME_55));
+    qsm.advance(Cycle::from_clocks(3 * FRAME_55));
     assert_eq!(read_word(&mut qsm, 0x0e, 3 * FRAME_55), 3);
 }
 
@@ -391,8 +392,8 @@ fn a_flag_set_after_scsr_is_read_stays() {
     let mut qsm = qsm();
     receiving(&mut qsm);
     read_word(&mut qsm, 0x0c, 0);
-    qsm.receive(Frame::Data(7), Cycles::ZERO);
-    qsm.advance(Cycles::from_clocks(FRAME_55));
+    qsm.receive(Frame::Data(7), Cycle::ZERO);
+    qsm.advance(Cycle::from_clocks(FRAME_55));
     read_word(&mut qsm, 0x0e, FRAME_55);
     assert_eq!(read_word(&mut qsm, 0x0c, FRAME_55) & 0x0040, 0x0040);
     // a byte read of SCDR's upper half clears nothing
@@ -406,12 +407,12 @@ fn errors_arrive_with_the_character() {
     // PE, even parity, RE
     write_word(&mut qsm, 0x0a, 0x0404, 0);
     // seven data bits 0x01 and a parity bit of zero: odd ones
-    qsm.receive(Frame::Data(0x01), Cycles::ZERO);
-    qsm.advance(Cycles::from_clocks(FRAME_55));
+    qsm.receive(Frame::Data(0x01), Cycle::ZERO);
+    qsm.advance(Cycle::from_clocks(FRAME_55));
     assert_eq!(read_word(&mut qsm, 0x0c, FRAME_55) & 0x0043, 0x0041, "PF");
     assert_eq!(read_word(&mut qsm, 0x0e, FRAME_55), 0x01);
-    qsm.receive(Frame::Break, Cycles::from_clocks(FRAME_55));
-    qsm.advance(Cycles::from_clocks(2 * FRAME_55));
+    qsm.receive(Frame::Break, Cycle::from_clocks(FRAME_55));
+    qsm.advance(Cycle::from_clocks(2 * FRAME_55));
     assert_eq!(
         read_word(&mut qsm, 0x0c, 2 * FRAME_55) & 0x0043,
         0x0042,
@@ -424,20 +425,20 @@ fn an_idle_line_follows_the_last_frame() {
     let mut qsm = qsm();
     // ILT long, ILIE, RE
     write_word(&mut qsm, 0x0a, 0x1014, 0);
-    qsm.receive(Frame::Data(0x7f), Cycles::ZERO);
-    qsm.advance(Cycles::from_clocks(FRAME_55));
-    assert_eq!(qsm.next_event(), Some(Cycles::from_clocks(2 * FRAME_55)));
-    qsm.advance(Cycles::from_clocks(2 * FRAME_55));
+    qsm.receive(Frame::Data(0x7f), Cycle::ZERO);
+    qsm.advance(Cycle::from_clocks(FRAME_55));
+    assert_eq!(qsm.next_event(), Some(Cycle::from_clocks(2 * FRAME_55)));
+    qsm.advance(Cycle::from_clocks(2 * FRAME_55));
     assert_eq!(read_word(&mut qsm, 0x0c, 2 * FRAME_55) & 0x0010, 0x0010);
     assert!(qsm.request().is_some());
     // short idle-line detect counts the stop bit and the trailing ones:
     // 0xf0's four and the stop bit leave five bit times
     let mut qsm = qsm_with_sccr1(0x0014);
-    qsm.receive(Frame::Data(0xf0), Cycles::ZERO);
-    qsm.advance(Cycles::from_clocks(FRAME_55));
+    qsm.receive(Frame::Data(0xf0), Cycle::ZERO);
+    qsm.advance(Cycle::from_clocks(FRAME_55));
     assert_eq!(
         qsm.next_event(),
-        Some(Cycles::from_clocks(FRAME_55 + 5 * 32 * 55))
+        Some(Cycle::from_clocks(FRAME_55 + 5 * 32 * 55))
     );
 }
 
@@ -451,11 +452,11 @@ fn qsm_with_sccr1(sccr1: u32) -> Qsm {
 fn wakeup_ignores_frames_until_an_address_mark() {
     // WAKE, RE, RWU
     let mut qsm = qsm_with_sccr1(0x0106);
-    qsm.receive(Frame::Data(0x12), Cycles::ZERO);
-    qsm.receive(Frame::Data(0x81), Cycles::ZERO);
-    qsm.advance(Cycles::from_clocks(FRAME_55));
+    qsm.receive(Frame::Data(0x12), Cycle::ZERO);
+    qsm.receive(Frame::Data(0x81), Cycle::ZERO);
+    qsm.advance(Cycle::from_clocks(FRAME_55));
     assert_eq!(read_word(&mut qsm, 0x0c, FRAME_55) & 0x0040, 0);
-    qsm.advance(Cycles::from_clocks(2 * FRAME_55));
+    qsm.advance(Cycle::from_clocks(2 * FRAME_55));
     assert_eq!(read_word(&mut qsm, 0x0a, 2 * FRAME_55), 0x0104, "RWU clear");
     assert_eq!(read_word(&mut qsm, 0x0e, 2 * FRAME_55), 0x81);
 }
@@ -466,7 +467,7 @@ fn loop_mode_feeds_the_receiver() {
     let mut qsm = qsm_with_sccr1(0x400c);
     read_word(&mut qsm, 0x0c, 0);
     write_word(&mut qsm, 0x0e, 0x5a, 0);
-    qsm.advance(Cycles::from_clocks(2 * FRAME_55));
+    qsm.advance(Cycle::from_clocks(2 * FRAME_55));
     assert!(qsm.take_transmitted().is_empty(), "TXD stays at mark");
     assert_eq!(read_word(&mut qsm, 0x0e, 2 * FRAME_55), 0x5a);
 }
@@ -481,7 +482,7 @@ fn a_stopped_baud_generator_moves_nothing() {
     assert_eq!(qsm.next_event(), None);
     // SCBR written: the preamble starts
     write_word(&mut qsm, 0x08, 1, 1000);
-    assert_eq!(qsm.next_event(), Some(Cycles::from_clocks(1000 + 10 * 32)));
+    assert_eq!(qsm.next_event(), Some(Cycle::from_clocks(1000 + 10 * 32)));
 }
 
 /// The QSM with an [`Echo`] on the QSPI, PCS\[3:0\], SCK and MOSI the
@@ -520,7 +521,7 @@ fn a_queue_runs_with_each_entrys_pcs_and_timing() {
     // entry 1: DSCKL 10, 12 bits, DTL 3 x 32 after
     let second = first + 17 + 10 + 96;
     let third = second + 96 + 4 + 64;
-    qsm.advance(Cycles::from_clocks(10_000));
+    qsm.advance(Cycle::from_clocks(10_000));
     assert_eq!(
         seen.borrow()[..],
         [
@@ -549,7 +550,7 @@ fn a_queue_runs_with_each_entrys_pcs_and_timing() {
     let four = InterruptLevel::new(4).unwrap();
     assert_eq!(qsm.request().unwrap().level, four);
     assert_eq!(
-        qsm.acknowledge(four, Cycles::from_clocks(10_000)),
+        qsm.acknowledge(four, Cycle::from_clocks(10_000)),
         Some(Vector(0x41))
     );
     write(&mut qsm, 0x1f, Size::Byte, 0x00, 10_000);
@@ -575,7 +576,7 @@ fn queue_output_changes(step: u64) -> Vec<(u64, u8, u8)> {
     write_word(&mut qsm, 0x1c, 0x8200, 0);
     write_word(&mut qsm, 0x1a, 0x8a03, 100);
     for now in (step..=10_000).step_by(step as usize) {
-        qsm.advance(Cycles::from_clocks(now));
+        qsm.advance(Cycle::from_clocks(now));
     }
     qsm.take_output_changes()
         .into_iter()
@@ -612,16 +613,16 @@ fn a_polled_queue_stops_without_a_quantum_unless_pcs_moves() {
         write_word(&mut qsm, 0x18, 0x8004, 0);
         write_word(&mut qsm, 0x1a, 0x8000, 100);
         let transfer = 100 + 4 + 64;
-        assert_eq!(qsm.next_event(), Some(Cycles::from_clocks(transfer)));
-        qsm.advance(Cycles::from_clocks(transfer));
+        assert_eq!(qsm.next_event(), Some(Cycle::from_clocks(transfer)));
+        qsm.advance(Cycle::from_clocks(transfer));
         // without CONT PCS returned at the transfer, so the stop calls
         // nothing and nothing sees it before a read
         assert_eq!(
             qsm.next_event(),
-            stop.map(Cycles::from_clocks),
+            stop.map(Cycle::from_clocks),
             "{command:#x}"
         );
-        qsm.advance(Cycles::from_clocks(10_000));
+        qsm.advance(Cycle::from_clocks(10_000));
         assert_eq!(
             seen.borrow().last(),
             Some(&Seen::Selects(0b1111, stop.unwrap_or(transfer)))
@@ -640,16 +641,16 @@ fn the_qspi_vector_wins_over_the_scis_at_one_level() {
     write_word(&mut qsm, 0x18, 0x8004, 0);
     write_word(&mut qsm, 0x1c, 0x8000, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
-    qsm.advance(Cycles::from_clocks(1000));
+    qsm.advance(Cycle::from_clocks(1000));
     let two = InterruptLevel::new(2).unwrap();
     assert_eq!(
-        qsm.acknowledge(two, Cycles::from_clocks(1000)),
+        qsm.acknowledge(two, Cycle::from_clocks(1000)),
         Some(Vector(0x41))
     );
     read(&mut qsm, 0x1f, Size::Byte, 1000);
     write(&mut qsm, 0x1f, Size::Byte, 0, 1000);
     assert_eq!(
-        qsm.acknowledge(two, Cycles::from_clocks(1000)),
+        qsm.acknowledge(two, Cycle::from_clocks(1000)),
         Some(Vector(0x40))
     );
 }
@@ -678,7 +679,7 @@ fn the_reset_clock_is_spcr0_out_of_reset() {
     write_word(&mut qsm, 0x18, 0x8000 | spcr0, 0);
     write_word(&mut qsm, 0x1c, 0x0100, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
-    qsm.advance(Cycles::from_clocks(10_000));
+    qsm.advance(Cycle::from_clocks(10_000));
     let reset = QspiClock::at_reset(Frequency::from_hz(SYSTEM_HZ));
     assert_eq!(clocks(&seen), [(reset, 0)]);
     assert_eq!(
@@ -695,13 +696,13 @@ fn the_peripheral_learns_the_mode_and_baud_when_they_change() {
     write_word(&mut qsm, 0x18, 0x8302, 0);
     write_word(&mut qsm, 0x1c, 0x0100, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
-    qsm.advance(Cycles::from_clocks(2 * ENTRY_2));
+    qsm.advance(Cycle::from_clocks(2 * ENTRY_2));
     let fast = sck(ClockPolarity::IdleHigh, ClockPhase::ChangeLeading, 2);
     assert_eq!(clocks(&seen), [(fast, 0)], "told once");
     assert_eq!(fast.baud().hz(), 4_194_304);
     // the same clock again: not told
     write_word(&mut qsm, 0x1a, 0x8000, 2 * ENTRY_2);
-    qsm.advance(Cycles::from_clocks(4 * ENTRY_2));
+    qsm.advance(Cycle::from_clocks(4 * ENTRY_2));
     assert_eq!(clocks(&seen).len(), 1);
     // CPOL and CPHA clear, SPBR 8, the system clock halved
     let now = 4 * ENTRY_2;
@@ -727,7 +728,7 @@ fn wraparound_repeats_the_queue_from_newqp() {
     write_word(&mut qsm, 0x18, 0x8002, 0);
     write_word(&mut qsm, 0x1c, 0x6504, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
-    qsm.advance(Cycles::from_clocks(5 * ENTRY_2));
+    qsm.advance(Cycle::from_clocks(5 * ENTRY_2));
     let codes: Vec<u8> = seen
         .borrow()
         .iter()
@@ -741,7 +742,7 @@ fn wraparound_repeats_the_queue_from_newqp() {
     assert_eq!(read_word(&mut qsm, 0x1a, 5 * ENTRY_2) & 0x8000, 0x8000);
     // WREN cleared: the queue ends at ENDQP and clears SPE
     write_word(&mut qsm, 0x1c, 0x0504, 5 * ENTRY_2);
-    qsm.advance(Cycles::from_clocks(8 * ENTRY_2));
+    qsm.advance(Cycle::from_clocks(8 * ENTRY_2));
     assert_eq!(read_word(&mut qsm, 0x1a, 8 * ENTRY_2) & 0x8000, 0);
 }
 
@@ -753,7 +754,7 @@ fn a_queue_past_f_wraps_to_0() {
     write_word(&mut qsm, 0x18, 0x8002, 0);
     write_word(&mut qsm, 0x1c, 0x010e, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
-    qsm.advance(Cycles::from_clocks(10 * ENTRY_2));
+    qsm.advance(Cycle::from_clocks(10 * ENTRY_2));
     let transfers = seen
         .borrow()
         .iter()
@@ -772,7 +773,7 @@ fn halt_stops_at_a_queue_boundary_and_resumes() {
     write_word(&mut qsm, 0x1c, 0x0300, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
     write(&mut qsm, 0x1e, Size::Byte, 0x03, 1);
-    qsm.advance(Cycles::from_clocks(10 * ENTRY_2));
+    qsm.advance(Cycle::from_clocks(10 * ENTRY_2));
     assert_eq!(
         read(&mut qsm, 0x1f, Size::Byte, 10 * ENTRY_2),
         0x20,
@@ -783,7 +784,7 @@ fn halt_stops_at_a_queue_boundary_and_resumes() {
     // HALT cleared: entries 1 to 3 follow
     write(&mut qsm, 0x1f, Size::Byte, 0x00, 10 * ENTRY_2);
     write(&mut qsm, 0x1e, Size::Byte, 0x02, 10 * ENTRY_2);
-    qsm.advance(Cycles::from_clocks(20 * ENTRY_2));
+    qsm.advance(Cycle::from_clocks(20 * ENTRY_2));
     assert_eq!(read(&mut qsm, 0x1f, Size::Byte, 20 * ENTRY_2), 0x83);
 }
 
@@ -803,8 +804,8 @@ fn freeze_with_frz1_halts_at_a_transfer_boundary_as_halt_does() {
     write_word(&mut qsm, 0x18, 0x8002, 0);
     write_word(&mut qsm, 0x1c, 0x0300, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
-    qsm.set_freeze(true, Cycles::from_clocks(1));
-    qsm.advance(Cycles::from_clocks(10 * ENTRY_2));
+    qsm.set_freeze(true, Cycle::from_clocks(1));
+    qsm.advance(Cycle::from_clocks(10 * ENTRY_2));
     assert_eq!(
         read(&mut qsm, 0x1f, Size::Byte, 10 * ENTRY_2),
         0x20,
@@ -814,8 +815,8 @@ fn freeze_with_frz1_halts_at_a_transfer_boundary_as_halt_does() {
     assert_eq!(transfers(&seen), 1, "the first entry, and no more");
     write(&mut qsm, 0x1f, Size::Byte, 0x00, 10 * ENTRY_2);
     // FREEZE ends: entries 1 to 3 follow
-    qsm.set_freeze(false, Cycles::from_clocks(10 * ENTRY_2));
-    qsm.advance(Cycles::from_clocks(20 * ENTRY_2));
+    qsm.set_freeze(false, Cycle::from_clocks(10 * ENTRY_2));
+    qsm.advance(Cycle::from_clocks(20 * ENTRY_2));
     assert_eq!(read(&mut qsm, 0x1f, Size::Byte, 20 * ENTRY_2), 0x83);
     assert_eq!(transfers(&seen), 4);
 }
@@ -828,14 +829,14 @@ fn freeze_ends_with_a_reset_and_comes_back_with_a_snapshot() {
         write_word(qsm, 0x18, 0x8002, 0);
         write_word(qsm, 0x1c, 0x0300, 0);
         write_word(qsm, 0x1a, 0x8000, 0);
-        qsm.advance(Cycles::from_clocks(10 * ENTRY_2));
+        qsm.advance(Cycle::from_clocks(10 * ENTRY_2));
         read(qsm, 0x1f, Size::Byte, 10 * ENTRY_2) & 0x20 != 0
     };
     let mut frozen = qsm();
     qspi(&mut frozen);
-    frozen.set_freeze(true, Cycles::ZERO);
+    frozen.set_freeze(true, Cycle::ZERO);
     let snapshot = frozen.save().unwrap();
-    frozen.reset(Cycles::ZERO);
+    frozen.reset(Cycle::ZERO);
     assert!(!halts(&mut frozen), "the reset ended it");
     let mut restored = qsm();
     qspi(&mut restored);
@@ -856,7 +857,7 @@ fn newqp_waits_for_the_entry_in_progress() {
     write_word(&mut qsm, 0x1a, 0x8000, 0);
     write_word(&mut qsm, 0x1c, 0x0908, 1);
     assert_eq!(read_word(&mut qsm, 0x1c, 1), 0x0900, "reads the register");
-    qsm.advance(Cycles::from_clocks(10 * ENTRY_2));
+    qsm.advance(Cycle::from_clocks(10 * ENTRY_2));
     let codes: Vec<u8> = seen
         .borrow()
         .iter()
@@ -875,7 +876,7 @@ fn spe_cleared_aborts_the_transfer() {
     write_word(&mut qsm, 0x18, 0x8002, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
     write_word(&mut qsm, 0x1a, 0x0000, 10);
-    qsm.advance(Cycles::from_clocks(1000));
+    qsm.advance(Cycle::from_clocks(1000));
     assert!(
         !seen
             .borrow()
@@ -891,7 +892,7 @@ fn ss_held_low_is_a_mode_fault() {
     qspi(&mut qsm);
     // PCS0/SS an input
     write_word(&mut qsm, 0x16, 0x7b76, 0);
-    qsm.set_port_pins(0xf7, u8::MAX, Cycles::from_clocks(0));
+    qsm.set_port_pins(0xf7, u8::MAX, Cycle::from_clocks(0));
     write_word(&mut qsm, 0x18, 0x8002, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
     assert_eq!(read(&mut qsm, 0x1f, Size::Byte, 0), 0x40, "MODF");
@@ -907,7 +908,7 @@ fn loopq_receives_what_it_sends() {
     write(&mut qsm, 0x1e, Size::Byte, 0x04, 0);
     write_word(&mut qsm, 0x18, 0x8002, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
-    qsm.advance(Cycles::from_clocks(ENTRY_2));
+    qsm.advance(Cycle::from_clocks(ENTRY_2));
     assert_eq!(read_word(&mut qsm, 0x100, ENTRY_2), 0xc3);
 }
 
@@ -920,7 +921,7 @@ fn a_stopped_baud_generator_waits() {
     write_word(&mut qsm, 0x1a, 0x8000, 0);
     assert_eq!(qsm.next_event(), None);
     write_word(&mut qsm, 0x18, 0x8002, 10);
-    assert_eq!(qsm.next_event(), Some(Cycles::from_clocks(10 + 2 + 32)));
+    assert_eq!(qsm.next_event(), Some(Cycle::from_clocks(10 + 2 + 32)));
 }
 
 #[test]
@@ -929,7 +930,7 @@ fn a_reset_keeps_the_ram_and_the_peripheral() {
     let seen = qspi(&mut qsm);
     write_word(&mut qsm, 0x120, 0x1234, 0);
     transmitting(&mut qsm, 0);
-    qsm.reset(Cycles::from_clocks(5));
+    qsm.reset(Cycle::from_clocks(5));
     assert_eq!(read_word(&mut qsm, 0x120, 5), 0x1234);
     assert_eq!(read_word(&mut qsm, 0x0a, 5), 0);
     assert_eq!(read_word(&mut qsm, 0x00, 5), 0x0080);
@@ -947,7 +948,7 @@ fn woms_makes_txd_open_drain() {
     // WOMS: released, to the board's level (QSMRM 5.2.2)
     write_word(&mut qsm, 0x0a, 0x2008, 0);
     assert_eq!(qsm.port_outputs(), PortLevels::new(0x00, 0x00));
-    qsm.set_port_pins(0x7f, u8::MAX, Cycles::ZERO);
+    qsm.set_port_pins(0x7f, u8::MAX, Cycle::ZERO);
     assert_eq!(read(&mut qsm, 0x15, Size::Byte, 0) & 0x80, 0);
 }
 
@@ -962,20 +963,20 @@ fn lpstop_holds_the_qspi_and_the_sci_until_the_wake() {
     let transfer = 100 + 4 + 64;
     // RE: a frame on RXD
     write_word(&mut qsm, 0x0a, 0x0004, 100);
-    qsm.receive(Frame::Data(0x55), Cycles::from_clocks(100));
+    qsm.receive(Frame::Data(0x55), Cycle::from_clocks(100));
     // the clock off 10 clocks in, for 1000 (MC68331UM 4.3.4)
-    qsm.stop_clock(Cycles::from_clocks(110));
+    qsm.stop_clock(Cycle::from_clocks(110));
     assert_eq!(qsm.next_event(), None);
-    qsm.advance(Cycles::from_clocks(1110));
-    qsm.receive(Frame::Data(0x33), Cycles::from_clocks(1110));
+    qsm.advance(Cycle::from_clocks(1110));
+    qsm.receive(Frame::Data(0x33), Cycle::from_clocks(1110));
     assert!(
         !seen
             .borrow()
             .iter()
             .any(|seen| matches!(seen, Seen::Transfer(..)))
     );
-    qsm.start_clock(Cycles::from_clocks(1110));
-    qsm.advance(Cycles::from_clocks(1_000_000));
+    qsm.start_clock(Cycle::from_clocks(1110));
+    qsm.advance(Cycle::from_clocks(1_000_000));
     assert!(
         seen.borrow()
             .contains(&Seen::Transfer(0b1110, 8, 0x0000, transfer + 1000)),
@@ -1001,7 +1002,7 @@ fn a_reset_first_makes_the_transfers_already_due() {
     write_word(&mut qsm, 0x18, 0x8004, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 100);
     let transfer = 100 + 4 + 64;
-    qsm.reset(Cycles::from_clocks(transfer + 10));
+    qsm.reset(Cycle::from_clocks(transfer + 10));
     assert!(
         seen.borrow()
             .contains(&Seen::Transfer(0b1110, 8, 0x00a5, transfer)),
@@ -1038,7 +1039,7 @@ fn shift(qsm: &mut Qsm, mosi: u16, bits: u8, now: u64) -> Shifted {
     for bit in (0..bits).rev() {
         shifted.record(
             bit,
-            qsm.clock_slave(mosi >> bit & 1 != 0, Cycles::from_clocks(now)),
+            qsm.clock_slave(mosi >> bit & 1 != 0, Cycle::from_clocks(now)),
         );
     }
     shifted
@@ -1059,15 +1060,15 @@ fn a_slave_takes_the_masters_bits_entry_by_entry() {
     enable(&mut qsm, 0);
     // not selected yet: the bits go nowhere
     assert_eq!(shift(&mut qsm, 0xff, 8, 0), Shifted::default());
-    qsm.set_slave_select(true, Cycles::from_clocks(10));
+    qsm.set_slave_select(true, Cycle::from_clocks(10));
     assert_eq!(shift(&mut qsm, 0x3c, 8, 10), driven(0xa5, 8));
     assert_eq!(read_word(&mut qsm, 0x100, 10), 0x3c);
     assert_eq!(read(&mut qsm, 0x1f, Size::Byte, 10), 0x00, "CPTQP 0");
     // entry 1 in two halves, SS negated between: it resumes
     assert_eq!(shift(&mut qsm, 0x9, 4, 20), driven(0x0, 4));
-    qsm.set_slave_select(false, Cycles::from_clocks(30));
+    qsm.set_slave_select(false, Cycle::from_clocks(30));
     assert_eq!(shift(&mut qsm, 0xf, 4, 35), Shifted::default());
-    qsm.set_slave_select(true, Cycles::from_clocks(40));
+    qsm.set_slave_select(true, Cycle::from_clocks(40));
     assert_eq!(read_word(&mut qsm, 0x102, 40), 0, "not yet stored");
     assert_eq!(shift(&mut qsm, 0x6, 4, 40), driven(0xf, 4));
     assert_eq!(read_word(&mut qsm, 0x102, 40), 0x96);
@@ -1106,7 +1107,7 @@ fn a_slave_word_is_bits_long() {
     // BITS 12; BITS 0 is 16 (QSMRM Table 4-2)
     write_word(&mut qsm, 0x18, 0x3000, 0);
     enable(&mut qsm, 0);
-    qsm.set_slave_select(true, Cycles::from_clocks(0));
+    qsm.set_slave_select(true, Cycle::from_clocks(0));
     assert_eq!(shift(&mut qsm, 0x0123, 12, 0), driven(0xabc, 12));
     assert_eq!(read_word(&mut qsm, 0x100, 0), 0x123);
     write_word(&mut qsm, 0x18, 0x0000, 0);
@@ -1122,7 +1123,7 @@ fn slave_wraparound_repeats_the_queue() {
     // WREN to $0, ENDQP 1, NEWQP 1
     write_word(&mut qsm, 0x1c, 0x4101, 0);
     enable(&mut qsm, 0);
-    qsm.set_slave_select(true, Cycles::from_clocks(0));
+    qsm.set_slave_select(true, Cycle::from_clocks(0));
     let out: Vec<u16> = [0xa1, 0xb0, 0xb1, 0xc0]
         .into_iter()
         .map(|mosi| shift(&mut qsm, mosi, 8, 0).miso)
@@ -1143,7 +1144,7 @@ fn a_slave_halts_after_the_word_in_progress() {
     let mut qsm = qsm();
     slave(&mut qsm, 3, &[0x0011, 0x0022]);
     enable(&mut qsm, 0);
-    qsm.set_slave_select(true, Cycles::from_clocks(0));
+    qsm.set_slave_select(true, Cycle::from_clocks(0));
     shift(&mut qsm, 0x5, 4, 0);
     // HMIE, HALT mid-word: the word completes, then the queue halts
     write(&mut qsm, 0x1e, Size::Byte, 0x03, 0);
@@ -1164,7 +1165,7 @@ fn newqp_moves_a_slave_only_between_words() {
     let mut qsm = qsm();
     slave(&mut qsm, 5, &[0x0011, 0x0022, 0x0033, 0x0044]);
     enable(&mut qsm, 0);
-    qsm.set_slave_select(true, Cycles::from_clocks(0));
+    qsm.set_slave_select(true, Cycle::from_clocks(0));
     // at a word boundary: entry 2 at once
     write_word(&mut qsm, 0x1c, 0x8502, 0);
     assert_eq!(shift(&mut qsm, 0, 8, 0).miso, 0x33);
@@ -1180,7 +1181,7 @@ fn a_selected_slave_is_no_mode_fault_but_a_master_is() {
     let mut qsm = qsm();
     slave(&mut qsm, 0, &[]);
     enable(&mut qsm, 0);
-    qsm.set_slave_select(true, Cycles::from_clocks(0));
+    qsm.set_slave_select(true, Cycle::from_clocks(0));
     assert_eq!(read(&mut qsm, 0x1f, Size::Byte, 0), 0);
     // MSTR set with SS still low (QSMRM 4.3.5)
     write_word(&mut qsm, 0x18, 0xa004, 0);
@@ -1193,7 +1194,7 @@ fn the_slaves_pins_follow_ddrqs_and_womq() {
     let mut qsm = qsm();
     slave(&mut qsm, 15, &[0x00f0, 0x00f0, 0x00f0]);
     enable(&mut qsm, 0);
-    qsm.set_slave_select(true, Cycles::from_clocks(0));
+    qsm.set_slave_select(true, Cycle::from_clocks(0));
     // WOMQ: MISO's high bits float (QSMRM 4.3.1)
     write_word(&mut qsm, 0x18, 0x6000, 0);
     assert_eq!(
@@ -1226,11 +1227,11 @@ fn master_entry(spcr0: u32, pins: u32, latch: u32, board: u8) -> (Vec<u16>, u32)
     let seen = qspi(&mut qsm);
     write_word(&mut qsm, 0x16, pins, 0);
     write(&mut qsm, 0x15, Size::Byte, latch, 0);
-    qsm.set_port_pins(board, u8::MAX, Cycles::from_clocks(0));
+    qsm.set_port_pins(board, u8::MAX, Cycle::from_clocks(0));
     write_word(&mut qsm, 0x120, 0x00c3, 0);
     write_word(&mut qsm, 0x18, spcr0, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
-    qsm.advance(Cycles::from_clocks(ENTRY_2));
+    qsm.advance(Cycle::from_clocks(ENTRY_2));
     let words = seen
         .borrow()
         .iter()
@@ -1270,7 +1271,7 @@ fn the_masters_pins_follow_pqspar_ddrqs_and_womq() {
     write(&mut qsm, 0x1e, Size::Byte, 0x04, 0);
     write_word(&mut qsm, 0x18, 0x8002, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
-    qsm.advance(Cycles::from_clocks(ENTRY_2));
+    qsm.advance(Cycle::from_clocks(ENTRY_2));
     assert_eq!(read_word(&mut qsm, 0x100, ENTRY_2), 0xc3);
 }
 
@@ -1307,7 +1308,7 @@ enum Syncing {
 }
 
 /// The QSM's next event as `syncing` has it.
-fn next_event(qsm: &Qsm, syncing: Syncing) -> Option<Cycles> {
+fn next_event(qsm: &Qsm, syncing: Syncing) -> Option<Cycle> {
     match syncing {
         Syncing::PerPhase => [qsm.sci.next_event(), qsm.qspi.next_phase_end()]
             .into_iter()
@@ -1347,11 +1348,11 @@ impl SpiPeripheral for Logged {
         !transfer.out
     }
 
-    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycle) {
         self.log(Seen::Selects(levels, now.clocks()));
     }
 
-    fn set_clock(&mut self, clock: QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, now: Cycle) {
         self.log(Seen::Clock(clock, now.clocks()));
     }
 
@@ -1529,7 +1530,7 @@ fn run_program(program: &Program, syncing: Syncing, peripheral: Option<bool>) ->
         states: Vec::new(),
         seen: Vec::new(),
     };
-    let mut now = Cycles::ZERO;
+    let mut now = Cycle::ZERO;
     let mut quanta = 0;
     let mut code = program.instructions.iter().cycle();
     for &(budget, pins) in &program.runs {
@@ -1537,7 +1538,7 @@ fn run_program(program: &Program, syncing: Syncing, peripheral: Option<bool>) ->
         while now < end {
             quanta += 1;
             let next = next_event(&qsm, syncing).map_or(end, |next| next.min(end));
-            let quantum_end = now + now.until(next).max(Cycles::from_clocks(1));
+            let quantum_end = now + next.since(now).max(Cycles::from_clocks(1));
             loop {
                 let request = qsm.request();
                 shown

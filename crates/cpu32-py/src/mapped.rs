@@ -15,7 +15,7 @@ use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::chip_select::ChipSelect;
@@ -447,8 +447,8 @@ fn truth(value: &Bound<'_, PyAny>) -> PyResult<bool> {
 }
 
 /// An optional time.
-fn time(value: &Bound<'_, PyAny>) -> PyResult<Option<Cycles>> {
-    Ok(value.extract::<Option<u64>>()?.map(Cycles::from_clocks))
+fn time(value: &Bound<'_, PyAny>) -> PyResult<Option<Cycle>> {
+    Ok(value.extract::<Option<u64>>()?.map(Cycle::from_clocks))
 }
 
 impl MappedPeripheral for PythonMapped {
@@ -499,7 +499,7 @@ impl MappedPeripheral for PythonMapped {
         self.call_or(self.methods.interrupt_request.as_ref(), (), truth, false)
     }
 
-    fn reset(&mut self, now: Cycles) {
+    fn reset(&mut self, now: Cycle) {
         self.call_or(self.methods.reset.as_ref(), (now.clocks(),), ignored, ());
     }
 }
@@ -515,11 +515,11 @@ impl Save for PythonMapped {
 }
 
 impl Timed for PythonMapped {
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         self.call_or(self.methods.next_event.as_ref(), (), time, None)
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         self.call_or(self.methods.advance.as_ref(), (now.clocks(),), ignored, ());
     }
 }

@@ -15,7 +15,7 @@ use std::mem;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -125,13 +125,13 @@ pub struct Qsm {
     qspi: Qspi,
     /// When LPSTOP turned its clock off, while it is off (MC68331UM
     /// 4.3.4): the SCI and the QSPI make no progress.
-    low_power: Option<Cycles>,
+    low_power: Option<Cycle>,
     /// Whether FREEZE is asserted: the CPU in background mode
     /// (MC68331UM 6.2.1.2).
     frozen: bool,
     /// What port QS drives, each change with its time, until the host
     /// takes them.
-    output_changes: Vec<(Cycles, PortLevels)>,
+    output_changes: Vec<(Cycle, PortLevels)>,
 }
 
 impl Qsm {
@@ -165,7 +165,7 @@ impl Qsm {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn stop_clock(&mut self, now: Cycles) {
+    pub fn stop_clock(&mut self, now: Cycle) {
         self.advance(now);
         self.low_power.get_or_insert(now);
     }
@@ -176,7 +176,7 @@ impl Qsm {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn set_freeze(&mut self, frozen: bool, now: Cycles) {
+    pub fn set_freeze(&mut self, frozen: bool, now: Cycle) {
         self.advance(now);
         self.frozen = frozen;
         // a queue that goes on drives its selects, as the host is told;
@@ -187,7 +187,7 @@ impl Qsm {
     }
 
     /// FREEZE or FRZ1 changed at `now`.
-    fn freeze_changed(&mut self, now: Cycles) {
+    fn freeze_changed(&mut self, now: Cycle) {
         let frozen = self.frozen && self.qsmcr & QSMCR_FRZ1 != 0;
         self.qspi.set_frozen(frozen, self.port, now);
     }
@@ -198,9 +198,9 @@ impl Qsm {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn start_clock(&mut self, now: Cycles) {
+    pub fn start_clock(&mut self, now: Cycle) {
         if let Some(stopped) = self.low_power.take() {
-            let off = stopped.until(now);
+            let off = now.since(stopped);
             self.sci.delay(off);
             self.qspi.delay(off);
             let before = self.port_outputs();
@@ -232,7 +232,7 @@ impl Qsm {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn reset_peripheral(&mut self, now: Cycles) {
+    pub fn reset_peripheral(&mut self, now: Cycle) {
         self.qspi.reset_peripheral(now);
     }
 
@@ -280,7 +280,7 @@ impl Qsm {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn receive(&mut self, frame: Frame, now: Cycles) {
+    pub fn receive(&mut self, frame: Frame, now: Cycle) {
         self.advance(now);
         if !self.clock_off() {
             self.sci.receive(frame, now);
@@ -307,7 +307,7 @@ impl Qsm {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn set_port_pins(&mut self, value: u8, mask: u8, now: Cycles) {
+    pub fn set_port_pins(&mut self, value: u8, mask: u8, now: Cycle) {
         self.advance(now);
         self.port.pins = merge_pins(self.port.pins, value, mask);
         if !self.clock_off() {
@@ -323,7 +323,7 @@ impl Qsm {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn set_slave_select(&mut self, asserted: bool, now: Cycles) {
+    pub fn set_slave_select(&mut self, asserted: bool, now: Cycle) {
         let pin = 1 << port::PCS0_PIN;
         self.set_port_pins(if asserted { 0 } else { pin }, pin, now);
     }
@@ -336,7 +336,7 @@ impl Qsm {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn clock_slave(&mut self, mosi: bool, now: Cycles) -> Option<bool> {
+    pub fn clock_slave(&mut self, mosi: bool, now: Cycle) -> Option<bool> {
         self.advance(now);
         if self.clock_off() {
             return None;
@@ -374,13 +374,13 @@ impl Qsm {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn take_output_changes(&mut self) -> Vec<(Cycles, PortLevels)> {
+    pub fn take_output_changes(&mut self) -> Vec<(Cycle, PortLevels)> {
         mem::take(&mut self.output_changes)
     }
 
     /// Records what port QS drives at `now` as a change if it differs
     /// from `before`; what it drives now.
-    fn record_outputs(&mut self, before: PortLevels, now: Cycles) -> PortLevels {
+    fn record_outputs(&mut self, before: PortLevels, now: Cycle) -> PortLevels {
         let outputs = self.port_outputs();
         if outputs != before {
             self.output_changes.push((now, outputs));
@@ -390,7 +390,7 @@ impl Qsm {
 
     /// When the SCI or the QSPI next changes on its own, seen or not:
     /// where what port QS drives may change.
-    fn next_change(&self) -> Option<Cycles> {
+    fn next_change(&self) -> Option<Cycle> {
         [self.sci.next_event(), self.qspi.next_phase_end()]
             .into_iter()
             .flatten()
@@ -411,7 +411,7 @@ impl Qsm {
 
     /// The port's pins or registers changed at `now`: the QSPI checks
     /// for a mode fault and the peripheral sees PCS.
-    fn pins_changed(&mut self, now: Cycles) {
+    fn pins_changed(&mut self, now: Cycle) {
         self.qspi.check_mode_fault(self.port, now);
         self.qspi.notify(self.port, now);
     }
@@ -526,7 +526,7 @@ impl Qsm {
 }
 
 impl Timed for Qsm {
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         if self.clock_off() {
             return None;
         }
@@ -538,7 +538,7 @@ impl Timed for Qsm {
 
     /// Brings it to `now` change by change, so each change in what
     /// port QS drives is recorded at its own time.
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         if self.clock_off() {
             return;
         }
@@ -612,7 +612,7 @@ impl Module for Qsm {
 
     /// The QSPI's vector, INTV0 set, if it requests `level`, before the
     /// SCI's at the same level (QSMRM 3.2.3, 3.2.4).
-    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Option<Vector> {
+    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycle) -> Option<Vector> {
         let (sci, qspi) = self.levels();
         if qspi == level {
             Some(Vector(self.qivr | INTV0))
@@ -628,7 +628,7 @@ impl Module for Qsm {
     /// the frames already sent and the output changes not taken stay.
     /// What was due before `now` happens first, as the GPT's reset
     /// does.  A reset turns on a clock LPSTOP turned off.
-    fn reset(&mut self, now: Cycles) {
+    fn reset(&mut self, now: Cycle) {
         self.advance(now);
         let before = self.port_outputs();
         self.low_power = None;

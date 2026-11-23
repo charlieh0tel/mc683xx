@@ -10,6 +10,7 @@ use std::any::Any;
 use std::fmt;
 
 use mc683xx_cpu32::cpu::state::Save;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 
@@ -168,9 +169,9 @@ impl<T: SpiPeripheral + Save + Any> AnySpiPeripheral for T {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum Phase {
     /// PCS to SCK delay and the serial transfer, ending at the time.
-    Shifting(Cycles),
+    Shifting(Cycle),
     /// The delay after the transfer, ending at the time.
-    Delay(Cycles),
+    Delay(Cycle),
 }
 
 /// The queue's state.
@@ -340,7 +341,7 @@ impl Qspi {
 
     /// The QSPI after a reset: the RAM, the peripheral, and what it was
     /// told, stay.
-    pub(super) fn reset(&mut self, port: PortQs, now: Cycles) {
+    pub(super) fn reset(&mut self, port: PortQs, now: Cycle) {
         let ram = self.ram;
         let peripheral = self.peripheral.take();
         *self = Self {
@@ -353,7 +354,7 @@ impl Qspi {
     }
 
     /// RESET reaches the host's peripheral at `now`.
-    pub(super) fn reset_peripheral(&mut self, now: Cycles) {
+    pub(super) fn reset_peripheral(&mut self, now: Cycle) {
         if let Some(peripheral) = &mut self.peripheral {
             peripheral.reset(now);
         }
@@ -371,7 +372,7 @@ impl Qspi {
     }
 
     /// The peripheral learns the serial clock at `now` if it changed.
-    fn tell_clock(&mut self, spbr: u64, now: Cycles) {
+    fn tell_clock(&mut self, spbr: u64, now: Cycle) {
         let clock = self.clock(spbr);
         if self.told != Some(clock)
             && let Some(peripheral) = &mut self.peripheral
@@ -487,7 +488,7 @@ impl Qspi {
     }
 
     /// The peripheral sees PCS\[3:0\] at `now` if their levels changed.
-    pub(super) fn notify(&mut self, port: PortQs, now: Cycles) {
+    pub(super) fn notify(&mut self, port: PortQs, now: Cycle) {
         let levels = port.chip_selects(self.code());
         if levels != self.selects {
             self.selects = levels;
@@ -498,7 +499,7 @@ impl Qspi {
     }
 
     /// SPCR0 written at `now`.
-    pub(super) fn write_spcr0(&mut self, value: u16, port: PortQs, now: Cycles) {
+    pub(super) fn write_spcr0(&mut self, value: u16, port: PortQs, now: Cycle) {
         self.spcr0 = value;
         match self.queue {
             Queue::Waiting(pointer) => self.start(pointer, port, now),
@@ -512,7 +513,7 @@ impl Qspi {
     /// SPCR1 written at `now`: SPE from 0 starts the queue at NEWQP
     /// (QSMRM 4.4.1.1); SPE cleared stops it at once, a transfer in
     /// progress lost (4.3.2).
-    pub(super) fn write_spcr1(&mut self, value: u16, port: PortQs, now: Cycles) {
+    pub(super) fn write_spcr1(&mut self, value: u16, port: PortQs, now: Cycle) {
         let was = self.enabled();
         self.spcr1 = value;
         match (was, self.enabled()) {
@@ -527,7 +528,7 @@ impl Qspi {
 
     /// SPCR2 written at `now`, `new_pointer` if the write reached
     /// NEWQP: during an entry it waits for the entry's end.
-    pub(super) fn write_spcr2(&mut self, value: u16, new_pointer: bool, port: PortQs, now: Cycles) {
+    pub(super) fn write_spcr2(&mut self, value: u16, new_pointer: bool, port: PortQs, now: Cycle) {
         let value = value & SPCR2_WRITABLE;
         let new_pointer = new_pointer || self.buffered.is_some_and(|buffered| buffered.new_pointer);
         self.buffered = Some(Buffered { value, new_pointer });
@@ -562,7 +563,7 @@ impl Qspi {
 
     /// SPCR3 written at `now`: HALT cleared resumes a halted queue
     /// (QSMRM 4.3.4).
-    pub(super) fn write_spcr3(&mut self, value: u8, port: PortQs, now: Cycles) {
+    pub(super) fn write_spcr3(&mut self, value: u8, port: PortQs, now: Cycle) {
         self.spcr3 = value & SPCR3_WRITABLE;
         self.resume(port, now);
     }
@@ -576,13 +577,13 @@ impl Qspi {
     /// FREEZE with FRZ1 begins or ends at `now`: the queue halts at the
     /// next entry's end, as HALT halts it, and goes on when FREEZE ends,
     /// unless HALT holds it (QSMRM 3.2.1, FRZ1).
-    pub(super) fn set_frozen(&mut self, frozen: bool, port: PortQs, now: Cycles) {
+    pub(super) fn set_frozen(&mut self, frozen: bool, port: PortQs, now: Cycle) {
         self.frozen = frozen;
         self.resume(port, now);
     }
 
     /// A halted queue goes on at `now` if nothing halts it now.
-    fn resume(&mut self, port: PortQs, now: Cycles) {
+    fn resume(&mut self, port: PortQs, now: Cycle) {
         if let Queue::Halted(pointer) = self.queue
             && !self.halting()
         {
@@ -600,7 +601,7 @@ impl Qspi {
 
     /// Checks for a mode fault at `now`: a master whose PCS0/SS input
     /// the board holds low clears SPE (QSMRM 4.3.5, MODF).
-    pub(super) fn check_mode_fault(&mut self, port: PortQs, now: Cycles) -> bool {
+    pub(super) fn check_mode_fault(&mut self, port: PortQs, now: Cycle) -> bool {
         let fault =
             self.enabled() && self.master() && port.slave_select_input() && port.slave_select_low();
         if fault {
@@ -613,7 +614,7 @@ impl Qspi {
 
     /// The queue stops at `now`: SPE is clear and PCS returns to
     /// PORTQS.
-    fn stop(&mut self, port: PortQs, now: Cycles) {
+    fn stop(&mut self, port: PortQs, now: Cycle) {
         self.queue = Queue::Idle;
         self.drive = None;
         self.notify(port, now);
@@ -707,7 +708,7 @@ impl Qspi {
     /// transmit word read, its PCS code driven (QSMRM Figure 4-4); as a
     /// slave its transmit word read, PCS left to PORTQS (Figure 4-5,
     /// 4.4.2.1).
-    fn start(&mut self, pointer: u8, port: PortQs, now: Cycles) {
+    fn start(&mut self, pointer: u8, port: PortQs, now: Cycle) {
         if !self.master() {
             self.drive = None;
             self.notify(port, now);
@@ -745,7 +746,7 @@ impl Qspi {
 
     /// The end of the queue entry's phase in progress: where it next
     /// changes on its own, seen or not.
-    pub(super) const fn next_phase_end(&self) -> Option<Cycles> {
+    pub(super) const fn next_phase_end(&self) -> Option<Cycle> {
         match self.queue {
             Queue::Entry {
                 phase: Phase::Shifting(end) | Phase::Delay(end),
@@ -762,7 +763,7 @@ impl Qspi {
     /// with a peripheral whose calls cannot be deferred, each call.
     /// Entries between, with nothing to see, run in a batch when it is
     /// brought up to date.  `port` gives the pins.
-    pub(super) fn next_event(&self, port: PortQs) -> Option<Cycles> {
+    pub(super) fn next_event(&self, port: PortQs) -> Option<Cycle> {
         let Queue::Entry {
             pointer,
             command,
@@ -854,7 +855,7 @@ impl Qspi {
     }
 
     /// Brings it to `now`, its entries in order.
-    pub(super) fn advance(&mut self, port: PortQs, now: Cycles) {
+    pub(super) fn advance(&mut self, port: PortQs, now: Cycle) {
         while let Queue::Entry {
             pointer,
             command,
@@ -881,15 +882,7 @@ impl Qspi {
     /// nothing; it sees MOSI's level as [`PortQs::mosi`] gives it; and
     /// unless MISO is the QSPI's input, or with no clock, zeros are
     /// received, as with no peripheral (PLAN.md).
-    fn transfer(
-        &mut self,
-        pointer: u8,
-        command: u8,
-        out: u16,
-        bits: u8,
-        port: PortQs,
-        now: Cycles,
-    ) {
+    fn transfer(&mut self, pointer: u8, command: u8, out: u16, bits: u8, port: PortQs, now: Cycle) {
         let mask = u16::MAX >> (MOST_BITS - bits);
         let out = out & mask;
         // told at the entry's start; a peripheral attached since, the
@@ -934,7 +927,7 @@ impl Qspi {
     /// or past the end of a queue without wraparound, it ignores the
     /// bit.  At BITS bits the entry's word goes to receive RAM and the
     /// queue moves on as a master's does (Figure 4-5).
-    pub(super) fn clock_slave(&mut self, mosi: bool, port: PortQs, now: Cycles) -> Option<bool> {
+    pub(super) fn clock_slave(&mut self, mosi: bool, port: PortQs, now: Cycle) -> Option<bool> {
         if !self.slave_selected(port) {
             return None;
         }
@@ -976,7 +969,7 @@ impl Qspi {
     /// halts it, HALTA set (QSMRM Figures 4-4 and 4-5, 4.3.3, 4.3.4,
     /// 3.2.1 FRZ1).  At ENDQP HALT stops it; FREEZE halts it before the
     /// wrap, to go on when FREEZE ends.
-    fn finish(&mut self, pointer: u8, port: PortQs, now: Cycles) {
+    fn finish(&mut self, pointer: u8, port: PortQs, now: Cycle) {
         let last = u16::from(pointer) == self.spcr2 >> SPCR2_ENDQP_SHIFT & POINTER_MASK;
         let moved = self.apply_buffered();
         let halt = self.spcr3 & SPCR3_HALT != 0;

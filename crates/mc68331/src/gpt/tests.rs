@@ -1,6 +1,7 @@
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -30,7 +31,7 @@ fn access(offset: u32, size: Size, now: u64) -> RegisterAccess {
         offset,
         size,
         supervisor: true,
-        now: Cycles::from_clocks(now),
+        now: Cycle::from_clocks(now),
     }
 }
 
@@ -53,7 +54,7 @@ fn write_byte(gpt: &mut Gpt, offset: u32, value: u32, now: u64) {
 /// The GPT with IARB 7, level 6 and vectors from $50: GPTMCR $0007,
 /// ICR $0650.
 fn gpt() -> Gpt {
-    let mut gpt = Gpt::new(Cycles::ZERO);
+    let mut gpt = Gpt::new(Cycle::ZERO);
     write(&mut gpt, 0x00, 0x0007, 0);
     write(&mut gpt, 0x04, 0x0650, 0);
     gpt
@@ -61,7 +62,7 @@ fn gpt() -> Gpt {
 
 #[test]
 fn registers_out_of_reset() {
-    let mut gpt = Gpt::new(Cycles::ZERO);
+    let mut gpt = Gpt::new(Cycle::ZERO);
     // MC68331UM D.2; GPTRM 3.2.1, 3.3.2; PAIS and PCLKS show the pins
     for (offset, value) in [
         (0x00, 0x0080),
@@ -117,7 +118,7 @@ fn the_format_matches_its_golden() {
     // TOC3 $100, OC3I, past the match
     write(&mut gpt, 0x18, 0x0100, 0);
     write_byte(&mut gpt, 0x20, 0x20, 0);
-    gpt.advance(Cycles::from_clocks(4 * 0x100 + 1));
+    gpt.advance(Cycle::from_clocks(4 * 0x100 + 1));
     snapshot_golden::check(
         env!("CARGO_MANIFEST_DIR"),
         "gpt",
@@ -149,16 +150,16 @@ fn a_state_no_run_could_save_is_refused() {
             edited(|saved| {
                 saved
                     .scheduled
-                    .push_back((Cycles::from_clocks(20), Input::Pai, true));
+                    .push_back((Cycle::from_clocks(20), Input::Pai, true));
                 saved
                     .scheduled
-                    .push_back((Cycles::from_clocks(10), Input::Pai, false));
+                    .push_back((Cycle::from_clocks(10), Input::Pai, false));
             }),
             "GPT scheduled inputs",
         ),
         (edited(|saved| saved.tick = u64::MAX), "GPT counts"),
         (
-            edited(|saved| saved.time = Cycles::from_clocks(u64::MAX)),
+            edited(|saved| saved.time = Cycle::from_clocks(u64::MAX)),
             "GPT counts",
         ),
         // TCNT synchronized at a prescaler count still to come
@@ -168,7 +169,7 @@ fn a_state_no_run_could_save_is_refused() {
         ),
         (edited(|saved| saved.gated = u64::MAX), "GPT counts"),
         (
-            edited(|saved| saved.pclk_rise = Some(Cycles::from_clocks(1 << 40))),
+            edited(|saved| saved.pclk_rise = Some(Cycle::from_clocks(1 << 40))),
             "GPT counts",
         ),
         // the next change's place, with nothing queued, short of 0
@@ -182,7 +183,7 @@ fn a_state_no_run_could_save_is_refused() {
             edited(|saved| {
                 saved.edges.port_queue.push(Queued {
                     sequence: 0,
-                    at: Cycles::ZERO,
+                    at: Cycle::ZERO,
                     change: PortLevels::new(1, 0),
                 });
             }),
@@ -202,12 +203,12 @@ fn a_state_no_run_could_save_is_refused() {
     let queued = edited(|saved| {
         saved.edges.port_queue.push(Queued {
             sequence: 0,
-            at: Cycles::ZERO,
+            at: Cycle::ZERO,
             change: PortLevels::new(1, 0),
         });
         saved.edges.pwm_queue.push(Queued {
             sequence: 1,
-            at: Cycles::ZERO,
+            at: Cycle::ZERO,
             change: (Channel::A, true),
         });
         saved.edges.sequence = 2;
@@ -225,10 +226,10 @@ fn a_restore_finds_the_next_event_again() {
     write(&mut gpt, 0x18, 0x0100, 0);
     write_byte(&mut gpt, 0x20, 0x20, 0);
     let snapshot = gpt.save().unwrap();
-    let mut restored = Gpt::new(Cycles::ZERO);
+    let mut restored = Gpt::new(Cycle::ZERO);
     assert_eq!(restored.next_event(), None);
     restored.restore(&snapshot).unwrap();
-    assert_eq!(restored.next_event(), Some(Cycles::from_clocks(4 * 0x100)));
+    assert_eq!(restored.next_event(), Some(Cycle::from_clocks(4 * 0x100)));
 }
 
 #[test]
@@ -237,19 +238,19 @@ fn output_compare_3_interrupts_when_tcnt_reaches_it() {
     // TOC3 $100, OC3I
     write(&mut gpt, 0x18, 0x0100, 0);
     write_byte(&mut gpt, 0x20, 0x20, 0);
-    assert_eq!(gpt.next_event(), Some(Cycles::from_clocks(4 * 0x100)));
-    gpt.advance(Cycles::from_clocks(4 * 0x100 - 1));
+    assert_eq!(gpt.next_event(), Some(Cycle::from_clocks(4 * 0x100)));
+    gpt.advance(Cycle::from_clocks(4 * 0x100 - 1));
     assert_eq!(gpt.request(), None);
-    gpt.advance(Cycles::from_clocks(4 * 0x100));
+    gpt.advance(Cycle::from_clocks(4 * 0x100));
     let six = InterruptLevel::new(6).unwrap();
     let request = gpt.request().unwrap();
     assert_eq!((request.level, request.arbitration), (six, 7));
     assert_eq!(
-        gpt.acknowledge(six, Cycles::from_clocks(4 * 0x100)),
+        gpt.acknowledge(six, Cycle::from_clocks(4 * 0x100)),
         Some(Vector(0x56))
     );
     assert_eq!(
-        gpt.acknowledge(InterruptLevel::new(5).unwrap(), Cycles::ZERO),
+        gpt.acknowledge(InterruptLevel::new(5).unwrap(), Cycle::ZERO),
         None
     );
     // a write of zero without the read clears nothing (GPTRM 7.1.2)
@@ -259,7 +260,7 @@ fn output_compare_3_interrupts_when_tcnt_reaches_it() {
     write_byte(&mut gpt, 0x22, 0xdf, 4 * 0x100);
     assert_eq!(gpt.request(), None);
     // the next match a TCNT period on
-    assert_eq!(gpt.next_event(), Some(Cycles::from_clocks(4 * 0x1_0100)));
+    assert_eq!(gpt.next_event(), Some(Cycle::from_clocks(4 * 0x1_0100)));
 }
 
 #[test]
@@ -267,10 +268,10 @@ fn a_flag_set_after_the_read_stays() {
     let mut gpt = gpt();
     write(&mut gpt, 0x16, 0x0010, 0);
     write(&mut gpt, 0x18, 0x0020, 0);
-    gpt.advance(Cycles::from_clocks(4 * 0x10));
+    gpt.advance(Cycle::from_clocks(4 * 0x10));
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x10), 0x1000, "OC2F");
     // OC3F sets between the read and the write
-    gpt.advance(Cycles::from_clocks(4 * 0x20));
+    gpt.advance(Cycle::from_clocks(4 * 0x20));
     write(&mut gpt, 0x22, 0x0000, 4 * 0x20);
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x20), 0x2000);
 }
@@ -284,32 +285,32 @@ fn compares_drive_their_pins_and_oc1_wins() {
     write(&mut gpt, 0x16, 0x0010, 0);
     write(&mut gpt, 0x18, 0x0040, 0);
     write(&mut gpt, 0x08, 0x3000, 0);
-    assert_eq!(gpt.port_outputs(Cycles::ZERO), PortLevels::new(0x30, 0x00));
+    assert_eq!(gpt.port_outputs(Cycle::ZERO), PortLevels::new(0x30, 0x00));
     // the pin actions show, so a run syncs at them
-    assert_eq!(gpt.next_event(), Some(Cycles::from_clocks(4 * 0x10)));
-    gpt.advance(Cycles::from_clocks(4 * 0x10));
+    assert_eq!(gpt.next_event(), Some(Cycle::from_clocks(4 * 0x10)));
+    gpt.advance(Cycle::from_clocks(4 * 0x10));
     assert_eq!(
-        gpt.port_outputs(Cycles::ZERO),
+        gpt.port_outputs(Cycle::ZERO),
         PortLevels::new(0x30, 0x10),
         "OC2 toggled"
     );
-    gpt.advance(Cycles::from_clocks(4 * 0x40));
+    gpt.advance(Cycle::from_clocks(4 * 0x40));
     assert_eq!(
-        gpt.port_outputs(Cycles::ZERO),
+        gpt.port_outputs(Cycle::ZERO),
         PortLevels::new(0x30, 0x00),
         "OC1 over OC3"
     );
     // CFORC: OC3's action, no flag
     let flags = read(&mut gpt, 0x22, 4 * 0x40);
     write_byte(&mut gpt, 0x24, 0x20, 4 * 0x40);
-    assert_eq!(gpt.port_outputs(Cycles::ZERO), PortLevels::new(0x30, 0x20));
+    assert_eq!(gpt.port_outputs(Cycle::ZERO), PortLevels::new(0x30, 0x20));
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x40), flags);
     assert_eq!(read_byte(&mut gpt, 0x24, 4 * 0x40), 0, "FOC reads zero");
     // a disconnected compare's pin is PORTGP's again
     write(&mut gpt, 0x1e, 0x0000, 4 * 0x40);
     write(&mut gpt, 0x08, 0x0000, 4 * 0x40);
     write(&mut gpt, 0x06, 0x30a0, 4 * 0x40);
-    assert_eq!(gpt.port_outputs(Cycles::ZERO), PortLevels::new(0x30, 0x20));
+    assert_eq!(gpt.port_outputs(Cycle::ZERO), PortLevels::new(0x30, 0x20));
     assert_eq!(read_byte(&mut gpt, 0x07, 4 * 0x40), 0xef);
 }
 
@@ -319,17 +320,17 @@ fn a_pin_edge_is_captured() {
     // EDGE1 rising, IC1I
     write(&mut gpt, 0x1e, 0x0001, 0);
     write_byte(&mut gpt, 0x20, 0x01, 0);
-    gpt.set_port_pins(0xfe, u8::MAX, Cycles::from_clocks(4 * 0x100));
+    gpt.set_port_pins(0xfe, u8::MAX, Cycle::from_clocks(4 * 0x100));
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x100), 0, "a falling edge");
-    gpt.set_port_pins(0xff, u8::MAX, Cycles::from_clocks(4 * 0x1234 + 2));
+    gpt.set_port_pins(0xff, u8::MAX, Cycle::from_clocks(4 * 0x1234 + 2));
     assert_eq!(read(&mut gpt, 0x0e, 4 * 0x1234 + 2), 0x1234);
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x1234 + 2), 0x0100, "IC1F");
     let six = InterruptLevel::new(6).unwrap();
-    assert_eq!(gpt.acknowledge(six, Cycles::ZERO), Some(Vector(0x51)));
+    assert_eq!(gpt.acknowledge(six, Cycle::ZERO), Some(Vector(0x51)));
     // input capture 4 on any edge, on PGP7
     write(&mut gpt, 0x0c, 0x0400, 4 * 0x2000);
     write(&mut gpt, 0x1e, 0x00c0, 4 * 0x2000);
-    gpt.set_port_pins(0x7f, u8::MAX, Cycles::from_clocks(4 * 0x2000));
+    gpt.set_port_pins(0x7f, u8::MAX, Cycle::from_clocks(4 * 0x2000));
     assert_eq!(read(&mut gpt, 0x1c, 4 * 0x2000), 0x2000);
     write(&mut gpt, 0x1c, 0, 4 * 0x2000);
     assert_eq!(
@@ -355,18 +356,18 @@ fn a_byte_write_changes_only_its_lane_of_ddrgp_and_portgp() {
     let mut gpt = gpt();
     // the board holds every pin low; PORTGP reads the pins, not its
     // latch (GPTRM 8.1)
-    gpt.set_port_pins(0x00, u8::MAX, Cycles::ZERO);
+    gpt.set_port_pins(0x00, u8::MAX, Cycle::ZERO);
     write_byte(&mut gpt, 0x07, 0xff, 0);
     assert_eq!(read_byte(&mut gpt, 0x07, 0), 0x00);
     write_byte(&mut gpt, 0x06, 0x0f, 0);
     assert_eq!(
-        gpt.port_outputs(Cycles::ZERO),
+        gpt.port_outputs(Cycle::ZERO),
         PortLevels::new(0x0f, 0x0f),
         "the latch kept"
     );
     write_byte(&mut gpt, 0x07, 0x05, 0);
     assert_eq!(
-        gpt.port_outputs(Cycles::ZERO),
+        gpt.port_outputs(Cycle::ZERO),
         PortLevels::new(0x0f, 0x05),
         "DDRGP kept"
     );
@@ -375,12 +376,12 @@ fn a_byte_write_changes_only_its_lane_of_ddrgp_and_portgp() {
     write_byte(&mut gpt, 0x07, 0xff, 0);
     write(&mut gpt, 0x1e, 0x0200, 0);
     write_byte(&mut gpt, 0x06, 0x1f, 0);
-    assert_eq!(gpt.port_outputs(Cycles::ZERO), PortLevels::new(0x1f, 0x0f));
+    assert_eq!(gpt.port_outputs(Cycle::ZERO), PortLevels::new(0x1f, 0x0f));
     assert_eq!(read_byte(&mut gpt, 0x07, 0), 0x0f);
     write_byte(&mut gpt, 0x06, 0x1f, 0);
     write(&mut gpt, 0x1e, 0x0000, 0);
     assert_eq!(
-        gpt.port_outputs(Cycles::ZERO),
+        gpt.port_outputs(Cycle::ZERO),
         PortLevels::new(0x1f, 0x1f),
         "the latch again"
     );
@@ -393,21 +394,21 @@ fn lpstop_holds_tcnt_and_the_inputs_until_the_wake() {
     write(&mut gpt, 0x18, 0x0100, 0);
     write(&mut gpt, 0x1e, 0x0002, 0);
     write(&mut gpt, 0x20, 0x2100, 0);
-    gpt.set_low_power(true, Cycles::from_clocks(4 * 0x10));
+    gpt.set_low_power(true, Cycle::from_clocks(4 * 0x10));
     assert_eq!(gpt.next_event(), None);
-    gpt.advance(Cycles::from_clocks(4 * 0x1000));
+    gpt.advance(Cycle::from_clocks(4 * 0x1000));
     assert_eq!(read(&mut gpt, 0x0a, 4 * 0x1000), 0x10, "TCNT holds");
     // a level the board drives while stopped is seen at the wake
     // (MC68331UM 4.3.4)
-    gpt.set_port_pins(0xfe, u8::MAX, Cycles::from_clocks(4 * 0x1000));
+    gpt.set_port_pins(0xfe, u8::MAX, Cycle::from_clocks(4 * 0x1000));
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x1000), 0, "no capture");
-    gpt.set_low_power(false, Cycles::from_clocks(4 * 0x2000));
+    gpt.set_low_power(false, Cycle::from_clocks(4 * 0x2000));
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x2000), 0x0100, "IC1F at the wake");
     assert_eq!(read(&mut gpt, 0x0e, 4 * 0x2000), 0x10);
     // TCNT runs on from $10: OC3 a $F0 counts later
     assert_eq!(
         gpt.next_event(),
-        Some(Cycles::from_clocks(4 * (0x2000 + 0xf0)))
+        Some(Cycle::from_clocks(4 * (0x2000 + 0xf0)))
     );
 }
 
@@ -416,12 +417,12 @@ fn tcnt_overflow_sets_tof() {
     let mut gpt = gpt();
     // TOI
     write_byte(&mut gpt, 0x21, 0x80, 0);
-    assert_eq!(gpt.next_event(), Some(Cycles::from_clocks(4 << 16)));
-    gpt.advance(Cycles::from_clocks(4 << 16));
+    assert_eq!(gpt.next_event(), Some(Cycle::from_clocks(4 << 16)));
+    gpt.advance(Cycle::from_clocks(4 << 16));
     // the compares at their reset value $FFFF matched on the way
     assert_eq!(read(&mut gpt, 0x22, 4 << 16), 0xf880);
     let six = InterruptLevel::new(6).unwrap();
-    assert_eq!(gpt.acknowledge(six, Cycles::ZERO), Some(Vector(0x59)));
+    assert_eq!(gpt.acknowledge(six, Cycle::ZERO), Some(Vector(0x59)));
 }
 
 #[test]
@@ -431,15 +432,15 @@ fn pab_moves_a_source_to_the_top() {
     write(&mut gpt, 0x14, 0x0001, 0);
     write(&mut gpt, 0x1a, 0x0001, 0);
     write_byte(&mut gpt, 0x20, 0x48, 0);
-    gpt.advance(Cycles::from_clocks(4));
+    gpt.advance(Cycle::from_clocks(4));
     let six = InterruptLevel::new(6).unwrap();
     assert_eq!(
-        gpt.acknowledge(six, Cycles::from_clocks(4)),
+        gpt.acknowledge(six, Cycle::from_clocks(4)),
         Some(Vector(0x54))
     );
     write(&mut gpt, 0x04, 0x7650, 4);
     assert_eq!(
-        gpt.acknowledge(six, Cycles::from_clocks(4)),
+        gpt.acknowledge(six, Cycle::from_clocks(4)),
         Some(Vector(0x50))
     );
 }
@@ -449,12 +450,12 @@ fn the_pulse_accumulator_counts_events_and_overflows() {
     let mut gpt = gpt();
     // PAEN, rising edges; PACNT $FE
     write(&mut gpt, 0x0c, 0x50fe, 0);
-    gpt.set_input(Input::Pai, false, Cycles::from_clocks(1));
-    gpt.set_input(Input::Pai, true, Cycles::from_clocks(2));
+    gpt.set_input(Input::Pai, false, Cycle::from_clocks(1));
+    gpt.set_input(Input::Pai, true, Cycle::from_clocks(2));
     assert_eq!(read(&mut gpt, 0x0c, 2), 0xd8ff, "PAIS, PCLKS");
     assert_eq!(read(&mut gpt, 0x22, 2), 0x0010, "PAIF");
-    gpt.set_input(Input::Pai, false, Cycles::from_clocks(3));
-    gpt.set_input(Input::Pai, true, Cycles::from_clocks(4));
+    gpt.set_input(Input::Pai, false, Cycle::from_clocks(3));
+    gpt.set_input(Input::Pai, true, Cycle::from_clocks(4));
     assert_eq!(read_byte(&mut gpt, 0x0d, 4), 0);
     assert_eq!(read(&mut gpt, 0x22, 4), 0x0030, "PAOVF");
 }
@@ -463,17 +464,17 @@ fn the_pulse_accumulator_counts_events_and_overflows() {
 fn gated_accumulation_counts_while_pai_is_high() {
     let mut gpt = gpt();
     // PAEN, PAMOD, PEDGE clear: a zero inhibits; the system clock / 512
-    gpt.set_input(Input::Pai, false, Cycles::ZERO);
+    gpt.set_input(Input::Pai, false, Cycle::ZERO);
     write(&mut gpt, 0x0c, 0x6000, 0);
-    gpt.set_input(Input::Pai, true, Cycles::from_clocks(512 * 10 + 100));
-    gpt.set_input(Input::Pai, false, Cycles::from_clocks(512 * 30));
+    gpt.set_input(Input::Pai, true, Cycle::from_clocks(512 * 10 + 100));
+    gpt.set_input(Input::Pai, false, Cycle::from_clocks(512 * 30));
     assert_eq!(read_byte(&mut gpt, 0x0d, 512 * 40), 20);
     assert_eq!(read(&mut gpt, 0x22, 512 * 40), 0x0010, "PAIF at the end");
     // PAOVI: the overflow is an event
     write(&mut gpt, 0x0c, 0x60f0, 512 * 40);
     write_byte(&mut gpt, 0x21, 0x20, 512 * 40);
-    gpt.set_input(Input::Pai, true, Cycles::from_clocks(512 * 40));
-    assert_eq!(gpt.next_event(), Some(Cycles::from_clocks(512 * 56)));
+    gpt.set_input(Input::Pai, true, Cycle::from_clocks(512 * 40));
+    assert_eq!(gpt.next_event(), Some(Cycle::from_clocks(512 * 56)));
 }
 
 #[test]
@@ -482,8 +483,8 @@ fn pclk_can_clock_tcnt() {
     write_byte(&mut gpt, 0x21, 0x07, 0);
     write(&mut gpt, 0x14, 0x0002, 0);
     for edge in 1..=2 {
-        gpt.set_input(Input::Pclk, false, Cycles::from_clocks(edge * 10));
-        gpt.set_input(Input::Pclk, true, Cycles::from_clocks(edge * 10 + 5));
+        gpt.set_input(Input::Pclk, false, Cycle::from_clocks(edge * 10));
+        gpt.set_input(Input::Pclk, true, Cycle::from_clocks(edge * 10 + 5));
     }
     assert_eq!(read(&mut gpt, 0x0a, 1000), 2);
     assert_eq!(read(&mut gpt, 0x22, 1000), 0x0800, "OC1F");
@@ -503,10 +504,10 @@ fn stopp_freezes_and_incp_steps() {
     assert_eq!(read(&mut gpt, 0x00, 4000), 0x1007, "INCP negates itself");
     // the pins are ignored until STOPP clears
     write(&mut gpt, 0x1e, 0x0001, 4000);
-    gpt.set_port_pins(0xfe, u8::MAX, Cycles::from_clocks(4000));
-    gpt.set_port_pins(0xff, u8::MAX, Cycles::from_clocks(4001));
+    gpt.set_port_pins(0xfe, u8::MAX, Cycle::from_clocks(4000));
+    gpt.set_port_pins(0xff, u8::MAX, Cycle::from_clocks(4001));
     assert_eq!(read(&mut gpt, 0x22, 4001), 0);
-    gpt.set_port_pins(0xfe, u8::MAX, Cycles::from_clocks(4002));
+    gpt.set_port_pins(0xfe, u8::MAX, Cycle::from_clocks(4002));
     write(&mut gpt, 0x00, 0x0007, 5000);
     assert_eq!(read(&mut gpt, 0x06, 5000), 0x00fe);
     assert_eq!(read(&mut gpt, 0x0a, 5000 + 4), 12);
@@ -531,7 +532,7 @@ impl Hold {
             Self::Stopp => write(gpt, 0x00, if held { 0x1007 } else { 0x0007 }, now),
             Self::Freeze => {
                 write(gpt, 0x00, 0x2007, now);
-                gpt.set_freeze(held, Cycles::from_clocks(now));
+                gpt.set_freeze(held, Cycle::from_clocks(now));
             }
         }
     }
@@ -550,7 +551,7 @@ fn a_forced_compare_is_not_captured_while_held() {
         write(&mut gpt, 0x08, 0x8080, 4 * 0x10);
         write_byte(&mut gpt, 0x24, 0x08, 4 * 0x10);
         assert_eq!(
-            gpt.port_outputs(Cycles::from_clocks(4 * 0x10)).levels(),
+            gpt.port_outputs(Cycle::from_clocks(4 * 0x10)).levels(),
             0x80,
             "{hold:?}"
         );
@@ -566,7 +567,7 @@ fn a_forced_compare_is_not_captured_while_held() {
     write(&mut gpt, 0x08, 0x8080, 0);
     write(&mut gpt, 0x0c, 0x0400, 0);
     write(&mut gpt, 0x1e, 0x00c0, 0);
-    gpt.set_freeze(true, Cycles::from_clocks(4 * 0x10));
+    gpt.set_freeze(true, Cycle::from_clocks(4 * 0x10));
     write_byte(&mut gpt, 0x24, 0x08, 4 * 0x10);
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x10), 0x8000, "I4O5F");
     assert_eq!(read(&mut gpt, 0x1c, 4 * 0x10), 0x10);
@@ -614,13 +615,13 @@ fn an_external_edge_is_not_captured_while_held() {
         write(&mut gpt, 0x1e, 0x0002, 0);
         hold.set(&mut gpt, true, 4 * 0x10);
         // a pulse is lost
-        gpt.set_port_pins(0xfe, u8::MAX, Cycles::from_clocks(4 * 0x10 + 1));
-        gpt.set_port_pins(0xff, u8::MAX, Cycles::from_clocks(4 * 0x10 + 2));
+        gpt.set_port_pins(0xfe, u8::MAX, Cycle::from_clocks(4 * 0x10 + 1));
+        gpt.set_port_pins(0xff, u8::MAX, Cycle::from_clocks(4 * 0x10 + 2));
         hold.set(&mut gpt, false, 4 * 0x20);
         assert_eq!(read(&mut gpt, 0x22, 4 * 0x20), 0, "{hold:?}: pulse lost");
         // a level changed while held is an edge once they are clocked
         hold.set(&mut gpt, true, 4 * 0x30);
-        gpt.set_port_pins(0xfe, u8::MAX, Cycles::from_clocks(4 * 0x30 + 1));
+        gpt.set_port_pins(0xfe, u8::MAX, Cycle::from_clocks(4 * 0x30 + 1));
         assert_eq!(read(&mut gpt, 0x22, 4 * 0x40), 0, "{hold:?}");
         hold.set(&mut gpt, false, 4 * 0x40);
         assert_eq!(read(&mut gpt, 0x22, 4 * 0x40), 0x0100, "{hold:?}: IC1F");
@@ -635,11 +636,11 @@ fn the_pulse_accumulator_ignores_pai_while_held() {
         let mut gpt = gpt();
         // PAEN, rising edges; PAI low
         write(&mut gpt, 0x0c, 0x5000, 0);
-        gpt.set_input(Input::Pai, false, Cycles::from_clocks(1));
+        gpt.set_input(Input::Pai, false, Cycle::from_clocks(1));
         hold.set(&mut gpt, true, 4 * 0x10);
-        gpt.set_input(Input::Pai, true, Cycles::from_clocks(4 * 0x10 + 1));
-        gpt.set_input(Input::Pai, false, Cycles::from_clocks(4 * 0x10 + 2));
-        gpt.set_input(Input::Pai, true, Cycles::from_clocks(4 * 0x10 + 3));
+        gpt.set_input(Input::Pai, true, Cycle::from_clocks(4 * 0x10 + 1));
+        gpt.set_input(Input::Pai, false, Cycle::from_clocks(4 * 0x10 + 2));
+        gpt.set_input(Input::Pai, true, Cycle::from_clocks(4 * 0x10 + 3));
         assert_eq!(read_byte(&mut gpt, 0x0d, 4 * 0x20), 0, "{hold:?}: PACNT");
         assert_eq!(read(&mut gpt, 0x22, 4 * 0x20), 0, "{hold:?}: no PAIF");
         // the level that rose while held is an edge once they are clocked
@@ -657,7 +658,7 @@ fn freeze_lets_tcnt_be_written_whatever_frz0() {
     assert_eq!(read(&mut gpt, 0x0a, 100), 25);
     // FRZ0 clear: writable all the same, counting on (GPTRM 9.3); the
     // compares at their reset value $FFFF do not match the write
-    gpt.set_freeze(true, Cycles::from_clocks(100));
+    gpt.set_freeze(true, Cycle::from_clocks(100));
     write(&mut gpt, 0x0a, 0xffff, 100);
     assert_eq!(read(&mut gpt, 0x0a, 100), 0xffff);
     assert_eq!(read(&mut gpt, 0x22, 103), 0);
@@ -667,7 +668,7 @@ fn freeze_lets_tcnt_be_written_whatever_frz0() {
     write(&mut gpt, 0x00, 0x2007, 200);
     write(&mut gpt, 0x0a, 0x1234, 200);
     assert_eq!(read(&mut gpt, 0x0a, 10_000), 0x1234);
-    gpt.set_freeze(false, Cycles::from_clocks(10_000));
+    gpt.set_freeze(false, Cycle::from_clocks(10_000));
     assert_eq!(read(&mut gpt, 0x0a, 10_003), 0x1234);
     assert_eq!(read(&mut gpt, 0x0a, 10_004), 0x1235);
     write(&mut gpt, 0x0a, 0, 10_004);
@@ -684,7 +685,7 @@ fn freeze_lets_the_captures_be_written() {
     write(&mut gpt, 0x1c, 0x5678, 0);
     assert_eq!(read(&mut gpt, 0x10, 0), 0xffff);
     assert_eq!(read(&mut gpt, 0x1c, 0), 0xffff);
-    gpt.set_freeze(true, Cycles::from_clocks(0));
+    gpt.set_freeze(true, Cycle::from_clocks(0));
     write(&mut gpt, 0x10, 0x1234, 0);
     write(&mut gpt, 0x1c, 0x5678, 0);
     assert_eq!(read(&mut gpt, 0x10, 0), 0x1234);
@@ -696,18 +697,18 @@ fn freeze_lets_cpr_be_written_again() {
     let mut gpt = gpt();
     // CPR 3, then 1 while FREEZE is asserted (GPTRM 5.1, 9.3)
     write_byte(&mut gpt, 0x21, 0x03, 0);
-    gpt.set_freeze(true, Cycles::from_clocks(0));
+    gpt.set_freeze(true, Cycle::from_clocks(0));
     write_byte(&mut gpt, 0x21, 0x01, 0);
     assert_eq!(read(&mut gpt, 0x20, 0), 0x0001);
     assert_eq!(read(&mut gpt, 0x0a, 80), 10, "the system clock / 8");
-    gpt.set_freeze(false, Cycles::from_clocks(80));
+    gpt.set_freeze(false, Cycle::from_clocks(80));
     write_byte(&mut gpt, 0x21, 0x02, 80);
     assert_eq!(read(&mut gpt, 0x20, 80), 0x0001, "written once");
     // a write while FREEZE is asserted is the one write
     let mut gpt = self::gpt();
-    gpt.set_freeze(true, Cycles::from_clocks(0));
+    gpt.set_freeze(true, Cycle::from_clocks(0));
     write_byte(&mut gpt, 0x21, 0x01, 0);
-    gpt.set_freeze(false, Cycles::from_clocks(0));
+    gpt.set_freeze(false, Cycle::from_clocks(0));
     write_byte(&mut gpt, 0x21, 0x02, 0);
     assert_eq!(read(&mut gpt, 0x20, 0), 0x0001);
 }
@@ -720,14 +721,14 @@ fn freeze_lets_the_prescaler_be_written() {
     assert_eq!(read(&mut gpt, 0x2c, 500), 0x1f4);
     // FRZ0: TCNT 250 and PWMCNT 500 hold, the prescaler $1FD
     write(&mut gpt, 0x00, 0x2007, 500);
-    gpt.set_freeze(true, Cycles::from_clocks(1000));
+    gpt.set_freeze(true, Cycle::from_clocks(1000));
     write(&mut gpt, 0x2c, 0xfffd, 1000);
     assert_eq!(read(&mut gpt, 0x2c, 2000), 0x1fd);
     assert_eq!(read(&mut gpt, 0x0a, 2000), 250);
     assert_eq!(read(&mut gpt, 0x28, 2000), 500);
     // the taps clock their counters as the new value counts to them:
     // PWMCNT at $1FE, TCNT at $200
-    gpt.set_freeze(false, Cycles::from_clocks(2000));
+    gpt.set_freeze(false, Cycle::from_clocks(2000));
     assert_eq!(read(&mut gpt, 0x28, 2001), 501);
     assert_eq!(read(&mut gpt, 0x0a, 2002), 250);
     assert_eq!(read(&mut gpt, 0x0a, 2003), 251);
@@ -742,7 +743,7 @@ fn freeze_lets_pwmcnt_be_written_and_a_falling_top_bit_starts_a_period() {
     write(&mut gpt, 0x26, 0x8000, 0);
     write(&mut gpt, 0x28, 0x1234, 0);
     assert_eq!(read(&mut gpt, 0x28, 0), 0, "read-only (GPTRM 6.1)");
-    gpt.set_freeze(true, Cycles::from_clocks(0x180));
+    gpt.set_freeze(true, Cycle::from_clocks(0x180));
     assert_eq!(read(&mut gpt, 0x28, 0x180), 0xc0);
     assert_eq!(read(&mut gpt, 0x2a, 0x180), 0);
     // bit 7 from one to zero is a zero detect: PWMA's period starts
@@ -750,16 +751,16 @@ fn freeze_lets_pwmcnt_be_written_and_a_falling_top_bit_starts_a_period() {
     write(&mut gpt, 0x28, 0x0005, 0x180);
     assert_eq!(read(&mut gpt, 0x28, 0x180), 5);
     assert_eq!(read(&mut gpt, 0x2a, 0x180), 0x8000);
-    assert!(gpt.pwm_level(Channel::A, Cycles::from_clocks(0x180)));
+    assert!(gpt.pwm_level(Channel::A, Cycle::from_clocks(0x180)));
     // bit 7 from zero, to zero or one, is none, whatever the count
     // passes
     write(&mut gpt, 0x26, 0x4000, 0x180);
     write(&mut gpt, 0x28, 0x0040, 0x180);
     write(&mut gpt, 0x28, 0x01c3, 0x180);
     assert_eq!(read(&mut gpt, 0x2a, 0x180), 0x8000);
-    assert!(!gpt.pwm_level(Channel::A, Cycles::from_clocks(0x180)));
+    assert!(!gpt.pwm_level(Channel::A, Cycle::from_clocks(0x180)));
     // PWMA $40 from the period that starts as PWMCNT counts to $200
-    gpt.set_freeze(false, Cycles::from_clocks(0x1000));
+    gpt.set_freeze(false, Cycle::from_clocks(0x1000));
     assert_eq!(read(&mut gpt, 0x2a, 0x1000 + 2 * 0x3d - 1), 0x8000);
     assert_eq!(read(&mut gpt, 0x2a, 0x1000 + 2 * 0x3d), 0x4000);
 }
@@ -768,13 +769,13 @@ fn freeze_lets_pwmcnt_be_written_and_a_falling_top_bit_starts_a_period() {
 fn freeze_with_frz0_lets_compares_be_forced_and_pins_written() {
     let mut gpt = gpt();
     write(&mut gpt, 0x00, 0x2007, 0);
-    gpt.set_freeze(true, Cycles::from_clocks(10));
+    gpt.set_freeze(true, Cycle::from_clocks(10));
     // OC3 sets PGP5, FOC3 forces it; PORTGP drives PGP0 (GPTRM 9.3)
     write(&mut gpt, 0x1e, 0x0c00, 10);
     write_byte(&mut gpt, 0x24, 0x20, 10);
     write(&mut gpt, 0x06, 0x0101, 10);
     assert_eq!(
-        gpt.port_outputs(Cycles::from_clocks(10)),
+        gpt.port_outputs(Cycle::from_clocks(10)),
         PortLevels::new(0x21, 0x21)
     );
 }
@@ -782,11 +783,11 @@ fn freeze_with_frz0_lets_compares_be_forced_and_pins_written() {
 #[test]
 fn a_snapshot_keeps_what_freeze_mode_wrote() {
     let mut gpt = gpt();
-    gpt.set_freeze(true, Cycles::from_clocks(100));
+    gpt.set_freeze(true, Cycle::from_clocks(100));
     write(&mut gpt, 0x0a, 0x8000, 100);
     write(&mut gpt, 0x2c, 0x01fd, 100);
     write(&mut gpt, 0x28, 0x1234, 100);
-    let mut restored = Gpt::new(Cycles::ZERO);
+    let mut restored = Gpt::new(Cycle::ZERO);
     restored.restore(&gpt.save().unwrap()).unwrap();
     for offset in [0x0a, 0x28, 0x2c] {
         assert_eq!(
@@ -804,27 +805,27 @@ fn pwm_duty_takes_effect_at_the_end_of_a_period() {
     // period
     write(&mut gpt, 0x26, 0x8040, 10);
     assert_eq!(
-        gpt.pwm(Channel::A, Cycles::from_clocks(10)),
+        gpt.pwm(Channel::A, Cycle::from_clocks(10)),
         Output::Level(false)
     );
     let next = 512 + 10;
     assert_eq!(
-        gpt.pwm(Channel::A, Cycles::from_clocks(next)),
+        gpt.pwm(Channel::A, Cycle::from_clocks(next)),
         Output::Wave {
             period: 256,
             high: 128,
             clocks: Some(Cycles::from_clocks(2))
         }
     );
-    assert!(gpt.pwm_level(Channel::A, Cycles::from_clocks(512 + 255)));
-    assert!(!gpt.pwm_level(Channel::A, Cycles::from_clocks(512 + 256)));
-    assert!(gpt.pwm_level(Channel::B, Cycles::from_clocks(512 + 127)));
-    assert!(!gpt.pwm_level(Channel::B, Cycles::from_clocks(512 + 128)));
+    assert!(gpt.pwm_level(Channel::A, Cycle::from_clocks(512 + 255)));
+    assert!(!gpt.pwm_level(Channel::A, Cycle::from_clocks(512 + 256)));
+    assert!(gpt.pwm_level(Channel::B, Cycle::from_clocks(512 + 127)));
+    assert!(!gpt.pwm_level(Channel::B, Cycle::from_clocks(512 + 128)));
     assert_eq!(read(&mut gpt, 0x2a, 600), 0x8040, "PWMBUFA and B");
     // slow mode for B at the system clock / 128: 128 x 32768 clocks
     write_byte(&mut gpt, 0x25, 0x64, 600);
     assert_eq!(
-        gpt.pwm(Channel::B, Cycles::from_clocks(600)),
+        gpt.pwm(Channel::B, Cycle::from_clocks(600)),
         Output::Wave {
             period: 32768,
             high: 64 * 128,
@@ -835,10 +836,10 @@ fn pwm_duty_takes_effect_at_the_end_of_a_period() {
     write_byte(&mut gpt, 0x25, 0x06, 600);
     write_byte(&mut gpt, 0x24, 0x01, 600);
     assert_eq!(
-        gpt.pwm(Channel::B, Cycles::from_clocks(600)),
+        gpt.pwm(Channel::B, Cycle::from_clocks(600)),
         Output::Level(false)
     );
-    assert!(gpt.pwm_level(Channel::A, Cycles::from_clocks(1024 + 300)));
+    assert!(gpt.pwm_level(Channel::A, Cycle::from_clocks(1024 + 300)));
     assert_eq!(
         read_byte(&mut gpt, 0x25, 1024 + 300),
         0x06,
@@ -847,7 +848,7 @@ fn pwm_duty_takes_effect_at_the_end_of_a_period() {
     // PPROUT: A carries PWMCNT's clock
     write_byte(&mut gpt, 0x25, 0x80, 2000);
     assert_eq!(
-        gpt.pwm(Channel::A, Cycles::from_clocks(2000)),
+        gpt.pwm(Channel::A, Cycle::from_clocks(2000)),
         Output::Clock {
             clocks: Some(Cycles::from_clocks(2))
         }
@@ -856,7 +857,7 @@ fn pwm_duty_takes_effect_at_the_end_of_a_period() {
 
 #[test]
 fn supv_moves_the_registers_to_supervisor_space() {
-    let mut gpt = Gpt::new(Cycles::ZERO);
+    let mut gpt = Gpt::new(Cycle::ZERO);
     let user = |offset| RegisterAccess {
         supervisor: false,
         ..access(offset, Size::Word, 0)
@@ -873,9 +874,9 @@ fn supv_moves_the_registers_to_supervisor_space() {
 #[test]
 fn a_reset_returns_the_registers_and_keeps_the_pins() {
     let mut gpt = gpt();
-    gpt.set_port_pins(0x0f, u8::MAX, Cycles::from_clocks(5));
+    gpt.set_port_pins(0x0f, u8::MAX, Cycle::from_clocks(5));
     write(&mut gpt, 0x14, 0x1234, 5);
-    gpt.reset(Cycles::from_clocks(100));
+    gpt.reset(Cycle::from_clocks(100));
     assert_eq!(read(&mut gpt, 0x14, 100), 0xffff);
     assert_eq!(read(&mut gpt, 0x0a, 100 + 8), 2, "TCNT from the reset");
     assert_eq!(read(&mut gpt, 0x06, 100), 0x000f);
@@ -910,7 +911,7 @@ const fn pwma(level: bool) -> Change {
 
 /// Every change, port GP's and the PWM pins' together, in time order,
 /// each with its time.
-fn take_output_changes(gpt: &mut Gpt) -> Vec<(Cycles, Change)> {
+fn take_output_changes(gpt: &mut Gpt) -> Vec<(Cycle, Change)> {
     gpt.take_output_changes()
         .into_iter()
         .map(|change| match change {
@@ -929,14 +930,14 @@ fn take_output_changes(gpt: &mut Gpt) -> Vec<(Cycles, Change)> {
 #[test]
 fn port_and_pwm_changes_are_taken_apart_each_in_time_order() {
     let mut gpt = gpt();
-    gpt.set_report_pwm_edges(Channel::A, true, Cycles::ZERO);
+    gpt.set_report_pwm_edges(Channel::A, true, Cycle::ZERO);
     // PWMA $80, fast: high at 512 (GPTRM 6.2); OC3 sets PGP5 by CFORC
     write(&mut gpt, 0x26, 0x8000, 10);
     write(&mut gpt, 0x1e, 0x0c00, 20);
     write_byte(&mut gpt, 0x24, 0x20, 1000);
-    gpt.advance(Cycles::from_clocks(1100));
+    gpt.advance(Cycle::from_clocks(1100));
     let port = |at, levels| PortChange {
-        now: Cycles::from_clocks(at),
+        now: Cycle::from_clocks(at),
         port: Port::Gp,
         outputs: PortLevels::new(0x20, levels),
     };
@@ -945,17 +946,17 @@ fn port_and_pwm_changes_are_taken_apart_each_in_time_order() {
         gpt.take_pwm_changes(),
         [
             PwmChange {
-                now: Cycles::from_clocks(512),
+                now: Cycle::from_clocks(512),
                 channel: Channel::A,
                 level: true,
             },
             PwmChange {
-                now: Cycles::from_clocks(768),
+                now: Cycle::from_clocks(768),
                 channel: Channel::A,
                 level: false,
             },
             PwmChange {
-                now: Cycles::from_clocks(1024),
+                now: Cycle::from_clocks(1024),
                 channel: Channel::A,
                 level: true,
             },
@@ -970,7 +971,7 @@ fn port_and_pwm_changes_are_taken_apart_each_in_time_order() {
 #[test]
 fn port_and_pwm_changes_at_one_time_keep_their_order() {
     let mut gpt = gpt();
-    gpt.set_report_pwm_edges(Channel::A, true, Cycles::ZERO);
+    gpt.set_report_pwm_edges(Channel::A, true, Cycle::ZERO);
     // FPWMA with F1A: PWMA high at once (GPTRM 6.3.1); then PORTGP drives
     // PGP0 low, then PWMA low, all at one time
     write(&mut gpt, 0x24, 0x0202, 100);
@@ -978,13 +979,13 @@ fn port_and_pwm_changes_at_one_time_keep_their_order() {
     write(&mut gpt, 0x24, 0x0200, 100);
     let pwm = |level| {
         OutputChange::Pwm(PwmChange {
-            now: Cycles::from_clocks(100),
+            now: Cycle::from_clocks(100),
             channel: Channel::A,
             level,
         })
     };
     let port = OutputChange::Port(PortChange {
-        now: Cycles::from_clocks(100),
+        now: Cycle::from_clocks(100),
         port: Port::Gp,
         outputs: PortLevels::new(0x01, 0x00),
     });
@@ -996,8 +997,8 @@ fn port_and_pwm_changes_at_one_time_keep_their_order() {
 #[test]
 fn each_take_drains_what_it_gives_and_the_rest_keeps_its_order() {
     let mut gpt = gpt();
-    gpt.set_report_pwm_edges(Channel::A, true, Cycles::ZERO);
-    let now = Cycles::from_clocks(100);
+    gpt.set_report_pwm_edges(Channel::A, true, Cycle::ZERO);
+    let now = Cycle::from_clocks(100);
     let pwm = |level| PwmChange {
         now,
         channel: Channel::A,
@@ -1040,15 +1041,15 @@ fn compare_edges_come_at_their_own_times() {
     // OC2 toggles on PGP4 at TCNT $10, once a TCNT period
     write(&mut gpt, 0x1e, 0x0100, 0);
     write(&mut gpt, 0x16, 0x0010, 0);
-    gpt.advance(Cycles::from_clocks(100));
+    gpt.advance(Cycle::from_clocks(100));
     let period = 4 * 0x1_0000;
-    gpt.advance(Cycles::from_clocks(period + 4 * 0x10 + 50));
+    gpt.advance(Cycle::from_clocks(period + 4 * 0x10 + 50));
     assert_eq!(
         take_output_changes(&mut gpt),
         [
-            (Cycles::from_clocks(0), gp(0x10, 0x00)),
-            (Cycles::from_clocks(4 * 0x10), gp(0x10, 0x10)),
-            (Cycles::from_clocks(period + 4 * 0x10), gp(0x10, 0x00)),
+            (Cycle::from_clocks(0), gp(0x10, 0x00)),
+            (Cycle::from_clocks(4 * 0x10), gp(0x10, 0x10)),
+            (Cycle::from_clocks(period + 4 * 0x10), gp(0x10, 0x00)),
         ]
     );
     assert_eq!(take_output_changes(&mut gpt), []);
@@ -1062,14 +1063,14 @@ fn cforc_and_a_reset_make_edges_at_once() {
     write_byte(&mut gpt, 0x24, 0x20, 1000);
     // PORTGP drives PGP0 high
     write(&mut gpt, 0x06, 0x0101, 1200);
-    gpt.reset(Cycles::from_clocks(2000));
+    gpt.reset(Cycle::from_clocks(2000));
     assert_eq!(
         take_output_changes(&mut gpt),
         [
-            (Cycles::from_clocks(10), gp(0x20, 0x00)),
-            (Cycles::from_clocks(1000), gp(0x20, 0x20)),
-            (Cycles::from_clocks(1200), gp(0x21, 0x21)),
-            (Cycles::from_clocks(2000), gp(0x00, 0x00)),
+            (Cycle::from_clocks(10), gp(0x20, 0x00)),
+            (Cycle::from_clocks(1000), gp(0x20, 0x20)),
+            (Cycle::from_clocks(1200), gp(0x21, 0x21)),
+            (Cycle::from_clocks(2000), gp(0x00, 0x00)),
         ]
     );
 }
@@ -1077,26 +1078,26 @@ fn cforc_and_a_reset_make_edges_at_once() {
 #[test]
 fn pwm_edges_follow_the_duty_a_period_late() {
     let mut gpt = gpt();
-    gpt.set_report_pwm_edges(Channel::A, true, Cycles::ZERO);
+    gpt.set_report_pwm_edges(Channel::A, true, Cycle::ZERO);
     // PWMA $80 and PWMB $40, fast at the system clock / 2: 512 clocks a
     // period, the duty from the next period (GPTRM 6.2); B unreported
     write(&mut gpt, 0x26, 0x8040, 10);
-    gpt.advance(Cycles::from_clocks(700));
-    gpt.advance(Cycles::from_clocks(1100));
+    gpt.advance(Cycle::from_clocks(700));
+    gpt.advance(Cycle::from_clocks(1100));
     write_byte(&mut gpt, 0x26, 0x40, 1100);
-    gpt.advance(Cycles::from_clocks(1700));
+    gpt.advance(Cycle::from_clocks(1700));
     // $00: low from 2048 on, which is no edge
     write_byte(&mut gpt, 0x26, 0x00, 1700);
-    gpt.advance(Cycles::from_clocks(1 << 24));
+    gpt.advance(Cycle::from_clocks(1 << 24));
     assert_eq!(
         take_output_changes(&mut gpt),
         [
-            (Cycles::from_clocks(512), pwma(true)),
-            (Cycles::from_clocks(768), pwma(false)),
-            (Cycles::from_clocks(1024), pwma(true)),
-            (Cycles::from_clocks(1280), pwma(false)),
-            (Cycles::from_clocks(1536), pwma(true)),
-            (Cycles::from_clocks(1664), pwma(false)),
+            (Cycle::from_clocks(512), pwma(true)),
+            (Cycle::from_clocks(768), pwma(false)),
+            (Cycle::from_clocks(1024), pwma(true)),
+            (Cycle::from_clocks(1280), pwma(false)),
+            (Cycle::from_clocks(1536), pwma(true)),
+            (Cycle::from_clocks(1664), pwma(false)),
         ]
     );
     // FPWMA with F1A: high at once
@@ -1104,9 +1105,9 @@ fn pwm_edges_follow_the_duty_a_period_late() {
     write(&mut gpt, 0x24, 0x0202, now);
     assert_eq!(
         take_output_changes(&mut gpt),
-        [(Cycles::from_clocks(now), pwma(true))]
+        [(Cycle::from_clocks(now), pwma(true))]
     );
-    gpt.set_report_pwm_edges(Channel::A, false, Cycles::from_clocks(now));
+    gpt.set_report_pwm_edges(Channel::A, false, Cycle::from_clocks(now));
     write(&mut gpt, 0x24, 0x0200, now);
     assert_eq!(take_output_changes(&mut gpt), []);
 }
@@ -1119,10 +1120,10 @@ fn clock_edges<T>(
     first: u64,
     last: u64,
     change: impl Fn(bool) -> T,
-) -> Vec<(Cycles, T)> {
+) -> Vec<(Cycle, T)> {
     (first.div_ceil(divisor) * divisor..=last)
         .filter(|&count| count % divisor <= 1)
-        .map(|count| (Cycles::from_clocks(count), change(count % divisor == 0)))
+        .map(|count| (Cycle::from_clocks(count), change(count % divisor == 0)))
         .collect()
 }
 
@@ -1130,78 +1131,78 @@ fn clock_edges<T>(
 fn cprout_drives_tcnts_clock_on_oc1() {
     let mut gpt = gpt();
     // an input out of reset: the board's level
-    assert_eq!(gpt.oc1(Cycles::from_clocks(10)), Output::Level(true));
+    assert_eq!(gpt.oc1(Cycle::from_clocks(10)), Output::Level(true));
     // CPROUT, CPR %001: TCNT at the system clock / 8 (GPTRM Table 5-1)
     write(&mut gpt, 0x20, 0x0009, 10);
     assert_eq!(
-        gpt.oc1(Cycles::from_clocks(10)),
+        gpt.oc1(Cycle::from_clocks(10)),
         Output::Clock {
             clocks: Some(Cycles::from_clocks(8))
         }
     );
     assert_eq!(gpt.next_event(), None);
-    gpt.advance(Cycles::from_clocks(30));
+    gpt.advance(Cycle::from_clocks(30));
     assert_eq!(
-        gpt.port_outputs(Cycles::from_clocks(32)),
+        gpt.port_outputs(Cycle::from_clocks(32)),
         PortLevels::new(0x08, 0x08)
     );
     assert_eq!(
-        gpt.port_outputs(Cycles::from_clocks(33)),
+        gpt.port_outputs(Cycle::from_clocks(33)),
         PortLevels::new(0x08, 0x00)
     );
     // unreported, the pin shows low
     assert_eq!(
         take_output_changes(&mut gpt),
-        [(Cycles::from_clocks(10), gp(0x08, 0x00))]
+        [(Cycle::from_clocks(10), gp(0x08, 0x00))]
     );
-    gpt.set_report_oc1_clock_edges(true, Cycles::from_clocks(30));
+    gpt.set_report_oc1_clock_edges(true, Cycle::from_clocks(30));
     assert_eq!(
         read(&mut gpt, 0x06, 56) & 0x08,
         0x08,
         "PORTGP reads the pin"
     );
-    gpt.advance(Cycles::from_clocks(60));
+    gpt.advance(Cycle::from_clocks(60));
     assert_eq!(gpt.next_event(), None, "the clock does not sync");
     // CPROUT off: PGP3 is an input again
     write(&mut gpt, 0x20, 0x0000, 60);
-    gpt.advance(Cycles::from_clocks(100));
+    gpt.advance(Cycle::from_clocks(100));
     let mut expected = clock_edges(8, 31, 59, |high| gp(0x08, u8::from(high) << 3));
-    expected.push((Cycles::from_clocks(60), gp(0x00, 0x00)));
+    expected.push((Cycle::from_clocks(60), gp(0x00, 0x00)));
     assert_eq!(take_output_changes(&mut gpt), expected);
 }
 
 #[test]
 fn cprout_edges_come_before_a_compare_at_their_time() {
     let mut gpt = gpt();
-    gpt.set_report_oc1_clock_edges(true, Cycles::ZERO);
+    gpt.set_report_oc1_clock_edges(true, Cycle::ZERO);
     // OC2 toggles PGP4 at TCNT $10; CPROUT on the system clock / 4
     write(&mut gpt, 0x1e, 0x0100, 0);
     write(&mut gpt, 0x16, 0x0010, 0);
     write(&mut gpt, 0x20, 0x0008, 0);
-    gpt.advance(Cycles::from_clocks(4 * 0x10 + 1));
+    gpt.advance(Cycle::from_clocks(4 * 0x10 + 1));
     let changes = take_output_changes(&mut gpt);
     assert_eq!(
         changes[changes.len() - 3..],
         [
-            (Cycles::from_clocks(4 * 0x10), gp(0x18, 0x08)),
-            (Cycles::from_clocks(4 * 0x10), gp(0x18, 0x18)),
-            (Cycles::from_clocks(4 * 0x10 + 1), gp(0x18, 0x10)),
+            (Cycle::from_clocks(4 * 0x10), gp(0x18, 0x08)),
+            (Cycle::from_clocks(4 * 0x10), gp(0x18, 0x18)),
+            (Cycle::from_clocks(4 * 0x10 + 1), gp(0x18, 0x10)),
         ]
     );
     // OC1M3 gives OC1's pin to the compare (GPTRM Table B-1)
     write(&mut gpt, 0x08, 0x0800, 4 * 0x10 + 2);
-    gpt.advance(Cycles::from_clocks(100));
+    gpt.advance(Cycle::from_clocks(100));
     assert_eq!(take_output_changes(&mut gpt), []);
     assert_eq!(
-        gpt.port_outputs(Cycles::from_clocks(100)),
+        gpt.port_outputs(Cycle::from_clocks(100)),
         PortLevels::new(0x18, 0x10)
     );
-    assert_eq!(gpt.oc1(Cycles::from_clocks(100)), Output::Level(false));
+    assert_eq!(gpt.oc1(Cycle::from_clocks(100)), Output::Level(false));
     // OC1D3 sets the pin at OC1's next match, TOC1 $0000
     write(&mut gpt, 0x08, 0x0808, 100);
-    gpt.advance(Cycles::from_clocks(4 * 0x10000 + 1));
+    gpt.advance(Cycle::from_clocks(4 * 0x10000 + 1));
     assert_eq!(
-        gpt.oc1(Cycles::from_clocks(4 * 0x10000 + 1)),
+        gpt.oc1(Cycle::from_clocks(4 * 0x10000 + 1)),
         Output::Level(true)
     );
 }
@@ -1209,57 +1210,57 @@ fn cprout_edges_come_before_a_compare_at_their_time() {
 #[test]
 fn pprout_drives_pwmcnts_clock_on_pwma() {
     let mut gpt = gpt();
-    gpt.set_report_pwm_edges(Channel::A, true, Cycles::ZERO);
+    gpt.set_report_pwm_edges(Channel::A, true, Cycle::ZERO);
     // PPROUT, PPR %010: PWMCNT at the system clock / 8 (GPTRM Table 6-2)
     write_byte(&mut gpt, 0x25, 0xa0, 10);
     assert_eq!(
-        gpt.pwm(Channel::A, Cycles::from_clocks(10)),
+        gpt.pwm(Channel::A, Cycle::from_clocks(10)),
         Output::Clock {
             clocks: Some(Cycles::from_clocks(8))
         }
     );
-    assert!(gpt.pwm_level(Channel::A, Cycles::from_clocks(16)));
-    assert!(!gpt.pwm_level(Channel::A, Cycles::from_clocks(17)));
-    gpt.advance(Cycles::from_clocks(30));
+    assert!(gpt.pwm_level(Channel::A, Cycle::from_clocks(16)));
+    assert!(!gpt.pwm_level(Channel::A, Cycle::from_clocks(17)));
+    gpt.advance(Cycle::from_clocks(30));
     // PPR %000 mid-run, the system clock / 2
     write_byte(&mut gpt, 0x25, 0x80, 30);
-    gpt.advance(Cycles::from_clocks(40));
+    gpt.advance(Cycle::from_clocks(40));
     assert_eq!(gpt.next_event(), None, "the clock does not sync");
     // PPROUT off: the waveform, low at duty 0
     write_byte(&mut gpt, 0x25, 0x00, 41);
-    gpt.advance(Cycles::from_clocks(100));
+    gpt.advance(Cycle::from_clocks(100));
     let mut expected = clock_edges(8, 11, 29, pwma);
     expected.extend(clock_edges(2, 30, 41, pwma));
     assert_eq!(take_output_changes(&mut gpt), expected);
     // FPWMA drives F1A whatever PPROUT (GPTRM 6.3.1)
     write(&mut gpt, 0x24, 0x0282, 100);
-    gpt.advance(Cycles::from_clocks(200));
+    gpt.advance(Cycle::from_clocks(200));
     assert_eq!(
         take_output_changes(&mut gpt),
-        [(Cycles::from_clocks(100), pwma(true))]
+        [(Cycle::from_clocks(100), pwma(true))]
     );
 }
 
 #[test]
 fn pprout_on_pclk_is_high_a_system_clock_from_each_rise() {
     let mut gpt = gpt();
-    gpt.set_report_pwm_edges(Channel::A, true, Cycles::ZERO);
+    gpt.set_report_pwm_edges(Channel::A, true, Cycle::ZERO);
     // PPROUT, PPR %111: PCLK
     write_byte(&mut gpt, 0x25, 0xf0, 10);
-    gpt.schedule_input(Cycles::from_clocks(100), Input::Pclk, false);
-    gpt.schedule_input(Cycles::from_clocks(200), Input::Pclk, true);
-    gpt.schedule_input(Cycles::from_clocks(300), Input::Pclk, false);
-    gpt.schedule_input(Cycles::from_clocks(400), Input::Pclk, true);
-    gpt.advance(Cycles::from_clocks(250));
-    assert_eq!(gpt.next_event(), Some(Cycles::from_clocks(300)));
-    gpt.advance(Cycles::from_clocks(500));
+    gpt.schedule_input(Cycle::from_clocks(100), Input::Pclk, false);
+    gpt.schedule_input(Cycle::from_clocks(200), Input::Pclk, true);
+    gpt.schedule_input(Cycle::from_clocks(300), Input::Pclk, false);
+    gpt.schedule_input(Cycle::from_clocks(400), Input::Pclk, true);
+    gpt.advance(Cycle::from_clocks(250));
+    assert_eq!(gpt.next_event(), Some(Cycle::from_clocks(300)));
+    gpt.advance(Cycle::from_clocks(500));
     assert_eq!(
         take_output_changes(&mut gpt),
         [
-            (Cycles::from_clocks(200), pwma(true)),
-            (Cycles::from_clocks(201), pwma(false)),
-            (Cycles::from_clocks(400), pwma(true)),
-            (Cycles::from_clocks(401), pwma(false)),
+            (Cycle::from_clocks(200), pwma(true)),
+            (Cycle::from_clocks(201), pwma(false)),
+            (Cycle::from_clocks(400), pwma(true)),
+            (Cycle::from_clocks(401), pwma(false)),
         ]
     );
 }
@@ -1272,25 +1273,25 @@ fn a_scheduled_capture_edge_latches_tcnt_at_its_time() {
     write_byte(&mut gpt, 0x20, 0x01, 0);
     let pgp0 = Input::PortGp(PortGpPin::new(0).unwrap());
     let at = 4 * 0x1234 + 2;
-    gpt.schedule_input(Cycles::from_clocks(at), pgp0, true);
-    gpt.schedule_input(Cycles::from_clocks(at), pgp0, false);
-    gpt.schedule_input(Cycles::from_clocks(at), pgp0, true);
+    gpt.schedule_input(Cycle::from_clocks(at), pgp0, true);
+    gpt.schedule_input(Cycle::from_clocks(at), pgp0, false);
+    gpt.schedule_input(Cycle::from_clocks(at), pgp0, true);
     assert_eq!(
         gpt.next_event(),
-        Some(Cycles::from_clocks(at)),
+        Some(Cycle::from_clocks(at)),
         "a quantum ends there"
     );
     assert_eq!(read(&mut gpt, 0x22, at - 1), 0);
     let later = at + 4000;
-    gpt.advance(Cycles::from_clocks(later));
+    gpt.advance(Cycle::from_clocks(later));
     assert_eq!(read(&mut gpt, 0x0e, later), 0x1234, "TIC1");
     assert_eq!(read(&mut gpt, 0x22, later), 0x0100, "IC1F");
     assert_eq!(gpt.next_event(), None);
     // one in the past takes effect at once
-    gpt.schedule_input(Cycles::from_clocks(at), pgp0, false);
-    gpt.schedule_input(Cycles::from_clocks(at), pgp0, true);
-    assert_eq!(gpt.next_event(), Some(Cycles::from_clocks(later)));
-    gpt.advance(Cycles::from_clocks(later));
+    gpt.schedule_input(Cycle::from_clocks(at), pgp0, false);
+    gpt.schedule_input(Cycle::from_clocks(at), pgp0, true);
+    assert_eq!(gpt.next_event(), Some(Cycle::from_clocks(later)));
+    gpt.advance(Cycle::from_clocks(later));
     assert_eq!(read(&mut gpt, 0x0e, later), 0x1234 + 1000);
 }
 
@@ -1300,10 +1301,10 @@ fn scheduled_pai_edges_count_at_their_times() {
     // PAEN, rising edges, as a GPS engine's 1 PPS
     write(&mut gpt, 0x0c, 0x5000, 0);
     for second in 1..=3 {
-        gpt.schedule_input(Cycles::from_clocks(second * 1000), Input::Pai, false);
-        gpt.schedule_input(Cycles::from_clocks(second * 1000 + 100), Input::Pai, true);
+        gpt.schedule_input(Cycle::from_clocks(second * 1000), Input::Pai, false);
+        gpt.schedule_input(Cycle::from_clocks(second * 1000 + 100), Input::Pai, true);
     }
-    gpt.advance(Cycles::from_clocks(2050));
+    gpt.advance(Cycle::from_clocks(2050));
     assert_eq!(read_byte(&mut gpt, 0x0d, 2050), 1);
     assert_eq!(read_byte(&mut gpt, 0x0d, 2100), 2);
     assert_eq!(read_byte(&mut gpt, 0x0d, 5000), 3);
@@ -1315,11 +1316,11 @@ fn unscheduled_inputs_past_now_never_come() {
     let mut gpt = gpt();
     write(&mut gpt, 0x0c, 0x5000, 0);
     for second in 1..=3 {
-        gpt.schedule_input(Cycles::from_clocks(second * 1000), Input::Pai, false);
-        gpt.schedule_input(Cycles::from_clocks(second * 1000 + 100), Input::Pai, true);
+        gpt.schedule_input(Cycle::from_clocks(second * 1000), Input::Pai, false);
+        gpt.schedule_input(Cycle::from_clocks(second * 1000 + 100), Input::Pai, true);
     }
     // the first second's edges have come by 1500; the rest are withdrawn
-    gpt.unschedule_inputs(Cycles::from_clocks(1500));
+    gpt.unschedule_inputs(Cycle::from_clocks(1500));
     assert_eq!(gpt.next_event(), None);
     assert_eq!(read_byte(&mut gpt, 0x0d, 5000), 1);
 }
@@ -1331,8 +1332,8 @@ fn scheduled_pclk_edges_clock_and_show_in_pclks() {
     write_byte(&mut gpt, 0x21, 0x07, 0);
     write(&mut gpt, 0x14, 0x0002, 0);
     for edge in 1..=2 {
-        gpt.schedule_input(Cycles::from_clocks(edge * 10), Input::Pclk, false);
-        gpt.schedule_input(Cycles::from_clocks(edge * 10 + 5), Input::Pclk, true);
+        gpt.schedule_input(Cycle::from_clocks(edge * 10), Input::Pclk, false);
+        gpt.schedule_input(Cycle::from_clocks(edge * 10 + 5), Input::Pclk, true);
     }
     // PCLKS reads the pin
     assert_eq!(read_byte(&mut gpt, 0x0c, 12) & 0x08, 0);

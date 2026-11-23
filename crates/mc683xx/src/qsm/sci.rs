@@ -10,6 +10,8 @@
 use std::collections::VecDeque;
 use std::mem;
 
+use mc683xx_cpu32::cycles::Cycle;
+
 use mc683xx_cpu32::cycles::Cycles;
 
 use super::port::Txd;
@@ -121,9 +123,9 @@ pub struct Transmitted {
     /// The frame.
     pub frame: Frame,
     /// When its start bit begins.
-    pub start: Cycles,
+    pub start: Cycle,
     /// When its stop bit ends.
-    pub end: Cycles,
+    pub end: Cycle,
     /// System clocks in its bit time, 32 x SCBR (QSMRM 5.2.1, equation
     /// 5-1): the baud is the system clock / `bit`.
     pub bit: Cycles,
@@ -144,7 +146,7 @@ struct Arriving {
     /// The frame.
     frame: Frame,
     /// When its stop bit ends.
-    end: Cycles,
+    end: Cycle,
     /// Whether the receiver was enabled at its start bit: one enabled
     /// later never found it.
     seen: bool,
@@ -166,7 +168,7 @@ pub(super) struct Sci {
     /// RDR.
     receive_data: u16,
     /// The transmit shifter's frame and when it ends.
-    shifting: Option<(Sending, Cycles)>,
+    shifting: Option<(Sending, Cycle)>,
     /// A preamble queued by TE going from 0 to 1.
     preamble: bool,
     /// Frames the host sent, waiting for RXD.
@@ -175,7 +177,7 @@ pub(super) struct Sci {
     arriving: Option<Arriving>,
     /// When RXD will have been idle long enough for IDLE (QSMRM
     /// 5.4.2.1).
-    idle_at: Option<Cycles>,
+    idle_at: Option<Cycle>,
     /// Whether a frame has been received since IDLE last set: IDLE
     /// sets once per idle line.
     idle_armed: bool,
@@ -316,14 +318,14 @@ impl Sci {
     }
 
     /// SCCR0 written at `now`.
-    pub(super) fn write_sccr0(&mut self, value: u16, now: Cycles) {
+    pub(super) fn write_sccr0(&mut self, value: u16, now: Cycle) {
         self.sccr0 = value & SCBR_MASK;
         self.shift(now);
     }
 
     /// SCCR1 written at `now`: TE from 0 to 1 queues a preamble (QSMRM
     /// 5.3).
-    pub(super) fn write_sccr1(&mut self, value: u16, now: Cycles) {
+    pub(super) fn write_sccr1(&mut self, value: u16, now: Cycle) {
         let value = value & SCCR1_WRITABLE;
         if value & SCCR1_TE != 0 && self.sccr1 & SCCR1_TE == 0 {
             self.preamble = true;
@@ -335,7 +337,7 @@ impl Sci {
     /// TDR written at `now`, by a write of SCDR's lower byte or word:
     /// the write clears TDRE and TC if a read of SCSR armed them; with
     /// TDRE still set the character is not sent (QSMRM 5.2.3).
-    pub(super) fn write_data(&mut self, value: u16, now: Cycles) {
+    pub(super) fn write_data(&mut self, value: u16, now: Cycle) {
         self.transmit_data = value & DATA_MASK;
         let cleared = self.armed & TRANSMIT_FLAGS;
         self.status &= !cleared;
@@ -346,7 +348,7 @@ impl Sci {
     /// The shifter, idle at `now`, takes what comes next: a queued
     /// preamble, a break while SBK is set, TDR's character; with
     /// nothing, the transmitter is complete (QSMRM 5.3).
-    fn shift(&mut self, now: Cycles) {
+    fn shift(&mut self, now: Cycle) {
         if self.shifting.is_some() {
             return;
         }
@@ -398,7 +400,7 @@ impl Sci {
 
     /// The host sends `frame` on RXD at `now`: it follows the frames
     /// already sent, back to back, at the SCI's baud.
-    pub(super) fn receive(&mut self, frame: Frame, now: Cycles) {
+    pub(super) fn receive(&mut self, frame: Frame, now: Cycle) {
         self.line.push_back(frame);
         if self.arriving.is_none() {
             self.arrive(now);
@@ -408,7 +410,7 @@ impl Sci {
     /// The next frame on the line starts on RXD at `now`.  With the
     /// baud rate generator stopped the receiver cannot sample: the line's
     /// frames pass unseen.
-    fn arrive(&mut self, now: Cycles) {
+    fn arrive(&mut self, now: Cycle) {
         let Some(frame_time) = self.frame_time() else {
             self.line.clear();
             return;
@@ -432,7 +434,7 @@ impl Sci {
     /// `now`: to RDR with its flags, or OR if RDR is full (QSMRM
     /// 5.4.2); in wakeup mode only an address mark is received
     /// (5.4.2.2).
-    fn received(&mut self, frame: Frame, now: Cycles) {
+    fn received(&mut self, frame: Frame, now: Cycle) {
         self.status &= !SCSR_RAF;
         let data = match frame {
             Frame::Data(data) => data & self.data_mask(),
@@ -511,7 +513,7 @@ impl Sci {
     }
 
     /// When it next changes on its own.
-    pub(super) fn next_event(&self) -> Option<Cycles> {
+    pub(super) fn next_event(&self) -> Option<Cycle> {
         [
             self.shifting.map(|(_, end)| end),
             self.arriving.map(|arriving| arriving.end),
@@ -523,7 +525,7 @@ impl Sci {
     }
 
     /// Brings it to `now`, its events in order.
-    pub(super) fn advance(&mut self, now: Cycles) {
+    pub(super) fn advance(&mut self, now: Cycle) {
         while let Some(at) = self.next_event().filter(|&at| at <= now) {
             if let Some((sending, end)) = self.shifting
                 && end == at

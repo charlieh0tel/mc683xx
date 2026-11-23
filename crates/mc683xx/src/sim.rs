@@ -22,7 +22,7 @@ use std::mem;
 use std::str::FromStr;
 
 use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
@@ -318,7 +318,7 @@ pub struct Sim {
     frozen: bool,
     /// What ports C, E and F drive, each change with its time, until
     /// the host takes them.
-    output_changes: Vec<(Cycles, Change)>,
+    output_changes: Vec<(Cycle, Change)>,
 }
 
 impl Sim {
@@ -328,7 +328,7 @@ impl Sim {
     /// the chip with; a SIM on its own is not a host's to build.
     #[doc(hidden)]
     #[must_use]
-    pub fn new(configuration: Configuration, now: Cycles) -> Self {
+    pub fn new(configuration: Configuration, now: Cycle) -> Self {
         let modclk = configuration.clock.modclk();
         let protection = ProtectionControl::new(modclk);
         let clock = SystemClock::new(configuration.clock, now);
@@ -380,7 +380,7 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn reset(&mut self, cause: ResetCause, now: Cycles) {
+    pub fn reset(&mut self, cause: ResetCause, now: Cycle) {
         let before = self.all_outputs();
         let output_changes = mem::take(&mut self.output_changes);
         let configuration = self.configuration;
@@ -561,7 +561,7 @@ impl Sim {
 
     /// Records the ports whose outputs differ from `before` as
     /// changing at `now`.
-    fn record_outputs(&mut self, before: [PortLevels; PortName::ALL.len()], now: Cycles) {
+    fn record_outputs(&mut self, before: [PortLevels; PortName::ALL.len()], now: Cycle) {
         for (port, before) in PortName::ALL.into_iter().zip(before) {
             let outputs = self.outputs(port);
             if outputs != before {
@@ -576,7 +576,7 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn take_output_changes(&mut self) -> Vec<(Cycles, Change)> {
+    pub fn take_output_changes(&mut self) -> Vec<(Cycle, Change)> {
         mem::take(&mut self.output_changes)
     }
 
@@ -625,7 +625,7 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn low_power_stop(&mut self, mask: InterruptLevel, now: Cycles) {
+    pub fn low_power_stop(&mut self, mask: InterruptLevel, now: Cycle) {
         self.low_power = Some(mask);
         self.counters_changed(self.clock.tick(now));
     }
@@ -634,7 +634,7 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn wake(&mut self, now: Cycles) {
+    pub fn wake(&mut self, now: Cycle) {
         if self.low_power.take().is_some() {
             self.counters_changed(self.clock.tick(now));
         }
@@ -644,7 +644,7 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn set_freeze(&mut self, frozen: bool, now: Cycles) {
+    pub fn set_freeze(&mut self, frozen: bool, now: Cycle) {
         self.frozen = frozen;
         self.counters_changed(self.clock.tick(now));
     }
@@ -734,7 +734,7 @@ impl Sim {
     }
 
     /// The register word at the even `offset` written with `value`.
-    fn write_word(&mut self, offset: u32, value: u16, now: Cycles) -> Written {
+    fn write_word(&mut self, offset: u32, value: u16, now: Cycle) -> Written {
         let low = value as u8;
         let mut written = Written::default();
         match offset {
@@ -865,7 +865,7 @@ impl Sim {
 }
 
 impl Timed for Sim {
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         [self.timer.end(), self.watchdog.deadline()]
             .into_iter()
             .flatten()
@@ -873,7 +873,7 @@ impl Timed for Sim {
             .min()
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         let tick = self.clock.tick(now);
         self.timer.advance(tick);
         if self

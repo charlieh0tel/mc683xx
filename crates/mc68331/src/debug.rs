@@ -263,7 +263,7 @@ impl Cpu32Target for Mc68331 {
                 break (true, ran.asked);
             }
             // a sync ends a run early, the step not done: it goes on
-            if ran.run.stop != Stop::Budget || start.until(self.now) >= STEP_BUDGET {
+            if ran.run.stop != Stop::Budget || self.now.since(start) >= STEP_BUDGET {
                 break (false, ran.asked);
             }
         };

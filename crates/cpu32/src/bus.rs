@@ -5,6 +5,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::cpu::hooks::ExceptionEntry;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::memory::Memory;
 use mc683xx_target::address::Address;
@@ -37,7 +38,7 @@ pub struct BusAccess {
     /// Its address space.
     pub function_code: FunctionCode,
     /// When it starts, on the board's clock.
-    pub now: Cycles,
+    pub now: Cycle,
 }
 
 impl BusAccess {
@@ -48,7 +49,7 @@ impl BusAccess {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
     ) -> Self {
         Self {
             address,
@@ -192,14 +193,14 @@ pub trait Bus {
     /// The `reset` instruction asserted RESET at `now` (CPU32RM 4,
     /// RESET; SIMRM 8.2.6): the chip resets its external peripherals and
     /// its modules other than the CPU.
-    fn reset_instruction(&mut self, now: Cycles) {
+    fn reset_instruction(&mut self, now: Cycle) {
         let _ = now;
     }
 
     /// The CPU entered an exception in the instruction or interrupt
     /// entry that started at `now`, for the chip's trace.  By default
     /// nothing.
-    fn exception_entered(&mut self, entry: &ExceptionEntry, now: Cycles) {
+    fn exception_entered(&mut self, entry: &ExceptionEntry, now: Cycle) {
         let _ = (entry, now);
     }
 
@@ -253,6 +254,7 @@ mod tests {
     use super::BusAccess;
     use super::PortSize;
     use super::stall;
+    use crate::cycles::Cycle;
     use crate::cycles::Cycles;
     use mc683xx_target::address::Address;
     use mc683xx_target::function_code::FunctionCode;
@@ -264,12 +266,12 @@ mod tests {
             Address(0x400),
             Size::Word,
             FunctionCode::SUPERVISOR_PROGRAM,
-            Cycles::from_clocks(7),
+            Cycle::from_clocks(7),
         );
         assert_eq!(access.address, Address(0x400));
         assert_eq!(access.size, Size::Word);
         assert_eq!(access.function_code, FunctionCode::SUPERVISOR_PROGRAM);
-        assert_eq!(access.now, Cycles::from_clocks(7));
+        assert_eq!(access.now, Cycle::from_clocks(7));
     }
 
     #[test]

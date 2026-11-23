@@ -6,6 +6,7 @@ use std::ops::ControlFlow;
 
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::bare::FaultCause;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::CycleKind;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -109,7 +110,7 @@ fn a_fault_stacking_the_interrupt_that_ends_lpstop_leaves_the_chip_asleep() {
         if run.stop != Stop::Budget && run.stop != Stop::Stopped {
             break run;
         }
-        assert!(chip.now() < Cycles::from_clocks(200_000), "never woke");
+        assert!(chip.now() < Cycle::from_clocks(200_000), "never woke");
     };
     assert_eq!(run.stop, Stop::Fault);
     assert_eq!(
@@ -163,7 +164,7 @@ fn lpstop_with_an_interrupt_already_pending_stays_asleep_when_it_faults() {
         if run.stop != Stop::Budget && run.stop != Stop::Stopped {
             break run;
         }
-        assert!(chip.now() < Cycles::from_clocks(200_000), "never stopped");
+        assert!(chip.now() < Cycle::from_clocks(200_000), "never stopped");
     };
     assert_eq!(run.stop, Stop::Fault);
     assert!(chip.cpu().stopped());

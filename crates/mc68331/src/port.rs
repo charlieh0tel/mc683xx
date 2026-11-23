@@ -5,7 +5,8 @@
 use std::fmt;
 use std::str::FromStr;
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
+
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::sim::ports::PortName;
 
@@ -98,7 +99,7 @@ pub struct NoInputsError(pub Port);
 #[non_exhaustive]
 pub struct PortChange {
     /// When.
-    pub now: Cycles,
+    pub now: Cycle,
     /// The port.
     pub port: Port,
     /// What it drives.
@@ -120,7 +121,7 @@ pub enum OutputChange {
 impl OutputChange {
     /// When it happened.
     #[must_use]
-    pub const fn now(&self) -> Cycles {
+    pub const fn now(&self) -> Cycle {
         match self {
             Self::Port(change) => change.now,
             Self::Pwm(change) => change.now,
@@ -159,7 +160,7 @@ impl fmt::Display for OutputChange {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_cpu32::cycles::Cycle;
     use mc683xx_modules::pins::PortLevels;
 
     use super::OutputChange;
@@ -183,13 +184,13 @@ mod tests {
     #[test]
     fn an_output_change_prints_what_changed() {
         let port = OutputChange::Port(PortChange {
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
             port: Port::E,
             outputs: PortLevels::new(0x0f, 0x05),
         });
         assert_eq!(port.to_string(), "port E drives 0x0f at 0x05");
         let pwm = OutputChange::Pwm(PwmChange {
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
             channel: Channel::A,
             level: true,
         });

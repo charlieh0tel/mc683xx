@@ -865,6 +865,7 @@ mod tests {
     use super::ParseLaneError;
     use super::ParseRoleError;
     use super::Role;
+    use mc683xx_cpu32::cycles::Cycle;
     use mc683xx_cpu32::cycles::Cycles;
     use mc683xx_cpu32::frequency::Frequency;
     use mc683xx_modules::chip_select::ChipSelect;
@@ -902,7 +903,7 @@ mod tests {
     #[test]
     fn a_drive_carries_the_system_clock() {
         let base = TimeBase::new(
-            Cycles::ZERO,
+            Cycle::ZERO,
             Time::from_picos(5),
             Frequency::from_hz(16_777_216),
         );

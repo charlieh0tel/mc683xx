@@ -8,6 +8,8 @@ use serde::Deserializer;
 use serde::de::Error;
 use serde::de::Unexpected;
 
+use crate::cycles::Cycle;
+
 use crate::cycles::Cycles;
 use crate::exception::Vector;
 
@@ -277,7 +279,7 @@ pub trait Interrupts {
     /// The highest level requested now.
     fn level(&self) -> InterruptLevel;
     /// The acknowledge cycle for `level`, at `now`.
-    fn acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged;
+    fn acknowledge(&mut self, level: InterruptLevel, now: Cycle) -> Acknowledged;
     /// The interrupt just acknowledged at `level` was not taken: a
     /// fault stopped its exception processing
     /// ([`Cpu::set_stop_on_fault`]), and the next run samples the

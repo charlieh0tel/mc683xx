@@ -13,7 +13,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode_layer;
 use mc683xx_cpu32::cpu::state::encode_layer;
 use mc683xx_cpu32::cpu::state::restore_each;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::memory::RegionId;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::sim::Sim;
@@ -47,7 +47,7 @@ struct ChipState {
     /// The QSPI's peripheral's snapshot, if the builder attached one.
     qspi: Option<Vec<u8>>,
     /// Now, on the system clock.
-    now: Cycles,
+    now: Cycle,
     /// Why the CPU halted, while it stays halted: the core's state's,
     /// kept for the format; restore takes the core's.
     halt: Option<Halt>,

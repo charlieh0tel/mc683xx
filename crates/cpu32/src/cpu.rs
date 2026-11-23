@@ -10,6 +10,7 @@ use std::mem;
 use crate::bus::Bus;
 use crate::bus::BusAccess;
 use crate::bus::BusError;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::effective_address::Altered;
 use crate::exception;
@@ -305,6 +306,7 @@ impl Cpu {
     /// use mc683xx_cpu32::bus::BusError;
     /// use mc683xx_cpu32::bus::Read;
     /// use mc683xx_cpu32::cpu::Cpu;
+    /// use mc683xx_cpu32::cycles::Cycle;
     /// use mc683xx_cpu32::cycles::Cycles;
     /// use mc683xx_cpu32::interrupt::Acknowledge;
     /// use mc683xx_cpu32::interrupt::Acknowledged;
@@ -337,7 +339,7 @@ impl Cpu {
     ///         InterruptLevel::NONE
     ///     }
     ///
-    ///     fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycles) -> Acknowledged {
+    ///     fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycle) -> Acknowledged {
     ///         Acknowledge::Spurious.into()
     ///     }
     /// }
@@ -354,7 +356,7 @@ impl Cpu {
     /// let mut cpu = Cpu::new(memory);
     /// cpu.registers.pc = Address(0x400);
     /// // A budget of one clock runs one instruction.
-    /// cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1));
+    /// cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycle::ZERO, Cycles::from_clocks(1));
     /// assert_eq!(cpu.registers.data[0], 42);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -429,7 +431,7 @@ impl Cpu {
     /// [`Halt::DoubleBusFault`] if fetching the vectors ends in a bus or
     /// address error, with background mode disabled; enabled, the CPU
     /// enters it instead ([`Cpu::background`]).
-    pub fn reset(&mut self, bus: &mut dyn Bus, now: Cycles) -> Result<(), Halt> {
+    pub fn reset(&mut self, bus: &mut dyn Bus, now: Cycle) -> Result<(), Halt> {
         self.registers
             .set_sr(status::S | status::INTERRUPT_MASK | (self.registers.sr() & status::CCR));
         self.registers.vbr = Address::default();
@@ -503,7 +505,7 @@ impl Cpu {
         &mut self,
         bus: &mut dyn Bus,
         interrupts: &mut dyn Interrupts,
-        now: Cycles,
+        now: Cycle,
         budget: Cycles,
     ) -> Run {
         if self.registers.pc != self.left_pc {
@@ -523,7 +525,7 @@ impl Cpu {
         &mut self,
         bus: &mut dyn Bus,
         interrupts: &mut dyn Interrupts,
-        now: Cycles,
+        now: Cycle,
         budget: Cycles,
         limits: Option<Limits>,
     ) -> Run {
@@ -546,7 +548,7 @@ impl Cpu {
         &mut self,
         bus: &mut dyn Bus,
         interrupts: &mut dyn Interrupts,
-        now: Cycles,
+        now: Cycle,
         budget: Cycles,
         limits: Option<Limits>,
     ) -> Run {
@@ -569,8 +571,13 @@ impl Cpu {
                 stop,
             };
         }
-        let mut run =
-            self.run_instructions(bus, interrupts, now + taken, taken.until(budget), limits);
+        let mut run = self.run_instructions(
+            bus,
+            interrupts,
+            now + taken,
+            budget.saturating_sub(taken),
+            limits,
+        );
         run.cycles += taken;
         run
     }
@@ -583,7 +590,7 @@ impl Cpu {
         &mut self,
         bus: &mut dyn Bus,
         interrupts: &mut dyn Interrupts,
-        now: Cycles,
+        now: Cycle,
         budget: Cycles,
         limits: Option<Limits>,
     ) -> Run {
@@ -884,7 +891,7 @@ pub(crate) struct Core<'a> {
     /// The bus.
     bus: &'a mut dyn Bus,
     /// When the instruction started.
-    now: Cycles,
+    now: Cycle,
 }
 
 impl Core<'_> {
@@ -909,7 +916,7 @@ impl Core<'_> {
     /// and not BKPT's.
     pub(crate) fn charge_replacement(&mut self, entry: Cycles) {
         let refund = mem::take(&mut self.cpu.refund);
-        self.charge(refund.until(entry));
+        self.charge(entry.saturating_sub(refund));
     }
 
     /// Charges or refunds `adjustment`.
@@ -997,7 +1004,7 @@ impl Core<'_> {
     /// the exception taken cleared, then an interrupt taken if one is
     /// due: its cycles, if one was.  Always inlined, as `step` is.
     #[inline(always)]
-    fn boundary(&mut self, interrupts: &mut dyn Interrupts, now: Cycles) -> Option<Cycles> {
+    fn boundary(&mut self, interrupts: &mut dyn Interrupts, now: Cycle) -> Option<Cycles> {
         let cpu = &mut *self.cpu;
         cpu.capture_began();
         cpu.stall = Cycles::ZERO;
@@ -1022,7 +1029,7 @@ impl Core<'_> {
     /// ends as if this look had not been made.
     #[cold]
     #[inline(never)]
-    fn step_boundary(&mut self, interrupts: &mut dyn Interrupts, now: Cycles) -> Option<Cycles> {
+    fn step_boundary(&mut self, interrupts: &mut dyn Interrupts, now: Cycle) -> Option<Cycles> {
         let cpu = &*self.cpu;
         let began = cpu.capture.then(|| cpu.began.clone());
         let left = (cpu.stall, cpu.extra, cpu.refund, cpu.taken);
@@ -1085,7 +1092,7 @@ impl Core<'_> {
             cpu.stopped = flow == Flow::Stop;
             cpu.loopable = cpu.loopable_after(flow, instruction_pc);
             let cycles = cpu.spend(tables.cost(opcode));
-            return cpu.refund.until(cycles) + cpu.stall + cpu.extra;
+            return cycles.saturating_sub(cpu.refund) + cpu.stall + cpu.extra;
         }
         self.step_exceptional(step, Some(opcode), trace, previous_pc, tables)
     }
@@ -1208,7 +1215,7 @@ impl Core<'_> {
         // A refund is never more than the table entry it is taken
         // from; saturating keeps an exception's cost in place of that
         // entry from going below zero.  The stall is bus time, kept.
-        self.cpu.refund.until(cycles) + self.cpu.stall + self.cpu.extra
+        cycles.saturating_sub(self.cpu.refund) + self.cpu.stall + self.cpu.extra
     }
 
     /// Trace exception processing (CPU32RM 6.2.10) after the instruction
@@ -2028,6 +2035,7 @@ mod tests {
     use crate::bus::BusAccess;
     use crate::bus::BusError;
     use crate::bus::Read;
+    use crate::cycles::Cycle;
     use crate::cycles::Cycles;
     use crate::exception::MICROCODE_REVISION;
     use crate::exception::Movem;
@@ -2101,7 +2109,7 @@ mod tests {
             self.level
         }
 
-        fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Acknowledged {
+        fn acknowledge(&mut self, level: InterruptLevel, _now: Cycle) -> Acknowledged {
             self.acknowledged.push(level);
             Acknowledged {
                 answer: self.answer,
@@ -2131,7 +2139,7 @@ mod tests {
     /// One run of budget 1: an interrupt, or an instruction with its
     /// exceptions.
     fn step(cpu: &mut Cpu, interrupts: &mut dyn Interrupts) -> Stop {
-        cpu.run_for(&mut NoBus, interrupts, Cycles::ZERO, Cycles::from_clocks(1))
+        cpu.run_for(&mut NoBus, interrupts, Cycle::ZERO, Cycles::from_clocks(1))
             .stop
     }
 
@@ -2183,13 +2191,8 @@ mod tests {
             let mut cpu = prepared(&[NOP], status::S);
             let mut source = Source::new(5, Acknowledge::Vector(Vector(0x40)));
             source.stall = Cycles::from_clocks(stall);
-            cpu.run_for(
-                &mut NoBus,
-                &mut source,
-                Cycles::ZERO,
-                Cycles::from_clocks(1),
-            )
-            .cycles
+            cpu.run_for(&mut NoBus, &mut source, Cycle::ZERO, Cycles::from_clocks(1))
+                .cycles
         };
         assert_eq!(cycles(5), cycles(0) + Cycles::from_clocks(5));
     }
@@ -2246,7 +2249,7 @@ mod tests {
             InterruptLevel::new(1).unwrap()
         }
 
-        fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycles) -> Acknowledged {
+        fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycle) -> Acknowledged {
             self.0.set(true);
             Acknowledge::Autovector.into()
         }
@@ -2260,7 +2263,7 @@ mod tests {
         let run = cpu.run_for(
             &mut bus,
             &mut interrupts,
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(10_000),
         );
         assert_eq!(run.stop, Stop::Requested);
@@ -2303,7 +2306,7 @@ mod tests {
         let run = cpu.run_for(
             &mut NoBus,
             &mut NoInterrupts,
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(100),
         );
         assert_eq!(run.stop, Stop::Stopped);
@@ -2406,7 +2409,7 @@ mod tests {
         let mut core = Core {
             cpu: &mut cpu,
             bus: &mut bus,
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
         };
         core.movem_progress(3, Address(0x3006));
         let Err(crate::exception::Exception::Fault(fault)) = core.write_unreleased(
@@ -2447,7 +2450,7 @@ mod tests {
         let mut core = Core {
             cpu: &mut cpu,
             bus: &mut bus,
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
         };
         assert_eq!(core.movem_continuation(), None);
         core.cpu.instruction_pc = Address(CODE);
@@ -2562,7 +2565,7 @@ mod tests {
         let run = cpu.run_for(
             &mut bus,
             &mut NoInterrupts,
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(1),
         );
         // CPU space, type 0000, BKPT #7 on A[4:2], T on A1, a word
@@ -2593,7 +2596,7 @@ mod tests {
         let run = cpu.run_for(
             &mut NoBus,
             &mut NoInterrupts,
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(1),
         );
         assert!(!cpu.breakpoint_pending());
@@ -2628,7 +2631,7 @@ mod tests {
         cpu.run_for(
             &mut NoBus,
             &mut source,
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(breakpoint + 1),
         );
         // Table 6-2: the trace's processing first, then the
@@ -2668,7 +2671,7 @@ mod tests {
         let run = cpu.run_for(
             &mut NoBus,
             &mut NoInterrupts,
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(100),
         );
         assert_eq!(run.stop, Stop::Stopped);
@@ -2694,7 +2697,7 @@ mod tests {
         let run = cpu.run_for(
             &mut NoBus,
             &mut NoInterrupts,
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(100),
         );
         assert_eq!(run.stop, Stop::Background(Entry::Breakpoint));
@@ -2702,7 +2705,7 @@ mod tests {
         assert!(!cpu.breakpoint_pending());
         assert_eq!(cpu.registers.ssp.0, STACK, "no acknowledge, no exception");
         cpu.set_breakpoint_pending(true);
-        let _ = cpu.reset(&mut NoBus, Cycles::ZERO);
+        let _ = cpu.reset(&mut NoBus, Cycle::ZERO);
         assert!(!cpu.breakpoint_pending());
     }
 
@@ -2734,12 +2737,12 @@ mod tests {
         // nothing mapped: both vector fetches end in BERR
         let mut cpu = Cpu::new(Memory::new(24).unwrap());
         assert_eq!(
-            cpu.reset(&mut NoBus, Cycles::ZERO),
+            cpu.reset(&mut NoBus, Cycle::ZERO),
             Err(Halt::DoubleBusFault)
         );
         assert_eq!(cpu.background(), None);
         cpu.set_bdm_enabled(true);
-        assert_eq!(cpu.reset(&mut NoBus, Cycles::ZERO), Ok(()));
+        assert_eq!(cpu.reset(&mut NoBus, Cycle::ZERO), Ok(()));
         assert_eq!(cpu.halted(), None);
         let Some(Entry::DoubleBusFault { ssw }) = cpu.background() else {
             panic!("{:?}", cpu.background());
@@ -2789,7 +2792,7 @@ mod tests {
             answered: 4,
             reads: Vec::new(),
         };
-        assert_eq!(cpu.reset(&mut bus, Cycles::ZERO), Ok(()));
+        assert_eq!(cpu.reset(&mut bus, Cycle::ZERO), Ok(()));
         assert!(cpu.background().is_some());
         assert_eq!(cpu.registers.ssp.0, 0x1234_1234, "SSP loaded");
         assert_eq!(bus.reads, [0, 2, 4]);
@@ -2797,7 +2800,7 @@ mod tests {
             answered: 0,
             reads: Vec::new(),
         };
-        assert_eq!(cpu.reset(&mut bus, Cycles::ZERO), Ok(()));
+        assert_eq!(cpu.reset(&mut bus, Cycle::ZERO), Ok(()));
         assert_eq!(bus.reads, [0], "PC not fetched");
     }
 
@@ -2806,14 +2809,14 @@ mod tests {
         let mut cpu = prepared(&[], status::S);
         poke_long(&mut cpu, 0, STACK);
         poke_long(&mut cpu, 4, 0x0001_0000);
-        assert_eq!(cpu.reset(&mut NoBus, Cycles::ZERO), Ok(()));
+        assert_eq!(cpu.reset(&mut NoBus, Cycle::ZERO), Ok(()));
         assert_eq!(
             step(&mut cpu, &mut NoInterrupts),
             Stop::Halted(Halt::DoubleBusFault)
         );
         poke_long(&mut cpu, 4, CODE);
         poke_long(&mut cpu, CODE, u32::from(NOP) << 16);
-        assert_eq!(cpu.reset(&mut NoBus, Cycles::ZERO), Ok(()));
+        assert_eq!(cpu.reset(&mut NoBus, Cycle::ZERO), Ok(()));
         assert_eq!(step(&mut cpu, &mut NoInterrupts), Stop::Budget);
     }
 
@@ -2828,6 +2831,7 @@ mod tests {
         use super::handler;
         use super::step;
         use crate::cpu::Cpu;
+        use crate::cycles::Cycle;
         use crate::cycles::Cycles;
         use crate::exception::Vector;
         use crate::instructions::tests::CODE;
@@ -2874,7 +2878,7 @@ mod tests {
             cpu.run_for(
                 &mut NoBus,
                 &mut NoInterrupts,
-                Cycles::ZERO,
+                Cycle::ZERO,
                 Cycles::from_clocks(1),
             )
             .cycles

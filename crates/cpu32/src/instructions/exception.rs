@@ -456,6 +456,7 @@ mod tests {
     use crate::cpu::Halt;
     use crate::cpu::Run;
     use crate::cpu::Stop;
+    use crate::cycles::Cycle;
     use crate::cycles::Cycles;
     use crate::exception::MICROCODE_REVISION;
     use crate::exception::Vector;
@@ -592,7 +593,7 @@ mod tests {
 
     /// One instruction, with the exceptions it raises, on `bus`.
     fn step_on(cpu: &mut Cpu, bus: &mut TestBus) -> Run {
-        cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1))
+        cpu.run_for(bus, &mut NoInterrupts, Cycle::ZERO, Cycles::from_clocks(1))
     }
 
     /// One instruction on a bus with nothing on it.

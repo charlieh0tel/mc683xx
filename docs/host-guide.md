@@ -19,7 +19,7 @@ loads a real image instead.
 
 Crates: `mc683xx-target` (`Address`, `Size`, `FunctionCode`, and the
 `Cpu32Target` debug trait),
-`mc683xx-cpu32` (the core: `Cpu`, `Bus`, `Memory`, hooks, `Cycles`), `mc683xx-modules` (SIM, QSM, the `MappedPeripheral`, `Timed` and
+`mc683xx-cpu32` (the core: `Cpu`, `Bus`, `Memory`, hooks, `Cycle` and `Cycles`), `mc683xx-modules` (SIM, QSM, the `MappedPeripheral`, `Timed` and
 `SpiPeripheral` traits), `mc683xx-mc68331` (GPT, and the chip: `Builder`,
 `Mc68331`), `mc683xx-board` (board files, the `Registry` of peripheral
 types, nets, board time and `Board`), `mc683xx-peripherals` (the stock
@@ -238,7 +238,7 @@ let mut chip = builder.build();
 let run = chip.run_for(Cycles::from_clocks(10_000));
 assert_eq!(run.stop, Stop::Stopped);
 assert!(run.cycles >= Cycles::from_clocks(10_000));
-assert_eq!(chip.now(), run.cycles);
+assert_eq!(chip.now().since_power_on(), run.cycles);
 ```
 
 A host with a real-time display or a socket runs in budgets of a
@@ -258,7 +258,7 @@ host-ordered iteration in the chip.  A host keeps it so by making its
 inputs (pins, frames, edges) at chip times, not wall-clock ones.
 
 ```rust
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_examples::firmware;
 
 let chip = || {
@@ -266,9 +266,9 @@ let chip = || {
     firmware::booting(firmware::rom(&program)).0.build()
 };
 let (mut one, mut two) = (chip(), chip());
-one.run_until(Cycles::from_clocks(5000));
+one.run_until(Cycle::from_clocks(5000));
 for quantum in 1..=5 {
-    two.run_until(Cycles::from_clocks(quantum * 1000));
+    two.run_until(Cycle::from_clocks(quantum * 1000));
 }
 assert_eq!(one.now(), two.now());
 assert_eq!(one.cpu().registers.data, two.cpu().registers.data);
@@ -386,7 +386,7 @@ refuses.
 
 `Timed`:
 
-- `next_event() -> Option<Cycles>`: when it next changes on its own.
+- `next_event() -> Option<Cycle>`: when it next changes on its own.
 - `advance(now)`: brings it to `now`, between quanta.
 
 `Save`:
@@ -460,6 +460,7 @@ on CS10:
 
 ```rust
 use mc683xx_cpu32::bus::BusError;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
@@ -506,7 +507,7 @@ impl MappedPeripheral for Interrupter {
         self.requesting
     }
 
-    fn reset(&mut self, _: Cycles) {
+    fn reset(&mut self, _: Cycle) {
         *self = Self::default();
     }
 }
@@ -566,6 +567,7 @@ use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
@@ -580,8 +582,8 @@ const ALARM_VERSION: u32 = 1;
 /// Asserts its interrupt output from `at` on.
 #[derive(Debug)]
 struct Alarm {
-    at: Cycles,
-    now: Cycles,
+    at: Cycle,
+    now: Cycle,
 }
 
 impl MappedPeripheral for Alarm {
@@ -599,11 +601,11 @@ impl MappedPeripheral for Alarm {
 }
 
 impl Timed for Alarm {
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         (self.now < self.at).then_some(self.at)
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         self.now = now;
     }
 }
@@ -632,8 +634,8 @@ firmware::set_vector(&mut image, AUTOVECTOR_7, firmware::HANDLER);
 firmware::patch(&mut image, firmware::HANDLER, &[firmware::BRANCH_TO_SELF]);
 let (mut builder, _) = firmware::booting(image);
 let alarm = builder.unwired_peripheral(Alarm {
-    at: Cycles::from_clocks(5000),
-    now: Cycles::ZERO,
+    at: Cycle::from_clocks(5000),
+    now: Cycle::ZERO,
 });
 let seven = IrqPin::IRQ7;
 builder.set_interrupt(alarm, seven);
@@ -684,6 +686,7 @@ what the chip's outputs did (PLAN.md, Background debug mode).
 
 ```rust
 use mc683xx_cpu32::bus::BusError;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
@@ -705,7 +708,7 @@ impl MappedPeripheral for Counter {
         Ok(())
     }
 
-    fn reset(&mut self, _: Cycles) {
+    fn reset(&mut self, _: Cycle) {
         self.0 += 1;
     }
 }
@@ -921,6 +924,7 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
 
 ```rust
 use mc683xx_target::address::Address;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
@@ -952,12 +956,12 @@ let program = [
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
 let ic1 = Input::PortGp(PortGpPin::new(0).unwrap());
-chip.schedule_gpt_input(Cycles::from_clocks(2000), ic1, false);
-chip.schedule_gpt_input(Cycles::from_clocks(3000), ic1, true);
+chip.schedule_gpt_input(Cycle::from_clocks(2000), ic1, false);
+chip.schedule_gpt_input(Cycle::from_clocks(3000), ic1, true);
 chip.run_for(Cycles::from_clocks(CLOCKS_PER_COUNT * 0x1000 + 100));
 let changes = chip.take_port_changes();
 let last = changes.last().unwrap();
-assert_eq!(last.now, Cycles::from_clocks(CLOCKS_PER_COUNT * 0x1000));
+assert_eq!(last.now, Cycle::from_clocks(CLOCKS_PER_COUNT * 0x1000));
 assert_eq!(last.port, Port::Gp);
 assert_eq!(
     last.outputs,
@@ -1281,7 +1285,7 @@ first.  None moves the chip's time or shows in the trace.
 
 ```rust
 use mc683xx_target::address::Address;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 use mc683xx_examples::firmware;
@@ -1311,7 +1315,7 @@ let boot = firmware::BLOCK_64K.into();
 chip.bus_write(Address(CSBARBT), Size::Word, SUPERVISOR, boot).unwrap();
 let nowhere = Address(0x40_0000);
 assert_eq!(chip.peek(nowhere, Size::Word, SUPERVISOR), Err(AccessError::Unmapped(nowhere)));
-assert_eq!(chip.now(), Cycles::ZERO);
+assert_eq!(chip.now(), Cycle::ZERO);
 ```
 
 ## Save and restore
@@ -1702,7 +1706,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
 - Nothing in a run returns an error: a halt is a `Stop`, a reset an
   event.
 - Types print with `Display`: `Address` (`0x00001234`, and
-  `LowerHex`), `Cycles` (`12 clocks`), `Frequency` (`16777216 Hz`),
+  `LowerHex`), `Cycle` and `Cycles` (`12 clocks`), `Frequency` (`16777216 Hz`),
   `Vector` (its number), and on a board `Time` (`1000 ps`).  Those
   with a name also parse with `FromStr`, the name printed: `ChipSelect`
   (`CSBOOT`, `CS0`, any case), `FunctionCode` (its number, `0` to

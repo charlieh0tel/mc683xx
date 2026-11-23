@@ -20,7 +20,7 @@ use crate::cpu::state::decode;
 use crate::cpu::state::decode_layer;
 use crate::cpu::state::encode;
 use crate::cpu::state::encode_layer;
-use crate::cycles::Cycles;
+use crate::cycles::Cycle;
 use crate::exception::Vector;
 use crate::interrupt::IrqPin;
 use crate::memory::Backing;
@@ -640,7 +640,7 @@ fn peripheral_at(machine: &mut Machine, address: u32) -> (&mut dyn MappedPeriphe
         Address(address),
         Size::Long,
         FunctionCode::SUPERVISOR_DATA,
-        Cycles::ZERO,
+        Cycle::ZERO,
     );
     (wired.peripheral.as_mut(), cycle)
 }

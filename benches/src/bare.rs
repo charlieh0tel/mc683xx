@@ -6,6 +6,7 @@ use mc683xx_cpu32::bus::BusAccess;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::Read;
 use mc683xx_cpu32::cpu::Cpu;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::Acknowledged;
@@ -69,7 +70,7 @@ impl Interrupts for NoInterrupts {
         InterruptLevel::NONE
     }
 
-    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycles) -> Acknowledged {
+    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycle) -> Acknowledged {
         Acknowledge::Spurious.into()
     }
 }
@@ -109,7 +110,7 @@ pub fn prepare(cpu: &mut Cpu) {
 /// One iteration: the sled from its start for `budget` clocks.
 pub fn iteration(cpu: &mut Cpu, budget: Cycles) -> Cycles {
     prepare(cpu);
-    cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, budget)
+    cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycle::ZERO, budget)
         .cycles
 }
 
@@ -125,7 +126,7 @@ pub fn calibrate(kernel: &Kernel, budget: Cycles) -> Result<Calibration, Skip> {
         let run = cpu.run_for(
             &mut NoBus,
             &mut NoInterrupts,
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(1),
         );
         let taken = cpu.exception_taken();

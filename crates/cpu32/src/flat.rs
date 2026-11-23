@@ -28,6 +28,7 @@ use crate::cpu::state::StateError;
 use crate::cpu::state::decode_layer;
 use crate::cpu::state::encode_layer;
 use crate::cpu::state::restore_each;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::exception::Vector;
 use crate::interrupt::Acknowledge;
@@ -259,7 +260,7 @@ impl Interrupts for Requests {
         InterruptLevel::new(level as u8).unwrap_or(InterruptLevel::NONE)
     }
 
-    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Acknowledged {
+    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycle) -> Acknowledged {
         let line = usize::from(level.get()).checked_sub(1);
         match line.and_then(|line| self.lines[line]) {
             Some(Some(vector)) => Acknowledge::Vector(vector),
@@ -276,7 +277,7 @@ struct MachineState {
     /// [`Cpu::save`]'s bytes.
     cpu: Vec<u8>,
     /// The CPU's clock.
-    now: Cycles,
+    now: Cycle,
     /// The interrupt requests.
     requests: Requests,
     /// Each peripheral's snapshot, in attach order.
@@ -334,7 +335,7 @@ pub struct Machine {
     /// The interrupt requests.
     requests: Requests,
     /// The CPU's clock.
-    now: Cycles,
+    now: Cycle,
     /// The regions [`map`](Self::map) made, each with the address it is
     /// mapped from, its bytes backing its pages in order: the only ones
     /// [`unmap`](Self::unmap) frees or trims.  A region the host added
@@ -358,7 +359,7 @@ impl Machine {
             cpu,
             bus: FlatBus::default(),
             requests: Requests::default(),
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
             maps: BTreeMap::new(),
         })
     }
@@ -594,13 +595,13 @@ impl Machine {
         let run = self
             .cpu
             .run_limited(&mut self.bus, &mut self.requests, self.now, limits);
-        self.now = Cycles::from_clocks(self.now.clocks().saturating_add(run.cycles.clocks()));
+        self.now += run.cycles;
         run
     }
 
     /// The CPU's clock: the cycles the runs took.
     #[must_use]
-    pub const fn now(&self) -> Cycles {
+    pub const fn now(&self) -> Cycle {
         self.now
     }
 

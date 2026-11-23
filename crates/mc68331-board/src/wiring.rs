@@ -17,7 +17,7 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::state::Stateless;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::chip_select::ChipSelect;
@@ -122,7 +122,7 @@ pub(crate) struct SharedMemory {
 
 impl Shared {
     /// Board time at `cycles`.
-    pub(crate) fn time(&self, cycles: Cycles) -> Time {
+    pub(crate) fn time(&self, cycles: Cycle) -> Time {
         self.base.get().time(cycles)
     }
 
@@ -650,7 +650,7 @@ impl MappedPeripheral for PeripheralPins {
             .is_ok_and(|peripheral| peripheral.interrupt_request())
     }
 
-    fn reset(&mut self, now: Cycles) {
+    fn reset(&mut self, now: Cycle) {
         let now = self.shared.time(now);
         self.shared.call(self.peripheral, now, |peripheral, drive| {
             peripheral.reset(drive)
@@ -790,7 +790,7 @@ impl SpiPeripheral for QspiRouter {
         input
     }
 
-    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycle) {
         let now = self.shared.time(now);
         let was = self
             .shared
@@ -815,7 +815,7 @@ impl SpiPeripheral for QspiRouter {
         }
     }
 
-    fn set_clock(&mut self, clock: QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, now: Cycle) {
         let now = self.shared.time(now);
         let mut told: Vec<usize> = Vec::new();
         for target in &self.targets {

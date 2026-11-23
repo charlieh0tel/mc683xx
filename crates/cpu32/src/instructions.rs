@@ -358,6 +358,7 @@ pub(crate) mod tests {
     use crate::bus::Read;
     use crate::cpu::Cpu;
     use crate::cpu::Run;
+    use crate::cycles::Cycle;
     use crate::cycles::Cycles;
     use crate::interrupt::Acknowledge;
     use crate::interrupt::Acknowledged;
@@ -401,7 +402,7 @@ pub(crate) mod tests {
             InterruptLevel::NONE
         }
 
-        fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycles) -> Acknowledged {
+        fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycle) -> Acknowledged {
             Acknowledge::Spurious.into()
         }
     }
@@ -465,7 +466,7 @@ pub(crate) mod tests {
             run = Some(cpu.run_for(
                 &mut NoBus,
                 &mut NoInterrupts,
-                Cycles::ZERO,
+                Cycle::ZERO,
                 Cycles::from_clocks(1),
             ));
         }

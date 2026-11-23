@@ -25,6 +25,7 @@ use mc683xx_cpu32::cpu::Run;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::IrqPin;
@@ -126,7 +127,7 @@ pub trait Requests {
     /// whose change ends the run ([`Chip::stop_at_outputs`]) may change
     /// after the cycle's start, its start if one changed earlier in its
     /// instruction.  [`None`] if none will.
-    fn output_horizon(&self) -> Option<Cycles>;
+    fn output_horizon(&self) -> Option<Cycle>;
 }
 
 /// Where a board memory answers.
@@ -309,7 +310,7 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     fn builder(section: &Self::Section) -> Result<Self::Builder, LoadError>;
 
     /// Now, on the system clock.
-    fn now(&self) -> Cycles;
+    fn now(&self) -> Cycle;
 
     /// Runs whole instructions from now for `budget` system clocks, or
     /// until the CPU halts, a hook or a router stops it, or a router
@@ -389,7 +390,7 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     ///
     /// Not part of the semver API: plumbing the board runs the chip with.
     #[doc(hidden)]
-    fn input(&mut self, pin: Self::Pin, signal: Signal, at: Cycles);
+    fn input(&mut self, pin: Self::Pin, signal: Signal, at: Cycle);
 
     /// Withdraws the levels `input` scheduled on [`ChipPin::scheduled`]
     /// pins for after now, those up to now coming first: the board's
@@ -422,7 +423,7 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     ///
     /// Not part of the semver API: plumbing the board runs the chip with.
     #[doc(hidden)]
-    fn reset_pulse(event: &Self::Event) -> Option<(Cycles, Cycles)>;
+    fn reset_pulse(event: &Self::Event) -> Option<(Cycle, Cycle)>;
 
     /// The chip's state, versioned.
     ///

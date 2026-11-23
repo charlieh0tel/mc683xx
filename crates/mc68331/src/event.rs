@@ -3,7 +3,7 @@
 use std::fmt;
 
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::ChipSelect;
@@ -22,7 +22,7 @@ pub enum Event {
     #[non_exhaustive]
     Reset {
         /// When.
-        now: Cycles,
+        now: Cycle,
         /// Why.
         cause: ResetCause,
     },
@@ -34,7 +34,7 @@ pub enum Event {
     #[non_exhaustive]
     ArbitrationTie {
         /// When the level was acknowledged.
-        now: Cycles,
+        now: Cycle,
         /// The level acknowledged.
         level: InterruptLevel,
         /// The IARB value they shared.
@@ -48,7 +48,7 @@ pub enum Event {
     #[non_exhaustive]
     Access {
         /// When its instruction started.
-        now: Cycles,
+        now: Cycle,
         /// Its address, on the address lines.
         address: Address,
         /// Byte or word.
@@ -68,7 +68,7 @@ pub enum Event {
     #[non_exhaustive]
     Exception {
         /// When the instruction or interrupt entry it ended started.
-        now: Cycles,
+        now: Cycle,
         /// The exception.
         entry: ExceptionEntry,
     },
@@ -80,7 +80,7 @@ pub enum Event {
     #[non_exhaustive]
     Dsack {
         /// When.
-        now: Cycles,
+        now: Cycle,
         /// How.
         fault: DsackFault,
     },
@@ -89,7 +89,7 @@ pub enum Event {
 impl Event {
     /// When it happened.
     #[must_use]
-    pub const fn now(&self) -> Cycles {
+    pub const fn now(&self) -> Cycle {
         match *self {
             Self::Reset { now, .. }
             | Self::ArbitrationTie { now, .. }
@@ -186,7 +186,7 @@ pub struct ChipTracing {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_cpu32::cycles::Cycle;
     use mc683xx_modules::chip_select::ChipSelect;
     use mc683xx_modules::sim::ResetCause;
     use mc683xx_target::address::Address;
@@ -198,7 +198,7 @@ mod tests {
 
     #[test]
     fn an_event_prints_what_happened_and_tells_when() {
-        let now = Cycles::from_clocks(7);
+        let now = Cycle::from_clocks(7);
         let reset = Event::Reset {
             now,
             cause: ResetCause::PowerOn,
