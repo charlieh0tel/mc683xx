@@ -1557,7 +1557,11 @@ hand.  The keys are in `docs/board-files.md`.
   `device`; boot-diff reads that dialect.
 - **Run-time endpoints stay out of the file:** the file names them,
   the runner binds them (`--bind host=stdio`, `stdout`, `pty`,
-  `null`, `file:PATH`).
+  `null`, `file:PATH`).  Its standard error holds two kinds of line:
+  records, prefixed by the chip (the trace, `external` values, where a
+  `pty` or `tty` was `bound`; docs/tracing.md, semver-covered), and
+  messages, prefixed by the runner (`mc683xx-run: ...`), which are
+  not.
   Paths for working copies (an EEPROM's), the seed and the run length
   are runner options, handed to constructors as an `Environment`;
   every noise model draws from the one seed (each peripheral its own

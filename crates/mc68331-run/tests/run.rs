@@ -490,7 +490,7 @@ fn tty_takes_keystrokes_raw_and_ctrl_bracket_ends_the_run_and_restores_it() {
         .unwrap();
     let mut stderr = BufReader::new(child.stderr.take().unwrap());
     let mut line = String::new();
-    while !line.contains("bound name=console tty") {
+    while !line.contains("mc68331: bound name=console tty=1") {
         line.clear();
         assert_ne!(stderr.read_line(&mut line).unwrap(), 0, "never bound");
     }

@@ -166,3 +166,8 @@ mc68331: net time=1000000 name=pps level=1
 
 The runner writes what reaches a binding that takes no serial data the
 same way: `mc68331: external name=NAME time=PS` and the value's fields.
+It says where it bound an endpoint to a terminal, once, before the
+run: `mc68331: bound name=NAME pty=PATH`, the pseudo-terminal's slave
+a client opens, or `mc68331: bound name=NAME tty=1`, the terminal on
+standard input.  Lines prefixed by the runner's own name
+(`mc683xx-run: ...`) are messages, not records, and may change.

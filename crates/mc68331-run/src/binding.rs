@@ -201,7 +201,8 @@ impl Binding {
             How::Tty if !io::stdin().is_terminal() => return Err(RunError::NotATerminal(name)),
             How::Tty => {
                 let raw = RawTerminal::new()?;
-                eprintln!("{CHIP}: bound name={name} tty; Ctrl-] ends the run");
+                eprintln!("{CHIP}: bound name={name} tty=1");
+                eprintln!("mc683xx-run: Ctrl-] ends the run");
                 (Input::Raw(raw_input(escape.clone()), raw), Output::Stdout)
             }
             How::Pty => {
