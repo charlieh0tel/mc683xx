@@ -114,8 +114,8 @@ class Peripheral(Protocol):
     """A board peripheral, as the class `Board`'s `types` names makes it
     (Rust's `Peripheral`), called with its parameters as keyword
     arguments.  Its class declares its ports in `PORTS`, `(name, kind,
-    direction)` each, and sets `TIMED_SERIAL` to be told serial frames
-    as `Serial`s; every method is optional, a missing one taking the
+    direction)` each, and is told serial frames as `Serial`s; every
+    method is optional, a missing one taking the
     trait's default: `read(access, drive) -> int`, `write(access,
     value, drive)`, `wait_states(access, moment) -> int | None`,
     `dsack_port(access, moment) -> int | None`, `wants_horizon() -> bool`,
@@ -1382,8 +1382,7 @@ class Serial:
 class External:
     """A run-time endpoint: its name, its nets' type (`serial`, `logic`
     and so on) and its direction, `out` if it drives a net, `in` if it
-    is driven, `in-out` if both.  As a string it is its name, and it
-    equals its name."""
+    is driven, `in-out` if both."""
 
     @property
     def name(self) -> str: ...
@@ -1527,15 +1526,14 @@ class Board:
     def memory(self, name: str) -> bytes: ...
     def externals(self) -> list[External]: ...
     def send(self, name: str, value: object, *, kind: str = "serial") -> None: ...
-    def take_received(self, name: str, *, timed: bool = False) -> list[tuple[int, object]]: ...
+    def take_received(self, name: str) -> list[tuple[int, object]]: ...
     def nets(self) -> list[tuple[str, str]]: ...
-    def net_value(self, name: str, *, timed: bool = False) -> object | None: ...
+    def net_value(self, name: str) -> object | None: ...
     def observe(
         self,
         name: str,
         callback: Callable[[str, int, object], object],
         *,
-        timed: bool = False,
         on_restore: Callable[[str, int, object | None], object] | None = None,
     ) -> ObserverId: ...
     def unobserve(self, observer: ObserverId) -> bool: ...

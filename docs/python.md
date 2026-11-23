@@ -111,10 +111,7 @@ rename renames the Python name with it.  The deliberate differences:
   (`ValueError`, `IndexError`, `OSError`) where one fits.
 - **Python's own:** names with no Rust item behind them: `BoardChip`
   (`Board.chip`, the `Mc68331` methods over a board's chip), a board
-  peripheral class's `PORTS` and `TIMED_SERIAL` (its `PortSpec`s, and
-  whether it is told serial frames as `Serial`s), the `timed=` keyword
-  of `take_received`, `net_value` and `observe`, `External` equal to its
-  name as a string, and `__version__`.
+  peripheral class's `PORTS` (its `PortSpec`s), and `__version__`.
 
 Not offered, as a Python host has another way or no use for them:
 `Machine::remove_peripheral`, `take_natively_once` (a declined
@@ -1113,8 +1110,7 @@ baud_nanohertz, length)` gives it in picoseconds from start bit to the
 end of the stop bits, and `Serial.untimed(frame)` has neither; it has
 `frame`, `baud_nanohertz`, `length` and `end(start)`, when it ends.  An
 untimed frame may also be an `int` for its data (`None` a break).  A peripheral is
-told frames as `Serial`s if its class sets `TIMED_SERIAL = True`, else
-their data alone.  A peripheral's `BusError` in `read`, `write` or
+told frames as `Serial`s.  A peripheral's `BusError` in `read`, `write` or
 `memory_read` is the cycle's bus error; any other exception (a
 `KeyboardInterrupt` too) does not fault the bus, the read answering 0
 as undriven data lanes do and the write going nowhere.  A peripheral's
@@ -1145,9 +1141,9 @@ what the chip did, as `Mc68331.take_events`; `marking(name)` the
 peripheral's `marking`, or `None`; `peripheral(name)` a Python
 peripheral's object, `None` for a built-in one; `memory(name)`,
 `externals()` (`External`s: `name`, `kind` the nets' type, `direction`
-`in`, `out` or `in-out`; each is its name as a string and equals it),
+`in`, `out` or `in-out`),
 `send(name, value, kind="serial")`,
-`take_received(name, timed=False)` (frames as `Serial`s if `timed`;
+`take_received(name)` (frames as `Serial`s;
 `ValueError` for an endpoint no net drives, as `send` for one that
 drives none),
 `set_tracing(bus_cycles=, exceptions=, pins=,
@@ -1162,8 +1158,7 @@ state`).  An exception either raises from the board's call.  They take
 and raise as `Mc68331`'s do: `restore` takes `bytes` or a `bytearray`,
 and a cause raises the exception it raises there (Errors).
 `send` raises `ValueError` for an endpoint that drives no net, or none
-of `kind`.  A frame sent as an `int` or `None` is untimed; one received without
-`timed` drops its baud and length.
+of `kind`.  A frame sent as an `int` or `None` is untimed.
 
 ## Front ends (TUI, GUI)
 
@@ -1171,13 +1166,13 @@ A front end is the host's, outside the board file, which stays
 hardware only (PLAN.md, Boards), as in Rust (`docs/host-guide.md`,
 Front ends):
 
-- `Board.observe(net, callback, timed=False) -> ObserverId` calls
+- `Board.observe(net, callback) -> ObserverId` calls
   `callback(net, time, value)` at each change the net carries from
   now on, at its board time in picoseconds, after the net's sinks,
   in the order they see them, the changes already waiting included
   (the power-on levels, before the first run); values as
   `take_received` gives them.  It is not called with the net's
-  present value as it attaches: `net_value(net, timed=False)` gives
+  present value as it attaches: `net_value(net)` gives
   that, `None` before the net's first change, and `nets()` each net's
   `(name, type)`.  `unobserve(observer)` detaches one and says
   whether it was attached.  A net the board lacks raises

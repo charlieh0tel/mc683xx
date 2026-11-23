@@ -1041,16 +1041,14 @@ chip beside `Mc68331`.
   (docs/python.md, Board files), `PORTS` a list of `(name, kind,
   direction)`, as `PortSpec`.  A serial frame crosses as an
   `mc683xx.Serial` (`Serial(frame, baud_nanohertz, bits)`,
-  `Serial.timed`, `Serial.untimed`, as Rust's), or, for code written
-  before timed frames, as its data alone: a peripheral opts in with
-  `TIMED_SERIAL`, `take_received` with `timed`, so old classes keep
-  working.  A QSPI peripheral's `transfer(transfer, drive)` gets an
+  `Serial.timed`, `Serial.untimed`, as Rust's), always, in and out
+  (an untimed one may be sent as its data, an `int`, `None` a break).
+  A QSPI peripheral's `transfer(transfer, drive)` gets an
   `mc683xx.Transfer`, as the Rust peripheral's, and `set_qspi_clock(clock,
   moment)` as the Rust peripheral is told it; a call with no drive takes
   an `mc683xx.Moment` last, as Rust's does.
   `externals()` gives `mc683xx.External`s, name, type and direction
-  as the Rust `External`; each is its name as a string and equals
-  it, so code that took the names keeps working.  `observe(net,
+  as the Rust `External`, equal by value.  `observe(net,
   callback)` is `Board::observe` (Boards, Front ends), its
   `ObserverId` for `unobserve`; `inspect(name)` is `Board::inspect`, as
   a dict.  `reset_for(ResetCause)` is `Board::reset_for`;

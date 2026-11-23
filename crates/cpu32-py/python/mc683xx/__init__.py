@@ -43,8 +43,8 @@ class Peripheral(Protocol):
     """A board peripheral, as the class `Board`'s `types` names makes it
     (Rust's `Peripheral`), called with its parameters as keyword
     arguments.  Its class declares its ports in `PORTS`, `(name, kind,
-    direction)` each, and sets `TIMED_SERIAL` to be told serial frames
-    as `Serial`s; every method is optional, a missing one taking the
+    direction)` each, and is told serial frames as `Serial`s; every
+    method is optional, a missing one taking the
     trait's default: `read(access, drive) -> int`, `write(access,
     value, drive)`, `wait_states(access) -> int | None`,
     `dsack_port(access) -> int | None`, `wants_horizon() -> bool`,

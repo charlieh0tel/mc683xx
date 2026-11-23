@@ -483,9 +483,8 @@ impl SerialView {
 }
 
 /// A run-time endpoint, as Python sees one (`board::External`): its
-/// name, its nets' type and its direction.  As a string it is its
-/// name, and it equals its name, as `Board.externals` once gave.
-#[pyclass(name = "External", module = "mc683xx", frozen)]
+/// name, its nets' type and its direction.
+#[pyclass(name = "External", module = "mc683xx", frozen, eq)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ExternalView(External);
 
@@ -509,10 +508,6 @@ impl ExternalView {
         self.0.direction.to_string()
     }
 
-    fn __str__(&self) -> &str {
-        &self.0.name
-    }
-
     fn __repr__(&self) -> String {
         format!(
             "External(name={:?}, kind={:?}, direction={:?})",
@@ -521,21 +516,12 @@ impl ExternalView {
             self.direction()
         )
     }
-
-    /// Equal to another with the same name, type and direction, or to
-    /// its name.
-    fn __eq__(&self, other: &Bound<'_, PyAny>) -> bool {
-        if let Ok(other) = other.cast::<Self>() {
-            return *other.get() == *self;
-        }
-        other
-            .extract::<&str>()
-            .is_ok_and(|name| name == self.0.name)
-    }
-
-    /// Its name's, so that it hashes as the string it equals.
-    fn __hash__(&self, py: Python<'_>) -> PyResult<isize> {
-        PyString::new(py, &self.0.name).hash()
+    /// Its name's, type's and direction's, so that equal ones hash
+    /// alike.
+    fn __hash__(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        (self.name(), self.kind(), self.direction()).hash(&mut hasher);
+        hasher.finish()
     }
 }
 
@@ -558,8 +544,6 @@ struct PythonObserver {
     callback: Held,
     /// Called after a restore, if given.
     on_restore: Option<Held>,
-    /// Whether serial values come timed.
-    timed: bool,
     /// Where an exception waits.
     pending: Pending,
 }
@@ -568,7 +552,7 @@ impl Observer for PythonObserver {
     /// An exception stops the run, and `run_for` raises it.
     fn changed(&mut self, net: &str, at: Time, signal: Signal) {
         Python::attach(|py| {
-            let called = python_value(py, signal, self.timed)
+            let called = python_value(py, signal)
                 .and_then(|value| self.callback.call1(py, (net, at.picos(), value)));
             if let Err(error) = called {
                 self.pending.record(error);
@@ -584,7 +568,7 @@ impl Observer for PythonObserver {
         };
         Python::attach(|py| {
             let called = signal
-                .map(|signal| python_value(py, signal, self.timed))
+                .map(|signal| python_value(py, signal))
                 .transpose()
                 .and_then(|value| on_restore.call1(py, (net, at.picos(), value)));
             if let Err(error) = called {
@@ -731,12 +715,11 @@ pub(crate) fn signal(kind: Kind, value: &Bound<'_, PyAny>) -> PyResult<Signal> {
 }
 
 /// A signal as a Python value, as `signal` takes one: a serial frame a
-/// `Serial` if `timed`, else its data alone.
-fn python_value(py: Python<'_>, signal: Signal, timed: bool) -> PyResult<Py<PyAny>> {
+/// `Serial`.
+fn python_value(py: Python<'_>, signal: Signal) -> PyResult<Py<PyAny>> {
     match signal {
         Signal::Level(level) => level.into_py_any(py),
-        Signal::Serial(serial) if timed => SerialView(serial).into_py_any(py),
-        Signal::Serial(serial) => serial.frame.data().into_py_any(py),
+        Signal::Serial(serial) => SerialView(serial).into_py_any(py),
         Signal::Analog(value) => value.into_py_any(py),
         Signal::Bus(word) => word.into_py_any(py),
         Signal::Clock(clock) => (
@@ -893,9 +876,6 @@ struct PythonPeripheral {
     kinds: Vec<Kind>,
     /// Its analog input ports.
     analog_inputs: Vec<usize>,
-    /// Whether its class asks for serial frames as `Serial`s
-    /// (`TIMED_SERIAL`).
-    timed_serial: bool,
     /// Where an exception it raises waits.
     pending: Pending,
 }
@@ -1192,12 +1172,7 @@ impl Peripheral for PythonPeripheral {
         let _ = self.call(
             "input",
             drive,
-            |py| {
-                Ok(vec![
-                    port.into_py_any(py)?,
-                    python_value(py, signal, self.timed_serial)?,
-                ])
-            },
+            |py| Ok(vec![port.into_py_any(py)?, python_value(py, signal)?]),
             |_| Ok(()),
             (),
         );
@@ -1451,10 +1426,6 @@ impl BoardView {
                     .filter(|(_, port)| port.kind == Kind::Analog && port.direction.sinks())
                     .map(|(index, _)| index)
                     .collect();
-                let timed_serial = match class.getattr_opt("TIMED_SERIAL")? {
-                    Some(timed) => timed.is_truthy()?,
-                    None => false,
-                };
                 let class = pending.keep(&class);
                 let pending = pending.clone();
                 registry
@@ -1467,7 +1438,6 @@ impl BoardView {
                                 object: pending.keep(&parameters),
                                 kinds: kinds.clone(),
                                 analog_inputs: analog_inputs.clone(),
-                                timed_serial,
                                 pending: pending.clone(),
                             }) as Box<dyn Peripheral>)
                         })
@@ -1693,19 +1663,13 @@ impl BoardView {
     }
 
     /// What reached the run-time endpoint `name` since the last call:
-    /// `(time, value)` each, a serial frame a `Serial` if `timed`.
-    #[pyo3(signature = (name, *, timed = false))]
-    fn take_received(
-        &mut self,
-        py: Python<'_>,
-        name: &str,
-        timed: bool,
-    ) -> PyResult<Vec<(u64, Py<PyAny>)>> {
+    /// `(time, value)` each, a serial frame a `Serial`.
+    fn take_received(&mut self, py: Python<'_>, name: &str) -> PyResult<Vec<(u64, Py<PyAny>)>> {
         self.board
             .take_received(name)
             .map_err(Error::from)?
             .into_iter()
-            .map(|(at, signal)| Ok((at.picos(), python_value(py, signal, timed)?)))
+            .map(|(at, signal)| Ok((at.picos(), python_value(py, signal)?)))
             .collect()
     }
 
@@ -1719,12 +1683,11 @@ impl BoardView {
 
     /// The value the net `name` last carried, `None` before its first
     /// change, as `take_received` gives one.
-    #[pyo3(signature = (name, *, timed = false))]
-    fn net_value(&self, py: Python<'_>, name: &str, timed: bool) -> PyResult<Option<Py<PyAny>>> {
+    fn net_value(&self, py: Python<'_>, name: &str) -> PyResult<Option<Py<PyAny>>> {
         self.board
             .net_value(name)
             .map_err(Error::from)?
-            .map(|signal| python_value(py, signal, timed))
+            .map(|signal| python_value(py, signal))
             .transpose()
     }
 
@@ -1736,18 +1699,16 @@ impl BoardView {
     /// each successful `restore` with the net's restored value, `None`
     /// before its first change (Rust's `Observer::restored`); an
     /// exception it raises is raised by `restore`, the board restored.
-    #[pyo3(signature = (name, callback, *, timed = false, on_restore = None))]
+    #[pyo3(signature = (name, callback, *, on_restore = None))]
     fn observe(
         &mut self,
         name: &str,
         callback: &Bound<'_, PyAny>,
-        timed: bool,
         on_restore: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<ObserverIdView> {
         let observer = PythonObserver {
             callback: self.pending.keep(callback),
             on_restore: on_restore.map(|on_restore| self.pending.keep(on_restore)),
-            timed,
             pending: self.pending.clone(),
         };
         self.board
