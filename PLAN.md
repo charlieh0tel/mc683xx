@@ -3577,7 +3577,8 @@ checks move onto real code hooks.
   `mc683xx-board`, `mc683xx-peripherals` and `mc683xx-debug` build for
   it with no errors or warnings; their dependencies are pure Rust (no
   `getrandom`, no `RandomState`).  The chip and everything below it use
-  no clock, thread, file or process.  A board runs there as
+  no clock, thread, file or process.  These are release guarantees
+  (`docs/releasing.md`, Dependencies and platforms).  A board runs there as
   `examples/tests/demo_browser.rs` runs the demo board, on the host
   through the same API: the file's text and its image as bytes
   (`Description::parse_with`, its images from the host's `read(path)`),
