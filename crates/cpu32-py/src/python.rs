@@ -125,7 +125,27 @@ impl From<Error> for PyErr {
             | Error::Access(_)
             | Error::Build(_)
             | Error::Memory(_)
-            | Error::Map(_) => PyValueError::new_err(message),
+            | Error::Map(_)
+            | Error::Registry(_)
+            | Error::Send(_)
+            | Error::Receive(_)
+            | Error::Net(_)
+            | Error::Kind(_)
+            | Error::ParsePacing(_)
+            | Error::Pacing(_)
+            | Error::Inputs(_)
+            | Error::Interval(_)
+            | Error::BoardMemory(_)
+            | Error::Port(_)
+            | Error::AnalogInput(_)
+            | Error::Seconds(_)
+            | Error::SecondsOrPicoseconds
+            | Error::Wall(_)
+            | Error::Quantum
+            | Error::Nesting(_)
+            | Error::DsackPort(_)
+            | Error::ReadWidth { .. }
+            | Error::ShiftedIn { .. } => PyValueError::new_err(message),
         }
     }
 }

@@ -43,7 +43,6 @@ use mc683xx_board::registry::PortSpec;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Direction;
 use mc683xx_board::signal::Kind;
-use mc683xx_board::signal::ParseKindError;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Clock;
@@ -76,7 +75,6 @@ use pyo3::PyVisit;
 use pyo3::Python;
 use pyo3::exceptions::PyOverflowError;
 use pyo3::exceptions::PyTypeError;
-use pyo3::exceptions::PyValueError;
 use pyo3::pybacked::PyBackedBytes;
 use pyo3::pyclass;
 use pyo3::pymethods;
@@ -104,6 +102,7 @@ use crate::control;
 use crate::control::BoardControlView;
 use crate::control::PacingView;
 use crate::error::Error;
+use crate::error::INSPECTION_DEPTH;
 use crate::exceptions;
 use crate::function_code::FunctionCode;
 use crate::gdb;
@@ -118,11 +117,6 @@ use crate::peripherals::Frame as FrameView;
 use crate::python::repr;
 use crate::qspi::QspiClock;
 use crate::qspi::shifted_in;
-
-/// A board error as Python's `ValueError`.
-fn value_error(error: impl fmt::Display) -> PyErr {
-    PyValueError::new_err(error.to_string())
-}
 
 /// What a peripheral does with an attachment's cycles (Rust's
 /// `peripheral::Role`).
@@ -650,7 +644,7 @@ impl DriveView {
             .iter()
             .find(|&&(input, _)| input == port)
             .map(|&(_, value)| value)
-            .ok_or_else(|| PyValueError::new_err(format!("no analog input {port}")))
+            .ok_or_else(|| Error::AnalogInput(port).into())
     }
 
     /// Takes the board memory `memory` off the fast path: its cycles
@@ -685,10 +679,7 @@ impl DriveView {
     /// Drives `value` on output `port` from `at` picoseconds, or now if
     /// that is past.
     fn drive_at(&mut self, at: u64, port: usize, value: &Bound<'_, PyAny>) -> PyResult<()> {
-        let kind = *self
-            .kinds
-            .get(port)
-            .ok_or_else(|| PyValueError::new_err(format!("no port {port}")))?;
+        let kind = *self.kinds.get(port).ok_or(Error::Port(port))?;
         let signal = signal(kind, value)?;
         self.driven
             .push((Time::from_picos(at.max(self.now())), port, signal));
@@ -855,10 +846,6 @@ fn inspection_dict<'py>(py: Python<'py>, inspection: &Inspection) -> PyResult<Bo
     Ok(dict)
 }
 
-/// How deep a Python inspection's groups may nest: past it, a mapping
-/// that holds itself would recurse without end.
-const INSPECTION_DEPTH: usize = 32;
-
 /// A Python mapping as an inspection, as `inspection_dict` gives one.
 fn python_inspection(mapping: &Bound<'_, PyMapping>) -> PyResult<Inspection> {
     nested_inspection(mapping, 0)
@@ -876,9 +863,7 @@ fn nested_inspection(mapping: &Bound<'_, PyMapping>, depth: usize) -> PyResult<I
                 inspection.bytes(name, bytes.as_bytes())
             } else if let Ok(mapping) = value.cast::<PyMapping>() {
                 if depth + 1 == INSPECTION_DEPTH {
-                    return Err(PyValueError::new_err(format!(
-                        "{name}: inspected groups nest deeper than {INSPECTION_DEPTH}"
-                    )));
+                    return Err(Error::Nesting(name).into());
                 }
                 inspection.group(name, nested_inspection(mapping, depth + 1)?)
             } else if value.cast::<PyString>().is_ok() {
@@ -1369,13 +1354,11 @@ impl BoardView {
 /// The span of `seconds` or `picoseconds`, whichever is given.
 fn span_of(seconds: Option<f64>, picoseconds: Option<u64>) -> PyResult<Span> {
     match (seconds, picoseconds) {
-        (Some(seconds), None) => Span::checked_from_secs_f64(seconds).ok_or_else(|| {
-            PyValueError::new_err(format!(
-                "{seconds}: give a finite number of seconds, 0 or more, within board time"
-            ))
-        }),
+        (Some(seconds), None) => {
+            Ok(Span::checked_from_secs_f64(seconds).ok_or(Error::Seconds(seconds))?)
+        }
         (None, Some(picoseconds)) => Ok(Span::from_picos(picoseconds)),
-        _ => Err(PyValueError::new_err("give seconds or picoseconds")),
+        _ => Err(Error::SecondsOrPicoseconds.into()),
     }
 }
 
@@ -1389,8 +1372,7 @@ impl BoardView {
         pacing: Option<PacingView>,
         quantum: u64,
     ) -> PyResult<BoardRunView> {
-        let quantum = NonZeroSpan::new(Span::from_picos(quantum))
-            .ok_or_else(|| PyValueError::new_err("give a quantum of 1 ps or more"))?;
+        let quantum = NonZeroSpan::new(Span::from_picos(quantum)).ok_or(Error::Quantum)?;
         let pacing = pacing.map(PacingView::pacing);
         let control = self.board.control();
         let previous = control.pacing();
@@ -1490,10 +1472,10 @@ impl BoardView {
                             }) as Box<dyn Peripheral>)
                         })
                     })
-                    .map_err(value_error)?;
+                    .map_err(Error::from)?;
             }
         }
-        mc683xx_peripherals::register(&mut registry).map_err(value_error)?;
+        mc683xx_peripherals::register(&mut registry).map_err(Error::from)?;
         let parameters = match parameters {
             Some(parameters) => entries(parameters)?
                 .into_iter()
@@ -1595,11 +1577,7 @@ impl BoardView {
         seconds: Option<f64>,
         picoseconds: Option<u64>,
     ) -> PyResult<BoardRunView> {
-        let wall = Duration::try_from_secs_f64(wall).map_err(|_| {
-            PyValueError::new_err(format!(
-                "wall {wall}: give a finite number of seconds, 0 or more"
-            ))
-        })?;
+        let wall = Duration::try_from_secs_f64(wall).map_err(|_| Error::Wall(wall))?;
         let slice = span_of(seconds, picoseconds)?;
         let outcome = control::run_frame(py, &mut self.board, wall, slice);
         self.finished(outcome)
@@ -1685,7 +1663,7 @@ impl BoardView {
         let bytes = self
             .board
             .memory(name)
-            .ok_or_else(|| PyValueError::new_err(format!("no memory {name:?}")))?;
+            .ok_or_else(|| Error::BoardMemory(name.to_owned()))?;
         Ok(PyBytes::new(py, bytes))
     }
 
@@ -1703,12 +1681,11 @@ impl BoardView {
     /// net's type (`serial` by default).
     #[pyo3(signature = (name, value, *, kind = "serial"))]
     fn send(&mut self, name: &str, value: &Bound<'_, PyAny>, kind: &str) -> PyResult<()> {
-        let kind: Kind = kind
-            .parse()
-            .map_err(|error: ParseKindError| PyValueError::new_err(error.to_string()))?;
-        self.board
+        let kind: Kind = kind.parse().map_err(Error::from)?;
+        Ok(self
+            .board
             .send(name, signal(kind, value)?)
-            .map_err(|error| PyValueError::new_err(error.to_string()))
+            .map_err(Error::from)?)
     }
 
     /// What reached the run-time endpoint `name` since the last call:
@@ -1722,7 +1699,7 @@ impl BoardView {
     ) -> PyResult<Vec<(u64, Py<PyAny>)>> {
         self.board
             .take_received(name)
-            .map_err(|error| PyValueError::new_err(error.to_string()))?
+            .map_err(Error::from)?
             .into_iter()
             .map(|(at, signal)| Ok((at.picos(), python_value(py, signal, timed)?)))
             .collect()
@@ -1742,7 +1719,7 @@ impl BoardView {
     fn net_value(&self, py: Python<'_>, name: &str, timed: bool) -> PyResult<Option<Py<PyAny>>> {
         self.board
             .net_value(name)
-            .map_err(value_error)?
+            .map_err(Error::from)?
             .map(|signal| python_value(py, signal, timed))
             .transpose()
     }
@@ -1772,7 +1749,7 @@ impl BoardView {
         self.board
             .observe(name, observer)
             .map(ObserverIdView)
-            .map_err(value_error)
+            .map_err(|error| Error::from(error).into())
     }
 
     /// Detaches the observer `observer`; whether it was attached.

@@ -34,13 +34,13 @@ use pyo3::call::PyCallArgs;
 use pyo3::exceptions::PyBaseException;
 use pyo3::exceptions::PyKeyboardInterrupt;
 use pyo3::exceptions::PyTypeError;
-use pyo3::exceptions::PyValueError;
 use pyo3::intern;
 use pyo3::pyclass;
 use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
 use pyo3::types::PyBytes;
 
+use crate::error::Error;
 use crate::exceptions;
 use crate::function_code::FunctionCode;
 use crate::held::Held;
@@ -275,9 +275,7 @@ pub(crate) fn port_size(result: &Bound<'_, PyAny>) -> PyResult<Option<PortSize>>
         None => Ok(None),
         Some(8) => Ok(Some(PortSize::Bits8)),
         Some(16) => Ok(Some(PortSize::Bits16)),
-        Some(other) => Err(PyValueError::new_err(format!(
-            "no {other}-bit port: give 8, 16 or None"
-        ))),
+        Some(other) => Err(Error::DsackPort(other).into()),
     }
 }
 
@@ -432,10 +430,11 @@ pub(crate) fn value(value: &Bound<'_, PyAny>, size: Size) -> PyResult<u32> {
     if value & !size.mask() == 0 {
         Ok(value)
     } else {
-        Err(PyValueError::new_err(format!(
-            "{value:#x} does not fit a {}-byte cycle",
-            size.bytes()
-        )))
+        Err(Error::ReadWidth {
+            value,
+            bytes: size.bytes(),
+        }
+        .into())
     }
 }
 

@@ -47,7 +47,6 @@ use pyo3::PyResult;
 use pyo3::PyTraverseError;
 use pyo3::PyVisit;
 use pyo3::Python;
-use pyo3::exceptions::PyValueError;
 use pyo3::pybacked::PyBackedBytes;
 use pyo3::pyclass;
 use pyo3::pymethods;
@@ -1606,7 +1605,7 @@ chip_methods! {
     fn set_pins(&mut self, port: PortView, value: u8, mask: u8) -> PyResult<()> {
         self.chip
             .set_pins(port.into(), value, mask)
-            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+            .map_err(Error::from)?;
         self.pending.check()
     }
 
