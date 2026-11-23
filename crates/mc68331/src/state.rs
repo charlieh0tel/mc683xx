@@ -1,6 +1,6 @@
 //! Save and restore the chip ([PLAN.md], State): the core's snapshot,
 //! the SIM, the modules', the host's peripherals' and the QSPI peripheral's
-//! snapshots, board time and the pins the host drives.
+//! snapshots, chip time and the pins the host drives.
 //!
 //! The wiring is the builder's, so a snapshot restores into a chip
 //! built the same way.
@@ -121,7 +121,7 @@ impl Mc68331 {
     /// The chip's whole state as a snapshot: the core (registers,
     /// memory, run-loop timing), the SIM, the modules, every peripheral
     /// and the QSPI's peripheral
-    /// ([`Save`](mc683xx_cpu32::cpu::state::Save)), board time and the
+    /// ([`Save`](mc683xx_cpu32::cpu::state::Save)), chip time and the
     /// IRQ pins.  Not the host's hooks, tracing or events not yet taken.
     ///
     /// # Errors

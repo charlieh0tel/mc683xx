@@ -1,5 +1,5 @@
 //! The system integration module (SIMRM; MC68331UM 4): configuration
-//! and protection, the clock and board time, the chip selects, the I/O
+//! and protection, the clock and chip time, the chip selects, the I/O
 //! ports and the reset status.
 //!
 //! The chip that holds it routes its register cycles here, decodes the
@@ -291,7 +291,7 @@ pub struct Sim {
     simcr: u16,
     /// Whether MM's one write has happened.
     mm_written: bool,
-    /// The clock synthesizer and board time.
+    /// The clock synthesizer and chip time.
     clock: SystemClock,
     /// RSR.
     reset_status: u8,

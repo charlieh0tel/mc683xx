@@ -1,6 +1,6 @@
-//! The clock synthesizer (SIMRM 4; MC68331UM 4.3) and board time.
+//! The clock synthesizer (SIMRM 4; MC68331UM 4.3) and chip time.
 //!
-//! Board time is counted in system clocks ([`Cycles`]).  The periodic
+//! Chip time is counted in system clocks ([`Cycle`]).  The periodic
 //! interrupt timer and the software watchdog count EXTAL periods
 //! instead (MC68331UM 4.2.10, 4.2.11), and with the synthesizer a
 //! whole number of system clocks, 4(Y + 1)2^(2W + X), falls in each
