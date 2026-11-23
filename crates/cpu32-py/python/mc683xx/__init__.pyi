@@ -677,17 +677,20 @@ class Output:
 
     @final
     class Wave(Output):
-        """High for `high` of every `period` PWMCNT counts; `clocks`
-        system clocks a count, or None when PCLK clocks PWMCNT."""
+        """High for `high_counts` of every `period_counts` PWMCNT counts;
+        `clocks_per_count` system clocks a count, or None when PCLK clocks
+        PWMCNT."""
 
-        __match_args__ = ("period", "high", "clocks")
-        def __new__(cls, period: int, high: int, clocks: int | None) -> Output.Wave: ...
+        __match_args__ = ("period_counts", "high_counts", "clocks_per_count")
+        def __new__(
+            cls, period_counts: int, high_counts: int, clocks_per_count: int | None
+        ) -> Output.Wave: ...
         @property
-        def period(self) -> int: ...
+        def period_counts(self) -> int: ...
         @property
-        def high(self) -> int: ...
+        def high_counts(self) -> int: ...
         @property
-        def clocks(self) -> int | None: ...
+        def clocks_per_count(self) -> int | None: ...
 
     @final
     class Clock(Output):

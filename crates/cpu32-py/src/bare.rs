@@ -1285,9 +1285,9 @@ mod tests {
         for output in [
             pwm::Output::Level(true),
             pwm::Output::Wave {
-                period: 256,
-                high: 1,
-                clocks: None,
+                period_counts: 256,
+                high_counts: 1,
+                clocks_per_count: None,
             },
             pwm::Output::Clock { clocks: None },
         ] {

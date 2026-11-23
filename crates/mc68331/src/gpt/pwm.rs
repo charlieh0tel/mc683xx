@@ -108,15 +108,15 @@ impl Channel {
 pub enum Output {
     /// A steady level.
     Level(bool),
-    /// A waveform high for `high` of every `period` PWMCNT counts, from
-    /// the period's start.
+    /// A waveform high for `high_counts` of every `period_counts`
+    /// PWMCNT counts, from the period's start.
     Wave {
         /// Counts in a period: 256 fast, 32768 slow.
-        period: u32,
+        period_counts: u32,
         /// Counts high.
-        high: u32,
+        high_counts: u32,
         /// System clocks a count, or `None` when PCLK clocks PWMCNT.
-        clocks: Option<Cycles>,
+        clocks_per_count: Option<Cycles>,
     },
     /// A counter's clock, high one system clock a count: PWMCNT's on
     /// PWMA (PPROUT), TCNT's on OC1 (CPROUT).
@@ -356,9 +356,9 @@ impl Pwm {
         }
         let unit = 1 << self.shift(channel);
         Output::Wave {
-            period: unit << DUTY_BITS,
-            high: unit * duty as u32,
-            clocks,
+            period_counts: unit << DUTY_BITS,
+            high_counts: unit * duty as u32,
+            clocks_per_count: clocks,
         }
     }
 }

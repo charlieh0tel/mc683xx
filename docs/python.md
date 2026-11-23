@@ -55,7 +55,10 @@ rename renames the Python name with it.  The deliberate differences:
   (`Frequency` itself: a serial frame's baud, a clock net's frequency,
   a `QspiClock`'s `system_clock_nanohertz` and `baud_nanohertz`) is an
   `int` named `_nanohertz`.  Times are `int`s, system
-  clocks or picoseconds.  A board run's span, Rust's `Span` or
+  clocks or picoseconds.  A count names its unit: `Output.Wave`'s
+  `period_counts` and `high_counts` are PWMCNT counts, its
+  `clocks_per_count` system clocks a count, an `int | None` (`None`
+  when PCLK clocks PWMCNT).  A board run's span, Rust's `Span` or
   `NonZeroSpan`, is a keyword pair, `seconds=` (a `float`) or
   `picoseconds=` (an `int`), and its quantum `quantum_picoseconds=`.
 - **Settings:** a struct of settings is keyword arguments

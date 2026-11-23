@@ -906,7 +906,7 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
   clocks; a model with a finer phase rounds up.
 - Outputs: `outputs(Port::Gp)` (a `PortLevels`, TCNT's clock on OC1
   under CPROUT); `pwm(Channel)` gives what a PWM pin carries as an
-  `Output`: `Level`, `Wave { period, high, clocks }` or `Clock`
+  `Output`: `Level`, `Wave { period_counts, high_counts, clocks_per_count }` or `Clock`
   (PPROUT); `oc1()` gives OC1's pin as an `Output` too, `Clock` under
   CPROUT unless OC1M3 takes the pin back, `Level` otherwise.
 - Changes: port GP's come in `take_port_changes()`; a compare's edge

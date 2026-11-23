@@ -812,9 +812,9 @@ fn pwm_duty_takes_effect_at_the_end_of_a_period() {
     assert_eq!(
         gpt.pwm(Channel::A, Cycle::from_clocks(next)),
         Output::Wave {
-            period: 256,
-            high: 128,
-            clocks: Some(Cycles::from_clocks(2))
+            period_counts: 256,
+            high_counts: 128,
+            clocks_per_count: Some(Cycles::from_clocks(2))
         }
     );
     assert!(gpt.pwm_level(Channel::A, Cycle::from_clocks(512 + 255)));
@@ -827,9 +827,9 @@ fn pwm_duty_takes_effect_at_the_end_of_a_period() {
     assert_eq!(
         gpt.pwm(Channel::B, Cycle::from_clocks(600)),
         Output::Wave {
-            period: 32768,
-            high: 64 * 128,
-            clocks: Some(Cycles::from_clocks(128))
+            period_counts: 32768,
+            high_counts: 64 * 128,
+            clocks_per_count: Some(Cycles::from_clocks(128))
         }
     );
     // F1A: high from the next period; FPWMB: B a discrete output of F1B
