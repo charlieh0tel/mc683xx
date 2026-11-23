@@ -77,9 +77,9 @@ pub(crate) enum How {
 }
 
 impl FromStr for How {
-    type Err = String;
+    type Err = ParseHowError;
 
-    fn from_str(text: &str) -> Result<Self, Self::Err> {
+    fn from_str(text: &str) -> Result<Self, ParseHowError> {
         match text {
             "stdio" => Ok(Self::Stdio),
             "stdout" => Ok(Self::Stdout),
@@ -89,12 +89,15 @@ impl FromStr for How {
             _ => text
                 .strip_prefix("file:")
                 .map(|path| Self::File(PathBuf::from(path)))
-                .ok_or_else(|| {
-                    format!("{text:?}: give stdio, stdout, tty, pty, null or file:PATH")
-                }),
+                .ok_or_else(|| ParseHowError(text.to_owned())),
         }
     }
 }
+
+/// Text that names no way to bind an endpoint.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no binding {0:?}: stdio, stdout, tty, pty, null or file:PATH")]
+pub(crate) struct ParseHowError(String);
 
 /// Where an endpoint's input comes from.
 enum Input {
