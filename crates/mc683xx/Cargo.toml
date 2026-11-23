@@ -1,6 +1,6 @@
 [package]
 name = "mc683xx-modules"
-description = "The SIM and QSM of the Motorola 683xx parts, on the cpu32 core's bus"
+description = "The SIM and QSM of the Motorola 683xx parts, on the CPU32 core's bus"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -26,3 +26,7 @@ thiserror = "2.0.21"
 
 [dev-dependencies]
 snapshot-golden = { path = "../snapshot-golden" }
+
+# docs.rs documents every feature, as `make docs` does.
+[package.metadata.docs.rs]
+all-features = true

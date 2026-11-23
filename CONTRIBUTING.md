@@ -28,7 +28,8 @@ contribution is licensed the same way, with no additional terms.
 ## Before you open a pull request
 
 - `make hooks` once per clone, then `make ci` must pass: formatting,
-  clippy, every test.  If you touched the Python bindings, `make
+  the license copies, the commit-msg hook's tests, clippy, the feature
+  builds, every test and rustdoc.  If you touched the Python bindings, `make
   python` too.  Changes to the core or the modules should also pass
   `make singlestep` and `make oracle`.
 - Every fix comes with a test that fails without it; every new

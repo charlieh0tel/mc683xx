@@ -401,7 +401,7 @@ Endpoints:
 | `chip.ECLK` | clock | out of the chip: the system clock / 8 or / 16 (SYNCR EDIV), a rising edge at power-on (the manuals give no phase; our choice), retuned when the system clock or EDIV changes.  A peripheral on an ECLK-mode select (CSOR MODE, SIMRM 7.5.2) takes it as its E input and aligns its cycles to it; the chip charges each such cycle an ECLK period and a half. |
 | `chip.RXD` | serial | into the chip |
 | `chip.TXD` | serial | out of the chip |
-| `external.name` | any | either; the runner or host binds it (`--bind name=stdio`).  The runner refuses input (stdio, pty) to one that drives no serial net: `stdout`, `file:PATH` or `null` there |
+| `external.name` | any | either; the runner or host binds it (`--bind name=stdio`).  The runner refuses input (stdio, tty, pty) to one that drives no serial net: `stdout`, `file:PATH` or `null` there |
 
 A chip pin's name is taken in any case (`chip.pe0` is `chip.PE0`), as
 a chip select's or a reset cause's.  PGP0 is IC1, PGP1 IC2, PGP2 IC3,
@@ -465,7 +465,11 @@ parameters the file would refuse: `builtin::Fixed::new(value)`,
 ## The Rust API for peripheral types
 
 The contract a host's peripheral models target (rustdoc in
-`crates/mc68331-board`):
+`crates/mc68331-board`).  A crate of peripheral models depends on
+`mc683xx-board`, `mc683xx-cpu32` (`BusError`, `PortSize`,
+`StateError`), `mc683xx-modules` (`QspiClock`, `Frame`) and
+`mc683xx-target`, every one at the same version, as no crate
+re-exports another's types (`docs/host-guide.md`, Crates).
 
 - `registry::Registry`: `register(name, ports, constructor)` for a
   type with fixed ports, `register_ported(name, constructor)` for one

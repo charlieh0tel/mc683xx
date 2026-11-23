@@ -1,6 +1,6 @@
 [package]
 name = "cpu32-harness"
-description = "Tests of the cpu32 core: SingleStepTests, a Musashi differential fuzzer, the smartclock firmware corpus, and a boot smoke test of whole images on the chip"
+description = "Tests of the CPU32 core: SingleStepTests, a Musashi differential fuzzer, the smartclock firmware corpus, and a boot smoke test of whole images on the chip"
 publish = false
 version.workspace = true
 edition.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "cpu32-oracle"
-description = "Test oracles for the cpu32 core: Musashi and Unicorn in 68020 mode, as black boxes"
+description = "Test oracles for the CPU32 core: Musashi and Unicorn in 68020 mode, as black boxes"
 publish = false
 version.workspace = true
 edition.workspace = true

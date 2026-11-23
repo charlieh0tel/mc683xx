@@ -18,8 +18,7 @@ with the core, not after it.
 
 First user: `smartclock-emu` and the smartclock firmware harness
 ([smartclock](https://github.com/charlieh0tel/smartclock)), replacing
-Unicorn.  Unicorn is GPL-2.0-only, which keeps
-`smartclock-emu` a feature-gated local tool, and its m68k has bugs the
+Unicorn.  Unicorn is GPL-2.0-only, and its m68k has bugs the
 harness works around (lazy condition codes marked computed before they
 are).
 
@@ -93,9 +92,10 @@ Out:
 - `mc683xx-wasm` (`crates/wasm`): `wasm-bindgen` bindings, a board
   from JavaScript (see Open, WebAssembly); `publish = false`, released
   as the npm package `mc683xx`.
-- `examples` (`mc683xx-examples`, `publish = false`): the host
-  guide, `docs/host-guide.md`, as its crate documentation, so its
-  examples are doctests `make ci` runs.
+- `examples` (`mc683xx-examples`, `publish = false`): the examples of
+  the host guide (its crate documentation), `docs/gdb.md` and
+  `docs/init-scripts.md` as doctests `make ci` runs, and the example
+  boards and their firmware.
 - `mc683xx-board` (`crates/mc68331-board`): board files and the board
   around a 683xx chip: peripherals from a registry, decoders, nets and
   board time (see Boards), generic over the chip (`chip::Chip`), the
@@ -107,8 +107,10 @@ Out:
   scripts over any `Cpu32Target` (see Loading).
 - `mc683xx-peripherals` (`crates/peripherals`): stock chips as board-file peripherals
   (see Stock peripherals).
-- `cpu32-harness`, `cpu32-oracle`: instruction-level tests against
-  SingleStepTests and Musashi (see Verification); `publish = false`.
+- `cpu32-harness`, `cpu32-oracle`: test-only: SingleStepTests, the
+  differential runs against Musashi and Unicorn, the firmware function
+  corpus, boot smoke and boot diff (see Verification); `publish =
+  false`.
 - `snapshot-golden`: the snapshot formats' golden-file checks (see
   State); test-only, `publish = false`.
 
@@ -143,9 +145,9 @@ prefix; their directories keep the short names.
   the halt monitor's resets as they come, time passing while the CPU
   is halted (A halted CPU); `take_events` reports resets and IARB
   ties.  A run overshoots its budget by up to an
-  instruction, so `Mc68331::run_until(target)` runs to the first
+  instruction, so `Mc68331::run_until(deadline)` runs to the first
   instruction boundary at or after a time instead: its end depends
-  only on the chip and the target, so a series of them is one long
+  only on the chip and the deadline, so a series of them is one long
   run however the host cuts it.
 - **Host bus access:** `Mc68331::bus_read`, `bus_write` and `peek`
   (`mc683xx_mc68331::host`) reach the bus as a debugger does (BDM's memory
@@ -815,7 +817,7 @@ chip beside `Mc68331`.
 - **The chip:** `run_for(budget) -> Run(cycles, stop)`, Rust's
   `cpu::Run`, its `Stop` a class per variant as Rust's (`Stop.Budget()`,
   `Stop.Halted(halt)`, `Stop.Hook(hook)`, ...),
-  `run_until(target)`, `bus_read`, `bus_write`, `peek` (`size` in
+  `run_until(deadline)`, `bus_read`, `bus_write`, `peek` (`size` in
   bytes, `function_code` a `FunctionCode`, `SUPERVISOR_DATA` by default; `BusError`, `UnpeekableError`),
   `reset()`, `reset_for(ResetCause)`,
   `now`, `halted`, `exception_taken` (a vector), `read_register`,
@@ -850,7 +852,8 @@ chip beside `Mc68331`.
   Rust hook and return a `HookId`; `remove_hook(hook) -> bool`.
   The callable gets what the Rust hook does: an `Instruction` (`pc`,
   `registers` as `registers()` gives them, `stack_top`), a
-  `MemoryAccess` (`address`, `size`, `function_code`, `value`), an
+  `MemoryAccess` (`address`, `size`, `function_code`, `value`,
+  `previous`, `pc`, `stacking`, `registers`), an
   `InvalidAccess` (those, `cycle`, a `BusCycleKind`, `value` or `None`,
   `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`) or an
   `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`).  A
@@ -875,7 +878,7 @@ chip beside `Mc68331`.
   that cannot save, `NotImplementedError`.
 - **Peripherals:** any object with `read(cycle) -> int` and `write(cycle,
   value)`, and optionally `wait_states(cycle) -> int | None`,
-  `interrupt_request() -> bool`, `reset(now)`, `next_event() -> int |
+  `dsack_port(cycle) -> int | None`, `interrupt_request() -> bool`, `reset(now)`, `next_event() -> int |
   None` and `advance(now)`, the `MappedPeripheral` and `Timed` traits' methods;
   a missing one takes the trait's default.  A model on no pin needs
   neither `read` nor `write`.  The methods are looked up once, when
@@ -1590,7 +1593,7 @@ hand.  The keys are in `docs/board-files.md`.
   line for line.  smartclock-emu's own traces call a bus cycle
   `device`; boot-diff reads that dialect.
 - **Run-time endpoints stay out of the file:** the file names them,
-  the runner binds them (`--bind host=stdio`, `stdout`, `pty`,
+  the runner binds them (`--bind host=stdio`, `stdout`, `tty`, `pty`,
   `null`, `file:PATH`).  Its standard error holds two kinds of line:
   records, prefixed by the chip (the trace, `external` values, where a
   `pty` or `tty` was `bound`; docs/tracing.md, semver-covered), and
@@ -1803,7 +1806,9 @@ hand.  The keys are in `docs/board-files.md`.
   old snapshot is replaced whole or not at all, and a second Ctrl-C
   removes the temporary file and leaves the target as it was.  Exit status 0 when the run spent its
   time, 1 for a board or file error, 2 for a wrong command, 3 when the
-  CPU halted, 4 when a hook or a peripheral stopped it, or Ctrl-C did.
+  CPU halted, 4 when a hook, a peripheral or a fault (`--stop-on-fault`)
+  stopped it, gdb killed it, or Ctrl-C did; 130 when a second Ctrl-C
+  ended the process at once.
   `--pace` paces the turns against wall time (`Board::run_until_paced`'s
   pacing, the run the same whatever it is), and under `--gdb` the
   stub's quanta while gdb has the board running: its `Target`'s
@@ -1890,10 +1895,7 @@ Adversarial review of the board layer (2026-10-23):
   nets in file order, one seed: the same file, image, seed and
   bindings give the same run.  A binding to a terminal or pty is host
   timed, so a run with live input is not reproducible; piped input is
-  fed one frame per turn of fixed length, which is.  A SYNCR write
-  moves the cycle-to-time anchor only at the sync point, so board
-  time drifts by at most that quantum at the old rate; firmware writes
-  SYNCR once, at boot, before any edge matters.
+  fed one frame per turn of fixed length, which is.
 - *Latency.*  A peripheral's drive within the chip's run reaches the chip
   by the next instruction, and a chip output on a sensed net reaches
   its peripherals after the instruction that changed it, so a loop from the
@@ -3467,8 +3469,11 @@ runs 2 to 10 times faster than one at 16.78 MHz (`docs/performance.md`,
   transcripts are the nearest.
 - Boot of the Z3805A 3543B firmware to the same serial transcript:
   the core and the peripheral interface together.
-- A real 68331 over BDM, once a pod is available: the only check of
-  exception frames and undefined flags against silicon.
+- A real 68331 over BDM, through a pod's `Cpu32Target`: the only check
+  of exception frames and undefined flags against silicon.  Until it
+  is made, the provisional behaviors stay provisional: settled by the
+  manuals, the oracles and the firmware corpus where they can be, and
+  otherwise recorded as our choices.
 
 ## Phases
 
@@ -3483,9 +3488,7 @@ runs 2 to 10 times faster than one at 16.78 MHz (`docs/performance.md`,
 
 Phase 3 is in: hooks, page permissions, tracing, save and restore.
 The QSM and GPT save their registers and timing (the QSM not its
-host's QSPI peripheral, which a restore keeps).  Left: the Python
-bindings bind hooks and state; the Unicorn fault tests' code hook
-checks move onto real code hooks.
+host's QSPI peripheral, which a restore keeps).
 
 ## Decisions
 
@@ -3560,24 +3563,14 @@ checks move onto real code hooks.
 
 ## Open
 
-- Booting real images: smartclock-emu moves onto `mc683xx-mc68331`,
-  keeping its Unicorn emulator as the differential oracle until the
-  Z3805A 3543B and 58503A 3704 transcripts match (decided 2026-10-23).
-  API gaps it finds come back here.
-- A real 68331 over BDM: no BDM pod is available yet (2026-10-23).
-  Until then the provisional behaviors stay provisional: settled by
-  the manuals, the oracles and
-  the firmware corpus where they can be, and otherwise recorded as our
-  choices.
-- Whether `smartclock-emu` moves off its feature gate once it uses this
-  core.
 - WebAssembly: the target is a browser demo of the demo board
   (`examples/boards/demo.toml`) through JS bindings
   (`wasm32-unknown-unknown`, decided 2026-11-03).  `mc683xx-mc68331`,
   `mc683xx-board`, `mc683xx-peripherals` and `mc683xx-debug` build for
   it with no errors or warnings; their dependencies are pure Rust (no
   `getrandom`, no `RandomState`).  The chip and everything below it use
-  no clock, thread, file or process.  A board runs there as
+  no clock, thread, file or process.  These are release guarantees
+  (`docs/releasing.md`, Dependencies and platforms).  A board runs there as
   `examples/tests/demo_browser.rs` runs the demo board, on the host
   through the same API: the file's text and its image as bytes
   (`Description::parse_with`, its images from the host's `read(path)`),

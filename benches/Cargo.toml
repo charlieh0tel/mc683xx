@@ -1,6 +1,6 @@
 [package]
 name = "mc683xx-bench"
-description = "Benchmarks of the cpu32 core and the MC68331 (docs/performance.md)"
+description = "Benchmarks of the CPU32 core and the MC68331 (docs/performance.md)"
 publish = false
 version.workspace = true
 edition.workspace = true

@@ -17,21 +17,35 @@ vectors and a program at `START`, `select` programs a chip select,
 `booting` is the first example's board as a function.  A real host
 loads a real image instead.
 
-Crates: `mc683xx-target` (`Address`, `Size`, `FunctionCode`, and the
-`Cpu32Target` debug trait),
-`mc683xx-cpu32` (the core: `Cpu`, `Bus`, `Memory`, hooks, `Cycle` and `Cycles`), `mc683xx-modules` (SIM, QSM, the `MappedPeripheral`, `Timed` and
-`SpiPeripheral` traits), `mc683xx-mc68331` (GPT, and the chip: `Builder`,
-`Mc68331`), `mc683xx-board` (board files, the `Registry` of peripheral
-types, nets, board time and `Board`), `mc683xx-peripherals` (the stock
-peripherals, `docs/peripherals.md`), `mc683xx-gdb` (the GDB remote
-stub, `docs/gdb.md`) and `mc683xx-debug` (loading images and running
-init scripts over a `Cpu32Target`).
+## Crates
 
-The shared types are `mc683xx-target`'s alone (`Address`, `Size`,
-`FunctionCode`, `Register`, `SystemRegister`): no other crate re-exports
-them, so a host that names one (`Board::watch_code(Address(...))`, a
-bus cycle's size, a register) depends on `mc683xx-target` itself, at the
-release of the other crates.
+A host depends on each crate whose types it names: no crate re-exports
+another's, so a type has one path, in the crate that defines it.
+
+| Crate | What a host names from it |
+| --- | --- |
+| `mc683xx-target` | The shared types: `Address`, `Size`, `FunctionCode`, `Register`, `SystemRegister`, `Entry`, and the `Cpu32Target` debug trait with `Unsupported` |
+| `mc683xx-cpu32` | The core: `Cpu`, `Registers`, `Run`, `Stop`, `Bus`, `BusError`, `PortSize`, `StopRequest`, `Memory`, `MemoryKind`, `Space`, `Permissions`, the hooks, `MappedPeripheral` and `BusCycle`, `InterruptLevel`, `IrqPin`, `Cycle`, `Cycles`, `Frequency`, snapshots (`Save`, `StateError`, `state::encode` and `decode`), and the bare CPU (`flat::Machine`) |
+| `mc683xx-modules` | The SIM (`Configuration`, `ChipSelect`, `ResetCause`, `chip_select::Dsack`), the QSM (`qsm::sci::Frame`), and the `Timed` and `SpiPeripheral` traits with `QspiClock` |
+| `mc683xx-mc68331` | The GPT, and the chip: `Builder`, `Mc68331`, `SyncRequest`, `Diversion`, `Port`, `Event`, `BusCycleError` |
+| `mc683xx-board` | Board files (`Description`), the `Registry` of peripheral types, the `Peripheral` trait and its `Drive`, nets and `Signal`, board time (`Time`, `Span`, `Moment`, `TimeBase`) and `Board` |
+| `mc683xx-peripherals` | The stock peripherals (`docs/peripherals.md`) and their registry |
+| `mc683xx-gdb` | The GDB remote stub (`docs/gdb.md`) |
+| `mc683xx-debug` | Loading images and running init scripts over a `Cpu32Target` (`docs/init-scripts.md`) |
+
+So a host that names an `Address` (`Board::watch_code(Address(...))`)
+depends on `mc683xx-target` beside `mc683xx-board`, and a crate of
+board peripherals (`docs/board-files.md`, The Rust API for peripheral
+types) on `mc683xx-board`, `mc683xx-cpu32` (`BusError`, `PortSize`,
+`StateError`), `mc683xx-modules` (`QspiClock`, `Frame`) and
+`mc683xx-target`.
+
+The workspace releases as one: every crate at one version, depending
+on the others at exactly that version (`=X.Y.Z`,
+`docs/releasing.md`).  A host pins every `mc683xx-*` crate it depends
+on to the same version, so its types are the ones its other
+dependencies were built and tested with; two versions of one crate in
+a build are two sets of types that do not mix.
 
 ## Building a chip
 
@@ -291,10 +305,14 @@ calls `request`;
 the run stops once the instruction whose cycle asked ends, between
 quanta if `advance` asked, or at a reset within the run (the
 watchdog's, say) if `reset` asked, before the first instruction after
-it, with `Stop::Requested`.  The request is
-taken by the stop.  A host whose own run loop stopped for the same
+it, with `Stop::Requested`.  Any of a peripheral's calls may ask, in
+the run's thread.  The request is
+taken by the stop.  One made between runs (in a `reset` that
+`Mc68331::reset` calls) stays, and ends the next run after its first
+instruction; a host whose own run loop stopped for the same
 reason before the chip ran withdraws it (`withdraw`), so the next run
-does not stop for it.
+does not stop for it.  One made in a host bus cycle (Host bus cycles)
+is dropped, with no run to stop.
 
 ```rust
 use mc683xx_cpu32::bus::BusError;
@@ -1150,7 +1168,9 @@ but the exception hook cover an address range, on the address lines.
 `cpu_control().protect(space, start, length, Permissions)` sets
 read, write and execute per 2-Kbyte page in `Space::User` or
 `Space::Supervisor`; a cycle a page does not permit is a bus error,
-and the invalid hooks see it as `Protected`.  Hooks and permissions
+and the invalid hooks see it as `Protected`.  That holds on pages a
+peripheral serves too: the cycle faults before the peripheral sees
+it, so a read-only peripheral needs no bus error of its own.  Hooks and permissions
 outlive the chip's remaps.  Hooks cost little when absent; a memory
 hook makes its pages leave the fast path.  The GDB stub
 (`mc683xx-gdb`, `docs/gdb.md`) sets its breakpoints, watchpoints and
@@ -1738,30 +1758,24 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   bus error exception, as the firmware sees it.
 - Nothing in a run returns an error: a halt is a `Stop`, a reset an
   event.
-- Types print with `Display`: `Address` (`0x00001234`, and
-  `LowerHex`), `Cycle` and `Cycles` (`12 clocks`), `Frequency` (`16777216 Hz`),
-  `Vector` (its number), and on a board `Time` (`1000 ps`).  Those
-  with a name also parse with `FromStr`, the name printed: `ChipSelect`
-  (`CSBOOT`, `CS0`, any case), `FunctionCode` (its name in kebab case,
-  `supervisor-data`, any case; its number is `u8::from` and
-  `FunctionCode::try_from`), `InterruptLevel` (`level 7`, as CPU32RM Table 6-1 names it)
-  and `IrqPin` (`IRQ7`), any case, the snapshot's `state::Layer`
-  (`chip`, any case), and on a board the MC68331's `mc68331::Pin`
-  (`IRQ7`; a port's pin is
-  `Pin::Port(PortPin)`, `PortPin::new(Port::E, 0)` refusing a bit the
-  port lacks, and a `PortPin` itself `PE0`; both any case, as a board
-  file's `chip.pe0`), `signal::Kind`,
-  `Direction`, `peripheral::Role` (`read-write`) and `Lane` (`upper`),
-  as the board file names them; `pacing::Pacing` and `pacing::Factor`
-  (`2.5`); a `description::Setting` (`dac.value=16`, its value as TOML
-  writes it, a `registry::ParameterValue` printing so too);
-  `port::Port` (`E`, `GP`), the GPT's
-  `pwm::Channel` (`A`), `gpt::Input` (`PGP0`, `PAI`) and `PortGpPin`
-  (`PGP0`), and the SIM's
-  `ResetCause` (`power-on`, as a board file's reset scope names it),
-  any case.
-  The newtypes convert `From` and into what they
-  wrap.
+- A type with a printed form implements `Display`, and one with a name
+  also parses it with `FromStr`, the name it prints, in any case, its
+  error a `Parse<Type>Error`; rustdoc gives each one's form.  So
+  `Address` prints `0x00001234` (and `LowerHex`), `Cycle` and `Cycles`
+  `12 clocks`, `Frequency` `16777216 Hz` and a board's `Time`
+  `1000 ps`; `ChipSelect` (`CS0`), `FunctionCode` (`supervisor-data`),
+  `IrqPin` (`IRQ7`), `ResetCause` (`power-on`) and the names a board
+  file writes (`mc68331::Pin` and `PortPin`, `PE0`; `signal::Kind`;
+  `peripheral::Role`, `read-write`; `pacing::Pacing`;
+  `description::Setting`, `dac.value=16`) parse back.
+- Conversions, one way each: a bit pattern whose every value is valid
+  (`Address`, `Vector`) converts `From` and into what it wraps; a
+  checked value (`InterruptLevel`, `IrqPin`, `PortGpPin`,
+  `chip_select::Number`, `FunctionCode`) by `TryFrom<u8>`, failing
+  with `No<Type>`, and `From<T> for u8`; a quantity with a unit
+  (`Cycle`, `Cycles`, `Frequency`, `Time`, `Span`) by named
+  constructors and accessors only (`Cycles::from_clocks`, `clocks`);
+  an id a host receives (`PeripheralId`, `HookId`) is opaque.
 - Every public error enum is `#[non_exhaustive]`, and so are the
   enums that may grow: `Stop`, `Halt`, the bare run's `End` and
   `FaultCause`, `hooks::Invalid`, the GPT's `pwm::Output`, and the

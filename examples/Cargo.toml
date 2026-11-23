@@ -1,6 +1,6 @@
 [package]
 name = "mc683xx-examples"
-description = "The host guide's examples (docs/host-guide.md), compiled and run by cargo test"
+description = "The host, gdb and init script guides' examples, compiled and run by cargo test, and the example boards and their firmware"
 publish = false
 version.workspace = true
 edition.workspace = true

@@ -149,8 +149,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   could not take (`Protocol`); breakpoints planted could not be put
   back (`Unrestored`); or the session failed and cleaning up after it
   failed too (`Uncleaned`, both kept).  `Ending`, `SessionError`,
-  `target::TargetRun` and `target::AccessError` are
-  `#[non_exhaustive]`: a match on one needs a wildcard arm.
+  `target::TargetRun`, `target::TargetReset`, `target::AccessError` and
+  `connection::PollError` are `#[non_exhaustive]`: a match on one needs a wildcard arm.
 - Features: `mc68331` (the chip as a target) and `board` (a board,
   and the chip with it), both on by default.  A bare-CPU host takes
   `default-features = false` and builds without the chip and board

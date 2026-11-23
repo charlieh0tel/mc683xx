@@ -1,4 +1,4 @@
-//! Stock chips for MC68331 boards, registered by part number for board
+//! Stock chips for 683xx boards, registered by part number for board
 //! files to name.
 //!
 //! Models of commercial peripherals, each from its maker's datasheet

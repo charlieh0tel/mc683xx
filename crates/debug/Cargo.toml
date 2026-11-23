@@ -24,3 +24,7 @@ thiserror = "2.0.21"
 mc683xx-cpu32.workspace = true
 mc683xx-mc68331.workspace = true
 mc683xx-modules.workspace = true
+
+# docs.rs documents every feature, as `make docs` does.
+[package.metadata.docs.rs]
+all-features = true

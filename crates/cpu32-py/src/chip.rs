@@ -336,9 +336,9 @@ impl ChipBuilder {
     }
 
     /// `peripheral`, which has `transfer(transfer) -> int` and may have
-    /// `chip_selects(levels, now)`, `clock(clock, now)`, `reset(now)`
-    /// and `deferrable() -> bool`, on the QSPI's pins, replacing any
-    /// (QSMRM 4).  In the chip's snapshot by its `save() -> bytes` and
+    /// `set_chip_selects(levels, now)`, `set_clock(clock, now)`,
+    /// `reset(now)` and `deferrable() -> bool`, on the QSPI's pins,
+    /// replacing any (QSMRM 4).  In the chip's snapshot by its `save() -> bytes` and
     /// `restore(bytes)`, as a peripheral is.
     fn set_qspi(&mut self, peripheral: &Bound<'_, PyAny>) -> PyResult<()> {
         let peripheral = PythonSpiPeripheral::new(peripheral, self.pending.clone())?;
@@ -924,9 +924,9 @@ pub(crate) enum Event {
         /// The interrupt level, for an interrupt.
         level: Option<u8>,
     },
-    /// A peripheral's DSACK pins (`Builder.dsack`) disagree with the chip
-    /// on an externally terminated cycle at `now`: told once for each
-    /// peripheral and kind of fault.
+    /// A peripheral's DSACK pins (`Builder.set_dsack`) disagree with the
+    /// chip on an externally terminated cycle at `now`: told once for
+    /// each peripheral and kind of fault.
     Dsack {
         /// When, in system clocks.
         now: u64,

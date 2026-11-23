@@ -13,7 +13,7 @@ authors = [{ name = "Christopher Hoover", email = "ch@murgatroid.com" }]
 readme = "../../README.md"
 keywords = ["emulator", "m68k", "cpu32", "mc68331", "motorola"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Programming Language :: Python :: 3",
     "Programming Language :: Rust",
     "Topic :: System :: Emulators",

@@ -1,5 +1,5 @@
 //! The SIM and QSM shared by the 683xx parts (SIMRM, QSMRM), on the
-//! cpu32 core's bus, and the interface the host's peripherals plug
+//! CPU32 core's bus, and the interface the host's peripherals plug
 //! into.
 //!
 //! # Examples

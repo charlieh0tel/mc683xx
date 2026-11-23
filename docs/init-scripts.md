@@ -7,7 +7,8 @@ background mode.  `mc683xx_debug::script` parses and runs one over any
 `mc683xx_target::Cpu32Target`: a BDM pod's on silicon, or the emulated
 chip's.  The language is a format under semver (`docs/releasing.md`):
 a script that parses in one release parses, to the same commands, in
-every later one of the same major version.
+every later release that is not a breaking one (`docs/releasing.md`,
+Versions and tags).
 
 ```text
 # Chip selects for RAM at 0x200000 (SIMRM 7), then check them.

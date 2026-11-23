@@ -36,7 +36,7 @@ clippy:
 # The published crates' rustdoc, as docs.rs builds it, with no warnings.
 PUBLISHED_LIBRARIES := mc683xx-target mc683xx-cpu32 mc683xx-modules mc683xx-mc68331 mc683xx-board mc683xx-gdb mc683xx-debug mc683xx-peripherals
 docs:
-	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps $(addprefix -p ,$(PUBLISHED_LIBRARIES))
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features $(addprefix -p ,$(PUBLISHED_LIBRARIES))
 
 test:
 	cargo test --workspace

@@ -73,9 +73,19 @@ deploy replaces it.
 
 - Semantic versioning from 0.1.0.  Before 1.0, a breaking change
   (Semver scope) bumps the minor version; anything else the patch.
+  The API is in beta: a 0.x release may still break it, and does so
+  only in its minor version.
 - CI's `semver` job checks the published crates' APIs against their
   last release (cargo-semver-checks).  Before 1.0 it reports a break
   without failing, since the version is bumped only at release.
+- The 1.0 commit, as "Release 1.0.0", makes these changes beside the
+  version bump (Cutting a release, step 2), and no others: the PyPI
+  classifier becomes `Development Status :: 5 - Production/Stable`
+  (`crates/cpu32-py/pyproject.toml`); CI's `semver` job loses its
+  `continue-on-error` and blocks (`.github/workflows/ci.yml`); the
+  "Beta" line goes from `README.md` and `crates/wasm/npm/README.md`;
+  and this page's text on releases before 1.0 goes.  Nothing here
+  promises that a release before it does not break the API.
 - A release is an annotated tag `vX.Y.Z` on a commit of `main` that
   has passed every check (AGENTS.md).  Its notes, breaking changes
   first, are the tag message's body, below its "Release X.Y.Z"
@@ -95,7 +105,8 @@ means a change to:
   enum members, the exception classes, their bases and which errors
   raise which, and the methods the module calls on a host's objects
   (a peripheral's, as the protocol classes `MappedPeripheral`,
-  `SpiPeripheral` and `Peripheral` list them; a hook's callable);
+  `SpiPeripheral` and `Peripheral` list them; a hook's callable, the
+  intercept callback among them);
 - the npm package's JavaScript and TypeScript API, through its
   `exports`, but `InitOutput`, the module's own exports, which is
   opaque;
@@ -106,11 +117,15 @@ means a change to:
 - the trace text (`docs/tracing.md`), versioned by its first line;
 - the GDB stub's target description, monitor commands and stop
   signals (`docs/gdb.md`);
-- the init script language (`docs/init-scripts.md`).
+- the init script language (`docs/init-scripts.md`);
+- the `Display` of a type that also implements `FromStr`: the name a
+  host prints and parses back (`supervisor-data`, `CS0`, `IRQ7`), and
+  so the Python `str()` of the value that wraps it.
 
 Not covered, so a minor or patch release may change them:
 
-- the text of messages, `repr` and `Display` (but the trace's);
+- the text of messages, `repr` and `Display` (but the trace's, and a
+  parsed name's, above);
 - Python names that start with `_`, and Rust items that are
   `#[doc(hidden)]` ("Not part of the semver API");
 - npm package files outside its `exports`;
@@ -135,6 +150,19 @@ Dependencies and platforms:
 - The Python package supports Python 3.12 and later (abi3 wheels).
   Dropping a Python or Node release past its end of life is a minor
   release.
+- `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`,
+  `mc683xx-mc68331`, `mc683xx-board` and `mc683xx-peripherals` build
+  for `wasm32-unknown-unknown`, with no build script and no
+  `getrandom` or other source of entropy among their dependencies.
+- The model reads no host clock: an unpaced run (the chip's and the
+  board's `run_for` and `run_until`, `run_until_quantized`, and
+  `run_until_paced` under `Pacing::Unpaced`) and `Board::run_frame`
+  and `run_frame_with`, which take the wall time from the host, never
+  block or read `Instant`.  Only a paced `run_until_paced` and
+  `BoardControl::sleep` do.
+- The bare machine has 32 address lines by default (Rust's
+  `flat::ADDRESS_BITS`, Python's `Machine()`), so no address aliases
+  unless the host asks for 24.
 
 ## Setup
 
@@ -211,7 +239,7 @@ Once, before the first release.
    names `Cargo.toml`'s version, and, through the GitHub API with the
    workflow's token (`actions: read`), that the latest `ci` run of
    that commit's push to `main` completed with success; no run, a run
-   still going, or a failed or cancelled one fails it, and a re-run
+   still going, or a failed or canceled one fails it, and a re-run
    that passes clears it.  Alongside, the wheels, the sdist
    and its wheel's stub check build.  The `pypi` job uploads only once
    `gate` and the builds have passed.  A tag whose `gate` failed for a
