@@ -32,12 +32,22 @@ use register::SystemRegister;
 use size::Size;
 
 /// A [`Cpu32Target`] call the implementation does not support: the
-/// error a method added after 1.0 returns by default.
+/// error a method added after 1.0 returns by default.  Built with
+/// [`Unsupported::new`], so a field added later gets a default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
 #[error("{what} is not supported")]
+#[non_exhaustive]
 pub struct Unsupported {
     /// What is not supported: the call, or what it needs.
     pub what: &'static str,
+}
+
+impl Unsupported {
+    /// `what` is not supported.
+    #[must_use]
+    pub const fn new(what: &'static str) -> Self {
+        Self { what }
+    }
 }
 
 /// What a debugger needs of a CPU32 with BDM enabled (CPU32RM 7.2):
@@ -194,7 +204,7 @@ mod tests {
     #[test]
     fn unsupported_names_what() {
         assert_eq!(
-            Unsupported { what: "CALL" }.to_string(),
+            Unsupported::new("CALL").to_string(),
             "CALL is not supported"
         );
     }
