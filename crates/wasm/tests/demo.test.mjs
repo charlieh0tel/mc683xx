@@ -203,14 +203,14 @@ test("mistakes throw an error named for their kind", () => {
   assert.throws(() => new Board(text, 5), TypeError);
   assert.throws(() => new Board(text, { "demo.bin": [1, 2] }), TypeError);
   const { board } = booted();
-  assert.throws(() => board.setPacing("fast"), named("PacingError"));
+  assert.throws(() => board.setPacing("fast"), named("ParsePacingError"));
   assert.throws(() => board.runFrame(Number.NaN, SLICE), RangeError);
   assert.throws(() => board.runFor(-1n), RangeError);
   assert.throws(() => board.runFor(5), TypeError);
   assert.throws(() => board.sendBytes(CONSOLE, [1]), TypeError);
   assert.throws(() => board.sendBytes("nowhere", new Uint8Array()), named("SendError"));
   assert.throws(() => board.takeReceivedBytes("nowhere"), named("ReceiveError"));
-  assert.throws(() => board.memory("nowhere"), named("MemoryError"));
+  assert.throws(() => board.memory("nowhere"), named("NoMemory"));
   assert.throws(() => board.restore(new Uint8Array([1])), named("StateError"));
   assert.throws(() => board.restore([1]), TypeError);
 });

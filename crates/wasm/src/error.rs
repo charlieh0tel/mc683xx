@@ -92,12 +92,12 @@ impl Error {
             | Self::Bytes { .. } => Thrown::Type,
             Self::Picoseconds(_) | Self::Wall(_) => Thrown::Range,
             Self::Load(_) => Thrown::Named("LoadError"),
-            Self::ParsePacing(_) => Thrown::Named("PacingError"),
+            Self::ParsePacing(_) => Thrown::Named("ParsePacingError"),
             Self::Run(_) => Thrown::Named("RunError"),
             Self::Send(_) => Thrown::Named("SendError"),
             Self::Receive(_) => Thrown::Named("ReceiveError"),
             Self::State(_) => Thrown::Named("StateError"),
-            Self::Memory(_) => Thrown::Named("MemoryError"),
+            Self::Memory(_) => Thrown::Named("NoMemory"),
         }
     }
 }

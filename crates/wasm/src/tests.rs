@@ -178,7 +178,7 @@ fn each_error_is_thrown_as_its_kind() {
         (load, Thrown::Named("LoadError")),
         (
             board.set_pacing("fast").unwrap_err(),
-            Thrown::Named("PacingError"),
+            Thrown::Named("ParsePacingError"),
         ),
         (board.run_frame(f64::NAN, SLICE).unwrap_err(), Thrown::Range),
         (
@@ -191,7 +191,7 @@ fn each_error_is_thrown_as_its_kind() {
         ),
         (
             board.memory("nowhere").unwrap_err(),
-            Thrown::Named("MemoryError"),
+            Thrown::Named("NoMemory"),
         ),
         (
             board.restore(b"junk").unwrap_err(),

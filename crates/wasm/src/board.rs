@@ -182,7 +182,7 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// Throws a `PacingError` for text that names no pacing.
+    /// Throws a `ParsePacingError` for text that names no pacing.
     #[wasm_bindgen(js_name = setPacing)]
     pub fn set_pacing(&mut self, pacing: &str) -> Result<(), Error> {
         let pacing: Pacing = pacing.parse()?;
@@ -271,7 +271,7 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// Throws a `MemoryError` for a memory the board lacks.
+    /// Throws a `NoMemory` for a memory the board lacks.
     pub fn memory(&self, name: &str) -> Result<Vec<u8>, Error> {
         self.board
             .memory(name)
