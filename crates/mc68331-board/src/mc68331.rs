@@ -781,7 +781,9 @@ impl chip::Chip for Mc68331 {
                     };
                     emit(base.time(change.now), pin, Signal::Level(change.level));
                 }
-                _ => {}
+                // a kind added to the chip's stream reaches no net until
+                // it is wired here
+                other => debug_assert!(false, "an output change no net carries: {other}"),
             }
         }
         let system_clock = self.sim().system_clock().frequency();
