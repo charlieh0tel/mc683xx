@@ -41,8 +41,8 @@ use crate::peripheral::Drive;
 use crate::peripheral::Peripheral;
 use crate::peripheral::PeripheralAccess;
 use crate::peripheral::Transfer;
+use crate::time::Moment;
 use crate::time::Time;
-use crate::time::TimeBase;
 
 /// The PCS levels a [`SpiAdapter`]'s model is told when the board's decode
 /// selects it: all low.
@@ -131,17 +131,17 @@ impl<D> MappedAdapter<D> {
 
 /// The time of `drive`'s call in the chip's system clocks.
 fn cycle(drive: &Drive<'_>) -> Cycle {
-    drive.system_clock().cycles(drive.now())
+    drive.moment().cycle()
 }
 
-/// The cycle a model sees for `access`, its time in system clocks on
-/// `base`, through its select if one carried it.
-fn carried(access: PeripheralAccess, base: TimeBase) -> BusCycle {
+/// The cycle a model sees for `access` at `moment`, its time in system
+/// clocks, through its select if one carried it.
+fn carried(access: PeripheralAccess, moment: Moment) -> BusCycle {
     let cycle = BusCycle::new(
         Address(access.address),
         access.size,
         access.function_code,
-        base.cycles(access.now),
+        moment.cycle(),
     )
     .writing(access.write);
     match access.select {
@@ -152,7 +152,7 @@ fn carried(access: PeripheralAccess, base: TimeBase) -> BusCycle {
 
 impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<D> {
     fn read(&mut self, access: PeripheralAccess, drive: &mut Drive<'_>) -> Result<u32, BusError> {
-        self.peripheral.read(carried(access, drive.system_clock()))
+        self.peripheral.read(carried(access, drive.moment()))
     }
 
     fn write(
@@ -162,15 +162,15 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
         drive: &mut Drive<'_>,
     ) -> Result<(), BusError> {
         self.peripheral
-            .write(carried(access, drive.system_clock()), value)
+            .write(carried(access, drive.moment()), value)
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<Cycles> {
-        self.peripheral.wait_states(carried(access, system_clock))
+    fn wait_states(&mut self, access: PeripheralAccess, moment: Moment) -> Option<Cycles> {
+        self.peripheral.wait_states(carried(access, moment))
     }
 
-    fn dsack_port(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<PortSize> {
-        self.peripheral.dsack_port(carried(access, system_clock))
+    fn dsack_port(&mut self, access: PeripheralAccess, moment: Moment) -> Option<PortSize> {
+        self.peripheral.dsack_port(carried(access, moment))
     }
 
     fn interrupt_request(&self) -> bool {
@@ -181,8 +181,10 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
         self.peripheral.reset(cycle(drive));
     }
 
-    fn next_event(&self, system_clock: TimeBase) -> Option<Time> {
-        self.peripheral.next_event().map(|at| system_clock.time(at))
+    fn next_event(&self, moment: Moment) -> Option<Time> {
+        self.peripheral
+            .next_event()
+            .map(|at| moment.system_clock().time(at))
     }
 
     fn advance(&mut self, drive: &mut Drive<'_>) {
@@ -206,7 +208,7 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
 ///
 /// The board decodes PCS\[3:0\]: the model's `chip_selects` hears
 /// levels 0b0000 as its attachment's decode selects it and 0b1111, PCS's
-/// idle, as it releases it ([`Peripheral::select`], the board's
+/// idle, as it releases it ([`Peripheral::set_selected`], the board's
 /// framing), and each transfer with the levels on the pins.  Its
 /// `qspi_deferrable` is the model's `deferrable`.
 #[derive(Debug, Default)]
@@ -262,7 +264,7 @@ impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
         )
     }
 
-    fn select(&mut self, _: usize, selected: bool, drive: &mut Drive<'_>) {
+    fn set_selected(&mut self, _: usize, selected: bool, drive: &mut Drive<'_>) {
         let levels = if selected {
             SELECTED_LEVELS
         } else {
@@ -271,8 +273,8 @@ impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
         self.peripheral.set_chip_selects(levels, cycle(drive));
     }
 
-    fn set_qspi_clock(&mut self, clock: QspiClock, now: Time, system_clock: TimeBase) {
-        self.peripheral.set_clock(clock, system_clock.cycles(now));
+    fn set_qspi_clock(&mut self, clock: QspiClock, moment: Moment) {
+        self.peripheral.set_clock(clock, moment.cycle());
     }
 
     fn qspi_deferrable(&self) -> bool {

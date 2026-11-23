@@ -205,8 +205,8 @@ class Oven:
 
     PORTS = [("out", "analog", "out")]
 
-    def sample(self, port: int, now: int) -> float | None:
-        return 20.0 + now / 1e9
+    def analog_output(self, port: int, moment: mc683xx.Moment) -> float | None:
+        return 20.0 + moment.now / 1e9
 
     def save(self) -> bytes:
         return b""
@@ -225,7 +225,7 @@ class Probe:
         self.next = self.PERIOD
         self.readings: list[float | None] = []
 
-    def next_event(self) -> int | None:
+    def next_event(self, moment: mc683xx.Moment) -> int | None:
         return self.next
 
     def advance(self, drive: mc683xx.Drive) -> None:
@@ -423,9 +423,11 @@ class ClockedFlash:
     def __init__(self) -> None:
         self.told: list[tuple[mc683xx.ClockPolarity, mc683xx.ClockPhase, int]] = []
         self.transfers: list[tuple[mc683xx.ClockPolarity, mc683xx.ClockPhase, int]] = []
+        self.moments: list[mc683xx.Moment] = []
 
-    def set_qspi_clock(self, clock: mc683xx.QspiClock, now: int) -> None:
+    def set_qspi_clock(self, clock: mc683xx.QspiClock, moment: mc683xx.Moment) -> None:
         self.told.append((clock.polarity, clock.phase, clock.system_clock_nanohertz))
+        self.moments.append(moment)
 
     def transfer(self, transfer: mc683xx.Transfer, drive: mc683xx.Drive) -> int:
         clock = transfer.clock
@@ -446,6 +448,14 @@ def test_a_qspi_peripheral_is_told_the_clock_and_each_transfer_carries_it(tmp_pa
     ]
     assert flash.told == expected
     assert flash.transfers == expected
+    # each told at its moment, on the system clock of then
+    hertz = [moment.system_clock.frequency_hz for moment in flash.moments]
+    assert hertz == [8_388_608, 16_777_216]
+    for moment in flash.moments:
+        clock = moment.system_clock
+        assert moment.cycle() == clock.cycles(moment.now)
+        assert clock.time(moment.cycle()) >= moment.now
+        assert clock.cycles(clock.time(moment.cycle())) == moment.cycle()
 
 
 class TimedFlash:
@@ -600,7 +610,7 @@ class Failing:
         self.calls += 1
         raise KeyError("no interrupt")
 
-    def next_event(self) -> int | None:
+    def next_event(self, moment: mc683xx.Moment) -> int | None:
         self.calls += 1
         raise KeyError("no next event")
 
@@ -725,7 +735,7 @@ class Stuck:
 
     PORTS: list[tuple[str, str, str]] = []
 
-    def next_event(self) -> int:
+    def next_event(self, moment: mc683xx.Moment) -> int:
         return 1
 
 
@@ -806,7 +816,7 @@ class Horizoned:
         return self.wants
 
     def read(self, access: mc683xx.PeripheralAccess, drive: mc683xx.Drive) -> int:
-        self.reads.append((access.now, access.horizon))
+        self.reads.append((drive.now, access.horizon))
         return 0
 
 

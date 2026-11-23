@@ -47,8 +47,8 @@ use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Moment;
 use mc683xx_board::time::Time;
-use mc683xx_board::time::TimeBase;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
@@ -731,7 +731,7 @@ impl Duart {
 
 impl Peripheral for Duart {
     fn read(&mut self, access: PeripheralAccess, drive: &mut Drive<'_>) -> Result<u32, BusError> {
-        self.run_until(access.now);
+        self.run_until(drive.now());
         let value = if access.role == Role::Iack {
             // the IVR while IRQ is asserted; otherwise the DUART ignores
             // IACK and nothing ends the cycle (2.11)
@@ -739,7 +739,7 @@ impl Peripheral for Duart {
                 .then_some(u32::from(self.state.ivr))
                 .ok_or(BusError)
         } else {
-            Ok(access.read_byte(self.read_register(Self::register(&access), access.now)))
+            Ok(access.read_byte(self.read_register(Self::register(&access), drive.now())))
         };
         self.sync(drive);
         value
@@ -751,17 +751,17 @@ impl Peripheral for Duart {
         value: u32,
         drive: &mut Drive<'_>,
     ) -> Result<(), BusError> {
-        self.run_until(access.now);
+        self.run_until(drive.now());
         if access.role == Role::Iack {
             return Err(BusError);
         }
         let value = access.written_byte(value);
-        self.write_register(Self::register(&access), value, access.now);
+        self.write_register(Self::register(&access), value, drive.now());
         self.sync(drive);
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<Cycles> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: Moment) -> Option<Cycles> {
         // no DTACK for an acknowledge with no interrupt pending (2.11)
         (access.role != Role::Iack || self.interrupting()).then_some(Cycles::ZERO)
     }
@@ -799,7 +799,7 @@ impl Peripheral for Duart {
         self.sync(drive);
     }
 
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         let source = self.source();
         let opcr = self.state.opcr;
         let every = opcr >> OPCR_OP3_SHIFT & OPCR_FIELD_MASK == OP3_COUNTER;

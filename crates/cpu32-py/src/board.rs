@@ -47,6 +47,7 @@ use mc683xx_board::signal::ParseKindError;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Clock;
+use mc683xx_board::time::Moment;
 use mc683xx_board::time::NonZeroSpan;
 use mc683xx_board::time::Phase;
 use mc683xx_board::time::Span;
@@ -56,6 +57,7 @@ use mc683xx_board::trace::Line;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_mc68331::chip::Mc68331;
@@ -249,12 +251,6 @@ impl AccessView {
         self.0.write
     }
 
-    /// When its instruction started, in picoseconds.
-    #[getter]
-    const fn now(&self) -> u64 {
-        self.0.now.picos()
-    }
-
     /// On a read or write of a peripheral whose `wants_horizon()` is
     /// true, the board time in picoseconds before which everything that
     /// could reach it has; `None` otherwise.
@@ -266,7 +262,7 @@ impl AccessView {
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         Ok(format!(
             "PeripheralAccess(attachment={}, select={}, role={}, lane={}, address={:#x}, \
-             size={}, write={}, now={}, horizon={})",
+             size={}, write={}, horizon={})",
             self.attachment(),
             repr(py, self.select())?,
             repr(py, self.role()?)?,
@@ -274,10 +270,78 @@ impl AccessView {
             self.address(),
             self.size(),
             repr(py, self.write())?,
-            self.now(),
             repr(py, self.horizon())?
         ))
     }
+}
+
+/// The chip's system clock on board time (Rust's `time::TimeBase`): for
+/// converting between picoseconds and the chip's clocks.
+#[pyclass(name = "TimeBase", module = "mc683xx", frozen, eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TimeBaseView(TimeBase);
+
+#[pymethods]
+impl TimeBaseView {
+    /// The clock's frequency, whole hertz.
+    #[getter]
+    const fn frequency_hz(&self) -> u64 {
+        self.0.frequency().hz()
+    }
+
+    /// The board time clock `at` falls at, in picoseconds, rounded down.
+    fn time(&self, at: u64) -> u64 {
+        self.0.time(Cycle::from_clocks(at)).picos()
+    }
+
+    /// The first clock at or after board time `at` picoseconds.
+    fn cycles(&self, at: u64) -> u64 {
+        self.0.cycles(Time::from_picos(at)).clocks()
+    }
+
+    fn __repr__(&self) -> String {
+        format!("TimeBase(frequency_hz={})", self.frequency_hz())
+    }
+}
+
+/// A call's time and the chip's system clock then (Rust's
+/// `time::Moment`), as a Python peripheral's calls with no `Drive` are
+/// given it.
+#[pyclass(name = "Moment", module = "mc683xx", frozen, eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MomentView(Moment);
+
+#[pymethods]
+impl MomentView {
+    /// Board time, in picoseconds.
+    #[getter]
+    const fn now(&self) -> u64 {
+        self.0.now().picos()
+    }
+
+    /// The chip's system clock on board time, as of then.
+    #[getter]
+    const fn system_clock(&self) -> TimeBaseView {
+        TimeBaseView(self.0.system_clock())
+    }
+
+    /// The chip's clock at it, rounded up.
+    fn cycle(&self) -> u64 {
+        self.0.cycle().clocks()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "Moment(now={}, system_clock={})",
+            self.now(),
+            self.system_clock().__repr__()
+        )
+    }
+}
+
+/// `moment` as a Python argument.
+fn moment_argument(py: Python<'_>, moment: Moment) -> PyResult<Py<PyAny>> {
+    Ok(Py::new(py, MomentView(moment))?.into_any())
 }
 
 /// A QSPI transfer as a Python peripheral sees it (`peripheral::Transfer`).
@@ -560,8 +624,8 @@ impl BoardStopRequestView {
 #[pyclass(name = "Drive", module = "mc683xx", unsendable)]
 #[derive(Debug)]
 pub(crate) struct DriveView {
-    /// The call's time.
-    now: u64,
+    /// The call's time and the chip's system clock then.
+    moment: Moment,
     /// Each port's kind, by index.
     kinds: Vec<Kind>,
     /// What was driven: time, port, value.
@@ -604,12 +668,18 @@ impl DriveView {
     /// The call's time, in picoseconds.
     #[getter]
     const fn now(&self) -> u64 {
-        self.now
+        self.moment.now().picos()
+    }
+
+    /// The call's time and the chip's system clock then.
+    #[getter]
+    const fn moment(&self) -> MomentView {
+        MomentView(self.moment)
     }
 
     /// Drives `value` on output `port` now.
     fn drive(&mut self, port: usize, value: &Bound<'_, PyAny>) -> PyResult<()> {
-        self.drive_at(self.now, port, value)
+        self.drive_at(self.now(), port, value)
     }
 
     /// Drives `value` on output `port` from `at` picoseconds, or now if
@@ -621,7 +691,7 @@ impl DriveView {
             .ok_or_else(|| PyValueError::new_err(format!("no port {port}")))?;
         let signal = signal(kind, value)?;
         self.driven
-            .push((Time::from_picos(at.max(self.now)), port, signal));
+            .push((Time::from_picos(at.max(self.now())), port, signal));
         Ok(())
     }
 
@@ -872,7 +942,7 @@ impl PythonPeripheral {
             let view = Py::new(
                 py,
                 DriveView {
-                    now: drive.now().picos(),
+                    moment: drive.moment(),
                     kinds: self.kinds.clone(),
                     driven: Vec::new(),
                     writes: Vec::new(),
@@ -989,10 +1059,15 @@ impl Peripheral for PythonPeripheral {
         .unwrap_or(Err(BusError))
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<Cycles> {
+    fn wait_states(&mut self, access: PeripheralAccess, moment: Moment) -> Option<Cycles> {
         self.ask(
             "wait_states",
-            |py| Ok(vec![access_argument(py, access)?]),
+            |py| {
+                Ok(vec![
+                    access_argument(py, access)?,
+                    moment_argument(py, moment)?,
+                ])
+            },
             |value| {
                 Ok(value
                     .extract::<Option<u8>>()?
@@ -1002,10 +1077,15 @@ impl Peripheral for PythonPeripheral {
         )
     }
 
-    fn dsack_port(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<PortSize> {
+    fn dsack_port(&mut self, access: PeripheralAccess, moment: Moment) -> Option<PortSize> {
         self.ask(
             "dsack_port",
-            |py| Ok(vec![access_argument(py, access)?]),
+            |py| {
+                Ok(vec![
+                    access_argument(py, access)?,
+                    moment_argument(py, moment)?,
+                ])
+            },
             port_size,
             None,
         )
@@ -1090,13 +1170,13 @@ impl Peripheral for PythonPeripheral {
         }
     }
 
-    fn set_qspi_clock(&mut self, clock: peripheral::QspiClock, now: Time, _: TimeBase) {
+    fn set_qspi_clock(&mut self, clock: peripheral::QspiClock, moment: Moment) {
         self.ask(
             "set_qspi_clock",
             |py| {
                 Ok(vec![
                     Py::new(py, QspiClock::from(clock))?.into_any(),
-                    now.picos().into_py_any(py)?,
+                    moment_argument(py, moment)?,
                 ])
             },
             |_| Ok(()),
@@ -1104,9 +1184,9 @@ impl Peripheral for PythonPeripheral {
         );
     }
 
-    fn select(&mut self, attachment: usize, selected: bool, drive: &mut Drive<'_>) {
+    fn set_selected(&mut self, attachment: usize, selected: bool, drive: &mut Drive<'_>) {
         let _ = self.call(
-            "select",
+            "set_selected",
             drive,
             |py| Ok(vec![attachment.into_py_any(py)?, selected.into_py_any(py)?]),
             |_| Ok(()),
@@ -1138,19 +1218,19 @@ impl Peripheral for PythonPeripheral {
         );
     }
 
-    fn sample(&mut self, port: usize, now: Time) -> Option<f64> {
+    fn analog_output(&mut self, port: usize, moment: Moment) -> Option<f64> {
         self.ask(
-            "sample",
-            |py| Ok(vec![port.into_py_any(py)?, now.picos().into_py_any(py)?]),
+            "analog_output",
+            |py| Ok(vec![port.into_py_any(py)?, moment_argument(py, moment)?]),
             |value| value.extract::<Option<f64>>(),
             None,
         )
     }
 
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, moment: Moment) -> Option<Time> {
         self.ask(
             "next_event",
-            |_| Ok(Vec::new()),
+            |py| Ok(vec![moment_argument(py, moment)?]),
             |value| Ok(value.extract::<Option<u64>>()?.map(Time::from_picos)),
             None,
         )

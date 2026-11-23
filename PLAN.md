@@ -376,7 +376,7 @@ surrounds the SoC with its board peripherals through:
   decodes them to a peripheral number (smartclock does) is the host's.
   It is the one peripheral, so it sees every level change; on a board
   of `mc683xx-board` peripherals the board's PCS decode is it, and each peripheral
-  sees only its own select (`Peripheral::select`), the canonical framing
+  sees only its own select (`Peripheral::set_selected`), the canonical framing
   there.  `reset` is RESET by `Builder::set_qspi_reset_scope`
   (all causes by default; smartclock's DACs clear on RESET).
   Each queue entry takes the time SPCR0's baud and SPCR1's delays give
@@ -1027,8 +1027,9 @@ chip beside `Mc68331`.
   before timed frames, as its data alone: a peripheral opts in with
   `TIMED_SERIAL`, `take_received` with `timed`, so old classes keep
   working.  A QSPI peripheral's `transfer(transfer, drive)` gets an
-  `mc683xx.Transfer`, as the Rust peripheral's, and `set_qspi_clock(clock, now)`
-  as the Rust peripheral is told it.
+  `mc683xx.Transfer`, as the Rust peripheral's, and `set_qspi_clock(clock,
+  moment)` as the Rust peripheral is told it; a call with no drive takes
+  an `mc683xx.Moment` last, as Rust's does.
   `externals()` gives `mc683xx.External`s, name, type and direction
   as the Rust `External`; each is its name as a string and equals
   it, so code that took the names keeps working.  `observe(net,
@@ -1364,7 +1365,7 @@ hand.  The keys are in `docs/board-files.md`.
   timed from its start bit, with its baud and length, so a receiver
   times either edge; one direction, so a link is two nets), `analog` (an `f64`; data only, never time; a
   sink samples it at its own time, which asks the driver's
-  `Peripheral::sample` then, so a value that moves continuously, a warming
+  `Peripheral::analog_output` then, so a value that moves continuously, a warming
   oven, need not be driven at every change), `bus` (parallel lines as
   one word, so an ADC's byte into an FPGA changes in one drive, not
   eight).  One driver, except on a `wired-and` net: open drain with a
@@ -1470,21 +1471,23 @@ hand.  The keys are in `docs/board-files.md`.
   which the frequency changed (SYNCR, a reset), so it never drifts;
   toward the chip a time rounds up to the first clock at or after it
   (Peripherals, GPT input edges), toward the board a clock rounds
-  down.  A peripheral gets the anchor with every call that has a time:
-  in its `Drive` (`Drive::system_clock`), and as an argument to those
-  without one (`next_event`, `wait_states`, `dsack_port`,
-  `set_qspi_clock`): a part keeps no base between calls and unwraps
-  none, and no notification of a change is needed, since the board
-  asks `next_event` again whenever it needs it (decided 2026-11, for
-  0.8.0).  `sample` and `interrupt_request` take none: a value on
-  board time, not a conversion.  A call's own time follows the same
-  rule: one given a `Drive` takes it from `drive.now()` and has no time
-  argument (`read`, `write`, `memory_read`, `memory_write`, `power_on`,
-  `reset`, `transfer`, `select`, `input`, `advance`); one without takes
-  it as an argument (`sample(port, now)`, `set_qspi_clock(clock, now,
-  system_clock)`) or in its access (`PeripheralAccess::now`, for
-  `wait_states` and `dsack_port`), so no call has two times to
-  disagree.  A part the chip
+  down.  A peripheral gets its time and the anchor together, as a
+  `time::Moment` (`now()`, `system_clock()`, `cycle()`, the chip's
+  clock at it rounded up), with every call: one given a `Drive` takes it
+  from the drive (`Drive::moment`, `Drive::now` for the time alone) and
+  has no time argument (`read`, `write`, `memory_read`, `memory_write`,
+  `power_on`, `reset`, `transfer`, `set_selected`, `input`, `advance`);
+  one without takes `moment: Moment` last (`wait_states`, `dsack_port`,
+  `set_qspi_clock`, `analog_output`, `next_event`).  So no call has two
+  times to disagree (a `PeripheralAccess` carries none), a part keeps
+  no base between calls and unwraps none, and no notification of a
+  change is needed, since the board asks `next_event` again whenever it
+  needs it.  `interrupt_request` takes none: a level now, not a
+  conversion (decided 2026-11, for 0.9.0: `Moment` replaced
+  `PeripheralAccess::now`, `Drive::system_clock` and the bare
+  `system_clock`/`now` arguments, five ways a peripheral got its time;
+  `Peripheral::sample` became `analog_output`, the drive's `sample`
+  reading it, and `select` `set_selected`).  A part the chip
   does not clock (an oscillator, an oven, a GPS engine) that counts in
   cycles counts on `TimeBase::steady(frequency)`, clock zero at
   power-on and never moved: on the chip's base it would fall behind

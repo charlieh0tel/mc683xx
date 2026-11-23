@@ -144,7 +144,7 @@ impl Peripheral for Mc144110 {
 
     /// ENB's rise, the frame's end, loads the register into the latch
     /// (4.1, ENB).
-    fn select(&mut self, _: usize, selected: bool, drive: &mut Drive<'_>) {
+    fn set_selected(&mut self, _: usize, selected: bool, drive: &mut Drive<'_>) {
         if !selected {
             let before = self.state;
             self.state.latch = self.state.register.bits();
@@ -213,6 +213,7 @@ mod tests {
     use mc683xx_board::registry::ParameterError;
     use mc683xx_board::registry::Parameters;
     use mc683xx_board::signal::Signal;
+    use mc683xx_board::time::Moment;
     use mc683xx_board::time::Time;
     use mc683xx_cpu32::cpu::state::StateError;
     use mc683xx_cpu32::cpu::state::encode;
@@ -263,8 +264,8 @@ mod tests {
         words: &[u16],
         bits: u8,
     ) -> (Vec<u16>, Vec<(usize, Signal)>) {
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
-        dac.select(0, true, &mut drive);
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
+        dac.set_selected(0, true, &mut drive);
         let back = words
             .iter()
             .enumerate()
@@ -278,7 +279,7 @@ mod tests {
                 dac.transfer(transfer, &mut drive)
             })
             .collect();
-        dac.select(0, false, &mut drive);
+        dac.set_selected(0, false, &mut drive);
         let driven = drive
             .finish()
             .driven
@@ -322,8 +323,8 @@ mod tests {
     #[test]
     fn nothing_latches_before_enb_rises() {
         let mut dac = peripheral("").unwrap();
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
-        dac.select(0, true, &mut drive);
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
+        dac.set_selected(0, true, &mut drive);
         dac.transfer(spi_mode::transfer(2).shifting(0xfff, 12), &mut drive);
         assert!(drive.finish().driven.is_empty());
         assert_eq!(dac.state.latch, 0);
@@ -393,7 +394,7 @@ mod tests {
     #[test]
     fn power_on_drives_every_output_at_vss() {
         let mut dac = peripheral("vss = -1").unwrap();
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
         dac.power_on(&mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven.len(), 6);

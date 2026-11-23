@@ -30,8 +30,8 @@ use crate::registry::Registry;
 use crate::signal::Kind;
 use crate::signal::Signal;
 use crate::time::Clock;
+use crate::time::Moment;
 use crate::time::Time;
-use crate::time::TimeBase;
 use mc683xx_cpu32::frequency::Frequency;
 
 /// The format of the built-in peripherals' snapshots.
@@ -434,7 +434,7 @@ impl Oscillator {
 }
 
 impl Peripheral for Oscillator {
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         (!self.driven).then_some(Time::ZERO)
     }
 
@@ -556,7 +556,7 @@ impl Peripheral for Divider {
         }
     }
 
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         self.pending.map(|pending| pending.at)
     }
 
@@ -716,7 +716,7 @@ impl Peripheral for DcSource {
         drive.drive(Self::OUT, Signal::Analog(self.volts));
     }
 
-    fn sample(&mut self, _: usize, _: Time) -> Option<f64> {
+    fn analog_output(&mut self, _: usize, _: Moment) -> Option<f64> {
         Some(self.volts)
     }
 
@@ -762,6 +762,7 @@ mod tests {
     use crate::registry::Parameters;
     use crate::signal::Signal;
     use crate::time::Clock;
+    use crate::time::Moment;
     use crate::time::Time;
     use crate::time::TimeBase;
     use mc683xx_cpu32::frequency::Frequency;
@@ -790,19 +791,19 @@ mod tests {
         };
         // 10 MHz with an edge at 37 ps: edges at 37 + 100000n.
         let clock = Clock::new(Frequency::from_hz(10_000_000), Time::from_picos(37));
-        let mut drive = Drive::new(Time::from_picos(50), SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::from_picos(50), SYSTEM_CLOCK));
         divider.input(0, Signal::Clock(clock), &mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven.len(), 1);
         assert_eq!(driven[0].at, Time::from_picos(37 + 300_000));
         assert_eq!(driven[0].signal, Signal::Level(false));
-        let mut drive = Drive::new(Time::from_picos(300_037), SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::from_picos(300_037), SYSTEM_CLOCK));
         divider.advance(&mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven[0].at, Time::from_picos(1_000_037));
         assert_eq!(driven[0].signal, Signal::Level(true));
         assert_eq!(
-            divider.next_event(SYSTEM_CLOCK),
+            divider.next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
             Some(Time::from_picos(1_000_037))
         );
     }
@@ -819,10 +820,9 @@ mod tests {
                 address,
                 size,
                 FunctionCode::SupervisorData,
-                Time::ZERO,
             )
         };
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
         registers
             .write(access(2, Size::Word), 0x1234, &mut drive)
             .unwrap();
@@ -894,18 +894,18 @@ mod tests {
         divider.input(
             0,
             Signal::Clock(clock),
-            &mut Drive::new(Time::from_picos(50), SYSTEM_CLOCK),
+            &mut Drive::new(Moment::new(Time::from_picos(50), SYSTEM_CLOCK)),
         );
         let retuned = clock.retuned(Time::from_picos(100_000), Frequency::from_hz(20_000_000));
-        let mut drive = Drive::new(Time::from_picos(100_000), SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::from_picos(100_000), SYSTEM_CLOCK));
         divider.input(0, Signal::Clock(retuned), &mut drive);
         assert!(drive.finish().driven.is_empty());
         assert_eq!(
-            divider.next_event(SYSTEM_CLOCK),
+            divider.next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
             Some(Time::from_picos(37 + 300_000)),
             "the fall driven ahead keeps the old clock's time"
         );
-        let mut drive = Drive::new(Time::from_picos(300_037), SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::from_picos(300_037), SYSTEM_CLOCK));
         divider.advance(&mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven[0].at, retuned.edge(10).unwrap());
@@ -915,7 +915,7 @@ mod tests {
     #[test]
     fn a_dc_source_drives_its_voltage_and_answers_each_sample_with_it() {
         let mut source = DcSource::new(-1.25).unwrap();
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
         source.power_on(&mut drive);
         let driven = drive.finish().driven;
         assert_eq!(driven.len(), 1);
@@ -924,7 +924,10 @@ mod tests {
             (DcSource::OUT, Signal::Analog(-1.25))
         );
         assert_eq!(
-            source.sample(DcSource::OUT, Time::from_picos(1_000)),
+            source.analog_output(
+                DcSource::OUT,
+                Moment::new(Time::from_picos(1_000), SYSTEM_CLOCK)
+            ),
             Some(-1.25)
         );
         assert_eq!(source.volts(), -1.25);
@@ -971,10 +974,9 @@ mod tests {
                     0,
                     Size::Byte,
                     FunctionCode::SupervisorData,
-                    Time::from_picos(1),
                 ),
                 1,
-                &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
+                &mut Drive::new(Moment::new(Time::from_picos(1), SYSTEM_CLOCK)),
             )
             .unwrap();
         recorder.restore(&saved).unwrap();
@@ -1003,10 +1005,9 @@ mod tests {
                     0,
                     Size::Byte,
                     FunctionCode::SupervisorData,
-                    Time::from_picos(1),
                 ),
                 1,
-                &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
+                &mut Drive::new(Moment::new(Time::from_picos(1), SYSTEM_CLOCK)),
             )
             .unwrap();
         let recorded = recorder.inspect();
@@ -1032,7 +1033,7 @@ mod tests {
         divider.input(
             0,
             Signal::Clock(clock),
-            &mut Drive::new(Time::from_picos(50), SYSTEM_CLOCK),
+            &mut Drive::new(Moment::new(Time::from_picos(50), SYSTEM_CLOCK)),
         );
         let divided = divider.inspect();
         assert_eq!(divided.get("divide"), Some(&Value::Integer(10)));
@@ -1051,7 +1052,7 @@ mod tests {
         counter.input(
             0,
             Signal::Level(true),
-            &mut Drive::new(Time::from_picos(10), SYSTEM_CLOCK),
+            &mut Drive::new(Moment::new(Time::from_picos(10), SYSTEM_CLOCK)),
         );
         let counted = counter.inspect();
         assert_eq!(counted.get("level"), Some(&Value::Boolean(true)));
@@ -1075,14 +1076,14 @@ mod tests {
         divider.input(
             0,
             Signal::Clock(clock),
-            &mut Drive::new(Time::from_picos(50), SYSTEM_CLOCK),
+            &mut Drive::new(Moment::new(Time::from_picos(50), SYSTEM_CLOCK)),
         );
         let mut counter = EdgeCounter::new();
         for (level, at) in [(true, 10), (false, 20), (true, 30)] {
             counter.input(
                 0,
                 Signal::Level(level),
-                &mut Drive::new(Time::from_picos(at), SYSTEM_CLOCK),
+                &mut Drive::new(Moment::new(Time::from_picos(at), SYSTEM_CLOCK)),
             );
         }
         let peripherals: [&dyn Peripheral; 5] = [

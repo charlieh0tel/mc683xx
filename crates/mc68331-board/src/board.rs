@@ -1328,7 +1328,7 @@ impl<C: Chip> Board<C> {
     fn next_event(&self) -> Option<Time> {
         let change = self.first_change();
         let peripheral = (0..self.shared.peripherals.len())
-            .filter_map(|index| self.shared.next_event(index))
+            .filter_map(|index| self.shared.next_event(index, self.now))
             .min();
         change.into_iter().chain(peripheral).min()
     }
@@ -1353,7 +1353,11 @@ impl<C: Chip> Board<C> {
                 .map(|(&key, _)| key)
                 .filter(|&(at, _)| at <= self.now);
             let peripheral = (0..self.shared.peripherals.len())
-                .filter_map(|index| self.shared.next_event(index).map(|at| (at, index)))
+                .filter_map(|index| {
+                    self.shared
+                        .next_event(index, self.now)
+                        .map(|at| (at, index))
+                })
                 .filter(|&(at, _)| at <= self.now)
                 .min();
             match (change, peripheral) {

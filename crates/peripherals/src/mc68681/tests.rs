@@ -21,6 +21,7 @@ use mc683xx_board::signal::Direction;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Moment;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::bus::BusError;
@@ -117,7 +118,7 @@ impl Bench {
     /// A `variant` at 3.6864 MHz, powered on.
     fn of(variant: Variant) -> Self {
         let mut duart = Duart::new(variant, super::X1_DEFAULT_HZ);
-        duart.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
+        duart.power_on(&mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)));
         Self { duart }
     }
 
@@ -136,15 +137,15 @@ impl Bench {
         self
     }
 
-    /// An access to `register` at `now` through `role`.
-    fn access(register: u8, role: Role, now: Time) -> PeripheralAccess {
+    /// An access to `register` through `role`.
+    fn access(register: u8, role: Role) -> PeripheralAccess {
         let select = ChipSelect::Numbered(Number::try_from(8).unwrap());
         let function_code = if role == Role::Iack {
             FunctionCode::CpuSpace
         } else {
             FunctionCode::SupervisorData
         };
-        PeripheralAccess::new(select, u32::from(register), Size::Byte, function_code, now).through(
+        PeripheralAccess::new(select, u32::from(register), Size::Byte, function_code).through(
             0,
             role,
             Lane::Lower,
@@ -153,10 +154,10 @@ impl Bench {
 
     /// `register` written `value` at `now`: what it drove.
     fn write(&mut self, register: u8, value: u8, now: Time) -> Vec<Driven> {
-        let mut drive = Drive::new(now, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(now, SYSTEM_CLOCK));
         self.duart
             .write(
-                Self::access(register, Role::ReadWrite, now),
+                Self::access(register, Role::ReadWrite),
                 u32::from(value),
                 &mut drive,
             )
@@ -171,23 +172,24 @@ impl Bench {
 
     /// `register` read at `now`, and what the read drove.
     fn read_driving(&mut self, register: u8, now: Time) -> (u8, Vec<Driven>) {
-        let mut drive = Drive::new(now, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(now, SYSTEM_CLOCK));
         let value = self
             .duart
-            .read(Self::access(register, Role::ReadWrite, now), &mut drive)
+            .read(Self::access(register, Role::ReadWrite), &mut drive)
             .unwrap();
         (value as u8, drive.finish().driven)
     }
 
     /// An interrupt acknowledge at `now`.
     fn acknowledge(&mut self, now: Time) -> Result<u32, BusError> {
-        let access = Self::access(0, Role::Iack, now);
-        self.duart.read(access, &mut Drive::new(now, SYSTEM_CLOCK))
+        let access = Self::access(0, Role::Iack);
+        self.duart
+            .read(access, &mut Drive::new(Moment::new(now, SYSTEM_CLOCK)))
     }
 
     /// `signal` into `port` at `now`: what it drove.
     fn input(&mut self, port: usize, signal: Signal, now: Time) -> Vec<Driven> {
-        let mut drive = Drive::new(now, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(now, SYSTEM_CLOCK));
         self.duart.input(port, signal, &mut drive);
         drive.finish().driven
     }
@@ -197,14 +199,14 @@ impl Bench {
         let mut driven = Vec::new();
         while let Some(next) = self
             .duart
-            .next_event(SYSTEM_CLOCK)
+            .next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK))
             .filter(|&next| next <= until)
         {
-            let mut drive = Drive::new(next, SYSTEM_CLOCK);
+            let mut drive = Drive::new(Moment::new(next, SYSTEM_CLOCK));
             self.duart.advance(&mut drive);
             driven.extend(drive.finish().driven);
         }
-        let mut drive = Drive::new(until, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(until, SYSTEM_CLOCK));
         self.duart.advance(&mut drive);
         driven.extend(drive.finish().driven);
         driven
@@ -323,13 +325,20 @@ fn the_ivr_is_0f_out_of_reset_and_answers_an_acknowledge_only_while_interrupting
     assert_eq!(bench.read(IVR, Time::ZERO), 0x40);
     // no interrupt pending: the DUART ignores IACK (2.11)
     assert_eq!(bench.acknowledge(Time::ZERO), Err(BusError));
-    let iack = Bench::access(0, Role::Iack, Time::ZERO);
-    assert_eq!(bench.duart.wait_states(iack, SYSTEM_CLOCK), None);
+    let iack = Bench::access(0, Role::Iack);
+    assert_eq!(
+        bench
+            .duart
+            .wait_states(iack, Moment::new(Time::ZERO, SYSTEM_CLOCK)),
+        None
+    );
     bench.channel(0);
     bench.write(ISR, 0x01, Time::ZERO);
     assert_eq!(bench.acknowledge(Time::ZERO), Ok(0x40));
     assert_eq!(
-        bench.duart.wait_states(iack, SYSTEM_CLOCK),
+        bench
+            .duart
+            .wait_states(iack, Moment::new(Time::ZERO, SYSTEM_CLOCK)),
         Some(Cycles::ZERO)
     );
 }
@@ -473,7 +482,9 @@ fn a_character_arrives_at_the_center_of_its_stop_bit() {
     let start = Time::from_picos(5000);
     bench.input(RXDB, character(b'x'), start);
     assert_eq!(
-        bench.duart.next_event(SYSTEM_CLOCK),
+        bench
+            .duart
+            .next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
         Some(start + ps(TO_STOP_CENTER))
     );
     bench.run(start + ps(TO_STOP_CENTER - 1));
@@ -556,7 +567,12 @@ fn a_character_arriving_while_the_receiver_is_disabled_is_lost() {
     bench.write(CRA, 0x01, Time::from_picos(BIT));
     bench.run(Time::from_picos(4 * CHARACTER));
     assert_eq!(bench.read(SRA, Time::from_picos(4 * CHARACTER)) & 0x01, 0);
-    assert_eq!(bench.duart.next_event(SYSTEM_CLOCK), None);
+    assert_eq!(
+        bench
+            .duart
+            .next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
+        None
+    );
 }
 
 #[test]
@@ -744,7 +760,10 @@ fn the_counter_counts_down_from_its_start_to_terminal_count() {
     // 16 ticks a count: 40 counts
     let tick = 1_000_000_000_000 / 3_686_400;
     assert_eq!(count(&mut bench, Time::from_picos(640 * tick + 300)), 60);
-    let terminal = bench.duart.next_event(SYSTEM_CLOCK).unwrap();
+    let terminal = bench
+        .duart
+        .next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK))
+        .unwrap();
     assert_eq!(
         terminal,
         Time::from_picos((1600 * 1_000_000_000_000_u64).div_ceil(3_686_400))
@@ -829,7 +848,7 @@ fn the_output_port_shows_the_complement_of_its_register() {
     let mut bench = Bench::new();
     // power-on drove every pin high and IRQ high
     let mut fresh = Duart::new(Variant::Mc68681, super::X1_DEFAULT_HZ);
-    let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+    let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
     fresh.power_on(&mut drive);
     let first = levels(&drive.finish().driven);
     assert_eq!(first.len(), 9);
@@ -893,7 +912,9 @@ fn cts_holds_the_transmitter_until_it_goes_low() {
     // IP1 is CTSB; high from power-on
     assert!(frames(&bench.write(RBB, b'c', Time::ZERO), TXDB).is_empty());
     assert_eq!(
-        bench.duart.next_event(SYSTEM_CLOCK),
+        bench
+            .duart
+            .next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
         None,
         "nothing to wait for"
     );
@@ -925,7 +946,10 @@ fn the_input_port_reads_its_pins_and_its_detectors_take_25_to_50_microseconds() 
         0x0b,
         "not yet a change"
     );
-    let recognized = bench.duart.next_event(SYSTEM_CLOCK).unwrap();
+    let recognized = bench
+        .duart
+        .next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK))
+        .unwrap();
     // two samples 96 ticks apart, 26.04 microseconds
     assert!((26_000_000..=52_100_000).contains(&(recognized.picos() - 1_000_000)));
     bench.run(recognized);
@@ -939,10 +963,20 @@ fn the_input_port_reads_its_pins_and_its_detectors_take_25_to_50_microseconds() 
     // a pulse shorter than a sample period is not seen
     bench.input(IP0 + 2, Signal::Level(true), Time::from_picos(100_000_000));
     bench.input(IP0 + 2, Signal::Level(false), Time::from_picos(101_000_000));
-    assert_eq!(bench.duart.next_event(SYSTEM_CLOCK), None);
+    assert_eq!(
+        bench
+            .duart
+            .next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
+        None
+    );
     // an IP4 change has no detector
     bench.input(IP0 + 4, Signal::Level(false), Time::from_picos(200_000_000));
-    assert_eq!(bench.duart.next_event(SYSTEM_CLOCK), None);
+    assert_eq!(
+        bench
+            .duart
+            .next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
+        None
+    );
     assert_eq!(bench.read(OPCR, Time::from_picos(200_000_000)), 0xeb);
 }
 
@@ -962,7 +996,7 @@ fn reset_clears_the_mask_the_output_port_and_the_channels() {
     bench.write(IVR, 0x55, Time::ZERO);
     bench.write(START, 0xff, Time::ZERO);
     bench.write(ACR, 0x30, Time::ZERO);
-    let mut drive = Drive::new(Time::from_picos(10), SYSTEM_CLOCK);
+    let mut drive = Drive::new(Moment::new(Time::from_picos(10), SYSTEM_CLOCK));
     bench.duart.reset(&mut drive);
     let driven = levels(&drive.finish().driven);
     assert_eq!(driven.len(), 9, "every pin high, IRQ negated");
@@ -1014,7 +1048,9 @@ fn the_scc68692s_timeout_mode_restarts_the_counter_at_each_character() {
     bench.write(ISR, 0x08, Time::ZERO);
     bench.write(CRA, 0xa0, Time::ZERO);
     assert_eq!(
-        bench.duart.next_event(SYSTEM_CLOCK),
+        bench
+            .duart
+            .next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
         None,
         "stopped until a character"
     );
@@ -1023,7 +1059,10 @@ fn the_scc68692s_timeout_mode_restarts_the_counter_at_each_character() {
     let second = Time::from_picos(CHARACTER + TO_STOP_CENTER);
     bench.run(second);
     assert!(!bench.duart.interrupt_request());
-    let timeout = bench.duart.next_event(SYSTEM_CLOCK).unwrap();
+    let timeout = bench
+        .duart
+        .next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK))
+        .unwrap();
     let span = timeout.picos() - second.picos();
     assert!((1_301_000_000..1_303_000_000).contains(&span), "{span}");
     bench.run(timeout);
@@ -1183,9 +1222,8 @@ fn a_word_cycle_through_both_lanes_carries_the_register_on_data_15_8() {
         u32::from(IVR),
         Size::Word,
         FunctionCode::SupervisorData,
-        Time::ZERO,
     );
-    let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+    let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
     bench.duart.write(access, 0x4142, &mut drive).unwrap();
     assert_eq!(bench.duart.state.ivr, 0x41, "the upper byte (SIMRM 5.3.3)");
     assert_eq!(bench.duart.read(access, &mut drive), Ok(0x4100));
@@ -1205,7 +1243,9 @@ fn reset_runs_the_mc68681s_timer_and_stops_the_scc68692s() {
         // X1/16, preload 4: a terminal count every 64 ticks
         bench.write(ACR, acr, Time::ZERO);
         bench.write(CTLR, 4, Time::ZERO);
-        bench.duart.reset(&mut Drive::new(tick(32), SYSTEM_CLOCK));
+        bench
+            .duart
+            .reset(&mut Drive::new(Moment::new(tick(32), SYSTEM_CLOCK)));
         assert_eq!(bench.duart.state.acr, 0x70, "{variant:?}: timer mode");
         // the second terminal count from RESET
         let second = tick(32 + 2 * 64);
@@ -1244,13 +1284,13 @@ fn a_stop_condition_fires_for_its_character_and_survives_a_restore() {
     let snapshot = bench.duart.save().unwrap();
     let start = Time::from_picos(5000);
     let fired = |bench: &mut Bench, at: Time| {
-        let mut drive = Drive::new(at, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(at, SYSTEM_CLOCK));
         bench.duart.advance(&mut drive);
         drive.finish().fired
     };
     let written = |bench: &mut Bench, byte: u8, at: Time| {
-        let mut drive = Drive::new(at, SYSTEM_CLOCK);
-        let access = Bench::access(RBB, Role::ReadWrite, at);
+        let mut drive = Drive::new(Moment::new(at, SYSTEM_CLOCK));
+        let access = Bench::access(RBB, Role::ReadWrite);
         bench
             .duart
             .write(access, u32::from(byte), &mut drive)

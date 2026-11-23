@@ -126,6 +126,7 @@ mod tests {
     use crate::SYSTEM_CLOCK;
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::signal::Signal;
+    use mc683xx_board::time::Moment;
     use mc683xx_board::time::Time;
     use mc683xx_target::size::Size;
 
@@ -139,8 +140,8 @@ mod tests {
     fn read(buffer: &mut Buffer, size: Size) -> u32 {
         buffer
             .read(
-                access(size, Time::ZERO),
-                &mut Drive::new(Time::ZERO, SYSTEM_CLOCK),
+                access(size),
+                &mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
             )
             .unwrap()
     }
@@ -152,14 +153,14 @@ mod tests {
         buffer.input(
             3,
             Signal::Level(false),
-            &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
+            &mut Drive::new(Moment::new(Time::from_picos(1), SYSTEM_CLOCK)),
         );
         assert_eq!(read(&mut buffer, Size::Byte), 0xf7);
         buffer
             .write(
-                access(Size::Byte, Time::from_picos(2)),
+                access(Size::Byte),
                 0,
-                &mut Drive::new(Time::from_picos(2), SYSTEM_CLOCK),
+                &mut Drive::new(Moment::new(Time::from_picos(2), SYSTEM_CLOCK)),
             )
             .unwrap();
         assert_eq!(
@@ -183,13 +184,13 @@ mod tests {
         buffer.input(
             BUS,
             Signal::Bus(0x1a5),
-            &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
+            &mut Drive::new(Moment::new(Time::from_picos(1), SYSTEM_CLOCK)),
         );
         assert_eq!(read(&mut buffer, Size::Byte), 0xa5);
         buffer.input(
             0,
             Signal::Level(false),
-            &mut Drive::new(Time::from_picos(2), SYSTEM_CLOCK),
+            &mut Drive::new(Moment::new(Time::from_picos(2), SYSTEM_CLOCK)),
         );
         assert_eq!(read(&mut buffer, Size::Byte), 0xa4);
     }

@@ -403,13 +403,14 @@ Neither has a default: a peripheral gives both, is `Stateless`, or is
 `StateError::unsupported("its role")`.
 
 A peripheral on a board file implements `mc683xx_board::peripheral::Peripheral`
-instead (`docs/board-files.md`), on board time.  A call's time there: one
-given a `Drive` takes it from `drive.now()` and has no time argument
-(`read`, `write`, `memory_read`, `memory_write`, `power_on`, `reset`,
-`transfer`, `select`, `input`, `advance`); one without a drive takes it
-as an argument (`sample(port, now)`, `set_qspi_clock(clock, now,
-system_clock)`) or in its access (`PeripheralAccess::now`, for
-`wait_states` and `dsack_port`).
+instead (`docs/board-files.md`), on board time.  A call's time there is
+a `time::Moment`, board time and the chip's system clock then: one given
+a `Drive` takes it from `drive.moment()` (`drive.now()` for the time
+alone) and has no time argument (`read`, `write`, `memory_read`,
+`memory_write`, `power_on`, `reset`, `transfer`, `set_selected`, `input`,
+`advance`); one without a drive takes it as its last argument, `moment`
+(`wait_states`, `dsack_port`, `set_qspi_clock`, `analog_output`,
+`next_event`).
 
 ### Bus peripherals: on no chip select
 

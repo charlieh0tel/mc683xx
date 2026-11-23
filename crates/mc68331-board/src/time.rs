@@ -717,9 +717,9 @@ impl ClockHistory {
 /// clock moves (an MC68331 runs at 8.388608 MHz from the 32.768 kHz
 /// reference until SYNCR is written, MC68331UM 4.3), so a peripheral that
 /// converts must not keep a base it was given before: each call that
-/// has a time gives it one, in its drive ([`Drive::system_clock`]) or as
-/// an argument ([`Peripheral::next_event`]).  A part the chip does not
-/// clock keeps a base of its own that never moves
+/// has a time gives it one, in its [`Moment`]: its drive's
+/// ([`Drive::moment`]) or an argument ([`Peripheral::next_event`]).  A
+/// part the chip does not clock keeps a base of its own that never moves
 /// ([`steady`](Self::steady)).
 ///
 /// The rounding rule, the scheduled input rule's ([PLAN.md,
@@ -728,7 +728,7 @@ impl ClockHistory {
 /// rounds down, to the last picosecond at or before it (`time`).  So
 /// `cycles(time(c))` is `c`.
 ///
-/// [`Drive::system_clock`]: crate::peripheral::Drive::system_clock
+/// [`Drive::moment`]: crate::peripheral::Drive::moment
 /// [`Peripheral::next_event`]: crate::peripheral::Peripheral::next_event
 /// [plan-peripherals]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#peripherals
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -814,12 +814,60 @@ impl TimeBase {
     }
 }
 
+/// A point in board time and the chip's system clock as of then: what a
+/// peripheral call is given for its time ([`Drive::moment`], or the
+/// `moment` argument of a call with no drive, as
+/// [`Peripheral::next_event`]).
+///
+/// The system clock moves (SYNCR, a reset; [`TimeBase`]), so a part that
+/// converts takes it from each call's moment and keeps none between calls.
+///
+/// [`Drive::moment`]: crate::peripheral::Drive::moment
+/// [`Peripheral::next_event`]: crate::peripheral::Peripheral::next_event
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Moment {
+    /// The point in board time.
+    now: Time,
+    /// The chip's system clock on board time, as of then.
+    system_clock: TimeBase,
+}
+
+impl Moment {
+    /// The moment `now`, the chip's system clock on board time
+    /// `system_clock`.
+    #[must_use]
+    pub const fn new(now: Time, system_clock: TimeBase) -> Self {
+        Self { now, system_clock }
+    }
+
+    /// Its point in board time.
+    #[must_use]
+    pub const fn now(self) -> Time {
+        self.now
+    }
+
+    /// The chip's system clock on board time, as of then.
+    #[must_use]
+    pub const fn system_clock(self) -> TimeBase {
+        self.system_clock
+    }
+
+    /// The chip's system clock at it: the first clock at or after `now`,
+    /// rounded up toward the chip as [`TimeBase::cycles`] rounds.
+    #[must_use]
+    pub fn cycle(self) -> Cycle {
+        self.system_clock.cycles(self.now)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mc683xx_cpu32::cycles::Cycle;
 
     use super::Clock;
     use super::ClockHistory;
+    use super::Moment;
     use super::NonZeroSpan;
     use super::PHASE_UNITS;
     use super::Span;
@@ -1108,6 +1156,25 @@ mod tests {
             base.moved(Cycle::from_clocks(20), Frequency::from_hz(16_777_216)),
             base,
             "no drift"
+        );
+    }
+
+    #[test]
+    fn a_moment_gives_its_clock_rounded_up() {
+        let base = TimeBase::new(
+            Cycle::from_clocks(10),
+            Time::from_picos(1_000),
+            Frequency::from_hz(16_777_216),
+        );
+        let moment = Moment::new(Time::from_picos(1_001), base);
+        assert_eq!(
+            (moment.now(), moment.system_clock()),
+            (Time::from_picos(1_001), base)
+        );
+        assert_eq!(moment.cycle(), Cycle::from_clocks(11));
+        assert_eq!(
+            Moment::new(Time::from_picos(1_000), base).cycle(),
+            Cycle::from_clocks(10)
         );
     }
 
