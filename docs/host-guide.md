@@ -1414,11 +1414,15 @@ among them; it gives the names of the nets that went, so a host sees
 an external endpoint left on no net.  Each refuses a name the description
 lacks (`error::EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
 every method of the chip's.  `Chip` is sealed: a host names it in a
-bound (`Board<C: Chip>`) and calls its methods (`cpu`, `now`,
-`memory`, the resets, `save`; a halt is `cpu().halted()`), but cannot implement it, nor
+bound (`Board<C: Chip>`) and uses its items (`TYPE`, the name a
+board file's `[chip] type` gives, `"mc68331"`; `cpu`, `cpu_control`,
+`now`, `memory`, the resets, `save`; a halt is `cpu().halted()`), but cannot implement it, nor
 `ChipBuilder` or `ChipPin`; a new part is added inside mc683xx.  The
 plumbing the board runs the chip with is hidden from the docs and
-outside semver.
+outside semver.  `board.cpu_control()` lends the chip's
+`CpuControl` (registers, hooks, page permissions), as
+`board.chip_mut().cpu_control()` does: a data watch (`add_write_hook`)
+beside `watch_code`, a hook that breaks ending the run `Stop::Hook`.
 
 - **Board time.** `time::Time` is a time on the board, picoseconds
   since power-on, made by `Time::from_picos`, `from_secs`, `from_secs_f64`

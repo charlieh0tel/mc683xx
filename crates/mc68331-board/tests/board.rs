@@ -4211,6 +4211,40 @@ attach = [{ select = "CSBOOT" }]
 }
 
 #[test]
+fn a_data_watch_through_the_boards_cpu_control_stops_the_run() {
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+writable = true
+attach = [{ select = "CSBOOT" }]
+"#;
+    let watched = 0x8000;
+    let program: Vec<u16> = store(watched, 0x1234)
+        .into_iter()
+        .chain([BRA_SELF])
+        .collect();
+    let mut board = board("data-watch", text, &program);
+    let written = Rc::new(Cell::new(None));
+    let seen = Rc::clone(&written);
+    let id =
+        board
+            .cpu_control()
+            .add_write_hook(Address(watched)..=Address(watched), move |access| {
+                seen.set(Some(access.value));
+                ControlFlow::Break(())
+            });
+    let run = board.run_until(Time::from_secs(1)).unwrap();
+    assert_eq!(run.stop, Stop::Hook(id));
+    assert_eq!(written.get(), Some(0x1234));
+    assert_eq!(board.chip().cpu().registers.pc, Address(START + 8));
+}
+
+#[test]
 fn an_exception_taken_before_a_fault_stop_is_traced() {
     let text = r#"
 version = 1

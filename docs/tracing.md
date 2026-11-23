@@ -8,7 +8,9 @@ same bytes, so two runs' traces, or a trace and one another tool
 writes in this format, diff line for line.  The records are the API;
 the text is one output of them: `trace::Line`'s `Display`, the chip's
 name and the record's `Display`.  `Board::set_tracing` chooses what is
-recorded, `Board::watch_code` adds a code watch, and
+recorded, `Board::watch_code` adds a code watch (a data watch is a
+hook through `Board::cpu_control`, which ends the run rather than
+recording), and
 `Board::take_trace` gives the records in cycle order.
 
 ## The text

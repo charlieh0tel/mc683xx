@@ -25,6 +25,7 @@ use std::rc::Weak;
 use std::time::Duration;
 
 use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
 use mc683xx_cpu32::cpu::hooks::HookId;
 use mc683xx_cpu32::cpu::state::Layer;
@@ -1128,6 +1129,15 @@ impl<C: Chip> Board<C> {
             .add_code_hook(pc..=pc, |_| ControlFlow::Break(()));
         self.hooks.watches.insert(id);
         id
+    }
+
+    /// The CPU's registers, hooks and page permissions, to change, as
+    /// the chip lends them ([`Chip::cpu_control`]): a data watch
+    /// (`add_write_hook`, `add_read_hook`) beside
+    /// [`watch_code`](Self::watch_code).  A hook that breaks ends the
+    /// run [`Stop::Hook`] after its instruction.
+    pub fn cpu_control(&mut self) -> CpuControl<'_> {
+        self.chip.cpu_control()
     }
 
     /// Where the CPU is now, as a `position` record.
