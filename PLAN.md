@@ -1562,7 +1562,7 @@ hand.  The keys are in `docs/board-files.md`.
   run, which the board records and goes on from), pin edges with
   their clock and board time, QSPI transfers, positions and the run's
   end.  The text, `CHIP: KIND key=value ...` after a `# mc683xx trace
-  2 chip=CHIP` header, the chip's `Chip::TYPE` the prefix, is
+  4 chip=CHIP` header, the chip's `Chip::TYPE` the prefix, is
   smartclock-emu's shape, so a smartclock run and a board run diff
   line for line.  smartclock-emu's own traces call a bus cycle
   `device`; boot-diff reads that dialect.

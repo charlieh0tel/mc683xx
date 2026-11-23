@@ -30,12 +30,12 @@ use crate::signal::Signal;
 use crate::time::Time;
 
 /// The text's version, which [`header`] gives.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 /// Longs in a code record's stack.
 pub const STACK_LONGS: usize = 8;
 
 /// A trace's first line, for a run of `chip` (its [`Chip::TYPE`]): the
-/// format, its version and the chip, `# mc683xx trace 3 chip=mc68331`.
+/// format, its version and the chip, `# mc683xx trace 4 chip=mc68331`.
 #[must_use]
 pub fn header(chip: &str) -> String {
     format!("# mc683xx trace {VERSION} chip={chip}")
@@ -269,19 +269,6 @@ fn longs(values: impl Iterator<Item = Option<u32>>) -> String {
         .join(",")
 }
 
-/// A stop's reason as `stopped` names it.
-const fn reason(stop: Stop) -> &'static str {
-    match stop {
-        Stop::Budget | Stop::Stopped => "budget",
-        Stop::Halted(_) => "halted",
-        Stop::Hook(_) => "hook",
-        Stop::Requested => "requested",
-        Stop::Background(_) => "background",
-        Stop::Fault => "fault",
-        _ => "other",
-    }
-}
-
 /// `bus-cycle key=value ...`, after a [`Line`]'s prefix
 /// ([`docs/tracing.md`][tracing]).
 ///
@@ -420,7 +407,7 @@ impl fmt::Display for StoppedRecord {
             "stopped cycle={} instructions={} reason={}",
             self.cycle.clocks(),
             self.instructions,
-            reason(self.stop)
+            self.stop
         )
     }
 }
@@ -579,6 +566,13 @@ mod tests {
             stopped.to_string(),
             "stopped cycle=3 instructions=1 reason=budget"
         );
+        // the CPU stopped through the run's end is not its budget
+        let stopped = Record::Stopped(StoppedRecord {
+            cycle: Cycle::from_clocks(3),
+            instructions: 1,
+            stop: Stop::Stopped,
+        });
+        assert!(stopped.to_string().ends_with(" reason=stopped"));
     }
 
     #[test]
@@ -625,6 +619,6 @@ mod tests {
             Line::new("mc68331", &stopped).to_string(),
             "mc68331: stopped cycle=3 instructions=1 reason=budget"
         );
-        assert_eq!(header("mc68331"), "# mc683xx trace 3 chip=mc68331");
+        assert_eq!(header("mc68331"), "# mc683xx trace 4 chip=mc68331");
     }
 }

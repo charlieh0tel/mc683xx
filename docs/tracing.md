@@ -26,7 +26,7 @@ are an MC68331's.  Lines that start with `#` are comments: a trace
 starts with
 
 ```
-# mc683xx trace 3 chip=mc68331
+# mc683xx trace 4 chip=mc68331
 ```
 
 the format, its version (`trace::VERSION`, `trace::header`) and the
@@ -140,9 +140,10 @@ of board time.
 mc68331: stopped cycle=1677721 instructions=420001 reason=budget
 ```
 
-`cycle`, `instructions`, and `reason`: `budget`, `halted`, `hook`,
-`requested`, `background` or `fault` (`other` for a stop a later core
-adds).
+`cycle`, `instructions`, and `reason`, the stop's `Display`:
+`budget`, `stopped` (the CPU in `stop` or `lpstop` through the run's
+end), `halted`, `hook`, `requested`, `background` or `fault`; a stop
+a later core adds prints its own name.
 
 ## Net lines
 
