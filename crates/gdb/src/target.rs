@@ -435,7 +435,7 @@ impl Target for Machine {
 
     fn reset(&mut self) -> Result<TargetReset, Infallible> {
         // A halt reading the vectors is what the next run reports.
-        let _ = Self::reset(self);
+        Self::reset(self);
         Ok(TargetReset::Done)
     }
 }

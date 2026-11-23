@@ -26,6 +26,7 @@ use mc683xx_cpu32::exception::BusCycleKind;
 use mc683xx_cpu32::exception::Exception;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::registers::status;
+use mc683xx_target::register::Register;
 use regex::Regex;
 use serde_json::Value;
 
@@ -477,12 +478,8 @@ fn run(
         function.address,
         laid_out.sp,
         |registers| {
-            for (index, &value) in starting.iter().enumerate() {
-                if index < registers.data.len() {
-                    registers.data[index] = value;
-                } else {
-                    registers.set_address(index - registers.data.len(), value);
-                }
+            for (&register, &value) in Register::ALL.iter().zip(&starting) {
+                registers.set_register(register, value);
             }
         },
         observe,
@@ -584,13 +581,7 @@ fn outcome(
     match call.stopped {
         Stopped::Returned => {
             let registers = &call.registers;
-            let value = |index: usize| {
-                if index < registers.data.len() {
-                    registers.data[index]
-                } else {
-                    registers.address(index - registers.data.len())
-                }
-            };
+            let value = |index: usize| registers.register(Register::ALL[index]);
             let mut broken: Vec<String> = preserves
                 .iter()
                 .filter(|&&index| value(index) != starting[index])
@@ -767,6 +758,7 @@ mod tests {
     use mc683xx_cpu32::registers::Registers;
     use mc683xx_target::address::Address;
     use mc683xx_target::function_code::FunctionCode;
+    use mc683xx_target::register::Register;
     use mc683xx_target::size::Size;
 
     use super::Corpus;
@@ -789,9 +781,8 @@ mod tests {
         let mut registers = Registers::default();
         registers.set_sr(SUPERVISOR);
         let starting = starting_registers();
-        registers.data.copy_from_slice(&starting[..8]);
-        for (number, &value) in starting[8..].iter().enumerate() {
-            registers.set_address(number, value);
+        for (&register, &value) in Register::ALL.iter().zip(&starting) {
+            registers.set_register(register, value);
         }
         registers.ssp = Address(sp + 4);
         Call {

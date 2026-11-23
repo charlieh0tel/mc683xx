@@ -19,9 +19,9 @@ use crate::bus::LPSTOP_BROADCAST;
 use crate::bus::Read;
 use crate::bus::StopRequest;
 use crate::cpu::Cpu;
-use crate::cpu::Halt;
 use crate::cpu::bare::LimitedRun;
 use crate::cpu::bare::Limits;
+use crate::cpu::bare::TakeExceptionError;
 use crate::cpu::state::Layer;
 use crate::cpu::state::StateError;
 use crate::cpu::state::decode_layer;
@@ -380,7 +380,7 @@ impl Machine {
         let pages = (0..length / PAGE_BYTES).map(|page| start.offset(page * PAGE_BYTES));
         if let Some(mapped) = pages
             .clone()
-            .find(|&page| self.cpu.memory.entry(Space::Supervisor, page) != Page::BUS)
+            .find(|&page| self.cpu.memory.page(Space::Supervisor, page) != Page::BUS)
         {
             return Err(MapError::Mapped(mapped));
         }
@@ -421,7 +421,7 @@ impl Machine {
         // that address: not a page the host mapped from it elsewhere.
         let mut reached: Vec<(RegionId, u64)> = Vec::new();
         for page in (0..length / PAGE_BYTES).map(|page| start.offset(page * PAGE_BYTES)) {
-            if let Some(backing) = self.cpu.memory.entry(Space::Supervisor, page).read
+            if let Some(backing) = self.cpu.memory.page(Space::Supervisor, page).read
                 && let Some(&from) = self.maps.get(&backing.region)
                 && u64::from(from.0) + u64::from(backing.offset) == u64::from(page.0)
                 && reached
@@ -573,13 +573,26 @@ impl Machine {
     }
 
     /// The reset exception (CPU32RM 6.2.1): SSP and PC from the long
-    /// words at zero.
+    /// words at zero; a fault reading them halts the CPU, as
+    /// [`Cpu::reset`] says.
+    pub fn reset(&mut self) {
+        self.cpu.reset(&mut self.bus, self.now);
+    }
+
+    /// Takes the exception of `vector` now, the interrupt mask set to
+    /// `level` if given, whatever it was ([`Cpu::take_exception`]): the
+    /// frame stacked, PC at the handler, the clock unmoved.
     ///
     /// # Errors
     ///
-    /// As [`Cpu::reset`].
-    pub fn reset(&mut self) -> Result<(), Halt> {
-        self.cpu.reset(&mut self.bus, self.now)
+    /// As [`Cpu::take_exception`].
+    pub fn take_exception(
+        &mut self,
+        vector: Vector,
+        level: Option<InterruptLevel>,
+    ) -> Result<(), TakeExceptionError> {
+        self.cpu
+            .take_exception(&mut self.bus, self.now, vector, level)
     }
 
     /// Runs until `limits` or a stop ([`Cpu::run_limited`]).

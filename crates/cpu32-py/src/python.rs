@@ -24,7 +24,6 @@ use pyo3::types::PyAnyMethods;
 use pyo3::types::PyModule;
 use pyo3::types::PyModuleMethods;
 
-use crate::bare::DeviationsView;
 use crate::bare::EndView;
 use crate::bare::FaultCauseKind;
 use crate::bare::FaultStopView;
@@ -66,6 +65,7 @@ use crate::exceptions::BusError;
 use crate::function_code::FunctionCode;
 use crate::gdb::Ending;
 use crate::hooks::BusCycleKind;
+use crate::hooks::ExceptionReturnView;
 use crate::hooks::ExceptionView;
 use crate::hooks::HookIdView;
 use crate::hooks::InstructionView;
@@ -93,7 +93,7 @@ impl From<Error> for PyErr {
         match error {
             Error::Unknown { .. } | Error::Range { .. } => PyIndexError::new_err(message),
             Error::Budget(_) => PyOverflowError::new_err(message),
-            Error::Built => PyRuntimeError::new_err(message),
+            Error::Built | Error::Take(_) => PyRuntimeError::new_err(message),
             Error::Unmapped { kind: RUN_END, .. } | Error::Run(_) => {
                 exceptions::RunError::new_err(message)
             }
@@ -115,6 +115,7 @@ impl From<Error> for PyErr {
             | Error::Register(_)
             | Error::Width { .. }
             | Error::Level(_)
+            | Error::Mask(_)
             | Error::Clock
             | Error::Frequency(_)
             | Error::Permissions(_)
@@ -165,7 +166,6 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<FaultStopView>()?;
     module.add_class::<FaultCauseKind>()?;
     module.add_class::<InterceptedView>()?;
-    module.add_class::<DeviationsView>()?;
     module.add_class::<StopRequestView>()?;
     module.add_class::<SyncRequestView>()?;
     module.add_class::<DiversionView>()?;
@@ -205,6 +205,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<BusCycleKind>()?;
     module.add_class::<InvalidReason>()?;
     module.add_class::<ExceptionView>()?;
+    module.add_class::<ExceptionReturnView>()?;
     module.add_class::<BoardView>()?;
     module.add_class::<AccessView>()?;
     module.add_class::<RoleView>()?;

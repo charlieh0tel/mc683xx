@@ -46,6 +46,7 @@ use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::clock::ClockSource;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::register::Register;
 use mc683xx_target::size::Size;
 use snapshot_golden::version_of;
 
@@ -3099,7 +3100,7 @@ fn copying_with(more: impl FnOnce(&mut Builder)) -> (Mc68331, MemoryId, Peripher
     write_register(&mut chip, SIM + 0x4e, CS1_FAST);
     write_register(&mut chip, SIM + 0x50, CS1_BAR);
     write_register(&mut chip, SIM + 0x52, CS1_FAST);
-    chip.registers_mut().set_address(0, CS0_BASE);
+    chip.registers_mut().set_register(Register::A0, CS0_BASE);
     chip.registers_mut().data[0] = 9;
     (chip, ram, counter)
 }
@@ -3266,7 +3267,7 @@ fn a_restore_rebuilds_the_page_tables_from_the_chips_own_wiring() {
         chip
     };
     let pages = |chip: &Mc68331| {
-        [CS0_BASE, CS1_BASE].map(|base| chip.cpu().memory.entry(Space::Supervisor, Address(base)))
+        [CS0_BASE, CS1_BASE].map(|base| chip.cpu().memory.page(Space::Supervisor, Address(base)))
     };
     let chip = wired(0, 1);
     let snapshot = chip.save().unwrap();
@@ -3626,7 +3627,7 @@ fn interrupt_trace() -> Wired {
 
 /// The D0 values [`interrupt_trace`] logged.
 fn trace_log(board: &Wired) -> Vec<u32> {
-    let end = (board.chip.cpu().registers.address(0) - RAM) as usize;
+    let end = (board.chip.cpu().registers.register(Register::A0) - RAM) as usize;
     board.chip.memory(board.ram)[(TRACE_LOG - RAM) as usize..end]
         .chunks(4)
         .map(|long| u32::from_be_bytes([long[0], long[1], long[2], long[3]]))

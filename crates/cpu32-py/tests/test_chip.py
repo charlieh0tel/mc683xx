@@ -893,6 +893,17 @@ def test_an_invalid_hook_and_an_exception_hook_see_a_bus_error():
     assert chip.read_register("PC") == BUS_ERROR_HANDLER
 
 
+def test_an_exception_return_hook_installs_and_goes():
+    builder, _, _ = board(WIRING + [short_branch(BRA_SHORT, 1)], Faulting())
+    chip = builder.build()
+    returned = []
+    hook = chip.add_exception_return_hook(returned.append)
+    chip.run_for(1000)
+    assert returned == []
+    assert chip.remove_hook(hook)
+    assert not chip.remove_hook(hook)
+
+
 def test_an_invalid_hook_stops_once_the_exception_is_taken():
     builder, _, _ = board(WIRING + [MOVE_WORD_ABSOLUTE_TO_D1, PERIPHERAL_BASE >> 16, 0x0020], Faulting())
     chip = builder.build()
@@ -1299,7 +1310,6 @@ def test_enums_and_values_hash_as_they_compare() -> None:
             mc683xx.PortState(1, 2, 3, 4),
             mc683xx.Role.IACK,
             mc683xx.Lane.UPPER,
-            mc683xx.Deviations(misaligned=True),
         ]
 
     for one, other in zip(values(), values()):

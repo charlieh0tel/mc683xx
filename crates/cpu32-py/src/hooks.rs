@@ -8,6 +8,7 @@ use std::ops::ControlFlow;
 
 use mc683xx_cpu32::cpu::hooks::Control;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
+use mc683xx_cpu32::cpu::hooks::ExceptionReturn;
 use mc683xx_cpu32::cpu::hooks::HookId;
 use mc683xx_cpu32::cpu::hooks::Instruction;
 use mc683xx_cpu32::cpu::hooks::Invalid;
@@ -53,7 +54,7 @@ pub(crate) fn register_dictionary<'py>(
 ) -> PyResult<Bound<'py, PyDict>> {
     let dictionary = PyDict::new(py);
     for register in Register::all() {
-        dictionary.set_item(register.name(), register.read(registers))?;
+        dictionary.set_item(register.to_string(), register.read(registers))?;
     }
     Ok(dictionary)
 }
@@ -122,6 +123,13 @@ impl MemoryAccessView {
     #[getter]
     const fn value(&self) -> u32 {
         self.0.value
+    }
+
+    /// For a write, the value it replaced, read with no cycle; `None`
+    /// for a read, and for a write to a peripheral.
+    #[getter]
+    const fn previous(&self) -> Option<u32> {
+        self.0.previous
     }
 
     /// The address of the instruction it is part of.
@@ -352,6 +360,48 @@ impl ExceptionView {
     }
 }
 
+/// An exception returned from, as an exception return hook sees it.
+#[pyclass(name = "ExceptionReturn", module = "mc683xx", frozen)]
+#[derive(Debug)]
+pub(crate) struct ExceptionReturnView(ExceptionReturn);
+
+#[pymethods]
+impl ExceptionReturnView {
+    /// The vector number its frame names.
+    #[getter]
+    const fn vector(&self) -> u8 {
+        self.0.vector.0
+    }
+
+    /// The PC it returns to.
+    #[getter]
+    const fn pc(&self) -> u32 {
+        self.0.pc.0
+    }
+
+    /// The SR it restored.
+    #[getter]
+    const fn sr(&self) -> u16 {
+        self.0.sr
+    }
+
+    /// Its frame's lowest address: the `ExceptionEntry`'s `stack`.
+    #[getter]
+    const fn stack(&self) -> u32 {
+        self.0.stack.0
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ExceptionReturn(vector={}, pc={:#08x}, sr={:#06x}, stack={:#08x})",
+            self.vector(),
+            self.pc(),
+            self.sr(),
+            self.stack()
+        )
+    }
+}
+
 /// `callable`, which must be callable, as a hook whose argument is
 /// `view` of what the Rust hook sees.
 pub(crate) fn hook<T, V>(
@@ -419,4 +469,9 @@ pub(crate) const fn invalid_access_with(
 /// An exception hook's argument.
 pub(crate) const fn exception_entry(entry: &ExceptionEntry) -> ExceptionView {
     ExceptionView(*entry)
+}
+
+/// An exception return hook's argument.
+pub(crate) const fn exception_return(exception_return: &ExceptionReturn) -> ExceptionReturnView {
+    ExceptionReturnView(*exception_return)
 }

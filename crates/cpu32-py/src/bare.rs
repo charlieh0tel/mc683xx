@@ -17,7 +17,6 @@ use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use mc683xx_cpu32::cpu;
-use mc683xx_cpu32::cpu::bare::Deviations;
 use mc683xx_cpu32::cpu::bare::End;
 use mc683xx_cpu32::cpu::bare::FaultCause;
 use mc683xx_cpu32::cpu::bare::FaultStop;
@@ -26,6 +25,7 @@ use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::hooks::Control;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
+use mc683xx_cpu32::cpu::hooks::ExceptionReturn;
 use mc683xx_cpu32::cpu::hooks::HookId;
 use mc683xx_cpu32::cpu::hooks::Instruction;
 use mc683xx_cpu32::cpu::hooks::InvalidAccess;
@@ -34,6 +34,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::flat;
 use mc683xx_cpu32::flat::Machine;
+use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::registers::Registers;
@@ -92,6 +93,8 @@ enum Context {
     Invalid(InvalidAccess),
     /// An exception hook's entry.
     Exception(ExceptionEntry),
+    /// An exception return hook's return.
+    ExceptionReturn(ExceptionReturn),
 }
 
 /// A hook that fired: its callable and what it saw.
@@ -322,70 +325,6 @@ impl LimitedRunView {
     }
 }
 
-/// Deviations from the CPU32, for parity runs against an emulator that
-/// has them; never the CPU's behavior (Rust's `bare::Deviations`).
-#[pyclass(
-    name = "Deviations",
-    module = "mc683xx",
-    frozen,
-    eq,
-    hash,
-    get_all,
-    from_py_object
-)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct DeviationsView {
-    /// A word or long at an odd data address is run as byte cycles, not
-    /// an address error.  Fetches stay strict.
-    misaligned: bool,
-    /// T1 and T0 trace nothing.
-    untraced: bool,
-}
-
-#[pymethods]
-impl DeviationsView {
-    /// None by default: the CPU32's behavior.
-    #[new]
-    #[pyo3(signature = (*, misaligned = false, untraced = false))]
-    const fn new(misaligned: bool, untraced: bool) -> Self {
-        Self {
-            misaligned,
-            untraced,
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!(
-            "Deviations(misaligned={}, untraced={})",
-            python_bool(self.misaligned),
-            python_bool(self.untraced)
-        )
-    }
-}
-
-/// `value` as Python prints it.
-const fn python_bool(value: bool) -> &'static str {
-    if value { "True" } else { "False" }
-}
-
-impl From<Deviations> for DeviationsView {
-    fn from(deviations: Deviations) -> Self {
-        Self {
-            misaligned: deviations.misaligned,
-            untraced: deviations.untraced,
-        }
-    }
-}
-
-impl From<DeviationsView> for Deviations {
-    fn from(view: DeviationsView) -> Self {
-        let mut deviations = Self::default();
-        deviations.misaligned = view.misaligned;
-        deviations.untraced = view.untraced;
-        deviations
-    }
-}
-
 /// A bare CPU32 on flat memory (Rust's `flat::Machine`).
 #[pyclass(name = "Machine", module = "mc683xx", unsendable)]
 #[derive(Debug)]
@@ -448,6 +387,9 @@ fn view(py: Python<'_>, context: Context, registers: &Registers) -> PyResult<Py<
             Py::new(py, hooks::invalid_access_with(access, registers.clone()))?.into_any()
         }
         Context::Exception(entry) => Py::new(py, hooks::exception_entry(&entry))?.into_any(),
+        Context::ExceptionReturn(exception_return) => {
+            Py::new(py, hooks::exception_return(&exception_return))?.into_any()
+        }
     })
 }
 
@@ -609,12 +551,13 @@ impl MachineView {
     /// Register `name`: `D0`-`D7`, `A0`-`A7`, `PC`, `SR`, `CCR`, `USP`,
     /// `SSP`, `VBR`, `SFC`, `DFC`.
     fn read_register(&self, name: &str) -> Result<u32, Error> {
-        Ok(Register::parse(name)?.read(&self.machine.cpu.registers))
+        Ok(name.parse::<Register>()?.read(&self.machine.cpu.registers))
     }
 
     /// Sets register `name` to `value`, which must fit it.
     fn write_register(&mut self, name: &str, value: u32) -> Result<(), Error> {
-        Register::parse(name)?.write(&mut self.machine.cpu.registers, value)
+        name.parse::<Register>()?
+            .write(&mut self.machine.cpu.registers, value)
     }
 
     /// Every register by name.
@@ -626,8 +569,7 @@ impl MachineView {
     /// words at zero.  A fault reading them halts the CPU (`halt`).  A
     /// peripheral's exception in the reads is raised here.
     fn reset(&mut self) -> PyResult<()> {
-        // A halt is what `halt` reports.
-        let _ = self.machine.reset();
+        self.machine.reset();
         self.pending.check()
     }
 
@@ -641,6 +583,35 @@ impl MachineView {
             vector.map(Vector),
         );
         Ok(())
+    }
+
+    /// Takes the exception of `vector` now, as the CPU takes its own: a
+    /// four-word frame with SR and PC stacked, S set, T1 and T0 clear,
+    /// PC at the handler.  `level`, 0 to 7, sets the interrupt mask, as
+    /// an interrupt does, whatever it was.  No clocks pass.  The hooks
+    /// it fires are called before it returns, their results stopping
+    /// nothing.  A halted CPU, or a fault that stops
+    /// (`set_stop_on_fault`), raises `RuntimeError`, nothing stacked.
+    #[pyo3(signature = (vector, level = None))]
+    fn take_exception(slf: &Bound<'_, Self>, vector: u8, level: Option<u8>) -> PyResult<()> {
+        let level = level
+            .map(InterruptLevel::try_from)
+            .transpose()
+            .map_err(Error::from)?;
+        let (taken, fired, registers) = {
+            let mut this = running(slf)?;
+            let taken = this.machine.take_exception(Vector(vector), level);
+            let fired = mem::take(&mut *this.queue.borrow_mut());
+            let registers = this.machine.cpu.instruction_registers().clone();
+            (taken, fired, registers)
+        };
+        let pending = slf.borrow().pending.clone();
+        let dispatched = pending
+            .check()
+            .and_then(|()| Self::dispatch(slf, slf.py(), fired, &registers));
+        slf.borrow_mut().running = false;
+        dispatched?;
+        Ok(taken.map_err(Error::from)?)
     }
 
     /// Withdraws the request on IRQ`pin`.
@@ -754,18 +725,6 @@ impl MachineView {
     #[getter]
     fn stops_on_fault(&self) -> bool {
         self.machine.cpu.stops_on_fault()
-    }
-
-    /// Sets the deviations from the CPU32 its runs take, for parity
-    /// runs; none at first.
-    fn set_deviations(&mut self, deviations: DeviationsView) {
-        self.machine.cpu.set_deviations(deviations.into());
-    }
-
-    /// The deviations its runs take (`set_deviations`).
-    #[getter]
-    fn deviations(&self) -> DeviationsView {
-        self.machine.cpu.deviations().into()
     }
 
     /// Instructions run since the CPU was made.
@@ -892,6 +851,17 @@ impl MachineView {
             callback,
             |seen: &ExceptionEntry| Context::Exception(*seen),
             |cpu, hook| cpu.add_exception_hook(hook),
+        )
+    }
+
+    /// Calls `callback(ExceptionReturn)` after each exception is
+    /// returned from, `rte` having restored SR and PC from its frame,
+    /// before the instruction it returns to runs.
+    fn add_exception_return_hook(&mut self, callback: &Bound<'_, PyAny>) -> PyResult<HookIdView> {
+        self.install(
+            callback,
+            |seen: &ExceptionReturn| Context::ExceptionReturn(*seen),
+            |cpu, hook| cpu.add_exception_return_hook(hook),
         )
     }
 
@@ -1132,6 +1102,7 @@ mod tests {
     use mc683xx_modules::sim;
     use mc683xx_target::address::Address;
     use mc683xx_target::entry::Entry;
+    use mc683xx_target::register::Register;
     use pyo3::PyErr;
     use pyo3::Python;
     use pyo3::exceptions::PyNotImplementedError;
@@ -1176,7 +1147,7 @@ mod tests {
         }
         let mut machine = Machine::new(32).unwrap();
         machine.map(Address(0), PAGE_BYTES, &image).unwrap();
-        machine.reset().unwrap();
+        machine.reset();
         setup(&mut machine);
         machine.run_limited(limits).end
     }
@@ -1213,7 +1184,7 @@ mod tests {
             end(&[NOP, NOP], steps, |_| ()),
             end(&[NOP, NOP], budget, |_| ()),
             end(&[MOVE_LONG_A0_TO_D0], instructions, |machine| {
-                machine.cpu.registers.set_address(0, UNMAPPED);
+                machine.cpu.registers.set_register(Register::A0, UNMAPPED);
                 machine.cpu.set_stop_on_fault(true);
             }),
             end(&[TRAP_0], instructions, |machine| {

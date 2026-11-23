@@ -46,6 +46,7 @@ use mc683xx_mc68331::event::Event;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_target::address::Address;
+use mc683xx_target::register::Register;
 use wire::Send;
 use wire::Wire;
 use wire::bytes;
@@ -114,8 +115,8 @@ fn machine() -> Machine {
     let vectors = [STACK.to_be_bytes(), START.to_be_bytes()].concat();
     machine.write(Address(0), &vectors).unwrap();
     machine.write(Address(START), &bytes(&PROGRAM)).unwrap();
-    machine.reset().unwrap();
-    machine.cpu.registers.set_address(0, STORE);
+    machine.reset();
+    machine.cpu.registers.set_register(Register::A0, STORE);
     machine
 }
 
@@ -955,7 +956,7 @@ where
 #[test]
 fn monitor_faults_stop_the_bare_cpu_s_run() {
     let mut machine = machine();
-    machine.cpu.registers.set_address(0, ODD);
+    machine.cpu.registers.set_register(Register::A0, ODD);
     monitor_faults_stop_the_run(&mut machine);
     assert_eq!(machine.cpu.registers.pc.0, STORE_PC);
 }
@@ -963,7 +964,9 @@ fn monitor_faults_stop_the_bare_cpu_s_run() {
 #[test]
 fn monitor_faults_stop_the_chip_s_run() {
     let mut chip = chip();
-    chip.cpu_control().registers_mut().set_address(0, ODD);
+    chip.cpu_control()
+        .registers_mut()
+        .set_register(Register::A0, ODD);
     monitor_faults_stop_the_run(&mut chip);
     assert_eq!(chip.cpu().registers.pc.0, STORE_PC);
 }

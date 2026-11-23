@@ -659,10 +659,10 @@ impl Memory {
             })
     }
 
-    /// The entry of the page `address` is in: [`Page::BUS`] if none is
-    /// mapped.
+    /// The page `address` is in, as its table entry maps it:
+    /// [`Page::BUS`] if none is mapped.
     #[must_use]
-    pub fn entry(&self, space: Space, address: Address) -> Page {
+    pub fn page(&self, space: Space, address: Address) -> Page {
         self.locate(address).map_or(Page::BUS, |(slab, index, _)| {
             slab.tables[space.index()][index]
         })
@@ -917,7 +917,7 @@ impl Memory {
         backing: fn(&Page) -> Option<Backing>,
     ) -> Result<(RegionId, usize, usize), Unserved> {
         let at = address.offset(done as u32);
-        let backing = backing(&self.entry(Space::Supervisor, at)).ok_or(Unserved(at))?;
+        let backing = backing(&self.page(Space::Supervisor, at)).ok_or(Unserved(at))?;
         let within = self.mask(at).0 % PAGE_BYTES;
         let count = ((PAGE_BYTES - within) as usize).min(length - done);
         Ok((backing.region, (backing.offset + within) as usize, count))

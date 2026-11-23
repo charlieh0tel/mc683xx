@@ -6,6 +6,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 use super::ExceptionEntry;
+use super::ExceptionReturn;
 use super::Invalid;
 use super::InvalidAccess;
 use super::MemoryAccess;
@@ -27,6 +28,7 @@ use crate::instructions::tests::step;
 use crate::memory::PAGE_BYTES;
 use crate::memory::Permissions;
 use crate::memory::Space;
+use crate::registers::status;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
@@ -206,7 +208,7 @@ fn a_reset_starts_a_block() {
     let (mut cpu, starts) = stopping_at_the_second();
     poke_long(&mut cpu, Vector::RESET_STACK_POINTER.offset(), STACK);
     poke_long(&mut cpu, Vector::RESET_PROGRAM_COUNTER.offset(), CODE + 2);
-    cpu.reset(&mut NoBus, Cycle::ZERO).unwrap();
+    cpu.reset(&mut NoBus, Cycle::ZERO);
     // The stop's skip is gone: the code hook stops again.
     assert!(matches!(step(&mut cpu, 1).stop, Stop::Hook(_)));
     assert_eq!(*starts.borrow(), [CODE, CODE + 2]);
@@ -236,6 +238,35 @@ fn memory_hooks_see_each_word_cycle_and_stop_after_the_instruction() {
     // Fetches are not reads.
     assert_eq!(*reads.borrow(), [(DATA, 0x1234), (DATA + 2, 0x5678)]);
     assert_eq!(cpu.registers.data[1], 0x1234_5678);
+}
+
+#[test]
+fn a_write_hook_sees_what_each_write_replaced_and_a_read_hook_none() {
+    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT, MOVE_INDIRECT_TO_D1], &[]);
+    cpu.registers.set_address(0, DATA);
+    cpu.registers.data[0] = 0x1234_5678;
+    poke_long(&mut cpu, DATA, 0xdead_beef);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_write_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push((access.value, access.previous));
+        ControlFlow::Continue(())
+    });
+    let into = Rc::clone(&seen);
+    cpu.add_read_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push((access.value, access.previous));
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 2);
+    assert_eq!(
+        *seen.borrow(),
+        [
+            (0x1234, Some(0xdead)),
+            (0x5678, Some(0xbeef)),
+            (0x1234, None),
+            (0x5678, None),
+        ]
+    );
 }
 
 #[test]
@@ -377,6 +408,60 @@ fn an_exception_hook_sees_the_entry_and_stops_before_the_handler() {
             handler: Address(HANDLER),
             stack: Address(STACK - 8),
             level: None,
+        }]
+    );
+}
+
+#[test]
+fn an_exception_return_hook_sees_the_frame_it_pops_and_stops_after_rte() {
+    let mut cpu = prepared(&[TRAP, NOP], &[RTE]);
+    let sr = status::S | status::Z;
+    cpu.registers.set_sr(sr);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    let id = cpu.add_exception_return_hook(move |exception_return: &ExceptionReturn| {
+        into.borrow_mut().push(*exception_return);
+        ControlFlow::Break(())
+    });
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(id));
+    // CPU32RM 6.2.12: SR and PC restored, the four words deallocated
+    assert_eq!(cpu.registers.pc.0, CODE + 2);
+    assert_eq!(cpu.registers.ssp.0, STACK);
+    assert_eq!(
+        *seen.borrow(),
+        [ExceptionReturn {
+            vector: Vector::TRAP,
+            pc: Address(CODE + 2),
+            sr,
+            stack: Address(STACK - 8),
+        }]
+    );
+    assert!(cpu.remove_hook(id));
+    assert!(!cpu.has_hook(id));
+}
+
+#[test]
+fn an_exception_return_hook_sees_a_bus_error_frame_returned_from() {
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1], &[RTE]);
+    cpu.registers.set_sr(status::S);
+    cpu.registers.set_address(0, NOWHERE);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_exception_return_hook(move |exception_return: &ExceptionReturn| {
+        into.borrow_mut().push(*exception_return);
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 2);
+    // CPU32RM 6.3.2: the twelve-word frame's RTE restarts the MOVE
+    let bus_error_frame = 24;
+    assert_eq!(
+        *seen.borrow(),
+        [ExceptionReturn {
+            vector: Vector::BUS_ERROR,
+            pc: Address(CODE),
+            sr: status::S,
+            stack: Address(STACK - bus_error_frame),
         }]
     );
 }

@@ -1,9 +1,9 @@
 //! What a bare host asks of the core beyond what the chip does.
 //!
 //! Runs limited by an address or an instruction count, exceptions the
-//! host answers before the CPU stacks anything, faults that stop the
-//! run instead of being taken, and, for parity runs against other
-//! emulators only, deviations from the CPU32 ([PLAN.md, Bare CPU]).
+//! host handles before the CPU stacks anything, exceptions the host has
+//! the CPU take, and faults that stop the run instead of being taken
+//! ([PLAN.md, Bare CPU]).
 //! None of it costs a run that does not ask for it.
 //!
 //! [PLAN.md, Bare CPU]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#bare-cpu
@@ -11,6 +11,7 @@
 use std::fmt;
 use std::mem;
 
+use super::Core;
 use super::Cpu;
 use super::Halt;
 use super::Idle;
@@ -25,9 +26,9 @@ use crate::exception::Exception;
 use crate::exception::Fault;
 use crate::exception::Vector;
 use crate::instructions::Flow;
+use crate::interrupt::InterruptLevel;
 use crate::interrupt::Interrupts;
 use crate::registers::Registers;
-use crate::registers::status;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
@@ -132,7 +133,7 @@ impl fmt::Display for FaultStop {
     }
 }
 
-/// An exception an instruction raised that the host intercepts
+/// An exception an instruction raised that the host handles
 /// ([`Cpu::set_intercepted`]): nothing stacked, PC at the instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -141,6 +142,21 @@ pub struct Intercepted {
     pub vector: Vector,
     /// The instruction's address, where PC is.
     pub pc: Address,
+}
+
+/// Why [`Cpu::take_exception`] took nothing.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum TakeExceptionError {
+    /// The CPU executes nothing: halted, or in background mode, the
+    /// stop a run ends in at once.
+    #[error("the CPU executes nothing: {0}")]
+    Idle(Stop),
+    /// Stacking the frame or reading the vector faulted, with
+    /// [`Cpu::set_stop_on_fault`]: nothing stacked, the registers as
+    /// before.
+    #[error("stopped at a fault: {0}")]
+    Fault(FaultStop),
 }
 
 /// How a limited run ended.
@@ -191,21 +207,6 @@ pub struct LimitedRun {
     pub steps: u64,
 }
 
-/// Deviations from the CPU32, for parity runs against an emulator that
-/// has them; never the CPU's behavior.
-///
-/// It may gain fields: build one from [`Deviations::default()`] and set
-/// those it needs (`let mut x = Deviations::default(); x.misaligned = ...;`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct Deviations {
-    /// A word or long at an odd data address is run as byte cycles, not
-    /// an address error.  Fetches stay strict.
-    pub misaligned: bool,
-    /// T1 and T0 trace nothing.
-    pub untraced: bool,
-}
-
 /// The vectors, as a bit set.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct VectorSet([u64; 4]);
@@ -240,8 +241,6 @@ pub(crate) struct Bare {
     /// An intercepted exception taken natively once: by the instruction
     /// at this address, when the instruction count is this.
     pub(crate) native_once: Option<(Address, u64)>,
-    /// The deviations.
-    pub(crate) deviations: Deviations,
     /// The end a fault or an intercept set, for `run_limited`.
     pub(crate) end: Option<End>,
     /// The last invalid access's reason, for a fault's cause.
@@ -293,6 +292,62 @@ impl Cpu {
         }
     }
 
+    /// Takes the exception of `vector` now, between instructions, as
+    /// the host asks: exception processing as the CPU's own (CPU32RM
+    /// 6.1.3), SR copied, S set, T1 and T0 cleared, then a four-word
+    /// format $0 frame (6.4.1) with SR and PC, and PC from the vector,
+    /// at VBR plus its offset (6.1.1).  With `level`, as interrupt
+    /// processing does, the interrupt mask is set to it (6.2.11),
+    /// whatever the mask was: the mask does not hold it off.  It ends
+    /// STOP and LPSTOP, as an interrupt does (4.4), and leaves loop
+    /// mode.  The exception hooks and [`Bus::exception_entered`] see it
+    /// as an exception the CPU takes; a hook's stop has no run to stop,
+    /// nor has a stop a peripheral asks for in its cycles.  No clocks
+    /// are charged.
+    ///
+    /// A fault stacking the frame or reading the vector is taken as one
+    /// in exception processing is: a type IV bus error (6.3.1.4), or a
+    /// double bus fault while a bus or address error is being taken
+    /// (6.2.2).
+    ///
+    /// # Errors
+    ///
+    /// [`TakeExceptionError::Idle`] for a halted CPU, or one in
+    /// background mode, which takes nothing, and
+    /// [`TakeExceptionError::Fault`] for a fault that stops rather than
+    /// being taken ([`Cpu::set_stop_on_fault`]): the registers as
+    /// before, nothing stacked.
+    pub fn take_exception(
+        &mut self,
+        bus: &mut dyn Bus,
+        now: Cycle,
+        vector: Vector,
+        level: Option<InterruptLevel>,
+    ) -> Result<(), TakeExceptionError> {
+        if let Some(idle) = self.idle {
+            return Err(TakeExceptionError::Idle(idle.stop()));
+        }
+        self.bare.end = None;
+        self.began.clone_from(&self.registers);
+        self.leave_loop_mode();
+        let resume = self.resume;
+        let pc = self.registers.pc;
+        Core {
+            cpu: self,
+            bus,
+            now,
+        }
+        .process(vector, pc, None, level, false);
+        self.stop_request = None;
+        if let Some(End::Fault(fault)) = self.bare.end.take() {
+            // the instruction at PC not begun: its hooks still to run
+            self.resume = resume;
+            return Err(TakeExceptionError::Fault(fault));
+        }
+        self.stopped = false;
+        Ok(())
+    }
+
     /// Forgets that a hook stopped the last run at PC, so the next run
     /// calls the code and block hooks there again.
     pub const fn clear_resume(&mut self) {
@@ -320,9 +375,12 @@ impl Cpu {
 
     /// Whether `vector`, raised by an instruction (a trap, an illegal
     /// instruction, a divide by zero, but not a fault, a trace or an
-    /// interrupt), ends a limited run before anything is stacked
-    /// ([`End::Intercepted`]): its (An)+ and -(An) undone and PC at the
-    /// instruction.  None at first.
+    /// interrupt), is a host-handled exception: it ends a limited run
+    /// before anything is stacked ([`End::Intercepted`]), its (An)+ and
+    /// -(An) undone and PC at the instruction, for the host to handle (a
+    /// stubbed kernel call, an emulated instruction) and run on from PC,
+    /// or to decline ([`take_natively_once`](Self::take_natively_once)).
+    /// None at first.
     pub fn set_intercepted(&mut self, vector: Vector, intercepted: bool) {
         self.bare.intercepted.set(vector, intercepted);
     }
@@ -519,22 +577,6 @@ impl Cpu {
     /// first, as on the CPU32's 16-bit bus.
     pub const fn set_long_bus(&mut self, whole: bool) {
         self.long_bus = whole;
-    }
-
-    /// Sets the deviations from the CPU32: none at first.
-    pub const fn set_deviations(&mut self, deviations: Deviations) {
-        self.bare.deviations = deviations;
-        self.trace_mask = if deviations.untraced {
-            0
-        } else {
-            status::T1 | status::T0
-        };
-    }
-
-    /// The deviations from the CPU32.
-    #[must_use]
-    pub const fn deviations(&self) -> Deviations {
-        self.bare.deviations
     }
 
     /// Whether the registers are kept as each instruction begins.

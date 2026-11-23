@@ -23,6 +23,7 @@ use mc683xx_target::size::Size;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::registers::BackgroundOnly;
 use mc683xx_cpu32::registers::status;
 
 use crate::chip::Mc68331;
@@ -124,42 +125,19 @@ impl Mc68331 {
         self.sync_freeze();
     }
 
-    /// A data or address register.
-    fn register(&self, register: Register) -> u32 {
-        let number = usize::from(register.code());
-        let registers = &self.cpu.registers;
-        match number {
-            0..8 => registers.data[number],
-            _ => registers.address(number - 8),
-        }
-    }
-
-    /// Sets a data or address register, all 32 bits.
-    fn set_register(&mut self, register: Register, value: u32) {
-        let number = usize::from(register.code());
-        let registers = &mut self.cpu.registers;
-        match number {
-            0..8 => registers.data[number] = value,
-            _ => registers.set_address(number - 8, value),
-        }
-    }
-
-    /// A system register, zero-extended (CPU32RM 7.2.8.6).
+    /// A system register, zero-extended (CPU32RM 7.2.8.6): the
+    /// programming model's, or one of background mode's own (7.2.5).
     fn system_register(&self, register: SystemRegister) -> u32 {
         let cpu = &self.cpu;
-        let registers = &cpu.registers;
-        match register {
-            SystemRegister::Rpc => registers.pc.0,
-            SystemRegister::Pcc => cpu.pcc().0,
-            SystemRegister::Atemp => cpu.atemp(),
-            SystemRegister::Far => cpu.far().0,
-            SystemRegister::Vbr => registers.vbr.0,
-            SystemRegister::Sr => u32::from(registers.sr()),
-            SystemRegister::Usp => registers.usp.0,
-            SystemRegister::Ssp => registers.ssp.0,
-            SystemRegister::Sfc => u32::from(u8::from(registers.sfc)),
-            SystemRegister::Dfc => u32::from(u8::from(registers.dfc)),
-        }
+        cpu.registers
+            .system_register(register)
+            .unwrap_or_else(|| match register {
+                SystemRegister::Pcc => cpu.pcc().0,
+                SystemRegister::Atemp => cpu.atemp(),
+                SystemRegister::Far => cpu.far().0,
+                // RPC, where GO resumes: the PC
+                _ => cpu.registers.pc.0,
+            })
     }
 
     /// Sets a system register as WSREG does: a register narrower than
@@ -167,17 +145,14 @@ impl Mc68331 {
     /// (CPU32RM 7.2.8.7).
     fn set_system_register(&mut self, register: SystemRegister, value: u32) {
         let cpu = &mut self.cpu;
-        match register {
-            SystemRegister::Rpc => cpu.registers.pc = Address(value),
-            SystemRegister::Pcc => cpu.set_pcc(Address(value)),
-            SystemRegister::Atemp => cpu.set_atemp(value),
-            SystemRegister::Far => {}
-            SystemRegister::Vbr => cpu.registers.vbr = Address(value),
-            SystemRegister::Sr => cpu.registers.set_sr(value as u16),
-            SystemRegister::Usp => cpu.registers.usp = Address(value),
-            SystemRegister::Ssp => cpu.registers.ssp = Address(value),
-            SystemRegister::Sfc => cpu.registers.sfc = FunctionCode::from_low_bits(value),
-            SystemRegister::Dfc => cpu.registers.dfc = FunctionCode::from_low_bits(value),
+        if let Err(BackgroundOnly(register)) = cpu.registers.set_system_register(register, value) {
+            match register {
+                SystemRegister::Rpc => cpu.registers.pc = Address(value),
+                SystemRegister::Pcc => cpu.set_pcc(Address(value)),
+                SystemRegister::Atemp => cpu.set_atemp(value),
+                // FAR, read only
+                _ => {}
+            }
         }
     }
 
@@ -296,12 +271,12 @@ impl Cpu32Target for Mc68331 {
 
     fn read_register(&mut self, register: Register) -> Result<u32, TargetError> {
         self.command()?;
-        Ok(self.register(register))
+        Ok(self.cpu.registers.register(register))
     }
 
     fn write_register(&mut self, register: Register, value: u32) -> Result<(), TargetError> {
         self.command()?;
-        self.set_register(register, value);
+        self.cpu.registers.set_register(register, value);
         Ok(())
     }
 

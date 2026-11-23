@@ -122,7 +122,11 @@ prefix; their directories keep the short names.
 ## Interface
 
 - **Registers:** read and write every one: D0-D7, A0-A7, PC, SR, SSP,
-  USP, VBR, SFC, DFC.
+  USP, VBR, SFC, DFC.  `Registers` takes the target crate's names
+  (`register(Register)`, `system_register(SystemRegister)`), so the
+  chip's BDM, gdb and Python map none themselves; background mode's
+  RPC, PCC, ATEMP and FAR are not the programming model's and answer
+  `None` (`BackgroundOnly` to a write).
 - **Memory:** the host wires RAM, ROM and peripherals to chip-select pins
   (see Peripherals), and, emulator-only, memory at a fixed address on
   no pin (Fixed memory, below).  RAM and ROM are served in the core; peripherals get
@@ -161,10 +165,18 @@ prefix; their directories keep the short names.
 - **Peripherals:** see below.
 - **Hooks:** plain in-process callbacks, cheap when absent: code
   address (with registers and top of stack), block, memory read and
-  write, invalid access, exception taken.  Any hook can stop `run_for`.
+  write, invalid access, exception taken, exception returned from.  Any
+  hook can stop `run_for`.  A write hook sees the value the write
+  replaced (`MemoryAccess::previous`), peeked before it on the slow
+  path a watched page already takes; `None` for a peripheral's, where
+  a read is a cycle.
   `Cpu::add_code_hook`, `add_block_hook`, `add_read_hook`,
   `add_write_hook`, `add_invalid_hook` (each over an address range),
-  `add_exception_hook`, `remove_hook`; the chip's through
+  `add_exception_hook`, `add_exception_return_hook` (`rte` of a four-
+  or six-word frame, or of a format $C frame of a fault in an
+  instruction; not one of a fault in exception processing, whose `rte`
+  takes the faulted exception again, CPU32RM 6.3.2.7), `remove_hook`;
+  the chip's through
   `Mc68331::cpu_control`, a `CpuControl` that lends the registers, the
   hooks and the pages' permissions and shows the rest read-only, so a
   host cannot remap the core's memory apart from the chip's decode or
@@ -983,8 +995,8 @@ chip beside `Mc68331`.
   run, one left from before a run is withdrawn as it starts),
   `set_intercepted(vector, on)` and `set_intercept_callback(callable)`
   (no callback: taken natively), `set_stop_on_fault` and
-  `stops_on_fault`, `set_deviations(Deviations)` and `deviations`,
-  `request_interrupt(pin, vector)`, `clear_interrupt`, `reset`,
+  `stops_on_fault`, `request_interrupt(pin, vector)`,
+  `clear_interrupt`, `take_exception(vector, level=None)`, `reset`,
   `save`, `restore`.  `run_limited` gives a `LimitedRun(cycles, end)`,
   its `End` Rust's (`End.Stop(stop)`, `End.Until()`,
   `End.Instructions()`, `End.Fault(fault)`, their values the fields
@@ -2040,7 +2052,7 @@ Adversarial review (2026-10-24):
   gdb as `SIGTRAP`.  Firmware's own `bkpt` is the CPU32's (CPU32RM
   4, BKPT), never gdb's: breakpoints never touch memory.
 - *What it needs of the core.*  Nothing new: `instructions()`,
-  `add_code_hook` and the memory hooks, `Memory::entry` and
+  `add_code_hook` and the memory hooks, `Memory::page` and
   `region_mut` for pokes, `Mc68331::peek` for peeks.
 
 ### Loading
@@ -2419,6 +2431,18 @@ and `mc683xx.Machine` in Python (see Python).
   processing is stacking (`Bus::stacking`).
 - **Interrupts:** a request line per level 1 to 7 that the host sets
   with a vector or the autovector, level-sensitive until it clears it.
+- **Host exceptions:** `Cpu::take_exception(vector, level)` (and
+  `Machine`'s, Python's `take_exception(vector, level=None)`), between
+  runs: the core's own exception processing (`process`, CPU32RM
+  6.1.3), a four-word format $0 frame of SR and PC, the mask set to
+  `level` whatever it was, the exception hooks and
+  `Bus::exception_entered` called; STOP ended, no clocks charged.  A
+  hook's or peripheral's stop asked for in it has no run to end and is
+  dropped.  A fault in it is taken as in any exception processing
+  (type IV, or a double bus fault in a bus error's window), or with
+  stop on fault returned as `TakeExceptionError::Fault`, the registers
+  and the hooks at PC as before.  Not on the chip, whose interrupts
+  come from its modules and pins.
 - **Runs:** `Cpu::run_limited(limits)`: `until` (checked at each
   instruction boundary before an interrupt is taken or a hook called
   there), `instructions`, and an optional cycle budget; with none, a
@@ -2496,15 +2520,18 @@ and `mc683xx.Machine` in Python (see Python).
   - A trace RTE requeues from a format $C frame's TR (6.3.2.2) is
     kept as any trace is: a fault stacking it keeps the RTE, its
     rerun cycle not made again, and leaves the trace pending.
-- **Intercepts:** `set_intercepted(vector)`: an exception an
-  instruction raises (traps, illegal, line A and F, privilege, zero
-  divide, CHK, TRAPV, format error; not faults, trace or interrupts)
-  ends the run before anything is stacked (`End::Intercepted`), its
-  (An)+ and -(An) undone, PC at the instruction; flags it set (CHK's
-  N) stay.  `take_natively_once` lets the instruction at PC take it
-  natively when it runs again, which the host uses for an exception it
-  declines: the instruction reruns, exactly, as its effects were
-  undone.
+- **Intercepts (host-handled exceptions):** `set_intercepted(vector)`:
+  an exception an instruction raises (traps, illegal, line A and F,
+  privilege, zero divide, CHK, TRAPV, format error; not faults, trace
+  or interrupts) ends the run before anything is stacked
+  (`End::Intercepted`), its (An)+ and -(An) undone, PC at the
+  instruction; flags it set (CHK's N) stay.  `take_natively_once` lets
+  the instruction at PC take it natively when it runs again, which the
+  host uses for an exception it declines: the instruction reruns,
+  exactly, as its effects were undone.  A general host feature (a
+  stubbed kernel call, an emulated instruction, a stop at any
+  exception), under semver like the rest of the API (decided for
+  0.9.0); Python answers it with an intercept callback within the run.
 - **Hook context:** memory and invalid access hooks see the
   instruction's address (`pc`) and whether the cycle stacks a frame
   (`stacking`); `Cpu::instruction_registers` holds the registers as
@@ -2512,10 +2539,6 @@ and `mc683xx.Machine` in Python (see Python).
   after one, began while such a hook is installed or faults stop
   the run.  Stacking writes are flagged, not hidden: a host that wants
   them hidden skips them.
-- **Deviations, for parity runs only:** `Deviations { misaligned,
-  untraced }`: odd word and long data accesses run as byte cycles
-  rather than address errors (fetches stay strict), and T1/T0 trace
-  nothing.  Neither is the CPU32's behavior; both are off by default.
 - **Cost:** none of it on a run that does not ask, within the noise
   of the core benchmarks (best of interleaved runs on one pinned core,
   2026-10-23: `nop`, `dbra_self`, `move_indirect` -2 to +1%,
@@ -3491,7 +3514,7 @@ checks move onto real code hooks.
 | A bus stop request (`Bus::stop_requested`) beside hooks | A peripheral has no hook of its own; one question per bus cycle costs nothing on RAM. |
 | Board files in TOML, peripheral types from a registry | The file says what is wired where and how the chip is configured, never what a peripheral does; behavior stays the host's code.  A registry of names leaves room for plugins without a format change.  No dynamic loading yet (decided 2026-10-23). |
 | A bare CPU (`mc683xx_cpu32::flat`, `mc683xx.Machine`) beside the chip, 32 address lines by default | Function-level firmware tests map code and stubs at addresses no 68331 decodes (smartclock's harness uses $31400000); a chip-select decode would only get in the way. |
-| Bare-host stops (faults, intercepts) and parity deviations opt-in, off by default | The default stays the CPU32's behavior; a host porting from Unicorn asks for what it relied on, by name. |
+| Bare-host stops (faults, intercepts) opt-in, off by default | The default stays the CPU32's behavior; a host porting from Unicorn asks for what it relied on, by name. |
 | Published to crates.io and PyPI, one semver version for the workspace from 0.1.0, notes in GitHub releases | Decided 2026-10-24, with the repository public.  One version keeps the crates and the wheel in step; a release is tagged only on a commit that has passed every check (`docs/releasing.md`). |
 | abi3 wheels and the crates published by the `release` workflow, both by trusted publishing | One wheel per platform covers every Python from 3.12; no token is stored.  crates.io's trusted publishing needs the crate to exist first, so only the first release is published by hand (decided 2026-10-24). |
 | A GDB stub on the gdbstub crate, generic over a small `Target` trait, its breakpoints and steps hooks | Decided 2026-10-24; gdbstub is MIT OR Apache-2.0.  Hooks cost nothing until installed and never touch memory; one trait serves the bare CPU, the chip, a board and hosts with run loops of their own. |

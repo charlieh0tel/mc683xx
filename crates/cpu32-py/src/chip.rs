@@ -1101,13 +1101,13 @@ macro_rules! chip_methods {
             /// Register `name`: `D0`-`D7`, `A0`-`A7`, `PC`, `SR`, `CCR`,
             /// `USP`, `SSP`, `VBR`, `SFC`, `DFC`.
             fn read_register(&self, py: Python<'_>, name: &str) -> PyResult<u32> {
-                let register = Register::parse(name)?;
+                let register = name.parse::<Register>()?;
                 self.with_chip(py, |chip| Ok(register.read(&chip.cpu().registers)))
             }
 
             /// Sets register `name` to `value`, which must fit it.
             fn write_register(&mut self, py: Python<'_>, name: &str, value: u32) -> PyResult<()> {
-                let register = Register::parse(name)?;
+                let register = name.parse::<Register>()?;
                 self.with_chip_mut(py, |chip, _| {
                     Ok(register.write(chip.registers_mut(), value)?)
                 })
@@ -1239,6 +1239,19 @@ macro_rules! chip_methods {
                 self.with_chip_mut(callback.py(), |chip, pending| {
                     let hook = hooks::hook(callback, pending.clone(), hooks::exception_entry)?;
                     Ok(HookIdView(chip.cpu_control().add_exception_hook(hook)))
+                })
+            }
+
+            /// Calls `callback(ExceptionReturn)` after each exception is
+            /// returned from; a truthy result stops the run before the
+            /// instruction it returns to.
+            fn add_exception_return_hook(
+                &mut self,
+                callback: &Bound<'_, PyAny>,
+            ) -> PyResult<HookIdView> {
+                self.with_chip_mut(callback.py(), |chip, pending| {
+                    let hook = hooks::hook(callback, pending.clone(), hooks::exception_return)?;
+                    Ok(HookIdView(chip.cpu_control().add_exception_return_hook(hook)))
                 })
             }
 

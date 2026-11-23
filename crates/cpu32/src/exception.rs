@@ -12,6 +12,9 @@ use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 use std::fmt;
 
+/// The TRAP vectors, #0 to #15 (CPU32RM 4, TRAP).
+const TRAP_VECTORS: u8 = 16;
+
 /// An exception vector number (CPU32RM 6.1.1, Table 6-1).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
@@ -86,9 +89,16 @@ impl Vector {
         Self(Self::SPURIOUS_INTERRUPT.0 + level.get())
     }
 
-    /// TRAP #`number`'s vector, 32 to 47.
+    /// TRAP #`number`'s vector, 32 to 47 for `number` 0 to 15 (CPU32RM
+    /// 4, TRAP; Table 6-1).
+    ///
+    /// # Panics
+    ///
+    /// In a debug build, for a `number` past 15, which names no TRAP
+    /// but another vector.
     #[must_use]
     pub const fn trap(number: u8) -> Self {
+        debug_assert!(number < TRAP_VECTORS, "TRAP takes 0 to 15");
         Self(Self::TRAP.0 + number)
     }
 }
@@ -781,6 +791,13 @@ mod tests {
             format::vector(format::word(format::SIX_WORD, Vector(47))),
             Vector(47)
         );
+    }
+
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "TRAP takes 0 to 15")]
+    fn a_trap_past_15_is_no_trap() {
+        let _ = Vector::trap(16);
     }
 
     #[test]

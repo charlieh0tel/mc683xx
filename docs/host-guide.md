@@ -122,6 +122,12 @@ The host can also reach the core: `cpu()` gives the `Cpu` to read;
 pages' permissions (see Hooks), changes its registers and reads the
 rest.  Neither hands out the core's memory map, which the chip keeps
 in step with its decode, nor runs the core apart from the chip.
+`Registers` names its registers as `mc683xx-target` does:
+`register(Register::A0)` and `set_register`, A7 the stack pointer S
+selects; `system_register(SystemRegister::Vbr)` and
+`set_system_register`, which give `None` and `BackgroundOnly` for
+RPC, PCC, ATEMP and FAR, background mode's own (CPU32RM 7.2.5); the PC
+is the `pc` field.
 `write(address, bytes)` writes the memories the core serves without a
 cycle, as a debugger does and as the bare `Machine::write` does, a
 ROM's included, and `read(address, bytes)` reads them, as
@@ -1126,11 +1132,17 @@ but the exception hook cover an address range, on the address lines.
   when the instruction ends.  The chip's long is two word cycles; a
   bare `Cpu` with `set_long_bus` (`flat::Machine`'s default) shows a
   long operand once, size `Long` at its address, and a long that
-  faults midway not at all.
+  faults midway not at all.  A write's `previous` is what it
+  replaced, read with no cycle before it; `None` for a read, and for
+  a write the core's memory does not serve (a peripheral's).
 - `add_invalid_hook(range, f(&InvalidAccess))`: before a bus error is
   taken, with its reason, `Invalid::BusError` or `Invalid::Protected`.
 - `add_exception_hook(f(&ExceptionEntry))`: once the frame is stacked:
   vector, return PC, handler, stack, level.
+- `add_exception_return_hook(f(&ExceptionReturn))`: once `rte` has
+  restored SR and PC from an exception's frame: vector, PC, SR, and
+  the frame's address, the `stack` its `ExceptionEntry` had; a stop
+  takes effect before the instruction it returns to.
 - `remove_hook(id)`.
 
 `cpu_control().protect(space, start, length, Permissions)` sets
@@ -1769,7 +1781,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `ConditionInfo::new`, `Edges::new`, `Clock::new` and
   `Clock::with_phase`, `Field::new`, and `Inspection::default()` with
   its builders.
-- The configuration structs (`Limits`, `Deviations`, `BoardTracing`,
+- The configuration structs (`Limits`, `BoardTracing`,
   `ChipTracing`, `description::Options`, `registry::Environment`) are
   `#[non_exhaustive]` too, with every field public: build one from
   `X::default()` and set the fields it needs

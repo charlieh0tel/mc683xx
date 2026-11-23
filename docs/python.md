@@ -83,7 +83,7 @@ rename renames the Python name with it.  The deliberate differences:
 - **Properties:** a Rust accessor of plain state, with no arguments, is
   a read-only property (`now`, `halted`, `instructions`,
   `exception_taken`, `system_hz`, `qspi_chip_selects`,
-  `stops_on_fault`, `deviations`, `pacing`, `stopping`); one that takes
+  `stops_on_fault`, `pacing`, `stopping`); one that takes
   arguments or computes its value is a method (`registers()`,
   `outputs(port)`, the levels a port's pins resolve to, `port(port)`;
   `pwm(channel)`, `oc1()`, an output worked out from the GPT's
@@ -808,13 +808,18 @@ assert chip.now == 0
 
 `add_code_hook(callback, begin=0, end=0xFFFFFFFF)` and its siblings
 `add_block_hook`, `add_read_hook`, `add_write_hook`, `add_invalid_hook`
-(both ends of the range included), and `add_exception_hook(callback)`,
+(both ends of the range included), `add_exception_hook(callback)` and
+`add_exception_return_hook(callback)`,
 call a Python callable with what the Rust hook sees: an `Instruction`
 (`pc`, `registers`, `stack_top`), a `MemoryAccess` (`address`, `size`,
-`function_code`, `value`; on the chip a long operand is two word
-cycles, on the bare `Machine` one access of 4), an `InvalidAccess` (those, `cycle`, a
-`BusCycleKind`, and `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`)
-or an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`).
+`function_code`, `value`, and `previous`, what a write replaced, read
+with no cycle, `None` for a read or a peripheral's write; on the chip a
+long operand is two word cycles, on the bare `Machine` one access of
+4), an `InvalidAccess` (those, `cycle`, a
+`BusCycleKind`, and `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`),
+an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`) or
+an `ExceptionReturn` (`vector`, `pc`, `sr`, `stack`: what `rte`
+restored, and the frame's address, its `ExceptionEntry`'s `stack`).
 Each returns a `HookId` for `remove_hook`.  A truthy result stops the
 run (`Stop.Hook(hook)`); a code hook's stop leaves its
 instruction unexecuted, and the next run goes past it.  A hook's
@@ -1409,6 +1414,18 @@ assert bare.read_register("D0") == 6
 - **Interrupts:** `request_interrupt(pin, vector=None)` requests IRQ1
   to IRQ7 as 1 to 7, answered by `vector` or the autovector; it stays
   requested, as a level-sensitive line does, until `clear_interrupt(pin)`.
+- **Exceptions now:** `take_exception(vector, level=None)` (Rust's
+  `Machine::take_exception`) takes exception `vector` between runs, as
+  the CPU takes its own (CPU32RM 6.1.3): a four-word frame with SR and
+  PC, S set, T1 and T0 clear, PC at the handler.  `level`, 0 to 7,
+  sets the interrupt mask, as an interrupt does, whatever it was: no
+  mask holds it off, so a host stacks an interrupt where it wants one.
+  No clocks pass.  The exception hooks, and the write hooks on the
+  stack, are called before it returns, their results stopping nothing.
+  A halted CPU, or one in background mode, raises `RuntimeError`, as
+  does a fault stacking the frame with `set_stop_on_fault(True)`,
+  nothing stacked; without it, the fault is a bus error the CPU takes,
+  as in its own exception processing.
 - **Also:** `reset()` (the reset exception from the vectors at zero),
   `read_register`, `write_register`, `registers()`, `instructions`,
   `now`, `halted`, `exception_taken`, `save()` and `restore(snapshot)`
@@ -1421,7 +1438,8 @@ assert bare.read_register("D0") == 6
 
 The hooks are the chip's (`add_code_hook`, `add_block_hook`,
 `add_read_hook`, `add_write_hook`, `add_invalid_hook`,
-`add_exception_hook`, `remove_hook`), but on the bare `Machine` a callable
+`add_exception_hook`, `add_exception_return_hook`, `remove_hook`), but on
+the bare `Machine` a callable
 may read and write registers and memory, map, protect and stop the
 run (`stop_request().request()`), as a Unicorn hook does; a truthy
 result stops it too.  It
@@ -1473,10 +1491,12 @@ bare.remove_hook(stubbed)
 
 ### Exceptions and faults
 
-`set_intercepted(vector, True)` intercepts the exceptions an
-instruction raises with `vector` (traps, illegal, line A and F,
-privilege, divide by zero, CHK, TRAPV, format error) before anything
-is stacked, and `set_intercept_callback(callback)` answers them:
+A host-handled exception: `set_intercepted(vector, True)` intercepts
+the exceptions an instruction raises with `vector` (traps, illegal,
+line A and F, privilege, divide by zero, CHK, TRAPV, format error)
+before anything is stacked, for the host to handle (a stubbed kernel
+call, an emulated instruction, a stop), and
+`set_intercept_callback(callback)` answers them:
 `callback(Intercepted)` gets the `vector` and the instruction's `pc`,
 where PC is, its (An)+ and -(An) undone.  A truthy result means it
 handled it, and the run goes on from PC as the callable left it;
@@ -1527,14 +1547,32 @@ match bare.run_limited(begin=CALL, until=CALL_RETURN).end:
 bare.set_stop_on_fault(False)
 ```
 
-`set_deviations(Deviations(misaligned=True, untraced=True))`
-(`deviations`), Rust's `bare::Deviations`: odd word and long data
-accesses as byte cycles, and T1 and T0 tracing nothing, for parity
-runs against Unicorn only: not CPU32 behavior, off by default.
-`Deviations` (`set_deviations`, `deviations`), `Intercepted`,
-`set_intercepted` and `set_intercept_callback`, for parity with
-Unicorn, are outside semver (docs/releasing.md, Semver
-scope): a minor release may change them.
+To stop at any exception an instruction raises, with its vector and
+PC: intercept each such vector, and have the callback record
+`intercepted.vector` and `intercepted.pc`, call
+`stop_request().request()` and return `True`.  Nothing is stacked, PC
+is at the instruction, and the run ends `End.Stop(Stop.Requested())`.
+Faults are not intercepted: `set_stop_on_fault(True)` stops at them.
+
+```python
+stops: list[tuple[int, int]] = []
+
+
+def stop_at(intercepted: mc683xx.Intercepted) -> bool:
+    stops.append((intercepted.vector, intercepted.pc))
+    bare.stop_request().request()
+    return True
+
+
+bare.write(CALL, struct.pack(">2H", TRAP_7, RTS))
+bare.set_intercepted(32 + 7, True)
+bare.set_intercept_callback(stop_at)
+run = bare.run_limited(begin=CALL, until=CALL_RETURN)
+assert run.end == mc683xx.End.Stop(mc683xx.Stop.Requested())
+assert stops == [(32 + 7, CALL)] and bare.read_register("PC") == CALL
+bare.set_intercept_callback(None)
+bare.set_intercepted(32 + 7, False)
+```
 
 ### From Unicorn
 
@@ -1563,4 +1601,4 @@ The port of a Unicorn harness is mechanical:
 | `ctl_flush_tb()` | nothing: there is no translation cache |
 | `context_save()`, `context_restore` | `save()`, `restore()`: memory included |
 | a code hook's register write | the same: before the instruction, PC writes redirect |
-| misaligned access, ignored trace | `set_deviations(Deviations(misaligned=True, untraced=True))`: parity only |
+| misaligned access, ignored trace | none: an odd word or long is an address error, and T1 and T0 trace, as on the CPU32 (CPU32RM 6.2.3, 6.2.10) |

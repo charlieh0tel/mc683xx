@@ -110,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     machine.map(Address(0), 0x1_0000, &[])?;
     machine.write(Address(0), &image[..8])?;
     machine.write(Address(0x400), &image[8..])?;
-    machine.reset().map_err(|halt| halt.to_string())?;
+    machine.reset();
     let connection = connection::accept("127.0.0.1:1234", |address| {
         eprintln!("waiting for gdb on {address}");
         Ok::<(), std::io::Error>(())

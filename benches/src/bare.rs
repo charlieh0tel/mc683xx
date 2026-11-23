@@ -18,6 +18,7 @@ use mc683xx_cpu32::memory::Page;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::registers::status;
 use mc683xx_target::address::Address;
+use mc683xx_target::register::Register;
 
 use crate::kernel::Calibration;
 use crate::kernel::Kernel;
@@ -36,10 +37,6 @@ const DATA: u32 = 0x2_0000;
 const OUTPUT: u32 = 0x3_0000;
 /// The supervisor stack, at the top of RAM.
 const STACK: u32 = RAM_BYTES - 2;
-/// The address register numbers `prepare` sets.
-const A0: usize = 0;
-/// A1.
-const A1: usize = 1;
 /// D7, the kernels' loop counter.
 const D7: usize = 7;
 /// A loop counter for DBcc: 65536 times round.
@@ -103,8 +100,8 @@ pub fn prepare(cpu: &mut Cpu) {
     registers.ssp = Address(STACK);
     registers.data = [0; 8];
     registers.data[D7] = LOOP_COUNT;
-    registers.set_address(A0, DATA);
-    registers.set_address(A1, OUTPUT);
+    registers.set_register(Register::A0, DATA);
+    registers.set_register(Register::A1, OUTPUT);
 }
 
 /// One iteration: the sled from its start for `budget` clocks.

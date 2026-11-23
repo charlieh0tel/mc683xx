@@ -27,6 +27,7 @@ TRAP_0 = 32
 NOP = 0x4E71
 RTS = 0x4E75
 ILLEGAL = 0x4AFC
+RTE = 0x4E73
 MOVE_WORD_A0_TO_D0 = 0x3010
 MOVE_WORD_D0_TO_A0 = 0x3080
 MOVE_LONG_A0_TO_D0 = 0x2010
@@ -190,14 +191,20 @@ def test_a_memory_hook_sees_a_long_once_and_not_one_that_faults():
     cpu.set_stop_on_fault(True)
     cpu.write_register("D0", 0x12345678)
     cpu.write_register("A0", RAM_BYTES - 2)
+    cpu.write(STACK - 8, struct.pack(">I", 0xCAFEF00D))
     seen = []
     for kind, add in (("read", cpu.add_read_hook), ("write", cpu.add_write_hook)):
-        add(lambda access, kind=kind: seen.append((kind, access.address, access.size, access.value)))
+        add(
+            lambda access, kind=kind: seen.append(
+                (kind, access.address, access.size, access.value, access.previous)
+            )
+        )
     run = cpu.run_limited(until=RETURN)
     assert isinstance(run.end, mc683xx.End.Fault)
+    # A write sees what it replaced; a read, nothing.
     assert seen == [
-        ("write", STACK - 8, 4, 0x12345678),
-        ("read", STACK - 8, 4, 0x12345678),
+        ("write", STACK - 8, 4, 0x12345678, 0xCAFEF00D),
+        ("read", STACK - 8, 4, 0x12345678, None),
     ]
 
 
@@ -254,6 +261,22 @@ def test_an_exception_hook_may_return_from_the_handler():
     cpu.add_exception_hook(entered)
     assert cpu.run_limited(until=RETURN).end == mc683xx.End.Until()
     assert entries == [TRAP_0 + 3]
+
+
+def test_an_exception_return_hook_sees_rte_pop_the_frame():
+    cpu = machine(trap(3), RTS)
+    cpu.write(HANDLER, words(RTE))
+    entries, returns = [], []
+    cpu.add_exception_hook(lambda entry: entries.append(entry.stack))
+    hook = cpu.add_exception_return_hook(lambda back: returns.append(back) or True)
+    run = cpu.run_limited(until=RETURN)
+    # Stopped after the RTE, before the instruction it returns to.
+    assert run.end == mc683xx.End.Stop(mc683xx.Stop.Hook(hook))
+    assert cpu.read_register("PC") == CODE + 2
+    (back,) = returns
+    assert (back.vector, back.pc, back.sr, back.stack) == (TRAP_0 + 3, CODE + 2, SUPERVISOR, entries[0])
+    assert cpu.read_register("SSP") == back.stack + 8
+    assert cpu.run_limited(until=RETURN).end == mc683xx.End.Until()
 
 
 def test_an_intercept_handles_or_declines_before_stacking():
@@ -395,16 +418,35 @@ def test_an_interrupt_request_is_taken_through_its_vector():
         cpu.request_interrupt(0)
 
 
-def test_the_parity_switches():
-    cpu = machine(MOVE_WORD_A0_TO_D0, RTS)
-    cpu.write_register("A0", 0x2001)
-    cpu.write(0x2001, b"\xab\xcd")
-    deviations = mc683xx.Deviations(misaligned=True, untraced=True)
-    cpu.set_deviations(deviations)
-    assert cpu.deviations == deviations
-    cpu.write_register("SR", SUPERVISOR | 0x8000)
-    assert cpu.run_limited(until=RETURN).end == mc683xx.End.Until()
-    assert cpu.read_register("D0") == 0xABCD
+def test_a_host_exception_is_stacked_and_entered_now():
+    cpu = machine(NOP, RTS)
+    entries = []
+    cpu.add_exception_hook(lambda entry: entries.append((entry.vector, entry.level)) or True)
+    cpu.write_register("SR", SUPERVISOR | 0x0700)
+    cpu.take_exception(64, level=3)
+    # CPU32RM 6.2.11: the mask takes the level; 6.4.1: SR, PC, format $0
+    assert cpu.read_register("SR") == SUPERVISOR | 0x0300
+    assert cpu.read_register("PC") == HANDLER
+    sp = cpu.read_register("SSP")
+    assert sp == STACK - 4 - 8
+    assert struct.unpack(">HIH", cpu.read(sp, 8)) == (SUPERVISOR | 0x0700, CODE, 64 * 4)
+    assert entries == [(64, 3)]
+    assert cpu.now == 0
+    with pytest.raises(ValueError):
+        cpu.take_exception(64, level=8)
+
+
+def test_a_host_exception_refused():
+    cpu = machine(NOP, RTS)
+    cpu.set_stop_on_fault(True)
+    cpu.write_register("SSP", 0x90000000)
+    with pytest.raises(RuntimeError, match="stopped at a fault: bus error: write"):
+        cpu.take_exception(TRAP_0)
+    assert (cpu.read_register("SSP"), cpu.read_register("PC")) == (0x90000000, CODE)
+    halted = mc683xx.Machine()
+    halted.reset()
+    with pytest.raises(RuntimeError, match="executes nothing: halted"):
+        halted.take_exception(TRAP_0)
 
 
 def test_save_and_restore():

@@ -23,7 +23,7 @@
 //!
 //! let mut machine = Machine::new(ADDRESS_BITS)?;
 //! machine.map(Address(0), PAGE_BYTES, &image)?;
-//! machine.reset().expect("the vectors are mapped");
+//! machine.reset();
 //! let mut limits = Limits::default();
 //! limits.instructions = Some(1);
 //! machine.run_limited(limits);
