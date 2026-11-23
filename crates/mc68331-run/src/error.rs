@@ -30,8 +30,11 @@ pub(crate) enum RunError {
         error: io::Error,
     },
     /// A snapshot that would not save or restore.
-    #[error("snapshot: {0}")]
-    State(StateError),
+    #[error("snapshot: {error}")]
+    State {
+        /// Why.
+        error: StateError,
+    },
     /// A binding of an endpoint the board does not name.
     #[error("--bind {0}: the board names no external.{0}")]
     Unbound(String),
@@ -43,8 +46,11 @@ pub(crate) enum RunError {
     )]
     NoSerialNet(String),
     /// A pseudo-terminal that could not be opened.
-    #[error("pty: {0}")]
-    Pty(io::Error),
+    #[error("pty: {error}")]
+    Pty {
+        /// Why.
+        error: io::Error,
+    },
     /// A `tty` binding while another binding takes standard input.
     #[error("--bind {0}=tty: standard input is another binding's; tty needs it")]
     StdinTaken(String),
@@ -54,23 +60,35 @@ pub(crate) enum RunError {
     )]
     NotATerminal(String),
     /// The terminal on standard input, which would not be made raw.
-    #[error("tty: {0}")]
-    Terminal(io::Error),
+    #[error("tty: {error}")]
+    Terminal {
+        /// Why.
+        error: io::Error,
+    },
     /// Output that could not be written.
-    #[error("output: {0}")]
-    Output(io::Error),
+    #[error("output: {error}")]
+    Output {
+        /// Why.
+        error: io::Error,
+    },
     /// gdb's address: no listening there, or no connection taken.
-    #[error("gdb: {0}")]
-    Gdb(io::Error),
+    #[error("gdb: {error}")]
+    Gdb {
+        /// Why.
+        error: io::Error,
+    },
     /// Ctrl-C's handler, which could not be set.
-    #[error("Ctrl-C: {0}")]
-    Interrupt(ctrlc::Error),
+    #[error("Ctrl-C: {error}")]
+    Interrupt {
+        /// Why.
+        error: ctrlc::Error,
+    },
 }
 
 /// Not `#[from]`, which would make the error the source as well as the
 /// message's: printed twice by a reporter that walks the chain.
 impl From<StateError> for RunError {
     fn from(error: StateError) -> Self {
-        Self::State(error)
+        Self::State { error }
     }
 }

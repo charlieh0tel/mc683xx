@@ -172,8 +172,12 @@ pub(crate) fn serve(
     let connection = match accepted {
         Ok(connection) => connection,
         Err(PollError::Host(Interrupted)) => return Ok(Ending::Detached),
-        Err(PollError::Connection(error)) => return Err(RunError::Gdb(error)),
-        Err(error) => return Err(RunError::Gdb(io::Error::other(error.to_string()))),
+        Err(PollError::Connection(error)) => return Err(RunError::Gdb { error }),
+        Err(error) => {
+            return Err(RunError::Gdb {
+                error: io::Error::other(error.to_string()),
+            });
+        }
     };
     let mut debugged = Debugged {
         control: board.control(),

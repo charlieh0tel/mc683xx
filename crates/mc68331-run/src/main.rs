@@ -449,7 +449,7 @@ fn interruption(
         }
         control.stop();
     })
-    .map_err(RunError::Interrupt)?;
+    .map_err(|error| RunError::Interrupt { error })?;
     Ok(interrupted)
 }
 
@@ -552,7 +552,9 @@ impl Turns {
             let Ok(received) = board.take_received(&binding.name) else {
                 continue;
             };
-            binding.put_output(&received).map_err(RunError::Output)?;
+            binding
+                .put_output(&received)
+                .map_err(|error| RunError::Output { error })?;
         }
         let trace = board.take_trace();
         for record in &trace.records {
