@@ -136,7 +136,9 @@ impl Image {
         Ok(Self { segments, entry })
     }
 
-    /// `data` at `address`, a raw binary, with no entry point.
+    /// `data` at `address`, a raw binary, with no entry point.  It
+    /// takes the bytes, unlike the parsing constructors' borrowed text,
+    /// as they become the one segment as they are, with no copy.
     ///
     /// # Errors
     /// `data` is empty or runs past the top of the address space.
