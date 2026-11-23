@@ -272,7 +272,7 @@ fn a_run_sets_parameters_over_the_files() {
     options.set("z.value=1".parse().unwrap());
     assert!(matches!(
         Description::parse(text, Path::new("."), &options),
-        Err(LoadError::Peripheral(peripheral)) if peripheral == "z"
+        Err(LoadError::ParametersFor(peripheral)) if peripheral == "z"
     ));
     let setting: Setting = "d.value=0x10".parse().unwrap();
     assert_eq!(setting, Setting::new("d", "value", 0x10));
@@ -298,6 +298,10 @@ fn a_run_sets_parameters_over_the_files() {
             Err(ParseSettingError(setting)) if setting == malformed
         ));
     }
+    assert_eq!(
+        "d.value".parse::<Setting>().unwrap_err().to_string(),
+        "no setting \"d.value\": give PERIPHERAL.KEY=VALUE"
+    );
 }
 
 #[test]
@@ -507,7 +511,7 @@ attach = [{ select = "CS2", lane = "lower" }]
 #[test]
 fn versions_other_than_one_are_refused() {
     assert!(matches!(parse("version = 2"), Err(LoadError::Version(_))));
-    assert!(matches!(parse("[chip]"), Err(LoadError::Version(_))));
+    assert!(matches!(parse("[chip]"), Err(LoadError::NoVersion)));
     assert!(matches!(
         parse("version = 2\nfuture = 1"),
         Err(LoadError::Version(_))

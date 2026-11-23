@@ -501,9 +501,9 @@ impl Description {
     ///
     /// TOML that does not parse or is not the schema's
     /// ([`LoadError::Syntax`]), a version other than this build's
-    /// ([`LoadError::Version`]), an image that cannot be read
+    /// ([`LoadError::Version`], [`LoadError::NoVersion`]), an image that cannot be read
     /// ([`LoadError::Image`]), `options` the file does not declare or
-    /// name ([`LoadError::Option`], [`LoadError::Peripheral`]), or anything
+    /// name ([`LoadError::Option`], [`LoadError::ParametersFor`]), or anything
     /// else wrong with the board the file describes: each a
     /// [`LoadError`] naming it.
     pub fn parse(text: &str, directory: &Path, options: &Options) -> Result<Self, LoadError> {
@@ -531,7 +531,7 @@ impl Description {
         match versioned.version {
             Some(toml::Value::Integer(schema::VERSION)) => {}
             Some(other) => return Err(LoadError::Version(other.to_string())),
-            None => return Err(LoadError::Version("missing".to_owned())),
+            None => return Err(LoadError::NoVersion),
         }
         let file: schema::File =
             toml::from_str(text).map_err(|error| SyntaxError::new(error, text))?;
@@ -641,7 +641,7 @@ impl Description {
             {
                 peripheral.parameters.extend(parameters.clone());
             } else if !absent.contains(name) {
-                return Err(LoadError::Peripheral(name.clone()));
+                return Err(LoadError::ParametersFor(name.clone()));
             }
         }
         let peripheral_names: BTreeSet<&str> = peripherals
@@ -1553,6 +1553,7 @@ fn construct(
     if let Some(port) = repeated_port(&constructed.ports) {
         return Err(LoadError::Port {
             peripheral: spec.name.clone(),
+            peripheral_type: spec.kind.clone(),
             port: port.to_owned(),
         });
     }
@@ -1615,9 +1616,12 @@ pub enum LoadError {
     /// The TOML does not parse, or a key or value is not the schema's.
     #[error(transparent)]
     Syntax(#[from] SyntaxError),
-    /// A version other than this build's, or none.
+    /// A version other than this build's.
     #[error("board file version {0}: this build reads version 1")]
     Version(String),
+    /// No version: every board file names its format's.
+    #[error("board file has no version: give `version = 1`")]
+    NoVersion,
     /// A name used twice.
     #[error("{0:?} is named twice")]
     Duplicate(String),
@@ -1717,7 +1721,7 @@ pub enum LoadError {
     Option(String),
     /// Parameters set for a peripheral the file does not name.
     #[error("parameters set for {0:?}, which the board file does not name")]
-    Peripheral(String),
+    ParametersFor(String),
     /// Both a reference and an external clock.
     #[error("chip: give reference_hz or external_hz, not both")]
     Clock,
@@ -1743,11 +1747,15 @@ pub enum LoadError {
         /// Why.
         error: ParameterError,
     },
-    /// A constructor that gave two ports one name.
-    #[error("{peripheral}: port {port:?} declared twice")]
+    /// A constructor that gave two ports one name, as
+    /// [`RegistryError::Port`](crate::registry::RegistryError::Port) for a
+    /// type registered with its ports.
+    #[error("{peripheral}: peripheral type {peripheral_type:?} declares port {port:?} twice")]
     Port {
         /// The peripheral.
         peripheral: String,
+        /// Its type's name.
+        peripheral_type: String,
         /// The port.
         port: String,
     },
@@ -1812,7 +1820,7 @@ pub enum LoadError {
 ///
 /// [`Setting`]: crate::description::Setting
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("{0:?}: give PERIPHERAL.KEY=VALUE")]
+#[error("no setting {0:?}: give PERIPHERAL.KEY=VALUE")]
 pub struct ParseSettingError(pub(crate) String);
 
 /// Why a [`Description`] edit was refused.

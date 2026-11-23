@@ -1035,7 +1035,7 @@ to = ["lamps.{net}"]
     assert!(matches!(load(2, "in3"), Err(LoadError::Endpoint { .. })));
     assert!(matches!(
         load(0, "in0"),
-        Err(LoadError::Port { peripheral, port }) if peripheral == "lamps" && port == "in0"
+        Err(LoadError::Port { peripheral, port, .. }) if peripheral == "lamps" && port == "in0"
     ));
 }
 
