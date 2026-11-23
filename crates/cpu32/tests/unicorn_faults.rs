@@ -46,6 +46,7 @@ use mc683xx_cpu32::cpu::Cpu;
 use mc683xx_cpu32::cpu::Run;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::hooks::Instruction;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
@@ -66,7 +67,7 @@ const ADDRESS_BITS: u32 = 24;
 /// RAM from zero, in both spaces: the vector table, code and stacks.
 const RAM_BYTES: u32 = 0x10000;
 /// Clocks of a RAM cycle: the fastest (CPU32RM 8.1.5).
-const RAM_CLOCKS: u8 = 2;
+const RAM_CLOCKS: Cycles = Cycles::from_clocks(2);
 /// Where the code starts, as in `unicorn_check.py`.
 const START: u32 = 0x1000;
 /// The supervisor stack's top, as in `unicorn_check.py`.
@@ -157,7 +158,7 @@ impl Interrupts for Request {
         self.0
     }
 
-    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycles) -> Acknowledged {
+    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycle) -> Acknowledged {
         self.0 = InterruptLevel::NONE;
         Acknowledge::Autovector.into()
     }
@@ -281,7 +282,7 @@ impl Machine {
         self.cpu.run_for(
             &mut NoBus,
             &mut Request(InterruptLevel::NONE),
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(1),
         )
     }
@@ -329,7 +330,7 @@ impl Machine {
                 let run = self.cpu.run_for(
                     &mut NoBus,
                     &mut Request(InterruptLevel::NONE),
-                    Cycles::ZERO,
+                    Cycle::ZERO,
                     BUDGET,
                 );
                 assert_eq!(run.stop, Stop::Hook(id));
@@ -352,7 +353,7 @@ impl Machine {
             });
         let run = self
             .cpu
-            .run_for(&mut NoBus, interrupts, Cycles::ZERO, BUDGET);
+            .run_for(&mut NoBus, interrupts, Cycle::ZERO, BUDGET);
         assert_eq!(run.stop, Stop::Hook(id));
         assert_eq!(self.cpu.registers.pc.0, at);
         seen.take().expect("the hook ran")
@@ -783,7 +784,7 @@ fn fault_5_stop_waits_for_an_interrupt() {
     let run = machine.cpu.run_for(
         &mut NoBus,
         &mut Request(InterruptLevel::NONE),
-        Cycles::ZERO,
+        Cycle::ZERO,
         BUDGET,
     );
     assert_eq!(run.stop, Stop::Stopped);
@@ -792,7 +793,7 @@ fn fault_5_stop_waits_for_an_interrupt() {
     machine.cpu.run_for(
         &mut NoBus,
         &mut Request(level),
-        Cycles::ZERO,
+        Cycle::ZERO,
         Cycles::from_clocks(1),
     );
     assert_eq!(

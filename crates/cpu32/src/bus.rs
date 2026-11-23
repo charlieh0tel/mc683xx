@@ -5,8 +5,10 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::cpu::hooks::ExceptionEntry;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::memory::Memory;
+use crate::memory::Page;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
@@ -37,7 +39,7 @@ pub struct BusAccess {
     /// Its address space.
     pub function_code: FunctionCode,
     /// When it starts, on the board's clock.
-    pub now: Cycles,
+    pub now: Cycle,
 }
 
 impl BusAccess {
@@ -48,7 +50,7 @@ impl BusAccess {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
     ) -> Self {
         Self {
             address,
@@ -192,14 +194,14 @@ pub trait Bus {
     /// The `reset` instruction asserted RESET at `now` (CPU32RM 4,
     /// RESET; SIMRM 8.2.6): the chip resets its external peripherals and
     /// its modules other than the CPU.
-    fn reset_instruction(&mut self, now: Cycles) {
+    fn reset_instruction(&mut self, now: Cycle) {
         let _ = now;
     }
 
     /// The CPU entered an exception in the instruction or interrupt
     /// entry that started at `now`, for the chip's trace.  By default
     /// nothing.
-    fn exception_entered(&mut self, entry: &ExceptionEntry, now: Cycles) {
+    fn exception_entered(&mut self, entry: &ExceptionEntry, now: Cycle) {
         let _ = (entry, now);
     }
 
@@ -238,14 +240,18 @@ pub trait Bus {
 }
 
 /// The clocks a byte or word cycle of `size` takes beyond the timing
-/// tables' assumption, on a `port` whose cycles take `clocks` each.
+/// tables' assumption, on a `port` whose cycles take `clocks` each, at
+/// most a page's ([`Page::MOST_CLOCKS`]).
+///
+/// [`Page::MOST_CLOCKS`]: crate::memory::Page::MOST_CLOCKS
 #[must_use]
-pub fn stall(size: Size, port: PortSize, clocks: u8) -> Cycles {
+pub fn stall(size: Size, port: PortSize, clocks: Cycles) -> Cycles {
+    debug_assert!(clocks <= Page::MOST_CLOCKS, "more clocks than a page holds");
     let cycles = match (size, port) {
         (Size::Word, PortSize::Bits8) => 2,
         _ => 1,
     };
-    Cycles::from_clocks((cycles * u64::from(clocks)).saturating_sub(TABLE_CLOCKS))
+    Cycles::from_clocks((cycles * clocks.clocks()).saturating_sub(TABLE_CLOCKS))
 }
 
 #[cfg(test)]
@@ -253,6 +259,7 @@ mod tests {
     use super::BusAccess;
     use super::PortSize;
     use super::stall;
+    use crate::cycles::Cycle;
     use crate::cycles::Cycles;
     use mc683xx_target::address::Address;
     use mc683xx_target::function_code::FunctionCode;
@@ -264,27 +271,30 @@ mod tests {
             Address(0x400),
             Size::Word,
             FunctionCode::SupervisorProgram,
-            Cycles::from_clocks(7),
+            Cycle::from_clocks(7),
         );
         assert_eq!(access.address, Address(0x400));
         assert_eq!(access.size, Size::Word);
         assert_eq!(access.function_code, FunctionCode::SupervisorProgram);
-        assert_eq!(access.now, Cycles::from_clocks(7));
+        assert_eq!(access.now, Cycle::from_clocks(7));
     }
 
     #[test]
     fn a_two_clock_word_costs_what_the_tables_say() {
-        assert_eq!(stall(Size::Word, PortSize::Bits16, 2), Cycles::ZERO);
+        assert_eq!(
+            stall(Size::Word, PortSize::Bits16, Cycles::from_clocks(2)),
+            Cycles::ZERO
+        );
     }
 
     #[test]
     fn a_word_on_an_8_bit_port_is_two_cycles() {
         assert_eq!(
-            stall(Size::Word, PortSize::Bits8, 3),
+            stall(Size::Word, PortSize::Bits8, Cycles::from_clocks(3)),
             Cycles::from_clocks(4)
         );
         assert_eq!(
-            stall(Size::Byte, PortSize::Bits8, 3),
+            stall(Size::Byte, PortSize::Bits8, Cycles::from_clocks(3)),
             Cycles::from_clocks(1)
         );
     }

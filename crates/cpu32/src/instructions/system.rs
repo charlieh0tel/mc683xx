@@ -382,6 +382,7 @@ mod tests {
     use crate::bus::Read;
     use crate::cpu::Cpu;
     use crate::cpu::Stop;
+    use crate::cycles::Cycle;
     use crate::cycles::Cycles;
     use crate::exception::Exception;
     use crate::exception::Vector;
@@ -410,7 +411,7 @@ mod tests {
         /// The cycles, with the value of each write.
         cycles: Vec<(BusAccess, Option<u32>)>,
         /// When RESET was asserted.
-        resets: Vec<Cycles>,
+        resets: Vec<Cycle>,
     }
 
     impl Bus for Recorder {
@@ -427,7 +428,7 @@ mod tests {
             Ok(Cycles::ZERO)
         }
 
-        fn reset_instruction(&mut self, now: Cycles) {
+        fn reset_instruction(&mut self, now: Cycle) {
             self.resets.push(now);
         }
     }
@@ -441,7 +442,7 @@ mod tests {
 
     /// One instruction on `bus`.
     fn step_on(cpu: &mut Cpu, bus: &mut Recorder) -> Stop {
-        cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1))
+        cpu.run_for(bus, &mut NoInterrupts, Cycle::ZERO, Cycles::from_clocks(1))
             .stop
     }
 
@@ -544,7 +545,7 @@ mod tests {
         let run = cpu.run_for(
             &mut bus,
             &mut NoInterrupts,
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(1),
         );
         assert_eq!(run.cycles, Cycles::from_clocks(25));
@@ -554,7 +555,7 @@ mod tests {
         let run = cpu.run_for(
             &mut bus,
             &mut NoInterrupts,
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(1),
         );
         assert_eq!(run.cycles, Cycles::from_clocks(25 - 3));
@@ -582,7 +583,7 @@ mod tests {
         let before = cpu.registers.clone();
         let mut bus = Recorder::default();
         step_on(&mut cpu, &mut bus);
-        assert_eq!(bus.resets, [Cycles::ZERO]);
+        assert_eq!(bus.resets, [Cycle::ZERO]);
         let mut expected = before;
         expected.pc = Address(CODE + 2);
         assert_eq!(cpu.registers, expected);

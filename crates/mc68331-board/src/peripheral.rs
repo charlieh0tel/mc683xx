@@ -15,6 +15,7 @@ use std::str::FromStr;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::floating_miso;
@@ -676,8 +677,8 @@ pub trait Peripheral: Any {
     /// [`None`] if it never does, the chip's system clock on board time
     /// `system_clock`.  Asked before the cycle's `read` or `write`.  By
     /// default it answers at once.
-    fn wait_states(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<u8> {
-        Some(0)
+    fn wait_states(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<Cycles> {
+        Some(Cycles::ZERO)
     }
 
     /// With an external DSACK, the port this cycle's DSACK gives, for a
@@ -865,6 +866,7 @@ mod tests {
     use super::ParseLaneError;
     use super::ParseRoleError;
     use super::Role;
+    use mc683xx_cpu32::cycles::Cycle;
     use mc683xx_cpu32::cycles::Cycles;
     use mc683xx_cpu32::frequency::Frequency;
     use mc683xx_modules::chip_select::ChipSelect;
@@ -902,7 +904,7 @@ mod tests {
     #[test]
     fn a_drive_carries_the_system_clock() {
         let base = TimeBase::new(
-            Cycles::ZERO,
+            Cycle::ZERO,
             Time::from_picos(5),
             Frequency::from_hz(16_777_216),
         );

@@ -8,6 +8,7 @@ use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::cpu::Cpu;
 use mc683xx_cpu32::cpu::Halt;
 use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Exception;
 use mc683xx_cpu32::exception::Vector;
@@ -34,7 +35,7 @@ impl Interrupts for NoInterrupts {
         InterruptLevel::NONE
     }
 
-    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycles) -> Acknowledged {
+    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycle) -> Acknowledged {
         Acknowledge::Spurious.into()
     }
 }
@@ -90,7 +91,7 @@ pub fn capture(registers: &Registers) -> State {
 
 /// Runs one instruction: a budget of one cycle runs exactly one.
 pub fn step(cpu: &mut Cpu, bus: &mut dyn Bus) -> Ended {
-    let run = cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1));
+    let run = cpu.run_for(bus, &mut NoInterrupts, Cycle::ZERO, Cycles::from_clocks(1));
     // The exception first: taking it may halt the core, as on a stack
     // the case does not map.
     match (cpu.exception_taken(), run.stop) {

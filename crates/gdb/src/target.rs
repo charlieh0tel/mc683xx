@@ -324,7 +324,7 @@ pub trait Target {
         Ok(())
     }
 
-    /// Runs an emulated target for about `cycles` system clocks, or
+    /// Runs an emulated target for about `budget` system clocks, or
     /// until a hook, a halt or a request stops it; or for none, as
     /// [`TargetRun::Quantum`], if the host holds it back (to pace it
     /// against wall time), the stub then looking for gdb's bytes.  `hit` says whether
@@ -339,7 +339,7 @@ pub trait Target {
     /// # Errors
     ///
     /// The target's error, one a run cannot go on from.
-    fn run_for(&mut self, cycles: Cycles, hit: &dyn Fn() -> bool)
+    fn run_for(&mut self, budget: Cycles, hit: &dyn Fn() -> bool)
     -> Result<TargetRun, Self::Error>;
 
     /// Stops a running target, for gdb's Ctrl-C: how it stopped.  The
@@ -420,11 +420,11 @@ impl Target for Machine {
 
     fn run_for(
         &mut self,
-        cycles: Cycles,
+        budget: Cycles,
         _hit: &dyn Fn() -> bool,
     ) -> Result<TargetRun, Infallible> {
         let mut limits = Limits::default();
-        limits.cycles = Some(cycles);
+        limits.cycles = Some(budget);
         let run = Self::run_limited(self, limits);
         Ok(match run.end {
             End::Stop(stop) => stop.into(),

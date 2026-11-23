@@ -18,6 +18,8 @@ use std::ops::Rem;
 use std::ops::Sub;
 use std::ops::SubAssign;
 
+use mc683xx_cpu32::cycles::Cycle;
+
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::frequency::NANOHERTZ_PER_HERTZ;
@@ -732,7 +734,7 @@ impl ClockHistory {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeBase {
     /// The clock it starts at.
-    cycles: Cycles,
+    cycle: Cycle,
     /// Its time.
     time: Time,
     /// The clock's frequency from then, saved as its hertz.
@@ -741,12 +743,12 @@ pub struct TimeBase {
 }
 
 impl TimeBase {
-    /// A base: clock `cycles` falls at `time`, and the clock runs
+    /// A base: clock `cycle` falls at `time`, and the clock runs
     /// at `frequency`, whole hertz, from there.
     #[must_use]
-    pub const fn new(cycles: Cycles, time: Time, frequency: Frequency) -> Self {
+    pub const fn new(cycle: Cycle, time: Time, frequency: Frequency) -> Self {
         Self {
-            cycles,
+            cycle,
             time,
             frequency,
         }
@@ -762,7 +764,7 @@ impl TimeBase {
     /// would fall behind board time at each one.  This one never moves.
     #[must_use]
     pub const fn steady(frequency: Frequency) -> Self {
-        Self::new(Cycles::ZERO, Time::ZERO, frequency)
+        Self::new(Cycle::ZERO, Time::ZERO, frequency)
     }
 
     /// The clock's frequency.
@@ -773,39 +775,39 @@ impl TimeBase {
 
     /// The time `at` falls at, rounded down, before the base too.
     #[must_use]
-    pub fn time(&self, at: Cycles) -> Time {
+    pub fn time(&self, at: Cycle) -> Time {
         let picoseconds = |clocks: u64| u128::from(clocks) * u128::from(PICOSECONDS_PER_SECOND);
         let hz = u128::from(self.frequency.hz().max(1));
         let whole = |picoseconds: u128| Span(u64::try_from(picoseconds).unwrap_or(u64::MAX));
-        if at >= self.cycles {
-            self.time + whole(picoseconds(at.clocks() - self.cycles.clocks()) / hz)
+        if at >= self.cycle {
+            self.time + whole(picoseconds(at.since(self.cycle).clocks()) / hz)
         } else {
-            self.time - whole(picoseconds(self.cycles.clocks() - at.clocks()).div_ceil(hz))
+            self.time - whole(picoseconds(self.cycle.since(at).clocks()).div_ceil(hz))
         }
     }
 
     /// The first clock at or after `at`, before the base too.
     #[must_use]
-    pub fn cycles(&self, at: Time) -> Cycles {
+    pub fn cycles(&self, at: Time) -> Cycle {
         let scale = |span: Span| u128::from(span.0) * u128::from(self.frequency.hz());
         let whole = |clocks: u128| u64::try_from(clocks).unwrap_or(u64::MAX);
         if at >= self.time {
             let clocks = scale(at.since(self.time)).div_ceil(u128::from(PICOSECONDS_PER_SECOND));
-            Cycles::from_clocks(self.cycles.clocks().saturating_add(whole(clocks)))
+            self.cycle + Cycles::from_clocks(whole(clocks))
         } else {
             let clocks = scale(self.time.since(at)) / u128::from(PICOSECONDS_PER_SECOND);
-            Cycles::from_clocks(self.cycles.clocks().saturating_sub(whole(clocks)))
+            self.cycle - Cycles::from_clocks(whole(clocks))
         }
     }
 
     /// The base from `at` on, at `frequency`: itself if the frequency
     /// has not changed.
-    pub(crate) fn moved(&self, at: Cycles, frequency: Frequency) -> Self {
+    pub(crate) fn moved(&self, at: Cycle, frequency: Frequency) -> Self {
         if frequency == self.frequency {
             return *self;
         }
         Self {
-            cycles: at,
+            cycle: at,
             time: self.time(at),
             frequency,
         }
@@ -814,7 +816,7 @@ impl TimeBase {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_cpu32::cycles::Cycle;
 
     use super::Clock;
     use super::ClockHistory;
@@ -1081,35 +1083,29 @@ mod tests {
     #[test]
     fn chip_times_round_up_to_a_clock() {
         let base = TimeBase::new(
-            Cycles::from_clocks(10),
+            Cycle::from_clocks(10),
             Time::from_picos(1_000),
             Frequency::from_hz(16_777_216),
         );
         assert_eq!(
-            base.time(Cycles::from_clocks(11)),
+            base.time(Cycle::from_clocks(11)),
             Time::from_picos(1_000 + 59_604)
         );
-        assert_eq!(
-            base.cycles(Time::from_picos(1_000)),
-            Cycles::from_clocks(10)
-        );
-        assert_eq!(
-            base.cycles(Time::from_picos(1_001)),
-            Cycles::from_clocks(11)
-        );
+        assert_eq!(base.cycles(Time::from_picos(1_000)), Cycle::from_clocks(10));
+        assert_eq!(base.cycles(Time::from_picos(1_001)), Cycle::from_clocks(11));
         assert_eq!(
             base.cycles(Time::from_picos(1_000 + 59_605)),
-            Cycles::from_clocks(12)
+            Cycle::from_clocks(12)
         );
         assert_eq!(
-            base.cycles(base.time(Cycles::from_clocks(500))),
-            Cycles::from_clocks(500)
+            base.cycles(base.time(Cycle::from_clocks(500))),
+            Cycle::from_clocks(500)
         );
-        let moved = base.moved(Cycles::from_clocks(20), Frequency::from_hz(8_388_608));
-        assert_eq!(moved.time, base.time(Cycles::from_clocks(20)));
-        assert_eq!(moved.cycles(moved.time + ps(1)), Cycles::from_clocks(21));
+        let moved = base.moved(Cycle::from_clocks(20), Frequency::from_hz(8_388_608));
+        assert_eq!(moved.time, base.time(Cycle::from_clocks(20)));
+        assert_eq!(moved.cycles(moved.time + ps(1)), Cycle::from_clocks(21));
         assert_eq!(
-            base.moved(Cycles::from_clocks(20), Frequency::from_hz(16_777_216)),
+            base.moved(Cycle::from_clocks(20), Frequency::from_hz(16_777_216)),
             base,
             "no drift"
         );
@@ -1120,27 +1116,27 @@ mod tests {
         let base = TimeBase::steady(Frequency::from_hz(16_777_216));
         assert_eq!(
             base,
-            TimeBase::new(Cycles::ZERO, Time::ZERO, Frequency::from_hz(16_777_216))
+            TimeBase::new(Cycle::ZERO, Time::ZERO, Frequency::from_hz(16_777_216))
         );
         assert_eq!(
             base.cycles(Time::from_seconds(1)),
-            Cycles::from_clocks(16_777_216)
+            Cycle::from_clocks(16_777_216)
         );
     }
 
     #[test]
     fn clocks_before_the_base_round_down_and_back() {
         let base = TimeBase::new(
-            Cycles::from_clocks(1_000),
+            Cycle::from_clocks(1_000),
             Time::from_picos(100_000_000),
             Frequency::from_hz(16_777_216),
         );
         assert_eq!(
-            base.time(Cycles::from_clocks(999)),
+            base.time(Cycle::from_clocks(999)),
             Time::from_picos(100_000_000 - 59_605)
         );
         for clocks in (0..1_000).chain(1_000..1_100) {
-            let cycles = Cycles::from_clocks(clocks);
+            let cycles = Cycle::from_clocks(clocks);
             assert_eq!(base.cycles(base.time(cycles)), cycles, "{clocks}");
         }
     }

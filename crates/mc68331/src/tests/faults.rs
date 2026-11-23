@@ -6,8 +6,9 @@ use std::ops::ControlFlow;
 
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::bare::FaultCause;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::exception::CycleKind;
+use mc683xx_cpu32::exception::BusCycleKind;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_target::Cpu32Target;
@@ -40,7 +41,7 @@ fn a_fault_stop_ends_the_run_with_the_instruction_undone() {
     let run = chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(run.stop, Stop::Fault);
     let fault = chip.cpu().fault_stop().expect("a fault stop");
-    assert_eq!(fault.cycle, CycleKind::Read);
+    assert_eq!(fault.cycle, BusCycleKind::Read);
     assert_eq!(fault.cause, FaultCause::AddressError);
     assert_eq!(fault.address, Address(ODD));
     assert_eq!(fault.registers.pc.0, START);
@@ -62,7 +63,7 @@ fn a_bus_monitor_timeout_stops_the_run_rather_than_halting() {
     let run = chip.run_for(Cycles::from_clocks(1));
     assert_eq!(run.stop, Stop::Fault);
     let fault = chip.cpu().fault_stop().expect("a fault stop");
-    assert_eq!(fault.cycle, CycleKind::Fetch);
+    assert_eq!(fault.cycle, BusCycleKind::Fetch);
     assert_eq!(fault.cause, FaultCause::BusError);
     assert_eq!(chip.cpu().halted(), None, "no double bus fault");
 }
@@ -109,12 +110,12 @@ fn a_fault_stacking_the_interrupt_that_ends_lpstop_leaves_the_chip_asleep() {
         if run.stop != Stop::Budget && run.stop != Stop::Stopped {
             break run;
         }
-        assert!(chip.now() < Cycles::from_clocks(200_000), "never woke");
+        assert!(chip.now() < Cycle::from_clocks(200_000), "never woke");
     };
     assert_eq!(run.stop, Stop::Fault);
     assert_eq!(
         chip.cpu().fault_stop().map(|fault| fault.cycle),
-        Some(CycleKind::Write)
+        Some(BusCycleKind::Write)
     );
     assert!(chip.cpu().stopped(), "LPSTOP not ended (CPU32RM 4.4)");
     assert_eq!(
@@ -163,7 +164,7 @@ fn lpstop_with_an_interrupt_already_pending_stays_asleep_when_it_faults() {
         if run.stop != Stop::Budget && run.stop != Stop::Stopped {
             break run;
         }
-        assert!(chip.now() < Cycles::from_clocks(200_000), "never stopped");
+        assert!(chip.now() < Cycle::from_clocks(200_000), "never stopped");
     };
     assert_eq!(run.stop, Stop::Fault);
     assert!(chip.cpu().stopped());

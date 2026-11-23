@@ -62,7 +62,7 @@ __all__ = [
     "Instruction",
     "MemoryAccess",
     "InvalidAccess",
-    "CycleKind",
+    "BusCycleKind",
     "Invalid",
     "ExceptionEntry",
     "BusError",
@@ -343,12 +343,12 @@ class ClockPhase:
     def __int__(self) -> int: ...
 
 @final
-class CycleKind:
+class BusCycleKind:
     """A bus cycle's kind (CPU32RM 6.3)."""
 
-    FETCH: ClassVar[CycleKind]
-    READ: ClassVar[CycleKind]
-    WRITE: ClassVar[CycleKind]
+    FETCH: ClassVar[BusCycleKind]
+    READ: ClassVar[BusCycleKind]
+    WRITE: ClassVar[BusCycleKind]
     def __hash__(self) -> int: ...
     def __int__(self) -> int: ...
 
@@ -626,7 +626,7 @@ class InvalidAccess:
     @property
     def function_code(self) -> FunctionCode: ...
     @property
-    def cycle(self) -> CycleKind: ...
+    def cycle(self) -> BusCycleKind: ...
     @property
     def value(self) -> int | None: ...
     @property
@@ -694,17 +694,20 @@ class Output:
 
     @final
     class Wave(Output):
-        """High for `high` of every `period` PWMCNT counts; `clocks`
-        system clocks a count, or None when PCLK clocks PWMCNT."""
+        """High for `high_counts` of every `period_counts` PWMCNT counts;
+        `clocks_per_count` system clocks a count, or None when PCLK clocks
+        PWMCNT."""
 
-        __match_args__ = ("period", "high", "clocks")
-        def __new__(cls, period: int, high: int, clocks: int | None) -> Output.Wave: ...
+        __match_args__ = ("period_counts", "high_counts", "clocks_per_count")
+        def __new__(
+            cls, period_counts: int, high_counts: int, clocks_per_count: int | None
+        ) -> Output.Wave: ...
         @property
-        def period(self) -> int: ...
+        def period_counts(self) -> int: ...
         @property
-        def high(self) -> int: ...
+        def high_counts(self) -> int: ...
         @property
-        def clocks(self) -> int | None: ...
+        def clocks_per_count(self) -> int | None: ...
 
     @final
     class Clock(Output):
@@ -869,7 +872,7 @@ class Mc68331:
     """The chip."""
 
     def run_for(self, budget: int) -> Run: ...
-    def run_until(self, target: int) -> Run: ...
+    def run_until(self, deadline: int) -> Run: ...
     def serve_gdb(
         self, address: str = ..., ready: Callable[[int], object] | None = None
     ) -> Ending: ...
@@ -1023,7 +1026,7 @@ class FaultStop:
     and a chip's `fault_stop` carry it."""
 
     @property
-    def cycle(self) -> CycleKind: ...
+    def cycle(self) -> BusCycleKind: ...
     @property
     def cause(self) -> FaultCause: ...
     @property

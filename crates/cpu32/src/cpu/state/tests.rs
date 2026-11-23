@@ -13,6 +13,7 @@ use super::encode;
 use super::encode_layer;
 use super::restore_each;
 use crate::cpu::Cpu;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::effective_address::Altered;
 use crate::instructions::tests::CODE;
@@ -54,7 +55,7 @@ fn trace(cpu: &mut Cpu, budget: u64) -> Vec<u32> {
     cpu.run_for(
         &mut NoBus,
         &mut NoInterrupts,
-        Cycles::ZERO,
+        Cycle::ZERO,
         Cycles::from_clocks(budget),
     );
     cpu.remove_hook(id);
@@ -145,7 +146,7 @@ fn hooks_stay_and_permissions_come_back() {
             .run_for(
                 &mut NoBus,
                 &mut NoInterrupts,
-                Cycles::ZERO,
+                Cycle::ZERO,
                 Cycles::from_clocks(1000)
             )
             .stop,

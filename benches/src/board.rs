@@ -9,6 +9,7 @@
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::Halt;
 use mc683xx_cpu32::cpu::state::Stateless;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::BusCycle;
@@ -247,7 +248,7 @@ impl MappedPeripheral for QuantumCounter {
 }
 
 impl Timed for QuantumCounter {
-    fn advance(&mut self, _now: Cycles) {
+    fn advance(&mut self, _now: Cycle) {
         self.quanta += 1;
     }
 }

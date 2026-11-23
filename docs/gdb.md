@@ -154,7 +154,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   `CpuControl`: registers and hooks), `read_memory` and `write_memory`
   (memory at an `Address` in a function code's space, with no bus
   cycle; a `target::AccessError` for a byte not served),
-  `run_for(cycles, hit)` (a quantum, its end a `target::TargetRun`) and
+  `run_for(budget, hit)` (a quantum, its end a `target::TargetRun`) and
   `reset`.  The register methods default to `cpu_scope`'s; `resume`
   and `halt` default to an emulated target's, which runs only as the
   stub runs it.  `native_step` gives a target's own step

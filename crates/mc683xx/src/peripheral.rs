@@ -3,6 +3,8 @@
 //! module keeps, the cycles a peripheral on no select decodes, and the
 //! QSPI's peripherals.
 
+use mc683xx_cpu32::cycles::Cycle;
+
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -64,11 +66,11 @@ impl BusDecode {
 /// own.
 pub trait Timed {
     /// When it next changes on its own, if it will.
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         None
     }
     /// Brings it to `now`.
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         let _ = now;
     }
 }
@@ -170,14 +172,14 @@ pub struct QspiTransfer {
     /// SCK period.
     pub clock: QspiClock,
     /// When it ends.
-    pub now: Cycles,
+    pub now: Cycle,
 }
 
 impl QspiTransfer {
     /// A transfer of `bits` of `out`, shifted with `clock`, ending at
     /// `now`: queue entry 0, PCS\[3:0\] all low.
     #[must_use]
-    pub const fn new(out: u16, bits: u8, clock: QspiClock, now: Cycles) -> Self {
+    pub const fn new(out: u16, bits: u8, clock: QspiClock, now: Cycle) -> Self {
         Self {
             entry: 0,
             chip_selects: 0,
@@ -225,7 +227,7 @@ pub trait SpiPeripheral {
     /// RESET reaches it at `now`, as the chip's QSPI reset scope says
     /// (`Builder::set_qspi_reset_scope`; every reset by default, SIMRM 8.2).
     /// By default nothing changes.
-    fn reset(&mut self, now: Cycles) {
+    fn reset(&mut self, now: Cycle) {
         let _ = now;
     }
 
@@ -235,7 +237,7 @@ pub trait SpiPeripheral {
     /// framed by its select sees the frame start and end here, as the
     /// levels it decodes go to its code and away.  Levels that do not
     /// change are not told.  By default nothing changes.
-    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycle) {
         let _ = (levels, now);
     }
 
@@ -244,7 +246,7 @@ pub trait SpiPeripheral {
     /// CPOL, CPHA or SPBR, or the system clock, changed.  A peripheral
     /// that checks its SPI mode or its fastest SCK does it here.  By
     /// default nothing changes.
-    fn set_clock(&mut self, clock: QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, now: Cycle) {
         let _ = (clock, now);
     }
 

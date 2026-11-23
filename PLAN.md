@@ -829,7 +829,7 @@ chip beside `Mc68331`.
   The callable gets what the Rust hook does: an `Instruction` (`pc`,
   `registers` as `registers()` gives them, `stack_top`), a
   `MemoryAccess` (`address`, `size`, `function_code`, `value`), an
-  `InvalidAccess` (those, `cycle`, a `CycleKind`, `value` or `None`,
+  `InvalidAccess` (those, `cycle`, a `BusCycleKind`, `value` or `None`,
   `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`) or an
   `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`).  A
   truthy result stops the run (`Stop.Hook(hook)`),
@@ -1462,8 +1462,11 @@ hand.  The keys are in `docs/board-files.md`.
   peripherals' next events and the drives in flight, in (time, sequence)
   order, and runs the chip with `run_for(budget)` in quanta that end at
   the earliest of them.  Chip cycles convert to board time from an
-  anchor (`TimeBase`: cycles, time, system clock), public so peripherals
-  convert as the board does, moved only at a sync point in
+  anchor (`TimeBase`: a chip `Cycle`, its time, the system clock;
+  `Board::system_clock`, the same clock the SIM makes and counts in
+  `Cycle`s as `Sim::system_clock`, each layer viewing it in its own
+  time), public so peripherals convert as the board does, moved only
+  at a sync point in
   which the frequency changed (SYNCR, a reset), so it never drifts;
   toward the chip a time rounds up to the first clock at or after it
   (Peripherals, GPT input edges), toward the board a clock rounds
@@ -1858,7 +1861,7 @@ one session, `serve`, over one trait, `target::Target`, on a
 `connection::Connection`, the stub's own trait, which it adapts to
 gdbstub's.  An emulated target gives `cpu_scope` (registers and
 hooks), `read_memory` and `write_memory` (memory with no bus cycle, in
-a function code's space), `run_for(cycles, hit)` (a quantum) and
+a function code's space), `run_for(budget, hit)` (a quantum) and
 `reset`; the trait's other methods (registers, `resume`, `halt`)
 default to it, and it steps by a hook.  A target that steps by its own
 means gives `native_step`, a `NativeStep`; one with neither cannot step
@@ -2155,6 +2158,12 @@ Adversarial review (2026-11-01):
   `Bus`.  Per-page permissions and hook bits live in tables beside
   the entries, not in them, so the chip's rebuilds from the decode
   leave them; the host sets permissions, the hooks set their bits.
+- A page's bus-cycle clocks are a `u8` in the entry, the one count of
+  system clocks the API does not hold as `Cycles` (decided 2026-11,
+  for 0.9.0): the entries stay small for the fast path.  It is private
+  behind `Page::clocks() -> Cycles`; `Page::timed(port, Cycles)`
+  asserts it fits (`Page::MOST_CLOCKS`, 255, where an ECLK cycle, the
+  longest a select times, is 24), and `bus::stall` debug-asserts it.
 - The tables are two-level: a directory of slabs of 1024 pages (2
   Mbytes), each allocated when a map or a protection first reaches it;
   a page in no slab is on the bus with every permission, and a hook
@@ -3462,7 +3471,7 @@ checks move onto real code hooks.
 | The public API names no foreign type but serde 1's traits (below) | A dependency's major release must not break ours: board parameters are `registry::ParameterValue`, a syntax error a `SyntaxError`, a snapshot that does not decode a `DecodeError`, each opaque or ours.  `serve` takes the stub's own `connection::Connection` (write, flush, a blocking read and a peek that does not wait), adapted to gdbstub's inside the crate, so gdbstub's major version is not ours (decided 2026-11-21, reversing 2026-10-24's keeping of gdbstub's `ConnectionExt`). |
 | serde 1 in the public API, an accepted exception | The state types derive `Serialize` and `Deserialize` (`mc683xx-target`'s behind its `serde` feature), which is how the snapshot layers encode them; hiding the derives would mean a second set of types to keep in step.  serde 1 is stable, so a host is not broken by our dependency; the snapshot bytes stay outside semver (`docs/releasing.md`, Semver scope) (decided 2026-11-21, before 1.0).  The serde bounds on the board's chip traits (`ChipPin`'s `Serialize` and `DeserializeOwned`, `Chip::Section`'s) are not host API: those traits are sealed (above), so no host type has to meet them. |
 | `Cpu::registers` and `Cpu::memory` stay public fields | The programming model is the host's to read and write as it likes (a test's setup, a harness's comparison); no invariant spans them that a setter would guard, and hosts reach them a thousand times as fields (decided 2026-10-24). |
-| `memory::Page` public but non-exhaustive, built from `Page::BUS`; `MemoryKind` non-exhaustive | Decided 2026-11-21 (0.8.0).  A host that runs a bare `Cpu` on a memory map of its own lays it out with `Memory::map`, so it builds pages (the harness's firmware map and the benches do); the chip builds its own from the chip selects.  So `Page` stays public, its fields readable, but built as `Page::BUS.reading(..).writing(..).timed(port, clocks)`, so a field added after 1.0 gets a default.  `MemoryKind` may gain a kind (a write-once memory), each answering `writable`. |
+| `memory::Page` public but non-exhaustive, built from `Page::BUS`; `MemoryKind` non-exhaustive | Decided 2026-11-21 (0.8.0).  A host that runs a bare `Cpu` on a memory map of its own lays it out with `Memory::map`, so it builds pages (the harness's firmware map and the benches do); the chip builds its own from the chip selects.  So `Page` stays public, its fields readable, but built as `Page::BUS.reading(..).writing(..).timed(port, clocks)`, its clocks read through `clocks()`, so a field added after 1.0 gets a default.  `MemoryKind` may gain a kind (a write-once memory), each answering `writable`. |
 | A fixed memory on no select, emulator-only; a matching select wins | A host's hybrid boot maps rewritten code beside an image it must not change, where the only alternative was patching the reset code to program a select the firmware leaves unused.  A select winning keeps the firmware's decode as on hardware wherever it decodes; fast termination and no DSACK by default, as the chip has nothing to model, a select's internal timing (port, wait states) on request so code runs at its original bus speed; contents survive resets as RAM's unless a reload scope says (decided 2026-10-24). |
 | Pacing host-side, a front end's control taken at sync points | A GUI wants board time at wall speed and a stop and keys from its own thread; sleeping between quanta against the wall clock, outside the board's model, and taking a thread-safe handle's stop and inputs at sync points on the board's thread, keeps the core single-threaded, host time out of the model and the run the same whatever the pacing (decided 2026-10-24). |
 | Front ends outside the repository and the board file; they observe nets and inspect peripherals | Board files describe hardware, which a UI is not; a front end's needs are the host API's: read-only observers on nets, peripherals' state by type, inputs through externals.  Read-only keeps every run deterministic whatever watches it (decided 2026-10-24). |
@@ -3473,6 +3482,7 @@ checks move onto real code hooks.
 | Unit-bearing newtypes keep private fields; bit-pattern newtypes whose every value is valid have public ones | Decided 2026-11-21 (0.8.0, round 5).  A quantity (`Cycles`, `Frequency`, `Time`, `Span`) is reached through constructors and accessors that name its unit, so its field is private.  A bit pattern (`Address`, `Vector`) is a value read off the lines, with no unit and every value valid, so `Address(0x400)` and `vector.0` read as the hardware does and its field is public.  One with values that are not valid (`InterruptLevel`, 0 to 7) keeps its field private behind `TryFrom` (below); `FunctionCode`, eight codes each with a meaning, is an enum (0.9.0). |
 | One conversion for each kind of value: `TryFrom<u8>` and `From<T> for u8` for a checked value, a named pair for an encoding, opaque received ids | Decided 2026-11-23 (0.9.0).  A checked value (`InterruptLevel`, `IrqPin`, `PortGpPin`, `chip_select::Number`, `FunctionCode`) had `new`/`get` and `TryFrom`/`From` both, or only `new`/`get`; now only `TryFrom<u8>` (`No<Type>(u8)`, so `?` carries why) and `From<T> for u8`, and `IrqPin::level()` gives way to `From<IrqPin> for InterruptLevel`.  A wire or field encoding keeps a named pair (`Register::code`/`from_code`, `Size::field`, `Entry::atemp`), as `From` would hide which encoding.  A register-order index is `index`/`from_index` (`ChipSelect`).  An id a host only receives and gives back (`PeripheralId`, `ConditionId`, `ObserverId`, `HookId`) is opaque, `Display` and no `From`, so a host cannot forge one; `PeripheralId`'s number is reachable only through hidden plumbing for the workspace's crates, and `ConditionId` parses from the number it prints, as a debugger's `monitor stop delete N` names one.  A value the host chooses (`ConditionToken`) is one `From` pair.  A `const fn` that needed `get` (`iack_address`, `Sim::interrupt_pin`, `Builder::set_autovector`, `Mc68331::set_interrupt_pin`) is no longer `const`. |
 | One number syntax for what a person types: `mc683xx_target::integer::parse_integer` | Decided 2026-11-22 (0.9.0).  Init scripts, gdb `monitor` commands, the runner's options and the numbers in board-file strings all take decimal, `0x` hexadecimal or `0b` binary, the prefix in lower case, `_` between digits, no sign, no `$`, no decimal leading zero, so a number that works in one works in all and `010` is never octal by surprise.  One `no_std` function in the target crate, generic over the result (`TryFrom<u32>`), so a pod's firmware takes the same text; its error is `Invalid` or `TooLarge`, without the text, as the crate has no `alloc`.  A board file's TOML integers keep TOML's own syntax (`0o`, `+`), which the TOML parser reads before the board sees it; gdb packets and S-records keep theirs. |
+| Chip time splits: `Cycle` an instant, `Cycles` a count | Decided 2026-11 (0.9.0).  `Cycles` was both a clock by number and a count of clocks, so `now + budget` and `budget + budget` read alike and a run's deadline and its budget had one type.  `Cycle` (system clocks since power-on) mirrors the board's `Time`: `ZERO`, `MAX`, `from_clocks`/`clocks`, `since`, `since_power_on`; `Cycle + Cycles` and `Cycle - Cycles` saturate at power-on and `MAX`, `Cycle - Cycle` is the `Cycles` between, zero if the second is later; Display `12 clocks`; serde as its `u64`, so snapshots keep their bytes.  `Cycles`, `Span`'s counterpart, keeps its `+` and `-` and gains `saturating_add` and `saturating_sub`; `Cycles::until` went (`Cycle::since`).  Every chip-layer instant is a `Cycle` (`now`, `at`, `next_event`, a run's deadline, a trace record's `cycle`, `TimeBase`'s anchor), every cost, budget and period `Cycles`.  "Cycle" alone means the clock; a bus transaction is a bus cycle. |
 | Loading and init scripts in `mc683xx-debug`, over `Cpu32Target` | Decided 2026-11-01 with the BDM pod's maintainer.  One loader for silicon and the emulator, tested on the chip; a crate of its own, on `mc683xx-target` alone, so a pod host links it without the emulator.  Word writes, verify by default, RPC from the entry and no SSP inference, an init script with line-numbered errors; host time in `poll_memory` only. |
 | `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels) stay exhaustive, so a match on one needs no wildcard; the Python bindings' conversions of the others never panic: a run's end or halt they do not know raises `mc683xx.RunError` naming it, any other value (a fault cause among them) `NotImplementedError` naming its kind, but an event is never refused or dropped: one they cannot convert is `Event.Unknown(now, name)`, its Rust `Display`, and an unknown reset cause in a reset is `ResetCause.UNKNOWN`, so `take_events` always takes the whole queue (decided 2026-11-21, round 5); Rust tests (`every_run_end_maps_or_names_itself`, `every_value_maps`) list every variant, so a variant added to one is added there and mapped (decided 2026-11-21). |
 

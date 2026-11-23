@@ -18,8 +18,9 @@ use super::Stop;
 use super::hooks::Invalid;
 use super::hooks::Resume;
 use crate::bus::Bus;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
-use crate::exception::CycleKind;
+use crate::exception::BusCycleKind;
 use crate::exception::Exception;
 use crate::exception::Fault;
 use crate::exception::Vector;
@@ -100,7 +101,7 @@ impl fmt::Display for FaultCause {
 #[non_exhaustive]
 pub struct FaultStop {
     /// Fetch, read or write.
-    pub cycle: CycleKind,
+    pub cycle: BusCycleKind,
     /// Why.
     pub cause: FaultCause,
     /// The cycle's address, all 32 bits.
@@ -272,16 +273,14 @@ impl Cpu {
         &mut self,
         bus: &mut dyn Bus,
         interrupts: &mut dyn Interrupts,
-        now: Cycles,
+        now: Cycle,
         limits: Limits,
     ) -> LimitedRun {
         if self.registers.pc != self.left_pc {
             self.block_start = true;
         }
         self.bare.end = None;
-        let budget = limits
-            .cycles
-            .unwrap_or(Cycles::from_clocks(u64::MAX - now.clocks()));
+        let budget = limits.cycles.unwrap_or(Cycle::MAX.since(now));
         let first = self.instructions;
         self.bare.exceptions_stepped = 0;
         let run = self.run_from_boundary(bus, interrupts, now, budget, Some(limits));

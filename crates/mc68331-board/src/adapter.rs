@@ -26,6 +26,7 @@ use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
@@ -129,7 +130,7 @@ impl<D> MappedAdapter<D> {
 }
 
 /// The time of `drive`'s call in the chip's system clocks.
-fn cycles(drive: &Drive<'_>) -> Cycles {
+fn cycle(drive: &Drive<'_>) -> Cycle {
     drive.system_clock().cycles(drive.now())
 }
 
@@ -164,7 +165,7 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
             .write(carried(access, drive.system_clock()), value)
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<Cycles> {
         self.peripheral.wait_states(carried(access, system_clock))
     }
 
@@ -177,7 +178,7 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
     }
 
     fn reset(&mut self, drive: &mut Drive<'_>) {
-        self.peripheral.reset(cycles(drive));
+        self.peripheral.reset(cycle(drive));
     }
 
     fn next_event(&self, system_clock: TimeBase) -> Option<Time> {
@@ -185,7 +186,7 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
     }
 
     fn advance(&mut self, drive: &mut Drive<'_>) {
-        self.peripheral.advance(cycles(drive));
+        self.peripheral.advance(cycle(drive));
     }
 
     fn inspect(&self) -> Inspection {
@@ -250,12 +251,12 @@ impl<D> SpiAdapter<D> {
 
 impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
     fn reset(&mut self, drive: &mut Drive<'_>) {
-        self.peripheral.reset(cycles(drive));
+        self.peripheral.reset(cycle(drive));
     }
 
     fn transfer(&mut self, transfer: Transfer, drive: &mut Drive<'_>) -> u16 {
         self.peripheral.transfer(
-            QspiTransfer::new(transfer.out, transfer.bits, transfer.clock, cycles(drive))
+            QspiTransfer::new(transfer.out, transfer.bits, transfer.clock, cycle(drive))
                 .at_entry(transfer.entry)
                 .selecting(transfer.chip_selects),
         )
@@ -267,7 +268,7 @@ impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
         } else {
             RELEASED_LEVELS
         };
-        self.peripheral.set_chip_selects(levels, cycles(drive));
+        self.peripheral.set_chip_selects(levels, cycle(drive));
     }
 
     fn set_qspi_clock(&mut self, clock: QspiClock, now: Time, system_clock: TimeBase) {

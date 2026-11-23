@@ -38,7 +38,7 @@
 //!     assert_eq!(chip.cpu().registers.pc.0, START);
 //!     let run = chip.run_for(Cycles::from_clocks(10_000));
 //!     assert_eq!(run.stop, Stop::Stopped);
-//!     assert_eq!(chip.now(), run.cycles);
+//!     assert_eq!(chip.now().since_power_on(), run.cycles);
 //!     Ok(())
 //! }
 //! ```

@@ -7,7 +7,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode_layer;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cpu::state::encode_layer;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_mc68331::port::Port;
 
@@ -164,7 +164,7 @@ fn a_state_no_run_could_save_is_refused() {
         ),
         (
             edited(&snapshot, |state| {
-                state.base = TimeBase::new(Cycles::ZERO, Time::ZERO, Frequency::from_nanohertz(0));
+                state.base = TimeBase::new(Cycle::ZERO, Time::ZERO, Frequency::from_nanohertz(0));
             }),
             StateError::invalid("the system clock's frequency"),
         ),

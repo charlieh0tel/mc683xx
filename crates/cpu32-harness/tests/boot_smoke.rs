@@ -20,6 +20,7 @@ use cpu32_harness::layout;
 use cpu32_harness::layout::FIRMWARE;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
@@ -251,7 +252,7 @@ struct Boot {
     /// The PCs of the last `TAIL_INSTRUCTIONS`, tallied.
     tail: BTreeMap<u32, u64>,
     /// Milestones reached, with the time.
-    reached: Vec<(&'static str, Cycles)>,
+    reached: Vec<(&'static str, Cycle)>,
 }
 
 /// Boots `image` for `seconds` of emulated time, tracing as it goes.
@@ -267,7 +268,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
         .collect();
     let (builder, stub, _) = board(bytes, Stub::default());
     let mut chip = builder.build();
-    let hz = chip.sim().clock().frequency().hz();
+    let hz = chip.sim().system_clock().frequency().hz();
     let mut trace = Boot::default();
     let mut registers = select_registers(&chip);
     let mut vbr = chip.cpu().registers.vbr;
@@ -285,7 +286,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
     );
     let mut budget_end = None;
     loop {
-        let hz_now = chip.sim().clock().frequency().hz();
+        let hz_now = chip.sim().system_clock().frequency().hz();
         if budget_end.is_none() || hz_now != hz {
             // the end is a time, at the clock the firmware sets
             let elapsed = chip.now().clocks();
@@ -393,7 +394,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
         "{name}: end at clock {} ({hz} Hz at reset, {} Hz now), {} instructions, PC {:#x}, \
          SR {:#06x}, SSP {:#x}, USP {:#x}, VBR {:#x}",
         chip.now().clocks(),
-        chip.sim().clock().frequency().hz(),
+        chip.sim().system_clock().frequency().hz(),
         trace.instructions,
         registers.pc,
         registers.sr(),

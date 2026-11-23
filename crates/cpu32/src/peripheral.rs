@@ -10,6 +10,7 @@ use std::fmt;
 use crate::bus::BusError;
 use crate::bus::PortSize;
 use crate::cpu::state::Save;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
@@ -59,7 +60,7 @@ pub struct BusCycle {
     pub write: bool,
     /// When it starts (on the bare machine, when its instruction
     /// started), on the system clock.
-    pub now: Cycles,
+    pub now: Cycle,
     /// The chip select asserted, on a chip: a peripheral wired to
     /// several (separate read and write selects, byte-lane selects)
     /// sees which.  [`None`] on the bare machine.
@@ -78,7 +79,7 @@ impl BusCycle {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
     ) -> Self {
         Self {
             address,
@@ -148,9 +149,9 @@ pub trait MappedPeripheral: Save {
     /// `None` if it never does and the bus monitor ends the cycle.
     /// Asked before the cycle's `read` or `write`.  By default it
     /// answers at once.
-    fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
+    fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
         let _ = cycle;
-        Some(0)
+        Some(Cycles::ZERO)
     }
 
     /// With an external DSACK, the port this cycle's DSACK gives, for a
@@ -180,7 +181,7 @@ pub trait MappedPeripheral: Save {
 
     /// RESET asserted at `now`: a reset of the chip, or the `reset`
     /// instruction (SIMRM 8.2).  By default nothing changes.
-    fn reset(&mut self, now: Cycles) {
+    fn reset(&mut self, now: Cycle) {
         let _ = now;
     }
 }

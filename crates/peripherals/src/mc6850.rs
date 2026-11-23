@@ -38,6 +38,7 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::frequency::NANOHERTZ_PER_HERTZ;
 use mc683xx_modules::qsm::sci::Frame;
@@ -769,8 +770,8 @@ impl Peripheral for Acia {
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
-        (access.role != Role::Iack).then_some(0)
+    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<Cycles> {
+        (access.role != Role::Iack).then_some(Cycles::ZERO)
     }
 
     fn interrupt_request(&self) -> bool {

@@ -17,6 +17,7 @@ use mc683xx_cpu32::cpu::Cpu;
 use mc683xx_cpu32::cpu::Run;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -453,7 +454,7 @@ impl Requests for Handles {
         }
     }
 
-    fn output_horizon(&self) -> Option<Cycles> {
+    fn output_horizon(&self) -> Option<Cycle> {
         self.horizon.get()
     }
 }
@@ -645,7 +646,7 @@ impl chip::Chip for Mc68331 {
         })
     }
 
-    fn now(&self) -> Cycles {
+    fn now(&self) -> Cycle {
         Self::now(self)
     }
 
@@ -684,7 +685,7 @@ impl chip::Chip for Mc68331 {
     }
 
     fn system_frequency(&self) -> Frequency {
-        self.sim().clock().frequency()
+        self.sim().system_clock().frequency()
     }
 
     fn memory(&self, memory: MemoryId) -> &[u8] {
@@ -728,7 +729,7 @@ impl chip::Chip for Mc68331 {
         Self::set_publish_output_horizon(self, publish);
     }
 
-    fn input(&mut self, pin: Pin, signal: Signal, at: Cycles) {
+    fn input(&mut self, pin: Pin, signal: Signal, at: Cycle) {
         match (pin, signal) {
             (_, Signal::Level(level)) if pin.gpt_input().is_some() => {
                 let input = pin.gpt_input().expect("a GPT input");
@@ -756,7 +757,7 @@ impl chip::Chip for Mc68331 {
 
     fn clock_output(&self, pin: Pin) -> Option<Frequency> {
         (pin == Pin::Eclk).then(|| {
-            let clock = self.sim().clock();
+            let clock = self.sim().system_clock();
             Frequency::from_nanohertz(clock.frequency().nanohertz() / clock.eclk_divisor())
         })
     }
@@ -783,7 +784,7 @@ impl chip::Chip for Mc68331 {
                 _ => {}
             }
         }
-        let system_clock = self.sim().clock().frequency();
+        let system_clock = self.sim().system_clock().frequency();
         for sent in self.take_sci_transmitted() {
             let start = base.time(sent.start);
             let baud = u128::from(system_clock.nanohertz()) / u128::from(sent.bit.clocks());
@@ -800,7 +801,7 @@ impl chip::Chip for Mc68331 {
         Self::take_events(self)
     }
 
-    fn reset_pulse(event: &Event) -> Option<(Cycles, Cycles)> {
+    fn reset_pulse(event: &Event) -> Option<(Cycle, Cycle)> {
         match *event {
             Event::Reset { now, .. } => Some((now, now + Cycles::from_clocks(RESET_CLOCKS))),
             _ => None,

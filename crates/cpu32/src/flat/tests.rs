@@ -20,7 +20,7 @@ use crate::cpu::state::decode;
 use crate::cpu::state::decode_layer;
 use crate::cpu::state::encode;
 use crate::cpu::state::encode_layer;
-use crate::cycles::Cycles;
+use crate::cycles::Cycle;
 use crate::exception::Vector;
 use crate::interrupt::IrqPin;
 use crate::memory::Backing;
@@ -329,11 +329,7 @@ fn unmap_leaves_the_bytes_of_a_region_the_host_mapped() {
         .add_region([5, 6].map(|byte| [byte; PAGE_BYTES as usize]).concat());
     let backing = |offset| Backing { region, offset };
     for (at, offset, length) in [(0, 0, 2), (2, PAGE_BYTES, 1)] {
-        let page = Page {
-            read: Some(backing(offset)),
-            write: None,
-            ..Page::BUS
-        };
+        let page = Page::BUS.reading(Some(backing(offset)));
         machine
             .cpu
             .memory
@@ -640,7 +636,7 @@ fn peripheral_at(machine: &mut Machine, address: u32) -> (&mut dyn MappedPeriphe
         Address(address),
         Size::Long,
         FunctionCode::SupervisorData,
-        Cycles::ZERO,
+        Cycle::ZERO,
     );
     (wired.peripheral.as_mut(), cycle)
 }

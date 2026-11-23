@@ -32,7 +32,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode_layer;
 use mc683xx_cpu32::cpu::state::encode_layer;
 use mc683xx_cpu32::cpu::state::restore_each;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
@@ -188,7 +188,7 @@ struct Ahead<P> {
     /// When it comes.
     at: Time,
     /// The clock the chip holds it for.
-    cycles: Cycles,
+    cycle: Cycle,
     /// The pin.
     pin: P,
     /// The level.
@@ -677,7 +677,7 @@ impl<C: Chip> Board<C> {
         let mut builder = C::builder(&section)?;
         let shared = Rc::new(Shared {
             base: Cell::new(TimeBase::new(
-                Cycles::ZERO,
+                Cycle::ZERO,
                 Time::ZERO,
                 builder.system_frequency(),
             )),
@@ -751,7 +751,7 @@ impl<C: Chip> Board<C> {
             shared
                 .base
                 .get()
-                .moved(Cycles::ZERO, chip.system_frequency()),
+                .moved(Cycle::ZERO, chip.system_frequency()),
         );
         let mut sources: BTreeMap<Source<C::Pin>, Vec<usize>> = BTreeMap::new();
         for (index, net) in nets.iter().enumerate() {
@@ -1012,7 +1012,7 @@ impl<C: Chip> Board<C> {
                 self.shared.quantum_end.set(Some(next));
                 let queued = self.first_change().map_or(until, |at| at.min(until));
                 self.shared.run_horizon.set(Some(queued));
-                let stop = self.chip.run_for(self.chip.now().until(target)).stop;
+                let stop = self.chip.run_for(target.since(self.chip.now())).stop;
                 self.shared.quantum_end.set(None);
                 self.shared.run_horizon.set(None);
                 stop
@@ -1528,12 +1528,12 @@ impl<C: Chip> Board<C> {
     /// `signal` on [`ChipPin::scheduled`] input `pin` from `at`, at its
     /// clock, kept until it comes in case the clocks move first.
     fn schedule(&mut self, pin: C::Pin, signal: Signal, at: Time) {
-        let cycles = self.shared.base.get().cycles(at);
-        self.chip.input(pin, signal, cycles);
-        if cycles > self.chip.now() {
+        let cycle = self.shared.base.get().cycles(at);
+        self.chip.input(pin, signal, cycle);
+        if cycle > self.chip.now() {
             self.ahead.push(Ahead {
                 at,
-                cycles,
+                cycle,
                 pin,
                 signal,
             });
@@ -1551,7 +1551,7 @@ impl<C: Chip> Board<C> {
         self.chip.unschedule_inputs();
         let now = self.chip.now();
         for ahead in mem::take(&mut self.ahead) {
-            if ahead.cycles > now {
+            if ahead.cycle > now {
                 self.schedule(ahead.pin, ahead.signal, ahead.at);
             }
         }
@@ -1560,8 +1560,8 @@ impl<C: Chip> Board<C> {
     /// `signal` on chip input `pin` from `at`.
     fn apply(&mut self, pin: C::Pin, signal: Signal, at: Time) {
         if pin != C::RESET {
-            let at_cycles = self.shared.base.get().cycles(at);
-            self.chip.input(pin, signal, at_cycles);
+            let at_cycle = self.shared.base.get().cycles(at);
+            self.chip.input(pin, signal, at_cycle);
             return;
         }
         if let Signal::Level(level) = signal {
@@ -1579,9 +1579,9 @@ impl<C: Chip> Board<C> {
             (true, false) => self.chip.reset_for(ResetCause::External),
             (false, true) => {
                 let base = self.shared.base.get();
-                let cycles = self.chip.now();
-                let at = at.max(base.time(cycles));
-                self.move_base(TimeBase::new(cycles, at, base.frequency()));
+                let cycle = self.chip.now();
+                let at = at.max(base.time(cycle));
+                self.move_base(TimeBase::new(cycle, at, base.frequency()));
                 if breakpoint {
                     self.chip.reset_with_breakpoint();
                 } else {
@@ -1698,7 +1698,7 @@ impl<C: Chip> Board<C> {
             self.events.push(event);
         }
         let now = self.chip.now();
-        self.ahead.retain(|ahead| ahead.cycles > now);
+        self.ahead.retain(|ahead| ahead.cycle > now);
         self.move_base(base.moved(now, frequency));
         let moved = self.clocks.iter().any(|(&pin, clock)| {
             self.chip
@@ -1712,7 +1712,8 @@ impl<C: Chip> Board<C> {
 
     /// The chip's system clock on board time, as of the last quantum's
     /// end: where a peripheral converts between board time and the chip's
-    /// clocks.
+    /// clocks.  The SIM's `Sim::system_clock` is the same clock as the
+    /// chip counts it.
     #[must_use]
     pub fn system_clock(&self) -> TimeBase {
         self.shared.base.get()

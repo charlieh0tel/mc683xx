@@ -894,7 +894,7 @@ def test_an_invalid_hook_and_an_exception_hook_see_a_bus_error():
     assert run.stop == mc683xx.Stop.Hook(hook)
     (access,) = invalid
     assert (access.address, access.size, access.cycle, access.value, access.reason) == (
-        PERIPHERAL_BASE + 0x20, 2, mc683xx.CycleKind.READ, None, mc683xx.Invalid.BUS_ERROR,
+        PERIPHERAL_BASE + 0x20, 2, mc683xx.BusCycleKind.READ, None, mc683xx.Invalid.BUS_ERROR,
     )
     (entry,) = entered
     assert (entry.vector, entry.handler, entry.level) == (BUS_ERROR, BUS_ERROR_HANDLER, None)
@@ -947,7 +947,7 @@ def test_a_write_to_a_protected_page_is_a_bus_error():
     chip.run_for(2000)
     (access,) = invalid
     assert (access.address, access.cycle, access.reason) == (
-        RAM_WORD, mc683xx.CycleKind.WRITE, mc683xx.Invalid.PROTECTED,
+        RAM_WORD, mc683xx.BusCycleKind.WRITE, mc683xx.Invalid.PROTECTED,
     )
     assert chip.read_register("PC") == BUS_ERROR_HANDLER
     with pytest.raises(ValueError):
@@ -1295,7 +1295,7 @@ def test_enums_and_values_hash_as_they_compare() -> None:
             mc683xx.Halt.DOUBLE_BUS_FAULT,
             mc683xx.ResetCause.WATCHDOG,
             mc683xx.Space.USER,
-            mc683xx.CycleKind.READ,
+            mc683xx.BusCycleKind.READ,
             mc683xx.Invalid.PROTECTED,
             mc683xx.FaultCause.BUS_ERROR,
             mc683xx.ClockPolarity.IDLE_LOW,
@@ -1560,7 +1560,7 @@ def test_a_fault_stop_ends_the_chip_s_run_with_the_instruction_undone():
     run = chip.run_for(1000)
     assert run.stop == mc683xx.Stop.Fault()
     fault = chip.fault_stop
-    assert (fault.cycle, fault.cause) == (mc683xx.CycleKind.READ, mc683xx.FaultCause.ADDRESS_ERROR)
+    assert (fault.cycle, fault.cause) == (mc683xx.BusCycleKind.READ, mc683xx.FaultCause.ADDRESS_ERROR)
     assert (fault.address, fault.pc) == (START + 1, START)
     assert chip.registers()["PC"] == START
     chip.set_stop_on_fault(False)

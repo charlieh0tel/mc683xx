@@ -8,6 +8,7 @@ use std::rc::Rc;
 use crate::function_code::FunctionCode;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::IrqPin;
@@ -1139,7 +1140,7 @@ macro_rules! chip_methods {
             /// The system clock's frequency in hertz, as SYNCR sets it.
             #[getter]
             fn system_hz(&self, py: Python<'_>) -> PyResult<u64> {
-                self.with_chip(py, |chip| Ok(chip.sim().clock().frequency().hz()))
+                self.with_chip(py, |chip| Ok(chip.sim().system_clock().frequency().hz()))
             }
 
             /// The levels on PCS[3:0].
@@ -1323,12 +1324,10 @@ impl Chip {
     /// chip does; a quantum that ends early (a stop, a halt, a clock
     /// change) ends the run as the one long run would.  The GIL stays
     /// held: the chip holds Python objects and is not `Send`.
-    fn run_to(&mut self, py: Python<'_>, end: Cycles) -> PyResult<Run> {
+    fn run_to(&mut self, py: Python<'_>, end: Cycle) -> PyResult<Run> {
         let start = self.chip.now();
         loop {
-            let target =
-                Cycles::from_clocks(self.chip.now().clocks().saturating_add(QUANTUM.clocks()))
-                    .min(end);
+            let target = (self.chip.now() + QUANTUM).min(end);
             // A chip halted before the quantum spends it as time passes
             // (no instruction runs), so its halt goes on to the next.
             let halted = self.chip.cpu().halted().is_some();
@@ -1452,7 +1451,7 @@ chip_methods! {
         let Some(end) = self.chip.now().clocks().checked_add(budget) else {
             return Err(Error::Budget(budget).into());
         };
-        self.run_to(py, Cycles::from_clocks(end))
+        self.run_to(py, Cycle::from_clocks(end))
     }
 
     /// Waits for gdb at `address` (`host:port`, port 0 picks one),
@@ -1476,11 +1475,11 @@ chip_methods! {
         gdb::serve(&mut target, connection)
     }
 
-    /// Runs whole instructions until `now` is `target` or past it: to
+    /// Runs whole instructions until `now` is `deadline` or past it: to
     /// the first instruction boundary at or after it, so a series of
-    /// these to rising targets is one long run.  Exceptions as `run_for`.
-    fn run_until(&mut self, py: Python<'_>, target: u64) -> PyResult<Run> {
-        self.run_to(py, Cycles::from_clocks(target))
+    /// these to rising deadlines is one long run.  Exceptions as `run_for`.
+    fn run_until(&mut self, py: Python<'_>, deadline: u64) -> PyResult<Run> {
+        self.run_to(py, Cycle::from_clocks(deadline))
     }
 
     /// RESET driven by the board.
@@ -1675,7 +1674,7 @@ chip_methods! {
     /// or now if that is past; a run's quantum ends there.
     fn schedule_gpt_input(&mut self, at: u64, input: InputView, level: bool) {
         self.chip
-            .schedule_gpt_input(Cycles::from_clocks(at), input.into(), level);
+            .schedule_gpt_input(Cycle::from_clocks(at), input.into(), level);
     }
 
     /// The PWM pins' edges since the last call, in time order, while

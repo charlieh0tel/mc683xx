@@ -11,8 +11,9 @@ use super::InvalidAccess;
 use super::MemoryAccess;
 use crate::cpu::Cpu;
 use crate::cpu::Stop;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
-use crate::exception::CycleKind;
+use crate::exception::BusCycleKind;
 use crate::exception::Vector;
 use crate::instructions::tests::CODE;
 use crate::instructions::tests::NoBus;
@@ -205,7 +206,7 @@ fn a_reset_starts_a_block() {
     let (mut cpu, starts) = stopping_at_the_second();
     poke_long(&mut cpu, Vector::RESET_STACK_POINTER.offset(), STACK);
     poke_long(&mut cpu, Vector::RESET_PROGRAM_COUNTER.offset(), CODE + 2);
-    cpu.reset(&mut NoBus, Cycles::ZERO).unwrap();
+    cpu.reset(&mut NoBus, Cycle::ZERO).unwrap();
     // The stop's skip is gone: the code hook stops again.
     assert!(matches!(step(&mut cpu, 1).stop, Stop::Hook(_)));
     assert_eq!(*starts.borrow(), [CODE, CODE + 2]);
@@ -348,7 +349,7 @@ fn an_invalid_access_hook_sees_a_bus_error_then_the_exception_is_taken() {
             address: Address(NOWHERE),
             size: Size::Word,
             function_code: FunctionCode::SupervisorData,
-            cycle: CycleKind::Write,
+            cycle: BusCycleKind::Write,
             value: Some(0xabcd),
             reason: Invalid::BusError,
             pc: Address(CODE),
@@ -433,7 +434,10 @@ fn a_fetch_from_a_page_without_execute_is_a_bus_error() {
         ControlFlow::Continue(())
     });
     step(&mut cpu, 1);
-    assert_eq!(*cycles.borrow(), [(CycleKind::Fetch, Invalid::Protected)]);
+    assert_eq!(
+        *cycles.borrow(),
+        [(BusCycleKind::Fetch, Invalid::Protected)]
+    );
     assert_eq!(cpu.registers.pc.0, HANDLER);
 }
 
@@ -449,7 +453,7 @@ fn time_nops(cpu: &mut Cpu, instructions: usize) -> Duration {
             let start = Instant::now();
             for _ in 0..instructions / 1000 {
                 cpu.registers.pc = Address(CODE);
-                cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, BUDGET);
+                cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycle::ZERO, BUDGET);
             }
             start.elapsed()
         })

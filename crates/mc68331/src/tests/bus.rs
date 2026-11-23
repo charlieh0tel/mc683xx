@@ -4,6 +4,7 @@
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::state::Stateless;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
@@ -130,7 +131,7 @@ fn a_bus_peripherals_dsack_waits_sizes_and_is_checked_against_pepar() {
     assert_eq!(
         chip.take_events(),
         [Event::Dsack {
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
             fault: DsackFault::BusUnassigned { peripheral: id }
         }]
     );
@@ -143,12 +144,12 @@ fn a_bus_peripheral_gives_the_vector_of_its_acknowledge() {
     let four = InterruptLevel::from(IrqPin::try_from(4).unwrap());
     assert_eq!(chip.board.level(), four);
     assert_eq!(
-        chip.board.acknowledge(four, Cycles::ZERO).answer,
+        chip.board.acknowledge(four, Cycle::ZERO).answer,
         Acknowledge::Vector(Vector(0x48))
     );
     let three = InterruptLevel::from(IrqPin::try_from(3).unwrap());
     assert_eq!(
-        chip.board.acknowledge(three, Cycles::ZERO).answer,
+        chip.board.acknowledge(three, Cycle::ZERO).answer,
         Acknowledge::Spurious,
         "not its level"
     );

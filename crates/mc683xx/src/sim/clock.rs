@@ -1,12 +1,14 @@
-//! The clock synthesizer (SIMRM 4; MC68331UM 4.3) and board time.
+//! The clock synthesizer (SIMRM 4; MC68331UM 4.3) and chip time.
 //!
-//! Board time is counted in system clocks ([`Cycles`]).  The periodic
+//! Chip time is counted in system clocks ([`Cycle`]).  The periodic
 //! interrupt timer and the software watchdog count EXTAL periods
 //! instead (MC68331UM 4.2.10, 4.2.11), and with the synthesizer a
 //! whole number of system clocks, 4(Y + 1)2^(2W + X), falls in each
 //! (MC68331UM 4.3.2).  The clock keeps the first EXTAL period on the
 //! current multiplier and the system clock it begins at, so EXTAL time
 //! stays exact across SYNCR writes.
+
+use mc683xx_cpu32::cycles::Cycle;
 
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
@@ -155,7 +157,9 @@ impl ClockSource {
 }
 
 /// The system clock: its source, SYNCR, and the EXTAL period and
-/// system clock it last changed at.
+/// system clock it last changed at.  It counts the chip's [`Cycle`]s;
+/// a board's `TimeBase` (`Board::system_clock`) places the same clock
+/// on board time.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SystemClock {
     /// The source MODCLK chose.
@@ -168,14 +172,14 @@ pub struct SystemClock {
     /// the current multiplier: the end of the period running at the
     /// last change, or the change itself if it came at a period's
     /// start.  Before it, period `anchor_tick - 1` runs at the old one.
-    anchor: Cycles,
+    anchor: Cycle,
     /// The first EXTAL period on the current multiplier.
     anchor_tick: u64,
 }
 
 impl SystemClock {
     /// The clock from `source`, out of reset at `now`.
-    pub(crate) fn new(source: ClockSource, now: Cycles) -> Self {
+    pub(crate) fn new(source: ClockSource, now: Cycle) -> Self {
         let mut clock = Self {
             source,
             syncr: SYNCR_RESET,
@@ -194,7 +198,7 @@ impl SystemClock {
     }
 
     /// SYNCR written at `now`.
-    pub(crate) fn write_syncr(&mut self, value: u16, now: Cycles) {
+    pub(crate) fn write_syncr(&mut self, value: u16, now: Cycle) {
         self.syncr = value & SYNCR_WRITABLE;
         self.change(now);
     }
@@ -235,7 +239,7 @@ impl SystemClock {
     /// The EXTAL periods begun by `at`, counting from zero: before the
     /// anchor, the period the last change left running.
     #[must_use]
-    pub const fn tick(&self, at: Cycles) -> u64 {
+    pub const fn tick(&self, at: Cycle) -> u64 {
         if at.clocks() < self.anchor.clocks() {
             return self.anchor_tick.saturating_sub(1);
         }
@@ -245,8 +249,8 @@ impl SystemClock {
     /// The system clock EXTAL period `tick` begins at, on the current
     /// multiplier; a period before the anchor's is the anchor's.
     #[must_use]
-    pub const fn at(&self, tick: u64) -> Cycles {
-        Cycles::from_clocks(
+    pub const fn at(&self, tick: u64) -> Cycle {
+        Cycle::from_clocks(
             self.anchor.clocks() + tick.saturating_sub(self.anchor_tick) * self.clocks_per_tick,
         )
     }
@@ -256,7 +260,7 @@ impl SystemClock {
     /// own length in time: what is left of it, in old clocks, scales to
     /// new clocks, rounded up (PLAN.md, Clock synthesizer).  The new
     /// multiplier counts from its end.
-    fn change(&mut self, now: Cycles) {
+    fn change(&mut self, now: Cycle) {
         let (end, end_tick) = if now < self.anchor {
             (self.anchor, self.anchor_tick)
         } else {
@@ -271,7 +275,7 @@ impl SystemClock {
         let old = self.clocks_per_tick;
         self.clocks_per_tick = self.multiplier();
         let left = (end.clocks() - now.clocks()).saturating_mul(self.clocks_per_tick);
-        self.anchor = Cycles::from_clocks(now.clocks() + left.div_ceil(old));
+        self.anchor = Cycle::from_clocks(now.clocks() + left.div_ceil(old));
         self.anchor_tick = end_tick;
     }
 
@@ -310,12 +314,12 @@ mod tests {
     use super::SystemClock;
     use mc683xx_cpu32::cpu::state::decode;
     use mc683xx_cpu32::cpu::state::encode;
-    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_cpu32::cycles::Cycle;
     use mc683xx_cpu32::frequency::Frequency;
 
     #[test]
     fn reset_is_256_times_the_reference() {
-        let clock = SystemClock::new(ClockSource::default(), Cycles::ZERO);
+        let clock = SystemClock::new(ClockSource::default(), Cycle::ZERO);
         assert_eq!(clock.clocks_per_tick(), 256);
         assert_eq!(clock.frequency().hz(), 8_388_608);
         assert_eq!(clock.syncr(), 0x3f08);
@@ -323,77 +327,71 @@ mod tests {
 
     #[test]
     fn w_x_and_y_set_the_frequency() {
-        let mut clock = SystemClock::new(ClockSource::default(), Cycles::ZERO);
+        let mut clock = SystemClock::new(ClockSource::default(), Cycle::ZERO);
         // W, X, Y 15: 4 x 16 x 8 (MC68331UM Table 4-7)
-        clock.write_syncr(0xcf00, Cycles::ZERO);
+        clock.write_syncr(0xcf00, Cycle::ZERO);
         assert_eq!(clock.frequency().hz(), 16_777_216);
-        clock.write_syncr(0x0000, Cycles::ZERO);
+        clock.write_syncr(0x0000, Cycle::ZERO);
         assert_eq!(clock.clocks_per_tick(), 4);
     }
 
     #[test]
     fn extal_time_survives_a_change() {
-        let mut clock = SystemClock::new(ClockSource::default(), Cycles::ZERO);
+        let mut clock = SystemClock::new(ClockSource::default(), Cycle::ZERO);
         // 10.5 periods at 256 clocks; the half left is 256 clocks at 512
-        let now = Cycles::from_clocks(10 * 256 + 128);
+        let now = Cycle::from_clocks(10 * 256 + 128);
         clock.write_syncr(0xcf00, now);
         assert_eq!(clock.tick(now), 10);
-        assert_eq!(clock.at(11), Cycles::from_clocks(now.clocks() + 256));
-        assert_eq!(
-            clock.tick(Cycles::from_clocks(now.clocks() + 256 + 511)),
-            11
-        );
-        assert_eq!(
-            clock.tick(Cycles::from_clocks(now.clocks() + 256 + 512)),
-            12
-        );
+        assert_eq!(clock.at(11), Cycle::from_clocks(now.clocks() + 256));
+        assert_eq!(clock.tick(Cycle::from_clocks(now.clocks() + 256 + 511)), 11);
+        assert_eq!(clock.tick(Cycle::from_clocks(now.clocks() + 256 + 512)), 12);
     }
 
     #[test]
     fn a_lower_multiplier_finishes_the_running_period_in_time() {
-        let mut clock = SystemClock::new(ClockSource::default(), Cycles::ZERO);
+        let mut clock = SystemClock::new(ClockSource::default(), Cycle::ZERO);
         // half a 256-clock period in, Y = 0: the half left is 2 clocks
         // at 4 a period
-        let now = Cycles::from_clocks(128);
+        let now = Cycle::from_clocks(128);
         clock.write_syncr(0x0000, now);
         assert_eq!(clock.tick(now), 0);
-        assert_eq!(clock.tick(Cycles::from_clocks(129)), 0);
-        assert_eq!(clock.tick(Cycles::from_clocks(130)), 1);
-        assert_eq!(clock.at(1), Cycles::from_clocks(130));
-        assert_eq!(clock.tick(Cycles::from_clocks(130 + 4)), 2);
+        assert_eq!(clock.tick(Cycle::from_clocks(129)), 0);
+        assert_eq!(clock.tick(Cycle::from_clocks(130)), 1);
+        assert_eq!(clock.at(1), Cycle::from_clocks(130));
+        assert_eq!(clock.tick(Cycle::from_clocks(130 + 4)), 2);
         // a second change before that end scales what is left again:
         // 1 clock at 4 is 2 at 8
-        clock.write_syncr(0x0100, Cycles::from_clocks(129));
-        assert_eq!(clock.tick(Cycles::from_clocks(130)), 0);
-        assert_eq!(clock.at(1), Cycles::from_clocks(131));
-        assert_eq!(clock.at(2), Cycles::from_clocks(131 + 8));
+        clock.write_syncr(0x0100, Cycle::from_clocks(129));
+        assert_eq!(clock.tick(Cycle::from_clocks(130)), 0);
+        assert_eq!(clock.at(1), Cycle::from_clocks(131));
+        assert_eq!(clock.at(2), Cycle::from_clocks(131 + 8));
     }
 
     #[test]
     fn a_higher_multiplier_finishes_the_running_period_in_time() {
-        let mut clock = SystemClock::new(ClockSource::default(), Cycles::ZERO);
-        clock.write_syncr(0x0000, Cycles::ZERO);
+        let mut clock = SystemClock::new(ClockSource::default(), Cycle::ZERO);
+        clock.write_syncr(0x0000, Cycle::ZERO);
         // half a 4-clock period in, Y = 63: the half left is 128 clocks
-        clock.write_syncr(0x3f00, Cycles::from_clocks(2));
-        assert_eq!(clock.tick(Cycles::from_clocks(129)), 0);
-        assert_eq!(clock.at(1), Cycles::from_clocks(130));
-        assert_eq!(clock.at(2), Cycles::from_clocks(130 + 256));
+        clock.write_syncr(0x3f00, Cycle::from_clocks(2));
+        assert_eq!(clock.tick(Cycle::from_clocks(129)), 0);
+        assert_eq!(clock.at(1), Cycle::from_clocks(130));
+        assert_eq!(clock.at(2), Cycle::from_clocks(130 + 256));
     }
 
     #[test]
     fn what_is_left_rounds_up_to_a_whole_clock() {
-        let mut clock = SystemClock::new(ClockSource::default(), Cycles::ZERO);
+        let mut clock = SystemClock::new(ClockSource::default(), Cycle::ZERO);
         // 255 of 256 clocks left at 4 a period: 3.98 clocks
-        clock.write_syncr(0x0000, Cycles::from_clocks(1));
-        assert_eq!(clock.at(1), Cycles::from_clocks(1 + 4));
+        clock.write_syncr(0x0000, Cycle::from_clocks(1));
+        assert_eq!(clock.at(1), Cycle::from_clocks(1 + 4));
     }
 
     #[test]
     fn a_change_at_a_period_start_takes_effect_at_once() {
-        let mut clock = SystemClock::new(ClockSource::default(), Cycles::ZERO);
-        clock.write_syncr(0x0000, Cycles::from_clocks(256));
-        assert_eq!(clock.tick(Cycles::from_clocks(256)), 1);
-        assert_eq!(clock.tick(Cycles::from_clocks(260)), 2);
+        let mut clock = SystemClock::new(ClockSource::default(), Cycle::ZERO);
+        clock.write_syncr(0x0000, Cycle::from_clocks(256));
+        assert_eq!(clock.tick(Cycle::from_clocks(256)), 1);
+        assert_eq!(clock.tick(Cycle::from_clocks(260)), 2);
     }
 
     #[test]
@@ -441,7 +439,7 @@ mod tests {
             ClockSource::external(Frequency::from_hz(16_000_001)).unwrap(),
             ClockSource::synthesizer(Frequency::from_hz(32_768)).unwrap(),
         ] {
-            let clock = SystemClock::new(source, Cycles::ZERO);
+            let clock = SystemClock::new(source, Cycle::ZERO);
             let saved: SystemClock = decode(1, &encode(1, &clock)).unwrap();
             assert_eq!(saved.source(), source);
             assert_eq!(saved.frequency(), clock.frequency());
@@ -452,9 +450,9 @@ mod tests {
     fn an_external_clock_ignores_syncr() {
         let mut clock = SystemClock::new(
             ClockSource::external(Frequency::from_hz(16_000_000)).unwrap(),
-            Cycles::ZERO,
+            Cycle::ZERO,
         );
-        clock.write_syncr(0xcf00, Cycles::ZERO);
+        clock.write_syncr(0xcf00, Cycle::ZERO);
         assert_eq!(clock.clocks_per_tick(), 1);
         assert_eq!(clock.frequency().hz(), 16_000_000);
     }

@@ -4,7 +4,7 @@
 
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_modules::peripheral;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use pyo3::Bound;
@@ -236,7 +236,7 @@ impl SpiPeripheral for PythonSpiPeripheral {
         })
     }
 
-    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycle) {
         let Some(method) = &self.set_chip_selects else {
             return;
         };
@@ -262,7 +262,7 @@ impl SpiPeripheral for PythonSpiPeripheral {
         })
     }
 
-    fn reset(&mut self, now: Cycles) {
+    fn reset(&mut self, now: Cycle) {
         let Some(method) = &self.reset else {
             return;
         };
@@ -273,7 +273,7 @@ impl SpiPeripheral for PythonSpiPeripheral {
         });
     }
 
-    fn set_clock(&mut self, clock: peripheral::QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: peripheral::QspiClock, now: Cycle) {
         let Some(method) = &self.set_clock else {
             return;
         };

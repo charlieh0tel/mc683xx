@@ -54,6 +54,7 @@ use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::frequency::Frequency;
@@ -284,7 +285,7 @@ parameters = { bytes = 4 }
     let mut chip = builder.build();
     let outcome = board.run_until(Time::from_picos(1_000_000_000)).unwrap();
     assert_eq!(outcome.stop, Stop::Budget);
-    chip.run_for(board.chip().now());
+    chip.run_until(board.chip().now());
     assert_eq!(board.chip().now(), chip.now());
     assert_eq!(board.chip().cpu().registers, chip.cpu().registers);
     assert_eq!(
@@ -358,7 +359,7 @@ parameters = { value = 0x5a }
 struct Silent;
 
 impl Peripheral for Silent {
-    fn wait_states(&mut self, _: PeripheralAccess, _: TimeBase) -> Option<u8> {
+    fn wait_states(&mut self, _: PeripheralAccess, _: TimeBase) -> Option<Cycles> {
         None
     }
 
@@ -389,9 +390,9 @@ impl Peripheral for WriteLatch {
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<Cycles> {
         self.asked.push(access.write);
-        Some(1)
+        Some(Cycles::from_clocks(1))
     }
 
     fn dsack_port(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<PortSize> {
@@ -614,7 +615,7 @@ fn the_format_matches_its_golden() {
                 "qsm",
                 version_of(&Qsm::new(Frequency::from_hz(1)).save().unwrap()),
             ),
-            ("gpt", version_of(&Gpt::new(Cycles::ZERO).save().unwrap())),
+            ("gpt", version_of(&Gpt::new(Cycle::ZERO).save().unwrap())),
             ("builtin", builtin),
             ("stateless", mc683xx_cpu32::cpu::state::STATELESS_VERSION),
         ],
@@ -899,8 +900,8 @@ type = "watcher"
     let base = board.system_clock();
     assert_eq!(base.frequency().hz(), 16_777_216);
     assert_eq!(
-        base.cycles(base.time(Cycles::from_clocks(12_345))),
-        Cycles::from_clocks(12_345)
+        base.cycles(base.time(Cycle::from_clocks(12_345))),
+        Cycle::from_clocks(12_345)
     );
     let (asked, driven) = board
         .peripheral::<ClockWatcher>("watcher")
@@ -1042,7 +1043,7 @@ to = ["lamps.{net}"]
 #[derive(Debug, Default)]
 struct Periodic {
     /// Each advance's time.
-    advanced: Vec<Cycles>,
+    advanced: Vec<Cycle>,
 }
 
 /// `Periodic`'s period.
@@ -1061,13 +1062,13 @@ impl MappedPeripheral for Periodic {
 }
 
 impl Timed for Periodic {
-    fn next_event(&self) -> Option<Cycles> {
-        Some(Cycles::from_clocks(
+    fn next_event(&self) -> Option<Cycle> {
+        Some(Cycle::from_clocks(
             PERIOD.clocks() * (self.advanced.len() as u64 + 1),
         ))
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         if now >= self.next_event().unwrap() {
             self.advanced.push(now);
         }
@@ -1121,7 +1122,7 @@ type = "periodic"
     for (index, at) in advanced.iter().enumerate() {
         assert_eq!(
             *at,
-            Cycles::from_clocks(PERIOD.clocks() * (index as u64 + 1))
+            Cycle::from_clocks(PERIOD.clocks() * (index as u64 + 1))
         );
     }
 }
@@ -1366,13 +1367,13 @@ struct TimedWords {
     /// The registers.
     words: Words,
     /// Each cycle's select and start.
-    cycles: Vec<(ChipSelect, Cycles)>,
+    cycles: Vec<(ChipSelect, Cycle)>,
     /// Each advance's time.
-    advanced: Vec<Cycles>,
+    advanced: Vec<Cycle>,
 }
 
 /// `TimedWords`' event.
-const EVENT: Cycles = Cycles::from_clocks(1_000);
+const EVENT: Cycle = Cycle::from_clocks(1_000);
 
 impl MappedPeripheral for TimedWords {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
@@ -1401,11 +1402,11 @@ impl MappedPeripheral for TimedWords {
 mc683xx_cpu32::unsavable!(TimedWords, "a timed word latch");
 
 impl Timed for TimedWords {
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         self.advanced.is_empty().then_some(EVENT)
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         if self.advanced.is_empty() && now >= EVENT {
             self.advanced.push(now);
         }
@@ -1447,7 +1448,7 @@ attach = [{ select = "CS1" }]
     let id = builder.peripheral(TimedWords::default(), &[cs(1)]).unwrap();
     let mut chip = builder.build();
     board.run_until(Time::from_picos(1_000_000_000)).unwrap();
-    chip.run_for(board.chip().now());
+    chip.run_until(board.chip().now());
     assert_eq!(board.chip().cpu().registers, chip.cpu().registers);
     assert_eq!(board.chip().cpu().registers.data[0] & 0xffff, 0x1200);
     let (cycles, advanced) = board
@@ -1485,7 +1486,7 @@ impl SpiPeripheral for Dac {
         0
     }
 
-    fn set_chip_selects(&mut self, levels: u8, _: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, _: Cycle) {
         self.levels.push(levels);
     }
 }
@@ -1545,7 +1546,7 @@ struct Ticker {
     /// The periods past.
     ticks: u32,
     /// The next period's end.
-    next: Cycles,
+    next: Cycle,
 }
 
 /// `Ticker`'s period.
@@ -1564,11 +1565,11 @@ impl MappedPeripheral for Ticker {
 }
 
 impl Timed for Ticker {
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         Some(self.next)
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         while self.next <= now {
             self.ticks += 1;
             self.next += TICK;
@@ -1584,7 +1585,7 @@ impl Save for Ticker {
     fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
         let (ticks, next): (u32, u64) = decode(TICKER_VERSION, snapshot)?;
         self.ticks = ticks;
-        self.next = Cycles::from_clocks(next);
+        self.next = Cycle::from_clocks(next);
         Ok(())
     }
 }
@@ -1669,7 +1670,7 @@ attach = [{ select = "CS1" }]
     // a QSPI model saves as a bus model does; a bad snapshot is refused
     let mut peripheral = SpiAdapter::new(Ticker {
         ticks: 5,
-        next: TICK,
+        next: Cycle::ZERO + TICK,
     });
     let saved = peripheral.save().unwrap();
     peripheral.peripheral_mut().ticks = 9;
@@ -2564,9 +2565,9 @@ fn queue_program(spcr2: u16) -> Vec<u16> {
 #[derive(Debug, Default)]
 struct Logged {
     /// Each transfer's entry, levels and time.
-    transfers: Vec<(u8, u8, Cycles)>,
+    transfers: Vec<(u8, u8, Cycle)>,
     /// Each `chip_selects` call's levels and time.
-    levels: Vec<(u8, Cycles)>,
+    levels: Vec<(u8, Cycle)>,
     /// What `deferrable` returns.
     deferrable: bool,
 }
@@ -2580,7 +2581,7 @@ impl SpiPeripheral for Logged {
         !transfer.out
     }
 
-    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycle) {
         self.levels.push((levels, now));
     }
 
@@ -2607,7 +2608,7 @@ impl Peripheral for Probe {
 }
 
 /// A `Logged` model's transfers and levels.
-type Calls = (Vec<(u8, u8, Cycles)>, Vec<(u8, Cycles)>);
+type Calls = (Vec<(u8, u8, Cycle)>, Vec<(u8, Cycle)>);
 
 /// What a run of a queue showed.
 #[derive(Debug, PartialEq)]

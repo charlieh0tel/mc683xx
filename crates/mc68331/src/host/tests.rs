@@ -3,6 +3,7 @@
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -138,7 +139,7 @@ struct Ticker {
     /// Its period.
     period: Cycles,
     /// Its time.
-    now: Cycles,
+    now: Cycle,
 }
 
 impl MappedPeripheral for Ticker {
@@ -154,13 +155,13 @@ impl MappedPeripheral for Ticker {
 mc683xx_cpu32::unsavable!(Ticker, "a ticker");
 
 impl Timed for Ticker {
-    fn next_event(&self) -> Option<Cycles> {
-        Some(Cycles::from_clocks(
+    fn next_event(&self) -> Option<Cycle> {
+        Some(Cycle::from_clocks(
             (self.now.clocks() / self.period.clocks() + 1) * self.period.clocks(),
         ))
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         self.now = now;
     }
 }
@@ -229,7 +230,7 @@ fn board(program: &[u16], ticker: Option<Cycles>) -> Board {
     if let Some(period) = ticker {
         builder.unwired_peripheral(Ticker {
             period,
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
         });
     }
     let mut chip = builder.build();
@@ -384,7 +385,7 @@ fn a_peek_of_the_sci_leaves_its_flags_and_a_read_clears_them() {
 #[test]
 fn a_peek_of_a_counter_is_its_read() {
     let Board { mut chip, .. } = board(&[BRANCH_TO_SELF], None);
-    chip.run_until(Cycles::from_clocks(4000));
+    chip.run_until(Cycle::from_clocks(4000));
     let peeked = peek(&chip, TCNT, Size::Word).unwrap();
     assert_ne!(peeked, 0);
     assert_eq!(read(&mut chip, TCNT, Size::Word), Ok(peeked));
@@ -424,11 +425,11 @@ fn a_module_that_cannot_peek_says_so() {
             None
         }
 
-        fn acknowledge(&mut self, _: InterruptLevel, _: Cycles) -> Option<Vector> {
+        fn acknowledge(&mut self, _: InterruptLevel, _: Cycle) -> Option<Vector> {
             None
         }
 
-        fn reset(&mut self, _: Cycles) {}
+        fn reset(&mut self, _: Cycle) {}
 
         fn save(&self) -> Result<Vec<u8>, StateError> {
             Ok(Vec::new())
@@ -475,7 +476,7 @@ fn interrupted(ticker: Option<Cycles>) -> Board {
 
 /// What a run leaves: time, instructions, registers, the handler's
 /// count and when the recorder was read.
-fn outcome(board: &Board) -> (Cycles, u64, Registers, Vec<u8>, Vec<Cycles>) {
+fn outcome(board: &Board) -> (Cycle, u64, Registers, Vec<u8>, Vec<Cycle>) {
     let chip = &board.chip;
     let reads = chip
         .peripheral::<Recorder>(board.recorder)
@@ -495,12 +496,12 @@ fn outcome(board: &Board) -> (Cycles, u64, Registers, Vec<u8>, Vec<Cycles>) {
 fn a_run_until_ends_at_the_first_boundary_at_or_after_its_target() {
     let mut board = interrupted(None);
     let chip = &mut board.chip;
-    let run = chip.run_until(Cycles::from_clocks(10_000));
+    let run = chip.run_until(Cycle::from_clocks(10_000));
     assert_eq!(run.stop, Stop::Budget);
-    assert!(chip.now() >= Cycles::from_clocks(10_000) && chip.now() < Cycles::from_clocks(10_100));
-    assert_eq!(run.cycles, chip.now());
+    assert!(chip.now() >= Cycle::from_clocks(10_000) && chip.now() < Cycle::from_clocks(10_100));
+    assert_eq!(run.cycles, chip.now().since_power_on());
     let now = chip.now();
-    let past = chip.run_until(Cycles::from_clocks(5000));
+    let past = chip.run_until(Cycle::from_clocks(5000));
     assert_eq!((past.cycles, past.stop), (Cycles::ZERO, Stop::Budget));
     assert_eq!(chip.now(), now);
     let count = &chip.memory(board.ram)[..2];
@@ -513,14 +514,14 @@ fn a_run_until_ends_at_the_first_boundary_at_or_after_its_target() {
 #[test]
 fn a_stopped_cpu_runs_until_its_target_exactly() {
     let Board { mut chip, .. } = board(&[STOP, UNMASKED], None);
-    let run = chip.run_until(Cycles::from_clocks(7777));
+    let run = chip.run_until(Cycle::from_clocks(7777));
     assert_eq!(run.stop, Stop::Stopped);
-    assert_eq!(chip.now(), Cycles::from_clocks(7777));
+    assert_eq!(chip.now(), Cycle::from_clocks(7777));
 }
 
 #[test]
 fn runs_until_rising_targets_are_one_long_run() {
-    const END: Cycles = Cycles::from_clocks(60_000);
+    const END: Cycle = Cycle::from_clocks(60_000);
     let mut long = interrupted(None);
     long.chip.run_until(END);
     // targets closer than an instruction, irregular, and synced by a
@@ -528,7 +529,7 @@ fn runs_until_rising_targets_are_one_long_run() {
     for ticker in [None, Some(Cycles::from_clocks(333))] {
         let mut short = interrupted(ticker);
         let steps = [1, 7, 100, 13, 1500, 3, 999];
-        let mut target = Cycles::ZERO;
+        let mut target = Cycle::ZERO;
         for step in steps.iter().cycle() {
             target = (target + Cycles::from_clocks(*step)).min(END);
             short.chip.run_until(target);

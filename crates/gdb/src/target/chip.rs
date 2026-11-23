@@ -56,11 +56,10 @@ impl Target for Mc68331 {
 
     fn run_for(
         &mut self,
-        cycles: Cycles,
+        budget: Cycles,
         _hit: &dyn Fn() -> bool,
     ) -> Result<TargetRun, Infallible> {
-        let target = self.now() + cycles;
-        Ok(self.run_until(target).stop.into())
+        Ok(self.run_until(self.now() + budget).stop.into())
     }
 
     fn reset(&mut self) -> Result<TargetReset, Infallible> {

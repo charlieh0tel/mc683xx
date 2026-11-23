@@ -24,6 +24,7 @@ use mc683xx_cpu32::cpu::bare::Limits;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
 use mc683xx_cpu32::cpu::state::Save;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::Acknowledged;
@@ -140,18 +141,18 @@ impl SyncRequest {
 /// Not part of the semver API: plumbing `mc683xx-board` runs the chip with.
 #[doc(hidden)]
 #[derive(Debug, Clone, Default)]
-pub struct OutputHorizon(Rc<Cell<Option<Cycles>>>);
+pub struct OutputHorizon(Rc<Cell<Option<Cycle>>>);
 
 impl OutputHorizon {
     /// The earliest a watched output may change, as the cycle running
     /// left it.
     #[must_use]
-    pub fn get(&self) -> Option<Cycles> {
+    pub fn get(&self) -> Option<Cycle> {
         self.0.get()
     }
 
     /// Sets it.
-    pub(crate) fn set(&self, horizon: Option<Cycles>) {
+    pub(crate) fn set(&self, horizon: Option<Cycle>) {
         self.0.set(horizon);
     }
 }
@@ -307,8 +308,8 @@ impl Builder {
     /// A board with nothing wired, whose reset reads `configuration`.
     #[must_use]
     pub fn new(configuration: Configuration) -> Self {
-        let sim = Sim::new(configuration, Cycles::ZERO);
-        let system_clock = sim.clock().frequency();
+        let sim = Sim::new(configuration, Cycle::ZERO);
+        let system_clock = sim.system_clock().frequency();
         Self {
             configuration,
             memory: chip_memory(),
@@ -316,7 +317,7 @@ impl Builder {
                 sim,
                 modules: vec![
                     Box::new(Qsm::new(system_clock)),
-                    Box::new(Gpt::new(Cycles::ZERO)),
+                    Box::new(Gpt::new(Cycle::ZERO)),
                 ],
                 peripherals: Vec::new(),
                 reset_scopes: Vec::new(),
@@ -338,7 +339,7 @@ impl Builder {
                 stop_request: StopRequest::default(),
                 stop_taken: false,
                 sync_request: SyncRequest::default(),
-                quantum_end: Cycles::ZERO,
+                quantum_end: Cycle::ZERO,
                 sync: false,
                 clock_stop: false,
                 clock_moved: false,
@@ -371,7 +372,7 @@ impl Builder {
     /// configuration's clock pins give it (MC68331UM 4.3).
     #[must_use]
     pub const fn system_frequency(&self) -> Frequency {
-        self.board.sim.clock().frequency()
+        self.board.sim.system_clock().frequency()
     }
 
     /// The handle by which the host asks the chip's runs to stop, for
@@ -703,7 +704,7 @@ impl Builder {
         let mut chip = Mc68331 {
             cpu: Cpu::new(self.memory),
             board: self.board,
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
             serial: Serial::default(),
         };
         chip.reset_as(ResetCause::PowerOn, false);
@@ -740,7 +741,7 @@ pub struct Mc68331 {
     /// Everything else.
     pub(crate) board: Board,
     /// Now, on the system clock.
-    pub(crate) now: Cycles,
+    pub(crate) now: Cycle,
     /// BDM's serial interface.
     pub(crate) serial: Serial,
 }
@@ -787,22 +788,15 @@ impl Mc68331 {
         self.board.output_moved = false;
         while self.now < end {
             if let Some(cause) = self.board.sim.take_reset() {
-                let frequency = self.board.sim.clock().frequency();
-                self.reset_as(cause, false);
-                stop = self.cpu.idle().unwrap_or(Stop::Budget);
-                // or a peripheral the reset reached asks, or the reset
-                // reaches a watched output
-                let moved = self.board.outputs_moved() | self.board.output_stop.reset;
-                if self.board.clock_stop && self.board.sim.clock().frequency() != frequency
-                    || self.board.sync_request.take()
-                    || moved
-                {
+                let ends;
+                (stop, ends) = self.reset_in_run(cause);
+                if ends {
                     break;
                 }
                 continue;
             }
             let next = self.board.next_event().map_or(end, |next| next.min(end));
-            let quantum = self.now.until(next).max(Cycles::from_clocks(1));
+            let quantum = next.since(self.now).max(Cycles::from_clocks(1));
             if let Some(idle) = self.cpu.idle() {
                 // time passes without the CPU
                 stop = idle;
@@ -874,16 +868,10 @@ impl Mc68331 {
             match stop {
                 Stop::Halted(halt) => {
                     if halt == Halt::DoubleBusFault && self.board.sim.halt_monitor() {
-                        let frequency = self.board.sim.clock().frequency();
-                        self.reset_as(ResetCause::HaltMonitor, false);
-                        stop = self.cpu.idle().unwrap_or(Stop::Budget);
-                        // as the SIM's own resets: a clock the reset
-                        // changes ends the run there
-                        let moved = self.board.outputs_moved() | self.board.output_stop.reset;
-                        if self.board.clock_stop && self.board.sim.clock().frequency() != frequency
-                            || self.board.sync_request.take()
-                            || moved
-                        {
+                        // as the SIM's own resets
+                        let ends;
+                        (stop, ends) = self.reset_in_run(ResetCause::HaltMonitor);
+                        if ends {
                             break;
                         }
                     } else {
@@ -923,15 +911,31 @@ impl Mc68331 {
         }
     }
 
-    /// Runs whole instructions until now is `target` or past it, as
+    /// A reset for `cause` taken in a run: the stop the CPU's state
+    /// after it gives, and whether the run ends there, as it does if
+    /// the reset changes a clock the host stops on, a peripheral it
+    /// reached asks for a sync, or it reaches a watched output.
+    fn reset_in_run(&mut self, cause: ResetCause) -> (Stop, bool) {
+        let frequency = self.board.sim.system_clock().frequency();
+        self.reset_as(cause, false);
+        let stop = self.cpu.idle().unwrap_or(Stop::Budget);
+        let moved = self.board.outputs_moved() | self.board.output_stop.reset;
+        let ends = self.board.clock_stop && self.board.sim.system_clock().frequency() != frequency
+            || self.board.sync_request.take()
+            || moved;
+        (stop, ends)
+    }
+
+    /// Runs whole instructions until now is `deadline` or past it, as
     /// `run_for` does: it ends at the first instruction boundary at or
-    /// after `target` (at once if now already is; at `target` itself
-    /// if the CPU is stopped), or early for `run_for`'s reasons.  The end depends only on the chip and `target`, so a
-    /// series of `run_until` to rising targets is one long run to the
-    /// last, however the host cuts it; a series of `run_for(budget)` drifts
-    /// by each run's overshoot.
-    pub fn run_until(&mut self, target: Cycles) -> Run {
-        self.run_for(self.now.until(target))
+    /// after `deadline` (at once if now already is; at `deadline` itself
+    /// if the CPU is stopped), or early for `run_for`'s reasons.  The end
+    /// depends only on the chip and `deadline`, so a series of
+    /// `run_until` to rising deadlines is one long run to the last,
+    /// however the host cuts it; a series of `run_for(budget)` drifts by
+    /// each run's overshoot.
+    pub fn run_until(&mut self, deadline: Cycle) -> Run {
+        self.run_for(deadline.since(self.now))
     }
 
     /// RESET driven by the board: an external reset, BKPT high as it
@@ -1034,7 +1038,7 @@ impl Mc68331 {
 
     /// Now, on the system clock.
     #[must_use]
-    pub const fn now(&self) -> Cycles {
+    pub const fn now(&self) -> Cycle {
         self.now
     }
 
@@ -1109,7 +1113,7 @@ impl Mc68331 {
         let mut edge = self.now;
         for bit in (0..bits.min(MOST_BITS)).rev() {
             edge += period;
-            self.run_for(self.now.until(edge));
+            self.run_for(edge.since(self.now));
             let now = self.now;
             let miso = self
                 .board
@@ -1153,7 +1157,7 @@ impl Mc68331 {
     /// a run's quantum ends there ([PLAN.md], Peripherals).
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
-    pub fn schedule_gpt_input(&mut self, at: Cycles, input: Input, level: bool) {
+    pub fn schedule_gpt_input(&mut self, at: Cycle, input: Input, level: bool) {
         self.board
             .module_mut::<Gpt>(GPT)
             .schedule_input(at, input, level);
@@ -1440,11 +1444,11 @@ impl Bus for Connection<'_, '_> {
             .map(|(_, stall)| stall)
     }
 
-    fn reset_instruction(&mut self, now: Cycles) {
+    fn reset_instruction(&mut self, now: Cycle) {
         self.0.borrow_mut().reset_instruction(now);
     }
 
-    fn exception_entered(&mut self, entry: &ExceptionEntry, now: Cycles) {
+    fn exception_entered(&mut self, entry: &ExceptionEntry, now: Cycle) {
         let mut board = self.0.borrow_mut();
         if board.tracing.exceptions {
             board.events.push(Event::Exception { now, entry: *entry });
@@ -1465,7 +1469,7 @@ impl Interrupts for Connection<'_, '_> {
         self.0.borrow_mut().level()
     }
 
-    fn acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged {
+    fn acknowledge(&mut self, level: InterruptLevel, now: Cycle) -> Acknowledged {
         self.0.borrow_mut().acknowledge(level, now)
     }
 

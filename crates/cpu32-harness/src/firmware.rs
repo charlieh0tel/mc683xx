@@ -92,7 +92,7 @@ pub const RTS: u16 = 0x4e75;
 /// those that never return.
 pub const HANDLED_TRAPS: [u8; 2] = [1, 7];
 /// Clocks of a memory cycle: the fastest (CPU32RM 8.1.5).
-const CLOCKS: u8 = 2;
+const CLOCKS: Cycles = Cycles::from_clocks(2);
 
 /// The peripherals' chip selects and the MC68331's own modules, as
 /// smartclock's harness maps them (`harness.py`, `PERIPHERALS`; smartclock

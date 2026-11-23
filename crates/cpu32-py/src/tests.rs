@@ -3,6 +3,7 @@
 use std::ffi::CStr;
 
 use mc683xx_cpu32::bus::BusError;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::peripheral::BusCycle;
@@ -109,7 +110,7 @@ fn cycle(address: u32, size: Size) -> BusCycle {
         Address(address),
         size,
         FunctionCode::SupervisorData,
-        Cycles::from_clocks(7),
+        Cycle::from_clocks(7),
     )
     .through(ChipSelect::from_index(4).unwrap().into())
 }
@@ -141,11 +142,14 @@ fn a_peripheral_answers_its_cycles() {
         assert_eq!(peripheral.read(cycle(0x20_0012, Size::Word)), Ok(0x12));
         assert_eq!(peripheral.write(cycle(0x20_0014, Size::Byte), 0xab), Ok(()));
         assert_eq!(peripheral.wait_states(cycle(0, Size::Word)), None);
-        assert_eq!(peripheral.wait_states(cycle(2, Size::Word)), Some(3));
+        assert_eq!(
+            peripheral.wait_states(cycle(2, Size::Word)),
+            Some(Cycles::from_clocks(3))
+        );
         assert!(peripheral.interrupt_request());
-        peripheral.reset(Cycles::from_clocks(5));
-        assert_eq!(peripheral.next_event(), Some(Cycles::from_clocks(1000)));
-        peripheral.advance(Cycles::from_clocks(1000));
+        peripheral.reset(Cycle::from_clocks(5));
+        assert_eq!(peripheral.next_event(), Some(Cycle::from_clocks(1000)));
+        peripheral.advance(Cycle::from_clocks(1000));
         assert!(pending.check().is_ok());
         let writes: Vec<(String, u32, u32, u32)> =
             echo.getattr("writes").unwrap().extract().unwrap();
@@ -209,11 +213,14 @@ fn missing_methods_take_the_defaults() {
         let pending = Pending::default();
         let mut peripheral =
             PythonMapped::mapped(&object(module, "Bare"), pending.clone()).unwrap();
-        assert_eq!(peripheral.wait_states(cycle(0, Size::Word)), Some(0));
+        assert_eq!(
+            peripheral.wait_states(cycle(0, Size::Word)),
+            Some(Cycles::from_clocks(0))
+        );
         assert!(!peripheral.interrupt_request());
         assert_eq!(peripheral.next_event(), None);
-        peripheral.reset(Cycles::from_clocks(1));
-        peripheral.advance(Cycles::from_clocks(1));
+        peripheral.reset(Cycle::from_clocks(1));
+        peripheral.advance(Cycle::from_clocks(1));
         assert!(pending.check().is_ok());
     });
 }
@@ -237,7 +244,7 @@ fn qspi_transfer(chip_selects: u8, out: u16, bits: u8) -> QspiTransfer {
         Cycles::from_clocks(8),
         Frequency::from_hz(16_777_216),
     );
-    QspiTransfer::new(out, bits, clock, Cycles::from_clocks(3)).selecting(chip_selects)
+    QspiTransfer::new(out, bits, clock, Cycle::from_clocks(3)).selecting(chip_selects)
 }
 
 #[test]
@@ -247,7 +254,7 @@ fn a_qspi_peripheral_shifts_back() {
         let pending = Pending::default();
         let mut peripheral = PythonSpiPeripheral::new(&python, pending.clone()).unwrap();
         assert_eq!(peripheral.transfer(qspi_transfer(0b0101, 0x1234, 16)), 0x12);
-        peripheral.set_chip_selects(0b1111, Cycles::from_clocks(9));
+        peripheral.set_chip_selects(0b1111, Cycle::from_clocks(9));
         assert!(pending.check().is_ok());
         let levels: Vec<(u8, u64)> = python.getattr("levels").unwrap().extract().unwrap();
         assert_eq!(levels, [(0b1111, 9)]);

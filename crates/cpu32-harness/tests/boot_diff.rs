@@ -36,6 +36,7 @@ use cpu32_harness::layout;
 use cpu32_harness::layout::FIRMWARE;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
@@ -566,7 +567,7 @@ impl Replay {
     }
 
     /// The byte read at `address`.
-    fn read_byte(&mut self, address: u32, now: Cycles) -> u8 {
+    fn read_byte(&mut self, address: u32, now: Cycle) -> u8 {
         if EEPROM.contains(&address) {
             return self.eeprom.read(address - EEPROM.start, now);
         }
@@ -587,7 +588,7 @@ impl Replay {
     }
 
     /// `byte` written at `address`.
-    fn write_byte(&mut self, address: u32, byte: u8, now: Cycles) {
+    fn write_byte(&mut self, address: u32, byte: u8, now: Cycle) {
         if EEPROM.contains(&address) {
             self.eeprom.write(address - EEPROM.start, byte, now);
         }
@@ -620,7 +621,7 @@ struct Eeprom {
     /// Its bytes.
     memory: Vec<u8>,
     /// When the write cycle under way ends.
-    busy_until: Option<Cycles>,
+    busy_until: Option<Cycle>,
     /// The last byte written.
     last_written: u8,
     /// I/O6 as the next read in a write cycle gives it.
@@ -629,7 +630,7 @@ struct Eeprom {
 
 impl Eeprom {
     /// The byte at `offset` read at `now`.
-    fn read(&mut self, offset: u32, now: Cycles) -> u8 {
+    fn read(&mut self, offset: u32, now: Cycle) -> u8 {
         if self.busy_until.is_some_and(|end| now < end) {
             let byte = (!self.last_written & IO7) | if self.toggle { IO6 } else { 0 };
             self.toggle = !self.toggle;
@@ -640,7 +641,7 @@ impl Eeprom {
     }
 
     /// `byte` written at `offset` at `now`.
-    fn write(&mut self, offset: u32, byte: u8, now: Cycles) {
+    fn write(&mut self, offset: u32, byte: u8, now: Cycle) {
         if let Some(cell) = self.memory.get_mut(offset as usize) {
             *cell = byte;
         }
@@ -748,7 +749,7 @@ struct ReplayQspi {
     unreplayed: u64,
     /// The bytes shifted to the front panel since last taken, with
     /// when.
-    panel: Vec<(Cycles, u8)>,
+    panel: Vec<(Cycle, u8)>,
 }
 
 impl ReplayQspi {
@@ -1054,7 +1055,7 @@ fn run_chip(
             clippy::cast_precision_loss,
             reason = "seconds of a few clocks' worth"
         )]
-        let budget = (seconds * chip.sim().clock().frequency().hz() as f64) as u64;
+        let budget = (seconds * chip.sim().system_clock().frequency().hz() as f64) as u64;
         if chip.now().clocks() >= budget {
             break format!("the time, {seconds} s, at clock {}", chip.now().clocks());
         }
@@ -1142,7 +1143,7 @@ fn run_chip(
                 clippy::cast_precision_loss,
                 reason = "seconds of a few clocks' worth"
             )]
-            let after = (after_port * chip.sim().clock().frequency().hz() as f64) as u64;
+            let after = (after_port * chip.sim().system_clock().frequency().hz() as f64) as u64;
             stop_at = Some(chip.now().clocks() + after);
             println!(
                 "boot-diff: TBB written as the reference's at clock {}",

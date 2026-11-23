@@ -58,7 +58,7 @@ use mc683xx_board::time::Time;
 use mc683xx_board::trace::Line;
 use mc683xx_board::trace::header;
 use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_gdb::Ending;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
@@ -402,7 +402,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         // as the clock now runs (a SYNCR write moves it), and a turn
         // always moves time on.
         let until = arguments.cycles.map_or(until, |cycles| {
-            let at = board.system_clock().time(Cycles::from_clocks(cycles));
+            let at = board.system_clock().time(Cycle::from_clocks(cycles));
             until.min(at.max(board.now() + Span::from_picos(1)))
         });
         let outcome = board.run_until(until)?;
@@ -410,7 +410,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         let done = board.now() >= end
             || arguments
                 .cycles
-                .is_some_and(|cycles| board.chip().now() >= Cycles::from_clocks(cycles));
+                .is_some_and(|cycles| board.chip().now() >= Cycle::from_clocks(cycles));
         if outcome.stop != Stop::Budget || done {
             break outcome;
         }

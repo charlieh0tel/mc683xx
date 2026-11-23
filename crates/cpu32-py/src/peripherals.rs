@@ -262,16 +262,16 @@ pub(crate) enum Output {
         /// The level.
         level: bool,
     },
-    /// High for `high` of every `period` PWMCNT counts, from the
-    /// period's start; `clocks` system clocks a count, or `None` when
-    /// PCLK clocks PWMCNT.
+    /// High for `high_counts` of every `period_counts` PWMCNT counts,
+    /// from the period's start; `clocks_per_count` system clocks a
+    /// count, or `None` when PCLK clocks PWMCNT.
     Wave {
         /// Counts in a period.
-        period: u32,
+        period_counts: u32,
         /// Counts high.
-        high: u32,
+        high_counts: u32,
         /// System clocks a count.
-        clocks: Option<u64>,
+        clocks_per_count: Option<u64>,
     },
     /// A counter's clock: PWMCNT's on PWMA (PPROUT), TCNT's on OC1
     /// (CPROUT).
@@ -290,13 +290,13 @@ impl TryFrom<pwm::Output> for Output {
         Ok(match output {
             pwm::Output::Level(level) => Self::Level { level },
             pwm::Output::Wave {
-                period,
-                high,
-                clocks,
+                period_counts,
+                high_counts,
+                clocks_per_count,
             } => Self::Wave {
-                period,
-                high,
-                clocks: clocks.map(Cycles::clocks),
+                period_counts,
+                high_counts,
+                clocks_per_count: clocks_per_count.map(Cycles::clocks),
             },
             pwm::Output::Clock { clocks } => Self::Clock {
                 clocks: clocks.map(Cycles::clocks),

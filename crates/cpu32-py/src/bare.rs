@@ -69,7 +69,7 @@ use crate::function_code::FunctionCode as FunctionCodeView;
 use crate::gdb;
 use crate::held::Held;
 use crate::hooks;
-use crate::hooks::CycleKind;
+use crate::hooks::BusCycleKind;
 use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::PythonMapped;
@@ -159,7 +159,7 @@ pub(crate) struct FaultStopView(pub(crate) FaultStop);
 impl FaultStopView {
     /// Fetch, read or write.
     #[getter]
-    fn cycle(&self) -> CycleKind {
+    fn cycle(&self) -> BusCycleKind {
         self.0.cycle.into()
     }
 
@@ -1088,14 +1088,14 @@ impl Target for Debugged<'_, '_> {
         .map_err(|error| error.map(|never| match never {}))
     }
 
-    fn run_for(&mut self, cycles: Cycles, hit: &dyn Fn() -> bool) -> PyResult<TargetRun> {
-        let budget = Budget {
+    fn run_for(&mut self, budget: Cycles, hit: &dyn Fn() -> bool) -> PyResult<TargetRun> {
+        let limits = Budget {
             until: None,
             instructions: None,
-            cycles: Some(cycles.clocks()),
+            cycles: Some(budget.clocks()),
             spent: 0,
         };
-        let (_, end) = MachineView::run_dispatching(self.0, budget, hit)?;
+        let (_, end) = MachineView::run_dispatching(self.0, limits, hit)?;
         self.0.py().check_signals()?;
         if hit() {
             return Ok(TargetRun::Hook);
@@ -1286,9 +1286,9 @@ mod tests {
         for output in [
             pwm::Output::Level(true),
             pwm::Output::Wave {
-                period: 256,
-                high: 1,
-                clocks: None,
+                period_counts: 256,
+                high_counts: 1,
+                clocks_per_count: None,
             },
             pwm::Output::Clock { clocks: None },
         ] {

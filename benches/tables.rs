@@ -14,6 +14,7 @@ use criterion::criterion_group;
 use mc683xx_bench::bare;
 use mc683xx_bench::kernel;
 use mc683xx_cpu32::cpu::Cpu;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::memory::Memory;
 
@@ -37,7 +38,7 @@ fn first_fetch() {
     cpu.run_for(
         &mut bare::NoBus,
         &mut bare::NoInterrupts,
-        Cycles::ZERO,
+        Cycle::ZERO,
         Cycles::from_clocks(1),
     );
 }
@@ -48,7 +49,7 @@ fn first_instruction() {
     cpu.run_for(
         &mut bare::NoBus,
         &mut bare::NoInterrupts,
-        Cycles::ZERO,
+        Cycle::ZERO,
         Cycles::from_clocks(1),
     );
 }

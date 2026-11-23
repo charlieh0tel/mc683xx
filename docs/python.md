@@ -57,7 +57,10 @@ rename renames the Python name with it.  The deliberate differences:
   (`Frequency` itself: a serial frame's baud, a clock net's frequency,
   a `QspiClock`'s `system_clock_nanohertz` and `baud_nanohertz`) is an
   `int` named `_nanohertz`.  Times are `int`s, system
-  clocks or picoseconds.  A board run's span, Rust's `Span` or
+  clocks or picoseconds.  A count names its unit: `Output.Wave`'s
+  `period_counts` and `high_counts` are PWMCNT counts, its
+  `clocks_per_count` system clocks a count, an `int | None` (`None`
+  when PCLK clocks PWMCNT).  A board run's span, Rust's `Span` or
   `NonZeroSpan`, is a keyword pair, `seconds=` (a `float`) or
   `picoseconds=` (an `int`), and its quantum `quantum_picoseconds=`.
 - **Settings:** a struct of settings is keyword arguments
@@ -312,9 +315,10 @@ the chip syncs at the next event of the SIM, the modules and every
 peripheral's `next_event`, as in Rust, and the same inputs at the same chip
 times give the same run.  A run ends at the first instruction boundary
 at or past its budget, so many short runs drift from one long one; a
-host on a schedule runs to times instead.  `run_until(target)` runs to
-the first instruction boundary at or after `target` (at once if `now`
-already is), so a series of them to rising targets is one long run.
+host on a schedule runs to times instead.  `run_until(deadline)` runs
+to the first instruction boundary at or after `deadline` (at once if
+`now` already is), so a series of them to rising deadlines is one long
+run.
 A long run is that series inside: it runs to times 100,000 clocks
 apart and runs Python's signal handlers between them, so Ctrl-C
 raises `KeyboardInterrupt` within milliseconds, the chip at an
@@ -336,8 +340,8 @@ def twin() -> mc683xx.Mc68331:
 
 one, two = twin(), twin()
 one.run_until(5000)
-for target in range(100, 5001, 100):
-    two.run_until(target)
+for deadline in range(100, 5001, 100):
+    two.run_until(deadline)
 assert one.now == two.now and one.registers() == two.registers()
 ```
 
@@ -810,7 +814,7 @@ call a Python callable with what the Rust hook sees: an `Instruction`
 (`pc`, `registers`, `stack_top`), a `MemoryAccess` (`address`, `size`,
 `function_code`, `value`; on the chip a long operand is two word
 cycles, on the bare `Machine` one access of 4), an `InvalidAccess` (those, `cycle`, a
-`CycleKind`, and `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`)
+`BusCycleKind`, and `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`)
 or an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`).
 Each returns a `HookId` for `remove_hook`.  A truthy result stops the
 run (`Stop.Hook(hook)`); a code hook's stop leaves its
@@ -1476,7 +1480,7 @@ otherwise, or with no callback (`set_intercept_callback(None)`), the
 CPU takes it natively.  `set_stop_on_fault(True)` (`stops_on_fault`)
 stops the run on a bus or address error instead of taking it:
 `End.Fault(fault)`, its `FaultStop` giving the
-`cycle` (`CycleKind`), the `cause` (`FaultCause.BUS_ERROR` for
+`cycle` (`BusCycleKind`), the `cause` (`FaultCause.BUS_ERROR` for
 unmapped or a peripheral's, `PROTECTED`, `ADDRESS_ERROR`), the whole
 `address`, `size`, `function_code`, `pc` and `registers`, which
 the CPU holds again, nothing stacked.  A fault while stacking, a bad
