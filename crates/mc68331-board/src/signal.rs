@@ -178,7 +178,7 @@ pub enum Direction {
 
 impl Direction {
     /// Every direction.
-    const ALL: [Self; 3] = [Self::In, Self::Out, Self::InOut];
+    pub const ALL: [Self; 3] = [Self::In, Self::Out, Self::InOut];
 
     /// Its name, as a board file's port is declared.
     const fn name(self) -> &'static str {
