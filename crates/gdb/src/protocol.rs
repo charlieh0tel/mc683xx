@@ -5,8 +5,10 @@ use std::fmt::Display;
 
 use gdbstub::arch::Arch;
 use gdbstub::conn::ConnectionExt;
+use gdbstub::stub::DisconnectReason;
 use gdbstub::stub::GdbStubError;
 
+use crate::Ending;
 use crate::SessionError;
 use crate::arch::Cpu32;
 use crate::connection::Connection;
@@ -56,21 +58,29 @@ impl<C: Connection> ConnectionExt for Adapted<C> {
     }
 }
 
+/// How gdbstub's session ended, as ours: gdb's detach or kill, or
 /// gdbstub's error as ours.
-pub(crate) fn failure<E: Display, C: Display>(error: GdbStubError<E, C>) -> SessionError<E, C> {
+pub(crate) fn ended<E: Display, C: Display>(
+    served: Result<DisconnectReason, GdbStubError<E, C>>,
+) -> Result<Ending, SessionError<E, C>> {
+    let error = match served {
+        Ok(DisconnectReason::Kill) => return Ok(Ending::Killed),
+        Ok(_) => return Ok(Ending::Detached),
+        Err(error) => error,
+    };
     let text = error.to_string();
     if error.is_connection_error() {
-        return error
+        return Err(error
             .into_connection_error()
             .map_or(SessionError::Protocol(text), |(error, _)| {
                 SessionError::Connection { error }
-            });
+            }));
     }
-    error
+    Err(error
         .into_target_error()
         .map_or(SessionError::Protocol(text), |error| SessionError::Target {
             error,
-        })
+        }))
 }
 
 /// `length` bytes of the architecture's description at `offset`, into

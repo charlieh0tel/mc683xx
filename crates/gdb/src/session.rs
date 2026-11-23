@@ -15,7 +15,6 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 
 use gdbstub::common::Signal;
-use gdbstub::stub::DisconnectReason;
 use gdbstub::stub::GdbStub;
 use gdbstub::stub::SingleThreadStopReason;
 use gdbstub::stub::run_blocking::BlockingEventLoop;
@@ -64,7 +63,7 @@ use crate::protocol::EFAULT;
 use crate::protocol::EINVAL;
 use crate::protocol::EIO;
 use crate::protocol::description;
-use crate::protocol::failure;
+use crate::protocol::ended;
 use crate::target::AccessError;
 use crate::target::Target;
 use crate::target::TargetReset;
@@ -111,18 +110,17 @@ where
         action: Action::Continue,
         going: None,
     };
-    let served =
-        GdbStub::new(Adapted(connection)).run_blocking::<EventLoop<'_, T, C>>(&mut session);
+    let ended =
+        ended(GdbStub::new(Adapted(connection)).run_blocking::<EventLoop<'_, T, C>>(&mut session));
     let cleaned = session.clean_up();
     // a target left with BGND planted is not resumed
-    let ending = match (served, cleaned) {
-        (Ok(DisconnectReason::Kill), Ok(())) => Ending::Killed,
-        (Ok(_), Ok(())) => Ending::Detached,
+    let ending = match (ended, cleaned) {
+        (Ok(ending), Ok(())) => ending,
         (Ok(_), Err(cleanup)) => return Err(cleanup),
-        (Err(error), Ok(())) => return Err(failure(error)),
+        (Err(error), Ok(())) => return Err(error),
         (Err(error), Err(cleanup)) => {
             return Err(SessionError::Uncleaned {
-                error: Box::new(failure(error)),
+                error: Box::new(error),
                 cleanup: Box::new(cleanup),
             });
         }
