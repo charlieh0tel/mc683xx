@@ -91,7 +91,7 @@ pub struct ParsePortError(String);
 /// only (MC68331UM 4.8.1.4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("port {0} has no inputs")]
-pub struct NoInputsError(pub Port);
+pub struct NoInputs(pub Port);
 
 /// A change in what a port drives: from its time on, the pins it drives
 /// and their levels.

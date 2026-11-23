@@ -74,7 +74,7 @@ use crate::gpt::Input;
 use crate::gpt::PwmChange;
 use crate::gpt::pwm::Channel;
 use crate::gpt::pwm::Output;
-use crate::port::NoInputsError;
+use crate::port::NoInputs;
 use crate::port::OutputChange;
 use crate::port::Port;
 use crate::port::PortChange;
@@ -1267,9 +1267,9 @@ impl Mc68331 {
     ///
     /// # Errors
     ///
-    /// [`NoInputsError`] for port C, which has no inputs, driving
+    /// [`NoInputs`] for port C, which has no inputs, driving
     /// nothing.
-    pub fn set_pins(&mut self, port: Port, value: u8, mask: u8) -> Result<(), NoInputsError> {
+    pub fn set_pins(&mut self, port: Port, value: u8, mask: u8) -> Result<(), NoInputs> {
         let now = self.now;
         self.board.set_pins(port, value, mask, now)
     }

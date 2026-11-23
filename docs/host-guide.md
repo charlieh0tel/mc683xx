@@ -841,7 +841,7 @@ Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
 
 - Inputs: `set_pins(port, value, mask)` sets the levels the board
   drives on the pins in `mask`, the others kept.  Port C has no inputs:
-  a `NoInputsError`.
+  a `NoInputs`.
 - Outputs: `outputs(port)` gives the pins a port drives and their
   levels, a `PortLevels` (its fields private; `PortLevels::new(driven,
   levels)`, read back with `driven()` and `levels()`, the levels zero on

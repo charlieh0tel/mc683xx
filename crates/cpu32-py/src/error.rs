@@ -22,7 +22,7 @@ use mc683xx_cpu32::memory::Unserved;
 use mc683xx_mc68331::chip::BuildError;
 use mc683xx_mc68331::debug::TargetError;
 use mc683xx_mc68331::host::BusCycleError;
-use mc683xx_mc68331::port::NoInputsError;
+use mc683xx_mc68331::port::NoInputs;
 use mc683xx_modules::sim::clock::ClockSourceError;
 
 /// A host's mistake the bindings refuse.
@@ -156,7 +156,7 @@ pub(crate) enum Error {
     Pacing(#[from] PacingError),
     /// Pins driven on a port with no inputs.
     #[error(transparent)]
-    Inputs(#[from] NoInputsError),
+    Inputs(#[from] NoInputs),
     /// A switch interval that is no duration.
     #[error(transparent)]
     Interval(#[from] TryFromFloatSecsError),

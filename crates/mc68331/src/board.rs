@@ -59,7 +59,7 @@ use crate::event::ChipTracing;
 use crate::event::DsackFault;
 use crate::event::Event;
 use crate::gpt::Gpt;
-use crate::port::NoInputsError;
+use crate::port::NoInputs;
 use crate::port::OutputChange;
 use crate::port::Port;
 use crate::port::PortChange;
@@ -365,9 +365,9 @@ impl Board {
         value: u8,
         mask: u8,
         now: Cycle,
-    ) -> Result<(), NoInputsError> {
+    ) -> Result<(), NoInputs> {
         match port {
-            Port::C => return Err(NoInputsError(port)),
+            Port::C => return Err(NoInputs(port)),
             Port::E => {
                 self.modules_changed();
                 self.sim.set_port_pins(PortName::E, value, mask, now);
