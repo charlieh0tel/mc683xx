@@ -78,24 +78,24 @@ impl Board {
         Ok(Self { board })
     }
 
-    /// [`runFor`](Self::run_for_js), its time a [`Span`].
+    /// [`runFor`](Self::run_for_js), its budget a [`Span`].
     ///
     /// # Errors
     ///
     /// As [`run_for_js`](Self::run_for_js).
-    pub fn run_for(&mut self, span: Span) -> Result<BoardRun, Error> {
-        Ok(self.board.run_for(span)?.into())
+    pub fn run_for(&mut self, budget: Span) -> Result<BoardRun, Error> {
+        Ok(self.board.run_for(budget)?.into())
     }
 
-    /// [`runFrame`](Self::run_frame_js), its bound a [`Span`].
+    /// [`runFrame`](Self::run_frame_js), its budget a [`Span`].
     ///
     /// # Errors
     ///
     /// As [`run_frame_js`](Self::run_frame_js).
-    pub fn run_frame(&mut self, wall: f64, bound: Span) -> Result<BoardRun, Error> {
+    pub fn run_frame(&mut self, wall: f64, budget: Span) -> Result<BoardRun, Error> {
         let wall = Duration::try_from_secs_f64(wall / MILLISECONDS_PER_SECOND)
             .map_err(|_| Error::Wall(wall))?;
-        Ok(self.board.run_frame(wall, bound)?.into())
+        Ok(self.board.run_frame(wall, budget)?.into())
     }
 
     /// [`sendBytes`](Self::send_bytes_js), its data bytes.

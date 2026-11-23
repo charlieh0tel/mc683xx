@@ -1591,10 +1591,17 @@ hand.  The keys are in `docs/board-files.md`.
   instruction, and the board moves the base and its time there.  The
   synthesizer locks at once here (always SLOCK), so the change is at
   the write.
-- **Run loop:** `Board::run_until(until)` is the library's, for hosts to
+- **Run loop:** `Board::run_until(deadline)` is the library's, for hosts to
   embed (smartclock-emu builds its own command on it); `send` and
   `take_received` move values through run-time endpoints between
-  runs.  `Board::run_until_quantized(until, quantum, before)` runs it in quanta
+  runs.  A run's limit is named alike at every layer: a span is its
+  `budget` (`Board::run_for(budget)`, `run_frame(wall, budget)`, the
+  chip's `run_for(budget)`, gdb's `Target::run_for(budget, hit)`), an
+  instant its `deadline` (`run_until(deadline)` and its `_quantized`
+  and `_paced` forms, the chip's `run_until(deadline)`), as std's
+  `recv_deadline`; Python's board keeps `seconds=`/`picoseconds=`
+  (decided 2026-11, for 0.9.0).
+  `Board::run_until_quantized(deadline, quantum, before)` runs it in quanta
   of board time (a `time::NonZeroSpan`: a quantum of 0 would never end,
   so the type has none, and a host's zero is its own error, Python's
   `ValueError`, not a picosecond), calling `before` before each (the Python bindings'
@@ -1697,7 +1704,7 @@ hand.  The keys are in `docs/board-files.md`.
   live UI's input lands at the sync point after it is queued, timed
   by when the UI sent it, which is inherent to live input.  Pacing
   (`pacing::Pacing`: `Unpaced`, the default, `RealTime`, `Scaled(Factor)`
-  board seconds a wall second, finite and above 0 by construction) is host-side only: `Board::run_until_paced(until,
+  board seconds a wall second, finite and above 0 by construction) is host-side only: `Board::run_until_paced(deadline,
   quantum)` runs as `run_until_quantized` does (`pacing::QUANTUM`, 5 ms, a good
   quantum) and, before each quantum, a `pacing::Pacer` sleeps until board
   time is no longer ahead of wall time times the factor, waking for a
@@ -1711,7 +1718,7 @@ hand.  The keys are in `docs/board-files.md`.
   held back and runs unpaced until it catches up; a new factor or a
   restore starts the pacing again from where the board is.  A host
   with its own clock that cannot sleep (a browser) runs the board a
-  frame at a time (`Board::run_frame(wall, bound)`): to the time
+  frame at a time (`Board::run_frame(wall, budget)`): to the time
   the board's own pacer says is due by the clock's reading
   (`Pacer::due`), bounded by the frame's slice.  A frame so bounded
   drops the time it missed: the pacing starts again from where it

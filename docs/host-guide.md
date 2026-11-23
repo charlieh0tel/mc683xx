@@ -1508,31 +1508,31 @@ outside semver.
   so every `Pacing` can be kept, and it is `Eq` and `Hash`;
   `Factor::REAL_TIME` is 1.0, and `Pacing::factor()` the factor,
   `None` unpaced); it prints and parses as `unpaced`, `realtime`
-  or the factor.  `Board::run_until_paced(until, quantum)` runs to
-  `until` in quanta of `quantum` of board time, a `time::NonZeroSpan`
+  or the factor.  `Board::run_until_paced(deadline, quantum)` runs to
+  `deadline` in quanta of `quantum` of board time, a `time::NonZeroSpan`
   (never zero, so the loop always ends: `NonZeroSpan::new(span)` is
   `None` for a zero span, and its const constructors, `from_millis` and
   the rest, refuse zero at compile time; `pacing::QUANTUM`, 5 ms, is a
   good one), and before each sleeps until board time is no longer ahead
   of wall time times the control's factor, waking at once for a stop or
-  a change of pacing; a run that reaches `until` sleeps once more after
+  a change of pacing; a run that reaches `deadline` sleeps once more after
   its last quantum, so it never returns ahead of wall time.  The wall
   clock is host-side only: it decides how long to sleep and never
   reaches the board, so a paced run is the same as the unpaced run.  A
   run that falls behind (a slow host) is not held back.  A host with a
   loop of its own (the runner's turns) keeps a `pacing::Pacer` and calls
   `wait(now, &control)` between its runs;
-  `Board::run_until_quantized(until, quantum, before)` is the quantum
+  `Board::run_until_quantized(deadline, quantum, before)` is the quantum
   loop alone.  Unpaced, neither reads the clock nor sleeps.  A host with
   a clock of its own that cannot sleep (a browser, from
   `requestAnimationFrame` with `performance.now()`; a GUI's timer) runs
-  the board a frame at a time: `Board::run_frame(wall, bound)`,
+  the board a frame at a time: `Board::run_frame(wall, budget)`,
   `wall` its clock's reading as a `Duration` from any origin it keeps,
   never going back, runs to the board time due by then under the
-  control's pacing, but no more than `bound`, a `Span` of board time, a
+  control's pacing, but no more than `budget`, a `Span` of board time, a
   frame's bound however far behind the host is (a hidden page), and a
   frame so bounded drops the time it missed, the next paced from where
-  it ended; unpaced, it runs `bound`.  Paced,
+  it ended; unpaced, it runs `budget`.  Paced,
   the first frame, and the first after a `set_pacing` to another pacing (one
   to the pacing it has changes nothing, so a UI may set its choice every
   frame), any other run (even of no time) or a successful restore, runs

@@ -1380,12 +1380,12 @@ fn span_of(seconds: Option<f64>, picoseconds: Option<u64>) -> PyResult<Span> {
 }
 
 impl BoardView {
-    /// Runs to `until` in quanta of `quantum`, paced, for `run_for` and
+    /// Runs to `deadline` in quanta of `quantum`, paced, for `run_for` and
     /// `run_until`.
     fn run_until_paced(
         &mut self,
         py: Python<'_>,
-        until: Time,
+        deadline: Time,
         pacing: Option<PacingView>,
         quantum: u64,
     ) -> PyResult<BoardRunView> {
@@ -1397,7 +1397,7 @@ impl BoardView {
         if let Some(pacing) = pacing {
             control.set_pacing(pacing);
         }
-        let outcome = control::run_until_paced(py, &mut self.board, until, quantum);
+        let outcome = control::run_until_paced(py, &mut self.board, deadline, quantum);
         // this call's pacing put back, unless another thread changed it
         if let Some(pacing) = pacing
             && control.pacing() == pacing

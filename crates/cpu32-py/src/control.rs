@@ -217,13 +217,13 @@ impl BoardControlView {
 /// (a UI's `stop` or `send`) runs, and
 /// Python's signal handlers run between quanta and sleeps, so Ctrl-C
 /// raises `KeyboardInterrupt`, given as the `Err` of the outer result.
-/// A run that reaches `until` waits once more after its last quantum.
+/// A run that reaches `deadline` waits once more after its last quantum.
 /// The GIL stays held while a quantum runs: the board holds Python
 /// objects and is not `Send`.
 pub(crate) fn run_until_paced(
     py: Python<'_>,
     board: &mut Board<Mc68331>,
-    until: Time,
+    deadline: Time,
     quantum: NonZeroSpan,
 ) -> Result<Result<BoardRun, RunError>, PyErr> {
     let control = board.control();
@@ -235,12 +235,12 @@ pub(crate) fn run_until_paced(
             turns.signals()
         })
     };
-    let outcome = board.run_until_quantized(until, quantum, |board| {
+    let outcome = board.run_until_quantized(deadline, quantum, |board| {
         turns.turn()?;
         pace(&mut turns, board.now())
     });
     // the last quantum waited out, as Rust's does
-    if outcome.is_ok() && board.now() >= until && turns.signals().is_continue() {
+    if outcome.is_ok() && board.now() >= deadline && turns.signals().is_continue() {
         let _ = pace(&mut turns, board.now());
     }
     turns.ended(outcome)
@@ -248,16 +248,16 @@ pub(crate) fn run_until_paced(
 
 /// Runs a frame of `board` (Rust's `Board::run_frame`): to the board
 /// time due by `wall` under its control's pacing, but no more than
-/// `bound`, the GIL released between quanta and Python's
+/// `budget`, the GIL released between quanta and Python's
 /// signal handlers run, as [`run_until_paced`] does, but never sleeping.
 pub(crate) fn run_frame(
     py: Python<'_>,
     board: &mut Board<Mc68331>,
     wall: Duration,
-    bound: Span,
+    budget: Span,
 ) -> Result<Result<BoardRun, RunError>, PyErr> {
     let mut turns = Turns::new(py)?;
-    let outcome = board.run_frame_with(wall, bound, |_| turns.turn());
+    let outcome = board.run_frame_with(wall, budget, |_| turns.turn());
     turns.ended(outcome)
 }
 

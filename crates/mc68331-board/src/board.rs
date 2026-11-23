@@ -957,20 +957,20 @@ impl<C: Chip> Board<C> {
         self.collect();
     }
 
-    /// Runs the board to `until`, or until the CPU halts or enters
+    /// Runs the board to `deadline`, or until the CPU halts or enters
     /// background mode, a hook stops it, or the host or a peripheral asks
     /// it to stop.  At each sync point it takes what its
     /// [`control`](Self::control) holds.  A board whose CPU is already
-    /// halted or in background mode runs to `until` as time passes
+    /// halted or in background mode runs to `deadline` as time passes
     /// without the CPU ([`Chip::run_for`]), ending [`Stop::Halted`] or
     /// [`Stop::Background`] if it still is.
     ///
     /// # Errors
     ///
     /// A peripheral that stalls the board ([`RunError::Stalled`]).
-    pub fn run_until(&mut self, until: Time) -> Result<BoardRun, RunError> {
+    pub fn run_until(&mut self, deadline: Time) -> Result<BoardRun, RunError> {
         self.leave_frames();
-        self.run_to(until)
+        self.run_to(deadline)
     }
 
     /// Ends [`run_frame`](Self::run_frame)'s pacing, for the next frame
@@ -980,7 +980,7 @@ impl<C: Chip> Board<C> {
     }
 
     /// The run loop under every run: [`run_until`](Self::run_until)'s.
-    fn run_to(&mut self, until: Time) -> Result<BoardRun, RunError> {
+    fn run_to(&mut self, deadline: Time) -> Result<BoardRun, RunError> {
         // a condition that held between runs is the stop still asked
         if !self.shared.stop.get() {
             self.shared.fired.borrow_mut().clear();
@@ -991,10 +991,12 @@ impl<C: Chip> Board<C> {
             if self.take_stop() {
                 return Ok(self.outcome(Stop::Requested));
             }
-            if self.now >= until {
+            if self.now >= deadline {
                 return Ok(self.outcome(self.idle().unwrap_or(Stop::Budget)));
             }
-            let next = self.next_event().map_or(until, |next| next.min(until));
+            let next = self
+                .next_event()
+                .map_or(deadline, |next| next.min(deadline));
             // a peripheral's `next_event` may have asked (`BoardStopRequest`)
             if self.take_stop() {
                 return Ok(self.outcome(Stop::Requested));
@@ -1010,7 +1012,7 @@ impl<C: Chip> Board<C> {
             let idle = self.idle();
             let stop = if target > self.chip.now() {
                 self.shared.quantum_end.set(Some(next));
-                let queued = self.first_change().map_or(until, |at| at.min(until));
+                let queued = self.first_change().map_or(deadline, |at| at.min(deadline));
                 self.shared.run_horizon.set(Some(queued));
                 let stop = self.chip.run_for(target.since(self.chip.now())).stop;
                 self.shared.quantum_end.set(None);
@@ -1167,16 +1169,16 @@ impl<C: Chip> Board<C> {
         self.control.clone()
     }
 
-    /// Runs the board for `span` from now.
+    /// Runs the board for `budget` of board time from now.
     ///
     /// # Errors
     ///
     /// What [`Board::run_until`] fails with.
-    pub fn run_for(&mut self, span: Span) -> Result<BoardRun, RunError> {
-        self.run_until(self.now + span)
+    pub fn run_for(&mut self, budget: Span) -> Result<BoardRun, RunError> {
+        self.run_until(self.now + budget)
     }
 
-    /// Runs the board to `until` as [`run_until`](Self::run_until) does, in quanta
+    /// Runs the board to `deadline` as [`run_until`](Self::run_until) does, in quanta
     /// of `quantum` of board time, calling `before` before
     /// each: a host's loop, for its Ctrl-C checks or its pacing.  A
     /// series of runs to rising times is one long run, so the quanta
@@ -1186,19 +1188,19 @@ impl<C: Chip> Board<C> {
     /// it is, [`Stop::Requested`].  A frame `before` runs
     /// ([`run_frame`](Self::run_frame)) leaves the pacing ended, as any
     /// other run does.  A [`NonZeroSpan`] is never zero, so the loop always
-    /// comes to `until`.
+    /// comes to `deadline`.
     ///
     /// # Errors
     ///
     /// As [`run_until`](Self::run_until).
     pub fn run_until_quantized(
         &mut self,
-        until: Time,
+        deadline: Time,
         quantum: NonZeroSpan,
         before: impl FnMut(&mut Self) -> ControlFlow<()>,
     ) -> Result<BoardRun, RunError> {
         self.leave_frames();
-        let outcome = self.run_quantized(until, quantum, before);
+        let outcome = self.run_quantized(deadline, quantum, before);
         // a frame `before` ran paced no more than its own run
         self.leave_frames();
         outcome
@@ -1207,7 +1209,7 @@ impl<C: Chip> Board<C> {
     /// The quantum loop: [`run_until_quantized`](Self::run_until_quantized)'s.
     fn run_quantized(
         &mut self,
-        until: Time,
+        deadline: Time,
         quantum: NonZeroSpan,
         mut before: impl FnMut(&mut Self) -> ControlFlow<()>,
     ) -> Result<BoardRun, RunError> {
@@ -1215,17 +1217,17 @@ impl<C: Chip> Board<C> {
             if before(self).is_break() {
                 return Ok(self.outcome(Stop::Requested));
             }
-            let target = (self.now + quantum.get()).min(until);
+            let target = (self.now + quantum.get()).min(deadline);
             let idle = self.idle();
             let outcome = self.run_to(target)?;
             let quantized = outcome.stop == Stop::Budget || idle == Some(outcome.stop);
-            if !quantized || self.now >= until {
+            if !quantized || self.now >= deadline {
                 return Ok(outcome);
             }
         }
     }
 
-    /// Runs the board to `until` as [`run_until_quantized`](Self::run_until_quantized)
+    /// Runs the board to `deadline` as [`run_until_quantized`](Self::run_until_quantized)
     /// does, in quanta of `quantum`
     /// ([`pacing::QUANTUM`](crate::pacing::QUANTUM) is a good one), paced
     /// by its control's [`Pacing`](crate::pacing::Pacing), read before
@@ -1233,7 +1235,7 @@ impl<C: Chip> Board<C> {
     /// ahead of wall time times the pacing's factor, waking for a stop
     /// or a change of pacing.  Wall time decides only how long it
     /// sleeps, so the run is the same whatever the pacing.  A run that
-    /// reaches `until` waits once more after its last quantum, so it
+    /// reaches `deadline` waits once more after its last quantum, so it
     /// returns no earlier than wall time says, and short paced runs in a
     /// loop are paced too.  A stop through the control ends it at the
     /// next sync point, without waiting out the sleep.
@@ -1243,16 +1245,16 @@ impl<C: Chip> Board<C> {
     /// As [`run_until`](Self::run_until).
     pub fn run_until_paced(
         &mut self,
-        until: Time,
+        deadline: Time,
         quantum: NonZeroSpan,
     ) -> Result<BoardRun, RunError> {
         let control = self.control.clone();
         let mut pacer = Pacer::new();
-        let outcome = self.run_until_quantized(until, quantum, |board| {
+        let outcome = self.run_until_quantized(deadline, quantum, |board| {
             pacer.wait(board.now, &control);
             ControlFlow::Continue(())
         })?;
-        if self.now >= until {
+        if self.now >= deadline {
             pacer.wait(self.now, &control);
         }
         Ok(outcome)
@@ -1262,11 +1264,11 @@ impl<C: Chip> Board<C> {
     /// sleep (a browser's `requestAnimationFrame` and `performance.now()`,
     /// a GUI's timer): to the board time due by the host's clock reading
     /// `wall` under the control's pacing, but no more
-    /// than `bound` of board time, a frame's bound however far
+    /// than `budget` of board time, a frame's bound however far
     /// behind the host is (a hidden page): a frame so bounded drops the
     /// time it missed, and the next frames are paced from where it
     /// ended.  Unpaced, it runs
-    /// `bound`.  Paced, the first frame, and the first after the
+    /// `budget`.  Paced, the first frame, and the first after the
     /// control's [`set_pacing`](BoardControl::set_pacing) to another
     /// pacing, any other run (even of no time) or a successful
     /// [`restore`](Self::restore), runs nothing: it starts the pacing
@@ -1281,8 +1283,8 @@ impl<C: Chip> Board<C> {
     /// # Errors
     ///
     /// As [`run_until`](Self::run_until).
-    pub fn run_frame(&mut self, wall: Duration, bound: Span) -> Result<BoardRun, RunError> {
-        self.run_frame_with(wall, bound, |_| ControlFlow::Continue(()))
+    pub fn run_frame(&mut self, wall: Duration, budget: Span) -> Result<BoardRun, RunError> {
+        self.run_frame_with(wall, budget, |_| ControlFlow::Continue(()))
     }
 
     /// Runs a frame as [`run_frame`](Self::run_frame) does, calling
@@ -1300,15 +1302,15 @@ impl<C: Chip> Board<C> {
     pub fn run_frame_with(
         &mut self,
         wall: Duration,
-        bound: Span,
+        budget: Span,
         before: impl FnMut(&mut Self) -> ControlFlow<()>,
     ) -> Result<BoardRun, RunError> {
         let (pacing, pacings) = self.control.pacing_set();
         let (mut pacer, generation) = self.frames.take(pacings);
-        let bound = self.now + bound;
+        let bound = self.now + budget;
         let due = pacer.due(self.now, pacing, wall);
-        let until = due.map_or(bound, |due| due.min(bound));
-        let outcome = self.run_quantized(until, QUANTUM, before);
+        let deadline = due.map_or(bound, |due| due.min(bound));
+        let outcome = self.run_quantized(deadline, QUANTUM, before);
         if due.is_some_and(|due| due > bound) {
             pacer.restart(self.now, pacing, wall);
         }
