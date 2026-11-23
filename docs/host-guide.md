@@ -17,21 +17,35 @@ vectors and a program at `START`, `select` programs a chip select,
 `booting` is the first example's board as a function.  A real host
 loads a real image instead.
 
-Crates: `mc683xx-target` (`Address`, `Size`, `FunctionCode`, and the
-`Cpu32Target` debug trait),
-`mc683xx-cpu32` (the core: `Cpu`, `Bus`, `Memory`, hooks, `Cycle` and `Cycles`), `mc683xx-modules` (SIM, QSM, the `MappedPeripheral`, `Timed` and
-`SpiPeripheral` traits), `mc683xx-mc68331` (GPT, and the chip: `Builder`,
-`Mc68331`), `mc683xx-board` (board files, the `Registry` of peripheral
-types, nets, board time and `Board`), `mc683xx-peripherals` (the stock
-peripherals, `docs/peripherals.md`), `mc683xx-gdb` (the GDB remote
-stub, `docs/gdb.md`) and `mc683xx-debug` (loading images and running
-init scripts over a `Cpu32Target`).
+## Crates
 
-The shared types are `mc683xx-target`'s alone (`Address`, `Size`,
-`FunctionCode`, `Register`, `SystemRegister`): no other crate re-exports
-them, so a host that names one (`Board::watch_code(Address(...))`, a
-bus cycle's size, a register) depends on `mc683xx-target` itself, at the
-release of the other crates.
+A host depends on each crate whose types it names: no crate re-exports
+another's, so a type has one path, in the crate that defines it.
+
+| Crate | What a host names from it |
+| --- | --- |
+| `mc683xx-target` | The shared types: `Address`, `Size`, `FunctionCode`, `Register`, `SystemRegister`, `Entry`, and the `Cpu32Target` debug trait with `Unsupported` |
+| `mc683xx-cpu32` | The core: `Cpu`, `Registers`, `Run`, `Stop`, `Bus`, `BusError`, `PortSize`, `StopRequest`, `Memory`, `MemoryKind`, `Space`, `Permissions`, the hooks, `MappedPeripheral` and `BusCycle`, `InterruptLevel`, `IrqPin`, `Cycle`, `Cycles`, `Frequency`, snapshots (`Save`, `StateError`, `state::encode` and `decode`), and the bare CPU (`flat::Machine`) |
+| `mc683xx-modules` | The SIM (`Configuration`, `ChipSelect`, `ResetCause`, `chip_select::Dsack`), the QSM (`qsm::sci::Frame`), and the `Timed` and `SpiPeripheral` traits with `QspiClock` |
+| `mc683xx-mc68331` | The GPT, and the chip: `Builder`, `Mc68331`, `SyncRequest`, `Diversion`, `Port`, `Event`, `BusCycleError` |
+| `mc683xx-board` | Board files (`Description`), the `Registry` of peripheral types, the `Peripheral` trait and its `Drive`, nets and `Signal`, board time (`Time`, `Span`, `Moment`, `TimeBase`) and `Board` |
+| `mc683xx-peripherals` | The stock peripherals (`docs/peripherals.md`) and their registry |
+| `mc683xx-gdb` | The GDB remote stub (`docs/gdb.md`) |
+| `mc683xx-debug` | Loading images and running init scripts over a `Cpu32Target` (`docs/init-scripts.md`) |
+
+So a host that names an `Address` (`Board::watch_code(Address(...))`)
+depends on `mc683xx-target` beside `mc683xx-board`, and a crate of
+board peripherals (`docs/board-files.md`, The Rust API for peripheral
+types) on `mc683xx-board`, `mc683xx-cpu32` (`BusError`, `PortSize`,
+`StateError`), `mc683xx-modules` (`QspiClock`, `Frame`) and
+`mc683xx-target`.
+
+The workspace releases as one: every crate at one version, depending
+on the others at exactly that version (`=X.Y.Z`,
+`docs/releasing.md`).  A host pins every `mc683xx-*` crate it depends
+on to the same version, so its types are the ones its other
+dependencies were built and tested with; two versions of one crate in
+a build are two sets of types that do not mix.
 
 ## Building a chip
 

@@ -465,7 +465,11 @@ parameters the file would refuse: `builtin::Fixed::new(value)`,
 ## The Rust API for peripheral types
 
 The contract a host's peripheral models target (rustdoc in
-`crates/mc68331-board`):
+`crates/mc68331-board`).  A crate of peripheral models depends on
+`mc683xx-board`, `mc683xx-cpu32` (`BusError`, `PortSize`,
+`StateError`), `mc683xx-modules` (`QspiClock`, `Frame`) and
+`mc683xx-target`, every one at the same version, as no crate
+re-exports another's types (`docs/host-guide.md`, Crates).
 
 - `registry::Registry`: `register(name, ports, constructor)` for a
   type with fixed ports, `register_ported(name, constructor)` for one
