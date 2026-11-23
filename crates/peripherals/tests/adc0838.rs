@@ -154,7 +154,7 @@ attach = [{{ qspi = {ADC_SELECT:#06b} }}]
 name = "sensor"
 type = "analog"
 from = "source.out"
-to = ["adc.ch3"]
+to = ["adc.CH3"]
 {more}"#
     );
     let description = Description::parse(&text, &directory, &Options::default()).unwrap();

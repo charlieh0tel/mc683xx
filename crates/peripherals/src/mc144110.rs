@@ -1,7 +1,7 @@
 //! `mc144110`: Motorola's MC144110, six 6-bit DACs behind one serial
 //! input (MC144110/D, Rev. 2).  On the QSPI, its ENB the attachment's
 //! select: bits shift in while it is selected, and the frame's end
-//! latches them into the six outputs.  Its outputs `out0` to `out5`
+//! latches them into the six outputs.  Its outputs `R1Out` to `R6Out`
 //! are analog, R1 Out to R6 Out, in volts.
 
 use mc683xx_board::inspect::Inspection;
@@ -51,8 +51,8 @@ const EDGES: Edges = Edges::new(Edge::Falling, Edge::Falling, true);
 /// Its parameters: VDD and VSS, in volts, which scale the outputs (4.3;
 /// Figure 4).  VDD defaults to 5 V, the first supply Tables 2 and 3
 /// characterize; VSS is "usually ground" (4.3).
-const VDD: (&str, Volts) = ("vdd", Volts(5.0));
-const VSS: (&str, Volts) = ("vss", Volts(0.0));
+const VDD: (&str, Volts) = ("vdd_volts", Volts(5.0));
+const VSS: (&str, Volts) = ("vss_volts", Volts(0.0));
 
 /// What it holds, saved.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,7 +95,7 @@ struct Mc144110 {
 }
 
 impl Mc144110 {
-    /// From `vdd` and `vss`.
+    /// From `vdd_volts` and `vss_volts`.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         Ok(Self {
             span: Span::from_parameters(context, VSS, VDD)?,
@@ -106,7 +106,7 @@ impl Mc144110 {
     /// Its ports: `out0` to `out5`, R1 Out to R6 Out.
     fn ports() -> Vec<PortSpec> {
         (0..CHANNELS)
-            .map(|channel| PortSpec::output(format!("out{channel}"), Kind::Analog))
+            .map(|channel| PortSpec::output(format!("R{}Out", channel + 1), Kind::Analog))
             .collect()
     }
 
@@ -378,22 +378,22 @@ mod tests {
 
     #[test]
     fn vdd_and_vss_scale_the_outputs() {
-        let mut dac = peripheral("vdd = 12.0\nvss = 2").unwrap();
+        let mut dac = peripheral("vdd_volts = 12.0\nvss_volts = 2").unwrap();
         let (_, driven) = frame(&mut dac, &[0, 0, 32], 12);
         assert_eq!(driven[0], (0, Signal::Analog(7.0)), "halfway");
         assert!(matches!(
-            peripheral("vdd = nan"),
+            peripheral("vdd_volts = nan"),
             Err(ParameterError::Invalid { .. })
         ));
         assert!(matches!(
-            peripheral("vdd = \"high\""),
+            peripheral("vdd_volts = \"high\""),
             Err(ParameterError::Type { .. })
         ));
     }
 
     #[test]
     fn power_on_drives_every_output_at_vss() {
-        let mut dac = peripheral("vss = -1").unwrap();
+        let mut dac = peripheral("vss_volts = -1").unwrap();
         let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
         dac.power_on(&mut drive);
         let driven = drive.finish().driven;
@@ -423,7 +423,7 @@ mod tests {
         let mut dac = peripheral("").unwrap();
         frame(&mut dac, &[1, 2, 3], 12);
         let before = dac.state;
-        let other = peripheral("vdd = 12.0").unwrap();
+        let other = peripheral("vdd_volts = 12.0").unwrap();
         assert!(matches!(
             dac.restore(&other.save().unwrap()),
             Err(StateError::Mismatch(_))

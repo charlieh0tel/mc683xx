@@ -193,16 +193,16 @@ parameters = { cs = "low", hbe = "low", ldac = "low" }
 name = "db"
 type = "bus"
 from = "chain.Q"
-to = ["efc.db"]
+to = ["efc.DB"]
 [[net]]
 name = "lbe"
 type = "logic"
 from = "chip.PGP0"
-to = ["efc.lbe"]
+to = ["efc.LBE"]
 [[net]]
 name = "efc-out"
 type = "analog"
-from = "efc.out"
+from = "efc.VOUT"
 to = ["external.efc"]
 "#;
 
@@ -226,7 +226,8 @@ fn board_from(text: &str) -> Board<Mc68331> {
         .map(|channel| {
             format!(
                 "[[net]]\nname = \"hex-{channel}\"\ntype = \"analog\"\n\
-                 from = \"hex.out{channel}\"\nto = [\"external.hex{channel}\"]\n"
+                 from = \"hex.R{}Out\"\nto = [\"external.hex{channel}\"]\n",
+                channel + 1
             )
         })
         .collect();

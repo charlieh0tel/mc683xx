@@ -1,17 +1,18 @@
 //! `ad569`: Analog Devices' AD569, a 16-bit voltage-output DAC with a
 //! parallel input (AD569 datasheet, Rev. A).
 //!
-//! DB15-DB0, the bus input `db`, pass through a first rank of two byte
+//! DB15-DB0, the bus input `DB`, pass through a first rank of two byte
 //! latches, the 8 MSBs and the 8 LSBs, into the 16-bit DAC register,
-//! which VOUT, the analog output `out`, follows.  Four controls, the
-//! logic inputs `cs`, `hbe`, `lbe` and `ldac`, gate them (Digital
-//! Circuit Connections, Table I): with CS low, HBE low makes the MSB
+//! which the analog output `VOUT` follows.  Four controls, the logic
+//! inputs `CS`, `HBE`, `LBE` and `LDAC`, gate them (Digital Circuit
+//! Connections, Table I): with CS low, HBE low makes the MSB
 //! latch transparent, LBE low the LSB latch, and LDAC low the DAC
 //! register; with CS high nothing changes.  "All four control inputs
 //! latches are level-triggered and active low": a latch follows its
 //! input while enabled and holds from its enable's rise.  All four low
 //! make every latch transparent, DB to VOUT.  Each control takes its
-//! level from its parameter until a net drives it.  The latches power
+//! level from its parameter, the port's name in lowercase (`cs`), until
+//! a net drives it.  The latches power
 //! on holding `initial`, since the datasheet gives no power-on state.
 
 use mc683xx_board::inspect::Inspection;
@@ -54,9 +55,10 @@ const LBE: usize = 3;
 const LDAC: usize = 4;
 const OUT: usize = 5;
 
-/// The controls' names, as ports and as the parameters that tie them
-/// until a net drives them, in port order from `CS`.  Each is high, not
-/// enabled, by default.
+/// The controls' ports, in port order from `CS`.
+const CONTROL_PORTS: [&str; 4] = ["CS", "HBE", "LBE", "LDAC"];
+/// The parameters that tie the controls until a net drives them, in
+/// port order from `CS`.  Each is high, not enabled, by default.
 const CONTROLS: [&str; 4] = ["cs", "hbe", "lbe", "ldac"];
 
 /// The 16-bit word the MSB and LSB latches and the DAC register hold
@@ -70,8 +72,8 @@ const INITIAL: &str = "initial";
 /// zeros (0000H) to +VREF for an input code of all ones").  The
 /// defaults are the specifications' conditions, +VREF +5 V and -VREF
 /// -5 V (Specifications).
-const VREF_NEGATIVE: (&str, Volts) = ("vref_negative", Volts(-5.0));
-const VREF_POSITIVE: (&str, Volts) = ("vref_positive", Volts(5.0));
+const VREF_NEGATIVE: (&str, Volts) = ("vref_negative_volts", Volts(-5.0));
+const VREF_POSITIVE: (&str, Volts) = ("vref_positive_volts", Volts(5.0));
 
 /// The levels on its four controls, high not enabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,8 +154,8 @@ struct Ad569 {
 }
 
 impl Ad569 {
-    /// From `initial` (0), `vref_negative`, `vref_positive` and the
-    /// controls' levels.
+    /// From `initial` (0), `vref_negative_volts`, `vref_positive_volts`
+    /// and the controls' levels.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         let tied = |index: usize| choice(context, CONTROLS[index], LEVELS, true);
         let initial: u16 = context.parameters.integer(INITIAL)?.unwrap_or(0);
@@ -178,13 +180,13 @@ impl Ad569 {
 
     /// Its ports, by index.
     fn ports() -> Vec<PortSpec> {
-        let controls = CONTROLS
+        let controls = CONTROL_PORTS
             .iter()
             .map(|name| PortSpec::input(*name, Kind::Logic));
-        [PortSpec::input("db", Kind::Bus)]
+        [PortSpec::input("DB", Kind::Bus)]
             .into_iter()
             .chain(controls)
-            .chain([PortSpec::output("out", Kind::Analog)])
+            .chain([PortSpec::output("VOUT", Kind::Analog)])
             .collect()
     }
 
@@ -376,13 +378,13 @@ mod tests {
     #[test]
     fn the_references_set_the_span() {
         let mut dac = peripheral(
-            "vref_negative = 0\nvref_positive = -8.0\ncs = \"low\"\n\
+            "vref_negative_volts = 0\nvref_positive_volts = -8.0\ncs = \"low\"\n\
              hbe = \"low\"\nlbe = \"low\"\nldac = \"low\"",
         )
         .unwrap();
         assert_eq!(input(&mut dac, DB, Signal::Bus(0x4000)), [-2.0]);
         assert!(matches!(
-            peripheral("vref_positive = inf"),
+            peripheral("vref_positive_volts = inf"),
             Err(ParameterError::Invalid { .. })
         ));
         assert!(matches!(
@@ -446,7 +448,7 @@ mod tests {
         let mut dac = peripheral("cs = \"low\"\nhbe = \"low\"").unwrap();
         input(&mut dac, DB, Signal::Bus(0x1234));
         let before = dac.state;
-        let other = peripheral("vref_positive = 10.0").unwrap();
+        let other = peripheral("vref_positive_volts = 10.0").unwrap();
         assert!(matches!(
             dac.restore(&other.save().unwrap()),
             Err(StateError::Mismatch(_))

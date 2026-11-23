@@ -97,10 +97,10 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), RegistryError> {
 /// Its ports: the channels in order, COM, then /SE.
 fn ports() -> Vec<PortSpec> {
     (0..CHANNELS)
-        .map(|channel| PortSpec::input(format!("ch{channel}"), Kind::Analog))
+        .map(|channel| PortSpec::input(format!("CH{channel}"), Kind::Analog))
         .chain([
-            PortSpec::input("com", Kind::Analog),
-            PortSpec::input("se", Kind::Logic),
+            PortSpec::input("COM", Kind::Analog),
+            PortSpec::input("SE", Kind::Logic),
         ])
         .collect()
 }
