@@ -49,7 +49,7 @@ const VECTOR_BYTES: u32 = 4;
 /// `(d8, PC, Xn)`.
 const INDEXED: &str = "Xn)";
 /// The clocks of a RAM cycle: the fastest (CPU32RM 8.1.5).
-const RAM_CLOCKS: u8 = 2;
+const RAM_CLOCKS: Cycles = Cycles::from_clocks(2);
 
 /// A bus with nothing on it: an access outside the case's RAM is a bus
 /// error, so a stray access shows.

@@ -26,6 +26,7 @@ use mc683xx_board::time::Time;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
@@ -327,7 +328,10 @@ fn the_ivr_is_0f_out_of_reset_and_answers_an_acknowledge_only_while_interrupting
     bench.channel(0);
     bench.write(ISR, 0x01, Time::ZERO);
     assert_eq!(bench.acknowledge(Time::ZERO), Ok(0x40));
-    assert_eq!(bench.duart.wait_states(iack, SYSTEM_CLOCK), Some(0));
+    assert_eq!(
+        bench.duart.wait_states(iack, SYSTEM_CLOCK),
+        Some(Cycles::ZERO)
+    );
 }
 
 #[test]

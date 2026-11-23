@@ -16,6 +16,7 @@ use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::chip_select::ChipSelect;
@@ -470,16 +471,16 @@ impl MappedPeripheral for PythonMapped {
         )
     }
 
-    fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
+    fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
         match self.call(
             self.methods.wait_states.as_ref(),
             (BusCycleView(cycle),),
             |result| result.extract::<Option<u8>>(),
             Some(0),
         ) {
-            Some(Ok(wait_states)) => wait_states,
+            Some(Ok(wait_states)) => wait_states.map(|wait| Cycles::from_clocks(wait.into())),
             Some(Err(BusError)) => None,
-            None => Some(0),
+            None => Some(Cycles::ZERO),
         }
     }
 

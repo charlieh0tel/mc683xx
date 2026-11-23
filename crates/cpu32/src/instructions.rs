@@ -418,12 +418,10 @@ pub(crate) mod tests {
         let mut memory = Memory::new(24).unwrap();
         let region = memory.add_region(vec![0; RAM_BYTES as usize]);
         let backing = Some(Backing { region, offset: 0 });
-        let page = Page {
-            read: backing,
-            write: backing,
-            port: PortSize::Bits16,
-            clocks,
-        };
+        let page = Page::BUS
+            .reading(backing)
+            .writing(backing)
+            .timed(PortSize::Bits16, Cycles::from_clocks(u64::from(clocks)));
         for space in [Space::User, Space::Supervisor] {
             memory.map(space, Address(0), RAM_BYTES, page).unwrap();
         }

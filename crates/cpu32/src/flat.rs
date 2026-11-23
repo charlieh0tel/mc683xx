@@ -16,7 +16,6 @@ use crate::bus::Bus;
 use crate::bus::BusAccess;
 use crate::bus::BusError;
 use crate::bus::LPSTOP_BROADCAST;
-use crate::bus::PortSize;
 use crate::bus::Read;
 use crate::bus::StopRequest;
 use crate::cpu::Cpu;
@@ -59,9 +58,6 @@ pub const VERSION: u32 = 7;
 /// The address lines a machine has unless the host says otherwise:
 /// all of the CPU32's (CPU32RM 5.3), so no address aliases.
 pub const ADDRESS_BITS: u32 = 32;
-/// Clocks in a zero-wait bus cycle (CPU32RM 8.1.5): the timing of
-/// mapped memory and of peripherals.
-const FASTEST_CLOCKS: u8 = 2;
 /// The interrupt levels with a request line, 1 to 7.
 const LEVELS: usize = 7;
 /// Both spaces, each mapped alike.
@@ -401,12 +397,7 @@ impl Machine {
         self.maps.insert(region, start);
         let length = self.cpu.memory.region(region).len() as u32;
         let backing = Some(Backing { region, offset: 0 });
-        let page = Page {
-            read: backing,
-            write: backing,
-            port: PortSize::Bits16,
-            clocks: FASTEST_CLOCKS,
-        };
+        let page = Page::BUS.reading(backing).writing(backing);
         for space in SPACES {
             self.cpu.memory.map(space, start, length, page)?;
         }

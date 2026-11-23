@@ -120,7 +120,7 @@ fn sypcr_is_written_once() {
     write(&mut sim, 0x21, Size::Byte, 0xcc, Cycle::ZERO);
     write(&mut sim, 0x21, Size::Byte, 0x00, Cycle::ZERO);
     assert_eq!(read(&mut sim, 0x21, Size::Byte), 0xcc);
-    assert_eq!(sim.bus_monitor(), Some(64));
+    assert_eq!(sim.bus_monitor(), Some(Cycles::from_clocks(64)));
     assert!(sim.halt_monitor());
 }
 

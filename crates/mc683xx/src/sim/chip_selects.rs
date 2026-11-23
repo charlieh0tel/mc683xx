@@ -3,6 +3,7 @@
 //! CSORBT and CSOR0-10, and how each would end the cycle.
 
 use mc683xx_cpu32::bus::PortSize;
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
@@ -247,20 +248,20 @@ impl Termination {
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
     #[must_use]
-    pub const fn clocks(self, eclk_divisor: u64) -> Option<u8> {
+    pub const fn clocks(self, eclk_divisor: u64) -> Option<Cycles> {
         match self {
-            Self::Fast => Some(FAST_CLOCKS),
-            Self::WaitStates(wait) => Some(ZERO_WAIT_CLOCKS + wait),
+            Self::Fast => Some(Cycles::from_clocks(FAST_CLOCKS as u64)),
+            Self::WaitStates(wait) => Some(Cycles::from_clocks((ZERO_WAIT_CLOCKS + wait) as u64)),
             Self::External => None,
-            Self::Eclk => Some((eclk_divisor + eclk_divisor / 2) as u8),
+            Self::Eclk => Some(Cycles::from_clocks(eclk_divisor + eclk_divisor / 2)),
         }
     }
 
     /// The clocks of a cycle an external DSACK ends after `wait`
     /// states.
     #[must_use]
-    pub const fn external_clocks(wait: u8) -> u8 {
-        ZERO_WAIT_CLOCKS.saturating_add(wait)
+    pub const fn external_clocks(wait: Cycles) -> Cycles {
+        Cycles::from_clocks(ZERO_WAIT_CLOCKS as u64).saturating_add(wait)
     }
 }
 
@@ -597,6 +598,7 @@ mod tests {
     use crate::chip_select::ChipSelect;
     use crate::chip_select::Number;
     use mc683xx_cpu32::bus::PortSize;
+    use mc683xx_cpu32::cycles::Cycles;
     use mc683xx_target::function_code::FunctionCode;
     use mc683xx_target::size::Size;
 
@@ -640,7 +642,10 @@ mod tests {
         assert_eq!(found[0].select, ChipSelect::Boot);
         assert_eq!(found[0].port, PortSize::Bits16);
         assert_eq!(found[0].termination, Termination::WaitStates(13));
-        assert_eq!(found[0].termination.clocks(8), Some(16));
+        assert_eq!(
+            found[0].termination.clocks(8),
+            Some(Cycles::from_clocks(16))
+        );
         assert!(selected(&selects, read(0xf_fffe, Size::Word)).len() == 1);
         assert!(selected(&selects, read(0x10_0000, Size::Word)).is_empty());
         let user = DecodeRequest {
@@ -706,7 +711,10 @@ mod tests {
         assert_eq!(found[0].select, cs(5));
         assert_eq!(found[0].port, PortSize::Bits8);
         assert_eq!(found[0].termination, Termination::WaitStates(12));
-        assert_eq!(found[0].termination.clocks(8), Some(15));
+        assert_eq!(
+            found[0].termination.clocks(8),
+            Some(Cycles::from_clocks(15))
+        );
     }
 
     #[test]

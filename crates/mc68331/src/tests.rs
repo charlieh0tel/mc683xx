@@ -193,8 +193,8 @@ impl MappedPeripheral for Recorder {
         Ok(())
     }
 
-    fn wait_states(&mut self, _: BusCycle) -> Option<u8> {
-        self.wait
+    fn wait_states(&mut self, _: BusCycle) -> Option<Cycles> {
+        self.wait.map(|wait| Cycles::from_clocks(wait.into()))
     }
 
     fn interrupt_request(&self) -> bool {
@@ -282,18 +282,20 @@ fn cycle_in(
     address: u32,
     size: Size,
     write: Option<u32>,
-) -> Result<(u32, u16), BusError> {
+) -> Result<(u32, u64), BusError> {
     let Mc68331 {
         cpu, board, now, ..
     } = chip;
-    board.cycle(
-        Some(&mut cpu.memory),
-        address,
-        size,
-        function_code,
-        *now,
-        write,
-    )
+    board
+        .cycle(
+            Some(&mut cpu.memory),
+            address,
+            size,
+            function_code,
+            *now,
+            write,
+        )
+        .map(|(value, clocks)| (value, clocks.clocks()))
 }
 
 /// A supervisor data cycle straight to the board.
@@ -302,7 +304,7 @@ fn cycle(
     address: u32,
     size: Size,
     write: Option<u32>,
-) -> Result<(u32, u16), BusError> {
+) -> Result<(u32, u64), BusError> {
     cycle_in(chip, FunctionCode::SUPERVISOR_DATA, address, size, write)
 }
 
@@ -359,7 +361,7 @@ fn nothing_answers_outside_the_selects() {
         Cycle::ZERO,
         Some(5),
     );
-    assert_eq!(lpstop, Ok((0, 2)));
+    assert_eq!(lpstop, Ok((0, Cycles::from_clocks(2))));
     assert_eq!(board.sim.low_power(), InterruptLevel::new(5));
 }
 
@@ -414,7 +416,7 @@ fn user_mode_sim_cycles_go_external() {
         None,
     );
     // CSBOOT's 1-Mbyte block from $F00000 repeats the ROM
-    assert_eq!(user, Ok((u32::from(NOP), 16)));
+    assert_eq!(user, Ok((u32::from(NOP), Cycles::from_clocks(16))));
 }
 
 /// A synthetic map with every kind of select the decode handles
@@ -944,7 +946,10 @@ fn a_split_word_cycle_counts_both_bytes_clocks() {
         cycle(&mut chip, 0x60_0000, Size::Word, None),
         Ok((0x3434, 2 * 203))
     );
-    assert_eq!(stall(2 * 203), Cycles::from_clocks(2 * 203 - 2));
+    assert_eq!(
+        stall(Cycles::from_clocks(2 * 203)),
+        Cycles::from_clocks(2 * 203 - 2)
+    );
 }
 
 /// A peripheral whose writes divert a memory to another peripheral and back:
@@ -2106,11 +2111,11 @@ impl MappedPeripheral for Duart {
         Ok(())
     }
 
-    fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
+    fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
         Some(if cycle.function_code.is_cpu_space() {
-            self.wait
+            Cycles::from_clocks(self.wait.into())
         } else {
-            0
+            Cycles::ZERO
         })
     }
 

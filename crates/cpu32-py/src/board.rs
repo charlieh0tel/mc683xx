@@ -56,6 +56,7 @@ use mc683xx_board::trace::Line;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::peripheral;
@@ -987,12 +988,16 @@ impl Peripheral for PythonPeripheral {
         .unwrap_or(Err(BusError))
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<Cycles> {
         self.ask(
             "wait_states",
             |py| Ok(vec![access_argument(py, access)?]),
-            |value| value.extract::<Option<u8>>(),
-            Some(0),
+            |value| {
+                Ok(value
+                    .extract::<Option<u8>>()?
+                    .map(|wait| Cycles::from_clocks(wait.into())))
+            },
+            Some(Cycles::ZERO),
         )
     }
 

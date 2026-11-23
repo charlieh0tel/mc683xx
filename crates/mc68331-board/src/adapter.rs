@@ -27,6 +27,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::peripheral::QspiClock;
@@ -164,7 +165,7 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
             .write(carried(access, drive.system_clock()), value)
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<Cycles> {
         self.peripheral.wait_states(carried(access, system_clock))
     }
 

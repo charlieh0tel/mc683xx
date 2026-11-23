@@ -8,6 +8,7 @@ use crate::cpu::hooks::ExceptionEntry;
 use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::memory::Memory;
+use crate::memory::Page;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
@@ -239,14 +240,18 @@ pub trait Bus {
 }
 
 /// The clocks a byte or word cycle of `size` takes beyond the timing
-/// tables' assumption, on a `port` whose cycles take `clocks` each.
+/// tables' assumption, on a `port` whose cycles take `clocks` each, at
+/// most a page's ([`Page::MOST_CLOCKS`]).
+///
+/// [`Page::MOST_CLOCKS`]: crate::memory::Page::MOST_CLOCKS
 #[must_use]
-pub fn stall(size: Size, port: PortSize, clocks: u8) -> Cycles {
+pub fn stall(size: Size, port: PortSize, clocks: Cycles) -> Cycles {
+    debug_assert!(clocks <= Page::MOST_CLOCKS, "more clocks than a page holds");
     let cycles = match (size, port) {
         (Size::Word, PortSize::Bits8) => 2,
         _ => 1,
     };
-    Cycles::from_clocks((cycles * u64::from(clocks)).saturating_sub(TABLE_CLOCKS))
+    Cycles::from_clocks((cycles * clocks.clocks()).saturating_sub(TABLE_CLOCKS))
 }
 
 #[cfg(test)]
@@ -276,17 +281,20 @@ mod tests {
 
     #[test]
     fn a_two_clock_word_costs_what_the_tables_say() {
-        assert_eq!(stall(Size::Word, PortSize::Bits16, 2), Cycles::ZERO);
+        assert_eq!(
+            stall(Size::Word, PortSize::Bits16, Cycles::from_clocks(2)),
+            Cycles::ZERO
+        );
     }
 
     #[test]
     fn a_word_on_an_8_bit_port_is_two_cycles() {
         assert_eq!(
-            stall(Size::Word, PortSize::Bits8, 3),
+            stall(Size::Word, PortSize::Bits8, Cycles::from_clocks(3)),
             Cycles::from_clocks(4)
         );
         assert_eq!(
-            stall(Size::Byte, PortSize::Bits8, 3),
+            stall(Size::Byte, PortSize::Bits8, Cycles::from_clocks(3)),
             Cycles::from_clocks(1)
         );
     }

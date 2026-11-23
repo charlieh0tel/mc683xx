@@ -359,7 +359,7 @@ parameters = { value = 0x5a }
 struct Silent;
 
 impl Peripheral for Silent {
-    fn wait_states(&mut self, _: PeripheralAccess, _: TimeBase) -> Option<u8> {
+    fn wait_states(&mut self, _: PeripheralAccess, _: TimeBase) -> Option<Cycles> {
         None
     }
 
@@ -390,9 +390,9 @@ impl Peripheral for WriteLatch {
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<Cycles> {
         self.asked.push(access.write);
-        Some(1)
+        Some(Cycles::from_clocks(1))
     }
 
     fn dsack_port(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<PortSize> {

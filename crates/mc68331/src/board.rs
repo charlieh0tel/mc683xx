@@ -95,7 +95,8 @@ const TABLE_CLOCKS: u8 = 2;
 /// wait states that costs nothing beyond the timing tables, as an
 /// internal module's cycle does.  It has no DSACK: the chip has no such
 /// decode.
-pub(crate) const FIXED_TIMING: (PortSize, u8) = (PortSize::Bits16, TABLE_CLOCKS);
+pub(crate) const FIXED_TIMING: (PortSize, Cycles) =
+    (PortSize::Bits16, Cycles::from_clocks(TABLE_CLOCKS as u64));
 
 /// A host peripheral the chip holds: a peripheral on chip-select pins with its
 /// own time, in the chip's snapshot, which the host can get back by
@@ -137,7 +138,7 @@ pub(crate) struct FixedMemory {
     pub(crate) memory: HostMemory,
     /// Its port and the clocks of each of its cycles
     /// ([`FIXED_TIMING`] unless the host set them).
-    pub(crate) timing: (PortSize, u8),
+    pub(crate) timing: (PortSize, Cycles),
 }
 
 impl HostMemory {
@@ -334,7 +335,7 @@ impl fmt::Debug for Board {
 /// How a bus cycle ended well: its value, right-aligned, and its
 /// clocks, those of both byte cycles when a word goes to an 8-bit port
 /// (each up to a select's, `u8`).
-type Ended = Result<(u32, u16), BusError>;
+type Ended = Result<(u32, Cycles), BusError>;
 
 impl Board {
     /// The pins `port` drives and their levels at `now`.
@@ -815,7 +816,7 @@ impl Board {
                     InterruptLevel::new((value & LPSTOP_MASK) as u8).unwrap_or_default(),
                     now,
                 );
-                return Ok((0, TABLE_CLOCKS.into()));
+                return Ok((0, Cycles::from_clocks(TABLE_CLOCKS.into())));
             }
         } else if let Some(offset) = address
             .checked_sub(self.sim.module_base().0)
@@ -830,7 +831,7 @@ impl Board {
             {
                 self.rebuild(memory);
             }
-            return Ok((value, TABLE_CLOCKS.into()));
+            return Ok((value, Cycles::from_clocks(TABLE_CLOCKS.into())));
         }
         self.external(memory, address, size, function_code, now, write)
     }
@@ -899,7 +900,7 @@ impl Board {
     /// port size its DSACK gives for dynamic bus sizing: its own DSACK
     /// at its port field (SIMRM 7.6), or with an external DSACK its
     /// peripheral's (memory answers at once, at the field's size).
-    fn dsack(&mut self, found: Match, cycle: BusCycle) -> Option<(u8, PortSize)> {
+    fn dsack(&mut self, found: Match, cycle: BusCycle) -> Option<(Cycles, PortSize)> {
         if let Some(clocks) = found.termination.clocks(self.sim.clock().eclk_divisor()) {
             return Some((clocks, found.port));
         }
@@ -910,7 +911,7 @@ impl Board {
             Wire::Peripheral(peripheral) => {
                 self.peripheral_dsack(peripheral, cycle, Some(found.port))
             }
-            Wire::Memory(_) => Some((Termination::external_clocks(0), found.port)),
+            Wire::Memory(_) => Some((Termination::external_clocks(Cycles::ZERO), found.port)),
         }
     }
 
@@ -922,7 +923,7 @@ impl Board {
         peripheral: usize,
         cycle: BusCycle,
         field: Option<PortSize>,
-    ) -> Option<(u8, PortSize)> {
+    ) -> Option<(Cycles, PortSize)> {
         let port = self.dsack_port(peripheral, cycle, field)?;
         self.peripherals[peripheral]
             .wait_states(cycle)
@@ -1036,7 +1037,7 @@ impl Board {
             if self.bus_monitor().is_some_and(|limit| clocks > limit) {
                 return Err(BusError);
             }
-            let cycles: u16 = if size == Size::Word && port == PortSize::Bits8 {
+            let cycles: u64 = if size == Size::Word && port == PortSize::Bits8 {
                 2
             } else {
                 1
@@ -1049,14 +1050,14 @@ impl Board {
                 (None, Some(memory)) => load(memory, fixed.memory, address, size),
                 _ => 0,
             };
-            return Ok((value, cycles * u16::from(clocks)));
+            return Ok((value, Cycles::from_clocks(cycles * clocks.clocks())));
         }
         if self.publish_output_horizon {
             self.publish_output_horizon(now);
         }
         let bus_cycle =
             BusCycle::new(Address(address), size, function_code, now).writing(write.is_some());
-        let mut first: Option<(u8, PortSize)> = None;
+        let mut first: Option<(Cycles, PortSize)> = None;
         for &candidate in found.iter().flatten() {
             let cycle = bus_cycle.through(candidate.select.into());
             first = first_dsack(first, self.dsack(candidate, cycle));
@@ -1139,7 +1140,7 @@ impl Board {
                 }
             }
         }
-        Ok((value, clocks.into()))
+        Ok((value, clocks))
     }
 
     /// The level of the highest IRQ pin asserted with its interrupt
@@ -1279,7 +1280,7 @@ impl Board {
 
     /// The bus monitor's period in clocks, if it watches cycles now
     /// (SIMRM 3.2, 6.4.3).
-    fn bus_monitor(&self) -> Option<u8> {
+    fn bus_monitor(&self) -> Option<Cycles> {
         self.sim
             .bus_monitor()
             .filter(|_| !self.sim.freezes_bus_monitor())
@@ -1363,10 +1364,8 @@ impl Board {
             // no DSACK in time: the bus monitor's BERR ends the cycle
             // at its period (SIMRM 3.2, 6.4.3); with BME clear, a bus
             // error at once (PLAN.md, A cycle no DSACK ends)
-            Err(BusError) => Acknowledged::new(Acknowledge::Spurious).stalled(
-                self.bus_monitor()
-                    .map_or(Cycles::ZERO, |limit| stall(limit.into())),
-            ),
+            Err(BusError) => Acknowledged::new(Acknowledge::Spurious)
+                .stalled(self.bus_monitor().map_or(Cycles::ZERO, stall)),
         }
     }
 
@@ -1436,7 +1435,7 @@ impl Board {
         address: u32,
         function_code: FunctionCode,
         write: bool,
-    ) -> Option<(Backing, (PortSize, u8))> {
+    ) -> Option<(Backing, (PortSize, Cycles))> {
         let kinds = [
             (address, Size::Byte),
             (address + 1, Size::Byte),
@@ -1470,7 +1469,7 @@ impl Board {
     pub(crate) fn memory_alone(
         &self,
         request: DecodeRequest,
-    ) -> Option<(HostMemory, (PortSize, u8))> {
+    ) -> Option<(HostMemory, (PortSize, Cycles))> {
         if self.bus_takes(request.address, request.function_code) {
             return None;
         }
@@ -1486,7 +1485,7 @@ impl Board {
                 .map(|fixed| (fixed.memory, fixed.timing));
         }
         let eclk = self.sim.clock().eclk_divisor();
-        let mut first: Option<(u8, PortSize)> = None;
+        let mut first: Option<(Cycles, PortSize)> = None;
         let mut wired = None;
         let mut lanes = Lanes {
             upper: false,
@@ -1500,7 +1499,7 @@ impl Board {
             };
             let clocks = match (found.termination.clocks(eclk), wire) {
                 (Some(clocks), _) => Some(clocks),
-                (None, Some(Wire::Memory(_))) => Some(Termination::external_clocks(0)),
+                (None, Some(Wire::Memory(_))) => Some(Termination::external_clocks(Cycles::ZERO)),
                 (None, Some(Wire::Peripheral(_))) => return None,
                 (None, None) => None,
             };
@@ -1556,8 +1555,8 @@ const fn page(address: u32) -> usize {
 
 /// The clocks of a cycle of `clocks` beyond the timing tables' bus
 /// cycle: what the core adds to an instruction or interrupt.
-pub(crate) fn stall(clocks: u16) -> Cycles {
-    Cycles::from_clocks(u64::from(clocks.saturating_sub(TABLE_CLOCKS.into())))
+pub(crate) const fn stall(clocks: Cycles) -> Cycles {
+    clocks.saturating_sub(Cycles::from_clocks(TABLE_CLOCKS as u64))
 }
 
 /// Whether `source` arbitrates with the SIM's IARB.
@@ -1573,9 +1572,9 @@ const fn is_sim(source: Source) -> bool {
 /// does not matter.  A select's own DSACK is the pin its port field
 /// names (SIMRM 7.6).
 fn first_dsack(
-    first: Option<(u8, PortSize)>,
-    response: Option<(u8, PortSize)>,
-) -> Option<(u8, PortSize)> {
+    first: Option<(Cycles, PortSize)>,
+    response: Option<(Cycles, PortSize)>,
+) -> Option<(Cycles, PortSize)> {
     match (first, response) {
         (Some((earliest, port)), Some((clocks, other))) if clocks == earliest => {
             let wired = if port == PortSize::Bits16 || other == PortSize::Bits16 {

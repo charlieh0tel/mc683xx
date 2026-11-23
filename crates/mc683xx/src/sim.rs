@@ -23,6 +23,7 @@ use std::str::FromStr;
 
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
@@ -486,11 +487,14 @@ impl Sim {
         (self.simcr & SIMCR_IARB_MASK) as u8
     }
 
-    /// The bus monitor's period for internal-to-external cycles, in
-    /// system clocks, if BME enables it (SIMRM 3.2).
+    /// The bus monitor's period for internal-to-external cycles, if
+    /// BME enables it (SIMRM 3.2).
     #[must_use]
-    pub const fn bus_monitor(&self) -> Option<u8> {
-        self.protection.bus_monitor()
+    pub const fn bus_monitor(&self) -> Option<Cycles> {
+        match self.protection.bus_monitor() {
+            Some(clocks) => Some(Cycles::from_clocks(clocks as u64)),
+            None => None,
+        }
     }
 
     /// Whether the halt monitor resets the MCU on a double bus fault

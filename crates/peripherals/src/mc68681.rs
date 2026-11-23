@@ -53,6 +53,7 @@ use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::cycles::Cycles;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -760,9 +761,9 @@ impl Peripheral for Duart {
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<Cycles> {
         // no DTACK for an acknowledge with no interrupt pending (2.11)
-        (access.role != Role::Iack || self.interrupting()).then_some(0)
+        (access.role != Role::Iack || self.interrupting()).then_some(Cycles::ZERO)
     }
 
     fn interrupt_request(&self) -> bool {

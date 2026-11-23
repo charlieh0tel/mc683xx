@@ -18,6 +18,7 @@ use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::state::Stateless;
 use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::chip_select::ChipSelect;
@@ -424,9 +425,9 @@ impl Routes {
 
     /// The wait states of the first peripheral to take the cycle, in
     /// its direction.
-    pub(crate) fn wait_states(&self, shared: &Shared, cycle: BusCycle) -> Option<u8> {
+    pub(crate) fn wait_states(&self, shared: &Shared, cycle: BusCycle) -> Option<Cycles> {
         let Some(&(route, size, _)) = self.pieces(cycle).first() else {
-            return Some(0);
+            return Some(Cycles::ZERO);
         };
         let access = Self::access(shared, route, cycle, size);
         shared.peripherals[route.peripheral]
@@ -452,7 +453,7 @@ impl MappedPeripheral for SelectRouter {
         self.routes.write(&self.shared, cycle, value)
     }
 
-    fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
+    fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
         self.routes.wait_states(&self.shared, cycle)
     }
 
@@ -524,9 +525,11 @@ impl MappedPeripheral for DecoderRouter {
         }
     }
 
-    fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
+    fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
         self.routes(cycle.address.0)
-            .map_or(Some(0), |routes| routes.wait_states(&self.shared, cycle))
+            .map_or(Some(Cycles::ZERO), |routes| {
+                routes.wait_states(&self.shared, cycle)
+            })
     }
 
     fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
@@ -557,7 +560,7 @@ impl MappedPeripheral for BusRouter {
         self.routes.write(&self.shared, cycle, value)
     }
 
-    fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
+    fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
         self.routes.wait_states(&self.shared, cycle)
     }
 

@@ -142,7 +142,10 @@ fn a_peripheral_answers_its_cycles() {
         assert_eq!(peripheral.read(cycle(0x20_0012, Size::Word)), Ok(0x12));
         assert_eq!(peripheral.write(cycle(0x20_0014, Size::Byte), 0xab), Ok(()));
         assert_eq!(peripheral.wait_states(cycle(0, Size::Word)), None);
-        assert_eq!(peripheral.wait_states(cycle(2, Size::Word)), Some(3));
+        assert_eq!(
+            peripheral.wait_states(cycle(2, Size::Word)),
+            Some(Cycles::from_clocks(3))
+        );
         assert!(peripheral.interrupt_request());
         peripheral.reset(Cycle::from_clocks(5));
         assert_eq!(peripheral.next_event(), Some(Cycle::from_clocks(1000)));
@@ -210,7 +213,10 @@ fn missing_methods_take_the_defaults() {
         let pending = Pending::default();
         let mut peripheral =
             PythonMapped::mapped(&object(module, "Bare"), pending.clone()).unwrap();
-        assert_eq!(peripheral.wait_states(cycle(0, Size::Word)), Some(0));
+        assert_eq!(
+            peripheral.wait_states(cycle(0, Size::Word)),
+            Some(Cycles::from_clocks(0))
+        );
         assert!(!peripheral.interrupt_request());
         assert_eq!(peripheral.next_event(), None);
         peripheral.reset(Cycle::from_clocks(1));

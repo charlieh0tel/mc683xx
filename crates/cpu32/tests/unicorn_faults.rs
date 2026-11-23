@@ -67,7 +67,7 @@ const ADDRESS_BITS: u32 = 24;
 /// RAM from zero, in both spaces: the vector table, code and stacks.
 const RAM_BYTES: u32 = 0x10000;
 /// Clocks of a RAM cycle: the fastest (CPU32RM 8.1.5).
-const RAM_CLOCKS: u8 = 2;
+const RAM_CLOCKS: Cycles = Cycles::from_clocks(2);
 /// Where the code starts, as in `unicorn_check.py`.
 const START: u32 = 0x1000;
 /// The supervisor stack's top, as in `unicorn_check.py`.

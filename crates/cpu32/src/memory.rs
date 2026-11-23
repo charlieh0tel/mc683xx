@@ -164,8 +164,10 @@ pub struct Page {
     pub write: Option<Backing>,
     /// The port width of the memory behind it.
     pub port: PortSize,
-    /// Clocks in each of its bus cycles, wait states included.
-    pub clocks: u8,
+    /// Clocks in each of its bus cycles, wait states included: a
+    /// `u8`, not [`Cycles`], to keep the page tables small (PLAN.md,
+    /// Memory).
+    clocks: u8,
 }
 
 impl Page {
@@ -176,6 +178,9 @@ impl Page {
         port: PortSize::Bits16,
         clocks: FASTEST_CLOCKS,
     };
+
+    /// The longest bus cycle a page holds.
+    pub const MOST_CLOCKS: Cycles = Cycles::from_clocks(u8::MAX as u64);
 
     /// The page, its reads going to `read`, or to the bus if `None`.
     #[must_use]
@@ -191,13 +196,28 @@ impl Page {
 
     /// The page, the memory behind it `port` wide, each of its bus
     /// cycles `clocks` long, wait states included.
+    ///
+    /// # Panics
+    ///
+    /// If `clocks` is more than [`Page::MOST_CLOCKS`]: no select's timing
+    /// comes near it, an ECLK cycle, the longest, being 24 at most.
     #[must_use]
-    pub const fn timed(self, port: PortSize, clocks: u8) -> Self {
+    pub const fn timed(self, port: PortSize, clocks: Cycles) -> Self {
+        assert!(
+            clocks.clocks() <= Self::MOST_CLOCKS.clocks(),
+            "more clocks than a page holds"
+        );
         Self {
             port,
-            clocks,
+            clocks: clocks.clocks() as u8,
             ..self
         }
+    }
+
+    /// Clocks in each of its bus cycles, wait states included.
+    #[must_use]
+    pub const fn clocks(&self) -> Cycles {
+        Cycles::from_clocks(self.clocks as u64)
     }
 }
 
@@ -933,7 +953,7 @@ impl Memory {
             Size::Byte => u32::from(bytes[0]),
             _ => u32::from(u16::from_be_bytes([bytes[0], bytes[1]])),
         };
-        Some((value, stall(size, page.port, page.clocks)))
+        Some((value, stall(size, page.port, page.clocks())))
     }
 
     /// An even long's two word reads, high word first, with their stall,
@@ -944,7 +964,7 @@ impl Memory {
     pub(crate) fn read_long(&self, space: Space, address: Address) -> Option<(u32, Cycles)> {
         let (slab, index, within) = self.locate(address)?;
         let page = &slab.fast[space.index()][index];
-        let (backing, word) = (page.read?, stall(Size::Word, page.port, page.clocks));
+        let (backing, word) = (page.read?, stall(Size::Word, page.port, page.clocks()));
         let at = backing.offset as usize + Self::long_within(within)?;
         let bytes = &self.regions[backing.region.0][at..at + 4];
         Some((
@@ -965,7 +985,7 @@ impl Memory {
     ) -> Option<Cycles> {
         let (slab, index, within) = self.locate(address)?;
         let page = slab.fast[space.index()][index];
-        let (backing, word) = (page.write?, stall(Size::Word, page.port, page.clocks));
+        let (backing, word) = (page.write?, stall(Size::Word, page.port, page.clocks()));
         let at = backing.offset as usize + Self::long_within(within)?;
         self.regions[backing.region.0][at..at + 4].copy_from_slice(&value.to_be_bytes());
         Some(word + word)
@@ -1008,7 +1028,7 @@ impl Memory {
             page,
             region: backing.region.0,
             offset: backing.offset as usize,
-            stall: stall(Size::Word, entry.port, entry.clocks),
+            stall: stall(Size::Word, entry.port, entry.clocks()),
         };
         self.fetch_page = Some(cached);
         Some(cached)
@@ -1052,7 +1072,7 @@ impl Memory {
     /// A write to `page`, `within` bytes into it.
     #[inline]
     fn write_in(&mut self, page: Page, within: usize, size: Size, value: u32) -> Option<Cycles> {
-        let (backing, cost) = (page.write?, stall(size, page.port, page.clocks));
+        let (backing, cost) = (page.write?, stall(size, page.port, page.clocks()));
         let bytes = &mut self.regions[backing.region.0][backing.offset as usize + within..];
         match size {
             Size::Byte => bytes[0] = value as u8,
@@ -1079,12 +1099,10 @@ mod tests {
     fn ram(memory: &mut Memory, at: u32, bytes: u32) {
         let region = memory.add_region(vec![0; bytes as usize]);
         let backing = Some(Backing { region, offset: 0 });
-        let page = Page {
-            read: backing,
-            write: backing,
-            port: PortSize::Bits16,
-            clocks: 2,
-        };
+        let page = Page::BUS
+            .reading(backing)
+            .writing(backing)
+            .timed(PortSize::Bits16, Cycles::from_clocks(2));
         memory
             .map(Space::Supervisor, Address(at), bytes, page)
             .unwrap();

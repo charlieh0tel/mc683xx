@@ -356,7 +356,7 @@ refuses.
   a read, then `.through(select)` and `.writing(true)` as it needs, so a
   field added later gets a default.  Values are right-aligned; a read must fit
   the cycle.  `Err(BusError)` asserts BERR: the CPU takes a bus error.
-- `wait_states(cycle) -> Option<u8>`: on a select whose DSACK field is
+- `wait_states(cycle) -> Option<Cycles>`: on a select whose DSACK field is
   external (%1111, SIMRM 7.10.3), the wait states before the peripheral
   asserts DSACK, or `None` if it never does, so the bus monitor ends
   the cycle in a bus error.  On other selects the option register
@@ -500,8 +500,8 @@ impl MappedPeripheral for Interrupter {
         Ok(())
     }
 
-    fn wait_states(&mut self, _: BusCycle) -> Option<u8> {
-        Some(2)
+    fn wait_states(&mut self, _: BusCycle) -> Option<Cycles> {
+        Some(Cycles::from_clocks(2))
     }
 
     fn interrupt_request(&self) -> bool {
