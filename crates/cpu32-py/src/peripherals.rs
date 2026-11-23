@@ -65,15 +65,7 @@ impl From<sci::Frame> for Frame {
 }
 
 /// One of the GPT's two PWM outputs (Rust's `pwm::Channel`).
-#[pyclass(
-    name = "Channel",
-    module = "mc683xx",
-    eq,
-    hash,
-    eq_int,
-    frozen,
-    from_py_object
-)]
+#[pyclass(name = "Channel", module = "mc683xx", eq, hash, frozen, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ChannelView {
     /// PWMA.
@@ -81,6 +73,8 @@ pub(crate) enum ChannelView {
     /// PWMB.
     B,
 }
+
+enum_names!(ChannelView, Channel);
 
 impl From<ChannelView> for Channel {
     fn from(channel: ChannelView) -> Self {
@@ -101,15 +95,7 @@ impl From<Channel> for ChannelView {
 }
 
 /// One of the chip's general-purpose ports (Rust's `port::Port`).
-#[pyclass(
-    name = "Port",
-    module = "mc683xx",
-    eq,
-    hash,
-    eq_int,
-    frozen,
-    from_py_object
-)]
+#[pyclass(name = "Port", module = "mc683xx", eq, hash, frozen, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PortView {
     /// Port C: the chip-select pins CS3 to CS9 as discrete outputs.
@@ -125,6 +111,8 @@ pub(crate) enum PortView {
     #[pyo3(name = "QS")]
     Qs,
 }
+
+enum_names!(PortView, Port);
 
 impl From<PortView> for Port {
     fn from(port: PortView) -> Self {
@@ -198,15 +186,7 @@ impl From<PortState> for PortStateView {
 
 /// A GPT input pin (Rust's `gpt::Input`), a member per pin: Rust's
 /// `PortGp(pin)` is `PGP0` to `PGP7` here, as the pins are named.
-#[pyclass(
-    name = "Input",
-    module = "mc683xx",
-    eq,
-    hash,
-    eq_int,
-    frozen,
-    from_py_object
-)]
+#[pyclass(name = "Input", module = "mc683xx", eq, hash, frozen, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[expect(
     clippy::upper_case_acronyms,
@@ -234,6 +214,8 @@ pub(crate) enum InputView {
     /// PCLK, the external clock.
     PCLK,
 }
+
+enum_names!(InputView, Input);
 
 impl From<InputView> for Input {
     fn from(input: InputView) -> Self {

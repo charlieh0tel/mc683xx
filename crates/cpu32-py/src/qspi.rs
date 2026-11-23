@@ -31,7 +31,6 @@ use crate::python::repr;
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     rename_all = "SCREAMING_SNAKE_CASE"
 )]
@@ -43,12 +42,13 @@ pub(crate) enum ClockPolarity {
     IdleHigh,
 }
 
+enum_names!(ClockPolarity);
+
 /// Which SCK edges change and capture the data (QSMRM 4.3.1, CPHA).
 #[pyclass(
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     rename_all = "SCREAMING_SNAKE_CASE"
 )]
@@ -59,6 +59,8 @@ pub(crate) enum ClockPhase {
     /// CPHA 1: changed on the leading edge.
     ChangeLeading,
 }
+
+enum_names!(ClockPhase);
 
 /// The QSPI's serial clock, as a peripheral's `clock` is told it.
 #[pyclass(module = "mc683xx", frozen, get_all)]

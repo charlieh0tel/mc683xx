@@ -172,7 +172,6 @@ impl MemoryAccessView {
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     rename_all = "SCREAMING_SNAKE_CASE"
 )]
@@ -185,6 +184,18 @@ pub(crate) enum BusCycleKind {
     /// An operand write.
     Write,
 }
+
+impl From<BusCycleKind> for exception::BusCycleKind {
+    fn from(cycle: BusCycleKind) -> Self {
+        match cycle {
+            BusCycleKind::Fetch => Self::Fetch,
+            BusCycleKind::Read => Self::Read,
+            BusCycleKind::Write => Self::Write,
+        }
+    }
+}
+
+enum_names!(BusCycleKind, exception::BusCycleKind);
 
 impl From<exception::BusCycleKind> for BusCycleKind {
     fn from(cycle: exception::BusCycleKind) -> Self {
@@ -202,7 +213,6 @@ impl From<exception::BusCycleKind> for BusCycleKind {
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     rename_all = "SCREAMING_SNAKE_CASE"
 )]
@@ -213,6 +223,8 @@ pub(crate) enum InvalidReason {
     /// Its page's permissions do not allow it (`Mc68331.protect`).
     Protected,
 }
+
+enum_names!(InvalidReason);
 
 impl TryFrom<Invalid> for InvalidReason {
     type Error = Error;

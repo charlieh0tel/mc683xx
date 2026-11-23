@@ -125,7 +125,6 @@ use crate::qspi::shifted_in;
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     rename_all = "SCREAMING_SNAKE_CASE"
 )]
@@ -140,6 +139,19 @@ pub(crate) enum RoleView {
     /// Interrupt acknowledge cycles, in CPU space (SIMRM 7.8.1).
     Iack,
 }
+
+impl From<RoleView> for Role {
+    fn from(role: RoleView) -> Self {
+        match role {
+            RoleView::Read => Self::Read,
+            RoleView::Write => Self::Write,
+            RoleView::ReadWrite => Self::ReadWrite,
+            RoleView::Iack => Self::Iack,
+        }
+    }
+}
+
+enum_names!(RoleView, Role);
 
 impl TryFrom<Role> for RoleView {
     type Error = Error;
@@ -164,7 +176,6 @@ impl TryFrom<Role> for RoleView {
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     rename_all = "SCREAMING_SNAKE_CASE"
 )]
@@ -177,6 +188,18 @@ pub(crate) enum LaneView {
     /// The lower byte lane, DATA[7:0].
     Lower,
 }
+
+impl From<LaneView> for Lane {
+    fn from(lane: LaneView) -> Self {
+        match lane {
+            LaneView::Both => Self::Both,
+            LaneView::Upper => Self::Upper,
+            LaneView::Lower => Self::Lower,
+        }
+    }
+}
+
+enum_names!(LaneView, Lane);
 
 impl From<Lane> for LaneView {
     fn from(lane: Lane) -> Self {

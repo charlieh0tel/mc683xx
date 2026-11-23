@@ -39,7 +39,6 @@ pub(crate) const ADDRESS: &str = "127.0.0.1:1234";
 #[pyclass(
     module = "mc683xx",
     eq,
-    eq_int,
     hash,
     frozen,
     rename_all = "SCREAMING_SNAKE_CASE"
@@ -53,6 +52,8 @@ pub(crate) enum Ending {
     /// gdb hung up, without detaching or killing the target.
     HungUp,
 }
+
+enum_names!(Ending);
 
 /// A Rust target whose Python peripherals' exceptions wait in `pending`:
 /// raised when the quantum they stopped ends.

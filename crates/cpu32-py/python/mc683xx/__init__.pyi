@@ -280,7 +280,8 @@ class Halt:
 
     DOUBLE_BUS_FAULT: ClassVar[Halt]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Ending:
@@ -290,7 +291,8 @@ class Ending:
     KILLED: ClassVar[Ending]
     HUNG_UP: ClassVar[Ending]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class ResetCause:
@@ -304,7 +306,8 @@ class ResetCause:
     SYSTEM: ClassVar[ResetCause]
     TEST: ClassVar[ResetCause]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class FunctionCode:
@@ -321,6 +324,8 @@ class FunctionCode:
     SUPERVISOR_PROGRAM: ClassVar[FunctionCode]
     CPU_SPACE: ClassVar[FunctionCode]
     def __hash__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Space:
@@ -329,7 +334,8 @@ class Space:
     USER: ClassVar[Space]
     SUPERVISOR: ClassVar[Space]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class ClockPolarity:
@@ -338,7 +344,8 @@ class ClockPolarity:
     IDLE_LOW: ClassVar[ClockPolarity]
     IDLE_HIGH: ClassVar[ClockPolarity]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class ClockPhase:
@@ -347,7 +354,8 @@ class ClockPhase:
     CAPTURE_LEADING: ClassVar[ClockPhase]
     CHANGE_LEADING: ClassVar[ClockPhase]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class BusCycleKind:
@@ -357,7 +365,8 @@ class BusCycleKind:
     READ: ClassVar[BusCycleKind]
     WRITE: ClassVar[BusCycleKind]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Invalid:
@@ -366,7 +375,8 @@ class Invalid:
     BUS_ERROR: ClassVar[Invalid]
     PROTECTED: ClassVar[Invalid]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Channel:
@@ -375,7 +385,8 @@ class Channel:
     A: ClassVar[Channel]
     B: ClassVar[Channel]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Input:
@@ -392,7 +403,8 @@ class Input:
     PAI: ClassVar[Input]
     PCLK: ClassVar[Input]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Port:
@@ -404,7 +416,8 @@ class Port:
     GP: ClassVar[Port]
     QS: ClassVar[Port]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class PortState:
@@ -430,7 +443,8 @@ class Role:
     READ_WRITE: ClassVar[Role]
     IACK: ClassVar[Role]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Lane:
@@ -440,7 +454,8 @@ class Lane:
     UPPER: ClassVar[Lane]
     LOWER: ClassVar[Lane]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class HookId:
@@ -1047,7 +1062,8 @@ class FaultCause:
     PROTECTED: ClassVar[FaultCause]
     ADDRESS_ERROR: ClassVar[FaultCause]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class FaultStop:
@@ -1109,7 +1125,8 @@ class Dsack:
     DSACK1: ClassVar[Dsack]
     BOTH: ClassVar[Dsack]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @disjoint_base
 class Termination:

@@ -10,6 +10,7 @@ use mc683xx_mc68331::host::BusCycleError;
 use pyo3::Bound;
 use pyo3::IntoPyObject;
 use pyo3::IntoPyObjectExt;
+use pyo3::PyAny;
 use pyo3::PyErr;
 use pyo3::PyResult;
 use pyo3::Python;
@@ -18,6 +19,7 @@ use pyo3::exceptions::PyNotImplementedError;
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyOverflowError;
 use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::PyTypeError;
 use pyo3::exceptions::PyValueError;
 use pyo3::pymodule;
 use pyo3::types::PyAnyMethods;
@@ -151,6 +153,20 @@ impl From<Error> for PyErr {
             | Error::ShiftedIn { .. } => PyValueError::new_err(message),
         }
     }
+}
+
+/// An enum class member's name, as its class names it (`FETCH`): its
+/// default `repr` (`BusCycleKind.FETCH`) past the class's name.
+pub(crate) fn member_name(member: &Bound<'_, PyAny>) -> PyResult<String> {
+    let repr = member.repr()?.to_string();
+    Ok(repr
+        .rsplit_once('.')
+        .map_or_else(|| repr.clone(), |(_, name)| name.to_owned()))
+}
+
+/// What `int()` of an enum class's member raises: it is no number.
+pub(crate) fn not_a_number() -> PyErr {
+    PyTypeError::new_err("an enum member is not a number: use its name")
 }
 
 /// `value`'s Python `repr`, for a class's own: a value as Python

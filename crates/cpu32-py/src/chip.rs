@@ -548,7 +548,6 @@ impl TryFrom<cpu::Stop> for Stop {
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     from_py_object,
     rename_all = "SCREAMING_SNAKE_CASE"
@@ -558,6 +557,16 @@ pub(crate) enum Halt {
     /// A double bus fault (CPU32RM 6.2.1 to 6.2.3).
     DoubleBusFault,
 }
+
+impl From<Halt> for cpu::Halt {
+    fn from(halt: Halt) -> Self {
+        match halt {
+            Halt::DoubleBusFault => Self::DoubleBusFault,
+        }
+    }
+}
+
+enum_names!(Halt, cpu::Halt);
 
 impl TryFrom<cpu::Halt> for Halt {
     type Error = Error;
@@ -577,7 +586,6 @@ impl TryFrom<cpu::Halt> for Halt {
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     from_py_object,
     rename_all = "SCREAMING_SNAKE_CASE"
@@ -613,6 +621,8 @@ impl From<sim::ResetCause> for ResetCause {
         }
     }
 }
+
+enum_names!(ResetCause, sim::ResetCause);
 
 impl From<ResetCause> for sim::ResetCause {
     fn from(cause: ResetCause) -> Self {
@@ -666,7 +676,6 @@ impl Run {
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     from_py_object,
     rename_all = "SCREAMING_SNAKE_CASE"
@@ -678,6 +687,8 @@ pub(crate) enum Space {
     /// Supervisor space: FC2 set.
     Supervisor,
 }
+
+enum_names!(Space);
 
 impl From<Space> for memory::Space {
     fn from(space: Space) -> Self {
@@ -754,7 +765,6 @@ const fn addresses(begin: u32, end: u32) -> RangeInclusive<Address> {
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     from_py_object,
     rename_all = "SCREAMING_SNAKE_CASE"
@@ -768,6 +778,8 @@ pub(crate) enum DsackView {
     /// Both: reserved, taken as a 16-bit port.
     Both,
 }
+
+enum_names!(DsackView);
 
 impl From<DsackView> for Dsack {
     fn from(pins: DsackView) -> Self {

@@ -117,7 +117,6 @@ type Queue = Rc<RefCell<Vec<Fired>>>;
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     rename_all = "SCREAMING_SNAKE_CASE"
 )]
@@ -130,6 +129,18 @@ pub(crate) enum FaultCauseKind {
     /// A word or long at an odd address, or an odd PC.
     AddressError,
 }
+
+impl From<FaultCauseKind> for FaultCause {
+    fn from(cause: FaultCauseKind) -> Self {
+        match cause {
+            FaultCauseKind::BusError => Self::BusError,
+            FaultCauseKind::Protected => Self::Protected,
+            FaultCauseKind::AddressError => Self::AddressError,
+        }
+    }
+}
+
+enum_names!(FaultCauseKind, FaultCause);
 
 impl TryFrom<FaultCause> for FaultCauseKind {
     type Error = Error;
