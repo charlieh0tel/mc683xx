@@ -959,6 +959,19 @@ fn a_peripheral_on_no_select_takes_a_window_or_an_acknowledge() {
             "io: attachment 0: its window must be inside ADDR[23:0] and not empty",
         ),
         (
+            // past 32 bits: the attachment's error, as a memory's base
+            peripheral(dsack, "{ base = 0x100000000, size = 0x100 }"),
+            "io: attachment 0: its window must be inside ADDR[23:0] and not empty",
+        ),
+        (
+            peripheral(dsack, "{ base = 0xffffffffffffffff, size = 0x100 }"),
+            "io: attachment 0: its window must be inside ADDR[23:0] and not empty",
+        ),
+        (
+            peripheral("", "{ select = \"CS1\", offset = 0x100000000 }"),
+            "io: attachment 0: its offset must fit 32 bits",
+        ),
+        (
             peripheral(dsack, "{ iack = 0 }"),
             "io: attachment 0: iack is a level, 1 to 7",
         ),

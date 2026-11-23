@@ -1285,7 +1285,8 @@ fn read_attachment(
             lines.clone()
         }
     };
-    let offset = attachment.offset.unwrap_or(0);
+    let offset = u32::try_from(attachment.offset.unwrap_or(0))
+        .map_err(|_| error("its offset must fit 32 bits"))?;
     let on_bus =
         attachment.base.is_some() || attachment.size.is_some() || attachment.iack.is_some();
     let target = match (
@@ -1372,12 +1373,16 @@ fn bus_decode(attachment: &Attachment, role: Role) -> Result<Target, &'static st
             if role == Role::Iack {
                 return Err("a window takes no iack role: give iack = <level>");
             }
-            if size == 0 || u64::from(base) + u64::from(size) > 1 << ADDRESS_LINES {
+            let inside = base
+                .checked_add(size)
+                .is_some_and(|end| end <= 1 << ADDRESS_LINES);
+            if size == 0 || !inside {
                 return Err("its window must be inside ADDR[23:0] and not empty");
             }
+            // both within ADDR[23:0], so within 32 bits
             BusDecode::Window {
-                base: Address(base),
-                length: size,
+                base: Address(base as u32),
+                length: size as u32,
             }
         }
         (None, None, Some(level)) => {
