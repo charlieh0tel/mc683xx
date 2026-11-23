@@ -1326,13 +1326,9 @@ impl<C: Chip> Board<C> {
 
     /// The earliest change waiting or peripheral's next event.
     fn next_event(&self) -> Option<Time> {
-        let base = self.shared.base.get();
         let change = self.first_change();
-        let peripheral = self
-            .shared
-            .peripherals
-            .iter()
-            .filter_map(|peripheral| peripheral.borrow().next_event(base))
+        let peripheral = (0..self.shared.peripherals.len())
+            .filter_map(|index| self.shared.next_event(index))
             .min();
         change.into_iter().chain(peripheral).min()
     }
@@ -1356,15 +1352,8 @@ impl<C: Chip> Board<C> {
                 .first_key_value()
                 .map(|(&key, _)| key)
                 .filter(|&(at, _)| at <= self.now);
-            let base = self.shared.base.get();
-            let peripheral = self
-                .shared
-                .peripherals
-                .iter()
-                .enumerate()
-                .filter_map(|(index, peripheral)| {
-                    peripheral.borrow().next_event(base).map(|at| (at, index))
-                })
+            let peripheral = (0..self.shared.peripherals.len())
+                .filter_map(|index| self.shared.next_event(index).map(|at| (at, index)))
                 .filter(|&(at, _)| at <= self.now)
                 .min();
             match (change, peripheral) {

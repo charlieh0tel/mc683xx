@@ -137,8 +137,7 @@ impl Shared {
         call: impl FnOnce(&mut dyn Peripheral, &mut Drive<'_>) -> R,
     ) -> R {
         let sampler = |port: usize, at: Time| self.sample(peripheral, port, at);
-        let base = self.base.get();
-        let mut drive = Drive::with_sampler(now, base, &sampler);
+        let mut drive = Drive::with_sampler(now, self.base.get(), &sampler);
         let result = call(
             self.peripherals[peripheral].borrow_mut().as_mut(),
             &mut drive,
@@ -152,9 +151,8 @@ impl Shared {
         if let Some(quantum_end) = self.quantum_end.get()
             && (driving.driven.iter().any(|driven| driven.at < quantum_end)
                 || !driving.writes.is_empty()
-                || self.peripherals[peripheral]
-                    .borrow()
-                    .next_event(base)
+                || self
+                    .next_event(peripheral)
                     .is_some_and(|next| next < quantum_end))
         {
             self.requests.sync();
@@ -179,6 +177,13 @@ impl Shared {
             self.request_stop();
         }
         result
+    }
+
+    /// When peripheral `peripheral` next changes on its own, if it will.
+    pub(crate) fn next_event(&self, peripheral: usize) -> Option<Time> {
+        self.peripherals[peripheral]
+            .borrow()
+            .next_event(self.base.get())
     }
 
     /// Asks the board's run to stop, and the chip's within it.
@@ -417,23 +422,36 @@ impl Routes {
     /// The port the first peripheral to take the cycle, in its
     /// direction, gives it, if it says cycle by cycle.
     pub(crate) fn dsack_port(&self, shared: &Shared, cycle: BusCycle) -> Option<PortSize> {
-        let &(route, size, _) = self.pieces(cycle).first()?;
-        let access = Self::access(shared, route, cycle, size);
-        shared.peripherals[route.peripheral]
-            .borrow_mut()
-            .dsack_port(access, shared.base.get())
+        self.ask_first(shared, cycle, |peripheral, access, base| {
+            peripheral.dsack_port(access, base)
+        })
+        .flatten()
     }
 
     /// The wait states of the first peripheral to take the cycle, in
     /// its direction.
     pub(crate) fn wait_states(&self, shared: &Shared, cycle: BusCycle) -> Option<Cycles> {
-        let Some(&(route, size, _)) = self.pieces(cycle).first() else {
-            return Some(Cycles::ZERO);
-        };
+        self.ask_first(shared, cycle, |peripheral, access, base| {
+            peripheral.wait_states(access, base)
+        })
+        .unwrap_or(Some(Cycles::ZERO))
+    }
+
+    /// `ask` of the first peripheral to take `cycle`, in its direction,
+    /// with its access: [`None`] if none takes it.
+    fn ask_first<R>(
+        &self,
+        shared: &Shared,
+        cycle: BusCycle,
+        ask: impl FnOnce(&mut dyn Peripheral, PeripheralAccess, TimeBase) -> R,
+    ) -> Option<R> {
+        let &(route, size, _) = self.pieces(cycle).first()?;
         let access = Self::access(shared, route, cycle, size);
-        shared.peripherals[route.peripheral]
-            .borrow_mut()
-            .wait_states(access, shared.base.get())
+        Some(ask(
+            shared.peripherals[route.peripheral].borrow_mut().as_mut(),
+            access,
+            shared.base.get(),
+        ))
     }
 }
 
