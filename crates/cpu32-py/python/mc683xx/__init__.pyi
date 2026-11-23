@@ -28,6 +28,8 @@ __all__ = [
     "Lane",
     "Transfer",
     "Drive",
+    "Moment",
+    "TimeBase",
     "Serial",
     "External",
     "ObserverId",
@@ -114,13 +116,13 @@ class Peripheral(Protocol):
     direction)` each, and sets `TIMED_SERIAL` to be told serial frames
     as `Serial`s; every method is optional, a missing one taking the
     trait's default: `read(access, drive) -> int`, `write(access,
-    value, drive)`, `wait_states(access) -> int | None`,
-    `dsack_port(access) -> int | None`, `wants_horizon() -> bool`,
+    value, drive)`, `wait_states(access, moment) -> int | None`,
+    `dsack_port(access, moment) -> int | None`, `wants_horizon() -> bool`,
     `interrupt_request() -> bool`, `power_on(drive)`,
     `reset(drive)`, `transfer(transfer, drive) -> int`,
-    `set_qspi_clock(clock, now)`, `select(attachment, selected, drive)`,
-    `input(port, value, drive)`, `sample(port, now) -> float | None`,
-    `next_event() -> int | None`, `advance(drive)`,
+    `set_qspi_clock(clock, moment)`, `set_selected(attachment, selected,
+    drive)`, `input(port, value, drive)`, `analog_output(port, moment) ->
+    float | None`, `next_event(moment) -> int | None`, `advance(drive)`,
     `qspi_deferrable() -> bool`, `memory_read(memory, access, drive) ->
     int`, `memory_write(memory, access, value, drive)`, `inspect() ->
     Mapping[str, object]`, and `save() -> bytes` with
@@ -1269,9 +1271,6 @@ class PeripheralAccess:
         """Whether it is a write, R/W low; set for `wait_states` and
         `dsack_port` too."""
     @property
-    def now(self) -> int:
-        """When its instruction started, in picoseconds."""
-    @property
     def horizon(self) -> int | None:
         """On a read or write of a peripheral whose `wants_horizon()` is
         true, the board time in picoseconds before which everything that
@@ -1304,12 +1303,43 @@ class Transfer:
         """Whether it is the first since the attachment's select asserted."""
 
 @final
+class TimeBase:
+    """The chip's system clock on board time: for converting between
+    picoseconds and the chip's clocks."""
+
+    @property
+    def frequency_hz(self) -> int:
+        """The clock's frequency, whole hertz."""
+    def time(self, at: int) -> int:
+        """The board time clock `at` falls at, in picoseconds, rounded
+        down."""
+    def cycle(self, at: int) -> int:
+        """The first clock at or after board time `at` picoseconds."""
+
+@final
+class Moment:
+    """A call's time and the chip's system clock then, as a board
+    peripheral's calls with no `Drive` are given it."""
+
+    @property
+    def now(self) -> int:
+        """Board time, in picoseconds."""
+    @property
+    def system_clock(self) -> TimeBase:
+        """The chip's system clock on board time, as of then."""
+    def cycle(self) -> int:
+        """The chip's clock at it, rounded up."""
+
+@final
 class Drive:
     """Where a board peripheral drives its outputs during a call."""
 
     @property
     def now(self) -> int:
         """The call's time, in picoseconds."""
+    @property
+    def moment(self) -> Moment:
+        """The call's time and the chip's system clock then."""
     def drive(self, port: int, value: object) -> None: ...
     def drive_at(self, at: int, port: int, value: object) -> None: ...
     def write_memory(self, memory: str, offset: int, data: Sequence[int]) -> None: ...

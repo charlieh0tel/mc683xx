@@ -41,6 +41,7 @@ use mc683xx_board::signal::Direction;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Moment;
 use mc683xx_board::time::NonZeroSpan;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
 use mc683xx_board::time::Span;
@@ -359,11 +360,11 @@ parameters = { value = 0x5a }
 struct Silent;
 
 impl Peripheral for Silent {
-    fn wait_states(&mut self, _: PeripheralAccess, _: TimeBase) -> Option<Cycles> {
+    fn wait_states(&mut self, _: PeripheralAccess, _: Moment) -> Option<Cycles> {
         None
     }
 
-    fn dsack_port(&mut self, _: PeripheralAccess, _: TimeBase) -> Option<PortSize> {
+    fn dsack_port(&mut self, _: PeripheralAccess, _: Moment) -> Option<PortSize> {
         Some(PortSize::Bits16)
     }
 }
@@ -390,12 +391,12 @@ impl Peripheral for WriteLatch {
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<Cycles> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: Moment) -> Option<Cycles> {
         self.asked.push(access.write);
         Some(Cycles::from_clocks(1))
     }
 
-    fn dsack_port(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<PortSize> {
+    fn dsack_port(&mut self, access: PeripheralAccess, _: Moment) -> Option<PortSize> {
         self.asked.push(access.write);
         Some(PortSize::Bits8)
     }
@@ -851,17 +852,17 @@ struct ClockWatcher {
 }
 
 impl Peripheral for ClockWatcher {
-    fn next_event(&self, system_clock: TimeBase) -> Option<Time> {
+    fn next_event(&self, moment: Moment) -> Option<Time> {
         let mut asked = self.asked.borrow_mut();
-        if asked.last() != Some(&system_clock) {
-            asked.push(system_clock);
+        if asked.last() != Some(&moment.system_clock()) {
+            asked.push(moment.system_clock());
         }
         self.next
     }
 
     fn advance(&mut self, drive: &mut Drive<'_>) {
         let now = drive.now();
-        self.driven = Some(drive.system_clock());
+        self.driven = Some(drive.moment().system_clock());
         self.next = Some(now + Span::from_micros(1));
     }
 }
@@ -900,7 +901,7 @@ type = "watcher"
     let base = board.system_clock();
     assert_eq!(base.frequency().hz(), 16_777_216);
     assert_eq!(
-        base.cycles(base.time(Cycle::from_clocks(12_345))),
+        base.cycle(base.time(Cycle::from_clocks(12_345))),
         Cycle::from_clocks(12_345)
     );
     let (asked, driven) = board
@@ -1145,7 +1146,7 @@ impl Peripheral for Framed {
         0
     }
 
-    fn select(&mut self, attachment: usize, selected: bool, _: &mut Drive<'_>) {
+    fn set_selected(&mut self, attachment: usize, selected: bool, _: &mut Drive<'_>) {
         self.selects.push((attachment, selected));
     }
 }
@@ -1715,12 +1716,9 @@ to = ["external.host"]
     // 8.388608 MHz out of reset: 262144 baud, ten bits a frame
     assert_eq!(serial.baud, Frequency::from_hz(262_144));
     let base = board.system_clock();
-    let start = base.cycles(at);
+    let start = base.cycle(at);
     assert_eq!(base.time(start), at);
-    assert_eq!(
-        base.cycles(serial.end(at)),
-        start + Cycles::from_clocks(320)
-    );
+    assert_eq!(base.cycle(serial.end(at)), start + Cycles::from_clocks(320));
     // the preamble's frame went first, as TE set; this one followed it
     assert!(start.clocks() >= 320, "after the preamble: {start:?}");
 }
@@ -2056,7 +2054,7 @@ impl Peripheral for Flash {
                 FlashState::Busy {
                     offset,
                     data: value,
-                    until: access.now + PROGRAM_PICOSECONDS,
+                    until: drive.now() + PROGRAM_PICOSECONDS,
                 }
             }
             (busy @ FlashState::Busy { .. }, _) => busy,
@@ -2080,7 +2078,7 @@ impl Peripheral for Flash {
         Ok(status)
     }
 
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         match self.state {
             FlashState::Busy { until, .. } => Some(until),
             _ => None,
@@ -2184,7 +2182,7 @@ struct Overwriter {
 }
 
 impl Peripheral for Overwriter {
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         (!self.done).then_some(OVERWRITE_AT)
     }
 
@@ -2374,7 +2372,7 @@ struct Events {
 const AT: Time = Time::from_picos(1_000_000);
 
 impl Peripheral for Events {
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         (self.events > 0 || !self.moves).then_some(AT)
     }
 
@@ -2444,7 +2442,7 @@ struct Stopper {
 }
 
 impl Peripheral for Stopper {
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         self.timed.then_some(AT)
     }
 
@@ -4006,12 +4004,12 @@ attach = [{ select = "CSBOOT" }]
     // MOVE.W $401,D0: an odd address (CPU32RM 6.2.3)
     let mut board = board("fault-stop", text, &[MOVE_WORD_TO_D0, 0, 0x0401, NOP]);
     board.chip_mut().cpu_control().set_stop_on_fault(true);
-    let run = board.run_until(Time::from_seconds(1)).unwrap();
+    let run = board.run_until(Time::from_secs(1)).unwrap();
     assert_eq!(run.stop, Stop::Fault);
     let fault = board.chip().cpu().fault_stop().expect("a fault stop");
     assert_eq!(fault.address.0, 0x0401);
     assert_eq!(fault.registers.pc.0, START);
-    assert!(run.now < Time::from_seconds(1), "{:?}", run.now);
+    assert!(run.now < Time::from_secs(1), "{:?}", run.now);
 }
 
 #[test]
@@ -4054,7 +4052,7 @@ attach = [{ select = "CSBOOT" }]
     let mut tracing = BoardTracing::default();
     tracing.exceptions = true;
     board.set_tracing(tracing);
-    let run = board.run_until(Time::from_seconds(1)).unwrap();
+    let run = board.run_until(Time::from_secs(1)).unwrap();
     assert_eq!(run.stop, Stop::Fault);
     let vectors: Vec<u8> = board
         .take_trace()
@@ -4086,7 +4084,7 @@ struct Ahead {
 }
 
 impl Peripheral for Ahead {
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         (!self.driven).then_some(Time::from_picos(AHEAD_DRIVES_PS))
     }
 
@@ -4124,9 +4122,9 @@ impl Peripheral for Sampled {
     fn read(
         &mut self,
         access: PeripheralAccess,
-        _: &mut Drive<'_>,
+        drive: &mut Drive<'_>,
     ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
-        self.cycles.push((access.now, access.horizon));
+        self.cycles.push((drive.now(), access.horizon));
         Ok(0)
     }
 
@@ -4134,9 +4132,9 @@ impl Peripheral for Sampled {
         &mut self,
         access: PeripheralAccess,
         _: u32,
-        _: &mut Drive<'_>,
+        drive: &mut Drive<'_>,
     ) -> Result<(), mc683xx_cpu32::bus::BusError> {
-        self.cycles.push((access.now, access.horizon));
+        self.cycles.push((drive.now(), access.horizon));
         Ok(())
     }
 
@@ -4144,7 +4142,7 @@ impl Peripheral for Sampled {
         self.wants
     }
 
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         (!self.advanced).then_some(Time::from_picos(SAMPLED_EVENT_PS))
     }
 
@@ -4164,11 +4162,11 @@ struct Driver {
 impl Peripheral for Driver {
     fn read(
         &mut self,
-        access: PeripheralAccess,
+        _: PeripheralAccess,
         drive: &mut Drive<'_>,
     ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
         self.level = !self.level;
-        let at = Time::from_picos(access.now.picos() + DRIVER_AHEAD_PS);
+        let at = Time::from_picos(drive.now().picos() + DRIVER_AHEAD_PS);
         drive.drive_at(at, 0, Signal::Level(self.level));
         Ok(0)
     }

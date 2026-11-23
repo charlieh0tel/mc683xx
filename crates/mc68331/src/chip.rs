@@ -1188,6 +1188,13 @@ impl Mc68331 {
         self.gpt().oc1(self.now)
     }
 
+    /// The level on `channel`'s PWM pin now: PWMCNT's clock under
+    /// PPROUT (GPTRM 6.3.1), the PWM output otherwise.
+    #[must_use]
+    pub fn pwm_level(&self, channel: Channel) -> bool {
+        self.gpt().pwm_level(channel, self.now)
+    }
+
     /// The PWM pins' edges since the last call, in time order, each at
     /// the time it happened, while `set_report_pwm_edges` asks for them
     /// ([PLAN.md], Peripherals).  It takes only these: port changes stay

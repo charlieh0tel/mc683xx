@@ -226,6 +226,15 @@ Crates:
   as the state (`halted`).  How a run ended is a `*Run` (`Run`,
   `LimitedRun`, `BoardRun`); a gdb session is not a run, so how one
   ended is not a `*Run` (`Ending`).  `restore` is a snapshot's alone.
+- Time words (PLAN.md, Decisions): an instant is `Time` on the board,
+  `Cycle` on the chip; a span `Span`, `Cycles`.  `now` is the current
+  instant in the layer's unit, never a bundle; `at` another instant; a
+  run's limit is `budget` (a span, `run_for`) or `deadline` (an
+  instant, `run_until`); `since`, `after`, `next_event`.  A conversion
+  is named for its result and takes the instant as `at`
+  (`TimeBase::cycle(at)`).  A board peripheral call without a `Drive`
+  takes `moment: Moment` last; a chip-level callback with no cycle
+  struct takes `now: Cycle` last.
 - A type with a name or a printed form implements `Display`, and
   `FromStr` if it can be named, not `name()` and `from_name()`; the
   parse error is `Parse<Type>Error`.

@@ -1050,7 +1050,8 @@ are the built-in ones and `types`' classes, by the name the file's
 `parameters` as keyword arguments.
 Its object has any of the peripheral's methods, each optional:
 `read(access, drive) -> int`, `write(access, value, drive)`,
-`wait_states(access) -> int | None`, `dsack_port(access) -> int | None`,
+`wait_states(access, moment) -> int | None`, `dsack_port(access,
+moment) -> int | None`,
 `wants_horizon() -> bool` (asked once, as the board is built: whether
 its reads and writes carry `horizon`, as `Peripheral::wants_horizon` says,
 docs/board-files.md), `interrupt_request() -> bool`,
@@ -1061,25 +1062,30 @@ and `starts_frame`, whether it is the first since its select asserted;
 it ends at the drive's `now`; the Rust edge walk, `mc683xx_board::spi`, is not
 exposed, so a Python peripheral reckons its edges from `clock.polarity` and
 `clock.phase` by the rules docs/board-files.md, SPI edges, gives),
-`set_qspi_clock(clock, now)` (the QSPI's serial
+`set_qspi_clock(clock, moment)` (the QSPI's serial
 clock, as the QSPI tells it: at the first entry and after CPOL, CPHA,
-SPBR or the system clock change), `select(attachment,
+SPBR or the system clock change), `set_selected(attachment,
 selected, drive)`, `input(port, value, drive)`,
-`sample(port, now) -> float | None`, `next_event() -> int | None`,
+`analog_output(port, moment) -> float | None` (the value it drives on
+an analog output a sink samples then), `next_event(moment) -> int |
+None`,
 `advance(drive)`, `qspi_deferrable() -> bool` (asked once, as
 the board is built: whether its QSPI calls may come in a batch, as
 `Peripheral::qspi_deferrable` says, docs/board-files.md), `memory_read(memory,
 access, drive) -> int` and
 `memory_write(memory, access, value, drive)` (a memory it took),
-`save() -> bytes` and `restore(snapshot)`.  A call given a `Drive`
-takes its time from the drive's `now`, as the Rust trait does.  Times are
-board time in picoseconds, and none of these takes the chip's system
-clock base the Rust calls do (`system_clock`, a `TimeBase` Python does
-not have): a deliberate difference, since a Python peripheral counts
-board time; a `PeripheralAccess` carries `attachment`,
+`save() -> bytes` and `restore(snapshot)`.  A call's time is a
+moment, as the Rust trait's: a call given a `Drive` takes it from the
+drive (`now`, and `moment`), one without takes an `mc683xx.Moment` last
+(Rust's `time::Moment`: `now`, board time in picoseconds,
+`system_clock`, an `mc683xx.TimeBase`, and `cycle()`, the chip's
+clock at it, rounded up).  A `TimeBase` (Rust's `time::TimeBase`) has
+`frequency_hz`, `time(at)`, the picosecond clock `at` falls at, rounded
+down, and `cycle(at)`, the first clock at or after picosecond `at`.  A
+`PeripheralAccess` carries `attachment`,
 `select` (the chip select's name), `role` (a `Role`), `lane` (a
 `Lane`), `address`, `size`, `function_code`, `write` (as a
-`BusCycle`'s), `now` and `horizon` (`None` but on a read or write of
+`BusCycle`'s) and `horizon` (`None` but on a read or write of
 a peripheral that wants it).  A `Drive`
 drives outputs by port index (`drive(port, value)`, `drive_at(at,
 port, value)`), reads an analog input (`sample(port)`, its value as

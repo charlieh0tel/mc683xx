@@ -215,7 +215,7 @@ impl QspiTransfer {
 /// it sees every transfer and every change of the PCS levels, whatever
 /// they select.  On a board of `mc683xx-board` peripherals, the board's
 /// PCS decode is this peripheral, and each peripheral sees only its own
-/// select (`Peripheral::select`).
+/// select (`Peripheral::set_selected`).
 pub trait SpiPeripheral {
     /// Shifts the transfer's `bits` of `out` to the peripheral its
     /// `chip_selects` select, most significant bit first, in its clock's

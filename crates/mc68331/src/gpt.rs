@@ -959,7 +959,7 @@ impl Gpt {
 
     /// What `channel`'s PWM pin carries at `now`.
     #[must_use]
-    pub const fn pwm(&self, channel: Channel, now: Cycle) -> Output {
+    pub(crate) const fn pwm(&self, channel: Channel, now: Cycle) -> Output {
         self.pwm.output(channel, self.prescaler.count(now))
     }
 
@@ -967,7 +967,7 @@ impl Gpt {
     /// OC1M3 clear (GPTRM 5.1, Table B-1), otherwise the level PORTGP
     /// reads on it.
     #[must_use]
-    pub const fn oc1(&self, now: Cycle) -> Output {
+    pub(crate) const fn oc1(&self, now: Cycle) -> Output {
         if self.compare_clock_out() {
             Output::Clock {
                 clocks: tap_clocks(self.counter.divisor()),
@@ -980,7 +980,7 @@ impl Gpt {
     /// The level on `channel`'s PWM pin at `now`: PWMCNT's clock under
     /// PPROUT (GPTRM 6.3.1).
     #[must_use]
-    pub const fn pwm_level(&self, channel: Channel, now: Cycle) -> bool {
+    pub(crate) const fn pwm_level(&self, channel: Channel, now: Cycle) -> bool {
         if self.pwm.clock_out(channel) {
             self.clock_high(self.pwm.counter(), now)
         } else {

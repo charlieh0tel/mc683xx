@@ -361,7 +361,7 @@ impl Peripheral for Adc0838 {
 
     /// CS high clears its registers; CS low starts a frame waiting for
     /// the start bit (SNAS531B, THE DIGITAL INTERFACE steps 1 and 9).
-    fn select(&mut self, _: usize, _: bool, _: &mut Drive<'_>) {
+    fn set_selected(&mut self, _: usize, _: bool, _: &mut Drive<'_>) {
         self.state.phase = Phase::Idle;
     }
 
@@ -433,6 +433,7 @@ mod tests {
     use mc683xx_board::registry::ParameterError;
     use mc683xx_board::registry::Parameters;
     use mc683xx_board::signal::Signal;
+    use mc683xx_board::time::Moment;
     use mc683xx_board::time::Time;
     use mc683xx_cpu32::cpu::state::StateError;
     use mc683xx_cpu32::cpu::state::encode;
@@ -505,14 +506,15 @@ mod tests {
     /// `frame` in SPI mode `mode`.
     fn frame_in(mode: u8, adc: &mut Adc0838, inputs: Inputs, transfers: &[(u16, u8)]) -> Vec<u16> {
         let sampler = move |port: usize, _: Time| inputs.get(port).copied().flatten();
-        let mut drive = Drive::with_sampler(Time::from_picos(0), SYSTEM_CLOCK, &sampler);
-        adc.select(0, true, &mut drive);
+        let mut drive =
+            Drive::with_sampler(Moment::new(Time::from_picos(0), SYSTEM_CLOCK), &sampler);
+        adc.set_selected(0, true, &mut drive);
         let replies = transfers
             .iter()
             .enumerate()
             .map(|(index, &(out, bits))| adc.transfer(transfer(mode, index, out, bits), &mut drive))
             .collect();
-        adc.select(0, false, &mut drive);
+        adc.set_selected(0, false, &mut drive);
         assert!(drive.finish().driven.is_empty(), "it drives nothing");
         replies
     }
@@ -687,11 +689,12 @@ mod tests {
         let mut inputs: Inputs = [None; CHANNELS + 1];
         inputs[1] = Some(code_volts(0b1010_0101));
         let mut adc = adc();
-        let mut drive = Drive::new(Time::from_picos(0), SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::from_picos(0), SYSTEM_CLOCK));
         adc.input(SHIFT_ENABLE, Signal::Level(true), &mut drive);
         let sampler = move |port: usize, _: Time| inputs.get(port).copied().flatten();
-        let mut drive = Drive::with_sampler(Time::from_picos(0), SYSTEM_CLOCK, &sampler);
-        adc.select(0, true, &mut drive);
+        let mut drive =
+            Drive::with_sampler(Moment::new(Time::from_picos(0), SYSTEM_CLOCK), &sampler);
+        adc.set_selected(0, true, &mut drive);
         // the start bit, channel 1, the leading zero, MSB first
         let first = adc.transfer(transfer(mode, 0, 0b1_1100 << 9, 14), &mut drive);
         assert_eq!(first, 0b1_1111 << 9 | 0b1010_0101);
@@ -768,7 +771,7 @@ mod tests {
     /// then eight more: the replies.
     fn rest(adc: &mut Adc0838, inputs: Inputs, drive: &mut Drive<'_>) -> (u16, Vec<u16>) {
         let tail = adc.transfer(transfer(3, 1, 0, 16), drive);
-        adc.select(0, false, drive);
+        adc.set_selected(0, false, drive);
         let next = (0..8)
             .flat_map(|_| frame(adc, inputs, &[(command(0b1001), 16)]))
             .collect();
@@ -781,16 +784,18 @@ mod tests {
         inputs[2] = Some(1.7);
         let sampler = move |port: usize, _: Time| inputs.get(port).copied().flatten();
         let mut first = built("noise_volts = 0.05", 3).unwrap();
-        let mut drive = Drive::with_sampler(Time::from_picos(0), SYSTEM_CLOCK, &sampler);
+        let mut drive =
+            Drive::with_sampler(Moment::new(Time::from_picos(0), SYSTEM_CLOCK), &sampler);
         for _ in 0..5 {
             frame(&mut first, inputs, &[(command(0b1001), 16)]);
         }
-        first.select(0, true, &mut drive);
+        first.set_selected(0, true, &mut drive);
         first.transfer(transfer(3, 0, 0b1_1001 << 3, 8), &mut drive);
         let snapshot = first.save().unwrap();
         let mut second = built("noise_volts = 0.05", 99).unwrap();
         second.restore(&snapshot).unwrap();
-        let mut drive_second = Drive::with_sampler(Time::from_picos(0), SYSTEM_CLOCK, &sampler);
+        let mut drive_second =
+            Drive::with_sampler(Moment::new(Time::from_picos(0), SYSTEM_CLOCK), &sampler);
         assert_eq!(
             rest(&mut first, inputs, &mut drive),
             rest(&mut second, inputs, &mut drive_second)

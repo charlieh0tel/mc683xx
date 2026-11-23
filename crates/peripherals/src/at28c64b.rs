@@ -78,9 +78,9 @@ use mc683xx_board::registry::Context;
 use mc683xx_board::registry::ParameterError;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;
+use mc683xx_board::time::Moment;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_board::time::TimeBase;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
@@ -751,7 +751,7 @@ impl At28c64b {
 
 impl Peripheral for At28c64b {
     fn read(&mut self, access: PeripheralAccess, drive: &mut Drive<'_>) -> Result<u32, BusError> {
-        self.settle(access.now, drive);
+        self.settle(drive.now(), drive);
         let byte = self.read_byte(Offset::new(access.address));
         Ok(access.read_byte(byte))
     }
@@ -762,13 +762,13 @@ impl Peripheral for At28c64b {
         value: u32,
         drive: &mut Drive<'_>,
     ) -> Result<(), BusError> {
-        self.settle(access.now, drive);
+        self.settle(drive.now(), drive);
         let byte = access.written_byte(value);
-        self.write_byte(Offset::new(access.address), byte, access.now);
+        self.write_byte(Offset::new(access.address), byte, drive.now());
         Ok(())
     }
 
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         self.writing
             .as_ref()
             .map(|cycle| cycle.done(self.write_cycle))
@@ -879,6 +879,7 @@ mod tests {
     use mc683xx_board::registry::Environment;
     use mc683xx_board::registry::ParameterError;
     use mc683xx_board::registry::Parameters;
+    use mc683xx_board::time::Moment;
     use mc683xx_board::time::Span;
     use mc683xx_board::time::Time;
     use mc683xx_cpu32::cpu::state::StateError;
@@ -912,7 +913,7 @@ mod tests {
 
     /// `peripheral` brought to `now`.
     fn at(peripheral: &mut At28c64b, now: Time) {
-        peripheral.settle(now, &mut Drive::new(now, SYSTEM_CLOCK));
+        peripheral.settle(now, &mut Drive::new(Moment::new(now, SYSTEM_CLOCK)));
     }
 
     /// A byte written at `now`, as the bus writes one.
@@ -1005,11 +1006,17 @@ mod tests {
         );
         at(&mut peripheral, done(Time::ZERO) - Span::from_picos(1));
         assert_ne!(read(&mut peripheral, 0x10c0), 0x5a, "still programming");
-        assert_eq!(peripheral.next_event(SYSTEM_CLOCK), Some(done(Time::ZERO)));
+        assert_eq!(
+            peripheral.next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
+            Some(done(Time::ZERO))
+        );
         at(&mut peripheral, done(Time::ZERO));
         assert_eq!(read(&mut peripheral, 0x10c0), 0x5a);
         assert_eq!(read(&mut peripheral, 0x10c0), 0x5a, "settled");
-        assert_eq!(peripheral.next_event(SYSTEM_CLOCK), None);
+        assert_eq!(
+            peripheral.next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
+            None
+        );
     }
 
     #[test]
@@ -1054,19 +1061,14 @@ mod tests {
     #[test]
     fn a_word_cycle_is_one_byte_on_data_15_8() {
         let mut peripheral = peripheral(vec![0; SIZE]);
-        let access = |now| {
-            PeripheralAccess::new(
-                ChipSelect::Boot,
-                0x40,
-                Size::Word,
-                FunctionCode::SupervisorData,
-                now,
-            )
-        };
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
-        peripheral
-            .write(access(Time::ZERO), 0x1234, &mut drive)
-            .unwrap();
+        let access = PeripheralAccess::new(
+            ChipSelect::Boot,
+            0x40,
+            Size::Word,
+            FunctionCode::SupervisorData,
+        );
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
+        peripheral.write(access, 0x1234, &mut drive).unwrap();
         at(&mut peripheral, done(Time::ZERO));
         assert_eq!(
             [read(&mut peripheral, 0x40), read(&mut peripheral, 0x41)],
@@ -1074,7 +1076,7 @@ mod tests {
         );
         let now = done(Time::ZERO);
         assert_eq!(
-            peripheral.read(access(now), &mut Drive::new(now, SYSTEM_CLOCK)),
+            peripheral.read(access, &mut Drive::new(Moment::new(now, SYSTEM_CLOCK))),
             Ok(0x1200)
         );
     }
@@ -1380,7 +1382,7 @@ mod tests {
         let mut peripheral = construct("write_cycle_us = 2000", &scratch).unwrap();
         write(&mut peripheral, 0, 1, Time::ZERO);
         assert_eq!(
-            peripheral.next_event(SYSTEM_CLOCK),
+            peripheral.next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
             Some(Time::ZERO + BYTE_LOAD + Span::from_micros(2000))
         );
     }
@@ -1393,7 +1395,10 @@ mod tests {
         let snapshot = peripheral.save().unwrap();
         let mut copy = construct("file = \"cells.bin\"", &scratch).unwrap();
         copy.restore(&snapshot).unwrap();
-        assert_eq!(copy.next_event(SYSTEM_CLOCK), Some(done(last)));
+        assert_eq!(
+            copy.next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
+            Some(done(last))
+        );
         at(&mut copy, done(last));
         assert!(copy.protected());
         drop(copy);

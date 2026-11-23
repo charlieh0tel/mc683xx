@@ -30,10 +30,10 @@ use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Moment;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_board::time::TimeBase;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
@@ -738,7 +738,7 @@ impl Peripheral for Acia {
         if access.role == Role::Iack {
             return Err(BusError);
         }
-        self.run_until(access.now);
+        self.run_until(drive.now());
         let value = if access.address & RS == 0 {
             self.read_status()
         } else {
@@ -759,18 +759,18 @@ impl Peripheral for Acia {
         if access.role == Role::Iack {
             return Err(BusError);
         }
-        self.run_until(access.now);
+        self.run_until(drive.now());
         let value = access.written_byte(value);
         if access.address & RS == 0 {
-            self.write_control(value, access.now);
+            self.write_control(value, drive.now());
         } else {
-            self.write_data(value, access.now);
+            self.write_data(value, drive.now());
         }
         self.sync(drive);
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<Cycles> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: Moment) -> Option<Cycles> {
         (access.role != Role::Iack).then_some(Cycles::ZERO)
     }
 
@@ -802,7 +802,7 @@ impl Peripheral for Acia {
         self.sync(drive);
     }
 
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         self.next_internal()
     }
 

@@ -376,7 +376,7 @@ surrounds the SoC with its board peripherals through:
   decodes them to a peripheral number (smartclock does) is the host's.
   It is the one peripheral, so it sees every level change; on a board
   of `mc683xx-board` peripherals the board's PCS decode is it, and each peripheral
-  sees only its own select (`Peripheral::select`), the canonical framing
+  sees only its own select (`Peripheral::set_selected`), the canonical framing
   there.  `reset` is RESET by `Builder::set_qspi_reset_scope`
   (all causes by default; smartclock's DACs clear on RESET).
   Each queue entry takes the time SPCR0's baud and SPCR1's delays give
@@ -1027,8 +1027,9 @@ chip beside `Mc68331`.
   before timed frames, as its data alone: a peripheral opts in with
   `TIMED_SERIAL`, `take_received` with `timed`, so old classes keep
   working.  A QSPI peripheral's `transfer(transfer, drive)` gets an
-  `mc683xx.Transfer`, as the Rust peripheral's, and `set_qspi_clock(clock, now)`
-  as the Rust peripheral is told it.
+  `mc683xx.Transfer`, as the Rust peripheral's, and `set_qspi_clock(clock,
+  moment)` as the Rust peripheral is told it; a call with no drive takes
+  an `mc683xx.Moment` last, as Rust's does.
   `externals()` gives `mc683xx.External`s, name, type and direction
   as the Rust `External`; each is its name as a string and equals
   it, so code that took the names keeps working.  `observe(net,
@@ -1364,7 +1365,7 @@ hand.  The keys are in `docs/board-files.md`.
   timed from its start bit, with its baud and length, so a receiver
   times either edge; one direction, so a link is two nets), `analog` (an `f64`; data only, never time; a
   sink samples it at its own time, which asks the driver's
-  `Peripheral::sample` then, so a value that moves continuously, a warming
+  `Peripheral::analog_output` then, so a value that moves continuously, a warming
   oven, need not be driven at every change), `bus` (parallel lines as
   one word, so an ADC's byte into an FPGA changes in one drive, not
   eight).  One driver, except on a `wired-and` net: open drain with a
@@ -1448,9 +1449,10 @@ hand.  The keys are in `docs/board-files.md`.
 - **Board time:** `Time`, integer picoseconds in a `u64` (213 days),
   with no floats in scheduling.  A span of it is a `Span`, picoseconds
   too, its field private (`from_picos`, `from_nanos`, `from_micros`,
-  `from_millis`, `from_seconds`, `from_seconds_f64`, `checked_from_seconds_f64`; `picos`,
-  `seconds_f64`), so a time and a span cannot be mixed up: `Time +
-  Span` and `Time - Span` are times, `Time - Time` a `Span` (and
+  `from_millis`, `from_secs`, `from_secs_f64`, `checked_from_secs_f64`; `picos`,
+  `secs_f64`: std `Duration`'s names, decided 2026-11 for 0.9.0), so a
+  time and a span cannot be mixed up: `Time + Span` and `Time - Span`
+  are times, `Time - Time` a `Span` (and
   `Time::since_power_on` a time's own, not `time - Time::ZERO`), `Span`s
   add and scale by counts, all saturating as `Time` does.  Every API
   taking or giving a span takes a `Span` (`Board::run_for`,
@@ -1470,21 +1472,23 @@ hand.  The keys are in `docs/board-files.md`.
   which the frequency changed (SYNCR, a reset), so it never drifts;
   toward the chip a time rounds up to the first clock at or after it
   (Peripherals, GPT input edges), toward the board a clock rounds
-  down.  A peripheral gets the anchor with every call that has a time:
-  in its `Drive` (`Drive::system_clock`), and as an argument to those
-  without one (`next_event`, `wait_states`, `dsack_port`,
-  `set_qspi_clock`): a part keeps no base between calls and unwraps
-  none, and no notification of a change is needed, since the board
-  asks `next_event` again whenever it needs it (decided 2026-11, for
-  0.8.0).  `sample` and `interrupt_request` take none: a value on
-  board time, not a conversion.  A call's own time follows the same
-  rule: one given a `Drive` takes it from `drive.now()` and has no time
-  argument (`read`, `write`, `memory_read`, `memory_write`, `power_on`,
-  `reset`, `transfer`, `select`, `input`, `advance`); one without takes
-  it as an argument (`sample(port, now)`, `set_qspi_clock(clock, now,
-  system_clock)`) or in its access (`PeripheralAccess::now`, for
-  `wait_states` and `dsack_port`), so no call has two times to
-  disagree.  A part the chip
+  down.  A peripheral gets its time and the anchor together, as a
+  `time::Moment` (`now()`, `system_clock()`, `cycle()`, the chip's
+  clock at it rounded up), with every call: one given a `Drive` takes it
+  from the drive (`Drive::moment`, `Drive::now` for the time alone) and
+  has no time argument (`read`, `write`, `memory_read`, `memory_write`,
+  `power_on`, `reset`, `transfer`, `set_selected`, `input`, `advance`);
+  one without takes `moment: Moment` last (`wait_states`, `dsack_port`,
+  `set_qspi_clock`, `analog_output`, `next_event`).  So no call has two
+  times to disagree (a `PeripheralAccess` carries none), a part keeps
+  no base between calls and unwraps none, and no notification of a
+  change is needed, since the board asks `next_event` again whenever it
+  needs it.  `interrupt_request` takes none: a level now, not a
+  conversion (decided 2026-11, for 0.9.0: `Moment` replaced
+  `PeripheralAccess::now`, `Drive::system_clock` and the bare
+  `system_clock`/`now` arguments, five ways a peripheral got its time;
+  `Peripheral::sample` became `analog_output`, the drive's `sample`
+  reading it, and `select` `set_selected`).  A part the chip
   does not clock (an oscillator, an oven, a GPS engine) that counts in
   cycles counts on `TimeBase::steady(frequency)`, clock zero at
   power-on and never moved: on the chip's base it would fall behind
@@ -1591,10 +1595,17 @@ hand.  The keys are in `docs/board-files.md`.
   instruction, and the board moves the base and its time there.  The
   synthesizer locks at once here (always SLOCK), so the change is at
   the write.
-- **Run loop:** `Board::run_until(until)` is the library's, for hosts to
+- **Run loop:** `Board::run_until(deadline)` is the library's, for hosts to
   embed (smartclock-emu builds its own command on it); `send` and
   `take_received` move values through run-time endpoints between
-  runs.  `Board::run_until_quantized(until, quantum, before)` runs it in quanta
+  runs.  A run's limit is named alike at every layer: a span is its
+  `budget` (`Board::run_for(budget)`, `run_frame(wall, budget)`, the
+  chip's `run_for(budget)`, gdb's `Target::run_for(budget, hit)`), an
+  instant its `deadline` (`run_until(deadline)` and its `_quantized`
+  and `_paced` forms, the chip's `run_until(deadline)`), as std's
+  `recv_deadline`; Python's board keeps `seconds=`/`picoseconds=`
+  (decided 2026-11, for 0.9.0).
+  `Board::run_until_quantized(deadline, quantum, before)` runs it in quanta
   of board time (a `time::NonZeroSpan`: a quantum of 0 would never end,
   so the type has none, and a host's zero is its own error, Python's
   `ValueError`, not a picosecond), calling `before` before each (the Python bindings'
@@ -1697,7 +1708,7 @@ hand.  The keys are in `docs/board-files.md`.
   live UI's input lands at the sync point after it is queued, timed
   by when the UI sent it, which is inherent to live input.  Pacing
   (`pacing::Pacing`: `Unpaced`, the default, `RealTime`, `Scaled(Factor)`
-  board seconds a wall second, finite and above 0 by construction) is host-side only: `Board::run_until_paced(until,
+  board seconds a wall second, finite and above 0 by construction) is host-side only: `Board::run_until_paced(deadline,
   quantum)` runs as `run_until_quantized` does (`pacing::QUANTUM`, 5 ms, a good
   quantum) and, before each quantum, a `pacing::Pacer` sleeps until board
   time is no longer ahead of wall time times the factor, waking for a
@@ -1711,7 +1722,7 @@ hand.  The keys are in `docs/board-files.md`.
   held back and runs unpaced until it catches up; a new factor or a
   restore starts the pacing again from where the board is.  A host
   with its own clock that cannot sleep (a browser) runs the board a
-  frame at a time (`Board::run_frame(wall, bound)`): to the time
+  frame at a time (`Board::run_frame(wall, budget)`): to the time
   the board's own pacer says is due by the clock's reading
   (`Pacer::due`), bounded by the frame's slice.  A frame so bounded
   drops the time it missed: the pacing starts again from where it
@@ -3500,6 +3511,7 @@ checks move onto real code hooks.
 | One conversion for each kind of value: `TryFrom<u8>` and `From<T> for u8` for a checked value, a named pair for an encoding, opaque received ids | Decided 2026-11-23 (0.9.0).  A checked value (`InterruptLevel`, `IrqPin`, `PortGpPin`, `chip_select::Number`, `FunctionCode`) had `new`/`get` and `TryFrom`/`From` both, or only `new`/`get`; now only `TryFrom<u8>` (`No<Type>(u8)`, so `?` carries why) and `From<T> for u8`, and `IrqPin::level()` gives way to `From<IrqPin> for InterruptLevel`.  A wire or field encoding keeps a named pair (`Register::code`/`from_code`, `Size::field`, `Entry::atemp`), as `From` would hide which encoding.  A register-order index is `index`/`from_index` (`ChipSelect`).  An id a host only receives and gives back (`PeripheralId`, `ConditionId`, `ObserverId`, `HookId`) is opaque, `Display` and no `From`, so a host cannot forge one; `PeripheralId`'s number is reachable only through hidden plumbing for the workspace's crates, and `ConditionId` parses from the number it prints, as a debugger's `monitor stop delete N` names one.  A value the host chooses (`ConditionToken`) is one `From` pair.  A `const fn` that needed `get` (`iack_address`, `Sim::interrupt_pin`, `Builder::set_autovector`, `Mc68331::set_interrupt_pin`) is no longer `const`. |
 | One number syntax for what a person types: `mc683xx_target::integer::parse_integer` | Decided 2026-11-22 (0.9.0).  Init scripts, gdb `monitor` commands, the runner's options and the numbers in board-file strings all take decimal, `0x` hexadecimal or `0b` binary, the prefix in lower case, `_` between digits, no sign, no `$`, no decimal leading zero, so a number that works in one works in all and `010` is never octal by surprise.  One `no_std` function in the target crate, generic over the result (`TryFrom<u64>`, so the runner's 64-bit `--cycles` and `--seed` take it too), so a pod's firmware takes the same text; its error is `Invalid` or `TooLarge`, without the text, as the crate has no `alloc`.  A board file's TOML integers keep TOML's own syntax (`0o`, `+`), which the TOML parser reads before the board sees it; gdb packets and S-records keep theirs. |
 | Chip time splits: `Cycle` an instant, `Cycles` a count | Decided 2026-11 (0.9.0).  `Cycles` was both a clock by number and a count of clocks, so `now + budget` and `budget + budget` read alike and a run's deadline and its budget had one type.  `Cycle` (system clocks since power-on) mirrors the board's `Time`: `ZERO`, `MAX`, `from_clocks`/`clocks`, `since`, `since_power_on`; `Cycle + Cycles` and `Cycle - Cycles` saturate at power-on and `MAX`, `Cycle - Cycle` is the `Cycles` between, zero if the second is later; Display `12 clocks`; serde as its `u64`, so snapshots keep their bytes.  `Cycles`, `Span`'s counterpart, keeps its `+` and `-` and gains `saturating_add` and `saturating_sub`; `Cycles::until` went (`Cycle::since`).  Every chip-layer instant is a `Cycle` (`now`, `at`, `next_event`, a run's deadline, a trace record's `cycle`, `TimeBase`'s anchor), every cost, budget and period `Cycles`.  "Cycle" alone means the clock; a bus transaction is a bus cycle. |
+| One set of time words at every layer | Decided 2026-11-23 (0.9.0).  Each layer has an instant and a span: the board `Time` and `Span`, the chip `Cycle` and `Cycles`, the host std's `Instant` and `Duration`.  `now` is always the current instant in the layer's unit, never a bundle; `at` is a given instant other than now; a run's limit is a span `budget` (`run_for`) or an instant `deadline` (`run_until`), as VHDL's `wait for` and `wait until`; `since` is the span back to an earlier instant; `after` counts from one (`edge_after`); `next_event` is when a part next has work.  A conversion is named for its result and takes the instant it converts as `at` (`TimeBase::time(at: Cycle)`, `TimeBase::cycle(at: Time)`, `Clock::phase(at)`); one from a phase takes `phase` (`Clock::time(phase)`).  A board peripheral's call takes its time as a `time::Moment` (board time and the system clock then): from its `Drive`, or as `moment` last where there is none.  A chip-level callback with no cycle struct takes `now: Cycle` last (`Timed::advance`, `SpiPeripheral::set_clock`, `MappedPeripheral::reset`, `set_port_pins`); one with a struct reads its `now` field (`BusCycle`, `QspiTransfer`).  Units follow std's `Duration` (`from_secs`, `secs_f64`); names a person types carry SI symbols (`_ps`, `_us`, `_hz`). |
 | Loading and init scripts in `mc683xx-debug`, over `Cpu32Target` | Decided 2026-11-01 with the BDM pod's maintainer.  One loader for silicon and the emulator, tested on the chip; a crate of its own, on `mc683xx-target` alone, so a pod host links it without the emulator.  Word writes, verify by default, RPC from the entry and no SSP inference, an init script with line-numbered errors; host time in `poll_memory` only. |
 | `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels) stay exhaustive, so a match on one needs no wildcard; the Python bindings' conversions of the others never panic: a run's end or halt they do not know raises `mc683xx.RunError` naming it, any other value (a fault cause among them) `NotImplementedError` naming its kind, but an event is never refused or dropped: one they cannot convert is `Event.Unknown(now, name)`, its Rust `Display`, and an unknown reset cause in a reset is `ResetCause.UNKNOWN`, so `take_events` always takes the whole queue (decided 2026-11-21, round 5); Rust tests (`every_run_end_maps_or_names_itself`, `every_value_maps`) list every variant, so a variant added to one is added there and mapped (decided 2026-11-21). |
 

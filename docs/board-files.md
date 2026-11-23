@@ -422,7 +422,7 @@ when it drives a net, the host sending; `In` when it is driven;
 whose type carries the value, and fails with `SendError` if it drives
 none.  A frame from a run-time endpoint
 (the runner's input) is untimed: baud and length zero.  An analog sink reads its input when it wants it
-(`Drive::sample`): the driver's `Peripheral::sample` at that time, or else
+(`Drive::sample`): the driver's `Peripheral::analog_output` at that time, or else
 the value last driven.  A peripheral may drive a clock net as often as its
 frequency changes.
 
@@ -520,11 +520,15 @@ The contract a host's peripheral models target (rustdoc in
   `peripheral_mut`, and a `Box<dyn Peripheral>` upcasts to `Box<dyn Any>`.
   `inspect()` gives what a front end shows of it, an
   `inspect::Inspection` of named fields (empty by default;
-  `Board::inspect(name)`).  A call that takes a `peripheral::Drive`
-  takes its time from it, `drive.now()`, and no time of its own; one
-  without a drive takes its time as an argument (`sample(port, now)`,
-  `set_qspi_clock(clock, now, system_clock)`) or in its access
-  (`PeripheralAccess::now`, for `wait_states` and `dsack_port`).
+  `Board::inspect(name)`).  A call's time is a `time::Moment`, board
+  time and the chip's system clock then: a call that takes a
+  `peripheral::Drive` takes it from the drive (`drive.moment()`, or
+  `drive.now()` for the time alone), and one without a drive takes it
+  as its last argument, `moment` (`wait_states`, `dsack_port`,
+  `set_qspi_clock`, `analog_output`, `next_event`).  No call has two
+  times.  A chip-level model (`adapter`) takes `now: Cycle` last
+  instead, as every chip-level callback with no cycle struct does
+  (docs/host-guide.md, Board time).
   - Stop conditions, for a debugger and the emulator's alone
     ([docs/gdb.md](gdb.md), Stop conditions): `conditions()` lists
     what it offers (`condition::ConditionInfo::new(name, arguments,
@@ -537,8 +541,8 @@ The contract a host's peripheral models target (rustdoc in
     keeps its armed conditions out of `save`, and `restore` leaves them
     armed.
   - Bus: `read(access, drive)`, `write(access, value, drive)`,
-    `wait_states(access, system_clock)` for an external DSACK, and
-    `dsack_port(access, system_clock)`
+    `wait_states(access, moment)` for an external DSACK, and
+    `dsack_port(access, moment)`
     for a peripheral whose DSACK pins differ cycle by cycle (`Some(PortSize)`,
     16 bits on DSACK1, 8 on DSACK0 alone; `None` by default, its `dsack`
     saying), both asked of the peripheral that takes the cycle's
@@ -548,9 +552,9 @@ The contract a host's peripheral models target (rustdoc in
     carries `attachment` (the index in the peripheral's `attach`), its
     `role` and `lane`, `address` (`offset` plus ADDR on its `lines`),
     `size`, `function_code`, `write` (R/W low, set for `wait_states` and
-    `dsack_port` too), `now` in board time (when its instruction
-    started), `select`, the chip select that carried it (the decoder's,
-    through a decoder; `None` on no select), and `horizon`.  A
+    `dsack_port` too), `select`, the chip select that carried it (the
+    decoder's, through a decoder; `None` on no select), and `horizon`;
+    its time is the call's, when its instruction started.  A
     peripheral that samples a cycle at its end rather than at `now` (an
     FPGA's netlist behind wait states) returns true from
     `wants_horizon()`, asked once as the board is built, and its reads
@@ -568,8 +572,8 @@ The contract a host's peripheral models target (rustdoc in
     sample, or the run depends on how it is cut.  `None` for the
     others, which costs the board nothing.
     `PeripheralAccess` is `#[non_exhaustive]`: a host's test builds one with
-    `PeripheralAccess::new(select, address, size, function_code, now)`
-    (`PeripheralAccess::unselected(address, size, function_code, now)`
+    `PeripheralAccess::new(select, address, size, function_code)`
+    (`PeripheralAccess::unselected(address, size, function_code)`
     for a peripheral on no select), a read, and
     `.through(attachment, role, lane)` and `.writing(true)`.  The board layer turns each
     chip `mc683xx_cpu32::peripheral::BusCycle` into a `PeripheralAccess`.  An 8-bit
@@ -598,9 +602,9 @@ The contract a host's peripheral models target (rustdoc in
     word; `.clocked(clock)` another clock, such as
     `QspiClock::at_reset(system_clock)`, SPCR0's out of reset); it ends at the drive's time) returns the bits in, all ones by
     default (`mc683xx_modules::peripheral::floating_miso`),
-    `select(attachment, selected, drive)`, `set_qspi_clock(clock,
-    now, system_clock)`.  Framing: the board decodes PCS[3:0] by each attachment's
-    `qspi` code and `mask`, and a peripheral sees `select` only when its own
+    `set_selected(attachment, selected, drive)`, `set_qspi_clock(clock,
+    moment)`.  Framing: the board decodes PCS[3:0] by each attachment's
+    `qspi` code and `mask`, and a peripheral sees `set_selected` only when its own
     decode changes, true as a frame starts and false as it ends; that
     is the canonical framing for a board peripheral.  Fan-out: a transfer
     reaches every attachment whose decode the PCS levels select, in
@@ -651,8 +655,8 @@ The contract a host's peripheral models target (rustdoc in
     PCS's changes only at its end.  A batch runs where the CPU next sees the QSPI (its
     interrupt, a read or write of the QSM) or at the sync point,
     before `Board::run_until` goes on to the board's events: each
-    `transfer`, `select` and `set_qspi_clock` keeps its order and its own
-    `now`, but the CPU, board time and the other peripherals may be past
+    `transfer`, `set_selected` and `set_qspi_clock` keeps its order and its own
+    time, but the CPU, board time and the other peripherals may be past
     it.  A peripheral may say true only if, in those calls, it drives no net
     and asks for no IRQ, RESET or stop (no `drive`, `drive_at`, `stop`,
     `write_memory`, `take_memory` or `release_memory`, and no change
@@ -667,9 +671,9 @@ The contract a host's peripheral models target (rustdoc in
     model's calls are the model's to vouch for, not the wiring's, so
     it is code only (`SpiAdapter` and Python's `qspi_deferrable`).
   - Nets: `input(port, signal, drive)` for each value arriving on
-    an input; `sample(port, now)` for an analog output a sink reads at
-    its time.  Ports are indices in the declared list.
-  - Time: `next_event(system_clock)`, `advance(drive)`: `advance` must move
+    an input; `analog_output(port, moment)` for an analog output a sink
+    reads at its time (`Drive::sample`).  Ports are indices in the declared list.
+  - Time: `next_event(moment)`, `advance(drive)`: `advance` must move
     `next_event` past the drive's time or to `None`.  A peripheral advanced to one time
     1000 times running without that stalls the board, and `Board::run_until`
     fails with `RunError::Stalled`, naming it, rather than spin; several
@@ -681,14 +685,13 @@ The contract a host's peripheral models target (rustdoc in
     chip by the next instruction, and a run is the same however the
     host quanta `Board::run_until`.  Each such call costs a sync.
   - The chip's system clock on board time (`time::TimeBase`) comes with
-    every call that has a time: in its `Drive` (`Drive::system_clock`),
-    or, in a call without one (`next_event`, `wait_states`,
-    `dsack_port`, `set_qspi_clock`), as its `system_clock` argument.
-    The chip runs at 8.388608 MHz until the firmware writes SYNCR, and
-    the base moves right after the instruction that changes the
-    frequency, so a peripheral keeps no base past a call.  A test
-    builds its drive with one: `Drive::new(now, system_clock)`, or
-    `Drive::with_sampler(now, system_clock, sampler)`.
+    every call, in its moment: `Moment::new(now, system_clock)`, with
+    `now()`, `system_clock()` and `cycle()`, the chip's clock at it
+    rounded up.  The chip runs at 8.388608 MHz until the firmware writes
+    SYNCR, and the base moves right after the instruction that changes
+    the frequency, so a peripheral keeps no base past a call.  A test
+    builds its drive with one: `Drive::new(moment)`, or
+    `Drive::with_sampler(moment, sampler)`.
   - State: `save()`, `restore(bytes)`; by default it cannot, and the
     board's save fails with `StateError::Peripheral`, which names the peripheral
     (`stub: the peripheral cannot save its state`); so does a peripheral that
@@ -721,8 +724,8 @@ The contract a host's peripheral models target (rustdoc in
   written against `mc683xx_modules::peripheral` alone shows nothing.
 - `peripheral::Drive`, given to each call: `drive(port, signal)` and
   `drive_at(time, port, signal)` (now or later; a commitment);
-  `sample(port)` (an analog input now); `system_clock()`, the
-  `time::TimeBase` now; `write_memory(memory, offset,
+  `sample(port)` (an analog input now); `moment()`, the call's
+  `time::Moment`, and `now()`, its time; `write_memory(memory, offset,
   bytes)` (into a board memory by name, as the instruction ends, or
   between quanta before the next);
   `take_memory(memory)` and `release_memory(memory)` (its cycles to
@@ -736,10 +739,11 @@ The contract a host's peripheral models target (rustdoc in
   bits), timed from its start bit; build one with `Serial::new(frame,
   baud, bits)`, `Serial::timed(frame, baud, length)` or
   `Serial::untimed(frame)`, and `end(start)` gives its end.
-- `time::TimeBase`: the chip's system clock on board time, `cycles(time)`
-  and `time(cycles)`, and `frequency()`.  Toward the chip a time rounds up, to
+- `time::TimeBase`: the chip's system clock on board time, `cycle(at)`
+  (the clock at board time `at`) and `time(at)` (the board time of
+  clock `at`), and `frequency()`.  Toward the chip a time rounds up, to
   the first clock at or after it; toward the board a clock rounds down,
-  to its picosecond or the one before; so `cycles(time(c))` is `c`.  The
+  to its picosecond or the one before; so `cycle(time(c))` is `c`.  The
   board moves its base only where the frequency changes, so one base
   maps all the time between changes without drift.
   `TimeBase::steady(frequency)` is a base on board time alone, clock
@@ -753,16 +757,18 @@ The contract a host's peripheral models target (rustdoc in
   `TimeBase::frequency`),
   `time::Phase` (cycles, 10^21 units each, `from_units` and `units`) and `time::Clock`:
   `new(frequency, edge)`, `with_phase(frequency, at, phase)`,
-  `phase_at(time)` (with `cycles()` and
-  `fraction()`), `edges(from, to)` (rising edges in (from, to]),
+  `phase(at)` (with `cycles()` and
+  `fraction()`), `time(phase)` (the first picosecond at that phase),
+  `edges(from, to)` (rising edges in (from, to]),
   `edge_after(from, n)`, `edge(number)`, and `retuned(at, frequency)`:
   a source whose frequency moves (an OCXO following its EFC) drives a
   retuned clock at each change, its phase carried across exactly, and
   a sink counts and times edges across the change with no rounding.
   A sink that queries back across changes keeps a
   `time::ClockHistory` (`new(span)`, `push(clock)` at each input;
-  `Span::from_seconds(64)` of history is plenty): `phase_at`, `edges(from, to)`,
-  `edge(number)`, `edge_after(from, n)` and `to_next_edge(time)`
+  `Span::from_secs(64)` of history is plenty): `phase(at)`,
+  `time(phase)`, `edges(from, to)`,
+  `edge(number)`, `edge_after(from, n)` and `to_next_edge(at)`
   (a `Span` rounded up to a picosecond, and the exact fraction of a
   cycle) integrate
   each segment at its own frequency.  Edge numbers are absolute, so a

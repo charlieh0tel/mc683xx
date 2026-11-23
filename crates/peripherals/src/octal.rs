@@ -43,14 +43,13 @@ pub(crate) mod tests {
     use mc683xx_board::peripheral::Drive;
     use mc683xx_board::peripheral::PeripheralAccess;
     use mc683xx_board::signal::Signal;
-    use mc683xx_board::time::Time;
     use mc683xx_modules::chip_select::ChipSelect;
     use mc683xx_target::function_code::FunctionCode;
     use mc683xx_target::size::Size;
 
-    /// A data cycle of `size` at `now`.
-    pub(crate) const fn access(size: Size, now: Time) -> PeripheralAccess {
-        PeripheralAccess::new(ChipSelect::Boot, 0, size, FunctionCode::SupervisorData, now)
+    /// A data cycle of `size`.
+    pub(crate) const fn access(size: Size) -> PeripheralAccess {
+        PeripheralAccess::new(ChipSelect::Boot, 0, size, FunctionCode::SupervisorData)
     }
 
     /// The levels `drive` drove, by port.

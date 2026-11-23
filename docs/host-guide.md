@@ -403,13 +403,14 @@ Neither has a default: a peripheral gives both, is `Stateless`, or is
 `StateError::unsupported("its role")`.
 
 A peripheral on a board file implements `mc683xx_board::peripheral::Peripheral`
-instead (`docs/board-files.md`), on board time.  A call's time there: one
-given a `Drive` takes it from `drive.now()` and has no time argument
-(`read`, `write`, `memory_read`, `memory_write`, `power_on`, `reset`,
-`transfer`, `select`, `input`, `advance`); one without a drive takes it
-as an argument (`sample(port, now)`, `set_qspi_clock(clock, now,
-system_clock)`) or in its access (`PeripheralAccess::now`, for
-`wait_states` and `dsack_port`).
+instead (`docs/board-files.md`), on board time.  A call's time there is
+a `time::Moment`, board time and the chip's system clock then: one given
+a `Drive` takes it from `drive.moment()` (`drive.now()` for the time
+alone) and has no time argument (`read`, `write`, `memory_read`,
+`memory_write`, `power_on`, `reset`, `transfer`, `set_selected`, `input`,
+`advance`); one without a drive takes it as its last argument, `moment`
+(`wait_states`, `dsack_port`, `set_qspi_clock`, `analog_output`,
+`next_event`).
 
 ### Bus peripherals: on no chip select
 
@@ -1415,19 +1416,27 @@ plumbing the board runs the chip with is hidden from the docs and
 outside semver.
 
 - **Board time.** `time::Time` is a time on the board, picoseconds
-  since power-on, made by `Time::from_picos`, `from_seconds`, `from_seconds_f64`
-  (saturating) or `checked_from_seconds_f64` and read by `picos` or `seconds_f64`;
+  since power-on, made by `Time::from_picos`, `from_secs`, `from_secs_f64`
+  (saturating) or `checked_from_secs_f64` and read by `picos` or `secs_f64`;
   neither it nor a span converts to or from a bare `u64`.  `time::Span` is a span of it, picoseconds too, made
   by `Span::from_picos`, `from_nanos`, `from_micros`, `from_millis`,
-  `from_seconds` or `from_seconds_f64` (saturating; `checked_from_seconds_f64`
-  gives `None` out of range, as `Time::checked_from_seconds_f64` does) and read by `picos` or
-  `seconds_f64`.  `Time + Span` and `Time - Span` are times, `Time -
+  `from_secs` or `from_secs_f64` (saturating; `checked_from_secs_f64`
+  gives `None` out of range, as `Time::checked_from_secs_f64` does) and read by `picos` or
+  `secs_f64`.  `Time + Span` and `Time - Span` are times, `Time -
   Time` (`since`) the `Span` between them, `since_power_on` a time's
   span from power-on (to carry a time from one board to another:
   `board.now() + epoch.since_power_on()`), and spans add, subtract and
   scale by a count, all saturating.  A run for a while
-  (`Board::run_for(Span::from_millis(10))`), a frame's bound, a
-  quantum and a serial frame's length are `Span`s.
+  (`Board::run_for(Span::from_millis(10))`), a frame's budget, a
+  quantum and a serial frame's length are `Span`s.  The words are the
+  same at every layer: `now` the current instant (`Board::now`, a
+  `Time`; the chip's `now`, a `Cycle`), `at` another, a run's limit its
+  `budget` (a span) or `deadline` (an instant), and a conversion named
+  for its result, taking the instant as `at`
+  (`board.system_clock().cycle(at)`, `time(at)`).  A board peripheral's
+  call takes its time as a `time::Moment`, from its `Drive` or as
+  `moment` last; a chip-level callback with no cycle struct takes
+  `now: Cycle` last.
 - **Nets.** `Board::observe(net, observer) -> Result<ObserverId,
   NetError>` attaches an `observe::Observer` (a closure
   `FnMut(&str, Time, Signal)` is one) to a net by name; `NetError::Unknown`
@@ -1507,31 +1516,31 @@ outside semver.
   so every `Pacing` can be kept, and it is `Eq` and `Hash`;
   `Factor::REAL_TIME` is 1.0, and `Pacing::factor()` the factor,
   `None` unpaced); it prints and parses as `unpaced`, `realtime`
-  or the factor.  `Board::run_until_paced(until, quantum)` runs to
-  `until` in quanta of `quantum` of board time, a `time::NonZeroSpan`
+  or the factor.  `Board::run_until_paced(deadline, quantum)` runs to
+  `deadline` in quanta of `quantum` of board time, a `time::NonZeroSpan`
   (never zero, so the loop always ends: `NonZeroSpan::new(span)` is
   `None` for a zero span, and its const constructors, `from_millis` and
   the rest, refuse zero at compile time; `pacing::QUANTUM`, 5 ms, is a
   good one), and before each sleeps until board time is no longer ahead
   of wall time times the control's factor, waking at once for a stop or
-  a change of pacing; a run that reaches `until` sleeps once more after
+  a change of pacing; a run that reaches `deadline` sleeps once more after
   its last quantum, so it never returns ahead of wall time.  The wall
   clock is host-side only: it decides how long to sleep and never
   reaches the board, so a paced run is the same as the unpaced run.  A
   run that falls behind (a slow host) is not held back.  A host with a
   loop of its own (the runner's turns) keeps a `pacing::Pacer` and calls
   `wait(now, &control)` between its runs;
-  `Board::run_until_quantized(until, quantum, before)` is the quantum
+  `Board::run_until_quantized(deadline, quantum, before)` is the quantum
   loop alone.  Unpaced, neither reads the clock nor sleeps.  A host with
   a clock of its own that cannot sleep (a browser, from
   `requestAnimationFrame` with `performance.now()`; a GUI's timer) runs
-  the board a frame at a time: `Board::run_frame(wall, bound)`,
+  the board a frame at a time: `Board::run_frame(wall, budget)`,
   `wall` its clock's reading as a `Duration` from any origin it keeps,
   never going back, runs to the board time due by then under the
-  control's pacing, but no more than `bound`, a `Span` of board time, a
+  control's pacing, but no more than `budget`, a `Span` of board time, a
   frame's bound however far behind the host is (a hidden page), and a
   frame so bounded drops the time it missed, the next paced from where
-  it ended; unpaced, it runs `bound`.  Paced,
+  it ended; unpaced, it runs `budget`.  Paced,
   the first frame, and the first after a `set_pacing` to another pacing (one
   to the pacing it has changes nothing, so a UI may set its choice every
   frame), any other run (even of no time) or a successful restore, runs

@@ -378,11 +378,11 @@ impl Board {
             Port::C => return Err(NoInputsError(port)),
             Port::E => {
                 self.modules_changed();
-                self.sim.set_port_pins(PortName::E, value, mask);
+                self.sim.set_port_pins(PortName::E, value, mask, now);
             }
             Port::F => {
                 self.modules_changed();
-                self.sim.set_port_pins(PortName::F, value, mask);
+                self.sim.set_port_pins(PortName::F, value, mask, now);
             }
             Port::Gp => self.module_mut::<Gpt>(GPT).set_port_pins(value, mask, now),
             Port::Qs => self.module_mut::<Qsm>(QSM).set_port_pins(value, mask, now),

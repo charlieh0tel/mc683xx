@@ -26,7 +26,7 @@ const CONSOLE: &str = "console";
 /// a byte a 1 ms turn.
 const TURN: Span = Span::from_millis(1);
 /// The longest the boot or a command may take to its prompt: 2 s.
-const LONGEST: Span = Span::from_seconds(2);
+const LONGEST: Span = Span::from_secs(2);
 /// What ends a command's output: the next prompt.
 const PROMPT: &[u8] = b"> ";
 /// The Mandelbrot command, its line as typed.
