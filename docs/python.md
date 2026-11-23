@@ -84,7 +84,7 @@ rename renames the Python name with it.  The deliberate differences:
 - **Properties:** a Rust accessor of plain state, with no arguments, is
   a read-only property (`now`, `halted`, `instructions`,
   `exception_taken`, `system_hz`, `qspi_chip_selects`,
-  `stops_on_fault`, `deviations`, `pacing`, `stopping`); one that takes
+  `stops_on_fault`, `pacing`, `stopping`); one that takes
   arguments or computes its value is a method (`registers()`,
   `outputs(port)`, the levels a port's pins resolve to, `port(port)`;
   `pwm(channel)`, `oc1()`, an output worked out from the GPT's
@@ -1541,13 +1541,8 @@ match bare.run_limited(begin=CALL, until=CALL_RETURN).end:
 bare.set_stop_on_fault(False)
 ```
 
-`set_deviations(Deviations(misaligned=True, untraced=True))`
-(`deviations`), Rust's `bare::Deviations`: odd word and long data
-accesses as byte cycles, and T1 and T0 tracing nothing, for parity
-runs against Unicorn only: not CPU32 behavior, off by default.
-`Deviations` (`set_deviations`, `deviations`), `Intercepted`,
-`set_intercepted` and `set_intercept_callback`, for parity with
-Unicorn, are outside semver (docs/releasing.md, Semver
+`Intercepted`, `set_intercepted` and `set_intercept_callback`, for
+parity with Unicorn, are outside semver (docs/releasing.md, Semver
 scope): a minor release may change them.
 
 ### From Unicorn
@@ -1577,4 +1572,4 @@ The port of a Unicorn harness is mechanical:
 | `ctl_flush_tb()` | nothing: there is no translation cache |
 | `context_save()`, `context_restore` | `save()`, `restore()`: memory included |
 | a code hook's register write | the same: before the instruction, PC writes redirect |
-| misaligned access, ignored trace | `set_deviations(Deviations(misaligned=True, untraced=True))`: parity only |
+| misaligned access, ignored trace | none: an odd word or long is an address error, and T1 and T0 trace, as on the CPU32 (CPU32RM 6.2.3, 6.2.10) |

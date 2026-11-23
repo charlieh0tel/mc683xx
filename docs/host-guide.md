@@ -1769,7 +1769,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `ConditionInfo::new`, `Edges::new`, `Clock::new` and
   `Clock::with_phase`, `Field::new`, and `Inspection::default()` with
   its builders.
-- The configuration structs (`Limits`, `Deviations`, `BoardTracing`,
+- The configuration structs (`Limits`, `BoardTracing`,
   `ChipTracing`, `description::Options`, `registry::Environment`) are
   `#[non_exhaustive]` too, with every field public: build one from
   `X::default()` and set the fields it needs

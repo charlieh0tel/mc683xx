@@ -14,7 +14,6 @@ __all__ = [
     "FaultStop",
     "FaultCause",
     "Intercepted",
-    "Deviations",
     "StopRequest",
     "SyncRequest",
     "Diversion",
@@ -1074,18 +1073,6 @@ class Intercepted:
     def pc(self) -> int: ...
 
 @final
-class Deviations:
-    """Deviations from the CPU32, for parity runs against Unicorn only;
-    never the CPU's behavior.  Outside semver (docs/releasing.md)."""
-
-    def __new__(cls, *, misaligned: bool = False, untraced: bool = False) -> Deviations: ...
-    @property
-    def misaligned(self) -> bool: ...
-    @property
-    def untraced(self) -> bool: ...
-    def __hash__(self) -> int: ...
-
-@final
 class StopRequest:
     """The handle by which the host asks a run to stop."""
 
@@ -1228,11 +1215,6 @@ class Machine:
     def set_stop_on_fault(self, stop: bool) -> None: ...
     @property
     def stops_on_fault(self) -> bool: ...
-    def set_deviations(self, deviations: Deviations) -> None:
-        """For parity runs against Unicorn only; outside semver."""
-    @property
-    def deviations(self) -> Deviations:
-        """For parity runs against Unicorn only; outside semver."""
     @property
     def instructions(self) -> int: ...
     @property

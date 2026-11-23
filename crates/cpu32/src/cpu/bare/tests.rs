@@ -2,7 +2,6 @@ use std::cell::RefCell;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
-use super::Deviations;
 use super::End;
 use super::FaultCause;
 use super::Intercepted;
@@ -217,36 +216,6 @@ fn an_intercept_undoes_the_instruction_s_postincrement() {
     );
     assert_eq!(machine.cpu.registers.address(0), 0x2000);
     assert!(machine.cpu.intercepts());
-}
-
-#[test]
-fn the_misaligned_deviation_reads_bytes() {
-    let mut machine = machine(&[MOVE_LONG_A0_TO_D0]);
-    machine
-        .write(Address(0x2001), &[0x12, 0x34, 0x56, 0x78])
-        .unwrap();
-    machine.cpu.registers.set_address(0, 0x2001);
-    machine.cpu.set_deviations(Deviations {
-        misaligned: true,
-        untraced: false,
-    });
-    one(&mut machine);
-    assert_eq!(machine.cpu.registers.data[0], 0x1234_5678);
-}
-
-#[test]
-fn the_untraced_deviation_ignores_t1() {
-    let mut machine = machine(&[NOP, NOP]);
-    machine.cpu.registers.set_sr(status::S | status::T1);
-    machine.cpu.set_deviations(Deviations {
-        misaligned: false,
-        untraced: true,
-    });
-    one(&mut machine);
-    assert_eq!(machine.cpu.registers.pc.0, CODE + 2);
-    machine.cpu.set_deviations(Deviations::default());
-    one(&mut machine);
-    assert_eq!(machine.cpu.registers.pc.0, HANDLER, "traced");
 }
 
 #[test]

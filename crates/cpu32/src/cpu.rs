@@ -271,9 +271,6 @@ pub struct Cpu {
     /// breakpoint or interrupt processing after one, while `capture`:
     /// what a fault stop restores (PLAN.md, Faults).
     began: Registers,
-    /// The SR bits that trace: T1 and T0, or none with the untraced
-    /// deviation.
-    trace_mask: u16,
     /// Whether exception processing is stacking a frame.
     stacking: bool,
     /// Whether a long operand is one access: offered to the bus whole
@@ -397,7 +394,6 @@ impl Cpu {
             loop_mode: None,
             capture: false,
             began: Registers::default(),
-            trace_mask: status::T1 | status::T0,
             stacking: false,
             long_bus: false,
             long_operand: false,
@@ -782,26 +778,6 @@ impl Cpu {
 /// 1.1.2, Figure 1-1).
 const LOOPED_WORD: u32 = 2;
 
-/// The fault of a misaligned access's byte cycle at `address`.
-const fn misaligned_fault(
-    address: Address,
-    function_code: FunctionCode,
-    cycle: BusCycleKind,
-    size: Size,
-    data: u32,
-) -> Fault {
-    Fault {
-        vector: Vector::BUS_ERROR,
-        address,
-        function_code,
-        size: Size::Byte,
-        long: matches!(size, Size::Long),
-        cycle,
-        data,
-        read_modify_write: false,
-    }
-}
-
 /// RTE's opcode, whose bus errors cost their own (CPU32RM 8.3.14).
 const RTE: u16 = 0x4e73;
 /// BKPT's opcodes, $4848 to $484F, whose acknowledge ends in a bus
@@ -1058,7 +1034,7 @@ impl Core<'_> {
             cpu.continue_loop_mode(instruction_pc, previous_pc);
         }
         // Tracing follows T1 and T0 as the instruction begins (6.2.10).
-        let trace = cpu.registers.sr() & cpu.trace_mask;
+        let trace = cpu.registers.sr() & (status::T1 | status::T0);
         let opcode = match self.fetch_fast() {
             Some(opcode) => Ok(opcode),
             None => self.fetch_word_slow(),
@@ -1562,9 +1538,6 @@ impl Core<'_> {
             read_modify_write: false,
         };
         if size != Size::Byte && address.is_odd() {
-            if self.cpu.bare.deviations.misaligned && cycle != BusCycleKind::Fetch {
-                return self.misaligned_read(address, size, function_code, cycle);
-            }
             return Err(fault(Vector::ADDRESS_ERROR, address, size));
         }
         if size == Size::Long
@@ -1627,9 +1600,6 @@ impl Core<'_> {
             read_modify_write: false,
         };
         if size != Size::Byte && address.is_odd() {
-            if self.cpu.bare.deviations.misaligned {
-                return self.misaligned_write(address, size, function_code, data);
-            }
             return Err(fault(Vector::ADDRESS_ERROR, address, size));
         }
         if size == Size::Long
@@ -1893,42 +1863,6 @@ impl Core<'_> {
         );
         self.invalid(access);
         None
-    }
-
-    /// A word or long at an odd address as byte cycles, high byte
-    /// first: the misaligned deviation, not the CPU32's behavior.
-    #[cold]
-    fn misaligned_read(
-        &mut self,
-        address: Address,
-        size: Size,
-        function_code: FunctionCode,
-        cycle: BusCycleKind,
-    ) -> Result<u32, Fault> {
-        (0..size.bytes()).try_fold(0, |value, index| {
-            let at = address.offset(index);
-            let byte = self.cycle_read(at, Size::Byte, function_code, cycle);
-            byte.map(|byte| value << 8 | byte)
-                .ok_or_else(|| misaligned_fault(at, function_code, cycle, size, 0))
-        })
-    }
-
-    /// A word or long write at an odd address as byte cycles, as
-    /// `misaligned_read`.
-    #[cold]
-    fn misaligned_write(
-        &mut self,
-        address: Address,
-        size: Size,
-        function_code: FunctionCode,
-        data: u32,
-    ) -> Result<(), Fault> {
-        (0..size.bytes()).try_for_each(|index| {
-            let at = address.offset(index);
-            let byte = data >> (8 * (size.bytes() - 1 - index)) & 0xff;
-            self.cycle_write(at, Size::Byte, function_code, byte)
-                .ok_or_else(|| misaligned_fault(at, function_code, BusCycleKind::Write, size, data))
-        })
     }
 
     /// A long read the bus takes in one access ([`Bus::read_long`]), at

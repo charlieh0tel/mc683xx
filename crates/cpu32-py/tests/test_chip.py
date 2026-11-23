@@ -1320,7 +1320,6 @@ def test_enums_and_values_hash_as_they_compare() -> None:
             mc683xx.PortState(1, 2, 3, 4),
             mc683xx.Role.IACK,
             mc683xx.Lane.UPPER,
-            mc683xx.Deviations(misaligned=True),
         ]
 
     for one, other in zip(values(), values()):

@@ -1,9 +1,9 @@
 //! What a bare host asks of the core beyond what the chip does.
 //!
 //! Runs limited by an address or an instruction count, exceptions the
-//! host answers before the CPU stacks anything, faults that stop the
-//! run instead of being taken, and, for parity runs against other
-//! emulators only, deviations from the CPU32 ([PLAN.md, Bare CPU]).
+//! host handles before the CPU stacks anything, exceptions the host has
+//! the CPU take, and faults that stop the run instead of being taken
+//! ([PLAN.md, Bare CPU]).
 //! None of it costs a run that does not ask for it.
 //!
 //! [PLAN.md, Bare CPU]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#bare-cpu
@@ -29,7 +29,6 @@ use crate::instructions::Flow;
 use crate::interrupt::InterruptLevel;
 use crate::interrupt::Interrupts;
 use crate::registers::Registers;
-use crate::registers::status;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
@@ -208,21 +207,6 @@ pub struct LimitedRun {
     pub steps: u64,
 }
 
-/// Deviations from the CPU32, for parity runs against an emulator that
-/// has them; never the CPU's behavior.
-///
-/// It may gain fields: build one from [`Deviations::default()`] and set
-/// those it needs (`let mut x = Deviations::default(); x.misaligned = ...;`).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct Deviations {
-    /// A word or long at an odd data address is run as byte cycles, not
-    /// an address error.  Fetches stay strict.
-    pub misaligned: bool,
-    /// T1 and T0 trace nothing.
-    pub untraced: bool,
-}
-
 /// The vectors, as a bit set.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct VectorSet([u64; 4]);
@@ -257,8 +241,6 @@ pub(crate) struct Bare {
     /// An intercepted exception taken natively once: by the instruction
     /// at this address, when the instruction count is this.
     pub(crate) native_once: Option<(Address, u64)>,
-    /// The deviations.
-    pub(crate) deviations: Deviations,
     /// The end a fault or an intercept set, for `run_limited`.
     pub(crate) end: Option<End>,
     /// The last invalid access's reason, for a fault's cause.
@@ -592,22 +574,6 @@ impl Cpu {
     /// first, as on the CPU32's 16-bit bus.
     pub const fn set_long_bus(&mut self, whole: bool) {
         self.long_bus = whole;
-    }
-
-    /// Sets the deviations from the CPU32: none at first.
-    pub const fn set_deviations(&mut self, deviations: Deviations) {
-        self.bare.deviations = deviations;
-        self.trace_mask = if deviations.untraced {
-            0
-        } else {
-            status::T1 | status::T0
-        };
-    }
-
-    /// The deviations from the CPU32.
-    #[must_use]
-    pub const fn deviations(&self) -> Deviations {
-        self.bare.deviations
     }
 
     /// Whether the registers are kept as each instruction begins.

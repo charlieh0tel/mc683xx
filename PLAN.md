@@ -995,8 +995,8 @@ chip beside `Mc68331`.
   run, one left from before a run is withdrawn as it starts),
   `set_intercepted(vector, on)` and `set_intercept_callback(callable)`
   (no callback: taken natively), `set_stop_on_fault` and
-  `stops_on_fault`, `set_deviations(Deviations)` and `deviations`,
-  `request_interrupt(pin, vector)`, `clear_interrupt`, `reset`,
+  `stops_on_fault`, `request_interrupt(pin, vector)`,
+  `clear_interrupt`, `take_exception(vector, level=None)`, `reset`,
   `save`, `restore`.  `run_limited` gives a `LimitedRun(cycles, end)`,
   its `End` Rust's (`End.Stop(stop)`, `End.Until()`,
   `End.Instructions()`, `End.Fault(fault)`, their values the fields
@@ -2508,10 +2508,6 @@ and `mc683xx.Machine` in Python (see Python).
   after one, began while such a hook is installed or faults stop
   the run.  Stacking writes are flagged, not hidden: a host that wants
   them hidden skips them.
-- **Deviations, for parity runs only:** `Deviations { misaligned,
-  untraced }`: odd word and long data accesses run as byte cycles
-  rather than address errors (fetches stay strict), and T1/T0 trace
-  nothing.  Neither is the CPU32's behavior; both are off by default.
 - **Cost:** none of it on a run that does not ask, within the noise
   of the core benchmarks (best of interleaved runs on one pinned core,
   2026-10-23: `nop`, `dbra_self`, `move_indirect` -2 to +1%,
@@ -3487,7 +3483,7 @@ checks move onto real code hooks.
 | A bus stop request (`Bus::stop_requested`) beside hooks | A peripheral has no hook of its own; one question per bus cycle costs nothing on RAM. |
 | Board files in TOML, peripheral types from a registry | The file says what is wired where and how the chip is configured, never what a peripheral does; behavior stays the host's code.  A registry of names leaves room for plugins without a format change.  No dynamic loading yet (decided 2026-10-23). |
 | A bare CPU (`mc683xx_cpu32::flat`, `mc683xx.Machine`) beside the chip, 32 address lines by default | Function-level firmware tests map code and stubs at addresses no 68331 decodes (smartclock's harness uses $31400000); a chip-select decode would only get in the way. |
-| Bare-host stops (faults, intercepts) and parity deviations opt-in, off by default | The default stays the CPU32's behavior; a host porting from Unicorn asks for what it relied on, by name. |
+| Bare-host stops (faults, intercepts) opt-in, off by default | The default stays the CPU32's behavior; a host porting from Unicorn asks for what it relied on, by name. |
 | Published to crates.io and PyPI, one semver version for the workspace from 0.1.0, notes in GitHub releases | Decided 2026-10-24, with the repository public.  One version keeps the crates and the wheel in step; a release is tagged only on a commit that has passed every check (`docs/releasing.md`). |
 | abi3 wheels and the crates published by the `release` workflow, both by trusted publishing | One wheel per platform covers every Python from 3.12; no token is stored.  crates.io's trusted publishing needs the crate to exist first, so only the first release is published by hand (decided 2026-10-24). |
 | A GDB stub on the gdbstub crate, generic over a small `Target` trait, its breakpoints and steps hooks | Decided 2026-10-24; gdbstub is MIT OR Apache-2.0.  Hooks cost nothing until installed and never touch memory; one trait serves the bare CPU, the chip, a board and hosts with run loops of their own. |

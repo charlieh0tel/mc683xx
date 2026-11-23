@@ -17,7 +17,6 @@ use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use mc683xx_cpu32::cpu;
-use mc683xx_cpu32::cpu::bare::Deviations;
 use mc683xx_cpu32::cpu::bare::End;
 use mc683xx_cpu32::cpu::bare::FaultCause;
 use mc683xx_cpu32::cpu::bare::FaultStop;
@@ -323,70 +322,6 @@ impl LimitedRunView {
             self.cycles,
             repr(py, self.end.clone())?
         ))
-    }
-}
-
-/// Deviations from the CPU32, for parity runs against an emulator that
-/// has them; never the CPU's behavior (Rust's `bare::Deviations`).
-#[pyclass(
-    name = "Deviations",
-    module = "mc683xx",
-    frozen,
-    eq,
-    hash,
-    get_all,
-    from_py_object
-)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct DeviationsView {
-    /// A word or long at an odd data address is run as byte cycles, not
-    /// an address error.  Fetches stay strict.
-    misaligned: bool,
-    /// T1 and T0 trace nothing.
-    untraced: bool,
-}
-
-#[pymethods]
-impl DeviationsView {
-    /// None by default: the CPU32's behavior.
-    #[new]
-    #[pyo3(signature = (*, misaligned = false, untraced = false))]
-    const fn new(misaligned: bool, untraced: bool) -> Self {
-        Self {
-            misaligned,
-            untraced,
-        }
-    }
-
-    fn __repr__(&self) -> String {
-        format!(
-            "Deviations(misaligned={}, untraced={})",
-            python_bool(self.misaligned),
-            python_bool(self.untraced)
-        )
-    }
-}
-
-/// `value` as Python prints it.
-const fn python_bool(value: bool) -> &'static str {
-    if value { "True" } else { "False" }
-}
-
-impl From<Deviations> for DeviationsView {
-    fn from(deviations: Deviations) -> Self {
-        Self {
-            misaligned: deviations.misaligned,
-            untraced: deviations.untraced,
-        }
-    }
-}
-
-impl From<DeviationsView> for Deviations {
-    fn from(view: DeviationsView) -> Self {
-        let mut deviations = Self::default();
-        deviations.misaligned = view.misaligned;
-        deviations.untraced = view.untraced;
-        deviations
     }
 }
 
@@ -789,18 +724,6 @@ impl MachineView {
     #[getter]
     fn stops_on_fault(&self) -> bool {
         self.machine.cpu.stops_on_fault()
-    }
-
-    /// Sets the deviations from the CPU32 its runs take, for parity
-    /// runs; none at first.
-    fn set_deviations(&mut self, deviations: DeviationsView) {
-        self.machine.cpu.set_deviations(deviations.into());
-    }
-
-    /// The deviations its runs take (`set_deviations`).
-    #[getter]
-    fn deviations(&self) -> DeviationsView {
-        self.machine.cpu.deviations().into()
     }
 
     /// Instructions run since the CPU was made.

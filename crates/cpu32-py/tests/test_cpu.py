@@ -449,18 +449,6 @@ def test_a_host_exception_refused():
         halted.take_exception(TRAP_0)
 
 
-def test_the_parity_switches():
-    cpu = machine(MOVE_WORD_A0_TO_D0, RTS)
-    cpu.write_register("A0", 0x2001)
-    cpu.write(0x2001, b"\xab\xcd")
-    deviations = mc683xx.Deviations(misaligned=True, untraced=True)
-    cpu.set_deviations(deviations)
-    assert cpu.deviations == deviations
-    cpu.write_register("SR", SUPERVISOR | 0x8000)
-    assert cpu.run_limited(until=RETURN).end == mc683xx.End.Until()
-    assert cpu.read_register("D0") == 0xABCD
-
-
 def test_save_and_restore():
     cpu = machine(moveq(1, 0), RTS)
     snapshot = cpu.save()

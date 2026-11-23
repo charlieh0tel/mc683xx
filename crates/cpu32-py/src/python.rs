@@ -24,7 +24,6 @@ use pyo3::types::PyAnyMethods;
 use pyo3::types::PyModule;
 use pyo3::types::PyModuleMethods;
 
-use crate::bare::DeviationsView;
 use crate::bare::EndView;
 use crate::bare::FaultCauseKind;
 use crate::bare::FaultStopView;
@@ -166,7 +165,6 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<FaultStopView>()?;
     module.add_class::<FaultCauseKind>()?;
     module.add_class::<InterceptedView>()?;
-    module.add_class::<DeviationsView>()?;
     module.add_class::<StopRequestView>()?;
     module.add_class::<SyncRequestView>()?;
     module.add_class::<DiversionView>()?;
