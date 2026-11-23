@@ -107,24 +107,18 @@ fn reset_code_runs_in_a_fixed_memory_with_no_select_programmed() {
         Ok((0x1234, 2))
     );
     assert_eq!(
-        cycle_in(
-            &mut chip,
-            FunctionCode::USER_PROGRAM,
-            CODE,
-            Size::Word,
-            None
-        ),
+        cycle_in(&mut chip, FunctionCode::UserProgram, CODE, Size::Word, None),
         Ok((u32::from(program[0]), 2))
     );
     assert_eq!(
-        cycle_in(&mut chip, FunctionCode::CPU_SPACE, CODE, Size::Word, None),
+        cycle_in(&mut chip, FunctionCode::CpuSpace, CODE, Size::Word, None),
         Err(BusError)
     );
     // past it, nothing answers
     let past = DATA + FIXED_BYTES as u32;
     assert_eq!(cycle(&mut chip, past, Size::Word, None), Err(BusError));
     assert_eq!(
-        chip.peek(Address(DATA + 2), Size::Word, FunctionCode::SUPERVISOR_DATA),
+        chip.peek(Address(DATA + 2), Size::Word, FunctionCode::SupervisorData),
         Ok(0x1234)
     );
 }
@@ -155,7 +149,7 @@ fn a_chip_select_matching_a_cycle_wins_over_a_fixed_memory() {
     assert_eq!(chip.memory(selected)[0..2], [0x33, 0x33]);
     assert_eq!(chip.memory(fixed)[0..2], [0x22, 0x22]);
     assert_eq!(
-        chip.peek(Address(CODE), Size::Word, FunctionCode::SUPERVISOR_DATA),
+        chip.peek(Address(CODE), Size::Word, FunctionCode::SupervisorData),
         Ok(0x3333)
     );
     // past CS1's 2 Kbytes, the fixed memory answers again

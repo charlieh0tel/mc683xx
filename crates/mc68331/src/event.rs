@@ -119,7 +119,8 @@ impl fmt::Display for Event {
                 let direction = if *write { "write" } else { "read" };
                 write!(
                     formatter,
-                    "{size} {direction} at {address}, FC {function_code}"
+                    "{direction} of {} bytes at {address} in {function_code}",
+                    size.bytes()
                 )?;
                 match value {
                     Some(value) => write!(formatter, ": {value:#x}"),
@@ -209,7 +210,7 @@ mod tests {
             now,
             address: Address(0x10),
             size: Size::Word,
-            function_code: FunctionCode::SUPERVISOR_DATA,
+            function_code: FunctionCode::SupervisorData,
             write: false,
             value: None,
             bus_error: true,
@@ -217,7 +218,7 @@ mod tests {
         assert_eq!(access.now(), now);
         assert_eq!(
             access.to_string(),
-            "word read at 0x00000010, FC 5: bus error"
+            "read of 2 bytes at 0x00000010 in supervisor-data: bus error"
         );
         let dsack = Event::Dsack {
             now,

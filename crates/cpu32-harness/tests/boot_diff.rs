@@ -48,6 +48,7 @@ use mc683xx_mc68331::port::Port as ChipPort;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_target::function_code::FunctionCode;
 
 use common::board;
 
@@ -650,7 +651,7 @@ impl Eeprom {
 
 impl MappedPeripheral for Replay {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, BusError> {
-        if cycle.function_code.is_cpu_space() {
+        if cycle.function_code == FunctionCode::CpuSpace {
             // the DUART's interrupt acknowledge, through CS10
             if self.interrupt_request() {
                 self.interrupts.pop_front();
@@ -666,7 +667,7 @@ impl MappedPeripheral for Replay {
     }
 
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
-        if cycle.function_code.is_cpu_space() {
+        if cycle.function_code == FunctionCode::CpuSpace {
             return Ok(());
         }
         let bytes = cycle.size.bytes();
@@ -1254,12 +1255,14 @@ fn chip_record(chip: &Mc68331, ram: MemoryId, pc: u32, event: Event) -> Option<R
             write,
             value,
             ..
-        } if traced_address(address.0) && !function_code.is_cpu_space() => Some(Record::Access {
-            write,
-            address: address.0,
-            size: size.bytes() as u8,
-            value: value.unwrap_or_default(),
-        }),
+        } if traced_address(address.0) && function_code != FunctionCode::CpuSpace => {
+            Some(Record::Access {
+                write,
+                address: address.0,
+                size: size.bytes() as u8,
+                value: value.unwrap_or_default(),
+            })
+        }
         Event::Exception { entry, .. } => {
             let memory = chip.memory(ram);
             let offset = entry.stack.0 as usize & (memory.len() - 1);

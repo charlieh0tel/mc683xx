@@ -466,6 +466,7 @@ use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_examples::firmware;
+use mc683xx_target::function_code::FunctionCode;
 
 /// Its registers' offsets, on the lower byte.
 const VECTOR_REGISTER: u32 = 1;
@@ -481,7 +482,7 @@ struct Interrupter {
 
 impl MappedPeripheral for Interrupter {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, BusError> {
-        if cycle.function_code.is_cpu_space() {
+        if cycle.function_code == FunctionCode::CpuSpace {
             self.acknowledges.push(cycle);
             self.requesting = false;
             return Ok(self.vector.into());
@@ -887,7 +888,7 @@ let edges: Vec<(u8, u8)> = chip
     .collect();
 assert_eq!(edges, [(PE0, 0), (PE0, PE0), (PE0, 0)]);
 // PE1, an input, as PORTE reads it.
-let porte = chip.peek(Address(PORTE), Size::Word, FunctionCode::SUPERVISOR_DATA);
+let porte = chip.peek(Address(PORTE), Size::Word, FunctionCode::SupervisorData);
 assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
 ```
 
@@ -963,7 +964,7 @@ assert_eq!(
     last.outputs,
     PortLevels::new(OC2, OC2)
 );
-let captured = chip.peek(Address(TIC1), Size::Word, FunctionCode::SUPERVISOR_DATA);
+let captured = chip.peek(Address(TIC1), Size::Word, FunctionCode::SupervisorData);
 assert_eq!(u64::from(captured.unwrap()), 3000 / CLOCKS_PER_COUNT);
 assert_eq!(chip.pwm(Channel::A), Output::Level(false));
 assert!(matches!(chip.oc1(), Output::Level(_)));
@@ -1054,7 +1055,7 @@ builder.qspi(Peripheral::default());
 let mut chip = builder.build();
 chip.run_for(Cycles::from_clocks(5000));
 assert_eq!(chip.qspi_peripheral::<Peripheral>().unwrap().0, [(0b0101, 0x34, 8)]);
-let received = chip.peek(Address(RECEIVE_RAM), Size::Word, FunctionCode::SUPERVISOR_DATA);
+let received = chip.peek(Address(RECEIVE_RAM), Size::Word, FunctionCode::SupervisorData);
 assert_eq!(received, Ok(0xef));
 ```
 
@@ -1095,7 +1096,7 @@ chip.set_qspi_slave_select(true);
 let shifted = chip.qspi_slave_shift(0x5a, 8, Cycles::from_clocks(10));
 assert_eq!((shifted.miso, shifted.driven), (0xc3, 0xff));
 chip.set_qspi_slave_select(false);
-let received = chip.peek(Address(RECEIVE_RAM), Size::Word, FunctionCode::SUPERVISOR_DATA);
+let received = chip.peek(Address(RECEIVE_RAM), Size::Word, FunctionCode::SupervisorData);
 assert_eq!(received, Ok(0x5a));
 ```
 
@@ -1292,7 +1293,7 @@ use mc683xx_mc68331::host::AccessError;
 const CSBAR0: u32 = SIM + 0x4c;
 const CSOR0: u32 = SIM + 0x4e;
 const CSBARBT: u32 = SIM + 0x48;
-const SUPERVISOR: FunctionCode = FunctionCode::SUPERVISOR_DATA;
+const SUPERVISOR: FunctionCode = FunctionCode::SupervisorData;
 
 // No prologue: the host maps the RAM, as a debugger would.
 let (builder, ram) = firmware::booting(firmware::rom(&[firmware::BRANCH_TO_SELF]));
@@ -1705,8 +1706,9 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `LowerHex`), `Cycles` (`12 clocks`), `Frequency` (`16777216 Hz`),
   `Vector` (its number), and on a board `Time` (`1000 ps`).  Those
   with a name also parse with `FromStr`, the name printed: `ChipSelect`
-  (`CSBOOT`, `CS0`, any case), `FunctionCode` (its number, `0` to
-  `7`), `InterruptLevel` (`level 7`, as CPU32RM Table 6-1 names it)
+  (`CSBOOT`, `CS0`, any case), `FunctionCode` (its name in kebab case,
+  `supervisor-data`, any case; its number is `u8::from` and
+  `FunctionCode::try_from`), `InterruptLevel` (`level 7`, as CPU32RM Table 6-1 names it)
   and `IrqPin` (`IRQ7`), any case, the snapshot's `state::Layer`
   (`chip`, any case), and on a board the MC68331's `mc68331::Pin`
   (`IRQ7`; a port's pin is

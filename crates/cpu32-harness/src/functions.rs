@@ -809,7 +809,7 @@ mod tests {
                 exception: Exception::Fault(Fault::new(
                     vector,
                     Address(address),
-                    FunctionCode::SUPERVISOR_DATA,
+                    FunctionCode::SupervisorData,
                     Size::Word,
                     cycle,
                 )),

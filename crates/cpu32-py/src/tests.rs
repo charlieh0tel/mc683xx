@@ -108,7 +108,7 @@ fn cycle(address: u32, size: Size) -> BusCycle {
     BusCycle::new(
         Address(address),
         size,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
         Cycles::from_clocks(7),
     )
     .through(ChipSelect::from_index(4).unwrap().into())

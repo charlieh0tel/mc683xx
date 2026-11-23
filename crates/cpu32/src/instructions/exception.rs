@@ -194,7 +194,7 @@ fn replace(
 
 /// A word of the frame at `sp`, at `offset`.
 fn frame_word(core: &mut Core<'_>, sp: Address, offset: u32) -> Result<u16, Exception> {
-    core.read(sp.offset(offset), Size::Word, FunctionCode::SUPERVISOR_DATA)
+    core.read(sp.offset(offset), Size::Word, FunctionCode::SupervisorData)
         .map(|word| word as u16)
 }
 
@@ -211,7 +211,7 @@ fn rte(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
     let pc = Address(core.read(
         sp.offset(frame::PC),
         Size::Long,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
     )?);
     let format_vector = frame_word(core, sp, frame::FORMAT_VECTOR)?;
     let frame_format = format_vector >> format::SHIFT;
@@ -349,7 +349,7 @@ fn restore_bus_error(
         core.access_read(
             sp.offset(offset),
             size,
-            FunctionCode::SUPERVISOR_DATA,
+            FunctionCode::SupervisorData,
             CycleKind::Read,
         )
     };
@@ -522,7 +522,7 @@ mod tests {
 
     impl Bus for TestBus {
         fn read(&mut self, access: BusAccess) -> Result<Read, BusError> {
-            if access.function_code.is_cpu_space() {
+            if access.function_code == FunctionCode::CpuSpace {
                 self.cpu_space.push(access);
                 let word = self.breakpoint.ok_or(BusError)?;
                 return Ok(Read {
@@ -1101,7 +1101,7 @@ mod tests {
         assert_eq!(cpu.registers.pc.0, CODE + 2);
         let access = bus.cpu_space[0];
         assert_eq!(access.address, Address(5 << 2));
-        assert_eq!(access.function_code, FunctionCode::CPU_SPACE);
+        assert_eq!(access.function_code, FunctionCode::CpuSpace);
         assert_eq!(access.size, Size::Word);
     }
 

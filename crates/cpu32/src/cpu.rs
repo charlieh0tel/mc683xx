@@ -456,7 +456,7 @@ impl Cpu {
             core.read(
                 Address(vector.offset()),
                 Size::Long,
-                FunctionCode::SUPERVISOR_PROGRAM,
+                FunctionCode::SupervisorProgram,
             )
             .map(Address)
         };
@@ -2412,7 +2412,7 @@ mod tests {
         let Err(crate::exception::Exception::Fault(fault)) = core.write_unreleased(
             Address(0x0001_0000),
             Size::Word,
-            FunctionCode::SUPERVISOR_DATA,
+            FunctionCode::SupervisorData,
             7,
         ) else {
             panic!("a bus error");
@@ -2513,7 +2513,7 @@ mod tests {
 
     impl Bus for BreakpointResponder {
         fn read(&mut self, access: BusAccess) -> Result<Read, BusError> {
-            if !access.function_code.is_cpu_space() {
+            if access.function_code != FunctionCode::CpuSpace {
                 return Err(BusError);
             }
             self.acknowledges.push(access);
@@ -2570,7 +2570,7 @@ mod tests {
         assert_eq!(bus.acknowledges.len(), 1);
         let acknowledge = bus.acknowledges[0];
         assert_eq!(acknowledge.address, Address(0x1e));
-        assert_eq!(acknowledge.function_code, FunctionCode::CPU_SPACE);
+        assert_eq!(acknowledge.function_code, FunctionCode::CpuSpace);
         assert_eq!(acknowledge.size, Size::Word);
         assert!(!cpu.breakpoint_pending());
         assert_eq!(cpu.registers.pc.0, CODE + 2, "nothing taken");

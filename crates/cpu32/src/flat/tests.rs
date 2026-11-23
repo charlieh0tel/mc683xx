@@ -639,7 +639,7 @@ fn peripheral_at(machine: &mut Machine, address: u32) -> (&mut dyn MappedPeriphe
     let cycle = BusCycle::new(
         Address(address),
         Size::Long,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
         Cycles::ZERO,
     );
     (wired.peripheral.as_mut(), cycle)

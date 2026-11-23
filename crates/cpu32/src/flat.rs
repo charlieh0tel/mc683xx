@@ -48,6 +48,7 @@ use crate::peripheral::BusCycle;
 use crate::peripheral::MappedPeripheral;
 use crate::peripheral::PeripheralId;
 use mc683xx_target::address::Address;
+use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
 #[cfg(test)]
@@ -168,7 +169,7 @@ impl FlatBus {
     /// peripheral is in CPU space: its addresses are not memory's (CPU32RM
     /// 5.3.1).
     fn peripheral(&mut self, access: &BusAccess) -> Option<(&mut dyn MappedPeripheral, BusCycle)> {
-        if access.function_code.is_cpu_space() {
+        if access.function_code == FunctionCode::CpuSpace {
             return None;
         }
         let first = access.address.0;
@@ -235,7 +236,7 @@ impl Bus for FlatBus {
 
 /// Whether `access` is the LPSTOP broadcast (MC68331UM 4.5.4.2).
 fn is_lpstop_broadcast(access: &BusAccess) -> bool {
-    access.function_code.is_cpu_space()
+    access.function_code == FunctionCode::CpuSpace
         && access.address == LPSTOP_BROADCAST
         && access.size == Size::Word
 }

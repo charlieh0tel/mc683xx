@@ -22,6 +22,8 @@ mod chip;
 mod control;
 mod error;
 #[cfg(feature = "python")]
+mod function_code;
+#[cfg(feature = "python")]
 mod gdb;
 #[cfg(feature = "python")]
 mod held;

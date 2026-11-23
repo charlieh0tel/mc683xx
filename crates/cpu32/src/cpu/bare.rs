@@ -115,12 +115,12 @@ pub struct FaultStop {
 }
 
 /// The cause, then the cycle: `bus error: write of 2 bytes at
-/// 0x90000000, fc 5, pc 0x00001000`.
+/// 0x90000000 in supervisor-data, pc 0x00001000`.
 impl fmt::Display for FaultStop {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "{}: {} of {} bytes at {}, fc {}, pc {}",
+            "{}: {} of {} bytes at {} in {}, pc {}",
             self.cause,
             self.cycle,
             self.size.bytes(),

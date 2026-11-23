@@ -50,7 +50,7 @@ impl BusDecode {
                 function_code.is_memory_space() && address.0.wrapping_sub(base.0) < length
             }
             Self::Acknowledge(pin) => {
-                function_code.is_cpu_space() && address == iack_address(pin.level())
+                function_code == FunctionCode::CpuSpace && address == iack_address(pin.level())
             }
         }
     }

@@ -94,11 +94,11 @@ fn a_bus_peripheral_takes_its_window_and_nothing_else() {
     assert_eq!(recorder.writes[0].1, 0xabcd);
     // CPU space at the window's address is not its window
     assert_eq!(
-        cycle_in(&mut chip, FunctionCode::CPU_SPACE, WINDOW, Size::Byte, None),
+        cycle_in(&mut chip, FunctionCode::CpuSpace, WINDOW, Size::Byte, None),
         Err(BusError)
     );
     assert_eq!(
-        chip.peek(Address(WINDOW), Size::Word, FunctionCode::SUPERVISOR_DATA),
+        chip.peek(Address(WINDOW), Size::Word, FunctionCode::SupervisorData),
         Err(AccessError::Unpeekable),
         "a peripheral answers there"
     );
@@ -153,7 +153,7 @@ fn a_bus_peripheral_gives_the_vector_of_its_acknowledge() {
     );
     let reads = &chip.peripheral::<Recorder>(id).unwrap().reads;
     assert_eq!(reads.len(), 1);
-    assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
+    assert_eq!(reads[0].function_code, FunctionCode::CpuSpace);
     assert_eq!(reads[0].address, Address(0xff_fff9));
 }
 

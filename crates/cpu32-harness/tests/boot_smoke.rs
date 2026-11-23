@@ -27,6 +27,7 @@ use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::event::Event;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_target::function_code::FunctionCode;
 
 use common::board;
 
@@ -174,12 +175,12 @@ impl MappedPeripheral for Stub {
             .reads
             .entry((select_of(cycle), cycle.address.0))
             .or_default() += 1;
-        let space = cycle.function_code.get();
+        let space = u8::from(cycle.function_code);
         Ok((0..cycle.size.bytes()).fold(0, |value, byte| {
             let at = cycle.address.0.wrapping_add(byte);
-            let fixed = FIXED_READS
-                .iter()
-                .find(|&&(address, _)| address == at && !cycle.function_code.is_cpu_space());
+            let fixed = FIXED_READS.iter().find(|&&(address, _)| {
+                address == at && cycle.function_code != FunctionCode::CpuSpace
+            });
             let byte = fixed.map_or_else(
                 || {
                     self.bytes
@@ -207,7 +208,7 @@ impl MappedPeripheral for Stub {
         if log.len() < LOG_BYTES {
             log.push(value as u8);
         }
-        let space = cycle.function_code.get();
+        let space = u8::from(cycle.function_code);
         let bytes = cycle.size.bytes();
         for byte in 0..bytes {
             let shift = 8 * (bytes - 1 - byte);
@@ -420,7 +421,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
                 if *write { "write" } else { "read" },
                 cycle.address,
                 cycle.size,
-                cycle.function_code.get(),
+                u8::from(cycle.function_code),
                 cycle.now.clocks()
             );
         }

@@ -1059,7 +1059,7 @@ mod tests {
                 ChipSelect::Boot,
                 0x40,
                 Size::Word,
-                FunctionCode::SUPERVISOR_DATA,
+                FunctionCode::SupervisorData,
                 now,
             )
         };

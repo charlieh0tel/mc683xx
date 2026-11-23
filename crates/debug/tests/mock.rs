@@ -262,7 +262,7 @@ fn a_load_writes_words_in_supervisor_data_verifies_and_sets_rpc() {
     assert!(
         mock.calls
             .iter()
-            .all(|call| call.function_code == FunctionCode::SUPERVISOR_DATA)
+            .all(|call| call.function_code == FunctionCode::SupervisorData)
     );
     assert_eq!(
         report.to_string(),
@@ -296,7 +296,7 @@ fn odd_edges_are_refused_before_any_write_or_written_in_bytes() {
 
     let mut options = LoadOptions::default();
     options.odd_edges = OddEdges::Bytes;
-    options.function_code = FunctionCode::SUPERVISOR_PROGRAM;
+    options.function_code = FunctionCode::SupervisorProgram;
     let report = image.load(&mut mock, &options).unwrap();
     assert_eq!(report.entry, None);
     assert_eq!(mock.rpc, 0, "no entry, RPC alone");
@@ -313,7 +313,7 @@ fn odd_edges_are_refused_before_any_write_or_written_in_bytes() {
     assert!(
         mock.calls
             .iter()
-            .all(|call| call.function_code == FunctionCode::SUPERVISOR_PROGRAM)
+            .all(|call| call.function_code == FunctionCode::SupervisorProgram)
     );
 
     let mut mock = Mock::new();
@@ -420,28 +420,28 @@ fn a_script_writes_and_checks_in_order() {
             Call {
                 write: true,
                 address: Address(0x100),
-                function_code: FunctionCode::SUPERVISOR_DATA,
+                function_code: FunctionCode::SupervisorData,
                 size: Size::Long,
                 bytes: 4,
             },
             Call {
                 write: true,
                 address: Address(0x105),
-                function_code: FunctionCode::USER_DATA,
+                function_code: FunctionCode::UserData,
                 size: Size::Byte,
                 bytes: 1,
             },
             Call {
                 write: false,
                 address: Address(0x102),
-                function_code: FunctionCode::SUPERVISOR_DATA,
+                function_code: FunctionCode::SupervisorData,
                 size: Size::Word,
                 bytes: 2,
             },
             Call {
                 write: false,
                 address: Address(0x100),
-                function_code: FunctionCode::SUPERVISOR_DATA,
+                function_code: FunctionCode::SupervisorData,
                 size: Size::Long,
                 bytes: 4,
             },

@@ -102,6 +102,7 @@ use crate::control::BoardControlView;
 use crate::control::PacingView;
 use crate::error::Error;
 use crate::exceptions;
+use crate::function_code::FunctionCode;
 use crate::gdb;
 use crate::held::Held;
 use crate::hooks::HookIdView;
@@ -234,10 +235,10 @@ impl AccessView {
         self.0.size.bytes()
     }
 
-    /// FC[2:0].
+    /// Its function code.
     #[getter]
-    const fn function_code(&self) -> u8 {
-        self.0.function_code.get()
+    fn function_code(&self) -> FunctionCode {
+        self.0.function_code.into()
     }
 
     /// Whether it is a write, R/W low; set for `wait_states` and

@@ -81,7 +81,7 @@ fn chip(program: &[u16]) -> Mc68331 {
         .unwrap();
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
-    let data = u32::from(FunctionCode::SUPERVISOR_DATA.get());
+    let data = u32::from(u8::from(FunctionCode::SupervisorData));
     chip.write_system_register(SystemRegister::Sfc, data)
         .unwrap();
     chip.write_system_register(SystemRegister::Dfc, data)
@@ -206,7 +206,7 @@ fn memory_through_read_write_dump_and_fill() {
     chip.read_memory(
         Address(RAM),
         Size::Byte,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
         &mut back,
     )
     .unwrap();
@@ -273,7 +273,7 @@ fn call_stacks_rpc_or_answers_berr_and_stays() {
         chip.bus_read(
             Address(RAM + 0xFC),
             Size::Long,
-            FunctionCode::SUPERVISOR_DATA
+            FunctionCode::SupervisorData
         ),
         Ok(START + 2)
     );

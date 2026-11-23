@@ -302,7 +302,7 @@ fn cycle(
     size: Size,
     write: Option<u32>,
 ) -> Result<(u32, u16), BusError> {
-    cycle_in(chip, FunctionCode::SUPERVISOR_DATA, address, size, write)
+    cycle_in(chip, FunctionCode::SupervisorData, address, size, write)
 }
 
 fn write_register(chip: &mut Mc68331, address: u32, value: u16) {
@@ -345,7 +345,7 @@ fn nothing_answers_outside_the_selects() {
         None,
         0,
         Size::Word,
-        FunctionCode::CPU_SPACE,
+        FunctionCode::CpuSpace,
         Cycles::ZERO,
         None,
     );
@@ -354,7 +354,7 @@ fn nothing_answers_outside_the_selects() {
         None,
         0x3_fffe,
         Size::Word,
-        FunctionCode::CPU_SPACE,
+        FunctionCode::CpuSpace,
         Cycles::ZERO,
         Some(5),
     );
@@ -408,7 +408,7 @@ fn user_mode_sim_cycles_go_external() {
         Some(&mut cpu.memory),
         SIM + 0x04,
         Size::Word,
-        FunctionCode::USER_DATA,
+        FunctionCode::UserData,
         Cycles::ZERO,
         None,
     );
@@ -601,7 +601,7 @@ fn wired_timing() {
     assert_eq!(cycle(chip, 0x0f_0000, Size::Word, None), Ok((0, 7)));
     // RAM is supervisor space only
     assert_eq!(
-        cycle_in(chip, FunctionCode::USER_DATA, 0x10_0000, Size::Word, None),
+        cycle_in(chip, FunctionCode::UserData, 0x10_0000, Size::Word, None),
         Err(BusError)
     );
     // ROM is read only on CSBOOT, so a write there goes to CS6
@@ -632,7 +632,7 @@ fn the_duart_is_vectored_through_cs10() {
     assert_eq!(acknowledge.select, on(10));
     assert_eq!(acknowledge.address, Address(0xff_fff3));
     assert_eq!(acknowledge.size, Size::Byte);
-    assert_eq!(acknowledge.function_code, FunctionCode::CPU_SPACE);
+    assert_eq!(acknowledge.function_code, FunctionCode::CpuSpace);
     // PFPAR clear makes IRQ1 a port pin
     write_register(chip, SIM + 0x1e, 0x00fd);
     assert_eq!(chip.board.level(), InterruptLevel::NONE);
@@ -667,7 +667,7 @@ fn another_board() {
     write_register(&mut chip, SIM + 0x50, 0x2003);
     write_register(&mut chip, SIM + 0x52, 0x7b90);
     let user = |chip: &mut Mc68331, write| {
-        cycle_in(chip, FunctionCode::USER_DATA, 0x20_8002, Size::Word, write)
+        cycle_in(chip, FunctionCode::UserData, 0x20_8002, Size::Word, write)
     };
     assert_eq!(user(&mut chip, Some(0xbeef)), Ok((0, 2)));
     assert_eq!(user(&mut chip, None), Ok((0xbeef, 2)));
@@ -1881,7 +1881,7 @@ fn tcnt(chip: &Mc68331) -> u32 {
     chip.peek(
         Address(GPT + 0x0a),
         Size::Word,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
     )
     .unwrap()
 }
@@ -2089,7 +2089,7 @@ impl Duart {
 
 impl MappedPeripheral for Duart {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, BusError> {
-        if cycle.function_code.is_cpu_space() {
+        if cycle.function_code == FunctionCode::CpuSpace {
             self.acknowledges.push(cycle);
             return Ok(self.vector.into());
         }
@@ -2106,7 +2106,7 @@ impl MappedPeripheral for Duart {
     }
 
     fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
-        Some(if cycle.function_code.is_cpu_space() {
+        Some(if cycle.function_code == FunctionCode::CpuSpace {
             self.wait
         } else {
             0
@@ -2219,7 +2219,7 @@ fn a_duart_vectors_its_interrupt_through_a_chip_select() {
     // CPU space type $F, level 2 on ADDR[3:1] (MC68331UM 4.5.4)
     assert_eq!(acknowledge.address, Address(0xff_fff5));
     assert_eq!(acknowledge.size, Size::Byte);
-    assert_eq!(acknowledge.function_code, FunctionCode::CPU_SPACE);
+    assert_eq!(acknowledge.function_code, FunctionCode::CpuSpace);
 }
 
 #[test]
@@ -2511,7 +2511,7 @@ fn a_write_writes_rom_and_refuses_what_the_core_does_not_serve() {
     let (mut chip, _) = booting(&[NOP, NOP]);
     chip.write(Address(START), &[0x4e, 0x75]).unwrap();
     assert_eq!(
-        chip.peek(Address(START), Size::Word, FunctionCode::SUPERVISOR_DATA),
+        chip.peek(Address(START), Size::Word, FunctionCode::SupervisorData),
         Ok(0x4e75)
     );
     // the SIM's registers are the chip's, not memory the core serves
@@ -2597,7 +2597,7 @@ fn a_write_to_a_page_reading_rom_and_writing_ram_patches_the_rom() {
     assert_eq!(chip.memory(rom)[offset as usize..][..2], [0x4e, 0x75]);
     assert_eq!(chip.memory(ram)[offset as usize..][..2], [0, 0]);
     assert_eq!(
-        chip.peek(Address(at), Size::Word, FunctionCode::SUPERVISOR_DATA),
+        chip.peek(Address(at), Size::Word, FunctionCode::SupervisorData),
         Ok(0x4e75)
     );
     // the CPU's write still goes to the RAM
@@ -2660,7 +2660,7 @@ fn a_read_and_a_write_cross_pages() {
     assert_eq!(read, bytes);
     let last = START + 3 * PAGE_BYTES - 2;
     assert_eq!(
-        chip.peek(Address(last), Size::Word, FunctionCode::SUPERVISOR_DATA),
+        chip.peek(Address(last), Size::Word, FunctionCode::SupervisorData),
         Ok(u32::from(u16::from_be_bytes([
             bytes[bytes.len() - 2],
             bytes[bytes.len() - 1]
@@ -3676,7 +3676,7 @@ fn new_code_runs_however_the_host_writes_it() {
     chip.bus_write(
         Address(START),
         Size::Word,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
         moveq_to_d0(2).into(),
     )
     .unwrap();

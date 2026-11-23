@@ -44,7 +44,7 @@ pub struct LoadOptions {
 impl Default for LoadOptions {
     fn default() -> Self {
         Self {
-            function_code: FunctionCode::SUPERVISOR_DATA,
+            function_code: FunctionCode::SupervisorData,
             odd_edges: OddEdges::Refuse,
             verify: true,
         }

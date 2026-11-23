@@ -41,8 +41,10 @@ use pyo3::types::PyAnyMethods;
 use pyo3::types::PyBytes;
 
 use crate::exceptions;
+use crate::function_code::FunctionCode;
 use crate::held::Held;
 use crate::held::Holdings;
+use crate::python::repr;
 
 /// Whose run a peripheral's exception stops.
 #[derive(Debug, Clone)]
@@ -232,10 +234,10 @@ impl BusCycleView {
         self.0.size.bytes()
     }
 
-    /// FC[2:0].
+    /// Its function code.
     #[getter]
-    const fn function_code(&self) -> u8 {
-        self.0.function_code.get()
+    fn function_code(&self) -> FunctionCode {
+        self.0.function_code.into()
     }
 
     /// Whether it is a write, R/W low; set for `wait_states` and
@@ -251,18 +253,18 @@ impl BusCycleView {
         self.0.now.clocks()
     }
 
-    fn __repr__(&self) -> String {
-        format!(
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
             "BusCycle(select={}, address={:#010x}, size={}, function_code={}, write={}, now={}, stacking={})",
             self.select()
                 .map_or_else(|| "None".to_owned(), |select| format!("{select:?}")),
             self.address(),
             self.size(),
-            self.function_code(),
+            repr(py, self.function_code())?,
             if self.write() { "True" } else { "False" },
             self.now(),
             self.stacking()
-        )
+        ))
     }
 }
 

@@ -648,7 +648,7 @@ impl Board {
         address: u32,
         function_code: FunctionCode,
     ) -> Option<FixedMemory> {
-        if function_code.is_cpu_space() {
+        if function_code == FunctionCode::CpuSpace {
             return None;
         }
         self.fixed
@@ -806,7 +806,7 @@ impl Board {
         write: Option<u32>,
     ) -> Ended {
         self.level_stale = true;
-        if function_code.is_cpu_space() {
+        if function_code == FunctionCode::CpuSpace {
             if let Some(value) = write
                 && address == LPSTOP_BROADCAST.0
             {
@@ -1335,7 +1335,7 @@ impl Board {
         let address = iack_address(level);
         let request = DecodeRequest {
             address: address.0,
-            function_code: FunctionCode::CPU_SPACE,
+            function_code: FunctionCode::CpuSpace,
             write: false,
             size: Size::Byte,
         };
@@ -1352,7 +1352,7 @@ impl Board {
             None,
             address.0,
             Size::Byte,
-            FunctionCode::CPU_SPACE,
+            FunctionCode::CpuSpace,
             now,
             None,
         ) {
@@ -1397,8 +1397,8 @@ impl Board {
                 continue;
             }
             for (space, function_code) in [
-                (Space::User, FunctionCode::USER_DATA),
-                (Space::Supervisor, FunctionCode::SUPERVISOR_DATA),
+                (Space::User, FunctionCode::UserData),
+                (Space::Supervisor, FunctionCode::SupervisorData),
             ] {
                 let read = self.served(address, function_code, false);
                 let write = self

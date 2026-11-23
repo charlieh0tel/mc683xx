@@ -795,7 +795,7 @@ chip beside `Mc68331`.
   `cpu::Run`, its `Stop` a class per variant as Rust's (`Stop.Budget()`,
   `Stop.Halted(halt)`, `Stop.Hook(hook)`, ...),
   `run_until(target)`, `bus_read`, `bus_write`, `peek` (`size` in
-  bytes, `function_code` 5 by default; `BusError`, `UnpeekableError`),
+  bytes, `function_code` a `FunctionCode`, `SUPERVISOR_DATA` by default; `BusError`, `UnpeekableError`),
   `reset()`, `reset_for(ResetCause)`,
   `now`, `halted`, `exception_taken` (a vector), `read_register`,
   `write_register`, `registers()`, `memory`, `read_memory`,
@@ -863,7 +863,7 @@ chip beside `Mc68331`.
   its `__init__.py`): each declares its required methods, its
   docstring the optional ones, as `typing.Protocol` has no optional
   member (decided 2026-11-21).  A `BusCycle` carries `select`, `address`, `size`
-  (bytes), `function_code` and `now`.  A read's value must fit the
+  (bytes), `function_code` (a `FunctionCode`) and `now`.  A read's value must fit the
   cycle.
 - **Errors:** raising `mc683xx.BusError` in `read` or `write` asserts
   BERR.  Any other exception from a peripheral (a `KeyboardInterrupt`
@@ -2045,7 +2045,7 @@ parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
   times over and ask gigabytes of the host (decided 2026-11-02).
   S-records cannot: each data byte is two characters of the text.
 - **Load:** `Image::load(target, options)`: word writes in supervisor
-  data space (FC 5) unless the options name another; a segment's odd
+  data space unless the options name another; a segment's odd
   start or end byte refused before anything is written unless the
   options say byte writes (CPU32RM 6.2.3: a word at an odd address is
   an address error); calls of at most 256 bytes, so a failure names a
@@ -2057,16 +2057,18 @@ parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
   gdb's `load` leaves it.  `LoadReport` gives the segments, the bytes,
   the entry and whether it verified.
 - **Init scripts:** `script::Script`, one command a line, `#`
-  comments and blank lines: `write_memory.b|w|l ADDR VALUE [fc N]`,
+  comments and blank lines: `write_memory.b|w|l ADDR VALUE [fc FC]`,
   `write_register NAME VALUE`, `write_system_register NAME VALUE`
   (names as the target crate's `FromStr` takes them),
-  `read_memory.b|w|l ADDR expect V [mask M] [fc N]` and
-  `poll_memory.b|w|l ADDR mask M expect V timeout_ms N [fc N]`; the
+  `read_memory.b|w|l ADDR expect V [mask M] [fc FC]` and
+  `poll_memory.b|w|l ADDR mask M expect V timeout_ms N [fc FC]`; the
   clauses in any order, each once; numbers as `parse_integer` takes
-  them.
+  them; a function code by name (`FunctionCode`'s `FromStr`) or
+  number, printed by name.
   Parsing refuses what cannot work: a value wider than its access, an
   expected value outside its mask, a word or long access at an odd
-  address, a function code past 7.  A parse error carries its line; a
+  address, a word that names no function code and is no number from
+  0 to 7.  A parse error carries its line; a
   run error its line, the command (printed back as a script writes
   it) and the target's error, the value read or the timeout.  A
   script prints as its commands, a line each, which parse back to
@@ -2758,6 +2760,11 @@ then they stay our choices.
   `Bus` with that FC.  For the chip-select SPACE match, FC 0-3 count
   as user and 4-6 as supervisor, by FC2.  The page tables serve only
   FC 1, 2, 5 and 6.
+- **SFC and DFC before a program writes them**: reset leaves them
+  undefined (CPU32RM 6.2.1 lists what it sets, and they are not
+  among them), so a new CPU (`Registers::default()`) holds code 0
+  (`FunctionCode::Reserved0`) in both, and a reset leaves them as
+  they were.
 - **MOVES second word, bits 10:0** (CPU32RM 4.4, MOVES, prints them
   zero): ignored, as Musashi's 68020 does.
 - **`stop` with S clear in its word**: loaded as given, as STOP's
@@ -3463,7 +3470,7 @@ checks move onto real code hooks.
 | `Cpu32Target`: a memory call names its function code; halting reports the entry source; `halted` polls; `step` stops at the next boundary | Decided 2026-10-31 with the BDM pod; `step` 2026-11-01.  A named space leaves no hidden SFC/DFC state between calls for a debugger to forget, and an implementation over READ and WRITE restores the program's SFC and DFC before GO.  ATEMP holds the entry source only until the next command (CPU32RM 7.2.3), so halting returns it.  A poll, not a blocking wait, as `no_std` firmware has no clock to wait on.  `step` runs one instruction, or takes one exception, and stops before any handler's first instruction, so a debugger over it reads RPC rather than assuming one instruction; the pod meets that on silicon by stepping with T1 and pointing VBR, for the step, at a RAM table whose every vector is a BGND stub.  `Error: core::error::Error + From<Unsupported> + 'static` (2026-11-21, with the pod), so a host carries either target's errors as its own, as a `source()` too.  After 1.0 the trait gains a method only with a default body that returns `Err(Unsupported { what }.into())`: an implementation written before it still builds, and that call fails cleanly.  The pod names `reset_running`, `call`, `hold` and `resync` as candidates. |
 | A memory access's arguments in one order: address, size, function code | Decided 2026-11-21 (0.8.0).  `Mc68331::bus_read`, `bus_write` and `peek`, the `BusAccess`, `BusCycle` and `PeripheralAccess` constructors, and `Cpu32Target::read_memory` and `write_memory` all take `(address, size, function_code, ..)`, so a call reads the same whichever layer it reaches and two same-typed neighbors cannot be swapped unnoticed by habit.  The order is a bus cycle's own: where, how wide, then which space, the function code being the qualifier a debugger most often leaves at supervisor data.  gdb's `Target` memory calls take no size (the stub sizes them), so `(address, function_code, ..)` is the same order with size dropped. |
 | No `From` between a unit-bearing newtype and its number (`Cycles`, `Time`, `Span`, `Frequency`); named constructors and accessors only | Decided 2026-11-21 (0.8.0, round 5).  `Cycles::from(5)` or `u64::from(span)` reads as a number with no unit, and an `.into()` converts silently where a clock count, a picosecond count and hertz are all `u64`s; `Cycles::from_clocks(5)` and `span.picos()` say which.  Bit-pattern newtypes (`Address`, `Vector`) keep `From` both ways, every value valid. |
-| Unit-bearing newtypes keep private fields; bit-pattern newtypes whose every value is valid have public ones | Decided 2026-11-21 (0.8.0, round 5).  A quantity (`Cycles`, `Frequency`, `Time`, `Span`) is reached through constructors and accessors that name its unit, so its field is private.  A bit pattern (`Address`, `Vector`) is a value read off the lines, with no unit and every value valid, so `Address(0x400)` and `vector.0` read as the hardware does and its field is public.  One with values that are not valid (`FunctionCode`, three bits; `InterruptLevel`, 0 to 7) keeps its field private behind a checked constructor. |
+| Unit-bearing newtypes keep private fields; bit-pattern newtypes whose every value is valid have public ones | Decided 2026-11-21 (0.8.0, round 5).  A quantity (`Cycles`, `Frequency`, `Time`, `Span`) is reached through constructors and accessors that name its unit, so its field is private.  A bit pattern (`Address`, `Vector`) is a value read off the lines, with no unit and every value valid, so `Address(0x400)` and `vector.0` read as the hardware does and its field is public.  One with values that are not valid (`InterruptLevel`, 0 to 7) keeps its field private behind a checked constructor; `FunctionCode`, eight codes each with a meaning, is an enum (0.9.0). |
 | One number syntax for what a person types: `mc683xx_target::integer::parse_integer` | Decided 2026-11-22 (0.9.0).  Init scripts, gdb `monitor` commands, the runner's options and the numbers in board-file strings all take decimal, `0x` hexadecimal or `0b` binary, the prefix in lower case, `_` between digits, no sign, no `$`, no decimal leading zero, so a number that works in one works in all and `010` is never octal by surprise.  One `no_std` function in the target crate, generic over the result (`TryFrom<u32>`), so a pod's firmware takes the same text; its error is `Invalid` or `TooLarge`, without the text, as the crate has no `alloc`.  A board file's TOML integers keep TOML's own syntax (`0o`, `+`), which the TOML parser reads before the board sees it; gdb packets and S-records keep theirs. |
 | Loading and init scripts in `mc683xx-debug`, over `Cpu32Target` | Decided 2026-11-01 with the BDM pod's maintainer.  One loader for silicon and the emulator, tested on the chip; a crate of its own, on `mc683xx-target` alone, so a pod host links it without the emulator.  Word writes, verify by default, RPC from the entry and no SSP inference, an init script with line-numbered errors; host time in `poll_memory` only. |
 | `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels) stay exhaustive, so a match on one needs no wildcard; the Python bindings' conversions of the others never panic: a run's end or halt they do not know raises `mc683xx.RunError` naming it, any other value (a fault cause among them) `NotImplementedError` naming its kind, but an event is never refused or dropped: one they cannot convert is `Event.Unknown(now, name)`, its Rust `Display`, and an unknown reset cause in a reset is `ResetCause.UNKNOWN`, so `take_events` always takes the whole queue (decided 2026-11-21, round 5); Rust tests (`every_run_end_maps_or_names_itself`, `every_value_maps`) list every variant, so a variant added to one is added there and mapped (decided 2026-11-21). |

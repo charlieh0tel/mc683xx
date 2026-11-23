@@ -116,7 +116,7 @@ impl BusCycle {
 /// On a chip it is wired to chip-select pins, and the chip times the
 /// cycle from the select's option register (SIMRM 7.10.3); an interrupt
 /// acknowledge cycle reaches it as a CPU-space byte read
-/// ([`FunctionCode::CPU_SPACE`]) on a select programmed for it (SIMRM
+/// ([`FunctionCode::CpuSpace`]) on a select programmed for it (SIMRM
 /// 7.8.1), and the vector is the value it returns.  On the bare
 /// machine it covers a byte range and sees `read` and `write` alone:
 /// the machine has no DSACK, no IRQ wiring and no RESET pin, so the

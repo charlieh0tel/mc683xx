@@ -44,6 +44,7 @@ __all__ = [
     "Halt",
     "Entry",
     "ResetCause",
+    "FunctionCode",
     "Event",
     "Ending",
     "Frame",
@@ -299,6 +300,22 @@ class ResetCause:
     def __int__(self) -> int: ...
 
 @final
+class FunctionCode:
+    """The function code FC[2:0] a bus cycle carries, naming its address
+    space (CPU32RM 5.3, Table 5-1).  `str()` is its Rust name,
+    `supervisor-data`."""
+
+    RESERVED0: ClassVar[FunctionCode]
+    USER_DATA: ClassVar[FunctionCode]
+    USER_PROGRAM: ClassVar[FunctionCode]
+    RESERVED3: ClassVar[FunctionCode]
+    RESERVED4: ClassVar[FunctionCode]
+    SUPERVISOR_DATA: ClassVar[FunctionCode]
+    SUPERVISOR_PROGRAM: ClassVar[FunctionCode]
+    CPU_SPACE: ClassVar[FunctionCode]
+    def __hash__(self) -> int: ...
+
+@final
 class Space:
     """An address space whose pages `Mc68331.protect` sets."""
 
@@ -514,8 +531,8 @@ class BusCycle:
         """Bytes in the cycle: 1 or 2, or 4 on a bare `Machine` for a long the
         peripheral takes whole."""
     @property
-    def function_code(self) -> int:
-        """FC[2:0]."""
+    def function_code(self) -> FunctionCode:
+        """Its function code."""
     @property
     def write(self) -> bool:
         """Whether it is a write, R/W low; set for `wait_states` and
@@ -587,7 +604,7 @@ class MemoryAccess:
     @property
     def size(self) -> int: ...
     @property
-    def function_code(self) -> int: ...
+    def function_code(self) -> FunctionCode: ...
     @property
     def value(self) -> int: ...
     @property
@@ -607,7 +624,7 @@ class InvalidAccess:
     @property
     def size(self) -> int: ...
     @property
-    def function_code(self) -> int: ...
+    def function_code(self) -> FunctionCode: ...
     @property
     def cycle(self) -> CycleKind: ...
     @property
@@ -745,7 +762,7 @@ class Event:
             now: int,
             address: int,
             size: int,
-            function_code: int,
+            function_code: FunctionCode,
             write: bool,
             value: int | None,
             bus_error: bool,
@@ -757,7 +774,7 @@ class Event:
         @property
         def size(self) -> int: ...
         @property
-        def function_code(self) -> int: ...
+        def function_code(self) -> FunctionCode: ...
         @property
         def write(self) -> bool: ...
         @property
@@ -856,9 +873,9 @@ class Mc68331:
     def serve_gdb(
         self, address: str = ..., ready: Callable[[int], object] | None = None
     ) -> Ending: ...
-    def bus_read(self, address: int, size: int, function_code: int = 5) -> int: ...
-    def bus_write(self, address: int, size: int, value: int, function_code: int = 5) -> None: ...
-    def peek(self, address: int, size: int, function_code: int = 5) -> int: ...
+    def bus_read(self, address: int, size: int, function_code: FunctionCode = ...) -> int: ...
+    def bus_write(self, address: int, size: int, value: int, function_code: FunctionCode = ...) -> None: ...
+    def peek(self, address: int, size: int, function_code: FunctionCode = ...) -> int: ...
     def reset(self) -> None: ...
     def reset_for(self, cause: ResetCause) -> None: ...
     def reset_with_breakpoint(self) -> None: ...
@@ -942,9 +959,9 @@ class BoardChip:
     """A board's chip, as `Board.chip` gives it: the `Mc68331` methods
     that read or hook the chip the board runs."""
 
-    def bus_read(self, address: int, size: int, function_code: int = 5) -> int: ...
-    def bus_write(self, address: int, size: int, value: int, function_code: int = 5) -> None: ...
-    def peek(self, address: int, size: int, function_code: int = 5) -> int: ...
+    def bus_read(self, address: int, size: int, function_code: FunctionCode = ...) -> int: ...
+    def bus_write(self, address: int, size: int, value: int, function_code: FunctionCode = ...) -> None: ...
+    def peek(self, address: int, size: int, function_code: FunctionCode = ...) -> int: ...
     @property
     def now(self) -> int: ...
     @property
@@ -1014,7 +1031,7 @@ class FaultStop:
     @property
     def size(self) -> int: ...
     @property
-    def function_code(self) -> int: ...
+    def function_code(self) -> FunctionCode: ...
     @property
     def pc(self) -> int: ...
     @property
@@ -1241,8 +1258,8 @@ class PeripheralAccess:
     def size(self) -> int:
         """Bytes: 1 or 2."""
     @property
-    def function_code(self) -> int:
-        """FC[2:0]."""
+    def function_code(self) -> FunctionCode:
+        """Its function code."""
     @property
     def write(self) -> bool:
         """Whether it is a write, R/W low; set for `wait_states` and

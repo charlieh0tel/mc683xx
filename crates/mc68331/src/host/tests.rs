@@ -84,7 +84,7 @@ const STOP: u16 = 0x4e72;
 /// SR: supervisor, every interrupt level taken.
 const UNMASKED: u16 = 0x2000;
 
-const SUPERVISOR: FunctionCode = FunctionCode::SUPERVISOR_DATA;
+const SUPERVISOR: FunctionCode = FunctionCode::SupervisorData;
 
 /// A peripheral that records its cycles and answers `value`.
 #[derive(Debug, Default)]
@@ -356,7 +356,7 @@ fn the_host_sees_errors_by_kind() {
     );
     // a supervisor-only SIM register from user space goes external,
     // where nothing answers now (QSMRM 3.3; PLAN.md)
-    let user = FunctionCode::USER_DATA;
+    let user = FunctionCode::UserData;
     let sypcr = AccessError::Unmapped(Address(SYPCR));
     assert_eq!(chip.peek(Address(SYPCR), Size::Word, user), Err(sypcr));
     assert_eq!(chip.bus_read(Address(SYPCR), Size::Word, user), Err(sypcr));

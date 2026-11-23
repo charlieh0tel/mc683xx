@@ -818,7 +818,7 @@ mod tests {
                 ChipSelect::Boot,
                 address,
                 size,
-                FunctionCode::SUPERVISOR_DATA,
+                FunctionCode::SupervisorData,
                 Time::ZERO,
             )
         };
@@ -970,7 +970,7 @@ mod tests {
                     ChipSelect::Boot,
                     0,
                     Size::Byte,
-                    FunctionCode::SUPERVISOR_DATA,
+                    FunctionCode::SupervisorData,
                     Time::from_picos(1),
                 ),
                 1,
@@ -1002,7 +1002,7 @@ mod tests {
                     ChipSelect::Boot,
                     0,
                     Size::Byte,
-                    FunctionCode::SUPERVISOR_DATA,
+                    FunctionCode::SupervisorData,
                     Time::from_picos(1),
                 ),
                 1,

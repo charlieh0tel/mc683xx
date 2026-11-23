@@ -166,7 +166,7 @@ impl DecodeRequest {
     /// The interrupt level an interrupt acknowledge cycle carries, if
     /// it is one.
     const fn acknowledge_level(self) -> Option<u8> {
-        if self.function_code.is_cpu_space()
+        if matches!(self.function_code, FunctionCode::CpuSpace)
             && self.address >> CPU_SPACE_TYPE_SHIFT & CPU_SPACE_TYPE_MASK == CPU_SPACE_IACK
         {
             Some((self.address >> IACK_LEVEL_SHIFT & IACK_LEVEL_MASK) as u8)
@@ -502,7 +502,7 @@ impl ChipSelects {
             return None;
         }
         let space = registers.field(CSOR_SPACE_SHIFT);
-        let space_matches = if request.function_code.is_cpu_space() {
+        let space_matches = if request.function_code == FunctionCode::CpuSpace {
             space == SPACE_CPU
         } else if request.function_code.is_supervisor() {
             space & SPACE_SUPERVISOR != 0
@@ -610,7 +610,7 @@ mod tests {
     fn read(address: u32, size: Size) -> DecodeRequest {
         DecodeRequest {
             address,
-            function_code: FunctionCode::SUPERVISOR_PROGRAM,
+            function_code: FunctionCode::SupervisorProgram,
             write: false,
             size,
         }
@@ -644,12 +644,12 @@ mod tests {
         assert!(selected(&selects, read(0xf_fffe, Size::Word)).len() == 1);
         assert!(selected(&selects, read(0x10_0000, Size::Word)).is_empty());
         let user = DecodeRequest {
-            function_code: FunctionCode::USER_DATA,
+            function_code: FunctionCode::UserData,
             ..read(0x100, Size::Byte)
         };
         assert_eq!(selected(&selects, user), [ChipSelect::Boot]);
         let cpu = DecodeRequest {
-            function_code: FunctionCode::CPU_SPACE,
+            function_code: FunctionCode::CpuSpace,
             ..read(0x100, Size::Byte)
         };
         assert!(selected(&selects, cpu).is_empty());
@@ -717,7 +717,7 @@ mod tests {
         selects.write_base(cs(10), 0xfff8);
         selects.write_option(cs(10), 0x2bc4);
         let acknowledge = |level: u32| DecodeRequest {
-            function_code: FunctionCode::CPU_SPACE,
+            function_code: FunctionCode::CpuSpace,
             ..read(0xff_fff1 | level << 1, Size::Byte)
         };
         let found: Vec<_> = selects.matches(acknowledge(2)).collect();
@@ -753,7 +753,7 @@ mod tests {
         selects.write_option(cs(1), 0x6810);
         assert!(selected(&selects, read(0x20_0000, Size::Word)).is_empty());
         let user = DecodeRequest {
-            function_code: FunctionCode::USER_DATA,
+            function_code: FunctionCode::UserData,
             ..read(0x20_0000, Size::Word)
         };
         assert_eq!(selected(&selects, user), [cs(1)]);
@@ -798,7 +798,7 @@ mod tests {
             for write in [false, true] {
                 let request = DecodeRequest {
                     address,
-                    function_code: FunctionCode::SUPERVISOR_DATA,
+                    function_code: FunctionCode::SupervisorData,
                     write,
                     size: Size::Word,
                 };

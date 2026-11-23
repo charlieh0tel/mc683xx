@@ -157,8 +157,8 @@ impl Mc68331 {
             SystemRegister::Sr => u32::from(registers.sr()),
             SystemRegister::Usp => registers.usp.0,
             SystemRegister::Ssp => registers.ssp.0,
-            SystemRegister::Sfc => u32::from(registers.sfc.get()),
-            SystemRegister::Dfc => u32::from(registers.dfc.get()),
+            SystemRegister::Sfc => u32::from(u8::from(registers.sfc)),
+            SystemRegister::Dfc => u32::from(u8::from(registers.dfc)),
         }
     }
 
@@ -208,9 +208,9 @@ impl Mc68331 {
     pub fn call(&mut self, address: Address) -> Result<(), TargetError> {
         let supervisor = self.read_system_register(SystemRegister::Sr)? & u32::from(status::S) != 0;
         let space = if supervisor {
-            FunctionCode::SUPERVISOR_DATA
+            FunctionCode::SupervisorData
         } else {
-            FunctionCode::USER_DATA
+            FunctionCode::UserData
         };
         let sp = self.read_register(Register::A7)?.wrapping_sub(4);
         let rpc = self.read_system_register(SystemRegister::Rpc)?;

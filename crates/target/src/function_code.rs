@@ -4,24 +4,38 @@ use core::fmt;
 use core::str::FromStr;
 
 /// The function code FC\[2:0\] a bus cycle carries, naming its address
-/// space (CPU32RM 5.3, Table 5-1).  Codes 0, 3 and 4 are reserved;
+/// space (CPU32RM 5.3, Table 5-1), each variant's value its code.
+/// Codes 0, 3 and 4 are reserved (0 and 4 to Motorola, 3 to the user);
 /// `moves` can still produce them through SFC and DFC.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize))]
-pub struct FunctionCode(u8);
-
-/// A snapshot's function code, refused beyond FC\[2:0\].
-#[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for FunctionCode {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let bits = u8::deserialize(deserializer)?;
-        Self::new(bits).ok_or_else(|| {
-            serde::de::Error::invalid_value(
-                serde::de::Unexpected::Unsigned(bits.into()),
-                &"a function code, 0 to 7",
-            )
-        })
-    }
+///
+/// It converts to and from its code with `u8::from` and
+/// `FunctionCode::try_from`, and prints as its name, `supervisor-data`,
+/// which [`FromStr`] takes back in any case.  A snapshot holds the code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(into = "u8", try_from = "u8")
+)]
+#[repr(u8)]
+pub enum FunctionCode {
+    /// Code 0, reserved (Motorola).
+    Reserved0 = 0,
+    /// User data space.
+    UserData = 1,
+    /// User program space.
+    UserProgram = 2,
+    /// Code 3, reserved (user definition).
+    Reserved3 = 3,
+    /// Code 4, reserved (Motorola).
+    Reserved4 = 4,
+    /// Supervisor data space.
+    SupervisorData = 5,
+    /// Supervisor program space.
+    SupervisorProgram = 6,
+    /// CPU space: interrupt acknowledge, breakpoint acknowledge, the
+    /// LPSTOP broadcast (CPU32RM 5.3.1).
+    CpuSpace = 7,
 }
 
 impl FunctionCode {
@@ -30,51 +44,29 @@ impl FunctionCode {
     /// FC2: set in the supervisor spaces and CPU space.
     const SUPERVISOR: u8 = 0b100;
 
-    /// User data space.
-    pub const USER_DATA: Self = Self(1);
-    /// User program space.
-    pub const USER_PROGRAM: Self = Self(2);
-    /// Supervisor data space.
-    pub const SUPERVISOR_DATA: Self = Self(5);
-    /// Supervisor program space.
-    pub const SUPERVISOR_PROGRAM: Self = Self(6);
-    /// CPU space: interrupt acknowledge, breakpoint acknowledge, the
-    /// LPSTOP broadcast (CPU32RM 5.3.1).
-    pub const CPU_SPACE: Self = Self(7);
-
-    /// The function code FC\[2:0\] `bits` give, if they are one: 0 to 7.
-    #[must_use]
-    pub const fn new(bits: u8) -> Option<Self> {
-        if bits & !Self::MASK == 0 {
-            Some(Self(bits))
-        } else {
-            None
-        }
-    }
+    /// Every function code, in code order: `ALL[n] as u8 == n`.
+    pub const ALL: [Self; 8] = [
+        Self::Reserved0,
+        Self::UserData,
+        Self::UserProgram,
+        Self::Reserved3,
+        Self::Reserved4,
+        Self::SupervisorData,
+        Self::SupervisorProgram,
+        Self::CpuSpace,
+    ];
 
     /// The function code in the low three bits of `value`; the rest are
     /// ignored, as SFC and DFC ignore them (CPU32RM 2.3.1.3).
     #[must_use]
     pub const fn from_low_bits(value: u32) -> Self {
-        Self(value as u8 & Self::MASK)
-    }
-
-    /// FC\[2:0\], 0 to 7.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
+        Self::ALL[(value & Self::MASK as u32) as usize]
     }
 
     /// Whether FC2 is set: a supervisor space, or CPU space.
     #[must_use]
     pub const fn is_supervisor(self) -> bool {
-        self.0 & Self::SUPERVISOR != 0
-    }
-
-    /// Whether this is CPU space.
-    #[must_use]
-    pub const fn is_cpu_space(self) -> bool {
-        self.0 == Self::CPU_SPACE.0
+        self as u8 & Self::SUPERVISOR != 0
     }
 
     /// Whether this is one of the four memory spaces: user and
@@ -87,54 +79,74 @@ impl FunctionCode {
     pub const fn is_memory_space(self) -> bool {
         matches!(
             self,
-            Self::USER_DATA | Self::USER_PROGRAM | Self::SUPERVISOR_DATA | Self::SUPERVISOR_PROGRAM
+            Self::UserData | Self::UserProgram | Self::SupervisorData | Self::SupervisorProgram
         )
     }
-}
 
-/// FC\[2:0\] in decimal, as CPU32RM Table 5-1 numbers the spaces.
-impl fmt::Display for FunctionCode {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}", self.0)
+    /// Its name, in kebab case.
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Reserved0 => "reserved0",
+            Self::UserData => "user-data",
+            Self::UserProgram => "user-program",
+            Self::Reserved3 => "reserved3",
+            Self::Reserved4 => "reserved4",
+            Self::SupervisorData => "supervisor-data",
+            Self::SupervisorProgram => "supervisor-program",
+            Self::CpuSpace => "cpu-space",
+        }
     }
 }
 
-/// The function code its number, as `Display` writes it, names: `0`
-/// to `7`.
+/// `user-data`, `supervisor-program`, `cpu-space`, `reserved3` and so
+/// on.
+impl fmt::Display for FunctionCode {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.name())
+    }
+}
+
+/// The function code [`FunctionCode`]'s `Display` names, in any case.
+/// A number is not a name: a caller that takes one too parses it
+/// with [`parse_integer`](crate::integer::parse_integer) and
+/// [`FunctionCode::try_from`].
 impl FromStr for FunctionCode {
     type Err = ParseFunctionCodeError;
 
-    fn from_str(text: &str) -> Result<Self, ParseFunctionCodeError> {
-        match text.as_bytes() {
-            [digit @ b'0'..=b'7'] => Ok(Self(digit - b'0')),
-            _ => Err(ParseFunctionCodeError {}),
-        }
+    fn from_str(name: &str) -> Result<Self, ParseFunctionCodeError> {
+        Self::ALL
+            .into_iter()
+            .find(|candidate| candidate.name().eq_ignore_ascii_case(name))
+            .ok_or(ParseFunctionCodeError {})
     }
 }
 
 /// Text that names no function code; without the text, as
 /// [`ParseRegisterError`](crate::register::ParseRegisterError).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("not a function code, 0 to 7")]
+#[error("not a function code")]
 #[non_exhaustive]
 pub struct ParseFunctionCodeError {}
 
 impl TryFrom<u8> for FunctionCode {
     type Error = NoFunctionCode;
 
-    fn try_from(bits: u8) -> Result<Self, NoFunctionCode> {
-        Self::new(bits).ok_or(NoFunctionCode(bits))
+    fn try_from(code: u8) -> Result<Self, NoFunctionCode> {
+        Self::ALL
+            .get(usize::from(code))
+            .copied()
+            .ok_or(NoFunctionCode(code))
     }
 }
 
 /// A value past FC\[2:0\]: above 7.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("no function code {0}")]
+#[error("no function code {0}: FC[2:0] is 0 to 7")]
 pub struct NoFunctionCode(pub u8);
 
 impl From<FunctionCode> for u8 {
     fn from(function_code: FunctionCode) -> Self {
-        function_code.0
+        function_code as Self
     }
 }
 
@@ -147,52 +159,66 @@ mod tests {
     use super::ParseFunctionCodeError;
 
     #[test]
+    fn codes_follow_table_5_1() {
+        for (code, function_code) in (0..).zip(FunctionCode::ALL) {
+            assert_eq!(u8::from(function_code), code);
+            assert_eq!(FunctionCode::try_from(code), Ok(function_code));
+        }
+        assert_eq!(u8::from(FunctionCode::UserData), 1);
+        assert_eq!(u8::from(FunctionCode::SupervisorData), 5);
+        assert_eq!(u8::from(FunctionCode::CpuSpace), 7);
+        assert_eq!(FunctionCode::try_from(8), Err(NoFunctionCode(8)));
+    }
+
+    #[test]
     fn only_three_bits() {
         assert_eq!(
             FunctionCode::from_low_bits(0xffff_fffd),
-            FunctionCode::SUPERVISOR_DATA
+            FunctionCode::SupervisorData
         );
-        assert_eq!(FunctionCode::new(7), Some(FunctionCode::CPU_SPACE));
-        assert_eq!(FunctionCode::new(8), None);
-        assert_eq!(FunctionCode::CPU_SPACE.get(), 7);
-        assert_eq!(FunctionCode::try_from(7), Ok(FunctionCode::CPU_SPACE));
-        assert_eq!(FunctionCode::try_from(8), Err(NoFunctionCode(8)));
     }
 
     #[cfg(feature = "serde")]
     #[test]
-    fn a_snapshot_code_has_only_three_bits() {
+    fn a_snapshot_holds_the_code() {
+        assert_eq!(postcard::to_allocvec(&FunctionCode::CpuSpace).unwrap(), [7]);
         assert_eq!(
             postcard::from_bytes::<FunctionCode>(&[7]),
-            Ok(FunctionCode::CPU_SPACE)
+            Ok(FunctionCode::CpuSpace)
         );
         assert!(postcard::from_bytes::<FunctionCode>(&[8]).is_err());
     }
 
     #[test]
     fn spaces() {
-        assert!(!FunctionCode::USER_PROGRAM.is_supervisor());
-        assert!(FunctionCode::SUPERVISOR_DATA.is_supervisor());
-        assert!(FunctionCode::CPU_SPACE.is_cpu_space());
-        assert!(FunctionCode::USER_DATA.is_memory_space());
-        for code in [0, 3, 4, 7] {
-            assert!(!FunctionCode::from_low_bits(code).is_memory_space());
+        assert!(!FunctionCode::UserProgram.is_supervisor());
+        assert!(FunctionCode::SupervisorData.is_supervisor());
+        assert!(FunctionCode::CpuSpace.is_supervisor());
+        assert!(FunctionCode::UserData.is_memory_space());
+        for code in [
+            FunctionCode::Reserved0,
+            FunctionCode::Reserved3,
+            FunctionCode::Reserved4,
+            FunctionCode::CpuSpace,
+        ] {
+            assert!(!code.is_memory_space());
         }
     }
 
     #[test]
-    fn a_function_code_shows_as_its_number() {
-        assert_eq!(FunctionCode::SUPERVISOR_DATA.to_string(), "5");
-        assert_eq!(u8::from(FunctionCode::CPU_SPACE), 7);
+    fn a_function_code_shows_as_its_name() {
+        assert_eq!(FunctionCode::SupervisorData.to_string(), "supervisor-data");
+        assert_eq!(FunctionCode::CpuSpace.to_string(), "cpu-space");
+        assert_eq!(FunctionCode::Reserved3.to_string(), "reserved3");
     }
 
     #[test]
-    fn a_function_code_parses_from_its_number() {
-        for bits in 0..=7 {
-            let code = FunctionCode::from_low_bits(bits);
+    fn a_function_code_parses_from_its_name_in_any_case() {
+        for code in FunctionCode::ALL {
             assert_eq!(code.to_string().parse(), Ok(code));
         }
-        for text in ["8", "", "05", "+5", "-1", "5 "] {
+        assert_eq!("User-Program".parse(), Ok(FunctionCode::UserProgram));
+        for text in ["5", "", "supervisor_data", "supervisor data", "cpu-space "] {
             assert_eq!(text.parse::<FunctionCode>(), Err(ParseFunctionCodeError {}));
         }
     }

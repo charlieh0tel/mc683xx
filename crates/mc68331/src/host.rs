@@ -219,7 +219,7 @@ impl Mc68331 {
         function_code: FunctionCode,
     ) -> Result<u32, AccessError> {
         let board = &self.board;
-        if !function_code.is_cpu_space()
+        if function_code != FunctionCode::CpuSpace
             && let Some(offset) = address
                 .checked_sub(board.sim.module_base().0)
                 .filter(|&offset| offset < MODULE_SPACE_BYTES)

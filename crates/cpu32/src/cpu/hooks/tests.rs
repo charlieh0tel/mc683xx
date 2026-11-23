@@ -347,7 +347,7 @@ fn an_invalid_access_hook_sees_a_bus_error_then_the_exception_is_taken() {
         [InvalidAccess {
             address: Address(NOWHERE),
             size: Size::Word,
-            function_code: FunctionCode::SUPERVISOR_DATA,
+            function_code: FunctionCode::SupervisorData,
             cycle: CycleKind::Write,
             value: Some(0xabcd),
             reason: Invalid::BusError,

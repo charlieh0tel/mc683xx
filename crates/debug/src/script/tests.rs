@@ -33,7 +33,7 @@ fn write_memory_in_each_size() {
             address: Address(0xfffa21),
             size: Size::Byte,
             value: 0x40,
-            function_code: FunctionCode::SUPERVISOR_DATA,
+            function_code: FunctionCode::SupervisorData,
         }
     );
     assert_eq!(
@@ -42,7 +42,7 @@ fn write_memory_in_each_size() {
             address: Address(0xfffa44),
             size: Size::Word,
             value: 0x3fff,
-            function_code: FunctionCode::SUPERVISOR_DATA,
+            function_code: FunctionCode::SupervisorData,
         }
     );
     assert_eq!(
@@ -51,7 +51,7 @@ fn write_memory_in_each_size() {
             address: Address(0x20_0000),
             size: Size::Long,
             value: 0xdead_beef,
-            function_code: FunctionCode::USER_DATA,
+            function_code: FunctionCode::UserData,
         }
     );
 }
@@ -90,7 +90,7 @@ fn reads_with_and_without_mask_and_fc() {
             size: Size::Word,
             expect: 0x3fff,
             mask: 0xffff,
-            function_code: FunctionCode::SUPERVISOR_DATA,
+            function_code: FunctionCode::SupervisorData,
         }
     );
     assert_eq!(
@@ -100,7 +100,7 @@ fn reads_with_and_without_mask_and_fc() {
             size: Size::Byte,
             expect: 0x80,
             mask: 0xf0,
-            function_code: FunctionCode::SUPERVISOR_PROGRAM,
+            function_code: FunctionCode::SupervisorProgram,
         }
     );
 }
@@ -115,7 +115,7 @@ fn polls_take_mask_expect_and_timeout() {
             expect: 0,
             mask: 0x8000_0000,
             timeout: Duration::from_millis(250),
-            function_code: FunctionCode::SUPERVISOR_DATA,
+            function_code: FunctionCode::SupervisorData,
         }
     );
     assert_eq!(
@@ -126,7 +126,7 @@ fn polls_take_mask_expect_and_timeout() {
             expect: 1,
             mask: 1,
             timeout: Duration::from_millis(16),
-            function_code: FunctionCode::CPU_SPACE,
+            function_code: FunctionCode::CpuSpace,
         }
     );
 }
@@ -135,13 +135,13 @@ fn polls_take_mask_expect_and_timeout() {
 fn commands_print_as_they_parse() {
     for line in [
         "write_memory.b 0x00fffa21 0x40",
-        "write_memory.l 0x00200000 0xdeadbeef fc 1",
+        "write_memory.l 0x00200000 0xdeadbeef fc user-data",
         "write_register a7 0x20fffc",
         "write_system_register sr 0x2700",
         "read_memory.w 0x00fffa44 expect 0x3fff",
-        "read_memory.b 0x00000010 expect 0x80 mask 0xf0 fc 6",
+        "read_memory.b 0x00000010 expect 0x80 mask 0xf0 fc supervisor-program",
         "poll_memory.w 0x00300000 mask 0x8000 expect 0x8000 timeout_ms 100",
-        "poll_memory.b 0x00300001 mask 0x1 expect 0x0 timeout_ms 0 fc 2",
+        "poll_memory.b 0x00300001 mask 0x1 expect 0x0 timeout_ms 0 fc user-program",
     ] {
         assert_eq!(command(line).to_string(), line);
     }
@@ -338,12 +338,32 @@ fn word_and_long_addresses_are_even() {
 }
 
 #[test]
-fn function_codes_are_three_bits() {
-    assert_eq!(
-        error("write_memory.b 0 0 fc 8"),
-        ParseCommandError::FunctionCode { value: 8 }
-    );
-    assert!("write_memory.b 0 0 fc 0".parse::<Command>().is_ok());
+fn function_codes_by_name_or_number() {
+    for word in ["8", "0x8", "supervisor", "5x", "-1"] {
+        assert_eq!(
+            error(&format!("write_memory.b 0 0 fc {word}")),
+            ParseCommandError::FunctionCode {
+                word: word.to_owned()
+            },
+            "{word}"
+        );
+    }
+    for (word, function_code) in [
+        ("0", FunctionCode::Reserved0),
+        ("0b111", FunctionCode::CpuSpace),
+        ("CPU-Space", FunctionCode::CpuSpace),
+        ("reserved3", FunctionCode::Reserved3),
+    ] {
+        assert_eq!(
+            command(&format!("write_memory.b 0 0 fc {word}")),
+            Command::WriteMemory {
+                address: Address(0),
+                size: Size::Byte,
+                value: 0,
+                function_code,
+            }
+        );
+    }
 }
 
 #[test]
@@ -408,7 +428,7 @@ fn a_script_prints_its_commands_a_line_each() {
     assert_eq!(
         printed,
         "write_memory.w 0x00fffa44 0x3fff\n\
-         read_memory.w 0x00fffa44 expect 0x3fff fc 6\n"
+         read_memory.w 0x00fffa44 expect 0x3fff fc supervisor-program\n"
     );
     let reparsed: Script = printed.parse().unwrap();
     let commands = |script: &Script| {

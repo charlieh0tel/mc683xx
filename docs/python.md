@@ -24,8 +24,10 @@ rename renames the Python name with it.  The deliberate differences:
 
 - **Enums:** a Rust type with `Display` and `FromStr` crosses as its
   string, in and out: a chip select (`"CSBOOT"`, `"CS0"`), a net type
-  (`"serial"`), a port direction (`"in-out"`).  A newtype of a number
-  that also parses (`FunctionCode`, `InterruptLevel`, `IrqPin`,
+  (`"serial"`), a port direction (`"in-out"`).  A function code, a
+  value a host matches on, is a class, `FunctionCode.SUPERVISOR_DATA`,
+  whose `str()` is the Rust name, `"supervisor-data"`.  A newtype of a
+  number that also parses (`InterruptLevel`, `IrqPin`,
   `pacing::Factor`) crosses as its number.  Registers are
   by name, Python's own (`"D0"`, `"SR"`).  Any other Rust enum is a
   Python class whose members are its variants (`Channel.A`,
@@ -66,7 +68,7 @@ rename renames the Python name with it.  The deliberate differences:
   both included.  Arguments with defaults come last: a hook's callback
   before its range (all addresses by default), Rust's
   `add_code_hook(range, hook)`; `bus_write(address, size, value,
-  function_code=5)`, Rust's `(address, size, function_code, value)`;
+  function_code=FunctionCode.SUPERVISOR_DATA)`, Rust's `(address, size, function_code, value)`;
   `Builder.memory(contents, pins, writable=True)`, Rust's `(bytes,
   kind, pins)`, a `MemoryKind` (`Ram` or `Rom`) where Python takes a
   keyword's bool; `fixed_memory(base, contents, writable=True)`
@@ -364,8 +366,8 @@ value)`, and optionally:
 The methods but `save` and `restore` are looked up once, when the
 object is wired; a missing one takes the trait's default.  `save` and
 `restore` are looked up at each snapshot, as a board peripheral's are.  A `BusCycle` carries `select` (the pin's
-name), `address`, `size` (1 or 2 bytes), `function_code` (7 for CPU
-space), `write` (a write, R/W low; set for `wait_states` and
+name), `address`, `size` (1 or 2 bytes), `function_code` (a `FunctionCode`,
+`CPU_SPACE` for CPU space), `write` (a write, R/W low; set for `wait_states` and
 `dsack_port` too) and `now`.  A read's value must fit the cycle.  `raise
 mc683xx.BusError()` in `read` or `write` asserts BERR.  Any other
 exception (a `KeyboardInterrupt` too) does not fault the bus: the read
@@ -386,7 +388,6 @@ CPU-space byte read at $FFFFF1 + 2 x level, whose value is the vector.
 ```python
 PERIPHERAL_BASE, VECTOR_REGISTER, REQUEST_REGISTER = 0x200000, 1, 3
 VECTOR, LEVEL = 0x40, 2
-CPU_SPACE = 7
 # CS10 for the acknowledge: CPU space type $F at $FFFFFx, the lower
 # byte, read, external DSACK, IPL in bits 3:1 (SIMRM 7.8.1, 7.10.3).
 CSBAR_ACKNOWLEDGE, CSOR_ACKNOWLEDGE = 0xFFF8, 0x2BC0
@@ -401,7 +402,7 @@ class Interrupter:
         self.acknowledges: list[mc683xx.BusCycle] = []
 
     def read(self, cycle: mc683xx.BusCycle) -> int:
-        if cycle.function_code == CPU_SPACE:
+        if cycle.function_code == mc683xx.FunctionCode.CPU_SPACE:
             self.acknowledges.append(cycle)
             self.requesting = False
             return self.vector
@@ -756,15 +757,15 @@ chip.set_qspi_slave_select(False)
 The host reaches the bus as a debugger does (BDM's memory commands,
 CPU32RM 7), through the chip's decode: the modules' registers where
 MM puts them, and whatever a chip select reaches.  `size` is 1, 2 or 4
-bytes (a long is two word cycles); `function_code` is FC[2:0], 5
-(supervisor data) by default.  None moves `now` or shows in the trace.
+bytes (a long is two word cycles); `function_code` is a
+`FunctionCode`, `SUPERVISOR_DATA` by default.  None moves `now` or shows in the trace.
 
-- `bus_read(address, size, function_code=5)` and `bus_write(address,
-  size, value, function_code=5)`: real cycles at `now`, side effects
+- `bus_read(address, size, function_code=FunctionCode.SUPERVISOR_DATA)`
+  and `bus_write(address, size, value, function_code=...)`: real cycles at `now`, side effects
   and all (a read of SCDR clears RDRF after one of SCSR; a peripheral sees
   the cycle; a chip-select write remaps at once).  A peripheral's
   exception is raised here, as by `run_for`.
-- `peek(address, size, function_code=5)`: a look without a cycle, a
+- `peek(address, size, function_code=...)`: a look without a cycle, a
   module's register as a read would find it, memory's bytes through
   the decode.  A peripheral's bytes raise `UnpeekableError`.
 
@@ -955,8 +956,8 @@ chip.run_for(500)
   permission string, frame or shift; wiring a pin twice; memory not of
   whole pages; a fixed memory off a page boundary, past ADDR[23:0] or
   overlapping another; a register value that does not fit; a host cycle of a
-  size other than 1, 2 or 4, at an odd address, of a function code
-  past 7, or of a value wider than it; a bare `Machine`'s `read` of more
+  size other than 1, 2 or 4, at an odd address, or of a value wider
+  than it; a bare `Machine`'s `read` of more
   bytes than 32 bits of addresses.
 - `mc683xx.BusError`: a host cycle that ended in a bus error, or that
   nothing answers; a bare `Machine`'s `read` or `write` of bytes no map
@@ -1376,7 +1377,7 @@ assert bare.read_register("D0") == 6
   nowhere), stops the run, and `run_limited` (or `reset`, for the
   vectors' reads) raises it.  A peripheral cannot call into the `Machine`: the run
   holds it.  No peripheral sees a CPU-space cycle
-  (function code 7): the `Machine` acknowledges LPSTOP's broadcast itself,
+  (`FunctionCode.CPU_SPACE`): the `Machine` acknowledges LPSTOP's broadcast itself,
   and any other, a BKPT's acknowledge among them, is a bus error, so
   BKPT is an illegal instruction.
 - **Runs:** `run_limited(begin=None, until=None, instructions=None,
