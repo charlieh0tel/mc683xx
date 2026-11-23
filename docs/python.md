@@ -291,6 +291,15 @@ assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
   whose `divert(memory, peripheral)` sends a memory's cycles to a
   peripheral, by their numbers, until `release(memory)` (a flash
   answering status reads while it programs).
+  A peripheral may call `request()` from any of its callables, in the
+  run's thread: from `read` or `write`, the run ends after that
+  instruction; from `advance`, between quanta; from `reset`, during a
+  reset the run takes (the watchdog's, say), before the first
+  instruction after it.  A request made between runs (in a `reset`
+  the host's `chip.reset()` calls) stays, and the next run ends after
+  its first instruction, unless the host calls `withdraw()` first.
+  One made in a host bus cycle (`bus_read`, `bus_write`) is dropped,
+  with no run to stop.
 - `build()` spends the builder; a second call raises `RuntimeError`.
 
 Registers are by name: `"D0"`-`"D7"`, `"A0"`-`"A7"`, `"PC"`, `"SR"`,
@@ -1396,7 +1405,10 @@ assert bare.read_register("D0") == 6
   to `end`, both included, byte-granular, no two overlapping.  A cycle
   no mapped memory serves and one peripheral covers goes to it, before it
   lands: the read's value is the peripheral's, the write is the peripheral's
-  to keep.  A `BusCycle` has `address` (32 bits), `size` (1, 2, or 4: a
+  to keep.  `protect` covers a peripheral's pages too, mapped or not: a
+  cycle they do not permit is a bus error before the peripheral sees
+  it (`Invalid.PROTECTED`, `FaultCause.PROTECTED`), so a read-only
+  peripheral needs no `BusError` of its own.  A `BusCycle` has `address` (32 bits), `size` (1, 2, or 4: a
   long operand the peripheral covers whole comes once, as 4), `function_code`,
   `now` and `stacking`.  Raising `BusError` is a bus error; any other
   exception does not fault the bus (a read answers 0, a write goes
@@ -1585,6 +1597,40 @@ assert run.end == mc683xx.End.Stop(mc683xx.Stop.Requested())
 assert stops == [(32 + 7, CALL)] and bare.read_register("PC") == CALL
 bare.set_intercept_callback(None)
 bare.set_intercepted(32 + 7, False)
+```
+
+A peripheral's range protected read-only refuses a write before the
+peripheral sees it:
+
+```python
+class Latch:
+    """A byte-wide latch: what was written last."""
+
+    def __init__(self) -> None:
+        self.value = 0
+
+    def read(self, cycle: mc683xx.BusCycle) -> int:
+        return self.value
+
+    def write(self, cycle: mc683xx.BusCycle, value: int) -> None:
+        self.value = value
+
+
+LATCH, MOVE_B_D0_TO_A0 = 0xF00000, 0x1080  # move.b d0,(a0)
+latch = Latch()
+bare.add_peripheral(LATCH, LATCH, latch)
+bare.protect(LATCH, 2048, "r")
+bare.write(CALL, struct.pack(">2H", MOVE_B_D0_TO_A0, RTS))
+bare.write_register("A0", LATCH)
+bare.write_register("D0", 0x5A)
+bare.set_stop_on_fault(True)
+match bare.run_limited(begin=CALL, until=CALL_RETURN).end:
+    case mc683xx.End.Fault(fault):
+        assert (fault.cause, fault.address) == (mc683xx.FaultCause.PROTECTED, LATCH)
+    case end:
+        raise AssertionError(end)
+assert latch.value == 0
+bare.set_stop_on_fault(False)
 ```
 
 ### From Unicorn

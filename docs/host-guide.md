@@ -305,10 +305,14 @@ calls `request`;
 the run stops once the instruction whose cycle asked ends, between
 quanta if `advance` asked, or at a reset within the run (the
 watchdog's, say) if `reset` asked, before the first instruction after
-it, with `Stop::Requested`.  The request is
-taken by the stop.  A host whose own run loop stopped for the same
+it, with `Stop::Requested`.  Any of a peripheral's calls may ask, in
+the run's thread.  The request is
+taken by the stop.  One made between runs (in a `reset` that
+`Mc68331::reset` calls) stays, and ends the next run after its first
+instruction; a host whose own run loop stopped for the same
 reason before the chip ran withdraws it (`withdraw`), so the next run
-does not stop for it.
+does not stop for it.  One made in a host bus cycle (Host bus cycles)
+is dropped, with no run to stop.
 
 ```rust
 use mc683xx_cpu32::bus::BusError;
@@ -1164,7 +1168,9 @@ but the exception hook cover an address range, on the address lines.
 `cpu_control().protect(space, start, length, Permissions)` sets
 read, write and execute per 2-Kbyte page in `Space::User` or
 `Space::Supervisor`; a cycle a page does not permit is a bus error,
-and the invalid hooks see it as `Protected`.  Hooks and permissions
+and the invalid hooks see it as `Protected`.  That holds on pages a
+peripheral serves too: the cycle faults before the peripheral sees
+it, so a read-only peripheral needs no bus error of its own.  Hooks and permissions
 outlive the chip's remaps.  Hooks cost little when absent; a memory
 hook makes its pages leave the fast path.  The GDB stub
 (`mc683xx-gdb`, `docs/gdb.md`) sets its breakpoints, watchpoints and
