@@ -731,8 +731,8 @@ impl Sim {
             PICR => self.timer.control,
             PITR => self.timer.timing,
             PORTC => self.port_c.into(),
-            CSPAR0 => self.chip_selects.pin_assignment(0),
-            CSPAR1 => self.chip_selects.pin_assignment(1),
+            CSPAR0 => self.chip_selects.cspar0(),
+            CSPAR1 => self.chip_selects.cspar1(),
             CSBARBT..CHIP_SELECTS_END => match Self::select_at(offset) {
                 (select, false) => self.chip_selects.base(select),
                 (select, true) => self.chip_selects.option(select),
