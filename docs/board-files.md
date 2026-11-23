@@ -396,8 +396,9 @@ Endpoints:
 | `chip.TXD` | serial | out of the chip |
 | `external.name` | any | either; the runner or host binds it (`--bind name=stdio`).  The runner refuses input (stdio, pty) to one that drives no serial net: `stdout`, `file:PATH` or `null` there |
 
-PGP0 is IC1, PGP1 IC2, PGP2 IC3, PGP3 to PGP6 OC1 to OC4, PGP7
-IC4/OC5 (MC68331UM Figure 7-1).  A peripheral port takes a net of its own
+A chip pin's name is taken in any case (`chip.pe0` is `chip.PE0`), as
+a chip select's or a reset cause's.  PGP0 is IC1, PGP1 IC2, PGP2 IC3,
+PGP3 to PGP6 OC1 to OC4, PGP7 IC4/OC5 (MC68331UM Figure 7-1).  A peripheral port takes a net of its own
 kind only (a `wired-and` net is `logic`); a chip pin takes `logic` or
 `edge`.  A strobe that a peripheral samples as a level (a latch enable such
 as the AD569's /LBE) is a `logic` net: its low time matters, and an

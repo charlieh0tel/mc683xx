@@ -1736,8 +1736,8 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   (`chip`, any case), and on a board the MC68331's `mc68331::Pin`
   (`IRQ7`; a port's pin is
   `Pin::Port(PortPin)`, `PortPin::new(Port::E, 0)` refusing a bit the
-  port lacks, and a `PortPin` itself `PE0`, any case; a `Pin` exactly, as
-  a board file names it), `signal::Kind`,
+  port lacks, and a `PortPin` itself `PE0`; both any case, as a board
+  file's `chip.pe0`), `signal::Kind`,
   `Direction`, `peripheral::Role` (`read-write`) and `Lane` (`upper`),
   as the board file names them; `pacing::Pacing` and `pacing::Factor`
   (`2.5`); a `description::Setting` (`dac.value=16`, its value as TOML

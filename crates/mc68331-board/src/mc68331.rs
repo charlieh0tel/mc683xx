@@ -248,13 +248,14 @@ const IRQ: [&str; 7] = ["IRQ1", "IRQ2", "IRQ3", "IRQ4", "IRQ5", "IRQ6", "IRQ7"];
 #[error("no MC68331 pin {0:?}")]
 pub struct ParsePinError(String);
 
-/// The pin named so, after `chip.`, exactly as `Display` writes it.
+/// The pin named so, after `chip.`, as `Display` writes it, in any
+/// case: `PE0`, `pe0`.
 impl FromStr for Pin {
     type Err = ParsePinError;
 
     fn from_str(name: &str) -> Result<Self, ParsePinError> {
         Self::all()
-            .find(|pin| pin.name() == name)
+            .find(|pin| pin.name().eq_ignore_ascii_case(name))
             .ok_or_else(|| ParsePinError(name.to_owned()))
     }
 }
@@ -864,6 +865,9 @@ mod tests {
             Ok(Pin::Port(PortPin::new(Port::C, 6).unwrap()))
         );
         assert_eq!("IRQ7".parse(), Ok(Pin::Irq(IrqPin::IRQ7)));
+        assert_eq!("irq7".parse(), Ok(Pin::Irq(IrqPin::IRQ7)));
+        assert_eq!("pgp0".parse(), Ok(gp(0)));
+        assert_eq!("Reset".parse(), Ok(Pin::Reset));
         for bad in ["IRQ0", "PC7", "PE8", "PE05", "NMI", ""] {
             assert!(bad.parse::<Pin>().is_err(), "{bad}");
         }
