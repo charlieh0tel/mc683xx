@@ -3,7 +3,7 @@
 
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_debug::image::Image;
-use mc683xx_debug::load::LoadError;
+use mc683xx_debug::load::ImageLoadError;
 use mc683xx_debug::load::LoadOptions;
 use mc683xx_debug::load::OddEdges;
 use mc683xx_debug::load::Verification;
@@ -107,7 +107,7 @@ fn srecords_load_into_ram_with_odd_edges_in_bytes() {
     let image = Image::from_srecords("S30900200001DEADBEEF9D\nS70500200100D9\n").unwrap();
     assert!(matches!(
         image.load(&mut chip, &LoadOptions::default()),
-        Err(LoadError::OddEdge { .. })
+        Err(ImageLoadError::OddEdge { .. })
     ));
     let mut options = LoadOptions::default();
     options.odd_edges = OddEdges::Bytes;
@@ -129,7 +129,7 @@ fn a_load_into_rom_fails_verification() {
     assert!(
         matches!(
             error,
-            LoadError::Verify {
+            ImageLoadError::Verify {
                 address: Address(0x100),
                 wrote: 0x4e,
                 read: 0xff,
@@ -149,10 +149,10 @@ fn a_load_where_nothing_answers_fails_its_write() {
     assert!(
         matches!(
             error,
-            LoadError::Write {
+            ImageLoadError::Write {
                 address: Address(0x50_0000),
                 bytes: 4,
-                error: TargetError::Access { .. },
+                error: TargetError::Access(_),
             }
         ),
         "{error}"

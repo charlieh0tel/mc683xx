@@ -783,7 +783,7 @@ pub trait Peripheral: Any {
     /// fails ([`RunError::Stalled`]).  Several events at one time may each
     /// take an advance.
     ///
-    /// [`RunError::Stalled`]: crate::error::RunError::Stalled
+    /// [`RunError::Stalled`]: crate::board::RunError::Stalled
     fn advance(&mut self, drive: &mut Drive<'_>) {}
 
     /// Its state as a front end shows it: registers, FIFOs, levels,

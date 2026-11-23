@@ -65,7 +65,7 @@ pub struct Limits {
 }
 
 /// Why a fault that stopped the run was one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FaultCause {
     /// A bus error: nothing answered (an unmapped address) or a peripheral
@@ -98,7 +98,7 @@ impl fmt::Display for FaultCause {
 /// exception pending: the next run takes the trace or breakpoint
 /// first, and samples the interrupt again.  A stopped CPU stays
 /// stopped.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub struct FaultStop {
     /// Fetch, read or write.

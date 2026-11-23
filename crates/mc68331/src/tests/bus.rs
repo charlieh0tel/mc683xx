@@ -35,7 +35,7 @@ use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::event::DsackFault;
 use crate::event::Event;
-use crate::host::AccessError;
+use crate::host::BusCycleError;
 use mc683xx_cpu32::memory::MemoryKind;
 
 /// Where the bus peripheral's window is: above CSBOOT's reset block,
@@ -101,7 +101,7 @@ fn a_bus_peripheral_takes_its_window_and_nothing_else() {
     );
     assert_eq!(
         chip.peek(Address(WINDOW), Size::Word, FunctionCode::SupervisorData),
-        Err(AccessError::Unpeekable),
+        Err(BusCycleError::Unpeekable),
         "a peripheral answers there"
     );
 }

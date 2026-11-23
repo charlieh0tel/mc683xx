@@ -841,7 +841,7 @@ Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
 
 - Inputs: `set_pins(port, value, mask)` sets the levels the board
   drives on the pins in `mask`, the others kept.  Port C has no inputs:
-  a `NoInputsError`.
+  a `NoInputs`.
 - Outputs: `outputs(port)` gives the pins a port drives and their
   levels, a `PortLevels` (its fields private; `PortLevels::new(driven,
   levels)`, read back with `driven()` and `levels()`, the levels zero on
@@ -1290,17 +1290,17 @@ select reaches.  Each takes an `Address` (on the 24 address lines), a
 `Size` and a `FunctionCode`; a long is two word cycles, high word
 first.  None moves the chip's time or shows in the trace.
 
-- `bus_read(address, size, function_code) -> Result<u32, AccessError>`
+- `bus_read(address, size, function_code) -> Result<u32, BusCycleError>`
   and `bus_write(address, size, function_code, value)` are real
   cycles at `now()`, side effects and all: a read of SCSR arms its
   flags and one of SCDR clears them, a peripheral sees the cycle, a write
   to a chip-select register remaps at once.  A stop a peripheral asks for
   in one is dropped: no run is there to stop.
-- `peek(address, size, function_code) -> Result<u32, AccessError>` is
+- `peek(address, size, function_code) -> Result<u32, BusCycleError>` is
   a look without a cycle: a module's register as a read would find it
   (no flag armed or cleared), memory's bytes as the decode reaches
   them.  What only a cycle can tell, a peripheral's bytes, is
-  `AccessError::Unpeekable`.  A module answers through
+  `BusCycleError::Unpeekable`.  A module answers through
   `Module::peek`.
 
 ```rust
@@ -1310,7 +1310,7 @@ use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
-use mc683xx_mc68331::host::AccessError;
+use mc683xx_mc68331::host::BusCycleError;
 
 // CSBAR0, CSOR0, CSBARBT (MC68331UM Table D-3).
 const CSBAR0: u32 = SIM + 0x4c;
@@ -1334,7 +1334,7 @@ assert_eq!(chip.peek(Address(CSOR0), Size::Word, SUPERVISOR), Ok(option));
 let boot = firmware::BLOCK_64K.into();
 chip.bus_write(Address(CSBARBT), Size::Word, SUPERVISOR, boot).unwrap();
 let nowhere = Address(0x40_0000);
-assert_eq!(chip.peek(nowhere, Size::Word, SUPERVISOR), Err(AccessError::Unmapped(nowhere)));
+assert_eq!(chip.peek(nowhere, Size::Word, SUPERVISOR), Err(BusCycleError::Unserved(nowhere)));
 assert_eq!(chip.now(), Cycle::ZERO);
 ```
 
@@ -1424,7 +1424,7 @@ part off as an option off would, its net ends and any net left with no
 driver or no sink going with it, an `external.*` end it had left
 among them; it gives the names of the nets that went, so a host sees
 an external endpoint left on no net.  Each refuses a name the description
-lacks (`error::EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
+lacks (`description::EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
 every method of the chip's.  `Chip` is sealed: a host names it in a
 bound (`Board<C: Chip>`) and uses its items (`TYPE`, the name a
 board file's `[chip] type` gives, `"mc68331"`; `cpu`, `cpu_control`,
@@ -1727,12 +1727,13 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   reason == "...")`) or compares its message.
 - `MemoryError`, from `protect`: a range not of whole pages, or past
   the address lines.
-- `AccessError`, from the host's bus cycles and peeks: nothing
-  answers (`Unmapped`, at the address the cycle put out), a bus error
-  (`BusError`: a peripheral's BERR, no DSACK, the bus monitor), a word
-  or long at an odd address
-  (`Misaligned`), a value wider than its cycle (`Width`), or a peek
-  only a cycle can answer (`Unpeekable`).
+- `BusCycleError`, from the host's bus cycles and peeks: nothing
+  answers (`Unserved`), a bus error (`BusError`: a peripheral's BERR,
+  no DSACK, the bus monitor), a word or long at an odd address
+  (`Misaligned`), each at the address the cycle put out, a value wider
+  than its cycle (`Width`), or a peek only a cycle can answer
+  (`Unpeekable`).  The chip's `TargetError::Access` is one of them,
+  transparent.
 - `BusError` is a peripheral's answer, not a host error: the CPU takes the
   bus error exception, as the firmware sees it.
 - Nothing in a run returns an error: a halt is a `Stop`, a reset an

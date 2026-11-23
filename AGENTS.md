@@ -237,7 +237,10 @@ Crates:
   struct takes `now: Cycle` last.
 - A type with a name or a printed form implements `Display`, and
   `FromStr` if it can be named, not `name()` and `from_name()`; the
-  parse error is `Parse<Type>Error`.
+  parse error is `Parse<Type>Error`.  Its message holds the input
+  where it can, "no <thing> {0:?}" (`no setting "x": give
+  PERIPHERAL.KEY=VALUE`, a hint after a colon); a `no_std` one that
+  holds none says "not a <thing>".
 - Do not use `anyhow` at all; every crate here is a library but
   `mc683xx-run`, which keeps typed errors too.  Use typed
   errors via `thiserror`.

@@ -158,8 +158,9 @@ prefix; their directories keep the short names.
   through `Module::peek` (required, as `save` is), the SIM's reads
   have none, and memory answers byte by byte where memory alone
   answers the cycle (`Board::memory_alone`, the page-table rule).  A
-  peripheral's bytes are `AccessError::Unpeekable`, never a guess.
-  Errors are typed: `Unmapped`, `BusError`, `Misaligned`, `Width`.
+  peripheral's bytes are `BusCycleError::Unpeekable`, never a guess.
+  Errors are typed: `Unserved`, `BusError`, `Misaligned` (each with
+  its address), `Width`.
 - **Interrupts:** the host sets an IPL level; the core calls the
   host's IACK callback when it accepts, for a vector or autovector.
 - **Peripherals:** see below.
@@ -785,9 +786,12 @@ chip beside `Mc68331`.
 
 - **Names:** each Python item has its Rust item's name and words
   (AGENTS.md); where Python's ways differ the binding says so
-  (docs/python.md, Names): a Rust type with `Display` and `FromStr`
-  crosses as its string, any other enum as a Python enum class (a
-  class per variant when they carry data), never as a string; a struct
+  (docs/python.md, Names): a name a host writes when it wires (a pin,
+  a chip select, a net type, a direction, a register) crosses as its
+  string; a value a host matches on (a kind, a cause, a port, a
+  channel, a function code) as a Python enum class, whatever the Rust
+  type's traits (a class per variant when they carry data), never as
+  a string nor an `int`; a struct
   of plain values a call returns as a tuple of its fields (a port's
   outputs a `(driven, levels)` pair); a frequency an `int` named `_hz`
   in whole hertz or `_nanohertz`; a setter `set_*`, never a writable
@@ -836,8 +840,9 @@ chip beside `Mc68331`.
   `reset_with_breakpoint()`, `assert_breakpoint()`, `halt()` and
   `go()`, and its `chip` only `background`.
   `Stop`, `Halt` and `ResetCause` are enums; they, the other enums
-  and the value classes that compare equal (`Frame`, `Output`,
-  `Serial`) hash, so they key dicts and sets.
+  and the value classes, which compare equal by value (`Frame`,
+  `Output`, `Serial`, `Event`, `End`, `LimitedRun`, `FaultStop`), hash,
+  so they key dicts and sets.
 - **Hooks:** `add_code_hook`, `add_block_hook`, `add_read_hook`,
   `add_write_hook` and `add_invalid_hook(callback, begin=0,
   end=0xFFFFFFFF)` (both ends included) and
@@ -1040,16 +1045,14 @@ chip beside `Mc68331`.
   (docs/python.md, Board files), `PORTS` a list of `(name, kind,
   direction)`, as `PortSpec`.  A serial frame crosses as an
   `mc683xx.Serial` (`Serial(frame, baud_nanohertz, bits)`,
-  `Serial.timed`, `Serial.untimed`, as Rust's), or, for code written
-  before timed frames, as its data alone: a peripheral opts in with
-  `TIMED_SERIAL`, `take_received` with `timed`, so old classes keep
-  working.  A QSPI peripheral's `transfer(transfer, drive)` gets an
+  `Serial.timed`, `Serial.untimed`, as Rust's), always, in and out
+  (an untimed one may be sent as its data, an `int`, `None` a break).
+  A QSPI peripheral's `transfer(transfer, drive)` gets an
   `mc683xx.Transfer`, as the Rust peripheral's, and `set_qspi_clock(clock,
   moment)` as the Rust peripheral is told it; a call with no drive takes
   an `mc683xx.Moment` last, as Rust's does.
   `externals()` gives `mc683xx.External`s, name, type and direction
-  as the Rust `External`; each is its name as a string and equals
-  it, so code that took the names keeps working.  `observe(net,
+  as the Rust `External`, equal by value.  `observe(net,
   callback)` is `Board::observe` (Boards, Front ends), its
   `ObserverId` for `unobserve`; `inspect(name)` is `Board::inspect`, as
   a dict.  `reset_for(ResetCause)` is `Board::reset_for`;
@@ -3512,7 +3515,7 @@ checks move onto real code hooks.
 | Block cache and lazy flags deferred | Simpler core; the per-instruction overhead measured first (`docs/performance.md`) is cheaper to cut directly. |
 | Benchmarks with criterion in the `benches/` workspace member | Statistics and saved baselines for before and after; its shared setup is tested by `make ci`, which only compiles the benchmarks. |
 | Python bindings behind a crate feature | The workspace forbids default-members; a `python` feature keeps PyO3, and a Python interpreter, out of `make ci`. |
-| Python mirrors the Rust types it wraps: `Run`, `LimitedRun` and `BoardRun`, `Stop` and `End` a class per variant (a variant's value a field named for it, `stop.hook`, `frame.data`, not `_0`; positional patterns still match), `Machine`, `HookId`, plain enums as enum classes | One name per item across both APIs (AGENTS.md); a host porting between them translates nothing.  A Rust type with `FromStr` crosses as its string; `End::Intercepted` and `End::Steps` have no Python variant, as the run answers an intercept and takes no step limit (decided 2026-10-24, before 0.1.0). |
+| Python mirrors the Rust types it wraps: `Run`, `LimitedRun` and `BoardRun`, `Stop` and `End` a class per variant (a variant's value a field named for it, `stop.hook`, `frame.data`, not `_0`; positional patterns still match), `Machine`, `HookId`, plain enums as enum classes | One name per item across both APIs (AGENTS.md); a host porting between them translates nothing.  A name a host writes when it wires (pin, chip select, net type, direction, register) crosses as its string, a value it matches on (kind, cause, port, channel, function code) as an enum class whatever its traits (amended 2026-11-23: the earlier "a type with `FromStr` crosses as its string" did not describe `Port`, `Channel`, `Input`, `Role`, `Lane` or `ResetCause`, and would have made `FunctionCode` the one value matched as a string); `End::Intercepted` and `End::Steps` have no Python variant, as the run answers an intercept and takes no step limit (decided 2026-10-24, before 0.1.0). |
 | A peripheral's Python exception stops the run after its instruction and is raised when `run_for` returns | The `MappedPeripheral` trait can report only BERR; the chip's `StopRequest` ends the run there, and the exception cannot cross it. |
 | A bare `Machine`'s hooks may write the CPU; their callables run between core runs | Unicorn's harness stubs routines and peripherals from hooks; queuing in the core and calling Python with nothing borrowed needs no `unsafe` and costs only hooks that fire. |
 | A Python hook stops the run on a truthy result; its exception stops it as `Break` and is raised when `run_for` returns | A breakpoint is `return True`; a hook returns `Control`, so it can stop where it is, with no stop request left for the next run. |

@@ -117,7 +117,6 @@ type Queue = Rc<RefCell<Vec<Fired>>>;
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     rename_all = "SCREAMING_SNAKE_CASE"
 )]
@@ -130,6 +129,18 @@ pub(crate) enum FaultCauseKind {
     /// A word or long at an odd address, or an odd PC.
     AddressError,
 }
+
+impl From<FaultCauseKind> for FaultCause {
+    fn from(cause: FaultCauseKind) -> Self {
+        match cause {
+            FaultCauseKind::BusError => Self::BusError,
+            FaultCauseKind::Protected => Self::Protected,
+            FaultCauseKind::AddressError => Self::AddressError,
+        }
+    }
+}
+
+enum_names!(FaultCauseKind, FaultCause);
 
 impl TryFrom<FaultCause> for FaultCauseKind {
     type Error = Error;
@@ -154,8 +165,15 @@ fn unknown_fault_cause(cause: FaultCause) -> Error {
 
 /// A fault that stopped a run (`set_stop_on_fault`), as `End.Fault`
 /// and a chip's `fault_stop` carry it (Rust's `bare::FaultStop`).
-#[pyclass(name = "FaultStop", module = "mc683xx", frozen, eq, from_py_object)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[pyclass(
+    name = "FaultStop",
+    module = "mc683xx",
+    frozen,
+    eq,
+    hash,
+    from_py_object
+)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct FaultStopView(pub(crate) FaultStop);
 
 #[pymethods]
@@ -251,8 +269,8 @@ impl InterceptedView {
 /// intercepted exception: `run_limited` answers it through the intercept
 /// callback, or the CPU takes it natively.  A variant's value is a field
 /// named for it, not Rust's `_0`.
-#[pyclass(name = "End", module = "mc683xx", frozen, eq)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[pyclass(name = "End", module = "mc683xx", frozen, eq, hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum EndView {
     /// As a chip's run ends: its `Stop`.
     Stop {
@@ -305,8 +323,8 @@ impl EndView {
 }
 
 /// A limited run's outcome (Rust's `bare::LimitedRun`).
-#[pyclass(name = "LimitedRun", module = "mc683xx", frozen, eq, get_all)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[pyclass(name = "LimitedRun", module = "mc683xx", frozen, eq, hash, get_all)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct LimitedRunView {
     /// The cycles it took.
     cycles: u64,

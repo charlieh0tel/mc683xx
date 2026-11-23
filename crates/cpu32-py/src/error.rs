@@ -1,8 +1,19 @@
 //! What a Python host can get wrong, before it becomes a Python
 //! exception.
 
-use mc683xx_board::error::LoadError;
-use mc683xx_board::error::RunError;
+use std::time::TryFromFloatSecsError;
+
+use mc683xx_board::board::NetError;
+use mc683xx_board::board::NoMemory;
+use mc683xx_board::board::NoPeripheral;
+use mc683xx_board::board::ReceiveError;
+use mc683xx_board::board::RunError;
+use mc683xx_board::board::SendError;
+use mc683xx_board::description::LoadError;
+use mc683xx_board::pacing::PacingError;
+use mc683xx_board::pacing::ParsePacingError;
+use mc683xx_board::registry::RegistryError;
+use mc683xx_board::signal::ParseKindError;
 use mc683xx_cpu32::cpu::bare::TakeExceptionError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::flat::MapError;
@@ -12,7 +23,8 @@ use mc683xx_cpu32::memory::MemoryError;
 use mc683xx_cpu32::memory::Unserved;
 use mc683xx_mc68331::chip::BuildError;
 use mc683xx_mc68331::debug::TargetError;
-use mc683xx_mc68331::host::AccessError;
+use mc683xx_mc68331::host::BusCycleError;
+use mc683xx_mc68331::port::NoInputs;
 use mc683xx_modules::sim::clock::ClockSourceError;
 
 /// A host's mistake the bindings refuse.
@@ -104,7 +116,7 @@ pub(crate) enum Error {
     Memory(#[from] MemoryError),
     /// A host cycle or peek gave no value.
     #[error(transparent)]
-    Access(#[from] AccessError),
+    Access(#[from] BusCycleError),
     /// The bare CPU refused a map or a peripheral.
     #[error(transparent)]
     Map(#[from] MapError),
@@ -123,6 +135,79 @@ pub(crate) enum Error {
     /// A board's run that could not go on.
     #[error(transparent)]
     Run(#[from] RunError),
+    /// A peripheral type the registry refused.
+    #[error(transparent)]
+    Registry(#[from] RegistryError),
+    /// A value a run-time endpoint could not drive.
+    #[error(transparent)]
+    Send(#[from] SendError),
+    /// A run-time endpoint no net drives.
+    #[error(transparent)]
+    Receive(#[from] ReceiveError),
+    /// A net the board does not have.
+    #[error(transparent)]
+    Net(#[from] NetError),
+    /// A net type that is none of a board file's.
+    #[error(transparent)]
+    Kind(#[from] ParseKindError),
+    /// A pacing that does not parse.
+    #[error(transparent)]
+    ParsePacing(#[from] ParsePacingError),
+    /// A pacing factor not finite and above 0.
+    #[error(transparent)]
+    Pacing(#[from] PacingError),
+    /// Pins driven on a port with no inputs.
+    #[error(transparent)]
+    Inputs(#[from] NoInputs),
+    /// A switch interval that is no duration.
+    #[error(transparent)]
+    Interval(#[from] TryFromFloatSecsError),
+    /// A board memory the board does not have.
+    #[error(transparent)]
+    NoMemory(#[from] NoMemory),
+    /// A peripheral the board does not have.
+    #[error(transparent)]
+    NoPeripheral(#[from] NoPeripheral),
+    /// A port index past a Python peripheral's ports.
+    #[error("no port {0}")]
+    Port(usize),
+    /// A port index that is none of a Python peripheral's analog inputs.
+    #[error("no analog input {0}")]
+    AnalogInput(usize),
+    /// A board time in seconds that is no span of board time.
+    #[error("{0}: give a finite number of seconds, 0 or more, within board time")]
+    Seconds(f64),
+    /// Both or neither of seconds and picoseconds.
+    #[error("give seconds or picoseconds")]
+    SecondsOrPicoseconds,
+    /// A host's wall clock reading that is no duration.
+    #[error("wall {0}: give a finite number of seconds, 0 or more")]
+    Wall(f64),
+    /// A paced run's quantum of zero.
+    #[error("give a quantum of 1 ps or more")]
+    Quantum,
+    /// A Python inspection's groups nested too deep, at the field named.
+    #[error("{0}: inspected groups nest deeper than {INSPECTION_DEPTH}")]
+    Nesting(String),
+    /// A `dsack_port` answer that is none of 8, 16 and `None`.
+    #[error("no {0}-bit port: give 8, 16 or None")]
+    DsackPort(u8),
+    /// A Python peripheral's read wider than its cycle.
+    #[error("{value:#x} does not fit a {bytes}-byte cycle")]
+    ReadWidth {
+        /// The value.
+        value: u32,
+        /// The cycle's bytes.
+        bytes: u32,
+    },
+    /// A QSPI peripheral's bits shifted back wider than the transfer.
+    #[error("{value:#x} does not fit a {bits}-bit transfer")]
+    ShiftedIn {
+        /// The bits.
+        value: u16,
+        /// The transfer's bits.
+        bits: u8,
+    },
     /// A value the bindings have no Python value for, by its kind and,
     /// where it prints, its Rust name: a variant of a `non_exhaustive`
     /// enum newer than they are, or a run's end with no Python class
@@ -136,6 +221,10 @@ pub(crate) enum Error {
         name: Option<String>,
     },
 }
+
+/// How deep a Python inspection's groups may nest: past it, a mapping
+/// that holds itself would recurse without end.
+pub(crate) const INSPECTION_DEPTH: usize = 32;
 
 /// A run's end as an [`Error::Unmapped`] names its kind.
 pub(crate) const RUN_END: &str = "run end";

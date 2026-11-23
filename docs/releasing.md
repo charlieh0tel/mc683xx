@@ -111,7 +111,6 @@ means a change to:
 Not covered, so a minor or patch release may change them:
 
 - the text of messages, `repr` and `Display` (but the trace's);
-- enum integer values;
 - Python names that start with `_`, and Rust items that are
   `#[doc(hidden)]` ("Not part of the semver API");
 - npm package files outside its `exports`;

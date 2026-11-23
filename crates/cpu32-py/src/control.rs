@@ -15,14 +15,13 @@ use std::time::Instant;
 use mc683xx_board::board::Board;
 
 use mc683xx_board::board::BoardRun;
+use mc683xx_board::board::RunError;
 use mc683xx_board::control::BoardControl;
-use mc683xx_board::error::RunError;
 use mc683xx_board::pacing;
 use mc683xx_board::pacing::Pacer;
 use mc683xx_board::pacing::Pacing;
 use mc683xx_board::pacing::ParsePacingError;
 use mc683xx_board::signal::Kind;
-use mc683xx_board::signal::ParseKindError;
 use mc683xx_board::time::NonZeroSpan;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
@@ -35,7 +34,6 @@ use pyo3::PyAny;
 use pyo3::PyErr;
 use pyo3::PyResult;
 use pyo3::Python;
-use pyo3::exceptions::PyValueError;
 use pyo3::marker::Ungil;
 use pyo3::pyclass;
 use pyo3::pymethods;
@@ -43,6 +41,7 @@ use pyo3::types::PyAnyMethods;
 use pyo3::types::PyFloat;
 
 use crate::board::signal;
+use crate::error::Error;
 use crate::python::repr;
 
 /// How fast a paced run's board time may go against wall time (Rust's
@@ -75,7 +74,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for Factor {
     fn extract(object: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
         pacing::Factor::new(object.extract()?)
             .map(Self)
-            .map_err(|error| PyValueError::new_err(error.to_string()))
+            .map_err(|error| Error::from(error).into())
     }
 }
 
@@ -127,7 +126,7 @@ impl PacingView {
     fn parse(text: &str) -> PyResult<Self> {
         text.parse()
             .map(|pacing: Pacing| pacing.into())
-            .map_err(|error: ParsePacingError| PyValueError::new_err(error.to_string()))
+            .map_err(|error: ParsePacingError| Error::from(error).into())
     }
 
     /// Board seconds a wall second, `None` unpaced (Rust's
@@ -186,12 +185,11 @@ impl BoardControlView {
     /// net, or none of `kind`, raises `ValueError`, queuing nothing.
     #[pyo3(signature = (name, value, *, kind = "serial"))]
     fn send(&self, name: &str, value: &Bound<'_, PyAny>, kind: &str) -> PyResult<()> {
-        let kind: Kind = kind
-            .parse()
-            .map_err(|error: ParseKindError| PyValueError::new_err(error.to_string()))?;
-        self.0
+        let kind: Kind = kind.parse().map_err(Error::from)?;
+        Ok(self
+            .0
             .send(name, signal(kind, value)?)
-            .map_err(|error| PyValueError::new_err(error.to_string()))
+            .map_err(Error::from)?)
     }
 
     /// Paces the board's runs from their next quantum.
@@ -357,6 +355,5 @@ impl<'py> Turns<'py> {
 /// interval `switch_interval` (`sys.getswitchinterval`) gives.
 fn held(switch_interval: &Bound<'_, PyAny>) -> PyResult<Duration> {
     let interval: f64 = switch_interval.call0()?.extract()?;
-    Duration::try_from_secs_f64(2.0 * interval)
-        .map_err(|error| PyValueError::new_err(error.to_string()))
+    Ok(Duration::try_from_secs_f64(2.0 * interval).map_err(Error::from)?)
 }

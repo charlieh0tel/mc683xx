@@ -8,10 +8,10 @@ use std::rc::Rc;
 
 use mc683xx_board::board::Board;
 
+use mc683xx_board::board::NetError;
 use mc683xx_board::builtin::EdgeCounter;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
-use mc683xx_board::error::NetError;
 use mc683xx_board::observe::Observer;
 use mc683xx_board::peripheral::Drive;
 use mc683xx_board::peripheral::Peripheral;

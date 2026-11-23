@@ -67,6 +67,7 @@ __all__ = [
     "Invalid",
     "ExceptionEntry",
     "ExceptionReturn",
+    "BusCycleError",
     "BusError",
     "UnpeekableError",
     "StateError",
@@ -113,8 +114,8 @@ class Peripheral(Protocol):
     """A board peripheral, as the class `Board`'s `types` names makes it
     (Rust's `Peripheral`), called with its parameters as keyword
     arguments.  Its class declares its ports in `PORTS`, `(name, kind,
-    direction)` each, and sets `TIMED_SERIAL` to be told serial frames
-    as `Serial`s; every method is optional, a missing one taking the
+    direction)` each, and is told serial frames as `Serial`s; every
+    method is optional, a missing one taking the
     trait's default: `read(access, drive) -> int`, `write(access,
     value, drive)`, `wait_states(access, moment) -> int | None`,
     `dsack_port(access, moment) -> int | None`, `wants_horizon() -> bool`,
@@ -129,11 +130,15 @@ class Peripheral(Protocol):
     `restore(snapshot: bytes)`, both or neither (docs/python.md, Board
     files)."""
 
-class BusError(Exception):
+class BusCycleError(Exception):
+    """Raised by a host's bus cycle or peek that gave no value (Rust's
+    BusCycleError): BusError or UnpeekableError."""
+
+class BusError(BusCycleError):
     """Raised by a peripheral's read or write: BERR ends
     the cycle."""
 
-class UnpeekableError(Exception):
+class UnpeekableError(BusCycleError):
     """Raised by peek where only a real bus cycle can tell: a peripheral,
     or a module register a read would change."""
 
@@ -275,7 +280,8 @@ class Halt:
 
     DOUBLE_BUS_FAULT: ClassVar[Halt]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Ending:
@@ -285,7 +291,8 @@ class Ending:
     KILLED: ClassVar[Ending]
     HUNG_UP: ClassVar[Ending]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class ResetCause:
@@ -299,7 +306,8 @@ class ResetCause:
     SYSTEM: ClassVar[ResetCause]
     TEST: ClassVar[ResetCause]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class FunctionCode:
@@ -316,6 +324,8 @@ class FunctionCode:
     SUPERVISOR_PROGRAM: ClassVar[FunctionCode]
     CPU_SPACE: ClassVar[FunctionCode]
     def __hash__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Space:
@@ -324,7 +334,8 @@ class Space:
     USER: ClassVar[Space]
     SUPERVISOR: ClassVar[Space]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class ClockPolarity:
@@ -333,7 +344,8 @@ class ClockPolarity:
     IDLE_LOW: ClassVar[ClockPolarity]
     IDLE_HIGH: ClassVar[ClockPolarity]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class ClockPhase:
@@ -342,7 +354,8 @@ class ClockPhase:
     CAPTURE_LEADING: ClassVar[ClockPhase]
     CHANGE_LEADING: ClassVar[ClockPhase]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class BusCycleKind:
@@ -352,7 +365,8 @@ class BusCycleKind:
     READ: ClassVar[BusCycleKind]
     WRITE: ClassVar[BusCycleKind]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Invalid:
@@ -361,7 +375,8 @@ class Invalid:
     BUS_ERROR: ClassVar[Invalid]
     PROTECTED: ClassVar[Invalid]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Channel:
@@ -370,7 +385,8 @@ class Channel:
     A: ClassVar[Channel]
     B: ClassVar[Channel]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Input:
@@ -387,7 +403,8 @@ class Input:
     PAI: ClassVar[Input]
     PCLK: ClassVar[Input]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Port:
@@ -399,7 +416,8 @@ class Port:
     GP: ClassVar[Port]
     QS: ClassVar[Port]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class PortState:
@@ -425,7 +443,8 @@ class Role:
     READ_WRITE: ClassVar[Role]
     IACK: ClassVar[Role]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class Lane:
@@ -435,7 +454,8 @@ class Lane:
     UPPER: ClassVar[Lane]
     LOWER: ClassVar[Lane]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class HookId:
@@ -456,6 +476,8 @@ class Run:
 @disjoint_base
 class End:
     """How a bare `Machine`'s limited run ended."""
+
+    def __hash__(self) -> int: ...
 
     @final
     class Stop(End):
@@ -497,6 +519,7 @@ class End:
 class LimitedRun:
     """A bare `Machine`'s limited run's outcome."""
 
+    def __hash__(self) -> int: ...
     @property
     def cycles(self) -> int: ...
     @property
@@ -740,6 +763,8 @@ class Output:
 @disjoint_base
 class Event:
     """Something the chip did that the host may want to know of."""
+
+    def __hash__(self) -> int: ...
 
     @final
     class Reset(Event):
@@ -1042,13 +1067,15 @@ class FaultCause:
     PROTECTED: ClassVar[FaultCause]
     ADDRESS_ERROR: ClassVar[FaultCause]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @final
 class FaultStop:
     """A fault that stopped a run (`set_stop_on_fault`), as `End.Fault`
     and a chip's `fault_stop` carry it."""
 
+    def __hash__(self) -> int: ...
     @property
     def cycle(self) -> BusCycleKind: ...
     @property
@@ -1104,7 +1131,8 @@ class Dsack:
     DSACK1: ClassVar[Dsack]
     BOTH: ClassVar[Dsack]
     def __hash__(self) -> int: ...
-    def __int__(self) -> int: ...
+    @property
+    def name(self) -> str: ...
 
 @disjoint_base
 class Termination:
@@ -1377,8 +1405,7 @@ class Serial:
 class External:
     """A run-time endpoint: its name, its nets' type (`serial`, `logic`
     and so on) and its direction, `out` if it drives a net, `in` if it
-    is driven, `in-out` if both.  As a string it is its name, and it
-    equals its name."""
+    is driven, `in-out` if both."""
 
     @property
     def name(self) -> str: ...
@@ -1518,19 +1545,18 @@ class Board:
     def go(self) -> None: ...
     def take_events(self) -> list[Event]: ...
     def marking(self, name: str) -> str | None: ...
-    def inspect(self, name: str) -> dict[str, object] | None: ...
+    def inspect(self, name: str) -> dict[str, object]: ...
     def memory(self, name: str) -> bytes: ...
     def externals(self) -> list[External]: ...
     def send(self, name: str, value: object, *, kind: str = "serial") -> None: ...
-    def take_received(self, name: str, *, timed: bool = False) -> list[tuple[int, object]]: ...
+    def take_received(self, name: str) -> list[tuple[int, object]]: ...
     def nets(self) -> list[tuple[str, str]]: ...
-    def net_value(self, name: str, *, timed: bool = False) -> object | None: ...
+    def net_value(self, name: str) -> object | None: ...
     def observe(
         self,
         name: str,
         callback: Callable[[str, int, object], object],
         *,
-        timed: bool = False,
         on_restore: Callable[[str, int, object | None], object] | None = None,
     ) -> ObserverId: ...
     def unobserve(self, observer: ObserverId) -> bool: ...

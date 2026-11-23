@@ -473,6 +473,13 @@ fn a_word_past_a_peripheral_s_end_is_a_bus_error() {
         ),
         Err(MapError::Overlap(Address(PERIPHERAL)))
     );
+    assert_eq!(
+        machine.add_peripheral(
+            Address(PERIPHERAL + 0x10)..=Address(PERIPHERAL + 0xf),
+            Box::new(Logger::default())
+        ),
+        Err(MapError::Empty(Address(PERIPHERAL + 0x10)))
+    );
 }
 
 /// LPSTOP #$2700 (CPU32RM 4.4, LPSTOP).

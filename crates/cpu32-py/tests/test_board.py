@@ -521,11 +521,10 @@ to = ["external.echo"]
 """
 
 
-class TimedModem:
+class Modem:
     """Echoes each frame, its timing kept, and records what it got."""
 
     PORTS = [("rx", "serial", "in"), ("tx", "serial", "out")]
-    TIMED_SERIAL = True
 
     def __init__(self) -> None:
         self.received: list[object] = []
@@ -533,12 +532,6 @@ class TimedModem:
     def input(self, port: int, value: object, drive: mc683xx.Drive) -> None:
         self.received.append(value)
         drive.drive(1, value)
-
-
-class Modem(TimedModem):
-    """As `TimedModem`, but told frames' data alone."""
-
-    TIMED_SERIAL = False
 
 
 def test_serial_values_carry_their_timing(tmp_path: Path) -> None:
@@ -550,14 +543,12 @@ def test_serial_values_carry_their_timing(tmp_path: Path) -> None:
     assert frame == mc683xx.Serial.timed(mc683xx.Frame.Data(0x41), baud, 1_041_666_666)
     assert frame.end(5) == 5 + frame.length
     assert mc683xx.Serial.untimed(mc683xx.Frame.Break()).length == 0
-    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"modem": TimedModem})
+    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"modem": Modem})
     echo, host = board.externals()
     assert (echo.name, echo.kind, echo.direction) == ("echo", "serial", "in")
     assert (host.name, host.kind, host.direction) == ("host", "serial", "out")
     assert repr(host) == 'External(name="host", kind="serial", direction="out")'
-    # as the names alone, which it once gave
-    assert board.externals() == ["echo", "host"]
-    assert str(host) == "host" and "host" in {host}
+    assert host != "host" and host == board.externals()[1] and host in {host}
     board.send("host", frame)
     board.send("host", 0x42)
     with pytest.raises(ValueError, match="external.echo drives no net"):
@@ -566,18 +557,13 @@ def test_serial_values_carry_their_timing(tmp_path: Path) -> None:
         board.send("host", True, kind="logic")
     board.run_for(picoseconds=1_000_000)
     modem = board.peripheral("modem")
-    assert isinstance(modem, TimedModem)
+    assert isinstance(modem, Modem)
     assert modem.received == [frame, mc683xx.Serial.untimed(mc683xx.Frame.Data(0x42))]
-    received = board.take_received("echo", timed=True)
+    received = board.take_received("echo")
     assert [value for _, value in received] == modem.received
-    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"modem": Modem})
-    board.send("host", frame)
     board.send("host", None)
     board.run_for(picoseconds=1_000_000)
-    untimed = board.peripheral("modem")
-    assert isinstance(untimed, Modem)
-    assert untimed.received == [0x41, None]
-    assert [value for _, value in board.take_received("echo")] == [0x41, None]
+    assert modem.received[-1] == mc683xx.Serial.untimed(mc683xx.Frame.Break())
     with pytest.raises(ValueError, match="no net drives external.host"):
         board.take_received("host")
 
@@ -696,7 +682,8 @@ def test_enabled_turns_a_file_s_options_on(tmp_path: Path) -> None:
     (tmp_path / "board.toml").write_text(optional)
     path = str(tmp_path / "board.toml")
     types = {"latch": Latch, "lamp": Lamp}
-    assert mc683xx.Board(path, types=types).peripheral("spare") is None
+    with pytest.raises(ValueError, match="spare"):
+        mc683xx.Board(path, types=types).peripheral("spare")
     assert isinstance(mc683xx.Board(path, types=types, enabled=["spare"]).peripheral("spare"), Lamp)
 
 

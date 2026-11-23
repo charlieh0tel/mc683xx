@@ -146,7 +146,6 @@ pub mod condition;
 pub mod control;
 pub mod description;
 mod endpoint;
-pub mod error;
 pub mod inspect;
 #[cfg(feature = "mc68331")]
 pub mod mc68331;

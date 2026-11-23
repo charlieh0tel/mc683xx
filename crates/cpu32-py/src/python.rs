@@ -1,15 +1,17 @@
 //! The Python module `mc683xx`, and the bindings' errors as Python
 //! exceptions.
 
+use std::fmt;
 use std::io;
 use std::path::Path;
 
-use mc683xx_board::error::LoadError;
+use mc683xx_board::description::LoadError;
 use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_mc68331::host::AccessError;
+use mc683xx_mc68331::host::BusCycleError;
 use pyo3::Bound;
 use pyo3::IntoPyObject;
 use pyo3::IntoPyObjectExt;
+use pyo3::PyAny;
 use pyo3::PyErr;
 use pyo3::PyResult;
 use pyo3::Python;
@@ -18,6 +20,7 @@ use pyo3::exceptions::PyNotImplementedError;
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyOverflowError;
 use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::PyTypeError;
 use pyo3::exceptions::PyValueError;
 use pyo3::pymodule;
 use pyo3::types::PyAnyMethods;
@@ -101,9 +104,11 @@ impl From<Error> for PyErr {
                 PyNotImplementedError::new_err(message)
             }
             Error::State(_) => exceptions::StateError::new_err(message),
-            Error::Access(AccessError::BusError | AccessError::Unmapped(_))
+            Error::Access(BusCycleError::BusError(_) | BusCycleError::Unserved(_))
             | Error::Unserved(_) => BusError::new_err(message),
-            Error::Access(AccessError::Unpeekable) => exceptions::UnpeekableError::new_err(message),
+            Error::Access(BusCycleError::Unpeekable) => {
+                exceptions::UnpeekableError::new_err(message)
+            }
             Error::Target(_) => exceptions::TargetError::new_err(message),
             Error::Load(LoadError::Read { path, error } | LoadError::Image { path, error, .. }) => {
                 os_error(&path, error)
@@ -125,9 +130,54 @@ impl From<Error> for PyErr {
             | Error::Access(_)
             | Error::Build(_)
             | Error::Memory(_)
-            | Error::Map(_) => PyValueError::new_err(message),
+            | Error::Map(_)
+            | Error::Registry(_)
+            | Error::Send(_)
+            | Error::Receive(_)
+            | Error::Net(_)
+            | Error::Kind(_)
+            | Error::ParsePacing(_)
+            | Error::Pacing(_)
+            | Error::Inputs(_)
+            | Error::Interval(_)
+            | Error::NoMemory(_)
+            | Error::NoPeripheral(_)
+            | Error::Port(_)
+            | Error::AnalogInput(_)
+            | Error::Seconds(_)
+            | Error::SecondsOrPicoseconds
+            | Error::Wall(_)
+            | Error::Quantum
+            | Error::Nesting(_)
+            | Error::DsackPort(_)
+            | Error::ReadWidth { .. }
+            | Error::ShiftedIn { .. } => PyValueError::new_err(message),
         }
     }
+}
+
+/// An enum class member's name, as its class names it (`FETCH`): its
+/// default `repr` (`BusCycleKind.FETCH`) past the class's name.
+pub(crate) fn member_name(member: &Bound<'_, PyAny>) -> PyResult<String> {
+    let repr = member.repr()?.to_string();
+    Ok(repr
+        .rsplit_once('.')
+        .map_or_else(|| repr.clone(), |(_, name)| name.to_owned()))
+}
+
+/// What `int()` of an enum class's member raises: it is no number.
+pub(crate) fn not_a_number() -> PyErr {
+    PyTypeError::new_err("an enum member is not a number: use its name")
+}
+
+/// An opaque id's `repr`, `class(number)`, from its Rust `Display`,
+/// `kind number` (`hook 3`).
+pub(crate) fn opaque_repr(class: &str, id: &impl fmt::Display) -> String {
+    let shown = id.to_string();
+    let number = shown
+        .rsplit_once(' ')
+        .map_or(shown.as_str(), |(_, number)| number);
+    format!("{class}({number})")
 }
 
 /// `value`'s Python `repr`, for a class's own: a value as Python
@@ -220,6 +270,10 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<BoardControlView>()?;
     module.add_class::<BoardStopRequestView>()?;
     module.add_class::<PacingView>()?;
+    module.add(
+        "BusCycleError",
+        module.py().get_type::<exceptions::BusCycleError>(),
+    )?;
     module.add("BusError", module.py().get_type::<BusError>())?;
     module.add(
         "UnpeekableError",

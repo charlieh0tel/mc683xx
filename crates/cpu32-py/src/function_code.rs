@@ -1,8 +1,7 @@
 //! `FunctionCode`: a bus cycle's address space, a value a host matches
-//! on, so a class (python.md, Names).
+//! on, so a class (python.md, Names and values).
 
 use pyo3::pyclass;
-use pyo3::pymethods;
 
 use mc683xx_target::function_code;
 
@@ -68,10 +67,4 @@ impl From<FunctionCode> for function_code::FunctionCode {
     }
 }
 
-#[pymethods]
-impl FunctionCode {
-    /// Its Rust name, `supervisor-data`.
-    fn __str__(&self) -> String {
-        function_code::FunctionCode::from(*self).to_string()
-    }
-}
+enum_names!(FunctionCode, function_code::FunctionCode);

@@ -22,19 +22,25 @@ A Python name is its Rust item's: CamelCase classes, snake_case
 methods, properties and arguments, UPPER_CASE enum members.  A Rust
 rename renames the Python name with it.  The deliberate differences:
 
-- **Enums:** a Rust type with `Display` and `FromStr` crosses as its
-  string, in and out: a chip select (`"CSBOOT"`, `"CS0"`), a net type
-  (`"serial"`), a port direction (`"in-out"`).  A function code, a
-  value a host matches on, is a class, `FunctionCode.SUPERVISOR_DATA`,
-  whose `str()` is the Rust name, `"supervisor-data"`.  A newtype of a
-  number that also parses (`InterruptLevel`, `IrqPin`,
-  `pacing::Factor`) crosses as its number.  Registers are
-  by name, Python's own (`"D0"`, `"SR"`).  Any other Rust enum is a
-  Python class whose members are its variants (`Channel.A`,
-  `Port.E`, `Port.GP`, `Input.PAI`, `Role.READ_WRITE`, `Lane.UPPER`,
-  `ResetCause.WATCHDOG`, `Space.USER`), and is never taken as a
-  string (its members' `int` values are their order in the class, not
-  the hardware's encoding, and outside semver); one whose variants carry data has a class for each
+- **Names and values:** what a host *names* when it wires crosses as
+  its string, in and out, whatever the Rust type: a chip select
+  (`"CSBOOT"`, `"CS0"`), a net type (`"serial"`), a port direction
+  (`"in-out"`), a register (`"D0"`, `"SR"`, by Python's own names).
+  What a host *matches on* is a class whose members are the Rust
+  enum's variants, whatever traits the Rust type has (`Display` and
+  `FromStr` included): a kind, a cause, a port, a channel, a reason, a
+  function code (`BusCycleKind.FETCH`, `ResetCause.WATCHDOG`,
+  `Port.E`, `Port.GP`, `Channel.A`, `Input.PAI`, `Role.READ_WRITE`,
+  `Lane.UPPER`, `Space.USER`, `FunctionCode.SUPERVISOR_DATA`).  A
+  newtype of a number that also parses (`InterruptLevel`, `IrqPin`,
+  `pacing::Factor`) crosses as its number, and so, deliberately, do a
+  cycle's size (1, 2 or 4 bytes, Rust's `Size`) and a port's (8 or 16
+  bits, `PortSize`); page permissions are a string, `"rwx"`
+  (`Permissions`).  An enum class is never taken as a string nor an
+  `int`: a member has `name`, its name in the class
+  (`"WATCHDOG"`), and its `str()` is Rust's `Display` where the type
+  has one (`"watchdog"`), else that name.  An enum whose variants
+  carry data has a class for each
   (`Event.Reset(now, cause)`, `Frame.Data(bits)`), and so does
   `Pacing`, though it has `Display` and `FromStr`: its factor is a
   number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`
@@ -105,15 +111,13 @@ rename renames the Python name with it.  The deliberate differences:
   (docs/releasing.md); a peripheral may subclass one, or only match it.
 - **Errors:** a Rust error is a Python exception (Errors, below): the
   module's own where Python has none to match, named as Rust's error
-  is (`LoadError`, `RunError`, `StateError`, `TargetError`, `BusError`;
-  `UnpeekableError` for `AccessError::Unpeekable`), a builtin
+  is (`LoadError`, `RunError`, `StateError`, `TargetError`,
+  `BusCycleError`, with `BusError` and `UnpeekableError` for its
+  variants), a builtin
   (`ValueError`, `IndexError`, `OSError`) where one fits.
 - **Python's own:** names with no Rust item behind them: `BoardChip`
   (`Board.chip`, the `Mc68331` methods over a board's chip), a board
-  peripheral class's `PORTS` and `TIMED_SERIAL` (its `PortSpec`s, and
-  whether it is told serial frames as `Serial`s), the `timed=` keyword
-  of `take_received`, `net_value` and `observe`, `External` equal to its
-  name as a string, and `__version__`.
+  peripheral class's `PORTS` (its `PortSpec`s), and `__version__`.
 
 Not offered, as a Python host has another way or no use for them:
 `Machine::remove_peripheral`, `take_natively_once` (a declined
@@ -961,18 +965,26 @@ chip.run_for(500)
 
 ## Errors
 
-- `ValueError`: a bare `Machine`'s map over another or of peripheral pages, or
-  overlapping peripherals; a bad pin, register, level, channel, GPT input,
+- `ValueError`: a bare `Machine`'s map over another or of peripheral pages,
+  overlapping peripherals or an empty peripheral range; a bad pin,
+  register, level, channel, GPT input,
   permission string, frame or shift; wiring a pin twice; memory not of
   whole pages; a fixed memory off a page boundary, past ADDR[23:0] or
   overlapping another; a register value that does not fit; a host cycle of a
   size other than 1, 2 or 4, at an odd address, or of a value wider
   than it; a bare `Machine`'s `read` of more
-  bytes than 32 bits of addresses.
-- `mc683xx.BusError`: a host cycle that ended in a bus error, or that
-  nothing answers; a bare `Machine`'s `read` or `write` of bytes no map
-  covers.
-- `mc683xx.UnpeekableError`: a peek only a real cycle can answer.
+  bytes than 32 bits of addresses; a name a `Board` lacks, a
+  peripheral's, memory's, net's or endpoint's (a number a `Mc68331`
+  never gave is an `IndexError`).
+- `mc683xx.BusCycleError`: a host cycle or peek that gave no value,
+  Rust's `BusCycleError`, as one of its two subclasses:
+  - `mc683xx.BusError`: a host cycle that ended in a bus error, or that
+    nothing answers; a bare `Machine`'s `read` or `write` of bytes no
+    map covers.
+  - `mc683xx.UnpeekableError`: a peek only a real cycle can answer.
+
+  A host's own mistake in a cycle (`Misaligned`, `Width`) is a
+  `ValueError`, as above.
 - `mc683xx.StateError` (a `ValueError`): a snapshot of another format,
   of another layer (`a chip snapshot, not a board snapshot`) or of
   other hardware, another count of peripherals, bytes that do not
@@ -988,7 +1000,8 @@ chip.run_for(500)
   Rust core could give but none does today.
 - `NotImplementedError`: a module that cannot save; or any other value
   this build's bindings have no Python value for (a fault cause, a
-  role, an invalid access's reason, a PWM output), named where it
+  role, an invalid access's reason, a PWM output, a gdb session's
+  ending), named where it
   prints, which a newer Rust crate could give
   but none does today.  `take_events()` never raises and always takes
   every event: one it cannot convert (a kind the bindings lack, or a
@@ -1104,8 +1117,7 @@ baud_nanohertz, length)` gives it in picoseconds from start bit to the
 end of the stop bits, and `Serial.untimed(frame)` has neither; it has
 `frame`, `baud_nanohertz`, `length` and `end(start)`, when it ends.  An
 untimed frame may also be an `int` for its data (`None` a break).  A peripheral is
-told frames as `Serial`s if its class sets `TIMED_SERIAL = True`, else
-their data alone.  A peripheral's `BusError` in `read`, `write` or
+told frames as `Serial`s.  A peripheral's `BusError` in `read`, `write` or
 `memory_read` is the cycle's bus error; any other exception (a
 `KeyboardInterrupt` too) does not fault the bus, the read answering 0
 as undriven data lanes do and the write going nowhere.  A peripheral's
@@ -1133,11 +1145,12 @@ the nets; nothing while the board holds RESET low);
 `reset_with_breakpoint()`, `assert_breakpoint()`, `halt()` and `go()`
 BKPT on the board (Background debug mode); `take_events()`
 what the chip did, as `Mc68331.take_events`; `marking(name)` the
-peripheral's `marking`, or `None`; `memory(name)`,
+peripheral's `marking`, or `None`; `peripheral(name)` a Python
+peripheral's object, `None` for a built-in one; `memory(name)`,
 `externals()` (`External`s: `name`, `kind` the nets' type, `direction`
-`in`, `out` or `in-out`; each is its name as a string and equals it),
+`in`, `out` or `in-out`),
 `send(name, value, kind="serial")`,
-`take_received(name, timed=False)` (frames as `Serial`s if `timed`;
+`take_received(name)` (frames as `Serial`s;
 `ValueError` for an endpoint no net drives, as `send` for one that
 drives none),
 `set_tracing(bus_cycles=, exceptions=, pins=,
@@ -1152,8 +1165,7 @@ state`).  An exception either raises from the board's call.  They take
 and raise as `Mc68331`'s do: `restore` takes `bytes` or a `bytearray`,
 and a cause raises the exception it raises there (Errors).
 `send` raises `ValueError` for an endpoint that drives no net, or none
-of `kind`.  A frame sent as an `int` or `None` is untimed; one received without
-`timed` drops its baud and length.
+of `kind`.  A frame sent as an `int` or `None` is untimed.
 
 ## Front ends (TUI, GUI)
 
@@ -1161,13 +1173,13 @@ A front end is the host's, outside the board file, which stays
 hardware only (PLAN.md, Boards), as in Rust (`docs/host-guide.md`,
 Front ends):
 
-- `Board.observe(net, callback, timed=False) -> ObserverId` calls
+- `Board.observe(net, callback) -> ObserverId` calls
   `callback(net, time, value)` at each change the net carries from
   now on, at its board time in picoseconds, after the net's sinks,
   in the order they see them, the changes already waiting included
   (the power-on levels, before the first run); values as
   `take_received` gives them.  It is not called with the net's
-  present value as it attaches: `net_value(net, timed=False)` gives
+  present value as it attaches: `net_value(net)` gives
   that, `None` before the net's first change, and `nets()` each net's
   `(name, type)`.  `unobserve(observer)` detaches one and says
   whether it was attached.  A net the board lacks raises
@@ -1191,8 +1203,8 @@ Front ends):
   the callbacks.
 - `inspect(name)` gives what a peripheral shows (Rust's
   `Board::inspect`) as a dict, a field's name to its value, an `int`,
-  `bool`, `float`, `str`, `bytes` or, for a group, a dict; `None` for
-  a peripheral the board lacks.  Rust's unit and radix hints are
+  `bool`, `float`, `str`, `bytes` or, for a group, a dict.  Rust's
+  unit and radix hints are
   dropped.  A Python peripheral shows its own by defining `inspect()`,
   returning such a mapping (an empty one without it); an exception it
   raises, or a value of another type, raises from `inspect`, and an

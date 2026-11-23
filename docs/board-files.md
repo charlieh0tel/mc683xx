@@ -495,7 +495,7 @@ The contract a host's peripheral models target (rustdoc in
   is the first key no getter read, the load's unknown-parameter error,
   for a host's tests of its constructors, which build their `Parameters`
   with `Parameters::parse(toml_text)` (text that is not a TOML table an
-  `error::SyntaxError`, its `line()` and `column()` from 1, as a board
+  `description::SyntaxError`, its `line()` and `column()` from 1, as a board
   file's `LoadError::Syntax` carries; boxed, so a `LoadError`, and a
   host's error holding one, stays small).  A host holding TOML that sets
   a peripheral's parameters (`description::Options::parameters`) takes the

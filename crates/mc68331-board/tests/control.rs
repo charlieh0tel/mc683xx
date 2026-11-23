@@ -14,9 +14,9 @@ use std::time::Instant;
 
 use mc683xx_board::board::Board;
 
+use mc683xx_board::board::SendError;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
-use mc683xx_board::error::SendError;
 use mc683xx_board::pacing::Factor;
 use mc683xx_board::pacing::Pacing;
 use mc683xx_board::pacing::QUANTUM;

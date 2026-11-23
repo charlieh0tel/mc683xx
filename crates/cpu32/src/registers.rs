@@ -37,7 +37,7 @@ pub mod status {
 
 /// The registers of the programming model.  A7 is the stack pointer
 /// of the state S selects: USP in user state, SSP in supervisor.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct Registers {
     /// D0-D7.
     pub data: [u32; 8],

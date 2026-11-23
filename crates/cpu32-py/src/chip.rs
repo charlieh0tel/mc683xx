@@ -47,7 +47,6 @@ use pyo3::PyResult;
 use pyo3::PyTraverseError;
 use pyo3::PyVisit;
 use pyo3::Python;
-use pyo3::exceptions::PyValueError;
 use pyo3::pybacked::PyBackedBytes;
 use pyo3::pyclass;
 use pyo3::pymethods;
@@ -549,7 +548,6 @@ impl TryFrom<cpu::Stop> for Stop {
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     from_py_object,
     rename_all = "SCREAMING_SNAKE_CASE"
@@ -559,6 +557,16 @@ pub(crate) enum Halt {
     /// A double bus fault (CPU32RM 6.2.1 to 6.2.3).
     DoubleBusFault,
 }
+
+impl From<Halt> for cpu::Halt {
+    fn from(halt: Halt) -> Self {
+        match halt {
+            Halt::DoubleBusFault => Self::DoubleBusFault,
+        }
+    }
+}
+
+enum_names!(Halt, cpu::Halt);
 
 impl TryFrom<cpu::Halt> for Halt {
     type Error = Error;
@@ -578,7 +586,6 @@ impl TryFrom<cpu::Halt> for Halt {
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     from_py_object,
     rename_all = "SCREAMING_SNAKE_CASE"
@@ -614,6 +621,8 @@ impl From<sim::ResetCause> for ResetCause {
         }
     }
 }
+
+enum_names!(ResetCause, sim::ResetCause);
 
 impl From<ResetCause> for sim::ResetCause {
     fn from(cause: ResetCause) -> Self {
@@ -667,7 +676,6 @@ impl Run {
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     from_py_object,
     rename_all = "SCREAMING_SNAKE_CASE"
@@ -679,6 +687,8 @@ pub(crate) enum Space {
     /// Supervisor space: FC2 set.
     Supervisor,
 }
+
+enum_names!(Space);
 
 impl From<Space> for memory::Space {
     fn from(space: Space) -> Self {
@@ -755,7 +765,6 @@ const fn addresses(begin: u32, end: u32) -> RangeInclusive<Address> {
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     from_py_object,
     rename_all = "SCREAMING_SNAKE_CASE"
@@ -769,6 +778,8 @@ pub(crate) enum DsackView {
     /// Both: reserved, taken as a 16-bit port.
     Both,
 }
+
+enum_names!(DsackView);
 
 impl From<DsackView> for Dsack {
     fn from(pins: DsackView) -> Self {
@@ -860,8 +871,8 @@ impl DsackFaultView {
 }
 
 /// Something the chip did that the host may want to know of.
-#[pyclass(module = "mc683xx", frozen)]
-#[derive(Debug, Clone)]
+#[pyclass(module = "mc683xx", frozen, eq, hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Event {
     /// The chip reset, at `now`, for `cause`.
     Reset {
@@ -1606,7 +1617,7 @@ chip_methods! {
     fn set_pins(&mut self, port: PortView, value: u8, mask: u8) -> PyResult<()> {
         self.chip
             .set_pins(port.into(), value, mask)
-            .map_err(|error| PyValueError::new_err(error.to_string()))?;
+            .map_err(Error::from)?;
         self.pending.check()
     }
 

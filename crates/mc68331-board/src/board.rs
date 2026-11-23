@@ -53,6 +53,7 @@ use crate::chip::MemoryPlace;
 use crate::chip::MemoryPlan;
 use crate::chip::takes;
 use crate::condition::Condition;
+use crate::condition::ConditionError;
 use crate::condition::ConditionId;
 use crate::condition::ConditionInfo;
 use crate::condition::ConditionToken;
@@ -63,17 +64,12 @@ use crate::condition::level;
 use crate::control::BoardControl;
 use crate::control::Endpoints;
 use crate::description::Description;
+use crate::description::LoadError;
 use crate::description::NetSpec;
 use crate::description::Options;
 use crate::description::Target;
 use crate::description::port_of;
 use crate::endpoint::Endpoint;
-use crate::error::ConditionError;
-use crate::error::LoadError;
-use crate::error::NetError;
-use crate::error::ReceiveError;
-use crate::error::RunError;
-use crate::error::SendError;
 use crate::inspect::Inspection;
 use crate::observe::Attached;
 use crate::observe::Observer;
@@ -1817,36 +1813,61 @@ impl<C: Chip> Board<C> {
             .position(|peripheral| peripheral.name == name)
     }
 
+    /// The index of the peripheral `name`, or [`NoPeripheral`].
+    fn named_peripheral(&self, name: &str) -> Result<usize, NoPeripheral> {
+        self.peripheral_index(name)
+            .ok_or_else(|| NoPeripheral(name.to_owned()))
+    }
+
     /// What the peripheral `name` shows a front end
-    /// ([`Peripheral::inspect`]), if there is one.
+    /// ([`Peripheral::inspect`]).
+    ///
+    /// # Errors
+    ///
+    /// [`NoPeripheral`] if the board has no peripheral `name`.
     ///
     /// [`Peripheral::inspect`]: crate::peripheral::Peripheral::inspect
-    #[must_use]
-    pub fn inspect(&self, name: &str) -> Option<Inspection> {
-        let cell = &self.shared.peripherals[self.peripheral_index(name)?];
-        Some(cell.borrow().inspect())
+    pub fn inspect(&self, name: &str) -> Result<Inspection, NoPeripheral> {
+        let cell = &self.shared.peripherals[self.named_peripheral(name)?];
+        Ok(cell.borrow().inspect())
     }
 
-    /// The marking of the peripheral `name`, if its peripheral gives one.
-    #[must_use]
-    pub fn marking(&self, name: &str) -> Option<&str> {
-        self.peripherals
-            .iter()
-            .find(|peripheral| peripheral.name == name)?
+    /// The marking of the peripheral `name`, `None` if the file gives it
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// [`NoPeripheral`] if the board has no peripheral `name`.
+    pub fn marking(&self, name: &str) -> Result<Option<&str>, NoPeripheral> {
+        Ok(self.peripherals[self.named_peripheral(name)?]
             .marking
-            .as_deref()
+            .as_deref())
     }
 
-    /// The memory `name`'s bytes, if there is one.
-    #[must_use]
-    pub fn memory(&self, name: &str) -> Option<&[u8]> {
-        self.memories.get(name).map(|&id| self.chip.memory(id))
+    /// The memory `name`'s bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`NoMemory`] if the board has no memory `name`.
+    pub fn memory(&self, name: &str) -> Result<&[u8], NoMemory> {
+        let id = *self
+            .memories
+            .get(name)
+            .ok_or_else(|| NoMemory(name.to_owned()))?;
+        Ok(self.chip.memory(id))
     }
 
-    /// The memory `name`'s bytes, to change, if there is one.
-    pub fn memory_mut(&mut self, name: &str) -> Option<&mut [u8]> {
-        let id = *self.memories.get(name)?;
-        Some(self.chip.memory_mut(id))
+    /// The memory `name`'s bytes, to change.
+    ///
+    /// # Errors
+    ///
+    /// [`NoMemory`] if the board has no memory `name`.
+    pub fn memory_mut(&mut self, name: &str) -> Result<&mut [u8], NoMemory> {
+        let id = *self
+            .memories
+            .get(name)
+            .ok_or_else(|| NoMemory(name.to_owned()))?;
+        Ok(self.chip.memory_mut(id))
     }
 
     /// The run-time endpoints the nets name, by name and then type:
@@ -2470,6 +2491,81 @@ fn resolve_nets<P: ChipPin>(
             })
         })
         .collect()
+}
+
+/// A peripheral name the board does not have ([`Board::inspect`],
+/// [`Board::marking`]).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no peripheral {0:?}")]
+pub struct NoPeripheral(pub String);
+
+/// A memory name the board does not have ([`Board::memory`]).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no memory {0:?}")]
+pub struct NoMemory(pub String);
+
+/// Why a run could not go on.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum RunError {
+    /// A peripheral whose `advance` left its `next_event` at or before the
+    /// time it was advanced to, `repeats` times running: it breaks
+    /// [`Peripheral::advance`]'s contract, and the board would never get past
+    /// `at`.
+    ///
+    /// [`Peripheral::advance`]: crate::peripheral::Peripheral::advance
+    #[error("{peripheral}: advanced to {at} {repeats} times, its next event never past it")]
+    Stalled {
+        /// The peripheral.
+        peripheral: String,
+        /// The time it was advanced to.
+        at: Time,
+        /// The advances.
+        repeats: u32,
+    },
+}
+
+/// Why a run-time endpoint could not drive a value ([`Board::send`]).
+///
+/// [`Board::send`]: crate::board::Board::send
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SendError {
+    /// The board has no `external.name` that drives a net.
+    #[error("external.{0} drives no net")]
+    Endpoint(String),
+    /// It drives only nets of `kinds`, none of which carries the value.
+    #[error("external.{endpoint} drives {} nets only, which do not carry the value", kinds.iter().map(ToString::to_string).collect::<Vec<_>>().join(" and "))]
+    Kind {
+        /// The endpoint's name.
+        endpoint: String,
+        /// The types of the nets it drives.
+        kinds: Vec<Kind>,
+    },
+}
+
+/// Why [`Board::take_received`] took nothing.
+///
+/// [`Board::take_received`]: crate::board::Board::take_received
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ReceiveError {
+    /// The board has no `external.name` that a net drives.
+    #[error("no net drives external.{0}")]
+    Endpoint(String),
+}
+
+/// Why a net could not be observed or read ([`Board::observe`],
+/// [`Board::net_value`]).
+///
+/// [`Board::observe`]: crate::board::Board::observe
+/// [`Board::net_value`]: crate::board::Board::net_value
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum NetError {
+    /// The board has no net of that name.
+    #[error("no net {0:?}")]
+    Unknown(String),
 }
 
 #[cfg(test)]

@@ -182,7 +182,7 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// Throws a `PacingError` for text that names no pacing.
+    /// Throws a `ParsePacingError` for text that names no pacing.
     #[wasm_bindgen(js_name = setPacing)]
     pub fn set_pacing(&mut self, pacing: &str) -> Result<(), Error> {
         let pacing: Pacing = pacing.parse()?;
@@ -271,12 +271,12 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// Throws a `MemoryError` for a memory the board lacks.
+    /// Throws a `NoMemory` for a memory the board lacks.
     pub fn memory(&self, name: &str) -> Result<Vec<u8>, Error> {
         self.board
             .memory(name)
             .map(<[u8]>::to_vec)
-            .ok_or_else(|| Error::Memory(name.to_owned()))
+            .map_err(Error::from)
     }
 
     /// The board's state, as Rust's `Board::save`.
@@ -511,4 +511,31 @@ fn tag(value: &JsValue) -> Option<String> {
             .strip_suffix(TAG_SUFFIX)?
             .to_owned(),
     )
+}
+
+#[cfg(test)]
+mod stop_tests {
+    use mc683xx_cpu32::cpu::Halt;
+    use mc683xx_cpu32::cpu::Stop;
+    use mc683xx_target::entry::Entry;
+
+    use super::stop_name;
+
+    /// The bindings' names are their own, but agree with `Stop`'s
+    /// `Display` for every kind they name today but `hook`, whose
+    /// `HookId` a test cannot make.
+    #[test]
+    fn a_stop_s_name_is_its_display() {
+        let stops = [
+            Stop::Budget,
+            Stop::Stopped,
+            Stop::Halted(Halt::DoubleBusFault),
+            Stop::Requested,
+            Stop::Background(Entry::Breakpoint),
+            Stop::Fault,
+        ];
+        for stop in stops {
+            assert_eq!(stop_name(stop), stop.to_string());
+        }
+    }
 }

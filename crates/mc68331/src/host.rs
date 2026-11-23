@@ -25,23 +25,24 @@ use crate::chip::Mc68331;
 /// Bits in a word cycle, the most a cycle carries: a long is two.
 const WORD_BITS: u32 = 16;
 
-/// Why a host's cycle or peek did not give a value.
+/// Why a host's bus cycle or peek did not give a value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
-pub enum AccessError {
+pub enum BusCycleError {
     /// No module acknowledged the cycle and no chip select matched it:
     /// nothing answers at the address, the cycle's on the address
     /// lines.
-    #[error("nothing answers at {0}")]
-    Unmapped(Address),
-    /// The cycle ended in a bus error: a peripheral's BERR, a select
-    /// waiting for a DSACK that never comes, the bus monitor.
-    #[error("bus error")]
-    BusError,
+    #[error("{0} is not served by the chip")]
+    Unserved(Address),
+    /// The cycle at the address ended in a bus error: a peripheral's
+    /// BERR, a select waiting for a DSACK that never comes, the bus
+    /// monitor.
+    #[error("bus error at {0}")]
+    BusError(Address),
     /// A word or long at an odd address, which the CPU32 never makes
     /// (CPU32RM 6.2.3, address error).
-    #[error("a word or long at an odd address")]
-    Misaligned,
+    #[error("a word or long at odd address {0}")]
+    Misaligned(Address),
     /// A value wider than the cycle written.
     #[error("{0:#x} does not fit the cycle")]
     Width(u32),
@@ -61,15 +62,15 @@ impl Mc68331 {
     ///
     /// # Errors
     ///
-    /// [`AccessError::Misaligned`] for a word or long at an odd
-    /// address, [`AccessError::Unmapped`] if nothing answers,
-    /// [`AccessError::BusError`] if the cycle ends in a bus error.
+    /// [`BusCycleError::Misaligned`] for a word or long at an odd
+    /// address, [`BusCycleError::Unserved`] if nothing answers,
+    /// [`BusCycleError::BusError`] if the cycle ends in a bus error.
     pub fn bus_read(
         &mut self,
         address: Address,
         size: Size,
         function_code: FunctionCode,
-    ) -> Result<u32, AccessError> {
+    ) -> Result<u32, BusCycleError> {
         self.words(address, size)?
             .try_fold(0, |value, (at, size, shift)| {
                 Ok(value | self.cycle(at, size, function_code, None)? << shift)
@@ -81,7 +82,7 @@ impl Mc68331 {
     ///
     /// # Errors
     ///
-    /// [`AccessError::Width`] if `value` is wider than `size`, and
+    /// [`BusCycleError::Width`] if `value` is wider than `size`, and
     /// otherwise as `bus_read`.
     pub fn bus_write(
         &mut self,
@@ -89,9 +90,9 @@ impl Mc68331 {
         size: Size,
         function_code: FunctionCode,
         value: u32,
-    ) -> Result<(), AccessError> {
+    ) -> Result<(), BusCycleError> {
         if value & !size.mask() != 0 {
-            return Err(AccessError::Width(value));
+            return Err(BusCycleError::Width(value));
         }
         for (at, size, shift) in self.words(address, size)? {
             self.cycle(at, size, function_code, Some(value >> shift & size.mask()))?;
@@ -106,18 +107,18 @@ impl Mc68331 {
     /// register as it holds it (no flag armed or cleared), a memory's
     /// bytes through the decode.  A byte no memory alone answers, a
     /// peripheral's or one no cycle would end well, is
-    /// [`AccessError::Unpeekable`].
+    /// [`BusCycleError::Unpeekable`].
     ///
     /// # Errors
     ///
-    /// [`AccessError::Unpeekable`] as above, and otherwise as
+    /// [`BusCycleError::Unpeekable`] as above, and otherwise as
     /// `bus_read`.
     pub fn peek(
         &self,
         address: Address,
         size: Size,
         function_code: FunctionCode,
-    ) -> Result<u32, AccessError> {
+    ) -> Result<u32, BusCycleError> {
         self.words(address, size)?
             .try_fold(0, |value, (at, size, shift)| {
                 Ok(value | self.peek_cycle(at, size, function_code)? << shift)
@@ -164,9 +165,9 @@ impl Mc68331 {
         &self,
         address: Address,
         size: Size,
-    ) -> Result<impl Iterator<Item = (u32, Size, u32)> + use<>, AccessError> {
+    ) -> Result<impl Iterator<Item = (u32, Size, u32)> + use<>, BusCycleError> {
         if size != Size::Byte && address.is_odd() {
-            return Err(AccessError::Misaligned);
+            return Err(BusCycleError::Misaligned(address));
         }
         let at = |by| self.cpu.memory.mask(address.offset(by)).0;
         let first = (at(0), size, 0);
@@ -184,7 +185,7 @@ impl Mc68331 {
         size: Size,
         function_code: FunctionCode,
         write: Option<u32>,
-    ) -> Result<u32, AccessError> {
+    ) -> Result<u32, BusCycleError> {
         let now = self.now;
         let asked = self.board.stop_request.take();
         let ended = self.board.cycle(
@@ -217,7 +218,7 @@ impl Mc68331 {
         address: u32,
         size: Size,
         function_code: FunctionCode,
-    ) -> Result<u32, AccessError> {
+    ) -> Result<u32, BusCycleError> {
         let board = &self.board;
         if function_code != FunctionCode::CpuSpace
             && let Some(offset) = address
@@ -246,7 +247,7 @@ impl Mc68331 {
             };
             match peeked {
                 Peek::Value(value) => return Ok(value),
-                Peek::Unpeekable => return Err(AccessError::Unpeekable),
+                Peek::Unpeekable => return Err(BusCycleError::Unpeekable),
                 Peek::Unacknowledged => {}
             }
         }
@@ -261,11 +262,11 @@ impl Mc68331 {
 impl Board {
     /// Why a cycle `request` describes ended in a bus error: nothing
     /// matched it, or something answered it so.
-    fn unanswered(&self, request: DecodeRequest) -> AccessError {
+    fn unanswered(&self, request: DecodeRequest) -> BusCycleError {
         if self.sim.chip_selects().matches(request).next().is_none() {
-            AccessError::Unmapped(Address(request.address))
+            BusCycleError::Unserved(Address(request.address))
         } else {
-            AccessError::BusError
+            BusCycleError::BusError(Address(request.address))
         }
     }
 
@@ -276,7 +277,7 @@ impl Board {
         memory: &Memory,
         address: u32,
         function_code: FunctionCode,
-    ) -> Result<u32, AccessError> {
+    ) -> Result<u32, BusCycleError> {
         let request = DecodeRequest {
             address,
             function_code,
@@ -288,9 +289,9 @@ impl Board {
             None if self.sim.chip_selects().matches(request).next().is_none()
                 && !self.bus_takes(address, function_code) =>
             {
-                Err(AccessError::Unmapped(Address(address)))
+                Err(BusCycleError::Unserved(Address(address)))
             }
-            None => Err(AccessError::Unpeekable),
+            None => Err(BusCycleError::Unpeekable),
         }
     }
 }

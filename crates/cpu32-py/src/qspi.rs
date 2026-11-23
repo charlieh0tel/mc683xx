@@ -14,11 +14,11 @@ use pyo3::PyAny;
 use pyo3::PyResult;
 use pyo3::Python;
 use pyo3::exceptions::PyTypeError;
-use pyo3::exceptions::PyValueError;
 use pyo3::pyclass;
 use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
 
+use crate::error::Error;
 use crate::held::Held;
 use crate::mapped::PYTHON_PERIPHERAL;
 use crate::mapped::Pending;
@@ -31,7 +31,6 @@ use crate::python::repr;
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     rename_all = "SCREAMING_SNAKE_CASE"
 )]
@@ -43,12 +42,13 @@ pub(crate) enum ClockPolarity {
     IdleHigh,
 }
 
+enum_names!(ClockPolarity);
+
 /// Which SCK edges change and capture the data (QSMRM 4.3.1, CPHA).
 #[pyclass(
     module = "mc683xx",
     eq,
     hash,
-    eq_int,
     frozen,
     rename_all = "SCREAMING_SNAKE_CASE"
 )]
@@ -59,6 +59,8 @@ pub(crate) enum ClockPhase {
     /// CPHA 1: changed on the leading edge.
     ChangeLeading,
 }
+
+enum_names!(ClockPhase);
 
 /// The QSPI's serial clock, as a peripheral's `clock` is told it.
 #[pyclass(module = "mc683xx", frozen, get_all)]
@@ -209,9 +211,7 @@ pub(crate) fn shifted_in(value: &Bound<'_, PyAny>, bits: u8) -> PyResult<u16> {
     if u32::from(value) >> bits == 0 {
         Ok(value)
     } else {
-        Err(PyValueError::new_err(format!(
-            "{value:#x} does not fit a {bits}-bit transfer"
-        )))
+        Err(Error::ShiftedIn { value, bits }.into())
     }
 }
 

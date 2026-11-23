@@ -21,8 +21,9 @@ use std::str::FromStr;
 use mc683xx_target::integer::ParseIntegerError;
 use mc683xx_target::integer::parse_integer;
 
-use crate::error::ConditionError;
+use crate::board::NetError;
 use crate::observe::Observer;
+use crate::signal::Kind;
 use crate::signal::Signal;
 use crate::time::Time;
 use crate::wiring::Shared;
@@ -389,6 +390,36 @@ impl Observer for NetWatch {
     fn restored(&mut self, _net: &str, _at: Time, signal: Option<Signal>) {
         self.last = level(signal);
     }
+}
+
+/// Why a board would not arm a condition ([`Conditions::arm`]).
+///
+/// [`Conditions::arm`]: crate::condition::Conditions::arm
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum ConditionError {
+    /// The board has no such net.
+    #[error(transparent)]
+    Net(#[from] NetError),
+    /// A level's change on a net that carries no levels.
+    #[error("net {net:?} is a {kind} net: only `change` watches it")]
+    Kind {
+        /// The net.
+        net: String,
+        /// Its type.
+        kind: Kind,
+    },
+    /// The board has no peripheral of that name.
+    #[error("no peripheral {0:?}")]
+    Peripheral(String),
+    /// The peripheral would not arm it.
+    #[error("peripheral {peripheral:?}: {error}")]
+    Arm {
+        /// The peripheral.
+        peripheral: String,
+        /// Why.
+        error: ArmError,
+    },
 }
 
 #[cfg(test)]

@@ -59,7 +59,7 @@ use crate::chip::MemoryPlace;
 use crate::chip::MemoryPlan;
 use crate::chip::Requests;
 use crate::chip::sealed::Sealed;
-use crate::error::LoadError;
+use crate::description::LoadError;
 use crate::signal::Direction;
 use crate::signal::Kind;
 use crate::signal::Serial;

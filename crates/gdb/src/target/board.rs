@@ -2,8 +2,8 @@
 //! and nets.
 
 use mc683xx_board::board::Board;
+use mc683xx_board::board::RunError;
 use mc683xx_board::condition::Conditions;
-use mc683xx_board::error::RunError;
 use mc683xx_board::time::Span;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::control::CpuControl;

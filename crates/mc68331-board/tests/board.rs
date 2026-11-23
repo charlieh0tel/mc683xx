@@ -20,14 +20,14 @@ use mc683xx_board::adapter::SpiAdapter;
 use mc683xx_board::board::Board;
 use mc683xx_board::board::BoardRun;
 use mc683xx_board::board::BoardTracing;
+use mc683xx_board::board::ReceiveError;
+use mc683xx_board::board::RunError;
+use mc683xx_board::board::SendError;
 use mc683xx_board::builtin::EdgeCounter;
 use mc683xx_board::builtin::Recorder;
 use mc683xx_board::description::Description;
+use mc683xx_board::description::LoadError;
 use mc683xx_board::description::Options;
-use mc683xx_board::error::LoadError;
-use mc683xx_board::error::ReceiveError;
-use mc683xx_board::error::RunError;
-use mc683xx_board::error::SendError;
 use mc683xx_board::peripheral::Drive;
 use mc683xx_board::peripheral::Lane;
 use mc683xx_board::peripheral::Peripheral;
@@ -1035,7 +1035,7 @@ to = ["lamps.{net}"]
     assert!(matches!(load(2, "in3"), Err(LoadError::Endpoint { .. })));
     assert!(matches!(
         load(0, "in0"),
-        Err(LoadError::Port { peripheral, port }) if peripheral == "lamps" && port == "in0"
+        Err(LoadError::Port { peripheral, port, .. }) if peripheral == "lamps" && port == "in0"
     ));
 }
 

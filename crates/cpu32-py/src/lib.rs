@@ -12,6 +12,54 @@
     expect(dead_code, reason = "the bindings use these with `python`")
 )]
 
+/// An enum class's `name` and `__str__` (python.md, Names and values):
+/// `name` the member's (`FETCH`), `__str__` Rust's `Display` of the
+/// member as `$rust` where the Rust type has one (`fetch`), else the
+/// name.
+#[cfg(feature = "python")]
+macro_rules! enum_names {
+    ($class:ty) => {
+        #[pyo3::pymethods]
+        impl $class {
+            /// The member's name.
+            #[getter]
+            fn name(slf: &pyo3::Bound<'_, Self>) -> pyo3::PyResult<String> {
+                crate::python::member_name(slf.as_any())
+            }
+
+            /// No `int`: a member is not a number (python.md, Names and values).
+            fn __int__(&self) -> pyo3::PyResult<i64> {
+                Err(crate::python::not_a_number())
+            }
+
+            /// The member's name.
+            fn __str__(slf: &pyo3::Bound<'_, Self>) -> pyo3::PyResult<String> {
+                crate::python::member_name(slf.as_any())
+            }
+        }
+    };
+    ($class:ty, $rust:ty) => {
+        #[pyo3::pymethods]
+        impl $class {
+            /// The member's name.
+            #[getter]
+            fn name(slf: &pyo3::Bound<'_, Self>) -> pyo3::PyResult<String> {
+                crate::python::member_name(slf.as_any())
+            }
+
+            /// No `int`: a member is not a number (python.md, Names and values).
+            fn __int__(&self) -> pyo3::PyResult<i64> {
+                Err(crate::python::not_a_number())
+            }
+
+            /// Rust's `Display`.
+            fn __str__(&self) -> String {
+                <$rust>::from(*self).to_string()
+            }
+        }
+    };
+}
+
 #[cfg(feature = "python")]
 mod bare;
 #[cfg(feature = "python")]
@@ -55,8 +103,16 @@ mod exceptions {
 
     pyo3::create_exception!(
         mc683xx,
-        BusError,
+        BusCycleError,
         PyException,
+        "Raised by a host's bus cycle or peek that gave no value (Rust's \
+         BusCycleError): BusError or UnpeekableError."
+    );
+
+    pyo3::create_exception!(
+        mc683xx,
+        BusError,
+        BusCycleError,
         "Raised by a peripheral's read or write: BERR ends \
          the cycle."
     );
@@ -64,7 +120,7 @@ mod exceptions {
     pyo3::create_exception!(
         mc683xx,
         UnpeekableError,
-        PyException,
+        BusCycleError,
         "Raised by peek where only a real bus cycle can tell: a peripheral, \
          or a module register a read would change."
     );

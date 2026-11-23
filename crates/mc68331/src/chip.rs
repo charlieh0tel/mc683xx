@@ -74,7 +74,7 @@ use crate::gpt::Input;
 use crate::gpt::PwmChange;
 use crate::gpt::pwm::Channel;
 use crate::gpt::pwm::Output;
-use crate::port::NoInputsError;
+use crate::port::NoInputs;
 use crate::port::OutputChange;
 use crate::port::Port;
 use crate::port::PortChange;
@@ -250,9 +250,10 @@ pub enum BuildError {
     #[error("{0} is already wired")]
     Wired(ChipSelect),
     /// Memory that is not a whole number of 2-Kbyte pages, the
-    /// smallest chip-select block (SIMRM Table 7-2).
+    /// smallest chip-select block (SIMRM Table 7-2), its bytes; more
+    /// than a `u32` holds are `u32::MAX`.
     #[error("{0:#x} bytes: not a whole number of pages")]
-    Length(usize),
+    Length(u32),
     /// A fixed memory's base off a page boundary, or the memory past
     /// ADDR\[23:0\] (MC68331UM 4.4.1.1).
     #[error("{base}: a fixed memory of {length:#x} bytes does not fit there")]
@@ -260,7 +261,7 @@ pub enum BuildError {
         /// Its base.
         base: Address,
         /// Its bytes.
-        length: usize,
+        length: u32,
     },
     /// A fixed memory overlapping another.
     #[error("the fixed memory at {base} overlaps the one at {other}")]
@@ -483,10 +484,7 @@ impl Builder {
         base: Address,
     ) -> Result<MemoryId, BuildError> {
         let length = pages(&bytes)?;
-        let placement = BuildError::Placement {
-            base,
-            length: bytes.len(),
-        };
+        let placement = BuildError::Placement { base, length };
         if !base.0.is_multiple_of(PAGE_BYTES)
             || base
                 .0
@@ -725,11 +723,11 @@ impl Builder {
 
 /// The bytes of a memory of `bytes`: a whole number of pages.
 fn pages(bytes: &[u8]) -> Result<u32, BuildError> {
-    let length = bytes.len();
-    if length == 0 || !length.is_multiple_of(PAGE_BYTES as usize) {
+    let length = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
+    if length == 0 || !length.is_multiple_of(PAGE_BYTES) {
         return Err(BuildError::Length(length));
     }
-    u32::try_from(length).map_err(|_| BuildError::Length(length))
+    Ok(length)
 }
 
 /// How the chip's [`run`](Mc68331::run) ended.
@@ -1267,9 +1265,9 @@ impl Mc68331 {
     ///
     /// # Errors
     ///
-    /// [`NoInputsError`] for port C, which has no inputs, driving
+    /// [`NoInputs`] for port C, which has no inputs, driving
     /// nothing.
-    pub fn set_pins(&mut self, port: Port, value: u8, mask: u8) -> Result<(), NoInputsError> {
+    pub fn set_pins(&mut self, port: Port, value: u8, mask: u8) -> Result<(), NoInputs> {
         let now = self.now;
         self.board.set_pins(port, value, mask, now)
     }
