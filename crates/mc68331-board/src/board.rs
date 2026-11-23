@@ -25,6 +25,7 @@ use std::rc::Weak;
 use std::time::Duration;
 
 use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
 use mc683xx_cpu32::cpu::hooks::HookId;
 use mc683xx_cpu32::cpu::state::Layer;
@@ -113,7 +114,7 @@ use crate::wiring::SharedMemory;
 
 /// The format of [`Board::save`]'s bytes.  The chip's and the peripherals'
 /// snapshots inside carry their own.
-pub const VERSION: u32 = 22;
+pub const VERSION: u32 = 23;
 
 /// The levels on PCS\[3:0\] before the QSPI drives them: high.
 const PCS_IDLE: u8 = 0xf;
@@ -927,7 +928,7 @@ impl<C: Chip> Board<C> {
                     .qspi_deferrable()
             });
             *shared.qspi.borrow_mut() = Some(QspiState::new(PCS_IDLE, targets.len()));
-            builder.qspi(QspiRouter {
+            builder.set_qspi(QspiRouter {
                 shared: Rc::clone(shared),
                 targets,
                 deferrable,
@@ -1133,9 +1134,18 @@ impl<C: Chip> Board<C> {
         id
     }
 
+    /// The CPU's registers, hooks and page permissions, to change, as
+    /// the chip lends them ([`Chip::cpu_control`]): a data watch
+    /// (`add_write_hook`, `add_read_hook`) beside
+    /// [`watch_code`](Self::watch_code).  A hook that breaks ends the
+    /// run [`Stop::Hook`] after its instruction.
+    pub fn cpu_control(&mut self) -> CpuControl<'_> {
+        self.chip.cpu_control()
+    }
+
     /// Where the CPU is now, as a `position` record.
     #[must_use]
-    pub fn position(&self) -> PositionRecord {
+    pub fn position_record(&self) -> PositionRecord {
         let registers = &self.chip.cpu().registers;
         PositionRecord {
             cycle: self.chip.now(),
@@ -1905,7 +1915,7 @@ impl<C: Chip> Board<C> {
     /// # Errors
     ///
     /// As [`send`](Self::send).
-    pub fn check_send(&self, name: &str, signal: &Signal) -> Result<(), SendError> {
+    pub fn check_send(&self, name: &str, signal: Signal) -> Result<(), SendError> {
         self.control.endpoints().carrying(name, signal).map(drop)
     }
 
@@ -1913,7 +1923,7 @@ impl<C: Chip> Board<C> {
     /// without the control.
     fn drive_endpoint(&mut self, name: &str, signal: Signal) -> Result<(), SendError> {
         let source = Source::External(name.to_owned());
-        let carrying = self.control.endpoints().carrying(name, &signal)?;
+        let carrying = self.control.endpoints().carrying(name, signal)?;
         let at = self.now;
         for net in carrying {
             self.drive_net(net, &source, at, signal);

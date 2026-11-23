@@ -32,11 +32,11 @@ use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
-use super::Acia;
 use super::CTS;
 use super::Clock;
 use super::DCD;
 use super::IRQ;
+use super::Mc6850;
 use super::NAME;
 use super::Overrun;
 use super::RTS;
@@ -98,14 +98,14 @@ const fn ps(picoseconds: u64) -> Span {
 /// An ACIA under test.
 struct Bench {
     /// The peripheral.
-    acia: Acia,
+    acia: Mc6850,
 }
 
 impl Bench {
     /// Powered on, both clocks at `CLOCK_HZ`.
     fn new() -> Self {
         let clock = Clock { hz: CLOCK_HZ };
-        let mut acia = Acia::new(clock, clock);
+        let mut acia = Mc6850::new(clock, clock);
         acia.power_on(&mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)));
         Self { acia }
     }
@@ -272,7 +272,7 @@ fn the_clocks_are_required_parameters() {
 #[test]
 fn it_powers_on_in_its_first_master_reset() {
     let clock = Clock { hz: CLOCK_HZ };
-    let mut acia = Acia::new(clock, clock);
+    let mut acia = Mc6850::new(clock, clock);
     let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
     acia.power_on(&mut drive);
     assert_eq!(levels(&drive.finish().driven), [(RTS, true), (IRQ, true)]);
@@ -690,7 +690,7 @@ fn a_restore_refuses_other_clocks_and_a_state_no_run_holds() {
     let before = bench.acia.state.clone();
     let slow = Clock { hz: CLOCK_HZ / 2 };
     let fast = Clock { hz: CLOCK_HZ };
-    for other in [Acia::new(slow, fast), Acia::new(fast, slow)] {
+    for other in [Mc6850::new(slow, fast), Mc6850::new(fast, slow)] {
         assert!(matches!(
             bench.acia.restore(&other.save().unwrap()),
             Err(StateError::Mismatch(_))

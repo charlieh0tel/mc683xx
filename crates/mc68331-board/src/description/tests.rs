@@ -90,6 +90,26 @@ fn cs(number: u8) -> ChipSelect {
 }
 
 #[test]
+fn a_nets_sink_may_be_one_endpoint_as_its_driver_may() {
+    let net = |to: &str| {
+        parse(&with(&format!(
+            "[[peripheral]]\nname = \"pps\"\ntype = \"divider\"\n\
+             [[net]]\nname = \"one-pps\"\ntype = \"edge\"\n\
+             from = \"pps.out\"\nto = {to}\n"
+        )))
+        .unwrap()
+        .nets
+        .remove(0)
+        .to
+    };
+    assert_eq!(
+        net("\"chip.PGP0\""),
+        vec![Endpoint::Chip("PGP0".to_owned())]
+    );
+    assert_eq!(net("\"chip.PGP0\""), net("[\"chip.PGP0\"]"));
+}
+
+#[test]
 fn a_board_resolves() {
     let description = parse(&format!(
         "{BASE}{}",
@@ -937,6 +957,19 @@ fn a_peripheral_on_no_select_takes_a_window_or_an_acknowledge() {
         (
             peripheral(dsack, "{ base = 0xffff00, size = 0x200 }"),
             "io: attachment 0: its window must be inside ADDR[23:0] and not empty",
+        ),
+        (
+            // past 32 bits: the attachment's error, as a memory's base
+            peripheral(dsack, "{ base = 0x100000000, size = 0x100 }"),
+            "io: attachment 0: its window must be inside ADDR[23:0] and not empty",
+        ),
+        (
+            peripheral(dsack, "{ base = 0xffffffffffffffff, size = 0x100 }"),
+            "io: attachment 0: its window must be inside ADDR[23:0] and not empty",
+        ),
+        (
+            peripheral("", "{ select = \"CS1\", offset = 0x100000000 }"),
+            "io: attachment 0: its offset must fit 32 bits",
         ),
         (
             peripheral(dsack, "{ iack = 0 }"),

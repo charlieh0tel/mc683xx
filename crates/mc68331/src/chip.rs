@@ -925,10 +925,15 @@ impl Mc68331 {
     /// A reset for `cause` taken in a run: the stop the CPU's state
     /// after it gives, and whether the run ends there, as it does if
     /// the reset changes a clock the host stops on, a peripheral it
-    /// reached asks for a sync, or it reaches a watched output.
+    /// reached asks for a sync, or it reaches a watched output.  A
+    /// peripheral it reached that asks the run to stop ends it there,
+    /// [`Stop::Requested`], before the first instruction after it.
     fn reset_in_run(&mut self, cause: ResetCause) -> (Stop, bool) {
         let frequency = self.board.sim.system_clock().frequency();
         self.reset_as(cause, false);
+        if self.board.take_stop() {
+            return (Stop::Requested, true);
+        }
         let stop = self.cpu.idle().unwrap_or(Stop::Budget);
         let moved = self.board.outputs_moved() | self.board.output_stop.reset;
         let ends = self.board.clock_stop && self.board.sim.system_clock().frequency() != frequency
@@ -1416,14 +1421,14 @@ impl Connection<'_, '_> {
             access.now,
             write,
         );
-        if board.tracing.accesses {
-            board.events.push(Event::Access {
+        if board.tracing.bus_cycles {
+            board.events.push(Event::BusCycle {
                 now: access.now,
                 address: access.address,
                 size: access.size,
                 function_code: access.function_code,
                 write: write.is_some(),
-                value: write.or(ended.ok().map(|(value, _)| value)),
+                value: write.or(ended.ok().map(|(value, _)| value)).unwrap_or(0),
                 bus_error: ended.is_err(),
             });
         }

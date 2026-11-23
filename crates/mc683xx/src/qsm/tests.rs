@@ -23,7 +23,7 @@ use super::SPCR0;
 use super::SPCR1;
 use super::SPCR2;
 use super::SPCR3_SPSR;
-use super::STATE_VERSION;
+use super::VERSION;
 use super::qspi::Shifted;
 use super::sci::Frame;
 use crate::module::Module;
@@ -258,7 +258,7 @@ fn the_format_matches_its_golden() {
     snapshot_golden::check(
         env!("CARGO_MANIFEST_DIR"),
         "qsm",
-        &[("qsm", STATE_VERSION)],
+        &[("qsm", VERSION)],
         &qsm.save().unwrap(),
     );
 }
@@ -269,9 +269,9 @@ fn a_state_no_run_could_save_is_refused() {
     transmitting(&mut qsm, 100);
     let snapshot = qsm.save().unwrap();
     let edited = |change: fn(&mut Qsm)| {
-        let mut saved: Qsm = decode(STATE_VERSION, &snapshot).unwrap();
+        let mut saved: Qsm = decode(VERSION, &snapshot).unwrap();
         change(&mut saved);
-        encode(STATE_VERSION, &saved)
+        encode(VERSION, &saved)
     };
     let invalid: [(Vec<u8>, &str); 3] = [
         (edited(|saved| saved.qilr = 0xff), "QSM registers"),

@@ -59,20 +59,20 @@
     clippy::missing_panics_doc
 )]
 
-mod ad569;
-mod adc0838;
+pub mod ad569;
+pub mod adc0838;
 pub mod at28c64b;
-mod buffer;
+pub mod buffer;
 mod character;
 mod dac;
-mod latch;
-mod mc144110;
-mod mc6850;
-mod mc68681;
+pub mod latch;
+pub mod mc144110;
+pub mod mc6850;
+pub mod mc68681;
 mod noise;
 mod octal;
 mod shift_register;
-mod sipo;
+pub mod sipo;
 #[cfg(test)]
 mod spi_mode;
 

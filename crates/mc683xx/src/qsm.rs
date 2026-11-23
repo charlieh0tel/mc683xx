@@ -106,7 +106,7 @@ const INTV0: u8 = 1;
 /// QIVR out of reset: $0F, the uninitialized interrupt vector.
 const QIVR_RESET: u8 = 0x0f;
 /// The format of the QSM's snapshot ([`Module::save`]).
-const STATE_VERSION: u32 = 5;
+const VERSION: u32 = 5;
 
 /// The QSM's state.
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -651,12 +651,12 @@ impl Module for Qsm {
     /// included), the frames on the SCI's lines and the output changes
     /// not taken; not the host's QSPI peripheral.
     fn save(&self) -> Result<Vec<u8>, StateError> {
-        Ok(encode(STATE_VERSION, self))
+        Ok(encode(VERSION, self))
     }
 
     /// The host's QSPI peripheral stays.
     fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
-        let saved: Self = decode(STATE_VERSION, snapshot)?;
+        let saved: Self = decode(VERSION, snapshot)?;
         if saved.qilr & !QILR_WRITABLE != 0 || saved.qivr & INTV0 != 0 || !saved.port.is_valid() {
             return Err(StateError::invalid("QSM registers"));
         }

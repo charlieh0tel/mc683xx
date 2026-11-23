@@ -188,8 +188,8 @@ prefix; their directories keep the short names.
   a page does not permit is a bus error, shown to the invalid access
   hooks as `Invalid::Protected`.
 - **Tracing:** peripheral accesses, exceptions taken, instruction count.
-  The chip's events carry them: `Mc68331::set_tracing(Tracing {
-  accesses, exceptions })`, both off at first, adds `Event::Access`
+  The chip's events carry them: `Mc68331::set_tracing(ChipTracing {
+  bus_cycles, exceptions })`, both off at first, adds `Event::BusCycle`
   for each bus cycle the core sends the chip (module registers,
   peripherals, memory a peripheral shares a select with; not RAM and ROM the
   core serves, which memory hooks see) and `Event::Exception` for
@@ -622,7 +622,12 @@ type of the same name takes precedence.  A board's
 own logic (an FPGA's design, a custom panel) stays with its host.
 Each peripheral's ports, parameters and the choices where its datasheet is
 silent are in `docs/peripherals.md`; the datasheets are in
-`third_party/datasheets/`.  The larger choices:
+`third_party/datasheets/`.  Every stock type is public, with read-only
+accessors for its state and its parameter defaults as constants, so
+a host reads a peripheral by type (`Board::peripheral::<T>`) and
+writes a default once; `inspect` is for a front end and not a
+contract (decided 2026-11, for 0.9.0, over hiding `At28c64b`, then
+the one public type).  The larger choices:
 - *Logic peripherals.*  `74x374` and `74x373` are one model: strobed by a
   write cycle, the edge-triggered register and the transparent latch
   both hold the byte written from the cycle's end, and the '373's
@@ -816,7 +821,7 @@ chip beside `Mc68331`.
   `outputs(Port)`, `port(Port)` (a `PortState`),
   `take_port_changes()` (`(now, Port, driven, levels)`, every port's),
   `system_hz`, `take_events()` (`Event.Reset`, `Event.ArbitrationTie`,
-  `Event.Dsack`, `Event.Unknown`, and with `set_tracing(accesses=, exceptions=)` `Event.Access` and
+  `Event.Dsack`, `Event.Unknown`, and with `set_tracing(bus_cycles=, exceptions=)` `Event.BusCycle` and
   `Event.Exception`), `instructions`.
   Background debug mode (below) is `reset_with_breakpoint()`,
   `assert_breakpoint() -> bool`, the
@@ -1107,7 +1112,7 @@ hand.  The keys are in `docs/board-files.md`.
   each peripheral's IRQ output and reset scope on no pin, the QSPI's
   PCS decode), running for a budget with its sync and stop requests
   (`chip::Requests`, the stop the core's `StopRequest`), the system
-  clock and the clock outputs, its pins (`ChipPin`: name, kind,
+  clock and the clock outputs, its pins (`ChipPin`: printed and parsed by name, kind,
   direction, and whether it takes a level ahead at its time), the
   outputs it watches, its events and the RESET pulse each reset
   drives, the CPU, and its snapshot.  The board's generic code names
@@ -1128,8 +1133,8 @@ hand.  The keys are in `docs/board-files.md`.
   `Board<Mc68331>`, or is generic over `Board<C: Chip>`, and calls the
   chip's methods, but implements none of them; the plumbing only the
   board calls (`Chip::builder`, `input`, `collect`, the output watches,
-  the diversions, `ChipPin::pcs` and `scheduled`, `Requests`, the
-  memory plans, `BoardMapped`, `BoardSpi`, `Mc68331Builder`) is
+  the diversions, `ChipPin::name`, `pcs` and `scheduled`, `Requests`, the
+  memory plans, `Mc68331Builder`) is
   `#[doc(hidden)]`, outside semver (decided 2026-11-21).  The board's snapshot holds the chip's pins (its outputs'
   last levels, its clock outputs' clocks) in the chip's own pin
   type, and the levels the board drives on the chip's inputs are the
@@ -1366,7 +1371,14 @@ hand.  The keys are in `docs/board-files.md`.
   the board's snapshot: a trait, not serde, so a model keeps its own
   format and versions it, and one with state it cannot serialize (a
   file handle) is `unsavable!`, which the board's save names.  One
-  constructor, `new`: the adapter needs no opt-in.
+  constructor, `new`: the adapter needs no opt-in.  A mapped model
+  drives nets through its adapter: `MappedAdapter::driving(fn(&mut D,
+  &mut Drive))`, as `inspecting` shows its state, runs after each call
+  that may change the model (power-on, read, write, reset, advance),
+  so a model written against the chip's traits needs no wrapping
+  `Peripheral` to drive a net (decided for 0.9.0, over folding
+  `Timed` into `MappedPeripheral`: `Timed` stays `Module`'s
+  supertrait, and the bare machine takes untimed models).
 - **Nets:** named and typed, `{ name, type, from, to = [...] }`.
   Types: `logic` (a level whose state matters), `edge` (a level whose
   changes' times matter, 1 PPS), `clock` (a frequency in nanohertz
@@ -1375,7 +1387,10 @@ hand.  The keys are in `docs/board-files.md`.
   exactly, so a consumer counts and times edges across it with no
   rounding), `serial` (UART frames, `signal::Serial`: an `sci::Frame`
   timed from its start bit, with its baud and length, so a receiver
-  times either edge; one direction, so a link is two nets), `analog` (an `f64`; data only, never time; a
+  times either edge, both zero for an untimed frame, a host's
+  character, kept as a documented sentinel over an `Option` of the
+  pair, which every receiver would unwrap alike (decided 2026-11, for
+  0.9.0); one direction, so a link is two nets), `analog` (an `f64`; data only, never time; a
   sink samples it at its own time, which asks the driver's
   `Peripheral::analog_output` then, so a value that moves continuously, a warming
   oven, need not be driven at every change), `bus` (parallel lines as
@@ -1567,7 +1582,7 @@ hand.  The keys are in `docs/board-files.md`.
   run, which the board records and goes on from), pin edges with
   their clock and board time, QSPI transfers, positions and the run's
   end.  The text, `CHIP: KIND key=value ...` after a `# mc683xx trace
-  2 chip=CHIP` header, the chip's `Chip::TYPE` the prefix, is
+  4 chip=CHIP` header, the chip's `Chip::TYPE` the prefix, is
   smartclock-emu's shape, so a smartclock run and a board run diff
   line for line.  smartclock-emu's own traces call a bus cycle
   `device`; boot-diff reads that dialect.
@@ -2334,8 +2349,10 @@ Adversarial review (2026-11-01):
 - The bus can ask for a stop too (`Bus::stop_requested`, asked after
   each cycle it ends, after the `reset` instruction's RESET and after
   an interrupt acknowledge): the chip's `StopRequest` handle, for its
-  peripherals, ends the run after that instruction, or between quanta if
-  a peripheral's `advance` asked.  The Python bindings use it: a peripheral's
+  peripherals, ends the run after that instruction, between quanta if
+  a peripheral's `advance` asked, or at a reset the run takes (the
+  watchdog's, the halt monitor's) if a peripheral's `reset` asked,
+  before the first instruction after it.  The Python bindings use it: a peripheral's
   exception stops the run there.
 - Cost when absent (`make bench`'s `core/*`, pinned to one
   performance core, before and after run in turn, on a loaded host
@@ -3482,7 +3499,7 @@ checks move onto real code hooks.
 | Firmware images by path, not committed | Vendor images are not ours; feature-gated system tests read them from a path in an environment variable, for any board. |
 | Runs named `run_until` and `run_for` | A run to an absolute time is `run_until`, a run for a duration `run_for`, at every layer (the core, the chip, the board, gdb's targets, Python); a bare machine's run to limits is `run_limited`.  No bare `run`, whose meaning a reader must look up (decided 2026-10-24, before 0.1.0). |
 | The modules crate's assembly API sealed and hidden | `Module` and the plumbing only `mc683xx-mc68331` uses to compose the chip (register cycles, decode requests, the SIM's timer and reset handshakes, the serde helpers; from 0.7.0 the modules' blocks, chip-select decode, and the `Qsm` and `Sim` mutators a host cannot reach through the chip's `&Qsm` and `&Sim`; from 0.9.0 the `module` module, `Lanes`, `Selects`, `ChipSelects::at` and `blocks`, `Termination::clocks`, `external_clocks` and `MOST_WAIT_STATES`, `Sim::freezes_bus_monitor`, and `SystemClock::tick`, `at` and `clocks_per_tick`) change with the chip; sealing `Module` and `#[doc(hidden)]` with a "Not part of the semver API" note keep them out of semver, so the chip can change them in a minor release, while what a host needs stays public (decided 2026-10-24, before 0.1.0). |
-| The board's chip traits sealed | `Chip`, `ChipBuilder` and `ChipPin` are what the board's run loop needs of a part, and change with it; a new chip (a 68332) is added inside mc683xx, beside `mc683xx_board::mc68331`, not by a host.  Sealing them and `#[doc(hidden)]` on the plumbing only the board calls keep them out of semver, while a host keeps `Board<Mc68331>`, `Board<C: Chip>` and the chip's methods it calls (`cpu`, `now`, `memory`, the resets, `save`).  Opening them later is not breaking (decided 2026-11-21, before 1.0). |
+| The board's chip traits sealed | `Chip`, `ChipBuilder` and `ChipPin` are what the board's run loop needs of a part, and change with it; a new chip (a 68332) is added inside mc683xx, beside `mc683xx_board::mc68331`, not by a host.  Sealing them and `#[doc(hidden)]` on the plumbing only the board calls keep them out of semver, while a host keeps `Board<Mc68331>`, `Board<C: Chip>` and the chip's items it calls (`TYPE`, the name it prints and a board file's `[chip] type` gives; `cpu`, `cpu_control`, `now`, `memory`, the resets, `save`).  Opening them later is not breaking (decided 2026-11-21, before 1.0). |
 | Board time with the SIM | It derives from SYNCR. |
 | Not cycle accurate, not cycle stupid | Firmware timing comes from peripherals, but timing loops and peripheral pacing need table-based estimates with wait states. |
 | Level-sensitive IPL plus IACK | Matches the chip; makes IARB natural. |

@@ -55,7 +55,7 @@ pub enum Role {
 
 impl Role {
     /// Every one, in declaration order.
-    const EVERY: [Self; 4] = [Self::Read, Self::Write, Self::ReadWrite, Self::Iack];
+    const ALL: [Self; 4] = [Self::Read, Self::Write, Self::ReadWrite, Self::Iack];
 
     /// Its name, as an attachment's `role` gives it: `read`, `write`,
     /// `read-write` or `iack`.
@@ -81,7 +81,7 @@ impl FromStr for Role {
     type Err = ParseRoleError;
 
     fn from_str(name: &str) -> Result<Self, ParseRoleError> {
-        Self::EVERY
+        Self::ALL
             .into_iter()
             .find(|candidate| candidate.name() == name)
             .ok_or_else(|| ParseRoleError(name.to_owned()))
@@ -109,7 +109,7 @@ pub enum Lane {
 
 impl Lane {
     /// Every one, in declaration order.
-    const EVERY: [Self; 3] = [Self::Both, Self::Upper, Self::Lower];
+    pub const ALL: [Self; 3] = [Self::Both, Self::Upper, Self::Lower];
 
     /// Its name, as an attachment's `lane` gives it: `both`, `upper` or
     /// `lower`.
@@ -134,7 +134,7 @@ impl FromStr for Lane {
     type Err = ParseLaneError;
 
     fn from_str(name: &str) -> Result<Self, ParseLaneError> {
-        Self::EVERY
+        Self::ALL
             .into_iter()
             .find(|candidate| candidate.name() == name)
             .ok_or_else(|| ParseLaneError(name.to_owned()))
@@ -930,7 +930,7 @@ mod tests {
 
     #[test]
     fn roles_print_as_the_board_file_names_them_and_parse_back() {
-        for role in Role::EVERY {
+        for role in Role::ALL {
             assert_eq!(role.to_string().parse(), Ok(role));
         }
         assert_eq!("?".parse::<Role>(), Err(ParseRoleError("?".to_owned())));
@@ -938,7 +938,7 @@ mod tests {
 
     #[test]
     fn lanes_print_as_the_board_file_names_them_and_parse_back() {
-        for lane in Lane::EVERY {
+        for lane in Lane::ALL {
             assert_eq!(lane.to_string().parse(), Ok(lane));
         }
         assert_eq!("?".parse::<Lane>(), Err(ParseLaneError("?".to_owned())));

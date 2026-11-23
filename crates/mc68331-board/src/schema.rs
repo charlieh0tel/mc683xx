@@ -200,13 +200,15 @@ pub(crate) struct Attachment {
     pub(crate) lane: Option<Lane>,
     /// Address lines wired.
     pub(crate) lines: Option<Lines>,
-    /// Added to the address.
-    pub(crate) offset: Option<u32>,
+    /// Added to the address.  Integers here are `u64`, as a memory's,
+    /// so a value out of range is the attachment's error, not a
+    /// syntax error.
+    pub(crate) offset: Option<u64>,
     /// On no select: the first address of the window its own decode
     /// takes.
-    pub(crate) base: Option<u32>,
+    pub(crate) base: Option<u64>,
     /// The window's bytes.
-    pub(crate) size: Option<u32>,
+    pub(crate) size: Option<u64>,
     /// On no select: the interrupt level whose acknowledges it takes.
     pub(crate) iack: Option<u8>,
 }
@@ -396,6 +398,16 @@ pub(crate) enum Endpoints {
     Many(Vec<String>),
 }
 
+impl Endpoints {
+    /// The endpoints, one or several.
+    pub(crate) fn into_vec(self) -> Vec<String> {
+        match self {
+            Self::One(one) => vec![one],
+            Self::Many(many) => many,
+        }
+    }
+}
+
 /// `[[net]]`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -413,5 +425,5 @@ pub(crate) struct Net {
     /// Its drivers.
     pub(crate) from: Endpoints,
     /// Its sinks.
-    pub(crate) to: Vec<String>,
+    pub(crate) to: Endpoints,
 }

@@ -65,7 +65,7 @@ impl Kind {
 
     /// Whether a value of `signal` belongs on a net of this kind.
     #[must_use]
-    pub const fn carries(self, signal: &Signal) -> bool {
+    pub const fn carries(self, signal: Signal) -> bool {
         matches!(
             (self, signal),
             (Self::Logic | Self::Edge, Signal::Level(_))
@@ -84,7 +84,9 @@ impl Kind {
 /// leading edge, and it carries its bit rate and length, so a receiver
 /// times its start or its end (`end`) as its own logic wants.  Built
 /// with `new`, `timed` or `untimed`, so a field added later gets a
-/// default.
+/// default.  An untimed frame (a host's character) has `baud` and
+/// `length` zero, a sentinel, not a rate: a receiver that times frames
+/// tests `baud` for zero and takes such a frame whole at its time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Serial {
@@ -178,7 +180,7 @@ pub enum Direction {
 
 impl Direction {
     /// Every direction.
-    const ALL: [Self; 3] = [Self::In, Self::Out, Self::InOut];
+    pub const ALL: [Self; 3] = [Self::In, Self::Out, Self::InOut];
 
     /// Its name, as a board file's port is declared.
     const fn name(self) -> &'static str {

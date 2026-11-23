@@ -38,8 +38,10 @@ use mc683xx_mc68331::port::OutputChange;
 use mc683xx_mc68331::port::Port;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Dsack;
+use mc683xx_modules::peripheral::AnyMappedPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
+use mc683xx_modules::qsm::qspi::AnySpiPeripheral;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::clock::ClockSource;
@@ -51,8 +53,6 @@ use serde::Serializer;
 use serde::de::Error as _;
 
 use crate::chip;
-use crate::chip::BoardMapped;
-use crate::chip::BoardSpi;
 use crate::chip::ChipBuilder;
 use crate::chip::ChipPin;
 use crate::chip::MemoryPlace;
@@ -248,13 +248,14 @@ const IRQ: [&str; 7] = ["IRQ1", "IRQ2", "IRQ3", "IRQ4", "IRQ5", "IRQ6", "IRQ7"];
 #[error("no MC68331 pin {0:?}")]
 pub struct ParsePinError(String);
 
-/// The pin named so, after `chip.`, exactly as `Display` writes it.
+/// The pin named so, after `chip.`, as `Display` writes it, in any
+/// case: `PE0`, `pe0`.
 impl FromStr for Pin {
     type Err = ParsePinError;
 
     fn from_str(name: &str) -> Result<Self, ParsePinError> {
         Self::all()
-            .find(|pin| pin.name() == name)
+            .find(|pin| pin.name().eq_ignore_ascii_case(name))
             .ok_or_else(|| ParsePinError(name.to_owned()))
     }
 }
@@ -503,7 +504,7 @@ impl ChipBuilder for Mc68331Builder {
         Rc::clone(&self.handles) as Rc<dyn Requests>
     }
 
-    fn memory<R: BoardMapped>(
+    fn memory<R: AnyMappedPeripheral>(
         &mut self,
         plan: MemoryPlan<'_>,
         router: R,
@@ -530,7 +531,7 @@ impl ChipBuilder for Mc68331Builder {
         Ok(id)
     }
 
-    fn peripheral<R: BoardMapped>(
+    fn peripheral<R: AnyMappedPeripheral>(
         &mut self,
         router: R,
         select: ChipSelect,
@@ -543,7 +544,7 @@ impl ChipBuilder for Mc68331Builder {
         Ok(())
     }
 
-    fn bus_peripheral<R: BoardMapped>(
+    fn bus_peripheral<R: AnyMappedPeripheral>(
         &mut self,
         router: R,
         decodes: &[BusDecode],
@@ -555,7 +556,7 @@ impl ChipBuilder for Mc68331Builder {
             .map_err(built)
     }
 
-    fn unwired<R: BoardMapped>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>) {
+    fn unwired<R: AnyMappedPeripheral>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>) {
         let id = self.builder.unwired_peripheral(pins);
         self.builder.set_reset_scope(id, reset);
         if let Some(level) = irq {
@@ -563,7 +564,7 @@ impl ChipBuilder for Mc68331Builder {
         }
     }
 
-    fn qspi<R: BoardSpi>(&mut self, router: R) -> Result<(), LoadError> {
+    fn set_qspi<R: AnySpiPeripheral>(&mut self, router: R) -> Result<(), LoadError> {
         self.builder.set_qspi(router);
         Ok(())
     }
@@ -864,6 +865,9 @@ mod tests {
             Ok(Pin::Port(PortPin::new(Port::C, 6).unwrap()))
         );
         assert_eq!("IRQ7".parse(), Ok(Pin::Irq(IrqPin::IRQ7)));
+        assert_eq!("irq7".parse(), Ok(Pin::Irq(IrqPin::IRQ7)));
+        assert_eq!("pgp0".parse(), Ok(gp(0)));
+        assert_eq!("Reset".parse(), Ok(Pin::Reset));
         for bad in ["IRQ0", "PC7", "PE8", "PE05", "NMI", ""] {
             assert!(bad.parse::<Pin>().is_err(), "{bad}");
         }

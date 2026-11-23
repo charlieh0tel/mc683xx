@@ -41,12 +41,12 @@ pub enum Event {
         arbitration: u8,
     },
     /// A bus cycle the core sent to the chip, while
-    /// [`ChipTracing::accesses`] is set: one it could not serve from its
+    /// [`ChipTracing::bus_cycles`] is set: one it could not serve from its
     /// own memory, a module register's, a peripheral's, or host memory a
     /// peripheral shares a select with.  RAM and ROM the core serves are
     /// not traced; memory hooks see those.
     #[non_exhaustive]
-    Access {
+    BusCycle {
         /// When its instruction started.
         now: Cycle,
         /// Its address, on the address lines.
@@ -57,9 +57,9 @@ pub enum Event {
         function_code: FunctionCode,
         /// Whether it wrote.
         write: bool,
-        /// The value read or written, right-aligned; `None` for a read
-        /// that ended in a bus error.
-        value: Option<u32>,
+        /// The value read or written, right-aligned; 0 for a read that
+        /// ended in a bus error.
+        value: u32,
         /// Whether it ended in a bus error.
         bus_error: bool,
     },
@@ -93,7 +93,7 @@ impl Event {
         match *self {
             Self::Reset { now, .. }
             | Self::ArbitrationTie { now, .. }
-            | Self::Access { now, .. }
+            | Self::BusCycle { now, .. }
             | Self::Exception { now, .. }
             | Self::Dsack { now, .. } => now,
         }
@@ -108,12 +108,13 @@ impl fmt::Display for Event {
             Self::ArbitrationTie {
                 level, arbitration, ..
             } => write!(formatter, "arbitration tie at {level}, IARB {arbitration}"),
-            Self::Access {
+            Self::BusCycle {
                 address,
                 size,
                 function_code,
                 write,
                 value,
+                bus_error,
                 ..
             } => {
                 let direction = if *write { "write" } else { "read" };
@@ -122,9 +123,10 @@ impl fmt::Display for Event {
                     "{direction} of {} bytes at {address} in {function_code}",
                     size.bytes()
                 )?;
-                match value {
-                    Some(value) => write!(formatter, ": {value:#x}"),
-                    None => formatter.write_str(": bus error"),
+                if *bus_error {
+                    formatter.write_str(": bus error")
+                } else {
+                    write!(formatter, ": {value:#x}")
                 }
             }
             Self::Exception { entry, .. } => {
@@ -175,12 +177,12 @@ impl fmt::Display for DsackFault {
 /// off by default: each costs a little on every cycle or exception.
 ///
 /// It may gain fields: build one from [`ChipTracing::default()`] and set
-/// those it needs (`let mut x = ChipTracing::default(); x.accesses = ...;`).
+/// those it needs (`let mut x = ChipTracing::default(); x.bus_cycles = ...;`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ChipTracing {
-    /// Each bus cycle that reaches the chip ([`Event::Access`]).
-    pub accesses: bool,
+    /// Each bus cycle that reaches the chip ([`Event::BusCycle`]).
+    pub bus_cycles: bool,
     /// Each exception entered ([`Event::Exception`]).
     pub exceptions: bool,
 }
@@ -206,19 +208,32 @@ mod tests {
         };
         assert_eq!(reset.now(), now);
         assert_eq!(reset.to_string(), "reset (power-on)");
-        let access = Event::Access {
+        let cycle = Event::BusCycle {
             now,
             address: Address(0x10),
             size: Size::Word,
             function_code: FunctionCode::SupervisorData,
             write: false,
-            value: None,
+            value: 0,
             bus_error: true,
         };
-        assert_eq!(access.now(), now);
+        assert_eq!(cycle.now(), now);
         assert_eq!(
-            access.to_string(),
+            cycle.to_string(),
             "read of 2 bytes at 0x00000010 in supervisor-data: bus error"
+        );
+        let cycle = Event::BusCycle {
+            now,
+            address: Address(0x10),
+            size: Size::Word,
+            function_code: FunctionCode::SupervisorData,
+            write: false,
+            value: 0x1234,
+            bus_error: false,
+        };
+        assert_eq!(
+            cycle.to_string(),
+            "read of 2 bytes at 0x00000010 in supervisor-data: 0x1234"
         );
         let dsack = Event::Dsack {
             now,

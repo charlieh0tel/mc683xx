@@ -106,7 +106,7 @@ impl Board {
     pub fn send_bytes(&mut self, name: &str, data: &[u8]) -> Result<(), Error> {
         let serial = |byte: u8| Signal::Serial(Serial::untimed(Frame::Data(byte.into())));
         // the endpoint checked even for no data
-        self.board.check_send(name, &serial(0))?;
+        self.board.check_send(name, serial(0))?;
         for &byte in data {
             self.board.send(name, serial(byte))?;
         }

@@ -131,12 +131,13 @@ impl Configuration {
     }
 }
 
-/// The chain.  The datasheet gives no power-on state: it powers on
-/// here holding `initial`, every stage low by default, and CLR low
-/// clears it.  It has no reset input but CLR, so RESET
-/// changes nothing.
+/// The chain, `74x164`, as a host reads it by type
+/// (`Board::peripheral::<Sipo>`).  The datasheet gives no power-on
+/// state: it powers on here holding `initial`, every stage low by
+/// default, and CLR low clears it.  It has no reset input but CLR, so
+/// RESET changes nothing.
 #[derive(Debug)]
-struct Sipo {
+pub struct Sipo {
     /// Its parameters.
     configuration: Configuration,
     /// What it holds.
@@ -144,10 +145,18 @@ struct Sipo {
 }
 
 impl Sipo {
+    /// `cascade`'s default: one chip.
+    pub const CASCADE: u8 = 1;
+    /// `initial`'s default: every stage low.
+    pub const INITIAL: u32 = 0;
+
     /// From `cascade` (1), `initial` (0), `clr` (`"high"`), `miso`
     /// (`"qh"`) and `clock` (`"rising"`).
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
-        let cascade: u8 = context.parameters.integer(CASCADE)?.unwrap_or(1);
+        let cascade: u8 = context
+            .parameters
+            .integer(CASCADE)?
+            .unwrap_or(Self::CASCADE);
         if !(1..=MOST_CASCADED).contains(&cascade) {
             return Err(ParameterError::Range {
                 key: CASCADE.to_owned(),
@@ -155,7 +164,10 @@ impl Sipo {
             });
         }
         let width = u32::from(cascade) * LINES as u32;
-        let initial: u64 = context.parameters.integer(INITIAL)?.unwrap_or(0);
+        let initial: u64 = context
+            .parameters
+            .integer(INITIAL)?
+            .unwrap_or(Self::INITIAL.into());
         if initial >> width != 0 {
             return Err(ParameterError::invalid(INITIAL, "a stage past the chain's"));
         }
@@ -172,6 +184,26 @@ impl Sipo {
                 clr,
             },
         })
+    }
+
+    /// Its stages, as `Q` carries them: bit 8k + n is chip k's stage n.
+    #[must_use]
+    pub const fn stages(&self) -> u32 {
+        // at most 32 stages, by `cascade`
+        self.state.register.bits() as u32
+    }
+
+    /// The chips chained.
+    #[must_use]
+    pub const fn cascade(&self) -> u8 {
+        // at most four, by `cascade`
+        (self.configuration.width / LINES as u32) as u8
+    }
+
+    /// CLR's level: low clears.
+    #[must_use]
+    pub const fn clr(&self) -> bool {
+        self.state.clr
     }
 
     /// Drives `Q` if its stages are not `before`.

@@ -1228,6 +1228,77 @@ fn the_watchdog_resets_the_chip_unless_serviced() {
     assert!(chip.cpu().registers.pc >= Address(START));
 }
 
+/// A peripheral that asks the run to stop at every reset but the
+/// power-on reset the build makes.
+#[derive(Debug)]
+struct ResetStopper {
+    /// The chip's stop request.
+    stop: StopRequest,
+    /// The resets it saw.
+    resets: usize,
+}
+
+impl MappedPeripheral for ResetStopper {
+    fn read(&mut self, _: BusCycle) -> Result<u32, BusError> {
+        Ok(0)
+    }
+
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), BusError> {
+        Ok(())
+    }
+
+    fn reset(&mut self, _: Cycle) {
+        self.resets += 1;
+        if self.resets > 1 {
+            self.stop.request();
+        }
+    }
+}
+
+mc683xx_cpu32::unsavable!(ResetStopper, "a reset stopper");
+
+impl Timed for ResetStopper {}
+
+#[test]
+fn a_stop_asked_at_a_reset_in_a_run_ends_it_before_the_next_instruction() {
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    let stop = builder.stop_request();
+    let stopper = builder.unwired_peripheral(ResetStopper { stop, resets: 0 });
+    let mut chip = builder.build();
+    chip.take_events();
+    // the watchdog's time-out, 2^9 EXTAL periods at 256 clocks, resets
+    // the chip within the run
+    let run = chip.run_for(Cycles::from_clocks(2 * 512 * 256));
+    assert_eq!(run.stop, Stop::Requested);
+    let events = chip.take_events();
+    let [
+        Event::Reset {
+            now: reset,
+            cause: ResetCause::Watchdog,
+        },
+    ] = events[..]
+    else {
+        panic!("{events:?}");
+    };
+    assert_eq!(chip.now(), reset, "the run ends at the reset");
+    assert_eq!(
+        chip.cpu().registers.pc,
+        Address(START),
+        "before the first instruction after it"
+    );
+    assert_eq!(chip.peripheral::<ResetStopper>(stopper).unwrap().resets, 2);
+    // the request was taken: the next run goes on
+    let run = chip.run_for(Cycles::from_clocks(100));
+    assert_eq!(run.stop, Stop::Budget);
+}
+
 #[test]
 fn a_host_reset_sets_rsr_to_its_cause_alone() {
     // RSR one bit per source (SIMRM 8.2.8)
@@ -2753,7 +2824,7 @@ fn a_request_the_host_moves_between_runs_is_seen() {
     // a stack the peripheral takes the frame's writes on
     chip.registers_mut().ssp = Address(CS1_BASE + 0x1000);
     chip.set_tracing(ChipTracing {
-        accesses: false,
+        bus_cycles: false,
         exceptions: true,
     });
     chip.run_for(Cycles::from_clocks(100));
@@ -2941,13 +3012,13 @@ fn tracing_reports_peripheral_cycles_and_exceptions() {
     chip.registers_mut().ssp = Address(CS1_BASE + 0x1000);
     chip.take_events();
     chip.set_tracing(ChipTracing {
-        accesses: true,
+        bus_cycles: true,
         exceptions: true,
     });
     let before = chip.instructions();
     chip.run_for(Cycles::from_clocks(2000));
     let events = chip.take_events();
-    let Some(&Event::Access {
+    let Some(&Event::BusCycle {
         address,
         write,
         value,
@@ -2957,7 +3028,7 @@ fn tracing_reports_peripheral_cycles_and_exceptions() {
         panic!("an access first: {events:?}");
     };
     assert_eq!(address, Address(CS1_BASE + 2));
-    assert_eq!((write, value), (false, Some(0x1234)));
+    assert_eq!((write, value), (false, 0x1234));
     assert!(events.iter().any(|event| matches!(
         event,
         Event::Exception { entry, .. }
@@ -3108,7 +3179,7 @@ fn copying_with(more: impl FnOnce(&mut Builder)) -> (Mc68331, MemoryId, Peripher
 /// The trace of `budget` clocks, and what the run leaves.
 fn traced(chip: &mut Mc68331, ram: MemoryId, budget: u64) -> (Vec<Event>, Vec<u8>, Vec<u8>) {
     chip.set_tracing(ChipTracing {
-        accesses: true,
+        bus_cycles: true,
         exceptions: true,
     });
     chip.take_events();

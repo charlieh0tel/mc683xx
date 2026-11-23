@@ -94,7 +94,7 @@ fn the_example_board_echoes_its_console() {
     assert!(output.status.success(), "{stderr}");
     assert_eq!(output.stdout, b"hello");
     assert!(
-        stderr.starts_with("# mc683xx trace 3 chip=mc68331\n"),
+        stderr.starts_with("# mc683xx trace 4 chip=mc68331\n"),
         "{stderr}"
     );
     assert!(

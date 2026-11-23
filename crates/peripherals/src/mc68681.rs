@@ -296,9 +296,11 @@ impl Default for State {
     }
 }
 
-/// A DUART on the board.
+/// A DUART on the board, `mc68681` or `scc68692`, as a host reads it
+/// by type (`Board::peripheral::<Duart>`): its registers as of its
+/// last call.
 #[derive(Debug)]
-struct Duart {
+pub struct Duart {
     /// Which peripheral.
     variant: Variant,
     /// X1/CLK.
@@ -312,9 +314,13 @@ struct Duart {
 }
 
 impl Duart {
+    /// `x1_hz`'s default: the 3.6864 MHz the baud rate tables are for
+    /// (1.2).
+    pub const X1_HZ: u64 = X1_DEFAULT_HZ;
+
     /// A DUART out of reset, from `x1_hz`, X1/CLK's frequency.
     fn from_parameters(context: &Context<'_>, variant: Variant) -> Result<Self, ParameterError> {
-        let hz = context.parameters.integer(X1_HZ)?.unwrap_or(X1_DEFAULT_HZ);
+        let hz = context.parameters.integer(X1_HZ)?.unwrap_or(Self::X1_HZ);
         if hz == 0 {
             return Err(ParameterError::invalid(X1_HZ, "X1/CLK must run"));
         }
@@ -376,8 +382,56 @@ impl Duart {
         self.state.inputs & 1 << CTS_PINS[channel] == 0
     }
 
+    /// X1/CLK's frequency, in hertz.
+    #[must_use]
+    pub const fn x1_hz(&self) -> u64 {
+        self.crystal.hz
+    }
+
+    /// SRA or SRB, channel `channel`'s status register (4.2.3), 0 for
+    /// A, as a read would show it.
+    ///
+    /// # Panics
+    ///
+    /// If `channel` is not 0 or 1.
+    #[must_use]
+    pub fn channel_status(&self, channel: usize) -> u8 {
+        self.state.channels[channel].status()
+    }
+
+    /// ACR (4.2.13).
+    #[must_use]
+    pub const fn acr(&self) -> u8 {
+        self.state.acr
+    }
+
+    /// IMR (4.2.16).
+    #[must_use]
+    pub const fn imr(&self) -> u8 {
+        self.state.imr
+    }
+
+    /// IVR (4.2.19).
+    #[must_use]
+    pub const fn ivr(&self) -> u8 {
+        self.state.ivr
+    }
+
+    /// OPCR (4.2.11).
+    #[must_use]
+    pub const fn opcr(&self) -> u8 {
+        self.state.opcr
+    }
+
+    /// OPR (4.2.12): a one drives its pin low (1.7).
+    #[must_use]
+    pub const fn opr(&self) -> u8 {
+        self.state.opr
+    }
+
     /// ISR (4.2.15).
-    fn interrupt_status(&self) -> u8 {
+    #[must_use]
+    pub fn interrupt_status(&self) -> u8 {
         let [a, b] = &self.state.channels;
         let channel = |channel: &Channel| {
             [
@@ -427,8 +481,10 @@ impl Duart {
     }
 
     /// The input port read (Table 4-5, INPUT PORT): bit 7 one, bit 6
-    /// IACK's level, high, since a register read is no acknowledge.
-    fn input_port(&self) -> u8 {
+    /// IACK's level, high, since a register read is no acknowledge;
+    /// bits 5:0 IP5-IP0.
+    #[must_use]
+    pub const fn input_port(&self) -> u8 {
         INPUT_BIT_7 | INPUT_BIT_6 | self.state.inputs & INPUT_PINS_MASK
     }
 

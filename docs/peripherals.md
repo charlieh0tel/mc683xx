@@ -12,6 +12,16 @@ change that makes a board file using one mean something else, or
 refuses it, is a breaking change.  Adding a type is not: a host type
 of the same name, registered first, takes precedence.
 
+Names follow two rules.  A port named for a pin takes the datasheet's
+spelling, its spaces dropped (`Q0`, `OE`, `RxData` for "Rx Data",
+`R1Out` for "R1 Out", `CH3`, `VOUT`), as the manuals' register and
+bit names keep theirs; the built-in generic types, which model no
+part, keep `in` and `out`.  A parameter is lowercase, words joined by
+`_` (a control's tie is its port's name in lowercase, `oe` for `OE`),
+and one that is a quantity ends in its unit: `_volts`, `_hz`, `_us`,
+`_ps`.  Each type's tables give its ports (Port, Kind, Direction,
+Meaning) and its parameters (Parameter, Type, Default, Meaning).
+
 The peripherals on the bus are 8-bit peripherals, and follow the board's one rule
 for them (docs/board-files.md, attachments; SIMRM 5.3.3): on an 8-bit
 port, or on one lane of a 16-bit port, each cycle is a byte; a word
@@ -25,6 +35,23 @@ peripheral and refuses, with `StateError::Mismatch`, a snapshot of one built
 with others.  It refuses, with `StateError::Invalid`, state no run
 could have saved, named under each peripheral.  Either way the peripheral is left
 as it was.
+
+Each type is public, in the module of its part
+(`mc683xx_peripherals::ad569::Ad569`, `adc0838::Adc0838`,
+`at28c64b::At28c64b`, `buffer::Buffer` for the 74x244,
+`latch::Latch` for the 74x373 and 74x374, `mc144110::Mc144110`,
+`mc6850::Mc6850`, `mc68681::Duart` for the MC68681 and SCC68692,
+`sipo::Sipo` for the 74x164), so a host reaches a peripheral's state
+by type (`Board::peripheral::<Ad569>("efc")`) through read-only
+accessors: the latch's byte, OE and outputs; the buffer's inputs; the
+74x164's stages, cascade and CLR; the DACs' codes and volts; the
+ADC0838's parameters, its result while DO shifts it and /SE; the
+AT28C64B's cells, protection and tWC; the ACIA's control, status and
+receive data registers and RTS; the DUART's ACR, IMR, IVR, OPCR, OPR,
+ISR, input port, channel status registers and crystal.  A UART's
+registers are as of its last call.  Each type's parameter defaults are
+public constants on it (`Ad569::VREF_POSITIVE_VOLTS`,
+`Duart::X1_HZ`).  These are the contract; `inspect` (below) is not.
 
 Each shows its state to a front end (`Peripheral::inspect`,
 `Board::inspect`; docs/host-guide.md, Front ends), read-only and
@@ -53,11 +80,11 @@ within the cycle, which the bus does not resolve.
 | `Q0`-`Q7` | logic | out | The flip-flops, `Qn` bit n of the byte written. |
 | `OE` | logic | in | Output enable, active low. |
 
-| Parameter | Default | Meaning |
-| --- | --- | --- |
-| `initial` | `0` | The flip-flops out of power-on, which the datasheets give as unknown (SN74HC373 Table 6-1, note 3). |
-| `oe` | `"low"` | OE's level until a net drives it: `"low"` (tied low, Q driven) or `"high"` (tied high, Q released). |
-| `pull` | `"up"` | A released Q's level on its net: `"up"` (high) or `"down"` (low). |
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `initial` | integer | `0` | The flip-flops out of power-on, which the datasheets give as unknown (SN74HC373 Table 6-1, note 3). |
+| `oe` | string | `"low"` | OE's level until a net drives it: `"low"` (tied low, Q driven) or `"high"` (tied high, Q released). |
+| `pull` | string | `"up"` | A released Q's level on its net: `"up"` (high) or `"down"` (low). |
 
 - Its D inputs take the byte of an 8-bit peripheral (above): a word cycle
   through `lane = "both"` writes its upper byte.  On the lower lane,
@@ -104,9 +131,9 @@ passing its A inputs to its Y outputs while its OE is low (SN74HC244
 | `A0`-`A7` | logic | in | The inputs, `An` bit n of the byte read: `A0`-`A3` are 1A1-1A4, `A4`-`A7` 2A1-2A4. |
 | `A` | bus | in | All eight at once, from the value's low byte. |
 
-| Parameter | Default | Meaning |
-| --- | --- | --- |
-| `levels` | `0xff` | The inputs' levels until a net drives them, a one high: tied inputs, or a switch bank's positions (open, on pull-ups, high). |
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `levels` | integer | `0xff` | The inputs' levels until a net drives them, a one high: tied inputs, or a switch bank's positions (open, on pull-ups, high). |
 
 - A read gives the byte on the inputs, on DATA[15:8] for a word cycle
   (above); the lower byte is not driven and reads 0.  A write reaches
@@ -148,13 +175,13 @@ inverts SCK in front of CLK takes `clock = "falling"`.
 | `Q` | bus | out | The parallel outputs: bit 8k + n is chip k's stage n (QA 0 to QH 7), chip 0 the one MOSI feeds. |
 | `CLR` | logic | in | Clear, active low: every stage low while it is (Table 1). |
 
-| Parameter | Default | Meaning |
-| --- | --- | --- |
-| `cascade` | `1` | The chips chained, 1 to 4 (a bus net is 32 bits): 2 is 16 bits. |
-| `initial` | `0` | The stages out of power-on, driven on `Q` (bit 8k + n is chip k's stage n): the datasheet gives no power-on state; CLR held low clears it. |
-| `clr` | `"high"` | CLR's level until a net drives it: `"high"` or `"low"`. |
-| `miso` | `"qh"` | What answers on MISO: `"qh"`, the last chip's QH, or `"none"`, MISO not wired and undriven (all ones). |
-| `clock` | `"rising"` | The edge of SCK it shifts on: `"rising"`, SCK wired to CLK, or `"falling"`, SCK inverted to CLK on the board.  A QSPI clock is not a net, so an inverter cannot be wired in front of it: this stands for the board's. |
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `cascade` | integer | `1` | The chips chained, 1 to 4 (a bus net is 32 bits): 2 is 16 bits. |
+| `initial` | integer | `0` | The stages out of power-on, driven on `Q` (bit 8k + n is chip k's stage n): the datasheet gives no power-on state; CLR held low clears it. |
+| `clr` | string | `"high"` | CLR's level until a net drives it: `"high"` or `"low"`. |
+| `miso` | string | `"qh"` | What answers on MISO: `"qh"`, the last chip's QH, or `"none"`, MISO not wired and undriven (all ones). |
+| `clock` | string | `"rising"` | The edge of SCK it shifts on: `"rising"`, SCK wired to CLK, or `"falling"`, SCK inverted to CLK on the board.  A QSPI clock is not a net, so an inverter cannot be wired in front of it: this stands for the board's. |
 
 - Attach it with `{ qspi = code, mask = pins }`: it shifts on the
   transfers that select it, as a board gating SCK (or MOSI) by a PCS
@@ -208,7 +235,7 @@ parameters = { cascade = 2 }
 name = "db"
 type = "bus"
 from = "u40.Q"
-to = ["efc.db"]
+to = ["efc.DB"]
 ```
 
 ## AD569
@@ -222,19 +249,19 @@ register on DB15-DB0 (`74x164`).
 
 | Port | Kind | Direction | Meaning |
 | --- | --- | --- | --- |
-| `db` | bus | in | DB15-DB0, the value's low 16 bits; 0 until driven. |
-| `cs` | logic | in | CS, active low: with it high nothing changes (Table I). |
-| `hbe` | logic | in | HBE, active low: the 8 MSBs' latch. |
-| `lbe` | logic | in | LBE, active low: the 8 LSBs' latch. |
-| `ldac` | logic | in | LDAC, active low: the DAC register. |
-| `out` | analog | out | VOUT, volts: -VREF + code x (+VREF - -VREF) / 65536, offset binary (Analog Circuit Connections). |
+| `DB` | bus | in | DB15-DB0, the value's low 16 bits; 0 until driven. |
+| `CS` | logic | in | CS, active low: with it high nothing changes (Table I). |
+| `HBE` | logic | in | HBE, active low: the 8 MSBs' latch. |
+| `LBE` | logic | in | LBE, active low: the 8 LSBs' latch. |
+| `LDAC` | logic | in | LDAC, active low: the DAC register. |
+| `VOUT` | analog | out | VOUT, volts: -VREF + code x (+VREF - -VREF) / 65536, offset binary (Analog Circuit Connections). |
 
-| Parameter | Default | Meaning |
-| --- | --- | --- |
-| `cs`, `hbe`, `lbe`, `ldac` | `"high"` | Each control's level until a net drives it: `"high"` or `"low"` (tied). |
-| `initial` | `0` | The 16-bit word out of power-on, in the MSB and LSB latches and the DAC register, which the datasheet does not give.  The real part's power-on state is unknown; `0x8000` is mid-scale, VOUT halfway between the references. |
-| `vref_negative` | `-5.0` | -VREF, volts: VOUT at 0000H. |
-| `vref_positive` | `5.0` | +VREF, volts: VOUT a code past FFFFH would give.  The defaults are the specifications' conditions. |
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `cs`, `hbe`, `lbe`, `ldac` | string | `"high"` | Each control's level until a net drives it: `"high"` or `"low"` (tied). |
+| `initial` | integer | `0` | The 16-bit word out of power-on, in the MSB and LSB latches and the DAC register, which the datasheet does not give.  The real part's power-on state is unknown; `0x8000` is mid-scale, VOUT halfway between the references. |
+| `vref_negative_volts` | number | `-5.0` | -VREF, volts: VOUT at 0000H. |
+| `vref_positive_volts` | number | `5.0` | +VREF, volts: VOUT a code past FFFFH would give.  The defaults are the specifications' conditions. |
 
 - Table I in full: with CS low, HBE low makes the MSB latch
   transparent, LBE low the LSB latch and LDAC low the DAC register;
@@ -267,12 +294,12 @@ parameters = { cs = "low", hbe = "low", ldac = "low" }
 name = "efc-lbe"
 type = "logic"
 from = "chip.PGP0"
-to = ["efc.lbe"]
+to = ["efc.LBE"]
 
 [[net]]
 name = "efc-out"
 type = "analog"
-from = "efc.out"
+from = "efc.VOUT"
 to = ["external.control"]
 ```
 
@@ -294,26 +321,26 @@ attach = [{ qspi = 0b1110 }]      # its /CS on PCS0
 name = "sensor"
 type = "analog"
 from = "sensor.out"
-to = ["adc.ch3"]
+to = ["adc.CH3"]
 ```
 
 Ports:
 
-| Port | Kind | Meaning |
-| --- | --- | --- |
-| `ch0`-`ch7` | analog input | The channels, in volts. |
-| `com` | analog input | COM, the "-" input of each single-ended channel, in volts. |
-| `se` | logic input | /SE: high holds D0 on DO after MSB-first data; low lets LSB-first data follow. |
+| Port | Kind | Direction | Meaning |
+| --- | --- | --- | --- |
+| `CH0`-`CH7` | analog | in | The channels, in volts. |
+| `COM` | analog | in | COM, the "-" input of each single-ended channel, in volts. |
+| `SE` | logic | in | /SE: high holds D0 on DO after MSB-first data; low lets LSB-first data follow. |
 
-An analog input no net drives reads 0 V, and `se` no net drives is
+An analog input no net drives reads 0 V, and `SE` no net drives is
 low, as a board that ties /SE to ground.
 
 Parameters:
 
-| Key | Type | Default | Meaning |
+| Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `vref_volts` | number | 5.0 | VREF: 1 LSB is VREF / 256.  Positive. |
-| `noise_volts` | number | 0 | The standard deviation, in volts, of noise added to each conversion's input; 0 for none. |
+| `vref_volts` | number | `5.0` | VREF: 1 LSB is VREF / 256.  Positive. |
+| `noise_volts` | number | `0.0` | The standard deviation, in volts, of noise added to each conversion's input; 0 for none. |
 
 Behavior, by SNAS531B section:
 
@@ -362,7 +389,7 @@ Choices where the datasheet is silent, or the board cannot say:
 - MISO reads 1 while DO is in TRI-STATE, as the board reads a QSPI no
   peripheral answers.  A board with a pull-down on MISO is not modeled.
 - The inputs are sampled at the start of the transfer in which the
-  address completes, not at the clock edge, and a change of `se`
+  address completes, not at the clock edge, and a change of `SE`
   takes effect between transfers, never within one.
 - SARS, the conversion status output, is not modeled.
 - Noise is a normal deviate approximated as the sum of twelve
@@ -395,15 +422,13 @@ memory and never fails on the file: a file or sidecar that cannot be
 written drops the file, as a run's failed write does, and
 `file_error()` says why.
 
-Its type is public, the one stock type that is
-(`mc683xx_peripherals::at28c64b::At28c64b`), so a host reaches it by
-type (`Board::peripheral::<At28c64b>`): `cells()`, `protected()`
-and `file_error()`, the write-through failure a run cannot report
-otherwise.
+By type (`Board::peripheral::<At28c64b>`) a host reads `cells()`,
+`protected()`, `write_cycle()` and `file_error()`, the write-through
+failure a run cannot report otherwise.
 
 ### Parameters
 
-| Key | Type | Default | Meaning |
+| Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `image` | path | -- | The cells' first contents, relative to the board file, at most 8192 bytes, padded with `0xff`; never written.  Without it the peripheral starts erased, all `0xff`. |
 | `file` | path | -- | The file the cells live in, relative to the board file.  Made from `image` (or erased) if it does not exist, padded if short; refused if larger than the peripheral.  Every byte the peripheral programs is written to it as its write cycle ends, so a run's writes carry to the next.  The file itself is locked before it is read and held while the board is loaded: a second run refuses the file, and never sees it half made.  On Windows the lock is mandatory, so no other program can read or write the file while a run holds it; on Unix it is advisory.  It is never renamed over, so nothing but the file (and `<file>.sdp`, below) remains after a run.  A new file is written and synced in a sibling of a unique name, then linked into place, which never replaces a file another run made; a short file is padded erased in place and synced.  A run killed while making a new file may leave that sibling, `<file>.<process>-<count>.partial`, and no file; one killed while padding leaves the file shorter, which the next run pads the same. |
@@ -480,20 +505,20 @@ write cycle loses its bytes on the peripheral.
 `mc144110`: Motorola's MC144110, six 6-bit DACs behind one serial
 input (MC144110/D, Rev. 2), on the QSPI.
 
-| Parameter | Default | Meaning |
-| --- | --- | --- |
-| `vdd` | `5.0` | VDD, volts: the top of the outputs' span (4.3; Figure 4).  5 V is the first supply Tables 2 and 3 characterize. |
-| `vss` | `0.0` | VSS, volts: the output at code 0 ("usually ground", 4.3). |
-
 | Port | Kind | Direction | Meaning |
 | --- | --- | --- | --- |
-| `out0`-`out5` | analog | out | R1 Out to R6 Out, volts: VSS + code x (VDD - VSS) / 64 (Figures 3 and 4). |
+| `R1Out`-`R6Out` | analog | out | R1 Out to R6 Out, volts: VSS + code x (VDD - VSS) / 64 (Figures 3 and 4). |
+
+| Parameter | Type | Default | Meaning |
+| --- | --- | --- | --- |
+| `vdd_volts` | number | `5.0` | VDD, volts: the top of the outputs' span (4.3; Figure 4).  5 V is the first supply Tables 2 and 3 characterize. |
+| `vss_volts` | number | `0.0` | VSS, volts: the output at code 0 ("usually ground", 4.3). |
 
 - Attach it with `{ qspi = code, mask = pins }`: its select is ENB.
   Bits shift into a 36-bit register while it is selected, most
   significant first (4.1, Din, CLK), and the frame's end, ENB's rise,
   latches the register into the six DACs (4.1, ENB).
-- The last six bits shifted are DAC 1's (`out0`), the six before DAC
+- The last six bits shifted are DAC 1's (`R1Out`), the six before DAC
   2's, and so on (4.1, Din): send DAC 6 first.  Fewer than 36 bits
   set the low DACs and shift the rest up (Table 4).  Any transfer
   length works: three 12-bit entries under CONT are one frame.
@@ -529,12 +554,12 @@ input (MC144110/D, Rev. 2), on the QSPI.
 name = "trim"
 type = "mc144110"
 attach = [{ qspi = 0b1110 }]
-parameters = { vdd = 12.0 }
+parameters = { vdd_volts = 12.0 }
 
 [[net]]
 name = "trim-1"
 type = "analog"
-from = "trim.out0"
+from = "trim.R1Out"
 to = ["external.trim"]
 ```
 
@@ -547,7 +572,7 @@ interrupt output that gives no vector.
 
 ### Parameters
 
-| Key | Type | Default | Meaning |
+| Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `tx_clk_hz` | integer | required | Tx CLK's frequency in hertz: the transmitter's bit rate times the counter divide (Clock Inputs; Counter Divide Select Bits). |
 | `rx_clk_hz` | integer | required | Rx CLK's, the receiver's. |
@@ -713,7 +738,7 @@ SCC68692's timeout mode.
 
 ### Parameters
 
-| Key | Type | Default | Meaning |
+| Parameter | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `x1_hz` | integer | `3686400` | X1/CLK's frequency in hertz: the crystal or clock every rate derives from (1.2).  The baud rate tables are for 3.6864 MHz; another crystal scales every rate, as on the peripheral. |
 

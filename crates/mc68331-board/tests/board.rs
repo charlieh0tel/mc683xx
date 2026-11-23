@@ -1362,6 +1362,141 @@ to = ["external.q"]
     assert_eq!(resets, Some(0), "no reset reaches it");
 }
 
+/// A strobe's pulse, in system clocks.
+const STROBE_CLOCKS: Cycles = Cycles::from_clocks(100);
+
+/// A chip-level model of a strobe: a write raises its output for
+/// `STROBE_CLOCKS`; a reset lowers it.
+#[derive(Debug, Default)]
+struct Strobe {
+    /// Its output.
+    level: bool,
+    /// When its pulse ends, if one is on.
+    ends: Option<Cycle>,
+    /// The level last driven on its net, if any.
+    driven: Option<bool>,
+}
+
+impl Strobe {
+    /// The adapter's driver: the output onto port 0 when it changes.
+    fn drive(&mut self, drive: &mut Drive<'_>) {
+        if self.driven != Some(self.level) {
+            self.driven = Some(self.level);
+            drive.drive(0, Signal::Level(self.level));
+        }
+    }
+}
+
+impl MappedPeripheral for Strobe {
+    fn read(&mut self, _: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+        Ok(0)
+    }
+
+    fn write(&mut self, cycle: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
+        self.level = true;
+        self.ends = Some(cycle.now + STROBE_CLOCKS);
+        Ok(())
+    }
+
+    fn reset(&mut self, _: Cycle) {
+        self.level = false;
+        self.ends = None;
+    }
+}
+
+impl Timed for Strobe {
+    fn next_event(&self) -> Option<Cycle> {
+        self.ends
+    }
+
+    fn advance(&mut self, now: Cycle) {
+        if self.ends.is_some_and(|ends| now >= ends) {
+            self.level = false;
+            self.ends = None;
+        }
+    }
+}
+
+mc683xx_cpu32::unsavable!(Strobe, "a strobe");
+
+/// A board whose firmware writes once to a `Strobe` on CS1, its output
+/// on the `pulse` net to `external.pulse`, its adapter `driving` if
+/// `driving`: what the net carried in its first millisecond, and the
+/// board's system clock.
+fn strobed(driving: bool) -> (Vec<(Time, Signal)>, TimeBase) {
+    let program: Vec<u16> = [
+        store(CSBAR1, CS1_BAR),
+        store(CSOR1, CS_FAST),
+        store(CS1_BASE, 1),
+    ]
+    .concat()
+    .into_iter()
+    .chain([BRA_SELF])
+    .collect();
+    let directory = directory("driving", &program);
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[peripheral]]
+name = "strobe"
+type = "strobe"
+attach = [{ select = "CS1" }]
+[[net]]
+name = "pulse"
+type = "logic"
+from = "strobe.out"
+to = ["external.pulse"]
+"#;
+    let description = Description::parse(text, &directory, &Options::default()).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    let mut registry = Registry::with_builtins();
+    registry
+        .register(
+            "strobe",
+            vec![PortSpec::output("out", Kind::Logic)],
+            move |_| {
+                let adapter = MappedAdapter::new(Strobe::default());
+                Ok(Box::new(if driving {
+                    adapter.driving(Strobe::drive)
+                } else {
+                    adapter
+                }))
+            },
+        )
+        .unwrap();
+    let mut board =
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
+    board.run_for(Span::from_millis(1)).unwrap();
+    (board.take_received("pulse").unwrap(), board.system_clock())
+}
+
+#[test]
+fn a_driving_adapter_drives_its_nets_from_its_model() {
+    let (received, base) = strobed(true);
+    // low from power-on; high at the write; low again at the pulse's
+    // end, the model's advance
+    let [
+        (Time::ZERO, Signal::Level(false)),
+        (raised, Signal::Level(true)),
+        (lowered, Signal::Level(false)),
+    ] = received[..]
+    else {
+        panic!("{received:?}");
+    };
+    assert_eq!(
+        base.cycle(lowered).since(base.cycle(raised)),
+        STROBE_CLOCKS,
+        "{raised:?} to {lowered:?}"
+    );
+    assert!(strobed(false).0.is_empty(), "no driver, nothing driven");
+}
+
 /// `Words` with time of its own: an event at `EVENT`, and what it saw.
 #[derive(Debug, Default)]
 struct TimedWords {
@@ -1812,12 +1947,12 @@ to = ["chip.PGP0"]
     // checked alike, sending nothing
     for (name, signal) in [("nobody", frame), ("scope", frame), ("pps", frame)] {
         assert_eq!(
-            board.check_send(name, &signal),
+            board.check_send(name, signal),
             Err(board.send(name, signal).unwrap_err()),
             "{name}"
         );
     }
-    assert_eq!(board.check_send("pps", &Signal::Level(true)), Ok(()));
+    assert_eq!(board.check_send("pps", Signal::Level(true)), Ok(()));
     assert_eq!(
         board.take_received("nobody"),
         Err(ReceiveError::Endpoint("nobody".to_owned()))
@@ -2501,6 +2636,69 @@ fn a_stop_asked_between_quanta_stops_one_run_only() {
     assert_eq!(ran.stop, Stop::Budget, "the stop is not left pending");
     assert_eq!(ran.now, AT + Span::from_millis(10));
     assert!(board.chip().instructions() > instructions + 1);
+}
+
+/// A peripheral that asks the run to stop at every reset but power-on's.
+#[derive(Debug, Default)]
+struct ResetStopper {
+    /// The resets it saw.
+    resets: usize,
+}
+
+impl Peripheral for ResetStopper {
+    fn reset(&mut self, drive: &mut Drive<'_>) {
+        self.resets += 1;
+        if self.resets > 1 {
+            drive.stop();
+        }
+    }
+}
+
+#[test]
+fn a_stop_asked_at_a_reset_in_a_run_ends_it_before_the_next_instruction() {
+    // the firmware counts its starts in D1; the watchdog, on out of
+    // reset, times out within the run
+    let directory = directory("stop-reset", &COUNTING);
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[peripheral]]
+name = "stopper"
+type = "stopper"
+"#;
+    let description = Description::parse(text, &directory, &Options::default()).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    let mut registry = Registry::with_builtins();
+    registry
+        .register("stopper", Vec::new(), |_| {
+            Ok(Box::new(ResetStopper::default()))
+        })
+        .unwrap();
+    let mut board =
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
+    board.take_events();
+    let stopped = board.run_for(Span::from_millis(100)).unwrap();
+    assert_eq!(stopped.stop, Stop::Requested);
+    let events = board.take_events();
+    let [Event::Reset { now, cause, .. }] = events[..] else {
+        panic!("{events:?}");
+    };
+    assert_eq!(cause, ResetCause::Watchdog);
+    assert_eq!(stopped.now, board.system_clock().time(now), "at the reset");
+    assert_eq!(
+        board.chip().cpu().registers.data[1],
+        1,
+        "before the firmware's first instruction after it"
+    );
+    let ran = board.run_for(Span::from_millis(1)).unwrap();
+    assert_eq!(ran.stop, Stop::Budget, "the stop is not left pending");
+    assert_eq!(board.chip().cpu().registers.data[1], 2);
 }
 
 #[test]
@@ -4010,6 +4208,40 @@ attach = [{ select = "CSBOOT" }]
     assert_eq!(fault.address.0, 0x0401);
     assert_eq!(fault.registers.pc.0, START);
     assert!(run.now < Time::from_secs(1), "{:?}", run.now);
+}
+
+#[test]
+fn a_data_watch_through_the_boards_cpu_control_stops_the_run() {
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+writable = true
+attach = [{ select = "CSBOOT" }]
+"#;
+    let watched = 0x8000;
+    let program: Vec<u16> = store(watched, 0x1234)
+        .into_iter()
+        .chain([BRA_SELF])
+        .collect();
+    let mut board = board("data-watch", text, &program);
+    let written = Rc::new(Cell::new(None));
+    let seen = Rc::clone(&written);
+    let id =
+        board
+            .cpu_control()
+            .add_write_hook(Address(watched)..=Address(watched), move |access| {
+                seen.set(Some(access.value));
+                ControlFlow::Break(())
+            });
+    let run = board.run_until(Time::from_secs(1)).unwrap();
+    assert_eq!(run.stop, Stop::Hook(id));
+    assert_eq!(written.get(), Some(0x1234));
+    assert_eq!(board.chip().cpu().registers.pc, Address(START + 8));
 }
 
 #[test]

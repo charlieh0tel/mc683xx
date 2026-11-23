@@ -16,6 +16,13 @@ that added it, as an earlier one refuses the key as unknown.  Every
 the stock types (`docs/peripherals.md`) are under the same freeze:
 their names, parameters and ports (docs/releasing.md, Semver scope).
 
+Version 1 keeps two oddities for ever, which a version 2, if there is
+one, would drop: an attachment's lane also spelled as its role
+(`role = "upper"` for `lane = "upper"`), and two keys for which ADDR
+lines a part sees (a decoder's `address_bits`, which takes tied
+levels too, and an attachment's `lines`), which version 2 would make
+one.  No version 2 is planned.
+
 Two words, used one way throughout: a **peripheral** is anything
 outside the chip that the board wires to it (a memory's command
 logic, a UART, a decoder's targets, an oscillator on a net), and a
@@ -376,7 +383,7 @@ driven.  A peripheral on DATA7-0 of a 16-bit port states `lane = "lower"`.
 | `name` | string | required | Its name. |
 | `type` | `"logic"`, `"edge"`, `"clock"`, `"serial"`, `"analog"`, `"bus"`, `"wired-and"` | required | What it carries: a level whose state matters; a level whose changes' times matter (1 PPS); a clock (frequency and exact phase, re-driven at each change of frequency); UART frames; a value; parallel lines as one word; or an open-drain logic net, pulled up. |
 | `from` | endpoint, or array of endpoints | required | Its driver; several only on a `wired-and` net, whose level is the AND of theirs (a driver not driving is high). |
-| `to` | array of endpoints | required | Its sinks. |
+| `to` | endpoint, or array of endpoints | required | Its sinks. |
 
 A net goes one way: a serial link is two nets, one each way.  On a
 `wired-and` net an `in-out` port, or a chip port pin, may be both a
@@ -396,8 +403,9 @@ Endpoints:
 | `chip.TXD` | serial | out of the chip |
 | `external.name` | any | either; the runner or host binds it (`--bind name=stdio`).  The runner refuses input (stdio, pty) to one that drives no serial net: `stdout`, `file:PATH` or `null` there |
 
-PGP0 is IC1, PGP1 IC2, PGP2 IC3, PGP3 to PGP6 OC1 to OC4, PGP7
-IC4/OC5 (MC68331UM Figure 7-1).  A peripheral port takes a net of its own
+A chip pin's name is taken in any case (`chip.pe0` is `chip.PE0`), as
+a chip select's or a reset cause's.  PGP0 is IC1, PGP1 IC2, PGP2 IC3,
+PGP3 to PGP6 OC1 to OC4, PGP7 IC4/OC5 (MC68331UM Figure 7-1).  A peripheral port takes a net of its own
 kind only (a `wired-and` net is `logic`); a chip pin takes `logic` or
 `edge`.  A strobe that a peripheral samples as a level (a latch enable such
 as the AD569's /LBE) is a `logic` net: its low time matters, and an
@@ -710,7 +718,11 @@ The contract a host's peripheral models target (rustdoc in
   `set_chip_selects(0xf)` and each transfer as a
   `QspiTransfer`, its time in system clocks.  `peripheral()` and `peripheral_mut()` give the model
   back (`Board::peripheral::<MappedAdapter<M>>`).  An adapted peripheral drives
-  no nets.  The model implements `mc683xx_cpu32::cpu::state::Save` (`save()
+  no nets, unless its `MappedAdapter` is made `.driving(driver)`: then
+  `driver(&mut model, &mut Drive)` runs after each call that may change
+  the model (power-on, `read`, `write`, `reset`, `advance`) and drives
+  the ports the type was registered with from what the model shows (a
+  strobe's level), or stops the run.  The model implements `mc683xx_cpu32::cpu::state::Save` (`save()
   -> bytes`, `restore(bytes)`, in its own versioned format), so it is in
   the board's snapshot, its bytes inside the adapter's own versioned
   snapshot; one that cannot save is `mc683xx_cpu32::unsavable!`, and the

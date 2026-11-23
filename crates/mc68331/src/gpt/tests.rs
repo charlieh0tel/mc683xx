@@ -18,7 +18,7 @@ use super::ParsePortGpPinError;
 use super::PortGpPin;
 use super::PwmChange;
 use super::Queued;
-use super::STATE_VERSION;
+use super::VERSION;
 use super::pwm::Channel;
 use super::pwm::Output;
 use super::timer::Counter;
@@ -122,7 +122,7 @@ fn the_format_matches_its_golden() {
     snapshot_golden::check(
         env!("CARGO_MANIFEST_DIR"),
         "gpt",
-        &[("gpt", STATE_VERSION)],
+        &[("gpt", VERSION)],
         &gpt.save().unwrap(),
     );
 }
@@ -133,9 +133,9 @@ fn a_state_no_run_could_save_is_refused() {
     write(&mut gpt, 0x18, 0x0100, 0);
     let snapshot = gpt.save().unwrap();
     let edited = |change: fn(&mut Gpt)| {
-        let mut saved: Gpt = decode(STATE_VERSION, &snapshot).unwrap();
+        let mut saved: Gpt = decode(VERSION, &snapshot).unwrap();
         change(&mut saved);
-        encode(STATE_VERSION, &saved)
+        encode(VERSION, &saved)
     };
     let invalid: [(Vec<u8>, &str); 12] = [
         (edited(|saved| saved.icr = 0xffff), "GPT registers"),
@@ -214,7 +214,7 @@ fn a_state_no_run_could_save_is_refused() {
         saved.edges.sequence = 2;
     });
     other.restore(&queued).unwrap();
-    let pin = |bit: u8| decode::<PortGpPin>(STATE_VERSION, &encode(STATE_VERSION, &bit));
+    let pin = |bit: u8| decode::<PortGpPin>(VERSION, &encode(VERSION, &bit));
     assert_eq!(pin(7).unwrap(), PortGpPin::try_from(7).unwrap());
     assert!(matches!(pin(8), Err(StateError::Decode(_))));
 }

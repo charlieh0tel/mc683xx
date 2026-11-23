@@ -288,8 +288,10 @@ assert_eq!(one.instructions(), two.instructions());
 A peripheral holds the `StopRequest` (`mc683xx_cpu32::bus`, the one type
 the bare machine's `stop_request` gives too) its builder gave and
 calls `request`;
-the run stops once the instruction whose cycle asked ends, or between
-quanta if `advance` asked, with `Stop::Requested`.  The request is
+the run stops once the instruction whose cycle asked ends, between
+quanta if `advance` asked, or at a reset within the run (the
+watchdog's, say) if `reset` asked, before the first instruction after
+it, with `Stop::Requested`.  The request is
 taken by the stop.  A host whose own run loop stopped for the same
 reason before the chip ran withdraws it (`withdraw`), so the next run
 does not stop for it.
@@ -1243,8 +1245,8 @@ sense them and may answer within the run.  None by default.
 
 Tracing goes through the chip's events (`take_events`), off by
 default: `set_tracing(tracing)`, a `ChipTracing::default()` with
-`accesses` and `exceptions` set as wanted, adds an
-`Event::Access` for each bus cycle the core sends the chip (module
+`bus_cycles` and `exceptions` set as wanted, adds an
+`Event::BusCycle` for each bus cycle the core sends the chip (module
 registers, peripherals, memory a peripheral shares a select with; not the RAM
 and ROM the core serves, which memory hooks see) and an
 `Event::Exception` for each exception entered.  `instructions()`
@@ -1263,7 +1265,7 @@ let program = [firmware::prologue(), vec![firmware::BRANCH_TO_SELF]].concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
 let mut tracing = ChipTracing::default();
-tracing.accesses = true;
+tracing.bus_cycles = true;
 tracing.exceptions = true;
 chip.set_tracing(tracing);
 chip.run_for(Cycles::from_clocks(1000));
@@ -1271,7 +1273,7 @@ let writes: Vec<u32> = chip
     .take_events()
     .into_iter()
     .filter_map(|event| match event {
-        Event::Access { address, write: true, .. } => Some(address.0),
+        Event::BusCycle { address, write: true, .. } => Some(address.0),
         _ => None,
     })
     .collect();
@@ -1424,11 +1426,15 @@ among them; it gives the names of the nets that went, so a host sees
 an external endpoint left on no net.  Each refuses a name the description
 lacks (`error::EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
 every method of the chip's.  `Chip` is sealed: a host names it in a
-bound (`Board<C: Chip>`) and calls its methods (`cpu`, `now`,
-`memory`, the resets, `save`; a halt is `cpu().halted()`), but cannot implement it, nor
+bound (`Board<C: Chip>`) and uses its items (`TYPE`, the name a
+board file's `[chip] type` gives, `"mc68331"`; `cpu`, `cpu_control`,
+`now`, `memory`, the resets, `save`; a halt is `cpu().halted()`), but cannot implement it, nor
 `ChipBuilder` or `ChipPin`; a new part is added inside mc683xx.  The
 plumbing the board runs the chip with is hidden from the docs and
-outside semver.
+outside semver.  `board.cpu_control()` lends the chip's
+`CpuControl` (registers, hooks, page permissions), as
+`board.chip_mut().cpu_control()` does: a data watch (`add_write_hook`)
+beside `watch_code`, a hook that breaks ending the run `Stop::Hook`.
 
 - **Board time.** `time::Time` is a time on the board, picoseconds
   since power-on, made by `Time::from_picos`, `from_secs`, `from_secs_f64`
@@ -1742,8 +1748,8 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   (`chip`, any case), and on a board the MC68331's `mc68331::Pin`
   (`IRQ7`; a port's pin is
   `Pin::Port(PortPin)`, `PortPin::new(Port::E, 0)` refusing a bit the
-  port lacks, and a `PortPin` itself `PE0`, any case; a `Pin` exactly, as
-  a board file names it), `signal::Kind`,
+  port lacks, and a `PortPin` itself `PE0`; both any case, as a board
+  file's `chip.pe0`), `signal::Kind`,
   `Direction`, `peripheral::Role` (`read-write`) and `Lane` (`upper`),
   as the board file names them; `pacing::Pacing` and `pacing::Factor`
   (`2.5`); a `description::Setting` (`dac.value=16`, its value as TOML
