@@ -175,7 +175,7 @@ fn chip() -> Running {
         .memory(rom, MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), ram, MemoryKind::Ram)
+        .fixed_memory(ram, MemoryKind::Ram, Address(RAM))
         .unwrap();
     let mut chip = builder.build();
     chip.reset_halted().unwrap();

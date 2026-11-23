@@ -329,8 +329,8 @@ surrounds the SoC with its board peripherals through:
   not wire every peripheral to it: `Builder::set_reset_scope` names the
   causes that reach a peripheral (a `ResetScope`), all by default.
   smartclock's DUART, for one, sees no watchdog reset.
-- **Fixed memory (emulator-only):** `Builder::fixed_memory(base,
-  bytes, kind)` maps memory at a fixed, page-aligned address on no
+- **Fixed memory (emulator-only):** `Builder::fixed_memory(bytes,
+  kind, base)` maps memory at a fixed, page-aligned address on no
   select, for code and data a host maps beside an image it leaves as
   it is (a consumer's hybrid boot loads rewritten routines at $600000
   and their data at $6F0000 and diverts the image's calls there).

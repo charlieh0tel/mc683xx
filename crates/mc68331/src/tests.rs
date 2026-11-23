@@ -3215,7 +3215,7 @@ fn a_snapshot_of_fixed_memories_elsewhere_is_refused_and_changes_nothing() {
     let at = |base: u32| {
         copying_with(|builder| {
             builder
-                .fixed_memory(Address(base), vec![0; 64 << 10], MemoryKind::Ram)
+                .fixed_memory(vec![0; 64 << 10], MemoryKind::Ram, Address(base))
                 .unwrap();
         })
         .0

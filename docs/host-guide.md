@@ -93,7 +93,7 @@ fn main() -> Result<(), BuildError> {
   the memory repeats it.  The core serves memory itself, fast, except
   where a peripheral shares the cycle.  `memory` and `memory_mut` give
   the bytes back by `MemoryId`.
-- `fixed_memory(base, bytes, kind)`: memory at a fixed address on
+- `fixed_memory(bytes, kind, base)`: memory at a fixed address on
   no pin, emulator-only, and `set_fixed_timing(memory, port, termination)`
   its port and wait states (see Fixed memory).
 - `set_reload_scope(memory, ResetScope)` says which resets put a memory's
@@ -133,7 +133,7 @@ page it serves neither way is `Unserved` (PLAN.md, Memory).
 
 ### Fixed memory
 
-`Builder::fixed_memory(base, bytes, kind)` maps memory at `base`
+`Builder::fixed_memory(bytes, kind, base)` maps memory at `base`
 (an `Address` on a 2-Kbyte page boundary, the memory inside
 ADDR[23:0]) up to its size, on no chip select.  **It is emulator-only:
 the chip has no such decode.**  It is for code and data the host maps
@@ -186,7 +186,7 @@ use mc683xx_modules::sim::reset::ResetScope;
 // No select programmed: the boot code stores straight into it.
 let code = 0x60_0000;
 let (mut builder, _) = firmware::booting(firmware::rom(&firmware::store_word(code, 0x1234)));
-let fixed = builder.fixed_memory(Address(code), vec![0; 2048], MemoryKind::Ram).unwrap();
+let fixed = builder.fixed_memory(vec![0; 2048], MemoryKind::Ram, Address(code)).unwrap();
 builder.set_reload_scope(fixed, ResetScope::ALL);
 let mut chip = builder.build();
 chip.run_for(Cycles::from_clocks(1000));

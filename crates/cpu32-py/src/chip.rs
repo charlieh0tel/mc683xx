@@ -242,17 +242,17 @@ impl ChipBuilder {
     /// `contents` (a whole number of 2-Kbyte pages) at `base` on no pin,
     /// emulator-only: the program and data cycles there no chip select
     /// matches, at once; RAM if `writable`, else ROM; its number.
-    #[pyo3(signature = (base, contents, *, writable = true))]
+    #[pyo3(signature = (contents, base, *, writable = true))]
     fn fixed_memory(
         &mut self,
-        base: u32,
         contents: PyBackedBytes,
+        base: u32,
         writable: bool,
     ) -> Result<usize, Error> {
         let id = self.builder()?.fixed_memory(
-            Address(base),
             contents.to_vec(),
             memory_kind(writable),
+            Address(base),
         )?;
         Ok(self.wiring.borrow_mut().add_memory(id))
     }

@@ -515,7 +515,7 @@ impl ChipBuilder for Mc68331Builder {
                 termination,
             } => self
                 .builder
-                .fixed_memory(base, plan.bytes, plan.kind)
+                .fixed_memory(plan.bytes, plan.kind, base)
                 .and_then(|id| {
                     self.builder
                         .set_fixed_timing(id, port, termination)

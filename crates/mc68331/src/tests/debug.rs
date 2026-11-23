@@ -57,7 +57,7 @@ fn chip_and_stop(program: &[u16]) -> (Mc68331, StopRequest) {
         )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
+        .fixed_memory(vec![0; RAM_BYTES], MemoryKind::Ram, Address(RAM))
         .unwrap();
     let request = builder.stop_request();
     (builder.build(), request)
@@ -501,10 +501,10 @@ fn freeze_stops_the_bus_monitor_with_frzbm() {
         )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
+        .fixed_memory(vec![0; RAM_BYTES], MemoryKind::Ram, Address(RAM))
         .unwrap();
     let slow = builder
-        .fixed_memory(Address(SLOW), vec![SLOW_BYTE; RAM_BYTES], MemoryKind::Ram)
+        .fixed_memory(vec![SLOW_BYTE; RAM_BYTES], MemoryKind::Ram, Address(SLOW))
         .unwrap();
     builder
         .set_fixed_timing(
@@ -602,7 +602,7 @@ fn breakpoint_chip(program: &[u16], answered: bool) -> (Mc68331, Option<Peripher
         )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
+        .fixed_memory(vec![0; RAM_BYTES], MemoryKind::Ram, Address(RAM))
         .unwrap();
     let responder = answered.then(|| {
         builder

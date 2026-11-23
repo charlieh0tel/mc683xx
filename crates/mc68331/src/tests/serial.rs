@@ -77,7 +77,7 @@ fn chip(program: &[u16]) -> Mc68331 {
         )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
+        .fixed_memory(vec![0; RAM_BYTES], MemoryKind::Ram, Address(RAM))
         .unwrap();
     let mut chip = builder.build();
     chip.reset_halted().unwrap();

@@ -73,8 +73,8 @@ rename renames the Python name with it.  The deliberate differences:
   function_code=FunctionCode.SUPERVISOR_DATA)`, Rust's `(address, size, function_code, value)`;
   `Builder.memory(contents, pins, writable=True)`, Rust's `(bytes,
   kind, pins)`, a `MemoryKind` (`Ram` or `Rom`) where Python takes a
-  keyword's bool; `fixed_memory(base, contents, writable=True)`
-  likewise.  The bare `Machine`'s `map` takes the pages'
+  keyword's bool; `fixed_memory(contents, base, writable=True)`
+  likewise (Rust's `(bytes, kind, base)`).  The bare `Machine`'s `map` takes the pages'
   `permissions` too, Rust's `map` then `protect`.
 - **Builtins:** an argument Rust names `id` or `bytes`, Python
   builtins, is named for what it holds: `remove_hook(hook)`,
@@ -250,7 +250,7 @@ assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
 - `memory(contents, pins, writable=True)`: RAM or ROM, a whole number
   of 2-Kbyte pages; returns its number for `memory`, `read_memory` and
   `write_memory`.
-- `fixed_memory(base, contents, writable=True)`: emulator-only memory
+- `fixed_memory(contents, base, writable=True)`: emulator-only memory
   at a fixed address on no pin, which takes the cycles there no chip
   select matches (the host guide's Fixed memory); a memory number as
   `memory`'s.  `set_fixed_timing(memory, port=16, termination=None)`:

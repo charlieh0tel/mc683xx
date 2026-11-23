@@ -478,9 +478,9 @@ impl Builder {
     /// [`BuildError::Memory`] if the core's memory refuses it.
     pub fn fixed_memory(
         &mut self,
-        base: Address,
         bytes: Vec<u8>,
         kind: MemoryKind,
+        base: Address,
     ) -> Result<MemoryId, BuildError> {
         let length = pages(&bytes)?;
         let placement = BuildError::Placement {
