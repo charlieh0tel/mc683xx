@@ -214,7 +214,7 @@ fn a_state_no_run_could_save_is_refused() {
     });
     other.restore(&queued).unwrap();
     let pin = |bit: u8| decode::<PortGpPin>(STATE_VERSION, &encode(STATE_VERSION, &bit));
-    assert_eq!(pin(7).unwrap(), PortGpPin::new(7).unwrap());
+    assert_eq!(pin(7).unwrap(), PortGpPin::try_from(7).unwrap());
     assert!(matches!(pin(8), Err(StateError::Decode(_))));
 }
 
@@ -241,7 +241,7 @@ fn output_compare_3_interrupts_when_tcnt_reaches_it() {
     gpt.advance(Cycles::from_clocks(4 * 0x100 - 1));
     assert_eq!(gpt.request(), None);
     gpt.advance(Cycles::from_clocks(4 * 0x100));
-    let six = InterruptLevel::new(6).unwrap();
+    let six = InterruptLevel::try_from(6).unwrap();
     let request = gpt.request().unwrap();
     assert_eq!((request.level, request.arbitration), (six, 7));
     assert_eq!(
@@ -249,7 +249,7 @@ fn output_compare_3_interrupts_when_tcnt_reaches_it() {
         Some(Vector(0x56))
     );
     assert_eq!(
-        gpt.acknowledge(InterruptLevel::new(5).unwrap(), Cycles::ZERO),
+        gpt.acknowledge(InterruptLevel::try_from(5).unwrap(), Cycles::ZERO),
         None
     );
     // a write of zero without the read clears nothing (GPTRM 7.1.2)
@@ -324,7 +324,7 @@ fn a_pin_edge_is_captured() {
     gpt.set_port_pins(0xff, u8::MAX, Cycles::from_clocks(4 * 0x1234 + 2));
     assert_eq!(read(&mut gpt, 0x0e, 4 * 0x1234 + 2), 0x1234);
     assert_eq!(read(&mut gpt, 0x22, 4 * 0x1234 + 2), 0x0100, "IC1F");
-    let six = InterruptLevel::new(6).unwrap();
+    let six = InterruptLevel::try_from(6).unwrap();
     assert_eq!(gpt.acknowledge(six, Cycles::ZERO), Some(Vector(0x51)));
     // input capture 4 on any edge, on PGP7
     write(&mut gpt, 0x0c, 0x0400, 4 * 0x2000);
@@ -420,7 +420,7 @@ fn tcnt_overflow_sets_tof() {
     gpt.advance(Cycles::from_clocks(4 << 16));
     // the compares at their reset value $FFFF matched on the way
     assert_eq!(read(&mut gpt, 0x22, 4 << 16), 0xf880);
-    let six = InterruptLevel::new(6).unwrap();
+    let six = InterruptLevel::try_from(6).unwrap();
     assert_eq!(gpt.acknowledge(six, Cycles::ZERO), Some(Vector(0x59)));
 }
 
@@ -432,7 +432,7 @@ fn pab_moves_a_source_to_the_top() {
     write(&mut gpt, 0x1a, 0x0001, 0);
     write_byte(&mut gpt, 0x20, 0x48, 0);
     gpt.advance(Cycles::from_clocks(4));
-    let six = InterruptLevel::new(6).unwrap();
+    let six = InterruptLevel::try_from(6).unwrap();
     assert_eq!(
         gpt.acknowledge(six, Cycles::from_clocks(4)),
         Some(Vector(0x54))
@@ -1270,7 +1270,7 @@ fn a_scheduled_capture_edge_latches_tcnt_at_its_time() {
     // EDGE1 rising, IC1I
     write(&mut gpt, 0x1e, 0x0001, 0);
     write_byte(&mut gpt, 0x20, 0x01, 0);
-    let pgp0 = Input::PortGp(PortGpPin::new(0).unwrap());
+    let pgp0 = Input::PortGp(PortGpPin::try_from(0).unwrap());
     let at = 4 * 0x1234 + 2;
     gpt.schedule_input(Cycles::from_clocks(at), pgp0, true);
     gpt.schedule_input(Cycles::from_clocks(at), pgp0, false);
@@ -1351,7 +1351,7 @@ fn inputs_are_named_as_their_pins_in_any_case() {
     }
     assert_eq!(
         "pGp3".parse(),
-        Ok(Input::PortGp(PortGpPin::new(3).unwrap()))
+        Ok(Input::PortGp(PortGpPin::try_from(3).unwrap()))
     );
     for bad in ["PGP8", "PGP07", "PG", "PG\u{e9}0", "OC1"] {
         assert!(bad.parse::<Input>().is_err(), "{bad}");
@@ -1361,14 +1361,14 @@ fn inputs_are_named_as_their_pins_in_any_case() {
 #[test]
 fn port_gp_pins_are_named_pgp0_to_pgp7_in_any_case() {
     for bit in 0..8 {
-        let pin = PortGpPin::new(bit).unwrap();
+        let pin = PortGpPin::try_from(bit).unwrap();
         assert_eq!(pin.to_string(), format!("PGP{bit}"));
         assert_eq!(pin.to_string().parse(), Ok(pin));
     }
-    assert_eq!("pgp7".parse(), Ok(PortGpPin::new(7).unwrap()));
-    assert_eq!(PortGpPin::try_from(7), Ok(PortGpPin::new(7).unwrap()));
+    assert_eq!("pgp7".parse(), Ok(PortGpPin::try_from(7).unwrap()));
+    assert_eq!(PortGpPin::try_from(7), Ok(PortGpPin::try_from(7).unwrap()));
     assert_eq!(PortGpPin::try_from(8), Err(NoPortGpPin(8)));
-    assert_eq!(u8::from(PortGpPin::new(7).unwrap()), 7);
+    assert_eq!(u8::from(PortGpPin::try_from(7).unwrap()), 7);
     for bad in ["PGP8", "PGP07", "PGP", "PG\u{e9}0", "PAI", "PGP+1"] {
         assert_eq!(
             bad.parse::<PortGpPin>(),

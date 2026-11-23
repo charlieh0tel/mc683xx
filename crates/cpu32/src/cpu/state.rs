@@ -564,7 +564,7 @@ impl CpuState {
         if !self.altered.is_valid() {
             return Err(StateError::invalid("altered address registers"));
         }
-        if InterruptLevel::new(self.sampled_mask).is_none() {
+        if InterruptLevel::try_from(self.sampled_mask).is_err() {
             return Err(StateError::invalid("sampled interrupt mask"));
         }
         Ok(())

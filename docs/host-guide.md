@@ -105,7 +105,7 @@ fn main() -> Result<(), BuildError> {
   interrupt.  `Mc68331::peripheral::<D>(id)` and `peripheral_mut` give it back
   by type.
 - `set_interrupt(peripheral, pin)` wires a peripheral's interrupt output to an
-  IRQ pin, an `IrqPin` (levels 1 to 7; `IrqPin::new(level)`);
+  IRQ pin, an `IrqPin` (levels 1 to 7; `IrqPin::try_from(level)`);
   `set_autovector(pin)` ties AVEC for every acknowledge of its level, as
   decode logic does (SIMRM 6.4).
 - `set_reset_scope(peripheral, ResetScope)` says which reset causes reach a
@@ -543,7 +543,7 @@ let (mut builder, ram) = firmware::booting(image);
 let peripheral = builder
     .peripheral(Interrupter::default(), &[firmware::cs(1), firmware::cs(10)])
     .unwrap();
-builder.set_interrupt(peripheral, IrqPin::new(LEVEL).unwrap());
+builder.set_interrupt(peripheral, IrqPin::try_from(LEVEL).unwrap());
 let mut chip = builder.build();
 chip.run_for(Cycles::from_clocks(5000));
 assert_eq!(chip.memory(ram)[..2], [0xbe, 0xef], "the handler ran");
@@ -952,7 +952,7 @@ let program = [
 .concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
-let ic1 = Input::PortGp(PortGpPin::new(0).unwrap());
+let ic1 = Input::PortGp(PortGpPin::try_from(0).unwrap());
 chip.schedule_gpt_input(Cycles::from_clocks(2000), ic1, false);
 chip.schedule_gpt_input(Cycles::from_clocks(3000), ic1, true);
 chip.run_for(Cycles::from_clocks(CLOCKS_PER_COUNT * 0x1000 + 100));

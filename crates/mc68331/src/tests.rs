@@ -103,7 +103,7 @@ const GPT: u32 = 0xff_f900;
 const ROM_BYTES: usize = 64 << 10;
 
 fn cs(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).unwrap())
+    ChipSelect::Numbered(Number::try_from(number).unwrap())
 }
 
 /// CS`number` as a cycle carries it.
@@ -359,7 +359,7 @@ fn nothing_answers_outside_the_selects() {
         Some(5),
     );
     assert_eq!(lpstop, Ok((0, 2)));
-    assert_eq!(board.sim.low_power(), InterruptLevel::new(5));
+    assert_eq!(board.sim.low_power(), InterruptLevel::try_from(5).ok());
 }
 
 #[test]
@@ -523,7 +523,7 @@ fn wired_patched(program: &[u16], patches: &[(u32, &[u16])]) -> Wired {
     let duart = builder
         .peripheral(Recorder::answering(0x40), &[cs(8), cs(10)])
         .unwrap();
-    builder.set_interrupt(duart, IrqPin::new(1).unwrap());
+    builder.set_interrupt(duart, IrqPin::try_from(1).unwrap());
     let mut chip = builder.build();
     chip.run_for(Cycles::from_clocks(40 * WIRED_SELECTS.len() as u64));
     assert_eq!(chip.cpu().halted(), None);
@@ -621,7 +621,7 @@ fn the_duart_is_vectored_through_cs10() {
     chip.peripheral_mut::<Recorder>(board.duart)
         .unwrap()
         .interrupt = true;
-    let level = InterruptLevel::new(1).unwrap();
+    let level = InterruptLevel::try_from(1).unwrap();
     assert_eq!(chip.board.level(), level);
     assert_eq!(
         chip.board.acknowledge(level, Cycles::ZERO).answer,
@@ -655,7 +655,7 @@ fn another_board() {
     let ram = builder
         .memory(vec![0; 32 << 10], MemoryKind::Ram, &[cs(1)])
         .unwrap();
-    builder.set_autovector(IrqPin::new(3).unwrap());
+    builder.set_autovector(IrqPin::try_from(3).unwrap());
     let mut chip = builder.build();
     // a word fetch is two 16-clock byte cycles
     assert_eq!(
@@ -682,17 +682,21 @@ fn another_board() {
         "supervisor"
     );
     // IRQ3 with AVEC (PE2) tied for level 3; IRQ4 answered by nothing
-    let three = IrqPin::new(3).unwrap();
+    let three = IrqPin::try_from(3).unwrap();
     chip.set_interrupt_pin(three, true);
     assert_eq!(
-        chip.board.acknowledge(three.level(), Cycles::ZERO).answer,
+        chip.board
+            .acknowledge(InterruptLevel::from(three), Cycles::ZERO)
+            .answer,
         Acknowledge::Autovector
     );
-    let four = IrqPin::new(4).unwrap();
+    let four = IrqPin::try_from(4).unwrap();
     chip.set_interrupt_pin(four, true);
-    assert_eq!(chip.board.level(), four.level());
+    assert_eq!(chip.board.level(), InterruptLevel::from(four));
     assert_eq!(
-        chip.board.acknowledge(four.level(), Cycles::ZERO).answer,
+        chip.board
+            .acknowledge(InterruptLevel::from(four), Cycles::ZERO)
+            .answer,
         Acknowledge::Spurious
     );
 }
@@ -1123,7 +1127,7 @@ fn the_periodic_timer_interrupts_on_time() {
     let run = chip.run_for(Cycles::from_clocks(32));
     assert!(chip.now() >= period);
     assert_eq!(run.stop, Stop::Budget);
-    let six = InterruptLevel::new(6).unwrap();
+    let six = InterruptLevel::try_from(6).unwrap();
     assert_eq!(chip.board.level(), six);
     assert_eq!(
         chip.board.acknowledge(six, chip.now()).answer,
@@ -1406,7 +1410,7 @@ fn a_halt_monitor_reset_that_slows_the_clock_ends_the_run() {
 #[test]
 fn iarb_arbitrates_the_sim_qsm_and_gpt_at_one_level() {
     let (mut chip, _) = booting(&[NOP]);
-    let five = InterruptLevel::new(5).unwrap();
+    let five = InterruptLevel::try_from(5).unwrap();
     // the PIT at level 5, vector $42, on the SIM's IARB $F
     write_register(&mut chip, SIM + 0x22, 0x0542);
     write_register(&mut chip, SIM + 0x24, 0x0001);
@@ -1838,7 +1842,7 @@ fn takes_vector(program: &[u16], vector: u8, level: u8) -> Mc68331 {
     chip.registers_mut().set_sr(0x2000);
     chip.run_for(Cycles::from_clocks(20_000));
     assert_eq!(chip.memory(board.ram)[..2], [0xbe, 0xef], "the handler ran");
-    assert_eq!(chip.cpu().registers.interrupt_mask().get(), level);
+    assert_eq!(u8::from(chip.cpu().registers.interrupt_mask()), level);
     let frame = (chip.cpu().registers.ssp.0 - RAM) as usize;
     let format_vector = &chip.memory(board.ram)[frame + 6..frame + 8];
     assert_eq!(
@@ -1932,7 +1936,10 @@ fn in_lpstop_only_the_pit_wakes_and_the_gpt_and_qsm_stop() {
         assert_eq!(chip.cpu().halted(), None);
     };
     let (woke, vector, level) = taken;
-    assert_eq!((vector, level), (Vector(0x50), InterruptLevel::new(6)));
+    assert_eq!(
+        (vector, level),
+        (Vector(0x50), InterruptLevel::try_from(6).ok())
+    );
     assert!(woke > stopped + Cycles::from_clocks(60_000), "{woke:?}");
     assert_eq!(chip.sim().low_power(), None);
     // TCNT, at the system clock / 4, stood still from the stop to the
@@ -2190,7 +2197,7 @@ fn duart_board(wait: u8, protection: Option<u16>) -> (Mc68331, MemoryId, Periphe
     let duart = builder
         .peripheral(Duart::new(wait), &[cs(8), cs(10)])
         .unwrap();
-    builder.set_interrupt(duart, IrqPin::new(2).unwrap());
+    builder.set_interrupt(duart, IrqPin::try_from(2).unwrap());
     let mut chip = builder.build();
     chip.run_for(Cycles::from_clocks(5000));
     (chip, ram, duart)
@@ -2203,7 +2210,7 @@ fn taken_vector(chip: &Mc68331, ram: MemoryId) -> (u16, u8) {
     let format_vector = &chip.memory(ram)[frame + 6..frame + 8];
     (
         u16::from_be_bytes([format_vector[0], format_vector[1]]) / 4,
-        chip.cpu().registers.interrupt_mask().get(),
+        u8::from(chip.cpu().registers.interrupt_mask()),
     )
 }
 
@@ -2224,7 +2231,7 @@ fn a_duart_vectors_its_interrupt_through_a_chip_select() {
 
 #[test]
 fn a_duarts_wait_states_at_its_acknowledge_cost_time() {
-    let two = InterruptLevel::new(2).unwrap();
+    let two = InterruptLevel::try_from(2).unwrap();
     let stall = |wait| {
         // the handler leaves the mask at 2 and the DUART requesting
         let (mut chip, _, _) = duart_board(wait, None);
@@ -2244,7 +2251,7 @@ fn a_duarts_wait_states_at_its_acknowledge_cost_time() {
 
 #[test]
 fn a_spurious_acknowledge_costs_the_bus_monitors_period() {
-    let two = InterruptLevel::new(2).unwrap();
+    let two = InterruptLevel::try_from(2).unwrap();
     // the DUART too slow to answer: BME with BMT 16 and 32 clocks
     // (SIMRM 3.2, Table 3-1), less the tables' 2
     for (wait, protection, stall) in [(20, 0x0006, 14), (40, 0x0005, 30)] {
@@ -2418,7 +2425,7 @@ fn a_scheduled_gpt_input_edge_is_captured_inside_a_run() {
     let (mut chip, _) = booting(&[NOP]);
     // EDGE1 rising (GPTRM 3.2)
     write_register(&mut chip, GPT + 0x1e, 0x0001);
-    let pgp0 = Input::PortGp(PortGpPin::new(0).unwrap());
+    let pgp0 = Input::PortGp(PortGpPin::try_from(0).unwrap());
     chip.schedule_gpt_input(Cycles::from_clocks(1001), pgp0, false);
     chip.schedule_gpt_input(Cycles::from_clocks(2001), pgp0, true);
     assert_eq!(chip.board.next_event(), Some(Cycles::from_clocks(1001)));
@@ -2431,7 +2438,7 @@ fn a_scheduled_gpt_input_edge_is_captured_inside_a_run() {
 
 #[test]
 fn set_pins_takes_the_scheduled_gpt_inputs_before_it_merges() {
-    let pgp0 = Input::PortGp(PortGpPin::new(0).unwrap());
+    let pgp0 = Input::PortGp(PortGpPin::try_from(0).unwrap());
     // TFLG1 IC1F (GPTRM 7.1.2.1)
     let ic1f = 0x0100;
     for (value, mask, pins, flags) in [
@@ -2748,7 +2755,7 @@ fn a_request_the_host_moves_between_runs_is_seen() {
     assert!(
         chip.take_events().iter().any(|event| matches!(
             event,
-            Event::Exception { entry, .. } if entry.level == Some(seven.level())
+            Event::Exception { entry, .. } if entry.level == Some(InterruptLevel::from(seven))
         )),
         "level 7 taken"
     );

@@ -5,6 +5,8 @@
 //!
 //! [`Machine::add_peripheral`]: crate::flat::Machine::add_peripheral
 
+use std::fmt;
+
 use crate::bus::BusError;
 use crate::bus::PortSize;
 use crate::cpu::state::Save;
@@ -185,18 +187,36 @@ pub trait MappedPeripheral: Save {
 
 /// A mapped peripheral, as the bare machine's
 /// [`add_peripheral`](crate::flat::Machine::add_peripheral) and a
-/// chip's `Builder::peripheral` return it.
+/// chip's `Builder::peripheral` return it: a host receives one and
+/// gives it back, and cannot make one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PeripheralId(u64);
 
-impl From<u64> for PeripheralId {
-    fn from(number: u64) -> Self {
+impl PeripheralId {
+    /// The id numbered `number` by whatever added the peripheral.
+    ///
+    /// Not part of the semver API: for the workspace's crates that add
+    /// peripherals.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn from_number(number: u64) -> Self {
         Self(number)
+    }
+
+    /// Its number, as [`from_number`](Self::from_number) took it.
+    ///
+    /// Not part of the semver API: for the workspace's crates that add
+    /// peripherals.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn number(self) -> u64 {
+        self.0
     }
 }
 
-impl From<PeripheralId> for u64 {
-    fn from(id: PeripheralId) -> Self {
-        id.0
+/// `peripheral` and its number: `peripheral 3`.
+impl fmt::Display for PeripheralId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "peripheral {}", self.0)
     }
 }

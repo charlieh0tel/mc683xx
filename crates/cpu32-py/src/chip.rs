@@ -858,7 +858,7 @@ impl DsackFaultView {
             }),
             // Python numbers the chip's peripherals as it adds them
             DsackFault::BusUnassigned { peripheral } => Some(Self::BusUnassigned {
-                peripheral: peripheral.into(),
+                peripheral: peripheral.number(),
             }),
             _ => None,
         }
@@ -959,7 +959,7 @@ impl Event {
                 ..
             } => Self::ArbitrationTie {
                 now: now.clocks(),
-                level: level.get(),
+                level: u8::from(level),
                 arbitration,
             },
             event::Event::Access {
@@ -986,7 +986,7 @@ impl Event {
                 pc: entry.pc.0,
                 handler: entry.handler.0,
                 stack: entry.stack.0,
-                level: entry.level.map(|level| level.get()),
+                level: entry.level.map(u8::from),
             },
             event::Event::Dsack { now, fault, .. } => {
                 DsackFaultView::of(fault).map_or_else(unknown, |fault| Self::Dsack {

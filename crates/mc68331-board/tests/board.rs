@@ -200,7 +200,7 @@ fn board(name: &str, text: &str, program: &[u16]) -> Board<Mc68331> {
 
 /// CS`number`.
 fn cs(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).unwrap())
+    ChipSelect::Numbered(Number::try_from(number).unwrap())
 }
 
 /// A program that maps CS1 and writes two words through it, then reads

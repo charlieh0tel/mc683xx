@@ -18,6 +18,9 @@ use std::fmt;
 use std::rc::Weak;
 use std::str::FromStr;
 
+use mc683xx_target::integer::ParseIntegerError;
+use mc683xx_target::integer::parse_integer;
+
 use crate::error::ConditionError;
 use crate::observe::Observer;
 use crate::signal::Signal;
@@ -57,21 +60,8 @@ impl ConditionInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ConditionToken(u32);
 
-impl ConditionToken {
-    /// The token numbered `number`, in whatever scheme the peripheral
-    /// keeps.
-    #[must_use]
-    pub const fn new(number: u32) -> Self {
-        Self(number)
-    }
-
-    /// Its number.
-    #[must_use]
-    pub const fn number(self) -> u32 {
-        self.0
-    }
-}
-
+/// The token numbered `token`, in whatever scheme the peripheral
+/// keeps.
 impl From<u32> for ConditionToken {
     fn from(token: u32) -> Self {
         Self(token)
@@ -271,33 +261,23 @@ pub enum ParseConditionError {
     Change(#[from] ParseNetChangeError),
 }
 
-/// An armed condition's number, from 1, never reused on its board.
+/// An armed condition, as [`Board::arm`] returns it: numbered from 1,
+/// never reused on its board.  A host receives one, and names it back
+/// by the number it prints as.
+///
+/// [`Board::arm`]: crate::board::Board::arm
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ConditionId(u64);
 
 impl ConditionId {
     /// The condition numbered `number`.
-    #[must_use]
-    pub const fn new(number: u64) -> Self {
+    pub(crate) const fn new(number: u64) -> Self {
         Self(number)
     }
 
     /// Its number.
-    #[must_use]
-    pub const fn number(self) -> u64 {
+    pub(crate) const fn number(self) -> u64 {
         self.0
-    }
-}
-
-impl From<u64> for ConditionId {
-    fn from(id: u64) -> Self {
-        Self(id)
-    }
-}
-
-impl From<ConditionId> for u64 {
-    fn from(id: ConditionId) -> Self {
-        id.0
     }
 }
 
@@ -306,6 +286,32 @@ impl fmt::Display for ConditionId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}", self.0)
     }
+}
+
+/// The condition its number, as `Display` prints it, names; the number
+/// as [`parse_integer`] takes one.  Whether it is armed is the board's
+/// to say.
+impl FromStr for ConditionId {
+    type Err = ParseConditionIdError;
+
+    fn from_str(text: &str) -> Result<Self, ParseConditionIdError> {
+        parse_integer::<u64>(text)
+            .map(Self)
+            .map_err(|error| ParseConditionIdError {
+                text: text.to_owned(),
+                error,
+            })
+    }
+}
+
+/// Text that is no condition's number.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("not a condition's number: {text:?}: {error}")]
+pub struct ParseConditionIdError {
+    /// The text.
+    text: String,
+    /// Why.
+    error: ParseIntegerError,
 }
 
 /// What a board with conditions does for a debugger: arms and disarms
@@ -399,6 +405,20 @@ mod tests {
             let condition: Condition = text.parse().unwrap();
             assert_eq!(condition.to_string(), text);
         }
+    }
+
+    #[test]
+    fn an_id_parses_from_the_number_it_prints() {
+        let id = ConditionId::new(12);
+        assert_eq!(id.to_string().parse(), Ok(id));
+        assert_eq!("0xc".parse(), Ok(id));
+        assert_eq!(
+            "x".parse::<ConditionId>(),
+            Err(ParseConditionIdError {
+                text: "x".to_owned(),
+                error: ParseIntegerError::Invalid
+            })
+        );
     }
 
     #[test]

@@ -717,13 +717,13 @@ fn a_block_hook_sees_the_status_a_trap_enters_with() {
 /// before.
 #[test]
 fn a_block_hook_sees_the_mask_an_interrupt_enters_with() {
-    let level = InterruptLevel::new(3).expect("a level");
+    let level = InterruptLevel::try_from(3).expect("a level");
     let mut machine = Machine::new(&[NOP]);
     machine.cpu.registers.set_sr(status::S);
     let seen = machine.block_at(handler(Vector::autovector(level)), &mut Request(level));
     assert_eq!(
         seen.registers.sr(),
-        status::S | u16::from(level.get()) << status::INTERRUPT_SHIFT
+        status::S | u16::from(u8::from(level)) << status::INTERRUPT_SHIFT
     );
     assert_eq!(machine.stacked_sr(), status::S);
 }
@@ -778,7 +778,7 @@ fn fault_5_stop_waits_for_an_interrupt() {
     const LOADED: u16 = status::S;
     /// A whole run's budget: more than one instruction.
     const BUDGET: Cycles = Cycles::from_clocks(1000);
-    let level = InterruptLevel::new(1).expect("a level");
+    let level = InterruptLevel::try_from(1).expect("a level");
     let mut machine = Machine::new(&[STOP, LOADED, NOP]);
     let run = machine.cpu.run_for(
         &mut NoBus,

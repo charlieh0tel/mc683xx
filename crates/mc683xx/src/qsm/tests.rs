@@ -307,7 +307,7 @@ fn tdre_and_tc_interrupt_through_the_sci_vector() {
     let mut qsm = qsm();
     // TIE, TE
     write_word(&mut qsm, 0x0a, 0x0088, 0);
-    let three = InterruptLevel::new(3).unwrap();
+    let three = InterruptLevel::try_from(3).unwrap();
     assert_eq!(qsm.request().unwrap().level, three);
     assert_eq!(qsm.request().unwrap().arbitration, 9);
     assert_eq!(qsm.acknowledge(three, Cycles::ZERO), Some(Vector(0x40)));
@@ -361,7 +361,7 @@ fn a_character_arriving_sets_rdrf_a_frame_later() {
     assert_eq!(read_word(&mut qsm, 0x0c, 11) & 0x0060, 0x0020, "RAF");
     assert_eq!(qsm.next_event(), Some(Cycles::from_clocks(10 + FRAME_55)));
     qsm.advance(Cycles::from_clocks(10 + FRAME_55));
-    let three = InterruptLevel::new(3).unwrap();
+    let three = InterruptLevel::try_from(3).unwrap();
     assert_eq!(qsm.request().unwrap().level, three);
     assert_eq!(read_word(&mut qsm, 0x0c, 10 + FRAME_55) & 0x0060, 0x0040);
     assert_eq!(read_word(&mut qsm, 0x0e, 10 + FRAME_55), u32::from(b'*'));
@@ -546,7 +546,7 @@ fn a_queue_runs_with_each_entrys_pcs_and_timing() {
         0x82,
         "SPIF, CPTQP"
     );
-    let four = InterruptLevel::new(4).unwrap();
+    let four = InterruptLevel::try_from(4).unwrap();
     assert_eq!(qsm.request().unwrap().level, four);
     assert_eq!(
         qsm.acknowledge(four, Cycles::from_clocks(10_000)),
@@ -641,7 +641,7 @@ fn the_qspi_vector_wins_over_the_scis_at_one_level() {
     write_word(&mut qsm, 0x1c, 0x8000, 0);
     write_word(&mut qsm, 0x1a, 0x8000, 0);
     qsm.advance(Cycles::from_clocks(1000));
-    let two = InterruptLevel::new(2).unwrap();
+    let two = InterruptLevel::try_from(2).unwrap();
     assert_eq!(
         qsm.acknowledge(two, Cycles::from_clocks(1000)),
         Some(Vector(0x41))
@@ -1084,7 +1084,7 @@ fn a_slave_takes_the_masters_bits_entry_by_entry() {
     assert_eq!(read_word(&mut qsm, 0x1a, 50) & 0x8000, 0, "SPE clear");
     assert_eq!(
         qsm.request().unwrap().level,
-        InterruptLevel::new(4).unwrap()
+        InterruptLevel::try_from(4).unwrap()
     );
     // a slave drives no PCS and starts no master transfer: the
     // peripheral sees only the master's SS on PCS0

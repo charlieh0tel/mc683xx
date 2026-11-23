@@ -166,7 +166,7 @@ impl Timed for Ticker {
 }
 
 fn cs(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).unwrap())
+    ChipSelect::Numbered(Number::try_from(number).unwrap())
 }
 
 /// CS`number` as a cycle carries it.

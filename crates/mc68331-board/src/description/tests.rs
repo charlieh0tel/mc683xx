@@ -86,7 +86,7 @@ fn error(extra: &str) -> String {
 
 /// CS`number`.
 fn cs(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).unwrap())
+    ChipSelect::Numbered(Number::try_from(number).unwrap())
 }
 
 #[test]
@@ -914,7 +914,7 @@ fn a_peripheral_on_no_select_takes_a_window_or_an_acknowledge() {
     assert_eq!(io.attachments[0].role, Role::Read);
     assert_eq!(
         io.attachments[1].target,
-        Target::Bus(BusDecode::Acknowledge(IrqPin::new(4).unwrap()))
+        Target::Bus(BusDecode::Acknowledge(IrqPin::try_from(4).unwrap()))
     );
     assert_eq!(io.attachments[1].role, Role::Iack, "an acknowledge's role");
     let peripheral = |dsack: &str, attach: &str| {

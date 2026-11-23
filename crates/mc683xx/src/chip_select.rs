@@ -27,7 +27,7 @@ impl ChipSelect {
     pub const fn index(self) -> usize {
         match self {
             Self::Boot => 0,
-            Self::Numbered(number) => number.get() as usize + 1,
+            Self::Numbered(number) => number.0 as usize + 1,
         }
     }
 
@@ -106,33 +106,46 @@ impl Number {
     const LAST: u8 = 10;
 
     /// CS`number`, if there is one.
-    #[must_use]
-    pub const fn new(number: u8) -> Option<Self> {
+    const fn new(number: u8) -> Option<Self> {
         if number <= Self::LAST {
             Some(Self(number))
         } else {
             None
         }
     }
+}
 
-    /// Its number.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
+impl TryFrom<u8> for Number {
+    type Error = NoChipSelectNumber;
+
+    fn try_from(number: u8) -> Result<Self, NoChipSelectNumber> {
+        Self::new(number).ok_or(NoChipSelectNumber(number))
     }
 }
+
+impl From<Number> for u8 {
+    fn from(number: Number) -> Self {
+        number.0
+    }
+}
+
+/// A number no chip select has: past CS10.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no chip select CS{0}")]
+pub struct NoChipSelectNumber(pub u8);
 
 #[cfg(test)]
 mod tests {
     use mc683xx_cpu32::peripheral::Select;
 
     use super::ChipSelect;
+    use super::NoChipSelectNumber;
     use super::Number;
 
     #[test]
     fn eleven_numbered_selects() {
-        assert!(Number::new(10).is_some());
-        assert!(Number::new(11).is_none());
+        assert_eq!(Number::try_from(10).map(u8::from), Ok(10));
+        assert_eq!(Number::try_from(11), Err(NoChipSelectNumber(11)));
     }
 
     #[test]

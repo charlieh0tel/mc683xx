@@ -337,7 +337,7 @@ impl ExceptionView {
     /// The interrupt level, for an interrupt.
     #[getter]
     fn level(&self) -> Option<u8> {
-        self.0.level.map(|level| level.get())
+        self.0.level.map(u8::from)
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {

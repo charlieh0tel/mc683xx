@@ -207,7 +207,19 @@ Crates:
   quantities (time, frequency, clock counts: `Cycles`, `Time`, `Span`,
   `Frequency`), which have named constructors and accessors only
   (`Cycles::from_clocks`, `clocks`), so a bare number never silently
-  takes a unit.
+  takes a unit.  The other conversions, one way each:
+  - a checked value, some numbers not one (`InterruptLevel`, `IrqPin`,
+    `PortGpPin`, `chip_select::Number`, `FunctionCode`), converts by
+    `TryFrom<u8>`, failing with `No<Type>(pub u8)`, and `From<T> for
+    u8`; no `new` or `get` (a private `const fn` where a const context
+    needs one);
+  - a wire or field encoding is a named pair, not `From`
+    (`Register::code`/`from_code`, `Size::field`, `Entry::atemp`);
+  - a register-order index is `index`/`from_index` (`ChipSelect`);
+  - an id a host only receives is opaque: `Display`, no `From`, no
+    public constructor (`PeripheralId`, `ConditionId`, `ObserverId`,
+    `HookId`); a value the host chooses (`ConditionToken`) is one
+    `From` pair.
 - Method names: `with_*` is a constructor (`Registry::with_builtins`);
   a mutator is `set_*`; an accessor is the noun, `_mut` for the
   mutable one (`Board::peripheral`, `peripheral_mut`); a state reads

@@ -325,10 +325,10 @@ fn a_step_takes_an_interrupt_pending_at_its_start_or_its_end() {
     let mut first = machine(&[NOP]);
     let level_7 = handle(
         &mut first,
-        Vector::autovector(InterruptLevel::new(7).unwrap()),
+        Vector::autovector(InterruptLevel::try_from(7).unwrap()),
         0x4300,
     );
-    first.request_interrupt(IrqPin::new(7).unwrap(), None);
+    first.request_interrupt(IrqPin::try_from(7).unwrap(), None);
     assert_eq!(step(&mut first), End::Steps);
     assert_eq!(first.cpu.registers.pc.0, level_7);
     assert_eq!(frame(&first).1, CODE, "the NOP not executed");
@@ -342,10 +342,10 @@ fn a_step_takes_an_interrupt_pending_at_its_start_or_its_end() {
         .set_sr(status::S | status::INTERRUPT_MASK);
     let level_3 = handle(
         &mut machine,
-        Vector::autovector(InterruptLevel::new(3).unwrap()),
+        Vector::autovector(InterruptLevel::try_from(3).unwrap()),
         0x4200,
     );
-    machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), None);
     let run = machine.run_limited(Limits {
         steps: Some(1),
         ..Limits::default()
@@ -482,13 +482,13 @@ fn a_fault_stacking_a_breakpoint_after_stop_keeps_the_interrupt_before_it() {
     one(&mut machine);
     let level_3 = handle(
         &mut machine,
-        Vector::autovector(InterruptLevel::new(3).unwrap()),
+        Vector::autovector(InterruptLevel::try_from(3).unwrap()),
         0x4200,
     );
     machine.cpu.set_breakpoint_pending(true);
     // room for the interrupt's four words, not the breakpoint's six
     machine.cpu.registers.ssp = Address(8);
-    machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), None);
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
@@ -506,7 +506,7 @@ fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_its_breakpoint_pending()
     one(&mut machine);
     machine.cpu.set_breakpoint_pending(true);
     machine.cpu.registers.ssp = Address(NOWHERE);
-    machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), None);
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
@@ -530,7 +530,7 @@ fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_the_cpu_stopped() {
         one(&mut machine);
         let stopped_sr = machine.cpu.registers.sr();
         machine.cpu.registers.ssp = Address(NOWHERE);
-        let pin = IrqPin::new(3).unwrap();
+        let pin = IrqPin::try_from(3).unwrap();
         machine.request_interrupt(pin, None);
         let End::Fault(fault) = one(&mut machine) else {
             panic!("no fault");
@@ -546,7 +546,7 @@ fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_the_cpu_stopped() {
         machine.cpu.registers.ssp = Address(STACK);
         let level_3 = handle(
             &mut machine,
-            Vector::autovector(InterruptLevel::new(3).unwrap()),
+            Vector::autovector(InterruptLevel::try_from(3).unwrap()),
             0x4200,
         );
         machine.request_interrupt(pin, None);
@@ -575,7 +575,7 @@ fn a_fault_stacking_an_interrupt_leaves_the_next_instruction_s_hooks_to_run() {
         });
     one(&mut machine);
     machine.cpu.registers.ssp = Address(NOWHERE);
-    let pin = IrqPin::new(3).unwrap();
+    let pin = IrqPin::try_from(3).unwrap();
     machine.request_interrupt(pin, None);
     assert!(matches!(one(&mut machine), End::Fault(_)));
     assert_eq!(*calls.borrow(), 0, "the NOP not reached");
@@ -794,7 +794,7 @@ fn a_fault_stopped_exception_is_charged_once_when_taken() {
             machine.cpu.registers.set_address(0, COUNTER);
             machine.cpu.set_breakpoint_pending(case.breakpoint);
             if case.interrupt {
-                machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+                machine.request_interrupt(IrqPin::try_from(3).unwrap(), None);
             }
             machine
         };
@@ -930,11 +930,11 @@ fn a_fault_stacking_an_interrupt_is_not_a_step() {
     machine.cpu.set_stop_on_fault(true);
     let level_3 = handle(
         &mut machine,
-        Vector::autovector(InterruptLevel::new(3).unwrap()),
+        Vector::autovector(InterruptLevel::try_from(3).unwrap()),
         0x4200,
     );
     machine.cpu.registers.ssp = Address(NOWHERE);
-    machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), None);
     let run = machine.run_limited(Limits {
         steps: Some(1),
         ..Limits::default()

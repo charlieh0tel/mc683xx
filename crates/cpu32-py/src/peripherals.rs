@@ -237,7 +237,7 @@ pub(crate) enum InputView {
 
 impl From<InputView> for Input {
     fn from(input: InputView) -> Self {
-        let port_gp = |bit| Self::PortGp(PortGpPin::new(bit).expect("a port GP pin"));
+        let port_gp = |bit| Self::PortGp(PortGpPin::try_from(bit).expect("a port GP pin"));
         match input {
             InputView::PGP0 => port_gp(0),
             InputView::PGP1 => port_gp(1),
@@ -334,7 +334,7 @@ mod tests {
         }
         assert_eq!(
             Input::from(InputView::PGP7),
-            Input::PortGp(PortGpPin::new(7).unwrap())
+            Input::PortGp(PortGpPin::try_from(7).unwrap())
         );
     }
 }

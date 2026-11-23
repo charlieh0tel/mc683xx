@@ -269,7 +269,7 @@ pub struct Board {
 
 /// CS`number`.
 fn cs(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).expect("a chip select"))
+    ChipSelect::Numbered(Number::try_from(number).expect("a chip select"))
 }
 
 /// MOVE.W #`value`,(`address`).L.

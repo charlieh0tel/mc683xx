@@ -1033,7 +1033,7 @@ fn run_chip(
     }
     builder.set_interrupt(
         id,
-        mc683xx_cpu32::interrupt::IrqPin::new(DUART_LEVEL).expect("a level"),
+        mc683xx_cpu32::interrupt::IrqPin::try_from(DUART_LEVEL).expect("a level"),
     );
     let mut chip = builder.build();
     let mut tracing = mc683xx_mc68331::event::ChipTracing::default();
@@ -1269,9 +1269,7 @@ fn chip_record(chip: &Mc68331, ram: MemoryId, pc: u32, event: Event) -> Option<R
             let sr = memory
                 .get(offset..offset + 2)
                 .map_or(0, |word| u16::from_be_bytes([word[0], word[1]]));
-            let level = entry
-                .level
-                .map(mc683xx_cpu32::interrupt::InterruptLevel::get);
+            let level = entry.level.map(u8::from);
             Some(Record::Exception {
                 vector: entry.vector.0,
                 pc: if level.is_some() { entry.pc.0 } else { pc },

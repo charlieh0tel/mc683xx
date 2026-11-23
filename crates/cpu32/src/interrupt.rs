@@ -37,8 +37,7 @@ impl InterruptLevel {
     pub const NONMASKABLE: Self = Self(7);
 
     /// Level `level`, if it is one: 0 to 7.
-    #[must_use]
-    pub const fn new(level: u8) -> Option<Self> {
+    const fn new(level: u8) -> Option<Self> {
         if level <= Self::NONMASKABLE.0 {
             Some(Self(level))
         } else {
@@ -46,9 +45,9 @@ impl InterruptLevel {
         }
     }
 
-    /// The level, 0 to 7.
-    #[must_use]
-    pub const fn get(self) -> u8 {
+    /// The level, 0 to 7, where `u8::from` cannot be called: a const
+    /// context.
+    pub(crate) const fn get(self) -> u8 {
         self.0
     }
 
@@ -80,24 +79,17 @@ impl IrqPin {
     pub const IRQ7: Self = Self(InterruptLevel::NONMASKABLE);
 
     /// IRQ`level`'s pin, if there is one: 1 to 7.
-    #[must_use]
-    pub const fn new(level: u8) -> Option<Self> {
+    const fn new(level: u8) -> Option<Self> {
         match InterruptLevel::new(level) {
-            Some(level) if level.get() != InterruptLevel::NONE.get() => Some(Self(level)),
+            Some(level) if level.0 != InterruptLevel::NONE.0 => Some(Self(level)),
             _ => None,
         }
     }
 
-    /// The level it requests.
-    #[must_use]
-    pub const fn level(self) -> InterruptLevel {
-        self.0
-    }
-
-    /// The level, 1 to 7.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0.get()
+    /// The level, 1 to 7, where `u8::from` cannot be called: a const
+    /// context.
+    pub(crate) const fn get(self) -> u8 {
+        self.0.0
     }
 }
 

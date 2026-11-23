@@ -188,7 +188,7 @@ fn the_timer_ticks_on_extal() {
     sim.advance(Cycles::from_clocks(period.clocks() - 1));
     assert_eq!(sim.timer_request(), None);
     sim.advance(period);
-    assert_eq!(sim.timer_request(), InterruptLevel::new(5));
+    assert_eq!(sim.timer_request(), InterruptLevel::try_from(5).ok());
     assert_eq!(sim.acknowledge_timer(), Vector(0x42));
     assert_eq!(sim.timer_request(), None);
     assert_eq!(
@@ -222,7 +222,7 @@ fn timers_across_a_syncr_write(from: (u32, u64), to: (u32, u64)) {
     timer.advance(Cycles::from_clocks(at(4).clocks() - 1));
     assert_eq!(timer.timer_request(), None);
     timer.advance(at(4));
-    assert_eq!(timer.timer_request(), InterruptLevel::new(5));
+    assert_eq!(timer.timer_request(), InterruptLevel::try_from(5).ok());
     // the watchdog's 2^9 periods at reset (MC68331UM 4.2.10)
     let mut watchdog = sim();
     write(&mut watchdog, 0x04, Size::Word, to, half);
@@ -359,7 +359,11 @@ fn freeze_with_frzsw_holds_the_timer_s_count() {
     ));
     assert_eq!(sim.timer_request(), None);
     sim.advance(Cycles::from_clocks(10 * period.clocks() + half.clocks()));
-    assert_eq!(sim.timer_request(), InterruptLevel::new(5), "the half left");
+    assert_eq!(
+        sim.timer_request(),
+        InterruptLevel::try_from(5).ok(),
+        "the half left"
+    );
 }
 
 #[test]

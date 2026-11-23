@@ -604,7 +604,7 @@ mod tests {
     const PULLED_UP: u16 = 0xffff;
 
     fn cs(number: u8) -> ChipSelect {
-        ChipSelect::Numbered(Number::new(number).unwrap())
+        ChipSelect::Numbered(Number::try_from(number).unwrap())
     }
 
     fn read(address: u32, size: Size) -> DecodeRequest {

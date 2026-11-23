@@ -20,10 +20,10 @@ pub(super) fn monitor(
         [] => armed(conditions, out),
         ["conditions"] => offered(conditions, None, out),
         ["conditions", peripheral] => offered(conditions, Some(peripheral), out),
-        ["delete", id] => match id.parse() {
-            Ok(id) if conditions.disarm(ConditionId::new(id)) => outputln!(out, "deleted {id}"),
+        ["delete", id] => match id.parse::<ConditionId>() {
+            Ok(id) if conditions.disarm(id) => outputln!(out, "deleted {id}"),
             Ok(id) => outputln!(out, "no condition {id}"),
-            Err(_) => outputln!(out, "not a condition's number: {id:?}"),
+            Err(error) => outputln!(out, "{error}"),
         },
         ["clear"] => {
             for (id, _) in conditions.armed() {

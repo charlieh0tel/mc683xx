@@ -856,7 +856,7 @@ impl Description {
 
 /// IRQ pin `level`, 1 to 7.
 fn irq_pin(owner: &str, level: u8) -> Result<IrqPin, LoadError> {
-    IrqPin::new(level).ok_or_else(|| LoadError::Level {
+    IrqPin::try_from(level).map_err(|_| LoadError::Level {
         owner: owner.to_owned(),
         level,
     })
@@ -1388,7 +1388,7 @@ fn bus_decode(attachment: &Attachment, role: Role) -> Result<Target, &'static st
             {
                 return Err("an iack attachment's role is iack");
             }
-            BusDecode::Acknowledge(IrqPin::new(level).ok_or("iack is a level, 1 to 7")?)
+            BusDecode::Acknowledge(IrqPin::try_from(level).map_err(|_| "iack is a level, 1 to 7")?)
         }
         _ => return Err("give base and size, or iack, not both"),
     };

@@ -87,7 +87,7 @@ use mc683xx_modules::sim::reset::ResetScope;
 /// The index in the chip's peripherals of `id`, which the chip numbers
 /// from 0 in the order added.
 fn index(id: PeripheralId) -> usize {
-    usize::try_from(u64::from(id)).unwrap_or(usize::MAX)
+    usize::try_from(id.number()).unwrap_or(usize::MAX)
 }
 
 /// Host memory wired into the chip, as [`Builder::memory`] returns it.
@@ -573,7 +573,7 @@ impl Builder {
         self.board.reset_scopes.push(ResetScope::ALL);
         self.board.dsack_pins.push(None);
         self.board.dsack_told.push(0);
-        PeripheralId::from((self.board.peripherals.len() - 1) as u64)
+        PeripheralId::from_number((self.board.peripherals.len() - 1) as u64)
     }
 
     /// A peripheral on `pins`, which it tells apart by
@@ -688,13 +688,13 @@ impl Builder {
     pub fn set_interrupt(&mut self, peripheral: PeripheralId, pin: IrqPin) {
         self.board
             .interrupt_wires
-            .push((index(peripheral), pin.level()));
+            .push((index(peripheral), InterruptLevel::from(pin)));
     }
 
     /// The board asserts AVEC (PE2) at every acknowledge of `pin`'s
     /// level, as a pin tied low or decode logic does (SIMRM 6.4).
-    pub const fn set_autovector(&mut self, pin: IrqPin) {
-        self.board.autovector_levels |= 1 << pin.get();
+    pub fn set_autovector(&mut self, pin: IrqPin) {
+        self.board.autovector_levels |= 1 << u8::from(pin);
     }
 
     /// The chip, through its power-on reset.
@@ -1274,8 +1274,8 @@ impl Mc68331 {
     }
 
     /// The host asserts or negates `pin`.
-    pub const fn set_interrupt_pin(&mut self, pin: IrqPin, asserted: bool) {
-        let bit = 1 << pin.get();
+    pub fn set_interrupt_pin(&mut self, pin: IrqPin, asserted: bool) {
+        let bit = 1 << u8::from(pin);
         self.board.level_stale = true;
         if asserted {
             self.board.interrupt_pins |= bit;

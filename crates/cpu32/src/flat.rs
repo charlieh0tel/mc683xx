@@ -140,7 +140,7 @@ impl FlatBus {
     /// The peripherals' indices in attach order, the order of their ids.
     fn attach_order(&self) -> Vec<usize> {
         let mut order: Vec<usize> = (0..self.peripherals.len()).collect();
-        order.sort_by_key(|&index| u64::from(self.peripherals[index].id));
+        order.sort_by_key(|&index| self.peripherals[index].id);
         order
     }
 
@@ -257,7 +257,7 @@ impl Interrupts for Requests {
             .iter()
             .rposition(Option::is_some)
             .map_or(0, |index| index + 1);
-        InterruptLevel::new(level as u8).unwrap_or(InterruptLevel::NONE)
+        InterruptLevel::try_from(level as u8).unwrap_or(InterruptLevel::NONE)
     }
 
     fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Acknowledged {
@@ -540,7 +540,7 @@ impl Machine {
             )));
         }
         self.bus.next += 1;
-        let id = PeripheralId::from(self.bus.next);
+        let id = PeripheralId::from_number(self.bus.next);
         self.bus.peripherals.insert(
             index,
             Wired {

@@ -253,19 +253,12 @@ impl<'de> Deserialize<'de> for PortGpPin {
 
 impl PortGpPin {
     /// PGP`bit`, if there is one.
-    #[must_use]
-    pub const fn new(bit: u8) -> Option<Self> {
+    const fn new(bit: u8) -> Option<Self> {
         if bit < PORT_GP_PINS {
             Some(Self(bit))
         } else {
             None
         }
-    }
-
-    /// Its bit.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
     }
 
     /// Its bit in a mask of port GP.
@@ -1767,7 +1760,7 @@ impl Module for Gpt {
     }
 
     fn request(&self) -> Option<InterruptRequest> {
-        let level = InterruptLevel::new(self.level()).expect("three bits");
+        let level = InterruptLevel::try_from(self.level()).expect("three bits");
         (level != InterruptLevel::NONE && self.pending_source().is_some()).then_some(
             InterruptRequest {
                 level,
@@ -1778,7 +1771,7 @@ impl Module for Gpt {
 
     /// IVBA and the pending source's number, $0 for PAB's (GPTRM 7.1.1).
     fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Option<Vector> {
-        if level.get() != self.level() {
+        if u8::from(level) != self.level() {
             return None;
         }
         let source = self.pending_source()?;

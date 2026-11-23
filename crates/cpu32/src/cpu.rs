@@ -2087,7 +2087,7 @@ mod tests {
     impl Source {
         fn new(level: u8, answer: Acknowledge) -> Self {
             Self {
-                level: InterruptLevel::new(level).unwrap(),
+                level: InterruptLevel::try_from(level).unwrap(),
                 answer,
                 stall: Cycles::ZERO,
                 acknowledged: Vec::new(),
@@ -2145,8 +2145,8 @@ mod tests {
         let mut cpu = prepared(&[NOP], status::S | 2 << status::INTERRUPT_SHIFT);
         let mut source = Source::new(3, Acknowledge::Autovector);
         step(&mut cpu, &mut source);
-        assert_eq!(source.acknowledged, [InterruptLevel::new(3).unwrap()]);
-        let vector = Vector::autovector(InterruptLevel::new(3).unwrap());
+        assert_eq!(source.acknowledged, [InterruptLevel::try_from(3).unwrap()]);
+        let vector = Vector::autovector(InterruptLevel::try_from(3).unwrap());
         assert_eq!(cpu.registers.pc.0, handler(vector));
         assert_eq!(cpu.registers.interrupt_mask().get(), 3);
         // Figure 6-3: the PC of the instruction not yet executed.
@@ -2243,7 +2243,7 @@ mod tests {
 
     impl Interrupts for AcknowledgeStops {
         fn level(&self) -> InterruptLevel {
-            InterruptLevel::new(1).unwrap()
+            InterruptLevel::try_from(1).unwrap()
         }
 
         fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycles) -> Acknowledged {
@@ -2274,7 +2274,7 @@ mod tests {
         cpu.registers.ssp = Address(RAM_BYTES + 0x1000);
         let mut source = Source::new(3, Acknowledge::Autovector);
         assert_eq!(step(&mut cpu, &mut source), Stop::Fault);
-        let level = InterruptLevel::new(3).unwrap();
+        let level = InterruptLevel::try_from(3).unwrap();
         assert_eq!(source.acknowledged, [level]);
         assert_eq!(source.withdrawn, [level], "not taken");
         cpu.registers.ssp = Address(STACK);
@@ -2465,7 +2465,7 @@ mod tests {
         poke_long(&mut cpu, handler(Vector::BUS_ERROR), u32::from(RTE) << 16);
         // The level 1 handler: MOVEM.L D4-D5, -(A7); MOVEM.L (A7)+,
         // D4-D5; RTE.
-        let autovector = Vector::autovector(InterruptLevel::new(1).unwrap());
+        let autovector = Vector::autovector(InterruptLevel::try_from(1).unwrap());
         poke_long(&mut cpu, handler(autovector), 0x48e7_0c00);
         poke_long(&mut cpu, handler(autovector) + 4, 0x4cdf_0030);
         poke_long(&mut cpu, handler(autovector) + 8, u32::from(RTE) << 16);
@@ -2639,7 +2639,7 @@ mod tests {
         assert_eq!(cpu.registers.ssp.0, interrupt);
         assert_eq!(
             cpu.registers.pc.0,
-            handler(Vector::autovector(InterruptLevel::new(4).unwrap()))
+            handler(Vector::autovector(InterruptLevel::try_from(4).unwrap()))
         );
         assert_eq!(
             peek_long(&cpu, interrupt + 2),
@@ -2681,7 +2681,7 @@ mod tests {
         // handler (CPU32RM 6.2.6)
         assert_eq!(cpu.registers.pc.0, handler(Vector::HARDWARE_BREAKPOINT));
         assert_eq!(cpu.registers.ssp.0, STACK - 8 - 12);
-        let level_1 = Vector::autovector(InterruptLevel::new(1).unwrap());
+        let level_1 = Vector::autovector(InterruptLevel::try_from(1).unwrap());
         assert_eq!(peek_long(&cpu, cpu.registers.ssp.0 + 2), handler(level_1));
         assert_eq!(peek_long(&cpu, STACK - 6), CODE);
     }
@@ -2920,7 +2920,7 @@ mod tests {
         #[test]
         fn an_interrupt_ends_loop_mode() {
             let mut cpu = looping(&[ADDQ, DBF, BACK], 5);
-            let level = InterruptLevel::new(1).unwrap();
+            let level = InterruptLevel::try_from(1).unwrap();
             let autovector = handler(Vector::autovector(level));
             poke_long(&mut cpu, autovector, u32::from(RTE) << 16);
             cpu.registers.set_sr(status::S);

@@ -131,7 +131,7 @@ fn select_of(cycle: BusCycle) -> ChipSelect {
 fn select_name(select: ChipSelect) -> String {
     match select {
         ChipSelect::Boot => "CSBOOT".to_owned(),
-        ChipSelect::Numbered(number) => format!("CS{}", number.get()),
+        ChipSelect::Numbered(number) => format!("CS{}", u8::from(number)),
     }
 }
 

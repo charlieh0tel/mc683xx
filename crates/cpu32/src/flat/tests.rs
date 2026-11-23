@@ -509,7 +509,7 @@ fn a_requested_interrupt_is_taken_through_its_vector() {
         .write(Address(u32::from(USER_VECTOR) * 4), &HANDLER.to_be_bytes())
         .unwrap();
     machine.write(Address(HANDLER), &bytes(&STOP)).unwrap();
-    machine.request_interrupt(IrqPin::new(3).unwrap(), Some(Vector(USER_VECTOR)));
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), Some(Vector(USER_VECTOR)));
     let run = machine.run_limited(Limits {
         until: Some(Address(HANDLER)),
         ..Limits::default()
@@ -517,7 +517,7 @@ fn a_requested_interrupt_is_taken_through_its_vector() {
     assert_eq!(run.end, End::Until);
     assert_eq!(machine.cpu.instructions(), 0, "taken before the first");
     assert_eq!(machine.cpu.registers.interrupt_mask().get(), 3);
-    machine.clear_interrupt(IrqPin::new(3).unwrap());
+    machine.clear_interrupt(IrqPin::try_from(3).unwrap());
     // With no budget, a stop does not wait.
     let run = machine.run_limited(Limits::default());
     assert_eq!(run.end, End::Stop(crate::cpu::Stop::Stopped));
@@ -527,7 +527,7 @@ fn a_requested_interrupt_is_taken_through_its_vector() {
 fn the_format_matches_its_golden() {
     let mut machine = machine(&[MOVEQ_1_D0, RTS]);
     machine.run_limited(until_return());
-    machine.request_interrupt(IrqPin::new(3).unwrap(), Some(Vector(0x40)));
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), Some(Vector(0x40)));
     machine
         .add_peripheral(Address(PERIPHERAL)..=Address(PERIPHERAL), Box::new(Fixed))
         .unwrap();

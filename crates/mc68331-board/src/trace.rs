@@ -328,7 +328,7 @@ impl fmt::Display for ExceptionRecord {
             None => formatter.write_str("------")?,
         }
         if let Some(level) = self.level {
-            write!(formatter, " level={}", level.get())?;
+            write!(formatter, " level={}", u8::from(level))?;
         }
         Ok(())
     }
@@ -517,7 +517,7 @@ mod tests {
             vector: Vector(66),
             pc: Address(0x100),
             sr: Some(0x2000),
-            level: InterruptLevel::new(5),
+            level: InterruptLevel::try_from(5).ok(),
         });
         assert_eq!(
             exception.to_string(),

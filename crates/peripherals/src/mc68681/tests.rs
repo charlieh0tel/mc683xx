@@ -137,7 +137,7 @@ impl Bench {
 
     /// An access to `register` at `now` through `role`.
     fn access(register: u8, role: Role, now: Time) -> PeripheralAccess {
-        let select = ChipSelect::Numbered(Number::new(8).unwrap());
+        let select = ChipSelect::Numbered(Number::try_from(8).unwrap());
         let function_code = if role == Role::Iack {
             FunctionCode::CpuSpace
         } else {
