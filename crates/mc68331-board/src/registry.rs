@@ -463,6 +463,11 @@ impl Parameters {
 ///
 /// It may gain fields: build one from [`Environment::default()`] and set
 /// those it needs (`let mut x = Environment::default(); x.seed = ...;`).
+/// The board file's directory alone is private, behind
+/// [`set_board_dir`](Self::set_board_dir) and
+/// [`board_dir`](Self::board_dir): a load sets it from the board file,
+/// over whatever the host set, so a public field would invite a write
+/// that never takes.
 ///
 /// [plan-boards]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#boards
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
