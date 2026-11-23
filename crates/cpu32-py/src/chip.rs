@@ -347,14 +347,14 @@ impl ChipBuilder {
         Ok(())
     }
 
-    /// The DSACK pins peripheral number `peripheral` drives on an
-    /// externally terminated select (SIMRM 7.10.3), checked against
-    /// PEPAR at each such cycle (`Event.Dsack`), and sizing it (SIMRM
-    /// Table 5-2); unstated by default: unchecked, the select's port
-    /// field sizing it.
-    fn set_dsack(&mut self, peripheral: usize, pins: DsackView) -> Result<(), Error> {
+    /// The DSACK pins `dsack` that peripheral number `peripheral` drives
+    /// on an externally terminated select (SIMRM 7.10.3), checked
+    /// against PEPAR at each such cycle (`Event.Dsack`), and sizing it
+    /// (SIMRM Table 5-2); unstated by default: unchecked, the select's
+    /// port field sizing it.
+    fn set_dsack(&mut self, peripheral: usize, dsack: DsackView) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
-        self.builder()?.set_dsack(peripheral, pins.into());
+        self.builder()?.set_dsack(peripheral, dsack.into());
         Ok(())
     }
 

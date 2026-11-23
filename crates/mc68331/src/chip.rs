@@ -595,9 +595,9 @@ impl Builder {
     /// A peripheral on no chip select that takes the cycles `decodes`
     /// give by its own decode of the address bus, as board logic does:
     /// an address window, an interrupt acknowledge, or both.  It drives
-    /// DSACK `pins` itself, as a peripheral on an externally terminated
-    /// select does ([`Builder::set_dsack`]): its `wait_states` time each
-    /// cycle, the pins' port sizes it (or its `dsack_port`, cycle by
+    /// the DSACK pins `dsack` itself, as a peripheral on an externally
+    /// terminated select does ([`Builder::set_dsack`]): its `wait_states`
+    /// time each cycle, the pins' port sizes it (or its `dsack_port`, cycle by
     /// cycle), and with none of them assigned as DSACK by PEPAR the bus
     /// monitor ends it ([`DsackFault::BusUnassigned`](crate::event::DsackFault::BusUnassigned)).  It takes a cycle
     /// beside any select that matches, the first DSACK ending it, and
@@ -613,7 +613,7 @@ impl Builder {
         &mut self,
         peripheral: D,
         decodes: &[BusDecode],
-        pins: Dsack,
+        dsack: Dsack,
     ) -> Result<PeripheralId, BuildError> {
         for &decode in decodes {
             if let BusDecode::Window { base, length } = decode
@@ -628,7 +628,7 @@ impl Builder {
         }
         let id = self.add(peripheral);
         let peripheral = index(id);
-        self.board.dsack_pins[peripheral] = Some(pins);
+        self.board.dsack_pins[peripheral] = Some(dsack);
         self.board.bus.push(BusWiring {
             peripheral,
             decodes: decodes.to_vec(),
@@ -660,16 +660,16 @@ impl Builder {
             .attach(Box::new(peripheral));
     }
 
-    /// The DSACK pins `peripheral` drives on an externally terminated select
-    /// (DSACK %1111, SIMRM 7.10.3).  The chip checks them against PEPAR
+    /// The DSACK pins `dsack` that `peripheral` drives on an externally
+    /// terminated select (DSACK %1111, SIMRM 7.10.3).  The chip checks them against PEPAR
     /// at each such cycle: with none assigned as DSACK, its DSACK cannot
     /// end the cycle and the bus monitor does (SIMRM 9.1, told as
     /// [`Event::Dsack`]); otherwise the port size they encode (SIMRM
     /// Table 5-2: DSACK0 8 bits, DSACK1 or both 16) sizes the cycle,
     /// not the select's port field (SIMRM 5.3.3).  Unstated by default:
     /// unchecked, and the select's field sizes it.
-    pub fn set_dsack(&mut self, peripheral: PeripheralId, pins: Dsack) {
-        self.board.dsack_pins[index(peripheral)] = Some(pins);
+    pub fn set_dsack(&mut self, peripheral: PeripheralId, dsack: Dsack) {
+        self.board.dsack_pins[index(peripheral)] = Some(dsack);
     }
 
     /// The resets that reach the QSPI's peripheral
