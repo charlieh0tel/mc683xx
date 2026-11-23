@@ -44,11 +44,11 @@ impl Target for Board<Mc68331> {
         Target::write_memory(self.chip_mut(), address, function_code, data).map_err(widen)
     }
 
-    /// Runs the board to the board time `cycles` past the chip's now,
+    /// Runs the board to the board time `budget` past the chip's now,
     /// and at least a picosecond, so the board's peripherals and nets keep
     /// time with the chip.
-    fn run_for(&mut self, cycles: Cycles, _hit: &dyn Fn() -> bool) -> Result<TargetRun, RunError> {
-        let chip = self.chip().now() + cycles;
+    fn run_for(&mut self, budget: Cycles, _hit: &dyn Fn() -> bool) -> Result<TargetRun, RunError> {
+        let chip = self.chip().now() + budget;
         let until = self
             .system_clock()
             .time(chip)

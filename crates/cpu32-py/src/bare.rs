@@ -1087,14 +1087,14 @@ impl Target for Debugged<'_, '_> {
         .map_err(|error| error.map(|never| match never {}))
     }
 
-    fn run_for(&mut self, cycles: Cycles, hit: &dyn Fn() -> bool) -> PyResult<TargetRun> {
-        let budget = Budget {
+    fn run_for(&mut self, budget: Cycles, hit: &dyn Fn() -> bool) -> PyResult<TargetRun> {
+        let limits = Budget {
             until: None,
             instructions: None,
-            cycles: Some(cycles.clocks()),
+            cycles: Some(budget.clocks()),
             spent: 0,
         };
-        let (_, end) = MachineView::run_dispatching(self.0, budget, hit)?;
+        let (_, end) = MachineView::run_dispatching(self.0, limits, hit)?;
         self.0.py().check_signals()?;
         if hit() {
             return Ok(TargetRun::Hook);

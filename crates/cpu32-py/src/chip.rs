@@ -1483,11 +1483,11 @@ chip_methods! {
         gdb::serve(&mut target, connection)
     }
 
-    /// Runs whole instructions until `now` is `target` or past it: to
+    /// Runs whole instructions until `now` is `deadline` or past it: to
     /// the first instruction boundary at or after it, so a series of
-    /// these to rising targets is one long run.  Exceptions as `run_for`.
-    fn run_until(&mut self, py: Python<'_>, target: u64) -> PyResult<Run> {
-        self.run_to(py, Cycle::from_clocks(target))
+    /// these to rising deadlines is one long run.  Exceptions as `run_for`.
+    fn run_until(&mut self, py: Python<'_>, deadline: u64) -> PyResult<Run> {
+        self.run_to(py, Cycle::from_clocks(deadline))
     }
 
     /// RESET driven by the board.

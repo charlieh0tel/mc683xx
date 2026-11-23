@@ -245,12 +245,13 @@ A host with a real-time display or a socket runs in budgets of a
 frame or a millisecond and does its own work between them.  A run
 ends at the first instruction boundary at or past its budget, so the
 overshoot adds up over many runs.  A host that keeps to a schedule
-runs to times instead: `run_until(target)` runs whole instructions
-until `now()` is `target` or past it, and returns the same `Run`.  It
-ends at the first instruction boundary at or after `target` (at once
-if `now()` already is; exactly there if the CPU is stopped), which
-depends only on the chip and `target`, so a series of `run_until` to
-rising targets is one long run to the last, however the host cuts it.
+runs to times instead: `run_until(deadline)` runs whole instructions
+until `now()` is `deadline` or past it, and returns the same `Run`.
+It ends at the first instruction boundary at or after `deadline` (at
+once if `now()` already is; exactly there if the CPU is stopped),
+which depends only on the chip and `deadline`, so a series of
+`run_until` to rising deadlines is one long run to the last, however
+the host cuts it.
 
 Determinism: the same build, the same inputs at the same chip times,
 give the same run.  There is no host time, no threads and no

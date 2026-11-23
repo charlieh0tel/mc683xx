@@ -97,12 +97,12 @@ impl Target for Debugged<'_> {
 
     /// A quantum the pacing holds back is none: the board runs no
     /// time, and the stub looks for gdb's bytes.
-    fn run_for(&mut self, cycles: Cycles, hit: &dyn Fn() -> bool) -> Result<TargetRun, RunError> {
+    fn run_for(&mut self, budget: Cycles, hit: &dyn Fn() -> bool) -> Result<TargetRun, RunError> {
         if self.running && self.ahead() {
             return Ok(TargetRun::Quantum);
         }
         self.turns.before(self.board)?;
-        let ran = Target::run_for(self.board, cycles, hit)?;
+        let ran = Target::run_for(self.board, budget, hit)?;
         self.turns.after(self.board)?;
         if ran != TargetRun::Quantum || hit() {
             self.running = false;

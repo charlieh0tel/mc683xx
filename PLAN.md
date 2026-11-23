@@ -1856,7 +1856,7 @@ one session, `serve`, over one trait, `target::Target`, on a
 `connection::Connection`, the stub's own trait, which it adapts to
 gdbstub's.  An emulated target gives `cpu_scope` (registers and
 hooks), `read_memory` and `write_memory` (memory with no bus cycle, in
-a function code's space), `run_for(cycles, hit)` (a quantum) and
+a function code's space), `run_for(budget, hit)` (a quantum) and
 `reset`; the trait's other methods (registers, `resume`, `halt`)
 default to it, and it steps by a hook.  A target that steps by its own
 means gives `native_step`, a `NativeStep`; one with neither cannot step

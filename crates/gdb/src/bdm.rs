@@ -130,7 +130,7 @@ impl<T: Cpu32Target> Target for Bdm<'_, T> {
         self.target.go()
     }
 
-    fn run_for(&mut self, _cycles: Cycles, _hit: &dyn Fn() -> bool) -> Result<TargetRun, T::Error> {
+    fn run_for(&mut self, _budget: Cycles, _hit: &dyn Fn() -> bool) -> Result<TargetRun, T::Error> {
         if let Some(entry) = self.target.halted()? {
             return Ok(TargetRun::Background(entry));
         }

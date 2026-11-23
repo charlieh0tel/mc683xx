@@ -926,15 +926,16 @@ impl Mc68331 {
         (stop, ends)
     }
 
-    /// Runs whole instructions until now is `target` or past it, as
+    /// Runs whole instructions until now is `deadline` or past it, as
     /// `run_for` does: it ends at the first instruction boundary at or
-    /// after `target` (at once if now already is; at `target` itself
-    /// if the CPU is stopped), or early for `run_for`'s reasons.  The end depends only on the chip and `target`, so a
-    /// series of `run_until` to rising targets is one long run to the
-    /// last, however the host cuts it; a series of `run_for(budget)` drifts
-    /// by each run's overshoot.
-    pub fn run_until(&mut self, target: Cycle) -> Run {
-        self.run_for(target.since(self.now))
+    /// after `deadline` (at once if now already is; at `deadline` itself
+    /// if the CPU is stopped), or early for `run_for`'s reasons.  The end
+    /// depends only on the chip and `deadline`, so a series of
+    /// `run_until` to rising deadlines is one long run to the last,
+    /// however the host cuts it; a series of `run_for(budget)` drifts by
+    /// each run's overshoot.
+    pub fn run_until(&mut self, deadline: Cycle) -> Run {
+        self.run_for(deadline.since(self.now))
     }
 
     /// RESET driven by the board: an external reset, BKPT high as it

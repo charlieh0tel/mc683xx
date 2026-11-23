@@ -310,9 +310,10 @@ the chip syncs at the next event of the SIM, the modules and every
 peripheral's `next_event`, as in Rust, and the same inputs at the same chip
 times give the same run.  A run ends at the first instruction boundary
 at or past its budget, so many short runs drift from one long one; a
-host on a schedule runs to times instead.  `run_until(target)` runs to
-the first instruction boundary at or after `target` (at once if `now`
-already is), so a series of them to rising targets is one long run.
+host on a schedule runs to times instead.  `run_until(deadline)` runs
+to the first instruction boundary at or after `deadline` (at once if
+`now` already is), so a series of them to rising deadlines is one long
+run.
 A long run is that series inside: it runs to times 100,000 clocks
 apart and runs Python's signal handlers between them, so Ctrl-C
 raises `KeyboardInterrupt` within milliseconds, the chip at an
@@ -334,8 +335,8 @@ def twin() -> mc683xx.Mc68331:
 
 one, two = twin(), twin()
 one.run_until(5000)
-for target in range(100, 5001, 100):
-    two.run_until(target)
+for deadline in range(100, 5001, 100):
+    two.run_until(deadline)
 assert one.now == two.now and one.registers() == two.registers()
 ```
 

@@ -94,8 +94,8 @@ where
             .map_err(|error| error.map(raised_from))
     }
 
-    fn run_for(&mut self, cycles: Cycles, hit: &dyn Fn() -> bool) -> PyResult<TargetRun> {
-        let ran = self.target.run_for(cycles, hit);
+    fn run_for(&mut self, budget: Cycles, hit: &dyn Fn() -> bool) -> PyResult<TargetRun> {
+        let ran = self.target.run_for(budget, hit);
         self.pending.check()?;
         let ran = ran.map_err(raised_from)?;
         Python::attach(|py| py.check_signals())?;
