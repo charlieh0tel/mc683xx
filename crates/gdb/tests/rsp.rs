@@ -694,18 +694,23 @@ struct Counting {
     last: usize,
 }
 
+/// The idle that ended the session.
+#[derive(Debug, thiserror::Error)]
+#[error("idle {0}")]
+struct Idled(usize);
+
 impl Waiter for Counting {
-    type Error = usize;
+    type Error = Idled;
 
     fn wait<R: marker::Send>(&mut self, wait: impl FnOnce() -> R + marker::Send) -> R {
         self.waits += 1;
         wait()
     }
 
-    fn idle(&mut self) -> Result<(), usize> {
+    fn idle(&mut self) -> Result<(), Idled> {
         self.idles += 1;
         if self.idles == self.last {
-            Err(self.idles)
+            Err(Idled(self.idles))
         } else {
             Ok(())
         }
@@ -720,7 +725,7 @@ fn a_polled_wait_ends_when_the_host_says() {
         last: 3,
     };
     let accepted = accept_polled("127.0.0.1:0", |_| Ok(()), waiter);
-    assert!(matches!(accepted, Err(PollError::Host(3))));
+    assert!(matches!(accepted, Err(PollError::Host(Idled(3)))));
 }
 
 /// A host's error that has a cause.

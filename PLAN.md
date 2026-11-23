@@ -1860,7 +1860,9 @@ Adversarial review of the board layer (2026-10-23):
 so not in `third_party/NOTICE`, and named nowhere in the public API):
 one session, `serve`, over one trait, `target::Target`, on a
 `connection::Connection`, the stub's own trait, which it adapts to
-gdbstub's.  An emulated target gives `cpu_scope` (registers and
+gdbstub's.  `Target`, `Connection` and `Waiter` each bound their
+`Error` on `std::error::Error`, as `Cpu32Target` does, so `serve`
+needs no `where` clause to print a `SessionError`.  An emulated target gives `cpu_scope` (registers and
 hooks), `read_memory` and `write_memory` (memory with no bus cycle, in
 a function code's space), `run_for(budget, hit)` (a quantum) and
 `reset`; the trait's other methods (registers, `resume`, `halt`)

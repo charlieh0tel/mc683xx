@@ -10,7 +10,6 @@
 //! its own.  Every hook installed and every breakpoint planted is
 //! removed when the session ends, however it ends.
 
-use std::fmt::Display;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
@@ -85,16 +84,10 @@ mod planted;
 const QUANTUM: Cycles = Cycles::from_clocks(100_000);
 
 /// Serves gdb on `connection` over `target`: [`crate::serve`].
-pub(crate) fn serve<T, C>(
+pub(crate) fn serve<T: Target, C: Connection>(
     target: &mut T,
     connection: C,
-) -> Result<Ending, SessionError<T::Error, C::Error>>
-where
-    T: Target,
-    T::Error: Display,
-    C: Connection,
-    C::Error: Display,
-{
+) -> Result<Ending, SessionError<T::Error, C::Error>> {
     target
         .halt()
         .map_err(|error| SessionError::Target { error })?;

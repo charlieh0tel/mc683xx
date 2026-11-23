@@ -206,7 +206,7 @@ pub trait NativeStep {
 pub trait Target {
     /// What ends a session: an error a run cannot go on from (a host
     /// peripheral's, a pod's lost link).
-    type Error;
+    type Error: std::error::Error;
 
     /// Calls `call` with the CPU's controls, its registers and hooks to
     /// change and the rest to read: `Some` of what it returns for an

@@ -205,15 +205,9 @@ fn listed(addresses: &[Address]) -> String {
 /// cannot be put back; then a detach does not resume the target.  A
 /// session that failed and then failed to clean up reports both,
 /// [`SessionError::Uncleaned`].
-pub fn serve<T, C>(
+pub fn serve<T: Target, C: Connection>(
     target: &mut T,
     connection: C,
-) -> Result<Ending, SessionError<T::Error, C::Error>>
-where
-    T: Target,
-    T::Error: Display,
-    C: Connection,
-    C::Error: Display,
-{
+) -> Result<Ending, SessionError<T::Error, C::Error>> {
     session::serve(target, connection)
 }

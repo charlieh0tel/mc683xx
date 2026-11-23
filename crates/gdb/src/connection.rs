@@ -17,7 +17,7 @@ use std::time::Duration;
 /// for a test among them.
 pub trait Connection {
     /// Why the connection failed, gdb gone among them.
-    type Error;
+    type Error: std::error::Error;
 
     /// Writes all of `bytes`.
     ///
@@ -139,7 +139,7 @@ pub const POLL_INTERVAL: Duration = Duration::from_millis(20);
 /// signal handlers between them.
 pub trait Waiter {
     /// What ends the session from the host's side.
-    type Error;
+    type Error: std::error::Error;
 
     /// Runs `wait`, which blocks for at most [`POLL_INTERVAL`].
     fn wait<R: Send>(&mut self, wait: impl FnOnce() -> R + Send) -> R;
