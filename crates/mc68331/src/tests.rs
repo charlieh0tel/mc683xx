@@ -2922,6 +2922,10 @@ fn a_reported_pwm_edge_bounds_the_output_horizon() {
         horizon_seen(&mut chip, &seen),
         Some(Cycle::from_clocks(512))
     );
+    assert_eq!(
+        chip.pwm_level(Channel::B),
+        chip.gpt().pwm_level(Channel::B, chip.now())
+    );
 }
 
 /// ILLEGAL (CPU32RM 4, ILLEGAL).

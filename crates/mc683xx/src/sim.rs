@@ -546,12 +546,15 @@ impl Sim {
     }
 
     /// The board drives the pins of `port` in `mask` to their levels in
-    /// `value`, the others as they were.  Port C has no inputs.
+    /// `value` at `now`, the others as they were.  Port C has no inputs.
+    /// The SIM's ports keep no history, so `now` changes nothing: it is
+    /// here as on the other modules' `set_port_pins`.
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
     /// the chip with; a host drives the chip's ports.
     #[doc(hidden)]
-    pub const fn set_port_pins(&mut self, port: PortName, value: u8, mask: u8) {
+    #[expect(unused_variables, reason = "a chip-level callback takes its time last")]
+    pub const fn set_port_pins(&mut self, port: PortName, value: u8, mask: u8, now: Cycle) {
         let port = match port {
             PortName::C => return,
             PortName::E => &mut self.port_e,
