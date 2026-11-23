@@ -15,7 +15,7 @@ use crate::cycles::Cycles;
 use crate::effective_address::Altered;
 use crate::exception;
 use crate::exception::Breakpoint;
-use crate::exception::CycleKind;
+use crate::exception::BusCycleKind;
 use crate::exception::Exception;
 use crate::exception::Fault;
 use crate::exception::HARDWARE_BREAKPOINT_NUMBER;
@@ -792,7 +792,7 @@ const LOOPED_WORD: u32 = 2;
 const fn misaligned_fault(
     address: Address,
     function_code: FunctionCode,
-    cycle: CycleKind,
+    cycle: BusCycleKind,
     size: Size,
     data: u32,
 ) -> Fault {
@@ -1285,7 +1285,7 @@ impl Core<'_> {
         // An odd PC faults where a change of flow left it; that
         // instruction is the current one (6.2.3).
         let odd_pc = fault.vector == Vector::ADDRESS_ERROR
-            && fault.cycle == CycleKind::Fetch
+            && fault.cycle == BusCycleKind::Fetch
             && fault.address == instruction_pc;
         let current_pc = if odd_pc { previous_pc } else { instruction_pc };
         self.take_fault(fault, Recovery::Restart, instruction_pc, current_pc, false);
@@ -1503,7 +1503,7 @@ impl Core<'_> {
         size: Size,
         function_code: FunctionCode,
     ) -> Result<u32, Exception> {
-        self.access_read(address, size, function_code, CycleKind::Read)
+        self.access_read(address, size, function_code, BusCycleKind::Read)
             .map_err(Exception::Fault)
     }
 
@@ -1545,7 +1545,7 @@ impl Core<'_> {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        cycle: CycleKind,
+        cycle: BusCycleKind,
     ) -> Result<u32, Fault> {
         if self.whole_long(size) {
             self.cpu.long_operand = true;
@@ -1568,7 +1568,7 @@ impl Core<'_> {
             read_modify_write: false,
         };
         if size != Size::Byte && address.is_odd() {
-            if self.cpu.bare.deviations.misaligned && cycle != CycleKind::Fetch {
+            if self.cpu.bare.deviations.misaligned && cycle != BusCycleKind::Fetch {
                 return self.misaligned_read(address, size, function_code, cycle);
             }
             return Err(fault(Vector::ADDRESS_ERROR, address, size));
@@ -1627,7 +1627,7 @@ impl Core<'_> {
             function_code,
             size: remaining,
             long: size == Size::Long,
-            cycle: CycleKind::Write,
+            cycle: BusCycleKind::Write,
             data,
             read_modify_write: false,
         };
@@ -1730,7 +1730,7 @@ impl Core<'_> {
         let pc = self.cpu.registers.pc;
         let space = self.cpu.registers.program_space();
         let word = self
-            .access_read(pc, Size::Word, space, CycleKind::Fetch)
+            .access_read(pc, Size::Word, space, BusCycleKind::Fetch)
             .map_err(Exception::Fault)?;
         self.cpu.registers.pc = pc.offset(2);
         Ok(word as u16)
@@ -1750,7 +1750,7 @@ impl Core<'_> {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        cycle: CycleKind,
+        cycle: BusCycleKind,
     ) -> Option<u32> {
         let address = self.cpu.memory.mask(address);
         if function_code.is_memory_space() {
@@ -1772,7 +1772,7 @@ impl Core<'_> {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        cycle: CycleKind,
+        cycle: BusCycleKind,
     ) -> Option<u32> {
         if function_code.is_memory_space() && self.cpu.memory.is_special() {
             return self.special_read(address, size, function_code, cycle);
@@ -1788,7 +1788,7 @@ impl Core<'_> {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        cycle: CycleKind,
+        cycle: BusCycleKind,
     ) -> Option<u32> {
         let space = Space::of(function_code);
         if let Some((value, stall)) = self.cpu.memory.read_backed(space, address, size) {
@@ -1805,7 +1805,7 @@ impl Core<'_> {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        cycle: CycleKind,
+        cycle: BusCycleKind,
     ) -> Option<u32> {
         let access = self.access(address, size, function_code);
         let read = self.bus.read_with_memory(access, &mut self.cpu.memory);
@@ -1889,8 +1889,13 @@ impl Core<'_> {
             self.cpu.stall += stall;
             return Some(());
         }
-        let access =
-            self.invalid_access(address, size, function_code, CycleKind::Write, Some(value));
+        let access = self.invalid_access(
+            address,
+            size,
+            function_code,
+            BusCycleKind::Write,
+            Some(value),
+        );
         self.invalid(access);
         None
     }
@@ -1903,7 +1908,7 @@ impl Core<'_> {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        cycle: CycleKind,
+        cycle: BusCycleKind,
     ) -> Result<u32, Fault> {
         (0..size.bytes()).try_fold(0, |value, index| {
             let at = address.offset(index);
@@ -1927,7 +1932,7 @@ impl Core<'_> {
             let at = address.offset(index);
             let byte = data >> (8 * (size.bytes() - 1 - index)) & 0xff;
             self.cycle_write(at, Size::Byte, function_code, byte)
-                .ok_or_else(|| misaligned_fault(at, function_code, CycleKind::Write, size, data))
+                .ok_or_else(|| misaligned_fault(at, function_code, BusCycleKind::Write, size, data))
         })
     }
 
@@ -1939,7 +1944,7 @@ impl Core<'_> {
         &mut self,
         address: Address,
         function_code: FunctionCode,
-        cycle: CycleKind,
+        cycle: BusCycleKind,
     ) -> Option<Option<u32>> {
         let address = self.cpu.memory.mask(address);
         if function_code.is_memory_space() {
@@ -1997,7 +2002,7 @@ impl Core<'_> {
                     address,
                     Size::Long,
                     function_code,
-                    CycleKind::Write,
+                    BusCycleKind::Write,
                     Some(value),
                 );
                 self.invalid(access);

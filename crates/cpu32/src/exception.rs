@@ -96,7 +96,7 @@ impl Vector {
 /// The kind of bus cycle a fault ended: what the SSW's IN and RW bits
 /// record of it (CPU32RM 6.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum CycleKind {
+pub enum BusCycleKind {
     /// An instruction fetch: IN set, RW set.
     Fetch,
     /// An operand read: IN clear, RW set.
@@ -106,7 +106,7 @@ pub enum CycleKind {
 }
 
 /// `fetch`, `read` or `write`.
-impl fmt::Display for CycleKind {
+impl fmt::Display for BusCycleKind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Fetch => "fetch",
@@ -137,7 +137,7 @@ pub struct Fault {
     /// Whether the operand was a long word: the SSW's LG.
     pub long: bool,
     /// The kind of cycle.
-    pub cycle: CycleKind,
+    pub cycle: BusCycleKind,
     /// The data a write was to write, right-aligned (the frame's
     /// DBUF); zero for a read.
     pub data: u32,
@@ -156,7 +156,7 @@ impl Fault {
         address: Address,
         function_code: FunctionCode,
         size: Size,
-        cycle: CycleKind,
+        cycle: BusCycleKind,
     ) -> Self {
         Self {
             vector,
@@ -504,9 +504,9 @@ pub(crate) const fn double_fault_ssw(fault: &Fault) -> u16 {
 /// The SSW's IN, RW and RM for `fault` (CPU32RM 6.3.1.2).
 const fn restart_bits(fault: &Fault) -> u16 {
     let read = match fault.cycle {
-        CycleKind::Fetch => ssw::IN | ssw::RW,
-        CycleKind::Read => ssw::RW,
-        CycleKind::Write => 0,
+        BusCycleKind::Fetch => ssw::IN | ssw::RW,
+        BusCycleKind::Read => ssw::RW,
+        BusCycleKind::Write => 0,
     };
     let read_modify_write = if fault.read_modify_write { ssw::RM } else { 0 };
     read | read_modify_write
@@ -638,7 +638,7 @@ impl Core<'_> {
             Recovery::Released => (ssw::RR | trace_bit(trace_pending), fault.address, 0),
             Recovery::Restart => (restart_bits(&fault), fault.address, 0),
             Recovery::Movem(movem) => {
-                let rerun = if fault.cycle == CycleKind::Write {
+                let rerun = if fault.cycle == BusCycleKind::Write {
                     ssw::RR
                 } else {
                     0
@@ -752,7 +752,7 @@ impl Core<'_> {
             at,
             Size::Long,
             FunctionCode::SUPERVISOR_DATA,
-            CycleKind::Read,
+            BusCycleKind::Read,
         )
         .map(Address)
     }

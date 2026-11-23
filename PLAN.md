@@ -829,7 +829,7 @@ chip beside `Mc68331`.
   The callable gets what the Rust hook does: an `Instruction` (`pc`,
   `registers` as `registers()` gives them, `stack_top`), a
   `MemoryAccess` (`address`, `size`, `function_code`, `value`), an
-  `InvalidAccess` (those, `cycle`, a `CycleKind`, `value` or `None`,
+  `InvalidAccess` (those, `cycle`, a `BusCycleKind`, `value` or `None`,
   `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`) or an
   `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`).  A
   truthy result stops the run (`Stop.Hook(hook)`),

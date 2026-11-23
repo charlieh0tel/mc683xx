@@ -68,7 +68,7 @@ use crate::error::Error;
 use crate::gdb;
 use crate::held::Held;
 use crate::hooks;
-use crate::hooks::CycleKind;
+use crate::hooks::BusCycleKind;
 use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::PythonMapped;
@@ -158,7 +158,7 @@ pub(crate) struct FaultStopView(pub(crate) FaultStop);
 impl FaultStopView {
     /// Fetch, read or write.
     #[getter]
-    fn cycle(&self) -> CycleKind {
+    fn cycle(&self) -> BusCycleKind {
         self.0.cycle.into()
     }
 

@@ -168,7 +168,7 @@ impl MemoryAccessView {
     rename_all = "SCREAMING_SNAKE_CASE"
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum CycleKind {
+pub(crate) enum BusCycleKind {
     /// An instruction fetch.
     Fetch,
     /// An operand read.
@@ -177,12 +177,12 @@ pub(crate) enum CycleKind {
     Write,
 }
 
-impl From<exception::CycleKind> for CycleKind {
-    fn from(cycle: exception::CycleKind) -> Self {
+impl From<exception::BusCycleKind> for BusCycleKind {
+    fn from(cycle: exception::BusCycleKind) -> Self {
         match cycle {
-            exception::CycleKind::Fetch => Self::Fetch,
-            exception::CycleKind::Read => Self::Read,
-            exception::CycleKind::Write => Self::Write,
+            exception::BusCycleKind::Fetch => Self::Fetch,
+            exception::BusCycleKind::Read => Self::Read,
+            exception::BusCycleKind::Write => Self::Write,
         }
     }
 }
@@ -248,7 +248,7 @@ impl InvalidAccessView {
 
     /// Fetch, read or write.
     #[getter]
-    fn cycle(&self) -> CycleKind {
+    fn cycle(&self) -> BusCycleKind {
         self.0.cycle.into()
     }
 

@@ -4,7 +4,7 @@
 use crate::cpu::Core;
 use crate::cycles::Cycles;
 use crate::exception::Breakpoint;
-use crate::exception::CycleKind;
+use crate::exception::BusCycleKind;
 use crate::exception::Exception;
 use crate::exception::Fault;
 use crate::exception::MICROCODE_REVISION;
@@ -350,7 +350,7 @@ fn restore_bus_error(
             sp.offset(offset),
             size,
             FunctionCode::SUPERVISOR_DATA,
-            CycleKind::Read,
+            BusCycleKind::Read,
         )
     };
     let requeue = |status: u16, pc: Address, address: Address| {
@@ -427,7 +427,7 @@ fn rerun(core: &mut Core<'_>, status: u16, address: Address, data: u32) {
     };
     let function_code = FunctionCode::from_low_bits(u32::from(status & ssw::FUNC));
     let result = if status & ssw::RW != 0 {
-        core.access_read(address, size, function_code, CycleKind::Read)
+        core.access_read(address, size, function_code, BusCycleKind::Read)
             .map(|_| ())
     } else {
         core.access_write(address, size, function_code, data)

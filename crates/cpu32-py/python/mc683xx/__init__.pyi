@@ -61,7 +61,7 @@ __all__ = [
     "Instruction",
     "MemoryAccess",
     "InvalidAccess",
-    "CycleKind",
+    "BusCycleKind",
     "Invalid",
     "ExceptionEntry",
     "BusError",
@@ -326,12 +326,12 @@ class ClockPhase:
     def __int__(self) -> int: ...
 
 @final
-class CycleKind:
+class BusCycleKind:
     """A bus cycle's kind (CPU32RM 6.3)."""
 
-    FETCH: ClassVar[CycleKind]
-    READ: ClassVar[CycleKind]
-    WRITE: ClassVar[CycleKind]
+    FETCH: ClassVar[BusCycleKind]
+    READ: ClassVar[BusCycleKind]
+    WRITE: ClassVar[BusCycleKind]
     def __hash__(self) -> int: ...
     def __int__(self) -> int: ...
 
@@ -609,7 +609,7 @@ class InvalidAccess:
     @property
     def function_code(self) -> int: ...
     @property
-    def cycle(self) -> CycleKind: ...
+    def cycle(self) -> BusCycleKind: ...
     @property
     def value(self) -> int | None: ...
     @property
@@ -1009,7 +1009,7 @@ class FaultStop:
     and a chip's `fault_stop` carry it."""
 
     @property
-    def cycle(self) -> CycleKind: ...
+    def cycle(self) -> BusCycleKind: ...
     @property
     def cause(self) -> FaultCause: ...
     @property

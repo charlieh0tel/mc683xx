@@ -813,7 +813,7 @@ call a Python callable with what the Rust hook sees: an `Instruction`
 (`pc`, `registers`, `stack_top`), a `MemoryAccess` (`address`, `size`,
 `function_code`, `value`; on the chip a long operand is two word
 cycles, on the bare `Machine` one access of 4), an `InvalidAccess` (those, `cycle`, a
-`CycleKind`, and `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`)
+`BusCycleKind`, and `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`)
 or an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`).
 Each returns a `HookId` for `remove_hook`.  A truthy result stops the
 run (`Stop.Hook(hook)`); a code hook's stop leaves its
@@ -1479,7 +1479,7 @@ otherwise, or with no callback (`set_intercept_callback(None)`), the
 CPU takes it natively.  `set_stop_on_fault(True)` (`stops_on_fault`)
 stops the run on a bus or address error instead of taking it:
 `End.Fault(fault)`, its `FaultStop` giving the
-`cycle` (`CycleKind`), the `cause` (`FaultCause.BUS_ERROR` for
+`cycle` (`BusCycleKind`), the `cause` (`FaultCause.BUS_ERROR` for
 unmapped or a peripheral's, `PROTECTED`, `ADDRESS_ERROR`), the whole
 `address`, `size`, `function_code`, `pc` and `registers`, which
 the CPU holds again, nothing stacked.  A fault while stacking, a bad

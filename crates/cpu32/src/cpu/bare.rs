@@ -20,7 +20,7 @@ use super::hooks::Resume;
 use crate::bus::Bus;
 use crate::cycles::Cycle;
 use crate::cycles::Cycles;
-use crate::exception::CycleKind;
+use crate::exception::BusCycleKind;
 use crate::exception::Exception;
 use crate::exception::Fault;
 use crate::exception::Vector;
@@ -101,7 +101,7 @@ impl fmt::Display for FaultCause {
 #[non_exhaustive]
 pub struct FaultStop {
     /// Fetch, read or write.
-    pub cycle: CycleKind,
+    pub cycle: BusCycleKind,
     /// Why.
     pub cause: FaultCause,
     /// The cycle's address, all 32 bits.

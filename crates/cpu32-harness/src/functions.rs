@@ -22,7 +22,7 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use mc683xx_cpu32::exception::CycleKind;
+use mc683xx_cpu32::exception::BusCycleKind;
 use mc683xx_cpu32::exception::Exception;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::registers::status;
@@ -625,14 +625,15 @@ fn outcome(
             _ if exception.vector() == Vector::ZERO_DIVIDE => Outcome::Ended(call.stopped),
             Exception::Fault(fault)
                 if fault.vector == Vector::BUS_ERROR
-                    && fault.cycle == CycleKind::Write
+                    && fault.cycle == BusCycleKind::Write
                     && in_rom(fault.address.0) =>
             {
                 Outcome::Ended(call.stopped)
             }
             Exception::Fault(fault)
                 if !maps(fault.address.0)
-                    || fault.vector == Vector::ADDRESS_ERROR && fault.cycle == CycleKind::Fetch =>
+                    || fault.vector == Vector::ADDRESS_ERROR
+                        && fault.cycle == BusCycleKind::Fetch =>
             {
                 Outcome::Skipped(call.stopped)
             }
@@ -759,7 +760,7 @@ pub fn observed_verdict(
 #[cfg(test)]
 mod tests {
     use cpu32_oracle::state::State;
-    use mc683xx_cpu32::exception::CycleKind;
+    use mc683xx_cpu32::exception::BusCycleKind;
     use mc683xx_cpu32::exception::Exception;
     use mc683xx_cpu32::exception::Fault;
     use mc683xx_cpu32::exception::Vector;
@@ -803,7 +804,7 @@ mod tests {
 
     /// A call that ended at a fault of `vector` in a `cycle` at
     /// `address`.
-    fn faulted(vector: Vector, cycle: CycleKind, address: u32) -> Call {
+    fn faulted(vector: Vector, cycle: BusCycleKind, address: u32) -> Call {
         Call {
             stopped: Stopped::Exception {
                 exception: Exception::Fault(Fault::new(
@@ -834,16 +835,16 @@ mod tests {
             ..returned(0)
         };
         assert!(matches!(classify(&zero_divide), Outcome::Ended(_)));
-        let write_to_rom = faulted(Vector::BUS_ERROR, CycleKind::Write, 0x30);
+        let write_to_rom = faulted(Vector::BUS_ERROR, BusCycleKind::Write, 0x30);
         assert!(matches!(classify(&write_to_rom), Outcome::Ended(_)));
-        let beyond = faulted(Vector::BUS_ERROR, CycleKind::Read, 0x11_0000);
+        let beyond = faulted(Vector::BUS_ERROR, BusCycleKind::Read, 0x11_0000);
         assert!(matches!(classify(&beyond), Outcome::Skipped(_)));
-        let odd_jump = faulted(Vector::ADDRESS_ERROR, CycleKind::Fetch, 0x401);
+        let odd_jump = faulted(Vector::ADDRESS_ERROR, BusCycleKind::Fetch, 0x401);
         assert!(matches!(classify(&odd_jump), Outcome::Skipped(_)));
-        let odd_read = faulted(Vector::ADDRESS_ERROR, CycleKind::Read, 0x401);
+        let odd_read = faulted(Vector::ADDRESS_ERROR, BusCycleKind::Read, 0x401);
         assert!(matches!(classify(&odd_read), Outcome::Misaligned(_)));
         // A bus error inside the map is the core's or the runner's.
-        let read_of_rom = faulted(Vector::BUS_ERROR, CycleKind::Read, 0x400);
+        let read_of_rom = faulted(Vector::BUS_ERROR, BusCycleKind::Read, 0x400);
         assert!(matches!(
             classify(&read_of_rom),
             Outcome::Exception(_, 0x400)

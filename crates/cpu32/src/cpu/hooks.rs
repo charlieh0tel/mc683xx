@@ -16,7 +16,7 @@ use std::ops::RangeInclusive;
 use super::Core;
 use super::Cpu;
 use super::Stop;
-use crate::exception::CycleKind;
+use crate::exception::BusCycleKind;
 use crate::exception::Frame;
 use crate::exception::Vector;
 use crate::interrupt::InterruptLevel;
@@ -108,7 +108,7 @@ pub struct InvalidAccess {
     /// Its function code.
     pub function_code: FunctionCode,
     /// Fetch, read or write.
-    pub cycle: CycleKind,
+    pub cycle: BusCycleKind,
     /// A write's value, right-aligned.
     pub value: Option<u32>,
     /// Why.
@@ -442,7 +442,7 @@ impl Core<'_> {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        cycle: CycleKind,
+        cycle: BusCycleKind,
     ) -> Option<u32> {
         if !self.permitted(address, function_code, cycle) {
             self.invalid(InvalidAccess {
@@ -458,7 +458,7 @@ impl Core<'_> {
             return None;
         }
         let value = self.paged_read(address, size, function_code, cycle)?;
-        if cycle != CycleKind::Fetch {
+        if cycle != BusCycleKind::Fetch {
             self.watch(
                 watch::READ,
                 MemoryAccess {
@@ -484,12 +484,12 @@ impl Core<'_> {
         function_code: FunctionCode,
         value: u32,
     ) -> Option<()> {
-        if !self.permitted(address, function_code, CycleKind::Write) {
+        if !self.permitted(address, function_code, BusCycleKind::Write) {
             self.invalid(InvalidAccess {
                 address,
                 size,
                 function_code,
-                cycle: CycleKind::Write,
+                cycle: BusCycleKind::Write,
                 value: Some(value),
                 reason: Invalid::Protected,
                 pc: self.cpu.instruction_pc,
@@ -514,11 +514,16 @@ impl Core<'_> {
 
     /// Whether the page's permissions in `function_code`'s space allow
     /// a cycle of kind `cycle` at `address`.
-    fn permitted(&self, address: Address, function_code: FunctionCode, cycle: CycleKind) -> bool {
+    fn permitted(
+        &self,
+        address: Address,
+        function_code: FunctionCode,
+        cycle: BusCycleKind,
+    ) -> bool {
         let needed = match cycle {
-            CycleKind::Fetch => Permissions::EXECUTE,
-            CycleKind::Read => Permissions::READ,
-            CycleKind::Write => Permissions::WRITE,
+            BusCycleKind::Fetch => Permissions::EXECUTE,
+            BusCycleKind::Read => Permissions::READ,
+            BusCycleKind::Write => Permissions::WRITE,
         };
         self.cpu
             .memory
@@ -571,7 +576,7 @@ impl Core<'_> {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        cycle: CycleKind,
+        cycle: BusCycleKind,
         value: Option<u32>,
     ) -> InvalidAccess {
         InvalidAccess {
