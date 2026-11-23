@@ -512,3 +512,30 @@ fn tag(value: &JsValue) -> Option<String> {
             .to_owned(),
     )
 }
+
+#[cfg(test)]
+mod stop_tests {
+    use mc683xx_cpu32::cpu::Halt;
+    use mc683xx_cpu32::cpu::Stop;
+    use mc683xx_target::entry::Entry;
+
+    use super::stop_name;
+
+    /// The bindings' names are their own, but agree with `Stop`'s
+    /// `Display` for every kind they name today but `hook`, whose
+    /// `HookId` a test cannot make.
+    #[test]
+    fn a_stop_s_name_is_its_display() {
+        let stops = [
+            Stop::Budget,
+            Stop::Stopped,
+            Stop::Halted(Halt::DoubleBusFault),
+            Stop::Requested,
+            Stop::Background(Entry::Breakpoint),
+            Stop::Fault,
+        ];
+        for stop in stops {
+            assert_eq!(stop_name(stop), stop.to_string());
+        }
+    }
+}
