@@ -1227,6 +1227,77 @@ fn the_watchdog_resets_the_chip_unless_serviced() {
     assert!(chip.cpu().registers.pc >= Address(START));
 }
 
+/// A peripheral that asks the run to stop at every reset but the
+/// power-on reset the build makes.
+#[derive(Debug)]
+struct ResetStopper {
+    /// The chip's stop request.
+    stop: StopRequest,
+    /// The resets it saw.
+    resets: usize,
+}
+
+impl MappedPeripheral for ResetStopper {
+    fn read(&mut self, _: BusCycle) -> Result<u32, BusError> {
+        Ok(0)
+    }
+
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), BusError> {
+        Ok(())
+    }
+
+    fn reset(&mut self, _: Cycle) {
+        self.resets += 1;
+        if self.resets > 1 {
+            self.stop.request();
+        }
+    }
+}
+
+mc683xx_cpu32::unsavable!(ResetStopper, "a reset stopper");
+
+impl Timed for ResetStopper {}
+
+#[test]
+fn a_stop_asked_at_a_reset_in_a_run_ends_it_before_the_next_instruction() {
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    let stop = builder.stop_request();
+    let stopper = builder.unwired_peripheral(ResetStopper { stop, resets: 0 });
+    let mut chip = builder.build();
+    chip.take_events();
+    // the watchdog's time-out, 2^9 EXTAL periods at 256 clocks, resets
+    // the chip within the run
+    let run = chip.run_for(Cycles::from_clocks(2 * 512 * 256));
+    assert_eq!(run.stop, Stop::Requested);
+    let events = chip.take_events();
+    let [
+        Event::Reset {
+            now: reset,
+            cause: ResetCause::Watchdog,
+        },
+    ] = events[..]
+    else {
+        panic!("{events:?}");
+    };
+    assert_eq!(chip.now(), reset, "the run ends at the reset");
+    assert_eq!(
+        chip.cpu().registers.pc,
+        Address(START),
+        "before the first instruction after it"
+    );
+    assert_eq!(chip.peripheral::<ResetStopper>(stopper).unwrap().resets, 2);
+    // the request was taken: the next run goes on
+    let run = chip.run_for(Cycles::from_clocks(100));
+    assert_eq!(run.stop, Stop::Budget);
+}
+
 #[test]
 fn a_host_reset_sets_rsr_to_its_cause_alone() {
     // RSR one bit per source (SIMRM 8.2.8)

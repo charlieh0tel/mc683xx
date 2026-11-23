@@ -2503,6 +2503,69 @@ fn a_stop_asked_between_quanta_stops_one_run_only() {
     assert!(board.chip().instructions() > instructions + 1);
 }
 
+/// A peripheral that asks the run to stop at every reset but power-on's.
+#[derive(Debug, Default)]
+struct ResetStopper {
+    /// The resets it saw.
+    resets: usize,
+}
+
+impl Peripheral for ResetStopper {
+    fn reset(&mut self, drive: &mut Drive<'_>) {
+        self.resets += 1;
+        if self.resets > 1 {
+            drive.stop();
+        }
+    }
+}
+
+#[test]
+fn a_stop_asked_at_a_reset_in_a_run_ends_it_before_the_next_instruction() {
+    // the firmware counts its starts in D1; the watchdog, on out of
+    // reset, times out within the run
+    let directory = directory("stop-reset", &COUNTING);
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[peripheral]]
+name = "stopper"
+type = "stopper"
+"#;
+    let description = Description::parse(text, &directory, &Options::default()).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    let mut registry = Registry::with_builtins();
+    registry
+        .register("stopper", Vec::new(), |_| {
+            Ok(Box::new(ResetStopper::default()))
+        })
+        .unwrap();
+    let mut board =
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
+    board.take_events();
+    let stopped = board.run_for(Span::from_millis(100)).unwrap();
+    assert_eq!(stopped.stop, Stop::Requested);
+    let events = board.take_events();
+    let [Event::Reset { now, cause, .. }] = events[..] else {
+        panic!("{events:?}");
+    };
+    assert_eq!(cause, ResetCause::Watchdog);
+    assert_eq!(stopped.now, board.system_clock().time(now), "at the reset");
+    assert_eq!(
+        board.chip().cpu().registers.data[1],
+        1,
+        "before the firmware's first instruction after it"
+    );
+    let ran = board.run_for(Span::from_millis(1)).unwrap();
+    assert_eq!(ran.stop, Stop::Budget, "the stop is not left pending");
+    assert_eq!(board.chip().cpu().registers.data[1], 2);
+}
+
 #[test]
 fn a_run_stopped_by_an_instruction_past_its_end_ends_at_its_end() {
     let program: Vec<u16> = [

@@ -282,8 +282,10 @@ assert_eq!(one.instructions(), two.instructions());
 A peripheral holds the `StopRequest` (`mc683xx_cpu32::bus`, the one type
 the bare machine's `stop_request` gives too) its builder gave and
 calls `request`;
-the run stops once the instruction whose cycle asked ends, or between
-quanta if `advance` asked, with `Stop::Requested`.  The request is
+the run stops once the instruction whose cycle asked ends, between
+quanta if `advance` asked, or at a reset within the run (the
+watchdog's, say) if `reset` asked, before the first instruction after
+it, with `Stop::Requested`.  The request is
 taken by the stop.  A host whose own run loop stopped for the same
 reason before the chip ran withdraws it (`withdraw`), so the next run
 does not stop for it.

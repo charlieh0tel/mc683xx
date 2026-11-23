@@ -2322,8 +2322,10 @@ Adversarial review (2026-11-01):
 - The bus can ask for a stop too (`Bus::stop_requested`, asked after
   each cycle it ends, after the `reset` instruction's RESET and after
   an interrupt acknowledge): the chip's `StopRequest` handle, for its
-  peripherals, ends the run after that instruction, or between quanta if
-  a peripheral's `advance` asked.  The Python bindings use it: a peripheral's
+  peripherals, ends the run after that instruction, between quanta if
+  a peripheral's `advance` asked, or at a reset the run takes (the
+  watchdog's, the halt monitor's) if a peripheral's `reset` asked,
+  before the first instruction after it.  The Python bindings use it: a peripheral's
   exception stops the run there.
 - Cost when absent (`make bench`'s `core/*`, pinned to one
   performance core, before and after run in turn, on a loaded host
