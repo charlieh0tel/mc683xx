@@ -18,8 +18,7 @@ with the core, not after it.
 
 First user: `smartclock-emu` and the smartclock firmware harness
 ([smartclock](https://github.com/charlieh0tel/smartclock)), replacing
-Unicorn.  Unicorn is GPL-2.0-only, which keeps
-`smartclock-emu` a feature-gated local tool, and its m68k has bugs the
+Unicorn.  Unicorn is GPL-2.0-only, and its m68k has bugs the
 harness works around (lazy condition codes marked computed before they
 are).
 
@@ -3467,8 +3466,11 @@ runs 2 to 10 times faster than one at 16.78 MHz (`docs/performance.md`,
   transcripts are the nearest.
 - Boot of the Z3805A 3543B firmware to the same serial transcript:
   the core and the peripheral interface together.
-- A real 68331 over BDM, once a pod is available: the only check of
-  exception frames and undefined flags against silicon.
+- A real 68331 over BDM, through a pod's `Cpu32Target`: the only check
+  of exception frames and undefined flags against silicon.  Until it
+  is made, the provisional behaviors stay provisional: settled by the
+  manuals, the oracles and the firmware corpus where they can be, and
+  otherwise recorded as our choices.
 
 ## Phases
 
@@ -3483,9 +3485,7 @@ runs 2 to 10 times faster than one at 16.78 MHz (`docs/performance.md`,
 
 Phase 3 is in: hooks, page permissions, tracing, save and restore.
 The QSM and GPT save their registers and timing (the QSM not its
-host's QSPI peripheral, which a restore keeps).  Left: the Python
-bindings bind hooks and state; the Unicorn fault tests' code hook
-checks move onto real code hooks.
+host's QSPI peripheral, which a restore keeps).
 
 ## Decisions
 
@@ -3560,17 +3560,6 @@ checks move onto real code hooks.
 
 ## Open
 
-- Booting real images: smartclock-emu moves onto `mc683xx-mc68331`,
-  keeping its Unicorn emulator as the differential oracle until the
-  Z3805A 3543B and 58503A 3704 transcripts match (decided 2026-10-23).
-  API gaps it finds come back here.
-- A real 68331 over BDM: no BDM pod is available yet (2026-10-23).
-  Until then the provisional behaviors stay provisional: settled by
-  the manuals, the oracles and
-  the firmware corpus where they can be, and otherwise recorded as our
-  choices.
-- Whether `smartclock-emu` moves off its feature gate once it uses this
-  core.
 - WebAssembly: the target is a browser demo of the demo board
   (`examples/boards/demo.toml`) through JS bindings
   (`wasm32-unknown-unknown`, decided 2026-11-03).  `mc683xx-mc68331`,
