@@ -89,11 +89,10 @@ pub enum TargetRun {
     /// The host or a peripheral asked it to stop.
     Requested,
     /// A fault stopped it rather than being taken
-    /// ([`Cpu::set_stop_on_fault`]), or an intercepted exception did
-    /// (the bare CPU's [`Cpu::set_intercepted`]).
+    /// ([`Cpu::set_stop_on_fault`]), or, on the bare CPU, an exception
+    /// its host handles did.
     ///
     /// [`Cpu::set_stop_on_fault`]: mc683xx_cpu32::cpu::Cpu::set_stop_on_fault
-    /// [`Cpu::set_intercepted`]: mc683xx_cpu32::cpu::Cpu::set_intercepted
     Fault,
     /// A stop condition held ([`Target::conditions`]).
     Condition,
