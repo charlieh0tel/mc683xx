@@ -150,7 +150,7 @@ def test_a_peripheral_s_exception_in_a_reset_ends_the_session(ending: str) -> No
     image[START : START + 8] = words(PROGRAM)
     builder = mc683xx.Builder()
     builder.memory(bytes(image), ["CSBOOT"], writable=False)
-    builder.qspi(Failing())
+    builder.set_qspi(Failing())
     chip = builder.build()
     with pytest.raises(ValueError, match="the reset failed"):
         serve(chip, "qRcmd," + b"reset".hex(), ending)

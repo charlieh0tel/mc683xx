@@ -29,7 +29,7 @@ class MappedPeripheral(Protocol):
 
 
 class SpiPeripheral(Protocol):
-    """The QSPI's peripheral, as `Builder.qspi` takes it (Rust's
+    """The QSPI's peripheral, as `Builder.set_qspi` takes it (Rust's
     `SpiPeripheral`): `transfer` shifts a queue entry's bits.  The
     module also calls these, each optional: `set_chip_selects(levels:
     int, now: int)`, `set_clock(clock: QspiClock, now: int)`,

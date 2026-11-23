@@ -1153,7 +1153,7 @@ fn the_format_matches_its_golden() {
         )
         .unwrap();
     builder.unwired_peripheral(Fixed);
-    builder.qspi(Selected::default());
+    builder.set_qspi(Selected::default());
     let mut chip = builder.build();
     write_register(&mut chip, SIM + 0x22, 0x0650);
     write_register(&mut chip, SIM + 0x24, 0x0001);
@@ -1660,7 +1660,7 @@ fn two_entries(scope: ResetScope) -> Mc68331 {
             &[ChipSelect::Boot],
         )
         .unwrap();
-    builder.qspi(Framed::default());
+    builder.set_qspi(Framed::default());
     builder.set_qspi_reset_scope(scope);
     let mut chip = builder.build();
     chip.run_for(Cycles::from_clocks(4000));
@@ -1706,7 +1706,7 @@ fn the_firmware_talks_on_the_sci_and_the_qspi() {
             &[ChipSelect::Boot],
         )
         .unwrap();
-    builder.qspi(Selected::default());
+    builder.set_qspi(Selected::default());
     let mut chip = builder.build();
     chip.run_for(Cycles::from_clocks(2000));
     let sent = chip.take_sci_transmitted();
@@ -1766,7 +1766,7 @@ fn the_qspi_peripheral_sees_syncr_in_the_baud() {
             &[ChipSelect::Boot],
         )
         .unwrap();
-    builder.qspi(Clocked::default());
+    builder.set_qspi(Clocked::default());
     let mut chip = builder.build();
     // SYNCR $CF00: 16.78 MHz; SPBR 84: 100 kHz (QSMRM Table 4-3)
     write_register(&mut chip, SIM + 0x04, 0xcf00);
@@ -3394,7 +3394,7 @@ impl SpiPeripheral for Tally {
 
 /// [`copying`]'s board with a [`Tally`] of `count` on the QSPI.
 fn tallying(count: u16) -> (Mc68331, MemoryId, PeripheralId) {
-    copying_with(|builder| builder.qspi(Tally(count)))
+    copying_with(|builder| builder.set_qspi(Tally(count)))
 }
 
 /// The count of the [`Tally`] on `chip`'s QSPI.
@@ -3435,7 +3435,7 @@ fn a_qspi_peripheral_that_cannot_save_fails_the_save_and_restore_naming_it() {
 
     let (saving, _, _) = tallying(0);
     let snapshot = saving.save().unwrap();
-    let (mut unsaving, _, _) = copying_with(|builder| builder.qspi(Unsaving));
+    let (mut unsaving, _, _) = copying_with(|builder| builder.set_qspi(Unsaving));
     let unsupported =
         StateError::unsupported("an unsaving model").of_peripheral("the QSPI peripheral");
     assert_eq!(

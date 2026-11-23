@@ -218,7 +218,7 @@ prefix; their directories keep the short names.
   its first address, `the peripheral at 0xf00000`), as the board names a
   peripheral; a snapshot with another count of peripherals is
   `StateError::Mismatch("peripherals")`.  The QSPI's peripheral
-  (`Builder::qspi`) is held the same way: `Save` is a bound of the
+  (`Builder::set_qspi`) is held the same way: `Save` is a bound of the
   attach (`AnySpiPeripheral`, in `mc683xx-modules`, since the QSM holds
   it), and the chip's snapshot, not the QSM's, holds its bytes, so the
   QSM's format stays the module's own and the chip saves and puts back
@@ -366,7 +366,7 @@ surrounds the SoC with its board peripherals through:
   byte of a 16-bit port; the value read is the vector, after the
   peripheral's wait states on an external DSACK.  A bus error, or a DSACK
   later than the bus monitor allows, is the spurious vector.
-- **QSPI:** the host's `SpiPeripheral` (`Builder::qspi`) sees each
+- **QSPI:** the host's `SpiPeripheral` (`Builder::set_qspi`) sees each
   transfer that DDRQS gives SCK for (QSM, below; `QspiTransfer`: the
   queue entry, the levels on PCS[3:0],
   the word and its bits, and the serial clock it is shifted with, its
@@ -846,7 +846,7 @@ chip beside `Mc68331`.
   and `restore(bytes)`, as a Python board peripheral is; one without
   them makes `save` raise `StateError` naming it (`peripheral 0: a Python
   peripheral cannot save its state`), and an exception either raises is
-  raised.  The QSPI's peripheral (`Builder.qspi`) is in it the same
+  raised.  The QSPI's peripheral (`Builder.set_qspi`) is in it the same
   way, named `the QSPI peripheral`; hooks stay across a restore.
   A snapshot of another format or other hardware, or bytes that do
   not decode, raise `mc683xx.StateError` (a `ValueError`); a module
@@ -937,7 +937,7 @@ chip beside `Mc68331`.
   python` builds a `.venv`, runs clippy and the adapter's Rust tests
   with `python` (they embed the interpreter), `maturin develop`s the
   module into the venv, and runs `pytest`, `stubtest` and mypy.
-- **QSM and GPT:** `Builder.qspi(object)` puts an object with
+- **QSM and GPT:** `Builder.set_qspi(object)` puts an object with
   `transfer(transfer) -> int` (an `mc683xx.QspiTransfer`, as the Rust
   one) and optionally
   `set_chip_selects(levels, now)`, `set_clock(clock, now)`,

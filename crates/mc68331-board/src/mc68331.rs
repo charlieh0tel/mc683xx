@@ -564,7 +564,7 @@ impl ChipBuilder for Mc68331Builder {
     }
 
     fn qspi<R: BoardSpi>(&mut self, router: R) -> Result<(), LoadError> {
-        self.builder.qspi(router);
+        self.builder.set_qspi(router);
         Ok(())
     }
 

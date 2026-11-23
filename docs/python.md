@@ -690,7 +690,7 @@ assert isinstance(chip.oc1(), mc683xx.Output.Level)
 
 ### QSPI
 
-`Builder.qspi(object)` puts a peripheral on the QSPI: `transfer(
+`Builder.set_qspi(object)` puts a peripheral on the QSPI: `transfer(
 transfer) -> int`, given an `mc683xx.QspiTransfer` (`entry`, the queue
 entry, 0 to 15, its index in the QSPI RAM, QSMRM 4.3.6; `chip_selects`,
 the levels on PCS[3:0]; `out`, the bits out, right-aligned, MSB first;
@@ -734,7 +734,7 @@ master = (
 )
 builder, _ = booting(master)
 peripheral = Peripheral()
-builder.qspi(peripheral)
+builder.set_qspi(peripheral)
 chip = builder.build()
 chip.run_for(5000)
 assert peripheral.transfers == [(0b0101, 0x34, 8)]
@@ -880,7 +880,7 @@ peripheral is; one without both (`save` alone, say) makes `save` and
 `restore` raise `StateError` naming it by its peripheral number (`peripheral 0:
 a Python peripheral cannot save its state`), and an exception `save` or
 `restore` raises is raised, a `KeyboardInterrupt` too, the chip
-unchanged.  The QSPI peripheral (`Builder.qspi`) is in it the
+unchanged.  The QSPI peripheral (`Builder.set_qspi`) is in it the
 same way, one without `save` and `restore` named `the QSPI peripheral`
 (`the QSPI peripheral: a Python peripheral cannot save its state`).  A snapshot
 with another count of peripherals, or with a QSPI peripheral where the chip

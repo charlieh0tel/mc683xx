@@ -341,9 +341,9 @@ impl ChipBuilder {
     /// and `deferrable() -> bool`, on the QSPI's pins, replacing any
     /// (QSMRM 4).  In the chip's snapshot by its `save() -> bytes` and
     /// `restore(bytes)`, as a peripheral is.
-    fn qspi(&mut self, peripheral: &Bound<'_, PyAny>) -> PyResult<()> {
+    fn set_qspi(&mut self, peripheral: &Bound<'_, PyAny>) -> PyResult<()> {
         let peripheral = PythonSpiPeripheral::new(peripheral, self.pending.clone())?;
-        self.builder()?.qspi(peripheral);
+        self.builder()?.set_qspi(peripheral);
         Ok(())
     }
 
@@ -388,7 +388,8 @@ impl ChipBuilder {
         })
     }
 
-    /// Peripheral `peripheral`'s interrupt output to IRQ`pin`.
+    /// Peripheral `peripheral`'s interrupt output to IRQ`pin`.  Each call
+    /// adds a wire.
     fn set_interrupt(&mut self, peripheral: usize, pin: u8) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
         let pin = IrqPin::try_from(pin)?;

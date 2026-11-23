@@ -1030,7 +1030,7 @@ fn run_chip(
     let after_port = run.after_port;
     let (mut builder, id, ram) = board(image, peripheral);
     if let Some(qspi) = qspi {
-        builder.qspi(qspi);
+        builder.set_qspi(qspi);
     }
     builder.set_interrupt(
         id,

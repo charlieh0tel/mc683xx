@@ -654,7 +654,7 @@ impl Builder {
     /// transfer and the levels on PCS\[3:0\] (QSMRM 4).  It says
     /// whether it saves ([`Save`](mc683xx_cpu32::cpu::state::Save)), as a peripheral does: the chip's snapshot
     /// holds it.
-    pub fn qspi<D: AnySpiPeripheral>(&mut self, peripheral: D) {
+    pub fn set_qspi<D: AnySpiPeripheral>(&mut self, peripheral: D) {
         self.board
             .module_mut::<Qsm>(QSM)
             .attach(Box::new(peripheral));
@@ -679,7 +679,8 @@ impl Builder {
         self.board.qspi_reset_scope = scope;
     }
 
-    /// `peripheral`'s interrupt output wired to `pin`.
+    /// `peripheral`'s interrupt output wired to `pin`.  Each call adds a
+    /// wire: a peripheral with two interrupt outputs is wired twice.
     pub fn set_interrupt(&mut self, peripheral: PeripheralId, pin: IrqPin) {
         self.board
             .interrupt_wires
@@ -687,7 +688,8 @@ impl Builder {
     }
 
     /// The board asserts AVEC (PE2) at every acknowledge of `pin`'s
-    /// level, as a pin tied low or decode logic does (SIMRM 6.4).
+    /// level, as a pin tied low or decode logic does (SIMRM 6.4).  Each
+    /// call adds a level to those already autovectored.
     pub fn set_autovector(&mut self, pin: IrqPin) {
         self.board.autovector_levels |= 1 << u8::from(pin);
     }

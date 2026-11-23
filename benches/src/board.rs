@@ -348,7 +348,7 @@ impl Board {
         builder
             .peripheral(Latch(0x5a5a), &[cs(5)])
             .expect("CS5 is free");
-        builder.qspi(Echo {
+        builder.set_qspi(Echo {
             transfers: 0,
             deferrable: load == Load::QspiBytesDeferred,
         });

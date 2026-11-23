@@ -528,7 +528,7 @@ def test_a_qspi_transfer_reaches_the_peripheral():
     )
     builder = booting(program)
     peripheral = Peripheral(0xEF)
-    builder.qspi(peripheral)
+    builder.set_qspi(peripheral)
     chip = builder.build()
     chip.run_for(5000)
     assert chip.qspi_peripheral() is peripheral
@@ -554,7 +554,7 @@ def test_a_qspi_transfer_reaches_the_peripheral():
     with pytest.raises(ValueError, match="port C has no inputs"):
         chip.set_pins(mc683xx.Port.C, 0xFF, 0xFF)
     with pytest.raises(TypeError):
-        mc683xx.Builder().qspi(object())
+        mc683xx.Builder().set_qspi(object())
 
 
 class EntryPeripheral:
@@ -582,7 +582,7 @@ def test_a_qspi_peripheral_is_told_the_entry():
     )
     builder = booting(program)
     peripheral = EntryPeripheral()
-    builder.qspi(peripheral)
+    builder.set_qspi(peripheral)
     chip = builder.build()
     chip.run_for(5000)
     assert peripheral.transfers == [(entry, 0b0101, 0x34, 8)]
@@ -959,7 +959,7 @@ def counting(*models, qspi=None):
     for model in models:
         builder.unwired_peripheral(model)
     if qspi is not None:
-        builder.qspi(qspi)
+        builder.set_qspi(qspi)
     chip = builder.build()
     chip.set_tracing(accesses=True, exceptions=True)
     return chip, ram
@@ -1366,7 +1366,7 @@ def test_the_qspi_reset_scope_limits_the_qspi_peripheral_s_resets():
     def resets(scope):
         builder = booting([])
         peripheral = Reset()
-        builder.qspi(peripheral)
+        builder.set_qspi(peripheral)
         if scope is not None:
             builder.set_qspi_reset_scope(scope)
         chip = builder.build()

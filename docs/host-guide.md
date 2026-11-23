@@ -980,7 +980,7 @@ assert!(matches!(chip.oc1(), Output::Level(_)));
 ### QSPI
 
 As a master the QSPI's peripheral is the host's `SpiPeripheral`
-(`Builder::qspi`).  `transfer(QspiTransfer) -> u16` shifts one queue
+(`Builder::set_qspi`).  `transfer(QspiTransfer) -> u16` shifts one queue
 entry and returns the bits in.  A `QspiTransfer` (`#[non_exhaustive]`,
 `QspiTransfer::new(out, bits, clock, now)`, queue entry 0 and
 `PCS` all low, then `.at_entry(entry)` and `.selecting(chip_selects)`)
@@ -1059,7 +1059,7 @@ let program = [
 ]
 .concat();
 let (mut builder, _) = firmware::booting(firmware::rom(&program));
-builder.qspi(Peripheral::default());
+builder.set_qspi(Peripheral::default());
 let mut chip = builder.build();
 chip.run_for(Cycles::from_clocks(5000));
 assert_eq!(chip.qspi_peripheral::<Peripheral>().unwrap().0, [(0b0101, 0x34, 8)]);
@@ -1328,7 +1328,7 @@ assert_eq!(chip.now(), Cycle::ZERO);
 `Mc68331::save() -> Result<Vec<u8>, StateError>` snapshots the core
 (registers, memory, timing), the SIM, the modules, every peripheral and
 model the builder added, by its `Save`, in the order added, board time
-the QSPI's peripheral (`Builder::qspi`, which is `Save` too), board
+the QSPI's peripheral (`Builder::set_qspi`, which is `Save` too), board
 time and the IRQ pins; `restore(&[u8])` puts it back into a chip built
 the same way.  A peripheral that cannot save fails both, named by its place
 in that order (`peripheral 1: the peripheral cannot save its state`,
