@@ -36,6 +36,23 @@ with others.  It refuses, with `StateError::Invalid`, state no run
 could have saved, named under each peripheral.  Either way the peripheral is left
 as it was.
 
+Each type is public, in the module of its part
+(`mc683xx_peripherals::ad569::Ad569`, `adc0838::Adc0838`,
+`at28c64b::At28c64b`, `buffer::Buffer` for the 74x244,
+`latch::Latch` for the 74x373 and 74x374, `mc144110::Mc144110`,
+`mc6850::Mc6850`, `mc68681::Duart` for the MC68681 and SCC68692,
+`sipo::Sipo` for the 74x164), so a host reaches a peripheral's state
+by type (`Board::peripheral::<Ad569>("efc")`) through read-only
+accessors: the latch's byte, OE and outputs; the buffer's inputs; the
+74x164's stages, cascade and CLR; the DACs' codes and volts; the
+ADC0838's parameters, its result while DO shifts it and /SE; the
+AT28C64B's cells, protection and tWC; the ACIA's control, status and
+receive data registers and RTS; the DUART's ACR, IMR, IVR, OPCR, OPR,
+ISR, input port, channel status registers and crystal.  A UART's
+registers are as of its last call.  Each type's parameter defaults are
+public constants on it (`Ad569::VREF_POSITIVE_VOLTS`,
+`Duart::X1_HZ`).  These are the contract; `inspect` (below) is not.
+
 Each shows its state to a front end (`Peripheral::inspect`,
 `Board::inspect`; docs/host-guide.md, Front ends), read-only and
 outside the snapshot: the latches their flip-flops, OE and outputs;
@@ -405,11 +422,9 @@ memory and never fails on the file: a file or sidecar that cannot be
 written drops the file, as a run's failed write does, and
 `file_error()` says why.
 
-Its type is public, the one stock type that is
-(`mc683xx_peripherals::at28c64b::At28c64b`), so a host reaches it by
-type (`Board::peripheral::<At28c64b>`): `cells()`, `protected()`
-and `file_error()`, the write-through failure a run cannot report
-otherwise.
+By type (`Board::peripheral::<At28c64b>`) a host reads `cells()`,
+`protected()`, `write_cycle()` and `file_error()`, the write-through
+failure a run cannot report otherwise.
 
 ### Parameters
 

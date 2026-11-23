@@ -582,6 +582,12 @@ pub struct At28c64b {
 }
 
 impl At28c64b {
+    /// `write_cycle_us`' default: tWC's maximum, the datasheet's 10 ms
+    /// (Table 6-4).
+    pub const WRITE_CYCLE_US: u64 = WRITE_CYCLE_MAX_US;
+    /// `protected`'s default: the part ships unprotected (6.6.2).
+    pub const PROTECTED: bool = false;
+
     /// A peripheral holding `cells`, padded erased, with tWC `write_cycle`
     /// and protection `protected`, writing through to
     /// `store`.
@@ -612,14 +618,17 @@ impl At28c64b {
         let write_cycle_us = context
             .parameters
             .integer(WRITE_CYCLE_US)?
-            .unwrap_or(WRITE_CYCLE_MAX_US);
+            .unwrap_or(Self::WRITE_CYCLE_US);
         if !(1..=WRITE_CYCLE_MAX_US).contains(&write_cycle_us) {
             return Err(ParameterError::invalid(
                 WRITE_CYCLE_US,
                 format!("{write_cycle_us} is not 1 to {WRITE_CYCLE_MAX_US}"),
             ));
         }
-        let protected = context.parameters.boolean(PROTECTED)?.unwrap_or(false);
+        let protected = context
+            .parameters
+            .boolean(PROTECTED)?
+            .unwrap_or(Self::PROTECTED);
         let image = context
             .path(IMAGE)?
             .zip(context.contents(IMAGE)?)
@@ -652,6 +661,12 @@ impl At28c64b {
     #[must_use]
     pub fn cells(&self) -> &[u8] {
         &self.cells
+    }
+
+    /// tWC, the write cycle's programming time.
+    #[must_use]
+    pub const fn write_cycle(&self) -> Span {
+        self.write_cycle
     }
 
     /// Whether software data protection is on.

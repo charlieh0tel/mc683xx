@@ -16,6 +16,8 @@ use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_peripherals::buffer::Buffer;
+use mc683xx_peripherals::latch::Latch;
 
 /// The initial stack pointer and program counter in the image.
 const STACK: u32 = 0x10_fffe;
@@ -183,6 +185,11 @@ fn the_cpu_writes_the_latch_onto_nets_and_reads_the_buffer() {
         0xf1,
         "the file's levels, A0 from the endpoint"
     );
+    // read by type
+    let latch = *board.peripheral::<Latch>("u1").unwrap();
+    assert_eq!((latch.latched(), latch.output_enabled()), (WRITTEN, true));
+    assert_eq!(latch.outputs(), WRITTEN);
+    assert_eq!(board.peripheral::<Buffer>("u2").unwrap().inputs(), 0xf1);
     let snapshot = board.save().unwrap();
     let mut restored = self::board();
     restored.restore(&snapshot).unwrap();

@@ -360,10 +360,12 @@ impl State {
     }
 }
 
-/// An MC6850 on the board.  It has no RESET input: only a master reset
-/// resets it, so a board reset changes nothing.
+/// An MC6850 on the board, `mc6850`, as a host reads it by type
+/// (`Board::peripheral::<Mc6850>`): its registers as of its last call.
+/// It has no RESET input: only a master reset resets it, so a board
+/// reset changes nothing.
 #[derive(Debug)]
-struct Acia {
+pub struct Mc6850 {
     /// Tx CLK.
     tx_clock: Clock,
     /// Rx CLK.
@@ -374,7 +376,7 @@ struct Acia {
     transmitted: Vec<(Time, Serial)>,
 }
 
-impl Acia {
+impl Mc6850 {
     /// From `tx_clk_hz` and `rx_clk_hz`.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         let clock = |key| {
@@ -436,8 +438,23 @@ impl Acia {
         !state.in_master_reset() && (receive || transmit)
     }
 
-    /// The status register (Status Register).
-    fn status(&self) -> u8 {
+    /// The control register.
+    #[must_use]
+    pub const fn control(&self) -> u8 {
+        self.state.control
+    }
+
+    /// The receive data register, kept after it is read (Receive Data
+    /// Register).
+    #[must_use]
+    pub const fn receive_data(&self) -> u8 {
+        self.state.data
+    }
+
+    /// The status register, as a read would show it, without a read's
+    /// effects (Status Register).
+    #[must_use]
+    pub fn status(&self) -> u8 {
         let state = &self.state;
         [
             (self.receive_full(), SR_RDRF),
@@ -454,7 +471,8 @@ impl Acia {
     /// RTS's level: high with CR6:5 `10`, and through the first master
     /// reset (Peripheral/Modem Control, Request-to-Send; Device
     /// Operation, Master Reset).
-    const fn rts_high(&self) -> bool {
+    #[must_use]
+    pub const fn rts_high(&self) -> bool {
         let state = &self.state;
         (state.first_reset && state.in_master_reset())
             || transmit_control(state.control) == TRANSMIT_RTS_HIGH
@@ -730,7 +748,7 @@ impl Acia {
     }
 }
 
-impl Peripheral for Acia {
+impl Peripheral for Mc6850 {
     /// RS low reads the status register, high the receive data register.
     /// The MC6850 gives no vector: an acknowledge through an `iack`
     /// attachment ends in BERR.
@@ -854,7 +872,7 @@ impl Peripheral for Acia {
 
 /// Registers `mc6850`.
 pub(crate) fn register(registry: &mut Registry) -> Result<(), RegistryError> {
-    registry.register(NAME, Acia::ports(), |context| {
-        Ok(Box::new(Acia::from_parameters(context)?))
+    registry.register(NAME, Mc6850::ports(), |context| {
+        Ok(Box::new(Mc6850::from_parameters(context)?))
     })
 }

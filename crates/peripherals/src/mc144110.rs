@@ -4,6 +4,8 @@
 //! latches them into the six outputs.  Its outputs `R1Out` to `R6Out`
 //! are analog, R1 Out to R6 Out, in volts.
 
+use std::array;
+
 use mc683xx_board::inspect::Inspection;
 use mc683xx_board::peripheral::Drive;
 use mc683xx_board::peripheral::Peripheral;
@@ -51,8 +53,8 @@ const EDGES: Edges = Edges::new(Edge::Falling, Edge::Falling, true);
 /// Its parameters: VDD and VSS, in volts, which scale the outputs (4.3;
 /// Figure 4).  VDD defaults to 5 V, the first supply Tables 2 and 3
 /// characterize; VSS is "usually ground" (4.3).
-const VDD: (&str, Volts) = ("vdd_volts", Volts(5.0));
-const VSS: (&str, Volts) = ("vss_volts", Volts(0.0));
+const VDD: (&str, Volts) = ("vdd_volts", Volts(Mc144110::VDD_VOLTS));
+const VSS: (&str, Volts) = ("vss_volts", Volts(Mc144110::VSS_VOLTS));
 
 /// What it holds, saved.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,12 +84,13 @@ impl State {
     }
 }
 
-/// The peripheral.  No RESET reaches it: the MC144110 has no reset input
-/// (Figure 2), so a reset changes nothing.  The datasheet gives no
-/// power-on state; it powers on here with every stage and the latch
-/// at 0, its outputs at VSS.
+/// The peripheral, `mc144110`, as a host reads it by type
+/// (`Board::peripheral::<Mc144110>`).  No RESET reaches it: the
+/// MC144110 has no reset input (Figure 2), so a reset changes nothing.
+/// The datasheet gives no power-on state; it powers on here with every
+/// stage and the latch at 0, its outputs at VSS.
 #[derive(Debug)]
-struct Mc144110 {
+pub struct Mc144110 {
     /// Its outputs' span: VSS to VDD.
     span: Span,
     /// What it holds.
@@ -95,6 +98,12 @@ struct Mc144110 {
 }
 
 impl Mc144110 {
+    /// `vdd_volts`' default: the first supply Tables 2 and 3
+    /// characterize.
+    pub const VDD_VOLTS: f64 = 5.0;
+    /// `vss_volts`' default: "usually ground" (4.3).
+    pub const VSS_VOLTS: f64 = 0.0;
+
     /// From `vdd_volts` and `vss_volts`.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         Ok(Self {
@@ -103,7 +112,20 @@ impl Mc144110 {
         })
     }
 
-    /// Its ports: `out0` to `out5`, R1 Out to R6 Out.
+    /// The DACs' codes, DAC 1's (`R1Out`) first: 0 to 63.
+    #[must_use]
+    pub fn codes(&self) -> [u8; CHANNELS] {
+        // six bits, by the code's mask
+        array::from_fn(|channel| self.state.code(channel) as u8)
+    }
+
+    /// The outputs, R1 Out first, in volts.
+    #[must_use]
+    pub fn volts(&self) -> [f64; CHANNELS] {
+        array::from_fn(|channel| self.span.output(self.state.code(channel), CODE_BITS).0)
+    }
+
+    /// Its ports: `R1Out` to `R6Out`, R1 Out to R6 Out.
     fn ports() -> Vec<PortSpec> {
         (0..CHANNELS)
             .map(|channel| PortSpec::output(format!("R{}Out", channel + 1), Kind::Analog))

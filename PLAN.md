@@ -610,7 +610,12 @@ type of the same name takes precedence.  A board's
 own logic (an FPGA's design, a custom panel) stays with its host.
 Each peripheral's ports, parameters and the choices where its datasheet is
 silent are in `docs/peripherals.md`; the datasheets are in
-`third_party/datasheets/`.  The larger choices:
+`third_party/datasheets/`.  Every stock type is public, with read-only
+accessors for its state and its parameter defaults as constants, so
+a host reads a peripheral by type (`Board::peripheral::<T>`) and
+writes a default once; `inspect` is for a front end and not a
+contract (decided 2026-11, for 0.9.0, over hiding `At28c64b`, then
+the one public type).  The larger choices:
 - *Logic peripherals.*  `74x374` and `74x373` are one model: strobed by a
   write cycle, the edge-triggered register and the transparent latch
   both hold the byte written from the cycle's end, and the '373's

@@ -14,6 +14,7 @@ use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_peripherals::adc0838::Adc0838;
 
 /// The initial stack pointer and program counter in the image.
 const STACK: u32 = 0x10_fffe;
@@ -184,6 +185,11 @@ fn d0(board: &Board<Mc68331>) -> u16 {
 fn cpu_code_reads_a_channel_over_the_qspi() {
     let board = run(CONVERT_CHANNEL_3, "");
     assert_eq!(d0(&board), REPLY, "{:#06x}", d0(&board));
+    // read by type: its parameters, and no frame running after CS rose
+    let adc = board.peripheral::<Adc0838>("adc").unwrap();
+    assert_eq!(adc.vref_volts(), VREF_VOLTS);
+    assert_eq!(adc.noise_volts(), Adc0838::NOISE_VOLTS);
+    assert_eq!(adc.result(), None);
 }
 
 /// A 74x164 on the QSPI ungated, `mask = 0`, with `miso`, its outputs

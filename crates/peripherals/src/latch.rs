@@ -82,9 +82,10 @@ fn register(registry: &mut Registry, name: &str) -> Result<(), RegistryError> {
     })
 }
 
-/// An octal latch.
+/// An octal latch, `74x374` or `74x373`, as a host reads it by type
+/// (`Board::peripheral::<Latch>`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-struct Latch {
+pub struct Latch {
     /// The flip-flops.
     held: u8,
     /// OE's level: high releases Q.
@@ -96,18 +97,38 @@ struct Latch {
 }
 
 impl Latch {
+    /// `initial`'s default: the flip-flops out of power-on.
+    pub const INITIAL: u8 = 0;
+
     /// From `initial` (0), `oe` (`"low"`) and `pull` (`"up"`).
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         Ok(Self {
-            held: context.parameters.integer(INITIAL)?.unwrap_or(0),
+            held: context
+                .parameters
+                .integer(INITIAL)?
+                .unwrap_or(Self::INITIAL),
             oe: choice(context, OE_LEVEL, LEVELS, false)?,
             pull: choice(context, PULL, PULLS, true)?,
             driven: None,
         })
     }
 
-    /// The levels on Q0 to Q7.
-    const fn outputs(&self) -> u8 {
+    /// The flip-flops, the byte last written.
+    #[must_use]
+    pub const fn latched(&self) -> u8 {
+        self.held
+    }
+
+    /// Whether OE is low, Q driven from the flip-flops.
+    #[must_use]
+    pub const fn output_enabled(&self) -> bool {
+        !self.oe
+    }
+
+    /// The levels on Q0 to Q7: the flip-flops, or the pull's level on
+    /// every Q while OE is high.
+    #[must_use]
+    pub const fn outputs(&self) -> u8 {
         match (self.oe, self.pull) {
             (false, _) => self.held,
             (true, true) => u8::MAX,

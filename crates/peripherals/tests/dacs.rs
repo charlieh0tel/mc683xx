@@ -18,6 +18,9 @@ use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_peripherals::ad569::Ad569;
+use mc683xx_peripherals::mc144110::Mc144110;
+use mc683xx_peripherals::sipo::Sipo;
 
 /// The initial stack pointer and program counter in the image.
 const STACK: u32 = 0x10_fffe;
@@ -297,6 +300,20 @@ fn queues_set_the_dacs_and_lbe_completes_the_ad569s_word() {
     assert_eq!(volts(efc[1].1), vout(WORD & 0xff00));
     assert_eq!(volts(efc[2].1), vout(WORD));
     assert!(latched < efc[1].0 && efc[1].0 < efc[2].0);
+    // the same, read by type
+    let efc = board.peripheral::<Ad569>("efc").unwrap();
+    assert_eq!(efc.code(), WORD);
+    assert_eq!(efc.volts(), vout(WORD));
+    assert_eq!(efc.db(), WORD);
+    let hex = board.peripheral::<Mc144110>("hex").unwrap();
+    assert_eq!(hex.codes(), CODES.map(|code| code as u8));
+    assert_eq!(hex.volts()[0], 5.0 * f64::from(CODES[0]) / 64.0);
+    let chain = board.peripheral::<Sipo>("chain").unwrap();
+    assert_eq!(
+        (chain.stages(), chain.cascade(), chain.clr()),
+        (u32::from(WORD), 2, true)
+    );
+    drop((efc, hex, chain));
     assert_eq!(
         board.chip().cpu().registers.data[0] & 0xffff,
         u32::from(WORD),

@@ -72,8 +72,8 @@ const INITIAL: &str = "initial";
 /// zeros (0000H) to +VREF for an input code of all ones").  The
 /// defaults are the specifications' conditions, +VREF +5 V and -VREF
 /// -5 V (Specifications).
-const VREF_NEGATIVE: (&str, Volts) = ("vref_negative_volts", Volts(-5.0));
-const VREF_POSITIVE: (&str, Volts) = ("vref_positive_volts", Volts(5.0));
+const VREF_NEGATIVE: (&str, Volts) = ("vref_negative_volts", Volts(Ad569::VREF_NEGATIVE_VOLTS));
+const VREF_POSITIVE: (&str, Volts) = ("vref_positive_volts", Volts(Ad569::VREF_POSITIVE_VOLTS));
 
 /// The levels on its four controls, high not enabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,14 +139,15 @@ impl State {
     }
 }
 
-/// The peripheral.  No RESET reaches it: the AD569 has no reset input (its
-/// four control inputs are CS, LBE, HBE and LDAC; Product Description),
-/// so a reset changes nothing.  The datasheet gives no power-on state;
-/// it powers on here with its latches holding `initial` (0 by default,
-/// VOUT at -VREF), then follows whatever its tied controls make
-/// transparent.
+/// The peripheral, `ad569`, as a host reads it by type
+/// (`Board::peripheral::<Ad569>`).  No RESET reaches it: the AD569 has
+/// no reset input (its four control inputs are CS, LBE, HBE and LDAC;
+/// Product Description), so a reset changes nothing.  The datasheet
+/// gives no power-on state; it powers on here with its latches holding
+/// `initial` (0 by default, VOUT at -VREF), then follows whatever its
+/// tied controls make transparent.
 #[derive(Debug)]
-struct Ad569 {
+pub struct Ad569 {
     /// VOUT's span: -VREF to +VREF.
     span: Span,
     /// What it holds.
@@ -154,11 +155,21 @@ struct Ad569 {
 }
 
 impl Ad569 {
+    /// `initial`'s default: the latches out of power-on, VOUT at -VREF.
+    pub const INITIAL: u16 = 0;
+    /// `vref_negative_volts`' default, the specifications' -VREF.
+    pub const VREF_NEGATIVE_VOLTS: f64 = -5.0;
+    /// `vref_positive_volts`' default, the specifications' +VREF.
+    pub const VREF_POSITIVE_VOLTS: f64 = 5.0;
+
     /// From `initial` (0), `vref_negative_volts`, `vref_positive_volts`
     /// and the controls' levels.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         let tied = |index: usize| choice(context, CONTROLS[index], LEVELS, true);
-        let initial: u16 = context.parameters.integer(INITIAL)?.unwrap_or(0);
+        let initial: u16 = context
+            .parameters
+            .integer(INITIAL)?
+            .unwrap_or(Self::INITIAL);
         Ok(Self {
             span: Span::from_parameters(context, VREF_NEGATIVE, VREF_POSITIVE)?,
             state: State {
@@ -188,6 +199,30 @@ impl Ad569 {
             .chain(controls)
             .chain([PortSpec::output("VOUT", Kind::Analog)])
             .collect()
+    }
+
+    /// The DAC register, which VOUT follows.
+    #[must_use]
+    pub const fn code(&self) -> u16 {
+        self.state.dac
+    }
+
+    /// VOUT, in volts.
+    #[must_use]
+    pub fn volts(&self) -> f64 {
+        self.span.output(self.state.dac, CODE_BITS).0
+    }
+
+    /// The word on DB15-DB0.
+    #[must_use]
+    pub const fn db(&self) -> u16 {
+        self.state.db
+    }
+
+    /// The first rank's latches: the 8 MSBs', then the 8 LSBs'.
+    #[must_use]
+    pub const fn latches(&self) -> (u8, u8) {
+        (self.state.high, self.state.low)
     }
 
     /// Drives VOUT.

@@ -46,9 +46,6 @@ const VERSION: u32 = 1;
 const BUS: usize = LINES;
 /// The inputs' levels until nets drive them, a one high.
 const LEVELS: &str = "levels";
-/// Their default: every input high, a switch bank's open positions on
-/// pull-ups.
-const OPEN: u8 = 0xff;
 
 /// Registers the buffer: ports `A0` to `A7`, logic inputs, and `A`, a
 /// bus input.
@@ -62,19 +59,30 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), RegistryError> {
     })
 }
 
-/// An octal buffer.
+/// An octal buffer, `74x244`, as a host reads it by type
+/// (`Board::peripheral::<Buffer>`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-struct Buffer {
+pub struct Buffer {
     /// The levels on A0 to A7, a one high.
     inputs: u8,
 }
 
 impl Buffer {
+    /// `levels`' default: every input high, a switch bank's open
+    /// positions on pull-ups.
+    pub const LEVELS: u8 = 0xff;
+
     /// From `levels` (all high).
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         Ok(Self {
-            inputs: context.parameters.integer(LEVELS)?.unwrap_or(OPEN),
+            inputs: context.parameters.integer(LEVELS)?.unwrap_or(Self::LEVELS),
         })
+    }
+
+    /// The levels on A0 to A7, a one high: the byte a read gives.
+    #[must_use]
+    pub const fn inputs(&self) -> u8 {
+        self.inputs
     }
 }
 
@@ -132,7 +140,6 @@ mod tests {
 
     use super::BUS;
     use super::Buffer;
-    use super::OPEN;
     use super::VERSION;
     use crate::octal::tests::access;
 
@@ -148,7 +155,9 @@ mod tests {
 
     #[test]
     fn it_reads_its_inputs_and_ignores_writes() {
-        let mut buffer = Buffer { inputs: OPEN };
+        let mut buffer = Buffer {
+            inputs: Buffer::LEVELS,
+        };
         assert_eq!(read(&mut buffer, Size::Byte), 0xff);
         buffer.input(
             3,
@@ -180,7 +189,9 @@ mod tests {
 
     #[test]
     fn its_bus_input_sets_every_line() {
-        let mut buffer = Buffer { inputs: OPEN };
+        let mut buffer = Buffer {
+            inputs: Buffer::LEVELS,
+        };
         buffer.input(
             BUS,
             Signal::Bus(0x1a5),
@@ -198,7 +209,9 @@ mod tests {
     #[test]
     fn it_restores_what_it_saved() {
         let buffer = Buffer { inputs: 0x3c };
-        let mut restored = Buffer { inputs: OPEN };
+        let mut restored = Buffer {
+            inputs: Buffer::LEVELS,
+        };
         restored.restore(&buffer.save().unwrap()).unwrap();
         assert_eq!(restored, buffer);
     }

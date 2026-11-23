@@ -21,6 +21,7 @@ use mc683xx_board::time::Time;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
+use mc683xx_peripherals::mc68681::Duart;
 
 /// The initial stack pointer: the top of the RAM on CS2.
 const STACK: u32 = 0x10_fffe;
@@ -269,4 +270,9 @@ fn the_cpu_transmits_receives_and_takes_the_duarts_vectored_interrupt() {
         "{at:?} from {sent_at:?}"
     );
     assert_eq!(board.chip().cpu().registers.data[0] & 0xff, u32::from(b'x'));
+    // read by type: the vector the program gave it, its crystal
+    let duart = board.peripheral::<Duart>("duart").unwrap();
+    assert_eq!(duart.ivr(), VECTOR);
+    assert_eq!(duart.x1_hz(), Duart::X1_HZ);
+    assert_ne!(duart.imr(), 0);
 }

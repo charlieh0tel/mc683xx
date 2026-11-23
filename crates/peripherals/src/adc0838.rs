@@ -51,9 +51,6 @@ const COM: usize = CHANNELS;
 /// The port of /SE.
 const SHIFT_ENABLE: usize = COM + 1;
 
-/// The reference when the board file gives none: VCC's typical 5 V
-/// (SNAS531B, Reference Considerations).
-const DEFAULT_VREF_VOLTS: f64 = 5.0;
 /// The output codes over the reference's span: 1 LSB is VREF / 256
 /// (SNAS531B, Reference Considerations).
 const CODES: f64 = 256.0;
@@ -186,9 +183,10 @@ struct State {
     noise: Noise,
 }
 
-/// The converter.
+/// The converter, `adc0838`, as a host reads it by type
+/// (`Board::peripheral::<Adc0838>`).
 #[derive(Debug)]
-struct Adc0838 {
+pub struct Adc0838 {
     /// Its parameters.
     configuration: Configuration,
     /// Its state.
@@ -196,6 +194,39 @@ struct Adc0838 {
 }
 
 impl Adc0838 {
+    /// `vref_volts`' default: VCC's typical 5 V (SNAS531B, Reference
+    /// Considerations).
+    pub const VREF_VOLTS: f64 = 5.0;
+    /// `noise_volts`' default: none.
+    pub const NOISE_VOLTS: f64 = 0.0;
+
+    /// The reference, in volts: the span of the 256 codes.
+    #[must_use]
+    pub const fn vref_volts(&self) -> f64 {
+        self.configuration.vref_volts
+    }
+
+    /// The input noise's standard deviation, in volts; 0 for none.
+    #[must_use]
+    pub const fn noise_volts(&self) -> f64 {
+        self.configuration.noise_volts
+    }
+
+    /// The result of the frame's conversion, while DO shifts it out.
+    #[must_use]
+    pub const fn result(&self) -> Option<u8> {
+        match self.state.phase {
+            Phase::Output { result, .. } => Some(result),
+            Phase::Idle | Phase::Addressing { .. } => None,
+        }
+    }
+
+    /// /SE's level: high holds D0 on DO.
+    #[must_use]
+    pub const fn shift_enable(&self) -> bool {
+        self.state.shift_enable
+    }
+
     /// The converter with reference `vref_volts`, input noise of
     /// standard deviation `noise_volts`, and its noise from `seed`.
     fn new(vref_volts: f64, noise_volts: f64, seed: u64) -> Self {
@@ -224,13 +255,13 @@ impl Adc0838 {
         };
         let vref_volts = parameter(
             "vref_volts",
-            DEFAULT_VREF_VOLTS,
+            Self::VREF_VOLTS,
             |volts| volts.is_finite() && volts > 0.0,
             "not a positive voltage",
         )?;
         let noise_volts = parameter(
             "noise_volts",
-            0.0,
+            Self::NOISE_VOLTS,
             |volts| volts.is_finite() && volts >= 0.0,
             "not a voltage of zero or more",
         )?;
@@ -482,6 +513,7 @@ mod tests {
         let inspection = adc.inspect();
         assert_eq!(inspection.get("phase").cloned(), text("output"));
         assert_eq!(inspection.get("result"), Some(&Value::Integer(0x80)));
+        assert_eq!(adc.result(), Some(0x80));
         assert_eq!(inspection.get("do"), Some(&Value::Boolean(true)), "D7");
         assert_eq!(inspection.get("vref"), Some(&Value::Real(5.0)));
     }
