@@ -1758,30 +1758,24 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   bus error exception, as the firmware sees it.
 - Nothing in a run returns an error: a halt is a `Stop`, a reset an
   event.
-- Types print with `Display`: `Address` (`0x00001234`, and
-  `LowerHex`), `Cycle` and `Cycles` (`12 clocks`), `Frequency` (`16777216 Hz`),
-  `Vector` (its number), and on a board `Time` (`1000 ps`).  Those
-  with a name also parse with `FromStr`, the name printed: `ChipSelect`
-  (`CSBOOT`, `CS0`, any case), `FunctionCode` (its name in kebab case,
-  `supervisor-data`, any case; its number is `u8::from` and
-  `FunctionCode::try_from`), `InterruptLevel` (`level 7`, as CPU32RM Table 6-1 names it)
-  and `IrqPin` (`IRQ7`), any case, the snapshot's `state::Layer`
-  (`chip`, any case), and on a board the MC68331's `mc68331::Pin`
-  (`IRQ7`; a port's pin is
-  `Pin::Port(PortPin)`, `PortPin::new(Port::E, 0)` refusing a bit the
-  port lacks, and a `PortPin` itself `PE0`; both any case, as a board
-  file's `chip.pe0`), `signal::Kind`,
-  `Direction`, `peripheral::Role` (`read-write`) and `Lane` (`upper`),
-  as the board file names them; `pacing::Pacing` and `pacing::Factor`
-  (`2.5`); a `description::Setting` (`dac.value=16`, its value as TOML
-  writes it, a `registry::ParameterValue` printing so too);
-  `port::Port` (`E`, `GP`), the GPT's
-  `pwm::Channel` (`A`), `gpt::Input` (`PGP0`, `PAI`) and `PortGpPin`
-  (`PGP0`), and the SIM's
-  `ResetCause` (`power-on`, as a board file's reset scope names it),
-  any case.
-  The newtypes convert `From` and into what they
-  wrap.
+- A type with a printed form implements `Display`, and one with a name
+  also parses it with `FromStr`, the name it prints, in any case, its
+  error a `Parse<Type>Error`; rustdoc gives each one's form.  So
+  `Address` prints `0x00001234` (and `LowerHex`), `Cycle` and `Cycles`
+  `12 clocks`, `Frequency` `16777216 Hz` and a board's `Time`
+  `1000 ps`; `ChipSelect` (`CS0`), `FunctionCode` (`supervisor-data`),
+  `IrqPin` (`IRQ7`), `ResetCause` (`power-on`) and the names a board
+  file writes (`mc68331::Pin` and `PortPin`, `PE0`; `signal::Kind`;
+  `peripheral::Role`, `read-write`; `pacing::Pacing`;
+  `description::Setting`, `dac.value=16`) parse back.
+- Conversions, one way each: a bit pattern whose every value is valid
+  (`Address`, `Vector`) converts `From` and into what it wraps; a
+  checked value (`InterruptLevel`, `IrqPin`, `PortGpPin`,
+  `chip_select::Number`, `FunctionCode`) by `TryFrom<u8>`, failing
+  with `No<Type>`, and `From<T> for u8`; a quantity with a unit
+  (`Cycle`, `Cycles`, `Frequency`, `Time`, `Span`) by named
+  constructors and accessors only (`Cycles::from_clocks`, `clocks`);
+  an id a host receives (`PeripheralId`, `HookId`) is opaque.
 - Every public error enum is `#[non_exhaustive]`, and so are the
   enums that may grow: `Stop`, `Halt`, the bare run's `End` and
   `FaultCause`, `hooks::Invalid`, the GPT's `pwm::Output`, and the

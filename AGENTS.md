@@ -37,7 +37,7 @@ Crates:
   the firmware function corpus, boot smoke and boot diff.
 - `cpu32-oracle`: test-only: the Musashi and Unicorn oracles, behind
   features.
-- `mc683xx-examples` (`examples`): the host guide's and gdb guide's
+- `mc683xx-examples` (`examples`): the host, gdb and init script guides'
   examples as doctests, and the example boards and their firmware.
 - `mc683xx-bench` (`benches`): the criterion benchmarks.
 - `snapshot-golden`: test-only golden checks of the snapshot formats.

@@ -98,7 +98,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         &Environment::default(),
     )?;
     let run = board.run_until(Time::from_secs(1))?;
-    println!("{:?} at {:?}", run.stop, run.now);
+    println!("{} at {}", run.stop, run.now);
     Ok(())
 }
 ```
@@ -142,6 +142,10 @@ serial console: keys go in raw as typed, Ctrl-C included, and Ctrl-]
 ends the run.  `--bind NAME=stdout` writes an endpoint's
 output as `stdio` does and reads nothing, for an endpoint that only
 listens or to leave standard input to another binding.
+Its exit status is 0 when the run spent its time, 1 for a board or
+file error, 2 for a wrong command, 3 when the CPU halted, 4 when a
+hook, a peripheral or a fault (`--stop-on-fault`) stopped the run, gdb
+killed it, or Ctrl-C did, and 130 when a second Ctrl-C ended it at once.
 `mc683xx-run --help` gives the rest; `--firmware` gives a board
 another image.  [examples/README.md](https://github.com/charlieh0tel/mc683xx/blob/main/examples/README.md) describes the example
 boards and their firmware.
@@ -201,7 +205,7 @@ The crates above are in `crates/`: `target` (`mc683xx-target`),
 
 ```
 make hooks   # once per clone
-make ci      # fmt check, license copies, commit-msg hook, clippy, tests, rustdoc
+make ci      # fmt check, license copies, commit-msg hook, clippy, feature builds, tests, rustdoc
 make python      # the Python module in .venv, with its tests
 make wasm        # the JavaScript bindings (wasm32, wasm-bindgen), linted, as the npm package
 make npm-test    # the npm package packed and installed, in Node and headless Chrome

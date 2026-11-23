@@ -92,9 +92,10 @@ Out:
 - `mc683xx-wasm` (`crates/wasm`): `wasm-bindgen` bindings, a board
   from JavaScript (see Open, WebAssembly); `publish = false`, released
   as the npm package `mc683xx`.
-- `examples` (`mc683xx-examples`, `publish = false`): the host
-  guide, `docs/host-guide.md`, as its crate documentation, so its
-  examples are doctests `make ci` runs.
+- `examples` (`mc683xx-examples`, `publish = false`): the examples of
+  the host guide (its crate documentation), `docs/gdb.md` and
+  `docs/init-scripts.md` as doctests `make ci` runs, and the example
+  boards and their firmware.
 - `mc683xx-board` (`crates/mc68331-board`): board files and the board
   around a 683xx chip: peripherals from a registry, decoders, nets and
   board time (see Boards), generic over the chip (`chip::Chip`), the
@@ -106,8 +107,10 @@ Out:
   scripts over any `Cpu32Target` (see Loading).
 - `mc683xx-peripherals` (`crates/peripherals`): stock chips as board-file peripherals
   (see Stock peripherals).
-- `cpu32-harness`, `cpu32-oracle`: instruction-level tests against
-  SingleStepTests and Musashi (see Verification); `publish = false`.
+- `cpu32-harness`, `cpu32-oracle`: test-only: SingleStepTests, the
+  differential runs against Musashi and Unicorn, the firmware function
+  corpus, boot smoke and boot diff (see Verification); `publish =
+  false`.
 - `snapshot-golden`: the snapshot formats' golden-file checks (see
   State); test-only, `publish = false`.
 
@@ -142,9 +145,9 @@ prefix; their directories keep the short names.
   the halt monitor's resets as they come, time passing while the CPU
   is halted (A halted CPU); `take_events` reports resets and IARB
   ties.  A run overshoots its budget by up to an
-  instruction, so `Mc68331::run_until(target)` runs to the first
+  instruction, so `Mc68331::run_until(deadline)` runs to the first
   instruction boundary at or after a time instead: its end depends
-  only on the chip and the target, so a series of them is one long
+  only on the chip and the deadline, so a series of them is one long
   run however the host cuts it.
 - **Host bus access:** `Mc68331::bus_read`, `bus_write` and `peek`
   (`mc683xx_mc68331::host`) reach the bus as a debugger does (BDM's memory
@@ -814,7 +817,7 @@ chip beside `Mc68331`.
 - **The chip:** `run_for(budget) -> Run(cycles, stop)`, Rust's
   `cpu::Run`, its `Stop` a class per variant as Rust's (`Stop.Budget()`,
   `Stop.Halted(halt)`, `Stop.Hook(hook)`, ...),
-  `run_until(target)`, `bus_read`, `bus_write`, `peek` (`size` in
+  `run_until(deadline)`, `bus_read`, `bus_write`, `peek` (`size` in
   bytes, `function_code` a `FunctionCode`, `SUPERVISOR_DATA` by default; `BusError`, `UnpeekableError`),
   `reset()`, `reset_for(ResetCause)`,
   `now`, `halted`, `exception_taken` (a vector), `read_register`,
@@ -849,7 +852,8 @@ chip beside `Mc68331`.
   Rust hook and return a `HookId`; `remove_hook(hook) -> bool`.
   The callable gets what the Rust hook does: an `Instruction` (`pc`,
   `registers` as `registers()` gives them, `stack_top`), a
-  `MemoryAccess` (`address`, `size`, `function_code`, `value`), an
+  `MemoryAccess` (`address`, `size`, `function_code`, `value`,
+  `previous`, `pc`, `stacking`, `registers`), an
   `InvalidAccess` (those, `cycle`, a `BusCycleKind`, `value` or `None`,
   `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`) or an
   `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`).  A
@@ -874,7 +878,7 @@ chip beside `Mc68331`.
   that cannot save, `NotImplementedError`.
 - **Peripherals:** any object with `read(cycle) -> int` and `write(cycle,
   value)`, and optionally `wait_states(cycle) -> int | None`,
-  `interrupt_request() -> bool`, `reset(now)`, `next_event() -> int |
+  `dsack_port(cycle) -> int | None`, `interrupt_request() -> bool`, `reset(now)`, `next_event() -> int |
   None` and `advance(now)`, the `MappedPeripheral` and `Timed` traits' methods;
   a missing one takes the trait's default.  A model on no pin needs
   neither `read` nor `write`.  The methods are looked up once, when
@@ -1589,7 +1593,7 @@ hand.  The keys are in `docs/board-files.md`.
   line for line.  smartclock-emu's own traces call a bus cycle
   `device`; boot-diff reads that dialect.
 - **Run-time endpoints stay out of the file:** the file names them,
-  the runner binds them (`--bind host=stdio`, `stdout`, `pty`,
+  the runner binds them (`--bind host=stdio`, `stdout`, `tty`, `pty`,
   `null`, `file:PATH`).  Its standard error holds two kinds of line:
   records, prefixed by the chip (the trace, `external` values, where a
   `pty` or `tty` was `bound`; docs/tracing.md, semver-covered), and
@@ -1802,7 +1806,9 @@ hand.  The keys are in `docs/board-files.md`.
   old snapshot is replaced whole or not at all, and a second Ctrl-C
   removes the temporary file and leaves the target as it was.  Exit status 0 when the run spent its
   time, 1 for a board or file error, 2 for a wrong command, 3 when the
-  CPU halted, 4 when a hook or a peripheral stopped it, or Ctrl-C did.
+  CPU halted, 4 when a hook, a peripheral or a fault (`--stop-on-fault`)
+  stopped it, gdb killed it, or Ctrl-C did; 130 when a second Ctrl-C
+  ended the process at once.
   `--pace` paces the turns against wall time (`Board::run_until_paced`'s
   pacing, the run the same whatever it is), and under `--gdb` the
   stub's quanta while gdb has the board running: its `Target`'s
@@ -1889,10 +1895,7 @@ Adversarial review of the board layer (2026-10-23):
   nets in file order, one seed: the same file, image, seed and
   bindings give the same run.  A binding to a terminal or pty is host
   timed, so a run with live input is not reproducible; piped input is
-  fed one frame per turn of fixed length, which is.  A SYNCR write
-  moves the cycle-to-time anchor only at the sync point, so board
-  time drifts by at most that quantum at the old rate; firmware writes
-  SYNCR once, at boot, before any edge matters.
+  fed one frame per turn of fixed length, which is.
 - *Latency.*  A peripheral's drive within the chip's run reaches the chip
   by the next instruction, and a chip output on a sensed net reaches
   its peripherals after the instruction that changed it, so a loop from the

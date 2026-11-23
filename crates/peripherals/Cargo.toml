@@ -1,6 +1,6 @@
 [package]
 name = "mc683xx-peripherals"
-description = "Stock chips for MC68331 boards: memories, converters and UARTs as board-file peripherals"
+description = "Stock chips for 683xx boards: memories, converters and UARTs as board-file peripherals"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
