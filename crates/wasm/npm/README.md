@@ -11,7 +11,7 @@ board file format
 ([docs/board-files.md](https://github.com/charlieh0tel/mc683xx/blob/main/docs/board-files.md))
 and the example boards.
 
-Early: 0.x, and the API may change between minor versions.
+Beta: the API may still change before 1.0.
 
 ## Install
 

@@ -73,9 +73,19 @@ deploy replaces it.
 
 - Semantic versioning from 0.1.0.  Before 1.0, a breaking change
   (Semver scope) bumps the minor version; anything else the patch.
+  The API is in beta: a 0.x release may still break it, and does so
+  only in its minor version.
 - CI's `semver` job checks the published crates' APIs against their
   last release (cargo-semver-checks).  Before 1.0 it reports a break
   without failing, since the version is bumped only at release.
+- The 1.0 commit, as "Release 1.0.0", makes these changes beside the
+  version bump (Cutting a release, step 2), and no others: the PyPI
+  classifier becomes `Development Status :: 5 - Production/Stable`
+  (`crates/cpu32-py/pyproject.toml`); CI's `semver` job loses its
+  `continue-on-error` and blocks (`.github/workflows/ci.yml`); the
+  "Beta" line goes from `README.md` and `crates/wasm/npm/README.md`;
+  and this page's text on releases before 1.0 goes.  Nothing here
+  promises that a release before it does not break the API.
 - A release is an annotated tag `vX.Y.Z` on a commit of `main` that
   has passed every check (AGENTS.md).  Its notes, breaking changes
   first, are the tag message's body, below its "Release X.Y.Z"

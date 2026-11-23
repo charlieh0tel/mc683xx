@@ -64,7 +64,7 @@ crates.io.
   ([examples/web](https://github.com/charlieh0tel/mc683xx/blob/main/examples/README.md#web-page)):
   [try it in your browser](https://charlieh0tel.github.io/mc683xx/).
 
-Early: 0.x, and the API may change between minor versions.
+Beta: the API may still change before 1.0.
 
 ## Install
 
