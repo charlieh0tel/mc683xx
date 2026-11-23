@@ -38,8 +38,10 @@ use mc683xx_mc68331::port::OutputChange;
 use mc683xx_mc68331::port::Port;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Dsack;
+use mc683xx_modules::peripheral::AnyMappedPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
+use mc683xx_modules::qsm::qspi::AnySpiPeripheral;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::clock::ClockSource;
@@ -51,8 +53,6 @@ use serde::Serializer;
 use serde::de::Error as _;
 
 use crate::chip;
-use crate::chip::BoardMapped;
-use crate::chip::BoardSpi;
 use crate::chip::ChipBuilder;
 use crate::chip::ChipPin;
 use crate::chip::MemoryPlace;
@@ -503,7 +503,7 @@ impl ChipBuilder for Mc68331Builder {
         Rc::clone(&self.handles) as Rc<dyn Requests>
     }
 
-    fn memory<R: BoardMapped>(
+    fn memory<R: AnyMappedPeripheral>(
         &mut self,
         plan: MemoryPlan<'_>,
         router: R,
@@ -530,7 +530,7 @@ impl ChipBuilder for Mc68331Builder {
         Ok(id)
     }
 
-    fn peripheral<R: BoardMapped>(
+    fn peripheral<R: AnyMappedPeripheral>(
         &mut self,
         router: R,
         select: ChipSelect,
@@ -543,7 +543,7 @@ impl ChipBuilder for Mc68331Builder {
         Ok(())
     }
 
-    fn bus_peripheral<R: BoardMapped>(
+    fn bus_peripheral<R: AnyMappedPeripheral>(
         &mut self,
         router: R,
         decodes: &[BusDecode],
@@ -555,7 +555,7 @@ impl ChipBuilder for Mc68331Builder {
             .map_err(built)
     }
 
-    fn unwired<R: BoardMapped>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>) {
+    fn unwired<R: AnyMappedPeripheral>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>) {
         let id = self.builder.unwired_peripheral(pins);
         self.builder.set_reset_scope(id, reset);
         if let Some(level) = irq {
@@ -563,7 +563,7 @@ impl ChipBuilder for Mc68331Builder {
         }
     }
 
-    fn set_qspi<R: BoardSpi>(&mut self, router: R) -> Result<(), LoadError> {
+    fn set_qspi<R: AnySpiPeripheral>(&mut self, router: R) -> Result<(), LoadError> {
         self.builder.set_qspi(router);
         Ok(())
     }

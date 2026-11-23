@@ -1117,7 +1117,7 @@ hand.  The keys are in `docs/board-files.md`.
   chip's methods, but implements none of them; the plumbing only the
   board calls (`Chip::builder`, `input`, `collect`, the output watches,
   the diversions, `ChipPin::pcs` and `scheduled`, `Requests`, the
-  memory plans, `BoardMapped`, `BoardSpi`, `Mc68331Builder`) is
+  memory plans, `Mc68331Builder`) is
   `#[doc(hidden)]`, outside semver (decided 2026-11-21).  The board's snapshot holds the chip's pins (its outputs'
   last levels, its clock outputs' clocks) in the chip's own pin
   type, and the levels the board drives on the chip's inputs are the

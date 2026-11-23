@@ -13,7 +13,6 @@
 //!
 //! [plan-boards]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#boards
 
-use std::any::Any;
 use std::fmt;
 use std::rc::Rc;
 use std::str::FromStr;
@@ -23,20 +22,18 @@ use mc683xx_cpu32::bus::StopRequest;
 use mc683xx_cpu32::cpu::Cpu;
 use mc683xx_cpu32::cpu::Run;
 use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::MemoryKind;
-use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::chip_select::Termination;
+use mc683xx_modules::peripheral::AnyMappedPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
-use mc683xx_modules::peripheral::SpiPeripheral;
-use mc683xx_modules::peripheral::Timed;
+use mc683xx_modules::qsm::qspi::AnySpiPeripheral;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::reset::ResetScope;
 use mc683xx_target::address::Address;
@@ -166,23 +163,6 @@ pub struct MemoryPlan<'a> {
     pub reload: ResetScope,
 }
 
-/// A mapped peripheral the board hands the chip: one of the board's
-/// routers.  Every type that is one implements it.
-///
-/// Not part of the semver API: plumbing the board runs the chip with.
-#[doc(hidden)]
-pub trait BoardMapped: MappedPeripheral + Timed + Save + Any {}
-
-impl<T: MappedPeripheral + Timed + Save + Any> BoardMapped for T {}
-
-/// An SPI peripheral the board hands the chip: its PCS decode.
-///
-/// Not part of the semver API: plumbing the board runs the chip with.
-#[doc(hidden)]
-pub trait BoardSpi: SpiPeripheral + Save + Any {}
-
-impl<T: SpiPeripheral + Save + Any> BoardSpi for T {}
-
 /// The chip being wired, before its power-on reset.
 ///
 /// Sealed: a host cannot implement it.  Not part of the semver API:
@@ -209,7 +189,7 @@ pub trait ChipBuilder: sealed::Sealed {
     /// # Errors
     ///
     /// Wiring the chip refuses ([`LoadError::Build`]).
-    fn memory<R: BoardMapped>(
+    fn memory<R: AnyMappedPeripheral>(
         &mut self,
         plan: MemoryPlan<'_>,
         router: R,
@@ -221,7 +201,7 @@ pub trait ChipBuilder: sealed::Sealed {
     /// # Errors
     ///
     /// Wiring the chip refuses ([`LoadError::Build`]).
-    fn peripheral<R: BoardMapped>(
+    fn peripheral<R: AnyMappedPeripheral>(
         &mut self,
         router: R,
         select: ChipSelect,
@@ -234,7 +214,7 @@ pub trait ChipBuilder: sealed::Sealed {
     /// # Errors
     ///
     /// Wiring the chip refuses ([`LoadError::Build`]).
-    fn bus_peripheral<R: BoardMapped>(
+    fn bus_peripheral<R: AnyMappedPeripheral>(
         &mut self,
         router: R,
         decodes: &[BusDecode],
@@ -243,14 +223,14 @@ pub trait ChipBuilder: sealed::Sealed {
 
     /// A peripheral's interrupt output and reset input, on no pin: the
     /// resets that reach it and the IRQ pin its output is wired to.
-    fn unwired<R: BoardMapped>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>);
+    fn unwired<R: AnyMappedPeripheral>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>);
 
     /// `router` on the QSPI.
     ///
     /// # Errors
     ///
     /// A chip with no QSPI ([`LoadError::Build`]).
-    fn set_qspi<R: BoardSpi>(&mut self, router: R) -> Result<(), LoadError>;
+    fn set_qspi<R: AnySpiPeripheral>(&mut self, router: R) -> Result<(), LoadError>;
 
     /// The chip, through its power-on reset, its pins at the levels its
     /// section gives.  It ends its run after an instruction that
