@@ -50,7 +50,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::integer::parse_integer;
+use mc683xx_target::function_code::parse_function_code;
 use mc683xx_target::register::SystemRegister;
 
 use crate::Ending;
@@ -571,16 +571,12 @@ impl<T: Target> Session<'_, T> {
         };
         match words {
             ["fc"] => show_fc(out, self.function_code),
-            ["fc", code] => match code.parse().ok().or_else(|| {
-                parse_integer::<u8>(code)
-                    .ok()
-                    .and_then(|code| FunctionCode::try_from(code).ok())
-            }) {
-                Some(function_code) => {
+            ["fc", code] => match parse_function_code(code) {
+                Ok(function_code) => {
                     self.function_code = function_code;
                     show_fc(out, function_code);
                 }
-                None => outputln!(out, "fc takes a function code: a name or 0 to 7"),
+                Err(_) => outputln!(out, "fc takes a function code: a name or 0 to 7"),
             },
             ["faults"] => {
                 let shown = self.target.cpu_scope(|cpu| {
