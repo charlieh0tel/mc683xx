@@ -962,8 +962,9 @@ chip.run_for(500)
 
 ## Errors
 
-- `ValueError`: a bare `Machine`'s map over another or of peripheral pages, or
-  overlapping peripherals; a bad pin, register, level, channel, GPT input,
+- `ValueError`: a bare `Machine`'s map over another or of peripheral pages,
+  overlapping peripherals or an empty peripheral range; a bad pin,
+  register, level, channel, GPT input,
   permission string, frame or shift; wiring a pin twice; memory not of
   whole pages; a fixed memory off a page boundary, past ADDR[23:0] or
   overlapping another; a register value that does not fit; a host cycle of a

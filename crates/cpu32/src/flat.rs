@@ -82,9 +82,12 @@ pub enum MapError {
         /// The memory's.
         length: u32,
     },
-    /// A peripheral range that overlaps another peripheral's, or is empty.
+    /// A peripheral range that overlaps another peripheral's.
     #[error("peripherals overlap at {0}")]
     Overlap(Address),
+    /// A peripheral range that is empty, its end before its start.
+    #[error("empty peripheral range at {0}")]
+    Empty(Address),
 }
 
 /// A peripheral with the addresses it covers.
@@ -509,8 +512,8 @@ impl Machine {
     ///
     /// # Errors
     ///
-    /// [`MapError::Overlap`] if `range` is empty or overlaps another
-    /// peripheral's.
+    /// [`MapError::Empty`] if `range` is empty, [`MapError::Overlap`] if
+    /// it overlaps another peripheral's.
     pub fn add_peripheral(
         &mut self,
         range: RangeInclusive<Address>,
@@ -518,7 +521,7 @@ impl Machine {
     ) -> Result<PeripheralId, MapError> {
         let range = range.start().0..=range.end().0;
         if range.is_empty() {
-            return Err(MapError::Overlap(Address(*range.start())));
+            return Err(MapError::Empty(Address(*range.start())));
         }
         let index = self
             .bus
