@@ -1354,7 +1354,14 @@ hand.  The keys are in `docs/board-files.md`.
   the board's snapshot: a trait, not serde, so a model keeps its own
   format and versions it, and one with state it cannot serialize (a
   file handle) is `unsavable!`, which the board's save names.  One
-  constructor, `new`: the adapter needs no opt-in.
+  constructor, `new`: the adapter needs no opt-in.  A mapped model
+  drives nets through its adapter: `MappedAdapter::driving(fn(&mut D,
+  &mut Drive))`, as `inspecting` shows its state, runs after each call
+  that may change the model (power-on, read, write, reset, advance),
+  so a model written against the chip's traits needs no wrapping
+  `Peripheral` to drive a net (decided for 0.9.0, over folding
+  `Timed` into `MappedPeripheral`: `Timed` stays `Module`'s
+  supertrait, and the bare machine takes untimed models).
 - **Nets:** named and typed, `{ name, type, from, to = [...] }`.
   Types: `logic` (a level whose state matters), `edge` (a level whose
   changes' times matter, 1 PPS), `clock` (a frequency in nanohertz

@@ -10,8 +10,11 @@
 //! ADDR itself by default) and its start in system clocks; `now` in
 //! system clocks for its time, reset and QSPI calls.  Its `advance`
 //! runs at the time its `next_event` gave, as a peripheral's does, where the
-//! chip calls a peripheral's at every sync point.  It drives no nets and
-//! writes no memories: a model that does is a [`Peripheral`].  The model
+//! chip calls a peripheral's at every sync point.  It drives nets only
+//! through a driver its adapter was made `driving` with, which reads the
+//! model and drives the adapter's ports after each call that may change
+//! the model; a model that needs more of the board is a [`Peripheral`].
+//! The model
 //! implements [`Save`], so it is in the board's snapshot: one that cannot
 //! save is [`unsavable!`](mc683xx_cpu32::unsavable), and the board's save
 //! then fails naming it.  A model that implements
@@ -88,6 +91,9 @@ fn inspect<D>(inspector: Option<Inspector<D>>, peripheral: &D) -> Inspection {
     inspector.map_or_else(Inspection::default, |inspect| inspect(peripheral))
 }
 
+/// A model's driver, if its adapter was made `driving`.
+type Driver<D> = fn(&mut D, &mut Drive<'_>);
+
 /// A [`MappedPeripheral`] and [`Timed`] model on the bus as a peripheral.
 #[derive(Debug, Default)]
 pub struct MappedAdapter<D> {
@@ -95,6 +101,8 @@ pub struct MappedAdapter<D> {
     peripheral: D,
     /// Its inspection, if it shows one.
     inspector: Option<Inspector<D>>,
+    /// What drives the adapter's nets from the model, if anything.
+    driver: Option<Driver<D>>,
 }
 
 impl<D> MappedAdapter<D> {
@@ -103,6 +111,7 @@ impl<D> MappedAdapter<D> {
         Self {
             peripheral,
             inspector: None,
+            driver: None,
         }
     }
 
@@ -118,6 +127,20 @@ impl<D> MappedAdapter<D> {
         }
     }
 
+    /// It, `driver` driving its nets from the model: called with the
+    /// model and the call's [`Drive`] after each call that may change
+    /// the model (power-on, `read`, `write`, `reset`, `advance`), so a
+    /// model of [`mc683xx_modules::peripheral`], which knows nothing of
+    /// the board, drives the ports the adapter was registered with
+    /// ([`Drive::drive`]), or stops the run ([`Drive::stop`]).
+    #[must_use]
+    pub fn driving(self, driver: fn(&mut D, &mut Drive<'_>)) -> Self {
+        Self {
+            driver: Some(driver),
+            ..self
+        }
+    }
+
     /// The model.
     pub const fn peripheral(&self) -> &D {
         &self.peripheral
@@ -126,6 +149,13 @@ impl<D> MappedAdapter<D> {
     /// The model, to change.
     pub const fn peripheral_mut(&mut self) -> &mut D {
         &mut self.peripheral
+    }
+
+    /// The model's driver run on `drive`, if it has one.
+    fn drive(&mut self, drive: &mut Drive<'_>) {
+        if let Some(driver) = self.driver {
+            driver(&mut self.peripheral, drive);
+        }
     }
 }
 
@@ -152,7 +182,9 @@ fn carried(access: PeripheralAccess, moment: Moment) -> BusCycle {
 
 impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<D> {
     fn read(&mut self, access: PeripheralAccess, drive: &mut Drive<'_>) -> Result<u32, BusError> {
-        self.peripheral.read(carried(access, drive.moment()))
+        let read = self.peripheral.read(carried(access, drive.moment()));
+        self.drive(drive);
+        read
     }
 
     fn write(
@@ -161,8 +193,11 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
         value: u32,
         drive: &mut Drive<'_>,
     ) -> Result<(), BusError> {
-        self.peripheral
-            .write(carried(access, drive.moment()), value)
+        let written = self
+            .peripheral
+            .write(carried(access, drive.moment()), value);
+        self.drive(drive);
+        written
     }
 
     fn wait_states(&mut self, access: PeripheralAccess, moment: Moment) -> Option<Cycles> {
@@ -177,8 +212,13 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
         self.peripheral.interrupt_request()
     }
 
+    fn power_on(&mut self, drive: &mut Drive<'_>) {
+        self.drive(drive);
+    }
+
     fn reset(&mut self, drive: &mut Drive<'_>) {
         self.peripheral.reset(cycle(drive));
+        self.drive(drive);
     }
 
     fn next_event(&self, moment: Moment) -> Option<Time> {
@@ -189,6 +229,7 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
 
     fn advance(&mut self, drive: &mut Drive<'_>) {
         self.peripheral.advance(cycle(drive));
+        self.drive(drive);
     }
 
     fn inspect(&self) -> Inspection {

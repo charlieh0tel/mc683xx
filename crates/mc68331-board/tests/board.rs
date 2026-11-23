@@ -1362,6 +1362,141 @@ to = ["external.q"]
     assert_eq!(resets, Some(0), "no reset reaches it");
 }
 
+/// A strobe's pulse, in system clocks.
+const STROBE_CLOCKS: Cycles = Cycles::from_clocks(100);
+
+/// A chip-level model of a strobe: a write raises its output for
+/// `STROBE_CLOCKS`; a reset lowers it.
+#[derive(Debug, Default)]
+struct Strobe {
+    /// Its output.
+    level: bool,
+    /// When its pulse ends, if one is on.
+    ends: Option<Cycle>,
+    /// The level last driven on its net, if any.
+    driven: Option<bool>,
+}
+
+impl Strobe {
+    /// The adapter's driver: the output onto port 0 when it changes.
+    fn drive(&mut self, drive: &mut Drive<'_>) {
+        if self.driven != Some(self.level) {
+            self.driven = Some(self.level);
+            drive.drive(0, Signal::Level(self.level));
+        }
+    }
+}
+
+impl MappedPeripheral for Strobe {
+    fn read(&mut self, _: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+        Ok(0)
+    }
+
+    fn write(&mut self, cycle: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
+        self.level = true;
+        self.ends = Some(cycle.now + STROBE_CLOCKS);
+        Ok(())
+    }
+
+    fn reset(&mut self, _: Cycle) {
+        self.level = false;
+        self.ends = None;
+    }
+}
+
+impl Timed for Strobe {
+    fn next_event(&self) -> Option<Cycle> {
+        self.ends
+    }
+
+    fn advance(&mut self, now: Cycle) {
+        if self.ends.is_some_and(|ends| now >= ends) {
+            self.level = false;
+            self.ends = None;
+        }
+    }
+}
+
+mc683xx_cpu32::unsavable!(Strobe, "a strobe");
+
+/// A board whose firmware writes once to a `Strobe` on CS1, its output
+/// on the `pulse` net to `external.pulse`, its adapter `driving` if
+/// `driving`: what the net carried in its first millisecond, and the
+/// board's system clock.
+fn strobed(driving: bool) -> (Vec<(Time, Signal)>, TimeBase) {
+    let program: Vec<u16> = [
+        store(CSBAR1, CS1_BAR),
+        store(CSOR1, CS_FAST),
+        store(CS1_BASE, 1),
+    ]
+    .concat()
+    .into_iter()
+    .chain([BRA_SELF])
+    .collect();
+    let directory = directory("driving", &program);
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[peripheral]]
+name = "strobe"
+type = "strobe"
+attach = [{ select = "CS1" }]
+[[net]]
+name = "pulse"
+type = "logic"
+from = "strobe.out"
+to = ["external.pulse"]
+"#;
+    let description = Description::parse(text, &directory, &Options::default()).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    let mut registry = Registry::with_builtins();
+    registry
+        .register(
+            "strobe",
+            vec![PortSpec::output("out", Kind::Logic)],
+            move |_| {
+                let adapter = MappedAdapter::new(Strobe::default());
+                Ok(Box::new(if driving {
+                    adapter.driving(Strobe::drive)
+                } else {
+                    adapter
+                }))
+            },
+        )
+        .unwrap();
+    let mut board =
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
+    board.run_for(Span::from_millis(1)).unwrap();
+    (board.take_received("pulse").unwrap(), board.system_clock())
+}
+
+#[test]
+fn a_driving_adapter_drives_its_nets_from_its_model() {
+    let (received, base) = strobed(true);
+    // low from power-on; high at the write; low again at the pulse's
+    // end, the model's advance
+    let [
+        (Time::ZERO, Signal::Level(false)),
+        (raised, Signal::Level(true)),
+        (lowered, Signal::Level(false)),
+    ] = received[..]
+    else {
+        panic!("{received:?}");
+    };
+    assert_eq!(
+        base.cycle(lowered).since(base.cycle(raised)),
+        STROBE_CLOCKS,
+        "{raised:?} to {lowered:?}"
+    );
+    assert!(strobed(false).0.is_empty(), "no driver, nothing driven");
+}
+
 /// `Words` with time of its own: an event at `EVENT`, and what it saw.
 #[derive(Debug, Default)]
 struct TimedWords {
