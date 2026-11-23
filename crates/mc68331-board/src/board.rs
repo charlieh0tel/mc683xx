@@ -926,7 +926,7 @@ impl<C: Chip> Board<C> {
                     .qspi_deferrable()
             });
             *shared.qspi.borrow_mut() = Some(QspiState::new(PCS_IDLE, targets.len()));
-            builder.qspi(QspiRouter {
+            builder.set_qspi(QspiRouter {
                 shared: Rc::clone(shared),
                 targets,
                 deferrable,

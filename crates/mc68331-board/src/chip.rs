@@ -250,7 +250,7 @@ pub trait ChipBuilder: sealed::Sealed {
     /// # Errors
     ///
     /// A chip with no QSPI ([`LoadError::Build`]).
-    fn qspi<R: BoardSpi>(&mut self, router: R) -> Result<(), LoadError>;
+    fn set_qspi<R: BoardSpi>(&mut self, router: R) -> Result<(), LoadError>;
 
     /// The chip, through its power-on reset, its pins at the levels its
     /// section gives.  It ends its run after an instruction that
