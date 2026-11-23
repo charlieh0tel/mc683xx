@@ -627,8 +627,7 @@ impl MachineView {
     /// words at zero.  A fault reading them halts the CPU (`halt`).  A
     /// peripheral's exception in the reads is raised here.
     fn reset(&mut self) -> PyResult<()> {
-        // A halt is what `halt` reports.
-        let _ = self.machine.reset();
+        self.machine.reset();
         self.pending.check()
     }
 
@@ -1177,7 +1176,7 @@ mod tests {
         }
         let mut machine = Machine::new(32).unwrap();
         machine.map(Address(0), PAGE_BYTES, &image).unwrap();
-        machine.reset().unwrap();
+        machine.reset();
         setup(&mut machine);
         machine.run_limited(limits).end
     }

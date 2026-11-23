@@ -206,7 +206,7 @@ fn a_reset_starts_a_block() {
     let (mut cpu, starts) = stopping_at_the_second();
     poke_long(&mut cpu, Vector::RESET_STACK_POINTER.offset(), STACK);
     poke_long(&mut cpu, Vector::RESET_PROGRAM_COUNTER.offset(), CODE + 2);
-    cpu.reset(&mut NoBus, Cycle::ZERO).unwrap();
+    cpu.reset(&mut NoBus, Cycle::ZERO);
     // The stop's skip is gone: the code hook stops again.
     assert!(matches!(step(&mut cpu, 1).stop, Stop::Hook(_)));
     assert_eq!(*starts.borrow(), [CODE, CODE + 2]);

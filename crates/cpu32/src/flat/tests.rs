@@ -842,7 +842,7 @@ fn a_reset_reads_the_vectors() {
     let mut machine = machine(&[NOP]);
     machine.write(Address(0), &STACK.to_be_bytes()).unwrap();
     machine.write(Address(4), &CODE.to_be_bytes()).unwrap();
-    machine.reset().unwrap();
+    machine.reset();
     assert_eq!(machine.cpu.registers.pc.0, CODE);
     assert_eq!(machine.cpu.registers.ssp.0, STACK);
 }

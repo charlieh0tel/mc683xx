@@ -19,7 +19,6 @@ use crate::bus::LPSTOP_BROADCAST;
 use crate::bus::Read;
 use crate::bus::StopRequest;
 use crate::cpu::Cpu;
-use crate::cpu::Halt;
 use crate::cpu::bare::LimitedRun;
 use crate::cpu::bare::Limits;
 use crate::cpu::state::Layer;
@@ -573,13 +572,10 @@ impl Machine {
     }
 
     /// The reset exception (CPU32RM 6.2.1): SSP and PC from the long
-    /// words at zero.
-    ///
-    /// # Errors
-    ///
-    /// As [`Cpu::reset`].
-    pub fn reset(&mut self) -> Result<(), Halt> {
-        self.cpu.reset(&mut self.bus, self.now)
+    /// words at zero; a fault reading them halts the CPU, as
+    /// [`Cpu::reset`] says.
+    pub fn reset(&mut self) {
+        self.cpu.reset(&mut self.bus, self.now);
     }
 
     /// Runs until `limits` or a stop ([`Cpu::run_limited`]).

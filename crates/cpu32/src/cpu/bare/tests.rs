@@ -124,7 +124,7 @@ fn a_fault_stop_is_kept_until_the_next_run() {
             &[STACK.to_be_bytes(), CODE.to_be_bytes()].concat(),
         )
         .unwrap();
-    machine.reset().unwrap();
+    machine.reset();
     assert_eq!(machine.cpu.fault_stop(), None);
 }
 
@@ -902,7 +902,7 @@ fn reset_drops_a_pending_trace() {
             &[STACK.to_be_bytes(), CODE.to_be_bytes()].concat(),
         )
         .unwrap();
-    machine.reset().unwrap();
+    machine.reset();
     assert_eq!(machine.cpu.trace_pending(), None);
 }
 

@@ -423,15 +423,11 @@ impl Cpu {
     /// state, interrupt mask 7, VBR zero, then SSP and PC from the two
     /// long words at zero in supervisor program space.  A bus or
     /// address error before the first instruction is fetched is a
-    /// double bus fault.  A pending hardware breakpoint is dropped, as
-    /// reset clears all other exceptions (6.1.5).
-    ///
-    /// # Errors
-    ///
-    /// [`Halt::DoubleBusFault`] if fetching the vectors ends in a bus or
-    /// address error, with background mode disabled; enabled, the CPU
-    /// enters it instead ([`Cpu::background`]).
-    pub fn reset(&mut self, bus: &mut dyn Bus, now: Cycle) -> Result<(), Halt> {
+    /// double bus fault: the CPU halts ([`Cpu::halted`] says
+    /// [`Halt::DoubleBusFault`]), or with background mode enabled enters
+    /// it instead ([`Cpu::background`]).  A pending hardware breakpoint
+    /// is dropped, as reset clears all other exceptions (6.1.5).
+    pub fn reset(&mut self, bus: &mut dyn Bus, now: Cycle) {
         self.registers
             .set_sr(status::S | status::INTERRUPT_MASK | (self.registers.sr() & status::CCR));
         self.registers.vbr = Address::default();
@@ -471,7 +467,6 @@ impl Cpu {
             Ok(pc) => {
                 self.registers.pc = pc;
                 self.left_pc = pc;
-                Ok(())
             }
             Err(exception) => {
                 let fault = match exception {
@@ -479,7 +474,6 @@ impl Cpu {
                     _ => None,
                 };
                 self.double_fault(fault.as_ref(), Address(PCC_RESET_DOUBLE_FAULT));
-                self.halted().map_or(Ok(()), Err)
             }
         }
     }
@@ -2710,7 +2704,7 @@ mod tests {
         assert!(!cpu.breakpoint_pending());
         assert_eq!(cpu.registers.ssp.0, STACK, "no acknowledge, no exception");
         cpu.set_breakpoint_pending(true);
-        let _ = cpu.reset(&mut NoBus, Cycle::ZERO);
+        cpu.reset(&mut NoBus, Cycle::ZERO);
         assert!(!cpu.breakpoint_pending());
     }
 
@@ -2741,13 +2735,11 @@ mod tests {
     fn a_double_bus_fault_fetching_the_vectors_enters_background_mode_if_enabled() {
         // nothing mapped: both vector fetches end in BERR
         let mut cpu = Cpu::new(Memory::new(24).unwrap());
-        assert_eq!(
-            cpu.reset(&mut NoBus, Cycle::ZERO),
-            Err(Halt::DoubleBusFault)
-        );
+        cpu.reset(&mut NoBus, Cycle::ZERO);
+        assert_eq!(cpu.halted(), Some(Halt::DoubleBusFault));
         assert_eq!(cpu.background(), None);
         cpu.set_bdm_enabled(true);
-        assert_eq!(cpu.reset(&mut NoBus, Cycle::ZERO), Ok(()));
+        cpu.reset(&mut NoBus, Cycle::ZERO);
         assert_eq!(cpu.halted(), None);
         let Some(Entry::DoubleBusFault { ssw }) = cpu.background() else {
             panic!("{:?}", cpu.background());
@@ -2797,7 +2789,7 @@ mod tests {
             answered: 4,
             reads: Vec::new(),
         };
-        assert_eq!(cpu.reset(&mut bus, Cycle::ZERO), Ok(()));
+        cpu.reset(&mut bus, Cycle::ZERO);
         assert!(cpu.background().is_some());
         assert_eq!(cpu.registers.ssp.0, 0x1234_1234, "SSP loaded");
         assert_eq!(bus.reads, [0, 2, 4]);
@@ -2805,7 +2797,7 @@ mod tests {
             answered: 0,
             reads: Vec::new(),
         };
-        assert_eq!(cpu.reset(&mut bus, Cycle::ZERO), Ok(()));
+        cpu.reset(&mut bus, Cycle::ZERO);
         assert_eq!(bus.reads, [0], "PC not fetched");
     }
 
@@ -2814,14 +2806,16 @@ mod tests {
         let mut cpu = prepared(&[], status::S);
         poke_long(&mut cpu, 0, STACK);
         poke_long(&mut cpu, 4, 0x0001_0000);
-        assert_eq!(cpu.reset(&mut NoBus, Cycle::ZERO), Ok(()));
+        cpu.reset(&mut NoBus, Cycle::ZERO);
+        assert_eq!(cpu.halted(), None);
         assert_eq!(
             step(&mut cpu, &mut NoInterrupts),
             Stop::Halted(Halt::DoubleBusFault)
         );
         poke_long(&mut cpu, 4, CODE);
         poke_long(&mut cpu, CODE, u32::from(NOP) << 16);
-        assert_eq!(cpu.reset(&mut NoBus, Cycle::ZERO), Ok(()));
+        cpu.reset(&mut NoBus, Cycle::ZERO);
+        assert_eq!(cpu.halted(), None);
         assert_eq!(step(&mut cpu, &mut NoInterrupts), Stop::Budget);
     }
 
