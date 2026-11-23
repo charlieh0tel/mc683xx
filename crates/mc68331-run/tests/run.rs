@@ -250,8 +250,10 @@ fn a_halt_and_a_wrong_command_have_their_status() {
     let usage = runner(&[file.to_str().unwrap(), "--bind", "console=telnet"], b"");
     assert_eq!(usage.status.code(), Some(2));
     let wrong = [
-        ["--turn-us", "18446744073709551615"],
-        ["--turn-us", "0"],
+        ["--turn", "18446745"],
+        ["--turn", "0"],
+        ["--turn", "1e-13"],
+        ["--turn", "nan"],
         ["--seconds", "nan"],
         ["--seconds", "-inf"],
         ["--seconds", "-1"],
@@ -798,8 +800,8 @@ fn gdb_is_waited_for_before_piped_input_is_read() {
         &[
             "--bind",
             "console=stdio",
-            "--turn-us",
-            "100",
+            "--turn",
+            "0.0001",
             "--input-after",
             "0.0005",
         ],

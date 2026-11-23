@@ -1738,7 +1738,7 @@ hand.  The keys are in `docs/board-files.md`.
   [--bind NAME=stdio|stdout|tty|pty|null|file:PATH]
   [--trace bus-cycles,exceptions,pins,qspi,nets] [--watch-code ADDR]
   [--position S] [--seed N] [--work-dir DIR] [--restore FILE]
-  [--save FILE] [--turn-us N] [--input-after S] [--gdb HOST:PORT]
+  [--save FILE] [--turn S] [--input-after S] [--gdb HOST:PORT]
   [--pace unpaced|realtime|FACTOR]`,
   a thin command on
   the run loop with the built-in types only: it runs in turns of
@@ -1779,9 +1779,10 @@ hand.  The keys are in `docs/board-files.md`.
   them): Ctrl-C while waiting for gdb, or while gdb holds the board,
   ends the session and the run, with the `stopped` record and
   `--save`, at the next wait.  A wrong command
-  includes seconds (`--seconds`, `--position`, `--input-after`) that
-  are not finite or are negative, and a `--turn-us` of 0 or one longer
-  than a `Span` holds.  Piped input is read
+  includes seconds (`--seconds`, `--position`, `--input-after`,
+  `--turn`) that are not finite or are negative, and a `--turn` that
+  is zero picoseconds or longer than a `Span` holds.  Every time flag
+  is seconds of board time, `--turn` (1 ms by default) too.  Piped input is read
   whole and fed a byte a turn from `--input-after`, so a run with it
   is reproducible; a terminal's or a pty's is not.  It is read when
   input first goes in, after `--gdb` has said where it waits, and the

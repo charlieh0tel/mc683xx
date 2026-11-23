@@ -73,8 +73,6 @@ use crate::error::RunError;
 
 /// The chip the runner runs, which names its trace's lines.
 const CHIP: &str = <Mc68331 as Chip>::TYPE;
-/// The longest turn, in microseconds, that a [`Span`] holds.
-const MAX_TURN_US: u64 = Span::MAX.picos() / Span::from_micros(1).picos();
 /// Exit status: the board or a file could not be used.
 const EXIT_ERROR: u8 = 1;
 /// Exit status: the CPU halted.
@@ -191,12 +189,11 @@ struct Arguments {
     /// snapshot is written beside it and renamed over it.
     #[arg(long)]
     save: Option<PathBuf>,
-    /// Microseconds of board time between the runner's turns, where
-    /// input goes in (one fed byte a turn), output comes out and
-    /// positions are taken.
-    #[arg(long, default_value_t = 1000,
-          value_parser = clap::value_parser!(u64).range(1..=MAX_TURN_US))]
-    turn_us: u64,
+    /// Seconds of board time between the runner's turns, where input
+    /// goes in (one fed byte a turn), output comes out and positions
+    /// are taken.
+    #[arg(long, value_name = "S", default_value = "0.001", value_parser = turn)]
+    turn: Span,
     /// Seconds of board time before input goes in: a frame that
     /// arrives before the firmware enables its receiver is lost, as on
     /// the board.
@@ -241,6 +238,19 @@ fn seconds(text: &str) -> Result<f64, String> {
             "{text:?}: give a finite number of seconds, 0 or more"
         ))
     }
+}
+
+/// `--turn`: as `seconds`, more than 0 and no longer than a [`Span`]
+/// holds.
+fn turn(text: &str) -> Result<Span, String> {
+    Span::checked_from_seconds_f64(seconds(text)?)
+        .filter(|turn| !turn.is_zero())
+        .ok_or_else(|| {
+            format!(
+                "{text:?}: give more than 0 seconds, and at most {}",
+                Span::MAX.seconds_f64()
+            )
+        })
 }
 
 /// `--seconds`: as `seconds`, or inf, a run without end.
@@ -373,7 +383,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         }
         _ => Time::MAX,
     };
-    let turn = Span::from_micros(arguments.turn_us);
+    let turn = arguments.turn;
     let every = arguments
         .position
         .map(Span::from_seconds_f64)
