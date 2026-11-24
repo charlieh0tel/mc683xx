@@ -1446,6 +1446,7 @@ assert bare.read_register("D0") == 6
   PC, S set, T1 and T0 clear, PC at the handler.  `level`, 0 to 7,
   sets the interrupt mask, as an interrupt does, whatever it was: no
   mask holds it off, so a host stacks an interrupt where it wants one.
+  Level 0, which no interrupt sets, clears the mask.
   No clocks pass.  The exception hooks, and the write hooks on the
   stack, are called before it returns, their results stopping nothing.
   A halted CPU, or one in background mode, raises `RuntimeError`, as

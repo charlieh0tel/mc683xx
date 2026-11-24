@@ -298,7 +298,8 @@ impl Cpu {
     /// format $0 frame (6.4.1) with SR and PC, and PC from the vector,
     /// at VBR plus its offset (6.1.1).  With `level`, as interrupt
     /// processing does, the interrupt mask is set to it (6.2.11),
-    /// whatever the mask was: the mask does not hold it off.  It ends
+    /// whatever the mask was: the mask does not hold it off.  Level 0,
+    /// which no interrupt sets, clears the mask.  It ends
     /// STOP and LPSTOP, as an interrupt does (4.4), and leaves loop
     /// mode.  The exception hooks and [`Bus::exception_entered`] see it
     /// as an exception the CPU takes; a hook's stop has no run to stop,

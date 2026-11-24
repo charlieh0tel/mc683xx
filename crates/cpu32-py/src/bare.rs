@@ -606,7 +606,8 @@ impl MachineView {
     /// Takes the exception of `vector` now, as the CPU takes its own: a
     /// four-word frame with SR and PC stacked, S set, T1 and T0 clear,
     /// PC at the handler.  `level`, 0 to 7, sets the interrupt mask, as
-    /// an interrupt does, whatever it was.  No clocks pass.  The hooks
+    /// an interrupt does, whatever it was; 0, which no interrupt sets,
+    /// clears it.  No clocks pass.  The hooks
     /// it fires are called before it returns, their results stopping
     /// nothing.  A halted CPU, or a fault that stops
     /// (`set_stop_on_fault`), raises `RuntimeError`, nothing stacked.

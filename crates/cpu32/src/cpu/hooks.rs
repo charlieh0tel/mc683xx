@@ -400,7 +400,10 @@ impl Cpu {
 
     /// Calls `hook` after each exception is returned from: after `rte`
     /// restored SR and PC from the exception's frame.  If it stops the
-    /// run, it stops with the instruction at the return PC not yet run.
+    /// run, it stops before the next instruction: the one at the return
+    /// PC, or, where the restored SR has T1 or T0 set, the trace
+    /// handler's, as `rte` takes the trace exception in the same step
+    /// (CPU32RM 6.2.10).
     pub fn add_exception_return_hook(
         &mut self,
         hook: impl FnMut(&ExceptionReturn) -> Control + 'static,

@@ -1163,7 +1163,9 @@ but the exception hook cover an address range, on the address lines.
 - `add_exception_return_hook(f(&ExceptionReturn))`: once `rte` has
   restored SR and PC from an exception's frame: vector, PC, SR, and
   the frame's address, the `stack` its `ExceptionEntry` had; a stop
-  takes effect before the instruction it returns to.
+  takes effect before the next instruction: the one it returns to,
+  or the trace handler's where the restored SR sets T1 or T0, as `rte`
+  takes the trace exception in the same step (CPU32RM 6.2.10).
 - `remove_hook(id)`.
 
 `cpu_control().protect(space, start, length, Permissions)` sets
