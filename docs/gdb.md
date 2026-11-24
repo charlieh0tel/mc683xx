@@ -140,8 +140,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   for gdb's Ctrl-C between a run's quanta) and `start` (called as the
   session starts; a `TcpStream` turns off Nagle's delay), and says
   which of its errors is gdb hanging up (`hung_up`; for a `TcpStream`
-  and a `Polled` one, the connection at its end, reset or aborted, or
-  a write into a closed one; none by default).  The stub's
+  and a `Polled` one, the connection at its end, reset, aborted or no
+  longer connected, or a write into a closed one; none by default).  The stub's
   API names no type of the `gdbstub` crate it is built on.
 - `SessionError`: a call on the target failed (`Target`, a board's
   peripheral that stalled, a pod's lost link), the connection did

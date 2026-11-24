@@ -944,7 +944,8 @@ harness hands over with `ready=lambda port: print(f"target remote
 gdb, a few packets from a subprocess, reads the registers and
 detaches.  It reads each reply through its checksum, as gdb does: the
 stub writes a reply byte by byte, so a client that closes at the `#`
-may make `serve_gdb` raise `BrokenPipeError`.
+may end the session as a hang-up (`Ending.HUNG_UP`) rather than the
+detach it sent.
 
 ```python
 import subprocess
