@@ -74,6 +74,11 @@ working fails `make ci`.
   0.36 ms of the board time, and the PIT's 279 interrupts run about
   2,500 instructions: over 99% of the instructions are the command's
   computation and its writes to SCDR.
+- `access/*` (`benches/access.rs`): a debugger's access with no bus
+  cycle, a bare machine's `read` and `write` of 512 Kbytes, into RAM
+  (`ram_*`) and through a peripheral that peeks and pokes its own array
+  (`peripheral_*`), as a host loads an image into a part.  Throughput
+  is bytes.
 - `*/short_runs`: 1000 runs of one clock each, the cost of a run call:
   `Cpu::run_for` alone, and `Mc68331::run_for` with its syncing.
 - `tables/*` (`benches/tables.rs`): building the 64K-entry instruction
