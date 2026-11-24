@@ -223,7 +223,10 @@ Crates:
 - Method names: `with_*` is a constructor (`Registry::with_builtins`);
   a mutator is `set_*`; an accessor is the noun, `_mut` for the
   mutable one (`Board::peripheral`, `peripheral_mut`); a state reads
-  as the state (`halted`).  How a run ended is a `*Run` (`Run`,
+  as the state (`halted`).  A builder's adder is the noun, as std's
+  `Command::arg` and `thread::Builder::name` are (`Builder::memory`,
+  `Builder::peripheral`); a live object's is `add_*`
+  (`Machine::add_peripheral`, `Cpu::add_code_hook`).  How a run ended is a `*Run` (`Run`,
   `LimitedRun`, `BoardRun`); a gdb session is not a run, so how one
   ended is not a `*Run` (`Ending`).  `restore` is a snapshot's alone.
 - Time words (PLAN.md, Decisions): an instant is `Time` on the board,
