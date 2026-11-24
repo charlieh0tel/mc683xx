@@ -320,9 +320,9 @@ struct MachineState {
 /// registers.data[0] = 40;
 /// registers.data[1] = 2;
 /// let mut limits = Limits::default();
-/// limits.until = Some(RETURN);
+/// limits.reach = Some(RETURN);
 /// let run = machine.run_limited(limits);
-/// assert_eq!(run.end, End::Until);
+/// assert_eq!(run.end, End::Reached);
 /// assert_eq!(machine.cpu.registers.data[0], 42);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```

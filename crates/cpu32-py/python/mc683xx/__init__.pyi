@@ -490,11 +490,11 @@ class End:
         def stop(self) -> Stop: ...
 
     @final
-    class Until(End):
-        """PC reached `until`."""
+    class Reached(End):
+        """PC reached `reach`."""
 
         __match_args__ = ()
-        def __new__(cls) -> End.Until: ...
+        def __new__(cls) -> End.Reached: ...
         def __len__(self) -> int: ...
         def __getitem__(self, key: int, /) -> object: ...
 
@@ -1233,7 +1233,7 @@ class Machine:
         self,
         *,
         begin: int | None = None,
-        until: int | None = None,
+        reach: int | None = None,
         instructions: int | None = None,
         cycles: int | None = None,
     ) -> LimitedRun: ...

@@ -59,7 +59,7 @@ def test_a_class_per_variant_value_s_str_is_rust_s_display() -> None:
     assert str(background) == "background"
     assert str(mc683xx.Entry.DoubleBusFault(0x1234)) == "double bus fault, SSW 0x1234"
     assert str(mc683xx.Entry.Breakpoint()) == "breakpoint"
-    assert str(mc683xx.End.Until()) == "until"
+    assert str(mc683xx.End.Reached()) == "reached"
     assert str(mc683xx.End.Stop(mc683xx.Stop.Requested())) == "requested"
     assert repr(mc683xx.Stop.Budget()) == "Stop.Budget()"
 
@@ -69,6 +69,6 @@ def test_value_classes_compare_and_hash_by_value() -> None:
     assert reset == mc683xx.Event.Reset(0, mc683xx.ResetCause.POWER_ON)
     assert reset != mc683xx.Event.Reset(1, mc683xx.ResetCause.POWER_ON)
     assert len({reset, mc683xx.Event.Reset(0, mc683xx.ResetCause.POWER_ON)}) == 1
-    until = mc683xx.End.Until()
-    assert hash(until) == hash(mc683xx.End.Until())
-    assert len({until, mc683xx.End.Instructions()}) == 2
+    reached = mc683xx.End.Reached()
+    assert hash(reached) == hash(mc683xx.End.Reached())
+    assert len({reached, mc683xx.End.Instructions()}) == 2

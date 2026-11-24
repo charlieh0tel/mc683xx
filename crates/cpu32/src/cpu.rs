@@ -679,8 +679,8 @@ impl Cpu {
     /// The end `limits` make before the next instruction, if one, the
     /// run having started at instruction count `first`.
     fn limit_reached(&self, limits: &Limits, first: u64) -> Option<bare::End> {
-        if limits.until == Some(self.registers.pc) {
-            return Some(bare::End::Until);
+        if limits.reach == Some(self.registers.pc) {
+            return Some(bare::End::Reached);
         }
         limits
             .instructions

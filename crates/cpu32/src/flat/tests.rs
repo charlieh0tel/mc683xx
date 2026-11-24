@@ -92,21 +92,21 @@ fn machine(code: &[u16]) -> Machine {
     machine
 }
 
-/// Until [`RETURN`].
-const fn until_return() -> Limits {
+/// Limits reaching [`RETURN`].
+const fn reaching_return() -> Limits {
     Limits {
         cycles: None,
         instructions: None,
         steps: None,
-        until: Some(Address(RETURN)),
+        reach: Some(Address(RETURN)),
     }
 }
 
 #[test]
 fn a_call_at_a_high_address_runs_until_it_returns() {
     let mut machine = machine(&[MOVEQ_1_D0, RTS]);
-    let run = machine.run_limited(until_return());
-    assert_eq!(run.end, End::Until);
+    let run = machine.run_limited(reaching_return());
+    assert_eq!(run.end, End::Reached);
     assert_eq!(machine.cpu.registers.data[0], 1);
     assert_eq!(machine.cpu.registers.pc.0, RETURN);
     assert_eq!(machine.cpu.instructions(), 2);
@@ -118,7 +118,7 @@ fn an_instruction_limit_stops_the_run() {
     let mut machine = machine(&[NOP, NOP, NOP, RTS]);
     let run = machine.run_limited(Limits {
         instructions: Some(2),
-        ..until_return()
+        ..reaching_return()
     });
     assert_eq!(run.end, End::Instructions);
     assert_eq!(machine.cpu.registers.pc.0, CODE + 4);
@@ -136,19 +136,19 @@ fn until_is_checked_before_the_code_hooks_there() {
             ControlFlow::Break(())
         });
     let at_code = Limits {
-        until: Some(Address(CODE)),
+        reach: Some(Address(CODE)),
         ..Limits::default()
     };
-    assert_eq!(machine.run_limited(at_code).end, End::Until);
+    assert_eq!(machine.run_limited(at_code).end, End::Reached);
     assert_eq!(*called.borrow(), 0);
-    let run = machine.run_limited(until_return());
+    let run = machine.run_limited(reaching_return());
     assert!(matches!(run.end, End::Stop(crate::cpu::Stop::Hook(_))));
     assert_eq!(*called.borrow(), 1);
     // A resume skips the hook; clearing the skip calls it again.
     machine.cpu.clear_resume();
-    machine.run_limited(until_return());
+    machine.run_limited(reaching_return());
     assert_eq!(*called.borrow(), 2);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     assert_eq!(*called.borrow(), 2);
 }
 
@@ -236,7 +236,7 @@ fn mapping_and_unmapping_again_and_again_holds_no_more() {
     assert_eq!(after.regions, before.regions);
     assert_eq!(after.bytes, before.bytes);
     assert_eq!(after.slots, before.slots + 2);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
 }
 
 #[test]
@@ -292,14 +292,14 @@ fn a_trimmed_map_keeps_its_permissions_and_serves_the_core() {
     machine
         .write(Address(CODE), &bytes(&[MOVE_WORD_A0_TO_D0, RTS]))
         .unwrap();
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     assert_eq!(machine.cpu.registers.data[0], 0x0303);
 }
 
 #[test]
 fn code_mapped_again_where_it_was_unmapped_is_fetched_anew() {
     let mut machine = machine(&[MOVEQ_1_D0, RTS]);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     machine.unmap(Address(CODE), PAGE_BYTES).unwrap();
     machine
         .map(Address(CODE), PAGE_BYTES, &bytes(&[MOVEQ_2_D0, RTS]))
@@ -309,7 +309,7 @@ fn code_mapped_again_where_it_was_unmapped_is_fetched_anew() {
         .unwrap();
     machine.cpu.registers.ssp = Address(STACK - 4);
     machine.cpu.registers.pc = Address(CODE);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     assert_eq!(machine.cpu.registers.data[0], 2);
 }
 
@@ -408,7 +408,7 @@ fn a_peripheral_takes_a_long_in_one_access() {
         )
         .unwrap();
     machine.cpu.registers.set_address(0, PERIPHERAL + 1);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     assert_eq!(machine.cpu.registers.data[0], PERIPHERAL + 1);
     let cycles = cycles.borrow();
     assert_eq!(cycles.len(), 2);
@@ -442,7 +442,7 @@ fn a_write_hook_sees_a_long_s_previous_value_but_not_a_peripheral_s() {
                 .push((access.address.0, access.size, access.previous));
             ControlFlow::Continue(())
         });
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     assert_eq!(
         *seen.borrow(),
         [
@@ -463,7 +463,7 @@ fn a_watched_odd_long_write_at_a_region_s_last_byte_is_an_address_error() {
     );
     machine.cpu.set_stop_on_fault(true);
     machine.cpu.registers.set_address(0, last);
-    let End::Fault(fault) = machine.run_limited(until_return()).end else {
+    let End::Fault(fault) = machine.run_limited(reaching_return()).end else {
         panic!("no fault");
     };
     assert_eq!(fault.cause, FaultCause::AddressError);
@@ -481,7 +481,7 @@ fn a_word_past_a_peripheral_s_end_is_a_bus_error() {
         .unwrap();
     machine.cpu.set_stop_on_fault(true);
     machine.cpu.registers.set_address(0, PERIPHERAL + 1);
-    let End::Fault(fault) = machine.run_limited(until_return()).end else {
+    let End::Fault(fault) = machine.run_limited(reaching_return()).end else {
         panic!("no fault");
     };
     assert_eq!(fault.address, Address(PERIPHERAL + 1));
@@ -569,10 +569,10 @@ fn a_requested_interrupt_is_taken_through_its_vector() {
     machine.write(Address(HANDLER), &bytes(&STOP)).unwrap();
     machine.request_interrupt(IrqPin::try_from(3).unwrap(), Some(Vector(USER_VECTOR)));
     let run = machine.run_limited(Limits {
-        until: Some(Address(HANDLER)),
+        reach: Some(Address(HANDLER)),
         ..Limits::default()
     });
-    assert_eq!(run.end, End::Until);
+    assert_eq!(run.end, End::Reached);
     assert_eq!(machine.cpu.instructions(), 0, "taken before the first");
     assert_eq!(machine.cpu.registers.interrupt_mask().get(), 3);
     machine.clear_interrupt(IrqPin::try_from(3).unwrap());
@@ -584,7 +584,7 @@ fn a_requested_interrupt_is_taken_through_its_vector() {
 #[test]
 fn the_format_matches_its_golden() {
     let mut machine = machine(&[MOVEQ_1_D0, RTS]);
-    machine.run_limited(until_return());
+    machine.run_limited(reaching_return());
     machine.request_interrupt(IrqPin::try_from(3).unwrap(), Some(Vector(0x40)));
     machine
         .add_peripheral(Address(PERIPHERAL)..=Address(PERIPHERAL), Box::new(Fixed))
@@ -605,7 +605,7 @@ fn the_format_matches_its_golden() {
 fn a_snapshot_restores_memory_registers_and_requests() {
     let mut machine = machine(&[MOVEQ_1_D0, RTS]);
     let snapshot = machine.save().unwrap();
-    machine.run_limited(until_return());
+    machine.run_limited(reaching_return());
     machine.write(Address(0x100), &[9]).unwrap();
     machine.restore(&snapshot).unwrap();
     assert_eq!(machine.cpu.registers.pc.0, CODE);
@@ -613,7 +613,7 @@ fn a_snapshot_restores_memory_registers_and_requests() {
     let mut byte = [0];
     machine.read(Address(0x100), &mut byte).unwrap();
     assert_eq!(byte, [0]);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
 }
 
 /// The format of a [`Latch`]'s snapshot.
@@ -888,7 +888,7 @@ fn stacking_writes_are_flagged_to_hooks() {
         },
     );
     machine.run_limited(Limits {
-        until: Some(Address(HANDLER)),
+        reach: Some(Address(HANDLER)),
         ..Limits::default()
     });
     let seen = seen.borrow();
@@ -970,7 +970,7 @@ fn hooked(code: &[u16]) -> Vec<Seen> {
     let log = Rc::default();
     let rts = Address(CODE).offset(2 * (code.len() as u32 - 1));
     watch_ram(&mut machine, &log, rts);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     log.take()
 }
 
@@ -1042,7 +1042,7 @@ fn a_long_that_faults_on_its_second_word_is_not_seen() {
                 into.borrow_mut().push((access.address.0, access.size));
                 ControlFlow::Continue(())
             });
-        let End::Fault(fault) = machine.run_limited(until_return()).end else {
+        let End::Fault(fault) = machine.run_limited(reaching_return()).end else {
             panic!("no fault");
         };
         assert_eq!(fault.address, Address(RAM));
@@ -1059,7 +1059,7 @@ fn without_the_long_bus_a_hook_sees_a_long_as_two_words() {
     machine.cpu.registers.set_address(0, DATA);
     let log = Rc::default();
     watch_ram(&mut machine, &log, Address(CODE + 2));
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     assert_eq!(
         log.take(),
         [

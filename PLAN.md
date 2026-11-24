@@ -1002,7 +1002,7 @@ chip beside `Mc68331`.
   `map`, `unmap`, `protect` (`start, length`), `read`, `write`,
   `add_peripheral(begin, end, object)` (`read(BusCycle)`,
   `write(BusCycle, value)`), registers as the chip's,
-  `run_limited(begin=, until=, instructions=, cycles=)`,
+  `run_limited(begin=, reach=, instructions=, cycles=)`,
   `stop_request()` (a `StopRequest`, Rust's `bus::StopRequest`: a
   callable's request ends the run `Stop.Requested()` once the callables have
   run, one left from before a run is withdrawn as it starts),
@@ -1011,7 +1011,7 @@ chip beside `Mc68331`.
   `stops_on_fault`, `request_interrupt(pin, vector)`,
   `clear_interrupt`, `take_exception(vector, level=None)`, `reset`,
   `save`, `restore`.  `run_limited` gives a `LimitedRun(cycles, end)`,
-  its `End` Rust's (`End.Stop(stop)`, `End.Until()`,
+  its `End` Rust's (`End.Stop(stop)`, `End.Reached()`,
   `End.Instructions()`, `End.Fault(fault)`, their values the fields
   `stop` and `fault`) less `End::Intercepted`, which the run answers
   within it.  Its hooks may write the
@@ -2474,7 +2474,7 @@ and `mc683xx.Machine` in Python (see Python).
   entered, the registers and the hooks at PC as before, the frame's
   writes before the fault kept (memory is not rolled back).  Not on the chip, whose interrupts
   come from its modules and pins.
-- **Runs:** `Cpu::run_limited(limits)`: `until` (checked at each
+- **Runs:** `Cpu::run_limited(limits)`: `reach` (checked at each
   instruction boundary before an interrupt is taken or a hook called
   there), `instructions`, and an optional cycle budget; with none, a
   `stop` ends the run at once instead of waiting it out.  The limit

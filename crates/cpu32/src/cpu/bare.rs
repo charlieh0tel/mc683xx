@@ -61,7 +61,7 @@ pub struct Limits {
     pub steps: Option<u64>,
     /// An address: the run ends when PC reaches it at an instruction
     /// boundary, before an interrupt is taken or a hook called there.
-    pub until: Option<Address>,
+    pub reach: Option<Address>,
 }
 
 /// Why a fault that stopped the run was one.
@@ -166,8 +166,8 @@ pub enum TakeExceptionError {
 pub enum End {
     /// As [`Cpu::run_for`] ends.
     Stop(Stop),
-    /// PC reached [`Limits::until`].
-    Until,
+    /// PC reached [`Limits::reach`].
+    Reached,
     /// It ran [`Limits::instructions`].
     Instructions,
     /// It took [`Limits::steps`].
@@ -179,14 +179,14 @@ pub enum End {
 }
 
 /// A short lowercase name for each way a limited run ends, as
-/// [`Stop`]'s: its stop's name, or `until`, `instructions`, `steps`,
+/// [`Stop`]'s: its stop's name, or `reached`, `instructions`, `steps`,
 /// `fault` or `intercepted`.  The detail a variant holds (the fault, the
 /// exception) is not part of it.
 impl fmt::Display for End {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Stop(stop) => stop.fmt(formatter),
-            Self::Until => formatter.write_str("until"),
+            Self::Reached => formatter.write_str("reached"),
             Self::Instructions => formatter.write_str("instructions"),
             Self::Steps => formatter.write_str("steps"),
             Self::Fault(_) => formatter.write_str("fault"),
@@ -265,7 +265,7 @@ pub(crate) struct Bare {
 
 impl Cpu {
     /// Runs as [`run_for`](Self::run_for) does, but also until PC reaches
-    /// `limits.until`, `limits.instructions` have run, a fault stops it
+    /// `limits.reach`, `limits.instructions` have run, a fault stops it
     /// (`set_stop_on_fault`) or an exception is intercepted
     /// (`set_intercepted`).  With no cycle budget it runs until one of
     /// those or a stop.

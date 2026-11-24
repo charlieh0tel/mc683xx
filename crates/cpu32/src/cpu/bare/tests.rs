@@ -195,7 +195,7 @@ fn an_end_prints_its_short_name() {
     });
     let names = [
         (End::Stop(Stop::Budget), "budget"),
-        (End::Until, "until"),
+        (End::Reached, "reached"),
         (End::Instructions, "instructions"),
         (End::Steps, "steps"),
         (intercepted, "intercepted"),
