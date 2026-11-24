@@ -1597,7 +1597,9 @@ device model's way to answer what the firmware reads of RAM.  A long
 across two pages of memory is one call; a long with a byte a
 peripheral serves, or memory the decode serves off the core's pages
 (a select a peripheral shares), is none, nor are fetches, misaligned
-words and longs, and looks with no cycle (`peek_bytes`, `peek`, gdb).
+words and longs, reads the pages' permissions refuse (a fault, whose
+answer would be discarded), and looks with no cycle (`peek_bytes`,
+`peek`, gdb).
 A pre-read hook is a device model that answers an operand; the read
 hooks observe bus cycles.  So on an `Mc68331` or a `Board`, whose long
 is two word cycles, a long read is one pre-read call and two read hook

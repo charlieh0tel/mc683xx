@@ -2424,8 +2424,9 @@ Adversarial review (2026-11-01):
   follow it): a long across two pages of memory is one call; a long
   with a byte the bus serves is none, its cycles as usual, as the bus
   has no bytes to copy until it runs them; a misaligned word or long,
-  an address error, is none.  The cycles follow, timed by their pages,
-  refused by their permissions, shown to the read hooks with the
+  an address error, is none, and so is a read a page's permissions
+  refuse, a fault, as its answer would be discarded.  The cycles
+  follow, timed by their pages, shown to the read hooks with the
   served values.  Per range, removed by `remove_hook`, as the other
   memory hooks.  Pages with one stay on the fast path: an operand read
   checks one flag, set while any pre-read hook is installed, then the

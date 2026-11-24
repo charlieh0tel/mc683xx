@@ -1169,8 +1169,9 @@ but the exception hook cover an address range, on the address lines.
   says, so on the chip one pre-read call and two word read hook calls;
   a long across two pages of memory is one call too; a long with a byte the bus serves (a peripheral's, or
   memory the decode serves off the core's pages) is no call, nor is a
-  misaligned word or long, or a look with no cycle (`Memory::peek`, a
-  debugger's read).  The read hooks see the cycles after it, with the
+  misaligned word or long, a read its pages' permissions refuse (a
+  fault, whose answer would be discarded), or a look with no cycle
+  (`Memory::peek`, a debugger's read).  The read hooks see the cycles after it, with the
   values the copy gave; a stop takes effect when the instruction
   ends.
 - `add_read_hook`, `add_write_hook(range, f(&MemoryAccess))`: after

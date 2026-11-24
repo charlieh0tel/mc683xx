@@ -412,6 +412,36 @@ fn a_pre_read_hook_sees_no_fetch_write_or_misaligned_read() {
 }
 
 #[test]
+fn a_pre_read_hook_skips_a_read_its_page_s_permissions_refuse() {
+    // a long whose second word's page refuses reads: a fault, no call
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, NOP], &[]);
+    cpu.registers.set_address(0, DATA + PAGE_BYTES - 2);
+    cpu.memory
+        .protect(
+            Space::Supervisor,
+            Address(DATA + PAGE_BYTES),
+            PAGE_BYTES,
+            Permissions::WRITE,
+        )
+        .unwrap();
+    let calls = Rc::new(RefCell::new(0));
+    let into = Rc::clone(&calls);
+    cpu.add_pre_read_hook(
+        Address(DATA)..=Address(DATA + 2 * PAGE_BYTES),
+        move |_, _, _| {
+            *into.borrow_mut() += 1;
+            ControlFlow::Continue(())
+        },
+    );
+    step(&mut cpu, 1);
+    assert_eq!(
+        cpu.exception_taken().map(Exception::vector),
+        Some(Vector::BUS_ERROR)
+    );
+    assert_eq!(*calls.borrow(), 0);
+}
+
+#[test]
 fn a_pre_read_hook_slows_no_page_and_is_removed() {
     let mut cpu = prepared(&[NOP], &[]);
     let page = DATA + PAGE_BYTES;

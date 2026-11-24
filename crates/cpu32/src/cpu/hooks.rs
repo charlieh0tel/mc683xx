@@ -258,10 +258,10 @@ impl Cpu {
     /// with a byte the bus serves (a peripheral's, or memory the core's
     /// pages do not map) is no call, its cycles made as usual.  Not for
     /// a fetch, a misaligned word or long (an address error), or a look
-    /// with no cycle (`Memory::peek`, a debugger's read).  Its cycles
-    /// follow, timed as the pages time them and refused as their
-    /// permissions say; the read hooks see each with the value the copy
-    /// gave it.  If it stops the run, the instruction completes first.
+    /// with no cycle (`Memory::peek`, a debugger's read), nor a read its
+    /// pages' permissions refuse, a fault whose answer would be
+    /// discarded.  Its cycles follow, timed as the pages time them; the
+    /// read hooks see each with the value the copy gave it.  If it stops the run, the instruction completes first.
     pub fn add_pre_read_hook(
         &mut self,
         range: RangeInclusive<Address>,
@@ -547,7 +547,7 @@ impl Core<'_> {
 
     /// The pre-read hooks for an operand read of `size` at `address`
     /// in `function_code`'s space, aligned, that the core's memory serves
-    /// all of: each covering a byte of it, in the order installed, given
+    /// all of and its pages' permissions allow: each covering a byte of it, in the order installed, given
     /// the memory and a copy of its bytes.  The value the copy then
     /// holds, which answers the read; [`None`] if no hook was called.
     #[inline(never)]
@@ -564,6 +564,11 @@ impl Core<'_> {
         let length = size.bytes();
         let at = |offset: u32| memory.mask(address.offset(offset));
         if (memory.watched(at(0)) | memory.watched(at(length - 1))) & watch::PRE_READ == 0 {
+            return None;
+        }
+        // a refused read is a fault, whose answer would be discarded
+        let read_permitted = |offset| self.permitted(at(offset), function_code, BusCycleKind::Read);
+        if !read_permitted(0) || !read_permitted(length - 1) {
             return None;
         }
         let space = Space::of(function_code);
