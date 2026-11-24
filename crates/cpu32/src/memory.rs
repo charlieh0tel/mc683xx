@@ -135,6 +135,19 @@ pub(crate) mod watch {
 )]
 pub struct RegionId(usize);
 
+impl RegionId {
+    /// Its number, as [`Display`](fmt::Display) prints it: its slot in
+    /// the core's regions.
+    ///
+    /// Not part of the semver API: for the workspace's crates whose ids
+    /// wrap one.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn number(self) -> usize {
+        self.0
+    }
+}
+
 /// `region` and its number: `region 2`.
 impl fmt::Display for RegionId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
