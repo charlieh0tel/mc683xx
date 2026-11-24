@@ -396,7 +396,8 @@ pub trait Target {
     }
 }
 
-/// The bare CPU: one address space, whatever the function code.
+/// The bare CPU: one address space for memory, whatever the function
+/// code, which a peripheral's peek or poke sees.
 impl Target for Machine {
     type Error = Infallible;
 
@@ -407,10 +408,10 @@ impl Target for Machine {
     fn read_memory(
         &mut self,
         address: Address,
-        _function_code: FunctionCode,
+        function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<usize, AccessError<Infallible>> {
-        Ok(match self.read(address, data) {
+        Ok(match self.peek_bytes(address, function_code, data) {
             Ok(()) => data.len(),
             Err(error) => error.address().0.wrapping_sub(address.0) as usize,
         })
@@ -419,10 +420,10 @@ impl Target for Machine {
     fn write_memory(
         &mut self,
         address: Address,
-        _function_code: FunctionCode,
+        function_code: FunctionCode,
         data: &[u8],
     ) -> Result<(), AccessError<Infallible>> {
-        self.write(address, data)
+        self.poke_bytes(address, function_code, data)
             .map_err(|error| AccessError::Unserved(error.address()))
     }
 

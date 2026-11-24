@@ -189,7 +189,8 @@ pub trait MappedPeripheral: Save {
     /// Fills `data` with what byte read cycles from `cycle.address` up
     /// would return now, one byte an address, with none of their side
     /// effects (a flag a read clears, a FIFO a read pops): a debugger's
-    /// look, as the bare machine's [`read`](crate::flat::Machine::read),
+    /// look, as the bare machine's
+    /// [`peek_bytes`](crate::flat::Machine::peek_bytes),
     /// a chip's `peek` and gdb's memory reads take it.  `cycle` is the
     /// first byte's, a read of size [`Size::Byte`]; every byte of `data`
     /// is the peripheral's, and an access across several peripherals or
@@ -207,7 +208,8 @@ pub trait MappedPeripheral: Save {
     /// Stores `data` where byte write cycles from `cycle.address` up
     /// would, one byte an address, with none of their side effects (a
     /// command it starts, a transmitter it loads): a debugger's poke,
-    /// as the bare machine's [`write`](crate::flat::Machine::write), a
+    /// as the bare machine's
+    /// [`poke_bytes`](crate::flat::Machine::poke_bytes), a
     /// chip's `poke` and gdb's memory writes make it.  `cycle` is the
     /// first byte's, a write of size [`Size::Byte`], and every byte is
     /// the peripheral's, as for `peek`.  Whether it took them; by

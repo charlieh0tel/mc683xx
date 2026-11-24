@@ -67,7 +67,7 @@ class CpuHarness:
     def __init__(self) -> None:
         self.cpu = mc683xx.Machine()
         self.cpu.map(0, RAM_BYTES)
-        self.cpu.write(0, struct.pack(">II", STACK, START))
+        self.cpu.poke_bytes(0, struct.pack(">II", STACK, START))
         self.cpu.reset()
         self.cpu.add_code_hook(self.on_code)
         self.cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 1, self)

@@ -91,7 +91,7 @@ rename renames the Python name with it.  The deliberate differences:
 - **Builtins:** an argument Rust names `id` or `bytes`, Python
   builtins, is named for what it holds: `remove_hook(hook)`,
   `unobserve(observer)`, `peripheral(peripheral)`,
-  `remove_peripheral(peripheral)`, `write(address,
+  `remove_peripheral(peripheral)`, `poke_bytes(address,
   data)`.
 - **Properties:** a Rust accessor of plain state, with no arguments, is
   a read-only property (`now`, `halted`, `instructions`,
@@ -1019,15 +1019,15 @@ chip.run_for(500)
   whole pages; a fixed memory off a page boundary, past ADDR[23:0] or
   overlapping another; a register value that does not fit; a host cycle of a
   size other than 1, 2 or 4, at an odd address, or of a value wider
-  than it; a bare `Machine`'s `read` of more
+  than it; a bare `Machine`'s `peek_bytes` of more
   bytes than 32 bits of addresses; a name a `Board` lacks, a
   peripheral's, memory's, net's or endpoint's (an id a `Mc68331`'s
   builder never gave is a `KeyError`).
 - `mc683xx.BusCycleError`: a host cycle or peek that gave no value,
   Rust's `BusCycleError`, as one of its two subclasses:
   - `mc683xx.BusError`: a host cycle that ended in a bus error, or that
-    nothing answers; a bare `Machine`'s `read` or `write` of bytes no
-    map covers.
+    nothing answers; a bare `Machine`'s `peek_bytes` or `poke_bytes`
+    of bytes no map covers.
   - `mc683xx.UnpeekableError`: a peek or poke only a real cycle can
     answer; its `address` is the first byte declined (Rust's
     `BusCycleError::Unpeekable(address)`, `PeekError::Unpeekable`), the
@@ -1433,7 +1433,7 @@ bare = mc683xx.Machine()
 bare.map(0, 64 << 10)  # RAM, zero, readable, writable, executable
 code = struct.pack(">3H", MOVEQ_5_D0, ADDQ_1_D0, RTS)
 bare.map(CALL, 2048, permissions="rx", contents=code)
-bare.write(CALL_STACK - 4, struct.pack(">I", CALL_RETURN))
+bare.poke_bytes(CALL_STACK - 4, struct.pack(">I", CALL_RETURN))
 bare.write_register("SR", 0x2700)
 bare.write_register("A7", CALL_STACK - 4)
 limited = bare.run_limited(begin=CALL, reach=CALL_RETURN)
@@ -1448,10 +1448,13 @@ assert bare.read_register("D0") == 6
   partly unmapped stays, with its permissions), `protect(start,
   length, permissions)`.  A hook's callable may map and unmap.  `restore`
   needs the maps the snapshot was saved with.
-  `read(address, length) -> bytes` and `write(address, data)` reach
-  mapped bytes whatever their permissions, with no bus cycle;
-  unmapped bytes raise `BusError`, and a `read` longer than 32 bits of
-  addresses `ValueError`, before anything is allocated.
+  `peek_bytes(address, length, function_code=...) -> bytes` and
+  `poke_bytes(address, data, function_code=...)` reach mapped bytes
+  whatever their permissions, with no bus cycle, as the chip's do;
+  unmapped bytes raise `BusError`, and a `peek_bytes` longer than 32
+  bits of addresses `ValueError`, before anything is allocated.
+  Memory is the same in every space; `function_code`, supervisor data
+  by default, is the space a peripheral's `peek` or `poke` sees.
 - **Peripherals:** `add_peripheral(begin, end, peripheral)` puts an
   object with `read(cycle) -> int` and `write(cycle, value)`, and
   `save() -> bytes` and `restore(snapshot)` if it saves (both or
@@ -1468,8 +1471,8 @@ assert bare.read_register("D0") == 6
   read-only peripheral needs no `BusError` of its own.  A `BusCycle` has
   `address` (32 bits), `size` (1, 2, or 4: a long operand the peripheral
   covers whole comes once, as 4), `function_code`, `now` and `stacking`.
-  `read` and `write` reach a peripheral's bytes too, through its
-  optional `peek(cycle, length) -> bytes | None` and `poke(cycle,
+  `peek_bytes` and `poke_bytes` reach a peripheral's bytes too,
+  through its optional `peek(cycle, length) -> bytes | None` and `poke(cycle,
   data) -> bool`, with no cycle's side effects, once for each run of
   its bytes, `cycle.address` the first's; one with neither, or
   returning `None` or `False`, raises `UnpeekableError`, and an
@@ -1573,14 +1576,14 @@ length, is what the cycle reads, and stays in memory.  A
 `stacking`.  It is a device model's way to patch a few bytes of RAM
 just before the firmware reads them.  Fetches, peripherals' reads,
 memory the decode serves off the core's pages (a select a peripheral
-shares), and looks with no cycle (`read`, `peek`, gdb) call no
+shares), and looks with no cycle (`peek_bytes`, `peek`, gdb) call no
 pre-read hook.  The read hooks see the cycle after it, the value it
 read.  On the bare `Machine`, unlike its other hooks, it runs within
 the run, so it must not call into the machine; a truthy result stops
 the run once the instruction completes.
 
 ```python
-bare.write(0x6000, struct.pack(">H", 0x1111))
+bare.poke_bytes(0x6000, struct.pack(">H", 0x1111))
 
 
 def patch(read: mc683xx.PendingRead, data: bytearray) -> None:
@@ -1589,8 +1592,8 @@ def patch(read: mc683xx.PendingRead, data: bytearray) -> None:
 
 
 patching = bare.add_pre_read_hook(patch, 0x6000, 0x6001)
-bare.write(CALL, struct.pack(">HIH", 0x3039, 0x6000, RTS))  # move.w $6000,d0
-bare.write(CALL_STACK - 4, struct.pack(">I", CALL_RETURN))
+bare.poke_bytes(CALL, struct.pack(">HIH", 0x3039, 0x6000, RTS))  # move.w $6000,d0
+bare.poke_bytes(CALL_STACK - 4, struct.pack(">I", CALL_RETURN))
 bare.write_register("A7", CALL_STACK - 4)
 assert bare.run_limited(begin=CALL, reach=CALL_RETURN).end == mc683xx.End.Reached()
 assert bare.read_register("D0") & 0xFFFF == 0x2222
@@ -1631,14 +1634,14 @@ def stub(instruction: mc683xx.Instruction) -> None:
     """A stubbed routine: D0 = 99, then return as RTS would."""
     calls.append(instruction.pc)
     sp = bare.read_register("A7")
-    (back,) = struct.unpack(">I", bare.read(sp, 4))
+    (back,) = struct.unpack(">I", bare.peek_bytes(sp, 4))
     bare.write_register("D0", 99)
     bare.write_register("A7", sp + 4)
     bare.write_register("PC", back)
 
 
 stubbed = bare.add_code_hook(stub, CALL, CALL)
-bare.write(CALL_STACK - 4, struct.pack(">I", CALL_RETURN))
+bare.poke_bytes(CALL_STACK - 4, struct.pack(">I", CALL_RETURN))
 bare.write_register("A7", CALL_STACK - 4)
 assert bare.run_limited(begin=CALL, reach=CALL_RETURN).end == mc683xx.End.Reached()
 assert bare.read_register("D0") == 99 and calls == [CALL]
@@ -1680,9 +1683,9 @@ stopped CPU stays stopped).
 
 ```python
 TRAP_1, TRAP_7 = 0x4E41, 0x4E47
-bare.write(CALL, struct.pack(">3H", TRAP_1, TRAP_7, RTS))
-bare.write(4 * (32 + 7), struct.pack(">I", 0x4000))  # trap #7's handler
-bare.write(0x4000, struct.pack(">H", RTS))
+bare.poke_bytes(CALL, struct.pack(">3H", TRAP_1, TRAP_7, RTS))
+bare.poke_bytes(4 * (32 + 7), struct.pack(">I", 0x4000))  # trap #7's handler
+bare.poke_bytes(0x4000, struct.pack(">H", RTS))
 
 
 def trap_1(intercepted: mc683xx.Intercepted) -> bool:
@@ -1697,7 +1700,7 @@ assert bare.run_limited(begin=CALL, reach=0x4000).end == mc683xx.End.Reached()
 bare.remove_hook(kernel_call)
 
 bare.set_stop_on_fault(True)
-bare.write(CALL, struct.pack(">2H", 0x2010, RTS))  # move.l (a0),d0
+bare.poke_bytes(CALL, struct.pack(">2H", 0x2010, RTS))  # move.l (a0),d0
 bare.write_register("A0", 0x90000000)
 match bare.run_limited(begin=CALL, reach=CALL_RETURN).end:
     case mc683xx.End.Fault(fault):
@@ -1727,7 +1730,7 @@ intercept hook covers is the hook's: one no hook handles is taken
 natively, with no stop.
 
 ```python
-bare.write(CALL, struct.pack(">2H", TRAP_7, RTS))
+bare.poke_bytes(CALL, struct.pack(">2H", TRAP_7, RTS))
 bare.set_stop_on_exception({32 + 7})
 match bare.run_limited(begin=CALL, reach=CALL_RETURN).end:
     case mc683xx.End.Exception(vector, pc):
@@ -1752,7 +1755,7 @@ def stop_at(intercepted: mc683xx.Intercepted) -> bool:
     return True
 
 
-bare.write(CALL, struct.pack(">2H", TRAP_7, RTS))
+bare.poke_bytes(CALL, struct.pack(">2H", TRAP_7, RTS))
 stopping = bare.add_intercept_hook(stop_at, [32 + 7])
 run = bare.run_limited(begin=CALL, reach=CALL_RETURN)
 assert run.end == mc683xx.End.Stop(mc683xx.Stop.Requested())
@@ -1781,7 +1784,7 @@ LATCH, MOVE_B_D0_TO_A0 = 0xF00000, 0x1080  # move.b d0,(a0)
 latch = Latch()
 bare.add_peripheral(LATCH, LATCH, latch)
 bare.protect(LATCH, 2048, "r")
-bare.write(CALL, struct.pack(">2H", MOVE_B_D0_TO_A0, RTS))
+bare.poke_bytes(CALL, struct.pack(">2H", MOVE_B_D0_TO_A0, RTS))
 bare.write_register("A0", LATCH)
 bare.write_register("D0", 0x5A)
 bare.set_stop_on_fault(True)
@@ -1804,7 +1807,7 @@ The port of a Unicorn harness is mechanical:
 | `mem_map(address, size, perms)` | `map(start, length, permissions="rwx", contents=...)`, 2K pages |
 | `mem_unmap`, `mem_protect(address, size, perms)` | `unmap`, `protect(start, length, "rx")` |
 | `UC_PROT_READ`, `_WRITE`, `_EXEC` | `"r"`, `"w"`, `"x"` |
-| `mem_write(address, data)`, `mem_read(address, size)` | `write(address, data)`, `read(address, length)` |
+| `mem_write(address, data)`, `mem_read(address, size)` | `poke_bytes(address, data)`, `peek_bytes(address, length)` |
 | `reg_write(UC_M68K_REG_D0, value)`, `reg_read` | `write_register("D0", value)`, `read_register("D0")` |
 | `emu_start(begin, until, timeout, count)` | `run_limited(begin=begin, reach=until, instructions=count, cycles=...)`: no host time |
 | `emu_stop()` in a hook | `stop_request().request()`, or return a truthy value |

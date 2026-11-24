@@ -191,8 +191,8 @@ chip's, the board's), not a root `VERSION` that could be the crate's.
   decline by default, which is `BusCycleError::Unpeekable`, naming the
   first byte declined, as `PeekError::Unpeekable` does, never a
   guess: only the peripheral knows which of its registers a look
-  leaves alone (decided 2026-11-23).  The bare machine's `read` and
-  `write`, gdb's memory access and a board peripheral's
+  leaves alone (decided 2026-11-23).  The bare machine's `peek_bytes`
+  and `poke_bytes`, gdb's memory access and a board peripheral's
   (`Peripheral::peek`, `poke`, through `MappedAdapter` and the board's
   routers) take the same path.  A poke is not all-or-nothing where a
   peripheral is involved: a peripheral cannot be asked whether it
@@ -1040,7 +1040,7 @@ chip beside `Mc68331`.
   pass `mypy --strict` against the stubs.
 - **Bare CPU:** `Machine(address_bits=32)`, `mc683xx_cpu32::flat::Machine` bound
   (see Bare CPU; docs/python.md, Bare CPU, with the Unicorn mapping):
-  `map`, `unmap`, `protect` (`start, length`), `read`, `write`,
+  `map`, `unmap`, `protect` (`start, length`), `peek_bytes`, `poke_bytes`,
   `add_peripheral(begin, end, object)` (`read(BusCycle)`,
   `write(BusCycle, value)`; it returns the peripheral's number) and
   `remove_peripheral(id)`, registers as the chip's,
@@ -2336,8 +2336,9 @@ Adversarial review (2026-11-01):
   is our choice.  It serves only what the fast table serves, so a
   hooked or protected page still fetches through the slow path.
 - A debugger's cycle-free read and write (`Memory::read_bytes`,
-  `write_bytes`; the bare `Machine::read` and `write` and the chip's
-  `Mc68331::peek_bytes` and `poke_bytes` reach memory through these)
+  `write_bytes`; the bare `Machine::peek_bytes` and `poke_bytes` and
+  the chip's `Mc68331::peek_bytes` and `poke_bytes` reach memory
+  through these)
   go to the bytes a supervisor page reads, whatever its permissions.
   So a write then a read give back what was written, and what the CPU reads and runs is
   what the debugger wrote: a ROM's bytes, where its page writes to the

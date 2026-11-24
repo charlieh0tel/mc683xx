@@ -1360,8 +1360,10 @@ first.  None moves the chip's time or shows in the trace.
   peripheral's through its `MappedPeripheral::poke`, each that would
   take them.  A module's register, or a peripheral that declines, is
   `BusCycleError::Unpeekable`, what came before it stored.  The bare
-  `flat::Machine`'s `read` and `write` reach a peripheral's bytes the
-  same way, failing with `PeekError::Unpeekable` where it declines.
+  `flat::Machine`'s `peek_bytes(address, function_code, data)` and
+  `poke_bytes` reach a peripheral's bytes the same way, in
+  `function_code`'s space (memory is the same in every space), failing
+  with `PeekError::Unpeekable` where it declines.
 - A peripheral's `peek(cycle, data) -> bool` and `poke(cycle, data)
   -> bool` take a range: `cycle` is the first byte's, a byte an
   address from it up, all the peripheral's.  The chip, the bare

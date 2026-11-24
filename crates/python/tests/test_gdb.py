@@ -53,8 +53,8 @@ def cpu(program: list[int] = PROGRAM) -> mc683xx.Machine:
     """RAM from zero with the reset vectors and `program` at START."""
     bare = mc683xx.Machine()
     bare.map(0, RAM_BYTES)
-    bare.write(0, struct.pack(">II", STACK, START))
-    bare.write(START, words(program))
+    bare.poke_bytes(0, struct.pack(">II", STACK, START))
+    bare.poke_bytes(START, words(program))
     bare.reset()
     bare.write_register("A0", STORE)
     return bare
@@ -80,7 +80,7 @@ def test_gdb_runs_the_bare_cpu_with_its_python_hooks() -> None:
     assert replies[4] == "OK"
     assert calls == [STORE_PC]
     assert bare.read_register("PC") == START
-    assert bare.read(STORE, 2) == b"\xab\xcd"
+    assert bare.peek_bytes(STORE, 2) == b"\xab\xcd"
     # The CPU runs again once gdb has let go, the breakpoint gone.
     assert bare.run_limited(instructions=8).end == mc683xx.End.Instructions()
 

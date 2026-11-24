@@ -85,7 +85,11 @@ fn machine(code: &[u16]) -> Machine {
         .map(Address(CODE), PAGE_BYTES, &bytes(code))
         .unwrap();
     machine
-        .write(Address(STACK - 4), &RETURN.to_be_bytes())
+        .poke_bytes(
+            Address(STACK - 4),
+            FunctionCode::SupervisorData,
+            &RETURN.to_be_bytes(),
+        )
         .unwrap();
     machine.cpu.registers.set_sr(status::S);
     machine.cpu.registers.ssp = Address(STACK - 4);
@@ -164,22 +168,26 @@ fn maps_do_not_overlap_and_unmapped_bytes_are_refused() {
     );
     let mut buffer = [0; 4];
     assert_eq!(
-        machine.read(Address(RAM - 2), &mut buffer),
+        machine.peek_bytes(Address(RAM - 2), FunctionCode::SupervisorData, &mut buffer),
         Err(PeekError::Unserved(Unserved(Address(RAM))))
     );
     assert_eq!(
-        machine.write(Address(RAM - 2), &[1; 4]),
+        machine.poke_bytes(Address(RAM - 2), FunctionCode::SupervisorData, &[1; 4]),
         Err(PeekError::Unserved(Unserved(Address(RAM))))
     );
-    machine.read(Address(RAM - 4), &mut buffer).unwrap();
+    machine
+        .peek_bytes(Address(RAM - 4), FunctionCode::SupervisorData, &mut buffer)
+        .unwrap();
     assert_eq!(buffer, [0; 4], "a refused write writes nothing");
     machine.unmap(Address(0), RAM).unwrap();
     assert_eq!(
-        machine.read(Address(0), &mut buffer),
+        machine.peek_bytes(Address(0), FunctionCode::SupervisorData, &mut buffer),
         Err(PeekError::Unserved(Unserved(Address(0))))
     );
     machine.map(Address(0), PAGE_BYTES, &[7]).unwrap();
-    machine.read(Address(0), &mut buffer[..1]).unwrap();
+    machine
+        .peek_bytes(Address(0), FunctionCode::SupervisorData, &mut buffer[..1])
+        .unwrap();
     assert_eq!(buffer[0], 7);
 }
 
@@ -210,7 +218,10 @@ fn spare_pages(machine: &Machine) -> Vec<Option<u8>> {
         .map(|page| {
             let mut byte = [0];
             let at = Address(SPARE + page * PAGE_BYTES);
-            machine.read(at, &mut byte).ok().map(|()| byte[0])
+            machine
+                .peek_bytes(at, FunctionCode::SupervisorData, &mut byte)
+                .ok()
+                .map(|()| byte[0])
         })
         .collect()
 }
@@ -258,7 +269,11 @@ fn a_partial_unmap_splits_or_trims_a_map_and_keeps_the_rest() {
     assert_eq!(spare_pages(&machine), [Some(0), None, None, Some(3)]);
     assert_eq!(machine.cpu.memory.held().bytes, MACHINE_BYTES + 2 * page);
     machine
-        .write(Address(SPARE + 3 * PAGE_BYTES), &[7])
+        .poke_bytes(
+            Address(SPARE + 3 * PAGE_BYTES),
+            FunctionCode::SupervisorData,
+            &[7],
+        )
         .unwrap();
     assert_eq!(spare_pages(&machine), [Some(0), None, None, Some(7)]);
     // Both parts in one unmap, with the unmapped page between them.
@@ -291,7 +306,11 @@ fn a_trimmed_map_keeps_its_permissions_and_serves_the_core() {
     );
     machine.cpu.registers.set_address(0, last.0);
     machine
-        .write(Address(CODE), &bytes(&[MOVE_WORD_A0_TO_D0, RTS]))
+        .poke_bytes(
+            Address(CODE),
+            FunctionCode::SupervisorData,
+            &bytes(&[MOVE_WORD_A0_TO_D0, RTS]),
+        )
         .unwrap();
     assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     assert_eq!(machine.cpu.registers.data[0], 0x0303);
@@ -306,7 +325,11 @@ fn code_mapped_again_where_it_was_unmapped_is_fetched_anew() {
         .map(Address(CODE), PAGE_BYTES, &bytes(&[MOVEQ_2_D0, RTS]))
         .unwrap();
     machine
-        .write(Address(STACK - 4), &RETURN.to_be_bytes())
+        .poke_bytes(
+            Address(STACK - 4),
+            FunctionCode::SupervisorData,
+            &RETURN.to_be_bytes(),
+        )
         .unwrap();
     machine.cpu.registers.ssp = Address(STACK - 4);
     machine.cpu.registers.pc = Address(CODE);
@@ -352,11 +375,13 @@ fn unmap_leaves_the_bytes_of_a_region_the_host_mapped() {
     machine.unmap(host_page(3), PAGE_BYTES).unwrap();
     assert_eq!(machine.cpu.memory.held(), held);
     let mut byte = [0];
-    machine.read(host_page(2), &mut byte).unwrap();
+    machine
+        .peek_bytes(host_page(2), FunctionCode::SupervisorData, &mut byte)
+        .unwrap();
     assert_eq!(byte, [6]);
     assert_eq!(spare_pages(&machine), [Some(0), Some(1), Some(2), Some(3)]);
     assert_eq!(
-        machine.read(host_page(0), &mut byte),
+        machine.peek_bytes(host_page(0), FunctionCode::SupervisorData, &mut byte),
         Err(PeekError::Unserved(Unserved(host_page(0))))
     );
 }
@@ -368,7 +393,13 @@ fn a_snapshot_restores_after_a_partial_unmap_only_if_taken_after_it() {
     machine.unmap(Address(SPARE), PAGE_BYTES).unwrap();
     let after = machine.save().unwrap();
     assert!(machine.restore(&before).is_err());
-    machine.write(Address(SPARE + PAGE_BYTES), &[9]).unwrap();
+    machine
+        .poke_bytes(
+            Address(SPARE + PAGE_BYTES),
+            FunctionCode::SupervisorData,
+            &[9],
+        )
+        .unwrap();
     machine.restore(&after).unwrap();
     assert_eq!(spare_pages(&machine), [None, Some(1), Some(2), Some(3)]);
 }
@@ -429,7 +460,11 @@ fn a_write_hook_sees_a_long_s_previous_value_but_not_a_peripheral_s() {
         )
         .unwrap();
     machine
-        .write(Address(DATA), &0x1122_3344_u32.to_be_bytes())
+        .poke_bytes(
+            Address(DATA),
+            FunctionCode::SupervisorData,
+            &0x1122_3344_u32.to_be_bytes(),
+        )
         .unwrap();
     machine.cpu.registers.data[0] = 0x1234_5678;
     machine.cpu.registers.set_address(0, DATA);
@@ -540,8 +575,9 @@ fn bkpt_with_no_cpu_space_responder_is_illegal() {
         .unwrap();
     let handler = vbr + 0x1000;
     machine
-        .write(
+        .poke_bytes(
             Address(vbr + Vector::ILLEGAL_INSTRUCTION.offset()),
+            FunctionCode::SupervisorData,
             &handler.to_be_bytes(),
         )
         .unwrap();
@@ -565,9 +601,19 @@ fn bkpt_with_no_cpu_space_responder_is_illegal() {
 fn a_requested_interrupt_is_taken_through_its_vector() {
     let mut machine = machine(&[NOP, RTS]);
     machine
-        .write(Address(u32::from(USER_VECTOR) * 4), &HANDLER.to_be_bytes())
+        .poke_bytes(
+            Address(u32::from(USER_VECTOR) * 4),
+            FunctionCode::SupervisorData,
+            &HANDLER.to_be_bytes(),
+        )
         .unwrap();
-    machine.write(Address(HANDLER), &bytes(&STOP)).unwrap();
+    machine
+        .poke_bytes(
+            Address(HANDLER),
+            FunctionCode::SupervisorData,
+            &bytes(&STOP),
+        )
+        .unwrap();
     machine.request_interrupt(IrqPin::try_from(3).unwrap(), Some(Vector(USER_VECTOR)));
     let run = machine.run_limited(Limits {
         reach: Some(Address(HANDLER)),
@@ -607,12 +653,16 @@ fn a_snapshot_restores_memory_registers_and_requests() {
     let mut machine = machine(&[MOVEQ_1_D0, RTS]);
     let snapshot = machine.save().unwrap();
     machine.run_limited(reaching_return());
-    machine.write(Address(0x100), &[9]).unwrap();
+    machine
+        .poke_bytes(Address(0x100), FunctionCode::SupervisorData, &[9])
+        .unwrap();
     machine.restore(&snapshot).unwrap();
     assert_eq!(machine.cpu.registers.pc.0, CODE);
     assert_eq!(machine.cpu.registers.data[0], 0);
     let mut byte = [0];
-    machine.read(Address(0x100), &mut byte).unwrap();
+    machine
+        .peek_bytes(Address(0x100), FunctionCode::SupervisorData, &mut byte)
+        .unwrap();
     assert_eq!(byte, [0]);
     assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
 }
@@ -877,7 +927,11 @@ fn stacking_writes_are_flagged_to_hooks() {
     let mut machine = machine(&[0x4e40]);
     let trap = u32::from(Vector::trap(0).0) * 4;
     machine
-        .write(Address(trap), &HANDLER.to_be_bytes())
+        .poke_bytes(
+            Address(trap),
+            FunctionCode::SupervisorData,
+            &HANDLER.to_be_bytes(),
+        )
         .unwrap();
     let seen = Rc::new(RefCell::new(Vec::new()));
     let into = Rc::clone(&seen);
@@ -903,8 +957,20 @@ fn stacking_writes_are_flagged_to_hooks() {
 #[test]
 fn a_reset_reads_the_vectors() {
     let mut machine = machine(&[NOP]);
-    machine.write(Address(0), &STACK.to_be_bytes()).unwrap();
-    machine.write(Address(4), &CODE.to_be_bytes()).unwrap();
+    machine
+        .poke_bytes(
+            Address(0),
+            FunctionCode::SupervisorData,
+            &STACK.to_be_bytes(),
+        )
+        .unwrap();
+    machine
+        .poke_bytes(
+            Address(4),
+            FunctionCode::SupervisorData,
+            &CODE.to_be_bytes(),
+        )
+        .unwrap();
     machine.reset();
     assert_eq!(machine.cpu.registers.pc.0, CODE);
     assert_eq!(machine.cpu.registers.ssp.0, STACK);
@@ -966,7 +1032,11 @@ fn hooked(code: &[u16]) -> Vec<Seen> {
     machine.cpu.registers.set_address(0, DATA);
     machine.cpu.registers.set_address(6, 0x0bad_cafe);
     machine
-        .write(Address(DATA), &0x1122_3344_5566_7788_u64.to_be_bytes())
+        .poke_bytes(
+            Address(DATA),
+            FunctionCode::SupervisorData,
+            &0x1122_3344_5566_7788_u64.to_be_bytes(),
+        )
         .unwrap();
     let log = Rc::default();
     let rts = Address(CODE).offset(2 * (code.len() as u32 - 1));
@@ -1074,7 +1144,8 @@ fn without_the_long_bus_a_hook_sees_a_long_as_two_words() {
 const BYTES: u32 = RAM;
 
 /// Bytes a debugger peeks and pokes with no cycle, from `base`, each
-/// call's first address and length noted in `calls`.
+/// call's first address and length noted in `calls`, its function code
+/// in `codes`.
 #[derive(Debug, Default)]
 struct Bytes {
     /// Its first address.
@@ -1083,6 +1154,8 @@ struct Bytes {
     bytes: [u8; 4],
     /// Each peek's and poke's first address and length, in order.
     calls: Rc<RefCell<Vec<(u32, usize)>>>,
+    /// Each peek's and poke's function code, in order.
+    codes: Rc<RefCell<Vec<FunctionCode>>>,
 }
 
 impl Bytes {
@@ -1099,6 +1172,7 @@ impl Bytes {
     fn noted(&self, cycle: BusCycle, length: usize) -> usize {
         assert_eq!(cycle.size, Size::Byte);
         self.calls.borrow_mut().push((cycle.address.0, length));
+        self.codes.borrow_mut().push(cycle.function_code);
         (cycle.address.0 - self.base) as usize
     }
 }
@@ -1138,22 +1212,42 @@ fn a_debugger_s_access_peeks_and_pokes_a_peripheral() {
         .add_peripheral(range, Bytes::at_bytes(&calls))
         .unwrap();
     machine
-        .write(Address(BYTES), &[0x12, 0x34, 0x56, 0x78])
+        .poke_bytes(
+            Address(BYTES),
+            FunctionCode::SupervisorData,
+            &[0x12, 0x34, 0x56, 0x78],
+        )
         .unwrap();
     let mut bytes = [0; 4];
-    machine.read(Address(BYTES), &mut bytes).unwrap();
+    machine
+        .peek_bytes(Address(BYTES), FunctionCode::SupervisorData, &mut bytes)
+        .unwrap();
     assert_eq!(bytes, [0x12, 0x34, 0x56, 0x78]);
     // memory and the peripheral in one access, across the boundary
-    machine.write(Address(BYTES - 1), &[9, 8]).unwrap();
+    machine
+        .poke_bytes(Address(BYTES - 1), FunctionCode::SupervisorData, &[9, 8])
+        .unwrap();
     let mut across = [0; 2];
-    machine.read(Address(BYTES - 1), &mut across).unwrap();
+    machine
+        .peek_bytes(
+            Address(BYTES - 1),
+            FunctionCode::SupervisorData,
+            &mut across,
+        )
+        .unwrap();
     assert_eq!(across, [9, 8]);
     // past the peripheral, nothing: no byte written
     assert_eq!(
-        machine.write(Address(BYTES + 3), &[1, 2]),
+        machine.poke_bytes(Address(BYTES + 3), FunctionCode::SupervisorData, &[1, 2]),
         Err(PeekError::Unserved(Unserved(Address(BYTES + 4))))
     );
-    machine.read(Address(BYTES + 3), &mut across[..1]).unwrap();
+    machine
+        .peek_bytes(
+            Address(BYTES + 3),
+            FunctionCode::SupervisorData,
+            &mut across[..1],
+        )
+        .unwrap();
     assert_eq!(across[0], 0x78);
     // one call for each access's run of the peripheral's bytes
     assert_eq!(
@@ -1165,6 +1259,30 @@ fn a_debugger_s_access_peeks_and_pokes_a_peripheral() {
             (BYTES, 1),
             (BYTES + 3, 1)
         ]
+    );
+}
+
+#[test]
+fn a_debugger_s_access_gives_a_peripheral_its_function_code() {
+    let mut machine = machine(&[NOP]);
+    let codes = Rc::default();
+    let bytes = Box::new(Bytes {
+        base: BYTES,
+        codes: Rc::clone(&codes),
+        ..Bytes::default()
+    });
+    machine
+        .add_peripheral(Address(BYTES)..=Address(BYTES + 3), bytes)
+        .unwrap();
+    machine
+        .poke_bytes(Address(BYTES), FunctionCode::UserData, &[1])
+        .unwrap();
+    machine
+        .peek_bytes(Address(BYTES), FunctionCode::UserProgram, &mut [0])
+        .unwrap();
+    assert_eq!(
+        *codes.borrow(),
+        [FunctionCode::UserData, FunctionCode::UserProgram]
     );
 }
 
@@ -1184,9 +1302,13 @@ fn a_debugger_s_access_calls_each_peripheral_once_with_its_bytes() {
         .add_peripheral(Address(BYTES + 4)..=Address(BYTES + 7), next)
         .unwrap();
     let image = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-    machine.write(Address(BYTES - 1), &image).unwrap();
+    machine
+        .poke_bytes(Address(BYTES - 1), FunctionCode::SupervisorData, &image)
+        .unwrap();
     let mut back = [0; 9];
-    machine.read(Address(BYTES - 1), &mut back).unwrap();
+    machine
+        .peek_bytes(Address(BYTES - 1), FunctionCode::SupervisorData, &mut back)
+        .unwrap();
     assert_eq!(back, image);
     assert_eq!(*first.borrow(), [(BYTES, 4), (BYTES, 4)]);
     assert_eq!(*second.borrow(), [(BYTES + 4, 4), (BYTES + 4, 4)]);
@@ -1210,9 +1332,13 @@ fn memory_mapped_inside_a_peripheral_s_range_splits_its_run() {
         .map(Address(base + PAGE_BYTES), PAGE_BYTES, &[])
         .unwrap();
     let image: Vec<u8> = (0..window).map(|byte| byte as u8).collect();
-    machine.write(Address(base), &image).unwrap();
+    machine
+        .poke_bytes(Address(base), FunctionCode::SupervisorData, &image)
+        .unwrap();
     let mut back = vec![0; window as usize];
-    machine.read(Address(base), &mut back).unwrap();
+    machine
+        .peek_bytes(Address(base), FunctionCode::SupervisorData, &mut back)
+        .unwrap();
     assert_eq!(back, image);
     let page = PAGE_BYTES as usize;
     assert_eq!(
@@ -1272,10 +1398,13 @@ fn a_peripheral_that_declines_is_unpeekable() {
     let mut bytes = [0; 2];
     let unpeekable = PeekError::Unpeekable(Address(BYTES));
     assert_eq!(
-        machine.read(Address(BYTES - 1), &mut bytes),
+        machine.peek_bytes(Address(BYTES - 1), FunctionCode::SupervisorData, &mut bytes),
         Err(unpeekable)
     );
-    assert_eq!(machine.write(Address(BYTES), &[1]), Err(unpeekable));
+    assert_eq!(
+        machine.poke_bytes(Address(BYTES), FunctionCode::SupervisorData, &[1]),
+        Err(unpeekable)
+    );
     assert_eq!(
         unpeekable.to_string(),
         format!("not peekable at {}", Address(BYTES))

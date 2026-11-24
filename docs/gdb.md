@@ -102,14 +102,15 @@ use mc683xx_cpu32::flat::Machine;
 use mc683xx_gdb::Ending;
 use mc683xx_gdb::connection;
 use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The reset vectors, then the program: `bra.s` to itself.
     let image = [0, 0, 0x80, 0, 0, 0, 0x04, 0, 0x60, 0xfe];
     let mut machine = Machine::new(ADDRESS_BITS)?;
     machine.map(Address(0), 0x1_0000, &[])?;
-    machine.write(Address(0), &image[..8])?;
-    machine.write(Address(0x400), &image[8..])?;
+    machine.poke_bytes(Address(0), FunctionCode::SupervisorData, &image[..8])?;
+    machine.poke_bytes(Address(0x400), FunctionCode::SupervisorData, &image[8..])?;
     machine.reset();
     let connection = connection::accept("127.0.0.1:1234", |address| {
         eprintln!("waiting for gdb on {address}");
@@ -205,7 +206,8 @@ An emulated target's memory is reached with no bus cycle, so a
 debugger's look never has a peripheral's side effect.  Accesses are in
 supervisor data space unless `monitor fc FC` names another: the chip
 reads in that space through its decode and writes in supervisor space
-alone, and the bare CPU has one space whatever the code.
+alone, and the bare CPU has one memory space whatever the code, which
+it gives a peripheral's `peek` or `poke` (`Machine::peek_bytes`).
 
 | Access | Reads | Writes |
 | --- | --- | --- |

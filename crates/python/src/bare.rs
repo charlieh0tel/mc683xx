@@ -114,8 +114,8 @@ struct Fired {
 /// The hooks that fired in a core run, in order.
 type Queue = Rc<RefCell<Vec<Fired>>>;
 
-/// The most bytes `Machine.read` asks of the machine at once.
-const READ_CHUNK: usize = 1 << 24;
+/// The most bytes `Machine.peek_bytes` asks of the machine at once.
+const PEEK_CHUNK: usize = 1 << 24;
 
 /// The vectors an iterable of vector numbers names, every vector for
 /// `None`.
@@ -619,15 +619,18 @@ impl MachineView {
     }
 
     /// `length` bytes at `address` with no bus cycle: mapped memory's,
-    /// whatever its permissions, and a peripheral's from its `peek`.
-    /// Raises `BusError` if any is neither, `UnpeekableError` for one a
-    /// peripheral declines, an exception its `peek` raised, and
-    /// `ValueError` for more than 32 bits of addresses.
-    fn read<'py>(
+    /// whatever its permissions, and a peripheral's from its `peek`, in
+    /// `function_code`'s space.  Raises `BusError` if any is neither,
+    /// `UnpeekableError` for one a peripheral declines, an exception its
+    /// `peek` raised, and `ValueError` for more than 32 bits of
+    /// addresses.
+    #[pyo3(signature = (address, length, function_code = FunctionCodeView::SupervisorData))]
+    fn peek_bytes<'py>(
         &self,
         py: Python<'py>,
         address: u32,
         length: usize,
+        function_code: FunctionCodeView,
     ) -> PyResult<Bound<'py, PyBytes>> {
         u32::try_from(length).map_err(|_| Error::Length(length))?;
         // A chunk at a time, so that an unmapped one raises before more
@@ -635,25 +638,33 @@ impl MachineView {
         let mut bytes = Vec::new();
         while bytes.len() < length {
             let start = bytes.len();
-            bytes.resize(start + (length - start).min(READ_CHUNK), 0);
+            bytes.resize(start + (length - start).min(PEEK_CHUNK), 0);
             let at = Address(address).offset(start as u32);
-            let read = self
-                .pending
-                .looking(|| self.machine.read(at, &mut bytes[start..]));
+            let read = self.pending.looking(|| {
+                self.machine
+                    .peek_bytes(at, function_code.into(), &mut bytes[start..])
+            });
             self.pending.check()?;
             read.map_err(Error::from)?;
         }
         Ok(PyBytes::new(py, &bytes))
     }
 
-    /// Writes `data` at `address`, as `read` reads it: into mapped
+    /// Stores `data` at `address`, as `peek_bytes` reads it: into mapped
     /// memory, and a peripheral's bytes through its `poke`.  On an error
     /// nothing is written, but for the bytes before a run a peripheral
     /// declines; an exception its `poke` raised is raised.
-    fn write(&mut self, address: u32, data: PyBackedBytes) -> PyResult<()> {
-        let written = self
-            .pending
-            .looking(|| self.machine.write(Address(address), &data));
+    #[pyo3(signature = (address, data, function_code = FunctionCodeView::SupervisorData))]
+    fn poke_bytes(
+        &mut self,
+        address: u32,
+        data: PyBackedBytes,
+        function_code: FunctionCodeView,
+    ) -> PyResult<()> {
+        let written = self.pending.looking(|| {
+            self.machine
+                .poke_bytes(Address(address), function_code.into(), &data)
+        });
         self.pending.check()?;
         Ok(written.map_err(Error::from)?)
     }

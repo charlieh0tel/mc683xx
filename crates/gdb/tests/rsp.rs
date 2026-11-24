@@ -116,8 +116,16 @@ fn machine() -> Machine {
     let mut machine = Machine::new(ADDRESS_BITS).unwrap();
     machine.map(Address(0), MAPPED, &[]).unwrap();
     let vectors = [STACK.to_be_bytes(), START.to_be_bytes()].concat();
-    machine.write(Address(0), &vectors).unwrap();
-    machine.write(Address(START), &bytes(&PROGRAM)).unwrap();
+    machine
+        .poke_bytes(Address(0), FunctionCode::SupervisorData, &vectors)
+        .unwrap();
+    machine
+        .poke_bytes(
+            Address(START),
+            FunctionCode::SupervisorData,
+            &bytes(&PROGRAM),
+        )
+        .unwrap();
     machine.reset();
     machine.cpu.registers.set_register(Register::A0, STORE);
     machine
@@ -307,7 +315,13 @@ fn read_watchpoints_see_reads() {
     let mut machine = machine();
     // move.l (a0),d1, then branch to itself.
     let reader = [0x2210, 0x60fe];
-    machine.write(Address(START), &bytes(&reader)).unwrap();
+    machine
+        .poke_bytes(
+            Address(START),
+            FunctionCode::SupervisorData,
+            &bytes(&reader),
+        )
+        .unwrap();
     let (ending, replies) = session(
         &mut machine,
         vec![packet(&format!("Z3,{STORE:x},4")), packet("c"), packet("D")],
@@ -993,7 +1007,13 @@ fn monitor_faults_stop_the_chip_s_run() {
 #[test]
 fn a_bare_cpu_s_exception_stop_is_a_trap() {
     let mut machine = machine();
-    machine.write(Address(START), &bytes(&[0x4e40])).unwrap();
+    machine
+        .poke_bytes(
+            Address(START),
+            FunctionCode::SupervisorData,
+            &bytes(&[0x4e40]),
+        )
+        .unwrap();
     machine.cpu.set_stop_on_exception(VectorSet::ALL);
     let (ending, replies) = session(&mut machine, vec![packet("c"), packet("k")]);
     assert_eq!(ending.unwrap(), Ending::Killed);
@@ -1008,7 +1028,13 @@ fn a_fault_stop_outranks_a_watch_hit_it_undid() {
         let mut machine = machine();
         // TRAP #0, SSP 4: its frame's first words go to 2 and 0,
         // watched, then below zero, where nothing maps
-        machine.write(Address(START), &bytes(&[0x4e40])).unwrap();
+        machine
+            .poke_bytes(
+                Address(START),
+                FunctionCode::SupervisorData,
+                &bytes(&[0x4e40]),
+            )
+            .unwrap();
         machine.cpu.registers.ssp = Address(4);
         machine.cpu.set_stop_on_fault(true);
         let (ending, replies) = session(
@@ -1032,7 +1058,13 @@ fn a_watch_hit_in_an_instruction_kept_through_its_trace_s_fault_is_reported() {
         // ADDQ.W #1,(A0) traced (T1), SSP where nothing maps: the ADDQ
         // completes, its trace's stacking faults (CPU32RM 6.2.10), and
         // the ADDQ is kept, its trace pending
-        machine.write(Address(START), &bytes(&[0x5250])).unwrap();
+        machine
+            .poke_bytes(
+                Address(START),
+                FunctionCode::SupervisorData,
+                &bytes(&[0x5250]),
+            )
+            .unwrap();
         machine.cpu.registers.set_sr(0xa700);
         machine.cpu.registers.ssp = Address(UNMAPPED);
         machine.cpu.set_stop_on_fault(true);

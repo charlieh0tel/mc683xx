@@ -16,6 +16,7 @@ use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::state::Stateless;
 use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 
 /// The bytes each access moves: an image of a 4-Mbit part.
 const BYTES: u32 = 512 << 10;
@@ -81,10 +82,18 @@ fn access(criterion: &mut Criterion) {
     let mut buffer = vec![0; BYTES as usize];
     for (name, at) in [("ram", RAM), ("peripheral", PERIPHERAL)] {
         group.bench_function(format!("{name}_write"), |bencher| {
-            bencher.iter(|| machine.write(black_box(at), &image).expect("served"));
+            bencher.iter(|| {
+                machine
+                    .poke_bytes(black_box(at), FunctionCode::SupervisorData, &image)
+                    .expect("served")
+            });
         });
         group.bench_function(format!("{name}_read"), |bencher| {
-            bencher.iter(|| machine.read(black_box(at), &mut buffer).expect("served"));
+            bencher.iter(|| {
+                machine
+                    .peek_bytes(black_box(at), FunctionCode::SupervisorData, &mut buffer)
+                    .expect("served")
+            });
         });
     }
     group.finish();
