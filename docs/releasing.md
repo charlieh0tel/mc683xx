@@ -75,6 +75,10 @@ deploy replaces it.
   (Semver scope) bumps the minor version; anything else the patch.
   The API is in beta: a 0.x release may still break it, and does so
   only in its minor version.
+- A release branch that a consumer ports to before its release
+  carries a pre-release version, `X.Y.Z-alpha.N` (the wheel's
+  `X.Y.ZaN`), never the last release's or the coming one's; N goes up
+  with each further break on it, and the release commit sets `X.Y.Z`.
 - CI's `semver` job checks the published crates' APIs against their
   last release (cargo-semver-checks).  Before 1.0 it reports a break
   without failing, since the version is bumped only at release.
