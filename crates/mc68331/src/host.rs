@@ -138,7 +138,9 @@ impl Mc68331 {
     /// writes them, ROM included, whether the core serves the byte or
     /// the decode reaches it, and a peripheral's through its
     /// [`MappedPeripheral::poke`], each that would take the byte.  A
-    /// module's register is not poked.
+    /// byte the core serves is written in supervisor space, whatever
+    /// `function_code`, as `write` writes it.  A module's register is
+    /// not poked.
     ///
     /// # Errors
     ///

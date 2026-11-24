@@ -164,7 +164,7 @@ page it serves neither way is `Unserved` (PLAN.md, Memory).
 
 `Builder::fixed_memory(bytes, kind, base)` maps memory at `base`
 (an `Address` on a 2-Kbyte page boundary, the memory inside
-ADDR[23:0]) up to its size, on no chip select.  **It is emulator-only:
+ADDR\[23:0\]) up to its size, on no chip select.  **It is emulator-only:
 the chip has no such decode.**  It is for code and data the host maps
 beside an image it leaves as it is: rewritten routines the image's
 calls are diverted to, a test stub, a scratch area, without patching
@@ -189,7 +189,7 @@ the reset code to program a select the firmware leaves unused.
   cycle longer than its period, as it does a select's.  The core
   serves it itself.
 - Two fixed memories may not overlap (`BuildError::Overlap`); a base
-  off a page boundary or a memory past ADDR[23:0] is
+  off a page boundary or a memory past ADDR\[23:0\] is
   `BuildError::Placement`.
 - Written when `MemoryKind::Ram`; a `MemoryKind::Rom` one ignores
   writes, as ROM on a select does.  It is never diverted: `Diversion::divert` leaves it
@@ -460,7 +460,7 @@ on no select, taking the cycles `decodes` give
 (`mc683xx_modules::peripheral::BusDecode`):
 
 - `BusDecode::Window { base, length }`: program and data cycles, user
-  or supervisor, at `base` up to `base + length`, on ADDR[23:0]
+  or supervisor, at `base` up to `base + length`, on ADDR\[23:0\]
   (`BuildError::Window` if it is empty or runs past).
 - `BusDecode::Acknowledge(IrqPin)`: interrupt acknowledge cycles at the
   pin's level; its read gives the vector.  Wire its output with
