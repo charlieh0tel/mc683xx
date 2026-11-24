@@ -22,7 +22,7 @@ use mc683xx_board::board::Board;
 use mc683xx_board::board::BoardRun;
 use mc683xx_board::board::BoardTracing;
 use mc683xx_board::board::NoPeripheral;
-use mc683xx_board::board::ReceiveError;
+use mc683xx_board::board::NoReceiver;
 use mc683xx_board::board::RunError;
 use mc683xx_board::board::SendError;
 use mc683xx_board::builtin::EdgeCounter;
@@ -2038,7 +2038,7 @@ to = ["chip.PGP0"]
     assert_eq!(board.check_send("pps", Signal::Level(true)), Ok(()));
     assert_eq!(
         board.take_received("nobody"),
-        Err(ReceiveError::Endpoint("nobody".to_owned()))
+        Err(NoReceiver("nobody".to_owned()))
     );
     assert_eq!(
         board.take_received("pps").unwrap_err().to_string(),

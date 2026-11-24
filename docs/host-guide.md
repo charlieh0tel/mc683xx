@@ -1484,9 +1484,9 @@ beside `watch_code`, a hook that breaks ending the run `Stop::Hook`.
   `moment` last; a chip-level callback with no cycle struct takes
   `now: Cycle` last.
 - **Nets.** `Board::observe(net, observer) -> Result<ObserverId,
-  NetError>` attaches an `observe::Observer` (a closure
-  `FnMut(&str, Time, Signal)` is one) to a net by name; `NetError::Unknown`
-  names a net the board lacks.  It is told each change the net
+  NoNet>` attaches an `observe::Observer` (a closure
+  `FnMut(&str, Time, Signal)` is one) to a net by name; `NoNet` names
+  a net the board lacks.  It is told each change the net
   carries, at its board time, after the net's sinks, in the order
   they see them, the changes already waiting included (the power-on
   levels, before the first run); a wired-and net's resolved level
@@ -1535,7 +1535,7 @@ beside `watch_code`, a hook that breaks ending the run `Stop::Hook`.
   after a later direct one, and `Board::check_send(name, &signal)`
   fails as that send would, sending nothing;
   `Board::take_received(name)` gives what reached one since the last
-  call, with each value's time, and fails (`ReceiveError::Endpoint`)
+  call, with each value's time, and fails (`NoReceiver`)
   for an endpoint no net drives.
 - **Control from another thread.**  A machine (`Cpu`, `Machine`,
   `Mc68331`, `Board`, and a `Registry`) is not `Send`, by design: it

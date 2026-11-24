@@ -1664,7 +1664,7 @@ hand.  The keys are in `docs/board-files.md`.
   stop for it again.  `send` drives the nets the endpoint drives
   whose type carries the value, and fails (`SendError`) if there are
   none, so a typo or a value of the wrong type is not silently
-  dropped; `take_received` likewise fails (`ReceiveError`) for an
+  dropped; `take_received` likewise fails (`NoReceiver`) for an
   endpoint no net drives, rather than giving nothing for ever; the runner refuses at start-up a binding with
   input (stdio with standard input, a pty) to an endpoint that drives
   no serial net, naming it, and binds such an endpoint only to

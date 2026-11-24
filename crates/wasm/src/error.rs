@@ -4,7 +4,7 @@
 use js_sys::RangeError;
 use js_sys::TypeError;
 use mc683xx_board::board::NoMemory;
-use mc683xx_board::board::ReceiveError;
+use mc683xx_board::board::NoReceiver;
 use mc683xx_board::board::RunError;
 use mc683xx_board::board::SendError;
 use mc683xx_board::description::LoadError;
@@ -60,7 +60,7 @@ pub enum Error {
     Send(#[from] SendError),
     /// A take from an endpoint no net drives.
     #[error(transparent)]
-    Receive(#[from] ReceiveError),
+    Receive(#[from] NoReceiver),
     /// A board that cannot save, or a snapshot it refuses.
     #[error(transparent)]
     State(#[from] StateError),
@@ -95,7 +95,7 @@ impl Error {
             Self::ParsePacing(_) => Thrown::Named("ParsePacingError"),
             Self::Run(_) => Thrown::Named("RunError"),
             Self::Send(_) => Thrown::Named("SendError"),
-            Self::Receive(_) => Thrown::Named("ReceiveError"),
+            Self::Receive(_) => Thrown::Named("NoReceiver"),
             Self::State(_) => Thrown::Named("StateError"),
             Self::Memory(_) => Thrown::Named("NoMemory"),
         }

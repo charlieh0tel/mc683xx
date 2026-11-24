@@ -191,7 +191,7 @@ fn each_error_is_thrown_as_its_kind() {
         ),
         (
             board.take_received_bytes("nowhere").unwrap_err(),
-            Thrown::Named("ReceiveError"),
+            Thrown::Named("NoReceiver"),
         ),
         (
             board.memory("nowhere").unwrap_err(),

@@ -1984,16 +1984,16 @@ impl<C: Chip> Board<C> {
     ///
     /// # Errors
     ///
-    /// Taking nothing, if no net drives it ([`ReceiveError::Endpoint`]),
-    /// so a typo is not silently an endpoint that never receives.
-    pub fn take_received(&mut self, name: &str) -> Result<Vec<(Time, Signal)>, ReceiveError> {
+    /// Taking nothing, if no net drives it ([`NoReceiver`]), so a typo
+    /// is not silently an endpoint that never receives.
+    pub fn take_received(&mut self, name: &str) -> Result<Vec<(Time, Signal)>, NoReceiver> {
         let driven = self.nets.iter().any(|net| {
             net.sinks
                 .iter()
                 .any(|sink| matches!(sink, Sink::External(sink) if sink == name))
         });
         if !driven {
-            return Err(ReceiveError::Endpoint(name.to_owned()));
+            return Err(NoReceiver(name.to_owned()));
         }
         Ok(self.received.remove(name).unwrap_or_default())
     }
@@ -2004,11 +2004,11 @@ impl<C: Chip> Board<C> {
     }
 
     /// The index of the net `name`.
-    fn net_index(&self, name: &str) -> Result<usize, NetError> {
+    fn net_index(&self, name: &str) -> Result<usize, NoNet> {
         self.nets
             .iter()
             .position(|net| net.name == name)
-            .ok_or_else(|| NetError::Unknown(name.to_owned()))
+            .ok_or_else(|| NoNet(name.to_owned()))
     }
 
     /// The value the net `name` last carried, [`None`] before its first
@@ -2016,8 +2016,8 @@ impl<C: Chip> Board<C> {
     ///
     /// # Errors
     ///
-    /// A board with no net `name` ([`NetError::Unknown`]).
-    pub fn net_value(&self, name: &str) -> Result<Option<Signal>, NetError> {
+    /// A board with no net `name` ([`NoNet`]).
+    pub fn net_value(&self, name: &str) -> Result<Option<Signal>, NoNet> {
         let net = self.net_index(name)?;
         Ok(self.shared.last.borrow()[net])
     }
@@ -2038,10 +2038,10 @@ impl<C: Chip> Board<C> {
     ///
     /// # Errors
     ///
-    /// A board with no net `name` ([`NetError::Unknown`]).
+    /// A board with no net `name` ([`NoNet`]).
     ///
     /// [`observe::Observer`]: crate::observe::Observer
-    pub fn observe(&mut self, name: &str, observer: impl Observer) -> Result<ObserverId, NetError> {
+    pub fn observe(&mut self, name: &str, observer: impl Observer) -> Result<ObserverId, NoNet> {
         let net = self.net_index(name)?;
         let id = ObserverId(self.next_observer);
         self.next_observer += 1;
@@ -2555,29 +2555,17 @@ pub enum SendError {
     },
 }
 
-/// Why [`Board::take_received`] took nothing.
-///
-/// [`Board::take_received`]: crate::board::Board::take_received
+/// A run-time endpoint name no net drives, so nothing it could receive
+/// ([`Board::take_received`]).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum ReceiveError {
-    /// The board has no `external.name` that a net drives.
-    #[error("no net drives external.{0}")]
-    Endpoint(String),
-}
+#[error("no net drives external.{0}")]
+pub struct NoReceiver(pub String);
 
-/// Why a net could not be observed or read ([`Board::observe`],
+/// A net name the board does not have ([`Board::observe`],
 /// [`Board::net_value`]).
-///
-/// [`Board::observe`]: crate::board::Board::observe
-/// [`Board::net_value`]: crate::board::Board::net_value
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum NetError {
-    /// The board has no net of that name.
-    #[error("no net {0:?}")]
-    Unknown(String),
-}
+#[error("no net {0:?}")]
+pub struct NoNet(pub String);
 
 #[cfg(test)]
 mod tests;

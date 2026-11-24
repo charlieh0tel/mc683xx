@@ -3,10 +3,10 @@
 
 use std::time::TryFromFloatSecsError;
 
-use mc683xx_board::board::NetError;
 use mc683xx_board::board::NoMemory;
+use mc683xx_board::board::NoNet;
 use mc683xx_board::board::NoPeripheral;
-use mc683xx_board::board::ReceiveError;
+use mc683xx_board::board::NoReceiver;
 use mc683xx_board::board::RunError;
 use mc683xx_board::board::SendError;
 use mc683xx_board::description::LoadError;
@@ -144,10 +144,10 @@ pub(crate) enum Error {
     Send(#[from] SendError),
     /// A run-time endpoint no net drives.
     #[error(transparent)]
-    Receive(#[from] ReceiveError),
+    Receive(#[from] NoReceiver),
     /// A net the board does not have.
     #[error(transparent)]
-    Net(#[from] NetError),
+    Net(#[from] NoNet),
     /// A net type that is none of a board file's.
     #[error(transparent)]
     Kind(#[from] ParseKindError),

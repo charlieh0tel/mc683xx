@@ -253,7 +253,7 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// Throws a `ReceiveError` for an endpoint no net drives.
+    /// Throws a `NoReceiver` for an endpoint no net drives.
     #[wasm_bindgen(js_name = takeReceivedBytes)]
     pub fn take_received_bytes(&mut self, name: &str) -> Result<Vec<u8>, Error> {
         Ok(self

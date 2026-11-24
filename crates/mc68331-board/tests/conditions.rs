@@ -5,7 +5,7 @@
 use std::env;
 
 use mc683xx_board::board::Board;
-use mc683xx_board::board::NetError;
+use mc683xx_board::board::NoNet;
 use mc683xx_board::condition::ArmError;
 use mc683xx_board::condition::Condition;
 use mc683xx_board::condition::ConditionError;
@@ -258,7 +258,7 @@ fn conditions_the_board_cannot_watch_are_refused() {
     let mut board = board(false);
     assert_eq!(
         board.arm("net nowhere rise".parse().unwrap()),
-        Err(ConditionError::Net(NetError::Unknown("nowhere".to_owned())))
+        Err(ConditionError::Net(NoNet("nowhere".to_owned())))
     );
     assert_eq!(
         board.arm("net ten-megahertz rise".parse().unwrap()),
