@@ -88,7 +88,8 @@ rename renames the Python name with it.  The deliberate differences:
   `permissions` too, Rust's `map` then `protect`.
 - **Builtins:** an argument Rust names `id` or `bytes`, Python
   builtins, is named for what it holds: `remove_hook(hook)`,
-  `unobserve(observer)`, `peripheral(peripheral)`, `write(address,
+  `unobserve(observer)`, `peripheral(peripheral)`,
+  `remove_peripheral(peripheral)`, `write(address,
   data)`.
 - **Properties:** a Rust accessor of plain state, with no arguments, is
   a read-only property (`now`, `halted`, `instructions`,
@@ -1422,7 +1423,7 @@ assert bare.read_register("D0") == 6
   no two overlapping.  A cycle no mapped memory serves and one
   peripheral covers goes to it, before it lands: the read's value is the
   peripheral's, the write is the peripheral's to keep.  It returns the
-  peripheral's number, and `remove_peripheral(id)` takes it off again,
+  peripheral's number, and `remove_peripheral(peripheral)` takes it off again,
   `False` if there was none (Rust's `PeripheralId`,
   `remove_peripheral`).  `protect` covers a peripheral's pages too,
   mapped or not: a cycle they do not permit is a bus error before the
