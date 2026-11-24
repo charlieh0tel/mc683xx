@@ -37,6 +37,7 @@ use mc683xx_cpu32::flat::Machine;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
+use mc683xx_cpu32::memory::Permissions;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_gdb::target::AccessError;
@@ -75,7 +76,6 @@ use crate::hooks::BusCycleKind;
 use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::PythonMapped;
-use crate::permissions;
 use crate::python::repr;
 use crate::register::Register;
 use crate::requests::StopRequestView;
@@ -515,7 +515,7 @@ impl MachineView {
         permissions: &str,
         contents: Option<PyBackedBytes>,
     ) -> Result<(), Error> {
-        let permissions = permissions::parse(permissions)?;
+        let permissions = permissions.parse::<Permissions>()?;
         let contents = contents.as_deref().unwrap_or_default();
         self.machine.map(Address(start), length, contents)?;
         Ok(self.machine.protect(Address(start), length, permissions)?)
@@ -530,7 +530,7 @@ impl MachineView {
     /// in both spaces: `r`, `w` and `x` for the cycles allowed.  A
     /// cycle they do not allow ends in a bus error.
     fn protect(&mut self, start: u32, length: u32, permissions: &str) -> Result<(), Error> {
-        let permissions = permissions::parse(permissions)?;
+        let permissions = permissions.parse::<Permissions>()?;
         Ok(self.machine.protect(Address(start), length, permissions)?)
     }
 

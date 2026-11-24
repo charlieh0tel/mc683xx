@@ -67,7 +67,6 @@ use crate::peripherals::InputView;
 use crate::peripherals::Output;
 use crate::peripherals::PortStateView;
 use crate::peripherals::PortView;
-use crate::permissions;
 use crate::python::repr;
 use crate::qspi::PythonSpiPeripheral;
 use crate::register::Register;
@@ -1348,7 +1347,9 @@ macro_rules! chip_methods {
                 length: u32,
                 permissions: &str,
             ) -> PyResult<()> {
-                let permissions = permissions::parse(permissions)?;
+                let permissions = permissions
+                    .parse::<memory::Permissions>()
+                    .map_err(Error::from)?;
                 self.with_chip_mut(py, |chip, _| {
                     Ok(chip
                         .cpu_control()

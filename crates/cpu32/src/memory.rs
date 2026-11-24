@@ -6,9 +6,11 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fmt::Write;
 use std::mem;
 use std::ops::Range;
 use std::ops::RangeInclusive;
+use std::str::FromStr;
 
 use crate::bus::PortSize;
 use crate::bus::stall;
@@ -112,6 +114,50 @@ impl Permissions {
         self.0 & other.0 == other.0
     }
 }
+
+/// Each permission's letter, in the order `Display` writes them.
+const PERMISSION_LETTERS: [(char, Permissions); 3] = [
+    ('r', Permissions::READ),
+    ('w', Permissions::WRITE),
+    ('x', Permissions::EXECUTE),
+];
+
+/// Their letters, `r` (operand reads), `w` (operand writes) and `x`
+/// (instruction fetches), in that order: `rwx`, `rx`, and nothing for
+/// [`Permissions::NONE`].
+impl fmt::Display for Permissions {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        PERMISSION_LETTERS
+            .iter()
+            .filter(|&&(_, permission)| self.contains(permission))
+            .try_for_each(|&(letter, _)| formatter.write_char(letter))
+    }
+}
+
+/// The permissions named by their letters, as `Display` writes them,
+/// each at most once, in any order and case: `rwx`, `XR`, and the empty
+/// string for none.
+impl FromStr for Permissions {
+    type Err = ParsePermissionsError;
+
+    fn from_str(text: &str) -> Result<Self, ParsePermissionsError> {
+        text.chars().try_fold(Self::NONE, |permissions, letter| {
+            PERMISSION_LETTERS
+                .iter()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&letter))
+                .map(|&(_, permission)| permission)
+                .filter(|&permission| !permissions.contains(permission))
+                .map(|permission| permissions.union(permission))
+                .ok_or_else(|| ParsePermissionsError(text.to_owned()))
+        })
+    }
+}
+
+/// Text that names no permissions: a letter not `r`, `w` or `x`, or one
+/// twice.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no permissions {0:?}: give r, w and x, each at most once")]
+pub struct ParsePermissionsError(String);
 
 /// The hooks a page has, as bits: the core looks hooks up only on a
 /// page whose bit is set ([PLAN.md, Hooks]).
@@ -1135,12 +1181,42 @@ mod tests {
     use super::MemoryError;
     use super::PAGE_BYTES;
     use super::Page;
+    use super::ParsePermissionsError;
+    use super::Permissions;
     use super::Space;
     use super::Unserved;
     use crate::bus::PortSize;
     use crate::cycles::Cycles;
     use mc683xx_target::address::Address;
     use mc683xx_target::size::Size;
+
+    #[test]
+    fn permissions_print_in_order_and_parse_in_any_order_and_case() {
+        let read_execute = Permissions::READ.union(Permissions::EXECUTE);
+        for (permissions, text) in [
+            (Permissions::NONE, ""),
+            (Permissions::WRITE, "w"),
+            (read_execute, "rx"),
+            (Permissions::ALL, "rwx"),
+        ] {
+            assert_eq!(permissions.to_string(), text);
+            assert_eq!(text.parse(), Ok(permissions));
+        }
+        assert_eq!("XR".parse(), Ok(read_execute));
+        assert_eq!("xWr".parse(), Ok(Permissions::ALL));
+    }
+
+    #[test]
+    fn other_letters_and_repeats_name_no_permissions() {
+        for text in ["rr", "rwz", "-", " r"] {
+            let error = text.parse::<Permissions>().unwrap_err();
+            assert_eq!(error, ParsePermissionsError(text.to_owned()));
+            assert_eq!(
+                error.to_string(),
+                format!("no permissions {text:?}: give r, w and x, each at most once")
+            );
+        }
+    }
 
     fn ram(memory: &mut Memory, at: u32, bytes: u32) {
         let region = memory.add_region(vec![0; bytes as usize]);

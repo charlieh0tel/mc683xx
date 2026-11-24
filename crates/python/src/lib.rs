@@ -81,7 +81,6 @@ mod hooks;
 mod mapped;
 #[cfg(feature = "python")]
 mod peripherals;
-mod permissions;
 #[cfg(feature = "python")]
 mod python;
 #[cfg(feature = "python")]

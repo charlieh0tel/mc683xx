@@ -35,8 +35,8 @@ rename renames the Python name with it.  The deliberate differences:
   newtype of a number that also parses (`InterruptLevel`, `IrqPin`,
   `pacing::Factor`) crosses as its number, and so, deliberately, do a
   cycle's size (1, 2 or 4 bytes, Rust's `Size`) and a port's (8 or 16
-  bits, `PortSize`); page permissions are a string, `"rwx"`
-  (`Permissions`).  An enum class is never taken as a string nor an
+  bits, `PortSize`); page permissions are a string, `"rwx"`, as
+  `Permissions` prints and parses.  An enum class is never taken as a string nor an
   `int`: a member has `name`, its name in the class
   (`"WATCHDOG"`), and its `str()` is Rust's `Display` where the type
   has one (`"watchdog"`), else that name.  An enum whose variants

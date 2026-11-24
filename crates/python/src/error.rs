@@ -20,6 +20,7 @@ use mc683xx_cpu32::flat::MapError;
 use mc683xx_cpu32::interrupt::NoInterruptLevel;
 use mc683xx_cpu32::interrupt::NoIrqPin;
 use mc683xx_cpu32::memory::MemoryError;
+use mc683xx_cpu32::memory::ParsePermissionsError;
 use mc683xx_cpu32::memory::Unserved;
 use mc683xx_mc68331::chip::BuildError;
 use mc683xx_mc68331::debug::TargetError;
@@ -106,8 +107,8 @@ pub(crate) enum Error {
     PortWidth(u8),
     /// Page permissions that are not `r`, `w` and `x`, each at most
     /// once.
-    #[error("no permissions {0:?}: give r, w and x, each at most once")]
-    Permissions(String),
+    #[error(transparent)]
+    Permissions(#[from] ParsePermissionsError),
     /// The chip refused the wiring.
     #[error(transparent)]
     Build(#[from] BuildError),

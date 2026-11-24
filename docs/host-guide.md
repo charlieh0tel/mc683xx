@@ -1171,7 +1171,8 @@ but the exception hook cover an address range, on the address lines.
 
 `cpu_control().protect(space, start, length, Permissions)` sets
 read, write and execute per 2-Kbyte page in `Space::User` or
-`Space::Supervisor`; a cycle a page does not permit is a bus error,
+`Space::Supervisor` (`Permissions` prints and parses as its letters,
+`rwx`, `rx`, empty for none); a cycle a page does not permit is a bus error,
 and the invalid hooks see it as `Protected`.  That holds on pages a
 peripheral serves too: the cycle faults before the peripheral sees
 it, so a read-only peripheral needs no bus error of its own.  Hooks and permissions
