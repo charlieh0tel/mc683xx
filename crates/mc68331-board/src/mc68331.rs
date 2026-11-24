@@ -401,6 +401,11 @@ pub(crate) struct Pins {
 }
 
 /// The MC68331's `[chip]` table.
+///
+/// Not part of the semver API: the sealed
+/// [`Chip`](crate::chip::Chip)'s `Section`, which the board reads; a
+/// host names none of it.
+#[doc(hidden)]
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Section {
