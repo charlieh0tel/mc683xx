@@ -20,6 +20,7 @@ use mc683xx_board::adapter::SpiAdapter;
 use mc683xx_board::board::Board;
 use mc683xx_board::board::BoardRun;
 use mc683xx_board::board::BoardTracing;
+use mc683xx_board::board::NoPeripheral;
 use mc683xx_board::board::ReceiveError;
 use mc683xx_board::board::RunError;
 use mc683xx_board::board::SendError;
@@ -333,6 +334,7 @@ parameters = { value = 0x5a }
     board.run_until(Time::from_picos(100_000_000)).unwrap();
     let upper = board
         .peripheral::<Recorder>("upper")
+        .unwrap()
         .map(|recorder| recorder.log().to_vec())
         .unwrap();
     assert_eq!(upper.len(), 1, "the write only");
@@ -341,6 +343,7 @@ parameters = { value = 0x5a }
     assert_eq!(upper[0].access.lane, Lane::Upper);
     let lower = board
         .peripheral::<Recorder>("lower")
+        .unwrap()
         .map(|recorder| recorder.log().to_vec())
         .unwrap();
     assert_eq!(lower[0].written, Some(0xcd));
@@ -450,7 +453,7 @@ attach = [{ select = "CS1", role = "write" }]
         Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board.run_until(Time::from_picos(100_000_000)).unwrap();
-    let latch = board.peripheral::<WriteLatch>("latch").unwrap();
+    let latch = board.peripheral::<WriteLatch>("latch").unwrap().unwrap();
     assert_eq!(latch.writes, [(CS1_BASE, 0xab), (CS1_BASE + 1, 0xcd)]);
     assert!(!latch.asked.is_empty() && latch.asked.iter().all(|&write| write));
 }
@@ -496,6 +499,7 @@ attach = [{ decoder = "u1", output = 1, lines = 0 }]
     let written = |name| {
         board
             .peripheral::<Recorder>(name)
+            .unwrap()
             .map(|recorder| {
                 recorder
                     .log()
@@ -584,6 +588,7 @@ fn an_edge_between_peripherals_keeps_its_picosecond() {
             .unwrap();
         let (count, last) = board
             .peripheral::<EdgeCounter>("counter")
+            .unwrap()
             .map(|counter| (counter.count(), counter.last()))
             .unwrap();
         assert_eq!(count, 1);
@@ -603,6 +608,7 @@ fn the_format_matches_its_golden() {
         .unwrap();
     let builtin = board
         .peripheral::<EdgeCounter>("counter")
+        .unwrap()
         .map(|counter| version_of(&counter.save().unwrap()))
         .unwrap();
     snapshot_golden::check(
@@ -822,6 +828,7 @@ to = ["counter.in"]
     let first = (2 * 8 * 1_000_000_000_000_u128).div_ceil(8_388_608);
     let (count, last) = board
         .peripheral::<EdgeCounter>("counter")
+        .unwrap()
         .map(|counter| (counter.count(), counter.last()))
         .unwrap();
     assert_eq!(count, 5, "edges 2, 4, 6, 8 and 10 by 10 us");
@@ -906,6 +913,7 @@ type = "watcher"
     );
     let (asked, driven) = board
         .peripheral::<ClockWatcher>("watcher")
+        .unwrap()
         .map(|watcher| (watcher.asked.borrow().clone(), watcher.driven))
         .unwrap();
     let hz: Vec<u64> = asked.iter().map(|base| base.frequency().hz()).collect();
@@ -966,18 +974,30 @@ to = ["lamp.in"]
     board.run_until(Time::from_picos(1_000_000)).unwrap();
     let levels = board
         .peripheral::<Widget>("lamp")
+        .unwrap()
         .map(|widget| widget.levels.clone());
     assert_eq!(levels, Some(vec![true]));
-    assert_eq!(board.peripheral::<Recorder>("lamp").map(|_| ()), None);
-    assert!(board.peripheral::<Widget>("no such").is_none());
+    assert!(board.peripheral::<Recorder>("lamp").unwrap().is_none());
+    assert_eq!(
+        board.peripheral::<Widget>("no such").err(),
+        Some(NoPeripheral("no such".to_owned()))
+    );
+    assert_eq!(
+        board.peripheral_mut::<Widget>("no such").err(),
+        Some(NoPeripheral("no such".to_owned()))
+    );
     board
         .peripheral_mut::<Widget>("lamp")
+        .unwrap()
         .unwrap()
         .levels
         .clear();
     board.send("switch", Signal::Level(false)).unwrap();
     board.run_until(Time::from_picos(2_000_000)).unwrap();
-    assert_eq!(board.peripheral::<Widget>("lamp").unwrap().levels, [false]);
+    assert_eq!(
+        board.peripheral::<Widget>("lamp").unwrap().unwrap().levels,
+        [false]
+    );
     // A boxed peripheral upcasts to `Any` and downcasts to its type.
     let boxed: Box<dyn Peripheral> = Box::new(Widget::default());
     let any: Box<dyn Any> = boxed;
@@ -1030,6 +1050,7 @@ to = ["lamps.{net}"]
     board.run_until(Time::from_picos(1_000_000)).unwrap();
     let levels = board
         .peripheral::<Widget>("lamps")
+        .unwrap()
         .map(|widget| widget.levels.clone());
     assert_eq!(levels, Some(vec![true]));
     assert!(matches!(load(2, "in3"), Err(LoadError::Endpoint { .. })));
@@ -1116,6 +1137,7 @@ type = "periodic"
     );
     let advanced = board
         .peripheral::<MappedAdapter<Periodic>>("periodic")
+        .unwrap()
         .map(|peripheral| peripheral.peripheral().advanced.clone())
         .unwrap();
     // each advance at its event's clock exactly, before and after
@@ -1194,6 +1216,7 @@ attach = [{ qspi = 0b1010 }]
     let seen = |name: &str| {
         board
             .peripheral::<Framed>(name)
+            .unwrap()
             .map(|peripheral| (peripheral.selects.clone(), peripheral.transfers.clone()))
             .unwrap()
     };
@@ -1277,6 +1300,7 @@ fn a_qspi_peripheral_sees_each_transfers_mode_and_frame() {
     board.run_until(Time::from_picos(1_000_000_000)).unwrap();
     let transfers = board
         .peripheral::<Clocked>("clocked")
+        .unwrap()
         .map(|peripheral| peripheral.transfers.clone())
         .unwrap();
     let (polarity, phase) = (ClockPolarity::IdleHigh, ClockPhase::ChangeLeading);
@@ -1358,6 +1382,7 @@ to = ["external.q"]
     );
     let resets = board
         .peripheral::<PoweredLatch>("latch")
+        .unwrap()
         .map(|latch| latch.resets);
     assert_eq!(resets, Some(0), "no reset reaches it");
 }
@@ -1589,6 +1614,7 @@ attach = [{ select = "CS1" }]
     assert_eq!(board.chip().cpu().registers.data[0] & 0xffff, 0x1200);
     let (cycles, advanced) = board
         .peripheral::<MappedAdapter<TimedWords>>("words")
+        .unwrap()
         .map(|peripheral| {
             (
                 peripheral.peripheral().cycles.clone(),
@@ -1664,6 +1690,7 @@ attach = [{ qspi = 0b1010 }]
     board.run_until(Time::from_picos(1_000_000_000)).unwrap();
     let (transfers, levels) = board
         .peripheral::<SpiAdapter<Dac>>("dac")
+        .unwrap()
         .map(|peripheral| {
             (
                 peripheral.peripheral().transfers.clone(),
@@ -1768,6 +1795,7 @@ attach = [{ select = "CS1" }]
     let ticker = |board: &mut Board<Mc68331>| {
         board
             .peripheral::<MappedAdapter<Ticker>>("ticker")
+            .unwrap()
             .map(|peripheral| peripheral.peripheral().clone())
             .unwrap()
     };
@@ -2100,6 +2128,7 @@ dsack = "both"
     );
     let accesses: Vec<(u32, Size)> = board
         .peripheral::<Recorder>("duart")
+        .unwrap()
         .map(|duart| {
             duart
                 .log()
@@ -2291,6 +2320,7 @@ attach = [{ select = "CS2", role = "write", lines = [1, 2, 3, 4, 5, 6, 7, 8, 9, 
     board.run_until(Time::from_picos(5_000_000_000)).unwrap();
     let status = board
         .peripheral::<Flash>("commands")
+        .unwrap()
         .map(|flash| flash.status.clone())
         .unwrap();
     assert!(!status.is_empty() && status.iter().all(|&status| status == DQ7));
@@ -2552,6 +2582,7 @@ type = "events"
     assert_eq!(
         board
             .peripheral::<Events>("events")
+            .unwrap()
             .map(|peripheral| peripheral.events)
             .unwrap(),
         0
@@ -2892,11 +2923,12 @@ irq = 1
     let shown = QueueRun {
         registers: board.chip().cpu().registers.clone(),
         trace: board.take_trace().records,
-        first: board.peripheral("first").map(calls).unwrap(),
-        second: board.peripheral("second").map(calls),
+        first: board.peripheral("first").unwrap().map(calls).unwrap(),
+        second: board.peripheral("second").unwrap().map(calls),
     };
     let quanta = board
         .peripheral::<Probe>("probe")
+        .unwrap()
         .map(|probe| probe.asked.get())
         .unwrap();
     (shown, quanta)
@@ -3003,6 +3035,7 @@ to = ["counter.in"]
     board.run_until(Time::from_picos(2_000_000_000)).unwrap();
     board
         .peripheral::<EdgeCounter>("counter")
+        .unwrap()
         .map(|counter| counter.count())
         .unwrap()
 }
@@ -3830,6 +3863,7 @@ fn seen(board: &mut Board<Mc68331>, at: Time) -> Seen {
     let resets = ["every", "watchdog", "power"].map(|name| {
         board
             .peripheral::<PoweredLatch>(name)
+            .unwrap()
             .map_or(0, |latch| latch.resets)
     });
     let events = board
@@ -4019,6 +4053,7 @@ fn a_host_reset_while_reset_is_held_does_nothing() {
     host.take_events();
     let resets = |host: &Board<Mc68331>| {
         host.peripheral::<PoweredLatch>("every")
+            .unwrap()
             .map(|latch| latch.resets)
     };
     let before = resets(&host);
@@ -4473,6 +4508,7 @@ attach = [{{ select = "CS1" }}]
     board.run_until(until).unwrap();
     board
         .peripheral::<Sampled>("sampled")
+        .unwrap()
         .unwrap()
         .cycles
         .clone()

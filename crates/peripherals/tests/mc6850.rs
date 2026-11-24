@@ -249,7 +249,7 @@ fn the_cpu_transmits_and_echoes_through_the_autovectored_interrupt() {
     assert_eq!(data[1] & 0xff, 0x83);
     // read by type: the control register the program wrote, the
     // character received, and its status now, TDRE alone
-    let acia = board.peripheral::<Mc6850>("acia").unwrap();
+    let acia = board.peripheral::<Mc6850>("acia").unwrap().unwrap();
     assert_eq!(acia.control(), RUN_RIE);
     assert_eq!(acia.receive_data(), b'x');
     assert_eq!(acia.status(), 0x02);

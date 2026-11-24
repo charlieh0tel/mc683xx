@@ -186,10 +186,13 @@ fn the_cpu_writes_the_latch_onto_nets_and_reads_the_buffer() {
         "the file's levels, A0 from the endpoint"
     );
     // read by type
-    let latch = *board.peripheral::<Latch>("u1").unwrap();
+    let latch = *board.peripheral::<Latch>("u1").unwrap().unwrap();
     assert_eq!((latch.latched(), latch.output_enabled()), (WRITTEN, true));
     assert_eq!(latch.outputs(), WRITTEN);
-    assert_eq!(board.peripheral::<Buffer>("u2").unwrap().inputs(), 0xf1);
+    assert_eq!(
+        board.peripheral::<Buffer>("u2").unwrap().unwrap().inputs(),
+        0xf1
+    );
     let snapshot = board.save().unwrap();
     let mut restored = self::board();
     restored.restore(&snapshot).unwrap();

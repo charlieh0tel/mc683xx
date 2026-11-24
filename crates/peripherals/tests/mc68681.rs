@@ -271,7 +271,7 @@ fn the_cpu_transmits_receives_and_takes_the_duarts_vectored_interrupt() {
     );
     assert_eq!(board.chip().cpu().registers.data[0] & 0xff, u32::from(b'x'));
     // read by type: the vector the program gave it, its crystal
-    let duart = board.peripheral::<Duart>("duart").unwrap();
+    let duart = board.peripheral::<Duart>("duart").unwrap().unwrap();
     assert_eq!(duart.ivr(), VECTOR);
     assert_eq!(duart.x1_hz(), Duart::X1_HZ);
     assert_ne!(duart.imr(), 0);

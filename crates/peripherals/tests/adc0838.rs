@@ -186,7 +186,7 @@ fn cpu_code_reads_a_channel_over_the_qspi() {
     let board = run(CONVERT_CHANNEL_3, "");
     assert_eq!(d0(&board), REPLY, "{:#06x}", d0(&board));
     // read by type: its parameters, and no frame running after CS rose
-    let adc = board.peripheral::<Adc0838>("adc").unwrap();
+    let adc = board.peripheral::<Adc0838>("adc").unwrap().unwrap();
     assert_eq!(adc.vref_volts(), VREF_VOLTS);
     assert_eq!(adc.noise_volts(), Adc0838::NOISE_VOLTS);
     assert_eq!(adc.result(), None);

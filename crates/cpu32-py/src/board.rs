@@ -1629,10 +1629,10 @@ impl BoardView {
     /// a Python peripheral; `ValueError` for a peripheral the board
     /// lacks.
     fn peripheral(&self, py: Python<'_>, name: &str) -> PyResult<Option<Py<PyAny>>> {
-        self.board.marking(name).map_err(Error::from)?;
         Ok(self
             .board
             .peripheral::<PythonPeripheral>(name)
+            .map_err(Error::from)?
             .and_then(|peripheral| peripheral.object.object(py).ok()))
     }
 
