@@ -1675,11 +1675,22 @@ impl Core<'_> {
         function_code: FunctionCode,
         value: u32,
     ) -> Result<(), Fault> {
+        self.store(address, size, function_code, value)
+    }
+
+    /// The cycles of [`access_write`](Self::access_write).
+    fn store(
+        &mut self,
+        address: Address,
+        size: Size,
+        function_code: FunctionCode,
+        value: u32,
+    ) -> Result<(), Fault> {
         if self.whole_long(size) {
             let at = self.cpu.memory.mask(address);
             let previous = self.previous(at, size, function_code);
             self.cpu.long_operand = true;
-            let written = self.access_write(address, size, function_code, value);
+            let written = self.store(address, size, function_code, value);
             self.cpu.long_operand = false;
             if written.is_ok() {
                 self.watch_long(watch::WRITE, at, function_code, value, previous);

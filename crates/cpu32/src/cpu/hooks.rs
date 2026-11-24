@@ -545,6 +545,31 @@ impl Core<'_> {
             .contains(needed)
     }
 
+    /// Whether an operand access of `size` at `address` in
+    /// `function_code`'s space, a cycle of kind `cycle`, is one the
+    /// pre-access hooks whose [`watch`] bit is `bit` may see: in a
+    /// memory space, aligned, a byte of it on a page with `bit`, and
+    /// allowed by its pages' permissions, as a refused access is a
+    /// fault, whose answer would be discarded.
+    fn pre_hooked(
+        &self,
+        address: Address,
+        size: Size,
+        function_code: FunctionCode,
+        cycle: BusCycleKind,
+        bit: u8,
+    ) -> bool {
+        if !function_code.is_memory_space() || (size != Size::Byte && address.is_odd()) {
+            return false;
+        }
+        let memory = &self.cpu.memory;
+        let first = memory.mask(address);
+        let last = memory.mask(address.offset(size.bytes() - 1));
+        (memory.watched(first) | memory.watched(last)) & bit != 0
+            && self.permitted(first, function_code, cycle)
+            && self.permitted(last, function_code, cycle)
+    }
+
     /// The pre-read hooks for an operand read of `size` at `address`
     /// in `function_code`'s space, aligned, that the core's memory serves
     /// all of and its pages' permissions allow: each covering a byte of it, in the order installed, given
@@ -557,20 +582,18 @@ impl Core<'_> {
         size: Size,
         function_code: FunctionCode,
     ) -> Option<u32> {
-        if !function_code.is_memory_space() || (size != Size::Byte && address.is_odd()) {
+        if !self.pre_hooked(
+            address,
+            size,
+            function_code,
+            BusCycleKind::Read,
+            watch::PRE_READ,
+        ) {
             return None;
         }
         let memory = &self.cpu.memory;
         let length = size.bytes();
         let at = |offset: u32| memory.mask(address.offset(offset));
-        if (memory.watched(at(0)) | memory.watched(at(length - 1))) & watch::PRE_READ == 0 {
-            return None;
-        }
-        // a refused read is a fault, whose answer would be discarded
-        let read_permitted = |offset| self.permitted(at(offset), function_code, BusCycleKind::Read);
-        if !read_permitted(0) || !read_permitted(length - 1) {
-            return None;
-        }
         let space = Space::of(function_code);
         let mut copy = [0; 4];
         let bytes = &mut copy[..length as usize];

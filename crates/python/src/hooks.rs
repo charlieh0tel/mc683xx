@@ -22,6 +22,7 @@ use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_target::Address;
 use pyo3::Bound;
+use pyo3::Py;
 use pyo3::PyAny;
 use pyo3::PyResult;
 use pyo3::Python;
@@ -42,6 +43,7 @@ use pyo3::types::PyTypeMethods;
 
 use crate::error::Error;
 use crate::function_code::FunctionCode;
+use crate::held::Held;
 use crate::mapped::Pending;
 use crate::python::opaque_repr;
 use crate::python::repr;
@@ -552,17 +554,10 @@ where
     let callable = pending.keep(callable);
     Ok(move |context: &T| {
         Python::attach(|py| {
-            match callable
+            let answer = callable
                 .call1(py, (view(context),))
-                .and_then(|result| is_true(result.bind(py)))
-            {
-                Ok(false) => ControlFlow::Continue(()),
-                Ok(true) => ControlFlow::Break(()),
-                Err(error) => {
-                    pending.hold(error);
-                    ControlFlow::Break(())
-                }
-            }
+                .and_then(|result| is_true(result.bind(py)));
+            control(answer, &pending)
         })
     })
 }
@@ -583,34 +578,60 @@ pub(crate) fn pre_read_hook(
     Ok(
         move |read: &PendingRead, memory: &Memory, bytes: &mut [u8]| {
             Python::attach(|py| {
-                let data = PyByteArray::new(py, bytes);
-                let call = CALLS.get() + 1;
-                CALLS.set(call);
-                let view = PendingReadView { read: *read, call };
-                let answer = LENT
-                    .set(memory, || callable.call1(py, (view, data.clone().unbind())))
-                    .and_then(|result| is_true(result.bind(py)))
-                    .and_then(|stop| {
-                        let changed = data.to_vec();
-                        if changed.len() != bytes.len() {
-                            return Err(PyValueError::new_err(
-                                "a pre-read hook must keep the bytes' length",
-                            ));
-                        }
-                        bytes.copy_from_slice(&changed);
-                        Ok(stop)
-                    });
-                match answer {
-                    Ok(false) => ControlFlow::Continue(()),
-                    Ok(true) => ControlFlow::Break(()),
-                    Err(error) => {
-                        pending.hold(error);
-                        ControlFlow::Break(())
-                    }
-                }
+                let answer = lend(py, &callable, memory, bytes, "pre-read", |call| {
+                    PendingReadView { read: *read, call }
+                });
+                control(answer, &pending)
             })
         },
     )
+}
+
+/// Calls `callable(view, data)`, `view` made with the call's number
+/// (`CALLS`), `data` a bytearray copy of `bytes`, with `memory` lent to
+/// the views' `peek` for the call: whether its result stops the run.
+/// What it leaves in `data`, which must keep its length, goes back into
+/// `bytes`; `kind` names the hook in the error if it does not.
+fn lend<V>(
+    py: Python<'_>,
+    callable: &Held,
+    memory: &Memory,
+    bytes: &mut [u8],
+    kind: &str,
+    view: impl FnOnce(u64) -> V,
+) -> PyResult<bool>
+where
+    (V, Py<PyByteArray>): for<'py> PyCallArgs<'py>,
+{
+    let data = PyByteArray::new(py, bytes);
+    let call = CALLS.get() + 1;
+    CALLS.set(call);
+    let stop = LENT
+        .set(memory, || {
+            callable.call1(py, (view(call), data.clone().unbind()))
+        })
+        .and_then(|result| is_true(result.bind(py)))?;
+    let changed = data.to_vec();
+    if changed.len() != bytes.len() {
+        return Err(PyValueError::new_err(format!(
+            "a {kind} hook must keep the bytes' length"
+        )));
+    }
+    bytes.copy_from_slice(&changed);
+    Ok(stop)
+}
+
+/// A hook's `answer` as the core takes it: `True` stops the run, and
+/// so does an exception, which waits in `pending`.
+fn control(answer: PyResult<bool>, pending: &Pending) -> Control {
+    match answer {
+        Ok(false) => ControlFlow::Continue(()),
+        Ok(true) => ControlFlow::Break(()),
+        Err(error) => {
+            pending.hold(error);
+            ControlFlow::Break(())
+        }
+    }
 }
 
 /// A code or block hook's argument.

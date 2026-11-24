@@ -427,6 +427,19 @@ impl LimitedRunView {
     }
 }
 
+/// `control`, an in-run hook's: if it stops the run, `id` is the hook,
+/// recorded in `stopped` unless another hook stopped the run first.
+fn stopped_in_run(
+    stopped: &Cell<Option<HookId>>,
+    id: &Cell<Option<HookId>>,
+    control: Control,
+) -> Control {
+    if control.is_break() && stopped.get().is_none() {
+        stopped.set(id.get());
+    }
+    control
+}
+
 /// A bare CPU32 on flat memory (Rust's `flat::Machine`).
 #[pyclass(name = "Machine", module = "mc683xx", unsendable)]
 #[derive(Debug)]
@@ -437,9 +450,9 @@ pub(crate) struct MachineView {
     pending: Pending,
     /// The hooks that fired in the core run under way.
     queue: Queue,
-    /// The first pre-read hook whose callable, called within the core
-    /// run under way, stopped it.
-    pre_read_stop: Rc<Cell<Option<HookId>>>,
+    /// The first hook whose callable, called within the core run under
+    /// way (a pre-read hook), stopped it.
+    in_run_stop: Rc<Cell<Option<HookId>>>,
     /// The intercept hooks' callables, in the order installed, with the
     /// vectors each covers.
     intercepts: Vec<Intercept>,
@@ -572,7 +585,7 @@ impl MachineView {
             machine,
             pending,
             queue: Queue::default(),
-            pre_read_stop: Rc::default(),
+            in_run_stop: Rc::default(),
             intercepts: Vec::new(),
             running: false,
         })
@@ -970,17 +983,13 @@ impl MachineView {
         end: u32,
     ) -> PyResult<HookIdView> {
         let mut called = hooks::pre_read_hook(callback, self.pending.clone())?;
-        let stopped = Rc::clone(&self.pre_read_stop);
+        let stopped = Rc::clone(&self.in_run_stop);
         let id = Rc::new(Cell::new(None));
         let own = Rc::clone(&id);
         let assigned = self.machine.cpu.add_pre_read_hook(
             Address(begin)..=Address(end),
             move |read: &PendingRead, memory: &Memory, bytes: &mut [u8]| {
-                let control = called(read, memory, bytes);
-                if control.is_break() && stopped.get().is_none() {
-                    stopped.set(own.get());
-                }
-                control
+                stopped_in_run(&stopped, &own, called(read, memory, bytes))
             },
         );
         id.set(Some(assigned));
@@ -1139,7 +1148,7 @@ impl MachineView {
             };
             budget.spent = budget.spent.saturating_add(run.cycles.clocks());
             let pending = slf.borrow().pending.clone();
-            let pre_read_stop = slf.borrow().pre_read_stop.take();
+            let in_run_stop = slf.borrow().in_run_stop.take();
             pending.check()?;
             let dispatched = match registers {
                 Some(registers) => Self::dispatch(slf, py, fired, &registers)?,
@@ -1151,7 +1160,7 @@ impl MachineView {
                 return Ok((budget.spent, requested));
             }
             match (run.end, dispatched) {
-                (_, Dispatched::Continue) if let Some(hook) = pre_read_stop => {
+                (_, Dispatched::Continue) if let Some(hook) = in_run_stop => {
                     return Ok((budget.spent, End::Stop(mc683xx_cpu32::Stop::Hook(hook))));
                 }
                 (End::Intercepted(interception), Dispatched::Continue) if !stop => {
