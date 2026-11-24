@@ -2416,7 +2416,10 @@ Adversarial review (2026-11-01):
   in the copy answers the read and is not stored (serve-only, sc batch
   4: a hook that stored its answer left RAM other than the firmware
   wrote it).  The copy and the shared `&Memory` cannot alias, so the
-  hook sees memory as it is and cannot change it.  Operand-level, once
+  hook sees memory as it is and cannot change it.  A pre-read hook is
+  a device model that answers an operand; the read hooks observe bus
+  cycles (on the chip a long is one pre-read call, two word read hook
+  calls).  Operand-level, once
   before the first cycle, whatever `set_long_bus` says (the read hooks
   follow it): a long across two pages of memory is one call; a long
   with a byte the bus serves is none, its cycles as usual, as the bus

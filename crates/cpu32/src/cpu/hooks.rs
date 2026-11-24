@@ -249,9 +249,12 @@ impl Cpu {
     /// its pages map) serves all of, with the core's memory to look at
     /// and a copy of the bytes the read is to read: what the hooks leave
     /// in the copy, in the order installed, answers the read, and is not
-    /// stored.  A long is one call, whether it is two word cycles or
-    /// one access ([`set_long_bus`](Self::set_long_bus)), a long that
-    /// straddles two pages the core's memory serves included; a long
+    /// stored.  A pre-read hook is a device model that answers an
+    /// operand, where the read hooks observe bus cycles, so a long is
+    /// one call whatever [`set_long_bus`](Self::set_long_bus) says: on
+    /// the chip, whose long is two word cycles, one pre-read call and
+    /// two read hook calls.  A long that straddles two pages the core's
+    /// memory serves is one call too; a long
     /// with a byte the bus serves (a peripheral's, or memory the core's
     /// pages do not map) is no call, its cycles made as usual.  Not for
     /// a fetch, a misaligned word or long (an address error), or a look

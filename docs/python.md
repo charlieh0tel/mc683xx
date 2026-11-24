@@ -1598,7 +1598,11 @@ across two pages of memory is one call; a long with a byte a
 peripheral serves, or memory the decode serves off the core's pages
 (a select a peripheral shares), is none, nor are fetches, misaligned
 words and longs, and looks with no cycle (`peek_bytes`, `peek`, gdb).
-The read hooks see the cycles after it, with the values `data` gave
+A pre-read hook is a device model that answers an operand; the read
+hooks observe bus cycles.  So on an `Mc68331` or a `Board`, whose long
+is two word cycles, a long read is one pre-read call and two read hook
+calls (size 2 each); on the bare `Machine`, which sees a long once,
+one of each.  The read hooks see the cycles after it, with the values `data` gave
 them.  On the bare `Machine`, unlike its other hooks, it runs within
 the run, so a call into the machine raises `RuntimeError`, and memory
 is `PendingRead.peek`'s; `True` stops the run once the

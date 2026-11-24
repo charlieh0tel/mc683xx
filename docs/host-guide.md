@@ -1164,8 +1164,10 @@ but the exception hook cover an address range, on the address lines.
   at (other RAM, say, where firmware keeps a port's image) and a copy
   of the bytes it is to read: what `f` leaves in the copy answers the
   read and is not stored, for a device model that answers what the
-  firmware reads of RAM.  A long is one call, a long across two pages
-  of memory too; a long with a byte the bus serves (a peripheral's, or
+  firmware reads of RAM.  It answers an operand, where the read hooks
+  observe bus cycles: a long is one call, whatever `set_long_bus`
+  says, so on the chip one pre-read call and two word read hook calls;
+  a long across two pages of memory is one call too; a long with a byte the bus serves (a peripheral's, or
   memory the decode serves off the core's pages) is no call, nor is a
   misaligned word or long, or a look with no cycle (`Memory::peek`, a
   debugger's read).  The read hooks see the cycles after it, with the
