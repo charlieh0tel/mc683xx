@@ -733,10 +733,10 @@ before the changes below and after them:
 | --- | --- | --- |
 | no hook | 37.6 M instructions/s | 36.6 M instructions/s |
 | code hook elsewhere | 34.2 M instructions/s | 31.7 M instructions/s |
-| no-op code hook, a call | 0.42 us | 0.43 us |
-| no-op write hook, a call | 0.50 us | 0.51 us |
-| write hook reading `registers['A7']`, a call | 5.39 us | 2.61 us |
-| write hook reading `register('A7')`, a call | | 1.13 us |
+| no-op code hook, a call | 0.42 us | 0.29 us |
+| no-op write hook, a call | 0.50 us | 0.37 us |
+| write hook reading `registers['A7']`, a call | 5.39 us | 2.41 us |
+| write hook reading `register('A7')`, a call | | 0.92 us |
 | add and remove a code hook | 15.6 us | 15.8 us |
 
 The changes:
@@ -745,3 +745,10 @@ The changes:
   and kept, its keys interned once: a hook that reads
   `registers['A7']` no longer allocates 24 strings, and one that
   reads `register('A7')` makes no dictionary.
+- The bare `Machine`'s run borrows itself once a turn, not five
+  times: each borrow of an `unsendable` class checks the thread
+  (`std::thread::current`), which with the borrow flag was about a
+  quarter of a no-op hook's cost.  The handles that stay the
+  machine's (its pending exception, its stop request) are taken
+  once a run, and the first hook a turn fired is not looked up
+  again, as nothing can have removed it.

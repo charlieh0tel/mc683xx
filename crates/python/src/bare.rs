@@ -1151,6 +1151,16 @@ impl MachineView {
         halt: &dyn Fn() -> bool,
     ) -> PyResult<(u64, End)> {
         let py = slf.py();
+        // Handles that stay the machine's through the run: each borrow
+        // of the machine checks the thread, so the loop takes one a turn.
+        let (pending, in_run_stop, stop_request) = {
+            let this = slf.borrow();
+            (
+                this.pending.clone(),
+                Rc::clone(&this.in_run_stop),
+                this.machine.stop_request(),
+            )
+        };
         loop {
             let (run, fired, registers) = {
                 let mut this = slf.borrow_mut();
@@ -1175,14 +1185,13 @@ impl MachineView {
                 (run, fired, registers)
             };
             budget.spent = budget.spent.saturating_add(run.cycles.clocks());
-            let pending = slf.borrow().pending.clone();
-            let in_run_stop = slf.borrow().in_run_stop.take();
+            let in_run_stop = in_run_stop.take();
             pending.check()?;
             let dispatched = match registers {
                 Some(registers) => Self::dispatch(slf, py, fired, &registers)?,
                 None => Dispatched::Continue,
             };
-            let stop = slf.borrow().machine.stop_request().take();
+            let stop = stop_request.take();
             let requested = End::Stop(mc683xx_cpu32::Stop::Requested);
             if halt() {
                 return Ok((budget.spent, requested));
@@ -1193,7 +1202,7 @@ impl MachineView {
                 }
                 (End::Intercepted(interception), Dispatched::Continue) if !stop => {
                     Self::answer(slf, py, interception)?;
-                    if slf.borrow().machine.stop_request().take() {
+                    if stop_request.take() {
                         return Ok((budget.spent, requested));
                     }
                 }
@@ -1218,10 +1227,11 @@ impl MachineView {
         registers: &Registers,
     ) -> PyResult<Dispatched> {
         let mut stopped = None;
-        for fired in fired {
-            // A hook removed by an earlier callable is not called.
-            let installed = slf.borrow().machine.cpu.has_hook(fired.id);
-            if !installed {
+        for (index, fired) in fired.into_iter().enumerate() {
+            // A hook removed by an earlier callable is not called; the
+            // first has none before it, and no callable ran in the core
+            // run that removes one.
+            if index > 0 && !slf.borrow().machine.cpu.has_hook(fired.id) {
                 continue;
             }
             let argument = view(py, fired.context, registers)?;
