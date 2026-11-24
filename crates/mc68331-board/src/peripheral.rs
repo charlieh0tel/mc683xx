@@ -31,6 +31,7 @@ use crate::inspect::Inspection;
 use crate::signal::Signal;
 use crate::time::Moment;
 use crate::time::Time;
+use crate::time::TimeBase;
 
 /// Which cycles of its select or decoder output an attachment carries to
 /// the peripheral: the board's wiring of the peripheral's /OE and /WE.
@@ -498,6 +499,13 @@ impl<'a> Drive<'a> {
         self.moment.now()
     }
 
+    /// The chip's system clock on board time at the call: its moment's
+    /// `system_clock`.
+    #[must_use]
+    pub const fn system_clock(&self) -> TimeBase {
+        self.moment.system_clock()
+    }
+
     /// Drives `signal` on `port` now.
     pub fn drive(&mut self, port: usize, signal: Signal) {
         self.drive_at(self.now(), port, signal);
@@ -768,11 +776,14 @@ pub trait Peripheral: Any {
     }
 
     /// When it next changes on its own, if it will, asked at `moment`:
-    /// the board calls `advance` then.  A time already past is advanced
-    /// to at once.  The moment's system clock is the chip's, for a
-    /// peripheral whose events fall on the chip's clocks: asked again
-    /// whenever the board needs it, so a part keeps no base between
-    /// calls.  By default never.
+    /// the board calls `advance` then.  `moment.now()` is board time as
+    /// the board asks, at or after the peripheral's last call (its last
+    /// `advance`, `input` or bus cycle), not that call's time, and the
+    /// answer is a time in board time, not a span from it: an event
+    /// already past is advanced to at once.  The moment's system clock
+    /// is the chip's, for a peripheral whose events fall on the chip's
+    /// clocks: asked again whenever the board needs it, so a part keeps
+    /// no base between calls.  By default never.
     fn next_event(&self, moment: Moment) -> Option<Time> {
         None
     }

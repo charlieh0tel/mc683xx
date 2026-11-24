@@ -434,11 +434,13 @@ A peripheral on a board file implements `mc683xx_board::peripheral::Peripheral`
 instead (`docs/board-files.md`), on board time.  A call's time there is
 a `time::Moment`, board time and the chip's system clock then: one given
 a `Drive` takes it from `drive.moment()` (`drive.now()` for the time
-alone) and has no time argument (`read`, `write`, `memory_read`,
+alone, `drive.system_clock()` for the clock) and has no time argument (`read`, `write`, `memory_read`,
 `memory_write`, `power_on`, `reset`, `transfer`, `set_selected`, `input`,
 `advance`); one without a drive takes it as its last argument, `moment`
 (`wait_states`, `dsack_port`, `set_qspi_clock`, `analog_output`,
-`next_event`).
+`next_event`).  `next_event`'s `moment.now()` is board time as the
+board asks, at or after the peripheral's last call rather than that
+call's time, and it answers a board time, not a span.
 
 ### Bus peripherals: on no chip select
 

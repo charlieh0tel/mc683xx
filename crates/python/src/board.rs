@@ -702,6 +702,12 @@ impl DriveView {
         MomentView(self.moment)
     }
 
+    /// The chip's system clock on board time at the call.
+    #[getter]
+    const fn system_clock(&self) -> TimeBaseView {
+        TimeBaseView(self.moment.system_clock())
+    }
+
     /// Drives `value` on output `port` now.
     fn drive(&mut self, port: usize, value: &Bound<'_, PyAny>) -> PyResult<()> {
         self.drive_at(self.now(), port, value)

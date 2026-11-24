@@ -540,9 +540,10 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   `Board::inspect(name)`).  A call's time is a `time::Moment`, board
   time and the chip's system clock then: a call that takes a
   `peripheral::Drive` takes it from the drive (`drive.moment()`, or
-  `drive.now()` for the time alone), and one without a drive takes it
-  as its last argument, `moment` (`wait_states`, `dsack_port`,
-  `set_qspi_clock`, `analog_output`, `next_event`).  No call has two
+  `drive.now()` for the time alone, `drive.system_clock()` for the
+  clock), and one without a drive takes it as its last argument,
+  `moment` (`wait_states`, `dsack_port`, `set_qspi_clock`,
+  `analog_output`, `next_event`).  No call has two
   times.  A chip-level model (`adapter`) takes `now: Cycle` last
   instead, as every chip-level callback with no cycle struct does
   (docs/host-guide.md, Board time).

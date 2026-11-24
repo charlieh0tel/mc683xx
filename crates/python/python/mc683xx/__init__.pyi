@@ -1384,6 +1384,9 @@ class Drive:
     @property
     def moment(self) -> Moment:
         """The call's time and the chip's system clock then."""
+    @property
+    def system_clock(self) -> TimeBase:
+        """The chip's system clock on board time at the call."""
     def drive(self, port: int, value: object) -> None: ...
     def drive_at(self, at: int, port: int, value: object) -> None: ...
     def write_memory(self, memory: str, offset: int, data: bytes | bytearray) -> None: ...

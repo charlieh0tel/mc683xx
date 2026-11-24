@@ -1107,7 +1107,9 @@ SPBR or the system clock change), `set_selected(attachment,
 selected, drive)`, `input(port, value, drive)`,
 `analog_output(port, moment) -> float | None` (the value it drives on
 an analog output a sink samples then), `next_event(moment) -> int |
-None`,
+None` (the board time of its next event, not a span; `moment.now` is
+board time as the board asks, at or after its last call rather than
+that call's time),
 `advance(drive)`, `qspi_deferrable() -> bool` (asked once, as
 the board is built: whether its QSPI calls may come in a batch, as
 `Peripheral::qspi_deferrable` says, docs/board-files.md), `memory_read(memory,
@@ -1115,7 +1117,7 @@ access, drive) -> int` and
 `memory_write(memory, access, value, drive)` (a memory it took),
 `save() -> bytes` and `restore(snapshot)`.  A call's time is a
 moment, as the Rust trait's: a call given a `Drive` takes it from the
-drive (`now`, and `moment`), one without takes an `mc683xx.Moment` last
+drive (`now`, `moment` and `system_clock`), one without takes an `mc683xx.Moment` last
 (Rust's `time::Moment`: `now`, board time in picoseconds,
 `system_clock`, an `mc683xx.TimeBase`, and `cycle()`, the chip's
 clock at it, rounded up).  A `TimeBase` (Rust's `time::TimeBase`) has

@@ -866,7 +866,7 @@ impl Peripheral for ClockWatcher {
 
     fn advance(&mut self, drive: &mut Drive<'_>) {
         let now = drive.now();
-        self.driven = Some(drive.moment().system_clock());
+        self.driven = Some(drive.system_clock());
         self.next = Some(now + Span::from_micros(1));
     }
 }

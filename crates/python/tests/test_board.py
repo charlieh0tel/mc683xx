@@ -473,6 +473,7 @@ class ClockedFlash:
         self.told: list[tuple[mc683xx.ClockPolarity, mc683xx.ClockPhase, int]] = []
         self.transfers: list[tuple[mc683xx.ClockPolarity, mc683xx.ClockPhase, int]] = []
         self.moments: list[mc683xx.Moment] = []
+        self.drive_hertz: list[int] = []
 
     def set_qspi_clock(self, clock: mc683xx.QspiClock, moment: mc683xx.Moment) -> None:
         self.told.append((clock.polarity, clock.phase, clock.system_clock_nanohertz))
@@ -481,6 +482,7 @@ class ClockedFlash:
     def transfer(self, transfer: mc683xx.Transfer, drive: mc683xx.Drive) -> int:
         clock = transfer.clock
         self.transfers.append((clock.polarity, clock.phase, clock.system_clock_nanohertz))
+        self.drive_hertz.append(drive.system_clock.frequency_hz)
         return 0
 
 
@@ -500,6 +502,7 @@ def test_a_qspi_peripheral_is_told_the_clock_and_each_transfer_carries_it(tmp_pa
     # each told at its moment, on the system clock of then
     hertz = [moment.system_clock.frequency_hz for moment in flash.moments]
     assert hertz == [8_388_608, 16_777_216]
+    assert flash.drive_hertz == hertz
     for moment in flash.moments:
         clock = moment.system_clock
         assert moment.cycle() == clock.cycle(moment.now)
