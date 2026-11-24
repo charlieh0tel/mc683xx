@@ -333,17 +333,11 @@ impl ChipSelects {
         }
     }
 
-    /// CSPAR0, the pin assignments of CSBOOT and CS0 to CS5 (MC68331UM
-    /// D.3.23).
+    /// The chip-select pin assignment registers, CSPAR0 (CSBOOT and CS0
+    /// to CS5, MC68331UM D.3.23) then CSPAR1 (CS6 to CS10, D.3.24).
     #[must_use]
-    pub const fn cspar0(&self) -> u16 {
-        self.pins[0]
-    }
-
-    /// CSPAR1, the pin assignments of CS6 to CS10 (MC68331UM D.3.24).
-    #[must_use]
-    pub const fn cspar1(&self) -> u16 {
-        self.pins[1]
+    pub const fn pin_assignments(&self) -> [u16; 2] {
+        self.pins
     }
 
     /// CSPAR`register` written.
@@ -573,13 +567,11 @@ mod tests {
     #[test]
     fn reset_pins_follow_the_data_bus() {
         let selects = ChipSelects::new(PULLED_UP);
-        assert_eq!(selects.cspar0(), 0x3fff);
-        assert_eq!(selects.cspar1(), 0x03ff);
+        assert_eq!(selects.pin_assignments(), [0x3fff, 0x03ff]);
         // DATA0 low: an 8-bit boot ROM; DATA5 low: CS8 to CS6 address
         // lines (SIMRM Tables 7-6, 7-7)
         let selects = ChipSelects::new(!0b10_0001);
-        assert_eq!(selects.cspar0(), 0x3ffe);
-        assert_eq!(selects.cspar1(), 0x03d5);
+        assert_eq!(selects.pin_assignments(), [0x3ffe, 0x03d5]);
     }
 
     #[test]

@@ -237,7 +237,7 @@ fn select_registers(chip: &Mc68331) -> ([u16; 2], [(u16, u16); SELECTS]) {
         let select = ChipSelect::from_index(index).expect("a select");
         *entry = (selects.base(select), selects.option(select));
     }
-    ([selects.cspar0(), selects.cspar1()], registers)
+    (selects.pin_assignments(), registers)
 }
 
 /// What one image's boot did.
