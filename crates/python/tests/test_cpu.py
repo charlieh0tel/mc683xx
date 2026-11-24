@@ -361,8 +361,8 @@ def test_an_exception_no_hook_handles_is_taken_natively():
 
 def test_an_exception_stop_stacks_nothing_and_the_run_on_takes_it():
     cpu = machine(trap(1), RTS)
-    cpu.set_stop_on_exception(True)
-    assert cpu.stops_on_exception
+    cpu.set_stop_on_exception(None)
+    assert cpu.stops_on_exception == frozenset(range(256))
     match cpu.run_limited(reach=HANDLER).end:
         case mc683xx.End.Exception(vector, pc):
             assert (vector, pc) == (TRAP_0 + 1, CODE)
@@ -377,12 +377,32 @@ def test_an_exception_stop_stacks_nothing_and_the_run_on_takes_it():
 
 def test_an_interrupt_stops_once_acknowledged():
     cpu = machine(NOP, RTS)
-    cpu.set_stop_on_exception(True)
+    cpu.set_stop_on_exception(None)
     cpu.request_interrupt(3, 0x40)
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Exception(0x40, CODE)
     assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
-    cpu.set_stop_on_exception(False)
-    assert not cpu.stops_on_exception
+    cpu.set_stop_on_exception(set())
+    assert cpu.stops_on_exception == frozenset()
+
+
+def test_an_exception_stop_stops_only_the_vectors_set():
+    cpu = machine(trap(1), RTS)
+    cpu.set_stop_on_exception({TRAP_0 + 2})
+    assert cpu.stops_on_exception == {TRAP_0 + 2}
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
+    cpu = machine(trap(1), RTS)
+    cpu.set_stop_on_exception(vector for vector in [TRAP_0 + 1])
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Exception(TRAP_0 + 1, CODE)
+    with pytest.raises(TypeError):
+        cpu.set_stop_on_exception(True)
+
+
+def test_an_intercept_hook_on_every_vector_sees_any():
+    cpu = machine(trap(1), RTS)
+    seen: list[int] = []
+    cpu.add_intercept_hook(lambda intercepted: seen.append(intercepted.vector), None)
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
+    assert seen == [TRAP_0 + 1]
 
 
 def test_a_fault_stops_the_run_with_nothing_stacked():

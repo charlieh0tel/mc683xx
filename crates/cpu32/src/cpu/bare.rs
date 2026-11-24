@@ -244,8 +244,8 @@ pub(crate) struct TakeOnce {
 pub(crate) struct Bare {
     /// Stop on a fault rather than take it.
     pub(crate) stop_on_fault: bool,
-    /// Stop before any exception is taken.
-    pub(crate) stop_on_exception: bool,
+    /// The vectors whose exceptions stop a run before they are taken.
+    pub(crate) stop_on_exception: VectorSet,
     /// The vectors the intercept hooks cover.
     pub(crate) intercepted: VectorSet,
     /// An intercepted exception taken natively once.
@@ -404,9 +404,10 @@ impl Cpu {
         self.bare.stop_on_fault
     }
 
-    /// Whether any exception the CPU is about to take ends a run before
-    /// anything is stacked ([`End::Exception`]): off at first.  It
-    /// covers an exception an instruction raises (a trap, an illegal
+    /// The vectors whose exceptions, about to be taken, end a run before
+    /// anything is stacked ([`End::Exception`]): [`VectorSet::ALL`] for
+    /// any, [`VectorSet::EMPTY`], as at first, for none.  It covers an
+    /// exception an instruction raises (a trap, an illegal
     /// instruction, a fault), a trace, a hardware breakpoint and an
     /// interrupt, once acknowledged, as its vector is then known; not
     /// a fault in exception processing, nor one
@@ -430,14 +431,14 @@ impl Cpu {
     /// ([`End::Fault`]) instead, and an exception the intercept hooks
     /// cover is theirs ([`add_intercept_hook`](Self::add_intercept_hook)):
     /// one they all decline is taken natively, with no stop.
-    pub fn set_stop_on_exception(&mut self, stop: bool) {
-        self.bare.stop_on_exception = stop;
+    pub fn set_stop_on_exception(&mut self, vectors: VectorSet) {
+        self.bare.stop_on_exception = vectors;
         self.update_capture();
     }
 
-    /// Whether any exception stops a run.
+    /// The vectors whose exceptions stop a run.
     #[must_use]
-    pub const fn stops_on_exception(&self) -> bool {
+    pub const fn stops_on_exception(&self) -> VectorSet {
         self.bare.stop_on_exception
     }
 
@@ -618,8 +619,9 @@ impl Cpu {
 
     /// Whether the registers are kept as each instruction begins.
     pub(crate) fn update_capture(&mut self) {
-        self.capture =
-            self.bare.stop_on_fault || self.bare.stop_on_exception || self.hooks.want_registers();
+        self.capture = self.bare.stop_on_fault
+            || !self.bare.stop_on_exception.is_empty()
+            || self.hooks.want_registers();
     }
 
     /// The end the bare host's settings make of an instruction that
@@ -695,13 +697,13 @@ impl Cpu {
     }
 
     /// Whether an exception of `vector` about to be processed with PC
-    /// at `pc` stops the run: exceptions stop it, and it is not the one
+    /// at `pc` stops the run: its vector stops it, and it is not the one
     /// the last run stopped at, which is taken this once.
     /// The promise is spent by the first exception processed after it,
     /// stopping or not, so none outlives the run on.
     fn exception_stops_at(&mut self, pc: Address, vector: Vector) -> bool {
         let once = self.bare.exception_once.take();
-        self.bare.stop_on_exception && once != Some(self.take_once(pc, vector))
+        self.bare.stop_on_exception.contains(vector) && once != Some(self.take_once(pc, vector))
     }
 
     /// The key of an exception of `vector` raised now with PC at `pc`.

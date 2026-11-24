@@ -2608,7 +2608,8 @@ and `mc683xx.Machine` in Python (see Python).
   exception), under semver like the rest of the API (decided for
   0.9.0); Python answers it with its intercept hooks' callables within
   the run.
-- **Exception stops:** `set_stop_on_exception(true)`: any exception
+- **Exception stops:** `set_stop_on_exception(vectors)`, a
+  `VectorSet` (`VectorSet::ALL` for any): an exception of one of them
   the CPU is about to take ends the run before anything is stacked
   (`End::Exception { vector, pc }`): one an instruction raises, a fault
   among them, a trace, a hardware breakpoint, and an interrupt once

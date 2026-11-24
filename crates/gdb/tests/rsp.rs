@@ -27,6 +27,7 @@ use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Span;
 use mc683xx_cpu32::End;
 use mc683xx_cpu32::Limits;
+use mc683xx_cpu32::exception::VectorSet;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_cpu32::memory::MemoryKind;
@@ -975,7 +976,7 @@ fn monitor_faults_stop_the_chip_s_run() {
 fn a_bare_cpu_s_exception_stop_is_a_trap() {
     let mut machine = machine();
     machine.write(Address(START), &bytes(&[0x4e40])).unwrap();
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     let (ending, replies) = session(&mut machine, vec![packet("c"), packet("k")]);
     assert_eq!(ending.unwrap(), Ending::Killed);
     // SIGTRAP, gdb's 5

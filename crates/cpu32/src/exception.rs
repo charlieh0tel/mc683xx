@@ -102,31 +102,89 @@ impl Vector {
     }
 }
 
-/// The vectors, as a bit set.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct VectorSet([u64; 4]);
+/// Vectors a [`VectorSet`] word holds.
+const SET_WORD_BITS: u8 = u64::BITS as u8;
+/// Words in a [`VectorSet`]: one bit for each of the 256 vectors
+/// (CPU32RM Table 6-1).
+const SET_WORDS: usize = (u8::MAX as usize + 1) / SET_WORD_BITS as usize;
+
+/// A set of exception vectors, any of the 256: which exceptions stop a
+/// run ([`Cpu::set_stop_on_exception`]) or an intercept hook covers
+/// ([`Cpu::add_intercept_hook`]).  Built from an iterator of vectors
+/// (`collect`), or as [`ALL`](Self::ALL) or [`EMPTY`](Self::EMPTY), its
+/// default.
+///
+/// [`Cpu::set_stop_on_exception`]: crate::Cpu::set_stop_on_exception
+/// [`Cpu::add_intercept_hook`]: crate::Cpu::add_intercept_hook
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct VectorSet([u64; SET_WORDS]);
 
 impl VectorSet {
+    /// No vector.
+    pub const EMPTY: Self = Self([0; SET_WORDS]);
+    /// Every vector.
+    pub const ALL: Self = Self([u64::MAX; SET_WORDS]);
+
+    /// The word and the bit in it that hold `vector`.
+    const fn place(vector: Vector) -> (usize, u64) {
+        (
+            (vector.0 / SET_WORD_BITS) as usize,
+            1 << (vector.0 % SET_WORD_BITS),
+        )
+    }
+
     /// Whether `vector` is in it.
-    pub(crate) const fn contains(self, vector: Vector) -> bool {
-        self.0[(vector.0 >> 6) as usize] & 1 << (vector.0 & 63) != 0
+    #[must_use]
+    pub const fn contains(self, vector: Vector) -> bool {
+        let (word, bit) = Self::place(vector);
+        self.0[word] & bit != 0
+    }
+
+    /// Whether it holds no vector.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        let mut word = 0;
+        while word < SET_WORDS {
+            if self.0[word] != 0 {
+                return false;
+            }
+            word += 1;
+        }
+        true
     }
 
     /// It with `vector`.
-    pub(crate) const fn with(self, vector: Vector) -> Self {
+    #[must_use]
+    pub const fn with(self, vector: Vector) -> Self {
+        let (word, bit) = Self::place(vector);
         let mut words = self.0;
-        words[(vector.0 >> 6) as usize] |= 1 << (vector.0 & 63);
+        words[word] |= bit;
         Self(words)
     }
 
     /// The vectors in it or in `other`.
-    pub(crate) const fn union(self, other: Self) -> Self {
-        Self([
-            self.0[0] | other.0[0],
-            self.0[1] | other.0[1],
-            self.0[2] | other.0[2],
-            self.0[3] | other.0[3],
-        ])
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        let mut words = self.0;
+        let mut word = 0;
+        while word < SET_WORDS {
+            words[word] |= other.0[word];
+            word += 1;
+        }
+        Self(words)
+    }
+
+    /// Its vectors, in ascending order.
+    pub fn iter(self) -> impl Iterator<Item = Vector> {
+        (0..=u8::MAX)
+            .map(Vector)
+            .filter(move |&vector| self.contains(vector))
+    }
+}
+
+impl FromIterator<Vector> for VectorSet {
+    fn from_iter<I: IntoIterator<Item = Vector>>(vectors: I) -> Self {
+        vectors.into_iter().fold(Self::EMPTY, Self::with)
     }
 }
 
@@ -806,6 +864,7 @@ impl Core<'_> {
 mod tests {
     use super::Exception;
     use super::Vector;
+    use super::VectorSet;
     use super::format;
     use crate::interrupt::InterruptLevel;
     use mc683xx_target::Address;
@@ -817,6 +876,30 @@ mod tests {
         assert_eq!(
             format::vector(format::word(format::SIX_WORD, Vector(47))),
             Vector(47)
+        );
+    }
+
+    #[test]
+    fn a_vector_set_holds_what_it_is_built_from() {
+        let set: VectorSet = [Vector(0), Vector(63), Vector(64), Vector(255)]
+            .into_iter()
+            .collect();
+        assert!(set.contains(Vector(64)) && set.contains(Vector(255)));
+        assert!(!set.contains(Vector(1)) && !set.contains(Vector(128)));
+        assert_eq!(
+            set.iter().collect::<Vec<_>>(),
+            [Vector(0), Vector(63), Vector(64), Vector(255)]
+        );
+        assert_eq!(
+            set.union(VectorSet::EMPTY.with(Vector(1))).iter().count(),
+            5
+        );
+        assert!(VectorSet::EMPTY.is_empty() && VectorSet::default().is_empty());
+        assert!(!set.is_empty());
+        assert_eq!(VectorSet::ALL.iter().count(), 256);
+        assert_eq!(
+            (0..=u8::MAX).map(Vector).collect::<VectorSet>(),
+            VectorSet::ALL
         );
     }
 

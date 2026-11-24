@@ -168,7 +168,7 @@ def test_an_in_process_client_is_served() -> None:
 def test_an_exception_stop_is_a_trap_to_gdb() -> None:
     bare = bare_cpu()
     bare.write(START, struct.pack(">H", TRAP_0))
-    bare.set_stop_on_exception(True)
+    bare.set_stop_on_exception(None)
     replies: list[bytes] = []
     clients: list[threading.Thread] = []
     done = threading.Event()

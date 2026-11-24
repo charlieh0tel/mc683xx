@@ -15,6 +15,7 @@ use crate::exception::BusCycleKind;
 use crate::exception::Exception;
 use crate::exception::MICROCODE_REVISION;
 use crate::exception::Vector;
+use crate::exception::VectorSet;
 use crate::exception::format;
 use crate::exception::ssw;
 use crate::flat::Machine;
@@ -172,7 +173,9 @@ fn an_intercepted_trap_stacks_nothing_and_can_be_taken_natively() {
     let mut machine = machine(&[TRAP_0]);
     machine
         .cpu
-        .add_intercept_hook([Vector::trap(0)], |_| ControlFlow::Break(()));
+        .add_intercept_hook(VectorSet::EMPTY.with(Vector::trap(0)), |_| {
+            ControlFlow::Break(())
+        });
     assert_eq!(
         one(&mut machine),
         End::Intercepted(Intercepted {
@@ -205,12 +208,18 @@ fn intercept_hooks_are_called_in_order_until_one_stops_the_run() {
         }
     };
     let trap = Vector::trap(0);
-    machine.cpu.add_intercept_hook([trap], hook(1, false));
+    machine
+        .cpu
+        .add_intercept_hook(VectorSet::EMPTY.with(trap), hook(1, false));
     let other = machine
         .cpu
-        .add_intercept_hook([Vector::ZERO_DIVIDE], hook(2, true));
-    let third = machine.cpu.add_intercept_hook([trap], hook(3, true));
-    let fourth = machine.cpu.add_intercept_hook([trap], hook(4, true));
+        .add_intercept_hook(VectorSet::EMPTY.with(Vector::ZERO_DIVIDE), hook(2, true));
+    let third = machine
+        .cpu
+        .add_intercept_hook(VectorSet::EMPTY.with(trap), hook(3, true));
+    let fourth = machine
+        .cpu
+        .add_intercept_hook(VectorSet::EMPTY.with(trap), hook(4, true));
     assert!(matches!(one(&mut machine), End::Intercepted(_)));
     assert_eq!(*called.borrow(), [(1, trap), (3, trap)], "4 not called");
     called.borrow_mut().clear();
@@ -249,7 +258,9 @@ fn an_intercept_undoes_the_instruction_s_postincrement() {
     let mut machine = machine(&[DIVU_POSTINCREMENT]);
     machine
         .cpu
-        .add_intercept_hook([Vector::ZERO_DIVIDE], |_| ControlFlow::Break(()));
+        .add_intercept_hook(VectorSet::EMPTY.with(Vector::ZERO_DIVIDE), |_| {
+            ControlFlow::Break(())
+        });
     machine.cpu.registers.set_address(0, 0x2000);
     let end = one(&mut machine);
     assert!(
@@ -1200,8 +1211,8 @@ const fn exception(vector: Vector, pc: u32) -> End {
 #[test]
 fn an_exception_stop_stacks_nothing_and_the_run_on_takes_it() {
     let mut machine = machine(&[TRAP_0]);
-    machine.cpu.set_stop_on_exception(true);
-    assert!(machine.cpu.stops_on_exception());
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    assert_eq!(machine.cpu.stops_on_exception(), VectorSet::ALL);
     assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
     assert_eq!(machine.cpu.registers.pc.0, CODE);
     assert_eq!(machine.cpu.registers.ssp.0, STACK, "nothing stacked");
@@ -1214,9 +1225,29 @@ fn an_exception_stop_stacks_nothing_and_the_run_on_takes_it() {
 }
 
 #[test]
+fn an_exception_stop_stops_only_the_vectors_set() {
+    let mut machine = machine(&[DIVU_POSTINCREMENT, TRAP_0]);
+    let set: VectorSet = [Vector::trap(0)].into_iter().collect();
+    machine.cpu.set_stop_on_exception(set);
+    machine.cpu.registers.set_address(0, 0x2000);
+    assert_eq!(one(&mut machine), End::Instructions, "the divide, taken");
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    machine.cpu.registers.pc = Address(CODE + 2);
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE + 2));
+}
+
+#[test]
+fn an_empty_set_stops_on_no_exception() {
+    let mut machine = machine(&[TRAP_0]);
+    machine.cpu.set_stop_on_exception(VectorSet::EMPTY);
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
 fn an_exception_stop_undoes_the_instruction_s_postincrement() {
     let mut machine = machine(&[DIVU_POSTINCREMENT]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     machine.cpu.registers.set_address(0, 0x2000);
     assert_eq!(one(&mut machine), exception(Vector::ZERO_DIVIDE, CODE));
     assert_eq!(machine.cpu.registers.address(0), 0x2000);
@@ -1225,7 +1256,7 @@ fn an_exception_stop_undoes_the_instruction_s_postincrement() {
 #[test]
 fn a_fault_stops_as_an_exception_unless_faults_stop() {
     let mut machine = machine(&[MOVEQ_1_D1, MOVE_LONG_A0_TO_D0]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     machine.cpu.registers.set_address(0, NOWHERE);
     one(&mut machine);
     // stopping on faults, a fault is a fault stop
@@ -1245,16 +1276,20 @@ fn a_fault_stops_as_an_exception_unless_faults_stop() {
 #[test]
 fn an_intercept_hook_sees_an_exception_before_the_exception_stop() {
     let mut machine = machine(&[TRAP_0, TRAP_0]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     let stopping = machine
         .cpu
-        .add_intercept_hook([Vector::trap(0)], |_| ControlFlow::Break(()));
+        .add_intercept_hook(VectorSet::EMPTY.with(Vector::trap(0)), |_| {
+            ControlFlow::Break(())
+        });
     assert!(matches!(one(&mut machine), End::Intercepted(_)));
     // declined by every hook, it is taken natively, no exception stop
     machine.cpu.remove_hook(stopping);
     machine
         .cpu
-        .add_intercept_hook([Vector::trap(0)], |_| ControlFlow::Continue(()));
+        .add_intercept_hook(VectorSet::EMPTY.with(Vector::trap(0)), |_| {
+            ControlFlow::Continue(())
+        });
     assert_eq!(one(&mut machine), End::Instructions);
     assert_eq!(machine.cpu.registers.pc.0, HANDLER);
 }
@@ -1262,7 +1297,7 @@ fn an_intercept_hook_sees_an_exception_before_the_exception_stop() {
 #[test]
 fn a_trace_stops_after_its_instruction_and_the_run_on_takes_it() {
     let mut machine = machine(&[MOVEQ_1_D1, NOP]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     machine.cpu.registers.set_sr(status::S | status::T1);
     assert_eq!(one(&mut machine), exception(Vector::TRACE, CODE + 2));
     assert_eq!(machine.cpu.registers.data[1], 1, "the MOVEQ ran");
@@ -1277,7 +1312,7 @@ fn a_trace_stops_after_its_instruction_and_the_run_on_takes_it() {
 #[test]
 fn an_interrupt_stops_with_its_vector_and_the_run_on_takes_it() {
     let mut machine = machine(&[NOP, NOP]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     let vector = Vector(0x40);
     machine.request_interrupt(IrqPin::try_from(3).unwrap(), Some(vector));
     assert_eq!(one(&mut machine), exception(vector, CODE));
@@ -1296,7 +1331,7 @@ fn an_interrupt_stops_with_its_vector_and_the_run_on_takes_it() {
 #[test]
 fn take_exception_is_no_exception_stop() {
     let mut machine = machine(&[NOP]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     machine.take_exception(Vector::trap(3), None).unwrap();
     assert_eq!(machine.cpu.registers.pc.0, HANDLER);
 }
@@ -1304,7 +1339,7 @@ fn take_exception_is_no_exception_stop() {
 #[test]
 fn a_hardware_breakpoint_stops_and_is_left_pending() {
     let mut machine = machine(&[NOP]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     machine.cpu.set_breakpoint_pending(true);
     let vector = Vector::HARDWARE_BREAKPOINT;
     assert_eq!(boundary_only(&mut machine), exception(vector, CODE));
@@ -1318,7 +1353,7 @@ fn a_hardware_breakpoint_stops_and_is_left_pending() {
 #[test]
 fn a_trap_at_the_pc_of_a_withdrawn_trace_stop_stops() {
     let mut machine = machine(&[MOVEQ_1_D1, TRAP_0]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     machine.cpu.registers.set_sr(status::S | status::T1);
     assert_eq!(one(&mut machine), exception(Vector::TRACE, CODE + 2));
     machine.cpu.set_trace_pending(None);
@@ -1330,7 +1365,7 @@ fn a_trap_at_the_pc_of_a_withdrawn_trace_stop_stops() {
 #[test]
 fn a_trap_at_the_pc_of_a_withdrawn_interrupt_stop_stops() {
     let mut machine = machine(&[TRAP_0]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     let pin = IrqPin::try_from(3).unwrap();
     machine.request_interrupt(pin, Some(Vector(0x40)));
     assert_eq!(one(&mut machine), exception(Vector(0x40), CODE));
@@ -1342,7 +1377,7 @@ fn a_trap_at_the_pc_of_a_withdrawn_interrupt_stop_stops() {
 #[test]
 fn a_higher_interrupt_arriving_after_an_interrupt_stop_stops() {
     let mut machine = machine(&[NOP, NOP]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     machine.request_interrupt(IrqPin::try_from(3).unwrap(), Some(Vector(0x40)));
     assert_eq!(one(&mut machine), exception(Vector(0x40), CODE));
     machine.request_interrupt(IrqPin::try_from(5).unwrap(), Some(Vector(0x50)));
@@ -1353,7 +1388,7 @@ fn a_higher_interrupt_arriving_after_an_interrupt_stop_stops() {
 #[test]
 fn a_snapshot_from_before_an_exception_stop_stops_there_again() {
     let mut machine = machine(&[TRAP_0]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     let before = machine.save().unwrap();
     assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
     machine.restore(&before).unwrap();
@@ -1363,11 +1398,11 @@ fn a_snapshot_from_before_an_exception_stop_stops_there_again() {
 #[test]
 fn a_snapshot_at_an_exception_stop_takes_it_once_and_runs_on() {
     let mut machine = machine(&[TRAP_0]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
     let at_stop = machine.save().unwrap();
     let mut fresh = self::machine(&[TRAP_0]);
-    fresh.cpu.set_stop_on_exception(true);
+    fresh.cpu.set_stop_on_exception(VectorSet::ALL);
     fresh.restore(&at_stop).unwrap();
     assert_eq!(one(&mut fresh), End::Instructions);
     assert_eq!(fresh.cpu.registers.pc.0, HANDLER);
@@ -1377,12 +1412,12 @@ fn a_snapshot_at_an_exception_stop_takes_it_once_and_runs_on() {
 #[test]
 fn a_snapshot_at_an_exception_stop_restored_before_the_setting_runs_on() {
     let mut machine = machine(&[TRAP_0]);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
     let at_stop = machine.save().unwrap();
     let mut fresh = self::machine(&[TRAP_0]);
     fresh.restore(&at_stop).unwrap();
-    fresh.cpu.set_stop_on_exception(true);
+    fresh.cpu.set_stop_on_exception(VectorSet::ALL);
     assert_eq!(one(&mut fresh), End::Instructions);
     assert_eq!(fresh.cpu.registers.pc.0, HANDLER);
 }
@@ -1391,10 +1426,10 @@ fn a_snapshot_at_an_exception_stop_restored_before_the_setting_runs_on() {
 fn a_promise_kept_across_the_setting_off_and_on_is_spent_once() {
     let mut machine = machine(&[TRAP_0, TRAP_0]);
     machine.write(Address(HANDLER), &RTE.to_be_bytes()).unwrap();
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
-    machine.cpu.set_stop_on_exception(false);
-    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_stop_on_exception(VectorSet::EMPTY);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
     assert_eq!(one(&mut machine), End::Instructions, "the trap, taken");
     assert_eq!(one(&mut machine), End::Instructions, "the RTE");
     assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE + 2));
@@ -1405,7 +1440,9 @@ fn a_snapshot_keeps_take_natively_once() {
     let mut machine = machine(&[TRAP_0]);
     machine
         .cpu
-        .add_intercept_hook([Vector::trap(0)], |_| ControlFlow::Break(()));
+        .add_intercept_hook(VectorSet::EMPTY.with(Vector::trap(0)), |_| {
+            ControlFlow::Break(())
+        });
     assert!(matches!(one(&mut machine), End::Intercepted(_)));
     let before = machine.save().unwrap();
     machine.cpu.take_natively_once(Vector::trap(0));
@@ -1422,7 +1459,9 @@ fn take_natively_once_takes_only_its_vector() {
     let mut machine = machine(&[TRAP_0]);
     machine
         .cpu
-        .add_intercept_hook([Vector::trap(0)], |_| ControlFlow::Break(()));
+        .add_intercept_hook(VectorSet::EMPTY.with(Vector::trap(0)), |_| {
+            ControlFlow::Break(())
+        });
     assert!(matches!(one(&mut machine), End::Intercepted(_)));
     machine.cpu.take_natively_once(Vector::trap(1));
     assert!(matches!(one(&mut machine), End::Intercepted(_)));

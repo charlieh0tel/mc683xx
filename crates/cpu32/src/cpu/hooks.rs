@@ -313,8 +313,9 @@ impl Cpu {
     }
 
     /// Calls `hook` for each exception an instruction raises with a
-    /// vector of `vectors` (a trap, an illegal instruction, a divide by
-    /// zero, but not a fault, a trace or an interrupt), before anything
+    /// vector of `vectors` ([`VectorSet::ALL`] for any: a trap, an
+    /// illegal instruction, a divide by zero, but not a fault, a trace
+    /// or an interrupt), before anything
     /// is stacked.  If it stops the run, the run ends
     /// ([`End::Intercepted`]) with the exception not taken, the
     /// instruction's (An)+ and -(An) undone and PC at it, for the host
@@ -328,13 +329,10 @@ impl Cpu {
     /// [`End::Intercepted`]: super::bare::End::Intercepted
     pub fn add_intercept_hook(
         &mut self,
-        vectors: impl IntoIterator<Item = Vector>,
+        vectors: VectorSet,
         hook: impl FnMut(&Intercepted) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
-        let vectors = vectors
-            .into_iter()
-            .fold(VectorSet::default(), |set, vector| set.with(vector));
         self.hooks.intercept.push((id, vectors, Box::new(hook)));
         self.bare.intercepted = self.hooks.intercepted();
         id
