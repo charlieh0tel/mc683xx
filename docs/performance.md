@@ -79,6 +79,20 @@ working fails `make ci`.
   (`ram_*`) and through a peripheral that peeks and pokes its own array
   (`peripheral_*`), as a host loads an image into a part.  Throughput
   is bytes.
+- `hooks/*` (`benches/hooks.rs`): what the hooks cost the core, on
+  the `nop`, `move_indirect` and `clr_indirect` kernels: `unhooked`;
+  `code_elsewhere` and `write_elsewhere`, a hook on two bytes of the
+  RAM's pages that no sled reaches, so it never fires; and
+  `code_everywhere`, a Rust code hook that does nothing, called on
+  every instruction.  `hooks/add_remove` adds and removes a code
+  hook on the RAM; `coverage_elsewhere` and `coverage_sled` add a
+  coverage beside the sled or over it.  From Python,
+  `crates/python/benches/hooks.py`
+  (Python hooks, below).
+- `core/*_limited` (`benches/core.rs`): the `nop` and
+  `move_indirect` sleds run by `Cpu::run_limited`, their
+  instructions the limit, as a bare host runs: what the limits'
+  checks cost.
 - `*/short_runs`: 1000 runs of one clock each, the cost of a run call:
   `Cpu::run_for` alone, and `Mc68331::run_for` with its syncing.
 - `tables/*` (`benches/tables.rs`): building the 64K-entry instruction
@@ -701,3 +715,81 @@ benchmark 3% slower in fact.  What is left of a data access is the
 page walk itself (mask, slab, entry, region, bounds checks, about 20
 instructions); the compact entry is the next candidate once `cmpi`'s
 and `btst_immediate`'s cost is understood.
+
+## Hooks
+
+A hook costs nothing while none is installed; one installed costs
+what looking it up costs, and a Python one the call into Python.
+`crates/python/benches/hooks.py` measures the bare `Machine` from
+Python: a two-instruction loop (`move.w d0,(a0)`, `bra.s`) with no
+hook, a code hook outside it, a no-op code hook on every
+instruction, a no-op write hook, and write hooks that read A7; and
+adding and removing a code hook.  Built with `maturin develop
+--release`, pinned to one core:
+
+```
+taskset -c 16 python crates/python/benches/hooks.py
+```
+
+On the machine above, pinned to an efficiency core (16) while the
+performance cores' siblings were loaded, release builds, best of 7,
+before the changes below and after them:
+
+| Case | Before | After | Before, core 2 | After, core 2 |
+| --- | --- | --- | --- | --- |
+| no hook | 38.7 M instructions/s | 36.6 M instructions/s | 80.8 M instructions/s | 77.4 M instructions/s |
+| code hook elsewhere | 34.6 M instructions/s | 35.7 M instructions/s | 68.9 M instructions/s | 75.6 M instructions/s |
+| no-op code hook, a call | 0.42 us | 0.27-0.29 us | 0.25 us | 0.16 us |
+| no-op write hook, a call | 0.50 us | 0.32-0.34 us | 0.30 us | 0.18 us |
+| write hook reading `registers['A7']`, a call | 5.2-5.3 us | 2.2 us | 2.6 us | 0.82-0.85 us |
+| write hook reading `register('A7')`, a call | | 0.70 us | | 0.25 us |
+| add and remove a code hook | 15.5 us | 0.42 us | 7.1 us | 0.24 us |
+
+(core 2: a performance core, measured once the machine was quiet.)
+The run with no hook runs the same host instructions before and
+after, to within 0.2% (`perf stat` of 20 million instructions),
+in 4% more cycles: code placement, which moved it from -1% to -5%
+between builds of the same code on both kinds of core.
+
+The changes:
+
+- A hook argument's register dictionary is made at the first ask
+  and kept, its keys interned once: a hook that reads
+  `registers['A7']` no longer allocates 24 strings, and one that
+  reads `register('A7')` makes no dictionary.
+- The bare `Machine`'s run borrows itself once a turn, not five
+  times: each borrow of an `unsendable` class checks the thread
+  (`std::thread::current`), which with the borrow flag was about a
+  quarter of a no-op hook's cost.  The handles that stay the
+  machine's (its pending exception, its stop request) are taken
+  once a run, and the first hook a turn fired is not looked up
+  again, as nothing can have removed it.
+- The queue of hooks fired keeps its allocation from turn to turn.
+- An instruction on a page with no code or block hook compares its
+  page number with the quiet page's and looks nothing up (below).
+- Adding or removing a hook rewatches only its own pages.
+
+`benches/hooks.rs`, on the same core, two interleaved runs each,
+before and after a change:
+
+| Benchmark | Before | After | Change |
+| --- | --- | --- | --- |
+| `hooks/nop_code_elsewhere` | 200-205 us | 174 us | the quiet page |
+| `hooks/move_indirect_code_elsewhere` | 173 us | 151-155 us | the quiet page |
+| `hooks/clr_indirect_code_elsewhere` | 131-141 us | 119 us | the quiet page |
+| `hooks/nop_write_elsewhere` | 213-260 us | 180-185 us | the quiet page |
+| `hooks/add_remove` | 15.1 us | 80 ns | one hook's pages rewatched |
+
+With the quiet page a code hook that never fires costs `nop` about
+7% and the kernels that touch memory 2 to 3% (`unhooked`: 155-160,
+147-153 and 115-119 us); a write hook elsewhere costs a little
+more, as the registers are kept as each instruction begins for the
+write hooks to read.
+
+A coverage (`Cpu::add_coverage`) off the instructions' pages costs
+what a code hook there does (`hooks/nop_coverage_elsewhere` 161 us,
+`move_indirect_coverage_elsewhere` 147 us, against 150 and 144
+unhooked); over the whole sled, a bit set for every instruction,
+`nop` takes 236-238 us and `move_indirect` 188 us: about 4 ns an
+instruction on this core, where a Python code hook that does nothing
+costs about 280 ns.

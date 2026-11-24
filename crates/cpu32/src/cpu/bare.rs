@@ -33,6 +33,7 @@ use crate::instructions::Flow;
 use crate::interrupt::InterruptLevel;
 use crate::interrupt::Interrupts;
 use crate::registers::Registers;
+use crate::registers::status;
 use mc683xx_target::Address;
 use mc683xx_target::Entry;
 use mc683xx_target::FunctionCode;
@@ -66,6 +67,16 @@ pub struct Limits {
     /// An address: the run ends when PC reaches it at an instruction
     /// boundary, before an interrupt is taken or a hook called there.
     pub reach: Option<Address>,
+    /// Whether the run ends at a self-loop ([`End::SelfLoop`]): once a
+    /// BRA (8-, 16- or 32-bit displacement) or a JMP executes that
+    /// branches to its own address (CPU32RM 4.4, BRA, JMP), as
+    /// firmware idles waiting for an interrupt.  The loop runs once,
+    /// its cycles counted, and the run ends after it, PC at it; an
+    /// interrupt due at its boundary is taken before it, as ever, so
+    /// the run ends there only with none due.  Not with SR's T1 or T0
+    /// set, as a traced loop takes a trace exception each time round.
+    /// DBcc to itself counts down, so it is not one.
+    pub self_loop: bool,
 }
 
 /// Why a fault that stopped the run was one.
@@ -190,11 +201,16 @@ pub enum End {
         /// PC, where its processing begins when the run goes on.
         pc: Address,
     },
+    /// A self-loop ran, with [`Limits::self_loop`]: PC at it.
+    SelfLoop {
+        /// The loop's address.
+        pc: Address,
+    },
 }
 
 /// A short lowercase name for each way a limited run ends, as
 /// [`Stop`]'s: its stop's name, or `reached`, `instructions`, `steps`,
-/// `fault`, `intercepted` or `exception`.  The detail a variant holds
+/// `self-loop`, `fault`, `intercepted` or `exception`.  The detail a variant holds
 /// (the fault, the exception) is not part of it.
 impl fmt::Display for End {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -206,6 +222,7 @@ impl fmt::Display for End {
             Self::Fault(_) => formatter.write_str("fault"),
             Self::Intercepted(_) => formatter.write_str("intercepted"),
             Self::Exception { .. } => formatter.write_str("exception"),
+            Self::SelfLoop { .. } => formatter.write_str("self-loop"),
         }
     }
 }
@@ -253,7 +270,8 @@ pub(crate) struct Bare {
     /// The exception an exception stop ended the last run at, taken
     /// with no stop once.
     pub(crate) exception_once: Option<TakeOnce>,
-    /// The end a fault or an intercept set, for `run_limited`.
+    /// The end a fault, an intercept or a self-loop set, for
+    /// `run_limited`.
     pub(crate) end: Option<End>,
     /// The last invalid access's reason, for a fault's cause.
     pub(crate) last_invalid: Option<Invalid>,
@@ -290,7 +308,9 @@ impl Cpu {
         let budget = limits.cycles.unwrap_or(Cycle::MAX.since(now));
         let first = self.instructions;
         self.bare.exceptions_stepped = 0;
+        self.self_loop = limits.self_loop;
         let run = self.run_from_host(bus, interrupts, now, budget, Some(limits));
+        self.self_loop = false;
         let end = self.bare.end.clone().unwrap_or(End::Stop(run.stop));
         LimitedRun {
             cycles: run.cycles,
@@ -618,6 +638,28 @@ impl Cpu {
     /// first, as on the CPU32's 16-bit bus.
     pub const fn set_long_bus(&mut self, whole: bool) {
         self.long_bus = whole;
+    }
+
+    /// A BRA or JMP taken to `target`: if it is its own address, a
+    /// self-loop, which ends a run that asks ([`Limits::self_loop`]).
+    #[inline(always)]
+    pub(crate) fn branched(&mut self, target: Address) {
+        if self.self_loop && target == self.instruction_pc {
+            self.end_at_self_loop(target);
+        }
+    }
+
+    /// Ends the run at the self-loop just executed at `pc`, if
+    /// [`Limits::self_loop`] asked and SR's T1 and T0 are clear.
+    #[cold]
+    #[inline(never)]
+    fn end_at_self_loop(&mut self, pc: Address) {
+        if self.registers.sr() & (status::T1 | status::T0) == 0 {
+            self.end_with(End::SelfLoop { pc });
+            // The run loop takes back the instruction an end set in it
+            // as having run nothing; a self-loop ran.
+            self.instructions += 1;
+        }
     }
 
     /// Whether the registers are kept as each instruction begins.

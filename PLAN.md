@@ -2391,8 +2391,33 @@ Adversarial review (2026-11-01):
   the real table's memory and the hooks.  So a cycle on other RAM
   costs what it did; an instruction tests one flag, `Memory`'s
   "special" (some page has a hook bit or a permission), before
-  looking for code and block hooks.  Invalid access and exception
-  hooks need no flag: bus errors and exceptions are slow already.
+  looking for code and block hooks.  While it is set, the CPU keeps
+  the quiet page: the last page an instruction was found on with no
+  code or block hook bit.  An instruction on it compares its page
+  number and looks nothing up (sc batch 6: a ranged code hook that
+  never hit cost every instruction an out-of-line page lookup, 67 to
+  54 M instructions/s); any change to the hooks forgets it.
+  Installing or removing a ranged hook recomputes only its pages'
+  bits (and, for a bit that takes cycles off the fast path, their
+  fast entries); "special" is whether some page has a permission
+  short of all, kept as permissions change, or some hook range is
+  not empty (sc batch 6: every add and remove recomputed every
+  allocated slab, 15 us on 256 Kbytes, now 80 ns).  Invalid access
+  and exception hooks need no flag: bus errors and exceptions are
+  slow already.
+- Coverage (sc batch 6): `Cpu::add_coverage(range) -> CoverageId`
+  records natively the address of each instruction executed in the
+  range, a bit for each word (64 Kbytes a Mbyte of range, the end
+  clamped to the address lines), read out as a `Coverage`
+  (`addresses`, `contains`), cleared, removed; on `CpuControl` too, so
+  the chip and board have it.  It sets a page watch bit of its own, so
+  an instruction off its pages costs what it did (the quiet page) and
+  one on them the out-of-line lookup the code hooks use.  It records
+  an instruction once no code or block hook stopped the run before it
+  (a stopped one is recorded when it runs).  Decided: not part of a
+  snapshot, as the hooks are not: it is host instrumentation, and a
+  restore that rewound it would lose what the runs since showed.
+  Edges (branch pairs) are deferred to 1.x, additively.
 - When hooks run: code and block hooks before the instruction; a stop
   there leaves it unexecuted, and the next run executes it without
   calling the hooks that already ran for it.  Memory hooks after each
@@ -2442,7 +2467,10 @@ Adversarial review (2026-11-01):
   `core/add_to_memory` +1.0%, `core/tst` -1.0%, `core/cmpi` -2.2%,
   `core/btst_immediate` no change; `core/nop` and `core/moveq`, which
   read no operand, +3% to +7%, with `run_instructions` the same size:
-  placement.  Not for fetches (code hooks are theirs), nor a
+  placement.  Re-measured on a quiet performance core (sc batch 6),
+  the change's parent and itself interleaved: `core/nop` 80.8 and
+  80.6 us, `core/moveq` 85.0 and 85.1 us, the same; on an efficiency
+  core +2% and +2 to +6%, as before: placement there, not work.  Not for fetches (code hooks are theirs), nor a
   look with no cycle (`Memory::peek`, a debugger's read).  Python's
   `PendingRead.peek(address, length)` lends the memory to the callable
   for its call alone, through a scoped thread-local (`scoped-tls`, no
@@ -2629,6 +2657,32 @@ and `mc683xx.Machine` in Python (see Python).
   monomorphized twice, stopped `step` being inlined and cost 20% on
   `core/nop`.  `clear_resume` forgets a hook stop's skip, so a run
   from where a hook stopped calls it again.
+- **Self-loop stop** (sc batch 6, opt-in): `Limits::self_loop` ends
+  the run (`End::SelfLoop { pc }`) once an instruction that branches
+  to itself executes, BRA with a displacement of -2 (8, 16 or 32
+  bits) or a JMP of its own address, as firmware idles waiting for an
+  interrupt, so a harness need not run out its budget there.
+  Decided: the loop runs once, its cycles counted, and the run ends
+  after it, PC at it (as the CPU does; each run that asks runs it
+  once more, so time moves); an interrupt due at its boundary is taken
+  before it, as ever, so the run ends there only with none due; not
+  while T1 or T0 is set, as a traced loop takes a trace exception
+  each time round, so it is not idle.  The code and block hooks before
+  it run as for any instruction.  DBcc to itself counts down and
+  ends, so it is not one; `stop`/`lpstop` already end a run without a
+  budget.  No exception is involved, so `set_stop_on_exception` and
+  intercepts do not meet it.  The gdb stub's runs never ask for it.
+  The BRA and JMP handlers look for it, testing a flag the limited
+  run sets only when the branch is to its own address, so no other
+  instruction, and no run that does not ask, pays for it: host
+  instructions per iteration are those without it but for
+  `core/bra_self`'s +1.5% (`perf stat`, 2N - N).  A test in the run
+  loop's limit checks before each boundary, looked for with no cycle
+  from memory, the instruction left unexecuted, cost every limited run
+  +1.6% host instructions (`core/nop_limited`, `hooks.py`'s run with
+  no hook -4%) and was not kept.  The chip and board have no `Limits`
+  for hosts, so it is the bare CPU's (Python's
+  `Machine.run_limited(self_loop=True)`).
 - **Faults:** `set_stop_on_fault`: a bus or address error ends the
   run (`End::Fault`; an unlimited run, `Stop::Fault`, before any other
   stop asked for in the instruction): fetch, read or write; bus error

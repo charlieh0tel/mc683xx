@@ -7,6 +7,7 @@ use std::ops::RangeInclusive;
 
 use crate::cpu::Core;
 use crate::cpu::Cpu;
+use crate::cpu::NO_PAGE;
 use crate::cpu::Stop;
 use crate::cpu::bare::Intercepted;
 use crate::exception::BusCycleKind;
@@ -14,6 +15,8 @@ use crate::exception::Frame;
 use crate::exception::Vector;
 use crate::exception::VectorSet;
 use crate::hooks::Control;
+use crate::hooks::Coverage;
+use crate::hooks::CoverageId;
 use crate::hooks::ExceptionEntry;
 use crate::hooks::ExceptionReturn;
 use crate::hooks::HookId;
@@ -100,6 +103,16 @@ pub(crate) enum Resume {
     Code,
 }
 
+/// What [`Hooks::remove`] took out.
+enum Removed {
+    /// No hook had the id.
+    Nothing,
+    /// A hook that sets no [`watch`] bit.
+    Unwatched,
+    /// A hook over a range, with its [`watch`] bit.
+    Watched(RangeInclusive<Address>, u8),
+}
+
 /// The hooks installed, each kind in the order installed.
 #[derive(Default)]
 pub(crate) struct Hooks {
@@ -129,6 +142,11 @@ pub(crate) struct Hooks {
     /// Before an instruction's exception of one of the vectors is
     /// stacked.
     intercept: Vec<(HookId, VectorSet, InterceptHook)>,
+    /// The next [`CoverageId`].
+    next_coverage: u64,
+    /// The coverages, in the order added, each with the range it was
+    /// added with and its instructions executed.
+    coverage: Vec<(CoverageId, RangeInclusive<Address>, Coverage)>,
 }
 
 impl fmt::Debug for Hooks {
@@ -145,6 +163,7 @@ impl fmt::Debug for Hooks {
             .field("exception", &self.exception.len())
             .field("exception_return", &self.exception_return.len())
             .field("intercept", &self.intercept.len())
+            .field("coverage", &self.coverage.len())
             .finish_non_exhaustive()
     }
 }
@@ -156,52 +175,45 @@ impl Hooks {
         HookId(self.next)
     }
 
-    /// The ranges the code, block and memory hooks cover, with their
-    /// [`watch`] bits.
-    fn watched(&self) -> impl Iterator<Item = (RangeInclusive<Address>, u8)> + '_ {
-        fn ranges<H>(
-            hooks: &[Ranged<H>],
-            bit: u8,
-        ) -> impl Iterator<Item = (RangeInclusive<Address>, u8)> + '_ {
-            hooks.iter().map(move |hook| (hook.range.clone(), bit))
-        }
-        ranges(&self.code, watch::CODE)
-            .chain(ranges(&self.block, watch::BLOCK))
-            .chain(ranges(&self.pre_read, watch::PRE_READ))
-            .chain(ranges(&self.pre_write, watch::PRE_WRITE))
-            .chain(ranges(&self.read, watch::READ))
-            .chain(ranges(&self.write, watch::WRITE))
-    }
-
     /// Whether a hook reads the registers as the instruction began.
     pub(crate) const fn want_registers(&self) -> bool {
         !self.read.is_empty() || !self.write.is_empty() || !self.invalid.is_empty()
     }
 
-    /// Removes the hook `id`; whether there was one.
-    fn remove(&mut self, id: HookId) -> bool {
-        fn retain<H>(hooks: &mut Vec<Ranged<H>>, id: HookId) -> bool {
+    /// Removes the hook `id`: what it was, if there was one.
+    fn remove(&mut self, id: HookId) -> Removed {
+        fn take<H>(hooks: &mut Vec<Ranged<H>>, id: HookId) -> Option<RangeInclusive<Address>> {
+            let index = hooks.iter().position(|hook| hook.id == id)?;
+            Some(hooks.remove(index).range)
+        }
+        fn take_unranged<T>(hooks: &mut Vec<T>, id: HookId, of: impl Fn(&T) -> HookId) -> bool {
             let before = hooks.len();
-            hooks.retain(|hook| hook.id != id);
+            hooks.retain(|hook| of(hook) != id);
             hooks.len() != before
         }
-        fn retain_unranged<H>(hooks: &mut Vec<(HookId, H)>, id: HookId) -> bool {
-            let before = hooks.len();
-            hooks.retain(|(other, _)| *other != id);
-            hooks.len() != before
+        let watched = [
+            (take(&mut self.code, id), watch::CODE),
+            (take(&mut self.block, id), watch::BLOCK),
+            (take(&mut self.pre_read, id), watch::PRE_READ),
+            (take(&mut self.pre_write, id), watch::PRE_WRITE),
+            (take(&mut self.read, id), watch::READ),
+            (take(&mut self.write, id), watch::WRITE),
+        ];
+        if let Some((range, bit)) = watched
+            .into_iter()
+            .find_map(|(range, bit)| range.map(|range| (range, bit)))
+        {
+            return Removed::Watched(range, bit);
         }
-        let intercepts = self.intercept.len();
-        self.intercept.retain(|(other, _, _)| *other != id);
-        retain(&mut self.code, id)
-            | retain(&mut self.block, id)
-            | retain(&mut self.pre_read, id)
-            | retain(&mut self.pre_write, id)
-            | retain(&mut self.read, id)
-            | retain(&mut self.write, id)
-            | retain(&mut self.invalid, id)
-            | retain_unranged(&mut self.exception, id)
-            | retain_unranged(&mut self.exception_return, id)
-            | (self.intercept.len() != intercepts)
+        let unwatched = take(&mut self.invalid, id).is_some()
+            | take_unranged(&mut self.exception, id, |(other, _)| *other)
+            | take_unranged(&mut self.exception_return, id, |(other, _)| *other)
+            | take_unranged(&mut self.intercept, id, |(other, _, _)| *other);
+        if unwatched {
+            Removed::Unwatched
+        } else {
+            Removed::Nothing
+        }
     }
 
     /// The vectors the intercept hooks cover.
@@ -234,12 +246,13 @@ impl Cpu {
         hook: impl FnMut(&Instruction) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
+        self.memory.add_watch(range.clone(), watch::CODE);
         self.hooks.code.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
         });
-        self.rewatch();
+        self.hooks_changed();
         id
     }
 
@@ -253,12 +266,13 @@ impl Cpu {
         hook: impl FnMut(&Instruction) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
+        self.memory.add_watch(range.clone(), watch::BLOCK);
         self.hooks.block.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
         });
-        self.rewatch();
+        self.hooks_changed();
         id
     }
 
@@ -289,12 +303,13 @@ impl Cpu {
         hook: impl FnMut(&PendingRead, &Memory, &mut [u8]) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
+        self.memory.add_watch(range.clone(), watch::PRE_READ);
         self.hooks.pre_read.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
         });
-        self.rewatch();
+        self.hooks_changed();
         id
     }
 
@@ -328,12 +343,13 @@ impl Cpu {
         hook: impl FnMut(&mut PendingWrite, &Memory, &mut [u8]) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
+        self.memory.add_watch(range.clone(), watch::PRE_WRITE);
         self.hooks.pre_write.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
         });
-        self.rewatch();
+        self.hooks_changed();
         id
     }
 
@@ -347,12 +363,13 @@ impl Cpu {
         hook: impl FnMut(&MemoryAccess) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
+        self.memory.add_watch(range.clone(), watch::READ);
         self.hooks.read.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
         });
-        self.rewatch();
+        self.hooks_changed();
         id
     }
 
@@ -364,12 +381,13 @@ impl Cpu {
         hook: impl FnMut(&MemoryAccess) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
+        self.memory.add_watch(range.clone(), watch::WRITE);
         self.hooks.write.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
         });
-        self.rewatch();
+        self.hooks_changed();
         id
     }
 
@@ -444,6 +462,56 @@ impl Cpu {
         id
     }
 
+    /// Records in a new coverage the address of each instruction in
+    /// `range`, on the address lines, as it executes, once no code or
+    /// block hook stopped the run before it: a bit for each word of the
+    /// range (64 Kbytes for each Mbyte), so cover the code, not all of
+    /// memory.  An instruction outside every coverage's pages costs
+    /// what it did; one on them costs a lookup.  Not part of a
+    /// snapshot, which neither saves nor restores it, as the hooks.
+    pub fn add_coverage(&mut self, range: RangeInclusive<Address>) -> CoverageId {
+        self.hooks.next_coverage += 1;
+        let id = CoverageId(self.hooks.next_coverage);
+        let coverage = Coverage::new(&range, self.memory.address_mask);
+        self.memory.add_watch(range.clone(), watch::COVERAGE);
+        self.hooks.coverage.push((id, range, coverage));
+        self.hooks_changed();
+        id
+    }
+
+    /// Coverage `id`, if it was added and not removed.
+    #[must_use]
+    pub fn coverage(&self, id: CoverageId) -> Option<&Coverage> {
+        self.hooks
+            .coverage
+            .iter()
+            .find_map(|(other, _, coverage)| (*other == id).then_some(coverage))
+    }
+
+    /// Forgets the instructions coverage `id` recorded; whether there
+    /// is one.
+    pub fn clear_coverage(&mut self, id: CoverageId) -> bool {
+        self.hooks
+            .coverage
+            .iter_mut()
+            .find(|(other, _, _)| *other == id)
+            .map(|(_, _, coverage)| coverage.clear())
+            .is_some()
+    }
+
+    /// Removes coverage `id`: what it recorded, if there was one.
+    pub fn remove_coverage(&mut self, id: CoverageId) -> Option<Coverage> {
+        let index = self
+            .hooks
+            .coverage
+            .iter()
+            .position(|(other, _, _)| *other == id)?;
+        let (_, range, coverage) = self.hooks.coverage.remove(index);
+        self.memory.remove_watch(&range, watch::COVERAGE);
+        self.hooks_changed();
+        Some(coverage)
+    }
+
     /// Whether the hook `id` is installed.
     #[must_use]
     pub fn has_hook(&self, id: HookId) -> bool {
@@ -465,54 +533,79 @@ impl Cpu {
     /// Removes the hook `id`; whether it was installed.
     pub fn remove_hook(&mut self, id: HookId) -> bool {
         let removed = self.hooks.remove(id);
+        if let Removed::Watched(range, bit) = &removed {
+            self.memory.remove_watch(range, *bit);
+        }
         self.bare.intercepted = self.hooks.intercepted();
-        self.rewatch();
-        removed
+        self.hooks_changed();
+        !matches!(removed, Removed::Nothing)
     }
 
-    /// Sets the pages' hook bits from the hooks.
-    pub(crate) fn rewatch(&mut self) {
-        self.memory.set_watched(self.hooks.watched());
+    /// Brings what follows the hooks up to date, their pages' bits
+    /// having been: the quiet page forgotten, the flags of the
+    /// pre-access hooks, and whether the registers are captured.
+    fn hooks_changed(&mut self) {
+        self.quiet_page = NO_PAGE;
         self.pre_reading = !self.hooks.pre_read.is_empty();
         self.pre_writing = !self.hooks.pre_write.is_empty();
         self.update_capture();
     }
 
+    /// The code and block hooks for the instruction at PC, while some
+    /// page has a hook or permissions: none on the quiet page, which
+    /// only forgets the block start and the resume, as
+    /// [`before_instruction`](Self::before_instruction) does there.
+    /// Always inlined, so an instruction on it costs a compare.
+    #[inline(always)]
+    pub(super) fn hooks_before_instruction(&mut self) -> Option<HookId> {
+        if self.memory.page_number(self.registers.pc) == self.quiet_page {
+            self.block_start = false;
+            self.resume = None;
+            return None;
+        }
+        self.before_instruction()
+    }
+
     /// The code and block hooks for the instruction at PC, on a page
-    /// that has them: the first that stopped the run.
+    /// that has them: the first that stopped the run.  A page with none
+    /// becomes the quiet page.
     #[inline(never)]
-    pub(super) fn before_instruction(&mut self) -> Option<HookId> {
+    fn before_instruction(&mut self) -> Option<HookId> {
         let pc = self.registers.pc;
         let at = self.memory.mask(pc);
         let watched = self.memory.watched(at);
         let resume = self.resume.take().filter(|&(address, _)| address == pc);
         let block_start = mem::take(&mut self.block_start);
-        if watched & (watch::CODE | watch::BLOCK) == 0 {
+        if watched & (watch::CODE | watch::BLOCK | watch::COVERAGE) == 0 {
+            self.quiet_page = self.memory.page_number(at);
             return None;
         }
-        let instruction = || Instruction {
-            pc,
-            registers: self.registers.clone(),
-            stack_top: self.memory.peek(
-                Space::of(self.registers.data_space()),
-                Address(self.registers.address(7)),
-                Size::Long,
-            ),
-        };
         let block = block_start && watched & watch::BLOCK != 0 && resume.is_none();
         let code =
             watched & watch::CODE != 0 && resume.is_none_or(|(_, stage)| stage == Resume::Block);
-        if !block && !code {
-            return None;
+        if block || code {
+            let instruction = Instruction {
+                pc,
+                registers: self.registers.clone(),
+                stack_top: self.memory.peek(
+                    Space::of(self.registers.data_space()),
+                    Address(self.registers.address(7)),
+                    Size::Long,
+                ),
+            };
+            if block && let Some(id) = call(&mut self.hooks.block, at, &instruction) {
+                self.resume = Some((pc, Resume::Block));
+                return Some(id);
+            }
+            if code && let Some(id) = call(&mut self.hooks.code, at, &instruction) {
+                self.resume = Some((pc, Resume::Code));
+                return Some(id);
+            }
         }
-        let instruction = instruction();
-        if block && let Some(id) = call(&mut self.hooks.block, at, &instruction) {
-            self.resume = Some((pc, Resume::Block));
-            return Some(id);
-        }
-        if code && let Some(id) = call(&mut self.hooks.code, at, &instruction) {
-            self.resume = Some((pc, Resume::Code));
-            return Some(id);
+        if watched & watch::COVERAGE != 0 {
+            for (_, _, coverage) in &mut self.hooks.coverage {
+                coverage.record(at);
+            }
         }
         None
     }

@@ -6,12 +6,15 @@
 //! for the call into the chip to raise it when it returns.
 
 use std::cell::Cell;
+use std::fmt;
 use std::ops::ControlFlow;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use mc683xx_cpu32::exception;
 use mc683xx_cpu32::hooks::Control;
+use mc683xx_cpu32::hooks::Coverage;
+use mc683xx_cpu32::hooks::CoverageId;
 use mc683xx_cpu32::hooks::ExceptionEntry;
 use mc683xx_cpu32::hooks::ExceptionReturn;
 use mc683xx_cpu32::hooks::HookId;
@@ -35,6 +38,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::exceptions::PyValueError;
 use pyo3::pyclass;
 use pyo3::pymethods;
+use pyo3::sync::PyOnceLock;
 use pyo3::types::PyAnyMethods;
 use pyo3::types::PyBool;
 use pyo3::types::PyByteArray;
@@ -42,6 +46,8 @@ use pyo3::types::PyByteArrayMethods;
 use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
 use pyo3::types::PyDictMethods;
+use pyo3::types::PySet;
+use pyo3::types::PyString;
 use pyo3::types::PyTypeMethods;
 
 use crate::error::Error;
@@ -82,48 +88,151 @@ impl HookIdView {
     }
 }
 
-/// Every register in `registers` by name.
+/// A coverage, as `add_coverage` returns it (Rust's
+/// `hooks::CoverageId`).
+#[pyclass(
+    name = "CoverageId",
+    module = "mc683xx",
+    frozen,
+    eq,
+    hash,
+    from_py_object
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct CoverageIdView(pub(crate) CoverageId);
+
+#[pymethods]
+impl CoverageIdView {
+    /// `CoverageId(2)`, from Rust's `Display`, `coverage 2`.
+    fn __repr__(&self) -> String {
+        opaque_repr("CoverageId", &self.0)
+    }
+
+    /// Rust's `Display`: `coverage 2`.
+    fn __str__(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+/// The addresses of the instructions `coverage` recorded, as a set.
+pub(crate) fn covered<'py>(py: Python<'py>, coverage: &Coverage) -> PyResult<Bound<'py, PySet>> {
+    PySet::new(py, coverage.addresses().map(|address| address.0))
+}
+
+/// Every register in `registers` by name, the names interned once.
 pub(crate) fn register_dictionary<'py>(
     py: Python<'py>,
     registers: &Registers,
 ) -> PyResult<Bound<'py, PyDict>> {
+    /// Each register with its name, in `Register::all`'s order.
+    static NAMES: PyOnceLock<Vec<(Register, Py<PyString>)>> = PyOnceLock::new();
+    let names = NAMES.get_or_init(py, || {
+        Register::all()
+            .map(|register| {
+                let name = PyString::intern(py, &register.to_string()).unbind();
+                (register, name)
+            })
+            .collect()
+    });
     let dictionary = PyDict::new(py);
-    for register in Register::all() {
-        dictionary.set_item(register.to_string(), register.read(registers))?;
+    for (register, name) in names {
+        dictionary.set_item(name.bind(py), register.read(registers))?;
     }
     Ok(dictionary)
+}
+
+/// The registers a hook's argument carries, and their dictionary once
+/// a hook asks for it.
+pub(crate) struct Captured {
+    /// The registers.
+    registers: Registers,
+    /// Their dictionary, made at the first ask.
+    dictionary: PyOnceLock<Py<PyDict>>,
+}
+
+impl fmt::Debug for Captured {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("Captured")
+            .field("registers", &self.registers)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Captured {
+    /// `registers`, their dictionary not made yet.
+    const fn new(registers: Registers) -> Self {
+        Self {
+            registers,
+            dictionary: PyOnceLock::new(),
+        }
+    }
+
+    /// Every register by name: one dictionary, made at the first call.
+    fn dictionary<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        self.dictionary
+            .get_or_try_init(py, || {
+                register_dictionary(py, &self.registers).map(Bound::unbind)
+            })
+            .map(|dictionary| dictionary.bind(py).clone())
+    }
+
+    /// Register `name`.
+    fn register(&self, name: &str) -> Result<u32, Error> {
+        Ok(name.parse::<Register>()?.read(&self.registers))
+    }
+
+    /// Register `name` of `captured`, if any: a name not a register's is
+    /// an error either way.
+    fn optional_register(captured: Option<&Self>, name: &str) -> Result<Option<u32>, Error> {
+        let register = name.parse::<Register>()?;
+        Ok(captured.map(|captured| register.read(&captured.registers)))
+    }
 }
 
 /// An instruction about to execute, as a code or block hook sees it.
 #[pyclass(name = "Instruction", module = "mc683xx", frozen)]
 #[derive(Debug)]
-pub(crate) struct InstructionView(Instruction);
+pub(crate) struct InstructionView {
+    /// Its address.
+    pc: Address,
+    /// The registers.
+    registers: Captured,
+    /// The long word at A7 (`hooks::Instruction::stack_top`).
+    stack_top: Option<u32>,
+}
 
 #[pymethods]
 impl InstructionView {
     /// Its address.
     #[getter]
     const fn pc(&self) -> u32 {
-        self.0.pc.0
+        self.pc.0
     }
 
-    /// Every register by name, as `Mc68331.registers()` gives them.
+    /// Every register by name, as `Mc68331.registers()` gives them: one
+    /// dictionary, made at the first ask.
     #[getter]
     fn registers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        register_dictionary(py, &self.0.registers)
+        self.registers.dictionary(py)
+    }
+
+    /// Register `name`, as `read_register` names it.
+    fn register(&self, name: &str) -> Result<u32, Error> {
+        self.registers.register(name)
     }
 
     /// The long word at A7, in data space, if memory serves it; `None`
     /// if a peripheral would.
     #[getter]
-    fn stack_top(&self) -> Option<u32> {
-        self.0.stack_top
+    const fn stack_top(&self) -> Option<u32> {
+        self.stack_top
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         Ok(format!(
             "Instruction(pc={:#08x}, stack_top={})",
-            self.0.pc.0,
+            self.pc.0,
             repr(py, self.stack_top())?
         ))
     }
@@ -132,7 +241,7 @@ impl InstructionView {
 /// A read or write cycle that ended well, as a memory hook sees it.
 #[pyclass(name = "MemoryAccess", module = "mc683xx", frozen)]
 #[derive(Debug)]
-pub(crate) struct MemoryAccessView(MemoryAccess, Option<Registers>);
+pub(crate) struct MemoryAccessView(MemoryAccess, Option<Captured>);
 
 #[pymethods]
 impl MemoryAccessView {
@@ -181,14 +290,20 @@ impl MemoryAccessView {
 
     /// The registers as the instruction began, or, while a trace,
     /// hardware breakpoint or interrupt taken after one stacks its
-    /// frame, as that processing began; by name, on the bare `Machine`
-    /// only, `None` on the chip.
+    /// frame, as that processing began; by name, one dictionary made at
+    /// the first ask, on the bare `Machine` only, `None` on the chip.
     #[getter]
     fn registers<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
         self.1
             .as_ref()
-            .map(|registers| register_dictionary(py, registers))
+            .map(|registers| registers.dictionary(py))
             .transpose()
+    }
+
+    /// Register `name` of `registers`, on the bare `Machine` only,
+    /// `None` on the chip.
+    fn register(&self, name: &str) -> Result<Option<u32>, Error> {
+        Captured::optional_register(self.1.as_ref(), name)
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
@@ -456,7 +571,7 @@ impl TryFrom<Invalid> for InvalidReason {
 /// sees it.
 #[pyclass(name = "InvalidAccess", module = "mc683xx", frozen)]
 #[derive(Debug)]
-pub(crate) struct InvalidAccessView(InvalidAccess, Option<Registers>);
+pub(crate) struct InvalidAccessView(InvalidAccess, Option<Captured>);
 
 #[pymethods]
 impl InvalidAccessView {
@@ -511,14 +626,20 @@ impl InvalidAccessView {
 
     /// The registers as the instruction began, or, while a trace,
     /// hardware breakpoint or interrupt taken after one stacks its
-    /// frame, as that processing began; by name, on the bare `Machine`
-    /// only, `None` on the chip.
+    /// frame, as that processing began; by name, one dictionary made at
+    /// the first ask, on the bare `Machine` only, `None` on the chip.
     #[getter]
     fn registers<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
         self.1
             .as_ref()
-            .map(|registers| register_dictionary(py, registers))
+            .map(|registers| registers.dictionary(py))
             .transpose()
+    }
+
+    /// Register `name` of `registers`, on the bare `Machine` only,
+    /// `None` on the chip.
+    fn register(&self, name: &str) -> Result<Option<u32>, Error> {
+        Captured::optional_register(self.1.as_ref(), name)
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
@@ -783,7 +904,16 @@ fn control(answer: PyResult<bool>, pending: &Pending) -> Control {
 
 /// A code or block hook's argument.
 pub(crate) fn instruction(instruction: &Instruction) -> InstructionView {
-    InstructionView(instruction.clone())
+    owned_instruction(instruction.clone())
+}
+
+/// A code or block hook's argument, from the instruction itself.
+pub(crate) fn owned_instruction(instruction: Instruction) -> InstructionView {
+    InstructionView {
+        pc: instruction.pc,
+        registers: Captured::new(instruction.registers),
+        stack_top: instruction.stack_top,
+    }
 }
 
 /// A read or write hook's argument.
@@ -802,7 +932,7 @@ pub(crate) const fn memory_access_with(
     access: MemoryAccess,
     registers: Registers,
 ) -> MemoryAccessView {
-    MemoryAccessView(access, Some(registers))
+    MemoryAccessView(access, Some(Captured::new(registers)))
 }
 
 /// An invalid access hook's argument on the bare CPU, as
@@ -811,7 +941,7 @@ pub(crate) const fn invalid_access_with(
     access: InvalidAccess,
     registers: Registers,
 ) -> InvalidAccessView {
-    InvalidAccessView(access, Some(registers))
+    InvalidAccessView(access, Some(Captured::new(registers)))
 }
 
 /// An exception hook's argument.

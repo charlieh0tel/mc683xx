@@ -204,6 +204,34 @@ def test_a_memory_hook_s_writes_land_after_the_instruction():
     assert seen == [(9, b"\x00\x09", False)]
 
 
+def test_a_hook_reads_one_register_or_all_as_its_instruction_began():
+    cpu = machine(MOVE_WORD_A0_TO_D0, MOVE_WORD_D0_TO_A0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("D0", 5)
+    cpu.poke_bytes(0x2000, b"\x00\x07")
+    seen = []
+
+    def write(access: mc683xx.MemoryAccess) -> None:
+        registers = access.registers
+        assert registers is not None
+        # one dictionary, made once
+        assert access.registers is registers
+        seen.append((access.register("D0"), access.register("a0"), registers["D0"]))
+        assert access.register("A7") == registers["A7"] == STACK - 4
+        with pytest.raises(ValueError, match="no register"):
+            access.register("D8")
+
+    def code(instruction: mc683xx.Instruction) -> None:
+        assert instruction.register("PC") == instruction.pc
+        assert instruction.registers is instruction.registers
+
+    cpu.add_write_hook(write, 0x2000, 0x2001)
+    cpu.add_code_hook(code)
+    cpu.run_limited(reach=RETURN)
+    # D0 as the write's instruction began: what the read left
+    assert seen == [(7, 0x2000, 7)]
+
+
 def test_a_pre_read_hook_answers_the_long_from_its_copy_and_peeks_memory():
     cpu = machine(MOVE_LONG_A0_TO_D0, RTS)
     cpu.write_register("A0", 0x2000)
@@ -960,3 +988,38 @@ def test_vector_names_rust_s_vector_numbers():
         Vector.autovector(8)
     with pytest.raises(TypeError):
         Vector()
+
+
+BRA_SELF = 0x60FE  # BRA.S to itself
+
+
+def test_a_limited_run_can_end_at_a_self_loop_once_it_runs():
+    cpu = machine(NOP, BRA_SELF)
+    run = cpu.run_limited(self_loop=True, instructions=100)
+    assert run.end == mc683xx.End.SelfLoop(CODE + 2)
+    assert isinstance(run.end, mc683xx.End.SelfLoop) and run.end.pc == CODE + 2
+    assert repr(run.end) == f"End.SelfLoop({CODE + 2:#010x})"
+    assert str(run.end) == "self-loop"
+    assert cpu.instructions == 2
+    # not asked: the loop runs on
+    assert cpu.run_limited(instructions=10).end == mc683xx.End.Instructions()
+    assert cpu.instructions == 12
+
+
+def test_a_coverage_records_the_instructions_run_in_its_range():
+    cpu = machine(NOP, ADDQ_LONG_1_D0, RTS)
+    coverage = cpu.add_coverage(CODE, CODE + 0xFF)
+    assert repr(coverage) == "CoverageId(1)" and str(coverage) == "coverage 1"
+    cpu.run_limited(reach=RETURN)
+    assert cpu.coverage(coverage) == {CODE, CODE + 2, CODE + 4}
+    assert cpu.clear_coverage(coverage)
+    assert cpu.coverage(coverage) == set()
+    cpu.poke_bytes(STACK - 4, struct.pack(">I", RETURN))
+    cpu.write_register("A7", STACK - 4)
+    cpu.run_limited(begin=CODE + 2, reach=RETURN)
+    # not saved: a restore leaves it as it was
+    cpu.restore(cpu.save())
+    assert cpu.remove_coverage(coverage) == {CODE + 2, CODE + 4}
+    assert cpu.coverage(coverage) is None
+    assert not cpu.clear_coverage(coverage)
+    assert cpu.remove_coverage(coverage) is None

@@ -73,6 +73,7 @@ use crate::exceptions::BusError;
 use crate::function_code::FunctionCode;
 use crate::gdb::Ending;
 use crate::hooks::BusCycleKind;
+use crate::hooks::CoverageIdView;
 use crate::hooks::ExceptionReturnView;
 use crate::hooks::ExceptionView;
 use crate::hooks::HookIdView;
@@ -287,6 +288,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<ClockPhase>()?;
     module.add_class::<Space>()?;
     module.add_class::<HookIdView>()?;
+    module.add_class::<CoverageIdView>()?;
     module.add_class::<VectorNumbers>()?;
     module.add_class::<VectorSetView>()?;
     module.add_class::<InstructionView>()?;

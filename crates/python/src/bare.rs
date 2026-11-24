@@ -65,6 +65,7 @@ use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
 use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
+use pyo3::types::PySet;
 
 use crate::chip::Halt;
 
@@ -75,6 +76,7 @@ use crate::gdb;
 use crate::held::Held;
 use crate::hooks;
 use crate::hooks::BusCycleKind;
+use crate::hooks::CoverageIdView;
 use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::PythonMapped;
@@ -346,6 +348,11 @@ pub(crate) enum EndView {
         /// PC, where its processing begins when the run goes on.
         pc: u32,
     },
+    /// A self-loop ran, with `self_loop`: PC at it.
+    SelfLoop {
+        /// The loop's address.
+        pc: u32,
+    },
 }
 
 impl TryFrom<End> for EndView {
@@ -369,6 +376,7 @@ impl TryFrom<End> for EndView {
                 vector: vector.0,
                 pc: pc.0,
             },
+            End::SelfLoop { pc } => Self::SelfLoop { pc: pc.0 },
             other => return Err(Error::run_end(other)),
         })
     }
@@ -385,6 +393,7 @@ impl From<EndView> for End {
                 vector: Vector(vector),
                 pc: Address(pc),
             },
+            EndView::SelfLoop { pc } => Self::SelfLoop { pc: Address(pc) },
         }
     }
 }
@@ -403,6 +412,7 @@ impl EndView {
             Self::Instructions() => "End.Instructions()".to_owned(),
             Self::Fault { fault } => format!("End.Fault({})", repr(py, fault.clone())?),
             Self::Exception { vector, pc } => format!("End.Exception({vector}, {pc:#010x})"),
+            Self::SelfLoop { pc } => format!("End.SelfLoop({pc:#010x})"),
         })
     }
 }
@@ -498,7 +508,7 @@ impl MachineView {
 fn view(py: Python<'_>, context: Context, registers: &Registers) -> PyResult<Py<PyAny>> {
     Ok(match context {
         Context::Instruction(instruction) => {
-            Py::new(py, hooks::instruction(&instruction))?.into_any()
+            Py::new(py, hooks::owned_instruction(instruction))?.into_any()
         }
         Context::Memory(access) => {
             Py::new(py, hooks::memory_access_with(access, registers.clone()))?.into_any()
@@ -530,6 +540,8 @@ struct Budget {
     instructions: Option<(u64, u64)>,
     /// `cycles`.
     cycles: Option<u64>,
+    /// `self_loop`.
+    self_loop: bool,
     /// The cycles spent so far.
     spent: u64,
 }
@@ -558,6 +570,7 @@ impl Budget {
         limits.cycles = cycles;
         limits.instructions = instructions;
         limits.reach = self.reach;
+        limits.self_loop = self.self_loop;
         Ok(limits)
     }
 }
@@ -752,7 +765,7 @@ impl MachineView {
             .map(InterruptLevel::try_from)
             .transpose()
             .map_err(Error::from)?;
-        let (taken, fired, registers) = {
+        let (taken, mut fired, registers) = {
             let mut this = running(slf)?;
             let taken = this.machine.take_exception(Vector(vector), level);
             let fired = mem::take(&mut *this.queue.borrow_mut());
@@ -762,7 +775,7 @@ impl MachineView {
         let pending = slf.borrow().pending.clone();
         let dispatched = pending
             .check()
-            .and_then(|()| Self::dispatch(slf, slf.py(), fired, &registers));
+            .and_then(|()| Self::dispatch(slf, slf.py(), &mut fired, &registers));
         slf.borrow_mut().running = false;
         dispatched?;
         Ok(taken.map_err(Error::from)?)
@@ -779,16 +792,21 @@ impl MachineView {
     /// run `instructions`, its cycle estimate reaches `cycles`, a hook
     /// or the stop request stops it, a fault does
     /// (`set_stop_on_fault`), or the CPU
-    /// stops or halts.  `begin` sets PC first and forgets a hook stop's
-    /// skip, so the hooks at `begin` are called.  With no `cycles`, a
-    /// `stop` instruction ends the run at once.
-    #[pyo3(signature = (*, begin = None, reach = None, instructions = None, cycles = None))]
+    /// stops or halts, or, with `self_loop`, once an instruction that
+    /// branches to itself runs (`End.SelfLoop`, Rust's
+    /// `Limits::self_loop`).  `begin` sets PC first and forgets a hook
+    /// stop's skip, so the hooks at `begin` are called.  With no
+    /// `cycles`, a `stop` instruction ends the run at once.
+    #[pyo3(signature = (
+        *, begin = None, reach = None, instructions = None, cycles = None, self_loop = false
+    ))]
     fn run_limited(
         slf: &Bound<'_, Self>,
         begin: Option<u32>,
         reach: Option<u32>,
         instructions: Option<u64>,
         cycles: Option<u64>,
+        self_loop: bool,
     ) -> PyResult<LimitedRunView> {
         let first = {
             let mut this = running(slf)?;
@@ -803,6 +821,7 @@ impl MachineView {
             reach: reach.map(Address),
             instructions: instructions.map(|count| (count, first)),
             cycles,
+            self_loop,
             spent: 0,
         };
         let run = Self::run_dispatching(slf, budget, &|| false);
@@ -1104,6 +1123,47 @@ impl MachineView {
         self.machine.cpu.remove_hook(hook.0)
     }
 
+    /// Records the address of each instruction from `begin` to `end`,
+    /// both included, as it executes (Rust's `Cpu::add_coverage`): a
+    /// bit for each word of the range, so cover the code, not all of
+    /// memory.  Not saved by `save`.
+    fn add_coverage(&mut self, begin: u32, end: u32) -> CoverageIdView {
+        CoverageIdView(self.machine.cpu.add_coverage(Address(begin)..=Address(end)))
+    }
+
+    /// The addresses of the instructions `coverage` recorded, as a set;
+    /// `None` if it was removed.
+    fn coverage<'py>(
+        &self,
+        py: Python<'py>,
+        coverage: CoverageIdView,
+    ) -> PyResult<Option<Bound<'py, PySet>>> {
+        self.machine
+            .cpu
+            .coverage(coverage.0)
+            .map(|recorded| hooks::covered(py, recorded))
+            .transpose()
+    }
+
+    /// Forgets what `coverage` recorded; whether it is there.
+    fn clear_coverage(&mut self, coverage: CoverageIdView) -> bool {
+        self.machine.cpu.clear_coverage(coverage.0)
+    }
+
+    /// Removes `coverage`: what it recorded, as `coverage` gives it, or
+    /// `None` if it was removed already.
+    fn remove_coverage<'py>(
+        &mut self,
+        py: Python<'py>,
+        coverage: CoverageIdView,
+    ) -> PyResult<Option<Bound<'py, PySet>>> {
+        self.machine
+            .cpu
+            .remove_coverage(coverage.0)
+            .map(|recorded| hooks::covered(py, &recorded))
+            .transpose()
+    }
+
     /// The CPU's whole state as bytes: registers, memory, the clock, the
     /// interrupt requests and each peripheral's `save()`, in the order
     /// added; not the hooks or settings.  A peripheral with no `save` raises
@@ -1151,8 +1211,20 @@ impl MachineView {
         halt: &dyn Fn() -> bool,
     ) -> PyResult<(u64, End)> {
         let py = slf.py();
+        // Handles that stay the machine's through the run: each borrow
+        // of the machine checks the thread, so the loop takes one a turn.
+        let (pending, in_run_stop, stop_request) = {
+            let this = slf.borrow();
+            (
+                this.pending.clone(),
+                Rc::clone(&this.in_run_stop),
+                this.machine.stop_request(),
+            )
+        };
+        // The queue the last turn emptied, its allocation kept for the next.
+        let mut spare = Vec::new();
         loop {
-            let (run, fired, registers) = {
+            let (run, mut fired, registers) = {
                 let mut this = slf.borrow_mut();
                 let limits = match budget.remaining(this.machine.cpu.instructions()) {
                     Ok(mut limits) => {
@@ -1166,7 +1238,7 @@ impl MachineView {
                     Err(end) => return Ok((budget.spent, end)),
                 };
                 let run = this.machine.run_limited(limits);
-                let fired = mem::take(&mut *this.queue.borrow_mut());
+                let fired = mem::replace(&mut *this.queue.borrow_mut(), mem::take(&mut spare));
                 let registers = if fired.is_empty() {
                     None
                 } else {
@@ -1175,14 +1247,14 @@ impl MachineView {
                 (run, fired, registers)
             };
             budget.spent = budget.spent.saturating_add(run.cycles.clocks());
-            let pending = slf.borrow().pending.clone();
-            let in_run_stop = slf.borrow().in_run_stop.take();
+            let in_run_stop = in_run_stop.take();
             pending.check()?;
             let dispatched = match registers {
-                Some(registers) => Self::dispatch(slf, py, fired, &registers)?,
+                Some(registers) => Self::dispatch(slf, py, &mut fired, &registers)?,
                 None => Dispatched::Continue,
             };
-            let stop = slf.borrow().machine.stop_request().take();
+            spare = fired;
+            let stop = stop_request.take();
             let requested = End::Stop(mc683xx_cpu32::Stop::Requested);
             if halt() {
                 return Ok((budget.spent, requested));
@@ -1193,7 +1265,7 @@ impl MachineView {
                 }
                 (End::Intercepted(interception), Dispatched::Continue) if !stop => {
                     Self::answer(slf, py, interception)?;
-                    if slf.borrow().machine.stop_request().take() {
+                    if stop_request.take() {
                         return Ok((budget.spent, requested));
                     }
                 }
@@ -1214,14 +1286,15 @@ impl MachineView {
     fn dispatch(
         slf: &Bound<'_, Self>,
         py: Python<'_>,
-        fired: Vec<Fired>,
+        fired: &mut Vec<Fired>,
         registers: &Registers,
     ) -> PyResult<Dispatched> {
         let mut stopped = None;
-        for fired in fired {
-            // A hook removed by an earlier callable is not called.
-            let installed = slf.borrow().machine.cpu.has_hook(fired.id);
-            if !installed {
+        for (index, fired) in fired.drain(..).enumerate() {
+            // A hook removed by an earlier callable is not called; the
+            // first has none before it, and no callable ran in the core
+            // run that removes one.
+            if index > 0 && !slf.borrow().machine.cpu.has_hook(fired.id) {
                 continue;
             }
             let argument = view(py, fired.context, registers)?;
@@ -1322,6 +1395,7 @@ impl Target for Debugged<'_, '_> {
             reach: None,
             instructions: None,
             cycles: Some(budget.clocks()),
+            self_loop: false,
             spent: 0,
         };
         let (_, end) = MachineView::run_dispatching(self.0, limits, hit)?;

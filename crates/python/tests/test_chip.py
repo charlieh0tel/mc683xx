@@ -869,6 +869,7 @@ def test_a_code_hook_stops_before_its_instruction():
     (instruction,) = seen
     assert instruction.pc == AFTER_WIRING
     assert instruction.registers["A7"] == RAM_BASE + 0x100
+    assert instruction.register("a7") == RAM_BASE + 0x100
     assert instruction.stack_top == 0xCAFEF00D
     # the next run executes it, its hook not called again
     run = chip.run_for(2000)
@@ -904,6 +905,18 @@ def test_a_pc_write_after_a_stop_starts_a_block():
     assert starts[:2] == [START, second_move]
 
 
+def test_a_chip_s_coverage_records_its_instructions():
+    builder, _, _ = board(ram_round_trip(), Recorder())
+    chip = builder.build()
+    coverage = chip.add_coverage(START, START + 0xFF)
+    chip.run_for(2000)
+    covered = chip.coverage(coverage)
+    assert covered is not None and START in covered
+    assert all(START <= address <= START + 0xFF and address % 2 == 0 for address in covered)
+    assert chip.remove_coverage(coverage) == covered
+    assert chip.coverage(coverage) is None
+
+
 def test_memory_hooks_see_reads_and_writes():
     builder, _, _ = board(ram_round_trip(), Recorder())
     chip = builder.build()
@@ -916,6 +929,8 @@ def test_memory_hooks_see_reads_and_writes():
     assert [(a.address, a.size, a.value) for a in writes] == [(RAM_WORD, 2, 0x1234)]
     assert writes[0].function_code == mc683xx.FunctionCode.SUPERVISOR_DATA
     assert str(writes[0].function_code) == "supervisor-data"
+    # the registers are the bare Machine's alone
+    assert writes[0].registers is None and writes[0].register("D0") is None
     assert reads == []
     chip.run_for(2000)
     assert [(a.address, a.size, a.value) for a in reads] == [(RAM_WORD, 2, 0x1234)]

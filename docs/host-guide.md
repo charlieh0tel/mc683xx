@@ -1216,6 +1216,11 @@ but the exception hook cover an address range, on the address lines.
   or the trace handler's where the restored SR sets T1 or T0, as `rte`
   takes the trace exception in the same step (CPU32RM 6.2.10).
 - `remove_hook(id)`.
+- `add_coverage(range) -> CoverageId`: no callback; a bit for each
+  word of the range, set as an instruction starting there executes,
+  read with `cpu().coverage(id)` (a `Coverage`: `addresses()`,
+  `contains(address)`), forgotten with `clear_coverage(id)`, handed
+  back by `remove_coverage(id)`.  Not part of a snapshot.
 
 `cpu_control().protect(space, start, length, Permissions)` sets
 read, write and execute per 2-Kbyte page in `Space::User` or

@@ -258,6 +258,10 @@ pub struct Cpu {
     stop_request: Option<Stop>,
     /// Where a code or block hook stopped the run, to resume past it.
     resume: Option<(Address, Resume)>,
+    /// The number of a page no code or block hook covers, the last such
+    /// an instruction was found on, or [`NO_PAGE`]: an instruction
+    /// there looks no hook up.  The hooks' changes forget it.
+    quiet_page: usize,
     /// The address of the last instruction if it can be looped: one
     /// word, completed with no exception and no change of flow
     /// (CPU32RM 1.1.2).
@@ -286,12 +290,18 @@ pub struct Cpu {
     pre_reading: bool,
     /// Whether a pre-write hook is installed.
     pre_writing: bool,
+    /// Whether the run under way ends at a self-loop
+    /// ([`Limits::self_loop`](bare::Limits::self_loop)).
+    self_loop: bool,
     /// The bare host's settings.
     pub(crate) bare: Box<Bare>,
 }
 
 /// The interrupt mask that admits no maskable level.
 const MASK_ALL: u8 = InterruptLevel::NONMASKABLE.0;
+
+/// No page number: more than 32 address lines have.
+pub(super) const NO_PAGE: usize = usize::MAX;
 
 impl Cpu {
     /// A CPU on `memory`, its registers zero, not yet reset.
@@ -395,6 +405,7 @@ impl Cpu {
             hooks: Box::default(),
             stop_request: None,
             resume: None,
+            quiet_page: NO_PAGE,
             loopable: None,
             loop_mode: None,
             capture: false,
@@ -404,6 +415,7 @@ impl Cpu {
             long_operand: false,
             pre_reading: false,
             pre_writing: false,
+            self_loop: false,
             bare: Box::default(),
         }
     }
@@ -679,7 +691,7 @@ impl Cpu {
                 };
             }
             if cpu.memory.is_special()
-                && let Some(id) = cpu.before_instruction()
+                && let Some(id) = cpu.hooks_before_instruction()
             {
                 return Run {
                     cycles: elapsed,

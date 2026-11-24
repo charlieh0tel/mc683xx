@@ -64,3 +64,8 @@ harness = false
 name = "access"
 path = "access.rs"
 harness = false
+
+[[bench]]
+name = "hooks"
+path = "hooks.rs"
+harness = false

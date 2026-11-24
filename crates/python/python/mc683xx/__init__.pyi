@@ -62,6 +62,7 @@ __all__ = [
     "ClockPhase",
     "Space",
     "HookId",
+    "CoverageId",
     "Vector",
     "VectorSet",
     "Instruction",
@@ -498,6 +499,13 @@ class HookId:
     def __hash__(self) -> int: ...
 
 @final
+class CoverageId:
+    """A coverage, as `add_coverage` returns it; `str()` is
+    `coverage 2`."""
+
+    def __hash__(self) -> int: ...
+
+@final
 class Vector:
     """Rust's `exception::Vector` constants and constructors, as vector
     numbers (CPU32RM Table 6-1): a vector crosses as its number, so
@@ -621,6 +629,16 @@ class End:
         @property
         def pc(self) -> int: ...
 
+    @final
+    class SelfLoop(End):
+        """An instruction that branches to itself ran, with
+        `run_limited(self_loop=True)`: PC at it."""
+
+        __match_args__ = ("pc",)
+        def __new__(cls, pc: int) -> End.SelfLoop: ...
+        @property
+        def pc(self) -> int: ...
+
 @final
 class LimitedRun:
     """A bare `Machine`'s limited run's outcome."""
@@ -722,7 +740,11 @@ class Instruction:
     @property
     def pc(self) -> int: ...
     @property
-    def registers(self) -> dict[str, int]: ...
+    def registers(self) -> dict[str, int]:
+        """Every register by name: one dictionary, made at the first
+        ask."""
+    def register(self, name: str) -> int:
+        """Register `name`, as `read_register` names it."""
     @property
     def stack_top(self) -> int | None: ...
 
@@ -749,7 +771,13 @@ class MemoryAccess:
     @property
     def registers(self) -> dict[str, int] | None:
         """The registers as the instruction began, by name, on a bare
-        `Machine`; always `None` on an `Mc68331` and a `Board`."""
+        `Machine`; always `None` on an `Mc68331` and a `Board`.  One
+        dictionary, made at the first ask: `register` reads one
+        register without making it."""
+    def register(self, name: str) -> int | None:
+        """Register `name` as the instruction began, on a bare
+        `Machine`; `None` on an `Mc68331` and a `Board`.  A name that is
+        no register's raises `ValueError` on each."""
 
 @final
 class PendingRead:
@@ -825,6 +853,7 @@ class InvalidAccess:
         """Whether exception processing is stacking a frame."""
     @property
     def registers(self) -> dict[str, int] | None: ...
+    def register(self, name: str) -> int | None: ...
 
 @final
 class ExceptionEntry:
@@ -1182,6 +1211,13 @@ class Mc68331:
         self, callback: Callable[[ExceptionReturn], bool | None]
     ) -> HookId: ...
     def remove_hook(self, hook: HookId) -> bool: ...
+    def add_coverage(self, begin: int, end: int) -> CoverageId:
+        """Records the address of each instruction from `begin` to `end`
+        as it executes: a bit for each word of the range.  Not saved by
+        `save`."""
+    def coverage(self, coverage: CoverageId) -> set[int] | None: ...
+    def clear_coverage(self, coverage: CoverageId) -> bool: ...
+    def remove_coverage(self, coverage: CoverageId) -> set[int] | None: ...
     def set_stop_on_fault(self, stop: bool) -> None: ...
     @property
     def stops_on_fault(self) -> bool: ...
@@ -1264,6 +1300,13 @@ class BoardChip:
         self, callback: Callable[[ExceptionReturn], bool | None]
     ) -> HookId: ...
     def remove_hook(self, hook: HookId) -> bool: ...
+    def add_coverage(self, begin: int, end: int) -> CoverageId:
+        """Records the address of each instruction from `begin` to `end`
+        as it executes: a bit for each word of the range.  Not saved by
+        `save`."""
+    def coverage(self, coverage: CoverageId) -> set[int] | None: ...
+    def clear_coverage(self, coverage: CoverageId) -> bool: ...
+    def remove_coverage(self, coverage: CoverageId) -> set[int] | None: ...
     def set_stop_on_fault(self, stop: bool) -> None: ...
     @property
     def stops_on_fault(self) -> bool: ...
@@ -1456,6 +1499,7 @@ class Machine:
         reach: int | None = None,
         instructions: int | None = None,
         cycles: int | None = None,
+        self_loop: bool = False,
     ) -> LimitedRun: ...
     def stop_request(self) -> StopRequest: ...
     def serve_gdb(
@@ -1510,6 +1554,13 @@ class Machine:
         self, callback: Callable[[ExceptionReturn], bool | None]
     ) -> HookId: ...
     def remove_hook(self, hook: HookId) -> bool: ...
+    def add_coverage(self, begin: int, end: int) -> CoverageId:
+        """Records the address of each instruction from `begin` to `end`
+        as it executes: a bit for each word of the range.  Not saved by
+        `save`."""
+    def coverage(self, coverage: CoverageId) -> set[int] | None: ...
+    def clear_coverage(self, coverage: CoverageId) -> bool: ...
+    def remove_coverage(self, coverage: CoverageId) -> set[int] | None: ...
     def save(self) -> bytes: ...
     def restore(self, snapshot: bytes | bytearray) -> None: ...
 

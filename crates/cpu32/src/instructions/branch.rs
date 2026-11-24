@@ -91,7 +91,7 @@ fn branch(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
     };
     let target = base.offset(displacement);
     match condition(opcode) {
-        ALWAYS => {}
+        ALWAYS => core.cpu.branched(target),
         SUBROUTINE => push_return(core)?,
         condition if flags::test(&core.cpu.registers, condition) => {
             core.charge(timing::branch_taken(size));

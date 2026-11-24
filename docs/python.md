@@ -886,7 +886,24 @@ not to; any other result raises `TypeError`, as Rust's hook returns a
 instruction unexecuted, and the next run goes past it.  A hook's
 exception stops the run and is raised by `run_for`.  The run holds the
 chip, so a hook that calls into it raises `RuntimeError`; what it
-needs comes in its argument.
+needs comes in its argument.  An `Instruction`'s `registers`, and on
+the bare `Machine` a `MemoryAccess`'s and an `InvalidAccess`'s (the
+registers as the instruction began; `None` on the chip), is one
+dictionary, made at the first ask; `register(name)` reads one
+register without making it, the cheaper call in a hook that runs
+often.
+
+`add_coverage(begin, end)` (Rust's `Cpu::add_coverage`, on
+`Machine`, `Mc68331` and `Board.chip`) records natively, with no
+Python call, the address of each instruction from `begin` to `end`
+as it executes, a bit for each word of the range; it returns a
+`CoverageId`.  `coverage(id)` is the set of addresses recorded,
+`clear_coverage(id)` forgets them (whether there is such a
+coverage), and `remove_coverage(id)` removes it and returns its last
+set; both give `None` once it is removed.  An instruction outside
+every coverage costs nothing; one inside it a lookup.  Like the
+hooks, a coverage is not part of a snapshot: `save` leaves it out
+and `restore` leaves it as it was.
 
 `protect(space, start, length, permissions)` sets whole 2-Kbyte pages
 of `Space.USER` or `Space.SUPERVISOR` to a string of `r`, `w` and `x`;
@@ -1503,14 +1520,20 @@ assert bare.read_register("D0") == 6
   BKPT's acknowledge among them, is a bus error, so BKPT is an illegal
   instruction.
 - **Runs:** `run_limited(begin=None, reach=None, instructions=None,
-  cycles=None) -> LimitedRun`, Rust's `LimitedRun`: `cycles` and
+  cycles=None, self_loop=False) -> LimitedRun`, Rust's `LimitedRun`: `cycles` and
   `end`.  `reach` is checked at each instruction
   boundary, before an interrupt is taken or the hooks there are
-  called; `begin` sets PC and forgets a hook stop's skip, so the
+  called; `self_loop` (Rust's `Limits::self_loop`) ends the run once
+  an instruction that branches to itself runs, as firmware idles for
+  an interrupt: BRA to itself (`.S`, `.W` or `.L`) or a JMP of its
+  own address.  The loop runs once, its cycles counted, PC left at
+  it; an interrupt due before it is taken first, as ever; not while
+  T1 or T0 trace each time round; `begin` sets PC and forgets a hook stop's skip, so the
   hooks at `begin` fire even if the last run stopped there.  `end`,
   an `End` as Rust's, says why it ended: `End.Reached()`,
   `End.Instructions()`, `End.Fault(fault)` (a `FaultStop`),
-  `End.Exception(vector, pc)` (`set_stop_on_exception`), or
+  `End.Exception(vector, pc)` (`set_stop_on_exception`),
+  `End.SelfLoop(pc)` (`self_loop`), or
   `End.Stop(stop)` with a chip's `Stop` (the value a field named for
   it, `end.fault` and `end.stop`, not Rust's `_0`): `Budget()` (cycles),
   `Hook(hook)`, `Requested()` (`stop_request().request()`, from a
