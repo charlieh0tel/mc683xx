@@ -869,6 +869,7 @@ def test_a_code_hook_stops_before_its_instruction():
     (instruction,) = seen
     assert instruction.pc == AFTER_WIRING
     assert instruction.registers["A7"] == RAM_BASE + 0x100
+    assert instruction.register("a7") == RAM_BASE + 0x100
     assert instruction.stack_top == 0xCAFEF00D
     # the next run executes it, its hook not called again
     run = chip.run_for(2000)
@@ -916,6 +917,8 @@ def test_memory_hooks_see_reads_and_writes():
     assert [(a.address, a.size, a.value) for a in writes] == [(RAM_WORD, 2, 0x1234)]
     assert writes[0].function_code == mc683xx.FunctionCode.SUPERVISOR_DATA
     assert str(writes[0].function_code) == "supervisor-data"
+    # the registers are the bare Machine's alone
+    assert writes[0].registers is None and writes[0].register("D0") is None
     assert reads == []
     chip.run_for(2000)
     assert [(a.address, a.size, a.value) for a in reads] == [(RAM_WORD, 2, 0x1234)]

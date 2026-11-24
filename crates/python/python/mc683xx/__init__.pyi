@@ -722,7 +722,11 @@ class Instruction:
     @property
     def pc(self) -> int: ...
     @property
-    def registers(self) -> dict[str, int]: ...
+    def registers(self) -> dict[str, int]:
+        """Every register by name: one dictionary, made at the first
+        ask."""
+    def register(self, name: str) -> int:
+        """Register `name`, as `read_register` names it."""
     @property
     def stack_top(self) -> int | None: ...
 
@@ -749,7 +753,13 @@ class MemoryAccess:
     @property
     def registers(self) -> dict[str, int] | None:
         """The registers as the instruction began, by name, on a bare
-        `Machine`; always `None` on an `Mc68331` and a `Board`."""
+        `Machine`; always `None` on an `Mc68331` and a `Board`.  One
+        dictionary, made at the first ask: `register` reads one
+        register without making it."""
+    def register(self, name: str) -> int | None:
+        """Register `name` as the instruction began, on a bare
+        `Machine`; `None` on an `Mc68331` and a `Board`.  A name that is
+        no register's raises `ValueError` on each."""
 
 @final
 class PendingRead:
@@ -825,6 +835,7 @@ class InvalidAccess:
         """Whether exception processing is stacking a frame."""
     @property
     def registers(self) -> dict[str, int] | None: ...
+    def register(self, name: str) -> int | None: ...
 
 @final
 class ExceptionEntry:

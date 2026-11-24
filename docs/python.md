@@ -886,7 +886,12 @@ not to; any other result raises `TypeError`, as Rust's hook returns a
 instruction unexecuted, and the next run goes past it.  A hook's
 exception stops the run and is raised by `run_for`.  The run holds the
 chip, so a hook that calls into it raises `RuntimeError`; what it
-needs comes in its argument.
+needs comes in its argument.  An `Instruction`'s `registers`, and on
+the bare `Machine` a `MemoryAccess`'s and an `InvalidAccess`'s (the
+registers as the instruction began; `None` on the chip), is one
+dictionary, made at the first ask; `register(name)` reads one
+register without making it, the cheaper call in a hook that runs
+often.
 
 `protect(space, start, length, permissions)` sets whole 2-Kbyte pages
 of `Space.USER` or `Space.SUPERVISOR` to a string of `r`, `w` and `x`;

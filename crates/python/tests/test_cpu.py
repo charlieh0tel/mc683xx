@@ -204,6 +204,34 @@ def test_a_memory_hook_s_writes_land_after_the_instruction():
     assert seen == [(9, b"\x00\x09", False)]
 
 
+def test_a_hook_reads_one_register_or_all_as_its_instruction_began():
+    cpu = machine(MOVE_WORD_A0_TO_D0, MOVE_WORD_D0_TO_A0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("D0", 5)
+    cpu.poke_bytes(0x2000, b"\x00\x07")
+    seen = []
+
+    def write(access: mc683xx.MemoryAccess) -> None:
+        registers = access.registers
+        assert registers is not None
+        # one dictionary, made once
+        assert access.registers is registers
+        seen.append((access.register("D0"), access.register("a0"), registers["D0"]))
+        assert access.register("A7") == registers["A7"] == STACK - 4
+        with pytest.raises(ValueError, match="no register"):
+            access.register("D8")
+
+    def code(instruction: mc683xx.Instruction) -> None:
+        assert instruction.register("PC") == instruction.pc
+        assert instruction.registers is instruction.registers
+
+    cpu.add_write_hook(write, 0x2000, 0x2001)
+    cpu.add_code_hook(code)
+    cpu.run_limited(reach=RETURN)
+    # D0 as the write's instruction began: what the read left
+    assert seen == [(7, 0x2000, 7)]
+
+
 def test_a_pre_read_hook_answers_the_long_from_its_copy_and_peeks_memory():
     cpu = machine(MOVE_LONG_A0_TO_D0, RTS)
     cpu.write_register("A0", 0x2000)
