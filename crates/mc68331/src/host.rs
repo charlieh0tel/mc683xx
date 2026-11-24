@@ -32,7 +32,7 @@ pub enum BusCycleError {
     /// No module acknowledged the cycle and no chip select matched it:
     /// nothing answers at the address, the cycle's on the address
     /// lines.
-    #[error("nothing serves {0}")]
+    #[error("no memory at {0}")]
     Unserved(Address),
     /// The cycle at the address ended in a bus error: a peripheral's
     /// BERR, a select waiting for a DSACK that never comes, the bus

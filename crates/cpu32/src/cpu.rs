@@ -286,7 +286,7 @@ pub struct Cpu {
 }
 
 /// The interrupt mask that admits no maskable level.
-const MASK_ALL: u8 = InterruptLevel::NONMASKABLE.get();
+const MASK_ALL: u8 = InterruptLevel::NONMASKABLE.0;
 
 impl Cpu {
     /// A CPU on `memory`, its registers zero, not yet reset.
@@ -679,8 +679,8 @@ impl Cpu {
     /// The end `limits` make before the next instruction, if one, the
     /// run having started at instruction count `first`.
     fn limit_reached(&self, limits: &Limits, first: u64) -> Option<bare::End> {
-        if limits.until == Some(self.registers.pc) {
-            return Some(bare::End::Until);
+        if limits.reach == Some(self.registers.pc) {
+            return Some(bare::End::Reached);
         }
         limits
             .instructions
@@ -1307,11 +1307,11 @@ impl Core<'_> {
     #[inline]
     fn interrupt(&mut self, interrupts: &mut dyn Interrupts) -> Option<Processed> {
         let level = interrupts.level();
-        let mask = self.cpu.registers.interrupt_mask().get();
+        let mask = self.cpu.registers.interrupt_mask().0;
         let due = if level == InterruptLevel::NONMASKABLE {
             self.cpu.sampled_level != level || self.cpu.sampled_mask == MASK_ALL && mask < MASK_ALL
         } else {
-            level.get() > mask
+            level.0 > mask
         };
         self.cpu.sampled_level = level;
         self.cpu.sampled_mask = mask;
@@ -1338,7 +1338,7 @@ impl Core<'_> {
         let pc = self.cpu.registers.pc;
         self.cpu.taken = Some(Exception::Short { vector, pc });
         let processed = self.process_after_instruction(vector, pc, None, Some(level));
-        self.cpu.sampled_mask = self.cpu.registers.interrupt_mask().get();
+        self.cpu.sampled_mask = self.cpu.registers.interrupt_mask().0;
         if processed == Processed::Stopped {
             interrupts.withdrawn(level);
             // not taken: a level 7 request still held is a transition
@@ -1943,7 +1943,7 @@ impl Core<'_> {
     /// Marks the cycles that follow as exception stacking's, or not.
     pub(crate) fn set_stacking(&mut self, stacking: bool) {
         self.cpu.stacking = stacking;
-        self.bus.stacking(stacking);
+        self.bus.set_stacking(stacking);
     }
 
     /// Records a stop the bus asks for after a cycle.
@@ -2090,7 +2090,7 @@ mod tests {
         assert_eq!(source.acknowledged, [InterruptLevel::try_from(3).unwrap()]);
         let vector = Vector::autovector(InterruptLevel::try_from(3).unwrap());
         assert_eq!(cpu.registers.pc.0, handler(vector));
-        assert_eq!(cpu.registers.interrupt_mask().get(), 3);
+        assert_eq!(cpu.registers.interrupt_mask().0, 3);
         // Figure 6-3: the PC of the instruction not yet executed.
         assert_eq!(peek_long(&cpu, STACK - 8), 0x2200_0000 | CODE >> 16);
         assert_eq!(peek_long(&cpu, STACK - 4), (CODE & 0xffff) << 16 | 0x006c);
@@ -2163,6 +2163,35 @@ mod tests {
     /// quantum does.
     #[derive(Debug, Default)]
     struct AcknowledgeStops(Rc<Cell<bool>>);
+
+    /// A bus whose every read answers $3434 after half the most clocks
+    /// there are.
+    struct Slowest;
+
+    impl Bus for Slowest {
+        fn read(&mut self, _access: BusAccess) -> Result<Read, BusError> {
+            Ok(Read::new(0x3434).stalled(Cycles::from_clocks(1 << 63)))
+        }
+
+        fn write(&mut self, _access: BusAccess, _value: u32) -> Result<Cycles, BusError> {
+            Err(BusError)
+        }
+    }
+
+    #[test]
+    fn an_instruction_s_stalls_saturate_its_cost() {
+        // MOVE.L (A0),D1: two word reads from the bus
+        let mut cpu = machine(&[0x2210]);
+        cpu.registers.set_address(0, 0x10_0000);
+        let run = cpu.run_for(
+            &mut Slowest,
+            &mut NoInterrupts,
+            Cycle::ZERO,
+            Cycles::from_clocks(1),
+        );
+        assert_eq!(run.cycles, Cycles::MAX);
+        assert_eq!(cpu.registers.data[1], 0x3434_3434);
+    }
 
     impl Bus for AcknowledgeStops {
         fn read(&mut self, _access: BusAccess) -> Result<Read, BusError> {

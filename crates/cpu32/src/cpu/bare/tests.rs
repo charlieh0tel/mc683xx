@@ -195,7 +195,7 @@ fn an_end_prints_its_short_name() {
     });
     let names = [
         (End::Stop(Stop::Budget), "budget"),
-        (End::Until, "until"),
+        (End::Reached, "reached"),
         (End::Instructions, "instructions"),
         (End::Steps, "steps"),
         (intercepted, "intercepted"),
@@ -467,7 +467,7 @@ fn a_fault_stacking_a_breakpoint_after_stop_keeps_the_interrupt_before_it() {
     assert_eq!(fault.cycle, BusCycleKind::Write);
     assert_eq!(fault.registers.pc.0, level_3, "the interrupt kept");
     assert_eq!(fault.registers.ssp.0, 0);
-    assert_eq!(fault.registers.interrupt_mask().get(), 3);
+    assert_eq!(u8::from(fault.registers.interrupt_mask()), 3);
     assert!(machine.cpu.breakpoint_pending(), "left for the next run");
 }
 
@@ -1016,7 +1016,7 @@ fn a_halted_cpu_takes_no_host_exception() {
 }
 
 #[test]
-fn a_fault_stacking_a_host_exception_stops_with_nothing_stacked() {
+fn a_fault_stacking_a_host_exception_stops_with_no_exception_entered() {
     let mut machine = machine(&[NOP]);
     machine.cpu.set_stop_on_fault(true);
     machine.cpu.registers.ssp = Address(NOWHERE);
@@ -1040,6 +1040,92 @@ fn a_fault_stacking_a_host_exception_stops_with_nothing_stacked() {
     machine.cpu.registers.ssp = Address(STACK);
     assert_eq!(one(&mut machine), End::Instructions);
     assert_eq!(*hooked.borrow(), 1);
+}
+
+/// A machine whose stack's first word, the highest, is on a page that
+/// takes no writes, and the rest of the four-word frame and the type IV
+/// frame below it on one that does.
+fn first_stack_write_faults() -> Machine {
+    let mut machine = machine(&[NOP]);
+    let page = STACK;
+    machine
+        .protect(Address(page), PAGE_BYTES, Permissions::READ)
+        .unwrap();
+    machine.cpu.registers.ssp = Address(page + 2);
+    machine
+}
+
+#[test]
+fn a_fault_stacking_a_host_bus_or_address_error_is_a_double_bus_fault() {
+    // CPU32RM 6.2.2: a bus or address error while one is being taken
+    // halts; a fault taking any other exception is a type IV bus
+    // error (6.3.1.4)
+    let mut machine = first_stack_write_faults();
+    machine.take_exception(Vector(32), None).unwrap();
+    assert_eq!(machine.cpu.halted(), None);
+    assert_eq!(machine.cpu.registers.pc, Address(HANDLER));
+    for vector in [Vector::BUS_ERROR, Vector::ADDRESS_ERROR] {
+        let mut machine = first_stack_write_faults();
+        machine.take_exception(vector, None).unwrap();
+        assert_eq!(machine.cpu.halted(), Some(Halt::DoubleBusFault), "{vector}");
+    }
+}
+
+#[test]
+fn a_fault_reading_a_host_bus_or_address_error_s_vector_is_a_double_bus_fault() {
+    for vector in [Vector::BUS_ERROR, Vector::ADDRESS_ERROR] {
+        let mut machine = machine(&[NOP]);
+        // vectors 2 and 3 past the RAM
+        machine.cpu.registers.vbr = Address(RAM - 4);
+        machine.take_exception(vector, None).unwrap();
+        assert_eq!(machine.cpu.halted(), Some(Halt::DoubleBusFault), "{vector}");
+    }
+}
+
+#[test]
+fn a_fault_fetching_a_host_bus_error_s_handler_is_a_double_bus_fault() {
+    // MC68331UM 4.5.5.2: until the handler's first opcode is fetched
+    let mut machine = machine(&[NOP]);
+    machine
+        .write(Address(4 * 2), &NOWHERE.to_be_bytes())
+        .unwrap();
+    machine.take_exception(Vector::BUS_ERROR, None).unwrap();
+    assert_eq!(machine.cpu.halted(), None);
+    one(&mut machine);
+    assert_eq!(machine.cpu.halted(), Some(Halt::DoubleBusFault));
+}
+
+#[test]
+fn a_fault_stop_taking_a_host_bus_error_leaves_no_double_fault_armed() {
+    let mut machine = first_stack_write_faults();
+    machine.cpu.set_stop_on_fault(true);
+    assert!(matches!(
+        machine.take_exception(Vector::BUS_ERROR, None),
+        Err(TakeExceptionError::Fault(_))
+    ));
+    // a fault in the next instruction is its own, not a double fault
+    machine.cpu.set_stop_on_fault(false);
+    machine.cpu.registers.ssp = Address(STACK - 0x100);
+    machine.cpu.registers.pc = Address(NOWHERE);
+    one(&mut machine);
+    assert_eq!(machine.cpu.halted(), None);
+    assert_eq!(machine.cpu.registers.pc, Address(HANDLER));
+}
+
+#[test]
+fn a_fault_stop_reading_a_host_exception_s_vector_keeps_the_frame_written() {
+    let mut machine = machine(&[NOP]);
+    machine.cpu.set_stop_on_fault(true);
+    machine.cpu.registers.vbr = Address(NOWHERE);
+    let before = machine.cpu.registers.clone();
+    assert!(matches!(
+        machine.take_exception(Vector(32), None),
+        Err(TakeExceptionError::Fault(_))
+    ));
+    assert_eq!(machine.cpu.registers, before, "registers rolled back");
+    // the four-word frame was written before the vector read faulted
+    assert_eq!(word_at(&machine, STACK - 2), 0x0080);
+    assert_eq!(word_at(&machine, STACK - 4), CODE as u16);
 }
 
 #[test]

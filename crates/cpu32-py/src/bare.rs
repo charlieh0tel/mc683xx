@@ -37,6 +37,7 @@ use mc683xx_cpu32::flat::Machine;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
+use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_gdb::target::AccessError;
 use mc683xx_gdb::target::Target;
@@ -277,8 +278,8 @@ pub(crate) enum EndView {
         /// The stop.
         stop: Stop,
     },
-    /// PC reached `until`.
-    Until(),
+    /// PC reached `reach`.
+    Reached(),
     /// It ran `instructions`.
     Instructions(),
     /// A fault, with `set_stop_on_fault`.
@@ -300,7 +301,7 @@ impl TryFrom<End> for EndView {
             End::Stop(stop) => Self::Stop {
                 stop: stop.try_into()?,
             },
-            End::Until => Self::Until(),
+            End::Reached => Self::Reached(),
             End::Instructions => Self::Instructions(),
             End::Fault(fault) => Self::Fault {
                 fault: FaultStopView(fault),
@@ -314,7 +315,7 @@ impl From<EndView> for End {
     fn from(end: EndView) -> Self {
         match end {
             EndView::Stop { stop } => Self::Stop(stop.into()),
-            EndView::Until() => Self::Until,
+            EndView::Reached() => Self::Reached,
             EndView::Instructions() => Self::Instructions,
             EndView::Fault { fault } => Self::Fault(fault.0),
         }
@@ -331,7 +332,7 @@ impl EndView {
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         Ok(match self {
             Self::Stop { stop } => format!("End.Stop({})", repr(py, *stop)?),
-            Self::Until() => "End.Until()".to_owned(),
+            Self::Reached() => "End.Reached()".to_owned(),
             Self::Instructions() => "End.Instructions()".to_owned(),
             Self::Fault { fault } => format!("End.Fault({})", repr(py, fault.clone())?),
         })
@@ -438,8 +439,8 @@ enum Dispatched {
 /// The run's limits and what it has spent of them.
 #[derive(Debug, Clone, Copy)]
 struct Budget {
-    /// `until`.
-    until: Option<Address>,
+    /// `reach`.
+    reach: Option<Address>,
     /// `instructions`, and the count when the run began.
     instructions: Option<(u64, u64)>,
     /// `cycles`.
@@ -469,7 +470,7 @@ impl Budget {
         let mut limits = Limits::default();
         limits.cycles = cycles;
         limits.instructions = instructions;
-        limits.until = self.until;
+        limits.reach = self.reach;
         Ok(limits)
     }
 }
@@ -569,17 +570,27 @@ impl MachineView {
     /// and `write(cycle, value)`: it answers the cycles there that no
     /// mapped memory serves, before they land.  It saves as a chip's
     /// mapped peripheral does, through `save()` and `restore(bytes)`.
+    /// Its number, for `remove_peripheral`.
     fn add_peripheral(
         &mut self,
         begin: u32,
         end: u32,
         peripheral: &Bound<'_, PyAny>,
-    ) -> PyResult<()> {
+    ) -> PyResult<u64> {
         let peripheral = PythonMapped::mapped(peripheral, self.pending.clone())?;
-        self.machine
+        let id = self
+            .machine
             .add_peripheral(Address(begin)..=Address(end), Box::new(peripheral))
             .map_err(Error::from)?;
-        Ok(())
+        Ok(id.number())
+    }
+
+    /// Takes peripheral number `peripheral` off the bus: whether there
+    /// was one.
+    fn remove_peripheral(&mut self, peripheral: u64) -> bool {
+        self.machine
+            .remove_peripheral(PeripheralId::from_number(peripheral))
+            .is_some()
     }
 
     /// Register `name`: `D0`-`D7`, `A0`-`A7`, `PC`, `SR`, `CCR`, `USP`,
@@ -626,7 +637,9 @@ impl MachineView {
     /// clears it.  No clocks pass.  The hooks
     /// it fires are called before it returns, their results stopping
     /// nothing.  A halted CPU, or a fault that stops
-    /// (`set_stop_on_fault`), raises `RunError`, nothing stacked.
+    /// (`set_stop_on_fault`), raises `RunError`: no exception entered,
+    /// the registers rolled back, the frame's writes before the fault
+    /// kept.
     #[pyo3(signature = (vector, level = None))]
     fn take_exception(slf: &Bound<'_, Self>, vector: u8, level: Option<u8>) -> PyResult<()> {
         let level = level
@@ -656,18 +669,18 @@ impl MachineView {
         Ok(())
     }
 
-    /// Runs until PC reaches `until` (before the hooks there), it has
+    /// Runs until PC reaches `reach` (before the hooks there), it has
     /// run `instructions`, its cycle estimate reaches `cycles`, a hook
     /// or the stop request stops it, a fault does
     /// (`set_stop_on_fault`), or the CPU
     /// stops or halts.  `begin` sets PC first and forgets a hook stop's
     /// skip, so the hooks at `begin` are called.  With no `cycles`, a
     /// `stop` instruction ends the run at once.
-    #[pyo3(signature = (*, begin = None, until = None, instructions = None, cycles = None))]
+    #[pyo3(signature = (*, begin = None, reach = None, instructions = None, cycles = None))]
     fn run_limited(
         slf: &Bound<'_, Self>,
         begin: Option<u32>,
-        until: Option<u32>,
+        reach: Option<u32>,
         instructions: Option<u64>,
         cycles: Option<u64>,
     ) -> PyResult<LimitedRunView> {
@@ -681,7 +694,7 @@ impl MachineView {
             this.machine.cpu.instructions()
         };
         let budget = Budget {
-            until: until.map(Address),
+            reach: reach.map(Address),
             instructions: instructions.map(|count| (count, first)),
             cycles,
             spent: 0,
@@ -1096,7 +1109,7 @@ impl Target for Debugged<'_, '_> {
 
     fn run_for(&mut self, budget: Cycles, hit: &dyn Fn() -> bool) -> PyResult<TargetRun> {
         let limits = Budget {
-            until: None,
+            reach: None,
             instructions: None,
             cycles: Some(budget.clocks()),
             spent: 0,
@@ -1108,7 +1121,7 @@ impl Target for Debugged<'_, '_> {
         }
         Ok(match end {
             End::Stop(stop) => stop.into(),
-            End::Until | End::Instructions | End::Steps => TargetRun::Quantum,
+            End::Reached | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
             other => return Err(Error::run_end(other).into()),
         })
@@ -1205,8 +1218,8 @@ mod tests {
     /// either belongs here, and in the mappings.
     #[test]
     fn every_run_end_maps_or_names_itself() {
-        let mut until = Limits::default();
-        until.until = Some(Address(START + 2));
+        let mut reach = Limits::default();
+        reach.reach = Some(Address(START + 2));
         let mut instructions = Limits::default();
         instructions.instructions = Some(1);
         let mut steps = Limits::default();
@@ -1214,7 +1227,7 @@ mod tests {
         let mut budget = Limits::default();
         budget.cycles = Some(Cycles::from_clocks(1));
         let ends = [
-            end(&[NOP, NOP], until, |_| ()),
+            end(&[NOP, NOP], reach, |_| ()),
             end(&[NOP, NOP], instructions, |_| ()),
             end(&[NOP, NOP], steps, |_| ()),
             end(&[NOP, NOP], budget, |_| ()),
@@ -1227,7 +1240,7 @@ mod tests {
             }),
         ];
         let mapped: Vec<_> = ends.into_iter().map(EndView::try_from).collect();
-        assert!(matches!(mapped[0], Ok(EndView::Until())));
+        assert!(matches!(mapped[0], Ok(EndView::Reached())));
         assert!(matches!(mapped[1], Ok(EndView::Instructions())));
         assert!(
             matches!(&mapped[2], Err(Error::Unmapped { kind: RUN_END, name: Some(name) }) if name == "steps")

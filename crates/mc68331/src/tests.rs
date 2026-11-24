@@ -166,7 +166,7 @@ struct Recorder {
     /// What it reads as.
     value: u32,
     /// Its wait states on an externally terminated select.
-    wait: Option<u8>,
+    wait: Option<u64>,
     /// Whether it asks for an interrupt.
     interrupt: bool,
     /// The resets it saw.
@@ -195,7 +195,7 @@ impl MappedPeripheral for Recorder {
     }
 
     fn wait_states(&mut self, _: BusCycle) -> Option<Cycles> {
-        self.wait.map(|wait| Cycles::from_clocks(wait.into()))
+        self.wait.map(Cycles::from_clocks)
     }
 
     fn interrupt_request(&self) -> bool {
@@ -315,7 +315,8 @@ fn write_register(chip: &mut Mc68331, address: u32, value: u16) {
 
 #[test]
 fn csboot_serves_the_reset_vectors_with_13_wait_states() {
-    let (mut chip, _) = booting(&[NOP]);
+    let (mut chip, rom) = booting(&[NOP]);
+    assert_eq!(rom.to_string(), "memory in region 0");
     assert_eq!(chip.cpu().halted(), None);
     assert_eq!(chip.cpu().registers.ssp.0, STACK);
     assert_eq!(chip.cpu().registers.pc.0, START);

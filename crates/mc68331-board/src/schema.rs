@@ -144,39 +144,6 @@ pub(crate) enum Lines {
     List(Vec<u8>),
 }
 
-/// A role as the file writes it: a role, or a lane alone, which is
-/// that lane read and written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum FileRole {
-    /// `read`.
-    Read,
-    /// `write`.
-    Write,
-    /// `read-write`.
-    ReadWrite,
-    /// `iack`.
-    Iack,
-    /// `upper`: `lane = "upper"`.
-    Upper,
-    /// `lower`: `lane = "lower"`.
-    Lower,
-}
-
-impl FileRole {
-    /// The role, and the lane it implies.
-    pub(crate) const fn split(self) -> (Role, Option<Lane>) {
-        match self {
-            Self::Read => (Role::Read, None),
-            Self::Write => (Role::Write, None),
-            Self::ReadWrite => (Role::ReadWrite, None),
-            Self::Iack => (Role::Iack, None),
-            Self::Upper => (Role::ReadWrite, Some(Lane::Upper)),
-            Self::Lower => (Role::ReadWrite, Some(Lane::Lower)),
-        }
-    }
-}
-
 /// One attachment: exactly one of `select`, `decoder` and `qspi`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -195,7 +162,7 @@ pub(crate) struct Attachment {
     /// The PCS pins the code compares.
     pub(crate) mask: Option<u8>,
     /// Its role.
-    pub(crate) role: Option<FileRole>,
+    pub(crate) role: Option<Role>,
     /// Its lane.
     pub(crate) lane: Option<Lane>,
     /// Address lines wired.

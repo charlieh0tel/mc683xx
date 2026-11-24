@@ -327,7 +327,7 @@ attach = [{ select = "CS1", role = "write", lane = "upper", lines = [1, 2] }]
 [[peripheral]]
 name = "lower"
 type = "recorder"
-attach = [{ select = "CS1", role = "lower", lines = [1, 2], offset = 0x10 }]
+attach = [{ select = "CS1", lane = "lower", lines = [1, 2], offset = 0x10 }]
 parameters = { value = 0x5a }
 "#,
         &program,

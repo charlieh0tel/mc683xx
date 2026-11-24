@@ -64,8 +64,8 @@ def machine(*code):
 
 def test_a_call_runs_until_it_returns():
     cpu = machine(moveq(5, 0), ADDQ_LONG_1_D0, RTS)
-    run = cpu.run_limited(until=RETURN)
-    assert run.end == mc683xx.End.Until()
+    run = cpu.run_limited(reach=RETURN)
+    assert run.end == mc683xx.End.Reached()
     assert cpu.read_register("D0") == 6
     assert cpu.read_register("PC") == RETURN
     assert cpu.instructions == 3
@@ -93,7 +93,7 @@ def test_limits_and_begin():
             assert background == entry.entry
         case _:
             pytest.fail("Stop.Background did not match positionally")
-    assert cpu.run_limited(begin=CODE, until=RETURN).end == mc683xx.End.Until()
+    assert cpu.run_limited(begin=CODE, reach=RETURN).end == mc683xx.End.Reached()
 
 
 def test_memory_maps_and_refusals():
@@ -138,7 +138,7 @@ def test_a_code_hook_may_unmap_what_the_instruction_reads():
     cpu.write_register("A0", PERIPHERAL)
     cpu.set_stop_on_fault(True)
     cpu.add_code_hook(lambda instruction: cpu.unmap(PERIPHERAL, PAGE), CODE, CODE)
-    run = cpu.run_limited(until=RETURN)
+    run = cpu.run_limited(reach=RETURN)
     assert isinstance(run.end, mc683xx.End.Fault)
     assert run.end.fault.address == PERIPHERAL
 
@@ -151,14 +151,14 @@ def test_a_code_hook_s_pc_write_redirects_before_the_instruction():
         cpu.write_register("PC", CODE + 4)
 
     cpu.add_code_hook(jump, CODE, CODE)
-    cpu.run_limited(until=RETURN)
+    cpu.run_limited(reach=RETURN)
     assert cpu.read_register("D0") == 2
 
 
 def test_a_code_hook_s_register_write_is_seen_by_the_instruction():
     cpu = machine(ADDQ_LONG_1_D0, RTS)
     cpu.add_code_hook(lambda instruction: cpu.write_register("D0", 41), CODE, CODE)
-    cpu.run_limited(until=RETURN)
+    cpu.run_limited(reach=RETURN)
     assert cpu.read_register("D0") == 42
 
 
@@ -180,7 +180,7 @@ def test_a_memory_hook_s_writes_land_after_the_instruction():
 
     cpu.add_read_hook(read, 0x2000, 0x2001)
     cpu.add_write_hook(write, 0x2000, 0x2001)
-    cpu.run_limited(until=RETURN)
+    cpu.run_limited(reach=RETURN)
     assert seen == [(9, b"\x00\x09", False)]
 
 
@@ -199,7 +199,7 @@ def test_a_memory_hook_sees_a_long_once_and_not_one_that_faults():
                 (kind, access.address, access.size, access.value, access.previous)
             )
         )
-    run = cpu.run_limited(until=RETURN)
+    run = cpu.run_limited(reach=RETURN)
     assert isinstance(run.end, mc683xx.End.Fault)
     # A write sees what it replaced; a read, nothing.
     assert seen == [
@@ -211,20 +211,20 @@ def test_a_memory_hook_sees_a_long_once_and_not_one_that_faults():
 def test_a_truthy_hook_or_stop_ends_the_run():
     cpu = machine(NOP, NOP, RTS)
     hook = cpu.add_code_hook(lambda instruction: True, CODE + 2, CODE + 2)
-    run = cpu.run_limited(until=RETURN)
+    run = cpu.run_limited(reach=RETURN)
     assert run.end == mc683xx.End.Stop(mc683xx.Stop.Hook(hook))
     assert cpu.read_register("PC") == CODE + 2
     assert cpu.remove_hook(hook)
     stop = cpu.stop_request()
     cpu.add_code_hook(lambda instruction: stop.request(), CODE + 4, CODE + 4)
-    assert cpu.run_limited(until=RETURN).end == mc683xx.End.Stop(mc683xx.Stop.Requested())
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Stop(mc683xx.Stop.Requested())
     assert cpu.read_register("PC") == CODE + 4
 
 
 def test_a_stop_requested_between_runs_is_withdrawn():
     cpu = machine(NOP, NOP, RTS)
     cpu.stop_request().request()
-    assert cpu.run_limited(until=RETURN).end == mc683xx.End.Until()
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
 
 
 def test_lpstop_stops_the_bare_cpu():
@@ -242,7 +242,7 @@ def test_a_hook_s_exception_is_raised_and_a_nested_run_refused():
 
     cpu.add_code_hook(nested, CODE, CODE)
     with pytest.raises(RuntimeError):
-        cpu.run_limited(until=RETURN)
+        cpu.run_limited(reach=RETURN)
 
 
 def test_an_exception_hook_may_return_from_the_handler():
@@ -259,7 +259,7 @@ def test_an_exception_hook_may_return_from_the_handler():
         cpu.write_register("PC", pc)
 
     cpu.add_exception_hook(entered)
-    assert cpu.run_limited(until=RETURN).end == mc683xx.End.Until()
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
     assert entries == [TRAP_0 + 3]
 
 
@@ -269,14 +269,14 @@ def test_an_exception_return_hook_sees_rte_pop_the_frame():
     entries, returns = [], []
     cpu.add_exception_hook(lambda entry: entries.append(entry.stack))
     hook = cpu.add_exception_return_hook(lambda back: returns.append(back) or True)
-    run = cpu.run_limited(until=RETURN)
+    run = cpu.run_limited(reach=RETURN)
     # Stopped after the RTE, before the instruction it returns to.
     assert run.end == mc683xx.End.Stop(mc683xx.Stop.Hook(hook))
     assert cpu.read_register("PC") == CODE + 2
     (back,) = returns
     assert (back.vector, back.pc, back.sr, back.stack) == (TRAP_0 + 3, CODE + 2, SUPERVISOR, entries[0])
     assert cpu.read_register("SSP") == back.stack + 8
-    assert cpu.run_limited(until=RETURN).end == mc683xx.End.Until()
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
 
 
 def test_an_intercept_handles_or_declines_before_stacking():
@@ -293,8 +293,8 @@ def test_an_intercept_handles_or_declines_before_stacking():
     cpu.set_intercepted(TRAP_0 + 1, True)
     cpu.set_intercepted(TRAP_0 + 7, True)
     cpu.set_intercept_callback(answer)
-    run = cpu.run_limited(until=HANDLER)
-    assert run.end == mc683xx.End.Until()
+    run = cpu.run_limited(reach=HANDLER)
+    assert run.end == mc683xx.End.Reached()
     assert seen == [(TRAP_0 + 1, CODE), (TRAP_0 + 7, CODE + 2)]
     # Declined, trap #7 was taken natively: its frame is stacked.
     assert cpu.read_register("SSP") == STACK - 4 - 8
@@ -304,7 +304,7 @@ def test_an_intercept_handles_or_declines_before_stacking():
 def test_an_intercepted_exception_with_no_callback_is_taken_natively():
     cpu = machine(trap(1), RTS)
     cpu.set_intercepted(TRAP_0 + 1, True)
-    assert cpu.run_limited(until=HANDLER).end == mc683xx.End.Until()
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
     assert cpu.read_register("SSP") == STACK - 4 - 8
 
 
@@ -312,7 +312,7 @@ def test_a_fault_stops_the_run_with_nothing_stacked():
     cpu = machine(moveq(3, 1), MOVE_LONG_A0_TO_D0, RTS)
     cpu.set_stop_on_fault(True)
     cpu.write_register("A0", 0x90000000)
-    match cpu.run_limited(until=RETURN).end:
+    match cpu.run_limited(reach=RETURN).end:
         case mc683xx.End.Fault(fault):
             pass
         case end:
@@ -328,7 +328,7 @@ def test_a_write_to_read_only_code_is_protected():
     cpu = machine(MOVE_WORD_D0_TO_A0, RTS)
     cpu.set_stop_on_fault(True)
     cpu.write_register("A0", CODE)
-    end = cpu.run_limited(until=RETURN).end
+    end = cpu.run_limited(reach=RETURN).end
     assert isinstance(end, mc683xx.End.Fault)
     fault = end.fault
     assert (fault.cycle, fault.cause) == (mc683xx.BusCycleKind.WRITE, mc683xx.FaultCause.PROTECTED)
@@ -357,9 +357,18 @@ def test_a_peripheral_takes_a_long_whole_before_it_lands():
     register = Register()
     cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, register)
     cpu.write_register("A0", PERIPHERAL)
-    cpu.run_limited(until=RETURN)
+    cpu.run_limited(reach=RETURN)
     assert register.cycles == [("read", PERIPHERAL, 4), ("write", PERIPHERAL, 4)]
     assert register.value == 0x11223345
+
+
+def test_a_peripheral_removed_answers_no_more():
+    cpu = machine(MOVE_LONG_A0_TO_D0, RTS)
+    number = cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, Register())
+    assert cpu.remove_peripheral(number)
+    assert not cpu.remove_peripheral(number)
+    # the space is free again
+    assert cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, Register()) != number
 
 
 class Refusing:
@@ -375,10 +384,10 @@ def test_a_peripheral_s_errors():
     cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 1, Refusing())
     cpu.write_register("A0", PERIPHERAL)
     cpu.set_stop_on_fault(True)
-    assert isinstance(cpu.run_limited(until=RETURN).end, mc683xx.End.Fault)
+    assert isinstance(cpu.run_limited(reach=RETURN).end, mc683xx.End.Fault)
     cpu.write_register("PC", CODE + 2)
     with pytest.raises(KeyError):
-        cpu.run_limited(until=RETURN)
+        cpu.run_limited(reach=RETURN)
 
 
 def test_reset_raises_a_peripheral_s_exception_at_once():
@@ -411,7 +420,7 @@ def test_an_interrupt_request_is_taken_through_its_vector():
     cpu.write(64 * 4, struct.pack(">I", HANDLER))
     cpu.write(HANDLER, words(NOP))
     cpu.request_interrupt(5, 64)
-    assert cpu.run_limited(until=HANDLER).end == mc683xx.End.Until()
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
     assert cpu.read_register("SR") >> 8 & 7 == 5
     cpu.clear_interrupt(5)
     with pytest.raises(ValueError):
@@ -452,7 +461,7 @@ def test_a_host_exception_refused():
 def test_save_and_restore():
     cpu = machine(moveq(1, 0), RTS)
     snapshot = cpu.save()
-    cpu.run_limited(until=RETURN)
+    cpu.run_limited(reach=RETURN)
     cpu.write(0x100, b"\x01")
     cpu.restore(snapshot)
     assert cpu.read_register("PC") == CODE
@@ -520,7 +529,7 @@ def test_a_restore_into_another_count_of_peripherals_is_refused_and_changes_noth
     cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, latch)
     snapshot = cpu.save()
     cpu.add_peripheral(PERIPHERAL + 0x100, PERIPHERAL + 0x103, Latch(2))
-    cpu.run_limited(until=RETURN)
+    cpu.run_limited(reach=RETURN)
     latch.value = 10
     before = cpu.save()
     with pytest.raises(mc683xx.StateError, match="peripherals"):
@@ -539,7 +548,7 @@ def test_thousands_of_short_calls_a_second():
     for _ in range(calls):
         cpu.write(STACK - 4, frame)
         cpu.write_register("A7", STACK - 4)
-        cpu.run_limited(begin=CODE, until=RETURN)
+        cpu.run_limited(begin=CODE, reach=RETURN)
     rate = calls / (time.perf_counter() - start)
     print(f"{rate:.0f} calls per second")
     assert rate > 1000

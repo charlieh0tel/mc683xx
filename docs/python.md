@@ -830,7 +830,7 @@ assert chip.now == 0
 call a Python callable with what the Rust hook sees: an `Instruction`
 (`pc`, `registers`, `stack_top`), a `MemoryAccess` (`address`, `size`,
 `function_code`, `value`, and `previous`, what a write replaced, read
-with no cycle, `None` for a read, a CPU-space write or a peripheral's
+with no cycle from the bytes it writes to, `None` for a read, a CPU-space write or a peripheral's
 write; on the chip a
 long operand is two word cycles, on the bare `Machine` one access of
 4), an `InvalidAccess` (those, `cycle`, a
@@ -1393,8 +1393,8 @@ bare.map(CALL, 2048, permissions="rx", contents=code)
 bare.write(CALL_STACK - 4, struct.pack(">I", CALL_RETURN))
 bare.write_register("SR", 0x2700)
 bare.write_register("A7", CALL_STACK - 4)
-limited = bare.run_limited(begin=CALL, until=CALL_RETURN)
-assert limited.end == mc683xx.End.Until()
+limited = bare.run_limited(begin=CALL, reach=CALL_RETURN)
+assert limited.end == mc683xx.End.Reached()
 assert bare.read_register("D0") == 6
 ```
 
@@ -1415,7 +1415,9 @@ assert bare.read_register("D0") == 6
   to `end`, both included, byte-granular, no two overlapping.  A cycle
   no mapped memory serves and one peripheral covers goes to it, before it
   lands: the read's value is the peripheral's, the write is the peripheral's
-  to keep.  `protect` covers a peripheral's pages too, mapped or not: a
+  to keep.  It returns the peripheral's number, and
+  `remove_peripheral(number)` takes it off again, `False` if there was
+  none (Rust's `PeripheralId`, `remove_peripheral`).  `protect` covers a peripheral's pages too, mapped or not: a
   cycle they do not permit is a bus error before the peripheral sees
   it (`Invalid.PROTECTED`, `FaultCause.PROTECTED`), so a read-only
   peripheral needs no `BusError` of its own.  A `BusCycle` has `address` (32 bits), `size` (1, 2, or 4: a
@@ -1428,13 +1430,13 @@ assert bare.read_register("D0") == 6
   (`FunctionCode.CPU_SPACE`): the `Machine` acknowledges LPSTOP's broadcast itself,
   and any other, a BKPT's acknowledge among them, is a bus error, so
   BKPT is an illegal instruction.
-- **Runs:** `run_limited(begin=None, until=None, instructions=None,
+- **Runs:** `run_limited(begin=None, reach=None, instructions=None,
   cycles=None) -> LimitedRun`, Rust's `bare::LimitedRun`: `cycles` and
-  `end`.  `until` is checked at each instruction
+  `end`.  `reach` is checked at each instruction
   boundary, before an interrupt is taken or the hooks there are
   called; `begin` sets PC and forgets a hook stop's skip, so the
   hooks at `begin` fire even if the last run stopped there.  `end`,
-  an `End` as Rust's, says why it ended: `End.Until()`,
+  an `End` as Rust's, says why it ended: `End.Reached()`,
   `End.Instructions()`, `End.Fault(fault)` (a `FaultStop`), or
   `End.Stop(stop)` with a chip's `Stop` (the value a field named for
   it, `end.fault` and `end.stop`, not Rust's `_0`): `Budget()` (cycles),
@@ -1459,8 +1461,9 @@ assert bare.read_register("D0") == 6
   No clocks pass.  The exception hooks, and the write hooks on the
   stack, are called before it returns, their results stopping nothing.
   A halted CPU, or one in background mode, raises `RunError`, as
-  does a fault stacking the frame with `set_stop_on_fault(True)`,
-  nothing stacked; without it, the fault is a bus error the CPU takes,
+  does a fault stacking the frame with `set_stop_on_fault(True)`: no
+  exception entered, the registers rolled back, though what the frame's
+  writes before the fault wrote stays written; without it, the fault is a bus error the CPU takes,
   as in its own exception processing.
 - **Also:** `reset()` (the reset exception from the vectors at zero),
   `read_register`, `write_register`, `registers()`, `instructions`,
@@ -1520,7 +1523,7 @@ def stub(instruction: mc683xx.Instruction) -> None:
 stubbed = bare.add_code_hook(stub, CALL, CALL)
 bare.write(CALL_STACK - 4, struct.pack(">I", CALL_RETURN))
 bare.write_register("A7", CALL_STACK - 4)
-assert bare.run_limited(begin=CALL, until=CALL_RETURN).end == mc683xx.End.Until()
+assert bare.run_limited(begin=CALL, reach=CALL_RETURN).end == mc683xx.End.Reached()
 assert bare.read_register("D0") == 99 and calls == [CALL]
 bare.remove_hook(stubbed)
 ```
@@ -1568,13 +1571,13 @@ def trap_1(intercepted: mc683xx.Intercepted) -> bool:
 
 bare.set_intercepted(32 + 1, True)
 bare.set_intercept_callback(trap_1)
-assert bare.run_limited(begin=CALL, until=0x4000).end == mc683xx.End.Until()
+assert bare.run_limited(begin=CALL, reach=0x4000).end == mc683xx.End.Reached()
 bare.set_intercept_callback(None)
 
 bare.set_stop_on_fault(True)
 bare.write(CALL, struct.pack(">2H", 0x2010, RTS))  # move.l (a0),d0
 bare.write_register("A0", 0x90000000)
-match bare.run_limited(begin=CALL, until=CALL_RETURN).end:
+match bare.run_limited(begin=CALL, reach=CALL_RETURN).end:
     case mc683xx.End.Fault(fault):
         assert fault.cause == mc683xx.FaultCause.BUS_ERROR
         assert (fault.address, fault.size, fault.pc) == (0x90000000, 4, CALL)
@@ -1603,7 +1606,7 @@ def stop_at(intercepted: mc683xx.Intercepted) -> bool:
 bare.write(CALL, struct.pack(">2H", TRAP_7, RTS))
 bare.set_intercepted(32 + 7, True)
 bare.set_intercept_callback(stop_at)
-run = bare.run_limited(begin=CALL, until=CALL_RETURN)
+run = bare.run_limited(begin=CALL, reach=CALL_RETURN)
 assert run.end == mc683xx.End.Stop(mc683xx.Stop.Requested())
 assert stops == [(32 + 7, CALL)] and bare.read_register("PC") == CALL
 bare.set_intercept_callback(None)
@@ -1635,7 +1638,7 @@ bare.write(CALL, struct.pack(">2H", MOVE_B_D0_TO_A0, RTS))
 bare.write_register("A0", LATCH)
 bare.write_register("D0", 0x5A)
 bare.set_stop_on_fault(True)
-match bare.run_limited(begin=CALL, until=CALL_RETURN).end:
+match bare.run_limited(begin=CALL, reach=CALL_RETURN).end:
     case mc683xx.End.Fault(fault):
         assert (fault.cause, fault.address) == (mc683xx.FaultCause.PROTECTED, LATCH)
     case end:
@@ -1656,9 +1659,9 @@ The port of a Unicorn harness is mechanical:
 | `UC_PROT_READ`, `_WRITE`, `_EXEC` | `"r"`, `"w"`, `"x"` |
 | `mem_write(address, data)`, `mem_read(address, size)` | `write(address, data)`, `read(address, length)` |
 | `reg_write(UC_M68K_REG_D0, value)`, `reg_read` | `write_register("D0", value)`, `read_register("D0")` |
-| `emu_start(begin, until, timeout, count)` | `run_limited(begin=begin, until=until, instructions=count, cycles=...)`: no host time |
+| `emu_start(begin, until, timeout, count)` | `run_limited(begin=begin, reach=until, instructions=count, cycles=...)`: no host time |
 | `emu_stop()` in a hook | `stop_request().request()`, or return a truthy value |
-| `hook_add(UC_HOOK_CODE, f, begin=, end=)` | `add_code_hook(f, begin, end)`: `f(Instruction)`; `until` before it |
+| `hook_add(UC_HOOK_CODE, f, begin=, end=)` | `add_code_hook(f, begin, end)`: `f(Instruction)`; `reach` before it |
 | `hook_add(UC_HOOK_BLOCK, ...)` | `add_block_hook` |
 | `hook_add(UC_HOOK_MEM_READ, ...)` to feed a read | `add_peripheral(begin, end, peripheral)`: `read` answers before the read |
 | `hook_add(UC_HOOK_MEM_WRITE, ...)` before the write lands | `add_peripheral` `write`; or `add_write_hook`, after the instruction |

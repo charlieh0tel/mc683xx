@@ -476,10 +476,10 @@ impl MappedPeripheral for PythonMapped {
         match self.call(
             self.methods.wait_states.as_ref(),
             (BusCycleView(cycle),),
-            |result| result.extract::<Option<u8>>(),
+            |result| result.extract::<Option<u64>>(),
             Some(0),
         ) {
-            Some(Ok(wait_states)) => wait_states.map(|wait| Cycles::from_clocks(wait.into())),
+            Some(Ok(wait_states)) => wait_states.map(Cycles::from_clocks),
             Some(Err(BusError)) => None,
             None => Some(Cycles::ZERO),
         }

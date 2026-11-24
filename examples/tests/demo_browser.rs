@@ -94,7 +94,7 @@ fn the_demo_board_runs_from_bytes_and_a_host_clock() {
     assert!(text.contains(BANNER), "{text:?}");
     assert!(text.ends_with("> "), "{text:?}");
 
-    control.set_pacing(Pacing::Scaled(Factor::new(FACTOR).unwrap()));
+    control.set_pacing(Pacing::Scaled(Factor::try_from(FACTOR).unwrap()));
     let mut typed = TYPED.iter();
     let mut wall = Duration::from_secs(1000);
     let start = board.now();

@@ -223,7 +223,7 @@ pub trait Bus {
 
     /// Exception processing starts or ends stacking a frame: the write
     /// cycles between are its.  By default nothing.
-    fn stacking(&mut self, stacking: bool) {
+    fn set_stacking(&mut self, stacking: bool) {
         let _ = stacking;
     }
 

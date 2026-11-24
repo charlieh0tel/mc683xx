@@ -92,6 +92,13 @@ fn index(id: PeripheralId) -> usize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MemoryId(pub(crate) RegionId);
 
+/// The region it is: `memory in region 2`.
+impl fmt::Display for MemoryId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "memory in {}", self.0)
+    }
+}
+
 /// A handle by which the host's peripherals end the chip's run early.
 ///
 /// After the instruction whose cycle asked, or at the sync point if no
@@ -703,8 +710,8 @@ impl Builder {
     /// The board asserts AVEC (PE2) at every acknowledge of `pin`'s
     /// level, as a pin tied low or decode logic does (SIMRM 6.4).  Each
     /// call adds a level to those already autovectored.
-    pub const fn set_autovector(&mut self, pin: IrqPin) {
-        self.board.autovector_levels |= 1 << pin.get();
+    pub fn set_autovector(&mut self, pin: IrqPin) {
+        self.board.autovector_levels |= 1 << u8::from(pin);
     }
 
     /// The chip, through its power-on reset.
@@ -1305,8 +1312,8 @@ impl Mc68331 {
     }
 
     /// The host asserts or negates `pin`.
-    pub const fn set_interrupt_pin(&mut self, pin: IrqPin, asserted: bool) {
-        let bit = 1 << pin.get();
+    pub fn set_interrupt_pin(&mut self, pin: IrqPin, asserted: bool) {
+        let bit = 1 << u8::from(pin);
         self.board.level_stale = true;
         if asserted {
             self.board.interrupt_pins |= bit;

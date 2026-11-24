@@ -1079,11 +1079,7 @@ impl Peripheral for PythonPeripheral {
                     moment_argument(py, moment)?,
                 ])
             },
-            |value| {
-                Ok(value
-                    .extract::<Option<u8>>()?
-                    .map(|wait| Cycles::from_clocks(wait.into())))
-            },
+            |value| Ok(value.extract::<Option<u64>>()?.map(Cycles::from_clocks)),
             Some(Cycles::ZERO),
         )
     }

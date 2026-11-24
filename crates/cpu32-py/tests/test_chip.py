@@ -1538,6 +1538,22 @@ def test_a_peripheral_sees_the_direction_before_its_dsack():
     assert peripheral.asked == [False, True]
 
 
+class Slow(Recorder):
+    """A Recorder that waits more wait states than a byte holds."""
+
+    def wait_states(self, cycle):
+        return 300
+
+
+def test_a_peripheral_waits_more_than_255_wait_states():
+    window = 0x800000
+    builder = mc683xx.Builder()
+    builder.memory(rom([0x60FE]), ["CSBOOT"], writable=False)
+    builder.bus_peripheral(Slow(0x1234), windows=[(window, 0x100)], dsack=mc683xx.Dsack.DSACK1)
+    chip = builder.build()
+    assert chip.bus_read(window, 2) == 0x1234
+
+
 def test_a_bus_peripheral_decodes_its_own_window():
     window = 0x800000
     builder = mc683xx.Builder()

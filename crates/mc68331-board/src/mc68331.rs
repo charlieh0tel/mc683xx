@@ -790,7 +790,8 @@ impl chip::Chip for Mc68331 {
         let system_clock = self.sim().system_clock().frequency();
         for sent in self.take_sci_transmitted() {
             let start = base.time(sent.start);
-            let baud = u128::from(system_clock.nanohertz()) / u128::from(sent.bit.clocks());
+            let baud =
+                u128::from(system_clock.nanohertz()) / u128::from(sent.clocks_per_bit.clocks());
             let serial = Serial::timed(
                 sent.frame,
                 Frequency::from_nanohertz(u64::try_from(baud).unwrap_or(u64::MAX)),

@@ -155,7 +155,7 @@ pub enum TargetReset {
 pub enum AccessError<E> {
     /// The byte at this address is not memory the target serves, in
     /// the address space asked.
-    #[error("nothing serves {0}")]
+    #[error("no memory at {0}")]
     Unserved(Address),
     /// The target gives no access to its registers: neither its CPU's
     /// controls nor register methods of its own.
@@ -427,7 +427,7 @@ impl Target for Machine {
         let run = Self::run_limited(self, limits);
         Ok(match run.end {
             End::Stop(stop) => stop.into(),
-            End::Until | End::Instructions | End::Steps => TargetRun::Quantum,
+            End::Reached | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
             _ => TargetRun::Requested,
         })

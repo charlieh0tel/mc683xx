@@ -127,13 +127,13 @@ pub enum Ending {
     HungUp,
 }
 
-/// `detached`, `killed` or `hung-up`.
+/// `detached`, `killed` or `hung up`.
 impl fmt::Display for Ending {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Detached => "detached",
             Self::Killed => "killed",
-            Self::HungUp => "hung-up",
+            Self::HungUp => "hung up",
         })
     }
 }
@@ -240,6 +240,6 @@ mod tests {
     fn an_ending_shows_as_one_word() {
         assert_eq!(Ending::Detached.to_string(), "detached");
         assert_eq!(Ending::Killed.to_string(), "killed");
-        assert_eq!(Ending::HungUp.to_string(), "hung-up");
+        assert_eq!(Ending::HungUp.to_string(), "hung up");
     }
 }

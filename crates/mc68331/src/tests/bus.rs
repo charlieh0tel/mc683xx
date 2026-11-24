@@ -52,13 +52,18 @@ fn decoding<D: MappedPeripheral + Timed + Stateless + 'static>(
     peripheral: D,
     pins: Dsack,
 ) -> (Mc68331, PeripheralId) {
+    decoding_running(&[NOP], peripheral, pins)
+}
+
+/// [`decoding`], booting into `code`.
+fn decoding_running<D: MappedPeripheral + Timed + Stateless + 'static>(
+    code: &[u16],
+    peripheral: D,
+    pins: Dsack,
+) -> (Mc68331, PeripheralId) {
     let mut builder = Builder::default();
     builder
-        .memory(
-            image(&[NOP], ROM_BYTES),
-            MemoryKind::Rom,
-            &[ChipSelect::Boot],
-        )
+        .memory(image(code, ROM_BYTES), MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     let id = builder
         .bus_peripheral(
@@ -134,6 +139,24 @@ fn a_bus_peripherals_dsack_waits_sizes_and_is_checked_against_pepar() {
             now: Cycle::ZERO,
             fault: DsackFault::BusUnassigned { peripheral: id }
         }]
+    );
+}
+
+#[test]
+fn wait_states_near_the_most_clocks_saturate_a_cycles_cost() {
+    // DSACK0: a word is two byte cycles of 2^63 clocks each
+    let huge = || Recorder {
+        wait: Some((1 << 63) - 3),
+        ..Recorder::answering(0x1234)
+    };
+    let (mut chip, _) = decoding(huge(), Dsack::Dsack0);
+    assert_eq!(
+        cycle(&mut chip, WINDOW, Size::Word, None),
+        Ok((0x3434, u64::MAX))
+    );
+    assert_eq!(
+        chip.bus_read(Address(WINDOW), Size::Long, FunctionCode::SupervisorData),
+        Ok(0x3434_3434)
     );
 }
 

@@ -225,7 +225,7 @@ impl Bus for FlatBus {
         Some(self.write(access, value))
     }
 
-    fn stacking(&mut self, stacking: bool) {
+    fn set_stacking(&mut self, stacking: bool) {
         self.stacking = stacking;
     }
 
@@ -261,7 +261,7 @@ impl Interrupts for Requests {
     }
 
     fn acknowledge(&mut self, level: InterruptLevel, _now: Cycle) -> Acknowledged {
-        let line = usize::from(level.get()).checked_sub(1);
+        let line = usize::from(level.0).checked_sub(1);
         match line.and_then(|line| self.lines[line]) {
             Some(Some(vector)) => Acknowledge::Vector(vector),
             Some(None) => Acknowledge::Autovector,
@@ -320,9 +320,9 @@ struct MachineState {
 /// registers.data[0] = 40;
 /// registers.data[1] = 2;
 /// let mut limits = Limits::default();
-/// limits.until = Some(RETURN);
+/// limits.reach = Some(RETURN);
 /// let run = machine.run_limited(limits);
-/// assert_eq!(run.end, End::Until);
+/// assert_eq!(run.end, End::Reached);
 /// assert_eq!(machine.cpu.registers.data[0], 42);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -567,12 +567,12 @@ impl Machine {
     /// `vector`, or the autovector if [`None`]; it stays requested, as a
     /// level-sensitive line does, until cleared.
     pub fn request_interrupt(&mut self, pin: IrqPin, vector: Option<Vector>) {
-        self.requests.lines[usize::from(pin.get() - 1)] = Some(vector);
+        self.requests.lines[usize::from(u8::from(pin) - 1)] = Some(vector);
     }
 
     /// Withdraws the request on `pin`.
     pub fn clear_interrupt(&mut self, pin: IrqPin) {
-        self.requests.lines[usize::from(pin.get() - 1)] = None;
+        self.requests.lines[usize::from(u8::from(pin) - 1)] = None;
     }
 
     /// The reset exception (CPU32RM 6.2.1): SSP and PC from the long

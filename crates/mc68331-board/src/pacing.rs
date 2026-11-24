@@ -38,32 +38,18 @@ pub struct Factor(f64);
 impl Factor {
     /// A board second a wall second, [`Pacing::RealTime`]'s.
     pub const REAL_TIME: Self = Self(1.0);
+}
 
-    /// `factor`, if it is finite and above 0.
-    ///
-    /// # Errors
-    ///
-    /// [`PacingError::Factor`] for any other.
-    pub const fn new(factor: f64) -> Result<Self, PacingError> {
+/// `factor`, if it is finite and above 0, else [`PacingError::Factor`].
+impl TryFrom<f64> for Factor {
+    type Error = PacingError;
+
+    fn try_from(factor: f64) -> Result<Self, PacingError> {
         if factor.is_finite() && factor > 0.0 {
             Ok(Self(factor))
         } else {
             Err(PacingError::Factor(factor))
         }
-    }
-
-    /// Its value.
-    #[must_use]
-    pub const fn get(self) -> f64 {
-        self.0
-    }
-}
-
-impl TryFrom<f64> for Factor {
-    type Error = PacingError;
-
-    fn try_from(factor: f64) -> Result<Self, PacingError> {
-        Self::new(factor)
     }
 }
 
@@ -97,7 +83,7 @@ impl FromStr for Factor {
         let factor: f64 = text
             .parse()
             .map_err(|_| ParseFactorError::Number(text.to_owned()))?;
-        Self::new(factor).map_err(ParseFactorError::Factor)
+        Self::try_from(factor).map_err(ParseFactorError::Factor)
     }
 }
 
@@ -253,7 +239,7 @@ impl Pacer {
             return Duration::ZERO;
         };
         let board = now.since(anchor.board).secs_f64();
-        Duration::try_from_secs_f64(board / factor.get())
+        Duration::try_from_secs_f64(board / factor.0)
             .ok()
             .and_then(|elapsed| anchor.wall.checked_add(elapsed))
             .map_or(Duration::MAX, |due| due.saturating_sub(wall))
@@ -284,7 +270,7 @@ impl Pacer {
             return Some(now);
         };
         let elapsed = wall.saturating_sub(anchor.wall).as_secs_f64();
-        let board = Span::from_secs_f64(elapsed * factor.get());
+        let board = Span::from_secs_f64(elapsed * factor.0);
         Some((anchor.board + board).max(now))
     }
 
@@ -366,25 +352,25 @@ mod tests {
 
     /// The pacing at `factor`.
     fn scaled(factor: f64) -> Pacing {
-        Pacing::Scaled(Factor::new(factor).unwrap())
+        Pacing::Scaled(Factor::try_from(factor).unwrap())
     }
 
     #[test]
     fn a_factor_is_finite_and_above_0() {
-        assert_eq!(Factor::new(0.5).map(f64::from), Ok(0.5));
+        assert_eq!(Factor::try_from(0.5).map(f64::from), Ok(0.5));
         assert_eq!(Pacing::RealTime.factor(), Some(Factor::REAL_TIME));
-        assert_eq!(Factor::new(1.0), Ok(Factor::REAL_TIME));
+        assert_eq!(Factor::try_from(1.0), Ok(Factor::REAL_TIME));
         assert_eq!(Pacing::Unpaced.factor(), None);
-        assert_eq!(scaled(2.0).factor().map(Factor::get), Some(2.0));
+        assert_eq!(scaled(2.0).factor().map(f64::from), Some(2.0));
         for factor in [0.0, -0.0, -1.0, f64::INFINITY, f64::NAN] {
-            assert!(Factor::new(factor).is_err(), "{factor}");
+            assert!(Factor::try_from(factor).is_err(), "{factor}");
         }
     }
 
     #[test]
     fn a_factor_reads_as_it_prints() {
         for factor in [0.5, 1.0, 2.5, 1e-9] {
-            let factor = Factor::new(factor).unwrap();
+            let factor = Factor::try_from(factor).unwrap();
             assert_eq!(factor.to_string().parse(), Ok(factor));
         }
         assert_eq!(

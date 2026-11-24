@@ -82,7 +82,7 @@ impl Mode {
     /// does not use: CPOL its bit 1, CPHA its bit 0.  Higher bits are
     /// ignored.
     #[must_use]
-    pub const fn numbered(number: u8) -> Self {
+    pub const fn from_number(number: u8) -> Self {
         Self {
             polarity: if number & 0b10 == 0 {
                 ClockPolarity::IdleLow
@@ -103,7 +103,7 @@ impl Mode {
         Self::new(clock.polarity, clock.phase)
     }
 
-    /// Its number, as `numbered` takes it.
+    /// Its number, as `from_number` takes it.
     #[must_use]
     pub const fn number(self) -> u8 {
         let polarity = match self.polarity {
@@ -261,7 +261,7 @@ mod tests {
 
     /// A transfer in SPI mode `number`, a frame's first.
     fn transfer(number: u8) -> Transfer {
-        let mode = Mode::numbered(number);
+        let mode = Mode::from_number(number);
         let clock = QspiClock::new(
             mode.polarity,
             mode.phase,
@@ -320,7 +320,7 @@ mod tests {
             (Edge::Falling, Edge::Rising, Edge::Falling),
         ];
         for (number, (leading, capture, change)) in (0..4).zip(edges) {
-            let mode = Mode::numbered(number);
+            let mode = Mode::from_number(number);
             assert_eq!(
                 (mode.leading(), mode.capture(), mode.change()),
                 (leading, capture, change),
@@ -329,7 +329,7 @@ mod tests {
             assert_eq!(mode.number(), number);
         }
         assert_eq!(
-            Mode::numbered(3),
+            Mode::from_number(3),
             Mode::new(ClockPolarity::IdleHigh, ClockPhase::ChangeLeading)
         );
     }

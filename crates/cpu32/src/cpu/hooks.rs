@@ -78,7 +78,8 @@ pub struct MemoryAccess {
     /// The value read or written, right-aligned.
     pub value: u32,
     /// For a write, the value it replaced, right-aligned, read with no
-    /// cycle before it was written: [`None`] for a read, for a write in
+    /// cycle before it was written from the bytes it writes to (a
+    /// page's write backing, not its read one): [`None`] for a read, for a write in
     /// CPU space, and for a write the core's memory does not serve (a
     /// peripheral's: a read there would be a cycle of its own).
     pub previous: Option<u32>,
@@ -601,8 +602,8 @@ impl Core<'_> {
     }
 
     /// What a write of `size` at `address` is to replace, for the write
-    /// hooks: the bytes the core's memory holds there, read with no
-    /// cycle, while a write hook watches the page and the cycle is not
+    /// hooks: the bytes the core's memory writes to there, read with
+    /// no cycle (not the bytes a page reads, where the two differ), while a write hook watches the page and the cycle is not
     /// part of a long operand seen once.  [`None`] otherwise, where the
     /// memory does not serve the address, for a word or long at an odd
     /// address, which ends in an address error without writing, and for
@@ -622,7 +623,7 @@ impl Core<'_> {
         }
         self.cpu
             .memory
-            .peek(Space::of(function_code), address, size)
+            .peek_written(Space::of(function_code), address, size)
     }
 
     /// A cycle that ended well, as the read and write hooks see it.

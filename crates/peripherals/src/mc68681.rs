@@ -54,6 +54,7 @@ use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
 use mc683xx_cpu32::cpu::state::encode;
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::frequency::Frequency;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -205,13 +206,13 @@ fn ports() -> Vec<PortSpec> {
 struct State {
     /// Channels A and B.
     channels: [Channel; 2],
-    /// ACR (4.2.13).
+    /// ACR, the auxiliary control register (4.2.13).
     acr: u8,
-    /// IMR (4.2.16).
+    /// IMR, the interrupt mask register (4.2.16).
     imr: u8,
-    /// IVR (4.2.19).
+    /// IVR, the interrupt vector register (4.2.19).
     ivr: u8,
-    /// OPCR (4.2.11).
+    /// OPCR, the output port configuration register (4.2.11).
     opcr: u8,
     /// OPR (4.2.12).
     opr: u8,
@@ -317,13 +318,13 @@ pub struct Mc68681 {
 }
 
 impl Mc68681 {
-    /// `x1_hz`'s default: the 3.6864 MHz the baud rate tables are for
-    /// (1.2).
-    pub const X1_HZ: u64 = X1_DEFAULT_HZ;
+    /// The `x1_hz` parameter's default: the 3.6864 MHz the baud rate
+    /// tables are for (1.2).
+    pub const X1: Frequency = Frequency::from_hz(X1_DEFAULT_HZ);
 
     /// A DUART out of reset, from `x1_hz`, X1/CLK's frequency.
     fn from_parameters(context: &Context<'_>, variant: Variant) -> Result<Self, ParameterError> {
-        let hz = context.parameters.integer(X1_HZ)?.unwrap_or(Self::X1_HZ);
+        let hz = context.parameters.integer(X1_HZ)?.unwrap_or(X1_DEFAULT_HZ);
         if hz == 0 {
             return Err(ParameterError::invalid(X1_HZ, "X1/CLK must run"));
         }
@@ -385,10 +386,10 @@ impl Mc68681 {
         self.state.inputs & 1 << CTS_PINS[channel] == 0
     }
 
-    /// X1/CLK's frequency, in hertz.
+    /// X1/CLK's frequency.
     #[must_use]
-    pub const fn x1_hz(&self) -> u64 {
-        self.crystal.hz
+    pub const fn x1(&self) -> Frequency {
+        Frequency::from_hz(self.crystal.hz)
     }
 
     /// SRA or SRB, channel `channel`'s status register (4.2.3), 0 for
@@ -402,33 +403,33 @@ impl Mc68681 {
         self.state.channels[channel].status()
     }
 
-    /// ACR (4.2.13).
+    /// ACR, the auxiliary control register (4.2.13).
     #[must_use]
-    pub const fn acr(&self) -> u8 {
+    pub const fn auxiliary_control(&self) -> u8 {
         self.state.acr
     }
 
-    /// IMR (4.2.16).
+    /// IMR, the interrupt mask register (4.2.16).
     #[must_use]
-    pub const fn imr(&self) -> u8 {
+    pub const fn interrupt_mask(&self) -> u8 {
         self.state.imr
     }
 
-    /// IVR (4.2.19).
+    /// IVR, the interrupt vector register (4.2.19).
     #[must_use]
-    pub const fn ivr(&self) -> u8 {
+    pub const fn interrupt_vector(&self) -> u8 {
         self.state.ivr
     }
 
-    /// OPCR (4.2.11).
+    /// OPCR, the output port configuration register (4.2.11).
     #[must_use]
-    pub const fn opcr(&self) -> u8 {
+    pub const fn output_port_configuration(&self) -> u8 {
         self.state.opcr
     }
 
-    /// OPR (4.2.12): a one drives its pin low (1.7).
+    /// OPR, the output port register (4.2.12): a one drives its pin low (1.7).
     #[must_use]
-    pub const fn opr(&self) -> u8 {
+    pub const fn output_port(&self) -> u8 {
         self.state.opr
     }
 

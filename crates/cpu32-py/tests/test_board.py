@@ -19,6 +19,8 @@ CSBAR1, CSOR1 = SIM + 0x50, SIM + 0x52
 # termination (MC68331UM D.3.25, D.3.26).
 CS1_BAR = 0x2003
 CSOR_FAST = 0x7BB0
+# The same with external DSACK.
+CSOR_EXTERNAL = 0x7BF0
 LATCH = 0x200000
 ROM_BYTES = 64 << 10
 STACK = 0x10FFFE
@@ -835,6 +837,28 @@ def test_a_keyboard_interrupt_in_a_read_stops_the_run_without_a_bus_error(tmp_pa
     assert board.run_for(seconds=0.001).stop == mc683xx.Stop.Budget()
     assert board.chip.read_register("D0") & 0xFFFF == 0x1234
 
+
+class Slow:
+    """Reads 0x1234 after more wait states than a byte holds."""
+
+    PORTS: list[tuple[str, str, str]] = []
+
+    def read(self, access: mc683xx.PeripheralAccess, drive: mc683xx.Drive) -> int:
+        return 0x1234
+
+    def wait_states(self, access: mc683xx.PeripheralAccess, moment: mc683xx.Moment) -> int:
+        return 300
+
+
+def test_a_python_peripheral_waits_more_than_255_wait_states(tmp_path: Path) -> None:
+    # CS1 with external DSACK (MC68331UM D.3.26, DSACK %1111)
+    program = store_word(CSBAR1, CS1_BAR) + store_word(CSOR1, CSOR_EXTERNAL)
+    program += [MOVE_WORD_ABSOLUTE_TO_D0, LATCH >> 16, LATCH & 0xFFFF, BRA_BACK_8]
+    (tmp_path / "rom.bin").write_bytes(rom(program))
+    (tmp_path / "board.toml").write_text(INTERRUPTED_BOARD.replace('"interrupted"', '"slow"'))
+    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"slow": Slow})
+    board.run_for(seconds=0.001)
+    assert board.chip.read_register("D0") & 0xFFFF == 0x1234
 
 
 class Horizoned:

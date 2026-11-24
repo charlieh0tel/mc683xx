@@ -61,7 +61,7 @@ pub struct Limits {
     pub steps: Option<u64>,
     /// An address: the run ends when PC reaches it at an instruction
     /// boundary, before an interrupt is taken or a hook called there.
-    pub until: Option<Address>,
+    pub reach: Option<Address>,
 }
 
 /// Why a fault that stopped the run was one.
@@ -153,8 +153,9 @@ pub enum TakeExceptionError {
     #[error("the CPU executes nothing: {0}")]
     Idle(Stop),
     /// Stacking the frame or reading the vector faulted, with
-    /// [`Cpu::set_stop_on_fault`]: nothing stacked, the registers as
-    /// before.
+    /// [`Cpu::set_stop_on_fault`]: no exception entered, the registers
+    /// as before; what the frame's writes before the fault wrote stays
+    /// written.
     #[error("stopped at a fault: {0}")]
     Fault(FaultStop),
 }
@@ -165,8 +166,8 @@ pub enum TakeExceptionError {
 pub enum End {
     /// As [`Cpu::run_for`] ends.
     Stop(Stop),
-    /// PC reached [`Limits::until`].
-    Until,
+    /// PC reached [`Limits::reach`].
+    Reached,
     /// It ran [`Limits::instructions`].
     Instructions,
     /// It took [`Limits::steps`].
@@ -178,14 +179,14 @@ pub enum End {
 }
 
 /// A short lowercase name for each way a limited run ends, as
-/// [`Stop`]'s: its stop's name, or `until`, `instructions`, `steps`,
+/// [`Stop`]'s: its stop's name, or `reached`, `instructions`, `steps`,
 /// `fault` or `intercepted`.  The detail a variant holds (the fault, the
 /// exception) is not part of it.
 impl fmt::Display for End {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Stop(stop) => stop.fmt(formatter),
-            Self::Until => formatter.write_str("until"),
+            Self::Reached => formatter.write_str("reached"),
             Self::Instructions => formatter.write_str("instructions"),
             Self::Steps => formatter.write_str("steps"),
             Self::Fault(_) => formatter.write_str("fault"),
@@ -264,7 +265,7 @@ pub(crate) struct Bare {
 
 impl Cpu {
     /// Runs as [`run_for`](Self::run_for) does, but also until PC reaches
-    /// `limits.until`, `limits.instructions` have run, a fault stops it
+    /// `limits.reach`, `limits.instructions` have run, a fault stops it
     /// (`set_stop_on_fault`) or an exception is intercepted
     /// (`set_intercepted`).  With no cycle budget it runs until one of
     /// those or a stop.
@@ -309,15 +310,17 @@ impl Cpu {
     /// A fault stacking the frame or reading the vector is taken as one
     /// in exception processing is: a type IV bus error (6.3.1.4), or a
     /// double bus fault while a bus or address error is being taken
-    /// (6.2.2).
+    /// (6.2.2), as one is when `vector` is 2 or 3, until its handler's
+    /// first opcode is fetched.
     ///
     /// # Errors
     ///
     /// [`TakeExceptionError::Idle`] for a halted CPU, or one in
     /// background mode, which takes nothing, and
     /// [`TakeExceptionError::Fault`] for a fault that stops rather than
-    /// being taken ([`Cpu::set_stop_on_fault`]): the registers as
-    /// before, nothing stacked.
+    /// being taken ([`Cpu::set_stop_on_fault`]): no exception entered,
+    /// the registers rolled back, but memory and peripherals keep what
+    /// the frame's writes before the fault did to them.
     pub fn take_exception(
         &mut self,
         bus: &mut dyn Bus,
@@ -332,6 +335,10 @@ impl Cpu {
         self.began.clone_from(&self.registers);
         self.leave_loop_mode();
         let resume = self.resume;
+        let fault_window = self.fault_window;
+        if vector == Vector::BUS_ERROR || vector == Vector::ADDRESS_ERROR {
+            self.fault_window = true;
+        }
         let pc = self.registers.pc;
         Core {
             cpu: self,
@@ -343,6 +350,7 @@ impl Cpu {
         if let Some(End::Fault(fault)) = self.bare.end.take() {
             // the instruction at PC not begun: its hooks still to run
             self.resume = resume;
+            self.fault_window = fault_window;
             return Err(TakeExceptionError::Fault(fault));
         }
         self.stopped = false;
