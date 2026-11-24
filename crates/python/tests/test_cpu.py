@@ -921,6 +921,7 @@ def test_a_vector_set_is_rust_s():
     assert 32 in traps and 31 not in traps and 300 not in traps and -1 not in traps and "x" not in traps
     assert traps.contains(47) and not traps.without(47).contains(47)
     assert traps.union(VectorSet([4])) == VectorSet([4, *range(32, 48)])
+    assert traps.union([4]) == traps.union(VectorSet([4]))
     assert traps.difference(VectorSet(range(33, 48))) == VectorSet([32])
     two = [mc683xx.Vector.trap(1), mc683xx.Vector.trap(7)]
     rest = VectorSet.INSTRUCTION.difference(two)

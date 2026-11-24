@@ -1838,9 +1838,9 @@ bare.set_stop_on_exception(set())
 intercept hook can see), `contains(vector)` and `in`, `is_empty()`,
 `without(vector)`, `union(other)`, `difference(other)`, and iteration,
 giving its numbers in ascending order.  Rust's `with(vector)` is a
-Python keyword, so a vector is added by `union(VectorSet([vector]))`.
-`difference` takes an iterable of vector numbers too, where Rust's
-takes a `VectorSet`.
+Python keyword, so a vector is added by `union([vector])`.  `union`
+and `difference` take an iterable of vector numbers too, where Rust's
+take a `VectorSet`.
 
 ```python
 everything_but_trap_7 = mc683xx.VectorSet.INSTRUCTION.without(mc683xx.Vector.trap(7))
