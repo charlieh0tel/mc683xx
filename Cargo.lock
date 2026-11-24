@@ -285,21 +285,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cpu32-py"
-version = "0.8.0"
-dependencies = [
- "mc683xx-board",
- "mc683xx-cpu32",
- "mc683xx-gdb",
- "mc683xx-mc68331",
- "mc683xx-modules",
- "mc683xx-peripherals",
- "mc683xx-target",
- "pyo3",
- "thiserror",
-]
-
-[[package]]
 name = "criterion"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -615,6 +600,21 @@ dependencies = [
  "snapshot-golden",
  "thiserror",
  "toml",
+]
+
+[[package]]
+name = "mc683xx-python"
+version = "0.8.0"
+dependencies = [
+ "mc683xx-board",
+ "mc683xx-cpu32",
+ "mc683xx-gdb",
+ "mc683xx-mc68331",
+ "mc683xx-modules",
+ "mc683xx-peripherals",
+ "mc683xx-target",
+ "pyo3",
+ "thiserror",
 ]
 
 [[package]]

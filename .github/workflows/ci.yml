@@ -129,13 +129,13 @@ jobs:
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           maturin-version: ${{ env.MATURIN_VERSION }}
-          args: --release --out dist -m crates/cpu32-py/Cargo.toml
+          args: --release --out dist -m crates/python/Cargo.toml
       - name: Test the wheel
         shell: bash
         run: |
           python -m pip install --no-index --find-links dist mc683xx
           python -m pip install pytest==${{ env.PYTEST_VERSION }}
-          python -m pytest -q crates/cpu32-py
+          python -m pytest -q crates/python
 
   wasm:
     # The JavaScript bindings linted on wasm32 and built as the npm

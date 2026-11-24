@@ -7,7 +7,7 @@ members = [
     "crates/cpu32",
     "crates/cpu32-harness",
     "crates/cpu32-oracle",
-    "crates/cpu32-py",
+    "crates/python",
     "crates/debug",
     "crates/gdb",
     "crates/mc683xx",

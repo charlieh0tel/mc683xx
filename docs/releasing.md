@@ -12,10 +12,10 @@ release, step 7).
 | Package | Where | Built by |
 | --- | --- | --- |
 | `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`, `mc683xx-board`, `mc683xx-gdb`, `mc683xx-debug`, `mc683xx-peripherals`, `mc683xx-run` | crates.io | `cargo publish --workspace`: the first release by hand, then the `release` workflow |
-| `mc683xx` (the Python package, from `crates/cpu32-py`) | PyPI | `.github/workflows/release.yml`, from a `v*` tag |
+| `mc683xx` (the Python package, from `crates/python`) | PyPI | `.github/workflows/release.yml`, from a `v*` tag |
 | `mc683xx` (the npm package, from `crates/wasm`) | npm | `make npm-package`: the first release by hand, then the `release` workflow |
 
-Every other member has `publish = false`: `cpu32-py` (its wheel is its
+Every other member has `publish = false`: `mc683xx-python` (its wheel is its
 release), `mc683xx-wasm` (its npm package is its release),
 `cpu32-harness`, `cpu32-oracle`, `snapshot-golden`,
 `mc683xx-bench` and `mc683xx-examples`.
@@ -27,7 +27,7 @@ tests `mc683xx-examples`, both path-only dev-dependencies that `cargo
 publish` drops, so `cargo test` in an unpacked package fails to
 build.  The tests run from the repository.
 
-Each published crate and `crates/cpu32-py` holds copies of the root's
+Each published crate and `crates/python` holds copies of the root's
 `LICENSE-MIT` and `LICENSE-APACHE`, so its package, the wheels and the
 sdist carry them (`license-files` in `pyproject.toml`).  They are
 copies, not links, for checkouts on Windows; `make licenses`, part of
@@ -39,7 +39,7 @@ manylinux x86_64 and aarch64, macOS x86_64 and arm64, Windows x64, and
 an sdist.  Wheels the runner can load run the Python tests on Python
 3.12 first; the cross-built ones (Linux aarch64, macOS x86_64) are only
 built.  The package is a maturin `python-source` layout
-(`crates/cpu32-py/python/mc683xx`), so the sdist carries the stubs and
+(`crates/python/python/mc683xx`), so the sdist carries the stubs and
 `py.typed`; the `sdist` job builds a wheel from the sdist, as pip does
 where no wheel fits, and checks they are in it.  `mc683xx-run`
 installs on any host; its `nix` dependency, for `--bind NAME=pty`, is
@@ -81,7 +81,7 @@ deploy replaces it.
 - The 1.0 commit, as "Release 1.0.0", makes these changes beside the
   version bump (Cutting a release, step 2), and no others: the PyPI
   classifier becomes `Development Status :: 5 - Production/Stable`
-  (`crates/cpu32-py/pyproject.toml`); CI's `semver` job loses its
+  (`crates/python/pyproject.toml`); CI's `semver` job loses its
   `continue-on-error` and blocks (`.github/workflows/ci.yml`); the
   "Beta" line goes from `README.md` and `crates/wasm/npm/README.md`;
   and this page's text on releases before 1.0 goes.  Nothing here

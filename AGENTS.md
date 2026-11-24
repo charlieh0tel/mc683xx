@@ -19,7 +19,7 @@ Crates:
   shared by 683xx parts.
 - `mc683xx-mc68331` (`crates/mc68331`): GPT; composes the core and the
   modules into the chip.
-- `cpu32-py`: PyO3 bindings.
+- `mc683xx-python` (`crates/python`): PyO3 bindings.
 - `mc683xx-wasm` (`crates/wasm`): `wasm-bindgen` bindings, a board
   from JavaScript; `make wasm` lints and builds them, `make npm-test`
   tests them.

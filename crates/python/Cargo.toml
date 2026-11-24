@@ -1,5 +1,5 @@
 [package]
-name = "cpu32-py"
+name = "mc683xx-python"
 description = "Python bindings for the MC68331 emulator"
 version.workspace = true
 edition.workspace = true

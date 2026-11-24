@@ -21,7 +21,7 @@ fmt-check:
 # The license texts in each published crate and the Python package:
 # copies of the root's, not links, so a Windows checkout has them too.
 LICENSE_FILES := LICENSE-MIT LICENSE-APACHE
-LICENSED_CRATES := cpu32 cpu32-py debug gdb mc683xx mc68331 mc68331-board mc68331-run peripherals target
+LICENSED_CRATES := cpu32 python debug gdb mc683xx mc68331 mc68331-board mc68331-run peripherals target
 
 licenses:
 	@for crate in $(LICENSED_CRATES); do \
@@ -102,14 +102,14 @@ oracle: musashi
 	MUSASHI_DIR=$(EXTERNAL)/musashi \
 		cargo test --release -p cpu32-oracle -p cpu32-harness $(ORACLE_FEATURES) -- --nocapture
 
-# The Python bindings (cpu32-py, PLAN.md Python), built with maturin
+# The Python bindings (mc683xx-python, PLAN.md Python), built with maturin
 # and tested with pytest in the ignored .venv, which the first run
 # creates (it needs the network then, and again when the tools'
 # pins change).  The type stubs are checked against the module with
 # mypy's stubtest, and docs/python.md's examples with mypy.  Not part
 # of `ci`, which needs no Python.
 VENV := $(CURDIR)/.venv
-PYTHON_CRATE := crates/cpu32-py
+PYTHON_CRATE := crates/python
 PYTHON_TOOLS := maturin==1.15.0 pytest==9.1.1 mypy==2.4.0
 # A stamp naming the pins, so a change to them installs them.
 PYTHON_TOOLS_STAMP := $(VENV)/tools-$(subst ==,-,$(subst $() ,_,$(PYTHON_TOOLS)))
@@ -122,8 +122,8 @@ $(PYTHON_TOOLS_STAMP):
 
 python: $(PYTHON_TOOLS_STAMP)
 	PYO3_PYTHON=$(VENV)/bin/python \
-		cargo clippy -p cpu32-py --all-targets --features python -- -D warnings
-	PYO3_PYTHON=$(VENV)/bin/python cargo test -p cpu32-py --features python
+		cargo clippy -p mc683xx-python --all-targets --features python -- -D warnings
+	PYO3_PYTHON=$(VENV)/bin/python cargo test -p mc683xx-python --features python
 	VIRTUAL_ENV=$(VENV) $(VENV)/bin/maturin develop --quiet -m $(PYTHON_CRATE)/Cargo.toml
 	$(VENV)/bin/pytest -q $(PYTHON_CRATE)
 	$(VENV)/bin/python -m mypy.stubtest mc683xx \

@@ -188,7 +188,7 @@ The crates above are in `crates/`: `target` (`mc683xx-target`),
 (`mc683xx-debug`) and `mc68331-run`
 (`mc683xx-run`).  The other members are not on crates.io:
 
-- `cpu32-py` (`crates/cpu32-py`): the Python package `mc683xx`, on PyPI.
+- `mc683xx-python` (`crates/python`): the Python package `mc683xx`, on PyPI.
 - `mc683xx-wasm` (`crates/wasm`): JavaScript bindings for boards,
   through WebAssembly, the npm package `mc683xx`
   ([crates/wasm/README.md](https://github.com/charlieh0tel/mc683xx/blob/main/crates/wasm/README.md)).

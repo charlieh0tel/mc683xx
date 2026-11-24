@@ -12,7 +12,7 @@ board file (`docs/board-files.md`) describes a whole board as data;
 `mc683xx.Board` loads one (Board files, below).
 
 Every Python block here runs, in order, in one namespace, as a test:
-`crates/cpu32-py/tests/test_python_doc.py`, part of `make python`,
+`crates/python/tests/test_python_doc.py`, part of `make python`,
 which also type-checks the blocks with mypy against the module's
 stubs.
 
@@ -140,7 +140,7 @@ make python                # builds .venv, the module, and runs the tests
 .venv/bin/python -c 'import mc683xx'
 ```
 
-The package is built with maturin from `crates/cpu32-py` (abi3, Python
+The package is built with maturin from `crates/python` (abi3, Python
 3.12 and later) and ships type stubs (`python/mc683xx/__init__.pyi`,
 `py.typed`), so mypy and pyright see every class, method and argument.
 

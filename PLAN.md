@@ -87,7 +87,7 @@ Out:
   bus and IPL/IACK traits.
 - `mc683xx-mc68331` (`crates/mc68331`): GPT; composes the core and the
   modules into the chip.
-- `cpu32-py`: PyO3 bindings, the Python module `mc683xx` (see
+- `mc683xx-python`: PyO3 bindings, the Python module `mc683xx` (see
   Python); `publish = false`, released as the PyPI wheel.
 - `mc683xx-wasm` (`crates/wasm`): `wasm-bindgen` bindings, a board
   from JavaScript (see Open, WebAssembly); `publish = false`, released
@@ -781,8 +781,8 @@ the one public type).  The larger choices:
 
 ### Python
 
-`cpu32-py` builds the Python module `mc683xx` with PyO3 and maturin
-(`crates/cpu32-py/pyproject.toml`, abi3 from Python 3.12).  The
+`mc683xx-python` builds the Python module `mc683xx` with PyO3 and maturin
+(`crates/python/pyproject.toml`, abi3 from Python 3.12).  The
 module is named for the family, not the part: a 68332 would add its
 chip beside `Mc68331`.
 
@@ -987,7 +987,7 @@ chip beside `Mc68331`.
   `gpt::Input`).  The modules' registers are the firmware's,
   through the bus; the host reads their pins, and their registers
   only through `bus_read` and `peek`.
-- **Type stubs:** `crates/cpu32-py/python/mc683xx/__init__.pyi`,
+- **Type stubs:** `crates/python/python/mc683xx/__init__.pyi`,
   with `py.typed` and an `__init__.py` that takes the compiled
   module's names (`mc683xx.mc683xx`), a maturin `python-source`
   package, so a wheel built from the sdist carries them too; written
