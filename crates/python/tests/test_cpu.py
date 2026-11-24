@@ -852,6 +852,11 @@ def test_a_vector_set_is_rust_s():
     assert 32 in traps and 31 not in traps and 300 not in traps and -1 not in traps and "x" not in traps
     assert traps.contains(47) and not traps.without(47).contains(47)
     assert traps.union(VectorSet([4])) == VectorSet([4, *range(32, 48)])
+    assert traps.difference(VectorSet(range(33, 48))) == VectorSet([32])
+    two = [mc683xx.Vector.trap(1), mc683xx.Vector.trap(7)]
+    rest = VectorSet.INSTRUCTION.difference(two)
+    assert len(rest) == len(VectorSet.INSTRUCTION) - 2 and 33 not in rest and 39 not in rest
+    assert rest == VectorSet.INSTRUCTION.difference(VectorSet(two))
     assert list(VectorSet.INSTRUCTION) == [4, 5, 6, 7, 8, 10, 11, 14, *range(32, 48)]
     assert VectorSet(VectorSet.ALL) == VectorSet.ALL
     assert repr(VectorSet.ALL) == "VectorSet.ALL"
@@ -859,6 +864,8 @@ def test_a_vector_set_is_rust_s():
     assert len({VectorSet([1]), VectorSet([1])}) == 1
     with pytest.raises(OverflowError):
         VectorSet([256])
+    with pytest.raises(TypeError):
+        traps.difference(7)  # type: ignore[arg-type]
 
 
 def test_a_vector_set_is_taken_wherever_vectors_are():

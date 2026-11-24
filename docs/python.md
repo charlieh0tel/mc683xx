@@ -1777,13 +1777,17 @@ bare.set_stop_on_exception(set())
 `VectorSet()` for none, the class constants `ALL`, `NONE` and
 `INSTRUCTION` (the exceptions an instruction raises, which an
 intercept hook can see), `contains(vector)` and `in`, `is_empty()`,
-`without(vector)`, `union(other)`, and iteration, giving its numbers
-in ascending order.  Rust's `with(vector)` is a Python keyword, so a
-vector is added by `union(VectorSet([vector]))`.
+`without(vector)`, `union(other)`, `difference(other)`, and iteration,
+giving its numbers in ascending order.  Rust's `with(vector)` is a
+Python keyword, so a vector is added by `union(VectorSet([vector]))`.
+`difference` takes an iterable of vector numbers too, where Rust's
+takes a `VectorSet`.
 
 ```python
 everything_but_trap_7 = mc683xx.VectorSet.INSTRUCTION.without(mc683xx.Vector.trap(7))
 assert mc683xx.Vector.trap(7) not in everything_but_trap_7
+no_kernel_calls = mc683xx.VectorSet.INSTRUCTION.difference([mc683xx.Vector.trap(1), mc683xx.Vector.trap(7)])
+assert mc683xx.Vector.trap(1) not in no_kernel_calls
 assert mc683xx.Vector.ZERO_DIVIDE in everything_but_trap_7
 bare.set_stop_on_exception(everything_but_trap_7)
 assert bare.stops_on_exception == everything_but_trap_7

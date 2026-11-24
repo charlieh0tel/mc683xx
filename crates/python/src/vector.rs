@@ -168,6 +168,12 @@ impl VectorSetView {
         Self(self.0.union(other.0))
     }
 
+    /// The vectors in it but not in `other`, a `VectorSet` or an
+    /// iterable of vector numbers.
+    fn difference(&self, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Ok(Self(self.0.difference(numbers(other)?)))
+    }
+
     /// Its vector numbers, ascending (Rust's `iter`).
     fn __iter__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyIterator>> {
         PyList::new(py, self.0.iter().map(u8::from))?

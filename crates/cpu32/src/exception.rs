@@ -206,6 +206,18 @@ impl VectorSet {
         Self(words)
     }
 
+    /// The vectors in it but not in `other`.
+    #[must_use]
+    pub const fn difference(self, other: Self) -> Self {
+        let mut words = self.0;
+        let mut word = 0;
+        while word < SET_WORDS {
+            words[word] &= !other.0[word];
+            word += 1;
+        }
+        Self(words)
+    }
+
     /// Its vectors, in ascending order.
     pub fn iter(self) -> impl Iterator<Item = Vector> {
         (0..=u8::MAX)
@@ -930,6 +942,16 @@ mod tests {
         assert!(!all_but.contains(Vector(64)) && all_but.contains(Vector(63)));
         assert_eq!(all_but.iter().count(), 255);
         assert_eq!(all_but.without(Vector(64)), all_but);
+        let traps: VectorSet = (0..16).map(Vector::trap).collect();
+        let two = VectorSet::NONE.with(Vector::trap(1)).with(Vector::trap(7));
+        let rest = VectorSet::INSTRUCTION.difference(two);
+        assert!(!rest.contains(Vector::trap(1)) && !rest.contains(Vector::trap(7)));
+        assert_eq!(
+            rest.iter().count(),
+            VectorSet::INSTRUCTION.iter().count() - 2
+        );
+        assert_eq!(traps.difference(VectorSet::ALL), VectorSet::NONE);
+        assert_eq!(traps.difference(VectorSet::NONE), traps);
         assert!(
             VectorSet::NONE
                 .with(Vector(1))
