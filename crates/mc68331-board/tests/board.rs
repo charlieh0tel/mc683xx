@@ -4041,6 +4041,10 @@ fn a_host_external_reset_is_reset_driven_on_the_board() {
     host.run_until(at).unwrap();
     host.reset_for(ResetCause::External);
     let host_seen = seen(&mut host, at);
+    let mut bare = reset_board();
+    bare.run_until(at).unwrap();
+    bare.reset();
+    assert_eq!(seen(&mut bare, at), host_seen, "reset is External's");
     assert_eq!(host_seen.reset_status, ResetCause::External.status());
     assert_eq!(host_seen.registers.data[1], 2, "started again");
     let mut driven_seen = seen(&mut driven, at);

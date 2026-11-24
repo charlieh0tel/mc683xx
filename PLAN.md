@@ -1059,7 +1059,8 @@ chip beside `Mc68331`.
   as the Rust `External`, equal by value.  `observe(net,
   callback)` is `Board::observe` (Boards, Front ends), its
   `ObserverId` for `unobserve`; `inspect(name)` is `Board::inspect`, as
-  a dict.  `reset_for(ResetCause)` is `Board::reset_for`;
+  a dict.  `reset()` and `reset_for(ResetCause)` are `Board::reset`
+  and `reset_for`;
   `reset_with_breakpoint`, `assert_breakpoint`, `halt` and `go` are
   `Board`'s (Background debug mode).
   `control()` is `Board::control`, an `mc683xx.BoardControl`
@@ -1450,7 +1451,8 @@ hand.  The keys are in `docs/board-files.md`.
   DSACK, AVEC and MODCLK are configuration, not endpoints.
 - **Reset by cause:** a host resets the chip as a given source would,
   `Mc68331::reset_for(ResetCause)` and `Board::reset_for` (the
-  `Chip` trait's `reset_for`, which replaced its `reset()`), so a
+  `Chip` trait's `reset_for`, which replaced its `reset()`; the chip's
+  and the board's `reset()` are their `reset_for(External)`), so a
   board's reset control (a front panel's, say) gives the firmware the
   restart it tells apart by RSR: a warm one for the watchdog's SW, a
   cold one for EXT (SIMRM 8.2, Table 8-1; RSR one bit per source, SIMRM

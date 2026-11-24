@@ -708,7 +708,9 @@ the CPU and the SIM's configuration (SIMRM 8.2.6); `PowerOn` is
 (PLAN.md, Reset by cause).  A board's `Board::reset_for(cause)` is the
 same with its RESET nets driven: `External` as the board asserting and
 releasing RESET now, any other the chip driving RESET for 512 clocks
-as for a reset it takes in a run.  `Board::reset_with_breakpoint()`
+as for a reset it takes in a run; `Board::reset()` is its
+`reset_for(ResetCause::External)`, as the chip's `reset()` is.
+`Board::reset_with_breakpoint()`
 is its `External` reset with BKPT held low, a BDM debugger's: the
 CPU enters background mode before its first instruction (CPU32RM
 7.2.1); `Board::assert_breakpoint()`, `halt()` and `go()` are the

@@ -1164,7 +1164,8 @@ board's chip, a `BoardChip` with the `Mc68331` methods that read or
 hook it (registers, `bus_read`, `bus_write`, `peek`, the hooks,
 `protect`, what the pins drive, `now`, `halted`, `background`,
 `instructions`),
-Rust's `Board::chip`; `reset_for(cause)` a reset for a `ResetCause`
+Rust's `Board::chip`; `reset()` RESET from the board, as Rust's
+`Board::reset`; `reset_for(cause)` a reset for a `ResetCause`
 now, as Rust's `Board::reset_for` (`EXTERNAL` as RESET asserted and
 released by the board, any other the chip's own, which drives RESET on
 the nets; nothing while the board holds RESET low);

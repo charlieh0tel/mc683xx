@@ -1598,6 +1598,14 @@ impl<C: Chip> Board<C> {
         self.reset_in = level;
     }
 
+    /// RESET driven by the board now:
+    /// [`reset_for`](Self::reset_for)`(`[`ResetCause::External`]`)`, BKPT
+    /// high as it rises, so background mode is disabled (CPU32RM 7.2.1).
+    /// Nothing while the board holds RESET low.
+    pub fn reset(&mut self) {
+        self.reset_for(ResetCause::External);
+    }
+
     /// A reset now for `cause`, as its source makes it
     /// ([`Chip::reset_for`]): [`ResetCause::External`] as the board's
     /// RESET asserted and released now, by the path a RESET net's edges
