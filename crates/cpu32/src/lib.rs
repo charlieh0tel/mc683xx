@@ -9,11 +9,11 @@
 //! exception and runs MOVEQ #42,D0:
 //!
 //! ```
-//! use mc683xx_target::Address;
 //! use mc683xx_cpu32::Limits;
 //! use mc683xx_cpu32::flat::ADDRESS_BITS;
 //! use mc683xx_cpu32::flat::Machine;
 //! use mc683xx_cpu32::memory::PAGE_BYTES;
+//! use mc683xx_target::Address;
 //!
 //! // The reset vectors, SSP then PC (CPU32RM 6.2.1), and the code.
 //! let mut image = vec![0; PAGE_BYTES as usize];

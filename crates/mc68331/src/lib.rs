@@ -11,11 +11,11 @@
 //! (SIMRM 7.9.3), holding the reset vectors and a `stop`:
 //!
 //! ```
-//! use mc683xx_cpu32::Stop;
 //! use mc683xx_cpu32::Cycles;
+//! use mc683xx_cpu32::Stop;
+//! use mc683xx_cpu32::memory::MemoryKind;
 //! use mc683xx_mc68331::BuildError;
 //! use mc683xx_mc68331::Builder;
-//! use mc683xx_cpu32::memory::MemoryKind;
 //! use mc683xx_modules::chip_select::ChipSelect;
 //! use mc683xx_modules::sim::Configuration;
 //!

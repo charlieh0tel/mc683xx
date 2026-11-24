@@ -16,12 +16,12 @@
 //! use std::path::Path;
 //!
 //! use mc683xx_board::Board;
-//! use mc683xx_mc68331::Mc68331;
 //! use mc683xx_board::Description;
-//! use mc683xx_board::Options;
 //! use mc683xx_board::Environment;
+//! use mc683xx_board::Options;
 //! use mc683xx_board::signal::Signal;
 //! use mc683xx_board::time::Time;
+//! use mc683xx_mc68331::Mc68331;
 //!
 //! let registry = mc683xx_peripherals::registry();
 //! assert!(mc683xx_peripherals::names().any(|name| name == "74x374"));

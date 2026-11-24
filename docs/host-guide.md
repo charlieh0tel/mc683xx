@@ -57,14 +57,14 @@ memory).  Out of reset only CSBOOT decodes, the first Mbyte from
 address 0 (MC68331UM Table 4-24), so the boot ROM goes there.
 
 ```rust
-use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::Cycles;
-use mc683xx_modules::chip_select::ChipSelect;
-use mc683xx_modules::sim::Configuration;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_examples::firmware;
 use mc683xx_mc68331::BuildError;
 use mc683xx_mc68331::Builder;
-use mc683xx_cpu32::memory::MemoryKind;
+use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::sim::Configuration;
 
 fn main() -> Result<(), BuildError> {
     // CS0 at RAM_BASE, then a word into it.
@@ -197,11 +197,11 @@ instruction, before the next.  `set_reload_scope` takes any memory, one on
 pins too; reloading is emulator-only as well.
 
 ```rust
-use mc683xx_target::Address;
 use mc683xx_cpu32::Cycles;
-use mc683xx_examples::firmware;
 use mc683xx_cpu32::memory::MemoryKind;
+use mc683xx_examples::firmware;
 use mc683xx_modules::sim::ResetScope;
+use mc683xx_target::Address;
 
 // No select programmed: the boot code stores straight into it.
 let code = 0x60_0000;
@@ -249,8 +249,8 @@ interrupt it raises at its event waits at most one instruction.  The
 watchdog's resets are taken as they come.
 
 ```rust
-use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Stop;
 use mc683xx_examples::firmware;
 
 let program = [firmware::prologue(), firmware::stop(firmware::UNMASKED).to_vec()].concat();
@@ -316,14 +316,14 @@ is dropped, with no run to stop.
 
 ```rust
 use mc683xx_cpu32::BusError;
-use mc683xx_cpu32::Stop;
-use mc683xx_cpu32::state::Stateless;
 use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
-use mc683xx_modules::peripheral::Timed;
+use mc683xx_cpu32::state::Stateless;
 use mc683xx_examples::firmware;
-use mc683xx_cpu32::StopRequest;
+use mc683xx_modules::peripheral::Timed;
 
 /// Stops the run at each write: a breakpoint on a port.
 #[derive(Debug)]
@@ -497,8 +497,8 @@ use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
-use mc683xx_modules::peripheral::Timed;
 use mc683xx_examples::firmware;
+use mc683xx_modules::peripheral::Timed;
 use mc683xx_target::FunctionCode;
 
 /// Its registers' offsets, on the lower byte.
@@ -596,18 +596,18 @@ reports its next event, and the run syncs there:
 
 ```rust
 use mc683xx_cpu32::BusError;
-use mc683xx_cpu32::state::Save;
-use mc683xx_cpu32::state::StateError;
-use mc683xx_cpu32::state::decode;
-use mc683xx_cpu32::state::encode;
 use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
-use mc683xx_modules::peripheral::Timed;
+use mc683xx_cpu32::state::Save;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use mc683xx_examples::firmware;
+use mc683xx_modules::peripheral::Timed;
 
 /// The format of an `Alarm`'s snapshot.
 const ALARM_VERSION: u32 = 1;
@@ -725,10 +725,10 @@ use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
-use mc683xx_modules::peripheral::Timed;
-use mc683xx_modules::sim::ResetCause;
 use mc683xx_examples::firmware;
 use mc683xx_mc68331::Event;
+use mc683xx_modules::peripheral::Timed;
+use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::ResetScope;
 
 #[derive(Debug, Default)]
@@ -819,9 +819,9 @@ for a break.
 
 ```rust
 use mc683xx_cpu32::Cycles;
-use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::QSM;
+use mc683xx_modules::qsm::sci::Frame;
 
 // SCCR0, SCCR1, SCSR, SCDR (QSMRM 5.2); TE and RE, RDRF.
 const SCCR0: u32 = QSM + 0x08;
@@ -883,14 +883,14 @@ Every general-purpose port is keyed by one `Port`: `C`, `E`,
   the SCI's TXD at the entry's or frame's own time.
 
 ```rust
-use mc683xx_target::Address;
 use mc683xx_cpu32::Cycles;
-use mc683xx_target::FunctionCode;
-use mc683xx_target::Size;
-use mc683xx_mc68331::Port;
-use mc683xx_modules::pins::PortLevels;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
+use mc683xx_mc68331::Port;
+use mc683xx_modules::pins::PortLevels;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 // PORTE, DDRE, PEPAR (MC68331UM D.3.6 to D.3.8).
 const PORTE: u32 = SIM + 0x10;
@@ -958,19 +958,19 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
   `take_output_changes` takes both.
 
 ```rust
-use mc683xx_target::Address;
 use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::Cycles;
-use mc683xx_target::FunctionCode;
-use mc683xx_target::Size;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::GPT;
+use mc683xx_mc68331::Port;
 use mc683xx_mc68331::gpt::Input;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm::Channel;
 use mc683xx_mc68331::gpt::pwm::Output;
-use mc683xx_mc68331::Port;
 use mc683xx_modules::pins::PortLevels;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 // TCTL1:TCTL2, TOC2, TIC1 (GPTRM 3).  OM2:OL2 01 toggles OC2, PGP4,
 // on a match; EDGE1 01 captures IC1's rising edges.
@@ -1042,15 +1042,15 @@ and then the queue runs on without a sync, its calls coming in a batch, in
 order and each with its own `now`, where the CPU next sees the QSPI.
 
 ```rust
-use mc683xx_target::Address;
-use mc683xx_cpu32::state::Stateless;
 use mc683xx_cpu32::Cycles;
-use mc683xx_target::FunctionCode;
-use mc683xx_target::Size;
-use mc683xx_modules::peripheral::SpiPeripheral;
-use mc683xx_modules::peripheral::QspiTransfer;
+use mc683xx_cpu32::state::Stateless;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::QSM;
+use mc683xx_modules::peripheral::QspiTransfer;
+use mc683xx_modules::peripheral::SpiPeripheral;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// Records what it is sent; answers `0xef`.
 #[derive(Debug, Default)]
@@ -1105,12 +1105,12 @@ SCK `period` of system clocks, running the chip between them, and
 returns what the QSPI drove on MISO (`Shifted { miso, driven }`).
 
 ```rust
-use mc683xx_target::Address;
 use mc683xx_cpu32::Cycles;
-use mc683xx_target::FunctionCode;
-use mc683xx_target::Size;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::QSM;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 const PQSPAR: u32 = QSM + 0x16;
 const SPCR0: u32 = QSM + 0x18;
@@ -1193,14 +1193,14 @@ use std::cell::RefCell;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
-use mc683xx_target::Address;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::hooks::Invalid;
-use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Permissions;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_examples::firmware;
+use mc683xx_target::Address;
 
 // The bus error vector (CPU32RM Table 6-1).
 const BUS_ERROR: u8 = 2;
@@ -1290,8 +1290,8 @@ unpredictable.
 use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
-use mc683xx_mc68331::Event;
 use mc683xx_mc68331::ChipTracing;
+use mc683xx_mc68331::Event;
 
 let program = [firmware::prologue(), vec![firmware::BRANCH_TO_SELF]].concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
@@ -1346,13 +1346,13 @@ first.  None moves the chip's time or shows in the trace.
   `PeekError::Unpeekable` where it declines.
 
 ```rust
-use mc683xx_target::Address;
 use mc683xx_cpu32::Cycle;
-use mc683xx_target::FunctionCode;
-use mc683xx_target::Size;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
 use mc683xx_mc68331::BusCycleError;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 // CSBAR0, CSOR0, CSBARBT (MC68331UM Table D-3).
 const CSBAR0: u32 = SIM + 0x4c;
@@ -1629,13 +1629,13 @@ use std::rc::Rc;
 
 use mc683xx_board::Board;
 
-use mc683xx_mc68331::Mc68331;
 use mc683xx_board::Description;
+use mc683xx_board::Environment;
 use mc683xx_board::Options;
 use mc683xx_board::inspect::Value;
-use mc683xx_board::Environment;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
+use mc683xx_mc68331::Mc68331;
 
 // A 1 MHz clock divided by 1000 onto a 1 kHz net to PAI, a switch the
 // host moves, and a buffer of tied levels on CS1.
@@ -1708,16 +1708,16 @@ use std::time::Duration;
 
 use mc683xx_board::Board;
 
-use mc683xx_mc68331::Mc68331;
 use mc683xx_board::Description;
-use mc683xx_board::Options;
-use mc683xx_board::pacing::QUANTUM;
-use mc683xx_board::pacing::Pacing;
 use mc683xx_board::Environment;
+use mc683xx_board::Options;
+use mc683xx_board::pacing::Pacing;
+use mc683xx_board::pacing::QUANTUM;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::Stop;
+use mc683xx_mc68331::Mc68331;
 
 let text = r#"
 version = 1
@@ -1841,10 +1841,10 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   prints each cause once.
 
 ```rust
-use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_mc68331::BuildError;
 use mc683xx_mc68331::Builder;
-use mc683xx_cpu32::memory::MemoryKind;
+use mc683xx_modules::chip_select::ChipSelect;
 
 let mut builder = Builder::default();
 builder.memory(vec![0; 2048], MemoryKind::Rom, &[ChipSelect::Boot]).unwrap();

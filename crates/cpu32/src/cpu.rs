@@ -297,14 +297,13 @@ impl Cpu {
     /// MOVEQ #42,D0 from where the host puts PC:
     ///
     /// ```
-    /// use mc683xx_target::Address;
-    /// use mc683xx_cpu32::bus::Bus;
-    /// use mc683xx_cpu32::bus::BusAccess;
     /// use mc683xx_cpu32::BusError;
-    /// use mc683xx_cpu32::bus::Read;
     /// use mc683xx_cpu32::Cpu;
     /// use mc683xx_cpu32::Cycle;
     /// use mc683xx_cpu32::Cycles;
+    /// use mc683xx_cpu32::bus::Bus;
+    /// use mc683xx_cpu32::bus::BusAccess;
+    /// use mc683xx_cpu32::bus::Read;
     /// use mc683xx_cpu32::interrupt::Acknowledge;
     /// use mc683xx_cpu32::interrupt::Acknowledged;
     /// use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -314,6 +313,7 @@ impl Cpu {
     /// use mc683xx_cpu32::memory::PAGE_BYTES;
     /// use mc683xx_cpu32::memory::Page;
     /// use mc683xx_cpu32::memory::Space;
+    /// use mc683xx_target::Address;
     ///
     /// /// A bus with nothing on it.
     /// struct NoBus;

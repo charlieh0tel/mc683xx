@@ -146,9 +146,9 @@ pub mod sealed {
 /// a host reaches them through the chip.  So this does not compile:
 ///
 /// ```compile_fail,E0277
-/// use mc683xx_cpu32::state::StateError;
 /// use mc683xx_cpu32::Cycle;
 /// use mc683xx_cpu32::interrupt::InterruptLevel;
+/// use mc683xx_cpu32::state::StateError;
 /// use mc683xx_modules::module::Block;
 /// use mc683xx_modules::module::InterruptRequest;
 /// use mc683xx_modules::module::Module;

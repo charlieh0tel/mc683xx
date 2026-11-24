@@ -322,13 +322,13 @@ struct MachineState {
 /// it, PC and SP set, and the run limited to the function's return.
 ///
 /// ```
-/// use mc683xx_target::Address;
 /// use mc683xx_cpu32::End;
 /// use mc683xx_cpu32::Limits;
 /// use mc683xx_cpu32::flat::ADDRESS_BITS;
 /// use mc683xx_cpu32::flat::Machine;
 /// use mc683xx_cpu32::memory::PAGE_BYTES;
 /// use mc683xx_cpu32::registers::status;
+/// use mc683xx_target::Address;
 ///
 /// /// Where the function's caller returns to: nothing runs there.
 /// const RETURN: Address = Address(0x100);

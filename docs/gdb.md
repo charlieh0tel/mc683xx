@@ -97,11 +97,11 @@ watchpoints go with it.
 ## From Rust
 
 ```rust,no_run
-use mc683xx_target::Address;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_gdb::Ending;
 use mc683xx_gdb::connection;
+use mc683xx_target::Address;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The reset vectors, then the program: `bra.s` to itself.
