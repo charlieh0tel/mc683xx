@@ -922,6 +922,22 @@ def test_memory_hooks_see_reads_and_writes():
     assert chip.read_register("D1") == 0x1234
 
 
+def test_a_pre_read_hook_patches_ram_before_the_read():
+    builder, _, _ = board(ram_round_trip(), Recorder())
+    chip = builder.build()
+    chip.write_register("D0", 0x1234)
+    seen = []
+
+    def patch(read: mc683xx.PendingRead, data: bytearray) -> None:
+        seen.append((read.address, read.size, bytes(data)))
+        data[:] = b"\xab\xcd"
+
+    chip.add_pre_read_hook(patch, RAM_BASE, RAM_BASE + PAGE_BYTES - 1)
+    chip.run_for(4000)
+    assert seen == [(RAM_WORD, 2, b"\x12\x34")]
+    assert chip.read_register("D1") == 0xABCD
+
+
 def test_an_invalid_hook_and_an_exception_hook_see_a_bus_error():
     builder, _, _ = board(WIRING + [MOVE_WORD_ABSOLUTE_TO_D1, PERIPHERAL_BASE >> 16, 0x0020], Faulting())
     chip = builder.build()
@@ -1297,8 +1313,9 @@ def test_the_host_reaches_memory_and_peripherals_through_the_decode():
     assert chip.peek(CSBAR1, 2) == csbar(PERIPHERAL_BASE)
     assert chip.bus_read(PERIPHERAL_BASE + 4, 2) == 0xBEEF
     chip.bus_write(PERIPHERAL_BASE + 1, 1, 0x42)
-    with pytest.raises(mc683xx.UnpeekableError):
+    with pytest.raises(mc683xx.UnpeekableError) as raised:
         chip.peek(PERIPHERAL_BASE, 2)
+    assert raised.value.address == PERIPHERAL_BASE
     with pytest.raises(mc683xx.BusCycleError):
         chip.peek(PERIPHERAL_BASE, 2)
     assert peripheral.reads == [("CS1", PERIPHERAL_BASE + 4, 2)]
@@ -1320,12 +1337,14 @@ class Window:
     def write(self, cycle, value):
         self.cycles += 1
 
-    def peek(self, cycle):
+    def peek(self, cycle, length):
         assert (cycle.size, cycle.select) == (1, "CS1")
-        return self.held[cycle.address % 8]
+        at = cycle.address % 8
+        return bytes(self.held[at : at + length])
 
-    def poke(self, cycle, value):
-        self.held[cycle.address % 8] = value
+    def poke(self, cycle, data):
+        at = cycle.address % 8
+        self.held[at : at + len(data)] = data
         return True
 
 
@@ -1335,8 +1354,11 @@ def test_a_peek_and_a_poke_reach_a_peripheral_with_no_cycle():
     chip.poke(PERIPHERAL_BASE, 2, 0x1234)
     assert chip.peek(PERIPHERAL_BASE, 2) == 0x1234
     assert window.held[:2] == b"\x12\x34" and window.cycles == 0
+    chip.poke_bytes(PERIPHERAL_BASE + 2, b"\x56\x78\x9a")
+    assert chip.peek_bytes(PERIPHERAL_BASE, 5) == b"\x12\x34\x56\x78\x9a"
     chip.poke(RAM_BASE, 4, 0x55667788)
     assert chip.bus_read(RAM_BASE, 4) == 0x55667788
+    assert chip.peek_bytes(RAM_BASE, 4) == b"\x55\x66\x77\x88"
     with pytest.raises(mc683xx.UnpeekableError):
         chip.poke(CSBAR1, 2, 0)
     declining, _, _ = mapped(Recorder(0xBEEF))
@@ -1358,6 +1380,27 @@ def test_host_cycle_mistakes():
             mistake()
     with pytest.raises(TypeError):
         chip.peek(RAM_BASE, 2, 5)
+
+
+def test_a_peripheral_exception_in_a_peek_or_poke_is_raised_at_once():
+    class Raising(Recorder):
+        def peek(self, cycle, length):
+            return 1 // 0
+
+        def poke(self, cycle, data):
+            raise KeyError("no poke")
+
+    chip, _, _ = mapped(Raising())
+    with pytest.raises(ZeroDivisionError):
+        chip.peek(PERIPHERAL_BASE, 2)
+    with pytest.raises(ZeroDivisionError):
+        chip.peek_bytes(PERIPHERAL_BASE, 4)
+    with pytest.raises(KeyError):
+        chip.poke(PERIPHERAL_BASE, 2, 0)
+    with pytest.raises(KeyError):
+        chip.poke_bytes(PERIPHERAL_BASE, b"\x00")
+    # each raised already: no stop is left for the next run
+    assert chip.run_for(100).stop == mc683xx.Stop.Budget()
 
 
 def test_a_peripheral_exception_is_raised_by_the_host_cycle():

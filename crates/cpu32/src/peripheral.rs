@@ -186,30 +186,37 @@ pub trait MappedPeripheral: Save {
         let _ = now;
     }
 
-    /// What a read `cycle` would return now, right-aligned, with none of
-    /// its side effects (a flag a read clears, a FIFO a read pops): a
-    /// debugger's look, as the bare machine's
-    /// [`read`](crate::flat::Machine::read), a chip's `peek` and gdb's
-    /// memory reads take it, a byte at a time.  By default [`None`]:
-    /// only a real cycle can tell, and the look fails as unpeekable.  A
-    /// lazily advanced model, one that brings its state up to date only
-    /// inside `read`, declines where catching up could change the
-    /// answer, as `&self` cannot catch up.
-    fn peek(&self, cycle: BusCycle) -> Option<u32> {
-        let _ = cycle;
-        None
+    /// Fills `data` with what byte read cycles from `cycle.address` up
+    /// would return now, one byte an address, with none of their side
+    /// effects (a flag a read clears, a FIFO a read pops): a debugger's
+    /// look, as the bare machine's [`read`](crate::flat::Machine::read),
+    /// a chip's `peek` and gdb's memory reads take it.  `cycle` is the
+    /// first byte's, a read of size [`Size::Byte`]; every byte of `data`
+    /// is the peripheral's, and an access across several peripherals or
+    /// memory calls each once with its own bytes.  Whether it could; by
+    /// default it declines, as only a real cycle can tell, and the look
+    /// fails as unpeekable, all of `data` with it.  A lazily advanced
+    /// model, one that brings its state up to date only inside `read`,
+    /// declines where catching up could change the answer, as `&self`
+    /// cannot catch up.
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        let _ = (cycle, data);
+        false
     }
 
-    /// Stores `value`, right-aligned, where a write `cycle` would, with
-    /// none of its side effects (a command it starts, a transmitter it
-    /// loads): a debugger's poke, as the bare machine's
-    /// [`write`](crate::flat::Machine::write), a chip's `poke` and gdb's
-    /// memory writes make it, a byte at a time.  Whether it took it; by
-    /// default it declines, and the poke fails as unpeekable.  A lazily
-    /// advanced model declines where state it has yet to settle would
-    /// change what the byte becomes.
-    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
-        let _ = (cycle, value);
+    /// Stores `data` where byte write cycles from `cycle.address` up
+    /// would, one byte an address, with none of their side effects (a
+    /// command it starts, a transmitter it loads): a debugger's poke,
+    /// as the bare machine's [`write`](crate::flat::Machine::write), a
+    /// chip's `poke` and gdb's memory writes make it.  `cycle` is the
+    /// first byte's, a write of size [`Size::Byte`], and every byte is
+    /// the peripheral's, as for `peek`.  Whether it took them; by
+    /// default it declines, and the poke fails as unpeekable.  One that
+    /// declines should store none of them.  A lazily advanced model
+    /// declines where state it has yet to settle would change what a
+    /// byte becomes.
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
+        let _ = (cycle, data);
         false
     }
 }

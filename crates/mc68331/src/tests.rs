@@ -313,6 +313,26 @@ fn write_register(chip: &mut Mc68331, address: u32, value: u16) {
 }
 
 #[test]
+fn a_pre_read_hook_patches_a_select_s_memory_before_the_cycle() {
+    // MOVE.W $0000,D0: the stack pointer's high word, patched
+    let (mut chip, _) = booting(&[MOVE_WORD_FROM_ABSOLUTE, 0, 0, NOP]);
+    chip.cpu_control()
+        .add_pre_read_hook(Address(0)..=Address(1), |read, bytes| {
+            assert_eq!((read.address, read.size), (Address(0), Size::Word));
+            bytes.copy_from_slice(&[0xab, 0xcd]);
+            ControlFlow::Break(())
+        });
+    assert!(matches!(
+        chip.run_for(Cycles::from_clocks(1000)).stop,
+        Stop::Hook(_)
+    ));
+    assert_eq!(chip.cpu().registers.data[0] & 0xffff, 0xabcd);
+    let mut word = [0; 2];
+    chip.read(Address(0), &mut word).unwrap();
+    assert_eq!(word, [0xab, 0xcd], "the change stays");
+}
+
+#[test]
 fn csboot_serves_the_reset_vectors_with_13_wait_states() {
     let (mut chip, rom) = booting(&[NOP]);
     assert_eq!(rom.to_string(), "memory 0");

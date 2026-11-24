@@ -59,3 +59,8 @@ harness = false
 name = "demo"
 path = "demo.rs"
 harness = false
+
+[[bench]]
+name = "access"
+path = "access.rs"
+harness = false

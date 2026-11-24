@@ -547,12 +547,15 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   times.  A chip-level model (`adapter`) takes `now: Cycle` last
   instead, as every chip-level callback with no cycle struct does
   (docs/host-guide.md, Board time).
-  - A debugger's look and poke: `peek(access, moment)` gives what a
-    read would, a byte at a time, with none of its side effects, and
-    `poke(access, value, moment)` stores a byte as a write would,
-    whether it took it; both decline by default (`None`, `false`),
-    which the chip's `peek` and `poke` and gdb's memory access report as
-    unpeekable.  `MappedAdapter` passes them to its model's
+  - A debugger's look and poke: `peek(access, data, moment)` fills
+    `data` with what byte reads from `access.address` up, on the
+    peripheral's own addresses, would give, with none of their side
+    effects, and `poke(access, data, moment)` stores the bytes as
+    writes would; each says whether it could, and both decline by
+    default (`false`), which the chip's `peek` and `poke` and gdb's
+    memory access report as unpeekable.  The board calls each
+    peripheral once for each run of its addresses an access reaches,
+    the bytes of one on a lane gathered from every other address.  `MappedAdapter` passes them to its model's
     `MappedPeripheral::peek` and `poke`.  A lazily advanced model, one
     that brings its state up to date only inside `read`, declines
     where catching up could change the answer, as the AT28C64B

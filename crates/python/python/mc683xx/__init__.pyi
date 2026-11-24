@@ -64,6 +64,7 @@ __all__ = [
     "HookId",
     "Instruction",
     "MemoryAccess",
+    "PendingRead",
     "InvalidAccess",
     "BusCycleKind",
     "Invalid",
@@ -96,9 +97,10 @@ class MappedPeripheral(Protocol):
     default: `wait_states(cycle) -> int | None`, `dsack_port(cycle) ->
     int | None` (8, 16 or None), `interrupt_request() -> bool`,
     `reset(now: int)`, `next_event() -> int | None`, `advance(now:
-    int)`, `peek(cycle) -> int | None` and `poke(cycle, value) -> bool`
-    (a debugger's byte with no cycle's side effects; `None` and `False`
-    decline, as missing ones do), and `save() -> bytes` with
+    int)`, `peek(cycle, length) -> bytes | None` and `poke(cycle, data)
+    -> bool` (a debugger's run of `length` bytes from `cycle.address`
+    with no cycle's side effects; `None` and `False` decline, as missing
+    ones do, and a peek must give `length` bytes), and `save() -> bytes` with
     `restore(snapshot: bytes)`, both or neither."""
 
     def read(self, cycle: BusCycle, /) -> int: ...
@@ -125,8 +127,10 @@ class Peripheral(Protocol):
     `dsack_port(access, moment) -> int | None`, `wants_horizon() -> bool`,
     `interrupt_request() -> bool`, `power_on(drive)`,
     `reset(drive)`, `transfer(transfer, drive) -> int`,
-    `set_qspi_clock(clock, moment)`, `peek(access, moment) -> int |
-    None`, `poke(access, value, moment) -> bool`, `set_selected(attachment, selected,
+    `set_qspi_clock(clock, moment)`, `peek(access, length, moment) ->
+    bytes | None`, `poke(access, data, moment) -> bool` (a run of bytes
+    from `access.address` on the peripheral's own addresses),
+    `set_selected(attachment, selected,
     drive)`, `input(port, value, drive)`, `analog_output(port, moment) ->
     float | None`, `next_event(moment) -> int | None`, `advance(drive)`,
     `qspi_deferrable() -> bool`, `memory_read(memory, access, drive) ->
@@ -145,7 +149,10 @@ class BusError(BusCycleError):
 
 class UnpeekableError(BusCycleError):
     """Raised by peek where only a real bus cycle can tell: a peripheral,
-    or a module register a read would change."""
+    or a module register a read would change.  `address` is the first
+    byte declined."""
+
+    address: int
 
 class StateError(ValueError):
     """Raised by restore for a snapshot of another format or other
@@ -682,6 +689,23 @@ class MemoryAccess:
         `Machine`; always `None` on an `Mc68331` and a `Board`."""
 
 @final
+class PendingRead:
+    """An operand read cycle about to be served from memory, as a
+    pre-read hook sees it, beside a bytearray of the bytes it is to
+    read."""
+
+    @property
+    def address(self) -> int: ...
+    @property
+    def size(self) -> int: ...
+    @property
+    def function_code(self) -> FunctionCode: ...
+    @property
+    def pc(self) -> int: ...
+    @property
+    def stacking(self) -> bool: ...
+
+@final
 class InvalidAccess:
     """A bus cycle that ended in a bus error, as an invalid access hook
     sees it."""
@@ -970,6 +994,12 @@ class Mc68331:
     def poke(
         self, address: int, size: int, value: int, function_code: FunctionCode = ...
     ) -> None: ...
+    def peek_bytes(
+        self, address: int, length: int, function_code: FunctionCode = ...
+    ) -> bytes: ...
+    def poke_bytes(
+        self, address: int, data: bytes, function_code: FunctionCode = ...
+    ) -> None: ...
     def reset(self) -> None: ...
     def reset_for(self, cause: ResetCause) -> None: ...
     def reset_with_breakpoint(self) -> None: ...
@@ -1030,6 +1060,12 @@ class Mc68331:
     def add_block_hook(
         self, callback: Callable[[Instruction], object], begin: int = 0, end: int = ...
     ) -> HookId: ...
+    def add_pre_read_hook(
+        self,
+        callback: Callable[[PendingRead, bytearray], object],
+        begin: int = 0,
+        end: int = ...,
+    ) -> HookId: ...
     def add_read_hook(
         self, callback: Callable[[MemoryAccess], object], begin: int = 0, end: int = ...
     ) -> HookId: ...
@@ -1064,6 +1100,12 @@ class BoardChip:
     def poke(
         self, address: int, size: int, value: int, function_code: FunctionCode = ...
     ) -> None: ...
+    def peek_bytes(
+        self, address: int, length: int, function_code: FunctionCode = ...
+    ) -> bytes: ...
+    def poke_bytes(
+        self, address: int, data: bytes, function_code: FunctionCode = ...
+    ) -> None: ...
     @property
     def now(self) -> int: ...
     @property
@@ -1093,6 +1135,12 @@ class BoardChip:
     ) -> HookId: ...
     def add_block_hook(
         self, callback: Callable[[Instruction], object], begin: int = 0, end: int = ...
+    ) -> HookId: ...
+    def add_pre_read_hook(
+        self,
+        callback: Callable[[PendingRead, bytearray], object],
+        begin: int = 0,
+        end: int = ...,
     ) -> HookId: ...
     def add_read_hook(
         self, callback: Callable[[MemoryAccess], object], begin: int = 0, end: int = ...
@@ -1302,14 +1350,14 @@ class Machine:
         self, address: str = ..., ready: Callable[[int], object] | None = None
     ) -> Ending: ...
     def add_intercept_hook(
-        self, callback: Callable[[Intercepted], object], vectors: Iterable[int]
+        self, callback: Callable[[Intercepted], object], vectors: Iterable[int] | None
     ) -> HookId: ...
     def set_stop_on_fault(self, stop: bool) -> None: ...
     @property
     def stops_on_fault(self) -> bool: ...
-    def set_stop_on_exception(self, stop: bool) -> None: ...
+    def set_stop_on_exception(self, vectors: Iterable[int] | None) -> None: ...
     @property
-    def stops_on_exception(self) -> bool: ...
+    def stops_on_exception(self) -> frozenset[int]: ...
     @property
     def instructions(self) -> int: ...
     @property
@@ -1323,6 +1371,12 @@ class Machine:
     ) -> HookId: ...
     def add_block_hook(
         self, callback: Callable[[Instruction], object], begin: int = 0, end: int = ...
+    ) -> HookId: ...
+    def add_pre_read_hook(
+        self,
+        callback: Callable[[PendingRead, bytearray], object],
+        begin: int = 0,
+        end: int = ...,
     ) -> HookId: ...
     def add_read_hook(
         self, callback: Callable[[MemoryAccess], object], begin: int = 0, end: int = ...

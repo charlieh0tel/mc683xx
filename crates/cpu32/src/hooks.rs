@@ -83,6 +83,24 @@ pub struct MemoryAccess {
     pub stacking: bool,
 }
 
+/// A read cycle in user or supervisor space about to be served from
+/// the core's memory, as a pre-read hook sees it, with the bytes it is
+/// to read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PendingRead {
+    /// Its address, on the chip's address lines.
+    pub address: Address,
+    /// Byte or word: a long operand is two word cycles.
+    pub size: Size,
+    /// Its function code.
+    pub function_code: FunctionCode,
+    /// The address of the instruction it is part of.
+    pub pc: Address,
+    /// Whether it is exception processing stacking a frame.
+    pub stacking: bool,
+}
+
 /// Why a bus cycle was invalid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]

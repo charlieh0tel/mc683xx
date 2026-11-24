@@ -21,9 +21,10 @@ class MappedPeripheral(Protocol):
     default: `wait_states(cycle) -> int | None`, `dsack_port(cycle) ->
     int | None` (8, 16 or None), `interrupt_request() -> bool`,
     `reset(now: int)`, `next_event() -> int | None`, `advance(now:
-    int)`, `peek(cycle) -> int | None` and `poke(cycle, value) -> bool`
-    (a debugger's byte with no cycle's side effects; `None` and `False`
-    decline, as missing ones do), and `save() -> bytes` with
+    int)`, `peek(cycle, length) -> bytes | None` and `poke(cycle, data)
+    -> bool` (a debugger's run of `length` bytes from `cycle.address`
+    with no cycle's side effects; `None` and `False` decline, as missing
+    ones do, and a peek must give `length` bytes), and `save() -> bytes` with
     `restore(snapshot: bytes)`, both or neither."""
 
     def read(self, cycle: BusCycle, /) -> int: ...
@@ -52,8 +53,10 @@ class Peripheral(Protocol):
     `dsack_port(access, moment) -> int | None`, `wants_horizon() -> bool`,
     `interrupt_request() -> bool`, `power_on(drive)`,
     `reset(drive)`, `transfer(transfer, drive) -> int`,
-    `set_qspi_clock(clock, moment)`, `peek(access, moment) -> int |
-    None`, `poke(access, value, moment) -> bool`, `set_selected(attachment, selected,
+    `set_qspi_clock(clock, moment)`, `peek(access, length, moment) ->
+    bytes | None`, `poke(access, data, moment) -> bool` (a run of bytes
+    from `access.address` on the peripheral's own addresses),
+    `set_selected(attachment, selected,
     drive)`, `input(port, value, drive)`, `analog_output(port, moment) ->
     float | None`, `next_event(moment) -> int | None`, `advance(drive)`,
     `qspi_deferrable() -> bool`, `memory_read(memory, access, drive) ->

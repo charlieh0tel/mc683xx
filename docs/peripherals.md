@@ -487,8 +487,8 @@ From the datasheet's section 6:
   cycle without the enable sequence programs nothing, but runs its tWC
   and polls.
 - **A debugger's peek and poke (the chip's `peek` and `poke`, gdb).**
-  A peek gives the cell, outside a write cycle; during one it is
-  declined, as a read then polls.  A poke programs the cell at once,
+  A peek gives the cells, outside a write cycle; during one it is
+  declined, as a read then polls.  A poke programs the cells at once,
   through to `file`, as a programmer would: no write cycle, no tWC,
   whatever the data protection; a write cycle running that holds the
   byte's offset programs its own byte over it as it ends.

@@ -469,6 +469,8 @@ struct Cells {
     held: BTreeMap<u32, u8>,
     /// Whether a real cycle came.
     cycled: bool,
+    /// Each peek's and poke's first address and length, in order.
+    calls: RefCell<Vec<(u32, usize)>>,
 }
 
 impl Peripheral for Cells {
@@ -481,14 +483,21 @@ impl Peripheral for Cells {
         Ok(0)
     }
 
-    fn peek(&self, access: PeripheralAccess, _: Moment) -> Option<u32> {
-        assert_eq!(access.size, Size::Byte);
-        Some(self.held.get(&access.address).copied().unwrap_or(0).into())
+    fn peek(&self, access: PeripheralAccess, data: &mut [u8], _: Moment) -> bool {
+        assert!(access.size == Size::Byte && !access.write);
+        self.calls.borrow_mut().push((access.address, data.len()));
+        for (address, byte) in (access.address..).zip(data) {
+            *byte = self.held.get(&address).copied().unwrap_or(0);
+        }
+        true
     }
 
-    fn poke(&mut self, access: PeripheralAccess, value: u32, _: Moment) -> bool {
+    fn poke(&mut self, access: PeripheralAccess, data: &[u8], _: Moment) -> bool {
         assert!(access.write);
-        self.held.insert(access.address, value as u8);
+        self.calls.borrow_mut().push((access.address, data.len()));
+        for (address, &byte) in (access.address..).zip(data) {
+            self.held.insert(address, byte);
+        }
         true
     }
 }
@@ -513,11 +522,11 @@ attach = [{ select = "CSBOOT" }]
 [[peripheral]]
 name = "high"
 type = "cells"
-attach = [{ select = "CS1", lane = "upper" }]
+attach = [{ select = "CS1", lane = "upper", lines = [1, 2, 3, 4] }]
 [[peripheral]]
 name = "low"
 type = "cells"
-attach = [{ select = "CS1", lane = "lower" }]
+attach = [{ select = "CS1", lane = "lower", lines = [1, 2, 3, 4] }]
 "#;
     let description = Description::parse(text, &directory, &Options::default()).unwrap();
     let mut registry = Registry::with_builtins();
@@ -536,15 +545,29 @@ attach = [{ select = "CS1", lane = "lower" }]
         chip.peek(Address(CS1_BASE), Size::Long, supervisor),
         Ok(0x1122_3344)
     );
+    // a range across both lanes: each lane's bytes gathered, one call
+    // for each peripheral
+    let chip = board.chip_mut();
+    chip.poke_bytes(Address(CS1_BASE + 4), supervisor, &[5, 6, 7, 8, 9, 10])
+        .unwrap();
+    let mut back = [0; 6];
+    chip.peek_bytes(Address(CS1_BASE + 4), supervisor, &mut back)
+        .unwrap();
+    assert_eq!(back, [5, 6, 7, 8, 9, 10]);
     let high = board.peripheral::<Cells>("high").unwrap();
     assert_eq!(
         high.held.values().copied().collect::<Vec<_>>(),
-        [0x11, 0x33]
+        [0x11, 0x33, 5, 7, 9]
     );
+    assert_eq!(*high.calls.borrow(), [(0, 2), (0, 2), (2, 3), (2, 3)]);
     assert!(!high.cycled);
     drop(high);
     let low = board.peripheral::<Cells>("low").unwrap();
-    assert_eq!(low.held.values().copied().collect::<Vec<_>>(), [0x22, 0x44]);
+    assert_eq!(
+        low.held.values().copied().collect::<Vec<_>>(),
+        [0x22, 0x44, 6, 8, 10]
+    );
+    assert_eq!(*low.calls.borrow(), [(0, 2), (0, 2), (2, 3), (2, 3)]);
 }
 
 #[test]

@@ -9,10 +9,10 @@ use crate::cpu::Core;
 use crate::cpu::Cpu;
 use crate::cpu::Stop;
 use crate::cpu::bare::Intercepted;
-use crate::cpu::bare::VectorSet;
 use crate::exception::BusCycleKind;
 use crate::exception::Frame;
 use crate::exception::Vector;
+use crate::exception::VectorSet;
 use crate::hooks::Control;
 use crate::hooks::ExceptionEntry;
 use crate::hooks::ExceptionReturn;
@@ -21,6 +21,7 @@ use crate::hooks::Instruction;
 use crate::hooks::Invalid;
 use crate::hooks::InvalidAccess;
 use crate::hooks::MemoryAccess;
+use crate::hooks::PendingRead;
 use crate::interrupt::InterruptLevel;
 use crate::memory::Permissions;
 use crate::memory::Space;
@@ -38,6 +39,8 @@ type Callback<T> = Box<dyn FnMut(&T) -> Control>;
 type InstructionHook = Callback<Instruction>;
 /// A read or write hook.
 type MemoryHook = Callback<MemoryAccess>;
+/// A pre-read hook: given the read and the bytes it is to read.
+type PreReadHook = Box<dyn FnMut(&PendingRead, &mut [u8]) -> Control>;
 /// An invalid access hook.
 type InvalidHook = Callback<InvalidAccess>;
 /// An exception hook.
@@ -92,6 +95,9 @@ pub(crate) struct Hooks {
     /// Before each instruction in range that starts a block: the first
     /// after a change of flow, an exception, or reset.
     block: Vec<Ranged<InstructionHook>>,
+    /// Before each read cycle the core's memory serves of a byte in
+    /// range but fetches.
+    pre_read: Vec<Ranged<PreReadHook>>,
     /// After each read cycle in range but fetches.
     read: Vec<Ranged<MemoryHook>>,
     /// After each write cycle in range.
@@ -113,6 +119,7 @@ impl fmt::Debug for Hooks {
             .debug_struct("Hooks")
             .field("code", &self.code.len())
             .field("block", &self.block.len())
+            .field("pre_read", &self.pre_read.len())
             .field("read", &self.read.len())
             .field("write", &self.write.len())
             .field("invalid", &self.invalid.len())
@@ -141,6 +148,7 @@ impl Hooks {
         }
         ranges(&self.code, watch::CODE)
             .chain(ranges(&self.block, watch::BLOCK))
+            .chain(ranges(&self.pre_read, watch::PRE_READ))
             .chain(ranges(&self.read, watch::READ))
             .chain(ranges(&self.write, watch::WRITE))
     }
@@ -166,6 +174,7 @@ impl Hooks {
         self.intercept.retain(|(other, _, _)| *other != id);
         retain(&mut self.code, id)
             | retain(&mut self.block, id)
+            | retain(&mut self.pre_read, id)
             | retain(&mut self.read, id)
             | retain(&mut self.write, id)
             | retain(&mut self.invalid, id)
@@ -224,6 +233,31 @@ impl Cpu {
     ) -> HookId {
         let id = self.hooks.allocate();
         self.hooks.block.push(Ranged {
+            id,
+            range,
+            hook: Box::new(hook),
+        });
+        self.rewatch();
+        id
+    }
+
+    /// Calls `hook` before each operand read cycle in user or supervisor
+    /// space that reads a byte in `range` from the core's memory (RAM or
+    /// ROM its pages map), exception processing's included, with the
+    /// bytes the cycle is to read: what `hook` leaves in them is what
+    /// the cycle reads, and stays in memory.  Not for a fetch, a cycle
+    /// the bus serves (a peripheral's, or memory the core's pages do
+    /// not map), a refused one, or a look with no cycle (`Memory::peek`,
+    /// a debugger's read); a long operand is two word cycles, each
+    /// shown.  The read hooks see the cycle after it, with the value it
+    /// read.  If it stops the run, the instruction completes first.
+    pub fn add_pre_read_hook(
+        &mut self,
+        range: RangeInclusive<Address>,
+        hook: impl FnMut(&PendingRead, &mut [u8]) -> Control + 'static,
+    ) -> HookId {
+        let id = self.hooks.allocate();
+        self.hooks.pre_read.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
@@ -313,8 +347,9 @@ impl Cpu {
     }
 
     /// Calls `hook` for each exception an instruction raises with a
-    /// vector of `vectors` (a trap, an illegal instruction, a divide by
-    /// zero, but not a fault, a trace or an interrupt), before anything
+    /// vector of `vectors` ([`VectorSet::ALL`] for any: a trap, an
+    /// illegal instruction, a divide by zero, but not a fault, a trace
+    /// or an interrupt), before anything
     /// is stacked.  If it stops the run, the run ends
     /// ([`End::Intercepted`]) with the exception not taken, the
     /// instruction's (An)+ and -(An) undone and PC at it, for the host
@@ -328,13 +363,10 @@ impl Cpu {
     /// [`End::Intercepted`]: super::bare::End::Intercepted
     pub fn add_intercept_hook(
         &mut self,
-        vectors: impl IntoIterator<Item = Vector>,
+        vectors: VectorSet,
         hook: impl FnMut(&Intercepted) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
-        let vectors = vectors
-            .into_iter()
-            .fold(VectorSet::default(), |set, vector| set.with(vector));
         self.hooks.intercept.push((id, vectors, Box::new(hook)));
         self.bare.intercepted = self.hooks.intercepted();
         id
@@ -435,6 +467,9 @@ impl Core<'_> {
             });
             return None;
         }
+        if cycle != BusCycleKind::Fetch {
+            self.pre_read(address, size, function_code);
+        }
         let value = self.paged_read(address, size, function_code, cycle)?;
         if cycle != BusCycleKind::Fetch {
             self.watch(
@@ -494,6 +529,45 @@ impl Core<'_> {
             .memory
             .permissions(Space::of(function_code), address)
             .contains(needed)
+    }
+
+    /// The pre-read hooks for a read of `size` at `address`, on a page
+    /// that has them, if the core's memory serves it: each covering a
+    /// byte of it, in the order installed, given the bytes to read.
+    fn pre_read(&mut self, address: Address, size: Size, function_code: FunctionCode) {
+        if self.cpu.memory.watched(address) & watch::PRE_READ == 0 {
+            return;
+        }
+        let read = PendingRead {
+            address,
+            size,
+            function_code,
+            pc: self.cpu.instruction_pc,
+            stacking: self.cpu.stacking,
+        };
+        let last = address.offset(size.bytes() - 1);
+        let Some(bytes) = self
+            .cpu
+            .memory
+            .read_bytes_mut(Space::of(function_code), address, size)
+        else {
+            return;
+        };
+        let mut stopped = None;
+        for hook in self
+            .cpu
+            .hooks
+            .pre_read
+            .iter_mut()
+            .filter(|hook| *hook.range.start() <= last && address <= *hook.range.end())
+        {
+            if (hook.hook)(&read, bytes).is_break() {
+                stopped.get_or_insert(hook.id);
+            }
+        }
+        if let Some(id) = stopped {
+            self.cpu.stop_request.get_or_insert(Stop::Hook(id));
+        }
     }
 
     /// The read or write hooks, `bit`, for a cycle that ended well, on

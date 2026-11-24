@@ -24,6 +24,7 @@ use mc683xx_cpu32::FaultStop;
 use mc683xx_cpu32::Intercepted;
 use mc683xx_cpu32::Limits;
 use mc683xx_cpu32::exception::Vector;
+use mc683xx_cpu32::exception::VectorSet;
 use mc683xx_cpu32::flat;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_cpu32::hooks::Control;
@@ -33,9 +34,9 @@ use mc683xx_cpu32::hooks::HookId;
 use mc683xx_cpu32::hooks::Instruction;
 use mc683xx_cpu32::hooks::InvalidAccess;
 use mc683xx_cpu32::hooks::MemoryAccess;
+use mc683xx_cpu32::hooks::PendingRead;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
-use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Permissions;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
@@ -62,6 +63,7 @@ use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
 use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
+use pyo3::types::PyFrozenSet;
 
 use crate::chip::Halt;
 
@@ -112,13 +114,28 @@ struct Fired {
 /// The hooks that fired in a core run, in order.
 type Queue = Rc<RefCell<Vec<Fired>>>;
 
+/// The most bytes `Machine.read` asks of the machine at once.
+const READ_CHUNK: usize = 1 << 24;
+
+/// The vectors an iterable of vector numbers names, every vector for
+/// `None`.
+fn vector_set(vectors: Option<&Bound<'_, PyAny>>) -> PyResult<VectorSet> {
+    let Some(vectors) = vectors else {
+        return Ok(VectorSet::ALL);
+    };
+    vectors
+        .try_iter()?
+        .map(|vector| vector?.extract::<u8>().map(Vector))
+        .collect()
+}
+
 /// An intercept hook's callable and the vectors it covers.
 #[derive(Debug)]
 struct Intercept {
     /// The hook.
     id: HookId,
     /// The vectors it covers.
-    vectors: Vec<u8>,
+    vectors: VectorSet,
     /// Its callable.
     callable: Held,
 }
@@ -430,6 +447,9 @@ pub(crate) struct MachineView {
     pending: Pending,
     /// The hooks that fired in the core run under way.
     queue: Queue,
+    /// The first pre-read hook whose callable, called within the core
+    /// run under way, stopped it.
+    pre_read_stop: Rc<Cell<Option<HookId>>>,
     /// The intercept hooks' callables, in the order installed, with the
     /// vectors each covers.
     intercepts: Vec<Intercept>,
@@ -562,6 +582,7 @@ impl MachineView {
             machine,
             pending,
             queue: Queue::default(),
+            pre_read_stop: Rc::default(),
             intercepts: Vec::new(),
             running: false,
         })
@@ -600,35 +621,41 @@ impl MachineView {
     /// `length` bytes at `address` with no bus cycle: mapped memory's,
     /// whatever its permissions, and a peripheral's from its `peek`.
     /// Raises `BusError` if any is neither, `UnpeekableError` for one a
-    /// peripheral declines, and `ValueError` for more than 32 bits of
-    /// addresses.
+    /// peripheral declines, an exception its `peek` raised, and
+    /// `ValueError` for more than 32 bits of addresses.
     fn read<'py>(
         &self,
         py: Python<'py>,
         address: u32,
         length: usize,
-    ) -> Result<Bound<'py, PyBytes>, Error> {
-        let size = length;
-        let length = u32::try_from(size).map_err(|_| Error::Length(size))?;
-        // A byte of each page first, so that an unmapped one raises
-        // before the bytes are allocated.
-        let mut offset = 0;
-        while offset < length {
-            let at = Address(address).offset(offset);
-            self.machine.read(at, &mut [0])?;
-            offset = offset.saturating_add(PAGE_BYTES - at.0 % PAGE_BYTES);
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        u32::try_from(length).map_err(|_| Error::Length(length))?;
+        // A chunk at a time, so that an unmapped one raises before more
+        // is allocated.
+        let mut bytes = Vec::new();
+        while bytes.len() < length {
+            let start = bytes.len();
+            bytes.resize(start + (length - start).min(READ_CHUNK), 0);
+            let at = Address(address).offset(start as u32);
+            let read = self
+                .pending
+                .looking(|| self.machine.read(at, &mut bytes[start..]));
+            self.pending.check()?;
+            read.map_err(Error::from)?;
         }
-        let mut bytes = vec![0; size];
-        self.machine.read(Address(address), &mut bytes)?;
         Ok(PyBytes::new(py, &bytes))
     }
 
     /// Writes `data` at `address`, as `read` reads it: into mapped
     /// memory, and a peripheral's bytes through its `poke`.  On an error
-    /// nothing is written, but for the bytes before one a peripheral
-    /// declines.
-    fn write(&mut self, address: u32, data: PyBackedBytes) -> Result<(), Error> {
-        Ok(self.machine.write(Address(address), &data)?)
+    /// nothing is written, but for the bytes before a run a peripheral
+    /// declines; an exception its `poke` raised is raised.
+    fn write(&mut self, address: u32, data: PyBackedBytes) -> PyResult<()> {
+        let written = self
+            .pending
+            .looking(|| self.machine.write(Address(address), &data));
+        self.pending.check()?;
+        Ok(written.map_err(Error::from)?)
     }
 
     /// At addresses `begin` to `end`, both included, which no other
@@ -800,27 +827,27 @@ impl MachineView {
     }
 
     /// Calls `callback(Intercepted)` for each exception an instruction
-    /// raises with a vector of `vectors`, before anything is stacked, PC
-    /// at the instruction.  A truthy result means it handled it: the CPU
-    /// takes nothing and runs on from PC as the callable left it.
-    /// Otherwise the next hook that covers the vector is called, in the
-    /// order installed, and if none handles it the CPU takes it
-    /// natively.
+    /// raises with a vector of `vectors`, an iterable of vector numbers
+    /// or `None` for every vector, before anything is stacked, PC at the
+    /// instruction.  A truthy result means it handled it: the CPU takes
+    /// nothing and runs on from PC as the callable left it.  Otherwise
+    /// the next hook that covers the vector is called, in the order
+    /// installed, and if none handles it the CPU takes it natively.
+    #[pyo3(signature = (callback, vectors))]
     fn add_intercept_hook(
         &mut self,
         callback: &Bound<'_, PyAny>,
-        vectors: Vec<u8>,
+        vectors: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<HookIdView> {
         if !callback.is_callable() {
             return Err(PyTypeError::new_err("a hook must be callable"));
         }
+        let vectors = vector_set(vectors)?;
         let callable = self.pending.keep(callback);
         let id = self
             .machine
             .cpu
-            .add_intercept_hook(vectors.iter().copied().map(Vector), |_| {
-                ControlFlow::Break(())
-            });
+            .add_intercept_hook(vectors, |_| ControlFlow::Break(()));
         self.intercepts.push(Intercept {
             id,
             vectors,
@@ -842,20 +869,27 @@ impl MachineView {
         self.machine.cpu.stops_on_fault()
     }
 
-    /// Whether any exception the CPU is about to take, a trap, a fault,
-    /// a trace, a hardware breakpoint or an interrupt, stops the run
-    /// before anything is stacked (`End.Exception`).  The next run
-    /// takes it natively.  A fault with `set_stop_on_fault` is a fault
-    /// stop instead, and an intercept hook's exception is the hook's.
-    /// Off at first.
-    fn set_stop_on_exception(&mut self, stop: bool) {
-        self.machine.cpu.set_stop_on_exception(stop);
+    /// Which exceptions the CPU is about to take, a trap, a fault, a
+    /// trace, a hardware breakpoint or an interrupt, stop the run before
+    /// anything is stacked (`End.Exception`): `vectors`, an iterable of
+    /// vector numbers, `None` for every vector, an empty one for none.
+    /// The next run takes it natively.  A fault with `set_stop_on_fault`
+    /// is a fault stop instead, and an intercept hook's exception is the
+    /// hook's.  None at first.
+    #[pyo3(signature = (vectors))]
+    fn set_stop_on_exception(&mut self, vectors: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
+        self.machine.cpu.set_stop_on_exception(vector_set(vectors)?);
+        Ok(())
     }
 
-    /// Whether any exception stops the run (`set_stop_on_exception`).
+    /// The vectors whose exceptions stop the run, as a frozenset
+    /// (`set_stop_on_exception`).
     #[getter]
-    fn stops_on_exception(&self) -> bool {
-        self.machine.cpu.stops_on_exception()
+    fn stops_on_exception<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyFrozenSet>> {
+        PyFrozenSet::new(
+            py,
+            self.machine.cpu.stops_on_exception().iter().map(u8::from),
+        )
     }
 
     /// Instructions run since the CPU was made.
@@ -920,6 +954,37 @@ impl MachineView {
             |seen: &Instruction| Context::Instruction(seen.clone()),
             |cpu, hook| cpu.add_block_hook(range, hook),
         )
+    }
+
+    /// Calls `callback(PendingRead, data)` before each operand read cycle
+    /// the machine's memory serves of a byte from `begin` to `end`,
+    /// within the cycle, unlike the other hooks: `data` is a bytearray of
+    /// the bytes it is to read, and what the callable leaves in it is
+    /// what the cycle reads, and stays in memory.  A truthy result stops
+    /// the run once the instruction completes.
+    #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
+    fn add_pre_read_hook(
+        &mut self,
+        callback: &Bound<'_, PyAny>,
+        begin: u32,
+        end: u32,
+    ) -> PyResult<HookIdView> {
+        let mut called = hooks::pre_read_hook(callback, self.pending.clone())?;
+        let stopped = Rc::clone(&self.pre_read_stop);
+        let id = Rc::new(Cell::new(None));
+        let own = Rc::clone(&id);
+        let assigned = self.machine.cpu.add_pre_read_hook(
+            Address(begin)..=Address(end),
+            move |read: &PendingRead, bytes: &mut [u8]| {
+                let control = called(read, bytes);
+                if control.is_break() && stopped.get().is_none() {
+                    stopped.set(own.get());
+                }
+                control
+            },
+        );
+        id.set(Some(assigned));
+        Ok(HookIdView(assigned))
     }
 
     /// Calls `callback(MemoryAccess)` for each operand read from `begin`
@@ -1074,6 +1139,7 @@ impl MachineView {
             };
             budget.spent = budget.spent.saturating_add(run.cycles.clocks());
             let pending = slf.borrow().pending.clone();
+            let pre_read_stop = slf.borrow().pre_read_stop.take();
             pending.check()?;
             let dispatched = match registers {
                 Some(registers) => Self::dispatch(slf, py, fired, &registers)?,
@@ -1085,6 +1151,9 @@ impl MachineView {
                 return Ok((budget.spent, requested));
             }
             match (run.end, dispatched) {
+                (_, Dispatched::Continue) if let Some(hook) = pre_read_stop => {
+                    return Ok((budget.spent, End::Stop(mc683xx_cpu32::Stop::Hook(hook))));
+                }
                 (End::Intercepted(interception), Dispatched::Continue) if !stop => {
                     Self::answer(slf, py, interception)?;
                     if slf.borrow().machine.stop_request().take() {
@@ -1136,7 +1205,7 @@ impl MachineView {
             .borrow()
             .intercepts
             .iter()
-            .filter(|intercept| intercept.vectors.contains(&interception.vector.0))
+            .filter(|intercept| intercept.vectors.contains(interception.vector))
             .map(|intercept| (intercept.id, intercept.callable.clone()))
             .collect();
         let mut handled = false;
@@ -1239,6 +1308,7 @@ mod tests {
     use mc683xx_cpu32::FaultCause;
     use mc683xx_cpu32::Limits;
     use mc683xx_cpu32::exception::Vector;
+    use mc683xx_cpu32::exception::VectorSet;
     use mc683xx_cpu32::flat::Machine;
     use mc683xx_cpu32::hooks::Invalid;
     use mc683xx_cpu32::memory::PAGE_BYTES;
@@ -1334,7 +1404,9 @@ mod tests {
             end(&[TRAP_0], instructions, |machine| {
                 machine
                     .cpu
-                    .add_intercept_hook([TRAP_0_VECTOR], |_| ControlFlow::Break(()));
+                    .add_intercept_hook(VectorSet::EMPTY.with(TRAP_0_VECTOR), |_| {
+                        ControlFlow::Break(())
+                    });
             }),
         ];
         let mapped: Vec<_> = ends.into_iter().map(EndView::try_from).collect();

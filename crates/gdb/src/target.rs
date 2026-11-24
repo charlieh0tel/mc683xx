@@ -410,12 +410,10 @@ impl Target for Machine {
         _function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<usize, AccessError<Infallible>> {
-        Ok(peek_bytes(data, |at| {
-            let mut byte = [0];
-            self.read(address.offset(at), &mut byte)
-                .ok()
-                .map(|()| byte[0])
-        }))
+        Ok(match self.read(address, data) {
+            Ok(()) => data.len(),
+            Err(error) => error.address().0.wrapping_sub(address.0) as usize,
+        })
     }
 
     fn write_memory(
@@ -456,16 +454,4 @@ impl Target for Machine {
 #[cfg(feature = "board")]
 pub(crate) fn widen<E>(error: AccessError<Infallible>) -> AccessError<E> {
     error.map(|never| match never {})
-}
-
-/// Fills `data` with `byte(offset)` for each offset until one is `None`:
-/// the bytes filled.
-fn peek_bytes(data: &mut [u8], mut byte: impl FnMut(u32) -> Option<u8>) -> usize {
-    for (offset, slot) in data.iter_mut().enumerate() {
-        match byte(offset as u32) {
-            Some(value) => *slot = value,
-            None => return offset,
-        }
-    }
-    data.len()
 }

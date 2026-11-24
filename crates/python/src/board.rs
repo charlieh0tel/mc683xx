@@ -111,6 +111,7 @@ use crate::held::Held;
 use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::UNDRIVEN;
+use crate::mapped::peeked;
 use crate::mapped::python_method;
 use crate::mapped::python_restore;
 use crate::mapped::python_save;
@@ -1082,27 +1083,36 @@ impl Peripheral for PythonPeripheral {
         .unwrap_or(Err(BusError))
     }
 
-    fn peek(&self, access: PeripheralAccess, moment: Moment) -> Option<u32> {
-        self.ask(
+    fn peek(&self, access: PeripheralAccess, data: &mut [u8], moment: Moment) -> bool {
+        let length = data.len();
+        let peeked = self.ask(
             "peek",
             |py| {
                 Ok(vec![
                     access_argument(py, access)?,
+                    length.into_py_any(py)?,
                     moment_argument(py, moment)?,
                 ])
             },
-            |value| value.extract::<Option<u32>>(),
+            |result| peeked(result, length),
             None,
-        )
+        );
+        match peeked {
+            Some(bytes) => {
+                data.copy_from_slice(&bytes);
+                true
+            }
+            None => false,
+        }
     }
 
-    fn poke(&mut self, access: PeripheralAccess, value: u32, moment: Moment) -> bool {
+    fn poke(&mut self, access: PeripheralAccess, data: &[u8], moment: Moment) -> bool {
         self.ask(
             "poke",
             |py| {
                 Ok(vec![
                     access_argument(py, access)?,
-                    value.into_py_any(py)?,
+                    PyBytes::new(py, data).into_any().unbind(),
                     moment_argument(py, moment)?,
                 ])
             },
@@ -1398,8 +1408,8 @@ impl BoardView {
     }
 
     /// The board's chip.
-    pub(crate) const fn board_chip(&self) -> &Mc68331 {
-        self.board.chip()
+    pub(crate) const fn board_chip(&self) -> (&Mc68331, &Pending) {
+        (self.board.chip(), &self.pending)
     }
 
     /// The board's chip, to change, and where the board's exceptions

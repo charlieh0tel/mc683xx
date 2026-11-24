@@ -6,6 +6,7 @@
 //! exception waits in `Pending` for the call into the chip to raise it
 //! when it returns.
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -35,6 +36,7 @@ use pyo3::exceptions::PyBaseException;
 use pyo3::exceptions::PyKeyboardInterrupt;
 use pyo3::exceptions::PyTypeError;
 use pyo3::intern;
+use pyo3::pybacked::PyBackedBytes;
 use pyo3::pyclass;
 use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
@@ -75,6 +77,10 @@ pub(crate) struct Pending {
     stop: Stopper,
     /// The Python objects the target holds.
     holdings: Holdings,
+    /// Whether a host's look or store with no cycle is under way, whose
+    /// call raises what a peripheral raises in it: no run is asked to
+    /// stop for it, so none is left stale.
+    looking: Rc<Cell<bool>>,
 }
 
 impl Pending {
@@ -104,9 +110,13 @@ impl Pending {
     }
 
     /// Keeps `error`, unless an earlier one is waiting, and asks the
-    /// run to stop once the instruction ends.
+    /// run to stop once the instruction ends, unless a host's look is
+    /// under way ([`looking`](Self::looking)).
     pub(crate) fn record(&self, error: PyErr) {
         self.hold(error);
+        if self.looking.get() {
+            return;
+        }
         match &self.stop {
             Stopper::Core(stop) => stop.request(),
             Stopper::Board(slot) => {
@@ -115,6 +125,16 @@ impl Pending {
                 }
             }
         }
+    }
+
+    /// `look`, a host's peek or poke, with no cycle: an exception a
+    /// peripheral raises in it waits for the call to raise, but asks no
+    /// run to stop, as the chip's own host cycles leave none.
+    pub(crate) fn looking<R>(&self, look: impl FnOnce() -> R) -> R {
+        let was = self.looking.replace(true);
+        let looked = look();
+        self.looking.set(was);
+        looked
     }
 
     /// Keeps `error`, unless an earlier one is waiting, for a hook that
@@ -299,9 +319,9 @@ struct Methods {
     next_event: Option<Held>,
     /// `advance(now)`.
     advance: Option<Held>,
-    /// `peek(cycle) -> int | None`.
+    /// `peek(cycle, length) -> bytes | None`.
     peek: Option<Held>,
-    /// `poke(cycle, value) -> bool`.
+    /// `poke(cycle, data) -> bool`.
     poke: Option<Held>,
 }
 
@@ -444,6 +464,22 @@ pub(crate) fn value(value: &Bound<'_, PyAny>, size: Size) -> PyResult<u32> {
     }
 }
 
+/// A peek's bytes, `length` of them, or `None` for a decline: other
+/// than `length` is a `ValueError`.
+pub(crate) fn peeked(result: &Bound<'_, PyAny>, length: usize) -> PyResult<Option<PyBackedBytes>> {
+    let Some(bytes) = result.extract::<Option<PyBackedBytes>>()? else {
+        return Ok(None);
+    };
+    if bytes.len() != length {
+        return Err(Error::PeekLength {
+            asked: length,
+            given: bytes.len(),
+        }
+        .into());
+    }
+    Ok(Some(bytes))
+}
+
 /// A result nothing reads.
 const fn ignored(_: &Bound<'_, PyAny>) -> PyResult<()> {
     Ok(())
@@ -511,25 +547,26 @@ impl MappedPeripheral for PythonMapped {
         self.call_or(self.methods.reset.as_ref(), (now.clocks(),), ignored, ());
     }
 
-    fn peek(&self, cycle: BusCycle) -> Option<u32> {
-        self.call_or(
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        let peeked = self.call(
             self.methods.peek.as_ref(),
-            (BusCycleView(cycle),),
-            |result| {
-                if result.is_none() {
-                    Ok(None)
-                } else {
-                    value(result, cycle.size).map(Some)
-                }
-            },
+            (BusCycleView(cycle), data.len()),
+            |result| peeked(result, data.len()),
             None,
-        )
+        );
+        match peeked {
+            Some(Ok(Some(bytes))) => {
+                data.copy_from_slice(&bytes);
+                true
+            }
+            _ => false,
+        }
     }
 
-    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
         self.call_or(
             self.methods.poke.as_ref(),
-            (BusCycleView(cycle), value),
+            (BusCycleView(cycle), data),
             truth,
             false,
         )

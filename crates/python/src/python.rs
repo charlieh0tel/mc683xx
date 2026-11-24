@@ -9,6 +9,7 @@ use mc683xx_board::LoadError;
 use mc683xx_cpu32::flat::PeekError;
 use mc683xx_cpu32::state::StateError;
 use mc683xx_mc68331::BusCycleError;
+use mc683xx_target::Address;
 use pyo3::Bound;
 use pyo3::IntoPyObject;
 use pyo3::IntoPyObjectExt;
@@ -79,6 +80,7 @@ use crate::hooks::InstructionView;
 use crate::hooks::InvalidAccessView;
 use crate::hooks::InvalidReason;
 use crate::hooks::MemoryAccessView;
+use crate::hooks::PendingReadView;
 use crate::mapped::BusCycleView;
 use crate::peripherals::ChannelView;
 use crate::peripherals::Frame;
@@ -112,9 +114,9 @@ impl From<Error> for PyErr {
             Error::Access(BusCycleError::BusError(_) | BusCycleError::Unserved(_))
             | Error::Unserved(_)
             | Error::Peek(PeekError::Unserved(_)) => BusError::new_err(message),
-            Error::Access(BusCycleError::Unpeekable) | Error::Peek(_) => {
-                exceptions::UnpeekableError::new_err(message)
-            }
+            Error::Access(BusCycleError::Unpeekable(address))
+            | Error::Peek(PeekError::Unpeekable(address)) => unpeekable(message, address),
+            Error::Peek(_) => exceptions::UnpeekableError::new_err(message),
             Error::Target(_) => exceptions::TargetError::new_err(message),
             Error::Load(LoadError::Read { path, error } | LoadError::Image { path, error, .. }) => {
                 os_error(&path, error)
@@ -157,6 +159,7 @@ impl From<Error> for PyErr {
             | Error::Nesting(_)
             | Error::DsackPort(_)
             | Error::ReadWidth { .. }
+            | Error::PeekLength { .. }
             | Error::ShiftedIn { .. } => PyValueError::new_err(message),
         }
     }
@@ -196,6 +199,17 @@ pub(crate) fn repr<'py>(py: Python<'py>, value: impl IntoPyObject<'py>) -> PyRes
 /// image, as the `OSError` subclass
 /// Python gives the error's errno (`FileNotFoundError` for `ENOENT`),
 /// with `filename`; one with no errno as the bindings map its kind.
+/// `UnpeekableError(message)`, its `address` the first byte declined's.
+fn unpeekable(message: String, address: Address) -> PyErr {
+    Python::attach(|py| {
+        let error = exceptions::UnpeekableError::new_err(message);
+        match error.value(py).setattr("address", address.0) {
+            Ok(()) => error,
+            Err(raised) => raised,
+        }
+    })
+}
+
 fn os_error(path: &Path, error: io::Error) -> PyErr {
     let Some(errno) = error.raw_os_error() else {
         let message = format!("{}: {error}", path.display());
@@ -272,6 +286,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<HookIdView>()?;
     module.add_class::<InstructionView>()?;
     module.add_class::<MemoryAccessView>()?;
+    module.add_class::<PendingReadView>()?;
     module.add_class::<InvalidAccessView>()?;
     module.add_class::<BusCycleKind>()?;
     module.add_class::<InvalidReason>()?;

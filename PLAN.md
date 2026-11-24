@@ -164,7 +164,8 @@ chip's, the board's), not a root `VERSION` that could be the crate's.
   instruction boundary at or after a time instead: its end depends
   only on the chip and the deadline, so a series of them is one long
   run however the host cuts it.
-- **Host bus access:** `Mc68331::bus_read`, `bus_write` and `peek`
+- **Host bus access:** `Mc68331::bus_read`, `bus_write`, `peek` and
+  `peek_bytes`
   (`crates/mc68331/src/host.rs`) reach the bus as a debugger does (BDM's memory
   commands, CPU32RM 7), by address, size and function code, through
   the chip's decode: module registers at MM's base, and whatever a
@@ -175,17 +176,27 @@ chip's, the board's), not a root `VERSION` that could be the crate's.
   through `Module::peek` (required, as `save` is), the SIM's reads
   have none, and memory answers byte by byte where memory alone
   answers the cycle (`Board::memory_alone`, the page-table rule).  A
-  peripheral answers for its own bytes, a byte at a time, through the
-  optional `MappedPeripheral::peek`, the first that the decode would
-  have drive the byte answering; `poke` (`Mc68331::poke`) stores a byte in
-  each the decode would write to.  Both decline by default, which is
-  `BusCycleError::Unpeekable`, never a guess: only the peripheral knows
-  which of its registers a look leaves alone (decided 2026-11-23).  The
-  bare machine's `read` and `write`, gdb's memory access and a board
-  peripheral's (`Peripheral::peek`, `poke`, through `MappedAdapter` and
-  the board's routers) take the same path.  A poke is not
-  all-or-nothing where a peripheral is involved: a peripheral cannot be
-  asked whether it would take a byte without taking it.
+  peripheral answers for its own bytes through the optional
+  `MappedPeripheral::peek(cycle, data)`, the first that the decode
+  would have drive the bytes answering; `poke` (`Mc68331::poke`,
+  `poke_bytes`) stores bytes in each the decode would write to.  Both
+  take a range, a byte an address from `cycle.address` up: an access
+  is split where the memory or peripheral reaching its bytes changes,
+  and each peripheral called once with its run, so loading a 512-Kbyte
+  image into a host peripheral is one call, not one a byte (decided
+  for 0.9.0, sc's batch 3b: a byte form from Python took 3.2 s for
+  what RAM took 0.03 s).  A board peripheral on one lane gets its
+  bytes gathered, on its own addresses, a run where they are
+  consecutive.  A decline declines the peripheral's whole run.  Both
+  decline by default, which is `BusCycleError::Unpeekable`, naming the
+  first byte declined, as `PeekError::Unpeekable` does, never a
+  guess: only the peripheral knows which of its registers a look
+  leaves alone (decided 2026-11-23).  The bare machine's `read` and
+  `write`, gdb's memory access and a board peripheral's
+  (`Peripheral::peek`, `poke`, through `MappedAdapter` and the board's
+  routers) take the same path.  A poke is not all-or-nothing where a
+  peripheral is involved: a peripheral cannot be asked whether it
+  would take bytes without taking them.
   Errors are typed: `Unserved`, `BusError`, `Misaligned` (each with
   its address), `Width`.
 - **Interrupts:** the host sets an IPL level; the core calls the
@@ -198,8 +209,9 @@ chip's, the board's), not a root `VERSION` that could be the crate's.
   replaced (`MemoryAccess::previous`), peeked before it on the slow
   path a watched page already takes; `None` for a peripheral's, where
   a read is a cycle.
-  `Cpu::add_code_hook`, `add_block_hook`, `add_read_hook`,
-  `add_write_hook`, `add_invalid_hook` (each over an address range),
+  `Cpu::add_code_hook`, `add_block_hook`, `add_pre_read_hook`,
+  `add_read_hook`, `add_write_hook`, `add_invalid_hook` (each over an
+  address range),
   `add_exception_hook`, `add_exception_return_hook` (`rte` of a four-
   or six-word frame, or of a format $C frame of a fault in an
   instruction; not one of a fault in exception processing, whose `rte`
@@ -872,7 +884,8 @@ chip beside `Mc68331`.
   and the value classes, which compare equal by value (`Frame`,
   `Output`, `Serial`, `Event`, `End`, `LimitedRun`, `FaultStop`), hash,
   so they key dicts and sets.
-- **Hooks:** `add_code_hook`, `add_block_hook`, `add_read_hook`,
+- **Hooks:** `add_code_hook`, `add_block_hook`, `add_pre_read_hook`,
+  `add_read_hook`,
   `add_write_hook` and `add_invalid_hook(callback, begin=0,
   end=0xFFFFFFFF)` (both ends included) and
   `add_exception_hook(callback)` install a Python callable as the
@@ -1992,7 +2005,8 @@ checks the bare build.
   another, no bus cycle: memory the core
   serves (ROM too, so `load` works), module registers read through
   `Module::peek`; a peripheral read and written through its `peek` and
-  `poke`, `E0e` where it declines, as it does by default.  A
+  `poke`, a call for each run of its bytes, `E0e` where it declines,
+  as it does by default.  A
   debugger's look never has a side effect; a host wanting real cycles
   makes them with `bus_read` and `bus_write`.
 - **Breakpoints and watchpoints:** code hooks for `Z0` and `Z1`,
@@ -2383,6 +2397,25 @@ Adversarial review (2026-11-01):
   exception hooks once the frame is stacked and PC is the handler's.
   A stop from these takes effect when the instruction (or interrupt
   entry) ends.  Hook addresses are on the address lines (masked).
+- Pre-read hooks (`Cpu::add_pre_read_hook`, added for 0.9.0 at the
+  owner's call, against the recommendation to model such a device as a
+  peripheral that takes the memory): before an operand byte or word
+  read cycle the core's memory serves, of a byte in the hook's range,
+  each covering hook in the order installed gets the cycle
+  (`PendingRead`) and the bytes it is to read, a mutable slice of the
+  page's read backing, so a change is what the cycle reads and stays
+  in memory, as deterministic as the host's callback.  Per range,
+  removed by `remove_hook`, as the other memory hooks; a page with one
+  takes the slow path, as one with a read hook does, so a run with
+  none costs nothing more: the fast path is unchanged, and
+  `core/move_indirect`, `core/move_postincrement` and
+  `core/move_displacement` move within 2% either way, run to run,
+  before and after.  Not for fetches (code hooks are theirs), a cycle
+  the bus serves (a peripheral's has no bytes to patch; its own `read`
+  answers), nor a look with no cycle (`Memory::peek`, a debugger's
+  read), which is no cycle.  They run before the cycle, the read
+  hooks after it, seeing the value read.  A long operand is two word
+  cycles, each shown, with `set_long_bus` too.
 - A block starts after a change of flow (`Flow::Changed`), an
   exception, reset, restore, or a host jump: a run that finds PC
   other than where the last run, reset or restore left it (the core
@@ -2608,7 +2641,8 @@ and `mc683xx.Machine` in Python (see Python).
   exception), under semver like the rest of the API (decided for
   0.9.0); Python answers it with its intercept hooks' callables within
   the run.
-- **Exception stops:** `set_stop_on_exception(true)`: any exception
+- **Exception stops:** `set_stop_on_exception(vectors)`, a
+  `VectorSet` (`VectorSet::ALL` for any): an exception of one of them
   the CPU is about to take ends the run before anything is stacked
   (`End::Exception { vector, pc }`): one an instruction raises, a fault
   among them, a trace, a hardware breakpoint, and an interrupt once

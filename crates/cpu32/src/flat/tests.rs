@@ -1073,9 +1073,35 @@ fn without_the_long_bus_a_hook_sees_a_long_as_two_words() {
 /// Where [`Bytes`] are: just past [`machine`]'s RAM.
 const BYTES: u32 = RAM;
 
-/// Bytes a debugger peeks and pokes with no cycle, at [`BYTES`].
+/// Bytes a debugger peeks and pokes with no cycle, from `base`, each
+/// call's first address and length noted in `calls`.
 #[derive(Debug, Default)]
-struct Bytes([u8; 4]);
+struct Bytes {
+    /// Its first address.
+    base: u32,
+    /// The bytes.
+    bytes: [u8; 4],
+    /// Each peek's and poke's first address and length, in order.
+    calls: Rc<RefCell<Vec<(u32, usize)>>>,
+}
+
+impl Bytes {
+    /// Bytes at [`BYTES`], their calls noted in `calls`.
+    fn at_bytes(calls: &Rc<RefCell<Vec<(u32, usize)>>>) -> Box<Self> {
+        Box::new(Self {
+            base: BYTES,
+            calls: Rc::clone(calls),
+            ..Self::default()
+        })
+    }
+
+    /// The index in `bytes` of a call at `cycle` of `length`, noted.
+    fn noted(&self, cycle: BusCycle, length: usize) -> usize {
+        assert_eq!(cycle.size, Size::Byte);
+        self.calls.borrow_mut().push((cycle.address.0, length));
+        (cycle.address.0 - self.base) as usize
+    }
+}
 
 impl Stateless for Bytes {}
 
@@ -1088,14 +1114,17 @@ impl MappedPeripheral for Bytes {
         Err(BusError)
     }
 
-    fn peek(&self, cycle: BusCycle) -> Option<u32> {
-        assert_eq!(cycle.size, Size::Byte);
-        Some(u32::from(self.0[(cycle.address.0 - BYTES) as usize]))
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        assert!(!cycle.write);
+        let at = self.noted(cycle, data.len());
+        data.copy_from_slice(&self.bytes[at..at + data.len()]);
+        true
     }
 
-    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
         assert!(cycle.write);
-        self.0[(cycle.address.0 - BYTES) as usize] = value as u8;
+        let at = self.noted(cycle, data.len());
+        self.bytes[at..at + data.len()].copy_from_slice(data);
         true
     }
 }
@@ -1104,8 +1133,9 @@ impl MappedPeripheral for Bytes {
 fn a_debugger_s_access_peeks_and_pokes_a_peripheral() {
     let mut machine = machine(&[NOP]);
     let range = Address(BYTES)..=Address(BYTES + 3);
+    let calls = Rc::default();
     machine
-        .add_peripheral(range, Box::new(Bytes::default()))
+        .add_peripheral(range, Bytes::at_bytes(&calls))
         .unwrap();
     machine
         .write(Address(BYTES), &[0x12, 0x34, 0x56, 0x78])
@@ -1125,6 +1155,112 @@ fn a_debugger_s_access_peeks_and_pokes_a_peripheral() {
     );
     machine.read(Address(BYTES + 3), &mut across[..1]).unwrap();
     assert_eq!(across[0], 0x78);
+    // one call for each access's run of the peripheral's bytes
+    assert_eq!(
+        *calls.borrow(),
+        [
+            (BYTES, 4),
+            (BYTES, 4),
+            (BYTES, 1),
+            (BYTES, 1),
+            (BYTES + 3, 1)
+        ]
+    );
+}
+
+#[test]
+fn a_debugger_s_access_calls_each_peripheral_once_with_its_bytes() {
+    let mut machine = machine(&[NOP]);
+    let (first, second) = (Rc::default(), Rc::default());
+    machine
+        .add_peripheral(Address(BYTES)..=Address(BYTES + 3), Bytes::at_bytes(&first))
+        .unwrap();
+    let next = Box::new(Bytes {
+        base: BYTES + 4,
+        calls: Rc::clone(&second),
+        ..Bytes::default()
+    });
+    machine
+        .add_peripheral(Address(BYTES + 4)..=Address(BYTES + 7), next)
+        .unwrap();
+    let image = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    machine.write(Address(BYTES - 1), &image).unwrap();
+    let mut back = [0; 9];
+    machine.read(Address(BYTES - 1), &mut back).unwrap();
+    assert_eq!(back, image);
+    assert_eq!(*first.borrow(), [(BYTES, 4), (BYTES, 4)]);
+    assert_eq!(*second.borrow(), [(BYTES + 4, 4), (BYTES + 4, 4)]);
+}
+
+#[test]
+fn memory_mapped_inside_a_peripheral_s_range_splits_its_run() {
+    let mut machine = machine(&[NOP]);
+    let calls = Rc::default();
+    let window = PAGE_BYTES * 3;
+    let base = 0x0010_0000;
+    let peripheral = Box::new(Wide {
+        base,
+        bytes: vec![0; window as usize],
+        calls: Rc::clone(&calls),
+    });
+    machine
+        .add_peripheral(Address(base)..=Address(base + window - 1), peripheral)
+        .unwrap();
+    machine
+        .map(Address(base + PAGE_BYTES), PAGE_BYTES, &[])
+        .unwrap();
+    let image: Vec<u8> = (0..window).map(|byte| byte as u8).collect();
+    machine.write(Address(base), &image).unwrap();
+    let mut back = vec![0; window as usize];
+    machine.read(Address(base), &mut back).unwrap();
+    assert_eq!(back, image);
+    let page = PAGE_BYTES as usize;
+    assert_eq!(
+        *calls.borrow(),
+        [
+            (base, page),
+            (base + 2 * PAGE_BYTES, page),
+            (base, page),
+            (base + 2 * PAGE_BYTES, page)
+        ]
+    );
+}
+
+/// [`Bytes`] of any length.
+#[derive(Debug)]
+struct Wide {
+    /// Its first address.
+    base: u32,
+    /// The bytes.
+    bytes: Vec<u8>,
+    /// Each peek's and poke's first address and length, in order.
+    calls: Rc<RefCell<Vec<(u32, usize)>>>,
+}
+
+impl Stateless for Wide {}
+
+impl MappedPeripheral for Wide {
+    fn read(&mut self, _: BusCycle) -> Result<u32, BusError> {
+        Err(BusError)
+    }
+
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), BusError> {
+        Err(BusError)
+    }
+
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        self.calls.borrow_mut().push((cycle.address.0, data.len()));
+        let at = (cycle.address.0 - self.base) as usize;
+        data.copy_from_slice(&self.bytes[at..at + data.len()]);
+        true
+    }
+
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
+        self.calls.borrow_mut().push((cycle.address.0, data.len()));
+        let at = (cycle.address.0 - self.base) as usize;
+        self.bytes[at..at + data.len()].copy_from_slice(data);
+        true
+    }
 }
 
 #[test]
