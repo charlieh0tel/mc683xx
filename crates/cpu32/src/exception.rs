@@ -111,7 +111,7 @@ const SET_WORDS: usize = (u8::MAX as usize + 1) / SET_WORD_BITS as usize;
 /// A set of exception vectors, any of the 256: which exceptions stop a
 /// run ([`Cpu::set_stop_on_exception`]) or an intercept hook covers
 /// ([`Cpu::add_intercept_hook`]).  Built from an iterator of vectors
-/// (`collect`), or as [`ALL`](Self::ALL) or [`EMPTY`](Self::EMPTY), its
+/// (`collect`), or as [`ALL`](Self::ALL) or [`NONE`](Self::NONE), its
 /// default.
 ///
 /// [`Cpu::set_stop_on_exception`]: crate::Cpu::set_stop_on_exception
@@ -121,7 +121,7 @@ pub struct VectorSet([u64; SET_WORDS]);
 
 impl VectorSet {
     /// No vector.
-    pub const EMPTY: Self = Self([0; SET_WORDS]);
+    pub const NONE: Self = Self([0; SET_WORDS]);
     /// Every vector.
     pub const ALL: Self = Self([u64::MAX; SET_WORDS]);
 
@@ -162,6 +162,15 @@ impl VectorSet {
         Self(words)
     }
 
+    /// It but `vector`.
+    #[must_use]
+    pub const fn without(self, vector: Vector) -> Self {
+        let (word, bit) = Self::place(vector);
+        let mut words = self.0;
+        words[word] &= !bit;
+        Self(words)
+    }
+
     /// The vectors in it or in `other`.
     #[must_use]
     pub const fn union(self, other: Self) -> Self {
@@ -184,7 +193,7 @@ impl VectorSet {
 
 impl FromIterator<Vector> for VectorSet {
     fn from_iter<I: IntoIterator<Item = Vector>>(vectors: I) -> Self {
-        vectors.into_iter().fold(Self::EMPTY, Self::with)
+        vectors.into_iter().fold(Self::NONE, Self::with)
     }
 }
 
@@ -890,13 +899,20 @@ mod tests {
             set.iter().collect::<Vec<_>>(),
             [Vector(0), Vector(63), Vector(64), Vector(255)]
         );
-        assert_eq!(
-            set.union(VectorSet::EMPTY.with(Vector(1))).iter().count(),
-            5
-        );
-        assert!(VectorSet::EMPTY.is_empty() && VectorSet::default().is_empty());
+        assert_eq!(set.union(VectorSet::NONE.with(Vector(1))).iter().count(), 5);
+        assert!(VectorSet::NONE.is_empty() && VectorSet::default().is_empty());
         assert!(!set.is_empty());
         assert_eq!(VectorSet::ALL.iter().count(), 256);
+        let all_but = VectorSet::ALL.without(Vector(64));
+        assert!(!all_but.contains(Vector(64)) && all_but.contains(Vector(63)));
+        assert_eq!(all_but.iter().count(), 255);
+        assert_eq!(all_but.without(Vector(64)), all_but);
+        assert!(
+            VectorSet::NONE
+                .with(Vector(1))
+                .without(Vector(1))
+                .is_empty()
+        );
         assert_eq!(
             (0..=u8::MAX).map(Vector).collect::<VectorSet>(),
             VectorSet::ALL

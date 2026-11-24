@@ -53,9 +53,9 @@ def machine(*code):
     supervisor, a call's frame: RETURN at the top of the stack."""
     cpu = mc683xx.Machine()
     cpu.map(0, RAM_BYTES)
-    cpu.write(8, struct.pack(">I", HANDLER) * 254)
+    cpu.poke_bytes(8, struct.pack(">I", HANDLER) * 254)
     cpu.map(CODE, PAGE, permissions="rx", contents=words(*code))
-    cpu.write(STACK - 4, struct.pack(">I", RETURN))
+    cpu.poke_bytes(STACK - 4, struct.pack(">I", RETURN))
     cpu.write_register("SR", SUPERVISOR)
     cpu.write_register("A7", STACK - 4)
     cpu.write_register("PC", CODE)
@@ -123,19 +123,19 @@ def test_memory_maps_and_refusals():
     with pytest.raises(ValueError):
         cpu.map(1, PAGE)
     with pytest.raises(mc683xx.BusError):
-        cpu.read(RAM_BYTES - 2, 4)
+        cpu.peek_bytes(RAM_BYTES - 2, 4)
     # Refused before a byte is allocated.
     with pytest.raises(mc683xx.BusError):
-        cpu.read(0, 2**32 - 1)
+        cpu.peek_bytes(0, 2**32 - 1)
     with pytest.raises(ValueError):
-        cpu.read(0, 2**40)
-    cpu.write(0x100, b"\x12\x34")
-    assert cpu.read(0x100, 2) == b"\x12\x34"
+        cpu.peek_bytes(0, 2**40)
+    cpu.poke_bytes(0x100, b"\x12\x34")
+    assert cpu.peek_bytes(0x100, 2) == b"\x12\x34"
     # Host writes ignore permissions, as a loader's do.
-    cpu.write(CODE, words(RTS))
+    cpu.poke_bytes(CODE, words(RTS))
     cpu.unmap(CODE, PAGE)
     with pytest.raises(mc683xx.BusError):
-        cpu.read(CODE, 2)
+        cpu.peek_bytes(CODE, 2)
 
 
 def test_unmap_frees_a_map_or_keeps_the_rest_of_it():
@@ -144,12 +144,12 @@ def test_unmap_frees_a_map_or_keeps_the_rest_of_it():
     for _ in range(100):
         cpu.map(PERIPHERAL, 4 * PAGE, contents=contents)
         cpu.unmap(PERIPHERAL + PAGE, PAGE)
-        assert cpu.read(PERIPHERAL + 2 * PAGE, 1) == b"\x02"
+        assert cpu.peek_bytes(PERIPHERAL + 2 * PAGE, 1) == b"\x02"
         with pytest.raises(mc683xx.BusError):
-            cpu.read(PERIPHERAL + PAGE, 1)
+            cpu.peek_bytes(PERIPHERAL + PAGE, 1)
         cpu.unmap(PERIPHERAL, 4 * PAGE)
     with pytest.raises(mc683xx.BusError):
-        cpu.read(PERIPHERAL, 1)
+        cpu.peek_bytes(PERIPHERAL, 1)
 
 
 def test_a_code_hook_may_unmap_what_the_instruction_reads():
@@ -185,7 +185,7 @@ def test_a_code_hook_s_register_write_is_seen_by_the_instruction():
 def test_a_memory_hook_s_writes_land_after_the_instruction():
     cpu = machine(MOVE_WORD_A0_TO_D0, MOVE_WORD_D0_TO_A0, RTS)
     cpu.write_register("A0", 0x2000)
-    cpu.write(0x2000, b"\x00\x07")
+    cpu.poke_bytes(0x2000, b"\x00\x07")
     seen = []
 
     def read(access):
@@ -196,7 +196,7 @@ def test_a_memory_hook_s_writes_land_after_the_instruction():
         cpu.write_register("D0", 9)
 
     def write(access):
-        seen.append((access.value, cpu.read(0x2000, 2), access.stacking))
+        seen.append((access.value, cpu.peek_bytes(0x2000, 2), access.stacking))
 
     cpu.add_read_hook(read, 0x2000, 0x2001)
     cpu.add_write_hook(write, 0x2000, 0x2001)
@@ -207,7 +207,7 @@ def test_a_memory_hook_s_writes_land_after_the_instruction():
 def test_a_pre_read_hook_patches_the_bytes_before_the_read():
     cpu = machine(MOVE_LONG_A0_TO_D0, RTS)
     cpu.write_register("A0", 0x2000)
-    cpu.write(0x2000, struct.pack(">I", 0x11112222))
+    cpu.poke_bytes(0x2000, struct.pack(">I", 0x11112222))
     seen = []
 
     def patch(read: mc683xx.PendingRead, data: bytearray) -> None:
@@ -218,7 +218,7 @@ def test_a_pre_read_hook_patches_the_bytes_before_the_read():
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
     assert cpu.read_register("D0") == 0x11112299
     assert seen == [(0x2002, 2, b"\x22\x22", False)]
-    assert cpu.read(0x2000, 4) == bytes.fromhex("11112299")
+    assert cpu.peek_bytes(0x2000, 4) == bytes.fromhex("11112299")
 
 
 def test_a_truthy_pre_read_hook_stops_the_run_and_one_that_resizes_raises():
@@ -242,7 +242,7 @@ def test_a_memory_hook_sees_a_long_once_and_not_one_that_faults():
     cpu.set_stop_on_fault(True)
     cpu.write_register("D0", 0x12345678)
     cpu.write_register("A0", RAM_BYTES - 2)
-    cpu.write(STACK - 8, struct.pack(">I", 0xCAFEF00D))
+    cpu.poke_bytes(STACK - 8, struct.pack(">I", 0xCAFEF00D))
     seen = []
     for kind, add in (("read", cpu.add_read_hook), ("write", cpu.add_write_hook)):
         add(
@@ -304,7 +304,7 @@ def test_an_exception_hook_may_return_from_the_handler():
         entries.append(entry.vector)
         # rte by hand: pop the four-word frame (CPU32RM 6.4).
         sp = cpu.read_register("SSP")
-        sr, pc = struct.unpack(">HI", cpu.read(sp, 6))
+        sr, pc = struct.unpack(">HI", cpu.peek_bytes(sp, 6))
         cpu.write_register("SSP", sp + 8)
         cpu.write_register("SR", sr)
         cpu.write_register("PC", pc)
@@ -316,7 +316,7 @@ def test_an_exception_hook_may_return_from_the_handler():
 
 def test_an_exception_return_hook_sees_rte_pop_the_frame():
     cpu = machine(trap(3), RTS)
-    cpu.write(HANDLER, words(RTE))
+    cpu.poke_bytes(HANDLER, words(RTE))
     entries, returns = [], []
     cpu.add_exception_hook(lambda entry: entries.append(entry.stack))
     hook = cpu.add_exception_return_hook(lambda back: returns.append(back) or True)
@@ -431,7 +431,7 @@ def test_an_exception_stop_stops_only_the_vectors_set():
 def test_an_intercept_hook_on_every_vector_sees_any():
     cpu = machine(trap(1), RTS)
     seen: list[int] = []
-    cpu.add_intercept_hook(lambda intercepted: seen.append(intercepted.vector), None)
+    cpu.add_intercept_hook(lambda intercepted: seen.append(intercepted.vector))
     assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
     assert seen == [TRAP_0 + 1]
 
@@ -515,6 +515,7 @@ class Window:
         self.held = bytearray(4)
         self.closed = False
         self.calls = []
+        self.codes = []
 
     def read(self, cycle):
         raise mc683xx.BusError()
@@ -524,33 +525,43 @@ class Window:
 
     def peek(self, cycle, length):
         self.calls.append((cycle.address, length))
+        self.codes.append(cycle.function_code)
         at = cycle.address - PERIPHERAL
         return None if self.closed else bytes(self.held[at : at + length])
 
     def poke(self, cycle, data):
         self.calls.append((cycle.address, len(data)))
+        self.codes.append(cycle.function_code)
         if not self.closed:
             at = cycle.address - PERIPHERAL
             self.held[at : at + len(data)] = data
         return not self.closed
 
 
-def test_read_and_write_peek_and_poke_a_peripheral():
+def test_peek_bytes_and_poke_bytes_peek_and_poke_a_peripheral():
     cpu = machine(RTS)
     window = Window()
     cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, window)
-    cpu.write(PERIPHERAL, b"\x01\x02\x03\x04")
+    cpu.poke_bytes(PERIPHERAL, b"\x01\x02\x03\x04")
     assert window.held == b"\x01\x02\x03\x04"
-    assert cpu.read(PERIPHERAL + 1, 2) == b"\x02\x03"
+    assert cpu.peek_bytes(PERIPHERAL + 1, 2) == b"\x02\x03"
     assert window.calls == [(PERIPHERAL, 4), (PERIPHERAL + 1, 2)]
+    cpu.poke_bytes(PERIPHERAL, b"\x05", mc683xx.FunctionCode.USER_DATA)
+    assert cpu.peek_bytes(PERIPHERAL, 1, mc683xx.FunctionCode.USER_PROGRAM) == b"\x05"
+    assert window.codes == [
+        mc683xx.FunctionCode.SUPERVISOR_DATA,
+        mc683xx.FunctionCode.SUPERVISOR_DATA,
+        mc683xx.FunctionCode.USER_DATA,
+        mc683xx.FunctionCode.USER_PROGRAM,
+    ]
     window.closed = True
     with pytest.raises(mc683xx.UnpeekableError, match="not peekable at 0x00f00000") as raised:
-        cpu.read(PERIPHERAL, 1)
+        cpu.peek_bytes(PERIPHERAL, 1)
     assert raised.value.address == PERIPHERAL
     with pytest.raises(mc683xx.UnpeekableError):
-        cpu.write(PERIPHERAL, b"\x00")
+        cpu.poke_bytes(PERIPHERAL, b"\x00")
     with pytest.raises(mc683xx.BusError):
-        cpu.read(PERIPHERAL + 4, 1)
+        cpu.peek_bytes(PERIPHERAL + 4, 1)
 
 
 def test_a_peek_of_another_length_raises_value_error():
@@ -561,7 +572,7 @@ def test_a_peek_of_another_length_raises_value_error():
     cpu = machine(RTS)
     cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, Short())
     with pytest.raises(ValueError, match="a peek of 2 bytes gave 1"):
-        cpu.read(PERIPHERAL, 2)
+        cpu.peek_bytes(PERIPHERAL, 2)
     # raised already: no stop is left for the next run
     cpu.write_register("PC", CODE)
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
@@ -596,8 +607,8 @@ def test_a_large_write_into_a_peripheral_is_one_call():
     cpu.add_peripheral(PERIPHERAL, PERIPHERAL + size - 1, array)
     image = bytes(range(256)) * (size // 256)
     began = time.perf_counter()
-    cpu.write(PERIPHERAL, image)
-    assert cpu.read(PERIPHERAL, size) == image
+    cpu.poke_bytes(PERIPHERAL, image)
+    assert cpu.peek_bytes(PERIPHERAL, size) == image
     assert array.calls == 2
     # one call each way, not one a byte: well under the 3 s a byte at a time took
     assert time.perf_counter() - began < 1.0
@@ -649,8 +660,8 @@ def test_reset_raises_a_peripheral_s_exception_at_once():
 
 def test_an_interrupt_request_is_taken_through_its_vector():
     cpu = machine(NOP, RTS)
-    cpu.write(64 * 4, struct.pack(">I", HANDLER))
-    cpu.write(HANDLER, words(NOP))
+    cpu.poke_bytes(64 * 4, struct.pack(">I", HANDLER))
+    cpu.poke_bytes(HANDLER, words(NOP))
     cpu.request_interrupt(5, 64)
     assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
     assert cpu.read_register("SR") >> 8 & 7 == 5
@@ -670,7 +681,7 @@ def test_a_host_exception_is_stacked_and_entered_now():
     assert cpu.read_register("PC") == HANDLER
     sp = cpu.read_register("SSP")
     assert sp == STACK - 4 - 8
-    assert struct.unpack(">HIH", cpu.read(sp, 8)) == (SUPERVISOR | 0x0700, CODE, 64 * 4)
+    assert struct.unpack(">HIH", cpu.peek_bytes(sp, 8)) == (SUPERVISOR | 0x0700, CODE, 64 * 4)
     assert entries == [(64, 3)]
     assert cpu.now == 0
     with pytest.raises(ValueError):
@@ -694,10 +705,10 @@ def test_save_and_restore():
     cpu = machine(moveq(1, 0), RTS)
     snapshot = cpu.save()
     cpu.run_limited(reach=RETURN)
-    cpu.write(0x100, b"\x01")
+    cpu.poke_bytes(0x100, b"\x01")
     cpu.restore(snapshot)
     assert cpu.read_register("PC") == CODE
-    assert cpu.read(0x100, 1) == b"\x00"
+    assert cpu.peek_bytes(0x100, 1) == b"\x00"
     with pytest.raises(mc683xx.StateError):
         mc683xx.Machine(address_bits=24).restore(snapshot)
 
@@ -778,7 +789,7 @@ def test_thousands_of_short_calls_a_second():
     calls = 2000
     start = time.perf_counter()
     for _ in range(calls):
-        cpu.write(STACK - 4, frame)
+        cpu.poke_bytes(STACK - 4, frame)
         cpu.write_register("A7", STACK - 4)
         cpu.run_limited(begin=CODE, reach=RETURN)
     rate = calls / (time.perf_counter() - start)

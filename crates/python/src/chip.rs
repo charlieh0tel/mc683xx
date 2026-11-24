@@ -147,6 +147,24 @@ impl Wiring {
     }
 }
 
+/// Where `length` bytes from `offset` end in a memory of `size` bytes,
+/// to its end for no `length`; [`Error::Range`] past its end.
+pub(crate) fn memory_end(
+    size: usize,
+    offset: usize,
+    length: Option<usize>,
+) -> Result<usize, Error> {
+    let length = length.unwrap_or_else(|| size.saturating_sub(offset));
+    match offset.checked_add(length) {
+        Some(end) if end <= size => Ok(end),
+        _ => Err(Error::Range {
+            offset,
+            length,
+            size,
+        }),
+    }
+}
+
 /// System clocks a Python run goes between looks for Ctrl-C: about
 /// 6 ms of a 16.78 MHz chip, as gdb's quanta.
 const QUANTUM: Cycles = Cycles::from_clocks(100_000);
@@ -1528,25 +1546,6 @@ impl Chip {
             py.check_signals()?;
         }
     }
-
-    /// Memory `memory`'s bytes from `offset`, `length` of them.
-    fn span(
-        &self,
-        memory: MemoryIdView,
-        offset: usize,
-        length: usize,
-    ) -> Result<(MemoryId, usize), Error> {
-        let id = self.wiring.borrow().memory(memory)?;
-        let size = self.chip.memory(id).len();
-        match offset.checked_add(length) {
-            Some(end) if end <= size => Ok((id, end)),
-            _ => Err(Error::Range {
-                offset,
-                length,
-                size,
-            }),
-        }
-    }
 }
 
 impl Chip {
@@ -1771,10 +1770,9 @@ chip_methods! {
         offset: usize,
         length: Option<usize>,
     ) -> Result<Bound<'py, PyBytes>, Error> {
-        let id = self.wiring.borrow().memory(memory)?;
-        let length = length.unwrap_or_else(|| self.chip.memory(id).len().saturating_sub(offset));
-        let (id, end) = self.span(memory, offset, length)?;
-        Ok(PyBytes::new(py, &self.chip.memory(id)[offset..end]))
+        let bytes = self.chip.memory(self.wiring.borrow().memory(memory)?);
+        let end = memory_end(bytes.len(), offset, length)?;
+        Ok(PyBytes::new(py, &bytes[offset..end]))
     }
 
     /// Writes `data` into memory `memory` from `offset`.
@@ -1784,8 +1782,9 @@ chip_methods! {
         offset: usize,
         data: PyBackedBytes,
     ) -> Result<(), Error> {
-        let (id, end) = self.span(memory, offset, data.len())?;
-        self.chip.memory_mut(id)[offset..end].copy_from_slice(&data);
+        let bytes = self.chip.memory_mut(self.wiring.borrow().memory(memory)?);
+        let end = memory_end(bytes.len(), offset, Some(data.len()))?;
+        bytes[offset..end].copy_from_slice(&data);
         Ok(())
     }
 

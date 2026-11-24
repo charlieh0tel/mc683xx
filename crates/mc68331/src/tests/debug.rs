@@ -484,7 +484,11 @@ fn slow_access(chip: &mut Mc68331) -> (bool, bool) {
     if read.is_ok() {
         assert_eq!(word, [SLOW_BYTE; 2]);
     }
-    let served = chip.write(Address(SLOW), &[SLOW_BYTE]).is_ok();
+    let served = chip
+        .cpu
+        .memory
+        .write_bytes(Address(SLOW), &[SLOW_BYTE])
+        .is_ok();
     (read.is_ok(), served)
 }
 
@@ -616,7 +620,12 @@ fn breakpoint_chip(program: &[u16], answered: bool) -> (Mc68331, Option<Peripher
     }
     let handler = RAM + BREAKPOINT_HANDLER;
     let entry = RAM + Vector::HARDWARE_BREAKPOINT.offset();
-    chip.write(Address(entry), &handler.to_be_bytes()).unwrap();
+    chip.poke_bytes(
+        Address(entry),
+        FunctionCode::SupervisorData,
+        &handler.to_be_bytes(),
+    )
+    .unwrap();
     let registers = chip.registers_mut();
     registers.vbr = Address(RAM);
     registers.ssp = Address(RAM + BREAKPOINT_STACK);

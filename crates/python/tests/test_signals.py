@@ -90,8 +90,8 @@ def test_quanta_change_nothing_the_cpu_does() -> None:
         bare = mc683xx.Machine()
         bare.map(0, ROM_BYTES)
         # addq.l #1,d0; bra.s back to it (CPU32RM 4).
-        bare.write(0, struct.pack(">IIHH", STACK, START, 0, 0) + bytes(START - 12))
-        bare.write(START, struct.pack(">HH", 0x5280, 0x60FC))
+        bare.poke_bytes(0, struct.pack(">IIHH", STACK, START, 0, 0) + bytes(START - 12))
+        bare.poke_bytes(START, struct.pack(">HH", 0x5280, 0x60FC))
         bare.reset()
         return bare
 
@@ -167,7 +167,7 @@ def test_an_in_process_client_is_served() -> None:
 
 def test_an_exception_stop_is_a_trap_to_gdb() -> None:
     bare = bare_cpu()
-    bare.write(START, struct.pack(">H", TRAP_0))
+    bare.poke_bytes(START, struct.pack(">H", TRAP_0))
     bare.set_stop_on_exception(None)
     replies: list[bytes] = []
     clients: list[threading.Thread] = []

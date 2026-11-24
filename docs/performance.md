@@ -75,7 +75,7 @@ working fails `make ci`.
   2,500 instructions: over 99% of the instructions are the command's
   computation and its writes to SCDR.
 - `access/*` (`benches/access.rs`): a debugger's access with no bus
-  cycle, a bare machine's `read` and `write` of 512 Kbytes, into RAM
+  cycle, a bare machine's `poke_bytes` and `peek_bytes` of 512 Kbytes, into RAM
   (`ram_*`) and through a peripheral that peeks and pokes its own array
   (`peripheral_*`), as a host loads an image into a part.  Throughput
   is bytes.

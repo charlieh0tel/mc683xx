@@ -151,14 +151,11 @@ selects; `system_register(SystemRegister::Vbr)` and
 `set_system_register`, which give `None` and `BackgroundOnly` for
 RPC, PCC, ATEMP and FAR, background mode's own (CPU32RM 7.2.5); the PC
 is the `pc` field.
-`write(address, bytes)` writes the memories the core serves without a
-cycle, as a debugger does and as the bare `Machine::write` does, a
-ROM's included, and `read(address, bytes)` reads them, as
-`Machine::read` does (`memory::Unserved` for a byte the core does
-not serve a read of).  Both go to the bytes a page reads, so a read
-gives back what a write wrote; a write to a page the core serves only
-writes of (write-only RAM) goes to the bytes it writes, and one to a
-page it serves neither way is `Unserved` (PLAN.md, Memory).
+A debugger's cycle-free access is `peek_bytes` and `poke_bytes`
+(Host bus cycles, below).  A poke goes to the bytes a page reads, a
+ROM's included, so a peek gives back what a poke stored; a poke to a
+page the core serves only writes of (write-only RAM) goes to the bytes
+it writes (PLAN.md, Memory).
 
 ### Fixed memory
 
@@ -1359,12 +1356,14 @@ first.  None moves the chip's time or shows in the trace.
   time.
 - `poke(address, size, function_code, value)` and
   `poke_bytes(address, function_code, data)` store without a cycle:
-  memory's bytes, ROM's too, as `write` writes them, and a
+  memory's bytes, ROM's too, and a
   peripheral's through its `MappedPeripheral::poke`, each that would
   take them.  A module's register, or a peripheral that declines, is
   `BusCycleError::Unpeekable`, what came before it stored.  The bare
-  `flat::Machine`'s `read` and `write` reach a peripheral's bytes the
-  same way, failing with `PeekError::Unpeekable` where it declines.
+  `flat::Machine`'s `peek_bytes(address, function_code, data)` and
+  `poke_bytes` reach a peripheral's bytes the same way, in
+  `function_code`'s space (memory is the same in every space), failing
+  with `PeekError::Unpeekable` where it declines.
 - A peripheral's `peek(cycle, data) -> bool` and `poke(cycle, data)
   -> bool` take a range: `cycle` is the first byte's, a byte an
   address from it up, all the peripheral's.  The chip, the bare

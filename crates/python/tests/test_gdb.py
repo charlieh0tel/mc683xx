@@ -53,8 +53,8 @@ def cpu(program: list[int] = PROGRAM) -> mc683xx.Machine:
     """RAM from zero with the reset vectors and `program` at START."""
     bare = mc683xx.Machine()
     bare.map(0, RAM_BYTES)
-    bare.write(0, struct.pack(">II", STACK, START))
-    bare.write(START, words(program))
+    bare.poke_bytes(0, struct.pack(">II", STACK, START))
+    bare.poke_bytes(START, words(program))
     bare.reset()
     bare.write_register("A0", STORE)
     return bare
@@ -80,7 +80,7 @@ def test_gdb_runs_the_bare_cpu_with_its_python_hooks() -> None:
     assert replies[4] == "OK"
     assert calls == [STORE_PC]
     assert bare.read_register("PC") == START
-    assert bare.read(STORE, 2) == b"\xab\xcd"
+    assert bare.peek_bytes(STORE, 2) == b"\xab\xcd"
     # The CPU runs again once gdb has let go, the breakpoint gone.
     assert bare.run_limited(instructions=8).end == mc683xx.End.Instructions()
 
@@ -113,6 +113,31 @@ def test_a_peripheral_s_exception_ends_the_session() -> None:
     with pytest.raises(ValueError, match="the peripheral failed"):
         serve(bare, "c")
     assert bare.run_limited(instructions=1).end == mc683xx.End.Instructions()
+
+
+def test_a_peek_that_raises_under_gdb_leaves_no_stop() -> None:
+    class Failing:
+        def read(self, cycle: mc683xx.BusCycle) -> int:
+            return 0
+
+        def write(self, cycle: mc683xx.BusCycle, value: int) -> None:
+            pass
+
+        def peek(self, cycle: mc683xx.BusCycle, length: int) -> bytes:
+            raise ValueError("the peek failed")
+
+    image = bytearray(4 * 2048)
+    struct.pack_into(">II", image, 0, STACK, START)
+    image[START : START + 8] = words(PROGRAM)
+    builder = mc683xx.Builder()
+    builder.memory(bytes(image), ["CSBOOT"], writable=False)
+    builder.bus_peripheral(Failing(), windows=[(PERIPHERAL, 4)], dsack=mc683xx.Dsack.DSACK1)
+    chip = builder.build()
+    # the exception waits for the run's quantum, which no stop request
+    # cuts short
+    with pytest.raises(ValueError, match="the peek failed"):
+        serve(chip, f"m{PERIPHERAL:x},1", "c")
+    assert chip.instructions > len(PROGRAM)
 
 
 def test_gdb_peeks_the_chip_and_resets_it() -> None:

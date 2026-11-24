@@ -114,6 +114,24 @@ def test_a_peripheral_writes_a_board_memory_as_bytes(tmp_path: Path) -> None:
     assert poker.refused
 
 
+def test_the_host_slices_and_sets_a_board_memory(tmp_path: Path) -> None:
+    (tmp_path / "rom.bin").write_bytes(rom([]))
+    (tmp_path / "board.toml").write_text(BOARD)
+    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"latch": Latch, "lamp": Lamp})
+    size = len(board.memory("rom"))
+    assert board.memory("rom", 0, 8) == struct.pack(">II", STACK, START)
+    assert board.memory("rom", 4) == board.memory("rom")[4:]
+    board.set_memory("rom", 0x10, b"\xab\xcd")
+    assert board.memory("rom", 0x10, 2) == b"\xab\xcd"
+    assert board.chip.peek_bytes(0x10, 2) == b"\xab\xcd"
+    with pytest.raises(IndexError):
+        board.memory("rom", size, 1)
+    with pytest.raises(IndexError):
+        board.set_memory("rom", size - 1, b"\x00\x00")
+    with pytest.raises(ValueError):
+        board.set_memory("nothing", 0, b"\x00")
+
+
 class Cells:
     """Bytes a debugger peeks and pokes with no cycle."""
 
@@ -663,12 +681,14 @@ def test_serial_values_carry_their_timing(tmp_path: Path) -> None:
     assert (host.name, host.kind, host.direction) == ("host", "serial", "out")
     assert repr(host) == 'External(name="host", kind="serial", direction="out")'
     assert host != "host" and host == board.externals()[1] and host in {host}
+    board.check_send("host", frame)
     board.send("host", frame)
     board.send("host", 0x42)
-    with pytest.raises(ValueError, match="external.echo drives no net"):
-        board.send("echo", 0x42)
-    with pytest.raises(ValueError, match="drives serial nets only"):
-        board.send("host", True, kind="logic")
+    for send in (board.send, board.check_send):
+        with pytest.raises(ValueError, match="external.echo drives no net"):
+            send("echo", 0x42)
+        with pytest.raises(ValueError, match="drives serial nets only"):
+            send("host", True, kind="logic")
     board.run_for(picoseconds=1_000_000)
     modem = board.peripheral("modem")
     assert isinstance(modem, Modem)

@@ -114,8 +114,8 @@ struct Fired {
 /// The hooks that fired in a core run, in order.
 type Queue = Rc<RefCell<Vec<Fired>>>;
 
-/// The most bytes `Machine.read` asks of the machine at once.
-const READ_CHUNK: usize = 1 << 24;
+/// The most bytes `Machine.peek_bytes` asks of the machine at once.
+const PEEK_CHUNK: usize = 1 << 24;
 
 /// The vectors an iterable of vector numbers names, every vector for
 /// `None`.
@@ -619,15 +619,18 @@ impl MachineView {
     }
 
     /// `length` bytes at `address` with no bus cycle: mapped memory's,
-    /// whatever its permissions, and a peripheral's from its `peek`.
-    /// Raises `BusError` if any is neither, `UnpeekableError` for one a
-    /// peripheral declines, an exception its `peek` raised, and
-    /// `ValueError` for more than 32 bits of addresses.
-    fn read<'py>(
+    /// whatever its permissions, and a peripheral's from its `peek`, in
+    /// `function_code`'s space.  Raises `BusError` if any is neither,
+    /// `UnpeekableError` for one a peripheral declines, an exception its
+    /// `peek` raised, and `ValueError` for more than 32 bits of
+    /// addresses.
+    #[pyo3(signature = (address, length, function_code = FunctionCodeView::SupervisorData))]
+    fn peek_bytes<'py>(
         &self,
         py: Python<'py>,
         address: u32,
         length: usize,
+        function_code: FunctionCodeView,
     ) -> PyResult<Bound<'py, PyBytes>> {
         u32::try_from(length).map_err(|_| Error::Length(length))?;
         // A chunk at a time, so that an unmapped one raises before more
@@ -635,25 +638,33 @@ impl MachineView {
         let mut bytes = Vec::new();
         while bytes.len() < length {
             let start = bytes.len();
-            bytes.resize(start + (length - start).min(READ_CHUNK), 0);
+            bytes.resize(start + (length - start).min(PEEK_CHUNK), 0);
             let at = Address(address).offset(start as u32);
-            let read = self
-                .pending
-                .looking(|| self.machine.read(at, &mut bytes[start..]));
+            let read = self.pending.looking(|| {
+                self.machine
+                    .peek_bytes(at, function_code.into(), &mut bytes[start..])
+            });
             self.pending.check()?;
             read.map_err(Error::from)?;
         }
         Ok(PyBytes::new(py, &bytes))
     }
 
-    /// Writes `data` at `address`, as `read` reads it: into mapped
+    /// Stores `data` at `address`, as `peek_bytes` reads it: into mapped
     /// memory, and a peripheral's bytes through its `poke`.  On an error
     /// nothing is written, but for the bytes before a run a peripheral
     /// declines; an exception its `poke` raised is raised.
-    fn write(&mut self, address: u32, data: PyBackedBytes) -> PyResult<()> {
-        let written = self
-            .pending
-            .looking(|| self.machine.write(Address(address), &data));
+    #[pyo3(signature = (address, data, function_code = FunctionCodeView::SupervisorData))]
+    fn poke_bytes(
+        &mut self,
+        address: u32,
+        data: PyBackedBytes,
+        function_code: FunctionCodeView,
+    ) -> PyResult<()> {
+        let written = self.pending.looking(|| {
+            self.machine
+                .poke_bytes(Address(address), function_code.into(), &data)
+        });
         self.pending.check()?;
         Ok(written.map_err(Error::from)?)
     }
@@ -828,12 +839,12 @@ impl MachineView {
 
     /// Calls `callback(Intercepted)` for each exception an instruction
     /// raises with a vector of `vectors`, an iterable of vector numbers
-    /// or `None` for every vector, before anything is stacked, PC at the
-    /// instruction.  A truthy result means it handled it: the CPU takes
+    /// or `None`, the default, for every vector, before anything is
+    /// stacked, PC at the instruction.  A truthy result means it handled it: the CPU takes
     /// nothing and runs on from PC as the callable left it.  Otherwise
     /// the next hook that covers the vector is called, in the order
     /// installed, and if none handles it the CPU takes it natively.
-    #[pyo3(signature = (callback, vectors))]
+    #[pyo3(signature = (callback, vectors = None))]
     fn add_intercept_hook(
         &mut self,
         callback: &Bound<'_, PyAny>,
@@ -1248,13 +1259,17 @@ impl Target for Debugged<'_, '_> {
         function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<usize, AccessError<PyErr>> {
-        Target::read_memory(
-            &mut self.0.borrow_mut().machine,
-            address,
-            function_code,
-            data,
-        )
-        .map_err(|error| error.map(|never| match never {}))
+        let pending = self.0.borrow().pending.clone();
+        pending
+            .looking(|| {
+                Target::read_memory(
+                    &mut self.0.borrow_mut().machine,
+                    address,
+                    function_code,
+                    data,
+                )
+            })
+            .map_err(|error| error.map(|never| match never {}))
     }
 
     fn write_memory(
@@ -1263,13 +1278,17 @@ impl Target for Debugged<'_, '_> {
         function_code: FunctionCode,
         data: &[u8],
     ) -> Result<(), AccessError<PyErr>> {
-        Target::write_memory(
-            &mut self.0.borrow_mut().machine,
-            address,
-            function_code,
-            data,
-        )
-        .map_err(|error| error.map(|never| match never {}))
+        let pending = self.0.borrow().pending.clone();
+        pending
+            .looking(|| {
+                Target::write_memory(
+                    &mut self.0.borrow_mut().machine,
+                    address,
+                    function_code,
+                    data,
+                )
+            })
+            .map_err(|error| error.map(|never| match never {}))
     }
 
     fn run_for(&mut self, budget: Cycles, hit: &dyn Fn() -> bool) -> PyResult<TargetRun> {
@@ -1288,7 +1307,7 @@ impl Target for Debugged<'_, '_> {
             End::Stop(stop) => stop.into(),
             End::Reached | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
-            End::Exception { .. } => TargetRun::Exception,
+            End::Exception { vector, .. } => TargetRun::Exception { vector },
             other => return Err(Error::run_end(other).into()),
         })
     }
@@ -1404,7 +1423,7 @@ mod tests {
             end(&[TRAP_0], instructions, |machine| {
                 machine
                     .cpu
-                    .add_intercept_hook(VectorSet::EMPTY.with(TRAP_0_VECTOR), |_| {
+                    .add_intercept_hook(VectorSet::NONE.with(TRAP_0_VECTOR), |_| {
                         ControlFlow::Break(())
                     });
             }),

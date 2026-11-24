@@ -351,9 +351,17 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     fn system_frequency(&self) -> Frequency;
 
     /// A memory's bytes.
+    ///
+    /// # Panics
+    ///
+    /// It may, for a memory another chip's build gave.
     fn memory(&self, memory: Self::Memory) -> &[u8];
 
     /// A memory's bytes, to change.
+    ///
+    /// # Panics
+    ///
+    /// As [`memory`](Self::memory).
     fn memory_mut(&mut self, memory: Self::Memory) -> &mut [u8];
 
     /// The output pins on nets, whose changes the chip reports: set

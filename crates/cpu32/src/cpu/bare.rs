@@ -406,7 +406,7 @@ impl Cpu {
 
     /// The vectors whose exceptions, about to be taken, end a run before
     /// anything is stacked ([`End::Exception`]): [`VectorSet::ALL`] for
-    /// any, [`VectorSet::EMPTY`], as at first, for none.  It covers an
+    /// any, [`VectorSet::NONE`], as at first, for none.  It covers an
     /// exception an instruction raises (a trap, an illegal
     /// instruction, a fault), a trace, a hardware breakpoint and an
     /// interrupt, once acknowledged, as its vector is then known; not
@@ -430,7 +430,10 @@ impl Cpu {
     /// [`set_stop_on_fault`](Self::set_stop_on_fault) is a fault stop
     /// ([`End::Fault`]) instead, and an exception the intercept hooks
     /// cover is theirs ([`add_intercept_hook`](Self::add_intercept_hook)):
-    /// one they all decline is taken natively, with no stop.
+    /// one they all decline is taken natively, with no stop.  The stop
+    /// is [`run_limited`](Self::run_limited)'s; under
+    /// [`run_for`](Self::run_for) it is [`Stop::Requested`], with no
+    /// vector.
     pub fn set_stop_on_exception(&mut self, vectors: VectorSet) {
         self.bare.stop_on_exception = vectors;
         self.update_capture();

@@ -40,6 +40,7 @@ use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::End;
 use mc683xx_cpu32::Limits;
 use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_target::Address;
 use mc683xx_target::Entry;
@@ -96,7 +97,10 @@ pub enum TargetRun {
     /// ([`Cpu::set_stop_on_exception`]).
     ///
     /// [`Cpu::set_stop_on_exception`]: mc683xx_cpu32::Cpu::set_stop_on_exception
-    Exception,
+    Exception {
+        /// The exception's vector.
+        vector: Vector,
+    },
     /// A stop condition held ([`Target::conditions`]).
     Condition,
     /// A target under BDM control entered background mode, for the
@@ -396,7 +400,8 @@ pub trait Target {
     }
 }
 
-/// The bare CPU: one address space, whatever the function code.
+/// The bare CPU: one address space for memory, whatever the function
+/// code, which a peripheral's peek or poke sees.
 impl Target for Machine {
     type Error = Infallible;
 
@@ -407,10 +412,10 @@ impl Target for Machine {
     fn read_memory(
         &mut self,
         address: Address,
-        _function_code: FunctionCode,
+        function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<usize, AccessError<Infallible>> {
-        Ok(match self.read(address, data) {
+        Ok(match self.peek_bytes(address, function_code, data) {
             Ok(()) => data.len(),
             Err(error) => error.address().0.wrapping_sub(address.0) as usize,
         })
@@ -419,10 +424,10 @@ impl Target for Machine {
     fn write_memory(
         &mut self,
         address: Address,
-        _function_code: FunctionCode,
+        function_code: FunctionCode,
         data: &[u8],
     ) -> Result<(), AccessError<Infallible>> {
-        self.write(address, data)
+        self.poke_bytes(address, function_code, data)
             .map_err(|error| AccessError::Unserved(error.address()))
     }
 
@@ -438,7 +443,7 @@ impl Target for Machine {
             End::Stop(stop) => stop.into(),
             End::Reached | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
-            End::Exception { .. } => TargetRun::Exception,
+            End::Exception { vector, .. } => TargetRun::Exception { vector },
             _ => TargetRun::Requested,
         })
     }

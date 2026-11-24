@@ -1322,7 +1322,10 @@ impl Mc68331 {
         }
     }
 
-    /// A peripheral, if it is a `D`.
+    /// A peripheral, if it is a `D`; [`None`] too for an id another
+    /// builder gave, the one way to miss with an opaque id, so there is
+    /// no error to tell the two apart (a board's `peripheral`, by name,
+    /// has one).
     #[must_use]
     pub fn peripheral<D: Any>(&self, id: PeripheralId) -> Option<&D> {
         let peripheral: &dyn Any = self.board.peripherals.get(index(id))?.as_ref();
@@ -1354,12 +1357,20 @@ impl Mc68331 {
     }
 
     /// A memory's bytes.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is another builder's.
     #[must_use]
     pub fn memory(&self, id: MemoryId) -> &[u8] {
         self.cpu.memory.region(id.0)
     }
 
     /// A memory's bytes, to change.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is another builder's.
     pub fn memory_mut(&mut self, id: MemoryId) -> &mut [u8] {
         self.cpu.memory.region_mut(id.0)
     }

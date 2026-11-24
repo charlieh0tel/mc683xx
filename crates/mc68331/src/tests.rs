@@ -19,7 +19,6 @@ use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Space;
-use mc683xx_cpu32::memory::Unserved;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::Select;
@@ -65,6 +64,7 @@ use crate::gpt::Input;
 use crate::gpt::PortGpPin;
 use crate::gpt::PwmChange;
 use crate::gpt::pwm::Channel;
+use crate::host::BusCycleError;
 use crate::port::NoInputs;
 use crate::port::Port;
 use crate::port::PortChange;
@@ -328,7 +328,8 @@ fn a_pre_read_hook_patches_a_select_s_memory_before_the_cycle() {
     ));
     assert_eq!(chip.cpu().registers.data[0] & 0xffff, 0xabcd);
     let mut word = [0; 2];
-    chip.read(Address(0), &mut word).unwrap();
+    chip.peek_bytes(Address(0), FunctionCode::SupervisorData, &mut word)
+        .unwrap();
     assert_eq!(word, [0xab, 0xcd], "the change stays");
 }
 
@@ -2683,16 +2684,19 @@ mc683xx_cpu32::unsavable!(Stopper, "a stopper");
 impl Timed for Stopper {}
 
 #[test]
-fn a_write_writes_rom_and_refuses_what_the_core_does_not_serve() {
+fn a_byte_poke_writes_rom_and_refuses_a_modules_register() {
     let (mut chip, _) = booting(&[NOP, NOP]);
-    chip.write(Address(START), &[0x4e, 0x75]).unwrap();
-    assert_eq!(
-        chip.peek(Address(START), Size::Word, FunctionCode::SupervisorData),
-        Ok(0x4e75)
-    );
-    // the SIM's registers are the chip's, not memory the core serves
+    chip.poke_bytes(Address(START), FunctionCode::SupervisorData, &[0x4e, 0x75])
+        .unwrap();
+    let mut read = [0; 2];
+    chip.peek_bytes(Address(START), FunctionCode::SupervisorData, &mut read)
+        .unwrap();
+    assert_eq!(read, [0x4e, 0x75]);
     let simcr = Address(0x00ff_fa00);
-    assert_eq!(chip.write(simcr, &[0]), Err(Unserved(simcr)));
+    assert_eq!(
+        chip.poke_bytes(simcr, FunctionCode::SupervisorData, &[0]),
+        Err(BusCycleError::Unpeekable(simcr))
+    );
 }
 
 /// CSOR for CS0 or CS1: as [`CS1_FAST`], R/W (bits 12:11) reads only
@@ -2735,11 +2739,15 @@ fn a_write_to_write_only_ram_lands_in_it_for_the_firmware_to_read() {
         BRANCH_TO_SELF,
     ]);
     let at = Address(CS0_BASE + offset);
-    chip.write(at, &[0x12, 0x34]).unwrap();
+    chip.poke_bytes(at, FunctionCode::SupervisorData, &[0x12, 0x34])
+        .unwrap();
     assert_eq!(chip.memory(ram)[offset as usize..][..2], [0x12, 0x34]);
-    // the page's reads go to the bus: nothing to read back there
+    // the page's reads reach nothing: nothing to read back there
     let mut read = [0; 2];
-    assert_eq!(chip.read(at, &mut read), Err(Unserved(at)));
+    assert!(
+        chip.peek_bytes(at, FunctionCode::SupervisorData, &mut read)
+            .is_err()
+    );
     // the firmware reads it through the select that reads it
     chip.run_for(Cycles::from_clocks(100));
     assert_eq!(chip.cpu().registers.data[0] & 0xffff, 0x1234);
@@ -2769,7 +2777,8 @@ fn a_write_to_a_page_reading_rom_and_writing_ram_patches_the_rom() {
     write_register(&mut chip, SIM + 0x52, CS_READS_FAST);
     let offset = 0x10;
     let at = CS0_BASE + offset;
-    chip.write(Address(at), &[0x4e, 0x75]).unwrap();
+    chip.poke_bytes(Address(at), FunctionCode::SupervisorData, &[0x4e, 0x75])
+        .unwrap();
     assert_eq!(chip.memory(rom)[offset as usize..][..2], [0x4e, 0x75]);
     assert_eq!(chip.memory(ram)[offset as usize..][..2], [0, 0]);
     assert_eq!(
@@ -2802,37 +2811,20 @@ fn a_write_to_a_page_reading_a_peripheral_and_writing_ram_lands_in_the_ram() {
     write_register(&mut chip, SIM + 0x50, CS0_BAR);
     write_register(&mut chip, SIM + 0x52, CS_READS_FAST);
     let at = Address(CS0_BASE);
-    chip.write(at, &[0xab]).unwrap();
+    chip.poke_bytes(at, FunctionCode::SupervisorData, &[0xab])
+        .unwrap();
     assert_eq!(chip.memory(ram)[0], 0xab);
-    let mut read = [0; 1];
-    assert_eq!(chip.read(at, &mut read), Err(Unserved(at)));
 }
 
 #[test]
-fn a_write_to_a_peripheral_is_unserved() {
-    let (mut chip, _, _) = with_peripheral(&[NOP], |_| Counter::default());
-    let at = Address(CS1_BASE);
-    assert_eq!(chip.write(at, &[1]), Err(Unserved(at)));
-}
-
-#[test]
-fn a_read_reads_rom_and_refuses_what_the_core_does_not_serve() {
-    let (mut chip, _) = booting(&[NOP, NOP]);
-    chip.write(Address(START), &[0x4e, 0x75]).unwrap();
-    let mut read = [0; 2];
-    chip.read(Address(START), &mut read).unwrap();
-    assert_eq!(read, [0x4e, 0x75]);
-    let simcr = Address(0x00ff_fa00);
-    assert_eq!(chip.read(simcr, &mut read), Err(Unserved(simcr)));
-}
-
-#[test]
-fn a_read_and_a_write_cross_pages() {
+fn a_byte_peek_and_poke_cross_pages() {
     let (mut chip, _) = booting(&[NOP, NOP]);
     let bytes: Vec<u8> = (0..3 * PAGE_BYTES).map(|at| at as u8 ^ 0x5a).collect();
-    chip.write(Address(START), &bytes).unwrap();
+    chip.poke_bytes(Address(START), FunctionCode::SupervisorData, &bytes)
+        .unwrap();
     let mut read = vec![0; bytes.len()];
-    chip.read(Address(START), &mut read).unwrap();
+    chip.peek_bytes(Address(START), FunctionCode::SupervisorData, &mut read)
+        .unwrap();
     assert_eq!(read, bytes);
     let last = START + 3 * PAGE_BYTES - 2;
     assert_eq!(
