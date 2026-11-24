@@ -6,8 +6,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use mc683xx_cpu32::StopRequest;
-use mc683xx_mc68331::chip::Diversion;
-use mc683xx_mc68331::chip::SyncRequest;
+use mc683xx_mc68331::Diversion;
+use mc683xx_mc68331::SyncRequest;
 use pyo3::pyclass;
 use pyo3::pymethods;
 
@@ -40,7 +40,7 @@ impl StopRequestView {
 }
 
 /// A handle by which the host's peripherals end the chip's run early
-/// (Rust's `chip::SyncRequest`): after the instruction whose cycle asked,
+/// (Rust's `SyncRequest`): after the instruction whose cycle asked,
 /// or at the sync point if none is running, the run returns
 /// `Stop.Budget()` with the clocks run so far.  Asked between runs it
 /// does nothing.
@@ -61,7 +61,7 @@ impl SyncRequestView {
 }
 
 /// A handle by which the host's peripherals divert a memory's cycles to a
-/// peripheral and back (Rust's `chip::Diversion`), by the numbers the
+/// peripheral and back (Rust's `Diversion`), by the numbers the
 /// `Builder` gave them.
 #[pyclass(name = "Diversion", module = "mc683xx", unsendable)]
 #[derive(Debug, Clone)]

@@ -9,7 +9,7 @@ use mc683xx_cpu32::state::StateError;
 use mc683xx_cpu32::state::decode_layer;
 use mc683xx_cpu32::state::encode;
 use mc683xx_cpu32::state::encode_layer;
-use mc683xx_mc68331::port::Port;
+use mc683xx_mc68331::Port;
 
 use super::Board;
 use super::BoardState;
@@ -28,7 +28,7 @@ use crate::signal::Signal;
 use crate::time::Time;
 use crate::time::TimeBase;
 use crate::wiring::QspiState;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 /// A board of a clock divided onto an edge counter, its ROM empty;
 /// the counter restores before the divider.

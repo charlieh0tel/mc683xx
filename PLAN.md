@@ -161,7 +161,7 @@ public whole or private whole, so every public item keeps one path
   only on the chip and the deadline, so a series of them is one long
   run however the host cuts it.
 - **Host bus access:** `Mc68331::bus_read`, `bus_write` and `peek`
-  (`mc683xx_mc68331::host`) reach the bus as a debugger does (BDM's memory
+  (`crates/mc68331/src/host.rs`) reach the bus as a debugger does (BDM's memory
   commands, CPU32RM 7), by address, size and function code, through
   the chip's decode: module registers at MM's base, and whatever a
   chip select reaches.  `bus_read` and `bus_write` are real cycles at
@@ -494,7 +494,7 @@ surrounds the SoC with its board peripherals through:
   a frame after its time (2026-10-23).
 - **Pins:** port and module pins in and out, including GPT input
   capture and pulse accumulator inputs (1 PPS-style signals).  Every
-  general-purpose port is keyed by one `port::Port { C, E, F, Gp, Qs }`,
+  general-purpose port is keyed by one `Port { C, E, F, Gp, Qs }`,
   the manual's port names: the host sets the levels it drives
   (`set_pins(port, pins)`, a `PortLevels` as `outputs(port)` gives, and `set_gpt_input(input, level)`), reads
   the levels the chip drives (`outputs(port)`, `pwm`) and the port's
@@ -1102,7 +1102,7 @@ and the nets that join them.  The rule: **the file says what is wired
 where and how the chip is configured, never what a peripheral does.**
 Peripheral behavior lives in the host's code, behind the registry; this
 repository ships only small generic peripherals for tests and examples.
-`mc683xx_mc68331::chip::Builder` stays the underlying API: a loaded board is
+`mc683xx_mc68331::Builder` stays the underlying API: a loaded board is
 Builder calls plus the layers below, and a host can still build by
 hand.  The keys are in `docs/board-files.md`.
 
@@ -1196,7 +1196,7 @@ hand.  The keys are in `docs/board-files.md`.
   stays on the fast path.  While the command logic programs, erases
   or is in autoselect mode it takes the array (`Drive::take_memory`):
   the chip diverts the memory's cycles to a peripheral that passes them
-  to the peripheral (`mc683xx_mc68331::chip::Diversion`, asked within a cycle and
+  to the peripheral (`mc683xx_mc68331::Diversion`, asked within a cycle and
   made as it ends, the page tables rebuilt), so status and autoselect
   reads see the peripheral, until it releases the array.  Chosen over a
   read hook on every fetch, which would cost the fast path always.
@@ -2661,7 +2661,7 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   The SIM's halt monitor resets only on a halt, so not on this entry:
   HALT driven would make the bypass of 7.2.2.3 pointless, an inference
   the manuals do not state.
-- The chip implements `Cpu32Target` (`mc683xx_mc68331::debug`), its
+- The chip implements `Cpu32Target` (`crates/mc68331/src/debug.rs`), its
   calls between runs, so between instructions.  `reset_halted` is
   `Mc68331::reset_with_breakpoint`: RESET with BKPT low through its
   rising edge enables background mode and enters it before the first

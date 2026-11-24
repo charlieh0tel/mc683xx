@@ -11,7 +11,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::sim::ResetCause;

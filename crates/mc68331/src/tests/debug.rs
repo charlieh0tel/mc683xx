@@ -29,7 +29,7 @@ use super::write_register;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::debug::TargetError;
-use crate::debug::serial::NOT_IN_BACKGROUND;
+use crate::serial::NOT_IN_BACKGROUND;
 use mc683xx_cpu32::memory::MemoryKind;
 
 /// BGND (CPU32RM 4.4).

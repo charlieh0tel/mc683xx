@@ -68,7 +68,7 @@
 //! use mc683xx_board::registry::Registry;
 //! use mc683xx_board::time::Time;
 //! use mc683xx_cpu32::Stop;
-//! use mc683xx_mc68331::chip::Mc68331;
+//! use mc683xx_mc68331::Mc68331;
 //!
 //! let text = r#"
 //! version = 1

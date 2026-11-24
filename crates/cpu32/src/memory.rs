@@ -28,7 +28,7 @@ const PAGE_SHIFT: u32 = 11;
 const FASTEST_CLOCKS: u8 = 2;
 
 /// Whether the CPU may write a memory a host wires in: the chip's
-/// builder's (`mc683xx_mc68331::chip::Builder::memory`) and a board's.
+/// builder's (`mc683xx_mc68331::Builder::memory`) and a board's.
 /// Non-exhaustive: a kind may be added (a write-once memory, say), and
 /// [`writable`](Self::writable) answers for each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

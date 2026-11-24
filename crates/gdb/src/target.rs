@@ -20,10 +20,7 @@
 //!
 //! [`Bdm`]: crate::bdm::Bdm
 //! [`Cpu32Target`]: mc683xx_target::Cpu32Target
-#![cfg_attr(
-    feature = "mc68331",
-    doc = "[`Mc68331`]: mc683xx_mc68331::chip::Mc68331"
-)]
+#![cfg_attr(feature = "mc68331", doc = "[`Mc68331`]: mc683xx_mc68331::Mc68331")]
 #![cfg_attr(
     not(feature = "mc68331"),
     doc = "[`Mc68331`]: https://docs.rs/mc683xx-mc68331"

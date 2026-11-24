@@ -2,11 +2,11 @@
 //! PWM channels and outputs, and the ports.
 
 use mc683xx_cpu32::Cycles;
+use mc683xx_mc68331::Port;
 use mc683xx_mc68331::gpt::Input;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm;
 use mc683xx_mc68331::gpt::pwm::Channel;
-use mc683xx_mc68331::port::Port;
 use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::sci;
 use pyo3::pyclass;
@@ -94,7 +94,7 @@ impl From<Channel> for ChannelView {
     }
 }
 
-/// One of the chip's general-purpose ports (Rust's `port::Port`).
+/// One of the chip's general-purpose ports (Rust's `Port`).
 #[pyclass(name = "Port", module = "mc683xx", eq, hash, frozen, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum PortView {
@@ -290,9 +290,9 @@ impl TryFrom<pwm::Output> for Output {
 
 #[cfg(test)]
 mod tests {
+    use mc683xx_mc68331::Port;
     use mc683xx_mc68331::gpt::Input;
     use mc683xx_mc68331::gpt::PortGpPin;
-    use mc683xx_mc68331::port::Port;
 
     use super::InputView;
     use super::PortView;

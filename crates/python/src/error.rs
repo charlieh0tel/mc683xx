@@ -23,10 +23,10 @@ use mc683xx_cpu32::memory::MemoryError;
 use mc683xx_cpu32::memory::ParsePermissionsError;
 use mc683xx_cpu32::memory::Unserved;
 use mc683xx_cpu32::state::StateError;
-use mc683xx_mc68331::chip::BuildError;
-use mc683xx_mc68331::debug::TargetError;
-use mc683xx_mc68331::host::BusCycleError;
-use mc683xx_mc68331::port::NoInputs;
+use mc683xx_mc68331::BuildError;
+use mc683xx_mc68331::BusCycleError;
+use mc683xx_mc68331::NoInputs;
+use mc683xx_mc68331::TargetError;
 use mc683xx_modules::sim::clock::ClockSourceError;
 
 /// A host's mistake the bindings refuse.

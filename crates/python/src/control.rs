@@ -25,7 +25,7 @@ use mc683xx_board::signal::Kind;
 use mc683xx_board::time::NonZeroSpan;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 use pyo3::Borrowed;
 use pyo3::Bound;
 use pyo3::FromPyObject;

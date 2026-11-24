@@ -60,7 +60,7 @@ use mc683xx_board::trace::header;
 use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::Stop;
 use mc683xx_gdb::Ending;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_target::Address;
 use mc683xx_target::parse_integer;

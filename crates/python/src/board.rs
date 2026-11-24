@@ -60,7 +60,7 @@ use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::Frequency;
 use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::state::StateError;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::peripheral;
 use mc683xx_modules::peripheral::floating_miso;
 use mc683xx_modules::qsm::sci::Frame;

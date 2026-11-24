@@ -87,7 +87,7 @@ use mc683xx_board::board::Board;
 use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::time::Time;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let registry = mc683xx_peripherals::registry();
@@ -107,7 +107,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 (`Registry::with_builtins()`) and the stock ones, and a host registers
 its own peripheral models in a registry with `Registry::register`.  A
 host can also build the chip directly, without a board file, with
-`mc683xx_mc68331::chip::Builder` (the host guide, below).
+`mc683xx_mc68331::Builder` (the host guide, below).
 
 ## Python: a board (`mc683xx`)
 

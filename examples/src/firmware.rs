@@ -6,8 +6,8 @@
 //! self-contained.
 
 use mc683xx_cpu32::memory::MemoryKind;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::MemoryId;
+use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::MemoryId;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 

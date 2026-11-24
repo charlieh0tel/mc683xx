@@ -4,7 +4,7 @@ use std::convert::Infallible;
 
 use mc683xx_cpu32::CpuControl;
 use mc683xx_cpu32::Cycles;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_target::Address;
 use mc683xx_target::FunctionCode;
 use mc683xx_target::Size;

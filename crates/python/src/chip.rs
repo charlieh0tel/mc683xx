@@ -14,15 +14,14 @@ use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::PeripheralId;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::chip::MemoryId;
-use mc683xx_mc68331::event;
-use mc683xx_mc68331::event::ChipTracing;
-use mc683xx_mc68331::event::DsackFault;
+use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::ChipTracing;
+use mc683xx_mc68331::DsackFault;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_mc68331::MemoryId;
+use mc683xx_mc68331::OutputChange;
+use mc683xx_mc68331::PortChange;
 use mc683xx_mc68331::gpt::PwmChange;
-use mc683xx_mc68331::port::OutputChange;
-use mc683xx_mc68331::port::PortChange;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::chip_select::Termination;
@@ -860,7 +859,7 @@ impl From<TerminationView> for Termination {
 }
 
 /// How a peripheral's DSACK pins disagree with the chip (Rust's
-/// `event::DsackFault`).
+/// `mc683xx_mc68331::DsackFault`).
 #[pyclass(
     name = "DsackFault",
     module = "mc683xx",
@@ -978,17 +977,17 @@ pub(crate) enum Event {
 impl Event {
     /// `event` as Python sees it, [`Event::Unknown`] for one it cannot
     /// convert.
-    pub(crate) fn of(event: event::Event) -> Self {
+    pub(crate) fn of(event: mc683xx_mc68331::Event) -> Self {
         let unknown = || Self::Unknown {
             now: event.now().clocks(),
             text: event.to_string(),
         };
         match event {
-            event::Event::Reset { now, cause, .. } => Self::Reset {
+            mc683xx_mc68331::Event::Reset { now, cause, .. } => Self::Reset {
                 now: now.clocks(),
                 cause: cause.into(),
             },
-            event::Event::ArbitrationTie {
+            mc683xx_mc68331::Event::ArbitrationTie {
                 now,
                 level,
                 arbitration,
@@ -998,7 +997,7 @@ impl Event {
                 level: u8::from(level),
                 arbitration,
             },
-            event::Event::BusCycle {
+            mc683xx_mc68331::Event::BusCycle {
                 now,
                 address,
                 size,
@@ -1016,7 +1015,7 @@ impl Event {
                 value,
                 bus_error,
             },
-            event::Event::Exception { now, entry, .. } => Self::Exception {
+            mc683xx_mc68331::Event::Exception { now, entry, .. } => Self::Exception {
                 now: now.clocks(),
                 vector: entry.vector.0,
                 pc: entry.pc.0,
@@ -1024,12 +1023,11 @@ impl Event {
                 stack: entry.stack.0,
                 level: entry.level.map(u8::from),
             },
-            event::Event::Dsack { now, fault, .. } => {
-                DsackFaultView::of(fault).map_or_else(unknown, |fault| Self::Dsack {
+            mc683xx_mc68331::Event::Dsack { now, fault, .. } => DsackFaultView::of(fault)
+                .map_or_else(unknown, |fault| Self::Dsack {
                     now: now.clocks(),
                     fault,
-                })
-            }
+                }),
             _ => unknown(),
         }
     }

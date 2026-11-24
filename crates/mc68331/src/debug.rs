@@ -9,7 +9,7 @@
 //! command of its own, so one leaves the interface between commands,
 //! dropping a command in progress there.
 
-pub mod serial;
+pub(crate) mod serial;
 
 use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;

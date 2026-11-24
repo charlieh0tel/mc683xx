@@ -26,7 +26,7 @@ use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::Stop;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 /// The divided clock's period: 10 MHz divided by 1000.
 const PERIOD_PS: u64 = 100_000_000;

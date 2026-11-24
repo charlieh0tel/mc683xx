@@ -5,7 +5,7 @@ use mc683xx_board::board::Board;
 use mc683xx_board::description::Options;
 use mc683xx_board::registry::Environment;
 use mc683xx_board::time::Time;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let registry = mc683xx_peripherals::registry();

@@ -62,8 +62,8 @@ use mc683xx_cpu32::Cycles;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_examples::firmware;
-use mc683xx_mc68331::chip::BuildError;
-use mc683xx_mc68331::chip::Builder;
+use mc683xx_mc68331::BuildError;
+use mc683xx_mc68331::Builder;
 use mc683xx_cpu32::memory::MemoryKind;
 
 fn main() -> Result<(), BuildError> {
@@ -728,7 +728,7 @@ use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_examples::firmware;
-use mc683xx_mc68331::event::Event;
+use mc683xx_mc68331::Event;
 use mc683xx_modules::sim::ResetScope;
 
 #[derive(Debug, Default)]
@@ -858,7 +858,7 @@ assert!(sent[0].start < sent[0].end);
 
 ### Ports
 
-Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
+Every general-purpose port is keyed by one `Port`: `C`, `E`,
 `F` (the SIM's), `Gp` (the GPT's) and `Qs` (the QSM's).
 
 - Inputs: `set_pins(port, pins)` sets the levels the board drives on
@@ -887,7 +887,7 @@ use mc683xx_target::Address;
 use mc683xx_cpu32::Cycles;
 use mc683xx_target::FunctionCode;
 use mc683xx_target::Size;
-use mc683xx_mc68331::port::Port;
+use mc683xx_mc68331::Port;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
@@ -969,7 +969,7 @@ use mc683xx_mc68331::gpt::Input;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm::Channel;
 use mc683xx_mc68331::gpt::pwm::Output;
-use mc683xx_mc68331::port::Port;
+use mc683xx_mc68331::Port;
 use mc683xx_modules::pins::PortLevels;
 
 // TCTL1:TCTL2, TOC2, TIC1 (GPTRM 3).  OM2:OL2 01 toggles OC2, PGP4,
@@ -1290,8 +1290,8 @@ unpredictable.
 use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
-use mc683xx_mc68331::event::Event;
-use mc683xx_mc68331::event::ChipTracing;
+use mc683xx_mc68331::Event;
+use mc683xx_mc68331::ChipTracing;
 
 let program = [firmware::prologue(), vec![firmware::BRANCH_TO_SELF]].concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
@@ -1352,7 +1352,7 @@ use mc683xx_target::FunctionCode;
 use mc683xx_target::Size;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
-use mc683xx_mc68331::host::BusCycleError;
+use mc683xx_mc68331::BusCycleError;
 
 // CSBAR0, CSOR0, CSBARBT (MC68331UM Table D-3).
 const CSBAR0: u32 = SIM + 0x4c;
@@ -1629,7 +1629,7 @@ use std::rc::Rc;
 
 use mc683xx_board::board::Board;
 
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
 use mc683xx_board::inspect::Value;
@@ -1708,7 +1708,7 @@ use std::time::Duration;
 
 use mc683xx_board::board::Board;
 
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
 use mc683xx_board::pacing::QUANTUM;
@@ -1811,7 +1811,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `trace::Record`.  A match on one needs a wildcard arm.  The chip's
   `Event` is, and so is each of its variants, a struct variant with
   its time (`now`): a pattern on one needs `..`.  Enums of
-  what the hardware fixes (`Size`, `ChipSelect`, `port::Port`,
+  what the hardware fixes (`Size`, `ChipSelect`, `Port`,
   `pwm::Channel`, `Lane`, `Direction`) are not.
 - So are the structs a host reads but does not build: the hook
   payloads (`hooks::Instruction`, `MemoryAccess`, `InvalidAccess`,
@@ -1842,8 +1842,8 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
 
 ```rust
 use mc683xx_modules::chip_select::ChipSelect;
-use mc683xx_mc68331::chip::BuildError;
-use mc683xx_mc68331::chip::Builder;
+use mc683xx_mc68331::BuildError;
+use mc683xx_mc68331::Builder;
 use mc683xx_cpu32::memory::MemoryKind;
 
 let mut builder = Builder::default();

@@ -28,7 +28,7 @@ use mc683xx_board::time::PICOSECONDS_PER_SECOND;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_cpu32::Stop;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 /// A millisecond in picoseconds.
 const MILLISECOND: u64 = PICOSECONDS_PER_SECOND / 1000;
