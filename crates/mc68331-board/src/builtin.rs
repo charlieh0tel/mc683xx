@@ -701,10 +701,7 @@ impl DcSource {
 
     /// From `volts`, which it needs.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
-        let volts = context
-            .parameters
-            .float(Self::VOLTS)?
-            .ok_or_else(|| ParameterError::Missing(Self::VOLTS.to_owned()))?;
+        let volts = context.parameters.required_float(Self::VOLTS)?;
         Self::new(volts).ok_or_else(|| {
             ParameterError::invalid(Self::VOLTS, format!("{volts} is not a voltage"))
         })

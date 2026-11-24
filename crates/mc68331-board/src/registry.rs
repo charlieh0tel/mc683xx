@@ -392,8 +392,7 @@ impl Parameters {
     /// A `key` not given ([`ParameterError::Missing`]), or what
     /// [`Parameters::integer`] fails with.
     pub fn required_integer<T: TryFrom<i64>>(&self, key: &str) -> Result<T, ParameterError> {
-        self.integer(key)?
-            .ok_or_else(|| ParameterError::Missing(key.to_owned()))
+        required(key, self.integer(key)?)
     }
 
     /// A boolean `key`, if given.
@@ -403,6 +402,16 @@ impl Parameters {
     /// A `key` that is not a boolean ([`ParameterError::Type`]).
     pub fn boolean(&self, key: &str) -> Result<Option<bool>, ParameterError> {
         self.typed(key, ParameterValue::as_bool, "a boolean")
+    }
+
+    /// A boolean `key` the type needs.
+    ///
+    /// # Errors
+    ///
+    /// A `key` not given ([`ParameterError::Missing`]), or what
+    /// [`Parameters::boolean`] fails with.
+    pub fn required_boolean(&self, key: &str) -> Result<bool, ParameterError> {
+        required(key, self.boolean(key)?)
     }
 
     /// A number `key`, if given: a float, or an integer as one.
@@ -422,6 +431,16 @@ impl Parameters {
         )
     }
 
+    /// A number `key` the type needs.
+    ///
+    /// # Errors
+    ///
+    /// A `key` not given ([`ParameterError::Missing`]), or what
+    /// [`Parameters::float`] fails with.
+    pub fn required_float(&self, key: &str) -> Result<f64, ParameterError> {
+        required(key, self.float(key)?)
+    }
+
     /// A string `key`, if given.
     ///
     /// # Errors
@@ -429,6 +448,16 @@ impl Parameters {
     /// A `key` that is not a string ([`ParameterError::Type`]).
     pub fn string(&self, key: &str) -> Result<Option<&str>, ParameterError> {
         self.typed(key, ParameterValue::as_str, "a string")
+    }
+
+    /// A string `key` the type needs.
+    ///
+    /// # Errors
+    ///
+    /// A `key` not given ([`ParameterError::Missing`]), or what
+    /// [`Parameters::string`] fails with.
+    pub fn required_string(&self, key: &str) -> Result<&str, ParameterError> {
+        required(key, self.string(key)?)
     }
 
     /// `key` as `convert` reads it, if given.
@@ -456,6 +485,12 @@ impl Parameters {
         let read = self.read.borrow();
         self.table.keys().find(|key| !read.contains(*key)).cloned()
     }
+}
+
+/// `value`, the parameter `key` read, or [`ParameterError::Missing`] if
+/// it was not given.
+fn required<T>(key: &str, value: Option<T>) -> Result<T, ParameterError> {
+    value.ok_or_else(|| ParameterError::Missing(key.to_owned()))
 }
 
 /// What the run gives every peripheral: run-time choices that stay out of the
@@ -950,6 +985,29 @@ mod tests {
             Err(ParameterError::Missing("e".to_owned()))
         );
         assert_eq!(parameters.unread(), Some("d".to_owned()));
+    }
+
+    #[test]
+    fn required_parameters_are_missing_if_not_given() {
+        let parameters = Parameters::parse("a = 3\nb = \"x\"\nc = true\nd = 2.5").unwrap();
+        assert_eq!(parameters.required_integer::<u8>("a"), Ok(3));
+        assert_eq!(parameters.required_string("b"), Ok("x"));
+        assert_eq!(parameters.required_boolean("c"), Ok(true));
+        assert_eq!(parameters.required_float("d"), Ok(2.5));
+        assert_eq!(parameters.required_float("a"), Ok(3.0));
+        fn missing<T>(key: &str) -> Result<T, ParameterError> {
+            Err(ParameterError::Missing(key.to_owned()))
+        }
+        assert_eq!(parameters.required_string("e"), missing("e"));
+        assert_eq!(parameters.required_boolean("e"), missing("e"));
+        assert_eq!(parameters.required_float("e"), missing("e"));
+        assert_eq!(
+            parameters.required_boolean("b"),
+            Err(ParameterError::Type {
+                key: "b".to_owned(),
+                expected: "a boolean"
+            })
+        );
     }
 
     #[test]
