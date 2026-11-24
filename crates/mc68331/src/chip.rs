@@ -80,7 +80,7 @@ use crate::port::Port;
 use crate::port::PortChange;
 use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::chip_select::Termination;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 
 /// The index in the chip's peripherals of `id`, which the chip numbers
 /// from 0 in the order added.

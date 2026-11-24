@@ -35,7 +35,7 @@ use mc683xx_modules::peripheral::AnyMappedPeripheral;
 use mc683xx_modules::peripheral::AnySpiPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 use mc683xx_target::Address;
 use serde::Serialize;
 use serde::de::DeserializeOwned;

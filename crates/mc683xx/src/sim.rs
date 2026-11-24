@@ -6,7 +6,7 @@
 //! bus from its chip selects, and arbitrates the interrupts it
 //! requests.
 
-pub mod chip_selects;
+pub(crate) mod chip_selects;
 pub mod clock;
 /// The SIM's general-purpose ports.
 ///
@@ -15,7 +15,18 @@ pub mod clock;
 #[doc(hidden)]
 pub mod ports;
 mod protection;
-pub mod reset;
+mod reset;
+
+pub use chip_selects::ChipSelects;
+#[doc(hidden)]
+pub use chip_selects::DecodeRequest;
+#[doc(hidden)]
+pub use chip_selects::Lanes;
+#[doc(hidden)]
+pub use chip_selects::Match;
+#[doc(hidden)]
+pub use chip_selects::Selects;
+pub use reset::ResetScope;
 
 use std::fmt;
 use std::mem;
@@ -30,7 +41,6 @@ use mc683xx_cpu32::state::StateError;
 use mc683xx_target::Address;
 use mc683xx_target::Size;
 
-use self::chip_selects::ChipSelects;
 use self::clock::ClockSource;
 use self::clock::SystemClock;
 use self::ports::Change;

@@ -39,13 +39,13 @@ use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::sim::BLOCK;
+use mc683xx_modules::sim::DecodeRequest;
+use mc683xx_modules::sim::Lanes;
 use mc683xx_modules::sim::MODULE_SPACE_BYTES;
+use mc683xx_modules::sim::Match;
 use mc683xx_modules::sim::ResetCause;
+use mc683xx_modules::sim::Selects;
 use mc683xx_modules::sim::Sim;
-use mc683xx_modules::sim::chip_selects::DecodeRequest;
-use mc683xx_modules::sim::chip_selects::Lanes;
-use mc683xx_modules::sim::chip_selects::Match;
-use mc683xx_modules::sim::chip_selects::Selects;
 use mc683xx_modules::sim::ports::PortName;
 use mc683xx_target::Address;
 use mc683xx_target::FunctionCode;
@@ -65,7 +65,7 @@ use crate::port::Port;
 use crate::port::PortChange;
 use mc683xx_cpu32::StopRequest;
 use mc683xx_modules::chip_select::Dsack;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 
 /// The 68331's address lines, ADDR\[23:0\] (MC68331UM 4.4.1.1).
 pub(crate) const ADDRESS_LINES: u32 = 24;

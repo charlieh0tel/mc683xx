@@ -31,8 +31,8 @@ use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::ResetCause;
+use mc683xx_modules::sim::ResetScope;
 use mc683xx_modules::sim::clock::ClockSourceError;
-use mc683xx_modules::sim::reset::ResetScope;
 use mc683xx_target::Address;
 use mc683xx_target::parse_integer;
 

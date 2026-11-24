@@ -36,7 +36,7 @@ use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::Size;
 
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 use pyo3::Bound;
 use pyo3::IntoPyObject;
 use pyo3::Py;

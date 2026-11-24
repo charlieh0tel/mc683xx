@@ -30,7 +30,7 @@ use crate::chip::MemoryId;
 use crate::event::Event;
 use crate::state;
 use mc683xx_cpu32::memory::MemoryKind;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 
 /// JMP (xxx).L (CPU32RM 4, JMP).
 const JUMP_ABSOLUTE: u16 = 0x4ef9;

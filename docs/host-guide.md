@@ -201,7 +201,7 @@ use mc683xx_target::Address;
 use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 use mc683xx_cpu32::memory::MemoryKind;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 
 // No select programmed: the boot code stores straight into it.
 let code = 0x60_0000;
@@ -729,7 +729,7 @@ use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_examples::firmware;
 use mc683xx_mc68331::event::Event;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 
 #[derive(Debug, Default)]
 struct Counter(usize);

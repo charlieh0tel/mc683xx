@@ -15,7 +15,7 @@ use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 
 use super::Description;
 use super::EditError;
