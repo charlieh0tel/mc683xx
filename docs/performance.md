@@ -735,15 +735,21 @@ On the machine above, pinned to an efficiency core (16) while the
 performance cores' siblings were loaded, release builds, best of 7,
 before the changes below and after them:
 
-| Case | Before | After |
-| --- | --- | --- |
-| no hook | 37.6 M instructions/s | 36.6 M instructions/s |
-| code hook elsewhere | 34.2 M instructions/s | 31.7 M instructions/s |
-| no-op code hook, a call | 0.42 us | 0.28 us |
-| no-op write hook, a call | 0.50 us | 0.35 us |
-| write hook reading `registers['A7']`, a call | 5.39 us | 2.41 us |
-| write hook reading `register('A7')`, a call | | 0.92 us |
-| add and remove a code hook | 15.6 us | 15.8 us |
+| Case | Before | After | Before, core 2 | After, core 2 |
+| --- | --- | --- | --- | --- |
+| no hook | 38.7 M instructions/s | 36.6 M instructions/s | 80.8 M instructions/s | 77.4 M instructions/s |
+| code hook elsewhere | 34.6 M instructions/s | 35.7 M instructions/s | 68.9 M instructions/s | 75.6 M instructions/s |
+| no-op code hook, a call | 0.42 us | 0.27-0.29 us | 0.25 us | 0.16 us |
+| no-op write hook, a call | 0.50 us | 0.32-0.34 us | 0.30 us | 0.18 us |
+| write hook reading `registers['A7']`, a call | 5.2-5.3 us | 2.2 us | 2.6 us | 0.82-0.85 us |
+| write hook reading `register('A7')`, a call | | 0.70 us | | 0.25 us |
+| add and remove a code hook | 15.5 us | 0.42 us | 7.1 us | 0.24 us |
+
+(core 2: a performance core, measured once the machine was quiet.)
+The run with no hook runs the same host instructions before and
+after, to within 0.2% (`perf stat` of 20 million instructions),
+in 4% more cycles: code placement, which moved it from -1% to -5%
+between builds of the same code on both kinds of core.
 
 The changes:
 
@@ -759,6 +765,9 @@ The changes:
   once a run, and the first hook a turn fired is not looked up
   again, as nothing can have removed it.
 - The queue of hooks fired keeps its allocation from turn to turn.
+- An instruction on a page with no code or block hook compares its
+  page number with the quiet page's and looks nothing up (below).
+- Adding or removing a hook rewatches only its own pages.
 
 `benches/hooks.rs`, on the same core, two interleaved runs each,
 before and after a change:
