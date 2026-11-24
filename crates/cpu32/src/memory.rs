@@ -788,27 +788,39 @@ impl Memory {
         ranges: impl Iterator<Item = (RangeInclusive<Address>, u8)>,
     ) {
         self.watches = ranges.collect();
-        self.unallocated.fill(0);
+        self.rewatch_pages(0, self.pages - 1);
+        self.update_special();
+        self.refresh_all();
+    }
+
+    /// Recomputes from the hooks' ranges the [`watch`] bits of pages
+    /// `first` to `last`, those of an allocated slab, and the bits of
+    /// each slab not allocated that they are in: those of the ranges
+    /// reaching any of it.
+    fn rewatch_pages(&mut self, first: usize, last: usize) {
         let mask = self.address_mask;
-        for (range, bit) in &self.watches {
-            let (first, last) = range_pages(range, mask);
-            if first > last {
-                continue;
-            }
-            for slab in first >> SLAB_SHIFT..=last >> SLAB_SHIFT {
-                if self.slabs[slab].is_none() {
-                    self.unallocated[slab] |= bit;
+        for number in first >> SLAB_SHIFT..=last >> SLAB_SHIFT {
+            let base = number * SLAB_PAGES;
+            let end = base + SLAB_PAGES - 1;
+            match self.slabs[number].as_deref_mut() {
+                Some(slab) => {
+                    let from = first.max(base);
+                    let pages = &mut slab.watched[from - base..=last.min(end) - base];
+                    pages.fill(0);
+                    watch_pages(pages, from, &self.watches, mask);
+                }
+                None => {
+                    self.unallocated[number] = self
+                        .watches
+                        .iter()
+                        .filter(|(range, _)| {
+                            let (start, stop) = range_pages(range, mask);
+                            start <= stop && start <= end && stop >= base
+                        })
+                        .fold(0, |bits, (_, bit)| bits | bit);
                 }
             }
         }
-        for (number, slab) in self.slabs.iter_mut().enumerate() {
-            if let Some(slab) = slab.as_deref_mut() {
-                slab.watched.fill(0);
-                watch_pages(&mut slab.watched, number * SLAB_PAGES, &self.watches, mask);
-            }
-        }
-        self.update_special();
-        self.refresh_all();
     }
 
     /// Brings every allocated slab's fast tables up to date.
