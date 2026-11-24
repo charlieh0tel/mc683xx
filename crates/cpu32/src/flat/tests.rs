@@ -104,6 +104,7 @@ const fn reaching_return() -> Limits {
         instructions: None,
         steps: None,
         reach: Some(Address(RETURN)),
+        self_loop: false,
     }
 }
 

@@ -1508,14 +1508,20 @@ assert bare.read_register("D0") == 6
   BKPT's acknowledge among them, is a bus error, so BKPT is an illegal
   instruction.
 - **Runs:** `run_limited(begin=None, reach=None, instructions=None,
-  cycles=None) -> LimitedRun`, Rust's `LimitedRun`: `cycles` and
+  cycles=None, self_loop=False) -> LimitedRun`, Rust's `LimitedRun`: `cycles` and
   `end`.  `reach` is checked at each instruction
   boundary, before an interrupt is taken or the hooks there are
-  called; `begin` sets PC and forgets a hook stop's skip, so the
+  called; `self_loop` (Rust's `Limits::self_loop`) ends the run at an
+  instruction that branches to itself, unexecuted, as firmware idles
+  for an interrupt: BRA to itself (`.S`, `.W` or `.L`) or JMP
+  `(xxx).W` or `(xxx).L` of its own address, looked for once no
+  interrupt is due there (one due is taken first), before the hooks,
+  and not while T1 or T0 trace each time round; `begin` sets PC and forgets a hook stop's skip, so the
   hooks at `begin` fire even if the last run stopped there.  `end`,
   an `End` as Rust's, says why it ended: `End.Reached()`,
   `End.Instructions()`, `End.Fault(fault)` (a `FaultStop`),
-  `End.Exception(vector, pc)` (`set_stop_on_exception`), or
+  `End.Exception(vector, pc)` (`set_stop_on_exception`),
+  `End.SelfLoop(pc)` (`self_loop`), or
   `End.Stop(stop)` with a chip's `Stop` (the value a field named for
   it, `end.fault` and `end.stop`, not Rust's `_0`): `Budget()` (cycles),
   `Hook(hook)`, `Requested()` (`stop_request().request()`, from a

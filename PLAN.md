@@ -2640,6 +2640,33 @@ and `mc683xx.Machine` in Python (see Python).
   monomorphized twice, stopped `step` being inlined and cost 20% on
   `core/nop`.  `clear_resume` forgets a hook stop's skip, so a run
   from where a hook stopped calls it again.
+- **Self-loop stop** (sc batch 6, opt-in): `Limits::self_loop` ends
+  the run (`End::SelfLoop { pc }`) at an instruction that branches to
+  itself, BRA with a displacement of -2 (8, 16 or 32 bits) or JMP
+  `(xxx).W`/`(xxx).L` of its own address, as firmware idles waiting
+  for an interrupt, so a harness need not run out its budget there.
+  Decided: the instruction is not executed (as `reach`, so the next
+  run asking ends at once with no cycles, and one not asking runs the
+  loop); it is looked for after the boundary's interrupt check, so an
+  interrupt due is taken first and only a CPU with nothing to take
+  is idle; before the code and block hooks; not while T1 or T0 is
+  set, as a traced loop takes a trace exception each time round, so
+  it is not idle; it reads the instruction with no cycle from the
+  core's memory, so a loop a peripheral serves is not seen.  DBcc to
+  itself counts down and ends, so it is not one; `stop`/`lpstop`
+  already end a run without a budget.  No exception is involved, so
+  `set_stop_on_exception` and intercepts do not meet it.  The gdb
+  stub's runs never ask for it.  It is looked for where `steps` is,
+  in the limited run's checks before the boundary, and ends the run
+  as a step does, through the out-of-line boundary that takes an
+  interrupt due and otherwise leaves the instruction as it was.  So
+  off it costs a limited run one flag test an instruction and an
+  unlimited run (`run_for`) nothing; a test after the boundary,
+  where an interrupt due is known, measured +3 to +5% on
+  `core/moveq`, `bra_self` and `dbra_self` (`run_for`) and was not
+  kept.  The chip and board have
+  no `Limits` for hosts, so it is the bare CPU's (Python's
+  `Machine.run_limited(self_loop=True)`).
 - **Faults:** `set_stop_on_fault`: a bus or address error ends the
   run (`End::Fault`; an unlimited run, `Stop::Fault`, before any other
   stop asked for in the instruction): fetch, read or write; bus error

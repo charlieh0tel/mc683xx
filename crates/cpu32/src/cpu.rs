@@ -652,10 +652,20 @@ impl Cpu {
                         stop: Stop::Requested,
                     };
                 }
-                // the steps taken: interrupts pending, then the end
-                if limits.steps.is_some_and(|count| {
+                // the steps taken, or a self-loop: interrupts pending,
+                // then the end
+                let end = if limits.steps.is_some_and(|count| {
                     cpu.instructions - first + cpu.bare.exceptions_stepped >= count
                 }) {
+                    Some(bare::End::Steps)
+                } else if limits.self_loop && !cpu.stopped && cpu.at_self_loop() {
+                    Some(bare::End::SelfLoop {
+                        pc: cpu.registers.pc,
+                    })
+                } else {
+                    None
+                };
+                if let Some(end) = end {
                     if let Some(cycles) = core.step_boundary(interrupts, now + elapsed) {
                         elapsed += cycles;
                         if let Some(run) = requested(core.cpu, elapsed) {
@@ -663,7 +673,7 @@ impl Cpu {
                         }
                         continue;
                     }
-                    core.cpu.bare.end = Some(bare::End::Steps);
+                    core.cpu.bare.end = Some(end);
                     return Run {
                         cycles: elapsed,
                         stop: Stop::Requested,

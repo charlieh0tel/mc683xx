@@ -346,6 +346,11 @@ pub(crate) enum EndView {
         /// PC, where its processing begins when the run goes on.
         pc: u32,
     },
+    /// PC at a self-loop, with `self_loop`: the loop not executed.
+    SelfLoop {
+        /// The loop's address.
+        pc: u32,
+    },
 }
 
 impl TryFrom<End> for EndView {
@@ -369,6 +374,7 @@ impl TryFrom<End> for EndView {
                 vector: vector.0,
                 pc: pc.0,
             },
+            End::SelfLoop { pc } => Self::SelfLoop { pc: pc.0 },
             other => return Err(Error::run_end(other)),
         })
     }
@@ -385,6 +391,7 @@ impl From<EndView> for End {
                 vector: Vector(vector),
                 pc: Address(pc),
             },
+            EndView::SelfLoop { pc } => Self::SelfLoop { pc: Address(pc) },
         }
     }
 }
@@ -403,6 +410,7 @@ impl EndView {
             Self::Instructions() => "End.Instructions()".to_owned(),
             Self::Fault { fault } => format!("End.Fault({})", repr(py, fault.clone())?),
             Self::Exception { vector, pc } => format!("End.Exception({vector}, {pc:#010x})"),
+            Self::SelfLoop { pc } => format!("End.SelfLoop({pc:#010x})"),
         })
     }
 }
@@ -530,6 +538,8 @@ struct Budget {
     instructions: Option<(u64, u64)>,
     /// `cycles`.
     cycles: Option<u64>,
+    /// `self_loop`.
+    self_loop: bool,
     /// The cycles spent so far.
     spent: u64,
 }
@@ -558,6 +568,7 @@ impl Budget {
         limits.cycles = cycles;
         limits.instructions = instructions;
         limits.reach = self.reach;
+        limits.self_loop = self.self_loop;
         Ok(limits)
     }
 }
@@ -779,16 +790,21 @@ impl MachineView {
     /// run `instructions`, its cycle estimate reaches `cycles`, a hook
     /// or the stop request stops it, a fault does
     /// (`set_stop_on_fault`), or the CPU
-    /// stops or halts.  `begin` sets PC first and forgets a hook stop's
-    /// skip, so the hooks at `begin` are called.  With no `cycles`, a
-    /// `stop` instruction ends the run at once.
-    #[pyo3(signature = (*, begin = None, reach = None, instructions = None, cycles = None))]
+    /// stops or halts, or, with `self_loop`, PC is at an instruction
+    /// that branches to itself (`End.SelfLoop`, Rust's
+    /// `Limits::self_loop`).  `begin` sets PC first and forgets a hook
+    /// stop's skip, so the hooks at `begin` are called.  With no
+    /// `cycles`, a `stop` instruction ends the run at once.
+    #[pyo3(signature = (
+        *, begin = None, reach = None, instructions = None, cycles = None, self_loop = false
+    ))]
     fn run_limited(
         slf: &Bound<'_, Self>,
         begin: Option<u32>,
         reach: Option<u32>,
         instructions: Option<u64>,
         cycles: Option<u64>,
+        self_loop: bool,
     ) -> PyResult<LimitedRunView> {
         let first = {
             let mut this = running(slf)?;
@@ -803,6 +819,7 @@ impl MachineView {
             reach: reach.map(Address),
             instructions: instructions.map(|count| (count, first)),
             cycles,
+            self_loop,
             spent: 0,
         };
         let run = Self::run_dispatching(slf, budget, &|| false);
@@ -1335,6 +1352,7 @@ impl Target for Debugged<'_, '_> {
             reach: None,
             instructions: None,
             cycles: Some(budget.clocks()),
+            self_loop: false,
             spent: 0,
         };
         let (_, end) = MachineView::run_dispatching(self.0, limits, hit)?;

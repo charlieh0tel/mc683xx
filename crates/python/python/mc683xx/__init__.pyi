@@ -621,6 +621,16 @@ class End:
         @property
         def pc(self) -> int: ...
 
+    @final
+    class SelfLoop(End):
+        """PC at an instruction that branches to itself, with
+        `run_limited(self_loop=True)`: the loop not executed."""
+
+        __match_args__ = ("pc",)
+        def __new__(cls, pc: int) -> End.SelfLoop: ...
+        @property
+        def pc(self) -> int: ...
+
 @final
 class LimitedRun:
     """A bare `Machine`'s limited run's outcome."""
@@ -1467,6 +1477,7 @@ class Machine:
         reach: int | None = None,
         instructions: int | None = None,
         cycles: int | None = None,
+        self_loop: bool = False,
     ) -> LimitedRun: ...
     def stop_request(self) -> StopRequest: ...
     def serve_gdb(

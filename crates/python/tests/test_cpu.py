@@ -988,3 +988,19 @@ def test_vector_names_rust_s_vector_numbers():
         Vector.autovector(8)
     with pytest.raises(TypeError):
         Vector()
+
+
+BRA_SELF = 0x60FE  # BRA.S to itself
+
+
+def test_a_limited_run_can_end_at_a_self_loop_unexecuted():
+    cpu = machine(NOP, BRA_SELF)
+    run = cpu.run_limited(self_loop=True, instructions=100)
+    assert run.end == mc683xx.End.SelfLoop(CODE + 2)
+    assert isinstance(run.end, mc683xx.End.SelfLoop) and run.end.pc == CODE + 2
+    assert repr(run.end) == f"End.SelfLoop({CODE + 2:#010x})"
+    assert str(run.end) == "self-loop"
+    assert cpu.instructions == 1
+    # not asked: the loop runs
+    assert cpu.run_limited(instructions=10).end == mc683xx.End.Instructions()
+    assert cpu.instructions == 11

@@ -32,7 +32,9 @@ use crate::hooks::Invalid;
 use crate::instructions::Flow;
 use crate::interrupt::InterruptLevel;
 use crate::interrupt::Interrupts;
+use crate::memory::Space;
 use crate::registers::Registers;
+use crate::registers::status;
 use mc683xx_target::Address;
 use mc683xx_target::Entry;
 use mc683xx_target::FunctionCode;
@@ -40,6 +42,21 @@ use mc683xx_target::Size;
 
 #[cfg(test)]
 mod tests;
+
+/// BRA with an 8-bit displacement of -2: to itself (CPU32RM 4.4, BRA;
+/// the displacement is from the opcode's address plus two).
+const BRA_SELF_BYTE: u32 = 0x60fe;
+/// BRA with a 16-bit displacement in the word that follows.
+const BRA_WORD: u32 = 0x6000;
+/// BRA with a 32-bit displacement in the long word that follows.
+const BRA_LONG: u32 = 0x60ff;
+/// The displacement of a branch to itself, -2.
+const SELF_DISPLACEMENT: u32 = 0u32.wrapping_sub(2);
+/// JMP (xxx).W: the address in the word that follows, sign-extended
+/// (CPU32RM 4.4, JMP; 3.4.3).
+const JMP_ABSOLUTE_WORD: u32 = 0x4ef8;
+/// JMP (xxx).L: the address in the long word that follows.
+const JMP_ABSOLUTE_LONG: u32 = 0x4ef9;
 
 /// What ends a [`Cpu::run_limited`] besides what ends a [`Cpu::run_for`].
 ///
@@ -66,6 +83,18 @@ pub struct Limits {
     /// An address: the run ends when PC reaches it at an instruction
     /// boundary, before an interrupt is taken or a hook called there.
     pub reach: Option<Address>,
+    /// Whether the run ends at a self-loop ([`End::SelfLoop`]): an
+    /// instruction that branches to itself, BRA with a displacement of
+    /// -2 (8, 16 or 32 bits) or JMP (xxx).W or (xxx).L of its own
+    /// address (CPU32RM 4.4, BRA, JMP), as firmware idles waiting for
+    /// an interrupt.  Looked for at each instruction boundary once no
+    /// interrupt is due there (one due is taken first), before the
+    /// code and block hooks, with SR's T1 and T0 clear (a traced loop
+    /// takes a trace exception each time round); the instruction is
+    /// not executed, and is read with no cycle from the core's memory
+    /// (one a peripheral serves is not looked at).  DBcc to itself
+    /// counts down, so it is not one.
+    pub self_loop: bool,
 }
 
 /// Why a fault that stopped the run was one.
@@ -190,11 +219,17 @@ pub enum End {
         /// PC, where its processing begins when the run goes on.
         pc: Address,
     },
+    /// PC at a self-loop, with [`Limits::self_loop`]: the loop not
+    /// executed.
+    SelfLoop {
+        /// The loop's address.
+        pc: Address,
+    },
 }
 
 /// A short lowercase name for each way a limited run ends, as
 /// [`Stop`]'s: its stop's name, or `reached`, `instructions`, `steps`,
-/// `fault`, `intercepted` or `exception`.  The detail a variant holds
+/// `self-loop`, `fault`, `intercepted` or `exception`.  The detail a variant holds
 /// (the fault, the exception) is not part of it.
 impl fmt::Display for End {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -206,6 +241,7 @@ impl fmt::Display for End {
             Self::Fault(_) => formatter.write_str("fault"),
             Self::Intercepted(_) => formatter.write_str("intercepted"),
             Self::Exception { .. } => formatter.write_str("exception"),
+            Self::SelfLoop { .. } => formatter.write_str("self-loop"),
         }
     }
 }
@@ -618,6 +654,33 @@ impl Cpu {
     /// first, as on the CPU32's 16-bit bus.
     pub const fn set_long_bus(&mut self, whole: bool) {
         self.long_bus = whole;
+    }
+
+    /// Whether the instruction at PC is a self-loop
+    /// ([`Limits::self_loop`]), untraced, read from the core's memory
+    /// with no cycle.
+    #[cold]
+    #[inline(never)]
+    pub(super) fn at_self_loop(&self) -> bool {
+        let pc = self.registers.pc;
+        if pc.is_odd() || self.registers.sr() & (status::T1 | status::T0) != 0 {
+            return false;
+        }
+        let space = Space::of(self.registers.program_space());
+        let word = |offset: u32, size| self.memory.peek(space, pc.offset(offset), size);
+        match word(0, Size::Word) {
+            Some(BRA_SELF_BYTE) => true,
+            Some(BRA_WORD) => {
+                word(2, Size::Word).map(|word| Size::Word.sign_extend(word))
+                    == Some(SELF_DISPLACEMENT)
+            }
+            Some(BRA_LONG) => word(2, Size::Long) == Some(SELF_DISPLACEMENT),
+            Some(JMP_ABSOLUTE_WORD) => {
+                word(2, Size::Word).map(|word| Size::Word.sign_extend(word)) == Some(pc.0)
+            }
+            Some(JMP_ABSOLUTE_LONG) => word(2, Size::Long) == Some(pc.0),
+            _ => false,
+        }
     }
 
     /// Whether the registers are kept as each instruction begins.

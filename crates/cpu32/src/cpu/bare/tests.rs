@@ -5,6 +5,7 @@ use std::rc::Rc;
 use super::End;
 use super::FaultCause;
 use super::Intercepted;
+use super::LimitedRun;
 use super::Limits;
 use super::TakeExceptionError;
 use crate::cpu::Halt;
@@ -274,6 +275,7 @@ fn an_end_prints_its_short_name() {
         (End::Reached, "reached"),
         (End::Instructions, "instructions"),
         (End::Steps, "steps"),
+        (End::SelfLoop { pc: Address(CODE) }, "self-loop"),
         (intercepted, "intercepted"),
     ];
     for (end, name) in names {
@@ -1533,4 +1535,99 @@ fn take_natively_once_takes_only_its_vector() {
     machine.cpu.take_natively_once(Vector::trap(0));
     assert_eq!(one(&mut machine), End::Instructions);
     assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+}
+
+/// BRA.S to itself: an 8-bit displacement of -2, from the opcode's
+/// address plus two (CPU32RM 4.4, BRA).
+const BRA_SELF: u16 = 0x60fe;
+
+/// A run of at most `instructions` that ends at a self-loop.
+fn to_self_loop(machine: &mut Machine, instructions: u64) -> LimitedRun {
+    machine.run_limited(Limits {
+        instructions: Some(instructions),
+        self_loop: true,
+        ..Limits::default()
+    })
+}
+
+#[test]
+fn a_branch_or_jump_to_itself_ends_a_run_that_asks_unexecuted() {
+    let at = CODE + 2;
+    let codes: [&[u16]; 5] = [
+        &[NOP, BRA_SELF],
+        // BRA.W, BRA.L
+        &[NOP, 0x6000, 0xfffe],
+        &[NOP, 0x60ff, 0xffff, 0xfffe],
+        // JMP (xxx).W, JMP (xxx).L (CPU32RM 4.4, JMP)
+        &[NOP, 0x4ef8, at as u16],
+        &[NOP, 0x4ef9, (at >> 16) as u16, at as u16],
+    ];
+    for code in codes {
+        let mut machine = machine(code);
+        let run = to_self_loop(&mut machine, 100);
+        assert_eq!(run.end, End::SelfLoop { pc: Address(at) }, "{code:x?}");
+        assert_eq!(machine.cpu.instructions(), 1, "{code:x?}: the loop not run");
+        assert_eq!(machine.cpu.registers.pc.0, at);
+        // the next run that asks ends at once
+        let run = to_self_loop(&mut machine, 100);
+        assert_eq!(
+            (run.end, run.cycles),
+            (End::SelfLoop { pc: Address(at) }, Cycles::ZERO)
+        );
+        assert_eq!(machine.cpu.instructions(), 1);
+    }
+}
+
+#[test]
+fn a_self_loop_runs_on_unasked_traced_or_branching_elsewhere() {
+    // not asked
+    let mut unasked = machine(&[BRA_SELF]);
+    let run = unasked.run_limited(Limits {
+        instructions: Some(10),
+        ..Limits::default()
+    });
+    assert_eq!(run.end, End::Instructions);
+    assert_eq!(unasked.cpu.instructions(), 10);
+    // BRA.S to the instruction before it: a loop, not a self-loop
+    let mut elsewhere = machine(&[NOP, 0x60fc]);
+    assert_eq!(to_self_loop(&mut elsewhere, 10).end, End::Instructions);
+    // traced: each time round takes a trace exception
+    let mut traced = machine(&[BRA_SELF]);
+    traced.cpu.registers.set_sr(status::S | status::T1);
+    assert_eq!(to_self_loop(&mut traced, 1).end, End::Instructions);
+    assert_eq!(traced.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
+fn an_interrupt_due_at_a_self_loop_is_taken_first() {
+    let level_3 = Vector::autovector(InterruptLevel::try_from(3).unwrap());
+    let pin = IrqPin::try_from(3).unwrap();
+    // masked: the CPU stays in its loop
+    let mut masked = machine(&[BRA_SELF]);
+    masked
+        .cpu
+        .registers
+        .set_sr(status::S | status::INTERRUPT_MASK);
+    masked.request_interrupt(pin, None);
+    assert_eq!(
+        to_self_loop(&mut masked, 10).end,
+        End::SelfLoop { pc: Address(CODE) }
+    );
+    // due: taken, and its handler's own self-loop ends the run
+    let mut due = machine(&[BRA_SELF]);
+    let handler = handle(&mut due, level_3, 0x4200);
+    due.poke_bytes(
+        Address(handler),
+        FunctionCode::SupervisorData,
+        &BRA_SELF.to_be_bytes(),
+    )
+    .unwrap();
+    due.request_interrupt(pin, None);
+    assert_eq!(
+        to_self_loop(&mut due, 10).end,
+        End::SelfLoop {
+            pc: Address(handler)
+        }
+    );
+    assert_eq!(frame(&due).1, CODE, "the loop not run before it");
 }
