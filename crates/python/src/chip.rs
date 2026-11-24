@@ -15,6 +15,7 @@ use mc683xx_cpu32::memory;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::BusCycleError;
 use mc683xx_mc68331::ChipTracing;
 use mc683xx_mc68331::DsackFault;
 use mc683xx_mc68331::Mc68331;
@@ -1184,10 +1185,8 @@ macro_rules! chip_methods {
                 function_code: FunctionCode,
             ) -> PyResult<Bound<'py, PyBytes>> {
                 let mut data = vec![0; length];
-                self.with_chip(py, |chip| {
-                    Ok(chip
-                        .peek_bytes(Address(address), function_code.into(), &mut data)
-                        .map_err(Error::from)?)
+                self.peeking(py, |chip| {
+                    chip.peek_bytes(Address(address), function_code.into(), &mut data)
                 })?;
                 Ok(PyBytes::new(py, &data))
             }
@@ -1195,7 +1194,8 @@ macro_rules! chip_methods {
             /// What `bus_read` would return now, without a cycle: a
             /// module's register as it holds it, memory's bytes, a
             /// peripheral's from its `peek`.  Raises `UnpeekableError`
-            /// where only a cycle can tell (a peripheral that declines).
+            /// where only a cycle can tell (a peripheral that declines),
+            /// and at once an exception the peripheral's `peek` raised.
             #[pyo3(signature = (address, size, function_code = FunctionCode::SupervisorData))]
             fn peek(
                 &self,
@@ -1205,11 +1205,7 @@ macro_rules! chip_methods {
                 function_code: FunctionCode,
             ) -> PyResult<u32> {
                 let size = cycle_size(size)?;
-                self.with_chip(py, |chip| {
-                    Ok(chip
-                        .peek(Address(address), size, function_code.into())
-                        .map_err(Error::from)?)
-                })
+                self.peeking(py, |chip| chip.peek(Address(address), size, function_code.into()))
             }
 
             /// Now, in system clocks.
@@ -1561,6 +1557,18 @@ impl Chip {
         call(&self.chip)
     }
 
+    /// `look` at the chip; an exception a peripheral raised in it is
+    /// raised before `look`'s error.
+    fn peeking<R>(
+        &self,
+        _py: Python<'_>,
+        look: impl FnOnce(&Mc68331) -> Result<R, BusCycleError>,
+    ) -> PyResult<R> {
+        let looked = look(&self.chip);
+        self.pending.check()?;
+        Ok(looked.map_err(Error::from)?)
+    }
+
     /// `call` with the chip, to change, and where its peripherals'
     /// exceptions wait.
     fn with_chip_mut<R>(
@@ -1593,7 +1601,21 @@ impl BoardChip {
         call: impl FnOnce(&Mc68331) -> PyResult<R>,
     ) -> PyResult<R> {
         let board = self.board.try_borrow(py)?;
-        call(board.board_chip())
+        call(board.board_chip().0)
+    }
+
+    /// `look` at the board's chip; an exception a peripheral raised in it
+    /// is raised before `look`'s error.
+    fn peeking<R>(
+        &self,
+        py: Python<'_>,
+        look: impl FnOnce(&Mc68331) -> Result<R, BusCycleError>,
+    ) -> PyResult<R> {
+        let board = self.board.try_borrow(py)?;
+        let (chip, pending) = board.board_chip();
+        let looked = look(chip);
+        pending.check()?;
+        Ok(looked.map_err(Error::from)?)
     }
 
     /// `call` with the board's chip, to change, and where the board's

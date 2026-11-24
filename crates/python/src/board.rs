@@ -1408,8 +1408,8 @@ impl BoardView {
     }
 
     /// The board's chip.
-    pub(crate) const fn board_chip(&self) -> &Mc68331 {
-        self.board.chip()
+    pub(crate) const fn board_chip(&self) -> (&Mc68331, &Pending) {
+        (self.board.chip(), &self.pending)
     }
 
     /// The board's chip, to change, and where the board's exceptions

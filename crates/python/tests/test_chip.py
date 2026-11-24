@@ -1382,6 +1382,25 @@ def test_host_cycle_mistakes():
         chip.peek(RAM_BASE, 2, 5)
 
 
+def test_a_peripheral_exception_in_a_peek_or_poke_is_raised_at_once():
+    class Raising(Recorder):
+        def peek(self, cycle, length):
+            return 1 // 0
+
+        def poke(self, cycle, data):
+            raise KeyError("no poke")
+
+    chip, _, _ = mapped(Raising())
+    with pytest.raises(ZeroDivisionError):
+        chip.peek(PERIPHERAL_BASE, 2)
+    with pytest.raises(ZeroDivisionError):
+        chip.peek_bytes(PERIPHERAL_BASE, 4)
+    with pytest.raises(KeyError):
+        chip.poke(PERIPHERAL_BASE, 2, 0)
+    with pytest.raises(KeyError):
+        chip.poke_bytes(PERIPHERAL_BASE, b"\x00")
+
+
 def test_a_peripheral_exception_is_raised_by_the_host_cycle():
     chip, _, _ = mapped(Broken())
     with pytest.raises(ZeroDivisionError):

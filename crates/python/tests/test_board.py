@@ -132,6 +132,23 @@ class Cells:
         return True
 
 
+class Raising(Cells):
+    """Cells whose peek fails."""
+
+    def peek(self, access: mc683xx.PeripheralAccess, length: int, moment: mc683xx.Moment) -> bytes | None:
+        raise KeyError("no peek")
+
+
+def test_a_board_peripheral_s_peek_exception_is_raised_at_once(tmp_path: Path) -> None:
+    program = store_word(CSBAR1, CS1_BAR) + store_word(CSOR1, CSOR_FAST)
+    (tmp_path / "rom.bin").write_bytes(rom(program))
+    (tmp_path / "board.toml").write_text(BOARD.split("[[peripheral]]")[0] + CELLS)
+    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"cells": Raising})
+    board.run_for(seconds=0.0001)
+    with pytest.raises(KeyError):
+        board.chip.peek_bytes(LATCH, 2)
+
+
 CELLS = """[[peripheral]]
 name = "cells"
 type = "cells"
