@@ -752,7 +752,7 @@ impl MachineView {
             .map(InterruptLevel::try_from)
             .transpose()
             .map_err(Error::from)?;
-        let (taken, fired, registers) = {
+        let (taken, mut fired, registers) = {
             let mut this = running(slf)?;
             let taken = this.machine.take_exception(Vector(vector), level);
             let fired = mem::take(&mut *this.queue.borrow_mut());
@@ -762,7 +762,7 @@ impl MachineView {
         let pending = slf.borrow().pending.clone();
         let dispatched = pending
             .check()
-            .and_then(|()| Self::dispatch(slf, slf.py(), fired, &registers));
+            .and_then(|()| Self::dispatch(slf, slf.py(), &mut fired, &registers));
         slf.borrow_mut().running = false;
         dispatched?;
         Ok(taken.map_err(Error::from)?)
@@ -1161,8 +1161,10 @@ impl MachineView {
                 this.machine.stop_request(),
             )
         };
+        // The queue the last turn emptied, its allocation kept for the next.
+        let mut spare = Vec::new();
         loop {
-            let (run, fired, registers) = {
+            let (run, mut fired, registers) = {
                 let mut this = slf.borrow_mut();
                 let limits = match budget.remaining(this.machine.cpu.instructions()) {
                     Ok(mut limits) => {
@@ -1176,7 +1178,7 @@ impl MachineView {
                     Err(end) => return Ok((budget.spent, end)),
                 };
                 let run = this.machine.run_limited(limits);
-                let fired = mem::take(&mut *this.queue.borrow_mut());
+                let fired = mem::replace(&mut *this.queue.borrow_mut(), mem::take(&mut spare));
                 let registers = if fired.is_empty() {
                     None
                 } else {
@@ -1188,9 +1190,10 @@ impl MachineView {
             let in_run_stop = in_run_stop.take();
             pending.check()?;
             let dispatched = match registers {
-                Some(registers) => Self::dispatch(slf, py, fired, &registers)?,
+                Some(registers) => Self::dispatch(slf, py, &mut fired, &registers)?,
                 None => Dispatched::Continue,
             };
+            spare = fired;
             let stop = stop_request.take();
             let requested = End::Stop(mc683xx_cpu32::Stop::Requested);
             if halt() {
@@ -1223,11 +1226,11 @@ impl MachineView {
     fn dispatch(
         slf: &Bound<'_, Self>,
         py: Python<'_>,
-        fired: Vec<Fired>,
+        fired: &mut Vec<Fired>,
         registers: &Registers,
     ) -> PyResult<Dispatched> {
         let mut stopped = None;
-        for (index, fired) in fired.into_iter().enumerate() {
+        for (index, fired) in fired.drain(..).enumerate() {
             // A hook removed by an earlier callable is not called; the
             // first has none before it, and no callable ran in the core
             // run that removes one.

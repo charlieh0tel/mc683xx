@@ -733,8 +733,8 @@ before the changes below and after them:
 | --- | --- | --- |
 | no hook | 37.6 M instructions/s | 36.6 M instructions/s |
 | code hook elsewhere | 34.2 M instructions/s | 31.7 M instructions/s |
-| no-op code hook, a call | 0.42 us | 0.29 us |
-| no-op write hook, a call | 0.50 us | 0.37 us |
+| no-op code hook, a call | 0.42 us | 0.28 us |
+| no-op write hook, a call | 0.50 us | 0.35 us |
 | write hook reading `registers['A7']`, a call | 5.39 us | 2.41 us |
 | write hook reading `register('A7')`, a call | | 0.92 us |
 | add and remove a code hook | 15.6 us | 15.8 us |
@@ -752,3 +752,4 @@ The changes:
   machine's (its pending exception, its stop request) are taken
   once a run, and the first hook a turn fired is not looked up
   again, as nothing can have removed it.
+- The queue of hooks fired keeps its allocation from turn to turn.
