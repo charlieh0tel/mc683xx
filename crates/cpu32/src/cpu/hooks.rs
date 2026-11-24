@@ -280,7 +280,9 @@ impl Cpu {
     /// with no cycle (`Memory::peek`, a debugger's read), nor a read its
     /// pages' permissions refuse, a fault whose answer would be
     /// discarded.  Its cycles follow, timed as the pages time them; the
-    /// read hooks see each with the value the copy gave it.  If it stops the run, the instruction completes first.
+    /// read hooks see each with the value the copy gave it.  Its pages
+    /// leave the fast path for reads, fetches included, not writes.  If
+    /// it stops the run, the instruction completes first.
     pub fn add_pre_read_hook(
         &mut self,
         range: RangeInclusive<Address>,

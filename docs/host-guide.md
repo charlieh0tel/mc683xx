@@ -1225,8 +1225,8 @@ and the invalid hooks see it as `Protected`.  That holds on pages a
 peripheral serves too: the cycle faults before the peripheral sees
 it, so a read-only peripheral needs no bus error of its own.  Hooks and permissions
 outlive the chip's remaps.  Hooks cost little when absent; a read or
-write hook makes its pages leave the fast path, a pre-write hook for
-writes alone, a pre-read hook not at all.  The GDB stub
+write hook makes its pages leave the fast path, a pre-read hook for
+reads alone (fetches included), a pre-write hook for writes alone.  The GDB stub
 (`mc683xx-gdb`, `docs/gdb.md`) sets its breakpoints, watchpoints and
 steps as hooks like these.
 

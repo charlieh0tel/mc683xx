@@ -443,14 +443,20 @@ fn a_pre_read_hook_skips_a_read_its_page_s_permissions_refuse() {
 }
 
 #[test]
-fn a_pre_read_hook_slows_no_page_and_is_removed() {
+fn a_pre_read_hook_slows_its_page_s_reads_alone_and_is_removed() {
     let mut cpu = prepared(&[NOP], &[]);
     let page = DATA + PAGE_BYTES;
     let id = cpu.add_pre_read_hook(Address(page)..=Address(page), |_, _, _| {
         ControlFlow::Continue(())
     });
     let word = |cpu: &Cpu, at| cpu.memory.read(Space::Supervisor, Address(at), Size::Word);
-    assert!(word(&cpu, page).is_some());
+    assert!(word(&cpu, page).is_none());
+    assert!(word(&cpu, DATA).is_some());
+    assert!(
+        cpu.memory
+            .write(Space::Supervisor, Address(page), Size::Word, 0)
+            .is_some()
+    );
     assert!(cpu.has_hook(id));
     assert!(cpu.remove_hook(id));
     assert!(!cpu.has_hook(id));

@@ -2428,12 +2428,21 @@ Adversarial review (2026-11-01):
   refuse, a fault, as its answer would be discarded.  The cycles
   follow, timed by their pages, shown to the read hooks with the
   served values.  Per range, removed by `remove_hook`, as the other
-  memory hooks.  Pages with one stay on the fast path: an operand read
-  checks one flag, set while any pre-read hook is installed, then the
-  pages' bits; a run with none costs that flag: `core/move_indirect`
-  +0.5%, `core/move_postincrement` no change detected,
-  `core/move_displacement` +0.3%, `core/move_indexed` +1.2%, before
-  and after.  Not for fetches (code hooks are theirs), nor a
+  memory hooks.  Cost when absent, as pre-write's (sc batch 5): an
+  operand read first tries the fast tables, inline, and checks the
+  flag set while any pre-read hook is installed only where they miss,
+  so pages with a pre-read hook leave the fast path for reads,
+  fetches included (not writes).  Before, the flag was checked ahead
+  of the fast path and such pages stayed on it, at `core/move_indirect`
+  +0.5%, `core/move_indexed` +1.2%.  Before and after the change (two
+  interleaved runs on one pinned core, on a shared machine, so +-2% is
+  noise): `core/move_indirect` -2.5% and +1.4%, `core/move_displacement`
+  -1.9% and +1.4%, `core/move_indexed` +0.5% and +2.5%,
+  `core/move_immediate_absolute` +0.2%, `core/move_postincrement` -3%,
+  `core/add_to_memory` +1.0%, `core/tst` -1.0%, `core/cmpi` -2.2%,
+  `core/btst_immediate` no change; `core/nop` and `core/moveq`, which
+  read no operand, +3% to +7%, with `run_instructions` the same size:
+  placement.  Not for fetches (code hooks are theirs), nor a
   look with no cycle (`Memory::peek`, a debugger's read).  Python's
   `PendingRead.peek(address, length)` lends the memory to the callable
   for its call alone, through a scoped thread-local (`scoped-tls`, no
@@ -2473,7 +2482,7 @@ Adversarial review (2026-11-01):
   flag set while any pre-write hook is installed only where they miss
   (a page with a hook, permissions or the bus's, a long across pages),
   so pages with a pre-write hook leave the fast path for writes (not
-  reads).  The flag checked before the fast path, as pre-read's is,
+  reads).  The flag checked before the fast path, as pre-read's was,
   cost the write kernels 4% to 10% (`core/pea_displacement` +8%,
   `core/clr_indirect` +6%): not adopted.  As adopted, before and after
   (two interleaved runs on one pinned core): `core/move_indirect`

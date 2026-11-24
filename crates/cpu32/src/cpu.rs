@@ -1569,6 +1569,35 @@ impl Core<'_> {
         function_code: FunctionCode,
         cycle: BusCycleKind,
     ) -> Result<u32, Fault> {
+        if function_code.is_memory_space() && (size == Size::Byte || !address.is_odd()) {
+            let space = Space::of(function_code);
+            let read = if size == Size::Long {
+                self.cpu.memory.read_long(space, address)
+            } else {
+                let at = self.cpu.memory.mask(address);
+                self.cpu.memory.read(space, at, size)
+            };
+            if let Some((value, stall)) = read {
+                self.cpu.stall += stall;
+                return Ok(value);
+            }
+        }
+        self.slow_access_read(address, size, function_code, cycle)
+    }
+
+    /// [`access_read`](Self::access_read) where the fast tables do not
+    /// serve it all (a page with a hook, permissions or the bus's, or a
+    /// long across pages): first the pre-read hooks, if any is
+    /// installed, then its cycles, reading what they answered.  Out of
+    /// line, so the fast path checks no flag.
+    #[inline(never)]
+    fn slow_access_read(
+        &mut self,
+        address: Address,
+        size: Size,
+        function_code: FunctionCode,
+        cycle: BusCycleKind,
+    ) -> Result<u32, Fault> {
         if cycle == BusCycleKind::Read
             && self.cpu.pre_reading
             && !self.cpu.long_operand

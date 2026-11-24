@@ -406,10 +406,12 @@ impl Slab {
         let entry = self.tables[space][index];
         let slow = self.watched[index] & (watch::READ | watch::WRITE) != 0
             || self.permissions[space][index] != Permissions::ALL;
-        // a pre-write hook's page leaves the fast path for writes alone
+        // a pre-read or pre-write hook's page leaves the fast path for
+        // reads (fetches included) or writes alone
+        let slow_read = slow || self.watched[index] & watch::PRE_READ != 0;
         let slow_write = slow || self.watched[index] & watch::PRE_WRITE != 0;
         self.fast[space][index] = Page {
-            read: if slow { None } else { entry.read },
+            read: if slow_read { None } else { entry.read },
             write: if slow_write { None } else { entry.write },
             ..entry
         };
