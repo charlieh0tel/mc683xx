@@ -38,11 +38,11 @@ use std::convert::Infallible;
 
 #[cfg(feature = "board")]
 use mc683xx_board::condition::Conditions;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::bare::End;
-use mc683xx_cpu32::cpu::bare::Limits;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::End;
+use mc683xx_cpu32::Limits;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_target::Address;
 use mc683xx_target::Entry;
@@ -92,7 +92,7 @@ pub enum TargetRun {
     /// ([`Cpu::set_stop_on_fault`]), or, on the bare CPU, an exception
     /// its host handles or stops at did.
     ///
-    /// [`Cpu::set_stop_on_fault`]: mc683xx_cpu32::cpu::Cpu::set_stop_on_fault
+    /// [`Cpu::set_stop_on_fault`]: mc683xx_cpu32::Cpu::set_stop_on_fault
     Fault,
     /// A stop condition held ([`Target::conditions`]).
     Condition,

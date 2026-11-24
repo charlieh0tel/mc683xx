@@ -7,9 +7,9 @@ use std::ops::ControlFlow;
 
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Halt;
-use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Halt;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_peripherals::at28c64b::At28c64b;
 use mc683xx_target::Address;

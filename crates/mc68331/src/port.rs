@@ -5,7 +5,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::Cycle;
 
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::sim::ports::PortName;
@@ -160,7 +160,7 @@ impl fmt::Display for OutputChange {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::cycles::Cycle;
+    use mc683xx_cpu32::Cycle;
     use mc683xx_modules::pins::PortLevels;
 
     use super::OutputChange;

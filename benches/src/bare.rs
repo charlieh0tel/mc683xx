@@ -1,13 +1,13 @@
 //! The core alone: a CPU32 on 256 Kbytes of zero-wait RAM in both
 //! spaces, nothing on the bus and no interrupts.
 
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
-use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::Read;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::Acknowledged;
 use mc683xx_cpu32::interrupt::InterruptLevel;

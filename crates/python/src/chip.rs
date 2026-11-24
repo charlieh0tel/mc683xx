@@ -6,11 +6,10 @@ use std::ops::RangeInclusive;
 use std::rc::Rc;
 
 use crate::function_code::FunctionCode;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory;
 use mc683xx_cpu32::memory::MemoryKind;
@@ -423,7 +422,7 @@ impl ChipBuilder {
     }
 }
 
-/// Why a run ended (Rust's `cpu::Stop`).  A variant's value is a field
+/// Why a run ended (Rust's `mc683xx_cpu32::Stop`).  A variant's value is a field
 /// named for it, not Rust's `_0`.
 #[pyclass(module = "mc683xx", frozen, eq, hash, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -517,7 +516,7 @@ impl Entry {
     }
 }
 
-impl From<Stop> for cpu::Stop {
+impl From<Stop> for mc683xx_cpu32::Stop {
     fn from(stop: Stop) -> Self {
         match stop {
             Stop::Budget() => Self::Budget,
@@ -535,7 +534,7 @@ impl From<Stop> for cpu::Stop {
 impl Stop {
     /// Rust's `Display`.
     fn __str__(&self) -> String {
-        cpu::Stop::from(*self).to_string()
+        mc683xx_cpu32::Stop::from(*self).to_string()
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
@@ -551,26 +550,26 @@ impl Stop {
     }
 }
 
-impl TryFrom<cpu::Stop> for Stop {
+impl TryFrom<mc683xx_cpu32::Stop> for Stop {
     type Error = Error;
 
     /// The stop, or [`Error::Unmapped`] naming one the bindings do not
     /// know.
-    fn try_from(stop: cpu::Stop) -> Result<Self, Error> {
+    fn try_from(stop: mc683xx_cpu32::Stop) -> Result<Self, Error> {
         Ok(match stop {
-            cpu::Stop::Budget => Self::Budget(),
-            cpu::Stop::Stopped => Self::Stopped(),
-            cpu::Stop::Halted(halt) => Self::Halted {
+            mc683xx_cpu32::Stop::Budget => Self::Budget(),
+            mc683xx_cpu32::Stop::Stopped => Self::Stopped(),
+            mc683xx_cpu32::Stop::Halted(halt) => Self::Halted {
                 halt: halt.try_into()?,
             },
-            cpu::Stop::Hook(id) => Self::Hook {
+            mc683xx_cpu32::Stop::Hook(id) => Self::Hook {
                 hook: HookIdView(id),
             },
-            cpu::Stop::Requested => Self::Requested(),
-            cpu::Stop::Background(entry) => Self::Background {
+            mc683xx_cpu32::Stop::Requested => Self::Requested(),
+            mc683xx_cpu32::Stop::Background(entry) => Self::Background {
                 entry: entry.into(),
             },
-            cpu::Stop::Fault => Self::Fault(),
+            mc683xx_cpu32::Stop::Fault => Self::Fault(),
             other => return Err(Error::run_end(other)),
         })
     }
@@ -591,7 +590,7 @@ pub(crate) enum Halt {
     DoubleBusFault,
 }
 
-impl From<Halt> for cpu::Halt {
+impl From<Halt> for mc683xx_cpu32::Halt {
     fn from(halt: Halt) -> Self {
         match halt {
             Halt::DoubleBusFault => Self::DoubleBusFault,
@@ -599,16 +598,16 @@ impl From<Halt> for cpu::Halt {
     }
 }
 
-enum_names!(Halt, cpu::Halt);
+enum_names!(Halt, mc683xx_cpu32::Halt);
 
-impl TryFrom<cpu::Halt> for Halt {
+impl TryFrom<mc683xx_cpu32::Halt> for Halt {
     type Error = Error;
 
     /// The halt, or [`Error::Unmapped`] naming one the bindings do not
     /// know.
-    fn try_from(halt: cpu::Halt) -> Result<Self, Error> {
+    fn try_from(halt: mc683xx_cpu32::Halt) -> Result<Self, Error> {
         match halt {
-            cpu::Halt::DoubleBusFault => Ok(Self::DoubleBusFault),
+            mc683xx_cpu32::Halt::DoubleBusFault => Ok(Self::DoubleBusFault),
             other => Err(Error::run_end(other)),
         }
     }
@@ -671,7 +670,7 @@ impl From<ResetCause> for sim::ResetCause {
     }
 }
 
-/// A run's outcome (Rust's `cpu::Run`).
+/// A run's outcome (Rust's `mc683xx_cpu32::Run`).
 #[pyclass(module = "mc683xx", frozen, eq, hash, get_all)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Run {
@@ -681,10 +680,10 @@ pub(crate) struct Run {
     stop: Stop,
 }
 
-impl TryFrom<cpu::Run> for Run {
+impl TryFrom<mc683xx_cpu32::Run> for Run {
     type Error = Error;
 
-    fn try_from(run: cpu::Run) -> Result<Self, Error> {
+    fn try_from(run: mc683xx_cpu32::Run) -> Result<Self, Error> {
         Ok(Self {
             cycles: run.cycles.clocks(),
             stop: run.stop.try_into()?,
@@ -1415,10 +1414,12 @@ impl Chip {
             self.pending.check()?;
             let now = self.chip.now();
             let quantized = now >= target
-                && (matches!(run.stop, cpu::Stop::Budget | cpu::Stop::Stopped)
-                    || (halted && matches!(run.stop, cpu::Stop::Halted(_))));
+                && (matches!(
+                    run.stop,
+                    mc683xx_cpu32::Stop::Budget | mc683xx_cpu32::Stop::Stopped
+                ) || (halted && matches!(run.stop, mc683xx_cpu32::Stop::Halted(_))));
             if !quantized || now >= end {
-                return Ok(cpu::Run::new(now - start, run.stop).try_into()?);
+                return Ok(mc683xx_cpu32::Run::new(now - start, run.stop).try_into()?);
             }
             py.check_signals()?;
         }

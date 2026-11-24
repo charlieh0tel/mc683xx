@@ -2,7 +2,7 @@
 //! selects a bus cycle asserts, from CSPAR0-1, CSBARBT, CSBAR0-10,
 //! CSORBT and CSOR0-10, and how each would end the cycle.
 
-use mc683xx_cpu32::bus::PortSize;
+use mc683xx_cpu32::PortSize;
 use mc683xx_target::Address;
 use mc683xx_target::FunctionCode;
 use mc683xx_target::Size;
@@ -539,8 +539,8 @@ mod tests {
     use crate::chip_select::ChipSelect;
     use crate::chip_select::Number;
     use crate::chip_select::Termination;
-    use mc683xx_cpu32::bus::PortSize;
-    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_cpu32::Cycles;
+    use mc683xx_cpu32::PortSize;
     use mc683xx_target::FunctionCode;
     use mc683xx_target::Size;
 

@@ -14,7 +14,7 @@ use mc683xx_bench::board::Board;
 use mc683xx_bench::board::KERNELS;
 use mc683xx_bench::board::Load;
 use mc683xx_bench::kernel::Kernel;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 
 /// Runs of one instruction each per iteration of `short_runs`.
 const SHORT_RUNS: u64 = 1000;

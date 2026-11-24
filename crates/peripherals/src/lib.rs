@@ -80,7 +80,7 @@ mod spi_mode;
 /// power-on.  No stock part is on the chip's clocks.
 #[cfg(test)]
 const SYSTEM_CLOCK: mc683xx_board::time::TimeBase =
-    mc683xx_board::time::TimeBase::steady(mc683xx_cpu32::frequency::Frequency::from_hz(16_777_216));
+    mc683xx_board::time::TimeBase::steady(mc683xx_cpu32::Frequency::from_hz(16_777_216));
 
 use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;

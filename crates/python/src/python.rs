@@ -6,8 +6,8 @@ use std::io;
 use std::path::Path;
 
 use mc683xx_board::description::LoadError;
-use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::flat::PeekError;
+use mc683xx_cpu32::state::StateError;
 use mc683xx_mc68331::host::BusCycleError;
 use pyo3::Bound;
 use pyo3::IntoPyObject;

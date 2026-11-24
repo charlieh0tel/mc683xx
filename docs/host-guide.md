@@ -57,8 +57,8 @@ memory).  Out of reset only CSBOOT decodes, the first Mbyte from
 address 0 (MC68331UM Table 4-24), so the boot ROM goes there.
 
 ```rust
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::Cycles;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_examples::firmware;
@@ -93,7 +93,7 @@ fn main() -> Result<(), BuildError> {
   assignments; MC68331UM 4.6.3) and the clock source, a synthesizer
   reference (`ClockSource::synthesizer(reference)`) or, with MODCLK
   low, an external clock (`ClockSource::external(frequency)`), each a
-  `Frequency` (`mc683xx_cpu32::frequency`, nanohertz:
+  `Frequency` (`mc683xx_cpu32`, nanohertz:
   `Frequency::from_hz` and `hz`, `from_nanohertz` and `nanohertz`) of
   whole hertz: either refuses a fraction
   with `ClockSourceError::FractionalHertz`, since the chip's snapshot
@@ -132,7 +132,7 @@ fn main() -> Result<(), BuildError> {
 
 The host can also reach the core: `cpu()` gives the `Cpu` to read;
 `registers_mut()` its registers to change; `cpu_control()` a
-`cpu::control::CpuControl`, which adds and removes its hooks, sets its
+`CpuControl`, which adds and removes its hooks, sets its
 pages' permissions (see Hooks), changes its registers and reads the
 rest.  Neither hands out the core's memory map, which the chip keeps
 in step with its decode, nor runs the core apart from the chip.
@@ -198,7 +198,7 @@ pins too; reloading is emulator-only as well.
 
 ```rust
 use mc683xx_target::Address;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_modules::sim::reset::ResetScope;
@@ -249,8 +249,8 @@ interrupt it raises at its event waits at most one instruction.  The
 watchdog's resets are taken as they come.
 
 ```rust
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 
 let program = [firmware::prologue(), firmware::stop(firmware::UNMASKED).to_vec()].concat();
@@ -280,7 +280,7 @@ host-ordered iteration in the chip.  A host keeps it so by making its
 inputs (pins, frames, edges) at chip times, not wall-clock ones.
 
 ```rust
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::Cycle;
 use mc683xx_examples::firmware;
 
 let chip = || {
@@ -299,7 +299,7 @@ assert_eq!(one.instructions(), two.instructions());
 
 ### Stopping from a peripheral
 
-A peripheral holds the `StopRequest` (`mc683xx_cpu32::bus`, the one type
+A peripheral holds the `StopRequest` (`mc683xx_cpu32`, the one type
 the bare machine's `stop_request` gives too) its builder gave and
 calls `request`;
 the run stops once the instruction whose cycle asked ends, between
@@ -315,15 +315,15 @@ does not stop for it.  One made in a host bus cycle (Host bus cycles)
 is dropped, with no run to stop.
 
 ```rust
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::state::Stateless;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::state::Stateless;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_examples::firmware;
-use mc683xx_cpu32::bus::StopRequest;
+use mc683xx_cpu32::StopRequest;
 
 /// Stops the run at each write: a breakpoint on a port.
 #[derive(Debug)]
@@ -363,9 +363,9 @@ assert_eq!(chip.run_for(Cycles::from_clocks(100)).stop, Stop::Budget);
 
 A host peripheral implements `mc683xx_cpu32::peripheral::MappedPeripheral`,
 `mc683xx_modules::peripheral::Timed` (`impl Timed for X {}` if it keeps no time)
-and `mc683xx_cpu32::cpu::state::Save`, which says whether it saves (see
+and `mc683xx_cpu32::state::Save`, which says whether it saves (see
 Save and restore): both its methods if it saves, `impl Stateless for X {}`
-(`mc683xx_cpu32::cpu::state`) if it has no state, or
+(`mc683xx_cpu32::state`) if it has no state, or
 `mc683xx_cpu32::unsavable!(X, "its role")` if it cannot save.  `Save`
 has no defaults, so that a peripheral never saves what its own `restore`
 refuses.
@@ -422,7 +422,7 @@ refuses.
 
 - `save() -> Result<Vec<u8>, StateError>`: its state, in its own
   format, which it versions (`encode` and `decode` in
-  `mc683xx_cpu32::cpu::state` do).
+  `mc683xx_cpu32::state` do).
 - `restore(&[u8])`: puts back what `save` gave, and must take its own
   `save`'s bytes; it refuses, unchanged, what no run of it could save.
 
@@ -491,9 +491,9 @@ answers with its own DSACK after two wait states, and acknowledges
 on CS10:
 
 ```rust
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
@@ -595,13 +595,13 @@ A model beside the CPU (a GPS engine, a timer chip, a 1 PPS source)
 reports its next event, and the run syncs there:
 
 ```rust
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::state::Save;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
@@ -720,9 +720,9 @@ chip's BKPT, `Cpu32Target::halt` and `go` on the board, the nets told
 what the chip's outputs did (PLAN.md, Background debug mode).
 
 ```rust
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::peripheral::Timed;
@@ -818,7 +818,7 @@ data bits as on the line, LSB first, eight or nine, parity included;
 for a break.
 
 ```rust
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::QSM;
@@ -884,7 +884,7 @@ Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
 
 ```rust
 use mc683xx_target::Address;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_target::FunctionCode;
 use mc683xx_target::Size;
 use mc683xx_mc68331::port::Port;
@@ -959,8 +959,8 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
 
 ```rust
 use mc683xx_target::Address;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_target::FunctionCode;
 use mc683xx_target::Size;
 use mc683xx_examples::firmware;
@@ -1043,8 +1043,8 @@ order and each with its own `now`, where the CPU next sees the QSPI.
 
 ```rust
 use mc683xx_target::Address;
-use mc683xx_cpu32::cpu::state::Stateless;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::state::Stateless;
+use mc683xx_cpu32::Cycles;
 use mc683xx_target::FunctionCode;
 use mc683xx_target::Size;
 use mc683xx_modules::peripheral::SpiPeripheral;
@@ -1106,7 +1106,7 @@ returns what the QSPI drove on MISO (`Shifted { miso, driven }`).
 
 ```rust
 use mc683xx_target::Address;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_target::FunctionCode;
 use mc683xx_target::Size;
 use mc683xx_examples::firmware;
@@ -1194,9 +1194,9 @@ use std::ops::ControlFlow;
 use std::rc::Rc;
 
 use mc683xx_target::Address;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::hooks::Invalid;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::hooks::Invalid;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Permissions;
 use mc683xx_cpu32::memory::Space;
@@ -1287,7 +1287,7 @@ interrupt sources with one IARB, which the manual leaves
 unpredictable.
 
 ```rust
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
 use mc683xx_mc68331::event::Event;
@@ -1347,7 +1347,7 @@ first.  None moves the chip's time or shows in the trace.
 
 ```rust
 use mc683xx_target::Address;
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::Cycle;
 use mc683xx_target::FunctionCode;
 use mc683xx_target::Size;
 use mc683xx_examples::firmware;
@@ -1415,7 +1415,7 @@ peripheral's snapshot in the order added, an error naming the peripheral by its
 first address (`the peripheral at 0xf00000: ...`).
 
 ```rust
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 
 let program = [firmware::prologue(), firmware::delay(1000).to_vec()].concat();
@@ -1717,7 +1717,7 @@ use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::Stop;
 
 let text = r#"
 version = 1

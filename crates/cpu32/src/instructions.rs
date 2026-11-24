@@ -348,10 +348,10 @@ fn line_f(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
 pub(crate) mod tests {
     use super::build;
     use super::table;
+    use crate::BusError;
+    use crate::PortSize;
     use crate::bus::Bus;
     use crate::bus::BusAccess;
-    use crate::bus::BusError;
-    use crate::bus::PortSize;
     use crate::bus::Read;
     use crate::cpu::Cpu;
     use crate::cpu::Run;

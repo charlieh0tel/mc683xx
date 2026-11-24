@@ -12,17 +12,17 @@ use std::fmt;
 use std::rc::Rc;
 use std::str::FromStr;
 
-use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Run;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::Run;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::PeripheralId;
+use mc683xx_cpu32::state::StateError;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Diversion;
 use mc683xx_mc68331::chip::Mc68331;
@@ -848,10 +848,10 @@ mod tests {
         assert_eq!(names, ["PE0", "PE7", "PF0", "PQS0", "PGP0", "PC0"]);
     }
 
-    use mc683xx_cpu32::cpu::state::StateError;
-    use mc683xx_cpu32::cpu::state::decode;
-    use mc683xx_cpu32::cpu::state::encode;
     use mc683xx_cpu32::interrupt::IrqPin;
+    use mc683xx_cpu32::state::StateError;
+    use mc683xx_cpu32::state::decode;
+    use mc683xx_cpu32::state::encode;
     use mc683xx_mc68331::port::Port;
 
     use super::PORT_C_PINS;

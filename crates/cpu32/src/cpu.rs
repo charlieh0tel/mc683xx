@@ -7,9 +7,9 @@
 use std::fmt;
 use std::mem;
 
+use crate::BusError;
 use crate::bus::Bus;
 use crate::bus::BusAccess;
-use crate::bus::BusError;
 use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::effective_address::Altered;
@@ -43,17 +43,17 @@ use mc683xx_target::Entry;
 use mc683xx_target::FunctionCode;
 use mc683xx_target::Size;
 
-pub mod bare;
-pub mod control;
-pub mod hooks;
-pub mod state;
+pub(crate) mod bare;
+pub(crate) mod control;
+mod hooks;
+mod state;
 
 use bare::Bare;
 use bare::Limits;
 
-use hooks::HookId;
-use hooks::Hooks;
-use hooks::Resume;
+use crate::cpu::hooks::Hooks;
+use crate::cpu::hooks::Resume;
+use crate::hooks::HookId;
 
 /// Why a run ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,11 +300,11 @@ impl Cpu {
     /// use mc683xx_target::Address;
     /// use mc683xx_cpu32::bus::Bus;
     /// use mc683xx_cpu32::bus::BusAccess;
-    /// use mc683xx_cpu32::bus::BusError;
+    /// use mc683xx_cpu32::BusError;
     /// use mc683xx_cpu32::bus::Read;
-    /// use mc683xx_cpu32::cpu::Cpu;
-    /// use mc683xx_cpu32::cycles::Cycle;
-    /// use mc683xx_cpu32::cycles::Cycles;
+    /// use mc683xx_cpu32::Cpu;
+    /// use mc683xx_cpu32::Cycle;
+    /// use mc683xx_cpu32::Cycles;
     /// use mc683xx_cpu32::interrupt::Acknowledge;
     /// use mc683xx_cpu32::interrupt::Acknowledged;
     /// use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -1985,9 +1985,9 @@ mod tests {
     use super::Cpu;
     use super::Halt;
     use super::Stop;
+    use crate::BusError;
     use crate::bus::Bus;
     use crate::bus::BusAccess;
-    use crate::bus::BusError;
     use crate::bus::Read;
     use crate::cycles::Cycle;
     use crate::cycles::Cycles;

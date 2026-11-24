@@ -2,10 +2,10 @@
 
 use std::ops::ControlFlow;
 
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::ChipSelect;

@@ -2,8 +2,8 @@
 
 use mc683xx_board::peripheral::Transfer;
 use mc683xx_board::spi::Mode;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
 use mc683xx_modules::peripheral::QspiClock;
 
 /// A frame's first transfer in SPI mode `number`, of no bits

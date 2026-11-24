@@ -8,8 +8,8 @@
 use std::fmt::Display;
 
 use mc683xx_board::condition::Conditions;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycles;
 use mc683xx_gdb::SessionError;
 use mc683xx_gdb::connection;
 use mc683xx_gdb::connection::PollError;

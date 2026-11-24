@@ -2,8 +2,8 @@
 
 use std::fmt;
 
-use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::hooks::ExceptionEntry;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::ChipSelect;
@@ -189,7 +189,7 @@ pub struct ChipTracing {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::cycles::Cycle;
+    use mc683xx_cpu32::Cycle;
     use mc683xx_modules::chip_select::ChipSelect;
     use mc683xx_modules::sim::ResetCause;
     use mc683xx_target::Address;

@@ -1,9 +1,9 @@
 //! Memory at a fixed address, on no chip select: emulator-only.
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::state::StateError;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::sim::ResetCause;

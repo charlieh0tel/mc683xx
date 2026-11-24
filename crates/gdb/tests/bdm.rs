@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_gdb::Ending;
 use mc683xx_gdb::SessionError;
@@ -438,7 +438,7 @@ fn a_breakpoint_the_program_wrote_over_is_the_program_s() {
 /// a module of its own, where the stub's `Target` does not shadow the
 /// chip's `Cpu32Target`.
 mod unsteppable {
-    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_cpu32::Cycles;
     use mc683xx_gdb::bdm::Bdm;
     use mc683xx_gdb::target::AccessError;
     use mc683xx_gdb::target::Target;

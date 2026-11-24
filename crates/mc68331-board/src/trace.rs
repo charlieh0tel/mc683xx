@@ -15,8 +15,8 @@
 
 use std::fmt;
 
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_modules::peripheral::ClockPhase;
@@ -432,11 +432,11 @@ impl fmt::Display for Record {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::cpu::Stop;
-    use mc683xx_cpu32::cycles::Cycle;
+    use mc683xx_cpu32::Cycle;
+    use mc683xx_cpu32::Stop;
 
+    use mc683xx_cpu32::Frequency;
     use mc683xx_cpu32::exception::Vector;
-    use mc683xx_cpu32::frequency::Frequency;
     use mc683xx_cpu32::interrupt::InterruptLevel;
     use mc683xx_modules::peripheral::ClockPhase;
     use mc683xx_modules::peripheral::ClockPolarity;

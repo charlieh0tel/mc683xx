@@ -375,9 +375,9 @@ fn moves(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
 mod tests {
     use super::LPSTOP;
     use super::LPSTOP_EXTENSION;
+    use crate::BusError;
     use crate::bus::Bus;
     use crate::bus::BusAccess;
-    use crate::bus::BusError;
     use crate::bus::LPSTOP_BROADCAST;
     use crate::bus::Read;
     use crate::cpu::Cpu;

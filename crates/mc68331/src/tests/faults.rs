@@ -1,13 +1,13 @@
 //! Fault stops on the chip ([`CpuControl::set_stop_on_fault`]).
 //!
-//! [`CpuControl::set_stop_on_fault`]: mc683xx_cpu32::cpu::control::CpuControl::set_stop_on_fault
+//! [`CpuControl::set_stop_on_fault`]: mc683xx_cpu32::CpuControl::set_stop_on_fault
 
 use std::ops::ControlFlow;
 
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::bare::FaultCause;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::FaultCause;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::exception::BusCycleKind;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_modules::chip_select::ChipSelect;

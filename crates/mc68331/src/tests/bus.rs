@@ -1,11 +1,10 @@
 //! Peripherals on no chip select, which take cycles by their own decode
 //! of the address bus.
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::state::Stateless;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -13,6 +12,7 @@ use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
+use mc683xx_cpu32::state::Stateless;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::peripheral::BusDecode;

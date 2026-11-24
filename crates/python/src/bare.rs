@@ -16,24 +16,23 @@ use std::ops::ControlFlow;
 
 use std::rc::Rc;
 
-use mc683xx_cpu32::cpu;
-use mc683xx_cpu32::cpu::bare::End;
-use mc683xx_cpu32::cpu::bare::FaultCause;
-use mc683xx_cpu32::cpu::bare::FaultStop;
-use mc683xx_cpu32::cpu::bare::Intercepted;
-use mc683xx_cpu32::cpu::bare::Limits;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cpu::hooks::Control;
-use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
-use mc683xx_cpu32::cpu::hooks::ExceptionReturn;
-use mc683xx_cpu32::cpu::hooks::HookId;
-use mc683xx_cpu32::cpu::hooks::Instruction;
-use mc683xx_cpu32::cpu::hooks::InvalidAccess;
-use mc683xx_cpu32::cpu::hooks::MemoryAccess;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::End;
+use mc683xx_cpu32::FaultCause;
+use mc683xx_cpu32::FaultStop;
+use mc683xx_cpu32::Intercepted;
+use mc683xx_cpu32::Limits;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::flat;
 use mc683xx_cpu32::flat::Machine;
+use mc683xx_cpu32::hooks::Control;
+use mc683xx_cpu32::hooks::ExceptionEntry;
+use mc683xx_cpu32::hooks::ExceptionReturn;
+use mc683xx_cpu32::hooks::HookId;
+use mc683xx_cpu32::hooks::Instruction;
+use mc683xx_cpu32::hooks::InvalidAccess;
+use mc683xx_cpu32::hooks::MemoryAccess;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
@@ -203,7 +202,7 @@ fn unknown_fault_cause(cause: FaultCause) -> Error {
 }
 
 /// A fault that stopped a run (`set_stop_on_fault`), as `End.Fault`
-/// and a chip's `fault_stop` carry it (Rust's `bare::FaultStop`).
+/// and a chip's `fault_stop` carry it (Rust's `FaultStop`).
 #[pyclass(
     name = "FaultStop",
     module = "mc683xx",
@@ -281,7 +280,7 @@ impl FaultStopView {
 }
 
 /// An exception an instruction raised that an intercept hook answers:
-/// nothing stacked, PC at the instruction (Rust's `bare::Intercepted`).
+/// nothing stacked, PC at the instruction (Rust's `Intercepted`).
 #[pyclass(name = "Intercepted", module = "mc683xx", frozen)]
 #[derive(Debug)]
 pub(crate) struct InterceptedView(Intercepted);
@@ -309,7 +308,7 @@ impl InterceptedView {
     }
 }
 
-/// How a limited run ended (Rust's `bare::End`).  No run ends for an
+/// How a limited run ended (Rust's `End`).  No run ends for an
 /// intercepted exception: `run_limited` answers it through the intercept
 /// hooks, or the CPU takes it natively.  A variant's value is a field
 /// named for it, not Rust's `_0`.
@@ -399,7 +398,7 @@ impl EndView {
     }
 }
 
-/// A limited run's outcome (Rust's `bare::LimitedRun`).
+/// A limited run's outcome (Rust's `LimitedRun`).
 #[pyclass(name = "LimitedRun", module = "mc683xx", frozen, eq, hash, get_all)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct LimitedRunView {
@@ -445,7 +444,7 @@ impl MachineView {
         &mut self,
         callable: &Bound<'_, PyAny>,
         context: impl Fn(&T) -> Context + 'static,
-        install: impl FnOnce(&mut cpu::Cpu, Box<dyn FnMut(&T) -> Control>) -> HookId,
+        install: impl FnOnce(&mut mc683xx_cpu32::Cpu, Box<dyn FnMut(&T) -> Control>) -> HookId,
     ) -> PyResult<HookIdView> {
         if !callable.is_callable() {
             return Err(PyTypeError::new_err("a hook must be callable"));
@@ -524,7 +523,9 @@ impl Budget {
             None => None,
         };
         let cycles = match self.cycles {
-            Some(cycles) if self.spent >= cycles => return Err(End::Stop(cpu::Stop::Budget)),
+            Some(cycles) if self.spent >= cycles => {
+                return Err(End::Stop(mc683xx_cpu32::Stop::Budget));
+            }
             Some(cycles) => Some(Cycles::from_clocks(cycles - self.spent)),
             None => None,
         };
@@ -1078,7 +1079,7 @@ impl MachineView {
                 None => Dispatched::Continue,
             };
             let stop = slf.borrow().machine.stop_request().take();
-            let requested = End::Stop(cpu::Stop::Requested);
+            let requested = End::Stop(mc683xx_cpu32::Stop::Requested);
             if halt() {
                 return Ok((budget.spent, requested));
             }
@@ -1089,11 +1090,11 @@ impl MachineView {
                         return Ok((budget.spent, requested));
                     }
                 }
-                (End::Stop(cpu::Stop::Hook(_)), Dispatched::Continue) if !stop => {}
+                (End::Stop(mc683xx_cpu32::Stop::Hook(_)), Dispatched::Continue) if !stop => {}
                 // A quantum's end, or the run's, which `remaining` finds.
                 (End::Instructions, Dispatched::Continue) if !stop => py.check_signals()?,
                 (_, Dispatched::Stop(hook)) => {
-                    return Ok((budget.spent, End::Stop(cpu::Stop::Hook(hook))));
+                    return Ok((budget.spent, End::Stop(mc683xx_cpu32::Stop::Hook(hook))));
                 }
                 (_, Dispatched::Continue) if stop => return Ok((budget.spent, requested)),
                 (end, Dispatched::Continue) => return Ok((budget.spent, end)),
@@ -1231,14 +1232,13 @@ mod tests {
     use std::ops::ControlFlow;
 
     use mc683xx_board::peripheral::Role;
-    use mc683xx_cpu32::cpu;
-    use mc683xx_cpu32::cpu::bare::End;
-    use mc683xx_cpu32::cpu::bare::FaultCause;
-    use mc683xx_cpu32::cpu::bare::Limits;
-    use mc683xx_cpu32::cpu::hooks::Invalid;
-    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_cpu32::Cycles;
+    use mc683xx_cpu32::End;
+    use mc683xx_cpu32::FaultCause;
+    use mc683xx_cpu32::Limits;
     use mc683xx_cpu32::exception::Vector;
     use mc683xx_cpu32::flat::Machine;
+    use mc683xx_cpu32::hooks::Invalid;
     use mc683xx_cpu32::memory::PAGE_BYTES;
     use mc683xx_mc68331::gpt::pwm;
     use mc683xx_modules::sim;
@@ -1357,13 +1357,13 @@ mod tests {
             .cpu
             .add_code_hook(Address(0)..=Address(0), |_| ControlFlow::Continue(()));
         let stops = [
-            cpu::Stop::Budget,
-            cpu::Stop::Stopped,
-            cpu::Stop::Halted(cpu::Halt::DoubleBusFault),
-            cpu::Stop::Hook(hook),
-            cpu::Stop::Requested,
-            cpu::Stop::Background(Entry::Breakpoint),
-            cpu::Stop::Fault,
+            mc683xx_cpu32::Stop::Budget,
+            mc683xx_cpu32::Stop::Stopped,
+            mc683xx_cpu32::Stop::Halted(mc683xx_cpu32::Halt::DoubleBusFault),
+            mc683xx_cpu32::Stop::Hook(hook),
+            mc683xx_cpu32::Stop::Requested,
+            mc683xx_cpu32::Stop::Background(Entry::Breakpoint),
+            mc683xx_cpu32::Stop::Fault,
         ];
         let mapped: Vec<_> = stops.into_iter().map(Stop::try_from).collect();
         assert!(matches!(mapped[0], Ok(Stop::Budget())));
@@ -1387,7 +1387,7 @@ mod tests {
         ] {
             assert!(FaultCauseKind::try_from(cause).is_ok());
         }
-        assert!(Halt::try_from(cpu::Halt::DoubleBusFault).is_ok());
+        assert!(Halt::try_from(mc683xx_cpu32::Halt::DoubleBusFault).is_ok());
         for cause in sim::ResetCause::ALL {
             assert_eq!(sim::ResetCause::from(ResetCause::from(cause)), cause);
         }

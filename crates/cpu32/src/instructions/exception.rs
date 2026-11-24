@@ -457,9 +457,9 @@ mod tests {
     use super::RTE;
     use super::TRAP;
     use super::TRAPV;
+    use crate::BusError;
     use crate::bus::Bus;
     use crate::bus::BusAccess;
-    use crate::bus::BusError;
     use crate::bus::Read;
     use crate::cpu::Cpu;
     use crate::cpu::Halt;

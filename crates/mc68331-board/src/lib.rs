@@ -67,7 +67,7 @@
 //! use mc683xx_board::registry::Environment;
 //! use mc683xx_board::registry::Registry;
 //! use mc683xx_board::time::Time;
-//! use mc683xx_cpu32::cpu::Stop;
+//! use mc683xx_cpu32::Stop;
 //! use mc683xx_mc68331::chip::Mc68331;
 //!
 //! let text = r#"
@@ -111,7 +111,7 @@
 //! [`SpiPeripheral`]: mc683xx_modules::peripheral::SpiPeripheral
 //! [`MappedAdapter`]: adapter::MappedAdapter
 //! [`SpiAdapter`]: adapter::SpiAdapter
-//! [`Save`]: mc683xx_cpu32::cpu::state::Save
+//! [`Save`]: mc683xx_cpu32::state::Save
 //! [`Edges`]: spi::Edges
 //! [`Slave`]: spi::Slave
 //! [`exchange`]: spi::exchange

@@ -264,8 +264,8 @@ pub fn exchange<S: Slave + ?Sized>(transfer: Transfer, edges: Edges, slave: &mut
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::cycles::Cycles;
-    use mc683xx_cpu32::frequency::Frequency;
+    use mc683xx_cpu32::Cycles;
+    use mc683xx_cpu32::Frequency;
     use mc683xx_modules::peripheral::ClockPhase;
     use mc683xx_modules::peripheral::ClockPolarity;
     use mc683xx_modules::peripheral::QspiClock;

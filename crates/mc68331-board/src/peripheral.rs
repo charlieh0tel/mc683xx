@@ -12,10 +12,10 @@ use std::any::Any;
 use std::fmt;
 use std::str::FromStr;
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::state::StateError;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::floating_miso;
@@ -886,9 +886,9 @@ mod tests {
     use super::ParseLaneError;
     use super::ParseRoleError;
     use super::Role;
-    use mc683xx_cpu32::cycles::Cycle;
-    use mc683xx_cpu32::cycles::Cycles;
-    use mc683xx_cpu32::frequency::Frequency;
+    use mc683xx_cpu32::Cycle;
+    use mc683xx_cpu32::Cycles;
+    use mc683xx_cpu32::Frequency;
     use mc683xx_modules::chip_select::ChipSelect;
     use mc683xx_modules::peripheral::ClockPhase;
     use mc683xx_modules::peripheral::ClockPolarity;

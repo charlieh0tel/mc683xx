@@ -2,13 +2,13 @@ use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 
-use mc683xx_cpu32::cpu::state::Layer;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode_layer;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cpu::state::encode_layer;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::state::Layer;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode_layer;
+use mc683xx_cpu32::state::encode;
+use mc683xx_cpu32::state::encode_layer;
 use mc683xx_mc68331::port::Port;
 
 use super::Board;

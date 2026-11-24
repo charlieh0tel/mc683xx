@@ -235,7 +235,7 @@ public whole or private whole, so every public item keeps one path
   tables from its own wiring rather than take the snapshot's.
   Every peripheral attached to the chip (`Builder::peripheral`, `unwired_peripheral`) or the
   bare `Machine` (`add_peripheral`) says whether it saves:
-  `mc683xx_cpu32::cpu::state::Save` is a bound of the attach, as `Timed`
+  `mc683xx_cpu32::state::Save` is a bound of the attach, as `Timed`
   is, both its methods required, so that no peripheral saves what its own
   `restore` refuses: a peripheral gives both,
   `mc683xx_cpu32::unsavable!(X, "its role")` is one that cannot save
@@ -836,7 +836,7 @@ chip beside `Mc68331`.
   `"PC"`, `"SR"`, `"CCR"`, `"USP"`, `"SSP"`, `"VBR"`, `"SFC"`, `"DFC"`.
   Memories and peripherals are the numbers `Builder` returned.
 - **The chip:** `run_for(budget) -> Run(cycles, stop)`, Rust's
-  `cpu::Run`, its `Stop` a class per variant as Rust's (`Stop.Budget()`,
+  `Run`, its `Stop` a class per variant as Rust's (`Stop.Budget()`,
   `Stop.Halted(halt)`, `Stop.Hook(hook)`, ...),
   `run_until(deadline)`, `bus_read`, `bus_write`, `peek` (`size` in
   bytes, `function_code` a `FunctionCode`, `SUPERVISOR_DATA` by default; `BusError`, `UnpeekableError`),
@@ -1025,7 +1025,7 @@ chip beside `Mc68331`.
   `write(BusCycle, value)`; it returns the peripheral's number) and
   `remove_peripheral(id)`, registers as the chip's,
   `run_limited(begin=, reach=, instructions=, cycles=)`,
-  `stop_request()` (a `StopRequest`, Rust's `bus::StopRequest`: a
+  `stop_request()` (a `StopRequest`, Rust's `StopRequest`: a
   callable's request ends the run `Stop.Requested()` once the callables have
   run, one left from before a run is withdrawn as it starts),
   `add_intercept_hook(callable, vectors)` (a `HookId`; the hooks
@@ -1400,7 +1400,7 @@ hand.  The keys are in `docs/board-files.md`.
   (`adapter::MappedAdapter`, `SpiAdapter`) that converts cycles and times
   through the board's `TimeBase`, so smartclock's models serve both a
   hand-built chip and a board.  An adapted model implements
-  `mc683xx_cpu32::cpu::state::Save`, as every peripheral does, and is in
+  `mc683xx_cpu32::state::Save`, as every peripheral does, and is in
   the board's snapshot: a trait, not serde, so a model keeps its own
   format and versions it, and one with state it cannot serialize (a
   file handle) is `unsavable!`, which the board's save names.  One

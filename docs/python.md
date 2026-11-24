@@ -324,7 +324,7 @@ bits: `write_register` raises `OverflowError` for a value outside 0 to
 ## Running
 
 `run_for(budget)` runs for `budget` system clocks and returns a `Run`,
-Rust's `cpu::Run`: `cycles` and `stop`, a `Stop`, whose variants are
+Rust's `Run`: `cycles` and `stop`, a `Stop`, whose variants are
 classes as Rust's are (`Stop.Budget()`, `Stop.Stopped()`,
 `Stop.Halted(halt)`, `Stop.Hook(hook)` with the `HookId` that stopped
 it, `Stop.Requested()`, `Stop.Background(entry)` with the `Entry`
@@ -1464,7 +1464,7 @@ assert bare.read_register("D0") == 6
   BKPT's acknowledge among them, is a bus error, so BKPT is an illegal
   instruction.
 - **Runs:** `run_limited(begin=None, reach=None, instructions=None,
-  cycles=None) -> LimitedRun`, Rust's `bare::LimitedRun`: `cycles` and
+  cycles=None) -> LimitedRun`, Rust's `LimitedRun`: `cycles` and
   `end`.  `reach` is checked at each instruction
   boundary, before an interrupt is taken or the hooks there are
   called; `begin` sets PC and forgets a hook stop's skip, so the

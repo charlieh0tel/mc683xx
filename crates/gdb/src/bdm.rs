@@ -16,7 +16,7 @@
 use std::thread;
 use std::time::Duration;
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
 use mc683xx_target::FunctionCode;

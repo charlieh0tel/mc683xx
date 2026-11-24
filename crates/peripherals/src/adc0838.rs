@@ -29,9 +29,9 @@ use mc683xx_board::spi;
 use mc683xx_board::spi::Edge;
 use mc683xx_board::spi::Edges;
 use mc683xx_board::spi::Slave;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -466,8 +466,8 @@ mod tests {
     use mc683xx_board::signal::Signal;
     use mc683xx_board::time::Moment;
     use mc683xx_board::time::Time;
-    use mc683xx_cpu32::cpu::state::StateError;
-    use mc683xx_cpu32::cpu::state::encode;
+    use mc683xx_cpu32::state::StateError;
+    use mc683xx_cpu32::state::encode;
 
     use super::Adc0838;
     use super::CHANNELS;

@@ -5,13 +5,13 @@
 
 use std::any::Any;
 
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
+use mc683xx_cpu32::state::Save;
 use mc683xx_target::Address;
 use mc683xx_target::FunctionCode;
 
@@ -125,7 +125,7 @@ pub struct QspiClock {
     /// System clocks in an SCK period, 2 x SPBR (QSMRM equation 4-1).
     pub period: Cycles,
     /// The system clock's frequency (MC68331UM 4.3).
-    #[serde(with = "mc683xx_cpu32::frequency::hertz")]
+    #[serde(with = "mc683xx_cpu32::hertz")]
     pub system_clock: Frequency,
 }
 

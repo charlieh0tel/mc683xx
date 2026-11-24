@@ -6,15 +6,15 @@
 
 use std::ops::ControlFlow;
 
-use mc683xx_cpu32::cpu::hooks::Control;
-use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
-use mc683xx_cpu32::cpu::hooks::ExceptionReturn;
-use mc683xx_cpu32::cpu::hooks::HookId;
-use mc683xx_cpu32::cpu::hooks::Instruction;
-use mc683xx_cpu32::cpu::hooks::Invalid;
-use mc683xx_cpu32::cpu::hooks::InvalidAccess;
-use mc683xx_cpu32::cpu::hooks::MemoryAccess;
 use mc683xx_cpu32::exception;
+use mc683xx_cpu32::hooks::Control;
+use mc683xx_cpu32::hooks::ExceptionEntry;
+use mc683xx_cpu32::hooks::ExceptionReturn;
+use mc683xx_cpu32::hooks::HookId;
+use mc683xx_cpu32::hooks::Instruction;
+use mc683xx_cpu32::hooks::Invalid;
+use mc683xx_cpu32::hooks::InvalidAccess;
+use mc683xx_cpu32::hooks::MemoryAccess;
 use mc683xx_cpu32::registers::Registers;
 use pyo3::Bound;
 use pyo3::PyAny;

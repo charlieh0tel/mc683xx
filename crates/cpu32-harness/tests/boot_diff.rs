@@ -34,10 +34,10 @@ use std::path::PathBuf;
 
 use cpu32_harness::layout;
 use cpu32_harness::layout::FIRMWARE;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;

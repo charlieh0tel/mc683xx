@@ -741,7 +741,7 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   that may change the model (power-on, `reset`; a `MappedAdapter`'s
   `read`, `write`, `advance`; a `SpiAdapter`'s transfer, select and
   release) and drives the ports the type was registered with from what
-  the model shows (a strobe's level), or stops the run.  The model implements `mc683xx_cpu32::cpu::state::Save` (`save()
+  the model shows (a strobe's level), or stops the run.  The model implements `mc683xx_cpu32::state::Save` (`save()
   -> bytes`, `restore(bytes)`, in its own versioned format), so it is in
   the board's snapshot, its bytes inside the adapter's own versioned
   snapshot; one that cannot save is `mc683xx_cpu32::unsavable!`, and the
@@ -783,7 +783,7 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   of its own, which on the chip's base would fall behind at each reset.
 - `time::Time` (picoseconds since power-on) and `time::Span` (a span
   of it, picoseconds: `Time + Span`, `Time - Time` a `Span`),
-  `mc683xx_cpu32::frequency::Frequency`
+  `mc683xx_cpu32::Frequency`
   (nanohertz, `from_nanohertz` and `nanohertz`; the chip's clocks too:
   `TimeBase::frequency`),
   `time::Phase` (cycles, 10^21 units each, `from_units` and `units`) and `time::Clock`:

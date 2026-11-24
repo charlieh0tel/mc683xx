@@ -25,17 +25,17 @@ use std::rc::Rc;
 use std::rc::Weak;
 use std::time::Duration;
 
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
-use mc683xx_cpu32::cpu::hooks::HookId;
-use mc683xx_cpu32::cpu::state::Layer;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode_layer;
-use mc683xx_cpu32::cpu::state::encode_layer;
-use mc683xx_cpu32::cpu::state::restore_each;
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::hooks::ExceptionEntry;
+use mc683xx_cpu32::hooks::HookId;
 use mc683xx_cpu32::memory::Space;
+use mc683xx_cpu32::state::Layer;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode_layer;
+use mc683xx_cpu32::state::encode_layer;
+use mc683xx_cpu32::state::restore_each;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::ResetCause;
@@ -263,7 +263,7 @@ pub struct BoardRun {
 impl BoardRun {
     /// A run that ended at `now` for `stop`: a board's own, or a host's
     /// stand-in for one (a debugger that ended the session).  Time
-    /// first, as [`Run::new`](mc683xx_cpu32::cpu::Run::new).
+    /// first, as [`Run::new`](mc683xx_cpu32::Run::new).
     #[must_use]
     pub const fn new(now: Time, stop: Stop) -> Self {
         Self { now, stop }

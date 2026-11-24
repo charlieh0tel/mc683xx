@@ -11,13 +11,13 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use cpu32_oracle::state::State;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::Read;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::memory::Backing;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::PAGE_BYTES;

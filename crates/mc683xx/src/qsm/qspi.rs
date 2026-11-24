@@ -8,9 +8,9 @@
 
 use std::fmt;
 
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
 
 use super::port::PortQs;
 use crate::peripheral::AnySpiPeripheral;
@@ -229,7 +229,7 @@ pub(super) struct Qspi {
     /// SPSR's CPTQP.
     completed: u8,
     /// The QSPI RAM.
-    #[serde(with = "mc683xx_cpu32::cpu::state::byte_array")]
+    #[serde(with = "mc683xx_cpu32::state::byte_array")]
     pub(super) ram: [u8; RAM_BYTES],
     /// The queue.
     queue: Queue,
@@ -245,7 +245,7 @@ pub(super) struct Qspi {
     #[serde(skip)]
     peripheral: Option<Box<dyn AnySpiPeripheral>>,
     /// The system clock's frequency, as the board last set it.
-    #[serde(with = "mc683xx_cpu32::frequency::hertz")]
+    #[serde(with = "mc683xx_cpu32::hertz")]
     system_clock: Frequency,
     /// The serial clock the peripheral was last told.
     told: Option<QspiClock>,

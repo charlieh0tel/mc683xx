@@ -4,12 +4,12 @@
 use std::mem;
 
 use cpu32_oracle::state::State;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Halt;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::bus::Bus;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Halt;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Exception;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;

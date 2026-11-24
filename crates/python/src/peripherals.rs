@@ -1,7 +1,7 @@
 //! The chip's pins as Python sees them: SCI frames, GPT pin names,
 //! PWM channels and outputs, and the ports.
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_mc68331::gpt::Input;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm;

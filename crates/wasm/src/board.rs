@@ -22,7 +22,7 @@ use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Span;
-use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::Stop;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
 use wasm_bindgen::JsCast;
@@ -515,8 +515,8 @@ fn tag(value: &JsValue) -> Option<String> {
 
 #[cfg(test)]
 mod stop_tests {
-    use mc683xx_cpu32::cpu::Halt;
-    use mc683xx_cpu32::cpu::Stop;
+    use mc683xx_cpu32::Halt;
+    use mc683xx_cpu32::Stop;
     use mc683xx_target::Entry;
 
     use super::stop_name;

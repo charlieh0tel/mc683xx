@@ -4,7 +4,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::state::StateError;
 
 /// Why the runner could not run, or finish, a board.
 #[derive(Debug, thiserror::Error)]

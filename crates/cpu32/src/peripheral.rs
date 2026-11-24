@@ -7,11 +7,11 @@
 
 use std::fmt;
 
-use crate::bus::BusError;
-use crate::bus::PortSize;
-use crate::cpu::state::Save;
+use crate::BusError;
+use crate::PortSize;
 use crate::cycles::Cycle;
 use crate::cycles::Cycles;
+use crate::state::Save;
 use mc683xx_target::Address;
 use mc683xx_target::FunctionCode;
 use mc683xx_target::Size;

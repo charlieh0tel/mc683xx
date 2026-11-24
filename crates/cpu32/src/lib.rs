@@ -10,7 +10,7 @@
 //!
 //! ```
 //! use mc683xx_target::Address;
-//! use mc683xx_cpu32::cpu::bare::Limits;
+//! use mc683xx_cpu32::Limits;
 //! use mc683xx_cpu32::flat::ADDRESS_BITS;
 //! use mc683xx_cpu32::flat::Machine;
 //! use mc683xx_cpu32::memory::PAGE_BYTES;
@@ -40,16 +40,42 @@
 )]
 
 pub mod bus;
-pub mod cpu;
-pub mod cycles;
+mod bus_error;
+mod cpu;
+mod cycles;
 mod effective_address;
 pub mod exception;
 mod flags;
 pub mod flat;
-pub mod frequency;
+mod frequency;
+#[doc(hidden)]
+pub mod hertz;
+pub mod hooks;
 mod instructions;
 pub mod interrupt;
 pub mod memory;
 pub mod peripheral;
 pub mod registers;
+pub mod state;
+mod stop_request;
 mod timing;
+
+pub use bus_error::BusError;
+pub use bus_error::PortSize;
+pub use cpu::Cpu;
+pub use cpu::Halt;
+pub use cpu::Run;
+pub use cpu::Stop;
+pub use cpu::bare::End;
+pub use cpu::bare::FaultCause;
+pub use cpu::bare::FaultStop;
+pub use cpu::bare::Intercepted;
+pub use cpu::bare::LimitedRun;
+pub use cpu::bare::Limits;
+pub use cpu::bare::TakeExceptionError;
+pub use cpu::control::CpuControl;
+pub use cycles::Cycle;
+pub use cycles::Cycles;
+pub use frequency::Frequency;
+pub use frequency::NANOHERTZ_PER_HERTZ;
+pub use stop_request::StopRequest;

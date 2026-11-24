@@ -23,7 +23,7 @@ use std::str::FromStr;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
-use mc683xx_cpu32::bus::PortSize;
+use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::PAGE_BYTES;

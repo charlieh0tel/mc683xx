@@ -1,4 +1,4 @@
-use mc683xx_cpu32::bus::PortSize;
+use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::peripheral::BusDecode;

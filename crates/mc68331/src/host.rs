@@ -6,8 +6,8 @@
 //! cycle is real, with its side effects, at the chip's time; a peek is
 //! a look without them, where one can be had.
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::Unserved;
 use mc683xx_modules::module;

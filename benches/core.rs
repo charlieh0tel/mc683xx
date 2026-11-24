@@ -9,8 +9,8 @@ use criterion::criterion_group;
 use criterion::criterion_main;
 use mc683xx_bench::bare;
 use mc683xx_bench::kernel;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 
 /// Runs of one instruction each per iteration of `short_runs`.
 const SHORT_RUNS: u64 = 1000;

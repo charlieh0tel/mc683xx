@@ -9,23 +9,23 @@ use std::fmt;
 use std::mem;
 use std::rc::Rc;
 
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::End;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::Halt;
+use mc683xx_cpu32::Limits;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::Run;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::Read;
-use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Halt;
-use mc683xx_cpu32::cpu::Run;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::bare::End;
-use mc683xx_cpu32::cpu::bare::Limits;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::hooks::ExceptionEntry;
 use mc683xx_cpu32::interrupt::Acknowledged;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::Interrupts;
@@ -596,7 +596,7 @@ impl Builder {
 
     /// A peripheral on `pins`, which it tells apart by
     /// [`BusCycle::select`](mc683xx_cpu32::peripheral::BusCycle::select).
-    /// It says whether it saves ([`Save`](mc683xx_cpu32::cpu::state::Save)): the chip's snapshot holds
+    /// It says whether it saves ([`Save`](mc683xx_cpu32::state::Save)): the chip's snapshot holds
     /// every peripheral and model, in the order added.
     ///
     /// # Errors
@@ -672,7 +672,7 @@ impl Builder {
 
     /// `peripheral` on the QSPI's pins, replacing any: it sees each
     /// transfer and the levels on PCS\[3:0\] (QSMRM 4).  It says
-    /// whether it saves ([`Save`](mc683xx_cpu32::cpu::state::Save)), as a peripheral does: the chip's snapshot
+    /// whether it saves ([`Save`](mc683xx_cpu32::state::Save)), as a peripheral does: the chip's snapshot
     /// holds it.
     pub fn set_qspi<D: AnySpiPeripheral>(&mut self, peripheral: D) {
         self.board

@@ -20,9 +20,9 @@ use mc683xx_target::Size;
 use mc683xx_target::SystemRegister;
 use mc683xx_target::Unsupported;
 
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::bare::Limits;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Limits;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::registers::BackgroundOnly;
 use mc683xx_cpu32::registers::status;
 
@@ -80,7 +80,7 @@ impl Mc68331 {
     /// nothing left pending, and this is false: only RESET restarts it
     /// (CPU32RM 6.2.2).
     ///
-    /// [`Cpu::set_breakpoint_pending`]: mc683xx_cpu32::cpu::Cpu::set_breakpoint_pending
+    /// [`Cpu::set_breakpoint_pending`]: mc683xx_cpu32::Cpu::set_breakpoint_pending
     pub fn assert_breakpoint(&mut self) -> bool {
         let entered = self.cpu.assert_breakpoint();
         if entered {

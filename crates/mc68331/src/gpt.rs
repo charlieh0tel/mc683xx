@@ -14,13 +14,13 @@ use std::iter;
 use std::mem;
 use std::str::FromStr;
 
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use mc683xx_modules::module::Block;
 use mc683xx_modules::module::InterruptRequest;
 use mc683xx_modules::module::Module;

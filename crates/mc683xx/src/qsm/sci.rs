@@ -10,9 +10,9 @@
 use std::collections::VecDeque;
 use std::mem;
 
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::Cycle;
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 
 use super::port::Txd;
 

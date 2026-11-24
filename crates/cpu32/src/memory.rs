@@ -12,7 +12,7 @@ use std::ops::Range;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 
-use crate::bus::PortSize;
+use crate::PortSize;
 use crate::bus::stall;
 use crate::cycles::Cycles;
 use mc683xx_target::Address;
@@ -1185,7 +1185,7 @@ mod tests {
     use super::Permissions;
     use super::Space;
     use super::Unserved;
-    use crate::bus::PortSize;
+    use crate::PortSize;
     use crate::cycles::Cycles;
     use mc683xx_target::Address;
     use mc683xx_target::Size;

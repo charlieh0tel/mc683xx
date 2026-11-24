@@ -1,7 +1,7 @@
 //! BDM's serial interface: `Mc68331::bdm_exchange` (CPU32RM 7.2.7,
 //! 7.2.8).
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;

@@ -7,10 +7,10 @@
 
 use std::any::Any;
 
-use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
+use mc683xx_cpu32::state::Save;
 use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::MemoryId;
 use mc683xx_modules::chip_select::ChipSelect;

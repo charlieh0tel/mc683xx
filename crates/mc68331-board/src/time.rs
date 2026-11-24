@@ -18,11 +18,11 @@ use std::ops::Rem;
 use std::ops::Sub;
 use std::ops::SubAssign;
 
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::Cycle;
 
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
-use mc683xx_cpu32::frequency::NANOHERTZ_PER_HERTZ;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::NANOHERTZ_PER_HERTZ;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -745,7 +745,7 @@ pub struct TimeBase {
     /// Its time.
     time: Time,
     /// The clock's frequency from then, saved as its hertz.
-    #[serde(with = "mc683xx_cpu32::frequency::hertz")]
+    #[serde(with = "mc683xx_cpu32::hertz")]
     frequency: Frequency,
 }
 
@@ -870,7 +870,7 @@ impl Moment {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::cycles::Cycle;
+    use mc683xx_cpu32::Cycle;
 
     use super::Clock;
     use super::ClockHistory;
@@ -881,7 +881,7 @@ mod tests {
     use super::Span;
     use super::Time;
     use super::TimeBase;
-    use mc683xx_cpu32::frequency::Frequency;
+    use mc683xx_cpu32::Frequency;
 
     /// Ten megahertz, an OCXO's.
     const TEN_MHZ: Frequency = Frequency::from_hz(10_000_000);
