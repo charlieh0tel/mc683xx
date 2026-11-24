@@ -653,7 +653,8 @@ what the chip drives within a run comes back as timed changes.
   `Input.PGP0`-`Input.PGP7`, `Input.PAI` or `Input.PCLK` (Rust's
   `gpt::Input`, its `PortGp(pin)` a member per pin, as the pins are
   named: a deliberate difference); `pwm(Channel.A |
-  B)` (`Output.Level(level)`, `Output.Wave`, `Output.Clock`); `oc1()`
+  B)` (`Output.Level(level)`, `Output.Wave`, `Output.Clock`) and
+  `pwm_level(channel)`, the level on its pin now; `oc1()`
   (`Output.Clock` under CPROUT, else `Output.Level`);
   `take_pwm_changes() -> [(now, Channel, level)]` while
   `set_report_pwm_edges(channel, True)` asks (PPROUT's clock

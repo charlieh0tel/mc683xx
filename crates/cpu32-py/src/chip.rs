@@ -1198,6 +1198,12 @@ macro_rules! chip_methods {
                 self.with_chip(py, |chip| Ok(chip.oc1().try_into()?))
             }
 
+            /// The level on `channel`'s PWM pin now: PWMCNT's clock under
+            /// PPROUT (GPTRM 6.3.1), the PWM output otherwise.
+            fn pwm_level(&self, py: Python<'_>, channel: ChannelView) -> PyResult<bool> {
+                self.with_chip(py, |chip| Ok(chip.pwm_level(channel.into())))
+            }
+
             /// Calls `callback(Instruction)` before each instruction at an
             /// address from `begin` to `end`; a truthy result stops the run
             /// before it, and the next run executes it without calling the
