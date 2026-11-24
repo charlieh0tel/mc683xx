@@ -5,7 +5,6 @@
 
 use std::fmt;
 use std::ops::Range;
-use std::str::FromStr;
 
 use mc683xx_target::address::Address;
 
@@ -66,42 +65,15 @@ pub enum ElfPart {
     ProgramHeaders,
 }
 
-impl ElfPart {
-    /// Both parts.
-    const ALL: [Self; 2] = [Self::Header, Self::ProgramHeaders];
-
-    /// The part's name, as an error names it.
-    const fn name(self) -> &'static str {
-        match self {
-            Self::Header => "ELF header",
-            Self::ProgramHeaders => "program headers",
-        }
-    }
-}
-
 /// The part as an error names it.
 impl fmt::Display for ElfPart {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.name())
+        formatter.write_str(match self {
+            Self::Header => "ELF header",
+            Self::ProgramHeaders => "program headers",
+        })
     }
 }
-
-/// The part its name names, as [`ElfPart`]'s `Display` prints it.
-impl FromStr for ElfPart {
-    type Err = ParseElfPartError;
-
-    fn from_str(name: &str) -> Result<Self, ParseElfPartError> {
-        Self::ALL
-            .into_iter()
-            .find(|part| part.name() == name)
-            .ok_or_else(|| ParseElfPartError(name.to_owned()))
-    }
-}
-
-/// Text that names no part of an ELF file.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("no ELF part {0:?}")]
-pub struct ParseElfPartError(String);
 
 /// Why a file does not make an image.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -422,14 +394,9 @@ mod tests {
     }
 
     #[test]
-    fn parts_print_as_named_and_parse_back() {
-        for part in ElfPart::ALL {
-            assert_eq!(part.to_string().parse(), Ok(part));
-        }
-        assert_eq!(
-            "header".parse::<ElfPart>().unwrap_err().to_string(),
-            "no ELF part \"header\""
-        );
+    fn parts_print_as_an_error_names_them() {
+        assert_eq!(ElfPart::Header.to_string(), "ELF header");
+        assert_eq!(ElfPart::ProgramHeaders.to_string(), "program headers");
     }
 
     #[test]
