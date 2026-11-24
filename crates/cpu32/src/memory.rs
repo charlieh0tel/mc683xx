@@ -250,7 +250,7 @@ pub enum MemoryError {
 /// machine's or the chip's: not memory the core serves (nothing mapped
 /// there, or a peripheral's).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("{0} is not memory the core serves")]
+#[error("nothing serves {0}")]
 pub struct Unserved(pub Address);
 
 /// What a memory's regions hold, for tests that it frees what it

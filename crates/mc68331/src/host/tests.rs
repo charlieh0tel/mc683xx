@@ -349,7 +349,7 @@ fn the_host_sees_errors_by_kind() {
     let nowhere = BusCycleError::Unserved(Address(0x40_0000));
     assert_eq!(read(&mut chip, 0x40_0000, Size::Word), Err(nowhere));
     assert_eq!(peek(&chip, 0x40_0000, Size::Byte), Err(nowhere));
-    assert_eq!(nowhere.to_string(), "0x00400000 is not served by the chip");
+    assert_eq!(nowhere.to_string(), "nothing serves 0x00400000");
     // a long's second word, past the end
     assert_eq!(
         read(&mut chip, 0xfffe, Size::Long),
