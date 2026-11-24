@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use mc683xx_board::board::Board;
 
-use mc683xx_board::board::NetError;
+use mc683xx_board::board::NoNet;
 use mc683xx_board::builtin::EdgeCounter;
 use mc683xx_board::description::Description;
 use mc683xx_board::description::Options;
@@ -243,10 +243,10 @@ fn an_observer_is_detached_by_its_id() {
     run(&mut board);
     assert!(log.seen().iter().all(|(net, _, _)| net == "switch"));
     assert_eq!(log.seen().len(), 3);
-    assert!(matches!(
+    assert_eq!(
         board.observe("nowhere", log.observer()),
-        Err(NetError::Unknown(name)) if name == "nowhere"
-    ));
+        Err(NoNet("nowhere".to_owned()))
+    );
 }
 
 #[test]

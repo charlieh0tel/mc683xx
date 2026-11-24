@@ -181,7 +181,7 @@ impl<E> AccessError<E> {
 /// A target's own step ([`Target::native_step`]).
 pub trait NativeStep {
     /// The target's error.
-    type Error;
+    type Error: std::error::Error;
 
     /// One step: how it stopped, [`TargetRun::Background`] for a
     /// target under BDM control.

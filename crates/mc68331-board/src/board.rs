@@ -251,20 +251,21 @@ pub struct External {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct BoardRun {
-    /// Why: its time ran out ([`Stop::Budget`]), the CPU halted, a hook
-    /// stopped it, or the host or a peripheral asked ([`Stop::Requested`]).
-    pub stop: Stop,
     /// Board time at its end, never past the time it ran to, though
     /// the chip's last instruction may end past it.
     pub now: Time,
+    /// Why: its time ran out ([`Stop::Budget`]), the CPU halted, a hook
+    /// stopped it, or the host or a peripheral asked ([`Stop::Requested`]).
+    pub stop: Stop,
 }
 
 impl BoardRun {
-    /// A run that ended for `stop` at `now`: a board's own, or a host's
-    /// stand-in for one (a debugger that ended the session).
+    /// A run that ended at `now` for `stop`: a board's own, or a host's
+    /// stand-in for one (a debugger that ended the session).  Time
+    /// first, as [`Run::new`](mc683xx_cpu32::cpu::Run::new).
     #[must_use]
-    pub const fn new(stop: Stop, now: Time) -> Self {
-        Self { stop, now }
+    pub const fn new(now: Time, stop: Stop) -> Self {
+        Self { now, stop }
     }
 }
 
@@ -1597,6 +1598,14 @@ impl<C: Chip> Board<C> {
         self.reset_in = level;
     }
 
+    /// RESET driven by the board now:
+    /// [`reset_for`](Self::reset_for)`(`[`ResetCause::External`]`)`, BKPT
+    /// high as it rises, so background mode is disabled (CPU32RM 7.2.1).
+    /// Nothing while the board holds RESET low.
+    pub fn reset(&mut self) {
+        self.reset_for(ResetCause::External);
+    }
+
     /// A reset now for `cause`, as its source makes it
     /// ([`Chip::reset_for`]): [`ResetCause::External`] as the board's
     /// RESET asserted and released now, by the path a RESET net's edges
@@ -1743,7 +1752,7 @@ impl<C: Chip> Board<C> {
             };
             let clock = self.clocks.get(&pin).map_or_else(
                 || Clock::new(frequency, at),
-                |clock| clock.retuned(at, frequency),
+                |clock| clock.retuned(frequency, at),
             );
             self.clocks.insert(pin, clock);
             self.drive(&Source::Chip(pin), at, Signal::Clock(clock));
@@ -1983,16 +1992,16 @@ impl<C: Chip> Board<C> {
     ///
     /// # Errors
     ///
-    /// Taking nothing, if no net drives it ([`ReceiveError::Endpoint`]),
-    /// so a typo is not silently an endpoint that never receives.
-    pub fn take_received(&mut self, name: &str) -> Result<Vec<(Time, Signal)>, ReceiveError> {
+    /// Taking nothing, if no net drives it ([`NoReceiver`]), so a typo
+    /// is not silently an endpoint that never receives.
+    pub fn take_received(&mut self, name: &str) -> Result<Vec<(Time, Signal)>, NoReceiver> {
         let driven = self.nets.iter().any(|net| {
             net.sinks
                 .iter()
                 .any(|sink| matches!(sink, Sink::External(sink) if sink == name))
         });
         if !driven {
-            return Err(ReceiveError::Endpoint(name.to_owned()));
+            return Err(NoReceiver(name.to_owned()));
         }
         Ok(self.received.remove(name).unwrap_or_default())
     }
@@ -2003,11 +2012,11 @@ impl<C: Chip> Board<C> {
     }
 
     /// The index of the net `name`.
-    fn net_index(&self, name: &str) -> Result<usize, NetError> {
+    fn net_index(&self, name: &str) -> Result<usize, NoNet> {
         self.nets
             .iter()
             .position(|net| net.name == name)
-            .ok_or_else(|| NetError::Unknown(name.to_owned()))
+            .ok_or_else(|| NoNet(name.to_owned()))
     }
 
     /// The value the net `name` last carried, [`None`] before its first
@@ -2015,8 +2024,8 @@ impl<C: Chip> Board<C> {
     ///
     /// # Errors
     ///
-    /// A board with no net `name` ([`NetError::Unknown`]).
-    pub fn net_value(&self, name: &str) -> Result<Option<Signal>, NetError> {
+    /// A board with no net `name` ([`NoNet`]).
+    pub fn net_value(&self, name: &str) -> Result<Option<Signal>, NoNet> {
         let net = self.net_index(name)?;
         Ok(self.shared.last.borrow()[net])
     }
@@ -2037,10 +2046,10 @@ impl<C: Chip> Board<C> {
     ///
     /// # Errors
     ///
-    /// A board with no net `name` ([`NetError::Unknown`]).
+    /// A board with no net `name` ([`NoNet`]).
     ///
     /// [`observe::Observer`]: crate::observe::Observer
-    pub fn observe(&mut self, name: &str, observer: impl Observer) -> Result<ObserverId, NetError> {
+    pub fn observe(&mut self, name: &str, observer: impl Observer) -> Result<ObserverId, NoNet> {
         let net = self.net_index(name)?;
         let id = ObserverId(self.next_observer);
         self.next_observer += 1;
@@ -2554,29 +2563,17 @@ pub enum SendError {
     },
 }
 
-/// Why [`Board::take_received`] took nothing.
-///
-/// [`Board::take_received`]: crate::board::Board::take_received
+/// A run-time endpoint name no net drives, so nothing it could receive
+/// ([`Board::take_received`]).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum ReceiveError {
-    /// The board has no `external.name` that a net drives.
-    #[error("no net drives external.{0}")]
-    Endpoint(String),
-}
+#[error("no net drives external.{0}")]
+pub struct NoReceiver(pub String);
 
-/// Why a net could not be observed or read ([`Board::observe`],
+/// A net name the board does not have ([`Board::observe`],
 /// [`Board::net_value`]).
-///
-/// [`Board::observe`]: crate::board::Board::observe
-/// [`Board::net_value`]: crate::board::Board::net_value
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[non_exhaustive]
-pub enum NetError {
-    /// The board has no net of that name.
-    #[error("no net {0:?}")]
-    Unknown(String),
-}
+#[error("no net {0:?}")]
+pub struct NoNet(pub String);
 
 #[cfg(test)]
 mod tests;

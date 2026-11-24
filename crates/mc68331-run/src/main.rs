@@ -131,27 +131,27 @@ struct Arguments {
     /// The board file.
     board: PathBuf,
     /// Run until the chip has run this many system clocks.
-    #[arg(long, conflicts_with = "seconds", value_parser = parse_integer::<u64>)]
+    #[arg(long, value_name = "N", conflicts_with = "seconds", value_parser = parse_integer::<u64>)]
     cycles: Option<u64>,
     /// Run this many seconds of board time; inf, the default, runs
     /// until Ctrl-C, gdb, a halt or a stop ends it.
-    #[arg(long, value_parser = run_seconds)]
+    #[arg(long, value_name = "S", value_parser = run_seconds)]
     seconds: Option<f64>,
     /// The firmware image: replaces each memory image that is one of
     /// the file's `[board] images`.
-    #[arg(long)]
+    #[arg(long, value_name = "PATH")]
     firmware: Option<PathBuf>,
     /// A memory's image, NAME=PATH; may be given more than once.
-    #[arg(long = "image", value_parser = pair::<PathBuf>)]
+    #[arg(long = "image", value_name = "NAME=PATH", value_parser = pair::<PathBuf>)]
     images: Vec<(String, PathBuf)>,
     /// Enable a board option the file declares; may be given more than
     /// once.
-    #[arg(long = "option")]
+    #[arg(long = "option", value_name = "NAME")]
     options: Vec<String>,
     /// Set a peripheral's parameter, PERIPHERAL.KEY=VALUE, the value TOML (a
     /// bare word a string), over the file's; may be given more than
     /// once.
-    #[arg(long = "set")]
+    #[arg(long = "set", value_name = "PERIPHERAL.KEY=VALUE")]
     settings: Vec<String>,
     /// Bind a run-time endpoint, NAME=stdio|stdout|tty|pty|null|file:PATH;
     /// may be given more than once.  Unbound endpoints are null.  stdio:
@@ -159,20 +159,20 @@ struct Arguments {
     /// only.  tty: the terminal on standard input, raw.  pty: a new
     /// pseudo-terminal.  null: nothing.  A file: output written to PATH.
     /// tty and pty are Unix's.  Bindings, after the options, says more.
-    #[arg(long = "bind", value_parser = pair::<How>)]
+    #[arg(long = "bind", value_name = "NAME=HOW", value_parser = pair::<How>)]
     bindings: Vec<(String, How)>,
     /// What to trace on standard error, comma-separated.
     #[arg(long, value_enum, value_delimiter = ',')]
     trace: Vec<Traced>,
     /// Trace each time the instruction at this address runs; may be
     /// given more than once.
-    #[arg(long = "watch-code", value_parser = parse_integer::<u32>)]
+    #[arg(long = "watch-code", value_name = "ADDRESS", value_parser = parse_integer::<u32>)]
     watch_code: Vec<u32>,
     /// Trace where the CPU is every this many seconds of board time.
-    #[arg(long, value_parser = seconds)]
+    #[arg(long, value_name = "S", value_parser = seconds)]
     position: Option<f64>,
     /// The seed every noise model draws from.
-    #[arg(long, default_value_t = 0, value_parser = parse_integer::<u64>)]
+    #[arg(long, value_name = "N", default_value_t = 0, value_parser = parse_integer::<u64>)]
     seed: u64,
     /// Stop at a bus or address error instead of taking it as an
     /// exception, and say which (`reason=fault`); the instruction is
@@ -180,16 +180,16 @@ struct Arguments {
     #[arg(long)]
     stop_on_fault: bool,
     /// Where peripherals keep working copies.
-    #[arg(long)]
+    #[arg(long, value_name = "DIR")]
     work_dir: Option<PathBuf>,
     /// Restore this snapshot before running.
-    #[arg(long)]
+    #[arg(long, value_name = "FILE")]
     restore: Option<PathBuf>,
     /// Save a snapshot here after running.  A board with a peripheral
     /// that cannot save, or a file that will not open, is refused before
     /// the run; the file is replaced only at its end, whole: the
     /// snapshot is written beside it and renamed over it.
-    #[arg(long)]
+    #[arg(long, value_name = "FILE")]
     save: Option<PathBuf>,
     /// Seconds of board time between the runner's turns, where input
     /// goes in (one fed byte a turn), output comes out and positions
@@ -199,7 +199,7 @@ struct Arguments {
     /// Seconds of board time before input goes in: a frame that
     /// arrives before the firmware enables its receiver is lost, as on
     /// the board.
-    #[arg(long, default_value_t = 0.0, value_parser = seconds)]
+    #[arg(long, value_name = "S", default_value_t = 0.0, value_parser = seconds)]
     input_after: f64,
     /// Wait at reset for gdb at this address, HOST:PORT (port 0 picks
     /// one, which standard error names), and let it run the board; when
@@ -399,7 +399,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         let ending = gdb::serve(&mut board, &mut turns, address, &interrupted)?;
         let killed = ending == Ending::Killed;
         if killed || interrupted.load(Ordering::SeqCst) {
-            let outcome = BoardRun::new(Stop::Requested, board.now());
+            let outcome = BoardRun::new(board.now(), Stop::Requested);
             eprintln!("{}", Line::new(CHIP, &board.stopped_record(outcome)));
             if let Some(saving) = saving.filter(|_| !killed) {
                 saving.save(&board)?;

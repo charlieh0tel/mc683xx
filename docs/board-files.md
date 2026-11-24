@@ -486,8 +486,9 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   parameters, environment)` builds one to test it, and
   `Context::with_read(name, parameters, environment, read)` one whose
   `contents` come from `read`): the peripheral's `name`, its
-  `parameters` (typed getters `integer`, `required_integer`, `boolean`,
-  `float`, `string`, `value`, `table`, the values `registry::ParameterValue`s,
+  `parameters` (typed getters `integer`, `boolean`, `float` and
+  `string`, each with a `required_` one that fails for a key not given,
+  `value`, `table`, the values `registry::ParameterValue`s,
   the board's own type, not the TOML parser's; a key no getter read is an
   unknown-parameter error), `contents(key)` (the bytes of the file a
   path parameter names, relative to the board file: an image, which a
@@ -781,7 +782,7 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   `phase(at)` (with `cycles()` and
   `fraction()`), `time(phase)` (the first picosecond at that phase),
   `edges(from, to)` (rising edges in (from, to]),
-  `edge_after(from, n)`, `edge(number)`, and `retuned(at, frequency)`:
+  `edge_after(from, n)`, `edge(number)`, and `retuned(frequency, at)`:
   a source whose frequency moves (an OCXO following its EFC) drives a
   retuned clock at each change, its phase carried across exactly, and
   a sink counts and times edges across the change with no rounding.

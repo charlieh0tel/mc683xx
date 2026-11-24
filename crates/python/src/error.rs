@@ -3,10 +3,10 @@
 
 use std::time::TryFromFloatSecsError;
 
-use mc683xx_board::board::NetError;
 use mc683xx_board::board::NoMemory;
+use mc683xx_board::board::NoNet;
 use mc683xx_board::board::NoPeripheral;
-use mc683xx_board::board::ReceiveError;
+use mc683xx_board::board::NoReceiver;
 use mc683xx_board::board::RunError;
 use mc683xx_board::board::SendError;
 use mc683xx_board::description::LoadError;
@@ -20,6 +20,7 @@ use mc683xx_cpu32::flat::MapError;
 use mc683xx_cpu32::interrupt::NoInterruptLevel;
 use mc683xx_cpu32::interrupt::NoIrqPin;
 use mc683xx_cpu32::memory::MemoryError;
+use mc683xx_cpu32::memory::ParsePermissionsError;
 use mc683xx_cpu32::memory::Unserved;
 use mc683xx_mc68331::chip::BuildError;
 use mc683xx_mc68331::debug::TargetError;
@@ -106,8 +107,8 @@ pub(crate) enum Error {
     PortWidth(u8),
     /// Page permissions that are not `r`, `w` and `x`, each at most
     /// once.
-    #[error("no permissions {0:?}: give r, w and x, each at most once")]
-    Permissions(String),
+    #[error(transparent)]
+    Permissions(#[from] ParsePermissionsError),
     /// The chip refused the wiring.
     #[error(transparent)]
     Build(#[from] BuildError),
@@ -143,10 +144,10 @@ pub(crate) enum Error {
     Send(#[from] SendError),
     /// A run-time endpoint no net drives.
     #[error(transparent)]
-    Receive(#[from] ReceiveError),
+    Receive(#[from] NoReceiver),
     /// A net the board does not have.
     #[error(transparent)]
-    Net(#[from] NetError),
+    Net(#[from] NoNet),
     /// A net type that is none of a board file's.
     #[error(transparent)]
     Kind(#[from] ParseKindError),

@@ -995,9 +995,11 @@ name = "counter"
 type = "counter"
 reset = ["watchdog"]
 """
-# RSR, $YFFA07 (MC68331UM D.3.4); its SW bit, the watchdog's (SIMRM 8.2.8).
+# RSR, $YFFA07 (MC68331UM D.3.4); its SW bit, the watchdog's, and EXT,
+# RESET's (SIMRM 8.2.8).
 RSR = SIM + 0x07
 RSR_SW = 0x20
+RSR_EXT = 0x80
 # ADDQ.L #1,D1; BRA.S to itself: counts its starts in D1, which a reset
 # keeps, the watchdog on as reset leaves it.
 COUNTING = [0x5281, 0x60FE]
@@ -1033,6 +1035,12 @@ def test_a_board_resets_for_a_cause_as_its_source_does(tmp_path: Path) -> None:
     assert counter.resets == 1, "the watchdog's alone"
     board.run_for(seconds=0.001)
     assert board.chip.read_register("D1") == 2, "started again"
+    board.take_events()
+    board.reset()
+    assert [
+        event.cause for event in board.take_events() if isinstance(event, mc683xx.Event.Reset)
+    ] == [mc683xx.ResetCause.EXTERNAL] * 2, "RESET asserted and released"
+    assert board.chip.peek(RSR, 1) == RSR_EXT
 
 
 BKPT_BOARD = """

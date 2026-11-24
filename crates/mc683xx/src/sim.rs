@@ -722,7 +722,7 @@ impl Sim {
     fn read_word(&self, offset: u32) -> u16 {
         match offset {
             SIMCR => self.simcr,
-            SYNCR => self.clock.syncr(),
+            SYNCR => self.clock.synthesizer_control(),
             RSR => self.reset_status.into(),
             PORTE0 | PORTE1 => self.port_e.data().into(),
             DDRE => self.port_e.direction.into(),
@@ -734,8 +734,8 @@ impl Sim {
             PICR => self.timer.control,
             PITR => self.timer.timing,
             PORTC => self.port_c.into(),
-            CSPAR0 => self.chip_selects.cspar0(),
-            CSPAR1 => self.chip_selects.cspar1(),
+            CSPAR0 => self.chip_selects.pin_assignments()[0],
+            CSPAR1 => self.chip_selects.pin_assignments()[1],
             CSBARBT..CHIP_SELECTS_END => match Self::select_at(offset) {
                 (select, false) => self.chip_selects.base(select),
                 (select, true) => self.chip_selects.option(select),

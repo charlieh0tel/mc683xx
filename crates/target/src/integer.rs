@@ -62,7 +62,7 @@ pub fn parse_integer<T: TryFrom<u64>>(text: &str) -> Result<T, ParseIntegerError
 
 /// Why text is not an integer [`parse_integer`] takes; without the
 /// text, as [`ParseRegisterError`](crate::register::ParseRegisterError).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ParseIntegerError {
     /// Not a number in the syntax.

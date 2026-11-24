@@ -21,7 +21,7 @@ use std::str::FromStr;
 use mc683xx_target::integer::ParseIntegerError;
 use mc683xx_target::integer::parse_integer;
 
-use crate::board::NetError;
+use crate::board::NoNet;
 use crate::observe::Observer;
 use crate::signal::Kind;
 use crate::signal::Signal;
@@ -400,7 +400,7 @@ impl Observer for NetWatch {
 pub enum ConditionError {
     /// The board has no such net.
     #[error(transparent)]
-    Net(#[from] NetError),
+    Net(#[from] NoNet),
     /// A level's change on a net that carries no levels.
     #[error("net {net:?} is a {kind} net: only `change` watches it")]
     Kind {

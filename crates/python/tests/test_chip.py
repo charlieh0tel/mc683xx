@@ -189,7 +189,7 @@ def test_bus_error_from_a_peripheral_takes_the_exception():
     # a format $C frame: its format and vector word at SP + 6 (CPU32RM
     # 6.4.3)
     sp = chip.read_register("A7")
-    (word,) = struct.unpack(">H", chip.read_memory(ram, sp - RAM_BASE + 6, 2))
+    (word,) = struct.unpack(">H", chip.memory(ram, sp - RAM_BASE + 6, 2))
     assert word == 0xC000 | 4 * BUS_ERROR
 
 
@@ -384,11 +384,16 @@ def test_registers_and_memory():
         chip.write_register("SR", 0x10000)
     with pytest.raises(ValueError):
         chip.read_register("D8")
-    chip.write_memory(ram, 0x10, b"\x01\x02")
-    assert chip.read_memory(ram, 0x10, 2) == b"\x01\x02"
+    chip.set_memory(ram, 0x10, b"\x01\x02")
+    assert chip.memory(ram, 0x10, 2) == b"\x01\x02"
     assert len(chip.memory(ram)) == RAM_BYTES
+    assert chip.memory(ram, RAM_BYTES - 2) == chip.memory(ram)[-2:]
     with pytest.raises(IndexError):
-        chip.read_memory(ram, RAM_BYTES - 1, 2)
+        chip.memory(ram, RAM_BYTES - 1, 2)
+    with pytest.raises(IndexError):
+        chip.memory(ram, RAM_BYTES + 1)
+    with pytest.raises(IndexError):
+        chip.set_memory(ram, RAM_BYTES - 1, b"\x00\x00")
     with pytest.raises(IndexError):
         chip.memory(7)
     assert chip.system_hz == 32768 * 256
@@ -650,7 +655,7 @@ def test_a_gpt_output_compare_toggles_its_pin():
     oc1 = chip.oc1()
     assert isinstance(oc1, mc683xx.Output.Level)
     assert oc1 == mc683xx.Output.Level(level=oc1.level)
-    chip.set_pins(mc683xx.Port.GP, 0xFF)
+    chip.set_pins(mc683xx.Port.GP, 0xFF, 0xFF)
     assert chip.port(mc683xx.Port.GP).pins == 0xFF
     chip.set_gpt_input(mc683xx.Input.PAI, True)
     chip.set_gpt_input(mc683xx.Input.PCLK, True)
@@ -812,7 +817,7 @@ def test_a_code_hook_stops_before_its_instruction():
     builder, ram, _ = board(ram_round_trip(), Recorder())
     chip = builder.build()
     chip.write_register("A7", RAM_BASE + 0x100)
-    chip.write_memory(ram, 0x100, struct.pack(">I", 0xCAFEF00D))
+    chip.set_memory(ram, 0x100, struct.pack(">I", 0xCAFEF00D))
     seen = []
 
     def at(instruction):
@@ -890,7 +895,7 @@ def test_an_invalid_hook_and_an_exception_hook_see_a_bus_error():
     run = chip.run_for(2000)
     assert run.stop == mc683xx.Stop.Hook(hook)
     (access,) = invalid
-    assert (access.address, access.size, access.cycle, access.value, access.reason) == (
+    assert (access.address, access.size, access.kind, access.value, access.reason) == (
         PERIPHERAL_BASE + 0x20, 2, mc683xx.BusCycleKind.READ, None, mc683xx.Invalid.BUS_ERROR,
     )
     (entry,) = entered
@@ -954,7 +959,7 @@ def test_a_write_to_a_protected_page_is_a_bus_error():
     chip.add_invalid_hook(lambda a: invalid.append(a) or True)
     chip.run_for(2000)
     (access,) = invalid
-    assert (access.address, access.cycle, access.reason) == (
+    assert (access.address, access.kind, access.reason) == (
         RAM_WORD, mc683xx.BusCycleKind.WRITE, mc683xx.Invalid.PROTECTED,
     )
     assert chip.read_register("PC") == BUS_ERROR_HANDLER
@@ -1247,7 +1252,7 @@ def test_the_host_reaches_memory_and_peripherals_through_the_decode():
     chip, ram, _ = mapped(peripheral)
     now = chip.now
     chip.bus_write(RAM_BASE, 4, 0x12345678)
-    assert chip.read_memory(ram, 0, 4) == b"\x12\x34\x56\x78"
+    assert chip.memory(ram, 0, 4) == b"\x12\x34\x56\x78"
     assert chip.bus_read(RAM_BASE, 4) == 0x12345678
     assert chip.peek(RAM_BASE + 2, 2) == 0x5678
     assert chip.peek(RAM_BASE + 2, 2, mc683xx.FunctionCode.SUPERVISOR_PROGRAM) == 0x5678
@@ -1586,7 +1591,7 @@ def test_a_fault_stop_ends_the_chip_s_run_with_the_instruction_undone():
     run = chip.run_for(1000)
     assert run.stop == mc683xx.Stop.Fault()
     fault = chip.fault_stop
-    assert (fault.cycle, fault.cause) == (mc683xx.BusCycleKind.READ, mc683xx.FaultCause.ADDRESS_ERROR)
+    assert (fault.kind, fault.cause) == (mc683xx.BusCycleKind.READ, mc683xx.FaultCause.ADDRESS_ERROR)
     assert (fault.address, fault.pc) == (START + 1, START)
     assert chip.registers()["PC"] == START
     chip.set_stop_on_fault(False)

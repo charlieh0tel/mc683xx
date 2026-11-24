@@ -1793,6 +1793,13 @@ impl BoardView {
         }
     }
 
+    /// RESET driven by the board now, `reset_for(ResetCause.EXTERNAL)`
+    /// (Rust's `Board::reset`).  Nothing while the board holds RESET low.
+    fn reset(&mut self) -> PyResult<()> {
+        self.board.reset();
+        self.check()
+    }
+
     /// A reset now for `cause`, a `ResetCause`, as its source makes it
     /// (Rust's `Board::reset_for`): `EXTERNAL` as the board's RESET
     /// asserted and released now, any other the chip's own, RESET

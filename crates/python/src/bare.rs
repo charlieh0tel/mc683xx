@@ -37,6 +37,7 @@ use mc683xx_cpu32::flat::Machine;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
+use mc683xx_cpu32::memory::Permissions;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_gdb::target::AccessError;
@@ -75,7 +76,6 @@ use crate::hooks::BusCycleKind;
 use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::PythonMapped;
-use crate::permissions;
 use crate::python::repr;
 use crate::register::Register;
 use crate::requests::StopRequestView;
@@ -181,8 +181,8 @@ pub(crate) struct FaultStopView(pub(crate) FaultStop);
 impl FaultStopView {
     /// Fetch, read or write.
     #[getter]
-    fn cycle(&self) -> BusCycleKind {
-        self.0.cycle.into()
+    fn kind(&self) -> BusCycleKind {
+        self.0.kind.into()
     }
 
     /// Why.
@@ -225,8 +225,8 @@ impl FaultStopView {
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         Ok(format!(
-            "FaultStop(cycle={}, cause={}, address={:#010x}, size={}, function_code={}, pc={:#010x})",
-            repr(py, self.cycle())?,
+            "FaultStop(kind={}, cause={}, address={:#010x}, size={}, function_code={}, pc={:#010x})",
+            repr(py, self.kind())?,
             repr(py, self.cause()?)?,
             self.address(),
             self.size(),
@@ -515,7 +515,7 @@ impl MachineView {
         permissions: &str,
         contents: Option<PyBackedBytes>,
     ) -> Result<(), Error> {
-        let permissions = permissions::parse(permissions)?;
+        let permissions = permissions.parse::<Permissions>()?;
         let contents = contents.as_deref().unwrap_or_default();
         self.machine.map(Address(start), length, contents)?;
         Ok(self.machine.protect(Address(start), length, permissions)?)
@@ -530,7 +530,7 @@ impl MachineView {
     /// in both spaces: `r`, `w` and `x` for the cycles allowed.  A
     /// cycle they do not allow ends in a bus error.
     fn protect(&mut self, start: u32, length: u32, permissions: &str) -> Result<(), Error> {
-        let permissions = permissions::parse(permissions)?;
+        let permissions = permissions.parse::<Permissions>()?;
         Ok(self.machine.protect(Address(start), length, permissions)?)
     }
 
@@ -585,10 +585,11 @@ impl MachineView {
         Ok(id.number())
     }
 
-    /// Takes peripheral number `id` off the bus: whether there was one.
-    fn remove_peripheral(&mut self, id: u64) -> bool {
+    /// Takes peripheral number `peripheral` off the bus: whether there
+    /// was one.
+    fn remove_peripheral(&mut self, peripheral: u64) -> bool {
         self.machine
-            .remove_peripheral(PeripheralId::from_number(id))
+            .remove_peripheral(PeripheralId::from_number(peripheral))
             .is_some()
     }
 

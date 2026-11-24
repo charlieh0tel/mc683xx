@@ -701,10 +701,7 @@ impl DcSource {
 
     /// From `volts`, which it needs.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
-        let volts = context
-            .parameters
-            .float(Self::VOLTS)?
-            .ok_or_else(|| ParameterError::Missing(Self::VOLTS.to_owned()))?;
+        let volts = context.parameters.required_float(Self::VOLTS)?;
         Self::new(volts).ok_or_else(|| {
             ParameterError::invalid(Self::VOLTS, format!("{volts} is not a voltage"))
         })
@@ -896,7 +893,7 @@ mod tests {
             Signal::Clock(clock),
             &mut Drive::new(Moment::new(Time::from_picos(50), SYSTEM_CLOCK)),
         );
-        let retuned = clock.retuned(Time::from_picos(100_000), Frequency::from_hz(20_000_000));
+        let retuned = clock.retuned(Frequency::from_hz(20_000_000), Time::from_picos(100_000));
         let mut drive = Drive::new(Moment::new(Time::from_picos(100_000), SYSTEM_CLOCK));
         divider.input(0, Signal::Clock(retuned), &mut drive);
         assert!(drive.finish().driven.is_empty());

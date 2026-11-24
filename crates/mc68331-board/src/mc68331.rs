@@ -39,9 +39,9 @@ use mc683xx_mc68331::port::Port;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::peripheral::AnyMappedPeripheral;
+use mc683xx_modules::peripheral::AnySpiPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
-use mc683xx_modules::qsm::qspi::AnySpiPeripheral;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::clock::ClockSource;
@@ -401,6 +401,11 @@ pub(crate) struct Pins {
 }
 
 /// The MC68331's `[chip]` table.
+///
+/// Not part of the semver API: the sealed
+/// [`Chip`](crate::chip::Chip)'s `Section`, which the board reads; a
+/// host names none of it.
+#[doc(hidden)]
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Section {
@@ -580,7 +585,8 @@ impl ChipBuilder for Mc68331Builder {
             (Port::Gp, pins.gp),
         ] {
             if let Some(levels) = levels {
-                chip.set_pins(port, levels, u8::MAX).expect("an input port");
+                chip.set_pins(port, PortLevels::new(u8::MAX, levels))
+                    .expect("an input port");
             }
         }
         if let Some(pai) = pins.pai {
@@ -743,8 +749,11 @@ impl chip::Chip for Mc68331 {
                 }),
                 Signal::Level(level),
             ) => {
-                self.set_pins(port, if level { u8::MAX } else { 0 }, 1 << bit)
-                    .expect("an input port");
+                self.set_pins(
+                    port,
+                    PortLevels::new(1 << bit, if level { u8::MAX } else { 0 }),
+                )
+                .expect("an input port");
             }
             (Pin::Irq(irq), Signal::Level(level)) => self.set_interrupt_pin(irq, !level),
             (Pin::Rxd, Signal::Serial(serial)) => self.sci_receive(serial.frame),

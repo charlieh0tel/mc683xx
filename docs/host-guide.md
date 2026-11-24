@@ -708,7 +708,9 @@ the CPU and the SIM's configuration (SIMRM 8.2.6); `PowerOn` is
 (PLAN.md, Reset by cause).  A board's `Board::reset_for(cause)` is the
 same with its RESET nets driven: `External` as the board asserting and
 releasing RESET now, any other the chip driving RESET for 512 clocks
-as for a reset it takes in a run.  `Board::reset_with_breakpoint()`
+as for a reset it takes in a run; `Board::reset()` is its
+`reset_for(ResetCause::External)`, as the chip's `reset()` is.
+`Board::reset_with_breakpoint()`
 is its `External` reset with BKPT held low, a BDM debugger's: the
 CPU enters background mode before its first instruction (CPU32RM
 7.2.1); `Board::assert_breakpoint()`, `halt()` and `go()` are the
@@ -857,9 +859,9 @@ assert!(sent[0].start < sent[0].end);
 Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
 `F` (the SIM's), `Gp` (the GPT's) and `Qs` (the QSM's).
 
-- Inputs: `set_pins(port, value, mask)` sets the levels the board
-  drives on the pins in `mask`, the others kept.  Port C has no inputs:
-  a `NoInputs`.
+- Inputs: `set_pins(port, pins)` sets the levels the board drives on
+  the pins a `PortLevels` drives (`PortLevels::new(driven, levels)`),
+  the others kept.  Port C has no inputs: a `NoInputs`.
 - Outputs: `outputs(port)` gives the pins a port drives and their
   levels, a `PortLevels` (its fields private; `PortLevels::new(driven,
   levels)`, read back with `driven()` and `levels()`, the levels zero on
@@ -906,7 +908,7 @@ let program = [
 .concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
-chip.set_pins(Port::E, PE1, PE1).unwrap();
+chip.set_pins(Port::E, PortLevels::new(PE1, PE1)).unwrap();
 chip.run_for(Cycles::from_clocks(1000));
 assert_eq!(
     chip.outputs(Port::E),
@@ -1171,7 +1173,8 @@ but the exception hook cover an address range, on the address lines.
 
 `cpu_control().protect(space, start, length, Permissions)` sets
 read, write and execute per 2-Kbyte page in `Space::User` or
-`Space::Supervisor`; a cycle a page does not permit is a bus error,
+`Space::Supervisor` (`Permissions` prints and parses as its letters,
+`rwx`, `rx`, empty for none); a cycle a page does not permit is a bus error,
 and the invalid hooks see it as `Protected`.  That holds on pages a
 peripheral serves too: the cycle faults before the peripheral sees
 it, so a read-only peripheral needs no bus error of its own.  Hooks and permissions
@@ -1483,9 +1486,9 @@ beside `watch_code`, a hook that breaks ending the run `Stop::Hook`.
   `moment` last; a chip-level callback with no cycle struct takes
   `now: Cycle` last.
 - **Nets.** `Board::observe(net, observer) -> Result<ObserverId,
-  NetError>` attaches an `observe::Observer` (a closure
-  `FnMut(&str, Time, Signal)` is one) to a net by name; `NetError::Unknown`
-  names a net the board lacks.  It is told each change the net
+  NoNet>` attaches an `observe::Observer` (a closure
+  `FnMut(&str, Time, Signal)` is one) to a net by name; `NoNet` names
+  a net the board lacks.  It is told each change the net
   carries, at its board time, after the net's sinks, in the order
   they see them, the changes already waiting included (the power-on
   levels, before the first run); a wired-and net's resolved level
@@ -1534,9 +1537,13 @@ beside `watch_code`, a hook that breaks ending the run `Stop::Hook`.
   after a later direct one, and `Board::check_send(name, &signal)`
   fails as that send would, sending nothing;
   `Board::take_received(name)` gives what reached one since the last
-  call, with each value's time, and fails (`ReceiveError::Endpoint`)
+  call, with each value's time, and fails (`NoReceiver`)
   for an endpoint no net drives.
-- **Control from another thread.**  `Board::control() ->
+- **Control from another thread.**  A machine (`Cpu`, `Machine`,
+  `Mc68331`, `Board`, and a `Registry`) is not `Send`, by design: it
+  is built and run on one thread (PLAN.md, Decisions).  What it is
+  built from (`Description`, `Image`, `Script`, `Memory`) is `Send`,
+  so another thread may parse and read those.  `Board::control() ->
   control::BoardControl` is the board's thread-safe handle (`Send`,
   `Sync`, cheap to `Clone`; every call gives a handle to the one
   control), for a front end whose event loop is another thread:

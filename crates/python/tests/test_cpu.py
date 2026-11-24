@@ -317,7 +317,7 @@ def test_a_fault_stops_the_run_with_nothing_stacked():
             pass
         case end:
             raise AssertionError(end)
-    assert (fault.cycle, fault.cause) == (mc683xx.BusCycleKind.READ, mc683xx.FaultCause.BUS_ERROR)
+    assert (fault.kind, fault.cause) == (mc683xx.BusCycleKind.READ, mc683xx.FaultCause.BUS_ERROR)
     assert (fault.address, fault.size, fault.pc) == (0x90000000, 4, CODE + 2)
     assert fault.registers["D1"] == 3
     assert cpu.read_register("PC") == CODE + 2
@@ -331,7 +331,7 @@ def test_a_write_to_read_only_code_is_protected():
     end = cpu.run_limited(reach=RETURN).end
     assert isinstance(end, mc683xx.End.Fault)
     fault = end.fault
-    assert (fault.cycle, fault.cause) == (mc683xx.BusCycleKind.WRITE, mc683xx.FaultCause.PROTECTED)
+    assert (fault.kind, fault.cause) == (mc683xx.BusCycleKind.WRITE, mc683xx.FaultCause.PROTECTED)
     assert end == mc683xx.End.Fault(fault=fault)
 
 

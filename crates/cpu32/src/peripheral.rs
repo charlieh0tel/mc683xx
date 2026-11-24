@@ -19,9 +19,10 @@ use mc683xx_target::size::Size;
 /// A chip-select pin by the chip's own number for it: which select
 /// carried a cycle.  The chip names its pins
 /// (`mc683xx-modules`'s `ChipSelect` converts to and from it); the bare
-/// machine has none.
+/// machine has none.  Every number is one, as the core sees it, so its
+/// field is public, as [`Address`]'s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Select(u8);
+pub struct Select(pub u8);
 
 impl From<u8> for Select {
     fn from(number: u8) -> Self {

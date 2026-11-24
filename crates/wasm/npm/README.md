@@ -103,8 +103,9 @@ them:
   (picoseconds, a clock reading);
 - an `Error` named `LoadError` (a board file or a board that does not
   load), `ParsePacingError` (a pacing that does not parse), `RunError` (a
-  run that fails), `SendError` and `ReceiveError` (an endpoint no
-  serial net takes or drives), `NoMemory` (no such memory) or
+  run that fails), `SendError` (an endpoint no serial net takes),
+  `NoReceiver` (an endpoint no serial net drives), `NoMemory` (no
+  such memory) or
   `StateError` (a board that cannot save, or a snapshot it refuses).
 
 Its `message` is for people: its text may change in any release, and

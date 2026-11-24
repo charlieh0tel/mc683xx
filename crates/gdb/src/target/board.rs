@@ -9,7 +9,6 @@ use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::control::CpuControl;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_modules::sim::ResetCause;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 
@@ -61,11 +60,11 @@ impl Target for Board<Mc68331> {
     }
 
     /// An external reset, as the board asserting RESET makes it
-    /// ([`Board::reset_for`]): the chip's reset and the RESET it then
+    /// ([`Board::reset`]): the chip's reset and the RESET it then
     /// drives on the board's nets, now.  Nothing while the board holds
     /// RESET low.
     fn reset(&mut self) -> Result<TargetReset, RunError> {
-        self.reset_for(ResetCause::External);
+        Board::reset(self);
         Ok(TargetReset::Done)
     }
 

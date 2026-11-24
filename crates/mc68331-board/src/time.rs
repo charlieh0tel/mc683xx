@@ -592,9 +592,9 @@ impl Clock {
         self.at.0.checked_add(ahead).map(Time)
     }
 
-    /// This clock from `at` on at `frequency`, its phase carried across.
+    /// This clock at `frequency` from `at` on, its phase carried across.
     #[must_use]
-    pub const fn retuned(&self, at: Time, frequency: Frequency) -> Self {
+    pub const fn retuned(&self, frequency: Frequency, at: Time) -> Self {
         Self {
             at,
             frequency,
@@ -1010,8 +1010,8 @@ mod tests {
         let mut clock = third;
         for step in 1..=3_000 {
             clock = clock.retuned(
-                Time::from_picos(step * 1_000_000_000),
                 Frequency::from_hz(3),
+                Time::from_picos(step * 1_000_000_000),
             );
         }
         assert_eq!(clock.phase(Time::from_secs(3)).0, 9 * PHASE_UNITS);
@@ -1031,7 +1031,7 @@ mod tests {
         let phase = clock.phase(Time::from_picos(25_000));
         assert_eq!(phase.cycles(), 0);
         assert_eq!(phase.fraction(), PHASE_UNITS / 4);
-        let faster = clock.retuned(Time::from_picos(25_000), Frequency::from_hz(20_000_000));
+        let faster = clock.retuned(Frequency::from_hz(20_000_000), Time::from_picos(25_000));
         assert_eq!(
             faster.edge_after(Time::from_picos(25_000), 1),
             Some(Time::from_picos(62_500))
@@ -1044,7 +1044,7 @@ mod tests {
         let mut history = ClockHistory::new(Span::from_secs(64));
         let clock = Clock::new(TEN_MHZ, Time::ZERO);
         history.push(clock);
-        let faster = clock.retuned(Time::from_picos(1_000_000), Frequency::from_hz(20_000_000));
+        let faster = clock.retuned(Frequency::from_hz(20_000_000), Time::from_picos(1_000_000));
         history.push(faster);
         assert_eq!(
             history.edges(Time::ZERO, Time::from_picos(2_000_000)),
@@ -1076,7 +1076,7 @@ mod tests {
             Some((ps(40_000), PHASE_UNITS * 4 / 5))
         );
         // A push from the past replaces what it overlaps.
-        history.push(clock.retuned(Time::from_picos(1_000_000), TEN_MHZ));
+        history.push(clock.retuned(TEN_MHZ, Time::from_picos(1_000_000)));
         assert_eq!(
             history.edges(Time::ZERO, Time::from_picos(2_000_000)),
             Some(20)
@@ -1088,7 +1088,7 @@ mod tests {
         let mut history = ClockHistory::new(ps(10));
         let mut clock = Clock::new(TEN_MHZ, Time::ZERO);
         for at in 1..=100 {
-            clock = clock.retuned(Time::from_picos(at), TEN_MHZ);
+            clock = clock.retuned(TEN_MHZ, Time::from_picos(at));
             history.push(clock);
         }
         assert!(history.segments.len() <= 11);
@@ -1113,7 +1113,7 @@ mod tests {
             // drifting: 6.25 uHz is 6250 nHz.
             let step = 6_250 * (second % 7);
             frequency = Frequency::from_nanohertz(TEN_MHZ.nanohertz() + step - 6_250 * 3);
-            clock = clock.retuned(Time::from_secs(second) + ps(7), frequency);
+            clock = clock.retuned(frequency, Time::from_secs(second) + ps(7));
             history.push(clock);
         }
         let end = Time::from_secs(seconds) + ps(7);

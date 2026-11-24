@@ -191,9 +191,10 @@ impl SystemClock {
         clock
     }
 
-    /// SYNCR as read: always locked, never in limp mode.
+    /// The clock synthesizer control register, SYNCR, as read: always
+    /// locked, never in limp mode (MC68331UM D.3.3).
     #[must_use]
-    pub const fn syncr(&self) -> u16 {
+    pub const fn synthesizer_control(&self) -> u16 {
         self.syncr | SYNCR_SLOCK
     }
 
@@ -322,7 +323,7 @@ mod tests {
         let clock = SystemClock::new(ClockSource::default(), Cycle::ZERO);
         assert_eq!(clock.clocks_per_tick, 256);
         assert_eq!(clock.frequency().hz(), 8_388_608);
-        assert_eq!(clock.syncr(), 0x3f08);
+        assert_eq!(clock.synthesizer_control(), 0x3f08);
     }
 
     #[test]

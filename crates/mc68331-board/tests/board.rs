@@ -22,7 +22,7 @@ use mc683xx_board::board::Board;
 use mc683xx_board::board::BoardRun;
 use mc683xx_board::board::BoardTracing;
 use mc683xx_board::board::NoPeripheral;
-use mc683xx_board::board::ReceiveError;
+use mc683xx_board::board::NoReceiver;
 use mc683xx_board::board::RunError;
 use mc683xx_board::board::SendError;
 use mc683xx_board::builtin::EdgeCounter;
@@ -2038,7 +2038,7 @@ to = ["chip.PGP0"]
     assert_eq!(board.check_send("pps", Signal::Level(true)), Ok(()));
     assert_eq!(
         board.take_received("nobody"),
-        Err(ReceiveError::Endpoint("nobody".to_owned()))
+        Err(NoReceiver("nobody".to_owned()))
     );
     assert_eq!(
         board.take_received("pps").unwrap_err().to_string(),
@@ -4041,6 +4041,10 @@ fn a_host_external_reset_is_reset_driven_on_the_board() {
     host.run_until(at).unwrap();
     host.reset_for(ResetCause::External);
     let host_seen = seen(&mut host, at);
+    let mut bare = reset_board();
+    bare.run_until(at).unwrap();
+    bare.reset();
+    assert_eq!(seen(&mut bare, at), host_seen, "reset is External's");
     assert_eq!(host_seen.reset_status, ResetCause::External.status());
     assert_eq!(host_seen.registers.data[1], 2, "started again");
     let mut driven_seen = seen(&mut driven, at);
@@ -4149,7 +4153,7 @@ fn a_board_in_background_mode_runs_to_its_end_as_time() {
     // past the RESET release the chip drives, a board event
     assert_eq!(
         board.run_until(until).unwrap(),
-        BoardRun::new(Stop::Background(Entry::Breakpoint), until)
+        BoardRun::new(until, Stop::Background(Entry::Breakpoint))
     );
     assert_eq!(board.chip().instructions(), instructions);
     let observed: Vec<Signal> = board
@@ -4180,7 +4184,7 @@ fn run_in_background(board: &mut Board<Mc68331>, until: Time) {
     let instructions = board.chip().instructions();
     assert_eq!(
         board.run_until(until).unwrap(),
-        BoardRun::new(Stop::Background(Entry::Breakpoint), until)
+        BoardRun::new(until, Stop::Background(Entry::Breakpoint))
     );
     assert_eq!(board.chip().instructions(), instructions);
 }

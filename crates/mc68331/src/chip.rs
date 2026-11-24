@@ -39,11 +39,11 @@ use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::AnyMappedPeripheral;
+use mc683xx_modules::peripheral::AnySpiPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::Qsm;
-use mc683xx_modules::qsm::qspi::AnySpiPeripheral;
 use mc683xx_modules::qsm::qspi::MOST_BITS;
 use mc683xx_modules::qsm::qspi::Shifted;
 use mc683xx_modules::qsm::sci::Frame;
@@ -1272,17 +1272,17 @@ impl Mc68331 {
         self.board.port(port)
     }
 
-    /// The board drives the pins of `port` in `mask` to their levels in
-    /// `value` now, the others as they were: an input capture on port
-    /// GP takes a selected edge (GPTRM 3.2).
+    /// The board drives `pins`' driven pins of `port` to their levels
+    /// now, the others as they were: an input capture on port GP takes
+    /// a selected edge (GPTRM 3.2).
     ///
     /// # Errors
     ///
     /// [`NoInputs`] for port C, which has no inputs, driving
     /// nothing.
-    pub fn set_pins(&mut self, port: Port, value: u8, mask: u8) -> Result<(), NoInputs> {
+    pub fn set_pins(&mut self, port: Port, pins: PortLevels) -> Result<(), NoInputs> {
         let now = self.now;
-        self.board.set_pins(port, value, mask, now)
+        self.board.set_pins(port, pins.levels(), pins.driven(), now)
     }
 
     /// The changes in what each port drives since the last call, in time

@@ -53,14 +53,14 @@ def test_the_reset_code_reaches_a_fixed_memory_and_a_reset_reloads_it() -> None:
         builder.set_reload_scope(9, [])
     chip = builder.build()
     chip.run_for(1000)
-    assert chip.read_memory(data, 0, 2) == b"\x12\x34"
+    assert chip.memory(data, 0, 2) == b"\x12\x34"
     assert CODE <= chip.read_register("PC") < CODE + PAGE
     assert chip.peek(DATA, 2) == 0x1234
     snapshot = chip.save()
     chip.reset()
-    assert chip.read_memory(data, 0, 2) == b"\x5a\x5a"
+    assert chip.memory(data, 0, 2) == b"\x5a\x5a"
     chip.restore(snapshot)
-    assert chip.read_memory(data, 0, 2) == b"\x12\x34"
+    assert chip.memory(data, 0, 2) == b"\x12\x34"
 
 
 def test_fixed_memory_mistakes() -> None:

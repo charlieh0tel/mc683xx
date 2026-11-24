@@ -274,7 +274,7 @@ fn core_ending(call: &Call, outcome: &Outcome) -> Result<Ending, String> {
             Outcome::Ended(_) | Outcome::Skipped(_),
         ) if fault.vector == Vector::BUS_ERROR => Ok(Ending::Fault(Fault {
             address: fault.address.0 & ADDRESS_MASK,
-            write: fault.cycle == BusCycleKind::Write,
+            write: fault.kind == BusCycleKind::Write,
         })),
         (Stopped::Exception { pc, .. }, Outcome::Ended(_)) => Ok(Ending::Exception {
             vector: Vector::ZERO_DIVIDE.0,

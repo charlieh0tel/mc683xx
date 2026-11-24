@@ -287,6 +287,17 @@ pub trait SpiPeripheral {
     }
 }
 
+/// A QSPI peripheral the chip holds, which the host can get back by
+/// type (`Mc68331::qspi_peripheral` and `qspi_peripheral_mut` name it
+/// as their bound).  It says whether it saves ([`Save`]), as a chip's
+/// peripherals do: the chip's snapshot holds it.
+///
+/// Every [`SpiPeripheral`] that is [`Save`] and `'static` is one: a
+/// host implements those two, never this.
+pub trait AnySpiPeripheral: SpiPeripheral + Save + Any {}
+
+impl<T: SpiPeripheral + Save + Any> AnySpiPeripheral for T {}
+
 #[cfg(test)]
 mod tests {
     use mc683xx_cpu32::interrupt::InterruptLevel;

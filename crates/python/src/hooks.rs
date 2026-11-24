@@ -271,8 +271,8 @@ impl InvalidAccessView {
 
     /// Fetch, read or write.
     #[getter]
-    fn cycle(&self) -> BusCycleKind {
-        self.0.cycle.into()
+    fn kind(&self) -> BusCycleKind {
+        self.0.kind.into()
     }
 
     /// A write's value, right-aligned.
@@ -313,12 +313,12 @@ impl InvalidAccessView {
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         Ok(format!(
-            "InvalidAccess(address={:#08x}, size={}, function_code={}, cycle={}, value={}, \
+            "InvalidAccess(address={:#08x}, size={}, function_code={}, kind={}, value={}, \
              reason={})",
             self.address(),
             self.size(),
             repr(py, self.function_code())?,
-            repr(py, self.cycle())?,
+            repr(py, self.kind())?,
             repr(py, self.value())?,
             repr(py, self.reason()?)?
         ))

@@ -35,8 +35,8 @@ rename renames the Python name with it.  The deliberate differences:
   newtype of a number that also parses (`InterruptLevel`, `IrqPin`,
   `pacing::Factor`) crosses as its number, and so, deliberately, do a
   cycle's size (1, 2 or 4 bytes, Rust's `Size`) and a port's (8 or 16
-  bits, `PortSize`); page permissions are a string, `"rwx"`
-  (`Permissions`).  An enum class is never taken as a string nor an
+  bits, `PortSize`); page permissions are a string, `"rwx"`, as
+  `Permissions` prints and parses.  An enum class is never taken as a string nor an
   `int`: a member has `name`, its name in the class
   (`"WATCHDOG"`), and its `str()` is Rust's `Display` where the type
   has one (`"watchdog"`), else that name.  An enum whose variants
@@ -54,7 +54,8 @@ rename renames the Python name with it.  The deliberate differences:
   `take_output_changes()` likewise hands a change it cannot convert
   over as `(now, None, text)`.
 - **Tuples:** a struct of plain values a call returns is a tuple of its
-  fields, in order: `PortLevels` as `(driven, levels)`, a port's change
+  fields, in order, and one it takes is those fields as arguments:
+  `PortLevels` as `(driven, levels)` (`set_pins(port, driven, levels)`), a port's change
   as `(now, port, driven, levels)`, a PWM pin's as `(now, channel,
   level)`, a transmitted frame as `(start, frame)`, a QSPI slave
   shift's `Shifted` as `(miso, driven)`.  A struct of registers a host
@@ -87,7 +88,8 @@ rename renames the Python name with it.  The deliberate differences:
   `permissions` too, Rust's `map` then `protect`.
 - **Builtins:** an argument Rust names `id` or `bytes`, Python
   builtins, is named for what it holds: `remove_hook(hook)`,
-  `unobserve(observer)`, `peripheral(peripheral)`, `write(address,
+  `unobserve(observer)`, `peripheral(peripheral)`,
+  `remove_peripheral(peripheral)`, `write(address,
   data)`.
 - **Properties:** a Rust accessor of plain state, with no arguments, is
   a read-only property (`now`, `halted`, `instructions`,
@@ -104,7 +106,12 @@ rename renames the Python name with it.  The deliberate differences:
   as `halted` is the CPU's `Halt` (`Cpu::halted`, likewise).  `reset_halted` is
   `reset_with_breakpoint()` then `background`.
 - **Handles:** memories and peripherals are the numbers `Builder`
-  returns, not `MemoryId` and `PeripheralId`; a Rust callback trait
+  returns, not `MemoryId` and `PeripheralId`.  `Mc68331.memory(memory,
+  offset=0, length=None)` is Rust's `memory(id)`, sliced, and
+  `set_memory(memory, offset, data)` writes what Rust writes through
+  `memory_mut(id)`, a slice Python cannot hold (`read_memory` and
+  `write_memory` are the `Cpu32Target` calls of a bus address, which
+  Python does not offer); a Rust callback trait
   (`MappedPeripheral`, `SpiPeripheral`, `Peripheral`, `Observer`) is a
   duck-typed object or callable.  The protocol classes
   `mc683xx.MappedPeripheral`, `SpiPeripheral` and `Peripheral` type the
@@ -129,7 +136,7 @@ Not offered, as a Python host has another way or no use for them:
 `Mc68331::set_clock_stop` and `set_output_stop` (a host's own
 scheduler's, as the board's); the `_mut` accessors and
 `cpu`, `sim`, `qsm` and `gpt` (registers by name, a module's registers
-through `bus_read` and `peek`, memory through `write_memory`);
+through `bus_read` and `peek`, memory through `set_memory`);
 `Builder::system_frequency`; `Board::run_until_quantized`;
 `StopRequest::take` (the run loop's).
 
@@ -246,7 +253,7 @@ chip = builder.build()  # the power-on reset
 assert chip.read_register("PC") == START
 run = chip.run_for(1000)
 assert run.stop == mc683xx.Stop.Budget()
-assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
+assert chip.memory(ram, 0, 2) == b"\x12\x34"
 ```
 
 - `Builder(data=0xFFFF, reference_hz=None, external_hz=None)`: the
@@ -255,8 +262,7 @@ assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
   (`reference_hz`, 25000 to 50000, SIMRM 4.4.1; 32768 by default) or,
   with MODCLK low, an external clock (`external_hz`).
 - `memory(contents, pins, writable=True)`: RAM or ROM, a whole number
-  of 2-Kbyte pages; returns its number for `memory`, `read_memory` and
-  `write_memory`.
+  of 2-Kbyte pages; returns its number for `memory` and `set_memory`.
 - `fixed_memory(contents, base, writable=True)`: emulator-only memory
   at a fixed address on no pin, which takes the cycles there no chip
   select matches (the host guide's Fixed memory); a memory number as
@@ -463,7 +469,7 @@ number = builder.peripheral(interrupter, ["CS1", "CS10"])
 builder.set_interrupt(number, LEVEL)
 chip = builder.build()
 chip.run_for(5000)
-assert chip.read_memory(ram, 0, 2) == b"\xbe\xef", "the handler ran"
+assert chip.memory(ram, 0, 2) == b"\xbe\xef", "the handler ran"
 assert chip.peripheral(number) is interrupter
 [acknowledge] = interrupter.acknowledges
 assert (acknowledge.select, acknowledge.address) == ("CS10", 0xFFFFF1 + 2 * LEVEL)
@@ -639,9 +645,10 @@ what the chip drives within a run comes back as timed changes.
   `take_sci_transmitted() -> [(start, Frame)]`, each frame at its
   start bit.  A frame is the data bits
   as on the line, LSB first, parity included (`frame.data`).
-- Ports, by `Port.C`, `E`, `F`, `GP` or `QS`: `set_pins(port, value,
-  mask=0xFF)` drives the pins in `mask`, all by default (port C has
-  none to drive: `ValueError`);
+- Ports, by `Port.C`, `E`, `F`, `GP` or `QS`: `set_pins(port, driven,
+  levels)` drives the pins in `driven` to their levels in `levels`,
+  Rust's `PortLevels` flattened (port C has none to drive:
+  `ValueError`);
   `outputs(port)` as `(driven, levels)` masks, Rust's `PortLevels` as
   a pair Python unpacks; `port(port)`, a `PortState` (`latch`,
   `direction`, `assignment`, `pins`); `take_port_changes() -> [(now,
@@ -802,7 +809,7 @@ for bar, base in ((SIM + 0x4C, RAM_BASE), (SIM + 0x50, PERIPHERAL_BASE)):
     chip.bus_write(bar, 2, base >> 8 | BLOCK_64K)
     chip.bus_write(bar + 2, 2, CSOR_FAST)
 chip.bus_write(RAM_BASE, 4, 0x12345678)
-assert chip.read_memory(ram, 0, 4) == b"\x12\x34\x56\x78"
+assert chip.memory(ram, 0, 4) == b"\x12\x34\x56\x78"
 assert chip.bus_read(RAM_BASE + 2, 2) == chip.peek(RAM_BASE + 2, 2) == 0x5678
 chip.bus_write(PERIPHERAL_BASE + VECTOR_REGISTER, 1, VECTOR)
 wired = chip.peripheral(number)
@@ -833,7 +840,7 @@ call a Python callable with what the Rust hook sees: an `Instruction`
 with no cycle from the bytes it writes to, `None` for a read, a CPU-space write or a peripheral's
 write; on the chip a
 long operand is two word cycles, on the bare `Machine` one access of
-4), an `InvalidAccess` (those, `cycle`, a
+4), an `InvalidAccess` (those, `kind`, a
 `BusCycleKind`, and `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`),
 an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`) or
 an `ExceptionReturn` (`vector`, `pc`, `sr`, `stack`: what `rte`
@@ -879,7 +886,7 @@ chip.set_tracing(exceptions=True)
 chip.run_for(1000)
 assert reasons == [mc683xx.Invalid.PROTECTED]
 assert vectors == [BUS_ERROR]
-assert chip.read_memory(ram, 0, 2) == b"\x00\x00"
+assert chip.memory(ram, 0, 2) == b"\x00\x00"
 assert any(isinstance(event, mc683xx.Event.Exception) for event in chip.take_events())
 ```
 
@@ -1157,7 +1164,8 @@ board's chip, a `BoardChip` with the `Mc68331` methods that read or
 hook it (registers, `bus_read`, `bus_write`, `peek`, the hooks,
 `protect`, what the pins drive, `now`, `halted`, `background`,
 `instructions`),
-Rust's `Board::chip`; `reset_for(cause)` a reset for a `ResetCause`
+Rust's `Board::chip`; `reset()` RESET from the board, as Rust's
+`Board::reset`; `reset_for(cause)` a reset for a `ResetCause`
 now, as Rust's `Board::reset_for` (`EXTERNAL` as RESET asserted and
 released by the board, any other the chip's own, which drives RESET on
 the nets; nothing while the board holds RESET low);
@@ -1416,7 +1424,7 @@ assert bare.read_register("D0") == 6
   no two overlapping.  A cycle no mapped memory serves and one
   peripheral covers goes to it, before it lands: the read's value is the
   peripheral's, the write is the peripheral's to keep.  It returns the
-  peripheral's number, and `remove_peripheral(id)` takes it off again,
+  peripheral's number, and `remove_peripheral(peripheral)` takes it off again,
   `False` if there was none (Rust's `PeripheralId`,
   `remove_peripheral`).  `protect` covers a peripheral's pages too,
   mapped or not: a cycle they do not permit is a bus error before the
@@ -1545,7 +1553,7 @@ otherwise, or with no callback (`set_intercept_callback(None)`), the
 CPU takes it natively.  `set_stop_on_fault(True)` (`stops_on_fault`)
 stops the run on a bus or address error instead of taking it:
 `End.Fault(fault)`, its `FaultStop` giving the
-`cycle` (`BusCycleKind`), the `cause` (`FaultCause.BUS_ERROR` for
+`kind` (`BusCycleKind`), the `cause` (`FaultCause.BUS_ERROR` for
 unmapped or a peripheral's, `PROTECTED`, `ADDRESS_ERROR`), the whole
 `address`, `size`, `function_code`, `pc` and `registers`, which
 the CPU holds again, no frame stacked for the fault.  A fault while

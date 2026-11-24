@@ -34,7 +34,7 @@ use size::Size;
 /// A [`Cpu32Target`] call the implementation does not support: the
 /// error a method added after 1.0 returns by default.  Built with
 /// [`Unsupported::new`], so a field added later gets a default.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, thiserror::Error)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("{what} is not supported")]
 #[non_exhaustive]
 pub struct Unsupported {
