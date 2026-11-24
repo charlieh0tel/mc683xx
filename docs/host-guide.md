@@ -1557,7 +1557,7 @@ beside `watch_code`, a hook that breaks ending the run `Stop::Hook`.
 - **Pacing.**  `pacing::Pacing` is `Unpaced` (as fast as the host runs
   it, the default), `RealTime`, or `Scaled(factor)`, board seconds a
   wall second (2.0 twice real time, 0.5 half), a `pacing::Factor`
-  (`Factor::new(f64)`, finite and above 0, else `PacingError::Factor`,
+  (`Factor::try_from(f64)`, finite and above 0, else `PacingError::Factor`, and `f64::from(factor)`,
   so every `Pacing` can be kept, and it is `Eq` and `Hash`;
   `Factor::REAL_TIME` is 1.0, and `Pacing::factor()` the factor,
   `None` unpaced); it prints and parses as `unpaced`, `realtime`

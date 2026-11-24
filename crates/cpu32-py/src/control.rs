@@ -72,7 +72,7 @@ impl<'a, 'py> FromPyObject<'a, 'py> for Factor {
 
     /// A factor not finite and above 0 raises `ValueError`.
     fn extract(object: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        pacing::Factor::new(object.extract()?)
+        pacing::Factor::try_from(object.extract::<f64>()?)
             .map(Self)
             .map_err(|error| Error::from(error).into())
     }
@@ -84,7 +84,7 @@ impl<'py> IntoPyObject<'py> for Factor {
     type Error = Infallible;
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        self.0.get().into_pyobject(py)
+        f64::from(self.0).into_pyobject(py)
     }
 }
 
@@ -133,7 +133,7 @@ impl PacingView {
     /// `Pacing::factor`).
     #[getter]
     fn factor(&self) -> Option<f64> {
-        self.pacing().factor().map(pacing::Factor::get)
+        self.pacing().factor().map(f64::from)
     }
 
     /// As `==` compares: the variant and the factor.
@@ -153,7 +153,7 @@ impl PacingView {
         Ok(match self {
             Self::Unpaced() => "Pacing.Unpaced()".to_owned(),
             Self::RealTime() => "Pacing.RealTime()".to_owned(),
-            Self::Scaled { factor } => format!("Pacing.Scaled({})", repr(py, factor.0.get())?),
+            Self::Scaled { factor } => format!("Pacing.Scaled({})", repr(py, f64::from(factor.0))?),
         })
     }
 }

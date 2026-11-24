@@ -71,7 +71,7 @@ to = ["chip.PGP1"]
 
 /// The pacing at `factor`.
 fn scaled(factor: f64) -> Pacing {
-    Pacing::Scaled(Factor::new(factor).unwrap())
+    Pacing::Scaled(Factor::try_from(factor).unwrap())
 }
 
 /// The board.
