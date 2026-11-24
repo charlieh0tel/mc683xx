@@ -1010,9 +1010,10 @@ chip.run_for(500)
 - `mc683xx.TargetError` (a `RuntimeError`): a background debug control
   the CPU's state refuses (Background debug mode).
 - `mc683xx.RunError` (a `RuntimeError`): a run that could not go on, a
-  board peripheral stalling board time (Board files); or a run's end
+  board peripheral stalling board time (Board files); a run's end
   or halt this build's bindings have no class for, named, which a newer
-  Rust core could give but none does today.
+  Rust core could give but none does today; or an exception
+  `take_exception` could not take (Rust's `TakeExceptionError`).
 - `NotImplementedError`: a module that cannot save; or any other value
   this build's bindings have no Python value for (a fault cause, a
   role, an invalid access's reason, a PWM output, a gdb session's
@@ -1457,7 +1458,7 @@ assert bare.read_register("D0") == 6
   Level 0, which no interrupt sets, clears the mask.
   No clocks pass.  The exception hooks, and the write hooks on the
   stack, are called before it returns, their results stopping nothing.
-  A halted CPU, or one in background mode, raises `RuntimeError`, as
+  A halted CPU, or one in background mode, raises `RunError`, as
   does a fault stacking the frame with `set_stop_on_fault(True)`,
   nothing stacked; without it, the fault is a bus error the CPU takes,
   as in its own exception processing.

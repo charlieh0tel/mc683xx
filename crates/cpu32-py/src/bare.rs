@@ -626,7 +626,7 @@ impl MachineView {
     /// clears it.  No clocks pass.  The hooks
     /// it fires are called before it returns, their results stopping
     /// nothing.  A halted CPU, or a fault that stops
-    /// (`set_stop_on_fault`), raises `RuntimeError`, nothing stacked.
+    /// (`set_stop_on_fault`), raises `RunError`, nothing stacked.
     #[pyo3(signature = (vector, level = None))]
     fn take_exception(slf: &Bound<'_, Self>, vector: u8, level: Option<u8>) -> PyResult<()> {
         let level = level

@@ -440,12 +440,12 @@ def test_a_host_exception_refused():
     cpu = machine(NOP, RTS)
     cpu.set_stop_on_fault(True)
     cpu.write_register("SSP", 0x90000000)
-    with pytest.raises(RuntimeError, match="stopped at a fault: bus error: write"):
+    with pytest.raises(mc683xx.RunError, match="stopped at a fault: bus error: write"):
         cpu.take_exception(TRAP_0)
     assert (cpu.read_register("SSP"), cpu.read_register("PC")) == (0x90000000, CODE)
     halted = mc683xx.Machine()
     halted.reset()
-    with pytest.raises(RuntimeError, match="executes nothing: halted"):
+    with pytest.raises(mc683xx.RunError, match="executes nothing: halted"):
         halted.take_exception(TRAP_0)
 
 

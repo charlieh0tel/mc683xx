@@ -155,7 +155,8 @@ class LoadError(ValueError):
 
 class RunError(RuntimeError):
     """Raised by a run that could not go on: a board peripheral that
-    stalls board time, or a run's end the bindings do not know."""
+    stalls board time, or a run's end the bindings do not know; and by
+    take_exception for an exception the CPU could not take."""
 
 class TargetError(RuntimeError):
     """Raised by the chip's background debug controls: halt with
