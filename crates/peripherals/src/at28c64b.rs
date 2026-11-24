@@ -735,14 +735,23 @@ impl At28c64b {
     /// Programs `value` at `offset`, through to the file.  A failure
     /// there drops the file and stops the run.
     fn program(&mut self, offset: Offset, value: u8, drive: &mut Drive<'_>) {
+        if !self.store_cell(offset, value) {
+            drive.stop();
+        }
+    }
+
+    /// Stores `value` at `offset`, through to the file: whether the
+    /// file took it.  A failure there drops the file.
+    fn store_cell(&mut self, offset: Offset, value: u8) -> bool {
         self.cells[offset.index()] = value;
         let written = self
             .file()
             .map(|file| write_through(file, offset.0.into(), &[value]));
         if let Some(Err(error)) = written {
             self.drop_file(error);
-            drive.stop();
+            return false;
         }
+        true
     }
 
     /// A read of `offset`, settled: the cell, or the cycle's polling.

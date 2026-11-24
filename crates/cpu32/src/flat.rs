@@ -165,10 +165,10 @@ impl FlatBus {
             .map_err(|error| wired.named(error))
     }
 
-    /// The peripheral that covers every byte of `access`, if one does.  No
-    /// peripheral is in CPU space: its addresses are not memory's (CPU32RM
-    /// 5.3.1).
-    fn peripheral(&mut self, access: &BusAccess) -> Option<(&mut dyn MappedPeripheral, BusCycle)> {
+    /// The index of the peripheral that covers every byte of `access`, if
+    /// one does.  No peripheral is in CPU space: its addresses are not
+    /// memory's (CPU32RM 5.3.1).
+    fn covering(&self, access: &BusAccess) -> Option<usize> {
         if access.function_code == FunctionCode::CpuSpace {
             return None;
         }
@@ -177,10 +177,15 @@ impl FlatBus {
         let index = self
             .peripherals
             .partition_point(|wired| *wired.range.end() < first);
-        let wired = self.peripherals.get_mut(index)?;
-        if !(wired.range.contains(&first) && wired.range.contains(&last)) {
-            return None;
-        }
+        let wired = self.peripherals.get(index)?;
+        (wired.range.contains(&first) && wired.range.contains(&last)).then_some(index)
+    }
+
+    /// The peripheral that covers every byte of `access`, if one does, and
+    /// its cycle.
+    fn peripheral(&mut self, access: &BusAccess) -> Option<(&mut dyn MappedPeripheral, BusCycle)> {
+        let index = self.covering(access)?;
+        let wired = &mut self.peripherals[index];
         let cycle = BusCycle::new(
             access.address,
             access.size,
