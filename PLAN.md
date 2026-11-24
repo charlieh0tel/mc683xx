@@ -2467,7 +2467,9 @@ and `mc683xx.Machine` in Python (see Python).
   `Bus::exception_entered` called; STOP ended, no clocks charged.  A
   hook's or peripheral's stop asked for in it has no run to end and is
   dropped.  A fault in it is taken as in any exception processing
-  (type IV, or a double bus fault in a bus error's window), or with
+  (type IV, or a double bus fault in a bus error's window, which taking
+  vector 2 or 3 opens until the handler's first fetch, CPU32RM 6.2.2),
+  or with
   stop on fault returned as `TakeExceptionError::Fault`, the registers
   and the hooks at PC as before.  Not on the chip, whose interrupts
   come from its modules and pins.

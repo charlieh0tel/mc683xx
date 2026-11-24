@@ -309,7 +309,8 @@ impl Cpu {
     /// A fault stacking the frame or reading the vector is taken as one
     /// in exception processing is: a type IV bus error (6.3.1.4), or a
     /// double bus fault while a bus or address error is being taken
-    /// (6.2.2).
+    /// (6.2.2), as one is when `vector` is 2 or 3, until its handler's
+    /// first opcode is fetched.
     ///
     /// # Errors
     ///
@@ -332,6 +333,10 @@ impl Cpu {
         self.began.clone_from(&self.registers);
         self.leave_loop_mode();
         let resume = self.resume;
+        let fault_window = self.fault_window;
+        if vector == Vector::BUS_ERROR || vector == Vector::ADDRESS_ERROR {
+            self.fault_window = true;
+        }
         let pc = self.registers.pc;
         Core {
             cpu: self,
@@ -343,6 +348,7 @@ impl Cpu {
         if let Some(End::Fault(fault)) = self.bare.end.take() {
             // the instruction at PC not begun: its hooks still to run
             self.resume = resume;
+            self.fault_window = fault_window;
             return Err(TakeExceptionError::Fault(fault));
         }
         self.stopped = false;

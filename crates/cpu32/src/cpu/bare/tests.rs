@@ -1042,6 +1042,76 @@ fn a_fault_stacking_a_host_exception_stops_with_nothing_stacked() {
     assert_eq!(*hooked.borrow(), 1);
 }
 
+/// A machine whose stack's first word, the highest, is on a page that
+/// takes no writes, and the rest of the four-word frame and the type IV
+/// frame below it on one that does.
+fn first_stack_write_faults() -> Machine {
+    let mut machine = machine(&[NOP]);
+    let page = STACK;
+    machine
+        .protect(Address(page), PAGE_BYTES, Permissions::READ)
+        .unwrap();
+    machine.cpu.registers.ssp = Address(page + 2);
+    machine
+}
+
+#[test]
+fn a_fault_stacking_a_host_bus_or_address_error_is_a_double_bus_fault() {
+    // CPU32RM 6.2.2: a bus or address error while one is being taken
+    // halts; a fault taking any other exception is a type IV bus
+    // error (6.3.1.4)
+    let mut machine = first_stack_write_faults();
+    machine.take_exception(Vector(32), None).unwrap();
+    assert_eq!(machine.cpu.halted(), None);
+    assert_eq!(machine.cpu.registers.pc, Address(HANDLER));
+    for vector in [Vector::BUS_ERROR, Vector::ADDRESS_ERROR] {
+        let mut machine = first_stack_write_faults();
+        machine.take_exception(vector, None).unwrap();
+        assert_eq!(machine.cpu.halted(), Some(Halt::DoubleBusFault), "{vector}");
+    }
+}
+
+#[test]
+fn a_fault_reading_a_host_bus_or_address_error_s_vector_is_a_double_bus_fault() {
+    for vector in [Vector::BUS_ERROR, Vector::ADDRESS_ERROR] {
+        let mut machine = machine(&[NOP]);
+        // vectors 2 and 3 past the RAM
+        machine.cpu.registers.vbr = Address(RAM - 4);
+        machine.take_exception(vector, None).unwrap();
+        assert_eq!(machine.cpu.halted(), Some(Halt::DoubleBusFault), "{vector}");
+    }
+}
+
+#[test]
+fn a_fault_fetching_a_host_bus_error_s_handler_is_a_double_bus_fault() {
+    // MC68331UM 4.5.5.2: until the handler's first opcode is fetched
+    let mut machine = machine(&[NOP]);
+    machine
+        .write(Address(4 * 2), &NOWHERE.to_be_bytes())
+        .unwrap();
+    machine.take_exception(Vector::BUS_ERROR, None).unwrap();
+    assert_eq!(machine.cpu.halted(), None);
+    one(&mut machine);
+    assert_eq!(machine.cpu.halted(), Some(Halt::DoubleBusFault));
+}
+
+#[test]
+fn a_fault_stop_taking_a_host_bus_error_leaves_no_double_fault_armed() {
+    let mut machine = first_stack_write_faults();
+    machine.cpu.set_stop_on_fault(true);
+    assert!(matches!(
+        machine.take_exception(Vector::BUS_ERROR, None),
+        Err(TakeExceptionError::Fault(_))
+    ));
+    // a fault in the next instruction is its own, not a double fault
+    machine.cpu.set_stop_on_fault(false);
+    machine.cpu.registers.ssp = Address(STACK - 0x100);
+    machine.cpu.registers.pc = Address(NOWHERE);
+    one(&mut machine);
+    assert_eq!(machine.cpu.halted(), None);
+    assert_eq!(machine.cpu.registers.pc, Address(HANDLER));
+}
+
 #[test]
 fn a_fault_reading_a_host_exception_s_vector_is_a_type_iv_bus_error() {
     let mut machine = machine(&[NOP]);
