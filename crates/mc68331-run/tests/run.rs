@@ -253,6 +253,7 @@ fn a_halt_and_a_wrong_command_have_their_status() {
         ["--turn", "18446745"],
         ["--turn", "0"],
         ["--turn", "1e-13"],
+        ["--turn", "9.99e-7"],
         ["--turn", "nan"],
         ["--seconds", "nan"],
         ["--seconds", "-inf"],

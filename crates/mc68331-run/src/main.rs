@@ -82,6 +82,10 @@ const EXIT_STOPPED: u8 = 4;
 /// Exit status: a second Ctrl-C, the shell's for death by SIGINT
 /// (128 + 2).
 const EXIT_INTERRUPTED: i32 = 130;
+/// The shortest `--turn`: a turn is a sync point with input, output, the
+/// trace and positions, so one every few clocks would be a run that
+/// never gets on.
+const SHORTEST_TURN: Span = Span::from_micros(1);
 /// What `--help` says after the options.
 const AFTER_HELP: &str = "Ctrl-C stops the run at its next sync point: the `stopped` record is \
 written and --save still saves (exit status 4).  A second Ctrl-C ends the process at once, \
@@ -189,7 +193,7 @@ struct Arguments {
     save: Option<PathBuf>,
     /// Seconds of board time between the runner's turns, where input
     /// goes in (one fed byte a turn), output comes out and positions
-    /// are taken.
+    /// are taken; 1e-6 (a microsecond) or more.
     #[arg(long, value_name = "S", default_value = "0.001", value_parser = turn)]
     turn: Span,
     /// Seconds of board time before input goes in: a frame that
@@ -238,14 +242,15 @@ fn seconds(text: &str) -> Result<f64, String> {
     }
 }
 
-/// `--turn`: as `seconds`, more than 0 and no longer than a [`Span`]
-/// holds.
+/// `--turn`: as `seconds`, at least [`SHORTEST_TURN`] and no longer
+/// than a [`Span`] holds.
 fn turn(text: &str) -> Result<Span, String> {
     Span::checked_from_secs_f64(seconds(text)?)
-        .filter(|turn| !turn.is_zero())
+        .filter(|turn| *turn >= SHORTEST_TURN)
         .ok_or_else(|| {
             format!(
-                "{text:?}: give more than 0 seconds, and at most {}",
+                "{text:?}: give at least {} seconds, and at most {}",
+                SHORTEST_TURN.secs_f64(),
                 Span::MAX.secs_f64()
             )
         })
@@ -579,12 +584,24 @@ impl Turns {
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::fs;
 
+    use super::SHORTEST_TURN;
+    #[cfg(unix)]
     use super::temporary_file;
+    use super::turn;
 
+    #[test]
+    fn a_turn_is_a_microsecond_or_more() {
+        assert_eq!(turn("1e-6"), Ok(SHORTEST_TURN));
+        assert!(turn("9.99e-7").is_err());
+        assert!(turn("0").is_err());
+    }
+
+    #[cfg(unix)]
     #[test]
     fn a_link_at_the_temporary_path_is_not_followed() {
         let directory = std::env::temp_dir().join(format!("mc683xx-run-{}", std::process::id()));
