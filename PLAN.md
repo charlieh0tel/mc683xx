@@ -2120,7 +2120,7 @@ binary, text for S-records and scripts) and opens no files, so its
 parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
 2026-11-21).
 
-- **Images:** `image::Image`, segments in address order, apart (ones
+- **Images:** `Image`, segments in address order, apart (ones
   that touch are joined) and not empty, and an optional entry point.
   From S-records (M68000PRM Appendix C): S1-S3 data, S0 ignored, S5
   and S6 counts checked (S6, a 24-bit count, is not in the manual but

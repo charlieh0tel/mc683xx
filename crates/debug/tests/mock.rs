@@ -2,12 +2,12 @@
 //! where a test asks: a byte that drops writes, a byte that bus-errors,
 //! a status bit that sets after some reads.
 
-use mc683xx_debug::image::Image;
-use mc683xx_debug::image::Segment;
-use mc683xx_debug::load::ImageLoadError;
-use mc683xx_debug::load::LoadOptions;
-use mc683xx_debug::load::OddEdges;
-use mc683xx_debug::load::Verification;
+use mc683xx_debug::Image;
+use mc683xx_debug::ImageLoadError;
+use mc683xx_debug::LoadOptions;
+use mc683xx_debug::OddEdges;
+use mc683xx_debug::Segment;
+use mc683xx_debug::Verification;
 use mc683xx_debug::script::Command;
 use mc683xx_debug::script::CommandError;
 use mc683xx_debug::script::Script;

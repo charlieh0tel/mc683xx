@@ -2,11 +2,11 @@
 //! background mode as a BDM pod holds silicon.
 
 use mc683xx_cpu32::memory::MemoryKind;
-use mc683xx_debug::image::Image;
-use mc683xx_debug::load::ImageLoadError;
-use mc683xx_debug::load::LoadOptions;
-use mc683xx_debug::load::OddEdges;
-use mc683xx_debug::load::Verification;
+use mc683xx_debug::Image;
+use mc683xx_debug::ImageLoadError;
+use mc683xx_debug::LoadOptions;
+use mc683xx_debug::OddEdges;
+use mc683xx_debug::Verification;
 use mc683xx_debug::script::CommandError;
 use mc683xx_debug::script::Script;
 use mc683xx_mc68331::Builder;
