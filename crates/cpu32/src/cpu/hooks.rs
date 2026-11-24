@@ -600,15 +600,19 @@ impl Core<'_> {
     /// What a write of `size` at `address` is to replace, for the write
     /// hooks: the bytes the core's memory holds there, read with no
     /// cycle, while a write hook watches the page and the cycle is not
-    /// part of a long operand seen once.  [`None`] otherwise, and where
-    /// the memory does not serve the address.
+    /// part of a long operand seen once.  [`None`] otherwise, where the
+    /// memory does not serve the address, and for a word or long at an
+    /// odd address, which ends in an address error without writing.
     pub(super) fn previous(
         &self,
         address: Address,
         size: Size,
         function_code: FunctionCode,
     ) -> Option<u32> {
-        if self.cpu.long_operand || self.cpu.memory.watched(address) & watch::WRITE == 0 {
+        if self.cpu.long_operand
+            || (size != Size::Byte && address.is_odd())
+            || self.cpu.memory.watched(address) & watch::WRITE == 0
+        {
             return None;
         }
         self.cpu
