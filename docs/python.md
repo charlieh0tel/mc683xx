@@ -875,8 +875,10 @@ long operand is two word cycles, on the bare `Machine` one access of
 an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`) or
 an `ExceptionReturn` (`vector`, `pc`, `sr`, `stack`: what `rte`
 restored, and the frame's address, its `ExceptionEntry`'s `stack`).
-Each returns a `HookId` for `remove_hook`.  A truthy result stops the
-run (`Stop.Hook(hook)`); a code hook's stop leaves its
+Each returns a `HookId` for `remove_hook`.  A callable returns `True`
+to stop the run (`Stop.Hook(hook)`), `None` (no `return`) or `False`
+not to; any other result raises `TypeError`, as Rust's hook returns a
+`ControlFlow`, not a number or a list; a code hook's stop leaves its
 instruction unexecuted, and the next run goes past it.  A hook's
 exception stops the run and is raised by `run_for`.  The run holds the
 chip, so a hook that calls into it raises `RuntimeError`; what it
@@ -1561,8 +1563,8 @@ The hooks are the chip's (`add_code_hook`, `add_block_hook`,
 `add_exception_hook`, `add_exception_return_hook`, `remove_hook`), but on
 the bare `Machine` a callable
 may read and write registers and memory, map, protect and stop the
-run (`stop_request().request()`), as a Unicorn hook does; a truthy
-result stops it too.  It
+run (`stop_request().request()`), as a Unicorn hook does; `True`
+stops it too.  It
 cannot `run_limited`.  A hook stops the core's run where it fires; `run_limited` calls
 the callables, in order, with nothing held, and goes on.  So when a
 write takes effect:
@@ -1595,7 +1597,7 @@ words and longs, and looks with no cycle (`peek_bytes`, `peek`, gdb).
 The read hooks see the cycles after it, with the values `data` gave
 them.  On the bare `Machine`, unlike its other hooks, it runs within
 the run, so a call into the machine raises `RuntimeError`, and memory
-is `PendingRead.peek`'s; a truthy result stops the run once the
+is `PendingRead.peek`'s; `True` stops the run once the
 instruction completes.
 
 ```python
@@ -1679,7 +1681,7 @@ anything is stacked, for the host to handle (a stubbed kernel call, an
 emulated instruction, a stop), and returns a `HookId` that
 `remove_hook` takes.  `callback(Intercepted)` gets the `vector` and
 the instruction's `pc`, where PC is, its (An)+ and -(An) undone.  A
-truthy result means it handled it, and the run goes on from PC as the
+`True` means it handled it, and the run goes on from PC as the
 callable left it; otherwise the next intercept hook covering the
 vector is called, in the order installed, and once none is left the
 CPU takes it natively.  Rust's hook returns `ControlFlow::Break` to
@@ -1829,7 +1831,7 @@ The port of a Unicorn harness is mechanical:
 | `mem_write(address, data)`, `mem_read(address, size)` | `poke_bytes(address, data)`, `peek_bytes(address, length)` |
 | `reg_write(UC_M68K_REG_D0, value)`, `reg_read` | `write_register("D0", value)`, `read_register("D0")` |
 | `emu_start(begin, until, timeout, count)` | `run_limited(begin=begin, reach=until, instructions=count, cycles=...)`: no host time |
-| `emu_stop()` in a hook | `stop_request().request()`, or return a truthy value |
+| `emu_stop()` in a hook | `stop_request().request()`, or return `True` |
 | `hook_add(UC_HOOK_CODE, f, begin=, end=)` | `add_code_hook(f, begin, end)`: `f(Instruction)`; `reach` before it |
 | `hook_add(UC_HOOK_BLOCK, ...)` | `add_block_hook` |
 | `hook_add(UC_HOOK_MEM_READ, ...)` to feed a read | `add_peripheral(begin, end, peripheral)`: `read` answers before the read |

@@ -1328,7 +1328,7 @@ macro_rules! chip_methods {
             }
 
             /// Calls `callback(Instruction)` before each instruction at an
-            /// address from `begin` to `end`; a truthy result stops the run
+            /// address from `begin` to `end`; `True` stops the run
             /// before it, and the next run executes it without calling the
             /// code hooks for it again.
             #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
@@ -1365,7 +1365,7 @@ macro_rules! chip_methods {
             /// `end`: `data` is a bytearray copy of the bytes it is to
             /// read, and what the callable leaves in it answers the read,
             /// not stored; `PendingRead.peek` reads memory meanwhile.  A
-            /// truthy result stops the run once the instruction completes.
+            /// `True` stops the run once the instruction completes.
             #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
             fn add_pre_read_hook(
                 &mut self,
@@ -1380,7 +1380,7 @@ macro_rules! chip_methods {
             }
 
             /// Calls `callback(MemoryAccess)` after each operand read cycle
-            /// from `begin` to `end`; a truthy result stops the run once
+            /// from `begin` to `end`; `True` stops the run once
             /// the instruction completes.
             #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
             fn add_read_hook(
@@ -1412,7 +1412,7 @@ macro_rules! chip_methods {
 
             /// Calls `callback(InvalidAccess)` for each cycle from `begin`
             /// to `end` that ends in a bus error, before the CPU takes the
-            /// exception; a truthy result stops the run once it is taken.
+            /// exception; `True` stops the run once it is taken.
             #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
             fn add_invalid_hook(
                 &mut self,
@@ -1427,7 +1427,7 @@ macro_rules! chip_methods {
             }
 
             /// Calls `callback(ExceptionEntry)` after each exception is
-            /// entered; a truthy result stops the run with the handler not
+            /// entered; `True` stops the run with the handler not
             /// yet run.
             fn add_exception_hook(&mut self, callback: &Bound<'_, PyAny>) -> PyResult<HookIdView> {
                 self.with_chip_mut(callback.py(), |chip, pending| {
@@ -1437,7 +1437,7 @@ macro_rules! chip_methods {
             }
 
             /// Calls `callback(ExceptionReturn)` after each exception is
-            /// returned from; a truthy result stops the run before the
+            /// returned from; `True` stops the run before the
             /// instruction it returns to.
             fn add_exception_return_hook(
                 &mut self,

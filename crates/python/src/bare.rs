@@ -841,7 +841,7 @@ impl MachineView {
     /// Calls `callback(Intercepted)` for each exception an instruction
     /// raises with a vector of `vectors`, an iterable of vector numbers
     /// or `None`, the default, for every vector, before anything is
-    /// stacked, PC at the instruction.  A truthy result means it handled it: the CPU takes
+    /// stacked, PC at the instruction.  `True` means it handled it: the CPU takes
     /// nothing and runs on from PC as the callable left it.  Otherwise
     /// the next hook that covers the vector is called, in the order
     /// installed, and if none handles it the CPU takes it natively.
@@ -973,7 +973,7 @@ impl MachineView {
     /// within the run, unlike the other hooks: `data` is a bytearray
     /// copy of the bytes it is to read, and what the callable leaves in
     /// it answers the read, not stored; `PendingRead.peek` reads memory
-    /// meanwhile.  A truthy result stops the run once the instruction
+    /// meanwhile.  `True` stops the run once the instruction
     /// completes.
     #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
     fn add_pre_read_hook(

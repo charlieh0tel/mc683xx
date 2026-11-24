@@ -897,7 +897,9 @@ chip beside `Mc68331`.
   `InvalidAccess` (those, `kind`, a `BusCycleKind`, `value` or `None`,
   `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`) or an
   `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`).  A
-  truthy result stops the run (`Stop.Hook(hook)`),
+  `True` result stops the run (`Stop.Hook(hook)`), `None` or `False`
+  does not, and any other raises `TypeError` (sc batch 4: a truthy
+  count or list stopped runs by mistake),
   where the Rust hook's `Break` would.  An exception it raises stops
   the run there too and is raised when `run_for` returns, as a peripheral's
   is, but without a stop request left behind.  The run holds the
@@ -3653,7 +3655,7 @@ host's QSPI peripheral, which a restore keeps).
 | Python mirrors the Rust types it wraps: `Run`, `LimitedRun` and `BoardRun`, `Stop` and `End` a class per variant (a variant's value a field named for it, `stop.hook`, `frame.data`, not `_0`; positional patterns still match), `Machine`, `HookId`, plain enums as enum classes | One name per item across both APIs (AGENTS.md); a host porting between them translates nothing.  A name a host writes when it wires (pin, chip select, net type, direction, register) crosses as its string, a value it matches on (kind, cause, port, channel, function code) as an enum class whatever its traits (amended 2026-11-23: the earlier "a type with `FromStr` crosses as its string" did not describe `Port`, `Channel`, `Input`, `Role`, `Lane` or `ResetCause`, and would have made `FunctionCode` the one value matched as a string); `End::Intercepted` and `End::Steps` have no Python variant, as the run answers an intercept and takes no step limit (decided 2026-10-24, before 0.1.0). |
 | A peripheral's Python exception stops the run after its instruction and is raised when `run_for` returns | The `MappedPeripheral` trait can report only BERR; the chip's `StopRequest` ends the run there, and the exception cannot cross it. |
 | A bare `Machine`'s hooks may write the CPU; their callables run between core runs | Unicorn's harness stubs routines and peripherals from hooks; queuing in the core and calling Python with nothing borrowed needs no `unsafe` and costs only hooks that fire. |
-| A Python hook stops the run on a truthy result; its exception stops it as `Break` and is raised when `run_for` returns | A breakpoint is `return True`; a hook returns `Control`, so it can stop where it is, with no stop request left for the next run. |
+| A Python hook stops the run on `True`, not on `None` or `False`, and raises `TypeError` on anything else; its exception stops it as `Break` and is raised when `run_for` returns | A breakpoint is `return True`; a hook returns `Control`, so it can stop where it is, with no stop request left for the next run. |
 | Hook stops before an instruction skip that instruction's hooks once on resume | A breakpoint must stop before the instruction yet let the next run past it. |
 | A snapshot taken at a hook stop keeps that hook's skip on restore | Restore resumes exactly where the run stopped; no block hook fires again at that instruction (decided 2026-10-23). |
 | GPT clock outputs high in the system clock the tap advances its counter in | GPTRM 5.1 gives no phase; ours lines a compare's pin action up with a rise (decided 2026-10-23). |

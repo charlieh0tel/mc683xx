@@ -239,7 +239,7 @@ def test_a_pre_read_hook_s_peek_past_memory_raises_and_calling_the_machine_raise
         cpu2.run_limited(reach=RETURN)
 
 
-def test_a_truthy_pre_read_hook_stops_the_run_and_one_that_resizes_raises():
+def test_a_true_pre_read_hook_stops_the_run_and_one_that_resizes_raises():
     cpu = machine(MOVE_WORD_A0_TO_D0, NOP, RTS)
     cpu.write_register("A0", 0x2000)
     hook = cpu.add_pre_read_hook(lambda read, data: True, 0x2000, 0x2001)
@@ -277,7 +277,7 @@ def test_a_memory_hook_sees_a_long_once_and_not_one_that_faults():
     ]
 
 
-def test_a_truthy_hook_or_stop_ends_the_run():
+def test_a_true_hook_or_stop_ends_the_run():
     cpu = machine(NOP, NOP, RTS)
     hook = cpu.add_code_hook(lambda instruction: True, CODE + 2, CODE + 2)
     run = cpu.run_limited(reach=RETURN)
@@ -813,3 +813,31 @@ def test_thousands_of_short_calls_a_second():
     rate = calls / (time.perf_counter() - start)
     print(f"{rate:.0f} calls per second")
     assert rate > 1000
+
+
+@pytest.mark.parametrize("result", [1, 0, "", [], "yes"])
+def test_a_hook_result_not_a_bool_or_none_raises_type_error(result):
+    cpu = machine(NOP, NOP, RTS)
+    cpu.add_code_hook(lambda instruction: result, CODE + 2, CODE + 2)
+    with pytest.raises(TypeError, match="True, False or None"):
+        cpu.run_limited(reach=RETURN)
+
+
+@pytest.mark.parametrize("result", [1, 2.0])
+def test_an_intercept_or_pre_read_hook_result_not_a_bool_raises_type_error(result):
+    cpu = machine(0x4E40, RTS)  # TRAP #0
+    cpu.add_intercept_hook(lambda intercepted: result)
+    with pytest.raises(TypeError, match="True, False or None"):
+        cpu.run_limited(reach=RETURN)
+    cpu = machine(MOVE_WORD_A0_TO_D0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.add_pre_read_hook(lambda read, data: result, 0x2000, 0x2001)
+    with pytest.raises(TypeError, match="True, False or None"):
+        cpu.run_limited(reach=RETURN)
+
+
+def test_false_and_none_do_not_stop_a_hook():
+    cpu = machine(NOP, NOP, RTS)
+    cpu.add_code_hook(lambda instruction: False, CODE + 2, CODE + 2)
+    cpu.add_code_hook(lambda instruction: None, CODE + 2, CODE + 2)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()

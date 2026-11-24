@@ -1738,3 +1738,11 @@ def test_port_changes_written_in_one_instruction_come_in_port_order() -> None:
     keys = [(change[0], order.index(change[1])) for change in chip.take_port_changes()]
     assert len({port for _, port in keys}) > 1
     assert keys == sorted(keys)
+
+
+def test_a_chip_hook_result_not_a_bool_or_none_raises_type_error():
+    builder, _, _ = board(ram_round_trip(), Recorder())
+    chip = builder.build()
+    chip.add_code_hook(lambda instruction: 1)
+    with pytest.raises(TypeError, match="True, False or None"):
+        chip.run_for(4000)

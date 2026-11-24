@@ -1,8 +1,9 @@
 //! Python callables as the core's hooks (PLAN.md, Hooks and Python):
-//! each is called with what the Rust hook sees, and a truthy result
-//! stops the run (`Stop.Hook(hook)`).  An exception it raises cannot cross
-//! the run: it stops the run there, as a truthy result does, and waits
-//! in `Pending` for the call into the chip to raise it when it returns.
+//! each is called with what the Rust hook sees, and `True` stops the
+//! run (`Stop.Hook(hook)`), `None` or `False` does not, and any other
+//! result raises `TypeError`.  An exception it raises cannot cross the
+//! run: it stops the run there, as `True` does, and waits in `Pending`
+//! for the call into the chip to raise it when it returns.
 
 use std::cell::Cell;
 use std::ops::ControlFlow;
@@ -31,11 +32,13 @@ use pyo3::exceptions::PyValueError;
 use pyo3::pyclass;
 use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
+use pyo3::types::PyBool;
 use pyo3::types::PyByteArray;
 use pyo3::types::PyByteArrayMethods;
 use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
 use pyo3::types::PyDictMethods;
+use pyo3::types::PyTypeMethods;
 
 use crate::error::Error;
 use crate::function_code::FunctionCode;
@@ -517,9 +520,20 @@ impl ExceptionReturnView {
 }
 
 /// What a hook's `result` says: whether it stops the run, or, for an
-/// intercept hook, handled the exception.
+/// intercept hook, handled the exception.  `True` does, `None` and
+/// `False` do not; anything else is a `TypeError`, so a hook that
+/// returns what it computed by mistake (a count, a list) is caught.
 pub(crate) fn is_true(result: &Bound<'_, PyAny>) -> PyResult<bool> {
-    result.is_truthy()
+    if result.is_none() {
+        return Ok(false);
+    }
+    if result.is_instance_of::<PyBool>() {
+        return result.extract::<bool>();
+    }
+    Err(PyTypeError::new_err(format!(
+        "a hook returns True, False or None, not {}",
+        result.get_type().name()?
+    )))
 }
 
 /// `callable`, which must be callable, as a hook whose argument is
@@ -556,8 +570,8 @@ where
 /// `callable`, which must be callable, as a pre-read hook, called before
 /// the read as `callable(PendingRead, bytearray)`, the memory lent to
 /// `PendingRead.peek` for the call: what it leaves in the bytearray,
-/// which must keep its length, answers the read.  A truthy result, or
-/// an exception, which waits in `pending`, stops the run.
+/// which must keep its length, answers the read.  `True`, or an
+/// exception, which waits in `pending`, stops the run.
 pub(crate) fn pre_read_hook(
     callable: &Bound<'_, PyAny>,
     pending: Pending,
