@@ -1200,7 +1200,7 @@ impl MachineView {
             }
             let argument = view(py, fired.context, registers)?;
             let result = fired.callable.call1(py, (argument,))?;
-            if result.bind(py).is_truthy()? {
+            if hooks::is_true(result.bind(py))? {
                 stopped.get_or_insert(fired.id);
             }
         }
@@ -1225,7 +1225,7 @@ impl MachineView {
                 continue;
             }
             let answer = callable.call1(py, (InterceptedView(interception),))?;
-            if answer.bind(py).is_truthy()? {
+            if hooks::is_true(answer.bind(py))? {
                 handled = true;
                 break;
             }

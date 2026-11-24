@@ -473,6 +473,12 @@ impl ExceptionReturnView {
     }
 }
 
+/// What a hook's `result` says: whether it stops the run, or, for an
+/// intercept hook, handled the exception.
+pub(crate) fn is_true(result: &Bound<'_, PyAny>) -> PyResult<bool> {
+    result.is_truthy()
+}
+
 /// `callable`, which must be callable, as a hook whose argument is
 /// `view` of what the Rust hook sees.
 pub(crate) fn hook<T, V>(
@@ -491,7 +497,7 @@ where
         Python::attach(|py| {
             match callable
                 .call1(py, (view(context),))
-                .and_then(|result| result.bind(py).is_truthy())
+                .and_then(|result| is_true(result.bind(py)))
             {
                 Ok(false) => ControlFlow::Continue(()),
                 Ok(true) => ControlFlow::Break(()),
@@ -522,7 +528,7 @@ pub(crate) fn pre_read_hook(
             let data = PyByteArray::new(py, bytes);
             let answer = callable
                 .call1(py, (PendingReadView(*read), data.clone().unbind()))
-                .and_then(|result| result.bind(py).is_truthy())
+                .and_then(|result| is_true(result.bind(py)))
                 .and_then(|stop| {
                     let changed = data.to_vec();
                     if changed.len() != bytes.len() {
