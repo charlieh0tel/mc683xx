@@ -184,7 +184,7 @@ pub(super) fn lpstop(core: &mut Core<'_>) -> Result<Flow, Exception> {
         return Err(core.privilege_violation());
     }
     core.cpu.registers.set_sr(sr);
-    let mask = u32::from(core.cpu.registers.interrupt_mask().get());
+    let mask = u32::from(core.cpu.registers.interrupt_mask().0);
     core.write(LPSTOP_BROADCAST, Size::Word, FunctionCode::CpuSpace, mask)?;
     let last_tail = core.last_tail();
     core.adjust(timing::lpstop(last_tail));

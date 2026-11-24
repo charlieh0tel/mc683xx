@@ -86,7 +86,7 @@ impl Vector {
     /// The autovector of interrupt level `level`, 25 to 31.
     #[must_use]
     pub const fn autovector(level: InterruptLevel) -> Self {
-        Self(Self::SPURIOUS_INTERRUPT.0 + level.get())
+        Self(Self::SPURIOUS_INTERRUPT.0 + level.0)
     }
 
     /// TRAP #`number`'s vector, 32 to 47 for `number` 0 to 15 (CPU32RM
@@ -594,7 +594,7 @@ impl Core<'_> {
         let state = (sr | status::S) & !(status::T1 | status::T0);
         let state = match level {
             Some(level) => {
-                state & !status::INTERRUPT_MASK | u16::from(level.get()) << status::INTERRUPT_SHIFT
+                state & !status::INTERRUPT_MASK | u16::from(level.0) << status::INTERRUPT_SHIFT
             }
             None => state,
         };

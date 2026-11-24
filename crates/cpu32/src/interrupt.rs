@@ -16,7 +16,7 @@ use crate::exception::Vector;
 /// An interrupt priority level: 0, none, to 7, nonmaskable (CPU32RM
 /// 6.2.11).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
-pub struct InterruptLevel(u8);
+pub struct InterruptLevel(pub(crate) u8);
 
 /// A snapshot's level, refused above 7.
 impl<'de> Deserialize<'de> for InterruptLevel {
@@ -45,17 +45,6 @@ impl InterruptLevel {
         } else {
             None
         }
-    }
-
-    /// The level, 0 to 7, where `u8::from` cannot be called: a const
-    /// context.
-    ///
-    /// Not part of the semver API: for the modules' and the chip's
-    /// const fns; a host converts with `u8::from`.
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
     }
 
     /// The level in the low three bits of `value`, as SR's I\[2:0\]
@@ -91,17 +80,6 @@ impl IrqPin {
             Some(level) if level.0 != InterruptLevel::NONE.0 => Some(Self(level)),
             _ => None,
         }
-    }
-
-    /// The level, 1 to 7, where `u8::from` cannot be called: a const
-    /// context.
-    ///
-    /// Not part of the semver API: for the modules' and the chip's
-    /// const fns; a host converts with `u8::from`.
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0.0
     }
 }
 
@@ -151,7 +129,7 @@ pub struct ParseInterruptLevelError(String);
 /// Its pin's name: `IRQ7`.
 impl fmt::Display for IrqPin {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{IRQ}{}", self.get())
+        write!(formatter, "{IRQ}{}", self.0.0)
     }
 }
 
@@ -201,13 +179,13 @@ impl TryFrom<InterruptLevel> for IrqPin {
     type Error = NoIrqPin;
 
     fn try_from(level: InterruptLevel) -> Result<Self, NoIrqPin> {
-        Self::new(level.get()).ok_or(NoIrqPin(level.get()))
+        Self::new(level.0).ok_or(NoIrqPin(level.0))
     }
 }
 
 impl From<IrqPin> for u8 {
     fn from(pin: IrqPin) -> Self {
-        pin.get()
+        pin.0.0
     }
 }
 
@@ -322,7 +300,7 @@ mod tests {
     #[test]
     fn irq_pins_are_levels_1_to_7() {
         assert_eq!(IrqPin::new(0), None);
-        assert_eq!(IrqPin::new(1).map(IrqPin::get), Some(1));
+        assert_eq!(IrqPin::new(1).map(u8::from), Some(1));
         assert_eq!(IrqPin::new(7), Some(IrqPin::IRQ7));
         assert_eq!(IrqPin::try_from(8), Err(NoIrqPin(8)));
         assert_eq!(u8::from(IrqPin::IRQ7), 7);
