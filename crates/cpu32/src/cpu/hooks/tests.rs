@@ -35,9 +35,9 @@ use crate::memory::Page;
 use crate::memory::Permissions;
 use crate::memory::Space;
 use crate::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// NOP.
 const NOP: u16 = 0x4e71;

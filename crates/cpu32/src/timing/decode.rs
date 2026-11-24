@@ -23,7 +23,7 @@ use crate::timing::rows::move_;
 use crate::timing::rows::shift;
 use crate::timing::rows::single;
 use crate::timing::rows::special;
-use mc683xx_target::size::Size;
+use mc683xx_target::Size;
 
 /// Bits 15:12, the line (CPU32RM Table 4-11).
 const LINE_SHIFT: u16 = 12;

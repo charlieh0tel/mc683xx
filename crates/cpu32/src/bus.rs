@@ -9,9 +9,9 @@ use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::memory::Memory;
 use crate::memory::Page;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// Clocks in the bus cycle the timing tables assume: two clocks, no
 /// wait states, a 16-bit port (CPU32RM 8.1.5, 8.3).
@@ -261,9 +261,9 @@ mod tests {
     use super::stall;
     use crate::cycles::Cycle;
     use crate::cycles::Cycles;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     #[test]
     fn an_access_holds_what_it_was_built_with() {

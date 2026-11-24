@@ -17,8 +17,8 @@ use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::Page;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::register::Register;
+use mc683xx_target::Address;
+use mc683xx_target::Register;
 
 use crate::kernel::Calibration;
 use crate::kernel::Kernel;

@@ -12,8 +12,8 @@ use mc683xx_cpu32::cpu::Halt;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_peripherals::at28c64b::At28c64b;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
 
 use crate::board::Board;
 use crate::board::BoardRun;

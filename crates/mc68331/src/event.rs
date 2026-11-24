@@ -8,9 +8,9 @@ use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// Something the chip did that the host may want to know of, each at
 /// its time.  More kinds may come, and a kind more fields: a host's
@@ -192,9 +192,9 @@ mod tests {
     use mc683xx_cpu32::cycles::Cycle;
     use mc683xx_modules::chip_select::ChipSelect;
     use mc683xx_modules::sim::ResetCause;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     use super::DsackFault;
     use super::Event;

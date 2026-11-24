@@ -22,7 +22,7 @@ use crate::memory::MemoryError;
 use crate::memory::Permissions;
 use crate::memory::Space;
 use crate::registers::Registers;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 /// A CPU lent by what runs it (a chip, a board, the gdb stub's target):
 /// its registers, hooks, page permissions and fault stops to change,
@@ -154,7 +154,7 @@ mod tests {
     use crate::memory::PAGE_BYTES;
     use crate::memory::Permissions;
     use crate::memory::Space;
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     #[test]
     fn it_changes_registers_hooks_permissions_and_fault_stops_and_shows_the_rest() {

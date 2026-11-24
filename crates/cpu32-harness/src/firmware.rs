@@ -31,8 +31,8 @@ use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_cpu32::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 
 use crate::machine;
 use crate::machine::ADDRESS_BITS;

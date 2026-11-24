@@ -64,7 +64,7 @@ use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::peripheral;
 use mc683xx_modules::peripheral::floating_miso;
 use mc683xx_modules::qsm::sci::Frame;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use pyo3::Bound;
 use pyo3::IntoPyObjectExt;
 use pyo3::Py;

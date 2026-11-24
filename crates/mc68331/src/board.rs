@@ -47,9 +47,9 @@ use mc683xx_modules::sim::chip_selects::Lanes;
 use mc683xx_modules::sim::chip_selects::Match;
 use mc683xx_modules::sim::chip_selects::Selects;
 use mc683xx_modules::sim::ports::PortName;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 use crate::chip::Diversion;
 use crate::chip::OutputHorizon;

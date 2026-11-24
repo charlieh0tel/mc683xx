@@ -7,9 +7,9 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 use super::BRANCH_TO_SELF;
 use super::NOP;

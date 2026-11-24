@@ -142,7 +142,7 @@ mod tests {
     use mc683xx_board::signal::Signal;
     use mc683xx_board::time::Moment;
     use mc683xx_board::time::Time;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Size;
 
     use super::BUS;
     use super::Buffer;

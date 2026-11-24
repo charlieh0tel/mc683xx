@@ -215,7 +215,7 @@ mod tests {
     use mc683xx_board::time::Moment;
     use mc683xx_board::time::Time;
     use mc683xx_cpu32::cpu::state::StateError;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Size;
 
     use super::Latch;
     use super::OE;

@@ -14,7 +14,7 @@ use gdbstub::stub::SingleThreadStopReason;
 use gdbstub::target::ext::breakpoints::WatchKind;
 use mc683xx_cpu32::cpu::hooks::HookId;
 use mc683xx_cpu32::cpu::hooks::MemoryAccess;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use super::QUANTUM;
 use super::Session;

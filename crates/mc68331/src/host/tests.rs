@@ -19,9 +19,9 @@ use mc683xx_modules::module::Module;
 use mc683xx_modules::module::Peek;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::qsm::sci::Frame;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 use super::BusCycleError;
 use crate::chip::Builder;

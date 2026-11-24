@@ -33,10 +33,9 @@ use mc683xx_modules::qsm::qspi::MOST_BITS;
 use mc683xx_modules::sim;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::clock::ClockSource;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry;
-use mc683xx_target::size::Size;
+use mc683xx_target::Size;
 
 use mc683xx_modules::sim::reset::ResetScope;
 use pyo3::Bound;
@@ -459,7 +458,7 @@ pub(crate) enum Stop {
 }
 
 /// Why the CPU entered background mode (Rust's
-/// `mc683xx_target::entry::Entry`; CPU32RM Table 7-2).
+/// `mc683xx_target::Entry`; CPU32RM Table 7-2).
 #[pyclass(module = "mc683xx", frozen, eq, hash, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Entry {
@@ -479,18 +478,18 @@ pub(crate) enum Entry {
     },
 }
 
-impl From<entry::Entry> for Entry {
-    fn from(entry: entry::Entry) -> Self {
+impl From<mc683xx_target::Entry> for Entry {
+    fn from(entry: mc683xx_target::Entry) -> Self {
         match entry {
-            entry::Entry::Breakpoint => Self::Breakpoint(),
-            entry::Entry::Background => Self::Background(),
-            entry::Entry::DoubleBusFault { ssw } => Self::DoubleBusFault { ssw },
-            entry::Entry::Unknown { atemp } => Self::Unknown { atemp },
+            mc683xx_target::Entry::Breakpoint => Self::Breakpoint(),
+            mc683xx_target::Entry::Background => Self::Background(),
+            mc683xx_target::Entry::DoubleBusFault { ssw } => Self::DoubleBusFault { ssw },
+            mc683xx_target::Entry::Unknown { atemp } => Self::Unknown { atemp },
         }
     }
 }
 
-impl From<Entry> for entry::Entry {
+impl From<Entry> for mc683xx_target::Entry {
     fn from(entry: Entry) -> Self {
         match entry {
             Entry::Breakpoint() => Self::Breakpoint,
@@ -505,7 +504,7 @@ impl From<Entry> for entry::Entry {
 impl Entry {
     /// Rust's `Display`.
     fn __str__(&self) -> String {
-        entry::Entry::from(*self).to_string()
+        mc683xx_target::Entry::from(*self).to_string()
     }
 
     fn __repr__(&self) -> String {

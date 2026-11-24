@@ -33,8 +33,8 @@ use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::clock::ClockSourceError;
 use mc683xx_modules::sim::reset::ResetScope;
-use mc683xx_target::address::Address;
-use mc683xx_target::integer::parse_integer;
+use mc683xx_target::Address;
+use mc683xx_target::parse_integer;
 
 use crate::endpoint::Endpoint;
 use crate::peripheral::Lane;

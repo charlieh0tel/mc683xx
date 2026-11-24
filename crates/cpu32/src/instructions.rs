@@ -27,19 +27,16 @@ macro_rules! specialize {
 macro_rules! specialize_size {
     ($value:expr, $name:ident => $body:expr) => {
         match $value {
-            Some(::mc683xx_target::size::Size::Byte) => {
-                const $name: u8 =
-                    $crate::instructions::size_index(::mc683xx_target::size::Size::Byte);
+            Some(::mc683xx_target::Size::Byte) => {
+                const $name: u8 = $crate::instructions::size_index(::mc683xx_target::Size::Byte);
                 $body
             }
-            Some(::mc683xx_target::size::Size::Word) => {
-                const $name: u8 =
-                    $crate::instructions::size_index(::mc683xx_target::size::Size::Word);
+            Some(::mc683xx_target::Size::Word) => {
+                const $name: u8 = $crate::instructions::size_index(::mc683xx_target::Size::Word);
                 $body
             }
-            Some(::mc683xx_target::size::Size::Long) => {
-                const $name: u8 =
-                    $crate::instructions::size_index(::mc683xx_target::size::Size::Long);
+            Some(::mc683xx_target::Size::Long) => {
+                const $name: u8 = $crate::instructions::size_index(::mc683xx_target::Size::Long);
                 $body
             }
             None => $crate::instructions::illegal,
@@ -166,7 +163,7 @@ use std::sync::OnceLock;
 use crate::cpu::Core;
 use crate::exception::Exception;
 use crate::exception::Vector;
-use mc683xx_target::size::Size;
+use mc683xx_target::Size;
 
 /// The size as a number, for a handler specialized by size with a
 /// const generic: 0 byte, 1 word, 2 long.
@@ -371,8 +368,8 @@ pub(crate) mod tests {
     use crate::memory::Space;
     use crate::registers::status;
     use crate::timing;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::Size;
 
     /// Where [`Machine`] loads code.
     pub(crate) const CODE: u32 = 0x1000;

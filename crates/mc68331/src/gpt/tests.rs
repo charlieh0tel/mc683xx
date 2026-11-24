@@ -9,7 +9,7 @@ use mc683xx_modules::module::Module;
 use mc683xx_modules::module::RegisterAccess;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::pins::PortLevels;
-use mc683xx_target::size::Size;
+use mc683xx_target::Size;
 
 use super::Gpt;
 use super::Input;

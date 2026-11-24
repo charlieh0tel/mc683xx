@@ -17,9 +17,9 @@ use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 use super::NOP;
 use super::ROM_BYTES;

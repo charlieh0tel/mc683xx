@@ -25,9 +25,9 @@ use crate::memory::PAGE_BYTES;
 use crate::memory::Permissions;
 use crate::registers::Registers;
 use crate::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::Size;
 
 /// RAM from zero.
 const RAM: u32 = 0x1_0000;

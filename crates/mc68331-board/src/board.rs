@@ -39,11 +39,11 @@ use mc683xx_cpu32::memory::Space;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::ResetCause;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::register::Register;
-use mc683xx_target::size::Size;
+use mc683xx_target::Entry;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
 use serde::Deserialize;
 use serde::Serialize;
 

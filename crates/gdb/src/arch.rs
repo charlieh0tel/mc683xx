@@ -9,9 +9,9 @@ use std::array;
 
 use gdbstub::arch::Arch;
 use mc683xx_cpu32::registers::Registers;
-use mc683xx_target::address::Address;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
+use mc683xx_target::Address;
+use mc683xx_target::Register;
+use mc683xx_target::SystemRegister;
 
 #[cfg(test)]
 mod tests;

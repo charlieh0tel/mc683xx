@@ -940,7 +940,7 @@ By the MC68681 datasheet's section, the SCC68692's by heading:
   receiver assembles a character at its stop bit's center (3.2), into
   the FIFO or the shift register, a break not.  `CHANNEL` is `a` or
   `b`, `BYTE` decimal, `0x` hexadecimal or `0b` binary
-  (`mc683xx_target::integer::parse_integer`), any character without
+  (`mc683xx_target::parse_integer`), any character without
   it.  Armed conditions are outside the snapshot.
 
 Where the datasheets are silent, the model chooses:

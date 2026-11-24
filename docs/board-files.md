@@ -38,7 +38,7 @@ loader's, never a parameter or a code.  Numbers are TOML integers,
 with TOML's own syntax: hex (`0xff`), binary (`0b1110`), octal
 (`0o17`), a sign and `_` between digits.  A number inside a string, as
 a decoder's `alias` codes are, takes the one syntax the command line,
-init scripts and gdb take (`mc683xx_target::integer::parse_integer`):
+init scripts and gdb take (`mc683xx_target::parse_integer`):
 decimal, `0x` or `0b`, `_` between digits, no sign, no octal and no
 decimal leading zero.  Names
 (memories, decoders, peripherals, nets) are unique across the file, and

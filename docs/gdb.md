@@ -97,7 +97,7 @@ watchpoints go with it.
 ## From Rust
 
 ```rust,no_run
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_gdb::Ending;

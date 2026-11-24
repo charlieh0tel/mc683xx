@@ -197,7 +197,7 @@ instruction, before the next.  `set_reload_scope` takes any memory, one on
 pins too; reloading is emulator-only as well.
 
 ```rust
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_examples::firmware;
 use mc683xx_cpu32::memory::MemoryKind;
@@ -499,7 +499,7 @@ use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_examples::firmware;
-use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::FunctionCode;
 
 /// Its registers' offsets, on the lower byte.
 const VECTOR_REGISTER: u32 = 1;
@@ -883,10 +883,10 @@ Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
   the SCI's TXD at the entry's or frame's own time.
 
 ```rust
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 use mc683xx_mc68331::port::Port;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_examples::firmware;
@@ -958,11 +958,11 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
   `take_output_changes` takes both.
 
 ```rust
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::GPT;
 use mc683xx_mc68331::gpt::Input;
@@ -1042,11 +1042,11 @@ and then the queue runs on without a sync, its calls coming in a batch, in
 order and each with its own `now`, where the CPU next sees the QSPI.
 
 ```rust
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use mc683xx_cpu32::cpu::state::Stateless;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_examples::firmware;
@@ -1105,10 +1105,10 @@ SCK `period` of system clocks, running the chip between them, and
 returns what the QSPI drove on MISO (`Shifted { miso, driven }`).
 
 ```rust
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::QSM;
 
@@ -1193,7 +1193,7 @@ use std::cell::RefCell;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use mc683xx_cpu32::cpu::Stop;
 use mc683xx_cpu32::cpu::hooks::Invalid;
 use mc683xx_cpu32::cycles::Cycles;
@@ -1346,10 +1346,10 @@ first.  None moves the chip's time or shows in the trace.
   `PeekError::Unpeekable` where it declines.
 
 ```rust
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
 use mc683xx_mc68331::host::BusCycleError;

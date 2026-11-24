@@ -7,9 +7,9 @@ use crate::cycles::Cycles;
 use crate::interrupt::InterruptLevel;
 use crate::registers::status;
 use crate::timing;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 use std::fmt;
 
 /// The TRAP vectors, #0 to #15 (CPU32RM 4, TRAP).
@@ -780,7 +780,7 @@ mod tests {
     use super::Vector;
     use super::format;
     use crate::interrupt::InterruptLevel;
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     #[test]
     fn vectors_by_number() {

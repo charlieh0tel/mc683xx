@@ -34,9 +34,9 @@ use crate::memory::Unserved;
 use crate::peripheral::BusCycle;
 use crate::peripheral::MappedPeripheral;
 use crate::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// RAM from zero.
 const RAM: u32 = 0x1_0000;

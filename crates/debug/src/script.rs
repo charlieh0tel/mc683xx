@@ -55,16 +55,16 @@ use std::str::SplitWhitespace;
 use std::time::Duration;
 use std::time::Instant;
 
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::integer::ParseIntegerError;
-use mc683xx_target::integer::parse_integer;
-use mc683xx_target::register::ParseRegisterError;
-use mc683xx_target::register::ParseSystemRegisterError;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::ParseIntegerError;
+use mc683xx_target::ParseRegisterError;
+use mc683xx_target::ParseSystemRegisterError;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
+use mc683xx_target::parse_integer;
 
 /// What starts a comment.
 const COMMENT: char = '#';

@@ -28,8 +28,8 @@ use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::event::Event;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
 
 use common::board;
 

@@ -113,7 +113,7 @@ impl fmt::Display for FunctionCode {
 /// number: as a person types one to a command.
 ///
 /// ```
-/// use mc683xx_target::function_code::FunctionCode;
+/// use mc683xx_target::FunctionCode;
 ///
 /// assert_eq!("cpu-space".parse(), Ok(FunctionCode::CpuSpace));
 /// assert_eq!("0b101".parse(), Ok(FunctionCode::SupervisorData));

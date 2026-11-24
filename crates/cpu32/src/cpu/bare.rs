@@ -29,10 +29,10 @@ use crate::instructions::Flow;
 use crate::interrupt::InterruptLevel;
 use crate::interrupt::Interrupts;
 use crate::registers::Registers;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 #[cfg(test)]
 mod tests;

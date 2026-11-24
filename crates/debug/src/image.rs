@@ -1,7 +1,7 @@
 //! An image to load: segments of bytes at addresses, and an entry
 //! point.
 
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 /// Bytes in the CPU32's 32-bit address space (CPU32RM 5.3).
 const ADDRESS_SPACE: u64 = 1 << 32;
@@ -172,7 +172,7 @@ impl Image {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     use super::Image;
     use super::ImageError;

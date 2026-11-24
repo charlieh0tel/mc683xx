@@ -12,7 +12,7 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
-use mc683xx_target::size::Size;
+use mc683xx_target::Size;
 
 use super::PORTQS;
 use super::PQSPAR_DDRQS;

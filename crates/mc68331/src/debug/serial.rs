@@ -9,15 +9,15 @@
 
 use std::mem;
 
-use mc683xx_target::address::Address;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
+use mc683xx_target::Address;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
 use mc683xx_target::serial::BUS_ERROR;
 use mc683xx_target::serial::COMPLETE;
 use mc683xx_target::serial::ILLEGAL;
 use mc683xx_target::serial::NOT_READY;
 use mc683xx_target::serial::STATUS;
-use mc683xx_target::size::Size;
 use serde::Deserialize;
 use serde::Serialize;
 

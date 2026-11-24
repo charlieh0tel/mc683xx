@@ -17,12 +17,12 @@ use std::thread;
 use std::time::Duration;
 
 use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
 
 use crate::target::AccessError;
 use crate::target::NativeStep;

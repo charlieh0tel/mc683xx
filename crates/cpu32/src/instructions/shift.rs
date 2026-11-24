@@ -15,7 +15,7 @@ use crate::registers::Registers;
 use crate::registers::status;
 use crate::timing;
 use crate::timing::AddressTable;
-use mc683xx_target::size::Size;
+use mc683xx_target::Size;
 
 /// Line E: 1110 (CPU32RM 4.4, ASL, ASR and the rest).
 const LINE_MASK: u16 = 0xf000;
@@ -287,7 +287,7 @@ mod tests {
     use crate::instructions::tests::machine;
     use crate::instructions::tests::step;
     use crate::registers::status;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Size;
 
     fn ccr(cpu: &crate::cpu::Cpu) -> u16 {
         cpu.registers.sr() & status::CCR

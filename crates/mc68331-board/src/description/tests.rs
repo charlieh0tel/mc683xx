@@ -2,7 +2,7 @@ use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::peripheral::BusDecode;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;

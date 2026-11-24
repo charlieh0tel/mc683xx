@@ -21,7 +21,7 @@ use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_target::size::Size;
+use mc683xx_target::Size;
 use pyo3::Bound;
 use pyo3::Py;
 use pyo3::PyAny;

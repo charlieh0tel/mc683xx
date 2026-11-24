@@ -15,9 +15,9 @@ use std::str::FromStr;
 use crate::bus::PortSize;
 use crate::bus::stall;
 use crate::cycles::Cycles;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// Bytes in a page: the smallest chip-select block, 2K (SIMRM 7.3,
 /// Table 7-2), so a page never straddles two blocks.
@@ -1187,8 +1187,8 @@ mod tests {
     use super::Unserved;
     use crate::bus::PortSize;
     use crate::cycles::Cycles;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::Size;
 
     #[test]
     fn permissions_print_in_order_and_parse_in_any_order_and_case() {

@@ -88,10 +88,10 @@ use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 use snapshot_golden::version_of;
 
 /// `picoseconds` picoseconds.

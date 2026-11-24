@@ -38,10 +38,10 @@ use crate::memory::watch;
 use crate::registers::Registers;
 use crate::registers::status;
 use crate::timing;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 pub mod bare;
 pub mod control;
@@ -297,7 +297,7 @@ impl Cpu {
     /// MOVEQ #42,D0 from where the host puts PC:
     ///
     /// ```
-    /// use mc683xx_target::address::Address;
+    /// use mc683xx_target::Address;
     /// use mc683xx_cpu32::bus::Bus;
     /// use mc683xx_cpu32::bus::BusAccess;
     /// use mc683xx_cpu32::bus::BusError;
@@ -2008,10 +2008,10 @@ mod tests {
     use crate::interrupt::Interrupts;
     use crate::memory::Memory;
     use crate::registers::status;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::entry::Entry;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::Entry;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
     use std::cell::Cell;
     use std::ops::ControlFlow;
     use std::rc::Rc;
@@ -2826,7 +2826,7 @@ mod tests {
         use crate::interrupt::Acknowledge;
         use crate::interrupt::InterruptLevel;
         use crate::registers::status;
-        use mc683xx_target::address::Address;
+        use mc683xx_target::Address;
 
         /// ADDQ.L #1, D0.
         const ADDQ: u16 = 0x5280;

@@ -29,8 +29,8 @@ use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::qsm::sci::Frame;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 use super::CTS;
 use super::Clock;

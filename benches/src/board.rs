@@ -23,7 +23,7 @@ use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use crate::kernel::Calibration;
 use crate::kernel::Kernel;

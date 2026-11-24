@@ -9,7 +9,7 @@
 //! exception and runs MOVEQ #42,D0:
 //!
 //! ```
-//! use mc683xx_target::address::Address;
+//! use mc683xx_target::Address;
 //! use mc683xx_cpu32::cpu::bare::Limits;
 //! use mc683xx_cpu32::flat::ADDRESS_BITS;
 //! use mc683xx_cpu32::flat::Machine;

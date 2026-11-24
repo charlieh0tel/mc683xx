@@ -47,9 +47,9 @@ use crate::memory::Unserved;
 use crate::peripheral::BusCycle;
 use crate::peripheral::MappedPeripheral;
 use crate::peripheral::PeripheralId;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 #[cfg(test)]
 mod tests;
@@ -322,7 +322,7 @@ struct MachineState {
 /// it, PC and SP set, and the run limited to the function's return.
 ///
 /// ```
-/// use mc683xx_target::address::Address;
+/// use mc683xx_target::Address;
 /// use mc683xx_cpu32::cpu::bare::End;
 /// use mc683xx_cpu32::cpu::bare::Limits;
 /// use mc683xx_cpu32::flat::ADDRESS_BITS;

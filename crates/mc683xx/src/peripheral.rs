@@ -12,8 +12,8 @@ use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 
 /// An interrupt acknowledge's CPU-space address but the level in
 /// ADDR\[3:1\]: every other line set (MC68331UM 4.7.4, Figure 4-19).
@@ -301,7 +301,7 @@ impl<T: SpiPeripheral + Save + Any> AnySpiPeripheral for T {}
 #[cfg(test)]
 mod tests {
     use mc683xx_cpu32::interrupt::InterruptLevel;
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     use super::iack_address;
 

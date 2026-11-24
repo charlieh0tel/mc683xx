@@ -26,9 +26,9 @@ use crate::memory::Permissions;
 use crate::memory::Space;
 use crate::memory::watch;
 use crate::registers::Registers;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 #[cfg(test)]
 mod tests;

@@ -51,7 +51,7 @@ use mc683xx_modules::qsm::sci::Transmitted;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::Sim;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use crate::board::ADDRESS_LINES;
 use crate::board::Board;

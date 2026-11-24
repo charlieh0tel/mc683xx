@@ -19,8 +19,8 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::floating_miso;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -893,8 +893,8 @@ mod tests {
     use mc683xx_modules::peripheral::ClockPhase;
     use mc683xx_modules::peripheral::ClockPolarity;
     use mc683xx_modules::peripheral::QspiClock;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     use super::Drive;
     use super::PeripheralAccess;

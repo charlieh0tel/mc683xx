@@ -62,8 +62,8 @@ use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_gdb::Ending;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
-use mc683xx_target::address::Address;
-use mc683xx_target::integer::parse_integer;
+use mc683xx_target::Address;
+use mc683xx_target::parse_integer;
 
 use crate::binding::Binding;
 use crate::binding::Escape;

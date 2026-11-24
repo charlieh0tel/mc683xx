@@ -33,8 +33,8 @@ use crate::interrupt::InterruptLevel;
 use crate::memory::MemoryState;
 use crate::registers::Registers;
 use crate::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
 
 #[cfg(test)]
 mod tests;

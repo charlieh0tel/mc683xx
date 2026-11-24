@@ -18,8 +18,8 @@ use std::fmt;
 use std::rc::Weak;
 use std::str::FromStr;
 
-use mc683xx_target::integer::ParseIntegerError;
-use mc683xx_target::integer::parse_integer;
+use mc683xx_target::ParseIntegerError;
+use mc683xx_target::parse_integer;
 
 use crate::board::NoNet;
 use crate::observe::Observer;

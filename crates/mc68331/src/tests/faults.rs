@@ -11,9 +11,9 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::BusCycleKind;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::register::SystemRegister;
+use mc683xx_target::SystemRegister;
 
 use super::LPSTOP_MASK_0;
 use super::MOVE_WORD_FROM_ABSOLUTE;

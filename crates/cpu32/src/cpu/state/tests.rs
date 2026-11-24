@@ -25,8 +25,8 @@ use crate::memory::PAGE_BYTES;
 use crate::memory::Permissions;
 use crate::memory::Space;
 use crate::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Size;
 
 /// Where the loop stores.
 const DATA: u32 = 0x3000;

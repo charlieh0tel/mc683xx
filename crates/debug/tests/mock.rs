@@ -12,14 +12,14 @@ use mc683xx_debug::script::Command;
 use mc683xx_debug::script::CommandError;
 use mc683xx_debug::script::Script;
 use mc683xx_debug::script::ScriptError;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
 use mc683xx_target::Unsupported;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
-use mc683xx_target::size::Size;
 
 /// Bytes of the mock's memory, from address 0.
 const MEMORY_BYTES: usize = 0x1000;

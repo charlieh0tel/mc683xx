@@ -3,9 +3,9 @@
 //! CSORBT and CSOR0-10, and how each would end the cycle.
 
 use mc683xx_cpu32::bus::PortSize;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 use crate::chip_select::ChipSelect;
 use crate::chip_select::Termination;
@@ -531,7 +531,7 @@ impl ChipSelects {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     use super::ChipSelects;
     use super::DecodeRequest;
@@ -541,8 +541,8 @@ mod tests {
     use crate::chip_select::Termination;
     use mc683xx_cpu32::bus::PortSize;
     use mc683xx_cpu32::cycles::Cycles;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     /// DATA\[15:0\] left high by the pull-ups.
     const PULLED_UP: u16 = 0xffff;

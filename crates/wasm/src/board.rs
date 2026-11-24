@@ -517,7 +517,7 @@ fn tag(value: &JsValue) -> Option<String> {
 mod stop_tests {
     use mc683xx_cpu32::cpu::Halt;
     use mc683xx_cpu32::cpu::Stop;
-    use mc683xx_target::entry::Entry;
+    use mc683xx_target::Entry;
 
     use super::stop_name;
 

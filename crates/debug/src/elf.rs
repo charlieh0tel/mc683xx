@@ -6,7 +6,7 @@
 use std::fmt;
 use std::ops::Range;
 
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use crate::image::Image;
 use crate::image::ImageError;
@@ -260,7 +260,7 @@ impl Image {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     use super::ElfPart;
     use super::ParseElfError;

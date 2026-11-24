@@ -16,13 +16,13 @@ use mc683xx_mc68331::chip::Builder;
 use mc683xx_mc68331::chip::Mc68331;
 use mc683xx_mc68331::debug::TargetError;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
-use mc683xx_target::size::Size;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
 use wire::Send;
 use wire::Wire;
 use wire::bytes;
@@ -444,10 +444,10 @@ mod unsteppable {
     use mc683xx_gdb::target::Target;
     use mc683xx_gdb::target::TargetRun;
     use mc683xx_mc68331::debug::TargetError;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::register::Register;
-    use mc683xx_target::register::SystemRegister;
+    use mc683xx_target::Address;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Register;
+    use mc683xx_target::SystemRegister;
 
     use super::Running;
 

@@ -50,7 +50,7 @@ use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::pins::PortLevels;
-use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::FunctionCode;
 
 use common::board;
 

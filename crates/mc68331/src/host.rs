@@ -16,9 +16,9 @@ use mc683xx_modules::sim::BLOCK;
 use mc683xx_modules::sim::MODULE_SPACE_BYTES;
 use mc683xx_modules::sim::chip_selects::DecodeRequest;
 use mc683xx_modules::sim::chip_selects::Lanes;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 use crate::board::Board;
 use crate::board::Wire;

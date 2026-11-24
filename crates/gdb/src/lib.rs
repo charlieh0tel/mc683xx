@@ -86,7 +86,7 @@
 use std::fmt;
 use std::fmt::Display;
 
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use crate::connection::Connection;
 use crate::target::Target;

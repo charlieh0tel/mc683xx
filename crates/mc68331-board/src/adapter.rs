@@ -38,7 +38,7 @@ use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use crate::inspect::Inspection;
 use crate::peripheral::Drive;

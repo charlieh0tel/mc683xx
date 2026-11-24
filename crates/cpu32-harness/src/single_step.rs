@@ -24,7 +24,7 @@ use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Page;
 use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use crate::decode::Case;
 use crate::differences;

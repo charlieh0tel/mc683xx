@@ -21,9 +21,9 @@ use crate::instructions::Flow;
 use crate::instructions::Table;
 use crate::instructions::table;
 use crate::timing;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// RTE (CPU32RM 4.4, RTE).
 const RTE: u16 = 0x4e73;
@@ -476,10 +476,10 @@ mod tests {
     use crate::memory::Space;
     use crate::registers::status;
     use crate::timing;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::entry::Entry;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::Entry;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     /// The supervisor stack's top in the tests.
     const STACK: u32 = 0x4000;

@@ -3,8 +3,8 @@ use std::convert::Infallible;
 use gdbstub::arch::Registers as _;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_cpu32::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::register::Register;
+use mc683xx_target::Address;
+use mc683xx_target::Register;
 
 use super::GdbRegisters;
 use super::PS;

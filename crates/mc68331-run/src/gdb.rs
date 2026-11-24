@@ -23,8 +23,8 @@ use mc683xx_gdb::target::Target;
 use mc683xx_gdb::target::TargetReset;
 use mc683xx_gdb::target::TargetRun;
 use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 
 use crate::Turns;
 use crate::error::RunError;

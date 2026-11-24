@@ -22,7 +22,7 @@ use crate::instructions::data_movement::register_field;
 use crate::registers::Registers;
 use crate::registers::status;
 use crate::timing::AddressTable;
-use mc683xx_target::size::Size;
+use mc683xx_target::Size;
 
 /// The opcode bits of a line, 15:12 (CPU32RM Table 4-11).
 pub(super) const LINE_MASK: u16 = 0xf000;
