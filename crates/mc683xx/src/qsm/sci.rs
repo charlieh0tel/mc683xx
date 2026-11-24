@@ -127,8 +127,8 @@ pub struct Transmitted {
     /// When its stop bit ends.
     pub end: Cycle,
     /// System clocks in its bit time, 32 x SCBR (QSMRM 5.2.1, equation
-    /// 5-1): the baud is the system clock / `bit`.
-    pub bit: Cycles,
+    /// 5-1): the baud is the system clock / `clocks_per_bit`.
+    pub clocks_per_bit: Cycles,
 }
 
 /// What the transmit shifter is sending.
@@ -377,7 +377,9 @@ impl Sci {
                 frame,
                 start: now,
                 end,
-                bit: Cycles::from_clocks(self.bit_time().expect("the baud rate generator runs")),
+                clocks_per_bit: Cycles::from_clocks(
+                    self.bit_time().expect("the baud rate generator runs"),
+                ),
             });
         }
         self.shifting = Some((sending, end));

@@ -212,7 +212,7 @@ fn sent_frames(qsm: &mut Qsm) -> Vec<(Frame, u64, u64, u64)> {
                 sent.frame,
                 sent.start.clocks(),
                 sent.end.clocks(),
-                sent.bit.clocks(),
+                sent.clocks_per_bit.clocks(),
             )
         })
         .collect()
