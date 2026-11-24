@@ -315,8 +315,9 @@ impl Cpu {
     /// as it was before the store: the hook cannot change it.  Its
     /// cycles follow, timed as the pages time them; the write hooks see
     /// each with the value the copy gave it and, as `previous`, what it
-    /// replaced.  A dropped store's cycles take their time but write
-    /// nothing, and the write hooks see none of them.  Its pages leave
+    /// replaced.  A dropped store keeps its wait states, as the CPU
+    /// still drove the cycles and the device the hook models latched
+    /// them, but writes nothing, and the write hooks see none of them.  Its pages leave
     /// the fast path for writes, not reads.  If it stops the run, the
     /// instruction completes first.
     pub fn add_pre_write_hook(

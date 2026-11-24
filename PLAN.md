@@ -2464,8 +2464,10 @@ Adversarial review (2026-11-01):
   write hooks see each with the bytes stored and, as
   `MemoryAccess::previous`, the bytes it replaced (the hooks cannot
   change memory, so that is memory before the instruction's store).
-  A dropped store makes no cycle and the write hooks see none, but its
-  stall is charged, so dropping does not change the run's time.  A
+  A dropped store keeps its wait states: the CPU still drove the
+  cycle, and the device the hook models latched it rather than the
+  memory (decided sc batch 5), so dropping does not change the run's
+  time; the core makes no cycle of it, and the write hooks see none.  A
   stop takes effect when the instruction ends.  Cost when absent: an
   operand write first tries the fast tables, inline, and checks the
   flag set while any pre-write hook is installed only where they miss

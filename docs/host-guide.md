@@ -1188,7 +1188,8 @@ but the exception hook cover an address range, on the address lines.
   takes, misaligned, refused by the pages' permissions, a debugger's
   `Memory::write_bytes`).  The write hooks see the cycles after it,
   with the bytes stored and, as `previous`, what they replaced; a
-  dropped store takes its cycles' time but stores nothing, and the
+  dropped store keeps its wait states, as the CPU still drove the
+  cycle and the modeled device latched it, but stores nothing, and the
   write hooks see none of it.  A stop takes effect when the
   instruction ends.
 - `add_read_hook`, `add_write_hook(range, f(&MemoryAccess))`: after

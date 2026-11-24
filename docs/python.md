@@ -1650,8 +1650,9 @@ installed, each seeing the bytes and the drop the earlier left (a later
 one may `set_dropped(False)`); one that raises leaves both as they
 were.  The cases with no call are a pre-read's.  The write hooks see
 the cycles after it, with the bytes stored and, as `previous`, what
-they replaced; a dropped store's cycles take their time but store
-nothing, and the write hooks see none of them.
+they replaced; a dropped store keeps its wait states, as the CPU still
+drove the cycle and the modeled device latched it, but stores nothing,
+and the write hooks see none of it.
 
 ```python
 taken: list[int] = []
