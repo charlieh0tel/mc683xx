@@ -206,13 +206,13 @@ fn ports() -> Vec<PortSpec> {
 struct State {
     /// Channels A and B.
     channels: [Channel; 2],
-    /// ACR (4.2.13).
+    /// ACR, the auxiliary control register (4.2.13).
     acr: u8,
-    /// IMR (4.2.16).
+    /// IMR, the interrupt mask register (4.2.16).
     imr: u8,
-    /// IVR (4.2.19).
+    /// IVR, the interrupt vector register (4.2.19).
     ivr: u8,
-    /// OPCR (4.2.11).
+    /// OPCR, the output port configuration register (4.2.11).
     opcr: u8,
     /// OPR (4.2.12).
     opr: u8,
@@ -403,33 +403,33 @@ impl Mc68681 {
         self.state.channels[channel].status()
     }
 
-    /// ACR (4.2.13).
+    /// ACR, the auxiliary control register (4.2.13).
     #[must_use]
-    pub const fn acr(&self) -> u8 {
+    pub const fn auxiliary_control(&self) -> u8 {
         self.state.acr
     }
 
-    /// IMR (4.2.16).
+    /// IMR, the interrupt mask register (4.2.16).
     #[must_use]
-    pub const fn imr(&self) -> u8 {
+    pub const fn interrupt_mask(&self) -> u8 {
         self.state.imr
     }
 
-    /// IVR (4.2.19).
+    /// IVR, the interrupt vector register (4.2.19).
     #[must_use]
-    pub const fn ivr(&self) -> u8 {
+    pub const fn interrupt_vector(&self) -> u8 {
         self.state.ivr
     }
 
-    /// OPCR (4.2.11).
+    /// OPCR, the output port configuration register (4.2.11).
     #[must_use]
-    pub const fn opcr(&self) -> u8 {
+    pub const fn output_port_configuration(&self) -> u8 {
         self.state.opcr
     }
 
-    /// OPR (4.2.12): a one drives its pin low (1.7).
+    /// OPR, the output port register (4.2.12): a one drives its pin low (1.7).
     #[must_use]
-    pub const fn opr(&self) -> u8 {
+    pub const fn output_port(&self) -> u8 {
         self.state.opr
     }
 

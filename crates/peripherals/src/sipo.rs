@@ -92,7 +92,7 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), RegistryError> {
 struct State {
     /// Every stage of the chain.
     register: ShiftRegister,
-    /// CLR's level: low clears.
+    /// The level of CLR, the clear input: low clears.
     clr: bool,
 }
 
@@ -200,9 +200,9 @@ impl Sipo {
         (self.configuration.width / LINES as u32) as u8
     }
 
-    /// CLR's level: low clears.
+    /// The level of CLR, the clear input: low clears.
     #[must_use]
-    pub const fn clr(&self) -> bool {
+    pub const fn clear_level(&self) -> bool {
         self.state.clr
     }
 

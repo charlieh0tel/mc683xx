@@ -311,13 +311,13 @@ fn queues_set_the_dacs_and_lbe_completes_the_ad569s_word() {
     let efc = board.peripheral::<Ad569>("efc").unwrap().unwrap();
     assert_eq!(efc.code(), WORD);
     assert_eq!(efc.volts(), vout(WORD));
-    assert_eq!(efc.db(), WORD);
+    assert_eq!(efc.data_inputs(), WORD);
     let hex = board.peripheral::<Mc144110>("hex").unwrap().unwrap();
     assert_eq!(hex.codes(), CODES.map(|code| code as u8));
     assert_eq!(hex.volts()[0], 5.0 * f64::from(CODES[0]) / 64.0);
     let chain = board.peripheral::<Sipo>("chain").unwrap().unwrap();
     assert_eq!(
-        (chain.stages(), chain.cascade(), chain.clr()),
+        (chain.stages(), chain.cascade(), chain.clear_level()),
         (u32::from(WORD), 2, true)
     );
     drop((efc, hex, chain));

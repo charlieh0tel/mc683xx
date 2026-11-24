@@ -213,9 +213,9 @@ impl Ad569 {
         self.span.output(self.state.dac, CODE_BITS).0
     }
 
-    /// The word on DB15-DB0.
+    /// The word on the data inputs, DB15-DB0.
     #[must_use]
-    pub const fn db(&self) -> u16 {
+    pub const fn data_inputs(&self) -> u16 {
         self.state.db
     }
 
