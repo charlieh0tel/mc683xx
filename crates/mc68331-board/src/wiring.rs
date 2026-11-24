@@ -396,12 +396,7 @@ impl Routes {
             let read = shared.call(route.peripheral, now, |peripheral, drive| {
                 peripheral.read(access, drive)
             })?;
-            Ok(value
-                | match lane {
-                    Lane::Upper if cycle.size != Size::Byte => (read & 0xff) << 8,
-                    Lane::Both => read,
-                    _ => read & 0xff,
-                })
+            Ok(value | Self::on_lane(read, cycle.size, lane))
         });
         Self::traced(shared, cycle, read.ok(), !pieces.is_empty());
         read
@@ -420,16 +415,30 @@ impl Routes {
         Self::traced(shared, cycle, Some(value), !pieces.is_empty());
         for (route, size, lane) in pieces {
             let access = Self::sampled(shared, route, cycle, size, now);
-            let data = match lane {
-                Lane::Upper if cycle.size != Size::Byte => value >> 8 & 0xff,
-                Lane::Both => value,
-                _ => value & 0xff,
-            };
+            let data = Self::lane_data(value, cycle.size, lane);
             shared.call(route.peripheral, now, |peripheral, drive| {
                 peripheral.write(access, data, drive)
             })?;
         }
         Ok(())
+    }
+
+    /// A piece's value `read` on `lane`, placed in a cycle of `size`.
+    const fn on_lane(read: u32, size: Size, lane: Lane) -> u32 {
+        match lane {
+            Lane::Upper if !matches!(size, Size::Byte) => (read & 0xff) << 8,
+            Lane::Both => read,
+            _ => read & 0xff,
+        }
+    }
+
+    /// A cycle of `size`'s `value` as the piece on `lane` takes it.
+    const fn lane_data(value: u32, size: Size, lane: Lane) -> u32 {
+        match lane {
+            Lane::Upper if !matches!(size, Size::Byte) => value >> 8 & 0xff,
+            Lane::Both => value,
+            _ => value & 0xff,
+        }
     }
 
     /// The port the first peripheral to take the cycle, in its
