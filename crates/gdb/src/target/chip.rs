@@ -16,7 +16,8 @@ use super::TargetRun;
 use super::peek_bytes;
 
 /// The chip reads in the space the function code names, through its
-/// decode; it writes in supervisor space alone, where its pokes go.
+/// decode, a peripheral's bytes by its peek; it writes in supervisor
+/// space alone, into memory, and a peripheral's bytes by its poke.
 impl Target for Mc68331 {
     type Error = Infallible;
 
@@ -51,7 +52,15 @@ impl Target for Mc68331 {
         {
             return Err(AccessError::Unserved(address));
         }
-        Self::write(self, address, data).map_err(|unserved| AccessError::Unserved(unserved.0))
+        if Self::write(self, address, data).is_ok() {
+            return Ok(());
+        }
+        // a peripheral's bytes among them: poked, a byte at a time
+        data.iter().zip(0..).try_for_each(|(&byte, offset)| {
+            let at = address.offset(offset);
+            Self::poke(self, at, Size::Byte, function_code, u32::from(byte))
+                .map_err(|_| AccessError::Unserved(at))
+        })
     }
 
     fn run_for(

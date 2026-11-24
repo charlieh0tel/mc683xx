@@ -185,6 +185,28 @@ pub trait MappedPeripheral: Save {
     fn reset(&mut self, now: Cycle) {
         let _ = now;
     }
+
+    /// What a read `cycle` would return now, right-aligned, with none of
+    /// its side effects (a flag a read clears, a FIFO a read pops): a
+    /// debugger's look, as the bare machine's
+    /// [`read`](crate::flat::Machine::read), a chip's `peek` and gdb's
+    /// memory reads take it, a byte at a time.  By default [`None`]:
+    /// only a real cycle can tell, and the look fails as unpeekable.
+    fn peek(&self, cycle: BusCycle) -> Option<u32> {
+        let _ = cycle;
+        None
+    }
+
+    /// Stores `value`, right-aligned, where a write `cycle` would, with
+    /// none of its side effects (a command it starts, a transmitter it
+    /// loads): a debugger's poke, as the bare machine's
+    /// [`write`](crate::flat::Machine::write), a chip's `poke` and gdb's
+    /// memory writes make it, a byte at a time.  Whether it took it; by
+    /// default it declines, and the poke fails as unpeekable.
+    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
+        let _ = (cycle, value);
+        false
+    }
 }
 
 /// A mapped peripheral, as the bare machine's

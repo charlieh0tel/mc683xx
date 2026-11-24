@@ -141,7 +141,7 @@ fn a_host_gives_the_peripheral_s_image_as_it_gives_a_memory_s() {
         read,
     )
     .unwrap();
-    let eeprom = board.peripheral::<At28c64b>("eeprom").unwrap().unwrap();
+    let eeprom = board.peripheral::<At28c64b>("eeprom").unwrap();
     assert_eq!(eeprom.cells()[..5], [0x5a, 0x5a, 0x5a, 0x5a, 0xff]);
     assert_eq!(eeprom.write_cycle(), At28c64b::WRITE_CYCLE);
 }

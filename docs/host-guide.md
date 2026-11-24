@@ -434,11 +434,13 @@ A peripheral on a board file implements `mc683xx_board::peripheral::Peripheral`
 instead (`docs/board-files.md`), on board time.  A call's time there is
 a `time::Moment`, board time and the chip's system clock then: one given
 a `Drive` takes it from `drive.moment()` (`drive.now()` for the time
-alone) and has no time argument (`read`, `write`, `memory_read`,
+alone, `drive.system_clock()` for the clock) and has no time argument (`read`, `write`, `memory_read`,
 `memory_write`, `power_on`, `reset`, `transfer`, `set_selected`, `input`,
 `advance`); one without a drive takes it as its last argument, `moment`
-(`wait_states`, `dsack_port`, `set_qspi_clock`, `analog_output`,
-`next_event`).
+(`peek`, `poke`, `wait_states`, `dsack_port`, `set_qspi_clock`, `analog_output`,
+`next_event`).  `next_event`'s `moment.now()` is board time as the
+board asks, at or after the peripheral's last call rather than that
+call's time, and it answers a board time, not a span.
 
 ### Bus peripherals: on no chip select
 
@@ -1158,7 +1160,10 @@ but the exception hook cover an address range, on the address lines.
   replaced, read with no cycle before it from the bytes it writes to
   (a page's write backing, not its read one); `None` for a read, for a
   write in CPU space, and for a write the core's memory does not
-  serve (a peripheral's).
+  serve (a peripheral's).  A write hook sees exception processing's
+  stacking writes too, `stacking` set on each: a hook
+  that wants the program's own cycles alone returns early on
+  `access.stacking`.
 - `add_invalid_hook(range, f(&InvalidAccess))`: before a bus error is
   taken, with its reason, `Invalid::BusError` or `Invalid::Protected`.
 - `add_exception_hook(f(&ExceptionEntry))`: once the frame is stacked:
@@ -1326,9 +1331,19 @@ first.  None moves the chip's time or shows in the trace.
 - `peek(address, size, function_code) -> Result<u32, BusCycleError>` is
   a look without a cycle: a module's register as a read would find it
   (no flag armed or cleared), memory's bytes as the decode reaches
-  them.  What only a cycle can tell, a peripheral's bytes, is
-  `BusCycleError::Unpeekable`.  A module answers through
+  them, and a peripheral's bytes from its `MappedPeripheral::peek`, a
+  byte at a time, the first that would drive the byte answering.
+  What only a cycle can tell, a peripheral that declines (the
+  default), is `BusCycleError::Unpeekable`.  A module answers through
   `Module::peek`.
+- `poke(address, size, function_code, value)` is a store without a
+  cycle, a byte at a time: memory's bytes, ROM's too, as `write`
+  writes them, and a peripheral's through its `MappedPeripheral::poke`,
+  each that would take the byte.  A module's register, or a
+  peripheral that declines, is `BusCycleError::Unpeekable`, the bytes
+  before it written.  The bare `flat::Machine`'s `read` and `write`
+  reach a peripheral's bytes the same way, failing with
+  `PeekError::Unpeekable` where it declines.
 
 ```rust
 use mc683xx_target::address::Address;

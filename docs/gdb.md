@@ -211,7 +211,7 @@ alone, and the bare CPU has one space whatever the code.
 | --- | --- | --- |
 | RAM and ROM the core serves | yes | yes, ROM included, whatever the page permissions |
 | The chip's module registers (SIM, QSM, GPT) | yes, as a peek (`Module::peek`): no flag armed or cleared | no |
-| A peripheral (a peripheral on a select, a bare CPU's host peripheral) | no: `E0e` | no: `E0e` |
+| A peripheral (a peripheral on a select, a bare CPU's host peripheral, a board's) | as its `peek` gives it (`MappedPeripheral::peek`, a board peripheral's `Peripheral::peek`); one that declines, the default, `E0e` | as its `poke` takes it; one that declines, the default, `E0e`, the bytes before it written |
 | Memory a peripheral shares a select with, or a memory a peripheral has taken | no | no |
 | Nothing | no | no |
 
@@ -257,7 +257,7 @@ BDM, below):
 | A stop condition (`monitor stop`) | `SIGTRAP`; `monitor stop` names it |
 | A peripheral's or the host's stop request | `SIGINT` |
 | A double bus fault halt | `SIGBUS`; it stays halted until a reset: `monitor reset`, or the watchdog's as time passes |
-| A fault stop (`monitor faults stop`, `set_stop_on_fault`) or a bare CPU's intercept (`set_intercepted`) | `SIGBUS` |
+| A fault stop (`monitor faults stop`, `set_stop_on_fault`) or a bare CPU's intercept (`add_intercept_hook`) or exception stop (`set_stop_on_exception`) | `SIGBUS` |
 
 A signal gdb passes back on continue (`signal SIGINT`) is dropped: the
 CPU has none.

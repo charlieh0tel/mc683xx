@@ -45,9 +45,11 @@ rename renames the Python name with it.  The deliberate differences:
   `Pacing`, though it has `Display` and `FromStr`: its factor is a
   number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`
   the text.  Such a value's `str()` is Rust's `Display` too (`Stop`,
-  `End`, `Entry`, `Pacing`: `str(Stop.Budget())` is `"budget"`);
-  `Event` and `DsackFault`, whose Rust variants a binding cannot
-  rebuild, keep the default, their `repr`.
+  `End`, `Entry`, `Pacing`: `str(Stop.Budget())` is `"budget"`), and
+  so is a struct's or an id's that has one (`FaultStop`, `HookId`,
+  `ObserverId`, `PeripheralId`: `str(hook)` is `"hook 3"`, where its
+  `repr` is `HookId(3)`); `Event` and `DsackFault`, whose Rust variants
+  a binding cannot rebuild, keep the default, their `repr`.
 - **Unknown values:** Python has a member Rust lacks:
   `Event.Unknown(now, text)`, an event the bindings cannot convert, so
   that `take_events()` hands every event over (Exceptions, below);
@@ -105,8 +107,9 @@ rename renames the Python name with it.  The deliberate differences:
   `background` property (`Cpu::background`, through `Mc68331::cpu`),
   as `halted` is the CPU's `Halt` (`Cpu::halted`, likewise).  `reset_halted` is
   `reset_with_breakpoint()` then `background`.
-- **Handles:** memories and peripherals are the numbers `Builder`
-  returns, not `MemoryId` and `PeripheralId`.  `Mc68331.memory(memory,
+- **Handles:** a chip's memories and peripherals are the numbers
+  `Builder` returns, not `MemoryId` and `PeripheralId`; a bare
+  `Machine`'s peripheral is an opaque `PeripheralId`, as in Rust.  `Mc68331.memory(memory,
   offset=0, length=None)` is Rust's `memory(id)`, sliced, and
   `set_memory(memory, offset, data)` writes what Rust writes through
   `memory_mut(id)`, a slice Python cannot hold (`read_memory` and
@@ -313,7 +316,10 @@ assert chip.memory(ram, 0, 2) == b"\x12\x34"
 
 Registers are by name: `"D0"`-`"D7"`, `"A0"`-`"A7"`, `"PC"`, `"SR"`,
 `"CCR"`, `"USP"`, `"SSP"`, `"VBR"`, `"SFC"`, `"DFC"`, through
-`read_register`, `write_register` and `registers()`.
+`read_register`, `write_register` and `registers()`.  A register is 32
+bits: `write_register` raises `OverflowError` for a value outside 0 to
+2**32 - 1 (a negative one included; mask it, `value & 0xFFFFFFFF`), and
+`ValueError` for a name that is none of these.
 
 ## Running
 
@@ -794,7 +800,14 @@ bytes (a long is two word cycles); `function_code` is a
   exception is raised here, as by `run_for`.
 - `peek(address, size, function_code=...)`: a look without a cycle, a
   module's register as a read would find it, memory's bytes through
-  the decode.  A peripheral's bytes raise `UnpeekableError`.
+  the decode, a peripheral's from its `peek(cycle) -> int | None`, a
+  byte at a time.  A peripheral with no `peek`, or one returning
+  `None`, raises `UnpeekableError`.
+- `poke(address, size, value, function_code=...)`: a store without a
+  cycle, memory's bytes (ROM's too) and a peripheral's through its
+  `poke(cycle, value) -> bool`, a byte at a time; a module's register,
+  or a peripheral with no `poke` or one returning `False`, raises
+  `UnpeekableError`, the bytes before it written.
 
 ```python
 CSBARBT = SIM + 0x48  # MC68331UM Table D-3
@@ -816,7 +829,7 @@ wired = chip.peripheral(number)
 assert isinstance(wired, Interrupter) and wired.vector == VECTOR
 try:
     chip.peek(PERIPHERAL_BASE, 2)
-    raise AssertionError("a peripheral cannot be peeked")
+    raise AssertionError("a peripheral with no peek cannot be peeked")
 except mc683xx.UnpeekableError:
     pass
 chip.bus_write(CSBARBT, 2, BLOCK_64K)  # CSBOOT down to 64 Kbytes
@@ -1101,13 +1114,18 @@ and `starts_frame`, whether it is the first since its select asserted;
 it ends at the drive's `now`; the Rust edge walk, `mc683xx_board::spi`, is not
 exposed, so a Python peripheral reckons its edges from `clock.polarity` and
 `clock.phase` by the rules docs/board-files.md, SPI edges, gives),
-`set_qspi_clock(clock, moment)` (the QSPI's serial
+`peek(access, moment) -> int | None` and `poke(access, value, moment)
+-> bool` (a debugger's byte with no cycle's side effects, as the
+chip's `peek` and `poke` and gdb take it; `None` and `False` decline,
+as missing ones do), `set_qspi_clock(clock, moment)` (the QSPI's serial
 clock, as the QSPI tells it: at the first entry and after CPOL, CPHA,
 SPBR or the system clock change), `set_selected(attachment,
 selected, drive)`, `input(port, value, drive)`,
 `analog_output(port, moment) -> float | None` (the value it drives on
 an analog output a sink samples then), `next_event(moment) -> int |
-None`,
+None` (the board time of its next event, not a span; `moment.now` is
+board time as the board asks, at or after its last call rather than
+that call's time),
 `advance(drive)`, `qspi_deferrable() -> bool` (asked once, as
 the board is built: whether its QSPI calls may come in a batch, as
 `Peripheral::qspi_deferrable` says, docs/board-files.md), `memory_read(memory,
@@ -1115,7 +1133,7 @@ access, drive) -> int` and
 `memory_write(memory, access, value, drive)` (a memory it took),
 `save() -> bytes` and `restore(snapshot)`.  A call's time is a
 moment, as the Rust trait's: a call given a `Drive` takes it from the
-drive (`now`, and `moment`), one without takes an `mc683xx.Moment` last
+drive (`now`, `moment` and `system_clock`), one without takes an `mc683xx.Moment` last
 (Rust's `time::Moment`: `now`, board time in picoseconds,
 `system_clock`, an `mc683xx.TimeBase`, and `cycle()`, the chip's
 clock at it, rounded up).  A `TimeBase` (Rust's `time::TimeBase`) has
@@ -1424,14 +1442,19 @@ assert bare.read_register("D0") == 6
   no two overlapping.  A cycle no mapped memory serves and one
   peripheral covers goes to it, before it lands: the read's value is the
   peripheral's, the write is the peripheral's to keep.  It returns the
-  peripheral's number, and `remove_peripheral(peripheral)` takes it off again,
-  `False` if there was none (Rust's `PeripheralId`,
-  `remove_peripheral`).  `protect` covers a peripheral's pages too,
+  peripheral's id, an opaque `PeripheralId` (Rust's `PeripheralId`;
+  `str()` is its `Display`, `peripheral 3`), and
+  `remove_peripheral(peripheral)` takes it off again, `False` if there
+  was none.  `protect` covers a peripheral's pages too,
   mapped or not: a cycle they do not permit is a bus error before the
   peripheral sees it (`Invalid.PROTECTED`, `FaultCause.PROTECTED`), so a
   read-only peripheral needs no `BusError` of its own.  A `BusCycle` has
   `address` (32 bits), `size` (1, 2, or 4: a long operand the peripheral
   covers whole comes once, as 4), `function_code`, `now` and `stacking`.
+  `read` and `write` reach a peripheral's bytes too, a byte at a time,
+  through its optional `peek(cycle) -> int | None` and `poke(cycle,
+  value) -> bool`, with no cycle's side effects; one with neither, or
+  returning `None` or `False`, raises `UnpeekableError`.
   Raising `BusError` is a bus error; any other exception does not fault
   the bus (a read answers 0, a write goes nowhere), stops the run, and
   `run_limited` (or `reset`, for the vectors' reads) raises it.  A
@@ -1447,7 +1470,8 @@ assert bare.read_register("D0") == 6
   called; `begin` sets PC and forgets a hook stop's skip, so the
   hooks at `begin` fire even if the last run stopped there.  `end`,
   an `End` as Rust's, says why it ended: `End.Reached()`,
-  `End.Instructions()`, `End.Fault(fault)` (a `FaultStop`), or
+  `End.Instructions()`, `End.Fault(fault)` (a `FaultStop`),
+  `End.Exception(vector, pc)` (`set_stop_on_exception`), or
   `End.Stop(stop)` with a chip's `Stop` (the value a field named for
   it, `end.fault` and `end.stop`, not Rust's `_0`): `Budget()` (cycles),
   `Hook(hook)`, `Requested()` (`stop_request().request()`, from a
@@ -1457,7 +1481,21 @@ assert bare.read_register("D0") == 6
   `run_limited` answers an intercepted exception within it (below).
   Rust's `Limits::steps`, which serves the chip's BDM step, has no
   argument here, nor `End::Steps` a variant.  A stop requested
-  between runs is withdrawn as the next starts.
+  between runs is withdrawn as the next starts.  Each variant class has
+  `__match_args__`, its fields in order, so a `match` takes an end
+  apart, nested as deep as it goes, with no predicate methods:
+
+  ```python
+  match bare.run_limited(reach=0x4000).end:
+      case mc683xx.End.Reached():
+          pass
+      case mc683xx.End.Stop(mc683xx.Stop.Hook(hook)):
+          print("hook", hook)
+      case mc683xx.End.Fault(fault):
+          print(fault)  # its Display, `bus error: read of 4 bytes ...`
+      case end:
+          raise AssertionError(end)
+  ```
 - **Interrupts:** `request_interrupt(pin, vector=None)` requests IRQ1
   to IRQ7 as 1 to 7, answered by `vector` or the autovector; it stays
   requested, as a level-sensitive line does, until `clear_interrupt(pin)`.
@@ -1502,7 +1540,7 @@ write takes effect:
 | read, write | once the instruction has completed (a write hook sees memory written) | lands after the instruction, before the next |
 | invalid access | once the bus error exception is taken, PC the handler's (or the run stopped for it, with `stop_on_fault`) | lands before the handler's first instruction |
 | exception | once the frame is stacked and PC is the handler's | lands before the handler runs; writing SSP, SR and PC from the frame returns past it |
-| intercept callback | before anything is stacked, PC at the instruction | lands before the CPU goes on from PC |
+| intercept hook | before anything is stacked, PC at the instruction | lands before the CPU goes on from PC |
 
 A read or write hook sees a long operand once, `size` 4 at its
 address, as a peripheral and a Unicorn hook do (memory or peripheral, MOVEM.L
@@ -1514,7 +1552,21 @@ the faulting word.
 address, `stacking`, whether exception processing is stacking a frame
 (flagged, not hidden), and `registers`, as the instruction began, or,
 while a trace, hardware breakpoint or interrupt taken after one stacks
-its frame, as that processing began.
+its frame, as that processing began.  `registers` is a dict on the bare
+`Machine` alone; on an `Mc68331` and a `Board`, whose hooks run without
+the registers kept, it is always `None`.  A write hook sees the
+stacking writes of each exception the CPU takes, `stacking` set: a hook
+after the program's own writes alone filters them out:
+
+```python
+program_writes: list[tuple[int, int]] = []
+
+
+def on_write(access: mc683xx.MemoryAccess) -> None:
+    if access.stacking:
+        return  # exception processing's frame, not the program's write
+    program_writes.append((access.address, access.value))
+```
 
 ```python
 calls: list[int] = []
@@ -1540,17 +1592,20 @@ bare.remove_hook(stubbed)
 
 ### Exceptions and faults
 
-A host-handled exception: `set_intercepted(vector, True)` intercepts
-the exceptions an instruction raises with `vector` (traps, illegal,
-line A and F, privilege, divide by zero, CHK, TRAPV, format error)
-before anything is stacked, for the host to handle (a stubbed kernel
-call, an emulated instruction, a stop), and
-`set_intercept_callback(callback)` answers them:
-`callback(Intercepted)` gets the `vector` and the instruction's `pc`,
-where PC is, its (An)+ and -(An) undone.  A truthy result means it
-handled it, and the run goes on from PC as the callable left it;
-otherwise, or with no callback (`set_intercept_callback(None)`), the
-CPU takes it natively.  `set_stop_on_fault(True)` (`stops_on_fault`)
+A host-handled exception: `add_intercept_hook(callback, vectors)`
+(Rust's `Cpu::add_intercept_hook`) intercepts the exceptions an
+instruction raises with a vector of `vectors` (traps, illegal, line A
+and F, privilege, divide by zero, CHK, TRAPV, format error) before
+anything is stacked, for the host to handle (a stubbed kernel call, an
+emulated instruction, a stop), and returns a `HookId` that
+`remove_hook` takes.  `callback(Intercepted)` gets the `vector` and
+the instruction's `pc`, where PC is, its (An)+ and -(An) undone.  A
+truthy result means it handled it, and the run goes on from PC as the
+callable left it; otherwise the next intercept hook covering the
+vector is called, in the order installed, and once none is left the
+CPU takes it natively.  Rust's hook returns `ControlFlow::Break` to
+end the run for its host instead, which `run_limited` does on its
+callable's behalf.  `set_stop_on_fault(True)` (`stops_on_fault`)
 stops the run on a bus or address error instead of taking it:
 `End.Fault(fault)`, its `FaultStop` giving the
 `kind` (`BusCycleKind`), the `cause` (`FaultCause.BUS_ERROR` for
@@ -1580,10 +1635,9 @@ def trap_1(intercepted: mc683xx.Intercepted) -> bool:
     return True
 
 
-bare.set_intercepted(32 + 1, True)
-bare.set_intercept_callback(trap_1)
+kernel_call = bare.add_intercept_hook(trap_1, [32 + 1])
 assert bare.run_limited(begin=CALL, reach=0x4000).end == mc683xx.End.Reached()
-bare.set_intercept_callback(None)
+bare.remove_hook(kernel_call)
 
 bare.set_stop_on_fault(True)
 bare.write(CALL, struct.pack(">2H", 0x2010, RTS))  # move.l (a0),d0
@@ -1597,12 +1651,37 @@ match bare.run_limited(begin=CALL, reach=CALL_RETURN).end:
 bare.set_stop_on_fault(False)
 ```
 
-To stop at any exception an instruction raises, with its vector and
-PC: intercept each such vector, and have the callback record
-`intercepted.vector` and `intercepted.pc`, call
-`stop_request().request()` and return `True`.  Nothing is stacked, PC
-is at the instruction, and the run ends `End.Stop(Stop.Requested())`.
-Faults are not intercepted: `set_stop_on_fault(True)` stops at them.
+`set_stop_on_exception(True)` (`stops_on_exception`, Rust's
+`Cpu::set_stop_on_exception`) stops the run at any exception the CPU
+is about to take, before anything is stacked: `End.Exception(vector,
+pc)`.  It covers an exception an instruction raises, a fault among
+them, a trace, a hardware breakpoint and an interrupt, once
+acknowledged, as its vector is then known; not a fault while stacking,
+nor `take_exception`'s.  An instruction's exception leaves the
+instruction undone and PC at it, as a fault stop does; a trace or a
+breakpoint is left pending, the instruction before it kept, and an
+interrupt is sampled and acknowledged again.  The next run takes that
+exception natively, once, with no stop for it; the host may instead
+take one of its own with `take_exception`.  A fault with
+`set_stop_on_fault(True)` is `End.Fault` instead, and an exception an
+intercept hook covers is the hook's: one no hook handles is taken
+natively, with no stop.
+
+```python
+bare.write(CALL, struct.pack(">2H", TRAP_7, RTS))
+bare.set_stop_on_exception(True)
+match bare.run_limited(begin=CALL, reach=CALL_RETURN).end:
+    case mc683xx.End.Exception(vector, pc):
+        assert (vector, pc) == (32 + 7, CALL) and bare.read_register("PC") == CALL
+    case end:
+        raise AssertionError(end)
+bare.set_stop_on_exception(False)
+```
+
+A stop at chosen exceptions alone is an intercept hook's: one that
+records `intercepted.vector` and `intercepted.pc`, calls
+`stop_request().request()` and returns `True` ends the run
+`End.Stop(Stop.Requested())`, nothing stacked, PC at the instruction.
 
 ```python
 stops: list[tuple[int, int]] = []
@@ -1615,13 +1694,11 @@ def stop_at(intercepted: mc683xx.Intercepted) -> bool:
 
 
 bare.write(CALL, struct.pack(">2H", TRAP_7, RTS))
-bare.set_intercepted(32 + 7, True)
-bare.set_intercept_callback(stop_at)
+stopping = bare.add_intercept_hook(stop_at, [32 + 7])
 run = bare.run_limited(begin=CALL, reach=CALL_RETURN)
 assert run.end == mc683xx.End.Stop(mc683xx.Stop.Requested())
 assert stops == [(32 + 7, CALL)] and bare.read_register("PC") == CALL
-bare.set_intercept_callback(None)
-bare.set_intercepted(32 + 7, False)
+bare.remove_hook(stopping)
 ```
 
 A peripheral's range protected read-only refuses a write before the
@@ -1679,7 +1756,8 @@ The port of a Unicorn harness is mechanical:
 | `UC_HOOK_MEM_READ` to watch | `add_read_hook`, after the instruction |
 | `UC_HOOK_MEM_INVALID`, `UC_MEM_WRITE_PROT` | `add_invalid_hook` (`reason` `BUS_ERROR` or `PROTECTED`), or `set_stop_on_fault` and `End.Fault` |
 | `UcError` on a fault | `set_stop_on_fault(True)`, `End.Fault(fault)`; by default the CPU takes the bus error exception |
-| `UC_HOOK_INTR` (`intno`) | `set_intercepted(vector, True)` and `set_intercept_callback(f)` before stacking (the vector, not `intno`), or `add_exception_hook` after |
+| `emu_stop()` in a `UC_HOOK_INTR` hook | `set_stop_on_exception(True)`, `End.Exception(vector, pc)`, before stacking |
+| `UC_HOOK_INTR` (`intno`) | `add_intercept_hook(f, vectors)` before stacking (the vector, not `intno`), or `add_exception_hook` after |
 | interrupts stacked by hand | `request_interrupt(pin, vector)` |
 | `hook_del(handle)` | `remove_hook(hook)` |
 | `ctl_flush_tb()` | nothing: there is no translation cache |

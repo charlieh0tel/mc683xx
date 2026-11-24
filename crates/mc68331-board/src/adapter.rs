@@ -219,6 +219,14 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
         written
     }
 
+    fn peek(&self, access: PeripheralAccess, moment: Moment) -> Option<u32> {
+        self.peripheral.peek(carried(access, moment))
+    }
+
+    fn poke(&mut self, access: PeripheralAccess, value: u32, moment: Moment) -> bool {
+        self.peripheral.poke(carried(access, moment), value)
+    }
+
     fn wait_states(&mut self, access: PeripheralAccess, moment: Moment) -> Option<Cycles> {
         self.peripheral.wait_states(carried(access, moment))
     }

@@ -170,7 +170,9 @@ fn a_bad_stack_pointer_stops_without_a_halt_and_the_run_goes_on() {
 #[test]
 fn an_intercepted_trap_stacks_nothing_and_can_be_taken_natively() {
     let mut machine = machine(&[TRAP_0]);
-    machine.cpu.set_intercepted(Vector::trap(0), true);
+    machine
+        .cpu
+        .add_intercept_hook([Vector::trap(0)], |_| ControlFlow::Break(()));
     assert_eq!(
         one(&mut machine),
         End::Intercepted(Intercepted {
@@ -185,6 +187,43 @@ fn an_intercepted_trap_stacks_nothing_and_can_be_taken_natively() {
     one(&mut machine);
     assert_eq!(machine.cpu.registers.pc.0, HANDLER);
     assert_eq!(machine.cpu.registers.ssp.0, STACK - 8);
+}
+
+#[test]
+fn intercept_hooks_are_called_in_order_until_one_stops_the_run() {
+    let mut machine = machine(&[TRAP_0, TRAP_0]);
+    let called = Rc::new(RefCell::new(Vec::new()));
+    let hook = |number: u8, stop: bool| {
+        let called = called.clone();
+        move |intercepted: &Intercepted| {
+            called.borrow_mut().push((number, intercepted.vector));
+            if stop {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        }
+    };
+    let trap = Vector::trap(0);
+    machine.cpu.add_intercept_hook([trap], hook(1, false));
+    let other = machine
+        .cpu
+        .add_intercept_hook([Vector::ZERO_DIVIDE], hook(2, true));
+    let third = machine.cpu.add_intercept_hook([trap], hook(3, true));
+    let fourth = machine.cpu.add_intercept_hook([trap], hook(4, true));
+    assert!(matches!(one(&mut machine), End::Intercepted(_)));
+    assert_eq!(*called.borrow(), [(1, trap), (3, trap)], "4 not called");
+    called.borrow_mut().clear();
+    assert!(machine.cpu.remove_hook(third));
+    assert!(matches!(one(&mut machine), End::Intercepted(_)));
+    assert_eq!(*called.borrow(), [(1, trap), (4, trap)]);
+    // all that cover it declining, it is taken natively
+    called.borrow_mut().clear();
+    assert!(machine.cpu.remove_hook(fourth));
+    assert!(machine.cpu.has_hook(other));
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(*called.borrow(), [(1, trap)]);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
 }
 
 #[test]
@@ -208,14 +247,15 @@ fn an_end_prints_its_short_name() {
 #[test]
 fn an_intercept_undoes_the_instruction_s_postincrement() {
     let mut machine = machine(&[DIVU_POSTINCREMENT]);
-    machine.cpu.set_intercepted(Vector::ZERO_DIVIDE, true);
+    machine
+        .cpu
+        .add_intercept_hook([Vector::ZERO_DIVIDE], |_| ControlFlow::Break(()));
     machine.cpu.registers.set_address(0, 0x2000);
     let end = one(&mut machine);
     assert!(
         matches!(end, End::Intercepted(Intercepted { vector, .. }) if vector == Vector::ZERO_DIVIDE)
     );
     assert_eq!(machine.cpu.registers.address(0), 0x2000);
-    assert!(machine.cpu.intercepts());
 }
 
 #[test]
@@ -1147,4 +1187,130 @@ fn a_fault_reading_a_host_exception_s_vector_is_a_type_iv_bus_error() {
     assert_eq!(registers.ssp, Address(bottom));
     assert_eq!(word_at(&machine, bottom + 6), 0xc008, "format $C, vector 2");
     assert_eq!(machine.cpu.halted(), None);
+}
+
+/// The exception stop of `vector` at `pc`.
+const fn exception(vector: Vector, pc: u32) -> End {
+    End::Exception {
+        vector,
+        pc: Address(pc),
+    }
+}
+
+#[test]
+fn an_exception_stop_stacks_nothing_and_the_run_on_takes_it() {
+    let mut machine = machine(&[TRAP_0]);
+    machine.cpu.set_stop_on_exception(true);
+    assert!(machine.cpu.stops_on_exception());
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
+    assert_eq!(machine.cpu.registers.pc.0, CODE);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK, "nothing stacked");
+    assert_eq!(machine.cpu.instructions(), 0);
+    assert_eq!(exception(Vector::trap(0), CODE).to_string(), "exception");
+    // run on: the trap taken natively, a four-word frame after it
+    one(&mut machine);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(frame(&machine).1, CODE + 2);
+}
+
+#[test]
+fn an_exception_stop_undoes_the_instruction_s_postincrement() {
+    let mut machine = machine(&[DIVU_POSTINCREMENT]);
+    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.registers.set_address(0, 0x2000);
+    assert_eq!(one(&mut machine), exception(Vector::ZERO_DIVIDE, CODE));
+    assert_eq!(machine.cpu.registers.address(0), 0x2000);
+}
+
+#[test]
+fn a_fault_stops_as_an_exception_unless_faults_stop() {
+    let mut machine = machine(&[MOVEQ_1_D1, MOVE_LONG_A0_TO_D0]);
+    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.registers.set_address(0, NOWHERE);
+    one(&mut machine);
+    // stopping on faults, a fault is a fault stop
+    machine.cpu.set_stop_on_fault(true);
+    assert!(matches!(one(&mut machine), End::Fault(_)));
+    machine.cpu.set_stop_on_fault(false);
+    assert_eq!(one(&mut machine), exception(Vector::BUS_ERROR, CODE + 2));
+    assert_eq!(machine.cpu.registers.ssp.0, STACK);
+    assert_eq!(machine.cpu.registers.data[1], 1);
+    assert_eq!(machine.cpu.instructions(), 1);
+    // run on: the bus error taken, a format $C frame (CPU32RM 6.4.3)
+    one(&mut machine);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(format::vector(frame(&machine).2), Vector::BUS_ERROR);
+}
+
+#[test]
+fn an_intercept_hook_sees_an_exception_before_the_exception_stop() {
+    let mut machine = machine(&[TRAP_0, TRAP_0]);
+    machine.cpu.set_stop_on_exception(true);
+    let stopping = machine
+        .cpu
+        .add_intercept_hook([Vector::trap(0)], |_| ControlFlow::Break(()));
+    assert!(matches!(one(&mut machine), End::Intercepted(_)));
+    // declined by every hook, it is taken natively, no exception stop
+    machine.cpu.remove_hook(stopping);
+    machine
+        .cpu
+        .add_intercept_hook([Vector::trap(0)], |_| ControlFlow::Continue(()));
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
+fn a_trace_stops_after_its_instruction_and_the_run_on_takes_it() {
+    let mut machine = machine(&[MOVEQ_1_D1, NOP]);
+    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.registers.set_sr(status::S | status::T1);
+    assert_eq!(one(&mut machine), exception(Vector::TRACE, CODE + 2));
+    assert_eq!(machine.cpu.registers.data[1], 1, "the MOVEQ ran");
+    assert_eq!(machine.cpu.instructions(), 1);
+    assert_eq!(machine.cpu.trace_pending(), Some(Address(CODE)));
+    assert_eq!(machine.cpu.registers.ssp.0, STACK);
+    assert_eq!(boundary_only(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(frame_address(&machine), CODE);
+}
+
+#[test]
+fn an_interrupt_stops_with_its_vector_and_the_run_on_takes_it() {
+    let mut machine = machine(&[NOP, NOP]);
+    machine.cpu.set_stop_on_exception(true);
+    let vector = Vector(0x40);
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), Some(vector));
+    assert_eq!(one(&mut machine), exception(vector, CODE));
+    assert_eq!(machine.cpu.registers.ssp.0, STACK);
+    assert_eq!(machine.cpu.registers.sr(), status::S, "the mask as it was");
+    // run on, taking only the interrupts pending
+    let run = machine.run_limited(Limits {
+        steps: Some(0),
+        ..Limits::default()
+    });
+    assert_eq!((run.end, run.steps), (End::Steps, 1));
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(frame(&machine).1, CODE, "taken before the NOP");
+}
+
+#[test]
+fn take_exception_is_no_exception_stop() {
+    let mut machine = machine(&[NOP]);
+    machine.cpu.set_stop_on_exception(true);
+    machine.take_exception(Vector::trap(3), None).unwrap();
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
+fn a_hardware_breakpoint_stops_and_is_left_pending() {
+    let mut machine = machine(&[NOP]);
+    machine.cpu.set_stop_on_exception(true);
+    machine.cpu.set_breakpoint_pending(true);
+    let vector = Vector::HARDWARE_BREAKPOINT;
+    assert_eq!(boundary_only(&mut machine), exception(vector, CODE));
+    assert!(machine.cpu.breakpoint_pending());
+    assert_eq!(machine.cpu.registers.ssp.0, STACK);
+    assert_eq!(boundary_only(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert!(!machine.cpu.breakpoint_pending());
 }

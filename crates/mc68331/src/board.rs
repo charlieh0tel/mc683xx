@@ -676,6 +676,39 @@ impl Board {
             })
     }
 
+    /// What a cycle `request` describes reaches on the external bus, in
+    /// the order a read's lanes take them: each asserted select's wire
+    /// (a diverted memory's peripheral in its place), then each
+    /// peripheral on no select, with the cycle each sees at `now`.
+    pub(crate) fn takers(&self, request: DecodeRequest, now: Cycle) -> Vec<(Wire, BusCycle)> {
+        let cycle = BusCycle::new(
+            Address(request.address),
+            request.size,
+            request.function_code,
+            now,
+        )
+        .writing(request.write);
+        let selected = self
+            .sim
+            .chip_selects()
+            .matches(request)
+            .filter(|found| found.asserted)
+            .filter_map(|found| {
+                let wire = match self.wiring[found.select.index()]? {
+                    Wire::Memory(wired) => self
+                        .diverted_to(wired.region)
+                        .map_or(Wire::Memory(wired), Wire::Peripheral),
+                    wire @ Wire::Peripheral(_) => wire,
+                };
+                Some((wire, cycle.through(found.select.into())))
+            });
+        let bus = self
+            .bus_takers(request.address, request.function_code)
+            .into_iter()
+            .map(|peripheral| (Wire::Peripheral(peripheral), cycle));
+        selected.chain(bus).collect()
+    }
+
     /// Whether a peripheral on no select takes a cycle at `address` in
     /// `function_code`'s space.
     pub(crate) fn bus_takes(&self, address: u32, function_code: FunctionCode) -> bool {
@@ -1615,7 +1648,7 @@ pub(crate) fn load(memory: &Memory, wired: HostMemory, address: u32, size: Size)
 }
 
 /// A byte or word into host memory, on the `lanes` the select strobes.
-fn store(
+pub(crate) fn store(
     memory: &mut Memory,
     wired: HostMemory,
     address: u32,

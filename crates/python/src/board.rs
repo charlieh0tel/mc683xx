@@ -19,6 +19,7 @@ use mc683xx_board::board::BoardRun;
 use mc683xx_board::board::BoardStopRequest;
 use mc683xx_board::board::BoardTracing;
 use mc683xx_board::board::External;
+use mc683xx_board::board::LookupError;
 use mc683xx_board::board::RunError;
 use mc683xx_board::chip::Chip;
 use mc683xx_board::description::Options;
@@ -582,6 +583,11 @@ impl ObserverIdView {
     fn __repr__(&self) -> String {
         opaque_repr("ObserverId", &self.0)
     }
+
+    /// Rust's `Display`: `observer 2`.
+    fn __str__(&self) -> String {
+        self.0.to_string()
+    }
 }
 
 /// A Python observer on a net (`Board.observe`).
@@ -699,6 +705,12 @@ impl DriveView {
     #[getter]
     const fn moment(&self) -> MomentView {
         MomentView(self.moment)
+    }
+
+    /// The chip's system clock on board time at the call.
+    #[getter]
+    const fn system_clock(&self) -> TimeBaseView {
+        TimeBaseView(self.moment.system_clock())
     }
 
     /// Drives `value` on output `port` now.
@@ -1068,6 +1080,35 @@ impl Peripheral for PythonPeripheral {
             (),
         )
         .unwrap_or(Err(BusError))
+    }
+
+    fn peek(&self, access: PeripheralAccess, moment: Moment) -> Option<u32> {
+        self.ask(
+            "peek",
+            |py| {
+                Ok(vec![
+                    access_argument(py, access)?,
+                    moment_argument(py, moment)?,
+                ])
+            },
+            |value| value.extract::<Option<u32>>(),
+            None,
+        )
+    }
+
+    fn poke(&mut self, access: PeripheralAccess, value: u32, moment: Moment) -> bool {
+        self.ask(
+            "poke",
+            |py| {
+                Ok(vec![
+                    access_argument(py, access)?,
+                    value.into_py_any(py)?,
+                    moment_argument(py, moment)?,
+                ])
+            },
+            |result| result.is_truthy(),
+            false,
+        )
     }
 
     fn wait_states(&mut self, access: PeripheralAccess, moment: Moment) -> Option<Cycles> {
@@ -1646,11 +1687,11 @@ impl BoardView {
     /// a Python peripheral; `ValueError` for a peripheral the board
     /// lacks.
     fn peripheral(&self, py: Python<'_>, name: &str) -> PyResult<Option<Py<PyAny>>> {
-        Ok(self
-            .board
-            .peripheral::<PythonPeripheral>(name)
-            .map_err(Error::from)?
-            .and_then(|peripheral| peripheral.object.object(py).ok()))
+        match self.board.peripheral::<PythonPeripheral>(name) {
+            Ok(peripheral) => Ok(peripheral.object.object(py).ok()),
+            Err(LookupError::NoPeripheral(error)) => Err(Error::from(error).into()),
+            Err(_) => Ok(None),
+        }
     }
 
     /// What the peripheral `name` shows a front end, as a dict (Rust's

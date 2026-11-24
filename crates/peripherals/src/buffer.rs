@@ -28,6 +28,7 @@ use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Moment;
 use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::cpu::state::decode;
@@ -95,6 +96,11 @@ impl Peripheral for Buffer {
         Ok(())
     }
 
+    /// Its inputs, as a read gives them: a read has no side effect.
+    fn peek(&self, access: PeripheralAccess, _: Moment) -> Option<u32> {
+        Some(access.read_byte(self.inputs))
+    }
+
     fn input(&mut self, port: usize, signal: Signal, _: &mut Drive<'_>) {
         match (port, signal) {
             (BUS, Signal::Bus(value)) => self.inputs = value as u8,
@@ -151,6 +157,17 @@ mod tests {
                 &mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
             )
             .unwrap()
+    }
+
+    #[test]
+    fn a_peek_is_a_read_and_a_poke_is_declined() {
+        let mut buffer = Buffer { inputs: 0xa5 };
+        let moment = Moment::new(Time::ZERO, SYSTEM_CLOCK);
+        assert_eq!(
+            buffer.peek(access(Size::Byte), moment),
+            Some(read(&mut buffer, Size::Byte))
+        );
+        assert!(!buffer.poke(access(Size::Byte), 0, moment));
     }
 
     #[test]

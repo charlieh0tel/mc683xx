@@ -48,7 +48,7 @@ impl Slave for Register {
 
 /// A transfer in SPI mode `number`.
 fn transfer(number: u8) -> Transfer {
-    let mode = Mode::from_number(number);
+    let mode = Mode::try_from(number).unwrap();
     let clock = QspiClock::new(
         mode.polarity,
         mode.phase,

@@ -16,6 +16,8 @@ use std::ops::RangeInclusive;
 use super::Core;
 use super::Cpu;
 use super::Stop;
+use super::bare::Intercepted;
+use super::bare::VectorSet;
 use crate::exception::BusCycleKind;
 use crate::exception::Frame;
 use crate::exception::Vector;
@@ -174,6 +176,8 @@ type InvalidHook = Callback<InvalidAccess>;
 type ExceptionHook = Callback<ExceptionEntry>;
 /// An exception return hook.
 type ExceptionReturnHook = Callback<ExceptionReturn>;
+/// An intercept hook.
+type InterceptHook = Callback<Intercepted>;
 
 /// A hook with the addresses it covers.
 struct Ranged<H> {
@@ -230,6 +234,9 @@ pub(crate) struct Hooks {
     exception: Vec<(HookId, ExceptionHook)>,
     /// After each exception is returned from.
     exception_return: Vec<(HookId, ExceptionReturnHook)>,
+    /// Before an instruction's exception of one of the vectors is
+    /// stacked.
+    intercept: Vec<(HookId, VectorSet, InterceptHook)>,
 }
 
 impl fmt::Debug for Hooks {
@@ -243,6 +250,7 @@ impl fmt::Debug for Hooks {
             .field("invalid", &self.invalid.len())
             .field("exception", &self.exception.len())
             .field("exception_return", &self.exception_return.len())
+            .field("intercept", &self.intercept.len())
             .finish_non_exhaustive()
     }
 }
@@ -286,6 +294,8 @@ impl Hooks {
             hooks.retain(|(other, _)| *other != id);
             hooks.len() != before
         }
+        let intercepts = self.intercept.len();
+        self.intercept.retain(|(other, _, _)| *other != id);
         retain(&mut self.code, id)
             | retain(&mut self.block, id)
             | retain(&mut self.read, id)
@@ -293,6 +303,25 @@ impl Hooks {
             | retain(&mut self.invalid, id)
             | retain_unranged(&mut self.exception, id)
             | retain_unranged(&mut self.exception_return, id)
+            | (self.intercept.len() != intercepts)
+    }
+
+    /// The vectors the intercept hooks cover.
+    fn intercepted(&self) -> VectorSet {
+        self.intercept
+            .iter()
+            .fold(VectorSet::default(), |set, (_, vectors, _)| {
+                set.union(*vectors)
+            })
+    }
+
+    /// Calls the intercept hooks covering `intercepted`'s vector, in
+    /// the order installed, until one stops the run: whether one did.
+    pub(crate) fn intercept(&mut self, intercepted: &Intercepted) -> bool {
+        self.intercept
+            .iter_mut()
+            .filter(|(_, vectors, _)| vectors.contains(intercepted.vector))
+            .any(|(_, _, hook)| hook(intercepted).is_break())
     }
 }
 
@@ -415,6 +444,34 @@ impl Cpu {
         id
     }
 
+    /// Calls `hook` for each exception an instruction raises with a
+    /// vector of `vectors` (a trap, an illegal instruction, a divide by
+    /// zero, but not a fault, a trace or an interrupt), before anything
+    /// is stacked.  If it stops the run, the run ends
+    /// ([`End::Intercepted`]) with the exception not taken, the
+    /// instruction's (An)+ and -(An) undone and PC at it, for the host
+    /// to handle (a stubbed kernel call, an emulated instruction) and
+    /// run on from PC, or to decline
+    /// ([`take_natively_once`](Self::take_natively_once)).  If it does
+    /// not, the CPU takes the exception natively.  Where several hooks
+    /// cover a vector, they are called in the order installed until one
+    /// stops the run; the rest are not called.
+    ///
+    /// [`End::Intercepted`]: super::bare::End::Intercepted
+    pub fn add_intercept_hook(
+        &mut self,
+        vectors: impl IntoIterator<Item = Vector>,
+        hook: impl FnMut(&Intercepted) -> Control + 'static,
+    ) -> HookId {
+        let id = self.hooks.allocate();
+        let vectors = vectors
+            .into_iter()
+            .fold(VectorSet::default(), |set, vector| set.with(vector));
+        self.hooks.intercept.push((id, vectors, Box::new(hook)));
+        self.bare.intercepted = self.hooks.intercepted();
+        id
+    }
+
     /// Whether the hook `id` is installed.
     #[must_use]
     pub fn has_hook(&self, id: HookId) -> bool {
@@ -428,11 +485,13 @@ impl Cpu {
             || hooks.invalid.iter().any(|hook| hook.id == id)
             || hooks.exception.iter().any(|(other, _)| *other == id)
             || hooks.exception_return.iter().any(|(other, _)| *other == id)
+            || hooks.intercept.iter().any(|(other, _, _)| *other == id)
     }
 
     /// Removes the hook `id`; whether it was installed.
     pub fn remove_hook(&mut self, id: HookId) -> bool {
         let removed = self.hooks.remove(id);
+        self.bare.intercepted = self.hooks.intercepted();
         self.rewatch();
         removed
     }

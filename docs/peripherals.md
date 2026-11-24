@@ -141,6 +141,8 @@ passing its A inputs to its Y outputs while its OE is low (SN74HC244
   (above); the lower byte is not driven and reads 0.  A write reaches
   nothing: attach it `role = "read"`.  A
   latch and a buffer may share a select this way, one per role.
+- A debugger's peek (the chip's `peek`, gdb) gives what a read gives,
+  as a read has no side effect; a poke is declined.
 - A switch bank fixed for the run is `levels`, or `--set
   name.levels=...` on the runner.  One the host moves while the board
   runs is a net from an external: `external.switches` to `A`, the
@@ -486,6 +488,11 @@ From the datasheet's section 6:
   the bytes after them in the same cycle are.  While protected, a
   cycle without the enable sequence programs nothing, but runs its tWC
   and polls.
+- **A debugger's peek and poke (the chip's `peek` and `poke`, gdb).**
+  A peek gives the cell, outside a write cycle; during one it is
+  declined, as a read then polls.  A poke programs the cell at once,
+  through to `file`, as a programmer would: no write cycle, no tWC,
+  whatever the data protection.
 
 Where the datasheet is silent, the model chooses:
 

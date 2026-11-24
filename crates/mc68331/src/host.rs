@@ -7,6 +7,7 @@
 //! a look without them, where one can be had.
 
 use mc683xx_cpu32::bus::BusError;
+use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::Unserved;
 use mc683xx_modules::module;
@@ -14,12 +15,15 @@ use mc683xx_modules::module::Peek;
 use mc683xx_modules::sim::BLOCK;
 use mc683xx_modules::sim::MODULE_SPACE_BYTES;
 use mc683xx_modules::sim::chip_selects::DecodeRequest;
+use mc683xx_modules::sim::chip_selects::Lanes;
 use mc683xx_target::address::Address;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
 use crate::board::Board;
+use crate::board::Wire;
 use crate::board::load;
+use crate::board::store;
 use crate::chip::Mc68331;
 
 /// Bits in a word cycle, the most a cycle carries: a long is two.
@@ -105,14 +109,18 @@ impl Mc68331 {
 
     /// What `bus_read` would return now, without a cycle: a module's
     /// register as it holds it (no flag armed or cleared), a memory's
-    /// bytes through the decode.  A byte no memory alone answers, a
-    /// peripheral's or one no cycle would end well, is
+    /// bytes through the decode, and a peripheral's, a byte at a time,
+    /// from its [`MappedPeripheral::peek`], the first that would drive
+    /// the byte answering.  A byte a peripheral declines, or one a
+    /// matching select reaches nothing through, is
     /// [`BusCycleError::Unpeekable`].
     ///
     /// # Errors
     ///
     /// [`BusCycleError::Unpeekable`] as above, and otherwise as
     /// `bus_read`.
+    ///
+    /// [`MappedPeripheral::peek`]: mc683xx_cpu32::peripheral::MappedPeripheral::peek
     pub fn peek(
         &self,
         address: Address,
@@ -123,6 +131,43 @@ impl Mc68331 {
             .try_fold(0, |value, (at, size, shift)| {
                 Ok(value | self.peek_cycle(at, size, function_code)? << shift)
             })
+    }
+
+    /// Stores `value`, right-aligned, where `bus_write` would, without a
+    /// cycle, a byte at a time: memory's bytes as [`write`](Self::write)
+    /// writes them, ROM included, and a peripheral's through its
+    /// [`MappedPeripheral::poke`], each that would take the byte.  A
+    /// module's register is not poked.
+    ///
+    /// # Errors
+    ///
+    /// [`BusCycleError::Unpeekable`] for a module's register, a byte a
+    /// peripheral declines or one a matching select reaches nothing
+    /// through, [`BusCycleError::Width`] if `value` is wider than
+    /// `size`, and otherwise as `bus_read`.  The bytes before the one
+    /// that failed stay written.
+    ///
+    /// [`MappedPeripheral::poke`]: mc683xx_cpu32::peripheral::MappedPeripheral::poke
+    pub fn poke(
+        &mut self,
+        address: Address,
+        size: Size,
+        function_code: FunctionCode,
+        value: u32,
+    ) -> Result<(), BusCycleError> {
+        if value & !size.mask() != 0 {
+            return Err(BusCycleError::Width(value));
+        }
+        if size != Size::Byte && address.is_odd() {
+            return Err(BusCycleError::Misaligned(address));
+        }
+        let bytes = size.bytes();
+        for index in 0..bytes {
+            let byte = value >> (8 * (bytes - 1 - index)) & 0xff;
+            let at = self.cpu.memory.mask(address.offset(index)).0;
+            self.poke_byte(at, function_code, byte)?;
+        }
+        Ok(())
     }
 
     /// Fills `data` from `address` up, with no bus cycle, a debugger's
@@ -253,9 +298,73 @@ impl Mc68331 {
         }
         let bytes = if size == Size::Byte { 1 } else { 2 };
         (address..address + bytes).try_fold(0, |value, at| {
-            let byte = board.peek_byte(&self.cpu.memory, at, function_code)?;
+            let byte = board.peek_byte(&self.cpu.memory, at, function_code, self.now)?;
             Ok(value << 8 | byte)
         })
+    }
+
+    /// One byte poke, now: memory's byte where the core serves it, as
+    /// `write` writes it, else each peripheral or memory the external
+    /// bus would write it to.
+    fn poke_byte(
+        &mut self,
+        address: u32,
+        function_code: FunctionCode,
+        byte: u32,
+    ) -> Result<(), BusCycleError> {
+        let board = &mut self.board;
+        if function_code != FunctionCode::CpuSpace
+            && let Some(offset) = address
+                .checked_sub(board.sim.module_base().0)
+                .filter(|&offset| offset < MODULE_SPACE_BYTES)
+            && (BLOCK.contains(offset)
+                || board
+                    .modules
+                    .iter()
+                    .any(|module| module.block().contains(offset)))
+        {
+            return Err(BusCycleError::Unpeekable);
+        }
+        let request = DecodeRequest {
+            address,
+            function_code,
+            write: true,
+            size: Size::Byte,
+        };
+        if self
+            .cpu
+            .memory
+            .write_bytes(Address(address), &[byte as u8])
+            .is_ok()
+        {
+            return Ok(());
+        }
+        let takers = board.takers(request, self.now);
+        if takers.is_empty() {
+            return Err(board.unreached(request));
+        }
+        for (wire, cycle) in takers {
+            match wire {
+                Wire::Peripheral(peripheral) => {
+                    if !board.peripherals[peripheral].poke(cycle, byte) {
+                        return Err(BusCycleError::Unpeekable);
+                    }
+                }
+                Wire::Memory(wired) => {
+                    if wired.writable {
+                        store(
+                            &mut self.cpu.memory,
+                            wired,
+                            address,
+                            Size::Byte,
+                            Lanes::BOTH,
+                            byte,
+                        );
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -270,13 +379,15 @@ impl Board {
         }
     }
 
-    /// The byte at `address` as the memory that alone answers it holds
-    /// it.
+    /// The byte at `address` at `now`, as the memory that alone answers
+    /// it holds it, or as the first that would drive it, a memory or a
+    /// peripheral's peek.
     fn peek_byte(
         &self,
         memory: &Memory,
         address: u32,
         function_code: FunctionCode,
+        now: Cycle,
     ) -> Result<u32, BusCycleError> {
         let request = DecodeRequest {
             address,
@@ -284,14 +395,29 @@ impl Board {
             write: false,
             size: Size::Byte,
         };
-        match self.memory_alone(request) {
-            Some((wired, _)) => Ok(load(memory, wired, address, Size::Byte)),
-            None if self.sim.chip_selects().matches(request).next().is_none()
-                && !self.bus_takes(address, function_code) =>
-            {
-                Err(BusCycleError::Unserved(Address(address)))
-            }
-            None => Err(BusCycleError::Unpeekable),
+        if let Some((wired, _)) = self.memory_alone(request) {
+            return Ok(load(memory, wired, address, Size::Byte));
+        }
+        match self.takers(request, now).first() {
+            Some(&(Wire::Memory(wired), _)) => Ok(load(memory, wired, address, Size::Byte)),
+            Some(&(Wire::Peripheral(peripheral), cycle)) => self.peripherals[peripheral]
+                .peek(cycle)
+                .map(|value| value & 0xff)
+                .ok_or(BusCycleError::Unpeekable),
+            None => Err(self.unreached(request)),
+        }
+    }
+
+    /// Why nothing takes a byte cycle `request` describes: no select
+    /// matches it and no peripheral on no select takes it, or a select
+    /// that does reaches nothing.
+    fn unreached(&self, request: DecodeRequest) -> BusCycleError {
+        if self.sim.chip_selects().matches(request).next().is_none()
+            && !self.bus_takes(request.address, request.function_code)
+        {
+            BusCycleError::Unserved(Address(request.address))
+        } else {
+            BusCycleError::Unpeekable
         }
     }
 }

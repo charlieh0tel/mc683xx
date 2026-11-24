@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use super::Machine;
 use super::MapError;
+use super::PeekError;
 use crate::bus::BusError;
 use crate::cpu::Stop;
 use crate::cpu::bare::End;
@@ -164,18 +165,18 @@ fn maps_do_not_overlap_and_unmapped_bytes_are_refused() {
     let mut buffer = [0; 4];
     assert_eq!(
         machine.read(Address(RAM - 2), &mut buffer),
-        Err(Unserved(Address(RAM)))
+        Err(PeekError::Unserved(Unserved(Address(RAM))))
     );
     assert_eq!(
         machine.write(Address(RAM - 2), &[1; 4]),
-        Err(Unserved(Address(RAM)))
+        Err(PeekError::Unserved(Unserved(Address(RAM))))
     );
     machine.read(Address(RAM - 4), &mut buffer).unwrap();
     assert_eq!(buffer, [0; 4], "a refused write writes nothing");
     machine.unmap(Address(0), RAM).unwrap();
     assert_eq!(
         machine.read(Address(0), &mut buffer),
-        Err(Unserved(Address(0)))
+        Err(PeekError::Unserved(Unserved(Address(0))))
     );
     machine.map(Address(0), PAGE_BYTES, &[7]).unwrap();
     machine.read(Address(0), &mut buffer[..1]).unwrap();
@@ -356,7 +357,7 @@ fn unmap_leaves_the_bytes_of_a_region_the_host_mapped() {
     assert_eq!(spare_pages(&machine), [Some(0), Some(1), Some(2), Some(3)]);
     assert_eq!(
         machine.read(host_page(0), &mut byte),
-        Err(Unserved(host_page(0)))
+        Err(PeekError::Unserved(Unserved(host_page(0))))
     );
 }
 
@@ -1067,4 +1068,81 @@ fn without_the_long_bus_a_hook_sees_a_long_as_two_words() {
             (DATA + 2, Size::Word, 0x5678, true)
         ]
     );
+}
+
+/// Where [`Bytes`] are: just past [`machine`]'s RAM.
+const BYTES: u32 = RAM;
+
+/// Bytes a debugger peeks and pokes with no cycle, at [`BYTES`].
+#[derive(Debug, Default)]
+struct Bytes([u8; 4]);
+
+impl Stateless for Bytes {}
+
+impl MappedPeripheral for Bytes {
+    fn read(&mut self, _: BusCycle) -> Result<u32, BusError> {
+        Err(BusError)
+    }
+
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), BusError> {
+        Err(BusError)
+    }
+
+    fn peek(&self, cycle: BusCycle) -> Option<u32> {
+        assert_eq!(cycle.size, Size::Byte);
+        Some(u32::from(self.0[(cycle.address.0 - BYTES) as usize]))
+    }
+
+    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
+        assert!(cycle.write);
+        self.0[(cycle.address.0 - BYTES) as usize] = value as u8;
+        true
+    }
+}
+
+#[test]
+fn a_debugger_s_access_peeks_and_pokes_a_peripheral() {
+    let mut machine = machine(&[NOP]);
+    let range = Address(BYTES)..=Address(BYTES + 3);
+    machine
+        .add_peripheral(range, Box::new(Bytes::default()))
+        .unwrap();
+    machine
+        .write(Address(BYTES), &[0x12, 0x34, 0x56, 0x78])
+        .unwrap();
+    let mut bytes = [0; 4];
+    machine.read(Address(BYTES), &mut bytes).unwrap();
+    assert_eq!(bytes, [0x12, 0x34, 0x56, 0x78]);
+    // memory and the peripheral in one access, across the boundary
+    machine.write(Address(BYTES - 1), &[9, 8]).unwrap();
+    let mut across = [0; 2];
+    machine.read(Address(BYTES - 1), &mut across).unwrap();
+    assert_eq!(across, [9, 8]);
+    // past the peripheral, nothing: no byte written
+    assert_eq!(
+        machine.write(Address(BYTES + 3), &[1, 2]),
+        Err(PeekError::Unserved(Unserved(Address(BYTES + 4))))
+    );
+    machine.read(Address(BYTES + 3), &mut across[..1]).unwrap();
+    assert_eq!(across[0], 0x78);
+}
+
+#[test]
+fn a_peripheral_that_declines_is_unpeekable() {
+    let mut machine = machine(&[NOP]);
+    machine
+        .add_peripheral(Address(BYTES)..=Address(BYTES + 3), Box::new(Latch(1)))
+        .unwrap();
+    let mut bytes = [0; 2];
+    let unpeekable = PeekError::Unpeekable(Address(BYTES));
+    assert_eq!(
+        machine.read(Address(BYTES - 1), &mut bytes),
+        Err(unpeekable)
+    );
+    assert_eq!(machine.write(Address(BYTES), &[1]), Err(unpeekable));
+    assert_eq!(
+        unpeekable.to_string(),
+        format!("not peekable at {}", Address(BYTES))
+    );
+    assert_eq!(unpeekable.address(), Address(BYTES));
 }

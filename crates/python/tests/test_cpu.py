@@ -72,6 +72,26 @@ def test_a_call_runs_until_it_returns():
     assert run.cycles > 0
 
 
+def test_a_register_takes_32_bits():
+    cpu = machine()
+    for value in (-1, 1 << 32):
+        with pytest.raises(OverflowError):
+            cpu.write_register("D0", value)
+    cpu.write_register("D0", -1 & 0xFFFFFFFF)
+    assert cpu.read_register("D0") == 0xFFFFFFFF
+
+
+def test_a_write_hook_sees_stacking_flagged():
+    cpu = machine(trap(0))
+    writes = []
+    cpu.add_write_hook(lambda access: writes.append(access.stacking))
+    run = cpu.run_limited(reach=HANDLER)
+    assert run.end == mc683xx.End.Reached()
+    # the four-word frame, a word a cycle (CPU32RM 6.4.1), and no
+    # write of the program's own
+    assert writes == [True] * 4
+
+
 def test_limits_and_begin():
     cpu = machine(NOP, NOP, NOP, RTS)
     assert cpu.run_limited(instructions=2).end == mc683xx.End.Instructions()
@@ -290,22 +310,79 @@ def test_an_intercept_handles_or_declines_before_stacking():
             return True
         return False
 
-    cpu.set_intercepted(TRAP_0 + 1, True)
-    cpu.set_intercepted(TRAP_0 + 7, True)
-    cpu.set_intercept_callback(answer)
+    hook = cpu.add_intercept_hook(answer, [TRAP_0 + 1, TRAP_0 + 7])
+    assert isinstance(hook, mc683xx.HookId)
     run = cpu.run_limited(reach=HANDLER)
     assert run.end == mc683xx.End.Reached()
     assert seen == [(TRAP_0 + 1, CODE), (TRAP_0 + 7, CODE + 2)]
     # Declined, trap #7 was taken natively: its frame is stacked.
     assert cpu.read_register("SSP") == STACK - 4 - 8
-    cpu.set_intercept_callback(None)
+    assert cpu.remove_hook(hook)
+    assert not cpu.remove_hook(hook)
 
 
-def test_an_intercepted_exception_with_no_callback_is_taken_natively():
+def test_intercept_hooks_answer_in_order_until_one_handles():
+    cpu = machine(trap(1), trap(1), RTS)
+    called = []
+
+    def hook(number, handles):
+        def answer(intercepted):
+            called.append(number)
+            if handles:
+                cpu.write_register("PC", intercepted.pc + 2)
+            return handles
+
+        return answer
+
+    cpu.add_intercept_hook(hook(1, False), [TRAP_0 + 1])
+    cpu.add_intercept_hook(hook(2, False), [TRAP_0 + 2])
+    handling = cpu.add_intercept_hook(hook(3, True), [TRAP_0 + 1])
+    cpu.add_intercept_hook(hook(4, True), [TRAP_0 + 1])
+    # a handled trap is no instruction run: both answered, then RTS
+    assert cpu.run_limited(instructions=1).end == mc683xx.End.Instructions()
+    assert called == [1, 3, 1, 3]
+    assert cpu.read_register("PC") == RETURN
+    # removed, the next covering hook answers
+    cpu.remove_hook(handling)
+    called.clear()
+    cpu.write_register("A7", STACK - 4)
+    cpu.run_limited(begin=CODE, instructions=1)
+    assert called == [1, 4, 1, 4]
+    with pytest.raises(TypeError):
+        cpu.add_intercept_hook(42, [TRAP_0])
+
+
+def test_an_exception_no_hook_handles_is_taken_natively():
     cpu = machine(trap(1), RTS)
-    cpu.set_intercepted(TRAP_0 + 1, True)
+    cpu.add_intercept_hook(lambda intercepted: False, [TRAP_0 + 1])
     assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
     assert cpu.read_register("SSP") == STACK - 4 - 8
+
+
+def test_an_exception_stop_stacks_nothing_and_the_run_on_takes_it():
+    cpu = machine(trap(1), RTS)
+    cpu.set_stop_on_exception(True)
+    assert cpu.stops_on_exception
+    match cpu.run_limited(reach=HANDLER).end:
+        case mc683xx.End.Exception(vector, pc):
+            assert (vector, pc) == (TRAP_0 + 1, CODE)
+        case end:
+            raise AssertionError(end)
+    end = mc683xx.End.Exception(TRAP_0 + 1, CODE)
+    assert (str(end), repr(end)) == ("exception", f"End.Exception({TRAP_0 + 1}, {CODE:#010x})")
+    assert cpu.read_register("SSP") == STACK - 4
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
+    assert cpu.read_register("SSP") == STACK - 4 - 8
+
+
+def test_an_interrupt_stops_once_acknowledged():
+    cpu = machine(NOP, RTS)
+    cpu.set_stop_on_exception(True)
+    cpu.request_interrupt(3, 0x40)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Exception(0x40, CODE)
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
+    cpu.set_stop_on_exception(False)
+    assert not cpu.stops_on_exception
 
 
 def test_a_fault_stops_the_run_with_nothing_stacked():
@@ -320,6 +397,9 @@ def test_a_fault_stops_the_run_with_nothing_stacked():
     assert (fault.kind, fault.cause) == (mc683xx.BusCycleKind.READ, mc683xx.FaultCause.BUS_ERROR)
     assert (fault.address, fault.size, fault.pc) == (0x90000000, 4, CODE + 2)
     assert fault.registers["D1"] == 3
+    # str() is Rust's Display, the address and PC in full
+    assert str(fault) == "bus error: read of 4 bytes at 0x90000000 in supervisor-data, pc 0x31400002"
+    assert str(mc683xx.End.Fault(fault)) == "fault"
     assert cpu.read_register("PC") == CODE + 2
     assert cpu.read_register("SSP") == STACK - 4
 
@@ -365,10 +445,53 @@ def test_a_peripheral_takes_a_long_whole_before_it_lands():
 def test_a_peripheral_removed_answers_no_more():
     cpu = machine(MOVE_LONG_A0_TO_D0, RTS)
     number = cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, Register())
+    assert isinstance(number, mc683xx.PeripheralId)
+    shown = str(number).removeprefix("peripheral ")
+    assert int(shown) >= 0 and repr(number) == f"PeripheralId({shown})"
+    with pytest.raises(TypeError):
+        cpu.remove_peripheral(0)
     assert cpu.remove_peripheral(number)
     assert not cpu.remove_peripheral(number)
     # the space is free again
     assert cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, Register()) != number
+
+
+class Window:
+    """Bytes a debugger peeks and pokes with no cycle; `peek` declines
+    once `closed`."""
+
+    def __init__(self):
+        self.held = bytearray(4)
+        self.closed = False
+
+    def read(self, cycle):
+        raise mc683xx.BusError()
+
+    def write(self, cycle, value):
+        raise mc683xx.BusError()
+
+    def peek(self, cycle):
+        return None if self.closed else self.held[cycle.address - PERIPHERAL]
+
+    def poke(self, cycle, value):
+        self.held[cycle.address - PERIPHERAL] = value
+        return not self.closed
+
+
+def test_read_and_write_peek_and_poke_a_peripheral():
+    cpu = machine(RTS)
+    window = Window()
+    cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, window)
+    cpu.write(PERIPHERAL, b"\x01\x02\x03\x04")
+    assert window.held == b"\x01\x02\x03\x04"
+    assert cpu.read(PERIPHERAL + 1, 2) == b"\x02\x03"
+    window.closed = True
+    with pytest.raises(mc683xx.UnpeekableError, match="not peekable at"):
+        cpu.read(PERIPHERAL, 1)
+    with pytest.raises(mc683xx.UnpeekableError):
+        cpu.write(PERIPHERAL, b"\x00")
+    with pytest.raises(mc683xx.BusError):
+        cpu.read(PERIPHERAL + 4, 1)
 
 
 class Refusing:

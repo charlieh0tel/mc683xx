@@ -160,7 +160,17 @@ prefix; their directories keep the short names.
   through `Module::peek` (required, as `save` is), the SIM's reads
   have none, and memory answers byte by byte where memory alone
   answers the cycle (`Board::memory_alone`, the page-table rule).  A
-  peripheral's bytes are `BusCycleError::Unpeekable`, never a guess.
+  peripheral answers for its own bytes, a byte at a time, through the
+  optional `MappedPeripheral::peek`, the first that the decode would
+  have drive the byte answering; `poke` (`Mc68331::poke`) stores a byte in
+  each the decode would write to.  Both decline by default, which is
+  `BusCycleError::Unpeekable`, never a guess: only the peripheral knows
+  which of its registers a look leaves alone (decided 2026-11-23).  The
+  bare machine's `read` and `write`, gdb's memory access and a board
+  peripheral's (`Peripheral::peek`, `poke`, through `MappedAdapter` and
+  the board's routers) take the same path.  A poke is not
+  all-or-nothing where a peripheral is involved: a peripheral cannot be
+  asked whether it would take a byte without taking it.
   Errors are typed: `Unserved`, `BusError`, `Misaligned` (each with
   its address), `Width`.
 - **Interrupts:** the host sets an IPL level; the core calls the
@@ -1007,14 +1017,16 @@ chip beside `Mc68331`.
   `stop_request()` (a `StopRequest`, Rust's `bus::StopRequest`: a
   callable's request ends the run `Stop.Requested()` once the callables have
   run, one left from before a run is withdrawn as it starts),
-  `set_intercepted(vector, on)` and `set_intercept_callback(callable)`
-  (no callback: taken natively), `set_stop_on_fault` and
-  `stops_on_fault`, `request_interrupt(pin, vector)`,
+  `add_intercept_hook(callable, vectors)` (a `HookId`; the hooks
+  covering a vector answer in the order installed, until one handles
+  it, and none handling, it is taken natively), `set_stop_on_fault` and
+  `stops_on_fault`, `set_stop_on_exception` and `stops_on_exception`, `request_interrupt(pin, vector)`,
   `clear_interrupt`, `take_exception(vector, level=None)`, `reset`,
   `save`, `restore`.  `run_limited` gives a `LimitedRun(cycles, end)`,
   its `End` Rust's (`End.Stop(stop)`, `End.Reached()`,
-  `End.Instructions()`, `End.Fault(fault)`, their values the fields
-  `stop` and `fault`) less `End::Intercepted`, which the run answers
+  `End.Instructions()`, `End.Fault(fault)`, `End.Exception(vector,
+  pc)`, their values the fields `stop`, `fault`, `vector` and `pc`)
+  less `End::Intercepted`, which the run answers
   within it.  Its hooks may write the
   CPU (decided 2026-10-23; the chip keeps the copy model):
   a Rust hook only queues what it saw and stops the core's run, and
@@ -1961,7 +1973,8 @@ checks the bare build.
 - **Memory:** supervisor data space unless `monitor fc` names
   another, no bus cycle: memory the core
   serves (ROM too, so `load` works), module registers read through
-  `Module::peek`; peripherals neither read nor written (`E0e`).  A
+  `Module::peek`; a peripheral read and written through its `peek` and
+  `poke`, `E0e` where it declines, as it does by default.  A
   debugger's look never has a side effect; a host wanting real cycles
   makes them with `bus_read` and `bus_write`.
 - **Breakpoints and watchpoints:** code hooks for `Z0` and `Z1`,
@@ -2557,18 +2570,47 @@ and `mc683xx.Machine` in Python (see Python).
   - A trace RTE requeues from a format $C frame's TR (6.3.2.2) is
     kept as any trace is: a fault stacking it keeps the RTE, its
     rerun cycle not made again, and leaves the trace pending.
-- **Intercepts (host-handled exceptions):** `set_intercepted(vector)`:
-  an exception an instruction raises (traps, illegal, line A and F,
+- **Intercepts (host-handled exceptions):**
+  `add_intercept_hook(vectors, hook)`: an exception an instruction
+  raises with one of `vectors` (traps, illegal, line A and F,
   privilege, zero divide, CHK, TRAPV, format error; not faults, trace
-  or interrupts) ends the run before anything is stacked
-  (`End::Intercepted`), its (An)+ and -(An) undone, PC at the
-  instruction; flags it set (CHK's N) stay.  `take_natively_once` lets
+  or interrupts) calls the hook before anything is stacked; one that
+  stops the run ends it (`End::Intercepted`), its (An)+ and -(An)
+  undone, PC at the instruction; flags it set (CHK's N) stay.  Where
+  several cover a vector they are called in the order installed until
+  one stops the run, the rest not called, so one host answers each
+  exception; none stopping it, the CPU takes it natively.  A hook,
+  not a flag per vector or a single callback (decided 2026-11-23), so
+  the host's parts each install their own and `remove_hook` takes
+  them off as any hook.  `take_natively_once` lets
   the instruction at PC take it natively when it runs again, which the
   host uses for an exception it declines: the instruction reruns,
   exactly, as its effects were undone.  A general host feature (a
   stubbed kernel call, an emulated instruction, a stop at any
   exception), under semver like the rest of the API (decided for
-  0.9.0); Python answers it with an intercept callback within the run.
+  0.9.0); Python answers it with its intercept hooks' callables within
+  the run.
+- **Exception stops:** `set_stop_on_exception(true)`: any exception
+  the CPU is about to take ends the run before anything is stacked
+  (`End::Exception { vector, pc }`): one an instruction raises, a fault
+  among them, a trace, a hardware breakpoint, and an interrupt once
+  acknowledged, as only the acknowledge gives its vector (the stop
+  withdraws it, `Interrupts::withdrawn`, and the next run acknowledges
+  it again, as a fault stop does).  Not a fault in exception
+  processing (a type IV fault or double bus fault is the processing's
+  own), nor `take_exception`'s, which the host asked for.  It reuses
+  the fault stop's machinery: an instruction's exception is undone
+  (its registers as it began for a fault, its (An)+ and -(An) for
+  another), a trace or breakpoint is left pending, and nothing is
+  charged.  The next host run takes that exception natively once, by
+  the PC and instruction count it stopped at, as `take_natively_once`
+  does, so running on is the default answer; `take_exception` is the
+  host's own.  Precedence, decided 2026-11-23: a fault with
+  `set_stop_on_fault` is a fault stop, its detail the richer; then the
+  intercept hooks, for the vectors they cover, an exception they all
+  decline taken natively with no exception stop, as the host has seen
+  it; then the exception stop.  A general debugging stop (a Unicorn
+  port's `UC_HOOK_INTR` with `emu_stop`), opt-in as faults are.
 - **Hook context:** memory and invalid access hooks see the
   instruction's address (`pc`) and whether the cycle stacks a frame
   (`stacking`); `Cpu::instruction_registers` holds the registers as

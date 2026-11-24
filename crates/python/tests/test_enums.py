@@ -72,3 +72,13 @@ def test_value_classes_compare_and_hash_by_value() -> None:
     reached = mc683xx.End.Reached()
     assert hash(reached) == hash(mc683xx.End.Reached())
     assert len({reached, mc683xx.End.Instructions()}) == 2
+
+
+def test_an_end_matches_by_its_fields() -> None:
+    assert mc683xx.End.Stop.__match_args__ == ("stop",)
+    assert mc683xx.End.Fault.__match_args__ == ("fault",)
+    match mc683xx.End.Stop(mc683xx.Stop.Halted(mc683xx.Halt.DOUBLE_BUS_FAULT)):
+        case mc683xx.End.Stop(mc683xx.Stop.Halted(halt)):
+            assert halt == mc683xx.Halt.DOUBLE_BUS_FAULT
+        case end:
+            raise AssertionError(end)

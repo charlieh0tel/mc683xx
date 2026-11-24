@@ -57,11 +57,7 @@ fn images_reach_a_peripheral_s_image() {
     );
     images.insert("eeprom.bin".to_owned(), vec![0x5a; 4]);
     let board = Board::with_images(&with_eeprom(), &images, &[]).unwrap();
-    let eeprom = board
-        .board()
-        .peripheral::<At28c64b>("eeprom")
-        .unwrap()
-        .unwrap();
+    let eeprom = board.board().peripheral::<At28c64b>("eeprom").unwrap();
     assert_eq!(eeprom.cells()[3], 0x5a);
 }
 

@@ -17,6 +17,7 @@ use mc683xx_board::signal::ParseKindError;
 use mc683xx_cpu32::cpu::bare::TakeExceptionError;
 use mc683xx_cpu32::cpu::state::StateError;
 use mc683xx_cpu32::flat::MapError;
+use mc683xx_cpu32::flat::PeekError;
 use mc683xx_cpu32::interrupt::NoInterruptLevel;
 use mc683xx_cpu32::interrupt::NoIrqPin;
 use mc683xx_cpu32::memory::MemoryError;
@@ -124,6 +125,9 @@ pub(crate) enum Error {
     /// Host access to bytes that are not memory the core serves.
     #[error(transparent)]
     Unserved(#[from] Unserved),
+    /// A debugger's access of the bare machine stopped short.
+    #[error(transparent)]
+    Peek(#[from] PeekError),
     /// The chip could not save, or refused a snapshot.
     #[error(transparent)]
     State(#[from] StateError),

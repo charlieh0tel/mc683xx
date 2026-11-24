@@ -31,6 +31,7 @@ use crate::inspect::Inspection;
 use crate::signal::Signal;
 use crate::time::Moment;
 use crate::time::Time;
+use crate::time::TimeBase;
 
 /// Which cycles of its select or decoder output an attachment carries to
 /// the peripheral: the board's wiring of the peripheral's /OE and /WE.
@@ -498,6 +499,13 @@ impl<'a> Drive<'a> {
         self.moment.now()
     }
 
+    /// The chip's system clock on board time at the call: its moment's
+    /// `system_clock`.
+    #[must_use]
+    pub const fn system_clock(&self) -> TimeBase {
+        self.moment.system_clock()
+    }
+
     /// Drives `signal` on `port` now.
     pub fn drive(&mut self, port: usize, signal: Signal) {
         self.drive_at(self.now(), port, signal);
@@ -594,9 +602,9 @@ impl<'a> Drive<'a> {
 /// then: one given a [`Drive`] takes it from [`Drive::moment`] (`read`,
 /// `write`, `memory_read`, `memory_write`, `power_on`, `reset`,
 /// `transfer`, `set_selected`, `input`, `advance`); one without a drive
-/// takes it as its last argument, `moment` (`wait_states`,
-/// `dsack_port`, `set_qspi_clock`, `analog_output`, `next_event`).  No
-/// call has two times.
+/// takes it as its last argument, `moment` (`peek`, `poke`,
+/// `wait_states`, `dsack_port`, `set_qspi_clock`, `analog_output`,
+/// `next_event`).  No call has two times.
 #[expect(
     unused_variables,
     reason = "the defaults ignore their arguments, and the names document them"
@@ -657,6 +665,28 @@ pub trait Peripheral: Any {
         drive: &mut Drive<'_>,
     ) -> Result<(), BusError> {
         Ok(())
+    }
+
+    /// What a read through an attachment would return at `moment`,
+    /// right-aligned, with none of its side effects: a debugger's look
+    /// (the chip's `peek`, gdb's memory reads), a byte at a time, as
+    /// [`MappedPeripheral::peek`].  By default [`None`]: only a real
+    /// cycle can tell.
+    ///
+    /// [`MappedPeripheral::peek`]: mc683xx_cpu32::peripheral::MappedPeripheral::peek
+    fn peek(&self, access: PeripheralAccess, moment: Moment) -> Option<u32> {
+        None
+    }
+
+    /// Stores `value`, right-aligned, where a write through an
+    /// attachment would at `moment`, with none of its side effects: a
+    /// debugger's poke (the chip's `poke`, gdb's memory writes), a byte
+    /// at a time, as [`MappedPeripheral::poke`].  Whether it took it; by
+    /// default it declines.
+    ///
+    /// [`MappedPeripheral::poke`]: mc683xx_cpu32::peripheral::MappedPeripheral::poke
+    fn poke(&mut self, access: PeripheralAccess, value: u32, moment: Moment) -> bool {
+        false
     }
 
     /// On a select whose DSACK field is external (%1111, SIMRM
@@ -768,11 +798,14 @@ pub trait Peripheral: Any {
     }
 
     /// When it next changes on its own, if it will, asked at `moment`:
-    /// the board calls `advance` then.  A time already past is advanced
-    /// to at once.  The moment's system clock is the chip's, for a
-    /// peripheral whose events fall on the chip's clocks: asked again
-    /// whenever the board needs it, so a part keeps no base between
-    /// calls.  By default never.
+    /// the board calls `advance` then.  `moment.now()` is board time as
+    /// the board asks, at or after the peripheral's last call (its last
+    /// `advance`, `input` or bus cycle), not that call's time, and the
+    /// answer is a time in board time, not a span from it: an event
+    /// already past is advanced to at once.  The moment's system clock
+    /// is the chip's, for a peripheral whose events fall on the chip's
+    /// clocks: asked again whenever the board needs it, so a part keeps
+    /// no base between calls.  By default never.
     fn next_event(&self, moment: Moment) -> Option<Time> {
         None
     }

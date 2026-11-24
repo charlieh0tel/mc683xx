@@ -531,20 +531,29 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   default, so a peripheral implements only the sides it is on; one with
   only net ports (an OCXO, a GPS engine, an oven) is as first-class
   as one on the bus.  The trait is `Any`: a host reaches its own peripheral's state
-  (a UI's widget) by its type with `Board::peripheral::<T>(name)` (a `Ref`,
-  `None` if it is not a `T`, `NoPeripheral` for a name the board lacks) or
+  (a UI's widget) by its type with `Board::peripheral::<T>(name)` (a `Ref`; a
+  `LookupError`, `NoPeripheral` for a name the board lacks or `NotA` for
+  a peripheral of another type) or
   `peripheral_mut`, and a `Box<dyn Peripheral>` upcasts to `Box<dyn Any>`.
   `inspect()` gives what a front end shows of it, an
   `inspect::Inspection` of named fields (empty by default;
   `Board::inspect(name)`).  A call's time is a `time::Moment`, board
   time and the chip's system clock then: a call that takes a
   `peripheral::Drive` takes it from the drive (`drive.moment()`, or
-  `drive.now()` for the time alone), and one without a drive takes it
-  as its last argument, `moment` (`wait_states`, `dsack_port`,
+  `drive.now()` for the time alone, `drive.system_clock()` for the
+  clock), and one without a drive takes it as its last argument,
+  `moment` (`peek`, `poke`, `wait_states`, `dsack_port`,
   `set_qspi_clock`, `analog_output`, `next_event`).  No call has two
   times.  A chip-level model (`adapter`) takes `now: Cycle` last
   instead, as every chip-level callback with no cycle struct does
   (docs/host-guide.md, Board time).
+  - A debugger's look and poke: `peek(access, moment)` gives what a
+    read would, a byte at a time, with none of its side effects, and
+    `poke(access, value, moment)` stores a byte as a write would,
+    whether it took it; both decline by default (`None`, `false`),
+    which the chip's `peek` and `poke` and gdb's memory access report as
+    unpeekable.  `MappedAdapter` passes them to its model's
+    `MappedPeripheral::peek` and `poke`.
   - Stop conditions, for a debugger and the emulator's alone
     ([docs/gdb.md](gdb.md), Stop conditions): `conditions()` lists
     what it offers (`condition::ConditionInfo::new(name, arguments,

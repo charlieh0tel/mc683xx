@@ -7,6 +7,7 @@
 //! [plan-boards]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#boards
 
 use std::any::Any;
+use std::any::type_name;
 use std::array;
 use std::cell::Cell;
 use std::cell::Ref;
@@ -1793,36 +1794,34 @@ impl<C: Chip> Board<C> {
         &mut self.chip
     }
 
-    /// The peripheral `name`, `None` if it is not a `P`: a host's own
-    /// peripheral's state, by its type.
+    /// The peripheral `name`, a `P`: a host's own peripheral's state, by
+    /// its type.
     ///
     /// # Errors
     ///
-    /// [`NoPeripheral`] if the board has no peripheral `name`.
-    pub fn peripheral<P: Any>(&self, name: &str) -> Result<Option<Ref<'_, P>>, NoPeripheral> {
+    /// [`LookupError::NoPeripheral`] if the board has no peripheral
+    /// `name`, [`LookupError::NotA`] if it is not a `P`.
+    pub fn peripheral<P: Any>(&self, name: &str) -> Result<Ref<'_, P>, LookupError> {
         let cell = &self.shared.peripherals[self.named_peripheral(name)?];
-        Ok(Ref::filter_map(cell.borrow(), |peripheral| {
+        Ref::filter_map(cell.borrow(), |peripheral| {
             let peripheral: &dyn Any = peripheral.as_ref();
             peripheral.downcast_ref::<P>()
         })
-        .ok())
+        .map_err(|_| LookupError::not_a::<P>(name))
     }
 
-    /// The peripheral `name`, to change, `None` if it is not a `P`.
+    /// The peripheral `name`, a `P`, to change.
     ///
     /// # Errors
     ///
-    /// [`NoPeripheral`] if the board has no peripheral `name`.
-    pub fn peripheral_mut<P: Any>(
-        &mut self,
-        name: &str,
-    ) -> Result<Option<RefMut<'_, P>>, NoPeripheral> {
+    /// As [`peripheral`](Self::peripheral).
+    pub fn peripheral_mut<P: Any>(&mut self, name: &str) -> Result<RefMut<'_, P>, LookupError> {
         let cell = &self.shared.peripherals[self.named_peripheral(name)?];
-        Ok(RefMut::filter_map(cell.borrow_mut(), |peripheral| {
+        RefMut::filter_map(cell.borrow_mut(), |peripheral| {
             let peripheral: &mut dyn Any = peripheral.as_mut();
             peripheral.downcast_mut::<P>()
         })
-        .ok())
+        .map_err(|_| LookupError::not_a::<P>(name))
     }
 
     /// The index of the peripheral `name`.
@@ -2513,10 +2512,38 @@ fn resolve_nets<P: ChipPin>(
 }
 
 /// A peripheral name the board does not have ([`Board::inspect`],
-/// [`Board::marking`]).
+/// [`Board::marking`], [`LookupError::NoPeripheral`]).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("no peripheral {0:?}")]
 pub struct NoPeripheral(pub String);
+
+/// Why [`Board::peripheral`] or [`Board::peripheral_mut`] found no
+/// peripheral of the type asked for.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum LookupError {
+    /// The board has no peripheral of the name.
+    #[error(transparent)]
+    NoPeripheral(#[from] NoPeripheral),
+    /// The peripheral of the name is of another type.
+    #[error("peripheral {name:?} is not a {expected}")]
+    NotA {
+        /// The peripheral's name.
+        name: String,
+        /// The type asked for, as [`type_name`] gives it.
+        expected: &'static str,
+    },
+}
+
+impl LookupError {
+    /// The peripheral `name` is not a `P`.
+    fn not_a<P>(name: &str) -> Self {
+        Self::NotA {
+            name: name.to_owned(),
+            expected: type_name::<P>(),
+        }
+    }
+}
 
 /// A memory name the board does not have ([`Board::memory`]).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
