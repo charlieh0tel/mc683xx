@@ -1085,14 +1085,16 @@ hand.  The keys are in `docs/board-files.md`.
   none, is refused with a typed error.  Unknown keys are errors
   (serde's `deny_unknown_fields`), with the line, but every table takes
   a `note` the loader ignores, for provenance and confidence.
-  Version 1 is frozen from 0.1.0, the first release: from then a change
-  that makes a version 1 file mean something else, or refuses one, is
-  version 2.  A minor release may add a key to version 1; a file
-  using it needs at least that release, and every 1.x release reads
-  every version 1 file.  Before it the schema changed and stayed version 1, since
-  no release read the earlier form: `[[device]]` became
-  `[[peripheral]]` and `[chip] type` became required (2026-10-24), and
-  smartclock's six board files are the consumer's to convert.  `[board]` names the board (`name`,
+  Version 1 is frozen from 1.0.0: from then a change that makes a
+  version 1 file mean something else, or refuses one, is version 2.
+  A minor release may add a key to version 1; a file using it needs
+  at least that release, and every 1.x release reads every version 1
+  file.  Before 1.0.0 a minor release may change version 1 in place,
+  its release notes carrying the migration (decided 2026-11, 0.9.0,
+  when `role = "upper"` and `"lower"` went; Decisions): `[[device]]`
+  became `[[peripheral]]` and `[chip] type` became required before
+  0.1.0 (2026-10-24), and 0.9.0 refuses a lane as a `role`.
+  `[board]` names the board (`name`,
   `title`: what a host chooses it by), the firmware `images` it takes,
   the default first, and the `options` a run may enable.  Any memory,
   decoder, peripheral, unconnected select or net may carry `option =
@@ -3545,6 +3547,7 @@ host's QSPI peripheral, which a restore keeps).
 | Host bus cycles take no chip time and drop a peripheral's stop request | They are a debugger's, between runs: no instruction to charge, no run to stop. |
 | A bus stop request (`Bus::stop_requested`) beside hooks | A peripheral has no hook of its own; one question per bus cycle costs nothing on RAM. |
 | Board files in TOML, peripheral types from a registry | The file says what is wired where and how the chip is configured, never what a peripheral does; behavior stays the host's code.  A registry of names leaves room for plugins without a format change.  No dynamic loading yet (decided 2026-10-23). |
+| Board files' version 1 frozen from 1.0.0, not before | Decided 2026-11 (0.9.0).  The freeze was dated from 0.1.0, which kept a lane as a `role` (`role = "upper"`, `"lower"`) for ever beside `lane`; with breaking changes allowed before 1.0 and no compatibility cruft kept, version 1 may change in place in a minor release before 1.0.0, its release notes carrying the migration, and from 1.0.0 a change that makes a version 1 file mean something else, or refuses one, is version 2.  No version 2 is planned. |
 | A bare CPU (`mc683xx_cpu32::flat`, `mc683xx.Machine`) beside the chip, 32 address lines by default | Function-level firmware tests map code and stubs at addresses no 68331 decodes (smartclock's harness uses $31400000); a chip-select decode would only get in the way. |
 | Bare-host stops (faults, intercepts) opt-in, off by default | The default stays the CPU32's behavior; a host porting from Unicorn asks for what it relied on, by name. |
 | Published to crates.io and PyPI, one semver version for the workspace from 0.1.0, notes in GitHub releases | Decided 2026-10-24, with the repository public.  One version keeps the crates and the wheel in step; a release is tagged only on a commit that has passed every check (`docs/releasing.md`). |

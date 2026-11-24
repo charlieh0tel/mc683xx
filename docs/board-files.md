@@ -6,17 +6,19 @@ written against.  Why it is shaped this way is in `PLAN.md`, Boards.
 The rule: the file says what is wired where and how the chip is
 configured, never what a peripheral does.
 
-Version 1 is frozen from the first release, 0.1.0: a change that
-would make a version 1 file mean something else, or refuse one this
-reference accepts, is version 2.  A minor release may add keys to
-version 1, each marked here as added within it; a file without one
-means what it did, and a file that uses one needs at least the release
-that added it, as an earlier one refuses the key as unknown.  Every
-1.x release reads every version 1 file.  The built-in types below and
-the stock types (`docs/peripherals.md`) are under the same freeze:
-their names, parameters and ports (docs/releasing.md, Semver scope).
+Version 1 is frozen from 1.0.0: from then a change that would make a
+version 1 file mean something else, or refuse one this reference
+accepts, is version 2.  Before 1.0.0 a minor release may still make
+such a change and keep version 1, and its release notes say how to
+convert a file (docs/releasing.md, Semver scope).  A minor release may
+add keys to version 1, each marked here as added within it; a file
+without one means what it did, and a file that uses one needs at least
+the release that added it, as an earlier one refuses the key as
+unknown.  Every 1.x release reads every version 1 file.  The built-in
+types below and the stock types (`docs/peripherals.md`) are under the
+same freeze: their names, parameters and ports.
 
-Version 1 keeps one oddity for ever, which a version 2, if there is
+Version 1 keeps one oddity once frozen, which a version 2, if there is
 one, would drop: two keys for which ADDR lines a part sees (a
 decoder's `address_bits`, which takes tied levels too, and an
 attachment's `lines`), which version 2 would make one.  No version 2
