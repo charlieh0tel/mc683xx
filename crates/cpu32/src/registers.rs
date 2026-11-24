@@ -1,9 +1,9 @@
 //! The CPU32 programming model (CPU32RM 2.1, 2.3.1).
 
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::SystemRegister;
 
 use crate::interrupt::InterruptLevel;
 
@@ -269,10 +269,10 @@ impl Registers {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_target::address::Address;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::register::Register;
-    use mc683xx_target::register::SystemRegister;
+    use mc683xx_target::Address;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Register;
+    use mc683xx_target::SystemRegister;
 
     use super::BackgroundOnly;
     use super::Registers;

@@ -13,9 +13,9 @@ use criterion::Criterion;
 use criterion::criterion_group;
 use mc683xx_bench::bare;
 use mc683xx_bench::kernel;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::memory::Memory;
 
 /// The environment variable that makes this process a child, naming

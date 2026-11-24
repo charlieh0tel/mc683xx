@@ -8,19 +8,19 @@
 use std::fmt::Display;
 
 use mc683xx_board::condition::Conditions;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycles;
+use mc683xx_gdb::AccessError;
 use mc683xx_gdb::SessionError;
+use mc683xx_gdb::Target;
+use mc683xx_gdb::TargetReset;
+use mc683xx_gdb::TargetRun;
 use mc683xx_gdb::connection;
 use mc683xx_gdb::connection::PollError;
 use mc683xx_gdb::connection::Polled;
 use mc683xx_gdb::connection::Waiter;
-use mc683xx_gdb::target::AccessError;
-use mc683xx_gdb::target::Target;
-use mc683xx_gdb::target::TargetReset;
-use mc683xx_gdb::target::TargetRun;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 use pyo3::Bound;
 use pyo3::PyAny;
 use pyo3::PyErr;

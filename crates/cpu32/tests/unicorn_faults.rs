@@ -37,18 +37,18 @@ use std::ops::ControlFlow;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
 
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::Run;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::Read;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Run;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::hooks::Instruction;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
+use mc683xx_cpu32::hooks::Instruction;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::Acknowledged;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -60,8 +60,8 @@ use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_cpu32::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::register::Register;
+use mc683xx_target::Address;
+use mc683xx_target::Register;
 
 /// The address lines of the 68331, ADDR[23:0] (MC68331UM 4.4.1.1).
 const ADDRESS_BITS: u32 = 24;

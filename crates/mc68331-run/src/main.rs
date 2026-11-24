@@ -1,6 +1,6 @@
 //! `mc683xx-run`: runs a board file ([PLAN.md, Boards](https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#boards);
 //! [`docs/board-files.md`](https://github.com/charlieh0tel/mc683xx/blob/main/docs/board-files.md)).
-//! A thin command on `mc683xx_board::board::Board`'s run loop: it loads
+//! A thin command on `mc683xx_board::Board`'s run loop: it loads
 //! the file with the built-in peripheral types and the stock
 //! peripherals (`mc683xx_peripherals`), binds its run-time
 //! endpoints, runs it for a time, traces it ([`docs/tracing.md`](https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md)), and
@@ -41,15 +41,15 @@ use std::sync::atomic::Ordering;
 
 use clap::Parser;
 use clap::ValueEnum;
-use mc683xx_board::board::Board;
-use mc683xx_board::board::BoardRun;
-use mc683xx_board::board::BoardTracing;
-use mc683xx_board::chip::Chip;
-use mc683xx_board::control::BoardControl;
-use mc683xx_board::description::Options;
+use mc683xx_board::Board;
+use mc683xx_board::BoardControl;
+use mc683xx_board::BoardRun;
+use mc683xx_board::BoardTracing;
+use mc683xx_board::Chip;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::pacing::Pacer;
 use mc683xx_board::pacing::Pacing;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
@@ -57,13 +57,13 @@ use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_board::trace::Line;
 use mc683xx_board::trace::header;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Stop;
 use mc683xx_gdb::Ending;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
-use mc683xx_target::address::Address;
-use mc683xx_target::integer::parse_integer;
+use mc683xx_target::Address;
+use mc683xx_target::parse_integer;
 
 use crate::binding::Binding;
 use crate::binding::Escape;

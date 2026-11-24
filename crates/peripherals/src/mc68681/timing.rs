@@ -4,8 +4,8 @@
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::frequency::Frequency;
-use mc683xx_cpu32::frequency::NANOHERTZ_PER_HERTZ;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::NANOHERTZ_PER_HERTZ;
 
 use crate::character::Format;
 use crate::character::Parity;

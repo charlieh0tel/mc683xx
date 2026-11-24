@@ -16,7 +16,7 @@ use crate::instructions::Flow;
 use crate::instructions::Table;
 use crate::instructions::data_movement::register_field;
 use crate::registers::status;
-use mc683xx_target::size::Size;
+use mc683xx_target::Size;
 
 /// CHK: 0100 rrr1 s0 <ea>, size 11 word, 10 long (CPU32RM 4.4, CHK).
 const CHK_MASK: u16 = 0xf1c0;
@@ -163,7 +163,7 @@ mod tests {
     use crate::instructions::tests::poke_long;
     use crate::instructions::tests::step;
     use crate::registers::status;
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     /// Where the tests' supervisor stack starts, inside RAM.
     const STACK: u32 = 0x8000;

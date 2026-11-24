@@ -43,12 +43,12 @@ use gdbstub::target::ext::monitor_cmd::MonitorCmdOps;
 use gdbstub::target::ext::monitor_cmd::outputln;
 use gdbstub::target::ext::target_description_xml_override::TargetDescriptionXmlOverride;
 use gdbstub::target::ext::target_description_xml_override::TargetDescriptionXmlOverrideOps;
-use mc683xx_cpu32::cpu::hooks::HookId;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::SystemRegister;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::hooks::HookId;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::SystemRegister;
 
 use crate::Ending;
 use crate::SessionError;

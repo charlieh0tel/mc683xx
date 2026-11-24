@@ -3,8 +3,8 @@
 The `mc683xx-gdb` crate (`crates/gdb`) is a GDB remote stub: gdb's
 remote serial protocol, through the `gdbstub` crate, over the bare
 CPU (`mc683xx_cpu32::flat::Machine`), the chip
-(`mc683xx_mc68331::chip::Mc68331`), a board
-(`mc683xx_board::board::Board`), or any `Cpu32Target`, a BDM pod on
+(`mc683xx_mc68331::Mc68331`), a board
+(`mc683xx_board::Board`), or any `Cpu32Target`, a BDM pod on
 silicon among them (Over BDM, below).  gdb connects over TCP,
 reads and writes registers and memory, sets breakpoints and
 watchpoints, steps, continues and interrupts.  `PLAN.md` (Debugger)
@@ -97,11 +97,11 @@ watchpoints go with it.
 ## From Rust
 
 ```rust,no_run
-use mc683xx_target::address::Address;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_gdb::Ending;
 use mc683xx_gdb::connection;
+use mc683xx_target::Address;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The reset vectors, then the program: `bra.s` to itself.
@@ -149,30 +149,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   could not take (`Protocol`); breakpoints planted could not be put
   back (`Unrestored`); or the session failed and cleaning up after it
   failed too (`Uncleaned`, both kept).  `Ending`, `SessionError`,
-  `target::TargetRun`, `target::TargetReset`, `target::AccessError` and
+  `TargetRun`, `TargetReset`, `AccessError` and
   `connection::PollError` are `#[non_exhaustive]`: a match on one needs a wildcard arm.
 - Features: `mc68331` (the chip as a target) and `board` (a board,
   and the chip with it), both on by default.  A bare-CPU host takes
   `default-features = false` and builds without the chip and board
   crates.
-- `target::Target` is the one trait `serve` takes.  The bare CPU,
+- `Target` is the one trait `serve` takes.  The bare CPU,
   the chip and a board implement it, and a host with a run loop of its
   own implements it, delegating to one of them (`mc683xx-run` and the
   Python bindings do): `cpu_scope` (`Some` of a call with the
   `CpuControl`: registers and hooks), `read_memory` and `write_memory`
   (memory at an `Address` in a function code's space, with no bus
-  cycle; a `target::AccessError` for a byte not served),
-  `run_for(budget, hit)` (a quantum, its end a `target::TargetRun`) and
+  cycle; a `AccessError` for a byte not served),
+  `run_for(budget, hit)` (a quantum, its end a `TargetRun`) and
   `reset`.  The register methods default to `cpu_scope`'s; `resume`
   and `halt` default to an emulated target's, which runs only as the
   stub runs it.  `native_step` gives a target's own step
-  (`target::NativeStep`); without one the stub steps by a hook, and a
+  (`NativeStep`); without one the stub steps by a hook, and a
   target with neither that nor `cpu_scope` cannot step: gdb is offered
   none (`vCont?` lists no `s`), and gdbstub refuses a bare `s`, which
   ends the session as a `Protocol` error.  With the `board` feature, `conditions` gives
   the target's stop conditions (`mc683xx_board::condition::Conditions`,
   a board's; none by default), for `monitor stop`.
-- `bdm::Bdm::new(&mut target)` is any `mc683xx_target::Cpu32Target` as a
+- `Bdm::new(&mut target)` is any `mc683xx_target::Cpu32Target` as a
   `Target`: no `cpu_scope`, its own registers, memory, run control and
   step.  What a target gives decides what gdb gets:
 

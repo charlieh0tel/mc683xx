@@ -18,18 +18,18 @@ use std::path::PathBuf;
 
 use cpu32_harness::layout;
 use cpu32_harness::layout::FIRMWARE;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::event::Event;
+use mc683xx_mc68331::Event;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
 
 use common::board;
 

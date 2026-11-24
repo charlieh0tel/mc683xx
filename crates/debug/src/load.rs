@@ -4,11 +4,11 @@
 use std::fmt;
 use std::ops::Range;
 
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::SystemRegister;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
 
 use crate::image::Image;
 

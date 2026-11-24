@@ -6,8 +6,8 @@ use crate::exception::Exception;
 use crate::registers::Registers;
 use crate::timing;
 use crate::timing::AddressTable;
-use mc683xx_target::address::Address;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Size;
 
 /// A7, the stack pointer.
 const STACK_POINTER: usize = 7;

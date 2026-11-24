@@ -2,10 +2,10 @@
 //! answer the `SpiPeripheral` trait.  As for a bus peripheral, an exception it
 //! raises waits in `Pending`; the transfer shifts in zeros.
 
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::state::Save;
+use mc683xx_cpu32::state::StateError;
 use mc683xx_modules::peripheral;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use pyo3::Bound;

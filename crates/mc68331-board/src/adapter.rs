@@ -24,21 +24,21 @@
 //! model both on the bus and on the QSPI is two peripherals, or a
 //! [`Peripheral`].
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
+use mc683xx_cpu32::state::Save;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use crate::inspect::Inspection;
 use crate::peripheral::Drive;
@@ -396,12 +396,12 @@ impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::bus::BusError;
-    use mc683xx_cpu32::cpu::state::Save;
-    use mc683xx_cpu32::cpu::state::StateError;
-    use mc683xx_cpu32::cpu::state::Stateless;
+    use mc683xx_cpu32::BusError;
     use mc683xx_cpu32::peripheral::BusCycle;
     use mc683xx_cpu32::peripheral::MappedPeripheral;
+    use mc683xx_cpu32::state::Save;
+    use mc683xx_cpu32::state::StateError;
+    use mc683xx_cpu32::state::Stateless;
     use mc683xx_modules::peripheral::QspiTransfer;
     use mc683xx_modules::peripheral::SpiPeripheral;
     use mc683xx_modules::peripheral::Timed;

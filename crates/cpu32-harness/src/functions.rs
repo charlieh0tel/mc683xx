@@ -26,7 +26,7 @@ use mc683xx_cpu32::exception::BusCycleKind;
 use mc683xx_cpu32::exception::Exception;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::registers::status;
-use mc683xx_target::register::Register;
+use mc683xx_target::Register;
 use regex::Regex;
 use serde_json::Value;
 
@@ -756,10 +756,10 @@ mod tests {
     use mc683xx_cpu32::exception::Fault;
     use mc683xx_cpu32::exception::Vector;
     use mc683xx_cpu32::registers::Registers;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::register::Register;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Register;
+    use mc683xx_target::Size;
 
     use super::Corpus;
     use super::Outcome;

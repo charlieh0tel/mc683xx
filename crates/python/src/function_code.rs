@@ -3,11 +3,9 @@
 
 use pyo3::pyclass;
 
-use mc683xx_target::function_code;
-
 /// The function code FC[2:0] a bus cycle carries, naming its address
 /// space (CPU32RM 5.3, Table 5-1; Rust's
-/// `mc683xx_target::function_code::FunctionCode`).  `str()` is its
+/// `mc683xx_target::FunctionCode`).  `str()` is its
 /// Rust name, `supervisor-data`.
 #[pyclass(
     module = "mc683xx",
@@ -37,22 +35,22 @@ pub(crate) enum FunctionCode {
     CpuSpace,
 }
 
-impl From<function_code::FunctionCode> for FunctionCode {
-    fn from(function_code: function_code::FunctionCode) -> Self {
+impl From<mc683xx_target::FunctionCode> for FunctionCode {
+    fn from(function_code: mc683xx_target::FunctionCode) -> Self {
         match function_code {
-            function_code::FunctionCode::Reserved0 => Self::Reserved0,
-            function_code::FunctionCode::UserData => Self::UserData,
-            function_code::FunctionCode::UserProgram => Self::UserProgram,
-            function_code::FunctionCode::Reserved3 => Self::Reserved3,
-            function_code::FunctionCode::Reserved4 => Self::Reserved4,
-            function_code::FunctionCode::SupervisorData => Self::SupervisorData,
-            function_code::FunctionCode::SupervisorProgram => Self::SupervisorProgram,
-            function_code::FunctionCode::CpuSpace => Self::CpuSpace,
+            mc683xx_target::FunctionCode::Reserved0 => Self::Reserved0,
+            mc683xx_target::FunctionCode::UserData => Self::UserData,
+            mc683xx_target::FunctionCode::UserProgram => Self::UserProgram,
+            mc683xx_target::FunctionCode::Reserved3 => Self::Reserved3,
+            mc683xx_target::FunctionCode::Reserved4 => Self::Reserved4,
+            mc683xx_target::FunctionCode::SupervisorData => Self::SupervisorData,
+            mc683xx_target::FunctionCode::SupervisorProgram => Self::SupervisorProgram,
+            mc683xx_target::FunctionCode::CpuSpace => Self::CpuSpace,
         }
     }
 }
 
-impl From<FunctionCode> for function_code::FunctionCode {
+impl From<FunctionCode> for mc683xx_target::FunctionCode {
     fn from(function_code: FunctionCode) -> Self {
         match function_code {
             FunctionCode::Reserved0 => Self::Reserved0,
@@ -67,4 +65,4 @@ impl From<FunctionCode> for function_code::FunctionCode {
     }
 }
 
-enum_names!(FunctionCode, function_code::FunctionCode);
+enum_names!(FunctionCode, mc683xx_target::FunctionCode);

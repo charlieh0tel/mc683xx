@@ -11,18 +11,18 @@ use std::ops::Deref;
 use std::ops::RangeInclusive;
 
 use super::Cpu;
-use super::hooks::Control;
-use super::hooks::ExceptionEntry;
-use super::hooks::ExceptionReturn;
-use super::hooks::HookId;
-use super::hooks::Instruction;
-use super::hooks::InvalidAccess;
-use super::hooks::MemoryAccess;
+use crate::hooks::Control;
+use crate::hooks::ExceptionEntry;
+use crate::hooks::ExceptionReturn;
+use crate::hooks::HookId;
+use crate::hooks::Instruction;
+use crate::hooks::InvalidAccess;
+use crate::hooks::MemoryAccess;
 use crate::memory::MemoryError;
 use crate::memory::Permissions;
 use crate::memory::Space;
 use crate::registers::Registers;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 /// A CPU lent by what runs it (a chip, a board, the gdb stub's target):
 /// its registers, hooks, page permissions and fault stops to change,
@@ -154,7 +154,7 @@ mod tests {
     use crate::memory::PAGE_BYTES;
     use crate::memory::Permissions;
     use crate::memory::Space;
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     #[test]
     fn it_changes_registers_hooks_permissions_and_fault_stops_and_shows_the_rest() {

@@ -17,29 +17,29 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use mc683xx_board::Board;
+use mc683xx_board::BoardRun;
+use mc683xx_board::BoardTracing;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::LoadError;
+use mc683xx_board::LookupError;
+use mc683xx_board::NoPeripheral;
+use mc683xx_board::NoReceiver;
+use mc683xx_board::Options;
+use mc683xx_board::RunError;
+use mc683xx_board::SendError;
 use mc683xx_board::adapter::Driver;
 use mc683xx_board::adapter::MappedAdapter;
 use mc683xx_board::adapter::SpiAdapter;
-use mc683xx_board::board::Board;
-use mc683xx_board::board::BoardRun;
-use mc683xx_board::board::BoardTracing;
-use mc683xx_board::board::LookupError;
-use mc683xx_board::board::NoPeripheral;
-use mc683xx_board::board::NoReceiver;
-use mc683xx_board::board::RunError;
-use mc683xx_board::board::SendError;
 use mc683xx_board::builtin::EdgeCounter;
 use mc683xx_board::builtin::Recorder;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::LoadError;
-use mc683xx_board::description::Options;
 use mc683xx_board::peripheral::Drive;
 use mc683xx_board::peripheral::Lane;
 use mc683xx_board::peripheral::Peripheral;
 use mc683xx_board::peripheral::PeripheralAccess;
 use mc683xx_board::peripheral::Transfer;
 use mc683xx_board::registry::Constructed;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::PortSpec;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Direction;
@@ -53,17 +53,12 @@ use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_board::time::TimeBase;
 use mc683xx_board::trace::Record;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::state::Layer;
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::exception::Vector;
-use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Permissions;
@@ -71,11 +66,16 @@ use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::registers::Registers;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::debug::TargetError;
-use mc683xx_mc68331::event::DsackFault;
-use mc683xx_mc68331::event::Event;
+use mc683xx_cpu32::state::Layer;
+use mc683xx_cpu32::state::Save;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
+use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::DsackFault;
+use mc683xx_mc68331::Event;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_mc68331::TargetError;
 use mc683xx_mc68331::gpt::Gpt;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
@@ -88,10 +88,10 @@ use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 use snapshot_golden::version_of;
 
 /// `picoseconds` picoseconds.
@@ -241,7 +241,7 @@ fn writes_through_cs1() -> Vec<u16> {
 struct Words([u8; 4]);
 
 impl MappedPeripheral for Words {
-    fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::BusError> {
         let byte = u32::from(self.0[(cycle.address.0 & 3) as usize]);
         Ok(match cycle.size {
             Size::Byte => byte,
@@ -249,7 +249,7 @@ impl MappedPeripheral for Words {
         })
     }
 
-    fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), mc683xx_cpu32::BusError> {
         self.0[(cycle.address.0 & 3) as usize] = match cycle.size {
             Size::Byte => value as u8,
             Size::Word | Size::Long => (value >> 8) as u8,
@@ -392,7 +392,7 @@ impl Peripheral for WriteLatch {
         access: PeripheralAccess,
         value: u32,
         _: &mut Drive<'_>,
-    ) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    ) -> Result<(), mc683xx_cpu32::BusError> {
         self.writes.push((access.address, value));
         Ok(())
     }
@@ -476,7 +476,7 @@ impl Peripheral for Cells {
         &mut self,
         _: PeripheralAccess,
         _: &mut Drive<'_>,
-    ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    ) -> Result<u32, mc683xx_cpu32::BusError> {
         self.cycled = true;
         Ok(0)
     }
@@ -701,16 +701,16 @@ fn the_format_matches_its_golden() {
         env!("CARGO_MANIFEST_DIR"),
         "board",
         &[
-            ("board", mc683xx_board::board::VERSION),
+            ("board", mc683xx_board::state::VERSION),
             ("chip", mc683xx_mc68331::state::VERSION),
-            ("cpu", mc683xx_cpu32::cpu::state::VERSION),
+            ("cpu", mc683xx_cpu32::state::VERSION),
             (
                 "qsm",
                 version_of(&Qsm::new(Frequency::from_hz(1)).save().unwrap()),
             ),
             ("gpt", version_of(&Gpt::new(Cycle::ZERO).save().unwrap())),
             ("builtin", builtin),
-            ("stateless", mc683xx_cpu32::cpu::state::STATELESS_VERSION),
+            ("stateless", mc683xx_cpu32::state::STATELESS_VERSION),
         ],
         &board.save().unwrap(),
     );
@@ -1169,11 +1169,11 @@ const PERIOD: Cycles = Cycles::from_clocks(50_000);
 mc683xx_cpu32::unsavable!(Periodic, "a periodic model");
 
 impl MappedPeripheral for Periodic {
-    fn read(&mut self, _: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    fn read(&mut self, _: BusCycle) -> Result<u32, mc683xx_cpu32::BusError> {
         Ok(0)
     }
 
-    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::BusError> {
         Ok(())
     }
 }
@@ -1505,11 +1505,11 @@ impl Driver for Strobe {
 }
 
 impl MappedPeripheral for Strobe {
-    fn read(&mut self, _: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    fn read(&mut self, _: BusCycle) -> Result<u32, mc683xx_cpu32::BusError> {
         Ok(0)
     }
 
-    fn write(&mut self, cycle: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    fn write(&mut self, cycle: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::BusError> {
         self.level = true;
         self.ends = Some(cycle.now + STROBE_CLOCKS);
         Ok(())
@@ -1625,7 +1625,7 @@ struct TimedWords {
 const EVENT: Cycle = Cycle::from_clocks(1_000);
 
 impl MappedPeripheral for TimedWords {
-    fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::BusError> {
         self.cycles.push((
             cycle
                 .select
@@ -1636,7 +1636,7 @@ impl MappedPeripheral for TimedWords {
         self.words.read(cycle)
     }
 
-    fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), mc683xx_cpu32::BusError> {
         self.cycles.push((
             cycle
                 .select
@@ -1862,11 +1862,11 @@ const TICK: Cycles = Cycles::from_clocks(700);
 const TICKER_VERSION: u32 = 1;
 
 impl MappedPeripheral for Ticker {
-    fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::BusError> {
         Ok(self.ticks & cycle.size.mask())
     }
 
-    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::BusError> {
         Ok(())
     }
 }
@@ -2343,7 +2343,7 @@ impl Peripheral for Flash {
         access: PeripheralAccess,
         value: u32,
         drive: &mut Drive<'_>,
-    ) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    ) -> Result<(), mc683xx_cpu32::BusError> {
         let command = (access.address, value & 0xff);
         self.state = match (self.state, command) {
             (FlashState::Read, UNLOCK_FIRST) => FlashState::Unlocked,
@@ -2374,7 +2374,7 @@ impl Peripheral for Flash {
         memory: &str,
         _: PeripheralAccess,
         _: &mut Drive<'_>,
-    ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    ) -> Result<u32, mc683xx_cpu32::BusError> {
         assert_eq!(memory, "flash");
         let FlashState::Busy { data, .. } = self.state else {
             panic!("a read while not busy reached the peripheral");
@@ -2506,7 +2506,7 @@ impl Peripheral for Overwriter {
         _: &str,
         _: PeripheralAccess,
         _: &mut Drive<'_>,
-    ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    ) -> Result<u32, mc683xx_cpu32::BusError> {
         Ok(0x1234)
     }
 
@@ -2762,7 +2762,7 @@ impl Peripheral for Stopper {
         _: PeripheralAccess,
         _: u32,
         drive: &mut Drive<'_>,
-    ) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    ) -> Result<(), mc683xx_cpu32::BusError> {
         drive.stop();
         Ok(())
     }
@@ -3218,7 +3218,7 @@ impl Peripheral for BitLatch {
         _: PeripheralAccess,
         value: u32,
         drive: &mut Drive<'_>,
-    ) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    ) -> Result<(), mc683xx_cpu32::BusError> {
         drive.drive(0, Signal::Level(value & 1 != 0));
         Ok(())
     }
@@ -4530,7 +4530,7 @@ impl Peripheral for Sampled {
         &mut self,
         access: PeripheralAccess,
         drive: &mut Drive<'_>,
-    ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    ) -> Result<u32, mc683xx_cpu32::BusError> {
         self.cycles.push((drive.now(), access.horizon));
         Ok(0)
     }
@@ -4540,7 +4540,7 @@ impl Peripheral for Sampled {
         access: PeripheralAccess,
         _: u32,
         drive: &mut Drive<'_>,
-    ) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    ) -> Result<(), mc683xx_cpu32::BusError> {
         self.cycles.push((drive.now(), access.horizon));
         Ok(())
     }
@@ -4571,7 +4571,7 @@ impl Peripheral for AheadDriver {
         &mut self,
         _: PeripheralAccess,
         drive: &mut Drive<'_>,
-    ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    ) -> Result<u32, mc683xx_cpu32::BusError> {
         self.level = !self.level;
         let at = Time::from_picos(drive.now().picos() + DRIVER_AHEAD_PS);
         drive.drive_at(at, 0, Signal::Level(self.level));

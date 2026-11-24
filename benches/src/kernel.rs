@@ -3,7 +3,7 @@
 //! the core does not have yet is skipped (`Calibration::measure`), so
 //! the list can name instructions before they land.
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::exception::Exception;
 use mc683xx_cpu32::exception::Vector;
 

@@ -9,7 +9,7 @@
 //! how the SIM comes out of reset.
 //!
 //! ```
-//! use mc683xx_cpu32::frequency::Frequency;
+//! use mc683xx_cpu32::Frequency;
 //! use mc683xx_modules::chip_select::ChipSelect;
 //! use mc683xx_modules::sim::Configuration;
 //! use mc683xx_modules::sim::clock::ClockSource;

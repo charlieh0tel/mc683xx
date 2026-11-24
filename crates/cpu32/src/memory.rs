@@ -12,12 +12,12 @@ use std::ops::Range;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
 
-use crate::bus::PortSize;
+use crate::PortSize;
 use crate::bus::stall;
 use crate::cycles::Cycles;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// Bytes in a page: the smallest chip-select block, 2K (SIMRM 7.3,
 /// Table 7-2), so a page never straddles two blocks.
@@ -28,7 +28,7 @@ const PAGE_SHIFT: u32 = 11;
 const FASTEST_CLOCKS: u8 = 2;
 
 /// Whether the CPU may write a memory a host wires in: the chip's
-/// builder's (`mc683xx_mc68331::chip::Builder::memory`) and a board's.
+/// builder's (`mc683xx_mc68331::Builder::memory`) and a board's.
 /// Non-exhaustive: a kind may be added (a write-once memory, say), and
 /// [`writable`](Self::writable) answers for each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1185,10 +1185,10 @@ mod tests {
     use super::Permissions;
     use super::Space;
     use super::Unserved;
-    use crate::bus::PortSize;
+    use crate::PortSize;
     use crate::cycles::Cycles;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::Size;
 
     #[test]
     fn permissions_print_in_order_and_parse_in_any_order_and_case() {

@@ -3,19 +3,18 @@
 
 use std::time::TryFromFloatSecsError;
 
-use mc683xx_board::board::NoMemory;
-use mc683xx_board::board::NoNet;
-use mc683xx_board::board::NoPeripheral;
-use mc683xx_board::board::NoReceiver;
-use mc683xx_board::board::RunError;
-use mc683xx_board::board::SendError;
-use mc683xx_board::description::LoadError;
+use mc683xx_board::LoadError;
+use mc683xx_board::NoMemory;
+use mc683xx_board::NoNet;
+use mc683xx_board::NoPeripheral;
+use mc683xx_board::NoReceiver;
+use mc683xx_board::RunError;
+use mc683xx_board::SendError;
 use mc683xx_board::pacing::PacingError;
 use mc683xx_board::pacing::ParsePacingError;
 use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::ParseKindError;
-use mc683xx_cpu32::cpu::bare::TakeExceptionError;
-use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::TakeExceptionError;
 use mc683xx_cpu32::flat::MapError;
 use mc683xx_cpu32::flat::PeekError;
 use mc683xx_cpu32::interrupt::NoInterruptLevel;
@@ -23,10 +22,11 @@ use mc683xx_cpu32::interrupt::NoIrqPin;
 use mc683xx_cpu32::memory::MemoryError;
 use mc683xx_cpu32::memory::ParsePermissionsError;
 use mc683xx_cpu32::memory::Unserved;
-use mc683xx_mc68331::chip::BuildError;
-use mc683xx_mc68331::debug::TargetError;
-use mc683xx_mc68331::host::BusCycleError;
-use mc683xx_mc68331::port::NoInputs;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_mc68331::BuildError;
+use mc683xx_mc68331::BusCycleError;
+use mc683xx_mc68331::NoInputs;
+use mc683xx_mc68331::TargetError;
 use mc683xx_modules::sim::clock::ClockSourceError;
 
 /// A host's mistake the bindings refuse.
@@ -76,14 +76,10 @@ pub(crate) enum Error {
     /// A builder used after `build`.
     #[error("the chip is already built")]
     Built,
-    /// A memory or peripheral number the builder never returned.
-    #[error("no {kind} {index}")]
-    Unknown {
-        /// "memory" or "peripheral".
-        kind: &'static str,
-        /// The number.
-        index: usize,
-    },
+    /// A memory or peripheral the builder never returned: its id as
+    /// Rust shows it, `memory 2`.
+    #[error("no {0}")]
+    Unknown(String),
     /// Bytes outside a memory.
     #[error("{length:#x} bytes at {offset:#x}: outside the memory's {size:#x}")]
     Range {

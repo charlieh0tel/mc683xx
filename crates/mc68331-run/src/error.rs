@@ -4,23 +4,23 @@
 use std::io;
 use std::path::PathBuf;
 
-use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::state::StateError;
 
 /// Why the runner could not run, or finish, a board.
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum RunError {
     /// The board file, or its loading.
     #[error(transparent)]
-    Board(#[from] mc683xx_board::description::LoadError),
+    Board(#[from] mc683xx_board::LoadError),
     /// A `--set` not of the form `PERIPHERAL.KEY=VALUE`.
     #[error(transparent)]
-    Setting(#[from] mc683xx_board::description::ParseSettingError),
+    Setting(#[from] mc683xx_board::ParseSettingError),
     /// A run that could not go on: a peripheral stalled the board.
     #[error(transparent)]
-    Run(#[from] mc683xx_board::board::RunError),
+    Run(#[from] mc683xx_board::RunError),
     /// Input a binding's endpoint could not drive.
     #[error(transparent)]
-    Send(#[from] mc683xx_board::board::SendError),
+    Send(#[from] mc683xx_board::SendError),
     /// A file the runner reads or writes.
     #[error("{}: {error}", path.display())]
     Io {

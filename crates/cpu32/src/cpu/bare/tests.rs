@@ -9,7 +9,6 @@ use super::Limits;
 use super::TakeExceptionError;
 use crate::cpu::Halt;
 use crate::cpu::Stop;
-use crate::cpu::hooks::MemoryAccess;
 use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::exception::BusCycleKind;
@@ -19,15 +18,16 @@ use crate::exception::Vector;
 use crate::exception::format;
 use crate::exception::ssw;
 use crate::flat::Machine;
+use crate::hooks::MemoryAccess;
 use crate::interrupt::InterruptLevel;
 use crate::interrupt::IrqPin;
 use crate::memory::PAGE_BYTES;
 use crate::memory::Permissions;
 use crate::registers::Registers;
 use crate::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::Size;
 
 /// RAM from zero.
 const RAM: u32 = 0x1_0000;

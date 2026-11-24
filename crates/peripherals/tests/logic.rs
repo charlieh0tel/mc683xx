@@ -8,16 +8,16 @@ use std::process;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
 
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_peripherals::buffer::Buffer;
-use mc683xx_peripherals::latch::Latch;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_peripherals::Buffer;
+use mc683xx_peripherals::Latch;
 
 /// The initial stack pointer and program counter in the image.
 const STACK: u32 = 0x10_fffe;

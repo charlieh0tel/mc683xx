@@ -5,7 +5,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 
 use super::timer::Counter;
 

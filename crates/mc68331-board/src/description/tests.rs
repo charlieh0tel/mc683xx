@@ -1,8 +1,8 @@
-use mc683xx_cpu32::bus::PortSize;
+use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::peripheral::BusDecode;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -11,11 +11,11 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 
 use super::Description;
 use super::EditError;
@@ -28,10 +28,10 @@ use super::Target;
 use crate::board::Board;
 use crate::builtin::Fixed;
 use crate::endpoint::Endpoint;
+use crate::environment::Environment;
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
 use crate::registry::Constructed;
-use crate::registry::Environment;
 use crate::registry::ParameterValue;
 use crate::registry::PortSpec;
 use crate::registry::Registry;

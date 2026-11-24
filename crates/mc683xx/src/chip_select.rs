@@ -4,7 +4,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::peripheral::Select;
 
 use crate::sim::chip_selects::DSACK_FAST;

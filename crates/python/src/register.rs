@@ -7,10 +7,10 @@ use std::fmt;
 use std::str::FromStr;
 
 use mc683xx_cpu32::registers::Registers;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register as DataOrAddress;
-use mc683xx_target::register::SystemRegister;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register as DataOrAddress;
+use mc683xx_target::SystemRegister;
 
 use crate::error::Error;
 
@@ -138,8 +138,8 @@ impl FromStr for Register {
 mod tests {
     use mc683xx_cpu32::registers::Registers;
     use mc683xx_cpu32::registers::status;
-    use mc683xx_target::register::Register as DataOrAddress;
-    use mc683xx_target::register::SystemRegister;
+    use mc683xx_target::Register as DataOrAddress;
+    use mc683xx_target::SystemRegister;
 
     use super::Register;
     use crate::error::Error;

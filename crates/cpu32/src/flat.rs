@@ -12,21 +12,16 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::RangeInclusive;
 
+use crate::BusError;
+use crate::StopRequest;
 use crate::bus::Bus;
 use crate::bus::BusAccess;
-use crate::bus::BusError;
 use crate::bus::LPSTOP_BROADCAST;
 use crate::bus::Read;
-use crate::bus::StopRequest;
 use crate::cpu::Cpu;
 use crate::cpu::bare::LimitedRun;
 use crate::cpu::bare::Limits;
 use crate::cpu::bare::TakeExceptionError;
-use crate::cpu::state::Layer;
-use crate::cpu::state::StateError;
-use crate::cpu::state::decode_layer;
-use crate::cpu::state::encode_layer;
-use crate::cpu::state::restore_each;
 use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::exception::Vector;
@@ -47,9 +42,14 @@ use crate::memory::Unserved;
 use crate::peripheral::BusCycle;
 use crate::peripheral::MappedPeripheral;
 use crate::peripheral::PeripheralId;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use crate::state::Layer;
+use crate::state::StateError;
+use crate::state::decode_layer;
+use crate::state::encode_layer;
+use crate::state::restore_each;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 #[cfg(test)]
 mod tests;
@@ -322,13 +322,13 @@ struct MachineState {
 /// it, PC and SP set, and the run limited to the function's return.
 ///
 /// ```
-/// use mc683xx_target::address::Address;
-/// use mc683xx_cpu32::cpu::bare::End;
-/// use mc683xx_cpu32::cpu::bare::Limits;
+/// use mc683xx_cpu32::End;
+/// use mc683xx_cpu32::Limits;
 /// use mc683xx_cpu32::flat::ADDRESS_BITS;
 /// use mc683xx_cpu32::flat::Machine;
 /// use mc683xx_cpu32::memory::PAGE_BYTES;
 /// use mc683xx_cpu32::registers::status;
+/// use mc683xx_target::Address;
 ///
 /// /// Where the function's caller returns to: nothing runs there.
 /// const RETURN: Address = Address(0x100);
@@ -718,7 +718,7 @@ impl Machine {
     }
 
     /// The machine's state as bytes: the core's, the clock, the
-    /// interrupt requests and each peripheral's ([`Save`](crate::cpu::state::Save)), in the order
+    /// interrupt requests and each peripheral's ([`Save`](crate::state::Save)), in the order
     /// they were added.
     ///
     /// # Errors

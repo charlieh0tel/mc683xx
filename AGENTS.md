@@ -25,7 +25,7 @@ Crates:
   tests them.
 - `mc683xx-board` (`crates/mc68331-board`): board files, peripherals from a
   registry, nets, board time and the run loop, generic over the chip
-  (`chip::Chip`, the MC68331's impl its `mc68331` module).
+  (`Chip`, the MC68331's impl its `mc68331` module).
 - `mc683xx-run` (`crates/mc68331-run`): the runner, a thin command on
   `mc683xx-board`; the one binary.
 - `mc683xx-gdb` (`crates/gdb`): the GDB remote stub, over the bare
@@ -200,8 +200,9 @@ Crates:
 - Re-export only to give an item one short public path: a crate may
   lift an item out of a private module to its root (`mod board;` and
   `pub use board::Board;`), so a host writes `mc683xx_board::Board`,
-  not `mc683xx_board::board::Board`.  Every public item keeps exactly
-  one public path: never re-export from a public module, another
+  not `mc683xx_board::board::Board`, or to the private module's public
+  parent (`sim::ResetScope` from a private `sim::reset`).  Every public
+  item keeps exactly one public path: never re-export from a public module, another
   crate's items or a glob, and never `pub(crate) use` (import where
   needed instead).
 - Never employ a wildcard `use` statement on an enum when trying to

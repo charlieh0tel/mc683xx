@@ -14,8 +14,8 @@ use crate::time::Clock;
 use crate::time::PICOSECONDS_PER_SECOND;
 use crate::time::Span;
 use crate::time::Time;
-use mc683xx_cpu32::frequency::Frequency;
-use mc683xx_cpu32::frequency::NANOHERTZ_PER_HERTZ;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::NANOHERTZ_PER_HERTZ;
 
 /// A net's type, and a port's.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

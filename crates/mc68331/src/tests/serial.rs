@@ -1,15 +1,15 @@
 //! BDM's serial interface: `Mc68331::bdm_exchange` (CPU32RM 7.2.7,
 //! 7.2.8).
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
-use mc683xx_target::size::Size;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
 
 use super::BRANCH_TO_SELF;
 use super::ROM_BYTES;
@@ -17,7 +17,7 @@ use super::START;
 use super::image;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
-use crate::debug::serial::NOT_IN_BACKGROUND;
+use crate::serial::NOT_IN_BACKGROUND;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_target::serial::BUS_ERROR;
 use mc683xx_target::serial::COMPLETE;

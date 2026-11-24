@@ -4,8 +4,11 @@
 
 use std::env;
 
-use mc683xx_board::board::Board;
-use mc683xx_board::board::NoNet;
+use mc683xx_board::Board;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::NoNet;
+use mc683xx_board::Options;
 use mc683xx_board::condition::ArmError;
 use mc683xx_board::condition::Condition;
 use mc683xx_board::condition::ConditionError;
@@ -14,19 +17,16 @@ use mc683xx_board::condition::ConditionInfo;
 use mc683xx_board::condition::ConditionToken;
 use mc683xx_board::condition::Conditions;
 use mc683xx_board::condition::NetChange;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
 use mc683xx_board::peripheral::Drive;
 use mc683xx_board::peripheral::Peripheral;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::PortSpec;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_cpu32::Stop;
+use mc683xx_mc68331::Mc68331;
 
 /// The divided clock's period: 10 MHz divided by 1000.
 const PERIOD_PS: u64 = 100_000_000;

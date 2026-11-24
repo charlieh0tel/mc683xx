@@ -17,17 +17,17 @@ use std::fmt;
 use std::rc::Rc;
 use std::str::FromStr;
 
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Run;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::Run;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::MemoryKind;
+use mc683xx_cpu32::state::StateError;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::chip_select::Termination;
@@ -35,8 +35,8 @@ use mc683xx_modules::peripheral::AnyMappedPeripheral;
 use mc683xx_modules::peripheral::AnySpiPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_modules::sim::reset::ResetScope;
-use mc683xx_target::address::Address;
+use mc683xx_modules::sim::ResetScope;
+use mc683xx_target::Address;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
@@ -261,7 +261,7 @@ pub trait ChipBuilder: sealed::Sealed {
 /// its methods, which is all a host needs.  So this does not compile:
 ///
 /// ```compile_fail,E0277
-/// use mc683xx_board::chip::Chip;
+/// use mc683xx_board::Chip;
 ///
 /// struct Mine;
 ///
@@ -310,7 +310,7 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     /// until the CPU halts, a hook or a router stops it, or a router
     /// asks it to end early ([`Requests::sync`]) or a watched output
     /// changes ([`stop_at_outputs`](Self::stop_at_outputs)), ending
-    /// [`Stop::Budget`](mc683xx_cpu32::cpu::Stop::Budget) short of the
+    /// [`Stop::Budget`](mc683xx_cpu32::Stop::Budget) short of the
     /// budget.  A run that starts halted spends its budget as time
     /// passes.
     fn run_for(&mut self, budget: Cycles) -> Run;

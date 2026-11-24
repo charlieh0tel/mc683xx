@@ -57,14 +57,14 @@ memory).  Out of reset only CSBOOT decodes, the first Mbyte from
 address 0 (MC68331UM Table 4-24), so the boot ROM goes there.
 
 ```rust
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::memory::MemoryKind;
+use mc683xx_examples::firmware;
+use mc683xx_mc68331::BuildError;
+use mc683xx_mc68331::Builder;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::sim::Configuration;
-use mc683xx_examples::firmware;
-use mc683xx_mc68331::chip::BuildError;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_cpu32::memory::MemoryKind;
 
 fn main() -> Result<(), BuildError> {
     // CS0 at RAM_BASE, then a word into it.
@@ -93,7 +93,7 @@ fn main() -> Result<(), BuildError> {
   assignments; MC68331UM 4.6.3) and the clock source, a synthesizer
   reference (`ClockSource::synthesizer(reference)`) or, with MODCLK
   low, an external clock (`ClockSource::external(frequency)`), each a
-  `Frequency` (`mc683xx_cpu32::frequency`, nanohertz:
+  `Frequency` (`mc683xx_cpu32`, nanohertz:
   `Frequency::from_hz` and `hz`, `from_nanohertz` and `nanohertz`) of
   whole hertz: either refuses a fraction
   with `ClockSourceError::FractionalHertz`, since the chip's snapshot
@@ -132,7 +132,7 @@ fn main() -> Result<(), BuildError> {
 
 The host can also reach the core: `cpu()` gives the `Cpu` to read;
 `registers_mut()` its registers to change; `cpu_control()` a
-`cpu::control::CpuControl`, which adds and removes its hooks, sets its
+`CpuControl`, which adds and removes its hooks, sets its
 pages' permissions (see Hooks), changes its registers and reads the
 rest.  Neither hands out the core's memory map, which the chip keeps
 in step with its decode, nor runs the core apart from the chip.
@@ -197,11 +197,11 @@ instruction, before the next.  `set_reload_scope` takes any memory, one on
 pins too; reloading is emulator-only as well.
 
 ```rust
-use mc683xx_target::address::Address;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_examples::firmware;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::memory::MemoryKind;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_examples::firmware;
+use mc683xx_modules::sim::ResetScope;
+use mc683xx_target::Address;
 
 // No select programmed: the boot code stores straight into it.
 let code = 0x60_0000;
@@ -249,8 +249,8 @@ interrupt it raises at its event waits at most one instruction.  The
 watchdog's resets are taken as they come.
 
 ```rust
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Stop;
 use mc683xx_examples::firmware;
 
 let program = [firmware::prologue(), firmware::stop(firmware::UNMASKED).to_vec()].concat();
@@ -280,7 +280,7 @@ host-ordered iteration in the chip.  A host keeps it so by making its
 inputs (pins, frames, edges) at chip times, not wall-clock ones.
 
 ```rust
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::Cycle;
 use mc683xx_examples::firmware;
 
 let chip = || {
@@ -299,7 +299,7 @@ assert_eq!(one.instructions(), two.instructions());
 
 ### Stopping from a peripheral
 
-A peripheral holds the `StopRequest` (`mc683xx_cpu32::bus`, the one type
+A peripheral holds the `StopRequest` (`mc683xx_cpu32`, the one type
 the bare machine's `stop_request` gives too) its builder gave and
 calls `request`;
 the run stops once the instruction whose cycle asked ends, between
@@ -315,15 +315,15 @@ does not stop for it.  One made in a host bus cycle (Host bus cycles)
 is dropped, with no run to stop.
 
 ```rust
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::state::Stateless;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
-use mc683xx_modules::peripheral::Timed;
+use mc683xx_cpu32::state::Stateless;
 use mc683xx_examples::firmware;
-use mc683xx_cpu32::bus::StopRequest;
+use mc683xx_modules::peripheral::Timed;
 
 /// Stops the run at each write: a breakpoint on a port.
 #[derive(Debug)]
@@ -363,9 +363,9 @@ assert_eq!(chip.run_for(Cycles::from_clocks(100)).stop, Stop::Budget);
 
 A host peripheral implements `mc683xx_cpu32::peripheral::MappedPeripheral`,
 `mc683xx_modules::peripheral::Timed` (`impl Timed for X {}` if it keeps no time)
-and `mc683xx_cpu32::cpu::state::Save`, which says whether it saves (see
+and `mc683xx_cpu32::state::Save`, which says whether it saves (see
 Save and restore): both its methods if it saves, `impl Stateless for X {}`
-(`mc683xx_cpu32::cpu::state`) if it has no state, or
+(`mc683xx_cpu32::state`) if it has no state, or
 `mc683xx_cpu32::unsavable!(X, "its role")` if it cannot save.  `Save`
 has no defaults, so that a peripheral never saves what its own `restore`
 refuses.
@@ -422,7 +422,7 @@ refuses.
 
 - `save() -> Result<Vec<u8>, StateError>`: its state, in its own
   format, which it versions (`encode` and `decode` in
-  `mc683xx_cpu32::cpu::state` do).
+  `mc683xx_cpu32::state` do).
 - `restore(&[u8])`: puts back what `save` gave, and must take its own
   `save`'s bytes; it refuses, unchanged, what no run of it could save.
 
@@ -491,15 +491,15 @@ answers with its own DSACK after two wait states, and acknowledges
 on CS10:
 
 ```rust
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
-use mc683xx_modules::peripheral::Timed;
 use mc683xx_examples::firmware;
-use mc683xx_target::function_code::FunctionCode;
+use mc683xx_modules::peripheral::Timed;
+use mc683xx_target::FunctionCode;
 
 /// Its registers' offsets, on the lower byte.
 const VECTOR_REGISTER: u32 = 1;
@@ -595,19 +595,19 @@ A model beside the CPU (a GPS engine, a timer chip, a 1 PPS source)
 reports its next event, and the run syncs there:
 
 ```rust
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
-use mc683xx_modules::peripheral::Timed;
+use mc683xx_cpu32::state::Save;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use mc683xx_examples::firmware;
+use mc683xx_modules::peripheral::Timed;
 
 /// The format of an `Alarm`'s snapshot.
 const ALARM_VERSION: u32 = 1;
@@ -720,16 +720,16 @@ chip's BKPT, `Cpu32Target::halt` and `go` on the board, the nets told
 what the chip's outputs did (PLAN.md, Background debug mode).
 
 ```rust
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
+use mc683xx_examples::firmware;
+use mc683xx_mc68331::Event;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_examples::firmware;
-use mc683xx_mc68331::event::Event;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 
 #[derive(Debug, Default)]
 struct Counter(usize);
@@ -818,10 +818,10 @@ data bits as on the line, LSB first, eight or nine, parity included;
 for a break.
 
 ```rust
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_modules::qsm::sci::Frame;
+use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::QSM;
+use mc683xx_modules::qsm::sci::Frame;
 
 // SCCR0, SCCR1, SCSR, SCDR (QSMRM 5.2); TE and RE, RDRF.
 const SCCR0: u32 = QSM + 0x08;
@@ -858,7 +858,7 @@ assert!(sent[0].start < sent[0].end);
 
 ### Ports
 
-Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
+Every general-purpose port is keyed by one `Port`: `C`, `E`,
 `F` (the SIM's), `Gp` (the GPT's) and `Qs` (the QSM's).
 
 - Inputs: `set_pins(port, pins)` sets the levels the board drives on
@@ -883,14 +883,14 @@ Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
   the SCI's TXD at the entry's or frame's own time.
 
 ```rust
-use mc683xx_target::address::Address;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
-use mc683xx_mc68331::port::Port;
-use mc683xx_modules::pins::PortLevels;
+use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
+use mc683xx_mc68331::Port;
+use mc683xx_modules::pins::PortLevels;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 // PORTE, DDRE, PEPAR (MC68331UM D.3.6 to D.3.8).
 const PORTE: u32 = SIM + 0x10;
@@ -958,19 +958,19 @@ assert_eq!(porte.unwrap() & u32::from(PE1), u32::from(PE1));
   `take_output_changes` takes both.
 
 ```rust
-use mc683xx_target::address::Address;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::GPT;
+use mc683xx_mc68331::Port;
 use mc683xx_mc68331::gpt::Input;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm::Channel;
 use mc683xx_mc68331::gpt::pwm::Output;
-use mc683xx_mc68331::port::Port;
 use mc683xx_modules::pins::PortLevels;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 // TCTL1:TCTL2, TOC2, TIC1 (GPTRM 3).  OM2:OL2 01 toggles OC2, PGP4,
 // on a match; EDGE1 01 captures IC1's rising edges.
@@ -1042,15 +1042,15 @@ and then the queue runs on without a sync, its calls coming in a batch, in
 order and each with its own `now`, where the CPU next sees the QSPI.
 
 ```rust
-use mc683xx_target::address::Address;
-use mc683xx_cpu32::cpu::state::Stateless;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
-use mc683xx_modules::peripheral::SpiPeripheral;
-use mc683xx_modules::peripheral::QspiTransfer;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::state::Stateless;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::QSM;
+use mc683xx_modules::peripheral::QspiTransfer;
+use mc683xx_modules::peripheral::SpiPeripheral;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// Records what it is sent; answers `0xef`.
 #[derive(Debug, Default)]
@@ -1105,12 +1105,12 @@ SCK `period` of system clocks, running the chip between them, and
 returns what the QSPI drove on MISO (`Shifted { miso, driven }`).
 
 ```rust
-use mc683xx_target::address::Address;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::QSM;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 const PQSPAR: u32 = QSM + 0x16;
 const SPCR0: u32 = QSM + 0x18;
@@ -1193,14 +1193,14 @@ use std::cell::RefCell;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
-use mc683xx_target::address::Address;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::hooks::Invalid;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::hooks::Invalid;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Permissions;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_examples::firmware;
+use mc683xx_target::Address;
 
 // The bus error vector (CPU32RM Table 6-1).
 const BUS_ERROR: u8 = 2;
@@ -1287,11 +1287,11 @@ interrupt sources with one IARB, which the manual leaves
 unpredictable.
 
 ```rust
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
-use mc683xx_mc68331::event::Event;
-use mc683xx_mc68331::event::ChipTracing;
+use mc683xx_mc68331::ChipTracing;
+use mc683xx_mc68331::Event;
 
 let program = [firmware::prologue(), vec![firmware::BRANCH_TO_SELF]].concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
@@ -1346,13 +1346,13 @@ first.  None moves the chip's time or shows in the trace.
   `PeekError::Unpeekable` where it declines.
 
 ```rust
-use mc683xx_target::address::Address;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_cpu32::Cycle;
 use mc683xx_examples::firmware;
 use mc683xx_examples::firmware::SIM;
-use mc683xx_mc68331::host::BusCycleError;
+use mc683xx_mc68331::BusCycleError;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 // CSBAR0, CSOR0, CSBARBT (MC68331UM Table D-3).
 const CSBAR0: u32 = SIM + 0x4c;
@@ -1415,7 +1415,7 @@ peripheral's snapshot in the order added, an error naming the peripheral by its
 first address (`the peripheral at 0xf00000: ...`).
 
 ```rust
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_examples::firmware;
 
 let program = [firmware::prologue(), firmware::delay(1000).to_vec()].concat();
@@ -1435,12 +1435,12 @@ assert_eq!(chip.now(), now);
 
 A front end (a TUI, a GUI, a logger) is the host's, outside this
 repository, and outside the board file, which stays hardware only
-(PLAN.md, Boards): it attaches to a loaded `mc683xx_board::board::Board`
+(PLAN.md, Boards): it attaches to a loaded `mc683xx_board::Board`
 and watches it, and moves it only through the inputs the board file
 already names.
 
 A board is generic over the chip it is built around
-(`mc683xx_board::chip::Chip`): `Board::<Mc68331>::load(&description,
+(`mc683xx_board::Chip`): `Board::<Mc68331>::load(&description,
 ...)` loads one around the MC68331, and `Description::chip_type()`
 gives the file's `[chip] type`, for a host that serves several chips
 to choose by.  `Description::parse_with(text, directory, &options,
@@ -1466,7 +1466,7 @@ part off as an option off would, its net ends and any net left with no
 driver or no sink going with it, an `external.*` end it had left
 among them; it gives the names of the nets that went, so a host sees
 an external endpoint left on no net.  Each refuses a name the description
-lacks (`description::EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
+lacks (`EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
 every method of the chip's.  `Chip` is sealed: a host names it in a
 bound (`Board<C: Chip>`) and uses its items (`TYPE`, the name a
 board file's `[chip] type` gives, `"mc68331"`; `cpu`, `cpu_control`,
@@ -1559,7 +1559,7 @@ beside `watch_code`, a hook that breaks ending the run `Stop::Hook`.
   is built and run on one thread (PLAN.md, Decisions).  What it is
   built from (`Description`, `Image`, `Script`, `Memory`) is `Send`,
   so another thread may parse and read those.  `Board::control() ->
-  control::BoardControl` is the board's thread-safe handle (`Send`,
+  BoardControl` is the board's thread-safe handle (`Send`,
   `Sync`, cheap to `Clone`; every call gives a handle to the one
   control), for a front end whose event loop is another thread:
   `stop()` asks the run to stop, `send(name, signal) -> Result<(),
@@ -1627,15 +1627,15 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
 
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::inspect::Value;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
+use mc683xx_mc68331::Mc68331;
 
 // A 1 MHz clock divided by 1000 onto a 1 kHz net to PAI, a switch the
 // host moves, and a buffer of tied levels on CS1.
@@ -1706,18 +1706,18 @@ use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
 
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
-use mc683xx_board::pacing::QUANTUM;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::pacing::Pacing;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::pacing::QUANTUM;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::Stop;
+use mc683xx_mc68331::Mc68331;
 
 let text = r#"
 version = 1
@@ -1794,7 +1794,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `IrqPin` (`IRQ7`), `ResetCause` (`power-on`) and the names a board
   file writes (`mc68331::Pin` and `PortPin`, `PE0`; `signal::Kind`;
   `peripheral::Role`, `read-write`; `pacing::Pacing`;
-  `description::Setting`, `dac.value=16`) parse back.
+  `Setting`, `dac.value=16`) parse back.
 - Conversions, one way each: a bit pattern whose every value is valid
   (`Address`, `Vector`) converts `From` and into what it wraps; a
   checked value (`InterruptLevel`, `IrqPin`, `PortGpPin`,
@@ -1807,18 +1807,18 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   enums that may grow: `Stop`, `Halt`, the bare run's `End` and
   `FaultCause`, `hooks::Invalid`, the GPT's `pwm::Output`, and the
   board's `Signal`, `signal::Kind`,
-  `mc68331::Pin`, `peripheral::Role`, `chip::MemoryPlace` and
+  `mc68331::Pin`, `peripheral::Role`, `MemoryPlace` and
   `trace::Record`.  A match on one needs a wildcard arm.  The chip's
   `Event` is, and so is each of its variants, a struct variant with
   its time (`now`): a pattern on one needs `..`.  Enums of
-  what the hardware fixes (`Size`, `ChipSelect`, `port::Port`,
+  what the hardware fixes (`Size`, `ChipSelect`, `Port`,
   `pwm::Channel`, `Lane`, `Direction`) are not.
 - So are the structs a host reads but does not build: the hook
   payloads (`hooks::Instruction`, `MemoryAccess`, `InvalidAccess`,
   `ExceptionEntry`), `bus::BusAccess`, `peripheral::BusCycle`, the run
   results (`Run`, `LimitedRun`, `FaultStop`, `Intercepted`,
   `BoardRun`), the trace's record structs,
-  `board::External`, `trace::Trace`, `peripheral::Driving`, `Driven`
+  `External`, `trace::Trace`, `peripheral::Driving`, `Driven`
   and `MemoryWrite`, `builtin::Logged`, `inspect::Inspection` and
   `Field`, and `registry::Constructed` and `Context`; and the values a
   host builds but whose fields may grow: `registry::PortSpec`,
@@ -1830,7 +1830,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `Clock::with_phase`, `Field::new`, and `Inspection::default()` with
   its builders.
 - The configuration structs (`Limits`, `BoardTracing`,
-  `ChipTracing`, `description::Options`, `registry::Environment`) are
+  `ChipTracing`, `Options`, `Environment`) are
   `#[non_exhaustive]` too, with every field public: build one from
   `X::default()` and set the fields it needs
   (`let mut tracing = BoardTracing::default(); tracing.pins = true;`),
@@ -1841,10 +1841,10 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   prints each cause once.
 
 ```rust
-use mc683xx_modules::chip_select::ChipSelect;
-use mc683xx_mc68331::chip::BuildError;
-use mc683xx_mc68331::chip::Builder;
 use mc683xx_cpu32::memory::MemoryKind;
+use mc683xx_mc68331::BuildError;
+use mc683xx_mc68331::Builder;
+use mc683xx_modules::chip_select::ChipSelect;
 
 let mut builder = Builder::default();
 builder.memory(vec![0; 2048], MemoryKind::Rom, &[ChipSelect::Boot]).unwrap();

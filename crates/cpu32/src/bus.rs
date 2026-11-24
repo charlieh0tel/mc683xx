@@ -1,17 +1,16 @@
 //! The external bus: every cycle the core does not serve from its own
 //! memory goes here.
 
-use std::cell::Cell;
-use std::rc::Rc;
-
-use crate::cpu::hooks::ExceptionEntry;
+use crate::BusError;
+use crate::PortSize;
 use crate::cycles::Cycle;
 use crate::cycles::Cycles;
+use crate::hooks::ExceptionEntry;
 use crate::memory::Memory;
 use crate::memory::Page;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// Clocks in the bus cycle the timing tables assume: two clocks, no
 /// wait states, a 16-bit port (CPU32RM 8.1.5, 8.3).
@@ -90,52 +89,6 @@ impl Read {
     pub const fn stalled(self, stall: Cycles) -> Self {
         Self { stall, ..self }
     }
-}
-
-/// A handle by which the host asks a run to stop.
-///
-/// The host's peripherals, or anything else of the host's, stop the run
-/// after the instruction whose cycle asked, or, on the chip, at the
-/// sync point if no instruction is running
-/// ([`Stop::Requested`](crate::cpu::Stop::Requested)).  Clones share
-/// one request, which the stop clears.  The bare machine and the chip
-/// each give one.
-#[derive(Debug, Clone, Default)]
-pub struct StopRequest(Rc<Cell<bool>>);
-
-impl StopRequest {
-    /// Asks the run to stop.
-    pub fn request(&self) {
-        self.0.set(true);
-    }
-
-    /// Withdraws a request the run has not taken: for a host whose own
-    /// run loop stopped for it first, between runs.
-    pub fn withdraw(&self) {
-        self.0.set(false);
-    }
-
-    /// Whether a stop is asked for, clearing the request: for the run
-    /// loop that serves it ([`Bus::stop_requested`]).
-    #[must_use = "a stop taken and dropped is lost"]
-    pub fn take(&self) -> bool {
-        self.0.replace(false)
-    }
-}
-
-/// The cycle ended in a bus error (BERR, CPU32RM 6.2.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("bus error")]
-pub struct BusError;
-
-/// The width of the port a cycle reaches, which DSACK reports and the
-/// CPU32 sizes its cycles to (MC68331UM 4.4.2, dynamic bus sizing).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum PortSize {
-    /// An 8-bit port: a word takes two byte cycles.
-    Bits8,
-    /// A 16-bit port.
-    Bits16,
 }
 
 /// The external bus, as the chip and the host's peripherals answer it.
@@ -261,9 +214,9 @@ mod tests {
     use super::stall;
     use crate::cycles::Cycle;
     use crate::cycles::Cycles;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     #[test]
     fn an_access_holds_what_it_was_built_with() {

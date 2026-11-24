@@ -9,19 +9,19 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mc683xx_board::board;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_board::BoardStopRequest;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
+use mc683xx_cpu32::state::Save;
+use mc683xx_cpu32::state::StateError;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_target::size::Size;
+use mc683xx_target::Size;
 use pyo3::Bound;
 use pyo3::Py;
 use pyo3::PyAny;
@@ -54,7 +54,7 @@ enum Stopper {
     Core(StopRequest),
     /// A board's, once it is loaded: its peripherals are made, and may fail,
     /// before it has one.
-    Board(Rc<RefCell<Option<board::BoardStopRequest>>>),
+    Board(Rc<RefCell<Option<BoardStopRequest>>>),
 }
 
 impl Default for Stopper {
@@ -97,7 +97,7 @@ impl Pending {
     }
 
     /// The board's stop request, once it is loaded.
-    pub(crate) fn set_board_stop(&self, stop: board::BoardStopRequest) {
+    pub(crate) fn set_board_stop(&self, stop: BoardStopRequest) {
         if let Stopper::Board(slot) = &self.stop {
             *slot.borrow_mut() = Some(stop);
         }

@@ -17,8 +17,8 @@ const SEPARATOR: u8 = b'_';
 /// bits.
 ///
 /// ```
-/// use mc683xx_target::integer::ParseIntegerError;
-/// use mc683xx_target::integer::parse_integer;
+/// use mc683xx_target::ParseIntegerError;
+/// use mc683xx_target::parse_integer;
 ///
 /// assert_eq!(parse_integer::<u32>("0xfff_a44"), Ok(0xfffa44));
 /// assert_eq!(parse_integer::<u8>("0b101"), Ok(5));

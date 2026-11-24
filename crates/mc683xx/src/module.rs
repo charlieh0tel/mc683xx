@@ -6,11 +6,11 @@
 //!
 //! Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
 
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
-use mc683xx_target::size::Size;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_target::Size;
 
 use crate::peripheral::Timed;
 
@@ -146,9 +146,9 @@ pub mod sealed {
 /// a host reaches them through the chip.  So this does not compile:
 ///
 /// ```compile_fail,E0277
-/// use mc683xx_cpu32::cpu::state::StateError;
-/// use mc683xx_cpu32::cycles::Cycle;
+/// use mc683xx_cpu32::Cycle;
 /// use mc683xx_cpu32::interrupt::InterruptLevel;
+/// use mc683xx_cpu32::state::StateError;
 /// use mc683xx_modules::module::Block;
 /// use mc683xx_modules::module::InterruptRequest;
 /// use mc683xx_modules::module::Module;
@@ -209,7 +209,7 @@ pub trait Module: Timed + sealed::Sealed {
     fn reset(&mut self, now: Cycle);
 
     /// Its whole state as a snapshot, versioned
-    /// ([`mc683xx_cpu32::cpu::state`]'s `encode`), for the chip's.
+    /// ([`mc683xx_cpu32::state`]'s `encode`), for the chip's.
     ///
     /// # Errors
     ///

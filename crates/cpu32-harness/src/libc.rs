@@ -5,7 +5,7 @@
 //! the answers computed here as it computes them in Python.  Only
 //! routines that touch nothing but their arguments and RAM.
 
-use mc683xx_target::register::Register;
+use mc683xx_target::Register;
 
 use crate::firmware::Call;
 use crate::firmware::Firmware;

@@ -15,15 +15,15 @@ use js_sys::Object;
 use js_sys::Reflect;
 use js_sys::Symbol;
 use js_sys::Uint8Array;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::pacing::Pacing;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Span;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_cpu32::Stop;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -42,7 +42,7 @@ const MILLISECONDS_PER_SECOND: f64 = 1000.0;
 #[derive(Debug)]
 pub struct Board {
     /// The board.
-    board: mc683xx_board::board::Board<Mc68331>,
+    board: mc683xx_board::Board<Mc68331>,
 }
 
 impl Board {
@@ -69,7 +69,7 @@ impl Board {
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
         };
         let description = Description::parse_with(text, Path::new(""), &options, &read)?;
-        let board = mc683xx_board::board::Board::load_with(
+        let board = mc683xx_board::Board::load_with(
             &description,
             &mc683xx_peripherals::registry(),
             &Environment::default(),
@@ -124,12 +124,12 @@ impl Board {
 
     /// The board, to reach what the bindings do not.
     #[must_use]
-    pub const fn board(&self) -> &mc683xx_board::board::Board<Mc68331> {
+    pub const fn board(&self) -> &mc683xx_board::Board<Mc68331> {
         &self.board
     }
 
     /// The board, to change.
-    pub const fn board_mut(&mut self) -> &mut mc683xx_board::board::Board<Mc68331> {
+    pub const fn board_mut(&mut self) -> &mut mc683xx_board::Board<Mc68331> {
         &mut self.board
     }
 }
@@ -372,8 +372,8 @@ const fn stop_name(stop: Stop) -> &'static str {
     }
 }
 
-impl From<mc683xx_board::board::BoardRun> for BoardRun {
-    fn from(run: mc683xx_board::board::BoardRun) -> Self {
+impl From<mc683xx_board::BoardRun> for BoardRun {
+    fn from(run: mc683xx_board::BoardRun) -> Self {
         Self {
             stop: run.stop,
             now: run.now.picos(),
@@ -515,9 +515,9 @@ fn tag(value: &JsValue) -> Option<String> {
 
 #[cfg(test)]
 mod stop_tests {
-    use mc683xx_cpu32::cpu::Halt;
-    use mc683xx_cpu32::cpu::Stop;
-    use mc683xx_target::entry::Entry;
+    use mc683xx_cpu32::Halt;
+    use mc683xx_cpu32::Stop;
+    use mc683xx_target::Entry;
 
     use super::stop_name;
 

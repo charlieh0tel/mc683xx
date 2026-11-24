@@ -4,12 +4,12 @@
 use std::mem;
 
 use cpu32_oracle::state::State;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Halt;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::bus::Bus;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Halt;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Exception;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
@@ -18,8 +18,8 @@ use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::Interrupts;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::registers::Registers;
-use mc683xx_target::address::Address;
-use mc683xx_target::register::Register;
+use mc683xx_target::Address;
+use mc683xx_target::Register;
 
 /// The 68331's address lines, ADDR[23:0] (MC68331UM 4.4.1.1).
 pub const ADDRESS_BITS: u32 = 24;

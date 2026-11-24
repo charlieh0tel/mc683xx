@@ -5,12 +5,12 @@
 
 use std::mem;
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::BusError;
 use mc683xx_cpu32::exception::Vector;
-use mc683xx_target::size::Size;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
+use mc683xx_target::Size;
 use serde::Deserialize;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -32,7 +32,7 @@ use crate::signal::Signal;
 use crate::time::Clock;
 use crate::time::Moment;
 use crate::time::Time;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Frequency;
 
 /// The format of the built-in peripherals' snapshots.
 const VERSION: u32 = 1;
@@ -734,11 +734,11 @@ impl Peripheral for DcSource {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::cpu::state::StateError;
     use mc683xx_cpu32::exception::Vector;
+    use mc683xx_cpu32::state::StateError;
     use mc683xx_modules::chip_select::ChipSelect;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     use super::DcSource;
     use super::Divider;
@@ -748,13 +748,13 @@ mod tests {
     use super::Recorder;
     use super::RegisterFile;
     use super::VERSION;
+    use crate::environment::Environment;
     use crate::inspect::Inspection;
     use crate::inspect::Value;
     use crate::peripheral::Drive;
     use crate::peripheral::Peripheral;
     use crate::peripheral::PeripheralAccess;
     use crate::registry::Context;
-    use crate::registry::Environment;
     use crate::registry::ParameterError;
     use crate::registry::Parameters;
     use crate::signal::Signal;
@@ -762,7 +762,7 @@ mod tests {
     use crate::time::Moment;
     use crate::time::Time;
     use crate::time::TimeBase;
-    use mc683xx_cpu32::frequency::Frequency;
+    use mc683xx_cpu32::Frequency;
 
     /// The chip's system clock a test's drives carry: none of these parts
     /// is on it.

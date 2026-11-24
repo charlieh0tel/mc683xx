@@ -8,11 +8,11 @@
 //! current multiplier and the system clock it begins at, so EXTAL time
 //! stays exact across SYNCR writes.
 
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::Cycle;
 
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
-use mc683xx_cpu32::frequency::NANOHERTZ_PER_HERTZ;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::NANOHERTZ_PER_HERTZ;
 
 /// SYNCR (MC68331UM D.3.3): W, the VCO's divide by four.
 const SYNCR_W: u16 = 1 << 15;
@@ -95,7 +95,7 @@ pub enum ClockSource {
     #[non_exhaustive]
     Synthesizer {
         /// The reference's frequency, whole hertz.
-        #[serde(with = "mc683xx_cpu32::frequency::hertz")]
+        #[serde(with = "mc683xx_cpu32::hertz")]
         reference: Frequency,
     },
     /// MODCLK low: EXTAL is the system clock, of `frequency`; SYNCR has no
@@ -103,7 +103,7 @@ pub enum ClockSource {
     #[non_exhaustive]
     External {
         /// The clock's frequency, whole hertz.
-        #[serde(with = "mc683xx_cpu32::frequency::hertz")]
+        #[serde(with = "mc683xx_cpu32::hertz")]
         frequency: Frequency,
     },
 }
@@ -313,10 +313,10 @@ mod tests {
     use super::REFERENCE_MAX;
     use super::REFERENCE_MIN;
     use super::SystemClock;
-    use mc683xx_cpu32::cpu::state::decode;
-    use mc683xx_cpu32::cpu::state::encode;
-    use mc683xx_cpu32::cycles::Cycle;
-    use mc683xx_cpu32::frequency::Frequency;
+    use mc683xx_cpu32::Cycle;
+    use mc683xx_cpu32::Frequency;
+    use mc683xx_cpu32::state::decode;
+    use mc683xx_cpu32::state::encode;
 
     #[test]
     fn reset_is_256_times_the_reference() {

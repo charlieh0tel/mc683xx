@@ -10,19 +10,19 @@ use std::process;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use mc683xx_board::board::Board;
-use mc683xx_board::board::NoMemory;
-use mc683xx_board::board::NoPeripheral;
+use mc683xx_board::Board;
+use mc683xx_board::NoMemory;
+use mc683xx_board::NoPeripheral;
 
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_peripherals::ad569::Ad569;
-use mc683xx_peripherals::mc144110::Mc144110;
-use mc683xx_peripherals::sipo::Sipo;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_peripherals::Ad569;
+use mc683xx_peripherals::Mc144110;
+use mc683xx_peripherals::Sipo;
 
 /// The initial stack pointer and program counter in the image.
 const STACK: u32 = 0x10_fffe;

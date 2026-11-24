@@ -1,15 +1,15 @@
 //! Memory at a fixed address, on no chip select: emulator-only.
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::state::StateError;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 use super::BRANCH_TO_SELF;
 use super::NOP;
@@ -30,7 +30,7 @@ use crate::chip::MemoryId;
 use crate::event::Event;
 use crate::state;
 use mc683xx_cpu32::memory::MemoryKind;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 
 /// JMP (xxx).L (CPU32RM 4, JMP).
 const JUMP_ABSOLUTE: u16 = 0x4ef9;

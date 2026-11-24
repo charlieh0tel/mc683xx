@@ -2,7 +2,7 @@
 //! counted from the system clock, not stepped, so a counter's value at
 //! any time and the time it reaches any value are a division away.
 
-use mc683xx_cpu32::cycles::Cycle;
+use mc683xx_cpu32::Cycle;
 
 /// The span of the prescaler, nine stages (GPTRM 5.1).
 pub(super) const PRESCALER_SPAN: u64 = 1 << 9;
@@ -220,7 +220,7 @@ mod tests {
     use super::Counter;
     use super::PRESCALER_SPAN;
     use super::Prescaler;
-    use mc683xx_cpu32::cycles::Cycle;
+    use mc683xx_cpu32::Cycle;
 
     #[test]
     fn a_counter_counts_its_tap_across_a_change() {

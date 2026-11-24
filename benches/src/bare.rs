@@ -1,13 +1,13 @@
 //! The core alone: a CPU32 on 256 Kbytes of zero-wait RAM in both
 //! spaces, nothing on the bus and no interrupts.
 
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
-use mc683xx_cpu32::bus::BusError;
 use mc683xx_cpu32::bus::Read;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::Acknowledged;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -17,8 +17,8 @@ use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::Page;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::register::Register;
+use mc683xx_target::Address;
+use mc683xx_target::Register;
 
 use crate::kernel::Calibration;
 use crate::kernel::Kernel;

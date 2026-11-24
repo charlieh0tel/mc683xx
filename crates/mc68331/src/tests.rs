@@ -7,20 +7,13 @@ use std::cell::Cell;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu;
-use mc683xx_cpu32::cpu::Halt;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::state::Layer;
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::Stateless;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::Halt;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::exception::Vector;
-use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
@@ -30,6 +23,12 @@ use mc683xx_cpu32::memory::Unserved;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::Select;
+use mc683xx_cpu32::state::Layer;
+use mc683xx_cpu32::state::Save;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::Stateless;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::module;
@@ -44,10 +43,10 @@ use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::clock::ClockSource;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
 use snapshot_golden::version_of;
 
 use crate::board;
@@ -70,11 +69,11 @@ use crate::port::NoInputs;
 use crate::port::Port;
 use crate::port::PortChange;
 use crate::state;
-use mc683xx_cpu32::bus::StopRequest;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::Dsack;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 
 mod bus;
 mod debug;
@@ -1166,10 +1165,10 @@ fn the_format_matches_its_golden() {
         "chip",
         &[
             ("chip", state::VERSION),
-            ("cpu", cpu::state::VERSION),
+            ("cpu", mc683xx_cpu32::state::VERSION),
             ("qsm", module(board::QSM)),
             ("gpt", module(board::GPT)),
-            ("stateless", cpu::state::STATELESS_VERSION),
+            ("stateless", mc683xx_cpu32::state::STATELESS_VERSION),
         ],
         &chip.save().unwrap(),
     );

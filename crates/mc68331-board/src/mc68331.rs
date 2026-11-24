@@ -12,30 +12,30 @@ use std::fmt;
 use std::rc::Rc;
 use std::str::FromStr;
 
-use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Run;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::Run;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::PeripheralId;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::Diversion;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::chip::MemoryId;
-use mc683xx_mc68331::chip::OutputHorizon;
-use mc683xx_mc68331::chip::OutputStop;
-use mc683xx_mc68331::chip::SyncRequest;
-use mc683xx_mc68331::event::Event;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::Diversion;
+use mc683xx_mc68331::Event;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_mc68331::MemoryId;
+use mc683xx_mc68331::OutputChange;
+use mc683xx_mc68331::OutputHorizon;
+use mc683xx_mc68331::OutputStop;
+use mc683xx_mc68331::Port;
+use mc683xx_mc68331::SyncRequest;
 use mc683xx_mc68331::gpt::Input;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm::Channel;
-use mc683xx_mc68331::port::OutputChange;
-use mc683xx_mc68331::port::Port;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Dsack;
 use mc683xx_modules::peripheral::AnyMappedPeripheral;
@@ -44,8 +44,8 @@ use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
+use mc683xx_modules::sim::ResetScope;
 use mc683xx_modules::sim::clock::ClockSource;
-use mc683xx_modules::sim::reset::ResetScope;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -488,7 +488,7 @@ impl fmt::Debug for Mc68331Builder {
 }
 
 /// `error`, the chip's, as a load's.
-fn built(error: mc683xx_mc68331::chip::BuildError) -> LoadError {
+fn built(error: mc683xx_mc68331::BuildError) -> LoadError {
     LoadError::Build(Box::new(error))
 }
 
@@ -848,11 +848,11 @@ mod tests {
         assert_eq!(names, ["PE0", "PE7", "PF0", "PQS0", "PGP0", "PC0"]);
     }
 
-    use mc683xx_cpu32::cpu::state::StateError;
-    use mc683xx_cpu32::cpu::state::decode;
-    use mc683xx_cpu32::cpu::state::encode;
     use mc683xx_cpu32::interrupt::IrqPin;
-    use mc683xx_mc68331::port::Port;
+    use mc683xx_cpu32::state::StateError;
+    use mc683xx_cpu32::state::decode;
+    use mc683xx_cpu32::state::encode;
+    use mc683xx_mc68331::Port;
 
     use super::PORT_C_PINS;
     use super::PORT_PINS;

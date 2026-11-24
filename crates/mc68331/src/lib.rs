@@ -2,7 +2,7 @@
 //! (MC68331UM).
 //!
 //! The host wires its peripherals and memory to the chip-select pins with a
-//! [`chip::Builder`]; the SIM's decode of the firmware's chip-select
+//! [`Builder`]; the SIM's decode of the firmware's chip-select
 //! registers decides which cycles reach them.
 //!
 //! # Examples
@@ -11,11 +11,11 @@
 //! (SIMRM 7.9.3), holding the reset vectors and a `stop`:
 //!
 //! ```
-//! use mc683xx_cpu32::cpu::Stop;
-//! use mc683xx_cpu32::cycles::Cycles;
-//! use mc683xx_mc68331::chip::BuildError;
-//! use mc683xx_mc68331::chip::Builder;
+//! use mc683xx_cpu32::Cycles;
+//! use mc683xx_cpu32::Stop;
 //! use mc683xx_cpu32::memory::MemoryKind;
+//! use mc683xx_mc68331::BuildError;
+//! use mc683xx_mc68331::Builder;
 //! use mc683xx_modules::chip_select::ChipSelect;
 //! use mc683xx_modules::sim::Configuration;
 //!
@@ -51,13 +51,34 @@
 )]
 
 mod board;
-pub mod chip;
-pub mod debug;
-pub mod event;
+mod chip;
+mod debug;
+mod event;
 pub mod gpt;
-pub mod host;
-pub mod port;
+mod host;
+mod port;
+pub mod serial;
 pub mod state;
+
+pub use chip::BuildError;
+pub use chip::Builder;
+pub use chip::Diversion;
+pub use chip::Mc68331;
+pub use chip::MemoryId;
+#[doc(hidden)]
+pub use chip::OutputHorizon;
+pub use chip::OutputStop;
+pub use chip::SyncRequest;
+pub use debug::TargetError;
+pub use event::ChipTracing;
+pub use event::DsackFault;
+pub use event::Event;
+pub use host::BusCycleError;
+pub use port::NoInputs;
+pub use port::OutputChange;
+pub use port::ParsePortError;
+pub use port::Port;
+pub use port::PortChange;
 
 #[cfg(test)]
 mod tests;

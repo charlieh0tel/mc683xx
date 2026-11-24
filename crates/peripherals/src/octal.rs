@@ -44,8 +44,8 @@ pub(crate) mod tests {
     use mc683xx_board::peripheral::PeripheralAccess;
     use mc683xx_board::signal::Signal;
     use mc683xx_modules::chip_select::ChipSelect;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     /// A data cycle of `size`.
     pub(crate) const fn access(size: Size) -> PeripheralAccess {

@@ -29,10 +29,10 @@ use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Moment;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -142,7 +142,7 @@ mod tests {
     use mc683xx_board::signal::Signal;
     use mc683xx_board::time::Moment;
     use mc683xx_board::time::Time;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Size;
 
     use super::BUS;
     use super::Buffer;

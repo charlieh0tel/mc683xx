@@ -20,15 +20,12 @@
 //!
 //! [`Bdm`]: crate::bdm::Bdm
 //! [`Cpu32Target`]: mc683xx_target::Cpu32Target
-#![cfg_attr(
-    feature = "mc68331",
-    doc = "[`Mc68331`]: mc683xx_mc68331::chip::Mc68331"
-)]
+#![cfg_attr(feature = "mc68331", doc = "[`Mc68331`]: mc683xx_mc68331::Mc68331")]
 #![cfg_attr(
     not(feature = "mc68331"),
     doc = "[`Mc68331`]: https://docs.rs/mc683xx-mc68331"
 )]
-#![cfg_attr(feature = "board", doc = "[`Board`]: mc683xx_board::board::Board")]
+#![cfg_attr(feature = "board", doc = "[`Board`]: mc683xx_board::Board")]
 #![cfg_attr(
     not(feature = "board"),
     doc = "[`Board`]: https://docs.rs/mc683xx-board"
@@ -38,17 +35,17 @@ use std::convert::Infallible;
 
 #[cfg(feature = "board")]
 use mc683xx_board::condition::Conditions;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::bare::End;
-use mc683xx_cpu32::cpu::bare::Limits;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::End;
+use mc683xx_cpu32::Limits;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::flat::Machine;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::SystemRegister;
 
 use crate::arch::Location;
 use crate::arch::get;
@@ -64,7 +61,7 @@ mod chip;
 /// More ends may come, so a match needs a wildcard arm:
 ///
 /// ```compile_fail
-/// use mc683xx_gdb::target::TargetRun;
+/// use mc683xx_gdb::TargetRun;
 ///
 /// fn ran_on(ran: TargetRun) -> bool {
 ///     match ran {
@@ -92,7 +89,7 @@ pub enum TargetRun {
     /// ([`Cpu::set_stop_on_fault`]), or, on the bare CPU, an exception
     /// its host handles or stops at did.
     ///
-    /// [`Cpu::set_stop_on_fault`]: mc683xx_cpu32::cpu::Cpu::set_stop_on_fault
+    /// [`Cpu::set_stop_on_fault`]: mc683xx_cpu32::Cpu::set_stop_on_fault
     Fault,
     /// A stop condition held ([`Target::conditions`]).
     Condition,
@@ -118,7 +115,7 @@ impl From<Stop> for TargetRun {
 /// More answers may come, so a match needs a wildcard arm:
 ///
 /// ```compile_fail
-/// use mc683xx_gdb::target::TargetReset;
+/// use mc683xx_gdb::TargetReset;
 ///
 /// fn reset(answer: TargetReset) -> bool {
 ///     match answer {
@@ -141,7 +138,7 @@ pub enum TargetReset {
 /// More reasons may come, so a match needs a wildcard arm:
 ///
 /// ```compile_fail
-/// use mc683xx_gdb::target::AccessError;
+/// use mc683xx_gdb::AccessError;
 ///
 /// fn target<E>(error: AccessError<E>) -> Option<E> {
 ///     match error {

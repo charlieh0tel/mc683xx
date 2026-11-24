@@ -2,11 +2,11 @@
 //! control, over any [`Cpu32Target`](mc683xx_target::Cpu32Target): a
 //! BDM pod's on silicon, or the emulated chip's.
 //!
-//! - [`image`]: an [`Image`](image::Image), from S-records
-//!   ([`srecord`]), an ELF32 big-endian executable ([`elf`]) or raw
-//!   binary.
-//! - [`load`]: [`Image::load`](image::Image::load) writes it in words,
-//!   reads it back and compares, and sets RPC from its entry point.
+//! - [`Image`]: an image, from S-records ([`srecord`]), an ELF32
+//!   big-endian executable ([`elf`]) or raw binary.
+//! - [`Image::load`] writes it in words, reads it back and compares,
+//!   and sets RPC from its entry point ([`LoadOptions`],
+//!   [`LoadReport`]).
 //! - [`script`]: an init script, one command a line, that writes
 //!   memory and registers and checks or polls memory, as a board's
 //!   reset code would before a load: chip selects, the watchdog, the
@@ -28,7 +28,17 @@
 )]
 
 pub mod elf;
-pub mod image;
-pub mod load;
+mod image;
+mod load;
 pub mod script;
 pub mod srecord;
+
+pub use image::Image;
+pub use image::ImageError;
+pub use image::Segment;
+pub use load::ImageLoadError;
+pub use load::LoadOptions;
+pub use load::LoadReport;
+pub use load::LoadedSegment;
+pub use load::OddEdges;
+pub use load::Verification;

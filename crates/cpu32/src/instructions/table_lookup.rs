@@ -23,7 +23,7 @@ use crate::instructions::data_movement::low_register;
 use crate::instructions::system;
 use crate::registers::status;
 use crate::timing;
-use mc683xx_target::size::Size;
+use mc683xx_target::Size;
 
 /// TBL: 1111 1000 00 <ea>, mode 000 the register form (CPU32RM 4.4,
 /// TBLS).
@@ -188,7 +188,7 @@ mod tests {
     use crate::instructions::tests::poke_long;
     use crate::instructions::tests::step;
     use crate::registers::status;
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     /// Where the tests' tables are.
     const TABLE: u32 = 0x2000;

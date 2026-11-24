@@ -148,6 +148,20 @@ class Alarm:
         return self.now >= self.at
 
 
+def foreign_peripheral():
+    """A peripheral id no test's builder gave: another builder's, past
+    theirs."""
+    other = mc683xx.Builder()
+    return [other.unwired_peripheral(Recorder()) for _ in range(16)][-1]
+
+
+def foreign_memory():
+    """A memory id no test's builder gave: another builder's, past
+    theirs."""
+    other = mc683xx.Builder()
+    return [other.fixed_memory(bytes(2048), base * 2048) for base in range(16)][-1]
+
+
 def board(program, peripheral):
     builder = mc683xx.Builder()
     builder.memory(rom(program), ["CSBOOT"], writable=False)
@@ -373,6 +387,25 @@ def test_background_controls_need_background_mode():
     assert chip.background is None
 
 
+def test_the_builder_s_ids_are_opaque():
+    builder, ram, number = board([NOP], Recorder())
+    assert isinstance(ram, mc683xx.MemoryId)
+    assert isinstance(number, mc683xx.PeripheralId)
+    shown = str(ram).removeprefix("memory ")
+    assert int(shown) >= 0 and repr(ram) == f"MemoryId({shown})"
+    assert str(number).startswith("peripheral ")
+    with pytest.raises(TypeError):
+        builder.set_interrupt(0, 1)
+    chip = builder.build()
+    assert len({ram, ram}) == 1
+    with pytest.raises(TypeError):
+        chip.memory(0)
+    other = mc683xx.Builder()
+    foreign = [other.unwired_peripheral(Recorder()) for _ in range(2)][-1]
+    with pytest.raises(KeyError, match="no peripheral"):
+        chip.peripheral(foreign)
+
+
 def test_registers_and_memory():
     builder, ram, _ = board([NOP], Recorder())
     chip = builder.build()
@@ -394,8 +427,10 @@ def test_registers_and_memory():
         chip.memory(ram, RAM_BYTES + 1)
     with pytest.raises(IndexError):
         chip.set_memory(ram, RAM_BYTES - 1, b"\x00\x00")
-    with pytest.raises(IndexError):
-        chip.memory(7)
+    other = mc683xx.Builder()
+    foreign = [other.fixed_memory(bytes(2048), base * 2048) for base in range(3)][-1]
+    with pytest.raises(KeyError, match="no memory"):
+        chip.memory(foreign)
     assert chip.system_hz == 32768 * 256
 
 
@@ -410,8 +445,8 @@ def test_wiring_mistakes():
         builder.peripheral(Recorder(), ["CSBOOT"])
     with pytest.raises(TypeError):
         builder.peripheral(object(), ["CS2"])
-    with pytest.raises(IndexError):
-        builder.set_interrupt(3, 1)
+    with pytest.raises(KeyError):
+        builder.set_interrupt(foreign_peripheral(), 1)
     with pytest.raises(ValueError):
         mc683xx.Builder(reference_hz=32768, external_hz=16_000_000)
     with pytest.raises(ValueError):
@@ -730,7 +765,7 @@ def test_cprout_edges_come_at_tcnts_clock():
 
 
 def test_every_rsr_cause_is_a_reset_cause():
-    builder, _, _ = board([NOP], Recorder())
+    builder, _, number = board([NOP], Recorder())
     causes = [
         mc683xx.ResetCause.EXTERNAL,
         mc683xx.ResetCause.POWER_ON,
@@ -741,7 +776,7 @@ def test_every_rsr_cause_is_a_reset_cause():
         mc683xx.ResetCause.TEST,
     ]
     assert len(set(causes)) == 7
-    builder.set_reset_scope(0, causes)
+    builder.set_reset_scope(number, causes)
 
 
 def test_a_reset_scope_keeps_a_peripheral_out_of_the_watchdog_reset():
@@ -753,8 +788,8 @@ def test_a_reset_scope_keeps_a_peripheral_out_of_the_watchdog_reset():
         mc683xx.ResetCause.EXTERNAL,
     ]
     builder.set_reset_scope(number, causes)
-    with pytest.raises(IndexError):
-        builder.set_reset_scope(9, causes)
+    with pytest.raises(KeyError):
+        builder.set_reset_scope(foreign_peripheral(), causes)
     chip = builder.build()
     # the watchdog's 2^9 EXTAL periods at 256 clocks
     chip.run_for(512 * 256 + 100)
@@ -973,20 +1008,22 @@ def test_a_write_to_a_protected_page_is_a_bus_error():
 def counting(*models, qspi=None):
     """A loop that counts D0 and stores it in RAM and to the peripheral, a
     `Register`, whose cycles the trace sees; `models` on no pin, `qspi`
-    on the QSPI."""
+    on the QSPI.  The chip, the RAM's id and the `Register`'s."""
     loop = [
         ADDQ_WORD_1_D0,
         MOVE_WORD_D0_TO_ABSOLUTE, RAM_WORD >> 16, RAM_WORD & 0xFFFF,
         MOVE_WORD_D0_TO_ABSOLUTE, PERIPHERAL_BASE >> 16, 0x0010,
     ]
-    builder, ram, _ = board(WIRING + loop + [short_branch(BRA_SHORT, len(loop) + 1)], Register())
+    builder, ram, register = board(
+        WIRING + loop + [short_branch(BRA_SHORT, len(loop) + 1)], Register()
+    )
     for model in models:
         builder.unwired_peripheral(model)
     if qspi is not None:
         builder.set_qspi(qspi)
     chip = builder.build()
     chip.set_tracing(bus_cycles=True, exceptions=True)
-    return chip, ram
+    return chip, ram, register
 
 
 def traced(chip, ram, budget):
@@ -1000,7 +1037,7 @@ def traced(chip, ram, budget):
 
 
 def test_a_restored_chip_runs_the_same():
-    chip, ram = counting()
+    chip, ram, _ = counting()
     chip.run_for(3000)
     chip.take_events()
     snapshot = chip.save()
@@ -1010,7 +1047,7 @@ def test_a_restored_chip_runs_the_same():
     chip.restore(snapshot)
     assert traced(chip, ram, 5000) == first
     # and into another chip built the same way
-    other, other_ram = counting()
+    other, other_ram, _ = counting()
     other.run_for(1234)
     other.take_events()
     other.restore(snapshot)
@@ -1018,9 +1055,9 @@ def test_a_restored_chip_runs_the_same():
 
 
 def test_a_snapshot_holds_the_peripherals():
-    chip, _ = counting()
+    chip, _, register = counting()
     chip.run_for(3000)
-    peripheral = chip.peripheral(0)
+    peripheral = chip.peripheral(register)
     snapshot = chip.save()
     value = peripheral.value
     assert value > 0
@@ -1031,10 +1068,10 @@ def test_a_snapshot_holds_the_peripherals():
 
 
 def test_a_peripheral_without_save_fails_the_save_naming_it():
-    chip, _ = counting(Fixed(), Recorder())
+    chip, _, _ = counting(Fixed(), Recorder())
     with pytest.raises(mc683xx.StateError, match="^peripheral 2: a Python peripheral cannot save its state$"):
         chip.save()
-    saving, _ = counting(Fixed(), Fixed())
+    saving, _, _ = counting(Fixed(), Fixed())
     with pytest.raises(mc683xx.StateError, match="^peripheral 2: "):
         chip.restore(saving.save())
 
@@ -1061,24 +1098,24 @@ class RestoreOnly:
 
 def test_a_peripheral_with_save_or_restore_alone_cannot_save():
     for half in (SaveOnly(), RestoreOnly()):
-        chip, _ = counting(Fixed(), half)
+        chip, _, _ = counting(Fixed(), half)
         chip.run_for(3000)
         before = chip.registers()
         with pytest.raises(
             mc683xx.StateError, match="^peripheral 2: a Python peripheral cannot save its state$"
         ):
             chip.save()
-        saving, _ = counting(Fixed(), Fixed())
+        saving, _, _ = counting(Fixed(), Fixed())
         with pytest.raises(mc683xx.StateError, match="^peripheral 2: "):
             chip.restore(saving.save())
         assert chip.registers() == before
     for half in (SaveOnly(), RestoreOnly()):
-        chip, _ = counting(qspi=half)
+        chip, _, _ = counting(qspi=half)
         with pytest.raises(
             mc683xx.StateError, match="^the QSPI peripheral: a Python peripheral cannot save its state$"
         ):
             chip.save()
-        saving, _ = counting(qspi=Tally())
+        saving, _, _ = counting(qspi=Tally())
         with pytest.raises(mc683xx.StateError, match="^the QSPI peripheral: "):
             chip.restore(saving.save())
 
@@ -1088,7 +1125,7 @@ def test_a_keyboard_interrupt_in_a_restore_is_raised_and_changes_nothing():
         def restore(self, snapshot):
             raise KeyboardInterrupt
 
-    chip, _ = counting(Fixed(), Interrupted())
+    chip, _, _ = counting(Fixed(), Interrupted())
     chip.run_for(3000)
     snapshot = chip.save()
     chip.run_for(3000)
@@ -1103,16 +1140,16 @@ def test_an_exception_a_peripheral_save_raises_is_raised():
         def save(self):
             return 1 // 0
 
-    chip, _ = counting(Raising())
+    chip, _, _ = counting(Raising())
     with pytest.raises(ZeroDivisionError):
         chip.save()
 
 
 def test_a_restore_into_another_count_of_peripherals_is_refused_and_changes_nothing():
-    chip, _ = counting()
+    chip, _, _ = counting()
     chip.run_for(3000)
     snapshot = chip.save()
-    other, other_ram = counting(Fixed())
+    other, other_ram, _ = counting(Fixed())
     other.run_for(1234)
     before = other.save()
     with pytest.raises(mc683xx.StateError, match="peripherals"):
@@ -1135,17 +1172,17 @@ def test_a_peripheral_that_refuses_its_snapshot_leaves_the_chip_as_it_was():
                 raise ValueError("another build's snapshot")
 
     model = Built(b"a")
-    chip, _ = counting(model)
+    chip, _, register = counting(model)
     chip.run_for(3000)
     snapshot = chip.save()
     chip.run_for(3000)
     model.build = b"b"
     before = chip.save()
-    value = chip.peripheral(0).value
+    value = chip.peripheral(register).value
     with pytest.raises(ValueError, match="another build's snapshot"):
         chip.restore(snapshot)
     assert chip.save() == before
-    assert chip.peripheral(0).value == value
+    assert chip.peripheral(register).value == value
 
 
 class Tally:
@@ -1170,7 +1207,7 @@ class Tally:
 
 def test_a_snapshot_holds_the_qspi_peripheral():
     tally = Tally(3)
-    chip, _ = counting(qspi=tally)
+    chip, _, _ = counting(qspi=tally)
     chip.run_for(3000)
     snapshot = chip.save()
     tally.count = 9
@@ -1178,26 +1215,26 @@ def test_a_snapshot_holds_the_qspi_peripheral():
     chip.restore(snapshot)
     assert tally.count == 3
     other_tally = Tally(5)
-    other, _ = counting(qspi=other_tally)
+    other, _, _ = counting(qspi=other_tally)
     other.restore(snapshot)
     assert other_tally.count == 3
     assert other.save() == snapshot
 
 
 def test_a_qspi_peripheral_without_save_fails_the_save_naming_it():
-    chip, _ = counting(qspi=Peripheral(0))
+    chip, _, _ = counting(qspi=Peripheral(0))
     with pytest.raises(
         mc683xx.StateError, match="^the QSPI peripheral: a Python peripheral cannot save its state$"
     ):
         chip.save()
-    saving, _ = counting(qspi=Tally())
+    saving, _, _ = counting(qspi=Tally())
     with pytest.raises(mc683xx.StateError, match="^the QSPI peripheral: "):
         chip.restore(saving.save())
 
 
 def test_a_snapshot_with_another_qspi_attachment_is_refused():
-    with_qspi, _ = counting(qspi=Tally())
-    chip, _ = counting()
+    with_qspi, _, _ = counting(qspi=Tally())
+    chip, _, _ = counting()
     before = chip.save()
     with pytest.raises(mc683xx.StateError, match="the QSPI peripheral"):
         chip.restore(with_qspi.save())
@@ -1213,23 +1250,23 @@ def test_a_qspi_peripheral_that_refuses_its_snapshot_leaves_the_chip_as_it_was()
                 raise ValueError("refused")
 
     tally = Tally(4)
-    saving, _ = counting(qspi=tally)
+    saving, _, _ = counting(qspi=tally)
     saving.run_for(3000)
     snapshot = saving.save()
     refusing = Refusing(7)
-    chip, _ = counting(qspi=refusing)
+    chip, _, register = counting(qspi=refusing)
     chip.run_for(1234)
     before = chip.save()
-    value = chip.peripheral(0).value
+    value = chip.peripheral(register).value
     with pytest.raises(ValueError, match="refused"):
         chip.restore(snapshot)
     assert chip.save() == before
-    assert chip.peripheral(0).value == value
+    assert chip.peripheral(register).value == value
     assert refusing.count == 7
 
 
 def test_a_snapshot_of_another_format_is_refused():
-    chip, _ = counting()
+    chip, _, _ = counting()
     snapshot = bytearray(chip.save())
     with pytest.raises(mc683xx.StateError):
         chip.restore(b"")
@@ -1396,8 +1433,8 @@ def test_a_peripheral_s_unassigned_dsack_is_an_event():
     builder = booting([])
     number = builder.peripheral(Recorder(0x1234), ["CS2"])
     builder.set_dsack(number, mc683xx.Dsack.BOTH)
-    with pytest.raises(IndexError):
-        builder.set_dsack(9, mc683xx.Dsack.DSACK0)
+    with pytest.raises(KeyError):
+        builder.set_dsack(foreign_peripheral(), mc683xx.Dsack.DSACK0)
     chip = builder.build()
     chip.bus_write(CSBAR2, 2, DSACK_BASE >> 8)
     chip.bus_write(CSOR2, 2, CSOR_EXTERNAL)
@@ -1530,8 +1567,8 @@ def test_a_peripheral_diverts_a_memory_to_another_and_back():
     chip = builder.build()
     chip.run_for(2000)
     assert [chip.read_register(f"D{n}") & 0xFFFF for n in range(3)] == [0x1111, 0xBEEF, 0x1111]
-    with pytest.raises(IndexError):
-        switch.diversion.release(9)
+    with pytest.raises(KeyError):
+        switch.diversion.release(foreign_memory())
 
 
 def test_a_host_with_no_board_takes_port_qs_changes() -> None:

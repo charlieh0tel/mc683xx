@@ -14,15 +14,16 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::mapped::port_size;
-use mc683xx_board::board::Board;
-use mc683xx_board::board::BoardRun;
-use mc683xx_board::board::BoardStopRequest;
-use mc683xx_board::board::BoardTracing;
-use mc683xx_board::board::External;
-use mc683xx_board::board::LookupError;
-use mc683xx_board::board::RunError;
-use mc683xx_board::chip::Chip;
-use mc683xx_board::description::Options;
+use mc683xx_board::Board;
+use mc683xx_board::BoardRun;
+use mc683xx_board::BoardStopRequest;
+use mc683xx_board::BoardTracing;
+use mc683xx_board::Chip;
+use mc683xx_board::Environment;
+use mc683xx_board::External;
+use mc683xx_board::LookupError;
+use mc683xx_board::Options;
+use mc683xx_board::RunError;
 use mc683xx_board::inspect::Field;
 use mc683xx_board::inspect::Inspection;
 use mc683xx_board::inspect::Value;
@@ -36,7 +37,6 @@ use mc683xx_board::peripheral::Peripheral;
 use mc683xx_board::peripheral::PeripheralAccess;
 use mc683xx_board::peripheral::Role;
 use mc683xx_board::peripheral::Transfer;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::ParameterError;
 use mc683xx_board::registry::ParameterTable;
 use mc683xx_board::registry::ParameterValue;
@@ -54,17 +54,17 @@ use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_board::time::TimeBase;
 use mc683xx_board::trace::Line;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::peripheral;
 use mc683xx_modules::peripheral::floating_miso;
 use mc683xx_modules::qsm::sci::Frame;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use pyo3::Bound;
 use pyo3::IntoPyObjectExt;
 use pyo3::Py;
@@ -528,7 +528,7 @@ impl SerialView {
     }
 }
 
-/// A run-time endpoint, as Python sees one (`board::External`): its
+/// A run-time endpoint, as Python sees one (`External`): its
 /// name, its nets' type and its direction.
 #[pyclass(name = "External", module = "mc683xx", frozen, eq)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -631,7 +631,7 @@ impl Observer for PythonObserver {
 }
 
 /// The handle by which the host asks a board's run to stop (Rust's
-/// `board::BoardStopRequest`), as `Board.stop_request` gives it: for an
+/// `BoardStopRequest`), as `Board.stop_request` gives it: for an
 /// observer's callback, which ends the run by it without raising.  It
 /// holds the board weakly; once the board is gone it does nothing.
 #[pyclass(name = "BoardStopRequest", module = "mc683xx", unsendable)]
@@ -1339,7 +1339,7 @@ fn ports(class: &Bound<'_, PyAny>) -> PyResult<Vec<PortSpec>> {
         .collect()
 }
 
-/// Why a board's run ended, and when (Rust's `board::BoardRun`).
+/// Why a board's run ended, and when (Rust's `BoardRun`).
 #[pyclass(name = "BoardRun", module = "mc683xx", frozen, eq, hash, get_all)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct BoardRunView {

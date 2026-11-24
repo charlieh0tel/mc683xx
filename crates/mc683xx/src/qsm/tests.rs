@@ -3,16 +3,16 @@ use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::Stateless;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
 use mc683xx_cpu32::exception::Vector;
-use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
-use mc683xx_target::size::Size;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::Stateless;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
+use mc683xx_target::Size;
 
 use super::PORTQS;
 use super::PQSPAR_DDRQS;

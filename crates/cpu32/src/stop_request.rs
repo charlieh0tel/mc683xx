@@ -1,0 +1,35 @@
+//! The host's request that a run stop.
+
+use std::cell::Cell;
+use std::rc::Rc;
+
+/// A handle by which the host asks a run to stop.
+///
+/// The host's peripherals, or anything else of the host's, stop the run
+/// after the instruction whose cycle asked, or, on the chip, at the
+/// sync point if no instruction is running
+/// ([`Stop::Requested`](crate::cpu::Stop::Requested)).  Clones share
+/// one request, which the stop clears.  The bare machine and the chip
+/// each give one.
+#[derive(Debug, Clone, Default)]
+pub struct StopRequest(Rc<Cell<bool>>);
+
+impl StopRequest {
+    /// Asks the run to stop.
+    pub fn request(&self) {
+        self.0.set(true);
+    }
+
+    /// Withdraws a request the run has not taken: for a host whose own
+    /// run loop stopped for it first, between runs.
+    pub fn withdraw(&self) {
+        self.0.set(false);
+    }
+
+    /// Whether a stop is asked for, clearing the request: for the run
+    /// loop that serves it ([`Bus::stop_requested`](crate::bus::Bus::stop_requested)).
+    #[must_use = "a stop taken and dropped is lost"]
+    pub fn take(&self) -> bool {
+        self.0.replace(false)
+    }
+}

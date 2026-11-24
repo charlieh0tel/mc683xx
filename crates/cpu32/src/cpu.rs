@@ -7,9 +7,9 @@
 use std::fmt;
 use std::mem;
 
+use crate::BusError;
 use crate::bus::Bus;
 use crate::bus::BusAccess;
-use crate::bus::BusError;
 use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::effective_address::Altered;
@@ -38,22 +38,22 @@ use crate::memory::watch;
 use crate::registers::Registers;
 use crate::registers::status;
 use crate::timing;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
-pub mod bare;
-pub mod control;
-pub mod hooks;
-pub mod state;
+pub(crate) mod bare;
+pub(crate) mod control;
+mod hooks;
+mod state;
 
 use bare::Bare;
 use bare::Limits;
 
-use hooks::HookId;
-use hooks::Hooks;
-use hooks::Resume;
+use crate::cpu::hooks::Hooks;
+use crate::cpu::hooks::Resume;
+use crate::hooks::HookId;
 
 /// Why a run ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -297,14 +297,13 @@ impl Cpu {
     /// MOVEQ #42,D0 from where the host puts PC:
     ///
     /// ```
-    /// use mc683xx_target::address::Address;
+    /// use mc683xx_cpu32::BusError;
+    /// use mc683xx_cpu32::Cpu;
+    /// use mc683xx_cpu32::Cycle;
+    /// use mc683xx_cpu32::Cycles;
     /// use mc683xx_cpu32::bus::Bus;
     /// use mc683xx_cpu32::bus::BusAccess;
-    /// use mc683xx_cpu32::bus::BusError;
     /// use mc683xx_cpu32::bus::Read;
-    /// use mc683xx_cpu32::cpu::Cpu;
-    /// use mc683xx_cpu32::cycles::Cycle;
-    /// use mc683xx_cpu32::cycles::Cycles;
     /// use mc683xx_cpu32::interrupt::Acknowledge;
     /// use mc683xx_cpu32::interrupt::Acknowledged;
     /// use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -314,6 +313,7 @@ impl Cpu {
     /// use mc683xx_cpu32::memory::PAGE_BYTES;
     /// use mc683xx_cpu32::memory::Page;
     /// use mc683xx_cpu32::memory::Space;
+    /// use mc683xx_target::Address;
     ///
     /// /// A bus with nothing on it.
     /// struct NoBus;
@@ -1985,9 +1985,9 @@ mod tests {
     use super::Cpu;
     use super::Halt;
     use super::Stop;
+    use crate::BusError;
     use crate::bus::Bus;
     use crate::bus::BusAccess;
-    use crate::bus::BusError;
     use crate::bus::Read;
     use crate::cycles::Cycle;
     use crate::cycles::Cycles;
@@ -2008,10 +2008,10 @@ mod tests {
     use crate::interrupt::Interrupts;
     use crate::memory::Memory;
     use crate::registers::status;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::entry::Entry;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::Entry;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
     use std::cell::Cell;
     use std::ops::ControlFlow;
     use std::rc::Rc;
@@ -2826,7 +2826,7 @@ mod tests {
         use crate::interrupt::Acknowledge;
         use crate::interrupt::InterruptLevel;
         use crate::registers::status;
-        use mc683xx_target::address::Address;
+        use mc683xx_target::Address;
 
         /// ADDQ.L #1, D0.
         const ADDQ: u16 = 0x5280;

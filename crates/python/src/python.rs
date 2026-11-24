@@ -5,10 +5,10 @@ use std::fmt;
 use std::io;
 use std::path::Path;
 
-use mc683xx_board::description::LoadError;
-use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_board::LoadError;
 use mc683xx_cpu32::flat::PeekError;
-use mc683xx_mc68331::host::BusCycleError;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_mc68331::BusCycleError;
 use pyo3::Bound;
 use pyo3::IntoPyObject;
 use pyo3::IntoPyObjectExt;
@@ -17,6 +17,7 @@ use pyo3::PyErr;
 use pyo3::PyResult;
 use pyo3::Python;
 use pyo3::exceptions::PyIndexError;
+use pyo3::exceptions::PyKeyError;
 use pyo3::exceptions::PyNotImplementedError;
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyOverflowError;
@@ -56,6 +57,7 @@ use crate::chip::DsackView;
 use crate::chip::Entry;
 use crate::chip::Event;
 use crate::chip::Halt;
+use crate::chip::MemoryIdView;
 use crate::chip::ResetCause;
 use crate::chip::Run;
 use crate::chip::Space;
@@ -96,7 +98,8 @@ impl From<Error> for PyErr {
     fn from(error: Error) -> Self {
         let message = error.to_string();
         match error {
-            Error::Unknown { .. } | Error::Range { .. } => PyIndexError::new_err(message),
+            Error::Unknown(_) => PyKeyError::new_err(message),
+            Error::Range { .. } => PyIndexError::new_err(message),
             Error::Budget(_) => PyOverflowError::new_err(message),
             Error::Built => PyRuntimeError::new_err(message),
             Error::Unmapped { kind: RUN_END, .. } | Error::Run(_) | Error::Take(_) => {
@@ -230,6 +233,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.setattr("__version__", pep440_version(env!("CARGO_PKG_VERSION")))?;
     module.add_class::<MachineView>()?;
     module.add_class::<PeripheralIdView>()?;
+    module.add_class::<MemoryIdView>()?;
     module.add_class::<FaultStopView>()?;
     module.add_class::<FaultCauseKind>()?;
     module.add_class::<InterceptedView>()?;

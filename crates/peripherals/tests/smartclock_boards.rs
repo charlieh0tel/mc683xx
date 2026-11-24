@@ -16,18 +16,18 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
 
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::builtin::Recorder;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::PortSpec;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Direction;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::time::Time;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 /// The variable naming the directory.
 const BOARDS: &str = "SMARTCLOCK_BOARDS";

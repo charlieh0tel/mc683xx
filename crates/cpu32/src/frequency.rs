@@ -43,42 +43,6 @@ impl Frequency {
     }
 }
 
-/// Serde for a whole-hertz frequency saved as its hertz, as a state
-/// field's `#[serde(with = "mc683xx_cpu32::frequency::hertz")]`: the
-/// chip's clocks, whose snapshots hold hertz.
-///
-/// Not part of the semver API: serde plumbing for the workspace's snapshots.
-#[doc(hidden)]
-pub mod hertz {
-    use serde::Deserialize;
-    use serde::Deserializer;
-    use serde::Serialize;
-    use serde::Serializer;
-
-    use super::Frequency;
-
-    /// The frequency's whole hertz.
-    ///
-    /// # Errors
-    ///
-    /// The serializer's.
-    pub fn serialize<S: Serializer>(
-        frequency: &Frequency,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        frequency.hz().serialize(serializer)
-    }
-
-    /// A frequency of whole hertz.
-    ///
-    /// # Errors
-    ///
-    /// The deserializer's.
-    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Frequency, D::Error> {
-        u64::deserialize(deserializer).map(Frequency::from_hz)
-    }
-}
-
 /// Hertz and their unit, the nanohertz as a fraction if there are any:
 /// `16777216 Hz`, `3.000000001 Hz`.
 impl fmt::Display for Frequency {
@@ -109,7 +73,7 @@ mod tests {
         assert_eq!(Frequency(1_999_999_999).hz(), 1, "rounded down");
 
         #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug)]
-        struct Saved(#[serde(with = "super::hertz")] Frequency);
+        struct Saved(#[serde(with = "crate::hertz")] Frequency);
         let bytes = postcard::to_allocvec(&Saved(frequency)).unwrap();
         assert_eq!(bytes, postcard::to_allocvec(&16_777_216_u64).unwrap());
         assert_eq!(postcard::from_bytes::<Saved>(&bytes), Ok(Saved(frequency)));

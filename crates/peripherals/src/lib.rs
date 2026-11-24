@@ -15,13 +15,13 @@
 //! ```
 //! use std::path::Path;
 //!
-//! use mc683xx_board::board::Board;
-//! use mc683xx_mc68331::chip::Mc68331;
-//! use mc683xx_board::description::Description;
-//! use mc683xx_board::description::Options;
-//! use mc683xx_board::registry::Environment;
+//! use mc683xx_board::Board;
+//! use mc683xx_board::Description;
+//! use mc683xx_board::Environment;
+//! use mc683xx_board::Options;
 //! use mc683xx_board::signal::Signal;
 //! use mc683xx_board::time::Time;
+//! use mc683xx_mc68331::Mc68331;
 //!
 //! let registry = mc683xx_peripherals::registry();
 //! assert!(mc683xx_peripherals::names().any(|name| name == "74x374"));
@@ -59,28 +59,38 @@
     clippy::missing_panics_doc
 )]
 
-pub mod ad569;
-pub mod adc0838;
-pub mod at28c64b;
-pub mod buffer;
+mod ad569;
+mod adc0838;
+mod at28c64b;
+mod buffer;
 mod character;
 mod dac;
-pub mod latch;
-pub mod mc144110;
-pub mod mc6850;
-pub mod mc68681;
+mod latch;
+mod mc144110;
+mod mc6850;
+mod mc68681;
 mod noise;
 mod octal;
 mod shift_register;
-pub mod sipo;
+mod sipo;
 #[cfg(test)]
 mod spi_mode;
+
+pub use ad569::Ad569;
+pub use adc0838::Adc0838;
+pub use at28c64b::At28c64b;
+pub use buffer::Buffer;
+pub use latch::Latch;
+pub use mc6850::Mc6850;
+pub use mc68681::Mc68681;
+pub use mc144110::Mc144110;
+pub use sipo::Sipo;
 
 /// The chip's system clock a test's drives carry: 16.777216 MHz from
 /// power-on.  No stock part is on the chip's clocks.
 #[cfg(test)]
 const SYSTEM_CLOCK: mc683xx_board::time::TimeBase =
-    mc683xx_board::time::TimeBase::steady(mc683xx_cpu32::frequency::Frequency::from_hz(16_777_216));
+    mc683xx_board::time::TimeBase::steady(mc683xx_cpu32::Frequency::from_hz(16_777_216));
 
 use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;

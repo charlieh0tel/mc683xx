@@ -38,7 +38,7 @@ loader's, never a parameter or a code.  Numbers are TOML integers,
 with TOML's own syntax: hex (`0xff`), binary (`0b1110`), octal
 (`0o17`), a sign and `_` between digits.  A number inside a string, as
 a decoder's `alias` codes are, takes the one syntax the command line,
-init scripts and gdb take (`mc683xx_target::integer::parse_integer`):
+init scripts and gdb take (`mc683xx_target::parse_integer`):
 decimal, `0x` or `0b`, `_` between digits, no sign, no octal and no
 decimal leading zero.  Names
 (memories, decoders, peripherals, nets) are unique across the file, and
@@ -502,13 +502,13 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   is the first key no getter read, the load's unknown-parameter error,
   for a host's tests of its constructors, which build their `Parameters`
   with `Parameters::parse(toml_text)` (text that is not a TOML table an
-  `description::SyntaxError`, its `line()` and `column()` from 1, as a board
+  `SyntaxError`, its `line()` and `column()` from 1, as a board
   file's `LoadError::Syntax` carries; boxed, so a `LoadError`, and a
   host's error holding one, stays small).  A host holding TOML that sets
-  a peripheral's parameters (`description::Options::parameters`) takes the
+  a peripheral's parameters (`Options::parameters`) takes the
   table as `Parameters::parse(toml_text)?.into_table()`, and one value
   with `Options::set("PERIPHERAL.KEY=VALUE".parse()?)` (a
-  `description::Setting`, its parse error a `ParseSettingError`,
+  `Setting`, its parse error a `ParseSettingError`,
   printing back as `PERIPHERAL.KEY=VALUE` with the value as TOML writes
   it); the TOML parser's types are
   not in the API, so a host that parsed its own TOML passes the text.
@@ -741,7 +741,7 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   that may change the model (power-on, `reset`; a `MappedAdapter`'s
   `read`, `write`, `advance`; a `SpiAdapter`'s transfer, select and
   release) and drives the ports the type was registered with from what
-  the model shows (a strobe's level), or stops the run.  The model implements `mc683xx_cpu32::cpu::state::Save` (`save()
+  the model shows (a strobe's level), or stops the run.  The model implements `mc683xx_cpu32::state::Save` (`save()
   -> bytes`, `restore(bytes)`, in its own versioned format), so it is in
   the board's snapshot, its bytes inside the adapter's own versioned
   snapshot; one that cannot save is `mc683xx_cpu32::unsavable!`, and the
@@ -783,7 +783,7 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   of its own, which on the chip's base would fall behind at each reset.
 - `time::Time` (picoseconds since power-on) and `time::Span` (a span
   of it, picoseconds: `Time + Span`, `Time - Time` a `Span`),
-  `mc683xx_cpu32::frequency::Frequency`
+  `mc683xx_cpu32::Frequency`
   (nanohertz, `from_nanohertz` and `nanohertz`; the chip's clocks too:
   `TimeBase::frequency`),
   `time::Phase` (cycles, 10^21 units each, `from_units` and `units`) and `time::Clock`:

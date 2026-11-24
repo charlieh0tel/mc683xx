@@ -98,7 +98,7 @@ Out:
   boards and their firmware.
 - `mc683xx-board` (`crates/mc68331-board`): board files and the board
   around a 683xx chip: peripherals from a registry, decoders, nets and
-  board time (see Boards), generic over the chip (`chip::Chip`), the
+  board time (see Boards), generic over the chip (`Chip`), the
   MC68331's implementation behind its default feature `mc68331`.
 - `mc683xx-run` (`crates/mc68331-run`): the runner, the workspace's one
   binary, for a board file (see Boards).
@@ -120,6 +120,21 @@ Out:
 `[workspace.dependencies]` with a path and a version
 (`docs/releasing.md`).  The published crates share the `mc683xx-`
 prefix; their directories keep the short names.
+
+Each crate's root holds what the crate is named for and what a host
+writes beside it: the type, its builder, its run result and its
+errors, lifted out of private modules (`mc683xx_target::Address`,
+`mc683xx_board::Board`).  A module stays public where its names read
+right only qualified (`hooks::Instruction`, `time::Clock`,
+`serial::NOT_READY`), where it is the sub-API one kind of author
+implements against (`peripheral`, `registry`, `adapter`), or where it
+is one of the manual's modules (`sim`, `qsm`, `gpt`).  A module is
+public whole or private whole, so every public item keeps one path
+(AGENTS.md, Rust Rules; decided 2026-11-24).  A private module's items
+may also be lifted to its public parent, as a one-item submodule's
+are into `sim` (`sim::ResetScope`, `sim::ChipSelects`), never to both.  A layer's snapshot
+format version is `state::VERSION` in its crate (the core's, the
+chip's, the board's), not a root `VERSION` that could be the crate's.
 
 ## Interface
 
@@ -150,7 +165,7 @@ prefix; their directories keep the short names.
   only on the chip and the deadline, so a series of them is one long
   run however the host cuts it.
 - **Host bus access:** `Mc68331::bus_read`, `bus_write` and `peek`
-  (`mc683xx_mc68331::host`) reach the bus as a debugger does (BDM's memory
+  (`crates/mc68331/src/host.rs`) reach the bus as a debugger does (BDM's memory
   commands, CPU32RM 7), by address, size and function code, through
   the chip's decode: module registers at MM's base, and whatever a
   chip select reaches.  `bus_read` and `bus_write` are real cycles at
@@ -224,7 +239,7 @@ prefix; their directories keep the short names.
   tables from its own wiring rather than take the snapshot's.
   Every peripheral attached to the chip (`Builder::peripheral`, `unwired_peripheral`) or the
   bare `Machine` (`add_peripheral`) says whether it saves:
-  `mc683xx_cpu32::cpu::state::Save` is a bound of the attach, as `Timed`
+  `mc683xx_cpu32::state::Save` is a bound of the attach, as `Timed`
   is, both its methods required, so that no peripheral saves what its own
   `restore` refuses: a peripheral gives both,
   `mc683xx_cpu32::unsavable!(X, "its role")` is one that cannot save
@@ -483,7 +498,7 @@ surrounds the SoC with its board peripherals through:
   a frame after its time (2026-10-23).
 - **Pins:** port and module pins in and out, including GPT input
   capture and pulse accumulator inputs (1 PPS-style signals).  Every
-  general-purpose port is keyed by one `port::Port { C, E, F, Gp, Qs }`,
+  general-purpose port is keyed by one `Port { C, E, F, Gp, Qs }`,
   the manual's port names: the host sets the levels it drives
   (`set_pins(port, pins)`, a `PortLevels` as `outputs(port)` gives, and `set_gpt_input(input, level)`), reads
   the levels the chip drives (`outputs(port)`, `pwm`) and the port's
@@ -819,13 +834,15 @@ chip beside `Mc68331`.
   `set_reset_scope(peripheral, [ResetCause])`, `set_dsack(peripheral, Dsack)`,
   `set_qspi_reset_scope([ResetCause])`, and the handles a peripheral holds,
   `stop_request()`, `sync_request()` and `diversion()` (a `Diversion`
-  by memory and peripheral numbers); `build()` gives
+  by memory and peripheral ids); `build()` gives
   an `Mc68331` through its power-on reset.  Pins are the manual's
   names, `"CSBOOT"`, `"CS0"`-`"CS10"`; registers too, `"D0"`-`"A7"`,
   `"PC"`, `"SR"`, `"CCR"`, `"USP"`, `"SSP"`, `"VBR"`, `"SFC"`, `"DFC"`.
-  Memories and peripherals are the numbers `Builder` returned.
+  Memories and peripherals are the opaque `MemoryId` and
+  `PeripheralId` `Builder` returned, as in Rust (decided 2026-11-24;
+  they were numbers).
 - **The chip:** `run_for(budget) -> Run(cycles, stop)`, Rust's
-  `cpu::Run`, its `Stop` a class per variant as Rust's (`Stop.Budget()`,
+  `Run`, its `Stop` a class per variant as Rust's (`Stop.Budget()`,
   `Stop.Halted(halt)`, `Stop.Hook(hook)`, ...),
   `run_until(deadline)`, `bus_read`, `bus_write`, `peek` (`size` in
   bytes, `function_code` a `FunctionCode`, `SUPERVISOR_DATA` by default; `BusError`, `UnpeekableError`),
@@ -913,6 +930,7 @@ chip beside `Mc68331`.
   it when it returns, the chip as it then is.  The bindings' own
   errors are `ValueError` (`StateError` and `LoadError` among them;
   a board file not read, the `OSError` its errno gives), `IndexError`,
+  `KeyError` (a chip id its builder never gave),
   `OverflowError`, `RuntimeError` (`TargetError` and `RunError` among
   them) and
   `NotImplementedError`; nothing
@@ -1014,7 +1032,7 @@ chip beside `Mc68331`.
   `write(BusCycle, value)`; it returns the peripheral's number) and
   `remove_peripheral(id)`, registers as the chip's,
   `run_limited(begin=, reach=, instructions=, cycles=)`,
-  `stop_request()` (a `StopRequest`, Rust's `bus::StopRequest`: a
+  `stop_request()` (a `StopRequest`, Rust's `StopRequest`: a
   callable's request ends the run `Stop.Requested()` once the callables have
   run, one left from before a run is withdrawn as it starts),
   `add_intercept_hook(callable, vectors)` (a `HookId`; the hooks
@@ -1091,7 +1109,7 @@ and the nets that join them.  The rule: **the file says what is wired
 where and how the chip is configured, never what a peripheral does.**
 Peripheral behavior lives in the host's code, behind the registry; this
 repository ships only small generic peripherals for tests and examples.
-`mc683xx_mc68331::chip::Builder` stays the underlying API: a loaded board is
+`mc683xx_mc68331::Builder` stays the underlying API: a loaded board is
 Builder calls plus the layers below, and a host can still build by
 hand.  The keys are in `docs/board-files.md`.
 
@@ -1116,7 +1134,7 @@ hand.  The keys are in `docs/board-files.md`.
   board with and without an option (the 58503A's front panel).  A
   net's endpoints on a peripheral left off go with it.
 - **Chip:** the board is generic over the chip it is built around,
-  `Board<C: chip::Chip>`, and `[chip]` holds `type`, the chip's name
+  `Board<C: Chip>`, and `[chip]` holds `type`, the chip's name
   (`"mc68331"`, `Chip::TYPE`), required (`LoadError::NoChip`; a file
   names what it is built around, as a schematic does, rather than a
   host guessing), another than the one the board is loaded as
@@ -1133,7 +1151,7 @@ hand.  The keys are in `docs/board-files.md`.
   reload scope, a router per select or decoder with its DSACK pins,
   each peripheral's IRQ output and reset scope on no pin, the QSPI's
   PCS decode), running for a budget with its sync and stop requests
-  (`chip::Requests`, the stop the core's `StopRequest`), the system
+  (`Requests`, the stop the core's `StopRequest`), the system
   clock and the clock outputs, its pins (`ChipPin`: printed and parsed by name, kind,
   direction, and whether it takes a level ahead at its time), the
   outputs it watches, its events and the RESET pulse each reset
@@ -1185,7 +1203,7 @@ hand.  The keys are in `docs/board-files.md`.
   stays on the fast path.  While the command logic programs, erases
   or is in autoselect mode it takes the array (`Drive::take_memory`):
   the chip diverts the memory's cycles to a peripheral that passes them
-  to the peripheral (`mc683xx_mc68331::chip::Diversion`, asked within a cycle and
+  to the peripheral (`mc683xx_mc68331::Diversion`, asked within a cycle and
   made as it ends, the page tables rebuilt), so status and autoselect
   reads see the peripheral, until it releases the array.  Chosen over a
   read hook on every fetch, which would cost the fast path always.
@@ -1389,7 +1407,7 @@ hand.  The keys are in `docs/board-files.md`.
   (`adapter::MappedAdapter`, `SpiAdapter`) that converts cycles and times
   through the board's `TimeBase`, so smartclock's models serve both a
   hand-built chip and a board.  An adapted model implements
-  `mc683xx_cpu32::cpu::state::Save`, as every peripheral does, and is in
+  `mc683xx_cpu32::state::Save`, as every peripheral does, and is in
   the board's snapshot: a trait, not serde, so a model keeps its own
   format and versions it, and one with state it cannot serialize (a
   file handle) is `unsavable!`, which the board's save names.  One
@@ -1667,7 +1685,7 @@ hand.  The keys are in `docs/board-files.md`.
   quanta change nothing.  `run_until` on such a board runs to `deadline`
   as time passes without the CPU, as the chip's run does, and ends
   `Halted` or `Background` if the CPU still is.
-  `Board::stop_request()` is the host's `board::BoardStopRequest`
+  `Board::stop_request()` is the host's `BoardStopRequest`
   (not the core's: it holds the board weakly, so a peripheral may keep
   it, and stops the board's loop as well as the chip), which stops the
   run as a peripheral's `Drive::stop` does: for a peripheral that fails
@@ -1743,7 +1761,7 @@ hand.  The keys are in `docs/board-files.md`.
   `inspecting` as `saving` takes `Save`: an opt-in, since stable Rust
   cannot ask whether a model implements a trait, and the modules crate
   stays free of the board's types.
-  `Board::control() -> control::BoardControl` is the board's one
+  `Board::control() -> BoardControl` is the board's one
   thread-safe handle (an `Arc` of an atomic flag, a mutex and a
   condition variable; `Send`, `Sync`, `Clone`), for a front end whose
   event loop is another thread: `stop()`, `send(name, signal)`, checked
@@ -1926,7 +1944,7 @@ Adversarial review of the board layer (2026-10-23):
 `mc683xx-gdb` serves gdb's remote serial protocol through the
 `gdbstub` crate (MIT OR Apache-2.0, a Cargo dependency like any other,
 so not in `third_party/NOTICE`, and named nowhere in the public API):
-one session, `serve`, over one trait, `target::Target`, on a
+one session, `serve`, over one trait, `Target`, on a
 `connection::Connection`, the stub's own trait, which it adapts to
 gdbstub's.  `Target`, `Connection` and `Waiter` each bound their
 `Error` on `std::error::Error`, as `Cpu32Target` does, so `serve`
@@ -1939,7 +1957,7 @@ means gives `native_step`, a `NativeStep`; one with neither cannot step
 and gdb is offered no step, never a step that does not move.  The bare CPU (`flat::Machine`), the chip and a
 board implement it; the runner (`--gdb`) and the Python bindings
 (`serve_gdb` on `Machine`, `Mc68331` and `Board`) implement it over
-those, keeping their own work between quanta.  `bdm::Bdm` makes any
+those, keeping their own work between quanta.  `Bdm` makes any
 `Cpu32Target` one (Over BDM, below).  docs/gdb.md is the guide.  The chip's and the board's
 `Target` impls are features (`mc68331`, `board`), on by default, so a
 bare-CPU host builds the stub without the chip and board crates; the
@@ -1992,7 +2010,7 @@ checks the bare build.
 - **Stops gdb did not ask for:** the host's own hook stops are
   `SIGTRAP`, a halt and a bare host's fault stop `SIGBUS`, a stop
   request `SIGINT`.
-- **Over BDM** (2026-11-01): `bdm::Bdm`, any `Cpu32Target` as a
+- **Over BDM** (2026-11-01): `Bdm`, any `Cpu32Target` as a
   `Target`, so a host driving silicon through a BDM pod has gdb.  It
   gives no `cpu_scope`, so the session plants BGND for a breakpoint,
   read back and refused in ROM, has no hardware breakpoints or
@@ -2029,7 +2047,7 @@ checks the bare build.
   peripherals stop the run where something outside the CPU happens,
   which no breakpoint or watchpoint reaches (a DUART's character, a
   net's edge).  `mc683xx_board::condition` holds the protocol, gdb's
-  only through `target::Target::conditions` (the `board` feature): a
+  only through `Target::conditions` (the `board` feature): a
   `Condition` parsed from `monitor stop`'s words (`net NET CHANGE`,
   `peripheral NAME CONDITION [ARGUMENTS]`), armed on the board
   (`Conditions`, which `Board` implements) until disarmed.  A net's is
@@ -2107,7 +2125,7 @@ binary, text for S-records and scripts) and opens no files, so its
 parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
 2026-11-21).
 
-- **Images:** `image::Image`, segments in address order, apart (ones
+- **Images:** `Image`, segments in address order, apart (ones
   that touch are joined) and not empty, and an optional entry point.
   From S-records (M68000PRM Appendix C): S1-S3 data, S0 ignored, S5
   and S6 counts checked (S6, a 24-bit count, is not in the manual but
@@ -2650,7 +2668,7 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   The SIM's halt monitor resets only on a halt, so not on this entry:
   HALT driven would make the bypass of 7.2.2.3 pointless, an inference
   the manuals do not state.
-- The chip implements `Cpu32Target` (`mc683xx_mc68331::debug`), its
+- The chip implements `Cpu32Target` (`crates/mc68331/src/debug.rs`), its
   calls between runs, so between instructions.  `reset_halted` is
   `Mc68331::reset_with_breakpoint`: RESET with BKPT low through its
   rising edge enables background mode and enters it before the first
@@ -3614,7 +3632,7 @@ host's QSPI peripheral, which a restore keeps).
 | No `From` between a unit-bearing newtype and its number (`Cycles`, `Time`, `Span`, `Frequency`); named constructors and accessors only | Decided 2026-11-21 (0.8.0, round 5).  `Cycles::from(5)` or `u64::from(span)` reads as a number with no unit, and an `.into()` converts silently where a clock count, a picosecond count and hertz are all `u64`s; `Cycles::from_clocks(5)` and `span.picos()` say which.  Bit-pattern newtypes (`Address`, `Vector`) keep `From` both ways, every value valid. |
 | Unit-bearing newtypes keep private fields; bit-pattern newtypes whose every value is valid have public ones | Decided 2026-11-21 (0.8.0, round 5).  A quantity (`Cycles`, `Frequency`, `Time`, `Span`) is reached through constructors and accessors that name its unit, so its field is private.  A bit pattern (`Address`, `Vector`, `peripheral::Select`) is a value read off the lines, with no unit and every value valid, so `Address(0x400)` and `vector.0` read as the hardware does and its field is public.  One with values that are not valid (`InterruptLevel`, 0 to 7) keeps its field private behind `TryFrom` (below); `FunctionCode`, eight codes each with a meaning, is an enum (0.9.0). |
 | One conversion for each kind of value: `TryFrom<u8>` and `From<T> for u8` for a checked value, a named pair for an encoding, opaque received ids | Decided 2026-11-23 (0.9.0).  A checked value (`InterruptLevel`, `IrqPin`, `PortGpPin`, `chip_select::Number`, `FunctionCode`) had `new`/`get` and `TryFrom`/`From` both, or only `new`/`get`; now only `TryFrom<u8>` (`No<Type>(u8)`, so `?` carries why) and `From<T> for u8`, and `IrqPin::level()` gives way to `From<IrqPin> for InterruptLevel`.  A wire or field encoding keeps a named pair (`Register::code`/`from_code`, `Size::field`, `Entry::atemp`), as `From` would hide which encoding.  A register-order index is `index`/`from_index` (`ChipSelect`).  An id a host only receives and gives back (`PeripheralId`, `ConditionId`, `ObserverId`, `HookId`) is opaque, `Display` and no `From`, so a host cannot forge one; `PeripheralId`'s number is reachable only through hidden plumbing for the workspace's crates, and `ConditionId` parses from the number it prints, as a debugger's `monitor stop delete N` names one.  A value the host chooses (`ConditionToken`) is one `From` pair.  A `const fn` that needed `get` (`iack_address`, `Sim::interrupt_pin`, `Builder::set_autovector`, `Mc68331::set_interrupt_pin`) is no longer `const`, and no hidden `get` stays for it (review round 2). |
-| One number syntax for what a person types: `mc683xx_target::integer::parse_integer` | Decided 2026-11-22 (0.9.0).  Init scripts, gdb `monitor` commands, the runner's options and the numbers in board-file strings all take decimal, `0x` hexadecimal or `0b` binary, the prefix in lower case, `_` between digits, no sign, no `$`, no decimal leading zero, so a number that works in one works in all and `010` is never octal by surprise.  One `no_std` function in the target crate, generic over the result (`TryFrom<u64>`, so the runner's 64-bit `--cycles` and `--seed` take it too), so a pod's firmware takes the same text; its error is `Invalid` or `TooLarge`, without the text, as the crate has no `alloc`.  A board file's TOML integers keep TOML's own syntax (`0o`, `+`), which the TOML parser reads before the board sees it; gdb packets and S-records keep theirs. |
+| One number syntax for what a person types: `mc683xx_target::parse_integer` | Decided 2026-11-22 (0.9.0).  Init scripts, gdb `monitor` commands, the runner's options and the numbers in board-file strings all take decimal, `0x` hexadecimal or `0b` binary, the prefix in lower case, `_` between digits, no sign, no `$`, no decimal leading zero, so a number that works in one works in all and `010` is never octal by surprise.  One `no_std` function in the target crate, generic over the result (`TryFrom<u64>`, so the runner's 64-bit `--cycles` and `--seed` take it too), so a pod's firmware takes the same text; its error is `Invalid` or `TooLarge`, without the text, as the crate has no `alloc`.  A board file's TOML integers keep TOML's own syntax (`0o`, `+`), which the TOML parser reads before the board sees it; gdb packets and S-records keep theirs. |
 | Chip time splits: `Cycle` an instant, `Cycles` a count | Decided 2026-11 (0.9.0).  `Cycles` was both a clock by number and a count of clocks, so `now + budget` and `budget + budget` read alike and a run's deadline and its budget had one type.  `Cycle` (system clocks since power-on) mirrors the board's `Time`: `ZERO`, `MAX`, `from_clocks`/`clocks`, `since`, `since_power_on`; `Cycle + Cycles` and `Cycle - Cycles` saturate at power-on and `MAX`, `Cycle - Cycle` is the `Cycles` between, zero if the second is later; Display `12 clocks`; serde as its `u64`, so snapshots keep their bytes.  `Cycles`, `Span`'s counterpart, keeps its `+` and `-`, gains `-=` and `saturating_add` and `saturating_sub`, and saturates as `Span` does: `+` at `MAX` (0.9.0 review: a peripheral's wait states may be any count, so a cost summed from them must not wrap), `-` at zero (a host's `budget - run.cycles` after a saturated cost neither panics nor wraps).  A saturated cost (a host's peripheral answering some 2^63 wait states with the bus monitor off) moves the chip's `now` to `Cycle::MAX`, where it stays: every `run_for` and `run_until` returns at once, and a board's time runs on past the frozen chip.  No signal is given, since only a host's bug reaches it, and before the saturation the same input panicked in debug and wrapped time backwards in release; `Cycles::until` went (`Cycle::since`).  Every chip-layer instant is a `Cycle` (`now`, `at`, `next_event`, a run's deadline, a trace record's `cycle`, `TimeBase`'s anchor), every cost, budget and period `Cycles`.  "Cycle" alone means the clock; a bus transaction is a bus cycle, and a field holding its `BusCycleKind` is `kind` (`Fault`, `InvalidAccess`, `FaultStop`; 0.9.0 review). |
 | One set of time words at every layer | Decided 2026-11-23 (0.9.0).  Each layer has an instant and a span: the board `Time` and `Span`, the chip `Cycle` and `Cycles`, the host std's `Instant` and `Duration`.  `now` is always the current instant in the layer's unit, never a bundle; `at` is a given instant other than now; a run's limit is a span `budget` (`run_for`) or an instant `deadline` (`run_until`), as VHDL's `wait for` and `wait until`; `since` is the span back to an earlier instant; `after` counts from one (`edge_after`); `next_event` is when a part next has work.  A conversion is named for its result and takes the instant it converts as `at` (`TimeBase::time(at: Cycle)`, `TimeBase::cycle(at: Time)`, `Clock::phase(at)`); one from a phase takes `phase` (`Clock::time(phase)`).  A board peripheral's call takes its time as a `time::Moment` (board time and the system clock then): from its `Drive`, or as `moment` last where there is none.  A chip-level callback with no cycle struct takes `now: Cycle` last (`Timed::advance`, `SpiPeripheral::set_clock`, `MappedPeripheral::reset`, `set_port_pins`); one with a struct reads its `now` field (`BusCycle`, `QspiTransfer`).  Units follow std's `Duration` (`from_secs`, `secs_f64`); names a person types carry SI symbols (`_ps`, `_us`, `_hz`). |
 | Loading and init scripts in `mc683xx-debug`, over `Cpu32Target` | Decided 2026-11-01 with the BDM pod's maintainer.  One loader for silicon and the emulator, tested on the chip; a crate of its own, on `mc683xx-target` alone, so a pod host links it without the emulator.  Word writes, verify by default, RPC from the entry and no SSP inference, an init script with line-numbered errors; host time in `poll_memory` only. |

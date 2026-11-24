@@ -2,7 +2,7 @@
 //! 4.2.17, 4.2.18), counted in closed form from X1/CLK ticks: a fast
 //! timer costs nothing until something looks at it.
 
-use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::state::StateError;
 use serde::Deserialize;
 use serde::Serialize;
 

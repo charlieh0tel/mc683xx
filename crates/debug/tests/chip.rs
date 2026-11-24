@@ -2,23 +2,23 @@
 //! background mode as a BDM pod holds silicon.
 
 use mc683xx_cpu32::memory::MemoryKind;
-use mc683xx_debug::image::Image;
-use mc683xx_debug::load::ImageLoadError;
-use mc683xx_debug::load::LoadOptions;
-use mc683xx_debug::load::OddEdges;
-use mc683xx_debug::load::Verification;
+use mc683xx_debug::Image;
+use mc683xx_debug::ImageLoadError;
+use mc683xx_debug::LoadOptions;
+use mc683xx_debug::OddEdges;
+use mc683xx_debug::Verification;
 use mc683xx_debug::script::CommandError;
 use mc683xx_debug::script::Script;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::debug::TargetError;
+use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_mc68331::TargetError;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
 
 /// The example demo board's firmware and its ELF (examples/boards).
 const DEMO_BIN: &[u8] = include_bytes!("../../../examples/boards/demo.bin");

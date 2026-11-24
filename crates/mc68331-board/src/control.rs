@@ -95,7 +95,7 @@ pub(crate) type Taken = (bool, Vec<(String, Signal)>);
 /// event loop) may hold it.  The run takes what it holds at each sync point
 /// (the end of each of the chip's quanta, and so of each of a paced run's), on the
 /// board's thread: a stop ends the run there
-/// ([`Stop::Requested`](mc683xx_cpu32::cpu::Stop::Requested)), as a
+/// ([`Stop::Requested`](mc683xx_cpu32::Stop::Requested)), as a
 /// [`BoardStopRequest`](crate::board::BoardStopRequest)'s does, and the
 /// inputs are driven there, at that board time, in the order queued.  So a
 /// run is the same for the same inputs at the same board times; an input

@@ -5,15 +5,15 @@
 
 use std::any::Any;
 
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
+use mc683xx_cpu32::state::Save;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 
 /// An interrupt acknowledge's CPU-space address but the level in
 /// ADDR\[3:1\]: every other line set (MC68331UM 4.7.4, Figure 4-19).
@@ -125,7 +125,7 @@ pub struct QspiClock {
     /// System clocks in an SCK period, 2 x SPBR (QSMRM equation 4-1).
     pub period: Cycles,
     /// The system clock's frequency (MC68331UM 4.3).
-    #[serde(with = "mc683xx_cpu32::frequency::hertz")]
+    #[serde(with = "mc683xx_cpu32::hertz")]
     pub system_clock: Frequency,
 }
 
@@ -301,7 +301,7 @@ impl<T: SpiPeripheral + Save + Any> AnySpiPeripheral for T {}
 #[cfg(test)]
 mod tests {
     use mc683xx_cpu32::interrupt::InterruptLevel;
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     use super::iack_address;
 

@@ -2,14 +2,14 @@ use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 
-use mc683xx_cpu32::cpu::state::Layer;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode_layer;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cpu::state::encode_layer;
-use mc683xx_cpu32::cycles::Cycle;
-use mc683xx_cpu32::frequency::Frequency;
-use mc683xx_mc68331::port::Port;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::state::Layer;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode_layer;
+use mc683xx_cpu32::state::encode;
+use mc683xx_cpu32::state::encode_layer;
+use mc683xx_mc68331::Port;
 
 use super::Board;
 use super::BoardState;
@@ -19,16 +19,16 @@ use crate::builtin::Divider;
 use crate::builtin::EdgeCounter;
 use crate::description::Description;
 use crate::description::Options;
+use crate::environment::Environment;
 use crate::mc68331::Pin;
 use crate::mc68331::PortPin;
 use crate::peripheral::Peripheral;
-use crate::registry::Environment;
 use crate::registry::Registry;
 use crate::signal::Signal;
 use crate::time::Time;
 use crate::time::TimeBase;
 use crate::wiring::QspiState;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 /// A board of a clock divided onto an edge counter, its ROM empty;
 /// the counter restores before the divider.

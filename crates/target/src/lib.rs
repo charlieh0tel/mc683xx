@@ -1,7 +1,7 @@
 //! A CPU32 (683xx) under debug control, as the emulator and a BDM pod
 //! on silicon both present it: [`Cpu32Target`], and the registers,
 //! entry sources, addresses, operand sizes and function codes it takes,
-//! and the number syntax a person types for them ([`integer`]).
+//! and the number syntax a person types for them ([`parse_integer`]).
 //! `no_std`.
 
 #![no_std]
@@ -16,20 +16,26 @@
 #[cfg(test)]
 extern crate std;
 
-pub mod address;
-pub mod entry;
-pub mod function_code;
-pub mod integer;
-pub mod register;
+mod address;
+mod entry;
+mod function_code;
+mod integer;
+mod register;
 pub mod serial;
-pub mod size;
+mod size;
 
-use address::Address;
-use entry::Entry;
-use function_code::FunctionCode;
-use register::Register;
-use register::SystemRegister;
-use size::Size;
+pub use address::Address;
+pub use entry::Entry;
+pub use function_code::FunctionCode;
+pub use function_code::NoFunctionCode;
+pub use function_code::ParseFunctionCodeError;
+pub use integer::ParseIntegerError;
+pub use integer::parse_integer;
+pub use register::ParseRegisterError;
+pub use register::ParseSystemRegisterError;
+pub use register::Register;
+pub use register::SystemRegister;
+pub use size::Size;
 
 /// A [`Cpu32Target`] call the implementation does not support: the
 /// error a method added after 1.0 returns by default.  Built with

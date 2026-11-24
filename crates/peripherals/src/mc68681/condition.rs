@@ -8,7 +8,7 @@ use std::mem;
 use mc683xx_board::condition::ArmError;
 use mc683xx_board::condition::ConditionInfo;
 use mc683xx_board::condition::ConditionToken;
-use mc683xx_target::integer::parse_integer;
+use mc683xx_target::parse_integer;
 
 /// `tx CHANNEL [BYTE]`.
 const TX: ConditionInfo = ConditionInfo::new(

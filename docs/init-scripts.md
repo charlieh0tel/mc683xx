@@ -56,14 +56,14 @@ digits: `1000`, `0xfffa44`, `0xff_fa44`, `0b1010_0000`.  There is no
 sign, no `$`, and a decimal number has no leading zero but `0`
 itself, so `010` is refused rather than read as octal.  It is the one
 number syntax a person types to the workspace's commands
-(`mc683xx_target::integer::parse_integer`): gdb's `monitor` commands
+(`mc683xx_target::parse_integer`): gdb's `monitor` commands
 and the runner's options take the same.
 
 ## Function codes
 
 `fc` takes a function code (CPU32RM 5.3, Table 5-1) by name, in any
 case, or by number, 0 to 7, in the number syntax above
-(`mc683xx_target::function_code::FunctionCode`'s `FromStr`):
+(`mc683xx_target::FunctionCode`'s `FromStr`):
 
 | Code | Name |
 | --- | --- |

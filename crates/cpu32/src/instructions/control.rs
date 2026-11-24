@@ -9,8 +9,8 @@ use crate::instructions::Flow;
 use crate::instructions::Table;
 use crate::instructions::branch::STACK_POINTER;
 use crate::instructions::branch::push_return;
-use mc683xx_target::address::Address;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Size;
 
 /// NOP's opcode (CPU32RM 4.4, NOP).
 const NOP: u16 = 0x4e71;
@@ -123,7 +123,7 @@ mod tests {
     use crate::instructions::tests::poke_long;
     use crate::instructions::tests::step;
     use crate::registers::status;
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     /// A stack in the test RAM.
     const STACK: u32 = 0x4000;

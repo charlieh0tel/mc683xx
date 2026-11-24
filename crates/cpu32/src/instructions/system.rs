@@ -19,10 +19,10 @@ use crate::instructions::Table;
 use crate::instructions::data_movement::low_register;
 use crate::registers::status;
 use crate::timing;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// RESET (CPU32RM 4.4, RESET).
 const RESET: u16 = 0x4e70;
@@ -375,9 +375,9 @@ fn moves(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
 mod tests {
     use super::LPSTOP;
     use super::LPSTOP_EXTENSION;
+    use crate::BusError;
     use crate::bus::Bus;
     use crate::bus::BusAccess;
-    use crate::bus::BusError;
     use crate::bus::LPSTOP_BROADCAST;
     use crate::bus::Read;
     use crate::cpu::Cpu;
@@ -393,10 +393,10 @@ mod tests {
     use crate::instructions::tests::poke_long;
     use crate::instructions::tests::step;
     use crate::registers::status;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::entry::Entry;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::Entry;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     /// A stack in the test RAM.
     const STACK: u32 = 0x4000;

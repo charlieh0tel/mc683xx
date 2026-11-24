@@ -3,13 +3,13 @@
 
 use js_sys::RangeError;
 use js_sys::TypeError;
-use mc683xx_board::board::NoMemory;
-use mc683xx_board::board::NoReceiver;
-use mc683xx_board::board::RunError;
-use mc683xx_board::board::SendError;
-use mc683xx_board::description::LoadError;
+use mc683xx_board::LoadError;
+use mc683xx_board::NoMemory;
+use mc683xx_board::NoReceiver;
+use mc683xx_board::RunError;
+use mc683xx_board::SendError;
 use mc683xx_board::pacing::ParsePacingError;
-use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::state::StateError;
 use wasm_bindgen::JsValue;
 
 /// A call the bindings or the board refuse; it is thrown as a JavaScript

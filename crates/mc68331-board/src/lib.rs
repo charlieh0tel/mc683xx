@@ -61,14 +61,14 @@
 //! ```
 //! use std::path::Path;
 //!
-//! use mc683xx_board::board::Board;
-//! use mc683xx_board::description::Description;
-//! use mc683xx_board::description::Options;
-//! use mc683xx_board::registry::Environment;
+//! use mc683xx_board::Board;
+//! use mc683xx_board::Description;
+//! use mc683xx_board::Environment;
+//! use mc683xx_board::Options;
 //! use mc683xx_board::registry::Registry;
 //! use mc683xx_board::time::Time;
-//! use mc683xx_cpu32::cpu::Stop;
-//! use mc683xx_mc68331::chip::Mc68331;
+//! use mc683xx_cpu32::Stop;
+//! use mc683xx_mc68331::Mc68331;
 //!
 //! let text = r#"
 //! version = 1
@@ -94,14 +94,12 @@
 //! [plan]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#boards
 //! [board-files]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/board-files.md
 //! [register]: registry::Registry::register
-//! [`Chip`]: chip::Chip
 //! [`Registry`]: registry::Registry
 //! [`PortSpec`]: registry::PortSpec
 //! [`Kind`]: signal::Kind
 //! [`Direction`]: signal::Direction
 //! [`Context`]: registry::Context
 //! [`Parameters`]: registry::Parameters
-//! [`Environment`]: registry::Environment
 //! [`Peripheral`]: peripheral::Peripheral
 //! [`PeripheralAccess`]: peripheral::PeripheralAccess
 //! [`Role`]: peripheral::Role
@@ -111,7 +109,7 @@
 //! [`SpiPeripheral`]: mc683xx_modules::peripheral::SpiPeripheral
 //! [`MappedAdapter`]: adapter::MappedAdapter
 //! [`SpiAdapter`]: adapter::SpiAdapter
-//! [`Save`]: mc683xx_cpu32::cpu::state::Save
+//! [`Save`]: mc683xx_cpu32::state::Save
 //! [`Edges`]: spi::Edges
 //! [`Slave`]: spi::Slave
 //! [`exchange`]: spi::exchange
@@ -120,15 +118,9 @@
 //! [`Time`]: time::Time
 //! [`Span`]: time::Span
 //! [`Observer`]: observe::Observer
-//! [`Board::observe`]: board::Board::observe
 //! [`Inspection`]: inspect::Inspection
 //! [`Peripheral::inspect`]: peripheral::Peripheral::inspect
-//! [`Board::inspect`]: board::Board::inspect
-//! [`BoardControl`]: control::BoardControl
-//! [`Board::control`]: board::Board::control
 //! [`Pacing`]: pacing::Pacing
-//! [`Board::run_until_paced`]: board::Board::run_until_paced
-//! [`Board::run_frame`]: board::Board::run_frame
 //! [`Pacer`]: pacing::Pacer
 // The published crates also hold these; test-only crates do not.
 #![warn(
@@ -139,13 +131,14 @@
 )]
 
 pub mod adapter;
-pub mod board;
+mod board;
 pub mod builtin;
-pub mod chip;
+mod chip;
 pub mod condition;
-pub mod control;
-pub mod description;
+mod control;
+mod description;
 mod endpoint;
+mod environment;
 pub mod inspect;
 #[cfg(feature = "mc68331")]
 pub mod mc68331;
@@ -156,6 +149,39 @@ pub mod registry;
 mod schema;
 pub mod signal;
 pub mod spi;
+pub mod state;
 pub mod time;
 pub mod trace;
 mod wiring;
+
+pub use board::Board;
+pub use board::BoardRun;
+pub use board::BoardStopRequest;
+pub use board::BoardTracing;
+pub use board::External;
+pub use board::LookupError;
+pub use board::NoMemory;
+pub use board::NoNet;
+pub use board::NoPeripheral;
+pub use board::NoReceiver;
+pub use board::RunError;
+pub use board::SendError;
+pub use chip::Chip;
+#[doc(hidden)]
+pub use chip::ChipBuilder;
+pub use chip::ChipPin;
+#[doc(hidden)]
+pub use chip::MemoryPlace;
+#[doc(hidden)]
+pub use chip::MemoryPlan;
+#[doc(hidden)]
+pub use chip::Requests;
+pub use control::BoardControl;
+pub use description::Description;
+pub use description::EditError;
+pub use description::LoadError;
+pub use description::Options;
+pub use description::ParseSettingError;
+pub use description::Setting;
+pub use description::SyntaxError;
+pub use environment::Environment;
