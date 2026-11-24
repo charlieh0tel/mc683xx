@@ -1752,7 +1752,7 @@ impl<C: Chip> Board<C> {
             };
             let clock = self.clocks.get(&pin).map_or_else(
                 || Clock::new(frequency, at),
-                |clock| clock.retuned(at, frequency),
+                |clock| clock.retuned(frequency, at),
             );
             self.clocks.insert(pin, clock);
             self.drive(&Source::Chip(pin), at, Signal::Clock(clock));

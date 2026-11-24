@@ -781,7 +781,7 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   `phase(at)` (with `cycles()` and
   `fraction()`), `time(phase)` (the first picosecond at that phase),
   `edges(from, to)` (rising edges in (from, to]),
-  `edge_after(from, n)`, `edge(number)`, and `retuned(at, frequency)`:
+  `edge_after(from, n)`, `edge(number)`, and `retuned(frequency, at)`:
   a source whose frequency moves (an OCXO following its EFC) drives a
   retuned clock at each change, its phase carried across exactly, and
   a sink counts and times edges across the change with no rounding.
