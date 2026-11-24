@@ -158,6 +158,7 @@ impl From<Error> for PyErr {
             | Error::Nesting(_)
             | Error::DsackPort(_)
             | Error::ReadWidth { .. }
+            | Error::PeekLength { .. }
             | Error::ShiftedIn { .. } => PyValueError::new_err(message),
         }
     }

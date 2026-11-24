@@ -35,6 +35,7 @@ use pyo3::exceptions::PyBaseException;
 use pyo3::exceptions::PyKeyboardInterrupt;
 use pyo3::exceptions::PyTypeError;
 use pyo3::intern;
+use pyo3::pybacked::PyBackedBytes;
 use pyo3::pyclass;
 use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
@@ -299,9 +300,9 @@ struct Methods {
     next_event: Option<Held>,
     /// `advance(now)`.
     advance: Option<Held>,
-    /// `peek(cycle) -> int | None`.
+    /// `peek(cycle, length) -> bytes | None`.
     peek: Option<Held>,
-    /// `poke(cycle, value) -> bool`.
+    /// `poke(cycle, data) -> bool`.
     poke: Option<Held>,
 }
 
@@ -444,6 +445,22 @@ pub(crate) fn value(value: &Bound<'_, PyAny>, size: Size) -> PyResult<u32> {
     }
 }
 
+/// A peek's bytes, `length` of them, or `None` for a decline: other
+/// than `length` is a `ValueError`.
+pub(crate) fn peeked(result: &Bound<'_, PyAny>, length: usize) -> PyResult<Option<PyBackedBytes>> {
+    let Some(bytes) = result.extract::<Option<PyBackedBytes>>()? else {
+        return Ok(None);
+    };
+    if bytes.len() != length {
+        return Err(Error::PeekLength {
+            asked: length,
+            given: bytes.len(),
+        }
+        .into());
+    }
+    Ok(Some(bytes))
+}
+
 /// A result nothing reads.
 const fn ignored(_: &Bound<'_, PyAny>) -> PyResult<()> {
     Ok(())
@@ -511,25 +528,26 @@ impl MappedPeripheral for PythonMapped {
         self.call_or(self.methods.reset.as_ref(), (now.clocks(),), ignored, ());
     }
 
-    fn peek(&self, cycle: BusCycle) -> Option<u32> {
-        self.call_or(
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        let peeked = self.call(
             self.methods.peek.as_ref(),
-            (BusCycleView(cycle),),
-            |result| {
-                if result.is_none() {
-                    Ok(None)
-                } else {
-                    value(result, cycle.size).map(Some)
-                }
-            },
+            (BusCycleView(cycle), data.len()),
+            |result| peeked(result, data.len()),
             None,
-        )
+        );
+        match peeked {
+            Some(Ok(Some(bytes))) => {
+                data.copy_from_slice(&bytes);
+                true
+            }
+            _ => false,
+        }
     }
 
-    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
         self.call_or(
             self.methods.poke.as_ref(),
-            (BusCycleView(cycle), value),
+            (BusCycleView(cycle), data),
             truth,
             false,
         )

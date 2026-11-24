@@ -211,11 +211,11 @@ alone, and the bare CPU has one space whatever the code.
 | --- | --- | --- |
 | RAM and ROM the core serves | yes | yes, ROM included, whatever the page permissions |
 | The chip's module registers (SIM, QSM, GPT) | yes, as a peek (`Module::peek`): no flag armed or cleared | no |
-| A peripheral (a peripheral on a select, a bare CPU's host peripheral, a board's) | as its `peek` gives it (`MappedPeripheral::peek`, a board peripheral's `Peripheral::peek`); one that declines, the default, `E0e` | as its `poke` takes it; one that declines, the default, `E0e`, the bytes before it written |
+| A peripheral (a peripheral on a select, a bare CPU's host peripheral, a board's) | as its `peek` gives it (`MappedPeripheral::peek`, a board peripheral's `Peripheral::peek`), a call for each run of its bytes; one that declines, the default, `E0e` | as its `poke` takes it, a call for each run; one that declines, the default, `E0e`, the bytes before it written |
 | Memory a peripheral shares a select with, or a memory a peripheral has taken | no | no |
 | Nothing | no | no |
 
-On the chip a byte is what the decode reaches now (`Mc68331::peek`),
+On the chip a byte is what the decode reaches now (`Mc68331::peek_bytes`),
 so the memory map is the firmware's: out of reset only CSBOOT
 decodes.  A read stops at the first byte it cannot give; gdb shows
 what came before it.  To make a real cycle, with its side effects, a

@@ -115,6 +115,15 @@ impl PeekError {
     }
 }
 
+/// What a debugger's access reaches of a run of its bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Span {
+    /// This many, which memory serves.
+    Memory(usize),
+    /// This many of the peripheral at this index in [`FlatBus::peripherals`].
+    Peripheral(usize, usize),
+}
+
 /// A peripheral with the addresses it covers.
 struct Wired {
     /// Its identity.
@@ -517,98 +526,128 @@ impl Machine {
 
     /// Fills `bytes` from `address` up with no bus cycle: from mapped
     /// memory, whatever its permissions ([`Memory::read_bytes`]), and a
-    /// peripheral's bytes from its [`peek`](MappedPeripheral::peek), a
-    /// byte at a time.
+    /// peripheral's bytes from its [`peek`](MappedPeripheral::peek), one
+    /// call for each peripheral's run of them.
     ///
     /// # Errors
     ///
     /// [`PeekError::Unserved`] for the first byte neither memory nor a
-    /// peripheral is at, [`PeekError::Unpeekable`] for the first a
-    /// peripheral declines; `bytes` is then filled up to it.
+    /// peripheral is at, [`PeekError::Unpeekable`] for the first of a
+    /// run a peripheral declines; `bytes` is then filled up to it.
     pub fn read(&self, address: Address, bytes: &mut [u8]) -> Result<(), PeekError> {
-        let mut done = 0;
-        loop {
+        let (spans, unserved) = self.spans(address, bytes.len(), |page| page.read);
+        for (done, span) in spans {
             let at = address.offset(done as u32);
-            let Err(Unserved(missing)) = self.cpu.memory.read_bytes(at, &mut bytes[done..]) else {
-                return Ok(());
-            };
-            done += missing.0.wrapping_sub(at.0) as usize;
-            let (wired, cycle) = self.byte_peripheral(missing)?;
-            bytes[done] = wired
-                .peripheral
-                .peek(cycle)
-                .ok_or(PeekError::Unpeekable(missing))? as u8;
-            done += 1;
+            match span {
+                Span::Memory(count) => self
+                    .cpu
+                    .memory
+                    .read_bytes(at, &mut bytes[done..done + count])?,
+                Span::Peripheral(index, count) => {
+                    let cycle = self.debug_cycle(at);
+                    if !self.bus.peripherals[index]
+                        .peripheral
+                        .peek(cycle, &mut bytes[done..done + count])
+                    {
+                        return Err(PeekError::Unpeekable(at));
+                    }
+                }
+            }
         }
+        unserved.map_or(Ok(()), |unserved| Err(unserved.into()))
     }
 
     /// Writes `bytes` at `address` up with no bus cycle, as
     /// [`read`](Self::read) reads them: into mapped memory
     /// ([`Memory::write_bytes`]), and a peripheral's bytes through its
-    /// [`poke`](MappedPeripheral::poke), a byte at a time.
+    /// [`poke`](MappedPeripheral::poke), one call for each peripheral's
+    /// run of them.
     ///
     /// # Errors
     ///
     /// As [`Machine::read`].  Nothing is written if a byte is neither
-    /// memory's nor a peripheral's; the bytes before one a peripheral
+    /// memory's nor a peripheral's; the bytes before a run a peripheral
     /// declines stay written.
     pub fn write(&mut self, address: Address, bytes: &[u8]) -> Result<(), PeekError> {
-        for offset in 0..bytes.len() {
-            let at = address.offset(offset as u32);
-            let page = self.cpu.memory.page(Space::Supervisor, at);
-            if page.read.or(page.write).is_none() {
-                self.byte_peripheral(at)?;
-            }
+        let (spans, unserved) = self.spans(address, bytes.len(), |page| page.read.or(page.write));
+        if let Some(unserved) = unserved {
+            return Err(unserved.into());
         }
-        let mut done = 0;
-        loop {
+        for (done, span) in spans {
             let at = address.offset(done as u32);
-            let Err(Unserved(missing)) = self.cpu.memory.write_bytes(at, &bytes[done..]) else {
-                return Ok(());
-            };
-            let served = missing.0.wrapping_sub(at.0) as usize;
-            self.cpu
-                .memory
-                .write_bytes(at, &bytes[done..done + served])?;
-            done += served;
-            let index = self.bus.covering(&self.byte_access(missing));
-            let Some(index) = index else {
-                return Err(Unserved(missing).into());
-            };
-            let cycle = self.byte_cycle(missing).writing(true);
-            if !self.bus.peripherals[index]
-                .peripheral
-                .poke(cycle, u32::from(bytes[done]))
-            {
-                return Err(PeekError::Unpeekable(missing));
+            match span {
+                Span::Memory(count) => self
+                    .cpu
+                    .memory
+                    .write_bytes(at, &bytes[done..done + count])?,
+                Span::Peripheral(index, count) => {
+                    let cycle = self.debug_cycle(at).writing(true);
+                    if !self.bus.peripherals[index]
+                        .peripheral
+                        .poke(cycle, &bytes[done..done + count])
+                    {
+                        return Err(PeekError::Unpeekable(at));
+                    }
+                }
             }
-            done += 1;
         }
+        Ok(())
     }
 
-    /// A debugger's byte access at `address`, in supervisor data space.
-    const fn byte_access(&self, address: Address) -> BusAccess {
-        BusAccess {
-            address,
-            size: Size::Byte,
-            function_code: FunctionCode::SupervisorData,
-            now: self.now,
+    /// The spans a debugger's access of `length` bytes from `address`
+    /// reaches, each with where it starts in the access, in order: a
+    /// page's bytes where `served` finds memory, and each peripheral's
+    /// run of bytes no memory serves.  They stop at the first byte
+    /// neither reaches, given with them.
+    fn spans(
+        &self,
+        address: Address,
+        length: usize,
+        served: fn(&Page) -> Option<Backing>,
+    ) -> (Vec<(usize, Span)>, Option<Unserved>) {
+        let memory = &self.cpu.memory;
+        let serves = |at: Address| served(&memory.page(Space::Supervisor, at)).is_some();
+        let mut spans = Vec::new();
+        let mut done = 0;
+        while done < length {
+            let at = address.offset(done as u32);
+            let left = length - done;
+            let page_left = (PAGE_BYTES - memory.mask(at).0 % PAGE_BYTES) as usize;
+            if serves(at) {
+                let count = page_left.min(left);
+                spans.push((done, Span::Memory(count)));
+                done += count;
+                continue;
+            }
+            let access = BusAccess {
+                address: at,
+                size: Size::Byte,
+                function_code: FunctionCode::SupervisorData,
+                now: self.now,
+            };
+            let Some(index) = self.bus.covering(&access) else {
+                return (spans, Some(Unserved(at)));
+            };
+            let last = u64::from(*self.bus.peripherals[index].range.end());
+            let mut count = (last - u64::from(at.0) + 1).min(left as u64) as usize;
+            // the pages memory serves past this one are memory's
+            let mut page = page_left;
+            while page < count {
+                if serves(at.offset(page as u32)) {
+                    count = page;
+                }
+                page += PAGE_BYTES as usize;
+            }
+            spans.push((done, Span::Peripheral(index, count)));
+            done += count;
         }
+        (spans, None)
     }
 
-    /// The cycle a peripheral sees of [`byte_access`](Self::byte_access).
-    const fn byte_cycle(&self, address: Address) -> BusCycle {
+    /// A debugger's byte read at `address`, as a peripheral sees it: in
+    /// supervisor data space, now.
+    const fn debug_cycle(&self, address: Address) -> BusCycle {
         BusCycle::new(address, Size::Byte, FunctionCode::SupervisorData, self.now)
-    }
-
-    /// The peripheral at `address`, and its cycle of a debugger's byte
-    /// read there.
-    fn byte_peripheral(&self, address: Address) -> Result<(&Wired, BusCycle), PeekError> {
-        let index = self
-            .bus
-            .covering(&self.byte_access(address))
-            .ok_or(Unserved(address))?;
-        Ok((&self.bus.peripherals[index], self.byte_cycle(address)))
     }
 
     /// Puts `peripheral` at `range`, which no other peripheral's overlaps: it

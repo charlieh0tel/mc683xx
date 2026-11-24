@@ -164,7 +164,8 @@ chip's, the board's), not a root `VERSION` that could be the crate's.
   instruction boundary at or after a time instead: its end depends
   only on the chip and the deadline, so a series of them is one long
   run however the host cuts it.
-- **Host bus access:** `Mc68331::bus_read`, `bus_write` and `peek`
+- **Host bus access:** `Mc68331::bus_read`, `bus_write`, `peek` and
+  `peek_bytes`
   (`crates/mc68331/src/host.rs`) reach the bus as a debugger does (BDM's memory
   commands, CPU32RM 7), by address, size and function code, through
   the chip's decode: module registers at MM's base, and whatever a
@@ -175,17 +176,26 @@ chip's, the board's), not a root `VERSION` that could be the crate's.
   through `Module::peek` (required, as `save` is), the SIM's reads
   have none, and memory answers byte by byte where memory alone
   answers the cycle (`Board::memory_alone`, the page-table rule).  A
-  peripheral answers for its own bytes, a byte at a time, through the
-  optional `MappedPeripheral::peek`, the first that the decode would
-  have drive the byte answering; `poke` (`Mc68331::poke`) stores a byte in
-  each the decode would write to.  Both decline by default, which is
-  `BusCycleError::Unpeekable`, never a guess: only the peripheral knows
-  which of its registers a look leaves alone (decided 2026-11-23).  The
-  bare machine's `read` and `write`, gdb's memory access and a board
-  peripheral's (`Peripheral::peek`, `poke`, through `MappedAdapter` and
-  the board's routers) take the same path.  A poke is not
-  all-or-nothing where a peripheral is involved: a peripheral cannot be
-  asked whether it would take a byte without taking it.
+  peripheral answers for its own bytes through the optional
+  `MappedPeripheral::peek(cycle, data)`, the first that the decode
+  would have drive the bytes answering; `poke` (`Mc68331::poke`,
+  `poke_bytes`) stores bytes in each the decode would write to.  Both
+  take a range, a byte an address from `cycle.address` up: an access
+  is split where the memory or peripheral reaching its bytes changes,
+  and each peripheral called once with its run, so loading a 512-Kbyte
+  image into a host peripheral is one call, not one a byte (decided
+  for 0.9.0, sc's batch 3b: a byte form from Python took 3.2 s for
+  what RAM took 0.03 s).  A board peripheral on one lane gets its
+  bytes gathered, on its own addresses, a run where they are
+  consecutive.  A decline declines the peripheral's whole run.  Both
+  decline by default, which is `BusCycleError::Unpeekable`, never a
+  guess: only the peripheral knows which of its registers a look
+  leaves alone (decided 2026-11-23).  The bare machine's `read` and
+  `write`, gdb's memory access and a board peripheral's
+  (`Peripheral::peek`, `poke`, through `MappedAdapter` and the board's
+  routers) take the same path.  A poke is not all-or-nothing where a
+  peripheral is involved: a peripheral cannot be asked whether it
+  would take bytes without taking them.
   Errors are typed: `Unserved`, `BusError`, `Misaligned` (each with
   its address), `Width`.
 - **Interrupts:** the host sets an IPL level; the core calls the
@@ -1994,7 +2004,8 @@ checks the bare build.
   another, no bus cycle: memory the core
   serves (ROM too, so `load` works), module registers read through
   `Module::peek`; a peripheral read and written through its `peek` and
-  `poke`, `E0e` where it declines, as it does by default.  A
+  `poke`, a call for each run of its bytes, `E0e` where it declines,
+  as it does by default.  A
   debugger's look never has a side effect; a host wanting real cycles
   makes them with `bus_read` and `bus_write`.
 - **Breakpoints and watchpoints:** code hooks for `Z0` and `Z1`,

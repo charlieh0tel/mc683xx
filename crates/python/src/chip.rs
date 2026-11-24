@@ -1130,11 +1130,8 @@ macro_rules! chip_methods {
                 })
             }
 
-            /// Stores `value` where `bus_write` would, without a cycle, a
-            /// byte at a time: memory's bytes, ROM's included, and a
-            /// peripheral's through its `poke`.  Raises `UnpeekableError`
-            /// for a module's register or a byte a peripheral declines,
-            /// the bytes before it written.
+            /// Stores `value` where `bus_write` would, without a cycle, as
+            /// `poke_bytes` stores its bytes, high byte first.
             #[pyo3(signature = (address, size, value, function_code = FunctionCode::SupervisorData))]
             fn poke(
                 &mut self,
@@ -1150,6 +1147,49 @@ macro_rules! chip_methods {
                     pending.check()?;
                     Ok(poked.map_err(Error::from)?)
                 })
+            }
+
+            /// Stores `data` from `address` up where `bus_write` would,
+            /// without a cycle: memory's bytes, ROM's included, and a
+            /// peripheral's through its `poke(cycle, data)`, once for each
+            /// run of its bytes.  Raises `UnpeekableError` for a module's
+            /// register or a run a peripheral declines, the bytes before
+            /// it written.
+            #[pyo3(signature = (address, data, function_code = FunctionCode::SupervisorData))]
+            fn poke_bytes(
+                &mut self,
+                py: Python<'_>,
+                address: u32,
+                data: PyBackedBytes,
+                function_code: FunctionCode,
+            ) -> PyResult<()> {
+                self.with_chip_mut(py, |chip, pending| {
+                    let poked = chip.poke_bytes(Address(address), function_code.into(), &data);
+                    pending.check()?;
+                    Ok(poked.map_err(Error::from)?)
+                })
+            }
+
+            /// `length` bytes from `address` up, without a cycle: a
+            /// module's registers' as they hold them, memory's, a
+            /// peripheral's from its `peek(cycle, length)`, once for each
+            /// run of its bytes.  Raises `UnpeekableError` where only a
+            /// cycle can tell (a peripheral that declines).
+            #[pyo3(signature = (address, length, function_code = FunctionCode::SupervisorData))]
+            fn peek_bytes<'py>(
+                &self,
+                py: Python<'py>,
+                address: u32,
+                length: usize,
+                function_code: FunctionCode,
+            ) -> PyResult<Bound<'py, PyBytes>> {
+                let mut data = vec![0; length];
+                self.with_chip(py, |chip| {
+                    Ok(chip
+                        .peek_bytes(Address(address), function_code.into(), &mut data)
+                        .map_err(Error::from)?)
+                })?;
+                Ok(PyBytes::new(py, &data))
             }
 
             /// What `bus_read` would return now, without a cycle: a

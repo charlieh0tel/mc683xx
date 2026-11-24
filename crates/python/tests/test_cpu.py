@@ -514,6 +514,7 @@ class Window:
     def __init__(self):
         self.held = bytearray(4)
         self.closed = False
+        self.calls = []
 
     def read(self, cycle):
         raise mc683xx.BusError()
@@ -521,11 +522,16 @@ class Window:
     def write(self, cycle, value):
         raise mc683xx.BusError()
 
-    def peek(self, cycle):
-        return None if self.closed else self.held[cycle.address - PERIPHERAL]
+    def peek(self, cycle, length):
+        self.calls.append((cycle.address, length))
+        at = cycle.address - PERIPHERAL
+        return None if self.closed else bytes(self.held[at : at + length])
 
-    def poke(self, cycle, value):
-        self.held[cycle.address - PERIPHERAL] = value
+    def poke(self, cycle, data):
+        self.calls.append((cycle.address, len(data)))
+        if not self.closed:
+            at = cycle.address - PERIPHERAL
+            self.held[at : at + len(data)] = data
         return not self.closed
 
 
@@ -536,6 +542,7 @@ def test_read_and_write_peek_and_poke_a_peripheral():
     cpu.write(PERIPHERAL, b"\x01\x02\x03\x04")
     assert window.held == b"\x01\x02\x03\x04"
     assert cpu.read(PERIPHERAL + 1, 2) == b"\x02\x03"
+    assert window.calls == [(PERIPHERAL, 4), (PERIPHERAL + 1, 2)]
     window.closed = True
     with pytest.raises(mc683xx.UnpeekableError, match="not peekable at"):
         cpu.read(PERIPHERAL, 1)
@@ -543,6 +550,53 @@ def test_read_and_write_peek_and_poke_a_peripheral():
         cpu.write(PERIPHERAL, b"\x00")
     with pytest.raises(mc683xx.BusError):
         cpu.read(PERIPHERAL + 4, 1)
+
+
+def test_a_peek_of_another_length_raises_value_error():
+    class Short(Window):
+        def peek(self, cycle, length):
+            return b"\x00"
+
+    cpu = machine(RTS)
+    cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, Short())
+    with pytest.raises(ValueError, match="a peek of 2 bytes gave 1"):
+        cpu.read(PERIPHERAL, 2)
+
+
+def test_a_large_write_into_a_peripheral_is_one_call():
+    class Array:
+        def __init__(self, size):
+            self.held = bytearray(size)
+            self.calls = 0
+
+        def read(self, cycle):
+            raise mc683xx.BusError()
+
+        def write(self, cycle, value):
+            raise mc683xx.BusError()
+
+        def peek(self, cycle, length):
+            self.calls += 1
+            at = cycle.address - PERIPHERAL
+            return bytes(self.held[at : at + length])
+
+        def poke(self, cycle, data):
+            self.calls += 1
+            at = cycle.address - PERIPHERAL
+            self.held[at : at + len(data)] = data
+            return True
+
+    size = 512 << 10
+    cpu = mc683xx.Machine()
+    array = Array(size)
+    cpu.add_peripheral(PERIPHERAL, PERIPHERAL + size - 1, array)
+    image = bytes(range(256)) * (size // 256)
+    began = time.perf_counter()
+    cpu.write(PERIPHERAL, image)
+    assert cpu.read(PERIPHERAL, size) == image
+    assert array.calls == 2
+    # one call each way, not one a byte: well under the 3 s a byte at a time took
+    assert time.perf_counter() - began < 1.0
 
 
 class Refusing:

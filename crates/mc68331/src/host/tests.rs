@@ -1,5 +1,7 @@
 //! The host's cycles and peeks, and runs to a target time.
 
+use std::cell::RefCell;
+
 use mc683xx_cpu32::BusError;
 use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::Cycles;
@@ -98,6 +100,8 @@ struct Recorder {
     value: u32,
     /// Whether it answers peeks and pokes, the word `value`'s bytes.
     peekable: bool,
+    /// Each peek's and poke's first address and length, in order.
+    looks: RefCell<Vec<(u32, usize)>>,
 }
 
 /// The shift of a byte's lane in a word, for a byte at `address`: the
@@ -117,17 +121,23 @@ impl MappedPeripheral for Recorder {
         Ok(())
     }
 
-    fn peek(&self, cycle: BusCycle) -> Option<u32> {
-        assert_eq!(cycle.size, Size::Byte);
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        assert!(cycle.size == Size::Byte && !cycle.write);
+        self.looks.borrow_mut().push((cycle.address.0, data.len()));
+        for (index, byte) in (0..).zip(data.iter_mut()) {
+            *byte = (self.value >> lane_shift(cycle.address.offset(index))) as u8;
+        }
         self.peekable
-            .then(|| self.value >> lane_shift(cycle.address) & 0xff)
     }
 
-    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
         assert!(cycle.write && cycle.select.is_some());
-        let shift = lane_shift(cycle.address);
+        self.looks.borrow_mut().push((cycle.address.0, data.len()));
         if self.peekable {
-            self.value = self.value & !(0xff << shift) | value << shift;
+            for (index, &byte) in (0..).zip(data) {
+                let shift = lane_shift(cycle.address.offset(index));
+                self.value = self.value & !(0xff << shift) | u32::from(byte) << shift;
+            }
         }
         self.peekable
     }
@@ -361,6 +371,15 @@ fn a_peek_and_a_poke_reach_a_peripheral_that_takes_them_with_no_cycle() {
     let peripheral = chip.peripheral::<Recorder>(recorder).unwrap();
     assert_eq!(peripheral.value, 0xabcd);
     assert!(peripheral.reads.is_empty() && peripheral.writes.is_empty());
+    // one call for each access's bytes
+    assert_eq!(
+        *peripheral.looks.borrow(),
+        [
+            (PERIPHERAL_BASE, 2),
+            (PERIPHERAL_BASE, 2),
+            (PERIPHERAL_BASE + 1, 1)
+        ]
+    );
     // memory, ROM too; a module's register, a peripheral that declines
     // and nothing at all are not poked
     chip.poke(Address(RAM_BASE), Size::Long, SUPERVISOR, 0x1122_3344)
@@ -390,6 +409,50 @@ fn a_peek_and_a_poke_reach_a_peripheral_that_takes_them_with_no_cycle() {
     assert_eq!(
         chip.poke(Address(0x40_0000), Size::Byte, SUPERVISOR, 0),
         Err(BusCycleError::Unserved(Address(0x40_0000)))
+    );
+}
+
+#[test]
+fn a_range_peek_and_poke_split_at_memory_and_call_a_peripheral_once() {
+    let Board {
+        mut chip,
+        recorder,
+        ram,
+    } = board(&[BRANCH_TO_SELF], None);
+    chip.peripheral_mut::<Recorder>(recorder).unwrap().peekable = true;
+    // CS1's recorder from just past RAM's 64-Kbyte block
+    let ram_end = RAM_BASE + RAM_BYTES as u32;
+    write(
+        &mut chip,
+        CSBAR0 + SELECT_BYTES,
+        Size::Word,
+        (ram_end >> 8) | u32::from(BLOCK_64K),
+    );
+    let image = [1, 2, 3, 4, 5, 6];
+    chip.poke_bytes(Address(ram_end - 2), SUPERVISOR, &image)
+        .unwrap();
+    assert_eq!(chip.memory(ram)[RAM_BYTES - 2..], [1, 2]);
+    let mut back = [0; 6];
+    chip.peek_bytes(Address(ram_end - 2), SUPERVISOR, &mut back)
+        .unwrap();
+    // the recorder holds a word: its last two bytes poked are what it reads
+    assert_eq!(back, [1, 2, 5, 6, 5, 6]);
+    let peripheral = chip.peripheral::<Recorder>(recorder).unwrap();
+    assert_eq!(*peripheral.looks.borrow(), [(ram_end, 4), (ram_end, 4)]);
+    // a run a peripheral declines declines all of it
+    chip.peripheral_mut::<Recorder>(recorder).unwrap().peekable = false;
+    assert_eq!(
+        chip.peek_bytes(Address(ram_end - 2), SUPERVISOR, &mut back),
+        Err(BusCycleError::Unpeekable)
+    );
+    // a module's registers byte by byte, unpoked
+    let mut sypcr = [0xff; 2];
+    chip.peek_bytes(Address(SYPCR), SUPERVISOR, &mut sypcr)
+        .unwrap();
+    assert_eq!(u16::from_be_bytes(sypcr), 0);
+    assert_eq!(
+        chip.poke_bytes(Address(SYPCR), SUPERVISOR, &[0]),
+        Err(BusCycleError::Unpeekable)
     );
 }
 

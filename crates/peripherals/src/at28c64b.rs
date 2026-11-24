@@ -792,27 +792,32 @@ impl Peripheral for At28c64b {
         Ok(())
     }
 
-    /// The cell, while no write cycle runs; during one a read polls
+    /// The cells, while no write cycle runs; during one a read polls
     /// (DATA polling, the toggle bit: datasheet, Write Cycle Operation),
     /// which only a cycle can do, so it declines.  A cycle ends as the
     /// model is next advanced or read, so it declines until then even
     /// at a `moment` past the cycle's tWC; a board advances it before a
-    /// host's peek.
-    fn peek(&self, access: PeripheralAccess, _: Moment) -> Option<u32> {
-        match self.writing {
-            Some(_) => None,
-            None => Some(access.read_byte(self.cells[Offset::new(access.address).index()])),
+    /// host's peek.  An address past the part's 13 lines wraps, as on
+    /// its pins.
+    fn peek(&self, access: PeripheralAccess, data: &mut [u8], _: Moment) -> bool {
+        if self.writing.is_some() {
+            return false;
         }
+        for (address, byte) in (access.address..).zip(data) {
+            *byte = self.cells[Offset::new(address).index()];
+        }
+        true
     }
 
-    /// Stores the byte in its cell at once, through to the file, as a
-    /// programmer would: no write cycle, no data protection.  During a
-    /// write cycle that holds the byte's offset, the cycle wins: it
+    /// Stores the bytes in their cells at once, through to the file, as
+    /// a programmer would: no write cycle, no data protection.  During a
+    /// write cycle that holds a byte's offset, the cycle wins: it
     /// programs its byte over the poke as it ends.  A failure
     /// writing the file drops it, as a cycle's does ([`At28c64b::file_error`]).
-    fn poke(&mut self, access: PeripheralAccess, value: u32, _: Moment) -> bool {
-        let offset = Offset::new(access.address);
-        self.store_cell(offset, access.written_byte(value));
+    fn poke(&mut self, access: PeripheralAccess, data: &[u8], _: Moment) -> bool {
+        for (address, &byte) in (access.address..).zip(data) {
+            self.store_cell(Offset::new(address), byte);
+        }
         true
     }
 
@@ -1143,12 +1148,20 @@ mod tests {
             )
         };
         let moment = Moment::new(Time::ZERO, SYSTEM_CLOCK);
-        assert!(peripheral.poke(access(0x41).writing(true), 0x5a, moment));
-        assert_eq!(peripheral.cells()[0x41], 0x5a);
-        assert_eq!(peripheral.peek(access(0x41), moment), Some(0x5a));
+        assert!(peripheral.poke(access(0x41).writing(true), &[0x5a, 0xa5], moment));
+        assert_eq!(peripheral.cells()[0x41..0x43], [0x5a, 0xa5]);
+        let mut cells = [0; 3];
+        assert!(peripheral.peek(access(0x40), &mut cells, moment));
+        assert_eq!(cells, [0, 0x5a, 0xa5]);
         assert!(peripheral.writing.is_none(), "no write cycle");
+        // the last cell, then the first: 13 lines wrap
+        assert!(peripheral.poke(access(SIZE as u32 - 1).writing(true), &[1, 2], moment));
+        assert_eq!(
+            (peripheral.cells()[SIZE - 1], peripheral.cells()[0]),
+            (1, 2)
+        );
         write(&mut peripheral, 0x40, 1, Time::ZERO);
-        assert_eq!(peripheral.peek(access(0x41), moment), None);
+        assert!(!peripheral.peek(access(0x41), &mut cells, moment));
     }
 
     /// Past tBLC and tWC a byte starts a write cycle of its own.

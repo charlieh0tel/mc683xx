@@ -96,9 +96,11 @@ impl Peripheral for Buffer {
         Ok(())
     }
 
-    /// Its inputs, as a read gives them: a read has no side effect.
-    fn peek(&self, access: PeripheralAccess, _: Moment) -> Option<u32> {
-        Some(access.read_byte(self.inputs))
+    /// Its inputs at every address, as a read gives them: a read has no
+    /// side effect.
+    fn peek(&self, _: PeripheralAccess, data: &mut [u8], _: Moment) -> bool {
+        data.fill(self.inputs);
+        true
     }
 
     fn input(&mut self, port: usize, signal: Signal, _: &mut Drive<'_>) {
@@ -163,11 +165,11 @@ mod tests {
     fn a_peek_is_a_read_and_a_poke_is_declined() {
         let mut buffer = Buffer { inputs: 0xa5 };
         let moment = Moment::new(Time::ZERO, SYSTEM_CLOCK);
-        assert_eq!(
-            buffer.peek(access(Size::Byte), moment),
-            Some(read(&mut buffer, Size::Byte))
-        );
-        assert!(!buffer.poke(access(Size::Byte), 0, moment));
+        let mut peeked = [0; 2];
+        assert!(buffer.peek(access(Size::Byte), &mut peeked, moment));
+        let byte = read(&mut buffer, Size::Byte) as u8;
+        assert_eq!(peeked, [byte, byte]);
+        assert!(!buffer.poke(access(Size::Byte), &[0], moment));
     }
 
     #[test]

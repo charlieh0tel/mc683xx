@@ -122,11 +122,13 @@ class Cells:
     def __init__(self) -> None:
         self.held = bytearray(8)
 
-    def peek(self, access: mc683xx.PeripheralAccess, moment: mc683xx.Moment) -> int | None:
-        return self.held[access.address % 8]
+    def peek(self, access: mc683xx.PeripheralAccess, length: int, moment: mc683xx.Moment) -> bytes | None:
+        at = access.address % 8
+        return bytes(self.held[at : at + length])
 
-    def poke(self, access: mc683xx.PeripheralAccess, value: int, moment: mc683xx.Moment) -> bool:
-        self.held[access.address % 8] = value
+    def poke(self, access: mc683xx.PeripheralAccess, data: bytes, moment: mc683xx.Moment) -> bool:
+        at = access.address % 8
+        self.held[at : at + len(data)] = data
         return True
 
 

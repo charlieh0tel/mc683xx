@@ -44,12 +44,15 @@ impl MappedPeripheral for Array {
         Err(BusError)
     }
 
-    fn peek(&self, cycle: BusCycle) -> Option<u32> {
-        Some(u32::from(self.0[Self::offset(cycle.address)]))
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        let at = Self::offset(cycle.address);
+        data.copy_from_slice(&self.0[at..at + data.len()]);
+        true
     }
 
-    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
-        self.0[Self::offset(cycle.address)] = value as u8;
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
+        let at = Self::offset(cycle.address);
+        self.0[at..at + data.len()].copy_from_slice(data);
         true
     }
 }

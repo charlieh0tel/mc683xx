@@ -804,14 +804,20 @@ bytes (a long is two word cycles); `function_code` is a
   exception is raised here, as by `run_for`.
 - `peek(address, size, function_code=...)`: a look without a cycle, a
   module's register as a read would find it, memory's bytes through
-  the decode, a peripheral's from its `peek(cycle) -> int | None`, a
-  byte at a time.  A peripheral with no `peek`, or one returning
-  `None`, raises `UnpeekableError`.
-- `poke(address, size, value, function_code=...)`: a store without a
+  the decode, a peripheral's from its `peek(cycle, length) -> bytes |
+  None`, once for each run of its bytes: `cycle.address` is the
+  first's, and it must give `length` bytes (other than that raises
+  `ValueError`).  A peripheral with no `peek`, or one returning
+  `None`, raises `UnpeekableError`.  `peek_bytes(address, length,
+  function_code=...) -> bytes` gives any length the same way.
+- `poke(address, size, value, function_code=...)` and
+  `poke_bytes(address, data, function_code=...)`: a store without a
   cycle, memory's bytes (ROM's too) and a peripheral's through its
-  `poke(cycle, value) -> bool`, a byte at a time; a module's register,
-  or a peripheral with no `poke` or one returning `False`, raises
-  `UnpeekableError`, the bytes before it written.
+  `poke(cycle, data) -> bool`, once for each run of its bytes; a
+  module's register, or a peripheral with no `poke` or one returning
+  `False`, raises `UnpeekableError`, the bytes before it written.  A
+  board peripheral's are `peek(access, length, moment)` and
+  `poke(access, data, moment)`, on its own addresses.
 
 ```python
 CSBARBT = SIM + 0x48  # MC68331UM Table D-3
@@ -1119,10 +1125,12 @@ and `starts_frame`, whether it is the first since its select asserted;
 it ends at the drive's `now`; the Rust edge walk, `mc683xx_board::spi`, is not
 exposed, so a Python peripheral reckons its edges from `clock.polarity` and
 `clock.phase` by the rules docs/board-files.md, SPI edges, gives),
-`peek(access, moment) -> int | None` and `poke(access, value, moment)
--> bool` (a debugger's byte with no cycle's side effects, as the
-chip's `peek` and `poke` and gdb take it; `None` and `False` decline,
-as missing ones do), `set_qspi_clock(clock, moment)` (the QSPI's serial
+`peek(access, length, moment) -> bytes | None` and `poke(access,
+data, moment) -> bool` (a debugger's run of bytes from
+`access.address` up, on the peripheral's own addresses, with no
+cycle's side effects, as the chip's `peek` and `poke` and gdb take
+it, once for each run; `None` and `False` decline, as missing ones
+do), `set_qspi_clock(clock, moment)` (the QSPI's serial
 clock, as the QSPI tells it: at the first entry and after CPOL, CPHA,
 SPBR or the system clock change), `set_selected(attachment,
 selected, drive)`, `input(port, value, drive)`,
@@ -1456,10 +1464,12 @@ assert bare.read_register("D0") == 6
   read-only peripheral needs no `BusError` of its own.  A `BusCycle` has
   `address` (32 bits), `size` (1, 2, or 4: a long operand the peripheral
   covers whole comes once, as 4), `function_code`, `now` and `stacking`.
-  `read` and `write` reach a peripheral's bytes too, a byte at a time,
-  through its optional `peek(cycle) -> int | None` and `poke(cycle,
-  value) -> bool`, with no cycle's side effects; one with neither, or
-  returning `None` or `False`, raises `UnpeekableError`.
+  `read` and `write` reach a peripheral's bytes too, through its
+  optional `peek(cycle, length) -> bytes | None` and `poke(cycle,
+  data) -> bool`, with no cycle's side effects, once for each run of
+  its bytes, `cycle.address` the first's; one with neither, or
+  returning `None` or `False`, raises `UnpeekableError`, and an
+  exception either raises is raised.
   Raising `BusError` is a bus error; any other exception does not fault
   the bus (a read answers 0, a write goes nowhere), stops the run, and
   `run_limited` (or `reset`, for the vectors' reads) raises it.  A

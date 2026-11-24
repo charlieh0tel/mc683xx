@@ -201,6 +201,14 @@ pub(crate) enum Error {
         /// The cycle's bytes.
         bytes: u32,
     },
+    /// A Python peripheral's peek of another length than asked for.
+    #[error("a peek of {asked} bytes gave {given}")]
+    PeekLength {
+        /// The bytes asked for.
+        asked: usize,
+        /// The bytes given.
+        given: usize,
+    },
     /// A QSPI peripheral's bits shifted back wider than the transfer.
     #[error("{value:#x} does not fit a {bits}-bit transfer")]
     ShiftedIn {

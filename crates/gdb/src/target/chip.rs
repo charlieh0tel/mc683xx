@@ -13,11 +13,11 @@ use super::AccessError;
 use super::Target;
 use super::TargetReset;
 use super::TargetRun;
-use super::peek_bytes;
 
 /// The chip reads in the space the function code names, through its
 /// decode, a peripheral's bytes by its peek; it writes in supervisor
-/// space alone, into memory, and a peripheral's bytes by its poke.
+/// space alone, into memory, and a peripheral's bytes by its poke: a
+/// call to the peripheral for each run of its bytes.
 impl Target for Mc68331 {
     type Error = Infallible;
 
@@ -31,11 +31,22 @@ impl Target for Mc68331 {
         function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<usize, AccessError<Infallible>> {
-        Ok(peek_bytes(data, |at| {
-            Self::peek(self, address.offset(at), Size::Byte, function_code)
-                .ok()
-                .map(|byte| byte as u8)
-        }))
+        if self.peek_bytes(address, function_code, data).is_ok() {
+            return Ok(data.len());
+        }
+        // the bytes before the first that fails, a byte at a time
+        Ok((0..)
+            .zip(data.iter_mut())
+            .find_map(|(offset, slot)| {
+                match self.peek(address.offset(offset), Size::Byte, function_code) {
+                    Ok(byte) => {
+                        *slot = byte as u8;
+                        None
+                    }
+                    Err(_) => Some(offset as usize),
+                }
+            })
+            .unwrap_or(data.len()))
     }
 
     fn write_memory(
@@ -55,12 +66,9 @@ impl Target for Mc68331 {
         if Self::write(self, address, data).is_ok() {
             return Ok(());
         }
-        // a peripheral's bytes among them: poked, a byte at a time
-        data.iter().zip(0..).try_for_each(|(&byte, offset)| {
-            let at = address.offset(offset);
-            Self::poke(self, at, Size::Byte, function_code, u32::from(byte))
-                .map_err(|_| AccessError::Unserved(at))
-        })
+        // a peripheral's bytes among them: poked, a run at a time
+        self.poke_bytes(address, function_code, data)
+            .map_err(|_| AccessError::Unserved(address))
     }
 
     fn run_for(

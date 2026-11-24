@@ -1336,12 +1336,14 @@ class Window:
     def write(self, cycle, value):
         self.cycles += 1
 
-    def peek(self, cycle):
+    def peek(self, cycle, length):
         assert (cycle.size, cycle.select) == (1, "CS1")
-        return self.held[cycle.address % 8]
+        at = cycle.address % 8
+        return bytes(self.held[at : at + length])
 
-    def poke(self, cycle, value):
-        self.held[cycle.address % 8] = value
+    def poke(self, cycle, data):
+        at = cycle.address % 8
+        self.held[at : at + len(data)] = data
         return True
 
 
@@ -1351,8 +1353,11 @@ def test_a_peek_and_a_poke_reach_a_peripheral_with_no_cycle():
     chip.poke(PERIPHERAL_BASE, 2, 0x1234)
     assert chip.peek(PERIPHERAL_BASE, 2) == 0x1234
     assert window.held[:2] == b"\x12\x34" and window.cycles == 0
+    chip.poke_bytes(PERIPHERAL_BASE + 2, b"\x56\x78\x9a")
+    assert chip.peek_bytes(PERIPHERAL_BASE, 5) == b"\x12\x34\x56\x78\x9a"
     chip.poke(RAM_BASE, 4, 0x55667788)
     assert chip.bus_read(RAM_BASE, 4) == 0x55667788
+    assert chip.peek_bytes(RAM_BASE, 4) == b"\x55\x66\x77\x88"
     with pytest.raises(mc683xx.UnpeekableError):
         chip.poke(CSBAR1, 2, 0)
     declining, _, _ = mapped(Recorder(0xBEEF))

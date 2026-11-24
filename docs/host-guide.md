@@ -1349,19 +1349,27 @@ first.  None moves the chip's time or shows in the trace.
 - `peek(address, size, function_code) -> Result<u32, BusCycleError>` is
   a look without a cycle: a module's register as a read would find it
   (no flag armed or cleared), memory's bytes as the decode reaches
-  them, and a peripheral's bytes from its `MappedPeripheral::peek`, a
-  byte at a time, the first that would drive the byte answering.
-  What only a cycle can tell, a peripheral that declines (the
-  default), is `BusCycleError::Unpeekable`.  A module answers through
-  `Module::peek`.
-- `poke(address, size, function_code, value)` is a store without a
-  cycle, a byte at a time: memory's bytes, ROM's too, as `write`
-  writes them, and a peripheral's through its `MappedPeripheral::poke`,
-  each that would take the byte.  A module's register, or a
-  peripheral that declines, is `BusCycleError::Unpeekable`, the bytes
-  before it written.  The bare `flat::Machine`'s `read` and `write`
-  reach a peripheral's bytes the same way, failing with
-  `PeekError::Unpeekable` where it declines.
+  them, and a peripheral's bytes from its `MappedPeripheral::peek`,
+  the first that would drive them answering.  What only a cycle can
+  tell, a peripheral that declines (the default), is
+  `BusCycleError::Unpeekable`.  A module answers through
+  `Module::peek`.  `peek_bytes(address, function_code, data)` fills
+  any length of bytes the same way, a module's registers a byte at a
+  time.
+- `poke(address, size, function_code, value)` and
+  `poke_bytes(address, function_code, data)` store without a cycle:
+  memory's bytes, ROM's too, as `write` writes them, and a
+  peripheral's through its `MappedPeripheral::poke`, each that would
+  take them.  A module's register, or a peripheral that declines, is
+  `BusCycleError::Unpeekable`, what came before it stored.  The bare
+  `flat::Machine`'s `read` and `write` reach a peripheral's bytes the
+  same way, failing with `PeekError::Unpeekable` where it declines.
+- A peripheral's `peek(cycle, data) -> bool` and `poke(cycle, data)
+  -> bool` take a range: `cycle` is the first byte's, a byte an
+  address from it up, all the peripheral's.  The chip, the bare
+  machine, a board and gdb split an access where the memory or
+  peripheral reaching its bytes changes and call each peripheral once
+  with its run; a decline fails the whole run.
 
 ```rust
 use mc683xx_cpu32::Cycle;

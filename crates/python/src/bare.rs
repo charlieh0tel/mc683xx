@@ -37,7 +37,6 @@ use mc683xx_cpu32::hooks::MemoryAccess;
 use mc683xx_cpu32::hooks::PendingRead;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
-use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Permissions;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
@@ -114,6 +113,9 @@ struct Fired {
 
 /// The hooks that fired in a core run, in order.
 type Queue = Rc<RefCell<Vec<Fired>>>;
+
+/// The most bytes `Machine.read` asks of the machine at once.
+const READ_CHUNK: usize = 1 << 24;
 
 /// The vectors an iterable of vector numbers names, every vector for
 /// `None`.
@@ -619,35 +621,38 @@ impl MachineView {
     /// `length` bytes at `address` with no bus cycle: mapped memory's,
     /// whatever its permissions, and a peripheral's from its `peek`.
     /// Raises `BusError` if any is neither, `UnpeekableError` for one a
-    /// peripheral declines, and `ValueError` for more than 32 bits of
-    /// addresses.
+    /// peripheral declines, an exception its `peek` raised, and
+    /// `ValueError` for more than 32 bits of addresses.
     fn read<'py>(
         &self,
         py: Python<'py>,
         address: u32,
         length: usize,
-    ) -> Result<Bound<'py, PyBytes>, Error> {
-        let size = length;
-        let length = u32::try_from(size).map_err(|_| Error::Length(size))?;
-        // A byte of each page first, so that an unmapped one raises
-        // before the bytes are allocated.
-        let mut offset = 0;
-        while offset < length {
-            let at = Address(address).offset(offset);
-            self.machine.read(at, &mut [0])?;
-            offset = offset.saturating_add(PAGE_BYTES - at.0 % PAGE_BYTES);
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        u32::try_from(length).map_err(|_| Error::Length(length))?;
+        // A chunk at a time, so that an unmapped one raises before more
+        // is allocated.
+        let mut bytes = Vec::new();
+        while bytes.len() < length {
+            let start = bytes.len();
+            bytes.resize(start + (length - start).min(READ_CHUNK), 0);
+            let read = self
+                .machine
+                .read(Address(address).offset(start as u32), &mut bytes[start..]);
+            self.pending.check()?;
+            read.map_err(Error::from)?;
         }
-        let mut bytes = vec![0; size];
-        self.machine.read(Address(address), &mut bytes)?;
         Ok(PyBytes::new(py, &bytes))
     }
 
     /// Writes `data` at `address`, as `read` reads it: into mapped
     /// memory, and a peripheral's bytes through its `poke`.  On an error
-    /// nothing is written, but for the bytes before one a peripheral
-    /// declines.
-    fn write(&mut self, address: u32, data: PyBackedBytes) -> Result<(), Error> {
-        Ok(self.machine.write(Address(address), &data)?)
+    /// nothing is written, but for the bytes before a run a peripheral
+    /// declines; an exception its `poke` raised is raised.
+    fn write(&mut self, address: u32, data: PyBackedBytes) -> PyResult<()> {
+        let written = self.machine.write(Address(address), &data);
+        self.pending.check()?;
+        Ok(written.map_err(Error::from)?)
     }
 
     /// At addresses `begin` to `end`, both included, which no other
