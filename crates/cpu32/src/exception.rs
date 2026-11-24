@@ -94,11 +94,10 @@ impl Vector {
     ///
     /// # Panics
     ///
-    /// In a debug build, for a `number` past 15, which names no TRAP
-    /// but another vector.
+    /// For a `number` past 15, which names no TRAP but another vector.
     #[must_use]
     pub const fn trap(number: u8) -> Self {
-        debug_assert!(number < TRAP_VECTORS, "TRAP takes 0 to 15");
+        assert!(number < TRAP_VECTORS, "TRAP takes 0 to 15");
         Self(Self::TRAP.0 + number)
     }
 }
@@ -794,7 +793,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(debug_assertions)]
     #[should_panic(expected = "TRAP takes 0 to 15")]
     fn a_trap_past_15_is_no_trap() {
         let _ = Vector::trap(16);
