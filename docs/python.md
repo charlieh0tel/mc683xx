@@ -809,7 +809,7 @@ bytes (a long is two word cycles); `function_code` is a
   first's, and it must give `length` bytes (other than that raises
   `ValueError`).  A peripheral with no `peek`, or one returning
   `None`, raises `UnpeekableError`; an exception its `peek` raises
-  is raised at once, as by `poke`.  `peek_bytes(address, length,
+  is raised at once, as by `poke`, and leaves no stop for the next run.  `peek_bytes(address, length,
   function_code=...) -> bytes` gives any length the same way.
 - `poke(address, size, value, function_code=...)` and
   `poke_bytes(address, data, function_code=...)`: a store without a

@@ -138,6 +138,9 @@ class Raising(Cells):
     def peek(self, access: mc683xx.PeripheralAccess, length: int, moment: mc683xx.Moment) -> bytes | None:
         raise KeyError("no peek")
 
+    def poke(self, access: mc683xx.PeripheralAccess, data: bytes, moment: mc683xx.Moment) -> bool:
+        raise KeyError("no poke")
+
 
 def test_a_board_peripheral_s_peek_exception_is_raised_at_once(tmp_path: Path) -> None:
     program = store_word(CSBAR1, CS1_BAR) + store_word(CSOR1, CSOR_FAST)
@@ -147,6 +150,10 @@ def test_a_board_peripheral_s_peek_exception_is_raised_at_once(tmp_path: Path) -
     board.run_for(seconds=0.0001)
     with pytest.raises(KeyError):
         board.chip.peek_bytes(LATCH, 2)
+    with pytest.raises(KeyError):
+        board.chip.poke_bytes(LATCH, b"\x00")
+    # each raised already: no stop is left for the next run
+    assert board.run_for(seconds=0.0001).stop == mc683xx.Stop.Budget()
 
 
 CELLS = """[[peripheral]]

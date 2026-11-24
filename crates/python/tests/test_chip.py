@@ -1399,6 +1399,8 @@ def test_a_peripheral_exception_in_a_peek_or_poke_is_raised_at_once():
         chip.poke(PERIPHERAL_BASE, 2, 0)
     with pytest.raises(KeyError):
         chip.poke_bytes(PERIPHERAL_BASE, b"\x00")
+    # each raised already: no stop is left for the next run
+    assert chip.run_for(100).stop == mc683xx.Stop.Budget()
 
 
 def test_a_peripheral_exception_is_raised_by_the_host_cycle():

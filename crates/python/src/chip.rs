@@ -1144,7 +1144,8 @@ macro_rules! chip_methods {
             ) -> PyResult<()> {
                 let size = cycle_size(size)?;
                 self.with_chip_mut(py, |chip, pending| {
-                    let poked = chip.poke(Address(address), size, function_code.into(), value);
+                    let poked = pending
+                        .looking(|| chip.poke(Address(address), size, function_code.into(), value));
                     pending.check()?;
                     Ok(poked.map_err(Error::from)?)
                 })
@@ -1165,7 +1166,8 @@ macro_rules! chip_methods {
                 function_code: FunctionCode,
             ) -> PyResult<()> {
                 self.with_chip_mut(py, |chip, pending| {
-                    let poked = chip.poke_bytes(Address(address), function_code.into(), &data);
+                    let poked = pending
+                        .looking(|| chip.poke_bytes(Address(address), function_code.into(), &data));
                     pending.check()?;
                     Ok(poked.map_err(Error::from)?)
                 })
@@ -1564,7 +1566,7 @@ impl Chip {
         _py: Python<'_>,
         look: impl FnOnce(&Mc68331) -> Result<R, BusCycleError>,
     ) -> PyResult<R> {
-        let looked = look(&self.chip);
+        let looked = self.pending.looking(|| look(&self.chip));
         self.pending.check()?;
         Ok(looked.map_err(Error::from)?)
     }
@@ -1613,7 +1615,7 @@ impl BoardChip {
     ) -> PyResult<R> {
         let board = self.board.try_borrow(py)?;
         let (chip, pending) = board.board_chip();
-        let looked = look(chip);
+        let looked = pending.looking(|| look(chip));
         pending.check()?;
         Ok(looked.map_err(Error::from)?)
     }

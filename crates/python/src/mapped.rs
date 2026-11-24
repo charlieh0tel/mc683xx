@@ -6,6 +6,7 @@
 //! exception waits in `Pending` for the call into the chip to raise it
 //! when it returns.
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -76,6 +77,10 @@ pub(crate) struct Pending {
     stop: Stopper,
     /// The Python objects the target holds.
     holdings: Holdings,
+    /// Whether a host's look or store with no cycle is under way, whose
+    /// call raises what a peripheral raises in it: no run is asked to
+    /// stop for it, so none is left stale.
+    looking: Rc<Cell<bool>>,
 }
 
 impl Pending {
@@ -105,9 +110,13 @@ impl Pending {
     }
 
     /// Keeps `error`, unless an earlier one is waiting, and asks the
-    /// run to stop once the instruction ends.
+    /// run to stop once the instruction ends, unless a host's look is
+    /// under way ([`looking`](Self::looking)).
     pub(crate) fn record(&self, error: PyErr) {
         self.hold(error);
+        if self.looking.get() {
+            return;
+        }
         match &self.stop {
             Stopper::Core(stop) => stop.request(),
             Stopper::Board(slot) => {
@@ -116,6 +125,16 @@ impl Pending {
                 }
             }
         }
+    }
+
+    /// `look`, a host's peek or poke, with no cycle: an exception a
+    /// peripheral raises in it waits for the call to raise, but asks no
+    /// run to stop, as the chip's own host cycles leave none.
+    pub(crate) fn looking<R>(&self, look: impl FnOnce() -> R) -> R {
+        let was = self.looking.replace(true);
+        let looked = look();
+        self.looking.set(was);
+        looked
     }
 
     /// Keeps `error`, unless an earlier one is waiting, for a hook that

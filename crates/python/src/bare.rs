@@ -636,9 +636,10 @@ impl MachineView {
         while bytes.len() < length {
             let start = bytes.len();
             bytes.resize(start + (length - start).min(READ_CHUNK), 0);
+            let at = Address(address).offset(start as u32);
             let read = self
-                .machine
-                .read(Address(address).offset(start as u32), &mut bytes[start..]);
+                .pending
+                .looking(|| self.machine.read(at, &mut bytes[start..]));
             self.pending.check()?;
             read.map_err(Error::from)?;
         }
@@ -650,7 +651,9 @@ impl MachineView {
     /// nothing is written, but for the bytes before a run a peripheral
     /// declines; an exception its `poke` raised is raised.
     fn write(&mut self, address: u32, data: PyBackedBytes) -> PyResult<()> {
-        let written = self.machine.write(Address(address), &data);
+        let written = self
+            .pending
+            .looking(|| self.machine.write(Address(address), &data));
         self.pending.check()?;
         Ok(written.map_err(Error::from)?)
     }

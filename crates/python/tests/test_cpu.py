@@ -562,6 +562,9 @@ def test_a_peek_of_another_length_raises_value_error():
     cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, Short())
     with pytest.raises(ValueError, match="a peek of 2 bytes gave 1"):
         cpu.read(PERIPHERAL, 2)
+    # raised already: no stop is left for the next run
+    cpu.write_register("PC", CODE)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
 
 
 def test_a_large_write_into_a_peripheral_is_one_call():
