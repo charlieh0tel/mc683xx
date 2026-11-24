@@ -431,7 +431,7 @@ def test_an_exception_stop_stops_only_the_vectors_set():
 def test_an_intercept_hook_on_every_vector_sees_any():
     cpu = machine(trap(1), RTS)
     seen: list[int] = []
-    cpu.add_intercept_hook(lambda intercepted: seen.append(intercepted.vector), None)
+    cpu.add_intercept_hook(lambda intercepted: seen.append(intercepted.vector))
     assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
     assert seen == [TRAP_0 + 1]
 

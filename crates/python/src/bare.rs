@@ -839,12 +839,12 @@ impl MachineView {
 
     /// Calls `callback(Intercepted)` for each exception an instruction
     /// raises with a vector of `vectors`, an iterable of vector numbers
-    /// or `None` for every vector, before anything is stacked, PC at the
-    /// instruction.  A truthy result means it handled it: the CPU takes
+    /// or `None`, the default, for every vector, before anything is
+    /// stacked, PC at the instruction.  A truthy result means it handled it: the CPU takes
     /// nothing and runs on from PC as the callable left it.  Otherwise
     /// the next hook that covers the vector is called, in the order
     /// installed, and if none handles it the CPU takes it natively.
-    #[pyo3(signature = (callback, vectors))]
+    #[pyo3(signature = (callback, vectors = None))]
     fn add_intercept_hook(
         &mut self,
         callback: &Bound<'_, PyAny>,
