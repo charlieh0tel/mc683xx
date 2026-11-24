@@ -798,7 +798,7 @@ impl Mc68331 {
         while self.now < end {
             if let Some(cause) = self.board.sim.take_reset() {
                 let ends;
-                (stop, ends) = self.reset_in_run(cause);
+                (stop, ends, asked) = self.reset_in_run(cause);
                 if ends {
                     break;
                 }
@@ -879,7 +879,7 @@ impl Mc68331 {
                     if halt == Halt::DoubleBusFault && self.board.sim.halt_monitor() {
                         // as the SIM's own resets
                         let ends;
-                        (stop, ends) = self.reset_in_run(ResetCause::HaltMonitor);
+                        (stop, ends, asked) = self.reset_in_run(ResetCause::HaltMonitor);
                         if ends {
                             break;
                         }
@@ -925,19 +925,25 @@ impl Mc68331 {
     /// the reset changes a clock the host stops on, a peripheral it
     /// reached asks for a sync, or it reaches a watched output.  A
     /// peripheral it reached that asks the run to stop ends it there,
-    /// [`Stop::Requested`], before the first instruction after it.
-    fn reset_in_run(&mut self, cause: ResetCause) -> (Stop, bool) {
+    /// [`Stop::Requested`], before the first instruction after it, or,
+    /// if the reset halted the CPU, with the halt, the request taken
+    /// with it ([`ChipRun::asked`], the third).  The outputs, the sync
+    /// request and the clock are looked at whatever ends it, so the
+    /// next run starts from the reset's.
+    fn reset_in_run(&mut self, cause: ResetCause) -> (Stop, bool, bool) {
         let frequency = self.board.sim.system_clock().frequency();
         self.reset_as(cause, false);
-        if self.board.take_stop() {
-            return (Stop::Requested, true);
-        }
-        let stop = self.cpu.idle().unwrap_or(Stop::Budget);
         let moved = self.board.outputs_moved() | self.board.output_stop.reset;
-        let ends = self.board.clock_stop && self.board.sim.system_clock().frequency() != frequency
-            || self.board.sync_request.take()
-            || moved;
-        (stop, ends)
+        let synced = self.board.sync_request.take();
+        let clock_moved =
+            self.board.clock_stop && self.board.sim.system_clock().frequency() != frequency;
+        let ends = clock_moved || synced || moved;
+        let asked = self.board.take_stop();
+        match self.cpu.idle() {
+            Some(idle) => (idle, ends || asked, asked),
+            None if asked => (Stop::Requested, true, false),
+            None => (Stop::Budget, ends, false),
+        }
     }
 
     /// Runs whole instructions until now is `deadline` or past it, as
