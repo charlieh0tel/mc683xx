@@ -89,6 +89,8 @@ mod register;
 #[cfg(feature = "python")]
 mod requests;
 mod select;
+#[cfg(feature = "python")]
+mod vector;
 
 #[cfg(all(test, feature = "python"))]
 mod tests;

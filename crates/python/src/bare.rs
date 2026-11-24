@@ -82,6 +82,7 @@ use crate::python::opaque_repr;
 use crate::python::repr;
 use crate::register::Register;
 use crate::requests::StopRequestView;
+use crate::vector::vector_set;
 
 /// Instructions a run goes between looks for Ctrl-C.
 const QUANTUM: u64 = 100_000;
@@ -117,18 +118,6 @@ type Queue = Rc<RefCell<Vec<Fired>>>;
 
 /// The most bytes `Machine.peek_bytes` asks of the machine at once.
 const PEEK_CHUNK: usize = 1 << 24;
-
-/// The vectors an iterable of vector numbers names, every vector for
-/// `None`.
-fn vector_set(vectors: Option<&Bound<'_, PyAny>>) -> PyResult<VectorSet> {
-    let Some(vectors) = vectors else {
-        return Ok(VectorSet::ALL);
-    };
-    vectors
-        .try_iter()?
-        .map(|vector| vector?.extract::<u8>().map(Vector))
-        .collect()
-}
 
 /// An intercept hook's callable and the vectors it covers.
 #[derive(Debug)]
