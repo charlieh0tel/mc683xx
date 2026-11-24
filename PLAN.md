@@ -1939,7 +1939,7 @@ Adversarial review of the board layer (2026-10-23):
 `mc683xx-gdb` serves gdb's remote serial protocol through the
 `gdbstub` crate (MIT OR Apache-2.0, a Cargo dependency like any other,
 so not in `third_party/NOTICE`, and named nowhere in the public API):
-one session, `serve`, over one trait, `target::Target`, on a
+one session, `serve`, over one trait, `Target`, on a
 `connection::Connection`, the stub's own trait, which it adapts to
 gdbstub's.  `Target`, `Connection` and `Waiter` each bound their
 `Error` on `std::error::Error`, as `Cpu32Target` does, so `serve`
@@ -1952,7 +1952,7 @@ means gives `native_step`, a `NativeStep`; one with neither cannot step
 and gdb is offered no step, never a step that does not move.  The bare CPU (`flat::Machine`), the chip and a
 board implement it; the runner (`--gdb`) and the Python bindings
 (`serve_gdb` on `Machine`, `Mc68331` and `Board`) implement it over
-those, keeping their own work between quanta.  `bdm::Bdm` makes any
+those, keeping their own work between quanta.  `Bdm` makes any
 `Cpu32Target` one (Over BDM, below).  docs/gdb.md is the guide.  The chip's and the board's
 `Target` impls are features (`mc68331`, `board`), on by default, so a
 bare-CPU host builds the stub without the chip and board crates; the
@@ -2005,7 +2005,7 @@ checks the bare build.
 - **Stops gdb did not ask for:** the host's own hook stops are
   `SIGTRAP`, a halt and a bare host's fault stop `SIGBUS`, a stop
   request `SIGINT`.
-- **Over BDM** (2026-11-01): `bdm::Bdm`, any `Cpu32Target` as a
+- **Over BDM** (2026-11-01): `Bdm`, any `Cpu32Target` as a
   `Target`, so a host driving silicon through a BDM pod has gdb.  It
   gives no `cpu_scope`, so the session plants BGND for a breakpoint,
   read back and refused in ROM, has no hardware breakpoints or
@@ -2042,7 +2042,7 @@ checks the bare build.
   peripherals stop the run where something outside the CPU happens,
   which no breakpoint or watchpoint reaches (a DUART's character, a
   net's edge).  `mc683xx_board::condition` holds the protocol, gdb's
-  only through `target::Target::conditions` (the `board` feature): a
+  only through `Target::conditions` (the `board` feature): a
   `Condition` parsed from `monitor stop`'s words (`net NET CHANGE`,
   `peripheral NAME CONDITION [ARGUMENTS]`), armed on the board
   (`Conditions`, which `Board` implements) until disarmed.  A net's is

@@ -2,10 +2,10 @@
 //! or a CPU32 under BDM control.
 //!
 //! gdb's remote serial protocol, through the [`gdbstub`] crate, over a
-//! [`target::Target`] ([PLAN.md, Debugger]): [`serve`], on a
+//! [`Target`] ([PLAN.md, Debugger]): [`serve`], on a
 //! [`connection::Connection`].  An emulated target gives the CPU's
 //! controls, so breakpoints, watchpoints and steps are the core's
-//! hooks; [`bdm::Bdm`] makes any
+//! hooks; [`Bdm`] makes any
 //! [`Cpu32Target`](mc683xx_target::Cpu32Target), a BDM pod's on
 //! silicon among them, a target whose breakpoints are BGND planted in
 //! memory.  [`docs/gdb.md`] is its guide, whose Rust block the
@@ -89,14 +89,20 @@ use std::fmt::Display;
 use mc683xx_target::Address;
 
 use crate::connection::Connection;
-use crate::target::Target;
 
 mod arch;
-pub mod bdm;
+mod bdm;
 pub mod connection;
 mod protocol;
 mod session;
-pub mod target;
+mod target;
+
+pub use bdm::Bdm;
+pub use target::AccessError;
+pub use target::NativeStep;
+pub use target::Target;
+pub use target::TargetReset;
+pub use target::TargetRun;
 
 /// How a session ended.
 ///

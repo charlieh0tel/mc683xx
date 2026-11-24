@@ -8,9 +8,9 @@ use std::rc::Rc;
 
 use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::memory::MemoryKind;
+use mc683xx_gdb::Bdm;
 use mc683xx_gdb::Ending;
 use mc683xx_gdb::SessionError;
-use mc683xx_gdb::bdm::Bdm;
 use mc683xx_gdb::serve;
 use mc683xx_mc68331::Builder;
 use mc683xx_mc68331::Mc68331;
@@ -439,10 +439,10 @@ fn a_breakpoint_the_program_wrote_over_is_the_program_s() {
 /// chip's `Cpu32Target`.
 mod unsteppable {
     use mc683xx_cpu32::Cycles;
-    use mc683xx_gdb::bdm::Bdm;
-    use mc683xx_gdb::target::AccessError;
-    use mc683xx_gdb::target::Target;
-    use mc683xx_gdb::target::TargetRun;
+    use mc683xx_gdb::AccessError;
+    use mc683xx_gdb::Bdm;
+    use mc683xx_gdb::Target;
+    use mc683xx_gdb::TargetRun;
     use mc683xx_mc68331::TargetError;
     use mc683xx_target::Address;
     use mc683xx_target::FunctionCode;

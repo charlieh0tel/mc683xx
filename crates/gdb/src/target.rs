@@ -61,7 +61,7 @@ mod chip;
 /// More ends may come, so a match needs a wildcard arm:
 ///
 /// ```compile_fail
-/// use mc683xx_gdb::target::TargetRun;
+/// use mc683xx_gdb::TargetRun;
 ///
 /// fn ran_on(ran: TargetRun) -> bool {
 ///     match ran {
@@ -115,7 +115,7 @@ impl From<Stop> for TargetRun {
 /// More answers may come, so a match needs a wildcard arm:
 ///
 /// ```compile_fail
-/// use mc683xx_gdb::target::TargetReset;
+/// use mc683xx_gdb::TargetReset;
 ///
 /// fn reset(answer: TargetReset) -> bool {
 ///     match answer {
@@ -138,7 +138,7 @@ pub enum TargetReset {
 /// More reasons may come, so a match needs a wildcard arm:
 ///
 /// ```compile_fail
-/// use mc683xx_gdb::target::AccessError;
+/// use mc683xx_gdb::AccessError;
 ///
 /// fn target<E>(error: AccessError<E>) -> Option<E> {
 ///     match error {
