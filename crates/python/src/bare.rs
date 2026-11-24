@@ -1153,7 +1153,7 @@ impl MachineView {
         if !handled {
             let mut this = slf.borrow_mut();
             if this.machine.cpu.registers.pc == interception.pc {
-                this.machine.cpu.take_natively_once();
+                this.machine.cpu.take_natively_once(interception.vector);
             }
         }
         Ok(())

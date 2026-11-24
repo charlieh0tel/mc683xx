@@ -2621,8 +2621,11 @@ and `mc683xx.Machine` in Python (see Python).
   (its registers as it began for a fault, its (An)+ and -(An) for
   another), a trace or breakpoint is left pending, and nothing is
   charged.  The next host run takes that exception natively once, by
-  the PC and instruction count it stopped at, as `take_natively_once`
-  does, so running on is the default answer; `take_exception` is the
+  the PC, instruction count and vector it stopped at, as
+  `take_natively_once` does by PC, count and the vector the host
+  names, so running on is the default answer, and another exception
+  there (the trap after a trace the host withdrew, a higher interrupt
+  arriving since) is a stop of its own; `take_exception` is the
   host's own.  Precedence, decided 2026-11-23: a fault with
   `set_stop_on_fault` is a fault stop, its detail the richer; then the
   intercept hooks, for the vectors they cover, an exception they all
