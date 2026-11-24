@@ -123,9 +123,9 @@ rename renames the Python name with it.  The deliberate differences:
   peripheral class's `PORTS` (its `PortSpec`s), and `__version__`.
 
 Not offered, as a Python host has another way or no use for them:
-`Machine::remove_peripheral`, `take_natively_once` (a declined
-intercept is taken natively), `clear_resume` (`run_limited(begin=)`),
-`set_long_bus` and `instruction_registers` (a hook's `registers`);
+`take_natively_once` (a declined intercept is taken natively),
+`clear_resume` (`run_limited(begin=)`), `set_long_bus` and
+`instruction_registers` (a hook's `registers`);
 `Mc68331::set_clock_stop` and `set_output_stop` (a host's own
 scheduler's, as the board's); the `_mut` accessors and
 `cpu`, `sim`, `qsm` and `gpt` (registers by name, a module's registers
