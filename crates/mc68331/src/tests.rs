@@ -315,7 +315,8 @@ fn write_register(chip: &mut Mc68331, address: u32, value: u16) {
 
 #[test]
 fn csboot_serves_the_reset_vectors_with_13_wait_states() {
-    let (mut chip, _) = booting(&[NOP]);
+    let (mut chip, rom) = booting(&[NOP]);
+    assert_eq!(rom.to_string(), "memory in region 0");
     assert_eq!(chip.cpu().halted(), None);
     assert_eq!(chip.cpu().registers.ssp.0, STACK);
     assert_eq!(chip.cpu().registers.pc.0, START);

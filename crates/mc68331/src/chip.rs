@@ -92,6 +92,13 @@ fn index(id: PeripheralId) -> usize {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MemoryId(pub(crate) RegionId);
 
+/// The region it is: `memory in region 2`.
+impl fmt::Display for MemoryId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "memory in {}", self.0)
+    }
+}
+
 /// A handle by which the host's peripherals end the chip's run early.
 ///
 /// After the instruction whose cycle asked, or at the sync point if no

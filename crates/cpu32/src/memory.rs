@@ -135,6 +135,13 @@ pub(crate) mod watch {
 )]
 pub struct RegionId(usize);
 
+/// `region` and its number: `region 2`.
+impl fmt::Display for RegionId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "region {}", self.0)
+    }
+}
+
 /// The bytes a page reads or writes: [`region`](Self::region) from
 /// `offset` on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -1157,6 +1164,10 @@ mod tests {
         let mut memory = Memory::new(24).unwrap();
         let rom = memory.add_region(vec![0; PAGE_BYTES as usize]);
         let ram = memory.add_region(vec![0; PAGE_BYTES as usize]);
+        assert_eq!(
+            (rom.to_string(), ram.to_string()),
+            ("region 0".to_owned(), "region 1".to_owned())
+        );
         let backing = |region| Some(Backing { region, offset: 0 });
         // a ROM that reads, the RAM under it that takes the writes
         let page = Page::BUS.reading(backing(rom)).writing(backing(ram));
