@@ -159,14 +159,17 @@ impl Cycles {
 impl Add for Cycles {
     type Output = Self;
 
+    /// The sum, or the most clocks there are: a peripheral's wait states
+    /// may be any count, so a cost never wraps.
     fn add(self, other: Self) -> Self {
-        Self(self.0 + other.0)
+        self.saturating_add(other)
     }
 }
 
 impl AddAssign for Cycles {
+    /// As [`Add`].
     fn add_assign(&mut self, other: Self) {
-        self.0 += other.0;
+        *self = *self + other;
     }
 }
 

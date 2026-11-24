@@ -2164,6 +2164,35 @@ mod tests {
     #[derive(Debug, Default)]
     struct AcknowledgeStops(Rc<Cell<bool>>);
 
+    /// A bus whose every read answers $3434 after half the most clocks
+    /// there are.
+    struct Slowest;
+
+    impl Bus for Slowest {
+        fn read(&mut self, _access: BusAccess) -> Result<Read, BusError> {
+            Ok(Read::new(0x3434).stalled(Cycles::from_clocks(1 << 63)))
+        }
+
+        fn write(&mut self, _access: BusAccess, _value: u32) -> Result<Cycles, BusError> {
+            Err(BusError)
+        }
+    }
+
+    #[test]
+    fn an_instruction_s_stalls_saturate_its_cost() {
+        // MOVE.L (A0),D1: two word reads from the bus
+        let mut cpu = machine(&[0x2210]);
+        cpu.registers.set_address(0, 0x10_0000);
+        let run = cpu.run_for(
+            &mut Slowest,
+            &mut NoInterrupts,
+            Cycle::ZERO,
+            Cycles::from_clocks(1),
+        );
+        assert_eq!(run.cycles, Cycles::MAX);
+        assert_eq!(cpu.registers.data[1], 0x3434_3434);
+    }
+
     impl Bus for AcknowledgeStops {
         fn read(&mut self, _access: BusAccess) -> Result<Read, BusError> {
             Err(BusError)

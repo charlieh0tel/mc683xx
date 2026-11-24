@@ -166,7 +166,7 @@ struct Recorder {
     /// What it reads as.
     value: u32,
     /// Its wait states on an externally terminated select.
-    wait: Option<u8>,
+    wait: Option<u64>,
     /// Whether it asks for an interrupt.
     interrupt: bool,
     /// The resets it saw.
@@ -195,7 +195,7 @@ impl MappedPeripheral for Recorder {
     }
 
     fn wait_states(&mut self, _: BusCycle) -> Option<Cycles> {
-        self.wait.map(|wait| Cycles::from_clocks(wait.into()))
+        self.wait.map(Cycles::from_clocks)
     }
 
     fn interrupt_request(&self) -> bool {
