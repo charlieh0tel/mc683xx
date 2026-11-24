@@ -718,8 +718,8 @@ impl DriveView {
 
     /// Writes `data` at `offset` in the board's memory `memory` when the
     /// chip's quantum ends.
-    fn write_memory(&mut self, memory: String, offset: usize, data: Vec<u8>) {
-        self.writes.push((memory, offset, data));
+    fn write_memory(&mut self, memory: String, offset: usize, data: PyBackedBytes) {
+        self.writes.push((memory, offset, data.to_vec()));
     }
 
     /// Asks the run to stop after the instruction running now.

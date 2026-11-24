@@ -83,6 +83,42 @@ class Latch:
         drive.drive(0, bool(value & 1))
 
 
+class Poker:
+    """A write-only peripheral that writes the board's memory `rom` from
+    a write's value, as bytes, and tries a list too."""
+
+    PORTS: list[tuple[str, str, str]] = []
+
+    def __init__(self) -> None:
+        self.refused = False
+
+    def write(self, access: mc683xx.PeripheralAccess, value: int, drive: mc683xx.Drive) -> None:
+        drive.write_memory("rom", 0x10, struct.pack(">H", value))
+        try:
+            drive.write_memory("rom", 0x12, [1, 2])  # type: ignore[arg-type]
+        except TypeError:
+            self.refused = True
+
+
+def test_a_peripheral_writes_a_board_memory_as_bytes(tmp_path: Path) -> None:
+    program = store_word(CSBAR1, CS1_BAR) + store_word(CSOR1, CSOR_FAST) + store_word(LATCH, 0x1234)
+    (tmp_path / "rom.bin").write_bytes(rom(program))
+    (tmp_path / "board.toml").write_text(BOARD.split("[[peripheral]]")[0] + POKER)
+    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"poker": Poker})
+    board.run_for(seconds=0.0001)
+    assert board.memory("rom")[0x10:0x14] == b"\x12\x34" + struct.pack(">H", NOP)
+    poker = board.peripheral("poker")
+    assert isinstance(poker, Poker)
+    assert poker.refused
+
+
+POKER = """[[peripheral]]
+name = "poker"
+type = "poker"
+attach = [{ select = "CS1", role = "write" }]
+"""
+
+
 class Lamp:
     """A lamp on a logic input."""
 
