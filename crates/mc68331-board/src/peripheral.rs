@@ -671,7 +671,12 @@ pub trait Peripheral: Any {
     /// right-aligned, with none of its side effects: a debugger's look
     /// (the chip's `peek`, gdb's memory reads), a byte at a time, as
     /// [`MappedPeripheral::peek`].  By default [`None`]: only a real
-    /// cycle can tell.
+    /// cycle can tell.  A lazily advanced model, one that brings its
+    /// state up to date only inside `read` (settling what happened
+    /// since its last call), declines where catching up could change
+    /// the answer, as `&self` cannot catch up: a board advances every
+    /// peripheral to its time before a host's peek, but a direct call
+    /// at a later `moment` gets the state as of the last `advance`.
     ///
     /// [`MappedPeripheral::peek`]: mc683xx_cpu32::peripheral::MappedPeripheral::peek
     fn peek(&self, access: PeripheralAccess, moment: Moment) -> Option<u32> {
@@ -682,7 +687,9 @@ pub trait Peripheral: Any {
     /// attachment would at `moment`, with none of its side effects: a
     /// debugger's poke (the chip's `poke`, gdb's memory writes), a byte
     /// at a time, as [`MappedPeripheral::poke`].  Whether it took it; by
-    /// default it declines.
+    /// default it declines.  A lazily advanced model declines where
+    /// state it has yet to settle would change what the byte becomes,
+    /// as for `peek`.
     ///
     /// [`MappedPeripheral::poke`]: mc683xx_cpu32::peripheral::MappedPeripheral::poke
     fn poke(&mut self, access: PeripheralAccess, value: u32, moment: Moment) -> bool {

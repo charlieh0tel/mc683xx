@@ -191,7 +191,10 @@ pub trait MappedPeripheral: Save {
     /// debugger's look, as the bare machine's
     /// [`read`](crate::flat::Machine::read), a chip's `peek` and gdb's
     /// memory reads take it, a byte at a time.  By default [`None`]:
-    /// only a real cycle can tell, and the look fails as unpeekable.
+    /// only a real cycle can tell, and the look fails as unpeekable.  A
+    /// lazily advanced model, one that brings its state up to date only
+    /// inside `read`, declines where catching up could change the
+    /// answer, as `&self` cannot catch up.
     fn peek(&self, cycle: BusCycle) -> Option<u32> {
         let _ = cycle;
         None
@@ -202,7 +205,9 @@ pub trait MappedPeripheral: Save {
     /// loads): a debugger's poke, as the bare machine's
     /// [`write`](crate::flat::Machine::write), a chip's `poke` and gdb's
     /// memory writes make it, a byte at a time.  Whether it took it; by
-    /// default it declines, and the poke fails as unpeekable.
+    /// default it declines, and the poke fails as unpeekable.  A lazily
+    /// advanced model declines where state it has yet to settle would
+    /// change what the byte becomes.
     fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
         let _ = (cycle, value);
         false
