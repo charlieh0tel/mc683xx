@@ -7,9 +7,9 @@ use std::ops::ControlFlow;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
+use mc683xx_board::BoardControl;
 use mc683xx_board::condition::Conditions;
-use mc683xx_board::control::BoardControl;
 use mc683xx_board::pacing::Pacer;
 use mc683xx_cpu32::CpuControl;
 use mc683xx_cpu32::Cycles;

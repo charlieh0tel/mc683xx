@@ -502,13 +502,13 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   is the first key no getter read, the load's unknown-parameter error,
   for a host's tests of its constructors, which build their `Parameters`
   with `Parameters::parse(toml_text)` (text that is not a TOML table an
-  `description::SyntaxError`, its `line()` and `column()` from 1, as a board
+  `SyntaxError`, its `line()` and `column()` from 1, as a board
   file's `LoadError::Syntax` carries; boxed, so a `LoadError`, and a
   host's error holding one, stays small).  A host holding TOML that sets
-  a peripheral's parameters (`description::Options::parameters`) takes the
+  a peripheral's parameters (`Options::parameters`) takes the
   table as `Parameters::parse(toml_text)?.into_table()`, and one value
   with `Options::set("PERIPHERAL.KEY=VALUE".parse()?)` (a
-  `description::Setting`, its parse error a `ParseSettingError`,
+  `Setting`, its parse error a `ParseSettingError`,
   printing back as `PERIPHERAL.KEY=VALUE` with the value as TOML writes
   it); the TOML parser's types are
   not in the API, so a host that parsed its own TOML passes the text.

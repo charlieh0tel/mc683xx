@@ -3,13 +3,13 @@
 
 use std::time::TryFromFloatSecsError;
 
-use mc683xx_board::board::NoMemory;
-use mc683xx_board::board::NoNet;
-use mc683xx_board::board::NoPeripheral;
-use mc683xx_board::board::NoReceiver;
-use mc683xx_board::board::RunError;
-use mc683xx_board::board::SendError;
-use mc683xx_board::description::LoadError;
+use mc683xx_board::LoadError;
+use mc683xx_board::NoMemory;
+use mc683xx_board::NoNet;
+use mc683xx_board::NoPeripheral;
+use mc683xx_board::NoReceiver;
+use mc683xx_board::RunError;
+use mc683xx_board::SendError;
 use mc683xx_board::pacing::PacingError;
 use mc683xx_board::pacing::ParsePacingError;
 use mc683xx_board::registry::RegistryError;

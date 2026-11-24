@@ -1435,12 +1435,12 @@ assert_eq!(chip.now(), now);
 
 A front end (a TUI, a GUI, a logger) is the host's, outside this
 repository, and outside the board file, which stays hardware only
-(PLAN.md, Boards): it attaches to a loaded `mc683xx_board::board::Board`
+(PLAN.md, Boards): it attaches to a loaded `mc683xx_board::Board`
 and watches it, and moves it only through the inputs the board file
 already names.
 
 A board is generic over the chip it is built around
-(`mc683xx_board::chip::Chip`): `Board::<Mc68331>::load(&description,
+(`mc683xx_board::Chip`): `Board::<Mc68331>::load(&description,
 ...)` loads one around the MC68331, and `Description::chip_type()`
 gives the file's `[chip] type`, for a host that serves several chips
 to choose by.  `Description::parse_with(text, directory, &options,
@@ -1466,7 +1466,7 @@ part off as an option off would, its net ends and any net left with no
 driver or no sink going with it, an `external.*` end it had left
 among them; it gives the names of the nets that went, so a host sees
 an external endpoint left on no net.  Each refuses a name the description
-lacks (`description::EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
+lacks (`EditError`).  `board.chip()` is the chip itself, an `&Mc68331` with
 every method of the chip's.  `Chip` is sealed: a host names it in a
 bound (`Board<C: Chip>`) and uses its items (`TYPE`, the name a
 board file's `[chip] type` gives, `"mc68331"`; `cpu`, `cpu_control`,
@@ -1559,7 +1559,7 @@ beside `watch_code`, a hook that breaks ending the run `Stop::Hook`.
   is built and run on one thread (PLAN.md, Decisions).  What it is
   built from (`Description`, `Image`, `Script`, `Memory`) is `Send`,
   so another thread may parse and read those.  `Board::control() ->
-  control::BoardControl` is the board's thread-safe handle (`Send`,
+  BoardControl` is the board's thread-safe handle (`Send`,
   `Sync`, cheap to `Clone`; every call gives a handle to the one
   control), for a front end whose event loop is another thread:
   `stop()` asks the run to stop, `send(name, signal) -> Result<(),
@@ -1627,13 +1627,13 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
 
 use mc683xx_mc68331::Mc68331;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
+use mc683xx_board::Description;
+use mc683xx_board::Options;
 use mc683xx_board::inspect::Value;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Environment;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
 
@@ -1706,14 +1706,14 @@ use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
 
 use mc683xx_mc68331::Mc68331;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
+use mc683xx_board::Description;
+use mc683xx_board::Options;
 use mc683xx_board::pacing::QUANTUM;
 use mc683xx_board::pacing::Pacing;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Environment;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
@@ -1794,7 +1794,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `IrqPin` (`IRQ7`), `ResetCause` (`power-on`) and the names a board
   file writes (`mc68331::Pin` and `PortPin`, `PE0`; `signal::Kind`;
   `peripheral::Role`, `read-write`; `pacing::Pacing`;
-  `description::Setting`, `dac.value=16`) parse back.
+  `Setting`, `dac.value=16`) parse back.
 - Conversions, one way each: a bit pattern whose every value is valid
   (`Address`, `Vector`) converts `From` and into what it wraps; a
   checked value (`InterruptLevel`, `IrqPin`, `PortGpPin`,
@@ -1807,7 +1807,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   enums that may grow: `Stop`, `Halt`, the bare run's `End` and
   `FaultCause`, `hooks::Invalid`, the GPT's `pwm::Output`, and the
   board's `Signal`, `signal::Kind`,
-  `mc68331::Pin`, `peripheral::Role`, `chip::MemoryPlace` and
+  `mc68331::Pin`, `peripheral::Role`, `MemoryPlace` and
   `trace::Record`.  A match on one needs a wildcard arm.  The chip's
   `Event` is, and so is each of its variants, a struct variant with
   its time (`now`): a pattern on one needs `..`.  Enums of
@@ -1818,7 +1818,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `ExceptionEntry`), `bus::BusAccess`, `peripheral::BusCycle`, the run
   results (`Run`, `LimitedRun`, `FaultStop`, `Intercepted`,
   `BoardRun`), the trace's record structs,
-  `board::External`, `trace::Trace`, `peripheral::Driving`, `Driven`
+  `External`, `trace::Trace`, `peripheral::Driving`, `Driven`
   and `MemoryWrite`, `builtin::Logged`, `inspect::Inspection` and
   `Field`, and `registry::Constructed` and `Context`; and the values a
   host builds but whose fields may grow: `registry::PortSpec`,
@@ -1830,7 +1830,7 @@ assert_eq!(board.net_value("key"), Ok(Some(Signal::Level(false))));
   `Clock::with_phase`, `Field::new`, and `Inspection::default()` with
   its builders.
 - The configuration structs (`Limits`, `BoardTracing`,
-  `ChipTracing`, `description::Options`, `registry::Environment`) are
+  `ChipTracing`, `Options`, `Environment`) are
   `#[non_exhaustive]` too, with every field public: build one from
   `X::default()` and set the fields it needs
   (`let mut tracing = BoardTracing::default(); tracing.pins = true;`),

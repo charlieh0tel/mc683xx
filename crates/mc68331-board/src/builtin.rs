@@ -748,13 +748,13 @@ mod tests {
     use super::Recorder;
     use super::RegisterFile;
     use super::VERSION;
+    use crate::environment::Environment;
     use crate::inspect::Inspection;
     use crate::inspect::Value;
     use crate::peripheral::Drive;
     use crate::peripheral::Peripheral;
     use crate::peripheral::PeripheralAccess;
     use crate::registry::Context;
-    use crate::registry::Environment;
     use crate::registry::ParameterError;
     use crate::registry::Parameters;
     use crate::signal::Signal;

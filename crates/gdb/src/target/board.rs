@@ -1,8 +1,8 @@
 //! A board as the stub's target: its chip, run with the board's peripherals
 //! and nets.
 
-use mc683xx_board::board::Board;
-use mc683xx_board::board::RunError;
+use mc683xx_board::Board;
+use mc683xx_board::RunError;
 use mc683xx_board::condition::Conditions;
 use mc683xx_board::time::Span;
 use mc683xx_cpu32::CpuControl;

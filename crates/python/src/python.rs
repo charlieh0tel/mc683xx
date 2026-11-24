@@ -5,7 +5,7 @@ use std::fmt;
 use std::io;
 use std::path::Path;
 
-use mc683xx_board::description::LoadError;
+use mc683xx_board::LoadError;
 use mc683xx_cpu32::flat::PeekError;
 use mc683xx_cpu32::state::StateError;
 use mc683xx_mc68331::BusCycleError;

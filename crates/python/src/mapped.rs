@@ -9,7 +9,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mc683xx_board::board;
+use mc683xx_board::BoardStopRequest;
 use mc683xx_cpu32::BusError;
 use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::Cycles;
@@ -54,7 +54,7 @@ enum Stopper {
     Core(StopRequest),
     /// A board's, once it is loaded: its peripherals are made, and may fail,
     /// before it has one.
-    Board(Rc<RefCell<Option<board::BoardStopRequest>>>),
+    Board(Rc<RefCell<Option<BoardStopRequest>>>),
 }
 
 impl Default for Stopper {
@@ -97,7 +97,7 @@ impl Pending {
     }
 
     /// The board's stop request, once it is loaded.
-    pub(crate) fn set_board_stop(&self, stop: board::BoardStopRequest) {
+    pub(crate) fn set_board_stop(&self, stop: BoardStopRequest) {
         if let Stopper::Board(slot) = &self.stop {
             *slot.borrow_mut() = Some(stop);
         }

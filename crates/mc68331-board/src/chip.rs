@@ -261,7 +261,7 @@ pub trait ChipBuilder: sealed::Sealed {
 /// its methods, which is all a host needs.  So this does not compile:
 ///
 /// ```compile_fail,E0277
-/// use mc683xx_board::chip::Chip;
+/// use mc683xx_board::Chip;
 ///
 /// struct Mine;
 ///

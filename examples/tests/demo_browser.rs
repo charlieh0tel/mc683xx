@@ -11,13 +11,13 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
-use mc683xx_board::board::Board;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
+use mc683xx_board::Board;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::pacing::Factor;
 use mc683xx_board::pacing::Pacing;
 use mc683xx_board::pacing::QUANTUM;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;

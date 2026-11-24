@@ -229,9 +229,9 @@ mod tests {
     use mc683xx_board::peripheral::Drive;
 
     use crate::SYSTEM_CLOCK;
+    use mc683xx_board::Environment;
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::registry::Context;
-    use mc683xx_board::registry::Environment;
     use mc683xx_board::registry::ParameterError;
     use mc683xx_board::registry::Parameters;
     use mc683xx_board::signal::Signal;

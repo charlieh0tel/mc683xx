@@ -6,6 +6,7 @@ use mc683xx_board::inspect::Value;
 use mc683xx_board::peripheral::Drive;
 
 use crate::SYSTEM_CLOCK;
+use mc683xx_board::Environment;
 use mc683xx_board::peripheral::Driven;
 use mc683xx_board::peripheral::Lane;
 use mc683xx_board::peripheral::Peripheral;
@@ -13,7 +14,6 @@ use mc683xx_board::peripheral::PeripheralAccess;
 use mc683xx_board::peripheral::Role;
 use mc683xx_board::registry::ConstructError;
 use mc683xx_board::registry::Context;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::ParameterError;
 use mc683xx_board::registry::Parameters;
 use mc683xx_board::registry::Registry;

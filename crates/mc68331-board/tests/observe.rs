@@ -6,16 +6,16 @@ use std::cell::RefCell;
 use std::env;
 use std::rc::Rc;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
 
-use mc683xx_board::board::NoNet;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::NoNet;
+use mc683xx_board::Options;
 use mc683xx_board::builtin::EdgeCounter;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
 use mc683xx_board::observe::Observer;
 use mc683xx_board::peripheral::Drive;
 use mc683xx_board::peripheral::Peripheral;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::PortSpec;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Kind;

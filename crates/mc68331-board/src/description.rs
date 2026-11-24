@@ -37,12 +37,12 @@ use mc683xx_target::Address;
 use mc683xx_target::parse_integer;
 
 use crate::endpoint::Endpoint;
+use crate::environment::Environment;
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
 use crate::registry::ConstructError;
 use crate::registry::Constructed;
 use crate::registry::Context;
-use crate::registry::Environment;
 use crate::registry::ParameterError;
 use crate::registry::ParameterTable;
 use crate::registry::ParameterValue;

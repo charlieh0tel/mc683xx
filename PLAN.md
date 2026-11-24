@@ -98,7 +98,7 @@ Out:
   boards and their firmware.
 - `mc683xx-board` (`crates/mc68331-board`): board files and the board
   around a 683xx chip: peripherals from a registry, decoders, nets and
-  board time (see Boards), generic over the chip (`chip::Chip`), the
+  board time (see Boards), generic over the chip (`Chip`), the
   MC68331's implementation behind its default feature `mc68331`.
 - `mc683xx-run` (`crates/mc68331-run`): the runner, the workspace's one
   binary, for a board file (see Boards).
@@ -130,7 +130,9 @@ right only qualified (`hooks::Instruction`, `time::Clock`,
 implements against (`peripheral`, `registry`, `adapter`), or where it
 is one of the manual's modules (`sim`, `qsm`, `gpt`).  A module is
 public whole or private whole, so every public item keeps one path
-(AGENTS.md, Rust Rules; decided 2026-11-24).
+(AGENTS.md, Rust Rules; decided 2026-11-24).  A layer's snapshot
+format version is `state::VERSION` in its crate (the core's, the
+chip's, the board's), not a root `VERSION` that could be the crate's.
 
 ## Interface
 
@@ -1127,7 +1129,7 @@ hand.  The keys are in `docs/board-files.md`.
   board with and without an option (the 58503A's front panel).  A
   net's endpoints on a peripheral left off go with it.
 - **Chip:** the board is generic over the chip it is built around,
-  `Board<C: chip::Chip>`, and `[chip]` holds `type`, the chip's name
+  `Board<C: Chip>`, and `[chip]` holds `type`, the chip's name
   (`"mc68331"`, `Chip::TYPE`), required (`LoadError::NoChip`; a file
   names what it is built around, as a schematic does, rather than a
   host guessing), another than the one the board is loaded as
@@ -1144,7 +1146,7 @@ hand.  The keys are in `docs/board-files.md`.
   reload scope, a router per select or decoder with its DSACK pins,
   each peripheral's IRQ output and reset scope on no pin, the QSPI's
   PCS decode), running for a budget with its sync and stop requests
-  (`chip::Requests`, the stop the core's `StopRequest`), the system
+  (`Requests`, the stop the core's `StopRequest`), the system
   clock and the clock outputs, its pins (`ChipPin`: printed and parsed by name, kind,
   direction, and whether it takes a level ahead at its time), the
   outputs it watches, its events and the RESET pulse each reset
@@ -1678,7 +1680,7 @@ hand.  The keys are in `docs/board-files.md`.
   quanta change nothing.  `run_until` on such a board runs to `deadline`
   as time passes without the CPU, as the chip's run does, and ends
   `Halted` or `Background` if the CPU still is.
-  `Board::stop_request()` is the host's `board::BoardStopRequest`
+  `Board::stop_request()` is the host's `BoardStopRequest`
   (not the core's: it holds the board weakly, so a peripheral may keep
   it, and stops the board's loop as well as the chip), which stops the
   run as a peripheral's `Drive::stop` does: for a peripheral that fails
@@ -1754,7 +1756,7 @@ hand.  The keys are in `docs/board-files.md`.
   `inspecting` as `saving` takes `Save`: an opt-in, since stable Rust
   cannot ask whether a model implements a trait, and the modules crate
   stays free of the board's types.
-  `Board::control() -> control::BoardControl` is the board's one
+  `Board::control() -> BoardControl` is the board's one
   thread-safe handle (an `Arc` of an atomic flag, a mutex and a
   condition variable; `Send`, `Sync`, `Clone`), for a front end whose
   event loop is another thread: `stop()`, `send(name, signal)`, checked

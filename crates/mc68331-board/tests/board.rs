@@ -17,29 +17,29 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use mc683xx_board::Board;
+use mc683xx_board::BoardRun;
+use mc683xx_board::BoardTracing;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::LoadError;
+use mc683xx_board::LookupError;
+use mc683xx_board::NoPeripheral;
+use mc683xx_board::NoReceiver;
+use mc683xx_board::Options;
+use mc683xx_board::RunError;
+use mc683xx_board::SendError;
 use mc683xx_board::adapter::Driver;
 use mc683xx_board::adapter::MappedAdapter;
 use mc683xx_board::adapter::SpiAdapter;
-use mc683xx_board::board::Board;
-use mc683xx_board::board::BoardRun;
-use mc683xx_board::board::BoardTracing;
-use mc683xx_board::board::LookupError;
-use mc683xx_board::board::NoPeripheral;
-use mc683xx_board::board::NoReceiver;
-use mc683xx_board::board::RunError;
-use mc683xx_board::board::SendError;
 use mc683xx_board::builtin::EdgeCounter;
 use mc683xx_board::builtin::Recorder;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::LoadError;
-use mc683xx_board::description::Options;
 use mc683xx_board::peripheral::Drive;
 use mc683xx_board::peripheral::Lane;
 use mc683xx_board::peripheral::Peripheral;
 use mc683xx_board::peripheral::PeripheralAccess;
 use mc683xx_board::peripheral::Transfer;
 use mc683xx_board::registry::Constructed;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::PortSpec;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Direction;
@@ -701,7 +701,7 @@ fn the_format_matches_its_golden() {
         env!("CARGO_MANIFEST_DIR"),
         "board",
         &[
-            ("board", mc683xx_board::board::VERSION),
+            ("board", mc683xx_board::state::VERSION),
             ("chip", mc683xx_mc68331::state::VERSION),
             ("cpu", mc683xx_cpu32::state::VERSION),
             (

@@ -4,7 +4,7 @@ The `mc683xx-gdb` crate (`crates/gdb`) is a GDB remote stub: gdb's
 remote serial protocol, through the `gdbstub` crate, over the bare
 CPU (`mc683xx_cpu32::flat::Machine`), the chip
 (`mc683xx_mc68331::Mc68331`), a board
-(`mc683xx_board::board::Board`), or any `Cpu32Target`, a BDM pod on
+(`mc683xx_board::Board`), or any `Cpu32Target`, a BDM pod on
 silicon among them (Over BDM, below).  gdb connects over TCP,
 reads and writes registers and memory, sets breakpoints and
 watchpoints, steps, continues and interrupts.  `PLAN.md` (Debugger)

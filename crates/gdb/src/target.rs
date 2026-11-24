@@ -25,7 +25,7 @@
     not(feature = "mc68331"),
     doc = "[`Mc68331`]: https://docs.rs/mc683xx-mc68331"
 )]
-#![cfg_attr(feature = "board", doc = "[`Board`]: mc683xx_board::board::Board")]
+#![cfg_attr(feature = "board", doc = "[`Board`]: mc683xx_board::Board")]
 #![cfg_attr(
     not(feature = "board"),
     doc = "[`Board`]: https://docs.rs/mc683xx-board"

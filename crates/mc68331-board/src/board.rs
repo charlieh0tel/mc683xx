@@ -71,19 +71,20 @@ use crate::description::Options;
 use crate::description::Target;
 use crate::description::port_of;
 use crate::endpoint::Endpoint;
+use crate::environment::Environment;
 use crate::inspect::Inspection;
 use crate::observe::Attached;
 use crate::observe::Observer;
 use crate::observe::ObserverId;
 use crate::pacing::Pacer;
 use crate::pacing::QUANTUM;
-use crate::registry::Environment;
 use crate::registry::PortSpec;
 use crate::registry::Registry;
 use crate::schema::Undecoded;
 use crate::signal::Direction;
 use crate::signal::Kind;
 use crate::signal::Signal;
+use crate::state::VERSION;
 use crate::time::Clock;
 use crate::time::NonZeroSpan;
 use crate::time::Span;
@@ -108,10 +109,6 @@ use crate::wiring::Routes;
 use crate::wiring::SelectRouter;
 use crate::wiring::Shared;
 use crate::wiring::SharedMemory;
-
-/// The format of [`Board::save`]'s bytes.  The chip's and the peripherals'
-/// snapshots inside carry their own.
-pub const VERSION: u32 = 23;
 
 /// The levels on PCS\[3:0\] before the QSPI drives them: high.
 const PCS_IDLE: u8 = 0xf;

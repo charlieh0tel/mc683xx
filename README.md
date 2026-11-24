@@ -83,9 +83,9 @@ of board time (from the repository's root):
 use std::error::Error;
 use std::path::Path;
 
-use mc683xx_board::board::Board;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Board;
+use mc683xx_board::Options;
+use mc683xx_board::Environment;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::Mc68331;
 

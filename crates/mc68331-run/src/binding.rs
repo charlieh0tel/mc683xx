@@ -25,7 +25,7 @@ use std::sync::mpsc;
 use std::sync::mpsc::Receiver;
 use std::thread;
 
-use mc683xx_board::control::BoardControl;
+use mc683xx_board::BoardControl;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
 #[cfg(unix)]

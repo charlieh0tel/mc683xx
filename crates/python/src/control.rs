@@ -1,5 +1,5 @@
 //! A board's control handle and pacing in Python (Rust's
-//! `control::BoardControl` and `pacing::Pacing`): a handle another
+//! `BoardControl` and `pacing::Pacing`): a handle another
 //! Python thread may hold, and a paced run that releases the GIL while
 //! it sleeps.
 
@@ -12,11 +12,11 @@ use std::ops::ControlFlow;
 use std::time::Duration;
 use std::time::Instant;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
 
-use mc683xx_board::board::BoardRun;
-use mc683xx_board::board::RunError;
-use mc683xx_board::control::BoardControl;
+use mc683xx_board::BoardControl;
+use mc683xx_board::BoardRun;
+use mc683xx_board::RunError;
 use mc683xx_board::pacing;
 use mc683xx_board::pacing::Pacer;
 use mc683xx_board::pacing::Pacing;

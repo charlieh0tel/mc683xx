@@ -25,7 +25,7 @@ Crates:
   tests them.
 - `mc683xx-board` (`crates/mc68331-board`): board files, peripherals from a
   registry, nets, board time and the run loop, generic over the chip
-  (`chip::Chip`, the MC68331's impl its `mc68331` module).
+  (`Chip`, the MC68331's impl its `mc68331` module).
 - `mc683xx-run` (`crates/mc68331-run`): the runner, a thin command on
   `mc683xx-board`; the one binary.
 - `mc683xx-gdb` (`crates/gdb`): the GDB remote stub, over the bare
