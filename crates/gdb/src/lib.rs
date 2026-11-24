@@ -237,7 +237,7 @@ mod tests {
     use super::Ending;
 
     #[test]
-    fn an_ending_shows_as_one_word() {
+    fn an_ending_prints_its_name() {
         assert_eq!(Ending::Detached.to_string(), "detached");
         assert_eq!(Ending::Killed.to_string(), "killed");
         assert_eq!(Ending::HungUp.to_string(), "hung up");

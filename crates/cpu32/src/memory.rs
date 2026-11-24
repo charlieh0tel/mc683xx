@@ -135,6 +135,19 @@ pub(crate) mod watch {
 )]
 pub struct RegionId(usize);
 
+impl RegionId {
+    /// Its number, as [`Display`](fmt::Display) prints it: its slot in
+    /// the core's regions.
+    ///
+    /// Not part of the semver API: for the workspace's crates whose ids
+    /// wrap one.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn number(self) -> usize {
+        self.0
+    }
+}
+
 /// `region` and its number: `region 2`.
 impl fmt::Display for RegionId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -852,9 +865,9 @@ impl Memory {
         Some((slab, page & SLAB_MASK, (address % PAGE_BYTES) as usize))
     }
 
-    /// A byte, word or long the core serves itself, read with no bus
-    /// cycle and no stall: what a hook sees of memory.  [`None`] if any
-    /// of it is on the bus.  A word or long must be aligned.
+    /// A byte, word or long the core serves itself, from the bytes the
+    /// pages read, with no bus cycle and no stall.  [`None`] if any of
+    /// it is on the bus.  A word or long must be aligned.
     #[must_use]
     pub fn peek(&self, space: Space, address: Address, size: Size) -> Option<u32> {
         self.peek_in(space, address, size, |page| page.read)

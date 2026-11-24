@@ -1001,7 +1001,8 @@ chip beside `Mc68331`.
   (see Bare CPU; docs/python.md, Bare CPU, with the Unicorn mapping):
   `map`, `unmap`, `protect` (`start, length`), `read`, `write`,
   `add_peripheral(begin, end, object)` (`read(BusCycle)`,
-  `write(BusCycle, value)`), registers as the chip's,
+  `write(BusCycle, value)`; it returns the peripheral's number) and
+  `remove_peripheral(id)`, registers as the chip's,
   `run_limited(begin=, reach=, instructions=, cycles=)`,
   `stop_request()` (a `StopRequest`, Rust's `bus::StopRequest`: a
   callable's request ends the run `Stop.Requested()` once the callables have
@@ -1085,14 +1086,16 @@ hand.  The keys are in `docs/board-files.md`.
   none, is refused with a typed error.  Unknown keys are errors
   (serde's `deny_unknown_fields`), with the line, but every table takes
   a `note` the loader ignores, for provenance and confidence.
-  Version 1 is frozen from 0.1.0, the first release: from then a change
-  that makes a version 1 file mean something else, or refuses one, is
-  version 2.  A minor release may add a key to version 1; a file
-  using it needs at least that release, and every 1.x release reads
-  every version 1 file.  Before it the schema changed and stayed version 1, since
-  no release read the earlier form: `[[device]]` became
-  `[[peripheral]]` and `[chip] type` became required (2026-10-24), and
-  smartclock's six board files are the consumer's to convert.  `[board]` names the board (`name`,
+  Version 1 is frozen from 1.0.0: from then a change that makes a
+  version 1 file mean something else, or refuses one, is version 2.
+  A minor release may add a key to version 1; a file using it needs
+  at least that release, and every 1.x release reads every version 1
+  file.  Before 1.0.0 a minor release may change version 1 in place,
+  its release notes carrying the migration (decided 2026-11, 0.9.0,
+  when `role = "upper"` and `"lower"` went; Decisions): `[[device]]`
+  became `[[peripheral]]` and `[chip] type` became required before
+  0.1.0 (2026-10-24), and 0.9.0 refuses a lane as a `role`.
+  `[board]` names the board (`name`,
   `title`: what a host chooses it by), the firmware `images` it takes,
   the default first, and the `options` a run may enable.  Any memory,
   decoder, peripheral, unconnected select or net may carry `option =
@@ -1647,7 +1650,7 @@ hand.  The keys are in `docs/board-files.md`.
   `ValueError`, not a picosecond), calling `before` before each (the Python bindings'
   Ctrl-C checks), `Break` ending it `Stop::Requested`; a board halted
   or in background mode before a quantum goes on to the next, so the
-  quanta change nothing.  `run_until` on such a board runs to `until`
+  quanta change nothing.  `run_until` on such a board runs to `deadline`
   as time passes without the CPU, as the chip's run does, and ends
   `Halted` or `Background` if the CPU still is.
   `Board::stop_request()` is the host's `board::BoardStopRequest`
@@ -1675,7 +1678,7 @@ hand.  The keys are in `docs/board-files.md`.
   library does not panic on a host's bug).  The bound allows a peripheral
   several events at one time; counting per peripheral, not per loop, keeps
   two stuck peripherals from resetting each other.  A run's end is never
-  past its `until`, though the chip's last instruction may end past
+  past its `deadline`, though the chip's last instruction may end past
   it, as a quantum's does.  `run_until` returns
   `Result<BoardRun, RunError>`.
 - **Front ends:** a TUI or GUI is the host's, outside this
@@ -2461,18 +2464,17 @@ and `mc683xx.Machine` in Python (see Python).
   with a vector or the autovector, level-sensitive until it clears it.
 - **Host exceptions:** `Cpu::take_exception(vector, level)` (and
   `Machine`'s, Python's `take_exception(vector, level=None)`), between
-  runs: the core's own exception processing (`process`, CPU32RM
-  6.1.3), a four-word format $0 frame of SR and PC, the mask set to
-  `level` whatever it was, the exception hooks and
-  `Bus::exception_entered` called; STOP ended, no clocks charged.  A
-  hook's or peripheral's stop asked for in it has no run to end and is
-  dropped.  A fault in it is taken as in any exception processing
-  (type IV, or a double bus fault in a bus error's window, which taking
-  vector 2 or 3 opens until the handler's first fetch, CPU32RM 6.2.2),
-  or with
-  stop on fault returned as `TakeExceptionError::Fault`: no exception
-  entered, the registers and the hooks at PC as before, the frame's
-  writes before the fault kept (memory is not rolled back).  Not on the chip, whose interrupts
+  runs: the core's own exception processing (`process`, CPU32RM 6.1.3),
+  a four-word format $0 frame of SR and PC, the mask set to `level`
+  whatever it was, the exception hooks and `Bus::exception_entered`
+  called; STOP ended, no clocks charged.  A hook's or peripheral's stop
+  asked for in it has no run to end and is dropped.  A fault in it is
+  taken as in any exception processing (type IV, or a double bus fault
+  in a bus error's window, which taking vector 2 or 3 opens until the
+  handler's first fetch, CPU32RM 6.2.2), or with stop on fault returned
+  as `TakeExceptionError::Fault`: no exception entered, the registers
+  and the hooks at PC as before, the frame's writes before the fault
+  kept (memory is not rolled back).  Not on the chip, whose interrupts
   come from its modules and pins.
 - **Runs:** `Cpu::run_limited(limits)`: `reach` (checked at each
   instruction boundary before an interrupt is taken or a hook called
@@ -2486,11 +2488,13 @@ and `mc683xx.Machine` in Python (see Python).
   run (`End::Fault`; an unlimited run, `Stop::Fault`, before any other
   stop asked for in the instruction): fetch, read or write; bus error
   (unmapped or a peripheral's), protected, or address error; the whole
-  address; nothing stacked.  `Cpu::fault_stop` holds it until the next
-  run starts.  A fault while stacking (a bad SSP) stops the same
-  way instead of a double bus fault, so the host fixes SSP and goes on
-  with no reset, and so does one in `rte` loading a format $C frame
-  or rewriting its faulted frame (6.2.12): the RTE is undone.  What the stop keeps:
+  address; no frame stacked for the fault.  `Cpu::fault_stop` holds
+  it until the next run starts.  A fault while stacking (a bad SSP)
+  stops the same way instead of a double bus fault, so the host fixes
+  SSP and goes on with no reset; the frame's writes before the fault
+  stay written, as the registers roll back but memory does not.  So
+  does one in `rte` loading a format $C frame or rewriting its
+  faulted frame (6.2.12): the RTE is undone.  What the stop keeps:
   - A fault in an instruction, its own exception's stacking included
     (a TRAP's, a CHK's), rolls the registers back to its start: it
     reruns, as a TRAP does, when the run goes on.
@@ -3545,6 +3549,7 @@ host's QSPI peripheral, which a restore keeps).
 | Host bus cycles take no chip time and drop a peripheral's stop request | They are a debugger's, between runs: no instruction to charge, no run to stop. |
 | A bus stop request (`Bus::stop_requested`) beside hooks | A peripheral has no hook of its own; one question per bus cycle costs nothing on RAM. |
 | Board files in TOML, peripheral types from a registry | The file says what is wired where and how the chip is configured, never what a peripheral does; behavior stays the host's code.  A registry of names leaves room for plugins without a format change.  No dynamic loading yet (decided 2026-10-23). |
+| Board files' version 1 frozen from 1.0.0, not before | Decided 2026-11 (0.9.0).  The freeze was dated from 0.1.0, which kept a lane as a `role` (`role = "upper"`, `"lower"`) for ever beside `lane`; with breaking changes allowed before 1.0 and no compatibility cruft kept, version 1 may change in place in a minor release before 1.0.0, its release notes carrying the migration, and from 1.0.0 a change that makes a version 1 file mean something else, or refuses one, is version 2.  No version 2 is planned. |
 | A bare CPU (`mc683xx_cpu32::flat`, `mc683xx.Machine`) beside the chip, 32 address lines by default | Function-level firmware tests map code and stubs at addresses no 68331 decodes (smartclock's harness uses $31400000); a chip-select decode would only get in the way. |
 | Bare-host stops (faults, intercepts) opt-in, off by default | The default stays the CPU32's behavior; a host porting from Unicorn asks for what it relied on, by name. |
 | Published to crates.io and PyPI, one semver version for the workspace from 0.1.0, notes in GitHub releases | Decided 2026-10-24, with the repository public.  One version keeps the crates and the wheel in step; a release is tagged only on a commit that has passed every check (`docs/releasing.md`). |
@@ -3565,7 +3570,7 @@ host's QSPI peripheral, which a restore keeps).
 | Unit-bearing newtypes keep private fields; bit-pattern newtypes whose every value is valid have public ones | Decided 2026-11-21 (0.8.0, round 5).  A quantity (`Cycles`, `Frequency`, `Time`, `Span`) is reached through constructors and accessors that name its unit, so its field is private.  A bit pattern (`Address`, `Vector`) is a value read off the lines, with no unit and every value valid, so `Address(0x400)` and `vector.0` read as the hardware does and its field is public.  One with values that are not valid (`InterruptLevel`, 0 to 7) keeps its field private behind `TryFrom` (below); `FunctionCode`, eight codes each with a meaning, is an enum (0.9.0). |
 | One conversion for each kind of value: `TryFrom<u8>` and `From<T> for u8` for a checked value, a named pair for an encoding, opaque received ids | Decided 2026-11-23 (0.9.0).  A checked value (`InterruptLevel`, `IrqPin`, `PortGpPin`, `chip_select::Number`, `FunctionCode`) had `new`/`get` and `TryFrom`/`From` both, or only `new`/`get`; now only `TryFrom<u8>` (`No<Type>(u8)`, so `?` carries why) and `From<T> for u8`, and `IrqPin::level()` gives way to `From<IrqPin> for InterruptLevel`.  A wire or field encoding keeps a named pair (`Register::code`/`from_code`, `Size::field`, `Entry::atemp`), as `From` would hide which encoding.  A register-order index is `index`/`from_index` (`ChipSelect`).  An id a host only receives and gives back (`PeripheralId`, `ConditionId`, `ObserverId`, `HookId`) is opaque, `Display` and no `From`, so a host cannot forge one; `PeripheralId`'s number is reachable only through hidden plumbing for the workspace's crates, and `ConditionId` parses from the number it prints, as a debugger's `monitor stop delete N` names one.  A value the host chooses (`ConditionToken`) is one `From` pair.  A `const fn` that needed `get` (`iack_address`, `Sim::interrupt_pin`, `Builder::set_autovector`, `Mc68331::set_interrupt_pin`) is no longer `const`, and no hidden `get` stays for it (review round 2). |
 | One number syntax for what a person types: `mc683xx_target::integer::parse_integer` | Decided 2026-11-22 (0.9.0).  Init scripts, gdb `monitor` commands, the runner's options and the numbers in board-file strings all take decimal, `0x` hexadecimal or `0b` binary, the prefix in lower case, `_` between digits, no sign, no `$`, no decimal leading zero, so a number that works in one works in all and `010` is never octal by surprise.  One `no_std` function in the target crate, generic over the result (`TryFrom<u64>`, so the runner's 64-bit `--cycles` and `--seed` take it too), so a pod's firmware takes the same text; its error is `Invalid` or `TooLarge`, without the text, as the crate has no `alloc`.  A board file's TOML integers keep TOML's own syntax (`0o`, `+`), which the TOML parser reads before the board sees it; gdb packets and S-records keep theirs. |
-| Chip time splits: `Cycle` an instant, `Cycles` a count | Decided 2026-11 (0.9.0).  `Cycles` was both a clock by number and a count of clocks, so `now + budget` and `budget + budget` read alike and a run's deadline and its budget had one type.  `Cycle` (system clocks since power-on) mirrors the board's `Time`: `ZERO`, `MAX`, `from_clocks`/`clocks`, `since`, `since_power_on`; `Cycle + Cycles` and `Cycle - Cycles` saturate at power-on and `MAX`, `Cycle - Cycle` is the `Cycles` between, zero if the second is later; Display `12 clocks`; serde as its `u64`, so snapshots keep their bytes.  `Cycles`, `Span`'s counterpart, keeps its `+` and `-` and gains `saturating_add` and `saturating_sub`; its `+` saturates at `MAX` (0.9.0 review: a peripheral's wait states may be any count, so a cost summed from them must not wrap); `Cycles::until` went (`Cycle::since`).  Every chip-layer instant is a `Cycle` (`now`, `at`, `next_event`, a run's deadline, a trace record's `cycle`, `TimeBase`'s anchor), every cost, budget and period `Cycles`.  "Cycle" alone means the clock; a bus transaction is a bus cycle. |
+| Chip time splits: `Cycle` an instant, `Cycles` a count | Decided 2026-11 (0.9.0).  `Cycles` was both a clock by number and a count of clocks, so `now + budget` and `budget + budget` read alike and a run's deadline and its budget had one type.  `Cycle` (system clocks since power-on) mirrors the board's `Time`: `ZERO`, `MAX`, `from_clocks`/`clocks`, `since`, `since_power_on`; `Cycle + Cycles` and `Cycle - Cycles` saturate at power-on and `MAX`, `Cycle - Cycle` is the `Cycles` between, zero if the second is later; Display `12 clocks`; serde as its `u64`, so snapshots keep their bytes.  `Cycles`, `Span`'s counterpart, keeps its `+` and `-`, gains `-=` and `saturating_add` and `saturating_sub`, and saturates as `Span` does: `+` at `MAX` (0.9.0 review: a peripheral's wait states may be any count, so a cost summed from them must not wrap), `-` at zero (a host's `budget - run.cycles` after a saturated cost neither panics nor wraps).  A saturated cost (a host's peripheral answering some 2^63 wait states with the bus monitor off) moves the chip's `now` to `Cycle::MAX`, where it stays: every `run_for` and `run_until` returns at once, and a board's time runs on past the frozen chip.  No signal is given, since only a host's bug reaches it, and before the saturation the same input panicked in debug and wrapped time backwards in release; `Cycles::until` went (`Cycle::since`).  Every chip-layer instant is a `Cycle` (`now`, `at`, `next_event`, a run's deadline, a trace record's `cycle`, `TimeBase`'s anchor), every cost, budget and period `Cycles`.  "Cycle" alone means the clock; a bus transaction is a bus cycle. |
 | One set of time words at every layer | Decided 2026-11-23 (0.9.0).  Each layer has an instant and a span: the board `Time` and `Span`, the chip `Cycle` and `Cycles`, the host std's `Instant` and `Duration`.  `now` is always the current instant in the layer's unit, never a bundle; `at` is a given instant other than now; a run's limit is a span `budget` (`run_for`) or an instant `deadline` (`run_until`), as VHDL's `wait for` and `wait until`; `since` is the span back to an earlier instant; `after` counts from one (`edge_after`); `next_event` is when a part next has work.  A conversion is named for its result and takes the instant it converts as `at` (`TimeBase::time(at: Cycle)`, `TimeBase::cycle(at: Time)`, `Clock::phase(at)`); one from a phase takes `phase` (`Clock::time(phase)`).  A board peripheral's call takes its time as a `time::Moment` (board time and the system clock then): from its `Drive`, or as `moment` last where there is none.  A chip-level callback with no cycle struct takes `now: Cycle` last (`Timed::advance`, `SpiPeripheral::set_clock`, `MappedPeripheral::reset`, `set_port_pins`); one with a struct reads its `now` field (`BusCycle`, `QspiTransfer`).  Units follow std's `Duration` (`from_secs`, `secs_f64`); names a person types carry SI symbols (`_ps`, `_us`, `_hz`). |
 | Loading and init scripts in `mc683xx-debug`, over `Cpu32Target` | Decided 2026-11-01 with the BDM pod's maintainer.  One loader for silicon and the emulator, tested on the chip; a crate of its own, on `mc683xx-target` alone, so a pod host links it without the emulator.  Word writes, verify by default, RPC from the entry and no SSP inference, an init script with line-numbered errors; host time in `poll_memory` only. |
 | `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels, reset causes) stay exhaustive, so a match on one needs no wildcard; the Python bindings' conversions of the others never panic: a run's end or halt they do not know raises `mc683xx.RunError` naming it, any other value (a fault cause among them) `NotImplementedError` naming its kind, but an event is never refused or dropped: one they cannot convert is `Event.Unknown(now, name)`, its Rust `Display`, so `take_events` always takes the whole queue (decided 2026-11-21, round 5; `ResetCause`, which RSR fixes, made exhaustive and its `UNKNOWN` dropped in 0.9.0); Rust tests (`every_run_end_maps_or_names_itself`, `every_value_maps`) list every variant, so a variant added to one is added there and mapped (decided 2026-11-21). |

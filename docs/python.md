@@ -123,9 +123,9 @@ rename renames the Python name with it.  The deliberate differences:
   peripheral class's `PORTS` (its `PortSpec`s), and `__version__`.
 
 Not offered, as a Python host has another way or no use for them:
-`Machine::remove_peripheral`, `take_natively_once` (a declined
-intercept is taken natively), `clear_resume` (`run_limited(begin=)`),
-`set_long_bus` and `instruction_registers` (a hook's `registers`);
+`take_natively_once` (a declined intercept is taken natively),
+`clear_resume` (`run_limited(begin=)`), `set_long_bus` and
+`instruction_registers` (a hook's `registers`);
 `Mc68331::set_clock_stop` and `set_output_stop` (a host's own
 scheduler's, as the board's); the `_mut` accessors and
 `cpu`, `sim`, `qsm` and `gpt` (registers by name, a module's registers
@@ -1409,27 +1409,29 @@ assert bare.read_register("D0") == 6
   mapped bytes whatever their permissions, with no bus cycle;
   unmapped bytes raise `BusError`, and a `read` longer than 32 bits of
   addresses `ValueError`, before anything is allocated.
-- **Peripherals:** `add_peripheral(begin, end, peripheral)` puts an object with
-  `read(cycle) -> int` and `write(cycle, value)`, and `save() -> bytes`
-  and `restore(snapshot)` if it saves (both or neither), at addresses `begin`
-  to `end`, both included, byte-granular, no two overlapping.  A cycle
-  no mapped memory serves and one peripheral covers goes to it, before it
-  lands: the read's value is the peripheral's, the write is the peripheral's
-  to keep.  It returns the peripheral's number, and
-  `remove_peripheral(number)` takes it off again, `False` if there was
-  none (Rust's `PeripheralId`, `remove_peripheral`).  `protect` covers a peripheral's pages too, mapped or not: a
-  cycle they do not permit is a bus error before the peripheral sees
-  it (`Invalid.PROTECTED`, `FaultCause.PROTECTED`), so a read-only
-  peripheral needs no `BusError` of its own.  A `BusCycle` has `address` (32 bits), `size` (1, 2, or 4: a
-  long operand the peripheral covers whole comes once, as 4), `function_code`,
-  `now` and `stacking`.  Raising `BusError` is a bus error; any other
-  exception does not fault the bus (a read answers 0, a write goes
-  nowhere), stops the run, and `run_limited` (or `reset`, for the
-  vectors' reads) raises it.  A peripheral cannot call into the `Machine`: the run
-  holds it.  No peripheral sees a CPU-space cycle
-  (`FunctionCode.CPU_SPACE`): the `Machine` acknowledges LPSTOP's broadcast itself,
-  and any other, a BKPT's acknowledge among them, is a bus error, so
-  BKPT is an illegal instruction.
+- **Peripherals:** `add_peripheral(begin, end, peripheral)` puts an
+  object with `read(cycle) -> int` and `write(cycle, value)`, and
+  `save() -> bytes` and `restore(snapshot)` if it saves (both or
+  neither), at addresses `begin` to `end`, both included, byte-granular,
+  no two overlapping.  A cycle no mapped memory serves and one
+  peripheral covers goes to it, before it lands: the read's value is the
+  peripheral's, the write is the peripheral's to keep.  It returns the
+  peripheral's number, and `remove_peripheral(id)` takes it off again,
+  `False` if there was none (Rust's `PeripheralId`,
+  `remove_peripheral`).  `protect` covers a peripheral's pages too,
+  mapped or not: a cycle they do not permit is a bus error before the
+  peripheral sees it (`Invalid.PROTECTED`, `FaultCause.PROTECTED`), so a
+  read-only peripheral needs no `BusError` of its own.  A `BusCycle` has
+  `address` (32 bits), `size` (1, 2, or 4: a long operand the peripheral
+  covers whole comes once, as 4), `function_code`, `now` and `stacking`.
+  Raising `BusError` is a bus error; any other exception does not fault
+  the bus (a read answers 0, a write goes nowhere), stops the run, and
+  `run_limited` (or `reset`, for the vectors' reads) raises it.  A
+  peripheral cannot call into the `Machine`: the run holds it.  No
+  peripheral sees a CPU-space cycle (`FunctionCode.CPU_SPACE`): the
+  `Machine` acknowledges LPSTOP's broadcast itself, and any other, a
+  BKPT's acknowledge among them, is a bus error, so BKPT is an illegal
+  instruction.
 - **Runs:** `run_limited(begin=None, reach=None, instructions=None,
   cycles=None) -> LimitedRun`, Rust's `bare::LimitedRun`: `cycles` and
   `end`.  `reach` is checked at each instruction
@@ -1546,9 +1548,10 @@ stops the run on a bus or address error instead of taking it:
 `cycle` (`BusCycleKind`), the `cause` (`FaultCause.BUS_ERROR` for
 unmapped or a peripheral's, `PROTECTED`, `ADDRESS_ERROR`), the whole
 `address`, `size`, `function_code`, `pc` and `registers`, which
-the CPU holds again, nothing stacked.  A fault while stacking, a bad
-SSP, stops it the same way rather than halting the CPU, so the host
-fixes SSP and runs on.  A fault in an instruction, its own exception's
+the CPU holds again, no frame stacked for the fault.  A fault while
+stacking, a bad SSP, stops it the same way rather than halting the
+CPU, so the host fixes SSP and runs on; the frame's writes before the
+fault stay written (memory is not rolled back).  A fault in an instruction, its own exception's
 stacking included, rolls the registers back to its start, and it
 reruns; a fault stacking a trace, a hardware breakpoint or an
 interrupt, taken after an instruction completed, keeps that

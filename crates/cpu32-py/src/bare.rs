@@ -585,11 +585,10 @@ impl MachineView {
         Ok(id.number())
     }
 
-    /// Takes peripheral number `peripheral` off the bus: whether there
-    /// was one.
-    fn remove_peripheral(&mut self, peripheral: u64) -> bool {
+    /// Takes peripheral number `id` off the bus: whether there was one.
+    fn remove_peripheral(&mut self, id: u64) -> bool {
         self.machine
-            .remove_peripheral(PeripheralId::from_number(peripheral))
+            .remove_peripheral(PeripheralId::from_number(id))
             .is_some()
     }
 
