@@ -974,7 +974,10 @@ raises (in a `monitor reset`'s resets too), or Ctrl-C in Python (`KeyboardInterr
 connected or not, idle or running the target), ends the session, the
 stub's breakpoints and watchpoints removed, and is raised by
 `serve_gdb`.  While it waits for gdb it releases the GIL, so a client
-in another thread of the harness is served.  Memory goes through peeks, never a peripheral's cycle.  A
+in another thread of the harness is served.  Memory goes through peeks, never a peripheral's cycle;
+gdb's read or write gets an error where a peripheral's `peek` or `poke`
+raised, and the exception, which asks no stop, waits for the next
+`continue`, step or `monitor reset` to end the session.  A
 harness hands over with `ready=lambda port: print(f"target remote
 :{port}")` and then `target remote :PORT` in gdb; here a stand-in for
 gdb, a few packets from a subprocess, reads the registers and

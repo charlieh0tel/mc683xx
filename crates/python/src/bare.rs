@@ -1259,13 +1259,17 @@ impl Target for Debugged<'_, '_> {
         function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<usize, AccessError<PyErr>> {
-        Target::read_memory(
-            &mut self.0.borrow_mut().machine,
-            address,
-            function_code,
-            data,
-        )
-        .map_err(|error| error.map(|never| match never {}))
+        let pending = self.0.borrow().pending.clone();
+        pending
+            .looking(|| {
+                Target::read_memory(
+                    &mut self.0.borrow_mut().machine,
+                    address,
+                    function_code,
+                    data,
+                )
+            })
+            .map_err(|error| error.map(|never| match never {}))
     }
 
     fn write_memory(
@@ -1274,13 +1278,17 @@ impl Target for Debugged<'_, '_> {
         function_code: FunctionCode,
         data: &[u8],
     ) -> Result<(), AccessError<PyErr>> {
-        Target::write_memory(
-            &mut self.0.borrow_mut().machine,
-            address,
-            function_code,
-            data,
-        )
-        .map_err(|error| error.map(|never| match never {}))
+        let pending = self.0.borrow().pending.clone();
+        pending
+            .looking(|| {
+                Target::write_memory(
+                    &mut self.0.borrow_mut().machine,
+                    address,
+                    function_code,
+                    data,
+                )
+            })
+            .map_err(|error| error.map(|never| match never {}))
     }
 
     fn run_for(&mut self, budget: Cycles, hit: &dyn Fn() -> bool) -> PyResult<TargetRun> {

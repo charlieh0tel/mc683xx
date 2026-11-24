@@ -115,6 +115,31 @@ def test_a_peripheral_s_exception_ends_the_session() -> None:
     assert bare.run_limited(instructions=1).end == mc683xx.End.Instructions()
 
 
+def test_a_peek_that_raises_under_gdb_leaves_no_stop() -> None:
+    class Failing:
+        def read(self, cycle: mc683xx.BusCycle) -> int:
+            return 0
+
+        def write(self, cycle: mc683xx.BusCycle, value: int) -> None:
+            pass
+
+        def peek(self, cycle: mc683xx.BusCycle, length: int) -> bytes:
+            raise ValueError("the peek failed")
+
+    image = bytearray(4 * 2048)
+    struct.pack_into(">II", image, 0, STACK, START)
+    image[START : START + 8] = words(PROGRAM)
+    builder = mc683xx.Builder()
+    builder.memory(bytes(image), ["CSBOOT"], writable=False)
+    builder.bus_peripheral(Failing(), windows=[(PERIPHERAL, 4)], dsack=mc683xx.Dsack.DSACK1)
+    chip = builder.build()
+    # the exception waits for the run's quantum, which no stop request
+    # cuts short
+    with pytest.raises(ValueError, match="the peek failed"):
+        serve(chip, f"m{PERIPHERAL:x},1", "c")
+    assert chip.instructions > len(PROGRAM)
+
+
 def test_gdb_peeks_the_chip_and_resets_it() -> None:
     image = bytearray(4 * 2048)
     struct.pack_into(">II", image, 0, STACK, START)

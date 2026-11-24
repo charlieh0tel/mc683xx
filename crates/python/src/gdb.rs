@@ -85,7 +85,8 @@ impl TryFrom<mc683xx_gdb::Ending> for Ending {
 const GDB_ENDING: &str = "gdb session ending";
 
 /// A Rust target whose Python peripherals' exceptions wait in `pending`:
-/// raised when the quantum they stopped ends.
+/// raised when the quantum they stopped ends, or, from a memory access,
+/// which asks no stop, when the next quantum or reset ends.
 pub(crate) struct Checked<'a, T> {
     /// The target.
     pub(crate) target: &'a mut T,
@@ -106,8 +107,8 @@ impl<T: Target> Target for Checked<'_, T> {
         function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<usize, AccessError<PyErr>> {
-        self.target
-            .read_memory(address, function_code, data)
+        self.pending
+            .looking(|| self.target.read_memory(address, function_code, data))
             .map_err(|error| error.map(raised_from))
     }
 
@@ -117,8 +118,8 @@ impl<T: Target> Target for Checked<'_, T> {
         function_code: FunctionCode,
         data: &[u8],
     ) -> Result<(), AccessError<PyErr>> {
-        self.target
-            .write_memory(address, function_code, data)
+        self.pending
+            .looking(|| self.target.write_memory(address, function_code, data))
             .map_err(|error| error.map(raised_from))
     }
 
