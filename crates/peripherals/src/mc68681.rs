@@ -169,14 +169,17 @@ enum Variant {
 /// Registers `mc68681`.
 pub(crate) fn register_mc68681(registry: &mut Registry) -> Result<(), RegistryError> {
     registry.register(MC68681, ports(), |context| {
-        Ok(Box::new(Duart::from_parameters(context, Variant::Mc68681)?))
+        Ok(Box::new(Mc68681::from_parameters(
+            context,
+            Variant::Mc68681,
+        )?))
     })
 }
 
 /// Registers `scc68692`.
 pub(crate) fn register_scc68692(registry: &mut Registry) -> Result<(), RegistryError> {
     registry.register(SCC68692, ports(), |context| {
-        Ok(Box::new(Duart::from_parameters(
+        Ok(Box::new(Mc68681::from_parameters(
             context,
             Variant::Scc68692,
         )?))
@@ -297,10 +300,10 @@ impl Default for State {
 }
 
 /// A DUART on the board, `mc68681` or `scc68692`, as a host reads it
-/// by type (`Board::peripheral::<Duart>`): its registers as of its
+/// by type (`Board::peripheral::<Mc68681>`): its registers as of its
 /// last call.
 #[derive(Debug)]
-pub struct Duart {
+pub struct Mc68681 {
     /// Which peripheral.
     variant: Variant,
     /// X1/CLK.
@@ -313,7 +316,7 @@ pub struct Duart {
     watches: Watches,
 }
 
-impl Duart {
+impl Mc68681 {
     /// `x1_hz`'s default: the 3.6864 MHz the baud rate tables are for
     /// (1.2).
     pub const X1_HZ: u64 = X1_DEFAULT_HZ;
@@ -785,7 +788,7 @@ impl Duart {
     }
 }
 
-impl Peripheral for Duart {
+impl Peripheral for Mc68681 {
     fn read(&mut self, access: PeripheralAccess, drive: &mut Drive<'_>) -> Result<u32, BusError> {
         self.run_until(drive.now());
         let value = if access.role == Role::Iack {

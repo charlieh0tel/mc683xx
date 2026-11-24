@@ -212,6 +212,7 @@ fn a_refused_snapshot_leaves_the_board_as_it_was() {
     let count = |board: &mut Board<Mc68331>| {
         board
             .peripheral::<EdgeCounter>("counter")
+            .unwrap()
             .map(|counter| counter.count())
             .unwrap()
     };

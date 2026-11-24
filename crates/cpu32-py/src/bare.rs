@@ -310,8 +310,24 @@ impl TryFrom<End> for EndView {
     }
 }
 
+impl From<EndView> for End {
+    fn from(end: EndView) -> Self {
+        match end {
+            EndView::Stop { stop } => Self::Stop(stop.into()),
+            EndView::Until() => Self::Until,
+            EndView::Instructions() => Self::Instructions,
+            EndView::Fault { fault } => Self::Fault(fault.0),
+        }
+    }
+}
+
 #[pymethods]
 impl EndView {
+    /// Rust's `Display`.
+    fn __str__(&self) -> String {
+        End::from(self.clone()).to_string()
+    }
+
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         Ok(match self {
             Self::Stop { stop } => format!("End.Stop({})", repr(py, *stop)?),
@@ -606,10 +622,11 @@ impl MachineView {
     /// Takes the exception of `vector` now, as the CPU takes its own: a
     /// four-word frame with SR and PC stacked, S set, T1 and T0 clear,
     /// PC at the handler.  `level`, 0 to 7, sets the interrupt mask, as
-    /// an interrupt does, whatever it was.  No clocks pass.  The hooks
+    /// an interrupt does, whatever it was; 0, which no interrupt sets,
+    /// clears it.  No clocks pass.  The hooks
     /// it fires are called before it returns, their results stopping
     /// nothing.  A halted CPU, or a fault that stops
-    /// (`set_stop_on_fault`), raises `RuntimeError`, nothing stacked.
+    /// (`set_stop_on_fault`), raises `RunError`, nothing stacked.
     #[pyo3(signature = (vector, level = None))]
     fn take_exception(slf: &Bound<'_, Self>, vector: u8, level: Option<u8>) -> PyResult<()> {
         let level = level

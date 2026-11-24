@@ -54,7 +54,17 @@ pub(crate) enum Ending {
     HungUp,
 }
 
-enum_names!(Ending);
+enum_names!(Ending, mc683xx_gdb::Ending);
+
+impl From<Ending> for mc683xx_gdb::Ending {
+    fn from(ending: Ending) -> Self {
+        match ending {
+            Ending::Detached => Self::Detached,
+            Ending::Killed => Self::Killed,
+            Ending::HungUp => Self::HungUp,
+        }
+    }
+}
 
 impl TryFrom<mc683xx_gdb::Ending> for Ending {
     type Error = Error;

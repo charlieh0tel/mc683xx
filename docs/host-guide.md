@@ -1153,8 +1153,9 @@ but the exception hook cover an address range, on the address lines.
   bare `Cpu` with `set_long_bus` (`flat::Machine`'s default) shows a
   long operand once, size `Long` at its address, and a long that
   faults midway not at all.  A write's `previous` is what it
-  replaced, read with no cycle before it; `None` for a read, and for
-  a write the core's memory does not serve (a peripheral's).
+  replaced, read with no cycle before it; `None` for a read, for a
+  write in CPU space, and for a write the core's memory does not
+  serve (a peripheral's).
 - `add_invalid_hook(range, f(&InvalidAccess))`: before a bus error is
   taken, with its reason, `Invalid::BusError` or `Invalid::Protected`.
 - `add_exception_hook(f(&ExceptionEntry))`: once the frame is stacked:
@@ -1162,7 +1163,9 @@ but the exception hook cover an address range, on the address lines.
 - `add_exception_return_hook(f(&ExceptionReturn))`: once `rte` has
   restored SR and PC from an exception's frame: vector, PC, SR, and
   the frame's address, the `stack` its `ExceptionEntry` had; a stop
-  takes effect before the instruction it returns to.
+  takes effect before the next instruction: the one it returns to,
+  or the trace handler's where the restored SR sets T1 or T0, as `rte`
+  takes the trace exception in the same step (CPU32RM 6.2.10).
 - `remove_hook(id)`.
 
 `cpu_control().protect(space, start, length, Permissions)` sets

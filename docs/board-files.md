@@ -403,8 +403,9 @@ Endpoints:
 | `chip.TXD` | serial | out of the chip |
 | `external.name` | any | either; the runner or host binds it (`--bind name=stdio`).  The runner refuses input (stdio, tty, pty) to one that drives no serial net: `stdout`, `file:PATH` or `null` there |
 
-A chip pin's name is taken in any case (`chip.pe0` is `chip.PE0`), as
-a chip select's or a reset cause's.  PGP0 is IC1, PGP1 IC2, PGP2 IC3,
+A chip pin's name is taken in any case (`chip.pe0` is `chip.PE0`, the
+same endpoint, so it drives or senses one net however it is written),
+as a chip select's or a reset cause's.  PGP0 is IC1, PGP1 IC2, PGP2 IC3,
 PGP3 to PGP6 OC1 to OC4, PGP7 IC4/OC5 (MC68331UM Figure 7-1).  A peripheral port takes a net of its own
 kind only (a `wired-and` net is `logic`); a chip pin takes `logic` or
 `edge`.  A strobe that a peripheral samples as a level (a latch enable such
@@ -528,7 +529,8 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   default, so a peripheral implements only the sides it is on; one with
   only net ports (an OCXO, a GPS engine, an oven) is as first-class
   as one on the bus.  The trait is `Any`: a host reaches its own peripheral's state
-  (a UI's widget) by its type with `Board::peripheral::<T>(name)` (a `Ref`) or
+  (a UI's widget) by its type with `Board::peripheral::<T>(name)` (a `Ref`,
+  `None` if it is not a `T`, `NoPeripheral` for a name the board lacks) or
   `peripheral_mut`, and a `Box<dyn Peripheral>` upcasts to `Box<dyn Any>`.
   `inspect()` gives what a front end shows of it, an
   `inspect::Inspection` of named fields (empty by default;
@@ -722,11 +724,13 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   `set_chip_selects(0xf)` and each transfer as a
   `QspiTransfer`, its time in system clocks.  `peripheral()` and `peripheral_mut()` give the model
   back (`Board::peripheral::<MappedAdapter<M>>`).  An adapted peripheral drives
-  no nets, unless its `MappedAdapter` is made `.driving(driver)`: then
-  `driver(&mut model, &mut Drive)` runs after each call that may change
-  the model (power-on, `read`, `write`, `reset`, `advance`) and drives
-  the ports the type was registered with from what the model shows (a
-  strobe's level), or stops the run.  The model implements `mc683xx_cpu32::cpu::state::Save` (`save()
+  no nets, unless its model implements `adapter::Driver` and its adapter
+  is made `.driving()`, as `adapter::Inspect` and `.inspecting()` show
+  its state: then the model's `drive(&mut Drive)` runs after each call
+  that may change the model (power-on, `reset`; a `MappedAdapter`'s
+  `read`, `write`, `advance`; a `SpiAdapter`'s transfer, select and
+  release) and drives the ports the type was registered with from what
+  the model shows (a strobe's level), or stops the run.  The model implements `mc683xx_cpu32::cpu::state::Save` (`save()
   -> bytes`, `restore(bytes)`, in its own versioned format), so it is in
   the board's snapshot, its bytes inside the adapter's own versioned
   snapshot; one that cannot save is `mc683xx_cpu32::unsavable!`, and the

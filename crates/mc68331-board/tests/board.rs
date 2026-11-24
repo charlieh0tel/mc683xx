@@ -15,11 +15,13 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use mc683xx_board::adapter::Driver;
 use mc683xx_board::adapter::MappedAdapter;
 use mc683xx_board::adapter::SpiAdapter;
 use mc683xx_board::board::Board;
 use mc683xx_board::board::BoardRun;
 use mc683xx_board::board::BoardTracing;
+use mc683xx_board::board::NoPeripheral;
 use mc683xx_board::board::ReceiveError;
 use mc683xx_board::board::RunError;
 use mc683xx_board::board::SendError;
@@ -333,6 +335,7 @@ parameters = { value = 0x5a }
     board.run_until(Time::from_picos(100_000_000)).unwrap();
     let upper = board
         .peripheral::<Recorder>("upper")
+        .unwrap()
         .map(|recorder| recorder.log().to_vec())
         .unwrap();
     assert_eq!(upper.len(), 1, "the write only");
@@ -341,6 +344,7 @@ parameters = { value = 0x5a }
     assert_eq!(upper[0].access.lane, Lane::Upper);
     let lower = board
         .peripheral::<Recorder>("lower")
+        .unwrap()
         .map(|recorder| recorder.log().to_vec())
         .unwrap();
     assert_eq!(lower[0].written, Some(0xcd));
@@ -450,7 +454,7 @@ attach = [{ select = "CS1", role = "write" }]
         Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
     board.run_until(Time::from_picos(100_000_000)).unwrap();
-    let latch = board.peripheral::<WriteLatch>("latch").unwrap();
+    let latch = board.peripheral::<WriteLatch>("latch").unwrap().unwrap();
     assert_eq!(latch.writes, [(CS1_BASE, 0xab), (CS1_BASE + 1, 0xcd)]);
     assert!(!latch.asked.is_empty() && latch.asked.iter().all(|&write| write));
 }
@@ -496,6 +500,7 @@ attach = [{ decoder = "u1", output = 1, lines = 0 }]
     let written = |name| {
         board
             .peripheral::<Recorder>(name)
+            .unwrap()
             .map(|recorder| {
                 recorder
                     .log()
@@ -584,6 +589,7 @@ fn an_edge_between_peripherals_keeps_its_picosecond() {
             .unwrap();
         let (count, last) = board
             .peripheral::<EdgeCounter>("counter")
+            .unwrap()
             .map(|counter| (counter.count(), counter.last()))
             .unwrap();
         assert_eq!(count, 1);
@@ -603,6 +609,7 @@ fn the_format_matches_its_golden() {
         .unwrap();
     let builtin = board
         .peripheral::<EdgeCounter>("counter")
+        .unwrap()
         .map(|counter| version_of(&counter.save().unwrap()))
         .unwrap();
     snapshot_golden::check(
@@ -822,6 +829,7 @@ to = ["counter.in"]
     let first = (2 * 8 * 1_000_000_000_000_u128).div_ceil(8_388_608);
     let (count, last) = board
         .peripheral::<EdgeCounter>("counter")
+        .unwrap()
         .map(|counter| (counter.count(), counter.last()))
         .unwrap();
     assert_eq!(count, 5, "edges 2, 4, 6, 8 and 10 by 10 us");
@@ -906,6 +914,7 @@ type = "watcher"
     );
     let (asked, driven) = board
         .peripheral::<ClockWatcher>("watcher")
+        .unwrap()
         .map(|watcher| (watcher.asked.borrow().clone(), watcher.driven))
         .unwrap();
     let hz: Vec<u64> = asked.iter().map(|base| base.frequency().hz()).collect();
@@ -966,18 +975,30 @@ to = ["lamp.in"]
     board.run_until(Time::from_picos(1_000_000)).unwrap();
     let levels = board
         .peripheral::<Widget>("lamp")
+        .unwrap()
         .map(|widget| widget.levels.clone());
     assert_eq!(levels, Some(vec![true]));
-    assert_eq!(board.peripheral::<Recorder>("lamp").map(|_| ()), None);
-    assert!(board.peripheral::<Widget>("no such").is_none());
+    assert!(board.peripheral::<Recorder>("lamp").unwrap().is_none());
+    assert_eq!(
+        board.peripheral::<Widget>("no such").err(),
+        Some(NoPeripheral("no such".to_owned()))
+    );
+    assert_eq!(
+        board.peripheral_mut::<Widget>("no such").err(),
+        Some(NoPeripheral("no such".to_owned()))
+    );
     board
         .peripheral_mut::<Widget>("lamp")
+        .unwrap()
         .unwrap()
         .levels
         .clear();
     board.send("switch", Signal::Level(false)).unwrap();
     board.run_until(Time::from_picos(2_000_000)).unwrap();
-    assert_eq!(board.peripheral::<Widget>("lamp").unwrap().levels, [false]);
+    assert_eq!(
+        board.peripheral::<Widget>("lamp").unwrap().unwrap().levels,
+        [false]
+    );
     // A boxed peripheral upcasts to `Any` and downcasts to its type.
     let boxed: Box<dyn Peripheral> = Box::new(Widget::default());
     let any: Box<dyn Any> = boxed;
@@ -1030,6 +1051,7 @@ to = ["lamps.{net}"]
     board.run_until(Time::from_picos(1_000_000)).unwrap();
     let levels = board
         .peripheral::<Widget>("lamps")
+        .unwrap()
         .map(|widget| widget.levels.clone());
     assert_eq!(levels, Some(vec![true]));
     assert!(matches!(load(2, "in3"), Err(LoadError::Endpoint { .. })));
@@ -1116,6 +1138,7 @@ type = "periodic"
     );
     let advanced = board
         .peripheral::<MappedAdapter<Periodic>>("periodic")
+        .unwrap()
         .map(|peripheral| peripheral.peripheral().advanced.clone())
         .unwrap();
     // each advance at its event's clock exactly, before and after
@@ -1194,6 +1217,7 @@ attach = [{ qspi = 0b1010 }]
     let seen = |name: &str| {
         board
             .peripheral::<Framed>(name)
+            .unwrap()
             .map(|peripheral| (peripheral.selects.clone(), peripheral.transfers.clone()))
             .unwrap()
     };
@@ -1277,6 +1301,7 @@ fn a_qspi_peripheral_sees_each_transfers_mode_and_frame() {
     board.run_until(Time::from_picos(1_000_000_000)).unwrap();
     let transfers = board
         .peripheral::<Clocked>("clocked")
+        .unwrap()
         .map(|peripheral| peripheral.transfers.clone())
         .unwrap();
     let (polarity, phase) = (ClockPolarity::IdleHigh, ClockPhase::ChangeLeading);
@@ -1358,6 +1383,7 @@ to = ["external.q"]
     );
     let resets = board
         .peripheral::<PoweredLatch>("latch")
+        .unwrap()
         .map(|latch| latch.resets);
     assert_eq!(resets, Some(0), "no reset reaches it");
 }
@@ -1377,8 +1403,8 @@ struct Strobe {
     driven: Option<bool>,
 }
 
-impl Strobe {
-    /// The adapter's driver: the output onto port 0 when it changes.
+/// The output onto port 0 when it changes.
+impl Driver for Strobe {
     fn drive(&mut self, drive: &mut Drive<'_>) {
         if self.driven != Some(self.level) {
             self.driven = Some(self.level);
@@ -1462,11 +1488,7 @@ to = ["external.pulse"]
             vec![PortSpec::output("out", Kind::Logic)],
             move |_| {
                 let adapter = MappedAdapter::new(Strobe::default());
-                Ok(Box::new(if driving {
-                    adapter.driving(Strobe::drive)
-                } else {
-                    adapter
-                }))
+                Ok(Box::new(if driving { adapter.driving() } else { adapter }))
             },
         )
         .unwrap();
@@ -1589,6 +1611,7 @@ attach = [{ select = "CS1" }]
     assert_eq!(board.chip().cpu().registers.data[0] & 0xffff, 0x1200);
     let (cycles, advanced) = board
         .peripheral::<MappedAdapter<TimedWords>>("words")
+        .unwrap()
         .map(|peripheral| {
             (
                 peripheral.peripheral().cycles.clone(),
@@ -1612,6 +1635,8 @@ struct Dac {
     transfers: Vec<(u8, u8)>,
     /// Each `chip_selects` call's levels.
     levels: Vec<u8>,
+    /// The level last driven on its output, if any.
+    driven: Option<bool>,
 }
 
 mc683xx_cpu32::unsavable!(Dac, "a logging DAC");
@@ -1627,8 +1652,23 @@ impl SpiPeripheral for Dac {
     }
 }
 
-#[test]
-fn a_qspi_peripheral_runs_as_a_peripheral_through_the_adapter() {
+/// Its output onto port 0 when it changes: high once it has shifted a
+/// transfer.
+impl Driver for Dac {
+    fn drive(&mut self, drive: &mut Drive<'_>) {
+        let level = !self.transfers.is_empty();
+        if self.driven != Some(level) {
+            self.driven = Some(level);
+            drive.drive(0, Signal::Level(level));
+        }
+    }
+}
+
+/// A board whose firmware runs a QSPI queue of two entries, PCS 0b0101
+/// and 0b1010, once, a `Dac` on 0b1010 its output on the `level` net to
+/// `external.level`, its adapter `driving` if `driving`, run for a
+/// millisecond.
+fn queued(driving: bool) -> Board<Mc68331> {
     let mut program: Vec<u16> = Vec::new();
     program.extend(store(QSM + 0x14, 0x0078));
     program.extend(store(QSM + 0x16, 0x7b7e));
@@ -1636,7 +1676,14 @@ fn a_qspi_peripheral_runs_as_a_peripheral_through_the_adapter() {
     program.extend(store(QSM + 0x1c, 0x0100));
     program.extend(store(QSM + 0x18, 0x8002));
     program.extend(store(QSM + 0x1a, 0x8000));
-    let directory = directory("qspi-adapter", &program);
+    let directory = directory(
+        if driving {
+            "qspi-driving"
+        } else {
+            "qspi-adapter"
+        },
+        &program,
+    );
     let text = r#"
 version = 1
 
@@ -1650,20 +1697,37 @@ attach = [{ select = "CSBOOT" }]
 name = "dac"
 type = "dac"
 attach = [{ qspi = 0b1010 }]
+[[net]]
+name = "level"
+type = "logic"
+from = "dac.out"
+to = ["external.level"]
 "#;
     let description = Description::parse(text, &directory, &Options::default()).unwrap();
     let mut registry = Registry::with_builtins();
     registry
-        .register("dac", Vec::new(), |_| {
-            Ok(Box::new(SpiAdapter::new(Dac::default())))
-        })
+        .register(
+            "dac",
+            vec![PortSpec::output("out", Kind::Logic)],
+            move |_| {
+                let adapter = SpiAdapter::new(Dac::default());
+                Ok(Box::new(if driving { adapter.driving() } else { adapter }))
+            },
+        )
         .unwrap();
     let mut board =
         Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
-    board.run_until(Time::from_picos(1_000_000_000)).unwrap();
+    board.run_for(Span::from_millis(1)).unwrap();
+    board
+}
+
+#[test]
+fn a_qspi_peripheral_runs_as_a_peripheral_through_the_adapter() {
+    let mut board = queued(false);
     let (transfers, levels) = board
         .peripheral::<SpiAdapter<Dac>>("dac")
+        .unwrap()
         .map(|peripheral| {
             (
                 peripheral.peripheral().transfers.clone(),
@@ -1673,6 +1737,24 @@ attach = [{ qspi = 0b1010 }]
         .unwrap();
     assert_eq!(transfers, [(1, 0b1010)], "its own entry only");
     assert_eq!(levels, [SELECTED_LEVELS, RELEASED_LEVELS]);
+    assert!(
+        board.take_received("level").unwrap().is_empty(),
+        "no driver, nothing driven"
+    );
+}
+
+#[test]
+fn a_driving_qspi_adapter_drives_its_nets_from_its_model() {
+    let received = queued(true).take_received("level").unwrap();
+    // low from power-on; high at its transfer
+    let [
+        (Time::ZERO, Signal::Level(false)),
+        (raised, Signal::Level(true)),
+    ] = received[..]
+    else {
+        panic!("{received:?}");
+    };
+    assert!(raised > Time::ZERO);
 }
 
 /// A model that counts its own periods and reads as the count, and
@@ -1768,6 +1850,7 @@ attach = [{ select = "CS1" }]
     let ticker = |board: &mut Board<Mc68331>| {
         board
             .peripheral::<MappedAdapter<Ticker>>("ticker")
+            .unwrap()
             .map(|peripheral| peripheral.peripheral().clone())
             .unwrap()
     };
@@ -2100,6 +2183,7 @@ dsack = "both"
     );
     let accesses: Vec<(u32, Size)> = board
         .peripheral::<Recorder>("duart")
+        .unwrap()
         .map(|duart| {
             duart
                 .log()
@@ -2291,6 +2375,7 @@ attach = [{ select = "CS2", role = "write", lines = [1, 2, 3, 4, 5, 6, 7, 8, 9, 
     board.run_until(Time::from_picos(5_000_000_000)).unwrap();
     let status = board
         .peripheral::<Flash>("commands")
+        .unwrap()
         .map(|flash| flash.status.clone())
         .unwrap();
     assert!(!status.is_empty() && status.iter().all(|&status| status == DQ7));
@@ -2552,6 +2637,7 @@ type = "events"
     assert_eq!(
         board
             .peripheral::<Events>("events")
+            .unwrap()
             .map(|peripheral| peripheral.events)
             .unwrap(),
         0
@@ -2892,11 +2978,12 @@ irq = 1
     let shown = QueueRun {
         registers: board.chip().cpu().registers.clone(),
         trace: board.take_trace().records,
-        first: board.peripheral("first").map(calls).unwrap(),
-        second: board.peripheral("second").map(calls),
+        first: board.peripheral("first").unwrap().map(calls).unwrap(),
+        second: board.peripheral("second").unwrap().map(calls),
     };
     let quanta = board
         .peripheral::<Probe>("probe")
+        .unwrap()
         .map(|probe| probe.asked.get())
         .unwrap();
     (shown, quanta)
@@ -3003,6 +3090,7 @@ to = ["counter.in"]
     board.run_until(Time::from_picos(2_000_000_000)).unwrap();
     board
         .peripheral::<EdgeCounter>("counter")
+        .unwrap()
         .map(|counter| counter.count())
         .unwrap()
 }
@@ -3830,6 +3918,7 @@ fn seen(board: &mut Board<Mc68331>, at: Time) -> Seen {
     let resets = ["every", "watchdog", "power"].map(|name| {
         board
             .peripheral::<PoweredLatch>(name)
+            .unwrap()
             .map_or(0, |latch| latch.resets)
     });
     let events = board
@@ -4019,6 +4108,7 @@ fn a_host_reset_while_reset_is_held_does_nothing() {
     host.take_events();
     let resets = |host: &Board<Mc68331>| {
         host.peripheral::<PoweredLatch>("every")
+            .unwrap()
             .map(|latch| latch.resets)
     };
     let before = resets(&host);
@@ -4334,9 +4424,9 @@ const COMPARE_PS: u64 = 7_812_500_000;
 const TOC2: u32 = GPT + 0x16;
 /// TCTL1: OC2 toggles its pin (GPTRM 3.3.6).
 const OC2_TOGGLES: u16 = 0x0100;
-/// How far ahead of its cycle `Driver` drives.
+/// How far ahead of its cycle `AheadDriver` drives.
 const DRIVER_AHEAD_PS: u64 = 100_000;
-/// The run of a board with a `Driver`.
+/// The run of a board with an `AheadDriver`.
 const DRIVER_RUN_PS: u64 = 1_000_000_000;
 
 /// A peripheral on CS1 that keeps each cycle's time and horizon.
@@ -4386,12 +4476,12 @@ impl Peripheral for Sampled {
 /// A peripheral on CS2 whose every read drives an edge `DRIVER_AHEAD_PS`
 /// ahead.
 #[derive(Debug, Default)]
-struct Driver {
+struct AheadDriver {
     /// The level it drove last.
     level: bool,
 }
 
-impl Peripheral for Driver {
+impl Peripheral for AheadDriver {
     fn read(
         &mut self,
         _: PeripheralAccess,
@@ -4449,7 +4539,7 @@ attach = [{{ select = "CS1" }}]
         .unwrap();
     registry
         .register("driver", vec![PortSpec::output("out", Kind::Edge)], |_| {
-            Ok(Box::new(Driver::default()))
+            Ok(Box::new(AheadDriver::default()))
         })
         .unwrap();
     registry
@@ -4473,6 +4563,7 @@ attach = [{{ select = "CS1" }}]
     board.run_until(until).unwrap();
     board
         .peripheral::<Sampled>("sampled")
+        .unwrap()
         .unwrap()
         .cycles
         .clone()
@@ -4581,7 +4672,7 @@ fn a_sensed_chip_output_bounds_the_horizon() {
 
 #[test]
 fn a_drive_earlier_in_the_instruction_bounds_the_horizon() {
-    // each MOVE reads `Driver`, which drives ahead, then writes `Sampled`
+    // each MOVE reads `AheadDriver`, which drives ahead, then writes `Sampled`
     let program = [
         MOVE_WORD_ABSOLUTE,
         (CS2_BASE >> 16) as u16,

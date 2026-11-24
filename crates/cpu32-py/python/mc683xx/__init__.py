@@ -46,13 +46,13 @@ class Peripheral(Protocol):
     direction)` each, and is told serial frames as `Serial`s; every
     method is optional, a missing one taking the
     trait's default: `read(access, drive) -> int`, `write(access,
-    value, drive)`, `wait_states(access) -> int | None`,
-    `dsack_port(access) -> int | None`, `wants_horizon() -> bool`,
+    value, drive)`, `wait_states(access, moment) -> int | None`,
+    `dsack_port(access, moment) -> int | None`, `wants_horizon() -> bool`,
     `interrupt_request() -> bool`, `power_on(drive)`,
     `reset(drive)`, `transfer(transfer, drive) -> int`,
-    `set_qspi_clock(clock, now)`, `select(attachment, selected, drive)`,
-    `input(port, value, drive)`, `sample(port, now) -> float | None`,
-    `next_event() -> int | None`, `advance(drive)`,
+    `set_qspi_clock(clock, moment)`, `set_selected(attachment, selected,
+    drive)`, `input(port, value, drive)`, `analog_output(port, moment) ->
+    float | None`, `next_event(moment) -> int | None`, `advance(drive)`,
     `qspi_deferrable() -> bool`, `memory_read(memory, access, drive) ->
     int`, `memory_write(memory, access, value, drive)`, `inspect() ->
     Mapping[str, object]`, and `save() -> bytes` with

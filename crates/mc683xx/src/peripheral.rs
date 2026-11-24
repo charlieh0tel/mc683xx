@@ -23,8 +23,8 @@ const IACK_LEVEL_SHIFT: u32 = 1;
 
 /// The address of an interrupt acknowledge cycle at `level`.
 #[must_use]
-pub fn iack_address(level: InterruptLevel) -> Address {
-    Address(IACK_ADDRESS | u32::from(u8::from(level)) << IACK_LEVEL_SHIFT)
+pub const fn iack_address(level: InterruptLevel) -> Address {
+    Address(IACK_ADDRESS | (level.get() as u32) << IACK_LEVEL_SHIFT)
 }
 
 /// The cycles a peripheral on no chip select takes by its own decode of
@@ -284,5 +284,22 @@ pub trait SpiPeripheral {
     /// peripherals and asks for no interrupt or stop.
     fn deferrable(&self) -> bool {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mc683xx_cpu32::interrupt::InterruptLevel;
+    use mc683xx_target::address::Address;
+
+    use super::iack_address;
+
+    /// IRQ7's acknowledge, worked out in a const context.
+    const NONMASKABLE_IACK: Address = iack_address(InterruptLevel::NONMASKABLE);
+
+    #[test]
+    fn an_acknowledge_s_address_carries_its_level_in_addr_3_1() {
+        assert_eq!(NONMASKABLE_IACK, Address(0xff_ffff));
+        assert_eq!(iack_address(InterruptLevel::NONE), Address(0xff_fff1));
     }
 }

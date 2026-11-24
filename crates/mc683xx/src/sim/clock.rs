@@ -209,15 +209,6 @@ impl SystemClock {
         self.source
     }
 
-    /// System clocks in an EXTAL period.
-    ///
-    /// Not part of the semver API: plumbing the SIM keeps its time with.
-    #[doc(hidden)]
-    #[must_use]
-    pub const fn clocks_per_tick(&self) -> u64 {
-        self.clocks_per_tick
-    }
-
     /// The system clock's frequency.
     #[must_use]
     pub const fn frequency(&self) -> Frequency {
@@ -329,7 +320,7 @@ mod tests {
     #[test]
     fn reset_is_256_times_the_reference() {
         let clock = SystemClock::new(ClockSource::default(), Cycle::ZERO);
-        assert_eq!(clock.clocks_per_tick(), 256);
+        assert_eq!(clock.clocks_per_tick, 256);
         assert_eq!(clock.frequency().hz(), 8_388_608);
         assert_eq!(clock.syncr(), 0x3f08);
     }
@@ -341,7 +332,7 @@ mod tests {
         clock.write_syncr(0xcf00, Cycle::ZERO);
         assert_eq!(clock.frequency().hz(), 16_777_216);
         clock.write_syncr(0x0000, Cycle::ZERO);
-        assert_eq!(clock.clocks_per_tick(), 4);
+        assert_eq!(clock.clocks_per_tick, 4);
     }
 
     #[test]
@@ -462,7 +453,7 @@ mod tests {
             Cycle::ZERO,
         );
         clock.write_syncr(0xcf00, Cycle::ZERO);
-        assert_eq!(clock.clocks_per_tick(), 1);
+        assert_eq!(clock.clocks_per_tick, 1);
         assert_eq!(clock.frequency().hz(), 16_000_000);
     }
 }

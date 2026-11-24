@@ -644,6 +644,9 @@ def test_a_gpt_output_compare_toggles_its_pin():
         chip.schedule_gpt_input(0, "PGP7", True)  # type: ignore[arg-type]
     chip.run_for(300)
     assert isinstance(chip.pwm(mc683xx.Channel.A), mc683xx.Output)
+    # PWMB's duty out of reset is 0: low
+    assert chip.pwm(mc683xx.Channel.B) == mc683xx.Output.Level(False)
+    assert chip.pwm_level(mc683xx.Channel.B) is False
     oc1 = chip.oc1()
     assert isinstance(oc1, mc683xx.Output.Level)
     assert oc1 == mc683xx.Output.Level(level=oc1.level)

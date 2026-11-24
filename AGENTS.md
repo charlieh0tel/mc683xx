@@ -211,8 +211,9 @@ Crates:
   - a checked value, some numbers not one (`InterruptLevel`, `IrqPin`,
     `PortGpPin`, `chip_select::Number`, `FunctionCode`), converts by
     `TryFrom<u8>`, failing with `No<Type>(pub u8)`, and `From<T> for
-    u8`; no `new` or `get` (a private `const fn` where a const context
-    needs one);
+    u8`; no public `new` or `get` (a private `const fn` where a const
+    context needs one, `#[doc(hidden)]` where another crate's does, as
+    `InterruptLevel::get` and `IrqPin::get`);
   - a wire or field encoding is a named pair, not `From`
     (`Register::code`/`from_code`, `Size::field`, `Entry::atemp`);
   - a register-order index is `index`/`from_index` (`ChipSelect`);
@@ -223,7 +224,10 @@ Crates:
 - Method names: `with_*` is a constructor (`Registry::with_builtins`);
   a mutator is `set_*`; an accessor is the noun, `_mut` for the
   mutable one (`Board::peripheral`, `peripheral_mut`); a state reads
-  as the state (`halted`).  How a run ended is a `*Run` (`Run`,
+  as the state (`halted`).  A builder's adder is the noun, as std's
+  `Command::arg` and `thread::Builder::name` are (`Builder::memory`,
+  `Builder::peripheral`); a live object's is `add_*`
+  (`Machine::add_peripheral`, `Cpu::add_code_hook`).  How a run ended is a `*Run` (`Run`,
   `LimitedRun`, `BoardRun`); a gdb session is not a run, so how one
   ended is not a `*Run` (`Ending`).  `restore` is a snapshot's alone.
 - Time words (PLAN.md, Decisions): an instant is `Time` on the board,

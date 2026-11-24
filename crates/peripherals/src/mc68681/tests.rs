@@ -35,10 +35,10 @@ use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 
-use super::Duart;
 use super::IP0;
 use super::IRQ;
 use super::MC68681;
+use super::Mc68681;
 use super::OP0;
 use super::RXDA;
 use super::RXDB;
@@ -106,7 +106,7 @@ const fn ps(picoseconds: u64) -> Span {
 /// A DUART under test.
 struct Bench {
     /// The peripheral.
-    duart: Duart,
+    duart: Mc68681,
 }
 
 impl Bench {
@@ -117,7 +117,7 @@ impl Bench {
 
     /// A `variant` at 3.6864 MHz, powered on.
     fn of(variant: Variant) -> Self {
-        let mut duart = Duart::new(variant, super::X1_DEFAULT_HZ);
+        let mut duart = Mc68681::new(variant, super::X1_DEFAULT_HZ);
         duart.power_on(&mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)));
         Self { duart }
     }
@@ -309,7 +309,7 @@ fn x1_clk_is_a_parameter_that_scales_every_rate() {
     ));
     // twice the crystal: code $B is 19200 baud
     let mut bench = Bench {
-        duart: Duart::new(Variant::Mc68681, 2 * super::X1_DEFAULT_HZ),
+        duart: Mc68681::new(Variant::Mc68681, 2 * super::X1_DEFAULT_HZ),
     };
     bench.channel(0);
     let sent = frames(&bench.write(RBA, b'2', Time::ZERO), TXDA);
@@ -847,7 +847,7 @@ fn the_timer_is_a_16x_clock_for_a_channel() {
 fn the_output_port_shows_the_complement_of_its_register() {
     let mut bench = Bench::new();
     // power-on drove every pin high and IRQ high
-    let mut fresh = Duart::new(Variant::Mc68681, super::X1_DEFAULT_HZ);
+    let mut fresh = Mc68681::new(Variant::Mc68681, super::X1_DEFAULT_HZ);
     let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
     fresh.power_on(&mut drive);
     let first = levels(&drive.finish().driven);
@@ -1153,8 +1153,8 @@ fn a_restore_refuses_another_peripheral_and_a_state_no_run_holds() {
     bench.input(RXDA, character(b's'), Time::ZERO);
     let before = bench.duart.state.clone();
     let others = [
-        Duart::new(Variant::Scc68692, super::X1_DEFAULT_HZ),
-        Duart::new(Variant::Mc68681, 2 * super::X1_DEFAULT_HZ),
+        Mc68681::new(Variant::Scc68692, super::X1_DEFAULT_HZ),
+        Mc68681::new(Variant::Mc68681, 2 * super::X1_DEFAULT_HZ),
     ];
     for other in others {
         assert!(matches!(

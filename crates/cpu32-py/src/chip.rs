@@ -491,8 +491,24 @@ impl From<entry::Entry> for Entry {
     }
 }
 
+impl From<Entry> for entry::Entry {
+    fn from(entry: Entry) -> Self {
+        match entry {
+            Entry::Breakpoint() => Self::Breakpoint,
+            Entry::Background() => Self::Background,
+            Entry::DoubleBusFault { ssw } => Self::DoubleBusFault { ssw },
+            Entry::Unknown { atemp } => Self::Unknown { atemp },
+        }
+    }
+}
+
 #[pymethods]
 impl Entry {
+    /// Rust's `Display`.
+    fn __str__(&self) -> String {
+        entry::Entry::from(*self).to_string()
+    }
+
     fn __repr__(&self) -> String {
         match self {
             Self::Breakpoint() => "Entry.Breakpoint()".to_owned(),
@@ -503,8 +519,27 @@ impl Entry {
     }
 }
 
+impl From<Stop> for cpu::Stop {
+    fn from(stop: Stop) -> Self {
+        match stop {
+            Stop::Budget() => Self::Budget,
+            Stop::Stopped() => Self::Stopped,
+            Stop::Halted { halt } => Self::Halted(halt.into()),
+            Stop::Hook { hook } => Self::Hook(hook.0),
+            Stop::Requested() => Self::Requested,
+            Stop::Background { entry } => Self::Background(entry.into()),
+            Stop::Fault() => Self::Fault,
+        }
+    }
+}
+
 #[pymethods]
 impl Stop {
+    /// Rust's `Display`.
+    fn __str__(&self) -> String {
+        cpu::Stop::from(*self).to_string()
+    }
+
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         Ok(match self {
             Self::Budget() => "Stop.Budget()".to_owned(),
@@ -1161,6 +1196,12 @@ macro_rules! chip_methods {
             /// `Output.Level` otherwise.
             fn oc1(&self, py: Python<'_>) -> PyResult<Output> {
                 self.with_chip(py, |chip| Ok(chip.oc1().try_into()?))
+            }
+
+            /// The level on `channel`'s PWM pin now: PWMCNT's clock under
+            /// PPROUT (GPTRM 6.3.1), the PWM output otherwise.
+            fn pwm_level(&self, py: Python<'_>, channel: ChannelView) -> PyResult<bool> {
+                self.with_chip(py, |chip| Ok(chip.pwm_level(channel.into())))
             }
 
             /// Calls `callback(Instruction)` before each instruction at an

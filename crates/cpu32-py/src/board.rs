@@ -295,12 +295,26 @@ impl AccessView {
 
 /// The chip's system clock on board time (Rust's `time::TimeBase`): for
 /// converting between picoseconds and the chip's clocks.
-#[pyclass(name = "TimeBase", module = "mc683xx", frozen, eq)]
+#[pyclass(name = "TimeBase", module = "mc683xx", frozen, eq, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TimeBaseView(TimeBase);
 
 #[pymethods]
 impl TimeBaseView {
+    /// A base: clock `cycle` falls at board time `time` picoseconds, and
+    /// the clock runs at `frequency_hz` from there (Rust's
+    /// `TimeBase::new`); by default clock zero at power-on, the base
+    /// `TimeBase::steady` gives.
+    #[new]
+    #[pyo3(signature = (frequency_hz, *, cycle = 0, time = 0))]
+    const fn new(frequency_hz: u64, cycle: u64, time: u64) -> Self {
+        Self(TimeBase::new(
+            Cycle::from_clocks(cycle),
+            Time::from_picos(time),
+            Frequency::from_hz(frequency_hz),
+        ))
+    }
+
     /// The clock's frequency, whole hertz.
     #[getter]
     const fn frequency_hz(&self) -> u64 {
@@ -331,6 +345,13 @@ pub(crate) struct MomentView(Moment);
 
 #[pymethods]
 impl MomentView {
+    /// The moment `now` picoseconds of board time, the chip's system
+    /// clock on board time `system_clock` (Rust's `Moment::new`).
+    #[new]
+    const fn new(now: u64, system_clock: TimeBaseView) -> Self {
+        Self(Moment::new(Time::from_picos(now), system_clock.0))
+    }
+
     /// Board time, in picoseconds.
     #[getter]
     const fn now(&self) -> u64 {
@@ -697,8 +718,8 @@ impl DriveView {
 
     /// Writes `data` at `offset` in the board's memory `memory` when the
     /// chip's quantum ends.
-    fn write_memory(&mut self, memory: String, offset: usize, data: Vec<u8>) {
-        self.writes.push((memory, offset, data));
+    fn write_memory(&mut self, memory: String, offset: usize, data: PyBackedBytes) {
+        self.writes.push((memory, offset, data.to_vec()));
     }
 
     /// Asks the run to stop after the instruction running now.
@@ -1619,12 +1640,6 @@ impl BoardView {
         self.board.now().picos()
     }
 
-    /// The chip's system clocks since power-on.
-    #[getter]
-    const fn cycles(&self) -> u64 {
-        self.board.chip().now().clocks()
-    }
-
     /// The chip's instructions run since power-on (`Mc68331.instructions`).
     #[getter]
     const fn instructions(&self) -> u64 {
@@ -1635,10 +1650,10 @@ impl BoardView {
     /// a Python peripheral; `ValueError` for a peripheral the board
     /// lacks.
     fn peripheral(&self, py: Python<'_>, name: &str) -> PyResult<Option<Py<PyAny>>> {
-        self.board.marking(name).map_err(Error::from)?;
         Ok(self
             .board
             .peripheral::<PythonPeripheral>(name)
+            .map_err(Error::from)?
             .and_then(|peripheral| peripheral.object.object(py).ok()))
     }
 
@@ -1875,6 +1890,6 @@ impl BoardView {
     }
 
     fn __repr__(&self) -> String {
-        format!("Board(now={}, cycles={})", self.now(), self.cycles())
+        format!("Board(now={})", self.now())
     }
 }

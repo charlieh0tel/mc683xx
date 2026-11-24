@@ -158,11 +158,9 @@ pub enum Termination {
 }
 
 impl Termination {
-    /// The most wait states DSACK encodes: the field's values below
-    /// fast termination's.
-    ///
-    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
-    #[doc(hidden)]
+    /// The most wait states a select encodes, 13: DSACK's values below
+    /// fast termination's (SIMRM 7.7), the most
+    /// [`Termination::WaitStates`] takes.
     pub const MOST_WAIT_STATES: u8 = DSACK_FAST as u8 - 1;
 
     /// The cycle's clocks, if the select ends it: ECLK cycles are

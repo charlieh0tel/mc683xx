@@ -155,7 +155,7 @@ pub enum TargetReset {
 pub enum AccessError<E> {
     /// The byte at this address is not memory the target serves, in
     /// the address space asked.
-    #[error("{0} is not memory the target serves")]
+    #[error("nothing serves {0}")]
     Unserved(Address),
     /// The target gives no access to its registers: neither its CPU's
     /// controls nor register methods of its own.

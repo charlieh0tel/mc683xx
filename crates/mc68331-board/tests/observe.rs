@@ -186,7 +186,12 @@ fn an_observer_sees_what_a_sink_sees_when_it_sees_it() {
         board.observe(net, log.observer()).unwrap();
     }
     run(&mut board);
-    let probed = board.peripheral::<Probe>("probe").unwrap().seen.clone();
+    let probed = board
+        .peripheral::<Probe>("probe")
+        .unwrap()
+        .unwrap()
+        .seen
+        .clone();
     assert!(probed.len() > 20, "{probed:?}");
     assert_eq!(log.seen(), probed);
     // the first rise: input edge 1000, the clock's phase after it
@@ -212,8 +217,13 @@ fn an_observer_changes_no_run() {
     run(&mut plain);
     assert!(!log.seen().is_empty());
     assert_eq!(observed.save().unwrap(), plain.save().unwrap());
-    let count =
-        |board: &Board<Mc68331>| board.peripheral::<EdgeCounter>("counter").unwrap().count();
+    let count = |board: &Board<Mc68331>| {
+        board
+            .peripheral::<EdgeCounter>("counter")
+            .unwrap()
+            .unwrap()
+            .count()
+    };
     assert_eq!(count(&observed), count(&plain));
 }
 

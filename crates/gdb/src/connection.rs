@@ -133,14 +133,16 @@ impl Connection for TcpStream {
     }
 }
 
-/// Whether `error` is the peer gone: the connection at its end, reset
-/// or aborted, or a write into one closed.
+/// Whether `error` is the peer gone: the connection at its end, reset,
+/// aborted or no longer connected (some stacks' read after a reset), or
+/// a write into one closed.
 fn closed(error: &io::Error) -> bool {
     matches!(
         error.kind(),
         io::ErrorKind::UnexpectedEof
             | io::ErrorKind::ConnectionReset
             | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::NotConnected
             | io::ErrorKind::BrokenPipe
     )
 }
@@ -312,4 +314,32 @@ pub fn accept<E: From<io::Error>>(
     ready(listener.local_addr()?)?;
     let (stream, _) = listener.accept()?;
     Ok(stream)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io;
+    use std::net::TcpStream;
+
+    use super::Connection;
+
+    #[test]
+    fn a_stream_s_hang_up_is_the_peer_gone_and_nothing_else() {
+        for kind in [
+            io::ErrorKind::UnexpectedEof,
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::NotConnected,
+            io::ErrorKind::BrokenPipe,
+        ] {
+            assert!(TcpStream::hung_up(&kind.into()), "{kind}");
+        }
+        for kind in [
+            io::ErrorKind::WouldBlock,
+            io::ErrorKind::TimedOut,
+            io::ErrorKind::Other,
+        ] {
+            assert!(!TcpStream::hung_up(&kind.into()), "{kind}");
+        }
+    }
 }

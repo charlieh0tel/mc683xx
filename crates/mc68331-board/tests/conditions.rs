@@ -310,7 +310,14 @@ fn a_peripheral_s_condition_stops_the_run_and_is_named() {
         Time::from_picos(FIRST_RISE.picos() + PERIOD_PS / 2)
     );
     assert_eq!(board.fired(), vec![net]);
-    assert!(board.peripheral::<Probe>("probe").unwrap().armed.is_empty());
+    assert!(
+        board
+            .peripheral::<Probe>("probe")
+            .unwrap()
+            .unwrap()
+            .armed
+            .is_empty()
+    );
 }
 
 #[test]

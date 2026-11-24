@@ -83,6 +83,42 @@ class Latch:
         drive.drive(0, bool(value & 1))
 
 
+class Poker:
+    """A write-only peripheral that writes the board's memory `rom` from
+    a write's value, as bytes, and tries a list too."""
+
+    PORTS: list[tuple[str, str, str]] = []
+
+    def __init__(self) -> None:
+        self.refused = False
+
+    def write(self, access: mc683xx.PeripheralAccess, value: int, drive: mc683xx.Drive) -> None:
+        drive.write_memory("rom", 0x10, struct.pack(">H", value))
+        try:
+            drive.write_memory("rom", 0x12, [1, 2])  # type: ignore[arg-type]
+        except TypeError:
+            self.refused = True
+
+
+def test_a_peripheral_writes_a_board_memory_as_bytes(tmp_path: Path) -> None:
+    program = store_word(CSBAR1, CS1_BAR) + store_word(CSOR1, CSOR_FAST) + store_word(LATCH, 0x1234)
+    (tmp_path / "rom.bin").write_bytes(rom(program))
+    (tmp_path / "board.toml").write_text(BOARD.split("[[peripheral]]")[0] + POKER)
+    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"poker": Poker})
+    board.run_for(seconds=0.0001)
+    assert board.memory("rom")[0x10:0x14] == b"\x12\x34" + struct.pack(">H", NOP)
+    poker = board.peripheral("poker")
+    assert isinstance(poker, Poker)
+    assert poker.refused
+
+
+POKER = """[[peripheral]]
+name = "poker"
+type = "poker"
+attach = [{ select = "CS1", role = "write" }]
+"""
+
+
 class Lamp:
     """A lamp on a logic input."""
 
@@ -104,7 +140,7 @@ def test_python_peripherals_on_a_board_file(tmp_path: Path) -> None:
     board.set_tracing(bus_cycles=True)
     run = board.run_for(seconds=0.0001)
     assert run.stop == mc683xx.Stop.Budget()
-    assert 0 < board.instructions < board.cycles
+    assert 0 < board.instructions < board.chip.now
     latch = board.peripheral("latch")
     assert isinstance(latch, Latch)
     assert latch.width == 1
@@ -170,7 +206,6 @@ def test_a_board_s_chip_reads_and_hooks_as_a_chip_does(tmp_path: Path) -> None:
     assert chip.halted is None
     assert chip.background is None
     assert chip.instructions == board.instructions
-    assert chip.now == board.cycles
     assert chip.system_hz == 8_388_608
     chip.write_register("D0", 7)
     assert board.chip.read_register("D0") == 7
@@ -213,6 +248,18 @@ class Oven:
 
     def restore(self, snapshot: bytes) -> None:
         assert snapshot == b""
+
+
+def test_a_peripheral_s_calls_run_with_no_board() -> None:
+    base = mc683xx.TimeBase(8_388_608)
+    assert base == mc683xx.TimeBase(8_388_608, cycle=0, time=0)
+    assert base.cycle(1_000_000) == 9  # rounded up
+    moved = mc683xx.TimeBase(16_000_000, cycle=100, time=5_000_000)
+    assert moved.time(100) == 5_000_000
+    assert moved.cycle(5_000_000 + 1_000_000) == 116
+    moment = mc683xx.Moment(1_000_000, base)
+    assert (moment.now, moment.system_clock, moment.cycle()) == (1_000_000, base, 9)
+    assert Oven().analog_output(0, moment) == 20.0 + 1_000_000 / 1e9
 
 
 class Probe:
@@ -655,9 +702,9 @@ def test_run_until_runs_to_a_time_and_run_for_for_a_span(tmp_path: Path) -> None
     board.run_for(picoseconds=2_000_000)
     assert board.now == 5_000_000
     # a time already passed: at once
-    cycles = board.cycles
+    cycles = board.chip.now
     assert board.run_until(picoseconds=1_000_000).now == 5_000_000
-    assert board.cycles == cycles
+    assert board.chip.now == cycles
     assert board.now == 5_000_000
 
 

@@ -593,8 +593,8 @@ impl Sim {
     /// Whether IRQ`level`'s pin has its interrupt function (PFPAR,
     /// MC68331UM Table D-5).
     #[must_use]
-    pub fn interrupt_pin(&self, pin: IrqPin) -> bool {
-        self.port_f.assignment & 1 << u8::from(pin) != 0
+    pub const fn interrupt_pin(&self, pin: IrqPin) -> bool {
+        self.port_f.assignment & 1 << pin.get() != 0
     }
 
     /// Whether PE2 is the AVEC input (PEPAR, MC68331UM Table D-4).

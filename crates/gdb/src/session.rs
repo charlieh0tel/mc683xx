@@ -48,7 +48,6 @@ use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
 use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::function_code::parse_function_code;
 use mc683xx_target::register::SystemRegister;
 
 use crate::Ending;
@@ -563,7 +562,7 @@ impl<T: Target> Session<'_, T> {
         };
         match words {
             ["fc"] => show_fc(out, self.function_code),
-            ["fc", code] => match parse_function_code(code) {
+            ["fc", code] => match code.parse() {
                 Ok(function_code) => {
                     self.function_code = function_code;
                     show_fc(out, function_code);

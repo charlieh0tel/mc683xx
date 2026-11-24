@@ -1784,26 +1784,36 @@ impl<C: Chip> Board<C> {
         &mut self.chip
     }
 
-    /// The peripheral `name`, if there is one and it is a `P`: a host's
-    /// own peripheral's state, by its type.
-    #[must_use]
-    pub fn peripheral<P: Any>(&self, name: &str) -> Option<Ref<'_, P>> {
-        let cell = &self.shared.peripherals[self.peripheral_index(name)?];
-        Ref::filter_map(cell.borrow(), |peripheral| {
+    /// The peripheral `name`, `None` if it is not a `P`: a host's own
+    /// peripheral's state, by its type.
+    ///
+    /// # Errors
+    ///
+    /// [`NoPeripheral`] if the board has no peripheral `name`.
+    pub fn peripheral<P: Any>(&self, name: &str) -> Result<Option<Ref<'_, P>>, NoPeripheral> {
+        let cell = &self.shared.peripherals[self.named_peripheral(name)?];
+        Ok(Ref::filter_map(cell.borrow(), |peripheral| {
             let peripheral: &dyn Any = peripheral.as_ref();
             peripheral.downcast_ref::<P>()
         })
-        .ok()
+        .ok())
     }
 
-    /// The peripheral `name`, to change, if there is one and it is a `P`.
-    pub fn peripheral_mut<P: Any>(&mut self, name: &str) -> Option<RefMut<'_, P>> {
-        let cell = &self.shared.peripherals[self.peripheral_index(name)?];
-        RefMut::filter_map(cell.borrow_mut(), |peripheral| {
+    /// The peripheral `name`, to change, `None` if it is not a `P`.
+    ///
+    /// # Errors
+    ///
+    /// [`NoPeripheral`] if the board has no peripheral `name`.
+    pub fn peripheral_mut<P: Any>(
+        &mut self,
+        name: &str,
+    ) -> Result<Option<RefMut<'_, P>>, NoPeripheral> {
+        let cell = &self.shared.peripherals[self.named_peripheral(name)?];
+        Ok(RefMut::filter_map(cell.borrow_mut(), |peripheral| {
             let peripheral: &mut dyn Any = peripheral.as_mut();
             peripheral.downcast_mut::<P>()
         })
-        .ok()
+        .ok())
     }
 
     /// The index of the peripheral `name`.

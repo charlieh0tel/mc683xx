@@ -44,7 +44,10 @@ rename renames the Python name with it.  The deliberate differences:
   (`Event.Reset(now, cause)`, `Frame.Data(bits)`), and so does
   `Pacing`, though it has `Display` and `FromStr`: its factor is a
   number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`
-  the text.
+  the text.  Such a value's `str()` is Rust's `Display` too (`Stop`,
+  `End`, `Entry`, `Pacing`: `str(Stop.Budget())` is `"budget"`);
+  `Event` and `DsackFault`, whose Rust variants a binding cannot
+  rebuild, keep the default, their `repr`.
 - **Unknown values:** Python has a member Rust lacks:
   `Event.Unknown(now, text)`, an event the bindings cannot convert, so
   that `take_events()` hands every event over (Exceptions, below);
@@ -650,7 +653,8 @@ what the chip drives within a run comes back as timed changes.
   `Input.PGP0`-`Input.PGP7`, `Input.PAI` or `Input.PCLK` (Rust's
   `gpt::Input`, its `PortGp(pin)` a member per pin, as the pins are
   named: a deliberate difference); `pwm(Channel.A |
-  B)` (`Output.Level(level)`, `Output.Wave`, `Output.Clock`); `oc1()`
+  B)` (`Output.Level(level)`, `Output.Wave`, `Output.Clock`) and
+  `pwm_level(channel)`, the level on its pin now; `oc1()`
   (`Output.Clock` under CPROUT, else `Output.Level`);
   `take_pwm_changes() -> [(now, Channel, level)]` while
   `set_report_pwm_edges(channel, True)` asks (PPROUT's clock
@@ -826,7 +830,8 @@ assert chip.now == 0
 call a Python callable with what the Rust hook sees: an `Instruction`
 (`pc`, `registers`, `stack_top`), a `MemoryAccess` (`address`, `size`,
 `function_code`, `value`, and `previous`, what a write replaced, read
-with no cycle, `None` for a read or a peripheral's write; on the chip a
+with no cycle, `None` for a read, a CPU-space write or a peripheral's
+write; on the chip a
 long operand is two word cycles, on the bare `Machine` one access of
 4), an `InvalidAccess` (those, `cycle`, a
 `BusCycleKind`, and `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`),
@@ -943,7 +948,8 @@ harness hands over with `ready=lambda port: print(f"target remote
 gdb, a few packets from a subprocess, reads the registers and
 detaches.  It reads each reply through its checksum, as gdb does: the
 stub writes a reply byte by byte, so a client that closes at the `#`
-may make `serve_gdb` raise `BrokenPipeError`.
+may end the session as a hang-up (`Ending.HUNG_UP`) rather than the
+detach it sent.
 
 ```python
 import subprocess
@@ -1004,9 +1010,10 @@ chip.run_for(500)
 - `mc683xx.TargetError` (a `RuntimeError`): a background debug control
   the CPU's state refuses (Background debug mode).
 - `mc683xx.RunError` (a `RuntimeError`): a run that could not go on, a
-  board peripheral stalling board time (Board files); or a run's end
+  board peripheral stalling board time (Board files); a run's end
   or halt this build's bindings have no class for, named, which a newer
-  Rust core could give but none does today.
+  Rust core could give but none does today; or an exception
+  `take_exception` could not take (Rust's `TakeExceptionError`).
 - `NotImplementedError`: a module that cannot save; or any other value
   this build's bindings have no Python value for (a fault cause, a
   role, an invalid access's reason, a PWM output, a gdb session's
@@ -1106,7 +1113,10 @@ drive (`now`, and `moment`), one without takes an `mc683xx.Moment` last
 `system_clock`, an `mc683xx.TimeBase`, and `cycle()`, the chip's
 clock at it, rounded up).  A `TimeBase` (Rust's `time::TimeBase`) has
 `frequency_hz`, `time(at)`, the picosecond clock `at` falls at, rounded
-down, and `cycle(at)`, the first clock at or after picosecond `at`.  A
+down, and `cycle(at)`, the first clock at or after picosecond `at`.
+Both build, so a peripheral's calls run in a test with no board:
+`TimeBase(frequency_hz, cycle=0, time=0)`, clock `cycle` at picosecond
+`time`, and `Moment(now, system_clock)`.  A
 `PeripheralAccess` carries `attachment`,
 `select` (the chip select's name), `role` (a `Role`), `lane` (a
 `Lane`), `address`, `size`, `function_code`, `write` (as a
@@ -1140,8 +1150,8 @@ times running, stalls the board, and `run_for` raises
 
 `run_for(seconds=...)` (finite, 0 or more, within board time's 2**64 ps, or `ValueError`) or
 `run_for(picoseconds=...)` gives a `BoardRun` (Rust's: `stop`, a `Stop`, and `now`, board time at its end), as does `run_until` with a board time (Rust's `Board::run_until`; `run_for` is `Board::run_for`); `now`
-(board time in picoseconds), `cycles` and `instructions` (the chip's
-system clocks and instructions since power-on);
+(board time in picoseconds) and `instructions` (the chip's
+instructions since power-on; its clock is `chip.now`);
 `peripheral(name)` gives a Python peripheral's object back; `chip` the
 board's chip, a `BoardChip` with the `Mc68331` methods that read or
 hook it (registers, `bus_read`, `bus_write`, `peek`, the hooks,
@@ -1445,9 +1455,10 @@ assert bare.read_register("D0") == 6
   PC, S set, T1 and T0 clear, PC at the handler.  `level`, 0 to 7,
   sets the interrupt mask, as an interrupt does, whatever it was: no
   mask holds it off, so a host stacks an interrupt where it wants one.
+  Level 0, which no interrupt sets, clears the mask.
   No clocks pass.  The exception hooks, and the write hooks on the
   stack, are called before it returns, their results stopping nothing.
-  A halted CPU, or one in background mode, raises `RuntimeError`, as
+  A halted CPU, or one in background mode, raises `RunError`, as
   does a fault stacking the frame with `set_stop_on_fault(True)`,
   nothing stacked; without it, the fault is a bus error the CPU takes,
   as in its own exception processing.

@@ -1377,14 +1377,17 @@ hand.  The keys are in `docs/board-files.md`.
   the board's snapshot: a trait, not serde, so a model keeps its own
   format and versions it, and one with state it cannot serialize (a
   file handle) is `unsavable!`, which the board's save names.  One
-  constructor, `new`: the adapter needs no opt-in.  A mapped model
-  drives nets through its adapter: `MappedAdapter::driving(fn(&mut D,
-  &mut Drive))`, as `inspecting` shows its state, runs after each call
-  that may change the model (power-on, read, write, reset, advance),
+  constructor, `new`: the adapter needs no opt-in.  A model drives
+  nets through its adapter: one that implements `adapter::Driver`, its
+  `MappedAdapter` or `SpiAdapter` made `driving()`, as `Inspect` and
+  `inspecting()` show its state, has `drive` run after each call that
+  may change the model (power-on, reset, and a mapped model's read,
+  write and advance or a QSPI model's transfer, select and release),
   so a model written against the chip's traits needs no wrapping
   `Peripheral` to drive a net (decided for 0.9.0, over folding
   `Timed` into `MappedPeripheral`: `Timed` stays `Module`'s
-  supertrait, and the bare machine takes untimed models).
+  supertrait, and the bare machine takes untimed models; a trait, as
+  `Inspect` is, not a function pointer).
 - **Nets:** named and typed, `{ name, type, from, to = [...] }`.
   Types: `logic` (a level whose state matters), `edge` (a level whose
   changes' times matter, 1 PPS), `clock` (a frequency in nanohertz
@@ -2126,8 +2129,8 @@ parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
   `read_memory.b|w|l ADDR expect V [mask M] [fc FC]` and
   `poll_memory.b|w|l ADDR mask M expect V timeout_ms N [fc FC]`; the
   clauses in any order, each once; numbers as `parse_integer` takes
-  them; a function code by name or number (`parse_function_code`,
-  as gdb's `monitor fc` takes one), printed by name.
+  them; a function code by name or number (`FunctionCode`'s
+  `FromStr`, as gdb's `monitor fc` takes one), printed by name.
   Parsing refuses what cannot work: a value wider than its access, an
   expected value outside its mask, a word or long access at an odd
   address, a word that names no function code and is no number from
@@ -2224,6 +2227,9 @@ Adversarial review (2026-11-01):
   behind `Page::clocks() -> Cycles`; `Page::timed(port, Cycles)`
   asserts it fits (`Page::MOST_CLOCKS`, 255, where an ECLK cycle, the
   longest a select times, is 24), and `bus::stall` debug-asserts it.
+  `Termination::WaitStates` holds a `u8` too, but it is DSACK's field,
+  a count of wait states a select encodes (0 to
+  `Termination::MOST_WAIT_STATES`, 13), not of clocks.
 - The tables are two-level: a directory of slabs of 1024 pages (2
   Mbytes), each allocated when a map or a protection first reaches it;
   a page in no slab is on the bus with every permission, and a hook
@@ -3504,7 +3510,7 @@ host's QSPI peripheral, which a restore keeps).
 | Manuals kept in the repo, in Git LFS | The specification, beside the code that cites it.  NXP no longer serves them; its terms of use allow reproduction for personal non-commercial use only, a risk accepted for the public repo. |
 | Firmware images by path, not committed | Vendor images are not ours; feature-gated system tests read them from a path in an environment variable, for any board. |
 | Runs named `run_until` and `run_for` | A run to an absolute time is `run_until`, a run for a duration `run_for`, at every layer (the core, the chip, the board, gdb's targets, Python); a bare machine's run to limits is `run_limited`.  No bare `run`, whose meaning a reader must look up (decided 2026-10-24, before 0.1.0). |
-| The modules crate's assembly API sealed and hidden | `Module` and the plumbing only `mc683xx-mc68331` uses to compose the chip (register cycles, decode requests, the SIM's timer and reset handshakes, the serde helpers; from 0.7.0 the modules' blocks, chip-select decode, and the `Qsm` and `Sim` mutators a host cannot reach through the chip's `&Qsm` and `&Sim`; from 0.9.0 the `module` module, `Lanes`, `Selects`, `ChipSelects::at` and `blocks`, `Termination::clocks`, `external_clocks` and `MOST_WAIT_STATES`, `Sim::freezes_bus_monitor`, and `SystemClock::tick`, `at` and `clocks_per_tick`) change with the chip; sealing `Module` and `#[doc(hidden)]` with a "Not part of the semver API" note keep them out of semver, so the chip can change them in a minor release, while what a host needs stays public (decided 2026-10-24, before 0.1.0). |
+| The modules crate's assembly API sealed and hidden | `Module` and the plumbing only `mc683xx-mc68331` uses to compose the chip (register cycles, decode requests, the SIM's timer and reset handshakes, the serde helpers; from 0.7.0 the modules' blocks, chip-select decode, and the `Qsm` and `Sim` mutators a host cannot reach through the chip's `&Qsm` and `&Sim`; from 0.9.0 the `module` module, `Lanes`, `Selects`, `ChipSelects::at` and `blocks`, `Termination::clocks` and `external_clocks`, `Sim::freezes_bus_monitor`, and `SystemClock::tick` and `at`) change with the chip; sealing `Module` and `#[doc(hidden)]` with a "Not part of the semver API" note keep them out of semver, so the chip can change them in a minor release, while what a host needs stays public (decided 2026-10-24, before 0.1.0). |
 | The board's chip traits sealed | `Chip`, `ChipBuilder` and `ChipPin` are what the board's run loop needs of a part, and change with it; a new chip (a 68332) is added inside mc683xx, beside `mc683xx_board::mc68331`, not by a host.  Sealing them and `#[doc(hidden)]` on the plumbing only the board calls keep them out of semver, while a host keeps `Board<Mc68331>`, `Board<C: Chip>` and the chip's items it calls (`TYPE`, the name it prints and a board file's `[chip] type` gives; `cpu`, `cpu_control`, `now`, `memory`, the resets, `save`).  Opening them later is not breaking (decided 2026-11-21, before 1.0). |
 | Board time with the SIM | It derives from SYNCR. |
 | Not cycle accurate, not cycle stupid | Firmware timing comes from peripherals, but timing loops and peripheral pacing need table-based estimates with wait states. |

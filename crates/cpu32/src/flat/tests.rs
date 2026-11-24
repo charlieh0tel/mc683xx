@@ -8,6 +8,7 @@ use super::MapError;
 use crate::bus::BusError;
 use crate::cpu::Stop;
 use crate::cpu::bare::End;
+use crate::cpu::bare::FaultCause;
 use crate::cpu::bare::Limits;
 use crate::cpu::hooks::Instruction;
 use crate::cpu::hooks::MemoryAccess;
@@ -449,6 +450,24 @@ fn a_write_hook_sees_a_long_s_previous_value_but_not_a_peripheral_s() {
             (PERIPHERAL + 1, Size::Long, None),
         ]
     );
+}
+
+#[test]
+fn a_watched_odd_long_write_at_a_region_s_last_byte_is_an_address_error() {
+    let mut machine = machine(&[MOVE_LONG_D0_TO_A0, RTS]);
+    let last = SPARE + PAGE_BYTES - 1;
+    machine.map(Address(SPARE), PAGE_BYTES, &[]).unwrap();
+    machine.cpu.add_write_hook(
+        Address(SPARE)..=Address(last),
+        |_| ControlFlow::Continue(()),
+    );
+    machine.cpu.set_stop_on_fault(true);
+    machine.cpu.registers.set_address(0, last);
+    let End::Fault(fault) = machine.run_limited(until_return()).end else {
+        panic!("no fault");
+    };
+    assert_eq!(fault.cause, FaultCause::AddressError);
+    assert_eq!(fault.address, Address(last));
 }
 
 #[test]

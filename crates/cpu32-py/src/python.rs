@@ -96,8 +96,8 @@ impl From<Error> for PyErr {
         match error {
             Error::Unknown { .. } | Error::Range { .. } => PyIndexError::new_err(message),
             Error::Budget(_) => PyOverflowError::new_err(message),
-            Error::Built | Error::Take(_) => PyRuntimeError::new_err(message),
-            Error::Unmapped { kind: RUN_END, .. } | Error::Run(_) => {
+            Error::Built => PyRuntimeError::new_err(message),
+            Error::Unmapped { kind: RUN_END, .. } | Error::Run(_) | Error::Take(_) => {
                 exceptions::RunError::new_err(message)
             }
             Error::State(StateError::Unsupported(_)) | Error::Unmapped { .. } => {

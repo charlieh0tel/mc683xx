@@ -170,6 +170,7 @@ to = ["probe.data"]
     board.run_until(Time::from_picos(100_000_000)).unwrap();
     let sampled = board
         .peripheral::<Probe>("probe")
+        .unwrap()
         .map(|probe| probe.sampled.clone());
     // the MOVEM's rising edge comes before its fall on PGP0
     assert_eq!(sampled, Some(vec![Some(true), Some(true)]));

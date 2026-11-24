@@ -1300,6 +1300,75 @@ fn a_stop_asked_at_a_reset_in_a_run_ends_it_before_the_next_instruction() {
 }
 
 #[test]
+fn a_stop_asked_at_a_reset_that_halts_ends_the_run_with_the_halt() {
+    // every vector fetch faults: halted out of power-on, then again at
+    // the watchdog's reset, 2^9 EXTAL periods at 256 clocks on
+    let mut builder = Builder::default();
+    builder.peripheral(Faulting, &[ChipSelect::Boot]).unwrap();
+    let stop = builder.stop_request();
+    builder.unwired_peripheral(ResetStopper { stop, resets: 0 });
+    let mut chip = builder.build();
+    chip.take_events();
+    let run = chip.run_for(Cycles::from_clocks(2 * 512 * 256));
+    assert_eq!(run.stop, Stop::Halted(Halt::DoubleBusFault));
+    let events = chip.take_events();
+    let [
+        Event::Reset {
+            now: reset,
+            cause: ResetCause::Watchdog,
+        },
+    ] = events[..]
+    else {
+        panic!("{events:?}");
+    };
+    assert_eq!(chip.now(), reset, "the run ends at the reset");
+    // the request was taken with the halt
+    let budget = Cycles::from_clocks(100);
+    let run = chip.run_for(budget);
+    assert_eq!(run.stop, Stop::Halted(Halt::DoubleBusFault));
+    assert_eq!(run.cycles, budget);
+}
+
+#[test]
+fn a_stop_asked_at_a_reset_leaves_no_watched_output_to_end_the_next_run() {
+    // PFPAR 0, DDRF bit 0 an output, PORTF bit 0 low (as
+    // a_watched_output_change_ends_the_run); the watchdog's reset puts
+    // PF0 back to an input, high, and asks the run to stop
+    let program = [
+        store_byte(SIM + 0x1f, 0),
+        store_byte(SIM + 0x1d, 1),
+        store_byte(SIM + 0x19, 0),
+    ]
+    .concat();
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(&program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    let stop = builder.stop_request();
+    builder.unwired_peripheral(ResetStopper { stop, resets: 0 });
+    let mut chip = builder.build();
+    let mut watched = OutputStop::default();
+    watched.set_port(Port::F, 1);
+    chip.set_output_stop(watched);
+    let run = chip.run_for(Cycles::from_clocks(1_000));
+    let first = run.cycles;
+    assert_eq!(run.stop, Stop::Budget, "PF0 low ends the run");
+    assert_eq!(chip.outputs(Port::F), PortLevels::new(1, 0));
+    let run = chip.run_for(Cycles::from_clocks(2 * 512 * 256));
+    assert_eq!(run.stop, Stop::Requested, "at the reset");
+    assert_ne!(chip.outputs(Port::F), PortLevels::new(1, 0));
+    // the reset's change was seen with it: the run ends where PF0 goes
+    // low again, as out of power-on
+    let run = chip.run_for(Cycles::from_clocks(1_000));
+    assert_eq!(run.cycles, first);
+    assert_eq!(chip.outputs(Port::F), PortLevels::new(1, 0));
+}
+
+#[test]
 fn a_host_reset_sets_rsr_to_its_cause_alone() {
     // RSR one bit per source (SIMRM 8.2.8)
     for cause in ResetCause::ALL {

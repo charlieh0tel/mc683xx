@@ -108,41 +108,31 @@ impl fmt::Display for FunctionCode {
     }
 }
 
-/// The function code [`FunctionCode`]'s `Display` names, in any case.
-/// A number is not a name: [`parse_function_code`] takes either.
-impl FromStr for FunctionCode {
-    type Err = ParseFunctionCodeError;
-
-    fn from_str(name: &str) -> Result<Self, ParseFunctionCodeError> {
-        Self::ALL
-            .into_iter()
-            .find(|candidate| candidate.name().eq_ignore_ascii_case(name))
-            .ok_or(ParseFunctionCodeError {})
-    }
-}
-
-/// `text` as a function code, as a person types one to a command: its
-/// name, as [`FromStr`] takes it, or its code, 0 to 7, as
-/// [`parse_integer`] takes a number.
+/// The function code named so, as [`FunctionCode`]'s `Display` writes
+/// it, in any case, or its code, 0 to 7, as [`parse_integer`] takes a
+/// number: as a person types one to a command.
 ///
 /// ```
 /// use mc683xx_target::function_code::FunctionCode;
-/// use mc683xx_target::function_code::parse_function_code;
 ///
-/// assert_eq!(parse_function_code("cpu-space"), Ok(FunctionCode::CpuSpace));
-/// assert_eq!(parse_function_code("0b101"), Ok(FunctionCode::SupervisorData));
-/// assert!(parse_function_code("8").is_err());
+/// assert_eq!("cpu-space".parse(), Ok(FunctionCode::CpuSpace));
+/// assert_eq!("0b101".parse(), Ok(FunctionCode::SupervisorData));
+/// assert!("8".parse::<FunctionCode>().is_err());
 /// ```
-///
-/// # Errors
-/// [`ParseFunctionCodeError`] for text that is neither.
-pub fn parse_function_code(text: &str) -> Result<FunctionCode, ParseFunctionCodeError> {
-    text.parse().or_else(|error| {
-        parse_integer::<u8>(text)
-            .ok()
-            .and_then(|code| FunctionCode::try_from(code).ok())
-            .ok_or(error)
-    })
+impl FromStr for FunctionCode {
+    type Err = ParseFunctionCodeError;
+
+    fn from_str(text: &str) -> Result<Self, ParseFunctionCodeError> {
+        Self::ALL
+            .into_iter()
+            .find(|candidate| candidate.name().eq_ignore_ascii_case(text))
+            .or_else(|| {
+                parse_integer::<u8>(text)
+                    .ok()
+                    .and_then(|code| Self::try_from(code).ok())
+            })
+            .ok_or(ParseFunctionCodeError {})
+    }
 }
 
 /// Text that names no function code; without the text, as
@@ -181,7 +171,6 @@ mod tests {
     use super::FunctionCode;
     use super::NoFunctionCode;
     use super::ParseFunctionCodeError;
-    use super::parse_function_code;
 
     #[test]
     fn codes_follow_table_5_1() {
@@ -238,30 +227,25 @@ mod tests {
     }
 
     #[test]
-    fn a_function_code_parses_from_its_name_in_any_case() {
+    fn a_function_code_parses_from_its_name_in_any_case_or_its_number() {
         for code in FunctionCode::ALL {
             assert_eq!(code.to_string().parse(), Ok(code));
+            assert_eq!(u8::from(code).to_string().parse(), Ok(code));
         }
         assert_eq!("User-Program".parse(), Ok(FunctionCode::UserProgram));
-        for text in ["5", "", "supervisor_data", "supervisor data", "cpu-space "] {
-            assert_eq!(text.parse::<FunctionCode>(), Err(ParseFunctionCodeError {}));
-        }
-    }
-
-    #[test]
-    fn a_command_takes_a_function_code_by_name_or_number() {
-        for code in FunctionCode::ALL {
-            assert_eq!(parse_function_code(&code.to_string()), Ok(code));
-            assert_eq!(parse_function_code(&u8::from(code).to_string()), Ok(code));
-        }
-        assert_eq!(
-            parse_function_code("0x6"),
-            Ok(FunctionCode::SupervisorProgram)
-        );
-        assert_eq!(parse_function_code("Cpu-Space"), Ok(FunctionCode::CpuSpace));
-        for text in ["8", "05", "$5", "-1", "", "supervisor_data"] {
+        assert_eq!("0x6".parse(), Ok(FunctionCode::SupervisorProgram));
+        for text in [
+            "8",
+            "05",
+            "$5",
+            "-1",
+            "",
+            "supervisor_data",
+            "supervisor data",
+            "cpu-space ",
+        ] {
             assert_eq!(
-                parse_function_code(text),
+                text.parse::<FunctionCode>(),
                 Err(ParseFunctionCodeError {}),
                 "{text}"
             );
