@@ -116,7 +116,7 @@ rename renames the Python name with it.  The deliberate differences:
   `Mc68331.memory(memory,
   offset=0, length=None)` is Rust's `memory(id)`, sliced, and
   `set_memory(memory, offset, data)` writes what Rust writes through
-  `memory_mut(id)`, a slice Python cannot hold (`read_memory` and
+  `memory_mut(id)` (`Board`'s likewise, by name), a slice Python cannot hold (`read_memory` and
   `write_memory` are the `Cpu32Target` calls of a bus address, which
   Python does not offer); a Rust callback trait
   (`MappedPeripheral`, `SpiPeripheral`, `Peripheral`, `Observer`) is a
@@ -145,6 +145,11 @@ scheduler's, as the board's); the `_mut` accessors and
 `cpu`, `sim`, `qsm` and `gpt` (registers by name, a module's registers
 through `bus_read` and `peek`, memory through `set_memory`);
 `Builder::system_frequency`; `Board::run_until_quantized`;
+`Board::cpu_control` (`Board.chip`'s hooks and registers),
+`Board::system_clock` (`Board.chip.system_hz`), `position_record` and
+`stopped_record` (the runner's records: `now`, `instructions`, the
+registers and a `BoardRun` hold what they do), and the board's
+`Conditions` (gdb's `monitor stop`);
 `StopRequest::take` (the run loop's).
 
 ## Installing
@@ -1211,10 +1216,13 @@ the nets; nothing while the board holds RESET low);
 BKPT on the board (Background debug mode); `take_events()`
 what the chip did, as `Mc68331.take_events`; `marking(name)` the
 peripheral's `marking`, or `None`; `peripheral(name)` a Python
-peripheral's object, `None` for a built-in one; `memory(name)`,
+peripheral's object, `None` for a built-in one; `memory(name,
+offset=0, length=None)` and `set_memory(name, offset, data)`, as
+`Mc68331`'s, by the memory's name,
 `externals()` (`External`s: `name`, `kind` the nets' type, `direction`
 `in`, `out` or `in-out`),
-`send(name, value, kind="serial")`,
+`send(name, value, kind="serial")`, `check_send(name, value,
+kind="serial")` (raises what `send` would, sending nothing),
 `take_received(name)` (frames as `Serial`s;
 `ValueError` for an endpoint no net drives, as `send` for one that
 drives none),

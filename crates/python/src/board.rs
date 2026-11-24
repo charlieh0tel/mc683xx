@@ -99,6 +99,7 @@ use crate::chip::Entry;
 use crate::chip::Event;
 use crate::chip::ResetCause;
 use crate::chip::Stop;
+use crate::chip::memory_end;
 use crate::control;
 use crate::control::BoardControlView;
 use crate::control::PacingView;
@@ -1722,10 +1723,27 @@ impl BoardView {
             .map(str::to_owned))
     }
 
-    /// The memory `name`'s bytes.
-    fn memory<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyBytes>> {
-        let bytes = self.board.memory(name).map_err(Error::from)?;
-        Ok(PyBytes::new(py, bytes))
+    /// The memory `name`'s bytes from `offset`: `length` of them, or to
+    /// its end.
+    #[pyo3(signature = (name, offset = 0, length = None))]
+    fn memory<'py>(
+        &self,
+        py: Python<'py>,
+        name: &str,
+        offset: usize,
+        length: Option<usize>,
+    ) -> Result<Bound<'py, PyBytes>, Error> {
+        let bytes = self.board.memory(name)?;
+        let end = memory_end(bytes.len(), offset, length)?;
+        Ok(PyBytes::new(py, &bytes[offset..end]))
+    }
+
+    /// Writes `data` into the memory `name` from `offset`.
+    fn set_memory(&mut self, name: &str, offset: usize, data: PyBackedBytes) -> Result<(), Error> {
+        let bytes = self.board.memory_mut(name)?;
+        let end = memory_end(bytes.len(), offset, Some(data.len()))?;
+        bytes[offset..end].copy_from_slice(&data);
+        Ok(())
     }
 
     /// The run-time endpoints the board's nets name, by name, then
@@ -1746,6 +1764,17 @@ impl BoardView {
         Ok(self
             .board
             .send(name, signal(kind, value)?)
+            .map_err(Error::from)?)
+    }
+
+    /// Raises what `send` of the same arguments would raise, sending
+    /// nothing.
+    #[pyo3(signature = (name, value, *, kind = "serial"))]
+    fn check_send(&self, name: &str, value: &Bound<'_, PyAny>, kind: &str) -> PyResult<()> {
+        let kind: Kind = kind.parse().map_err(Error::from)?;
+        Ok(self
+            .board
+            .check_send(name, signal(kind, value)?)
             .map_err(Error::from)?)
     }
 
