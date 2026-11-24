@@ -1466,7 +1466,21 @@ assert bare.read_register("D0") == 6
   `run_limited` answers an intercepted exception within it (below).
   Rust's `Limits::steps`, which serves the chip's BDM step, has no
   argument here, nor `End::Steps` a variant.  A stop requested
-  between runs is withdrawn as the next starts.
+  between runs is withdrawn as the next starts.  Each variant class has
+  `__match_args__`, its fields in order, so a `match` takes an end
+  apart, nested as deep as it goes, with no predicate methods:
+
+  ```python
+  match bare.run_limited(reach=0x4000).end:
+      case mc683xx.End.Reached():
+          pass
+      case mc683xx.End.Stop(mc683xx.Stop.Hook(hook)):
+          print("hook", hook)
+      case mc683xx.End.Fault(fault):
+          print(fault)  # its Display, `bus error: read of 4 bytes ...`
+      case end:
+          raise AssertionError(end)
+  ```
 - **Interrupts:** `request_interrupt(pin, vector=None)` requests IRQ1
   to IRQ7 as 1 to 7, answered by `vector` or the autovector; it stays
   requested, as a level-sensitive line does, until `clear_interrupt(pin)`.
