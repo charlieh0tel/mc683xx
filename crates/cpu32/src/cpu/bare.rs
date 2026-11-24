@@ -622,13 +622,32 @@ impl Cpu {
         if native || vector == Vector::TRACE || !self.bare.intercepted.contains(vector) {
             return None;
         }
-        mem::take(&mut self.altered).undo(&mut self.registers);
-        self.registers.pc = instruction_pc;
-        self.resume = Some((instruction_pc, Resume::Code));
+        self.undo_instruction(instruction_pc);
         Some(End::Intercepted(Intercepted {
             vector,
             pc: instruction_pc,
         }))
+    }
+
+    /// Undoes the instruction at `instruction_pc` that raised an
+    /// exception, for a stop before anything is stacked: its (An)+ and
+    /// -(An) undone, PC at it, its code and block hooks not called
+    /// again when it reruns.
+    fn undo_instruction(&mut self, instruction_pc: Address) {
+        mem::take(&mut self.altered).undo(&mut self.registers);
+        self.registers.pc = instruction_pc;
+        self.resume = Some((instruction_pc, Resume::Code));
+    }
+
+    /// Rolls the registers back as captured, as the instruction or the
+    /// exception processing after one began, for a fault's stop: its
+    /// released write and MOVEM progress dropped, its code and block
+    /// hooks not called again when it reruns.
+    fn roll_back(&mut self) {
+        self.registers.clone_from(&self.began);
+        self.released = None;
+        self.movem = None;
+        self.resume = Some((self.registers.pc, Resume::Code));
     }
 
     /// A fault's stop: the registers back as captured, as the
@@ -642,10 +661,7 @@ impl Cpu {
                 _ => FaultCause::BusError,
             }
         };
-        self.registers.clone_from(&self.began);
-        self.released = None;
-        self.movem = None;
-        self.resume = Some((self.registers.pc, Resume::Code));
+        self.roll_back();
         End::Fault(FaultStop {
             kind: fault.kind,
             cause,
