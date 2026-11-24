@@ -135,6 +135,35 @@ fn a_block_hook_sees_each_block_start() {
 }
 
 #[test]
+fn a_page_without_instruction_hooks_stays_quiet_until_one_is_added() {
+    // A TRAP into a handler that returns, twice, the handler's page
+    // alone with a block hook, over its NOP and RTE.
+    let mut cpu = prepared(&[NOP, TRAP, NOP, TRAP], &[NOP, RTE]);
+    let starts = log();
+    let into = Rc::clone(&starts);
+    cpu.add_block_hook(
+        Address(HANDLER)..=Address(HANDLER + 3),
+        move |instruction| {
+            into.borrow_mut().push(instruction.pc.0);
+            ControlFlow::Continue(())
+        },
+    );
+    // NOP, TRAP, the handler's NOP and RTE, back on the quiet page
+    step(&mut cpu, 4);
+    assert_eq!(cpu.registers.pc.0, CODE + 4);
+    let code = log();
+    let into = Rc::clone(&code);
+    cpu.add_code_hook(Address(CODE + 4)..=Address(CODE + 4), move |instruction| {
+        into.borrow_mut().push(instruction.pc.0);
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 4);
+    // The return's block start, on the code's page, was forgotten there.
+    assert_eq!(*starts.borrow(), [HANDLER, HANDLER]);
+    assert_eq!(*code.borrow(), [CODE + 4]);
+}
+
+#[test]
 fn a_block_hook_stop_resumes_into_the_code_hooks() {
     let mut cpu = prepared(&[NOP], &[]);
     let code = log();

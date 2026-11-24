@@ -901,7 +901,7 @@ impl Memory {
     }
 
     /// The number of the page `address` is in.
-    const fn page_number(&self, address: Address) -> usize {
+    pub(crate) const fn page_number(&self, address: Address) -> usize {
         ((address.0 & self.address_mask) >> PAGE_SHIFT) as usize
     }
 

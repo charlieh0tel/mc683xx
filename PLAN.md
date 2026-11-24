@@ -2391,7 +2391,12 @@ Adversarial review (2026-11-01):
   the real table's memory and the hooks.  So a cycle on other RAM
   costs what it did; an instruction tests one flag, `Memory`'s
   "special" (some page has a hook bit or a permission), before
-  looking for code and block hooks.  Invalid access and exception
+  looking for code and block hooks.  While it is set, the CPU keeps
+  the quiet page: the last page an instruction was found on with no
+  code or block hook bit.  An instruction on it compares its page
+  number and looks nothing up (sc batch 6: a ranged code hook that
+  never hit cost every instruction an out-of-line page lookup, 67 to
+  54 M instructions/s); any change to the hooks forgets it.  Invalid access and exception
   hooks need no flag: bus errors and exceptions are slow already.
 - When hooks run: code and block hooks before the instruction; a stop
   there leaves it unexecuted, and the next run executes it without

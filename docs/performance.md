@@ -753,3 +753,19 @@ The changes:
   once a run, and the first hook a turn fired is not looked up
   again, as nothing can have removed it.
 - The queue of hooks fired keeps its allocation from turn to turn.
+
+`benches/hooks.rs`, on the same core, two interleaved runs each,
+before and after a change:
+
+| Benchmark | Before | After | Change |
+| --- | --- | --- | --- |
+| `hooks/nop_code_elsewhere` | 200-205 us | 174 us | the quiet page |
+| `hooks/move_indirect_code_elsewhere` | 173 us | 151-155 us | the quiet page |
+| `hooks/clr_indirect_code_elsewhere` | 131-141 us | 119 us | the quiet page |
+| `hooks/nop_write_elsewhere` | 213-260 us | 180-185 us | the quiet page |
+
+With the quiet page a code hook that never fires costs `nop` about
+7% and the kernels that touch memory 2 to 3% (`unhooked`: 155-160,
+147-153 and 115-119 us); a write hook elsewhere costs a little
+more, as the registers are kept as each instruction begins for the
+write hooks to read.

@@ -7,6 +7,7 @@ use std::ops::RangeInclusive;
 
 use crate::cpu::Core;
 use crate::cpu::Cpu;
+use crate::cpu::NO_PAGE;
 use crate::cpu::Stop;
 use crate::cpu::bare::Intercepted;
 use crate::exception::BusCycleKind;
@@ -473,21 +474,39 @@ impl Cpu {
     /// Sets the pages' hook bits from the hooks.
     pub(crate) fn rewatch(&mut self) {
         self.memory.set_watched(self.hooks.watched());
+        self.quiet_page = NO_PAGE;
         self.pre_reading = !self.hooks.pre_read.is_empty();
         self.pre_writing = !self.hooks.pre_write.is_empty();
         self.update_capture();
     }
 
+    /// The code and block hooks for the instruction at PC, while some
+    /// page has a hook or permissions: none on the quiet page, which
+    /// only forgets the block start and the resume, as
+    /// [`before_instruction`](Self::before_instruction) does there.
+    /// Always inlined, so an instruction on it costs a compare.
+    #[inline(always)]
+    pub(super) fn hooks_before_instruction(&mut self) -> Option<HookId> {
+        if self.memory.page_number(self.registers.pc) == self.quiet_page {
+            self.block_start = false;
+            self.resume = None;
+            return None;
+        }
+        self.before_instruction()
+    }
+
     /// The code and block hooks for the instruction at PC, on a page
-    /// that has them: the first that stopped the run.
+    /// that has them: the first that stopped the run.  A page with none
+    /// becomes the quiet page.
     #[inline(never)]
-    pub(super) fn before_instruction(&mut self) -> Option<HookId> {
+    fn before_instruction(&mut self) -> Option<HookId> {
         let pc = self.registers.pc;
         let at = self.memory.mask(pc);
         let watched = self.memory.watched(at);
         let resume = self.resume.take().filter(|&(address, _)| address == pc);
         let block_start = mem::take(&mut self.block_start);
         if watched & (watch::CODE | watch::BLOCK) == 0 {
+            self.quiet_page = self.memory.page_number(at);
             return None;
         }
         let instruction = || Instruction {
