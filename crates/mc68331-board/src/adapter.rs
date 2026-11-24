@@ -14,9 +14,9 @@
 //! if it implements [`Driver`] and its adapter was made `driving`: its
 //! [`Driver::drive`] reads the model and drives the adapter's ports
 //! after each call that may change the model; a model that needs more
-//! of the board is a [`Peripheral`].
-//! The model
-//! implements [`Save`], so it is in the board's snapshot: one that cannot
+//! of the board is a [`Peripheral`].  It is a `Driver`, not a `Drive`,
+//! as [`Drive`] is what it drives through.
+//! The model implements [`Save`], so it is in the board's snapshot: one that cannot
 //! save is [`unsavable!`](mc683xx_cpu32::unsavable), and the board's save
 //! then fails naming it.  A model that implements
 //! [`Inspect`], its adapter made `inspecting`, shows its state to a front
