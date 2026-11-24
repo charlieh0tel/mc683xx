@@ -247,6 +247,17 @@ impl VectorSet {
     }
 }
 
+/// An exception the next run takes once with no stop or intercept for
+/// it: the one raised with PC at `pc` when the instruction count is
+/// `instructions`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct TakeOnce {
+    /// The PC it is raised at: its instruction's, or the boundary's.
+    pc: Address,
+    /// The instruction count it is raised at.
+    instructions: u64,
+}
+
 /// The bare host's settings, what a stop for them carries, and what
 /// the run loop looks at only between runs, kept out of its way.
 #[derive(Debug, Default)]
@@ -257,13 +268,11 @@ pub(crate) struct Bare {
     pub(crate) stop_on_exception: bool,
     /// The vectors the intercept hooks cover.
     pub(crate) intercepted: VectorSet,
-    /// An intercepted exception taken natively once: by the instruction
-    /// at this address, when the instruction count is this.
-    pub(crate) native_once: Option<(Address, u64)>,
+    /// An intercepted exception taken natively once.
+    pub(crate) native_once: Option<TakeOnce>,
     /// The exception an exception stop ended the last run at, taken
-    /// with no stop once: at this PC, when the instruction count is
-    /// this.
-    pub(crate) exception_once: Option<(Address, u64)>,
+    /// with no stop once.
+    pub(crate) exception_once: Option<TakeOnce>,
     /// The end a fault or an intercept set, for `run_limited`.
     pub(crate) end: Option<End>,
     /// The last invalid access's reason, for a fault's cause.
@@ -606,7 +615,7 @@ impl Cpu {
     /// natively, once, the next time it runs: no intercept hook is
     /// called for it.
     pub const fn take_natively_once(&mut self) {
-        self.bare.native_once = Some((self.registers.pc, self.instructions));
+        self.bare.native_once = Some(self.take_once(self.registers.pc));
     }
 
     /// Whether a long operand is one access: offered to the bus whole
@@ -656,7 +665,7 @@ impl Cpu {
         if vector == Vector::TRACE {
             return None;
         }
-        if self.bare.native_once.take() == Some((instruction_pc, self.instructions)) {
+        if self.bare.native_once.take() == Some(self.take_once(instruction_pc)) {
             return None;
         }
         if fault.is_none() && self.bare.intercepted.contains(vector) {
@@ -701,15 +710,22 @@ impl Cpu {
     /// stops the run: exceptions stop it, and it is not the one the
     /// last run stopped at, which is taken this once.
     fn exception_stops_at(&mut self, pc: Address) -> bool {
-        self.bare.stop_on_exception
-            && self.bare.exception_once.take() != Some((pc, self.instructions))
+        self.bare.stop_on_exception && self.bare.exception_once.take() != Some(self.take_once(pc))
+    }
+
+    /// The key of an exception raised now with PC at `pc`.
+    const fn take_once(&self, pc: Address) -> TakeOnce {
+        TakeOnce {
+            pc,
+            instructions: self.instructions,
+        }
     }
 
     /// What a host's run leaves for the next: after an exception stop,
     /// that exception taken with no stop, once.
     pub(crate) fn after_host_run(&mut self) {
         if let Some(End::Exception { pc, .. }) = self.bare.end {
-            self.bare.exception_once = Some((pc, self.instructions));
+            self.bare.exception_once = Some(self.take_once(pc));
         }
     }
 
