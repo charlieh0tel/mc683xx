@@ -160,7 +160,17 @@ prefix; their directories keep the short names.
   through `Module::peek` (required, as `save` is), the SIM's reads
   have none, and memory answers byte by byte where memory alone
   answers the cycle (`Board::memory_alone`, the page-table rule).  A
-  peripheral's bytes are `BusCycleError::Unpeekable`, never a guess.
+  peripheral answers for its own bytes, a byte at a time, through the
+  optional `MappedPeripheral::peek`, the first that the decode would
+  have drive the byte answering; `poke` (`Mc68331::poke`) stores a byte in
+  each the decode would write to.  Both decline by default, which is
+  `BusCycleError::Unpeekable`, never a guess: only the peripheral knows
+  which of its registers a look leaves alone (decided 2026-11-23).  The
+  bare machine's `read` and `write`, gdb's memory access and a board
+  peripheral's (`Peripheral::peek`, `poke`, through `MappedAdapter` and
+  the board's routers) take the same path.  A poke is not
+  all-or-nothing where a peripheral is involved: a peripheral cannot be
+  asked whether it would take a byte without taking it.
   Errors are typed: `Unserved`, `BusError`, `Misaligned` (each with
   its address), `Width`.
 - **Interrupts:** the host sets an IPL level; the core calls the
@@ -1963,7 +1973,8 @@ checks the bare build.
 - **Memory:** supervisor data space unless `monitor fc` names
   another, no bus cycle: memory the core
   serves (ROM too, so `load` works), module registers read through
-  `Module::peek`; peripherals neither read nor written (`E0e`).  A
+  `Module::peek`; a peripheral read and written through its `peek` and
+  `poke`, `E0e` where it declines, as it does by default.  A
   debugger's look never has a side effect; a host wanting real cycles
   makes them with `bus_read` and `bus_write`.
 - **Breakpoints and watchpoints:** code hooks for `Z0` and `Z1`,

@@ -423,6 +423,40 @@ impl Routes {
         Ok(())
     }
 
+    /// What a read `cycle` would return, with none of its side effects:
+    /// each piece's peripheral's peek on its lane, 0 where no peripheral
+    /// drives; [`None`] if one declines.
+    pub(crate) fn peek(&self, shared: &Shared, cycle: BusCycle) -> Option<u32> {
+        let cycle = cycle.writing(false);
+        let moment = shared.moment(shared.time(cycle.now));
+        self.pieces(cycle)
+            .iter()
+            .try_fold(0, |value, &(route, size, lane)| {
+                let access = Self::access(route, cycle, size);
+                let peeked = shared.peripherals[route.peripheral]
+                    .try_borrow()
+                    .ok()?
+                    .peek(access, moment)?;
+                Some(value | Self::on_lane(peeked, cycle.size, lane))
+            })
+    }
+
+    /// Stores `value` where a write `cycle` would, with none of its side
+    /// effects: each piece's peripheral pokes its lane's byte, or the
+    /// whole.  Whether every one took it.
+    pub(crate) fn poke(&self, shared: &Shared, cycle: BusCycle, value: u32) -> bool {
+        let cycle = cycle.writing(true);
+        let moment = shared.moment(shared.time(cycle.now));
+        self.pieces(cycle).into_iter().all(|(route, size, lane)| {
+            let access = Self::access(route, cycle, size);
+            shared.peripherals[route.peripheral]
+                .try_borrow_mut()
+                .is_ok_and(|mut peripheral| {
+                    peripheral.poke(access, Self::lane_data(value, cycle.size, lane), moment)
+                })
+        })
+    }
+
     /// A piece's value `read` on `lane`, placed in a cycle of `size`.
     const fn on_lane(read: u32, size: Size, lane: Lane) -> u32 {
         match lane {
@@ -491,6 +525,14 @@ impl MappedPeripheral for SelectRouter {
 
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
         self.routes.write(&self.shared, cycle, value)
+    }
+
+    fn peek(&self, cycle: BusCycle) -> Option<u32> {
+        self.routes.peek(&self.shared, cycle)
+    }
+
+    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
+        self.routes.poke(&self.shared, cycle, value)
     }
 
     fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
@@ -565,6 +607,15 @@ impl MappedPeripheral for DecoderRouter {
         }
     }
 
+    fn peek(&self, cycle: BusCycle) -> Option<u32> {
+        self.routes(cycle.address.0)?.peek(&self.shared, cycle)
+    }
+
+    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
+        self.routes(cycle.address.0)
+            .is_some_and(|routes| routes.poke(&self.shared, cycle, value))
+    }
+
     fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
         self.routes(cycle.address.0)
             .map_or(Some(Cycles::ZERO), |routes| {
@@ -598,6 +649,14 @@ impl MappedPeripheral for BusRouter {
 
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
         self.routes.write(&self.shared, cycle, value)
+    }
+
+    fn peek(&self, cycle: BusCycle) -> Option<u32> {
+        self.routes.peek(&self.shared, cycle)
+    }
+
+    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
+        self.routes.poke(&self.shared, cycle, value)
     }
 
     fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {

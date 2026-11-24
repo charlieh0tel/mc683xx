@@ -299,6 +299,10 @@ struct Methods {
     next_event: Option<Held>,
     /// `advance(now)`.
     advance: Option<Held>,
+    /// `peek(cycle) -> int | None`.
+    peek: Option<Held>,
+    /// `poke(cycle, value) -> bool`.
+    poke: Option<Held>,
 }
 
 /// A Python object wired into the chip.
@@ -343,6 +347,8 @@ impl PythonMapped {
                 reset: method("reset")?,
                 next_event: method("next_event")?,
                 advance: method("advance")?,
+                peek: method("peek")?,
+                poke: method("poke")?,
             },
             pending,
         })
@@ -503,6 +509,30 @@ impl MappedPeripheral for PythonMapped {
 
     fn reset(&mut self, now: Cycle) {
         self.call_or(self.methods.reset.as_ref(), (now.clocks(),), ignored, ());
+    }
+
+    fn peek(&self, cycle: BusCycle) -> Option<u32> {
+        self.call_or(
+            self.methods.peek.as_ref(),
+            (BusCycleView(cycle),),
+            |result| {
+                if result.is_none() {
+                    Ok(None)
+                } else {
+                    value(result, cycle.size).map(Some)
+                }
+            },
+            None,
+        )
+    }
+
+    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
+        self.call_or(
+            self.methods.poke.as_ref(),
+            (BusCycleView(cycle), value),
+            truth,
+            false,
+        )
     }
 }
 

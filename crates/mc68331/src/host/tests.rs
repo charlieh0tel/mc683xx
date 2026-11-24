@@ -96,6 +96,14 @@ struct Recorder {
     writes: Vec<(BusCycle, u32)>,
     /// What it reads as.
     value: u32,
+    /// Whether it answers peeks and pokes, the word `value`'s bytes.
+    peekable: bool,
+}
+
+/// The shift of a byte's lane in a word, for a byte at `address`: the
+/// upper at an even address.
+const fn lane_shift(address: Address) -> u32 {
+    if address.0 & 1 == 0 { 8 } else { 0 }
 }
 
 impl MappedPeripheral for Recorder {
@@ -107,6 +115,21 @@ impl MappedPeripheral for Recorder {
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
         self.writes.push((cycle, value));
         Ok(())
+    }
+
+    fn peek(&self, cycle: BusCycle) -> Option<u32> {
+        assert_eq!(cycle.size, Size::Byte);
+        self.peekable
+            .then(|| self.value >> lane_shift(cycle.address) & 0xff)
+    }
+
+    fn poke(&mut self, cycle: BusCycle, value: u32) -> bool {
+        assert!(cycle.write && cycle.select.is_some());
+        let shift = lane_shift(cycle.address);
+        if self.peekable {
+            self.value = self.value & !(0xff << shift) | value << shift;
+        }
+        self.peekable
     }
 }
 
@@ -323,6 +346,51 @@ fn a_peripheral_sees_the_hosts_cycles_and_never_its_peeks() {
     assert_eq!(cycle.function_code, SUPERVISOR);
     assert_eq!(peripheral.writes.len(), 1);
     assert_eq!(peripheral.writes[0].1, 0x56);
+}
+
+#[test]
+fn a_peek_and_a_poke_reach_a_peripheral_that_takes_them_with_no_cycle() {
+    let Board {
+        mut chip, recorder, ..
+    } = board(&[BRANCH_TO_SELF], None);
+    chip.peripheral_mut::<Recorder>(recorder).unwrap().peekable = true;
+    assert_eq!(peek(&chip, PERIPHERAL_BASE, Size::Word), Ok(0x1234));
+    chip.poke(Address(PERIPHERAL_BASE), Size::Word, SUPERVISOR, 0xabcd)
+        .unwrap();
+    assert_eq!(peek(&chip, PERIPHERAL_BASE + 1, Size::Byte), Ok(0xcd));
+    let peripheral = chip.peripheral::<Recorder>(recorder).unwrap();
+    assert_eq!(peripheral.value, 0xabcd);
+    assert!(peripheral.reads.is_empty() && peripheral.writes.is_empty());
+    // memory, ROM too; a module's register, a peripheral that declines
+    // and nothing at all are not poked
+    chip.poke(Address(RAM_BASE), Size::Long, SUPERVISOR, 0x1122_3344)
+        .unwrap();
+    assert_eq!(peek(&chip, RAM_BASE, Size::Long), Ok(0x1122_3344));
+    chip.poke(Address(START), Size::Word, SUPERVISOR, u32::from(NOP))
+        .unwrap();
+    assert_eq!(peek(&chip, START, Size::Word), Ok(NOP.into()));
+    let unpeekable = Err(BusCycleError::Unpeekable);
+    assert_eq!(
+        chip.poke(Address(SYPCR), Size::Byte, SUPERVISOR, 0),
+        unpeekable
+    );
+    assert_eq!(
+        chip.poke(Address(FAILING_BASE), Size::Byte, SUPERVISOR, 0),
+        unpeekable
+    );
+    assert_eq!(
+        peek(&chip, FAILING_BASE, Size::Byte),
+        Err(BusCycleError::Unpeekable)
+    );
+    assert_eq!(
+        chip.poke(Address(RAM_BASE), Size::Byte, SUPERVISOR, 0x100),
+        Err(BusCycleError::Width(0x100))
+    );
+    write(&mut chip, CSBARBT, Size::Word, BLOCK_64K.into());
+    assert_eq!(
+        chip.poke(Address(0x40_0000), Size::Byte, SUPERVISOR, 0),
+        Err(BusCycleError::Unserved(Address(0x40_0000)))
+    );
 }
 
 #[test]

@@ -283,8 +283,12 @@ pub trait Target {
     /// Fills `data` from `address` up, in the address space
     /// `function_code` names, as far as it can: the bytes filled, from
     /// the start.  An emulated target reads with no bus cycle and no
-    /// side effect, a byte only a cycle could tell (a peripheral's)
-    /// ending it; one under BDM control fills all of `data` or fails.
+    /// side effect, a peripheral's bytes by its
+    /// [`MappedPeripheral::peek`], a byte only a cycle could tell (one a
+    /// peripheral declines) ending it; one under BDM control fills all
+    /// of `data` or fails.
+    ///
+    /// [`MappedPeripheral::peek`]: mc683xx_cpu32::peripheral::MappedPeripheral::peek
     ///
     /// # Errors
     ///
@@ -299,13 +303,17 @@ pub trait Target {
     /// Writes `data` at `address` up, in the address space
     /// `function_code` names.  An emulated target writes with no bus
     /// cycle, into memory the core serves, ROM included, whatever its
-    /// permissions.
+    /// permissions, and a peripheral's bytes by its
+    /// [`MappedPeripheral::poke`].
     ///
     /// # Errors
     ///
-    /// [`AccessError::Unserved`] if a byte is not memory the target
-    /// serves in that space, nothing then written; the target's error,
-    /// for one under BDM control.
+    /// [`AccessError::Unserved`] if a byte is neither memory the target
+    /// serves in that space nor a peripheral's that takes it; nothing
+    /// is then written, but for the bytes before one a peripheral
+    /// declined.  The target's error, for one under BDM control.
+    ///
+    /// [`MappedPeripheral::poke`]: mc683xx_cpu32::peripheral::MappedPeripheral::poke
     fn write_memory(
         &mut self,
         address: Address,
@@ -414,7 +422,7 @@ impl Target for Machine {
         data: &[u8],
     ) -> Result<(), AccessError<Infallible>> {
         self.write(address, data)
-            .map_err(|unserved| AccessError::Unserved(unserved.0))
+            .map_err(|error| AccessError::Unserved(error.address()))
     }
 
     fn run_for(

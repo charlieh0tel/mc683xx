@@ -114,6 +114,42 @@ def test_a_peripheral_writes_a_board_memory_as_bytes(tmp_path: Path) -> None:
     assert poker.refused
 
 
+class Cells:
+    """Bytes a debugger peeks and pokes with no cycle."""
+
+    PORTS: list[tuple[str, str, str]] = []
+
+    def __init__(self) -> None:
+        self.held = bytearray(8)
+
+    def peek(self, access: mc683xx.PeripheralAccess, moment: mc683xx.Moment) -> int | None:
+        return self.held[access.address % 8]
+
+    def poke(self, access: mc683xx.PeripheralAccess, value: int, moment: mc683xx.Moment) -> bool:
+        self.held[access.address % 8] = value
+        return True
+
+
+CELLS = """[[peripheral]]
+name = "cells"
+type = "cells"
+attach = [{ select = "CS1" }]
+"""
+
+
+def test_a_board_peripheral_is_peeked_and_poked(tmp_path: Path) -> None:
+    program = store_word(CSBAR1, CS1_BAR) + store_word(CSOR1, CSOR_FAST)
+    (tmp_path / "rom.bin").write_bytes(rom(program))
+    (tmp_path / "board.toml").write_text(BOARD.split("[[peripheral]]")[0] + CELLS)
+    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"cells": Cells})
+    board.run_for(seconds=0.0001)
+    board.chip.poke(LATCH, 2, 0xBEEF)
+    assert board.chip.peek(LATCH, 2) == 0xBEEF
+    cells = board.peripheral("cells")
+    assert isinstance(cells, Cells)
+    assert cells.held[:2] == b"\xbe\xef"
+
+
 POKER = """[[peripheral]]
 name = "poker"
 type = "poker"

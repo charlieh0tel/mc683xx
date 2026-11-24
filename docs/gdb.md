@@ -211,7 +211,7 @@ alone, and the bare CPU has one space whatever the code.
 | --- | --- | --- |
 | RAM and ROM the core serves | yes | yes, ROM included, whatever the page permissions |
 | The chip's module registers (SIM, QSM, GPT) | yes, as a peek (`Module::peek`): no flag armed or cleared | no |
-| A peripheral (a peripheral on a select, a bare CPU's host peripheral) | no: `E0e` | no: `E0e` |
+| A peripheral (a peripheral on a select, a bare CPU's host peripheral, a board's) | as its `peek` gives it (`MappedPeripheral::peek`, a board peripheral's `Peripheral::peek`); one that declines, the default, `E0e` | as its `poke` takes it; one that declines, the default, `E0e`, the bytes before it written |
 | Memory a peripheral shares a select with, or a memory a peripheral has taken | no | no |
 | Nothing | no | no |
 

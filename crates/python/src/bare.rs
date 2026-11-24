@@ -595,10 +595,11 @@ impl MachineView {
         Ok(self.machine.protect(Address(start), length, permissions)?)
     }
 
-    /// `length` bytes of mapped memory at `address`, whatever its
-    /// permissions, with no bus cycle.  Raises `BusError` if any is not
-    /// mapped, and `ValueError` for more than 32 bits of addresses,
-    /// before anything is copied.
+    /// `length` bytes at `address` with no bus cycle: mapped memory's,
+    /// whatever its permissions, and a peripheral's from its `peek`.
+    /// Raises `BusError` if any is neither, `UnpeekableError` for one a
+    /// peripheral declines, and `ValueError` for more than 32 bits of
+    /// addresses.
     fn read<'py>(
         &self,
         py: Python<'py>,
@@ -620,8 +621,10 @@ impl MachineView {
         Ok(PyBytes::new(py, &bytes))
     }
 
-    /// Writes `data` to mapped memory at `address`, as `read`; on an
-    /// error nothing is written.
+    /// Writes `data` at `address`, as `read` reads it: into mapped
+    /// memory, and a peripheral's bytes through its `poke`.  On an error
+    /// nothing is written, but for the bytes before one a peripheral
+    /// declines.
     fn write(&mut self, address: u32, data: PyBackedBytes) -> Result<(), Error> {
         Ok(self.machine.write(Address(address), &data)?)
     }

@@ -7,6 +7,7 @@ use std::path::Path;
 
 use mc683xx_board::description::LoadError;
 use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::flat::PeekError;
 use mc683xx_mc68331::host::BusCycleError;
 use pyo3::Bound;
 use pyo3::IntoPyObject;
@@ -106,8 +107,9 @@ impl From<Error> for PyErr {
             }
             Error::State(_) => exceptions::StateError::new_err(message),
             Error::Access(BusCycleError::BusError(_) | BusCycleError::Unserved(_))
-            | Error::Unserved(_) => BusError::new_err(message),
-            Error::Access(BusCycleError::Unpeekable) => {
+            | Error::Unserved(_)
+            | Error::Peek(PeekError::Unserved(_)) => BusError::new_err(message),
+            Error::Access(BusCycleError::Unpeekable) | Error::Peek(_) => {
                 exceptions::UnpeekableError::new_err(message)
             }
             Error::Target(_) => exceptions::TargetError::new_err(message),

@@ -7,6 +7,7 @@ use std::any::type_name;
 use std::cell::Cell;
 use std::cell::Ref;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::ops::ControlFlow;
@@ -89,6 +90,7 @@ use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_target::address::Address;
 use mc683xx_target::entry::Entry;
+use mc683xx_target::function_code::FunctionCode;
 use mc683xx_target::size::Size;
 use snapshot_golden::version_of;
 
@@ -457,6 +459,92 @@ attach = [{ select = "CS1", role = "write" }]
     let latch = board.peripheral::<WriteLatch>("latch").unwrap();
     assert_eq!(latch.writes, [(CS1_BASE, 0xab), (CS1_BASE + 1, 0xcd)]);
     assert!(!latch.asked.is_empty() && latch.asked.iter().all(|&write| write));
+}
+
+/// Bytes a debugger peeks and pokes with no cycle, on one lane: a
+/// byte at each address.
+#[derive(Debug, Default)]
+struct Cells {
+    /// The bytes poked, by address on the peripheral's lines.
+    held: BTreeMap<u32, u8>,
+    /// Whether a real cycle came.
+    cycled: bool,
+}
+
+impl Peripheral for Cells {
+    fn read(
+        &mut self,
+        _: PeripheralAccess,
+        _: &mut Drive<'_>,
+    ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+        self.cycled = true;
+        Ok(0)
+    }
+
+    fn peek(&self, access: PeripheralAccess, _: Moment) -> Option<u32> {
+        assert_eq!(access.size, Size::Byte);
+        Some(self.held.get(&access.address).copied().unwrap_or(0).into())
+    }
+
+    fn poke(&mut self, access: PeripheralAccess, value: u32, _: Moment) -> bool {
+        assert!(access.write);
+        self.held.insert(access.address, value as u8);
+        true
+    }
+}
+
+#[test]
+fn a_peek_and_a_poke_reach_board_peripherals_by_lane() {
+    let program: Vec<u16> = [store(CSBAR1, CS1_BAR), store(CSOR1, CS_FAST)]
+        .concat()
+        .into_iter()
+        .chain([NOP, NOP, NOP])
+        .collect();
+    let directory = directory("peeks", &program);
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[peripheral]]
+name = "high"
+type = "cells"
+attach = [{ select = "CS1", lane = "upper" }]
+[[peripheral]]
+name = "low"
+type = "cells"
+attach = [{ select = "CS1", lane = "lower" }]
+"#;
+    let description = Description::parse(text, &directory, &Options::default()).unwrap();
+    let mut registry = Registry::with_builtins();
+    registry
+        .register("cells", Vec::new(), |_| Ok(Box::new(Cells::default())))
+        .unwrap();
+    let mut board =
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    board.run_until(Time::from_picos(100_000_000)).unwrap();
+    let supervisor = FunctionCode::SupervisorData;
+    let chip = board.chip_mut();
+    chip.poke(Address(CS1_BASE), Size::Long, supervisor, 0x1122_3344)
+        .unwrap();
+    assert_eq!(
+        chip.peek(Address(CS1_BASE), Size::Long, supervisor),
+        Ok(0x1122_3344)
+    );
+    let high = board.peripheral::<Cells>("high").unwrap();
+    assert_eq!(
+        high.held.values().copied().collect::<Vec<_>>(),
+        [0x11, 0x33]
+    );
+    assert!(!high.cycled);
+    drop(high);
+    let low = board.peripheral::<Cells>("low").unwrap();
+    assert_eq!(low.held.values().copied().collect::<Vec<_>>(), [0x22, 0x44]);
 }
 
 #[test]

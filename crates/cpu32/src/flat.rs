@@ -90,6 +90,31 @@ pub enum MapError {
     Empty(Address),
 }
 
+/// Why a debugger's access of the bare machine ([`Machine::read`],
+/// [`Machine::write`]) stopped short.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum PeekError {
+    /// Neither memory nor a peripheral at the address.
+    #[error(transparent)]
+    Unserved(#[from] Unserved),
+    /// The peripheral at the address declined: only a real cycle can
+    /// tell, or take, the byte ([`MappedPeripheral::peek`],
+    /// [`MappedPeripheral::poke`]).
+    #[error("not peekable at {0}")]
+    Unpeekable(Address),
+}
+
+impl PeekError {
+    /// The byte's address.
+    #[must_use]
+    pub const fn address(&self) -> Address {
+        match *self {
+            Self::Unserved(Unserved(address)) | Self::Unpeekable(address) => address,
+        }
+    }
+}
+
 /// A peripheral with the addresses it covers.
 struct Wired {
     /// Its identity.
@@ -490,26 +515,100 @@ impl Machine {
         Ok(())
     }
 
-    /// Fills `bytes` from mapped memory at `address`, whatever its
-    /// permissions, with no bus cycle ([`Memory::read_bytes`]).
+    /// Fills `bytes` from `address` up with no bus cycle: from mapped
+    /// memory, whatever its permissions ([`Memory::read_bytes`]), and a
+    /// peripheral's bytes from its [`peek`](MappedPeripheral::peek), a
+    /// byte at a time.
     ///
     /// # Errors
     ///
-    /// [`Unserved`], with the first address not mapped, if any is not;
-    /// `bytes` is then filled up to it.
-    pub fn read(&self, address: Address, bytes: &mut [u8]) -> Result<(), Unserved> {
-        self.cpu.memory.read_bytes(address, bytes)
+    /// [`PeekError::Unserved`] for the first byte neither memory nor a
+    /// peripheral is at, [`PeekError::Unpeekable`] for the first a
+    /// peripheral declines; `bytes` is then filled up to it.
+    pub fn read(&self, address: Address, bytes: &mut [u8]) -> Result<(), PeekError> {
+        let mut done = 0;
+        loop {
+            let at = address.offset(done as u32);
+            let Err(Unserved(missing)) = self.cpu.memory.read_bytes(at, &mut bytes[done..]) else {
+                return Ok(());
+            };
+            done += missing.0.wrapping_sub(at.0) as usize;
+            let (wired, cycle) = self.byte_peripheral(missing)?;
+            bytes[done] = wired
+                .peripheral
+                .peek(cycle)
+                .ok_or(PeekError::Unpeekable(missing))? as u8;
+            done += 1;
+        }
     }
 
-    /// Writes `bytes` to mapped memory at `address`, as
-    /// [`read`](Self::read) reads it ([`Memory::write_bytes`]).  On an
-    /// error nothing is written.
+    /// Writes `bytes` at `address` up with no bus cycle, as
+    /// [`read`](Self::read) reads them: into mapped memory
+    /// ([`Memory::write_bytes`]), and a peripheral's bytes through its
+    /// [`poke`](MappedPeripheral::poke), a byte at a time.
     ///
     /// # Errors
     ///
-    /// As [`Machine::read`].
-    pub fn write(&mut self, address: Address, bytes: &[u8]) -> Result<(), Unserved> {
-        self.cpu.memory.write_bytes(address, bytes)
+    /// As [`Machine::read`].  Nothing is written if a byte is neither
+    /// memory's nor a peripheral's; the bytes before one a peripheral
+    /// declines stay written.
+    pub fn write(&mut self, address: Address, bytes: &[u8]) -> Result<(), PeekError> {
+        for offset in 0..bytes.len() {
+            let at = address.offset(offset as u32);
+            let page = self.cpu.memory.page(Space::Supervisor, at);
+            if page.read.or(page.write).is_none() {
+                self.byte_peripheral(at)?;
+            }
+        }
+        let mut done = 0;
+        loop {
+            let at = address.offset(done as u32);
+            let Err(Unserved(missing)) = self.cpu.memory.write_bytes(at, &bytes[done..]) else {
+                return Ok(());
+            };
+            let served = missing.0.wrapping_sub(at.0) as usize;
+            self.cpu
+                .memory
+                .write_bytes(at, &bytes[done..done + served])?;
+            done += served;
+            let index = self.bus.covering(&self.byte_access(missing));
+            let Some(index) = index else {
+                return Err(Unserved(missing).into());
+            };
+            let cycle = self.byte_cycle(missing).writing(true);
+            if !self.bus.peripherals[index]
+                .peripheral
+                .poke(cycle, u32::from(bytes[done]))
+            {
+                return Err(PeekError::Unpeekable(missing));
+            }
+            done += 1;
+        }
+    }
+
+    /// A debugger's byte access at `address`, in supervisor data space.
+    const fn byte_access(&self, address: Address) -> BusAccess {
+        BusAccess {
+            address,
+            size: Size::Byte,
+            function_code: FunctionCode::SupervisorData,
+            now: self.now,
+        }
+    }
+
+    /// The cycle a peripheral sees of [`byte_access`](Self::byte_access).
+    const fn byte_cycle(&self, address: Address) -> BusCycle {
+        BusCycle::new(address, Size::Byte, FunctionCode::SupervisorData, self.now)
+    }
+
+    /// The peripheral at `address`, and its cycle of a debugger's byte
+    /// read there.
+    fn byte_peripheral(&self, address: Address) -> Result<(&Wired, BusCycle), PeekError> {
+        let index = self
+            .bus
+            .covering(&self.byte_access(address))
+            .ok_or(Unserved(address))?;
+        Ok((&self.bus.peripherals[index], self.byte_cycle(address)))
     }
 
     /// Puts `peripheral` at `range`, which no other peripheral's overlaps: it

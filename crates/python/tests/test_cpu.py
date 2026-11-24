@@ -456,6 +456,44 @@ def test_a_peripheral_removed_answers_no_more():
     assert cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, Register()) != number
 
 
+class Window:
+    """Bytes a debugger peeks and pokes with no cycle; `peek` declines
+    once `closed`."""
+
+    def __init__(self):
+        self.held = bytearray(4)
+        self.closed = False
+
+    def read(self, cycle):
+        raise mc683xx.BusError()
+
+    def write(self, cycle, value):
+        raise mc683xx.BusError()
+
+    def peek(self, cycle):
+        return None if self.closed else self.held[cycle.address - PERIPHERAL]
+
+    def poke(self, cycle, value):
+        self.held[cycle.address - PERIPHERAL] = value
+        return not self.closed
+
+
+def test_read_and_write_peek_and_poke_a_peripheral():
+    cpu = machine(RTS)
+    window = Window()
+    cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, window)
+    cpu.write(PERIPHERAL, b"\x01\x02\x03\x04")
+    assert window.held == b"\x01\x02\x03\x04"
+    assert cpu.read(PERIPHERAL + 1, 2) == b"\x02\x03"
+    window.closed = True
+    with pytest.raises(mc683xx.UnpeekableError, match="not peekable at"):
+        cpu.read(PERIPHERAL, 1)
+    with pytest.raises(mc683xx.UnpeekableError):
+        cpu.write(PERIPHERAL, b"\x00")
+    with pytest.raises(mc683xx.BusError):
+        cpu.read(PERIPHERAL + 4, 1)
+
+
 class Refusing:
     def read(self, cycle):
         raise mc683xx.BusError()

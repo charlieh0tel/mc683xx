@@ -1082,6 +1082,35 @@ impl Peripheral for PythonPeripheral {
         .unwrap_or(Err(BusError))
     }
 
+    fn peek(&self, access: PeripheralAccess, moment: Moment) -> Option<u32> {
+        self.ask(
+            "peek",
+            |py| {
+                Ok(vec![
+                    access_argument(py, access)?,
+                    moment_argument(py, moment)?,
+                ])
+            },
+            |value| value.extract::<Option<u32>>(),
+            None,
+        )
+    }
+
+    fn poke(&mut self, access: PeripheralAccess, value: u32, moment: Moment) -> bool {
+        self.ask(
+            "poke",
+            |py| {
+                Ok(vec![
+                    access_argument(py, access)?,
+                    value.into_py_any(py)?,
+                    moment_argument(py, moment)?,
+                ])
+            },
+            |result| result.is_truthy(),
+            false,
+        )
+    }
+
     fn wait_states(&mut self, access: PeripheralAccess, moment: Moment) -> Option<Cycles> {
         self.ask(
             "wait_states",

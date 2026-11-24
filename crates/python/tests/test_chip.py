@@ -1269,6 +1269,44 @@ def test_the_host_reaches_memory_and_peripherals_through_the_decode():
     assert chip.now == now
 
 
+class Window:
+    """A peripheral of bytes a debugger peeks and pokes with no cycle."""
+
+    def __init__(self):
+        self.held = bytearray(8)
+        self.cycles = 0
+
+    def read(self, cycle):
+        self.cycles += 1
+        return 0
+
+    def write(self, cycle, value):
+        self.cycles += 1
+
+    def peek(self, cycle):
+        assert (cycle.size, cycle.select) == (1, "CS1")
+        return self.held[cycle.address % 8]
+
+    def poke(self, cycle, value):
+        self.held[cycle.address % 8] = value
+        return True
+
+
+def test_a_peek_and_a_poke_reach_a_peripheral_with_no_cycle():
+    window = Window()
+    chip, _, _ = mapped(window)
+    chip.poke(PERIPHERAL_BASE, 2, 0x1234)
+    assert chip.peek(PERIPHERAL_BASE, 2) == 0x1234
+    assert window.held[:2] == b"\x12\x34" and window.cycles == 0
+    chip.poke(RAM_BASE, 4, 0x55667788)
+    assert chip.bus_read(RAM_BASE, 4) == 0x55667788
+    with pytest.raises(mc683xx.UnpeekableError):
+        chip.poke(CSBAR1, 2, 0)
+    declining, _, _ = mapped(Recorder(0xBEEF))
+    with pytest.raises(mc683xx.UnpeekableError):
+        declining.poke(PERIPHERAL_BASE, 1, 0)
+
+
 def test_host_cycle_mistakes():
     chip, _, _ = mapped(Faulting())
     with pytest.raises(mc683xx.BusError, match="bus error at 0x"):

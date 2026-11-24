@@ -542,11 +542,18 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   `peripheral::Drive` takes it from the drive (`drive.moment()`, or
   `drive.now()` for the time alone, `drive.system_clock()` for the
   clock), and one without a drive takes it as its last argument,
-  `moment` (`wait_states`, `dsack_port`, `set_qspi_clock`,
-  `analog_output`, `next_event`).  No call has two
+  `moment` (`peek`, `poke`, `wait_states`, `dsack_port`,
+  `set_qspi_clock`, `analog_output`, `next_event`).  No call has two
   times.  A chip-level model (`adapter`) takes `now: Cycle` last
   instead, as every chip-level callback with no cycle struct does
   (docs/host-guide.md, Board time).
+  - A debugger's look and poke: `peek(access, moment)` gives what a
+    read would, a byte at a time, with none of its side effects, and
+    `poke(access, value, moment)` stores a byte as a write would,
+    whether it took it; both decline by default (`None`, `false`),
+    which the chip's `peek` and `poke` and gdb's memory access report as
+    unpeekable.  `MappedAdapter` passes them to its model's
+    `MappedPeripheral::peek` and `poke`.
   - Stop conditions, for a debugger and the emulator's alone
     ([docs/gdb.md](gdb.md), Stop conditions): `conditions()` lists
     what it offers (`condition::ConditionInfo::new(name, arguments,
