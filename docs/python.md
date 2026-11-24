@@ -1145,8 +1145,8 @@ times running, stalls the board, and `run_for` raises
 
 `run_for(seconds=...)` (finite, 0 or more, within board time's 2**64 ps, or `ValueError`) or
 `run_for(picoseconds=...)` gives a `BoardRun` (Rust's: `stop`, a `Stop`, and `now`, board time at its end), as does `run_until` with a board time (Rust's `Board::run_until`; `run_for` is `Board::run_for`); `now`
-(board time in picoseconds), `cycles` and `instructions` (the chip's
-system clocks and instructions since power-on);
+(board time in picoseconds) and `instructions` (the chip's
+instructions since power-on; its clock is `chip.now`);
 `peripheral(name)` gives a Python peripheral's object back; `chip` the
 board's chip, a `BoardChip` with the `Mc68331` methods that read or
 hook it (registers, `bus_read`, `bus_write`, `peek`, the hooks,

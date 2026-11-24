@@ -1619,12 +1619,6 @@ impl BoardView {
         self.board.now().picos()
     }
 
-    /// The chip's system clocks since power-on.
-    #[getter]
-    const fn cycles(&self) -> u64 {
-        self.board.chip().now().clocks()
-    }
-
     /// The chip's instructions run since power-on (`Mc68331.instructions`).
     #[getter]
     const fn instructions(&self) -> u64 {
@@ -1875,6 +1869,6 @@ impl BoardView {
     }
 
     fn __repr__(&self) -> String {
-        format!("Board(now={}, cycles={})", self.now(), self.cycles())
+        format!("Board(now={})", self.now())
     }
 }
