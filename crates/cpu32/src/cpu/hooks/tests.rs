@@ -312,7 +312,9 @@ fn a_pre_read_hook_slows_only_its_pages_and_is_removed() {
     let word = |cpu: &Cpu, at| cpu.memory.read(Space::Supervisor, Address(at), Size::Word);
     assert!(word(&cpu, page).is_none());
     assert!(word(&cpu, DATA).is_some());
+    assert!(cpu.has_hook(id));
     assert!(cpu.remove_hook(id));
+    assert!(!cpu.has_hook(id));
     assert!(!cpu.memory.is_special());
 }
 

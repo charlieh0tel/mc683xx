@@ -380,6 +380,7 @@ impl Cpu {
         let memory = |list: &[Ranged<MemoryHook>]| list.iter().any(|hook| hook.id == id);
         ranged(&hooks.code)
             || ranged(&hooks.block)
+            || hooks.pre_read.iter().any(|hook| hook.id == id)
             || memory(&hooks.read)
             || memory(&hooks.write)
             || hooks.invalid.iter().any(|hook| hook.id == id)
