@@ -295,12 +295,26 @@ impl AccessView {
 
 /// The chip's system clock on board time (Rust's `time::TimeBase`): for
 /// converting between picoseconds and the chip's clocks.
-#[pyclass(name = "TimeBase", module = "mc683xx", frozen, eq)]
+#[pyclass(name = "TimeBase", module = "mc683xx", frozen, eq, from_py_object)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct TimeBaseView(TimeBase);
 
 #[pymethods]
 impl TimeBaseView {
+    /// A base: clock `cycle` falls at board time `time` picoseconds, and
+    /// the clock runs at `frequency_hz` from there (Rust's
+    /// `TimeBase::new`); by default clock zero at power-on, the base
+    /// `TimeBase::steady` gives.
+    #[new]
+    #[pyo3(signature = (frequency_hz, *, cycle = 0, time = 0))]
+    const fn new(frequency_hz: u64, cycle: u64, time: u64) -> Self {
+        Self(TimeBase::new(
+            Cycle::from_clocks(cycle),
+            Time::from_picos(time),
+            Frequency::from_hz(frequency_hz),
+        ))
+    }
+
     /// The clock's frequency, whole hertz.
     #[getter]
     const fn frequency_hz(&self) -> u64 {
@@ -331,6 +345,13 @@ pub(crate) struct MomentView(Moment);
 
 #[pymethods]
 impl MomentView {
+    /// The moment `now` picoseconds of board time, the chip's system
+    /// clock on board time `system_clock` (Rust's `Moment::new`).
+    #[new]
+    const fn new(now: u64, system_clock: TimeBaseView) -> Self {
+        Self(Moment::new(Time::from_picos(now), system_clock.0))
+    }
+
     /// Board time, in picoseconds.
     #[getter]
     const fn now(&self) -> u64 {

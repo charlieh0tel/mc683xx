@@ -214,6 +214,18 @@ class Oven:
         assert snapshot == b""
 
 
+def test_a_peripheral_s_calls_run_with_no_board() -> None:
+    base = mc683xx.TimeBase(8_388_608)
+    assert base == mc683xx.TimeBase(8_388_608, cycle=0, time=0)
+    assert base.cycle(1_000_000) == 9  # rounded up
+    moved = mc683xx.TimeBase(16_000_000, cycle=100, time=5_000_000)
+    assert moved.time(100) == 5_000_000
+    assert moved.cycle(5_000_000 + 1_000_000) == 116
+    moment = mc683xx.Moment(1_000_000, base)
+    assert (moment.now, moment.system_clock, moment.cycle()) == (1_000_000, base, 9)
+    assert Oven().analog_output(0, moment) == 20.0 + 1_000_000 / 1e9
+
+
 class Probe:
     """A sink that samples its input every 10 us and can save."""
 

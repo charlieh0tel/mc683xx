@@ -1340,6 +1340,10 @@ class TimeBase:
     """The chip's system clock on board time: for converting between
     picoseconds and the chip's clocks."""
 
+    def __new__(cls, frequency_hz: int, *, cycle: int = 0, time: int = 0) -> TimeBase:
+        """A base: clock `cycle` falls at board time `time` picoseconds,
+        and the clock runs at `frequency_hz` from there."""
+
     @property
     def frequency_hz(self) -> int:
         """The clock's frequency, whole hertz."""
@@ -1353,6 +1357,10 @@ class TimeBase:
 class Moment:
     """A call's time and the chip's system clock then, as a board
     peripheral's calls with no `Drive` are given it."""
+
+    def __new__(cls, now: int, system_clock: TimeBase) -> Moment:
+        """The moment `now` picoseconds of board time, the chip's
+        system clock on board time `system_clock`."""
 
     @property
     def now(self) -> int:
