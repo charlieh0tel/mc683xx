@@ -123,8 +123,9 @@ struct Intercept {
     callable: Held,
 }
 
-/// A peripheral on a bare `Machine`, as `add_peripheral` returns it and
-/// `remove_peripheral` takes it (Rust's `PeripheralId`).
+/// A peripheral on a bare `Machine` or a chip, as `add_peripheral` or
+/// the chip `Builder`'s peripheral methods return it (Rust's
+/// `PeripheralId`).
 #[pyclass(
     name = "PeripheralId",
     module = "mc683xx",
@@ -134,7 +135,7 @@ struct Intercept {
     from_py_object
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct PeripheralIdView(PeripheralId);
+pub(crate) struct PeripheralIdView(pub(crate) PeripheralId);
 
 #[pymethods]
 impl PeripheralIdView {

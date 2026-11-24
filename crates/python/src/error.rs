@@ -76,14 +76,10 @@ pub(crate) enum Error {
     /// A builder used after `build`.
     #[error("the chip is already built")]
     Built,
-    /// A memory or peripheral number the builder never returned.
-    #[error("no {kind} {index}")]
-    Unknown {
-        /// "memory" or "peripheral".
-        kind: &'static str,
-        /// The number.
-        index: usize,
-    },
+    /// A memory or peripheral the builder never returned: its id as
+    /// Rust shows it, `memory 2`.
+    #[error("no {0}")]
+    Unknown(String),
     /// Bytes outside a memory.
     #[error("{length:#x} bytes at {offset:#x}: outside the memory's {size:#x}")]
     Range {

@@ -3,7 +3,7 @@
 How to embed the MC68331 in a Python host with the `mc683xx` module:
 build a board, run firmware, and connect Python objects as its peripherals.
 The module is the Rust host API one to one (`docs/host-guide.md`), with
-pins and registers by the manual's names and wiring by number: each
+pins and registers by the manual's names: each
 class, method, property, argument and enum has the Rust item's name and
 words (`Machine`, `HookId`, `halted`, `request_interrupt(pin)`,
 `Ending`), in Python's case.  Where Python's ways differ, the binding
@@ -47,7 +47,7 @@ rename renames the Python name with it.  The deliberate differences:
   the text.  Such a value's `str()` is Rust's `Display` too (`Stop`,
   `End`, `Entry`, `Pacing`: `str(Stop.Budget())` is `"budget"`), and
   so is a struct's or an id's that has one (`FaultStop`, `HookId`,
-  `ObserverId`, `PeripheralId`: `str(hook)` is `"hook 3"`, where its
+  `ObserverId`, `PeripheralId`, `MemoryId`: `str(hook)` is `"hook 3"`, where its
   `repr` is `HookId(3)`); `Event` and `DsackFault`, whose Rust variants
   a binding cannot rebuild, keep the default, their `repr`.
 - **Unknown values:** Python has a member Rust lacks:
@@ -107,9 +107,11 @@ rename renames the Python name with it.  The deliberate differences:
   `background` property (`Cpu::background`, through `Mc68331::cpu`),
   as `halted` is the CPU's `Halt` (`Cpu::halted`, likewise).  `reset_halted` is
   `reset_with_breakpoint()` then `background`.
-- **Handles:** a chip's memories and peripherals are the numbers
-  `Builder` returns, not `MemoryId` and `PeripheralId`; a bare
-  `Machine`'s peripheral is an opaque `PeripheralId`, as in Rust.  `Mc68331.memory(memory,
+- **Handles:** a chip's memories and peripherals, and a bare
+  `Machine`'s peripheral, are the opaque `MemoryId` and `PeripheralId`
+  the builder or the machine returns, as in Rust; an id a chip's
+  `Builder` never returned (another builder's) raises `IndexError`.
+  `Mc68331.memory(memory,
   offset=0, length=None)` is Rust's `memory(id)`, sliced, and
   `set_memory(memory, offset, data)` writes what Rust writes through
   `memory_mut(id)`, a slice Python cannot hold (`read_memory` and
@@ -265,10 +267,10 @@ assert chip.memory(ram, 0, 2) == b"\x12\x34"
   (`reference_hz`, 25000 to 50000, SIMRM 4.4.1; 32768 by default) or,
   with MODCLK low, an external clock (`external_hz`).
 - `memory(contents, pins, writable=True)`: RAM or ROM, a whole number
-  of 2-Kbyte pages; returns its number for `memory` and `set_memory`.
+  of 2-Kbyte pages; returns its `MemoryId` for `memory` and `set_memory`.
 - `fixed_memory(contents, base, writable=True)`: emulator-only memory
   at a fixed address on no pin, which takes the cycles there no chip
-  select matches (the host guide's Fixed memory); a memory number as
+  select matches (the host guide's Fixed memory); a `MemoryId` as
   `memory`'s.  `set_fixed_timing(memory, port=16, termination=None)`:
   its port, 8 or 16 bits (Rust's `PortSize`), and its cycles'
   termination, a `Termination` as Rust's, a class per variant:
@@ -278,7 +280,7 @@ assert chip.memory(ram, 0, 2) == b"\x12\x34"
   no ECLK.  `set_reload_scope(memory, scope)`: the `ResetCause`s that
   put a memory's contents back as built, none by default.
 - `peripheral(object, pins)` and `unwired_peripheral(object)` (on no pin) return a
-  peripheral number for `interrupt`, `set_reset_scope` and `Mc68331.peripheral`.
+  `PeripheralId` for `set_interrupt`, `set_reset_scope` and `Mc68331.peripheral`.
 - `set_interrupt(peripheral, pin)` (IRQ1 to IRQ7 as 1 to 7), `set_autovector(pin)`,
   `set_reset_scope(peripheral, scope)`, `qspi(object)`: as in Rust.
 - `set_dsack(peripheral, Dsack.DSACK0 | DSACK1 | BOTH)`: the DSACK pins a
@@ -289,7 +291,7 @@ assert chip.memory(ram, 0, 2) == b"\x12\x34"
   default.
 - `bus_peripheral(object, windows=[(base, length)], acknowledges=[level],
   dsack=Dsack...)`: a peripheral on no select, taking the cycles its own
-  decode does, and driving `dsack`'s pins; its number.  Rust's
+  decode does, and driving `dsack`'s pins; its `PeripheralId`.  Rust's
   `bus_peripheral` takes `BusDecode`s, which Python has not: each
   window is a `BusDecode::Window`, each level a
   `BusDecode::Acknowledge`.  Its cycles' `select` is `None`; a PEPAR
@@ -301,7 +303,7 @@ assert chip.memory(ram, 0, 2) == b"\x12\x34"
   (or at the sync point), a `SyncRequest` whose `request()` ends it
   early as `Stop.Budget()`, the clocks run so far, and a `Diversion`
   whose `divert(memory, peripheral)` sends a memory's cycles to a
-  peripheral, by their numbers, until `release(memory)` (a flash
+  peripheral, by their ids, until `release(memory)` (a flash
   answering status reads while it programs).
   A peripheral may call `request()` from any of its callables, in the
   run's thread: from `read` or `write`, the run ends after that
@@ -354,7 +356,7 @@ board time, and the bare `Machine`'s every 100,000 instructions.  The GIL
 stays held during a run: the chip holds Python objects.
 
 ```python
-def booting(program: list[int], patches: Patches | None = None) -> tuple[mc683xx.Builder, int]:
+def booting(program: list[int], patches: Patches | None = None) -> tuple[mc683xx.Builder, mc683xx.MemoryId]:
     """The board above as a function: the builder and the RAM."""
     builder = mc683xx.Builder()
     builder.memory(rom(PROLOGUE + program, patches), ["CSBOOT"], writable=False)
@@ -471,12 +473,12 @@ program = (
 handler = store_word(RAM_BASE, 0xBEEF) + [BRANCH_TO_SELF]
 builder, ram = booting(program, {**vector(VECTOR, HANDLER), HANDLER: handler})
 interrupter = Interrupter()
-number = builder.peripheral(interrupter, ["CS1", "CS10"])
-builder.set_interrupt(number, LEVEL)
+interrupter_id = builder.peripheral(interrupter, ["CS1", "CS10"])
+builder.set_interrupt(interrupter_id, LEVEL)
 chip = builder.build()
 chip.run_for(5000)
 assert chip.memory(ram, 0, 2) == b"\xbe\xef", "the handler ran"
-assert chip.peripheral(number) is interrupter
+assert chip.peripheral(interrupter_id) is interrupter
 [acknowledge] = interrupter.acknowledges
 assert (acknowledge.select, acknowledge.address) == ("CS10", 0xFFFFF1 + 2 * LEVEL)
 ```
@@ -815,7 +817,7 @@ CSBARBT = SIM + 0x48  # MC68331UM Table D-3
 builder = mc683xx.Builder()
 builder.memory(rom([BRANCH_TO_SELF]), ["CSBOOT"], writable=False)
 ram = builder.memory(bytes(RAM_BYTES), ["CS0"])
-number = builder.peripheral(Interrupter(), ["CS1"])
+interrupter_id = builder.peripheral(Interrupter(), ["CS1"])
 chip = builder.build()
 # CS0 and CS1 mapped by the host, not the firmware
 for bar, base in ((SIM + 0x4C, RAM_BASE), (SIM + 0x50, PERIPHERAL_BASE)):
@@ -825,7 +827,7 @@ chip.bus_write(RAM_BASE, 4, 0x12345678)
 assert chip.memory(ram, 0, 4) == b"\x12\x34\x56\x78"
 assert chip.bus_read(RAM_BASE + 2, 2) == chip.peek(RAM_BASE + 2, 2) == 0x5678
 chip.bus_write(PERIPHERAL_BASE + VECTOR_REGISTER, 1, VECTOR)
-wired = chip.peripheral(number)
+wired = chip.peripheral(interrupter_id)
 assert isinstance(wired, Interrupter) and wired.vector == VECTOR
 try:
     chip.peek(PERIPHERAL_BASE, 2)
@@ -921,7 +923,7 @@ it back into a chip built the same way.  Each peripheral and model is in
 it, in the order added, by its own `save() -> bytes` and
 `restore(snapshot)` (its bytes in its own format), as a Python board
 peripheral is; one without both (`save` alone, say) makes `save` and
-`restore` raise `StateError` naming it by its peripheral number (`peripheral 0:
+`restore` raise `StateError` naming it by its `PeripheralId` (`peripheral 0:
 a Python peripheral cannot save its state`), and an exception `save` or
 `restore` raises is raised, a `KeyboardInterrupt` too, the chip
 unchanged.  The QSPI peripheral (`Builder.set_qspi`) is in it the
@@ -1009,8 +1011,8 @@ chip.run_for(500)
   size other than 1, 2 or 4, at an odd address, or of a value wider
   than it; a bare `Machine`'s `read` of more
   bytes than 32 bits of addresses; a name a `Board` lacks, a
-  peripheral's, memory's, net's or endpoint's (a number a `Mc68331`
-  never gave is an `IndexError`).
+  peripheral's, memory's, net's or endpoint's (an id a `Mc68331`'s
+  builder never gave is an `IndexError`).
 - `mc683xx.BusCycleError`: a host cycle or peek that gave no value,
   Rust's `BusCycleError`, as one of its two subclasses:
   - `mc683xx.BusError`: a host cycle that ended in a bus error, or that
@@ -1043,7 +1045,7 @@ chip.run_for(500)
   every event: one it cannot convert (a kind the bindings lack, or a
   DSACK fault they do not know) is `Event.Unknown(now, text)`, `text`
   what happened as Rust prints it.
-- `IndexError`: an unknown memory or peripheral number, or a memory range
+- `IndexError`: a memory or peripheral id the builder never returned, or a memory range
   past its end.
 - `OverflowError`: a run past the end of time.
 - `RuntimeError`: a spent builder, a hook calling into the chip, a
@@ -1061,7 +1063,7 @@ builder.memory(bytes(2048), ["CSBOOT"])
 for mistake in (
     lambda: builder.memory(bytes(2048), ["CSBOOT"]),
     lambda: builder.memory(bytes(100), ["CS1"]),
-    lambda: builder.set_interrupt(0, 0),
+    lambda: builder.set_interrupt(mc683xx.Builder().unwired_peripheral(object()), 1),
 ):
     try:
         mistake()

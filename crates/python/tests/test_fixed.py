@@ -49,8 +49,12 @@ def test_the_reset_code_reaches_a_fixed_memory_and_a_reset_reloads_it() -> None:
     builder.fixed_memory(code(), CODE, writable=False)
     data = builder.fixed_memory(bytes([0x5A]) * PAGE, DATA)
     builder.set_reload_scope(data, [mc683xx.ResetCause.EXTERNAL])
-    with pytest.raises(IndexError):
-        builder.set_reload_scope(9, [])
+    other = mc683xx.Builder()
+    foreign = [other.fixed_memory(bytes(PAGE), base * PAGE) for base in range(4)][-1]
+    with pytest.raises(IndexError, match="no memory"):
+        builder.set_reload_scope(foreign, [])
+    with pytest.raises(TypeError):
+        builder.set_reload_scope(2, [])  # type: ignore[arg-type]
     chip = builder.build()
     chip.run_for(1000)
     assert chip.memory(data, 0, 2) == b"\x12\x34"

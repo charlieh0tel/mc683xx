@@ -51,6 +51,7 @@ use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
 
 use crate::bare::FaultStopView;
+use crate::bare::PeripheralIdView;
 use crate::board::BoardView;
 use crate::error::Error;
 use crate::gdb;
@@ -64,6 +65,7 @@ use crate::peripherals::InputView;
 use crate::peripherals::Output;
 use crate::peripherals::PortStateView;
 use crate::peripherals::PortView;
+use crate::python::opaque_repr;
 use crate::python::repr;
 use crate::qspi::PythonSpiPeripheral;
 use crate::register::Register;
@@ -72,43 +74,75 @@ use crate::requests::StopRequestView;
 use crate::requests::SyncRequestView;
 use crate::select;
 
-/// What the host wired, by the numbers the bindings gave it: the
-/// builder's, then the chip's, and the `Diversion`'s that reads them.
+/// Host memory wired into the chip, as the `Builder`'s memory methods
+/// return it (Rust's `MemoryId`).
+#[pyclass(
+    name = "MemoryId",
+    module = "mc683xx",
+    frozen,
+    eq,
+    hash,
+    from_py_object
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct MemoryIdView(MemoryId);
+
+#[pymethods]
+impl MemoryIdView {
+    /// `MemoryId(2)`, from Rust's `Display`, `memory 2`.
+    fn __repr__(&self) -> String {
+        opaque_repr("MemoryId", &self.0)
+    }
+
+    /// Rust's `Display`: `memory 2`.
+    fn __str__(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+/// What the host wired: the ids the builder gave it, which the
+/// builder's, the chip's and the `Diversion`'s methods check theirs
+/// against, so that one the builder never gave is an error, not a
+/// panic.
 #[derive(Debug, Default)]
 pub(crate) struct Wiring {
-    /// Memories, by number.
+    /// The memories.
     memories: Vec<MemoryId>,
-    /// Peripherals and models, by number.
+    /// The peripherals and models.
     peripherals: Vec<PeripheralId>,
 }
 
 impl Wiring {
-    /// Numbers memory `id`: its number.
-    fn add_memory(&mut self, id: MemoryId) -> usize {
+    /// Records memory `id`, for Python.
+    fn add_memory(&mut self, id: MemoryId) -> MemoryIdView {
         self.memories.push(id);
-        self.memories.len() - 1
+        MemoryIdView(id)
     }
 
-    /// Numbers peripheral `id`: its number.
-    fn add_peripheral(&mut self, id: PeripheralId) -> usize {
+    /// Records peripheral `id`, for Python.
+    fn add_peripheral(&mut self, id: PeripheralId) -> PeripheralIdView {
         self.peripherals.push(id);
-        self.peripherals.len() - 1
+        PeripheralIdView(id)
     }
 
-    /// Memory number `index`.
-    pub(crate) fn memory(&self, index: usize) -> Result<MemoryId, Error> {
-        self.memories.get(index).copied().ok_or(Error::Unknown {
-            kind: "memory",
-            index,
-        })
+    /// Memory `id`, if the builder gave it.
+    pub(crate) fn memory(&self, id: MemoryIdView) -> Result<MemoryId, Error> {
+        let MemoryIdView(id) = id;
+        if self.memories.contains(&id) {
+            Ok(id)
+        } else {
+            Err(Error::Unknown(id.to_string()))
+        }
     }
 
-    /// Peripheral number `index`.
-    pub(crate) fn peripheral(&self, index: usize) -> Result<PeripheralId, Error> {
-        self.peripherals.get(index).copied().ok_or(Error::Unknown {
-            kind: "peripheral",
-            index,
-        })
+    /// Peripheral `id`, if the builder gave it.
+    pub(crate) fn peripheral(&self, id: PeripheralIdView) -> Result<PeripheralId, Error> {
+        let PeripheralIdView(id) = id;
+        if self.peripherals.contains(&id) {
+            Ok(id)
+        } else {
+            Err(Error::Unknown(id.to_string()))
+        }
     }
 }
 
@@ -172,7 +206,11 @@ impl ChipBuilder {
     }
 
     /// Wires `peripheral` to `pins`.
-    fn wire(&mut self, peripheral: PythonMapped, pins: &[ChipSelect]) -> Result<usize, Error> {
+    fn wire(
+        &mut self,
+        peripheral: PythonMapped,
+        pins: &[ChipSelect],
+    ) -> Result<PeripheralIdView, Error> {
         let id = self.builder()?.peripheral(peripheral, pins)?;
         Ok(self.wiring.borrow_mut().add_peripheral(id))
     }
@@ -219,14 +257,14 @@ impl ChipBuilder {
     }
 
     /// `contents` (a whole number of 2-Kbyte pages) on `pins`, RAM if
-    /// `writable`, else ROM; its number.
+    /// `writable`, else ROM; its id.
     #[pyo3(signature = (contents, pins, *, writable = true))]
     fn memory(
         &mut self,
         contents: PyBackedBytes,
         pins: Vec<String>,
         writable: bool,
-    ) -> Result<usize, Error> {
+    ) -> Result<MemoryIdView, Error> {
         let pins = self::pins(&pins)?;
         let id = self
             .builder()?
@@ -236,14 +274,14 @@ impl ChipBuilder {
 
     /// `contents` (a whole number of 2-Kbyte pages) at `base` on no pin,
     /// emulator-only: the program and data cycles there no chip select
-    /// matches, at once; RAM if `writable`, else ROM; its number.
+    /// matches, at once; RAM if `writable`, else ROM; its id.
     #[pyo3(signature = (contents, base, *, writable = true))]
     fn fixed_memory(
         &mut self,
         contents: PyBackedBytes,
         base: u32,
         writable: bool,
-    ) -> Result<usize, Error> {
+    ) -> Result<MemoryIdView, Error> {
         let id = self.builder()?.fixed_memory(
             contents.to_vec(),
             memory_kind(writable),
@@ -252,14 +290,14 @@ impl ChipBuilder {
         Ok(self.wiring.borrow_mut().add_memory(id))
     }
 
-    /// Fixed memory number `memory`'s port, `port` bits (8 or 16, Rust's
+    /// Fixed memory `memory`'s port, `port` bits (8 or 16, Rust's
     /// `PortSize`), and its cycles' `termination`, a `Termination`:
     /// `Fast()`, the default, or `WaitStates(n)`, 0 to 13 (Rust's
     /// `set_fixed_timing`).
     #[pyo3(signature = (memory, *, port = 16, termination = None))]
     fn set_fixed_timing(
         &mut self,
-        memory: usize,
+        memory: MemoryIdView,
         port: u8,
         termination: Option<TerminationView>,
     ) -> Result<(), Error> {
@@ -277,7 +315,11 @@ impl ChipBuilder {
 
     /// Only the resets in `scope`, `ResetCause`s, put memory number
     /// `memory`'s contents back as built; by default none do.
-    fn set_reload_scope(&mut self, memory: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
+    fn set_reload_scope(
+        &mut self,
+        memory: MemoryIdView,
+        scope: Vec<ResetCause>,
+    ) -> Result<(), Error> {
         let memory = self.wiring.borrow().memory(memory)?;
         self.builder()?
             .set_reload_scope(memory, self::scope(&scope));
@@ -285,8 +327,12 @@ impl ChipBuilder {
     }
 
     /// `peripheral`, which has `read(cycle)` and `write(cycle, value)`, on
-    /// `pins`; its number.
-    fn peripheral(&mut self, peripheral: &Bound<'_, PyAny>, pins: Vec<String>) -> PyResult<usize> {
+    /// `pins`; its id.
+    fn peripheral(
+        &mut self,
+        peripheral: &Bound<'_, PyAny>,
+        pins: Vec<String>,
+    ) -> PyResult<PeripheralIdView> {
         let pins = self::pins(&pins)?;
         let peripheral = PythonMapped::mapped(peripheral, self.pending.clone())?;
         Ok(self.wire(peripheral, &pins)?)
@@ -296,7 +342,7 @@ impl ChipBuilder {
     /// on no select, taking the cycles its own decode does: each
     /// `(base, length)` of `windows` and the acknowledges of each IRQ
     /// level of `acknowledges`, driving the DSACK pins `dsack`; its
-    /// number (Rust's `bus_peripheral`, whose `BusDecode`s these are).
+    /// id (Rust's `bus_peripheral`, whose `BusDecode`s these are).
     #[pyo3(signature = (peripheral, *, windows = Vec::new(), acknowledges = Vec::new(), dsack))]
     fn bus_peripheral(
         &mut self,
@@ -304,7 +350,7 @@ impl ChipBuilder {
         windows: Vec<(u32, u32)>,
         acknowledges: Vec<u8>,
         dsack: DsackView,
-    ) -> PyResult<usize> {
+    ) -> PyResult<PeripheralIdView> {
         let mut decodes: Vec<BusDecode> = windows
             .into_iter()
             .map(|(base, length)| BusDecode::Window {
@@ -325,8 +371,8 @@ impl ChipBuilder {
     }
 
     /// `peripheral` on no pin: it keeps time or drives an interrupt; its
-    /// number.
-    fn unwired_peripheral(&mut self, peripheral: &Bound<'_, PyAny>) -> PyResult<usize> {
+    /// id.
+    fn unwired_peripheral(&mut self, peripheral: &Bound<'_, PyAny>) -> PyResult<PeripheralIdView> {
         let peripheral = PythonMapped::unwired(peripheral, self.pending.clone())?;
         Ok(self.wire(peripheral, &[])?)
     }
@@ -342,12 +388,12 @@ impl ChipBuilder {
         Ok(())
     }
 
-    /// The DSACK pins `dsack` that peripheral number `peripheral` drives
+    /// The DSACK pins `dsack` that peripheral `peripheral` drives
     /// on an externally terminated select (SIMRM 7.10.3), checked
     /// against PEPAR at each such cycle (`Event.Dsack`), and sizing it
     /// (SIMRM Table 5-2); unstated by default: unchecked, the select's
     /// port field sizing it.
-    fn set_dsack(&mut self, peripheral: usize, dsack: DsackView) -> Result<(), Error> {
+    fn set_dsack(&mut self, peripheral: PeripheralIdView, dsack: DsackView) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
         self.builder()?.set_dsack(peripheral, dsack.into());
         Ok(())
@@ -373,7 +419,7 @@ impl ChipBuilder {
     }
 
     /// The handle by which the host's peripherals divert a memory's
-    /// cycles to a peripheral and back, by their numbers, for them to
+    /// cycles to a peripheral and back, by their ids, for them to
     /// hold.
     fn diversion(&mut self) -> Result<DiversionView, Error> {
         let diversion = self.builder()?.diversion();
@@ -385,16 +431,20 @@ impl ChipBuilder {
 
     /// Peripheral `peripheral`'s interrupt output to IRQ`pin`.  Each call
     /// adds a wire.
-    fn set_interrupt(&mut self, peripheral: usize, pin: u8) -> Result<(), Error> {
+    fn set_interrupt(&mut self, peripheral: PeripheralIdView, pin: u8) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
         let pin = IrqPin::try_from(pin)?;
         self.builder()?.set_interrupt(peripheral, pin);
         Ok(())
     }
 
-    /// Only the resets in `scope`, `ResetCause`s, reach peripheral number
+    /// Only the resets in `scope`, `ResetCause`s, reach peripheral
     /// `peripheral`'s reset; by default every one does (SIMRM 8.2).
-    fn set_reset_scope(&mut self, peripheral: usize, scope: Vec<ResetCause>) -> Result<(), Error> {
+    fn set_reset_scope(
+        &mut self,
+        peripheral: PeripheralIdView,
+        scope: Vec<ResetCause>,
+    ) -> Result<(), Error> {
         let peripheral = self.wiring.borrow().peripheral(peripheral)?;
         self.builder()?
             .set_reset_scope(peripheral, self::scope(&scope));
@@ -879,8 +929,8 @@ pub(crate) enum DsackFaultView {
     },
     /// The same for a peripheral on no select (`bus_peripheral`).
     BusUnassigned {
-        /// The peripheral's number.
-        peripheral: u64,
+        /// The peripheral.
+        peripheral: PeripheralIdView,
     },
 }
 
@@ -892,9 +942,8 @@ impl DsackFaultView {
             DsackFault::Unassigned { select } => Some(Self::Unassigned {
                 select: select.to_string(),
             }),
-            // Python numbers the chip's peripherals as it adds them
             DsackFault::BusUnassigned { peripheral } => Some(Self::BusUnassigned {
-                peripheral: peripheral.number(),
+                peripheral: PeripheralIdView(peripheral),
             }),
             _ => None,
         }
@@ -1423,9 +1472,14 @@ impl Chip {
         }
     }
 
-    /// Memory number `index`'s bytes from `offset`, `length` of them.
-    fn span(&self, index: usize, offset: usize, length: usize) -> Result<(MemoryId, usize), Error> {
-        let id = self.wiring.borrow().memory(index)?;
+    /// Memory `memory`'s bytes from `offset`, `length` of them.
+    fn span(
+        &self,
+        memory: MemoryIdView,
+        offset: usize,
+        length: usize,
+    ) -> Result<(MemoryId, usize), Error> {
+        let id = self.wiring.borrow().memory(memory)?;
         let size = self.chip.memory(id).len();
         match offset.checked_add(length) {
             Some(end) if end <= size => Ok((id, end)),
@@ -1624,13 +1678,13 @@ chip_methods! {
         Ok(entry.map_err(Error::from)?.into())
     }
 
-    /// Memory number `memory`'s bytes from `offset`: `length` of them,
-    /// or to its end.
+    /// Memory `memory`'s bytes from `offset`: `length` of them, or to
+    /// its end.
     #[pyo3(signature = (memory, offset = 0, length = None))]
     fn memory<'py>(
         &self,
         py: Python<'py>,
-        memory: usize,
+        memory: MemoryIdView,
         offset: usize,
         length: Option<usize>,
     ) -> Result<Bound<'py, PyBytes>, Error> {
@@ -1640,10 +1694,10 @@ chip_methods! {
         Ok(PyBytes::new(py, &self.chip.memory(id)[offset..end]))
     }
 
-    /// Writes `data` into memory number `memory` from `offset`.
+    /// Writes `data` into memory `memory` from `offset`.
     fn set_memory(
         &mut self,
-        memory: usize,
+        memory: MemoryIdView,
         offset: usize,
         data: PyBackedBytes,
     ) -> Result<(), Error> {
@@ -1652,16 +1706,13 @@ chip_methods! {
         Ok(())
     }
 
-    /// Peripheral number `peripheral`'s object.
-    fn peripheral(&self, py: Python<'_>, peripheral: usize) -> Result<Py<PyAny>, Error> {
+    /// Peripheral `peripheral`'s object.
+    fn peripheral(&self, py: Python<'_>, peripheral: PeripheralIdView) -> Result<Py<PyAny>, Error> {
         let id = self.wiring.borrow().peripheral(peripheral)?;
         self.chip
             .peripheral::<PythonMapped>(id)
             .and_then(|peripheral| peripheral.object(py))
-            .ok_or(Error::Unknown {
-                kind: "peripheral",
-                index: peripheral,
-            })
+            .ok_or_else(|| Error::Unknown(id.to_string()))
     }
 
     /// The host asserts or negates IRQ`pin`.

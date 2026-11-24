@@ -56,6 +56,7 @@ use crate::chip::DsackView;
 use crate::chip::Entry;
 use crate::chip::Event;
 use crate::chip::Halt;
+use crate::chip::MemoryIdView;
 use crate::chip::ResetCause;
 use crate::chip::Run;
 use crate::chip::Space;
@@ -96,7 +97,7 @@ impl From<Error> for PyErr {
     fn from(error: Error) -> Self {
         let message = error.to_string();
         match error {
-            Error::Unknown { .. } | Error::Range { .. } => PyIndexError::new_err(message),
+            Error::Unknown(_) | Error::Range { .. } => PyIndexError::new_err(message),
             Error::Budget(_) => PyOverflowError::new_err(message),
             Error::Built => PyRuntimeError::new_err(message),
             Error::Unmapped { kind: RUN_END, .. } | Error::Run(_) | Error::Take(_) => {
@@ -230,6 +231,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.setattr("__version__", pep440_version(env!("CARGO_PKG_VERSION")))?;
     module.add_class::<MachineView>()?;
     module.add_class::<PeripheralIdView>()?;
+    module.add_class::<MemoryIdView>()?;
     module.add_class::<FaultStopView>()?;
     module.add_class::<FaultCauseKind>()?;
     module.add_class::<InterceptedView>()?;

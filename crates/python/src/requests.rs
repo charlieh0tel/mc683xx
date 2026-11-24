@@ -11,6 +11,8 @@ use mc683xx_mc68331::SyncRequest;
 use pyo3::pyclass;
 use pyo3::pymethods;
 
+use crate::bare::PeripheralIdView;
+use crate::chip::MemoryIdView;
 use crate::chip::Wiring;
 use crate::error::Error;
 
@@ -61,32 +63,32 @@ impl SyncRequestView {
 }
 
 /// A handle by which the host's peripherals divert a memory's cycles to a
-/// peripheral and back (Rust's `Diversion`), by the numbers the
-/// `Builder` gave them.
+/// peripheral and back (Rust's `Diversion`), by the ids the `Builder`
+/// gave them.
 #[pyclass(name = "Diversion", module = "mc683xx", unsendable)]
 #[derive(Debug, Clone)]
 pub(crate) struct DiversionView {
     /// The chip's handle.
     pub(crate) diversion: Diversion,
-    /// The numbers, the builder's and then the chip's.
+    /// The ids, the builder's and then the chip's.
     pub(crate) wiring: Rc<RefCell<Wiring>>,
 }
 
 #[pymethods]
 impl DiversionView {
-    /// Every cycle that reaches memory number `memory` reaches peripheral
-    /// number `peripheral` instead, as a cycle on the select that carried
+    /// Every cycle that reaches memory `memory` reaches peripheral
+    /// `peripheral` instead, as a cycle on the select that carried
     /// it, until `release`.  Asked during a cycle it takes effect when the
     /// cycle ends; asked between runs, at the next cycle or sync point.
-    fn divert(&self, memory: usize, peripheral: usize) -> Result<(), Error> {
+    fn divert(&self, memory: MemoryIdView, peripheral: PeripheralIdView) -> Result<(), Error> {
         let wiring = self.wiring.borrow();
         self.diversion
             .divert(wiring.memory(memory)?, wiring.peripheral(peripheral)?);
         Ok(())
     }
 
-    /// Memory number `memory`'s cycles reach it again.
-    fn release(&self, memory: usize) -> Result<(), Error> {
+    /// Memory `memory`'s cycles reach it again.
+    fn release(&self, memory: MemoryIdView) -> Result<(), Error> {
         self.diversion.release(self.wiring.borrow().memory(memory)?);
         Ok(())
     }

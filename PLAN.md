@@ -832,11 +832,13 @@ chip beside `Mc68331`.
   `set_reset_scope(peripheral, [ResetCause])`, `set_dsack(peripheral, Dsack)`,
   `set_qspi_reset_scope([ResetCause])`, and the handles a peripheral holds,
   `stop_request()`, `sync_request()` and `diversion()` (a `Diversion`
-  by memory and peripheral numbers); `build()` gives
+  by memory and peripheral ids); `build()` gives
   an `Mc68331` through its power-on reset.  Pins are the manual's
   names, `"CSBOOT"`, `"CS0"`-`"CS10"`; registers too, `"D0"`-`"A7"`,
   `"PC"`, `"SR"`, `"CCR"`, `"USP"`, `"SSP"`, `"VBR"`, `"SFC"`, `"DFC"`.
-  Memories and peripherals are the numbers `Builder` returned.
+  Memories and peripherals are the opaque `MemoryId` and
+  `PeripheralId` `Builder` returned, as in Rust (decided 2026-11-24;
+  they were numbers).
 - **The chip:** `run_for(budget) -> Run(cycles, stop)`, Rust's
   `Run`, its `Stop` a class per variant as Rust's (`Stop.Budget()`,
   `Stop.Halted(halt)`, `Stop.Hook(hook)`, ...),
