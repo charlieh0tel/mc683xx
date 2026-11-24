@@ -1027,7 +1027,10 @@ chip.run_for(500)
   - `mc683xx.BusError`: a host cycle that ended in a bus error, or that
     nothing answers; a bare `Machine`'s `read` or `write` of bytes no
     map covers.
-  - `mc683xx.UnpeekableError`: a peek only a real cycle can answer.
+  - `mc683xx.UnpeekableError`: a peek or poke only a real cycle can
+    answer; its `address` is the first byte declined (Rust's
+    `BusCycleError::Unpeekable(address)`, `PeekError::Unpeekable`), the
+    message `not peekable at 0x...`.
 
   A host's own mistake in a cycle (`Misaligned`, `Width`) is a
   `ValueError`, as above.

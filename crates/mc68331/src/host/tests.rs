@@ -344,7 +344,11 @@ fn a_peripheral_sees_the_hosts_cycles_and_never_its_peeks() {
     write(&mut chip, PERIPHERAL_BASE + 1, Size::Byte, 0x56);
     assert_eq!(
         peek(&chip, PERIPHERAL_BASE, Size::Word),
-        Err(BusCycleError::Unpeekable)
+        Err(BusCycleError::Unpeekable(Address(PERIPHERAL_BASE)))
+    );
+    assert_eq!(
+        BusCycleError::Unpeekable(Address(PERIPHERAL_BASE)).to_string(),
+        "not peekable at 0x00200000"
     );
     let peripheral = chip.peripheral::<Recorder>(recorder).unwrap();
     assert_eq!(peripheral.reads.len(), 1);
@@ -388,19 +392,20 @@ fn a_peek_and_a_poke_reach_a_peripheral_that_takes_them_with_no_cycle() {
     chip.poke(Address(START), Size::Word, SUPERVISOR, u32::from(NOP))
         .unwrap();
     assert_eq!(peek(&chip, START, Size::Word), Ok(NOP.into()));
-    let unpeekable = Err(BusCycleError::Unpeekable);
+    let unpeekable = |address| BusCycleError::Unpeekable(Address(address));
     assert_eq!(
         chip.poke(Address(SYPCR), Size::Byte, SUPERVISOR, 0),
-        unpeekable
+        Err(unpeekable(SYPCR))
     );
     assert_eq!(
         chip.poke(Address(FAILING_BASE), Size::Byte, SUPERVISOR, 0),
-        unpeekable
+        Err(unpeekable(FAILING_BASE))
     );
     assert_eq!(
         peek(&chip, FAILING_BASE, Size::Byte),
-        Err(BusCycleError::Unpeekable)
+        Err(unpeekable(FAILING_BASE))
     );
+
     assert_eq!(
         chip.poke(Address(RAM_BASE), Size::Byte, SUPERVISOR, 0x100),
         Err(BusCycleError::Width(0x100))
@@ -443,8 +448,14 @@ fn a_range_peek_and_poke_split_at_memory_and_call_a_peripheral_once() {
     chip.peripheral_mut::<Recorder>(recorder).unwrap().peekable = false;
     assert_eq!(
         chip.peek_bytes(Address(ram_end - 2), SUPERVISOR, &mut back),
-        Err(BusCycleError::Unpeekable)
+        Err(BusCycleError::Unpeekable(Address(ram_end)))
     );
+    // the first byte declined named, the memory's before it stored
+    assert_eq!(
+        chip.poke_bytes(Address(ram_end - 1), SUPERVISOR, &[7, 8]),
+        Err(BusCycleError::Unpeekable(Address(ram_end)))
+    );
+    assert_eq!(chip.memory(ram)[RAM_BYTES - 1], 7);
     // a module's registers byte by byte, unpoked
     let mut sypcr = [0xff; 2];
     chip.peek_bytes(Address(SYPCR), SUPERVISOR, &mut sypcr)
@@ -452,7 +463,7 @@ fn a_range_peek_and_poke_split_at_memory_and_call_a_peripheral_once() {
     assert_eq!(u16::from_be_bytes(sypcr), 0);
     assert_eq!(
         chip.poke_bytes(Address(SYPCR), SUPERVISOR, &[0]),
-        Err(BusCycleError::Unpeekable)
+        Err(BusCycleError::Unpeekable(Address(SYPCR)))
     );
 }
 
@@ -601,7 +612,7 @@ fn a_module_that_cannot_peek_says_so() {
     let address = chip.sim().module_base().0 + 0x700;
     assert_eq!(
         peek(&chip, address, Size::Word),
-        Err(BusCycleError::Unpeekable)
+        Err(BusCycleError::Unpeekable(Address(address)))
     );
     assert_eq!(read(&mut chip, address, Size::Word), Ok(0));
 }

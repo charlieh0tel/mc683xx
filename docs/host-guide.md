@@ -1352,7 +1352,8 @@ first.  None moves the chip's time or shows in the trace.
   them, and a peripheral's bytes from its `MappedPeripheral::peek`,
   the first that would drive them answering.  What only a cycle can
   tell, a peripheral that declines (the default), is
-  `BusCycleError::Unpeekable`.  A module answers through
+  `BusCycleError::Unpeekable(address)`, the first byte declined.  A
+  module answers through
   `Module::peek`.  `peek_bytes(address, function_code, data)` fills
   any length of bytes the same way, a module's registers a byte at a
   time.

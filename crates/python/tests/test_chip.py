@@ -1313,8 +1313,9 @@ def test_the_host_reaches_memory_and_peripherals_through_the_decode():
     assert chip.peek(CSBAR1, 2) == csbar(PERIPHERAL_BASE)
     assert chip.bus_read(PERIPHERAL_BASE + 4, 2) == 0xBEEF
     chip.bus_write(PERIPHERAL_BASE + 1, 1, 0x42)
-    with pytest.raises(mc683xx.UnpeekableError):
+    with pytest.raises(mc683xx.UnpeekableError) as raised:
         chip.peek(PERIPHERAL_BASE, 2)
+    assert raised.value.address == PERIPHERAL_BASE
     with pytest.raises(mc683xx.BusCycleError):
         chip.peek(PERIPHERAL_BASE, 2)
     assert peripheral.reads == [("CS1", PERIPHERAL_BASE + 4, 2)]

@@ -544,8 +544,9 @@ def test_read_and_write_peek_and_poke_a_peripheral():
     assert cpu.read(PERIPHERAL + 1, 2) == b"\x02\x03"
     assert window.calls == [(PERIPHERAL, 4), (PERIPHERAL + 1, 2)]
     window.closed = True
-    with pytest.raises(mc683xx.UnpeekableError, match="not peekable at"):
+    with pytest.raises(mc683xx.UnpeekableError, match="not peekable at 0x00f00000") as raised:
         cpu.read(PERIPHERAL, 1)
+    assert raised.value.address == PERIPHERAL
     with pytest.raises(mc683xx.UnpeekableError):
         cpu.write(PERIPHERAL, b"\x00")
     with pytest.raises(mc683xx.BusError):

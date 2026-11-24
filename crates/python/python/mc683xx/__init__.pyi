@@ -149,7 +149,10 @@ class BusError(BusCycleError):
 
 class UnpeekableError(BusCycleError):
     """Raised by peek where only a real bus cycle can tell: a peripheral,
-    or a module register a read would change."""
+    or a module register a read would change.  `address` is the first
+    byte declined."""
+
+    address: int
 
 class StateError(ValueError):
     """Raised by restore for a snapshot of another format or other

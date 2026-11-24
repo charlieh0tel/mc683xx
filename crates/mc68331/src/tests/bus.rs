@@ -106,7 +106,7 @@ fn a_bus_peripheral_takes_its_window_and_nothing_else() {
     );
     assert_eq!(
         chip.peek(Address(WINDOW), Size::Word, FunctionCode::SupervisorData),
-        Err(BusCycleError::Unpeekable),
+        Err(BusCycleError::Unpeekable(Address(WINDOW))),
         "a peripheral answers there"
     );
 }

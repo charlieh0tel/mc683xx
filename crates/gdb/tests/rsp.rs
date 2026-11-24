@@ -31,6 +31,7 @@ use mc683xx_cpu32::exception::VectorSet;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_cpu32::memory::MemoryKind;
+use mc683xx_gdb::AccessError;
 use mc683xx_gdb::Ending;
 use mc683xx_gdb::SessionError;
 use mc683xx_gdb::Target;
@@ -47,6 +48,7 @@ use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 use mc683xx_target::Register;
 use wire::Send;
 use wire::Wire;
@@ -395,6 +397,22 @@ fn chip() -> Mc68331 {
         .memory(rom, MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     builder.build()
+}
+
+#[test]
+fn a_chip_access_stops_at_the_byte_it_names() {
+    let mut chip = chip();
+    let supervisor = FunctionCode::SupervisorData;
+    // CSBOOT's 1-Mbyte block out of reset (SIMRM 7.10.2), nothing past it
+    let past = Address(0x0010_0000);
+    let mut read = [0; 4];
+    let got = Target::read_memory(&mut chip, past.before(2), supervisor, &mut read);
+    assert!(matches!(got, Ok(2)), "{got:?}");
+    let written = Target::write_memory(&mut chip, past.before(1), supervisor, &[1, 2]);
+    assert!(
+        matches!(written, Err(AccessError::Unserved(at)) if at == past),
+        "{written:?}"
+    );
 }
 
 #[test]

@@ -54,10 +54,27 @@ pub enum BusCycleError {
     /// A value wider than the cycle written.
     #[error("{0:#x} does not fit the cycle")]
     Width(u32),
-    /// A peek where only a real cycle can tell: a peripheral, or a module
-    /// register a read would change.
-    #[error("not peekable")]
-    Unpeekable,
+    /// A peek or poke where only a real cycle can tell, at the first
+    /// byte declined: a peripheral's (the first of its run), a module
+    /// register a read would change or that takes no poke, or one a
+    /// matching select reaches nothing through.
+    #[error("not peekable at {0}")]
+    Unpeekable(Address),
+}
+
+impl BusCycleError {
+    /// The address it names: [`None`] for [`Width`](Self::Width), which
+    /// names a value.
+    #[must_use]
+    pub const fn address(&self) -> Option<Address> {
+        match *self {
+            Self::Unserved(address)
+            | Self::BusError(address)
+            | Self::Misaligned(address)
+            | Self::Unpeekable(address) => Some(address),
+            Self::Width(_) => None,
+        }
+    }
 }
 
 impl Mc68331 {
@@ -251,7 +268,7 @@ impl Mc68331 {
                         .iter()
                         .any(|module| module.block().contains(offset)))
             {
-                return Err(BusCycleError::Unpeekable);
+                return Err(BusCycleError::Unpeekable(Address(at)));
             }
             let page_left = (PAGE_BYTES - at % PAGE_BYTES) as usize;
             let count = self
@@ -428,7 +445,7 @@ impl Mc68331 {
         };
         match peeked {
             Peek::Value(value) => Ok(Some(value)),
-            Peek::Unpeekable => Err(BusCycleError::Unpeekable),
+            Peek::Unpeekable => Err(BusCycleError::Unpeekable(Address(address))),
             Peek::Unacknowledged => Ok(None),
         }
     }
@@ -505,7 +522,7 @@ impl Board {
                 if self.peripherals[peripheral].peek(cycle, &mut data[..count]) {
                     Ok(count)
                 } else {
-                    Err(BusCycleError::Unpeekable)
+                    Err(BusCycleError::Unpeekable(Address(address)))
                 }
             }
         }
@@ -554,7 +571,7 @@ impl Board {
                 match wire {
                     Wire::Peripheral(peripheral) => {
                         if !self.peripherals[peripheral].poke(cycle, run) {
-                            return Err(BusCycleError::Unpeekable);
+                            return Err(BusCycleError::Unpeekable(Address(at)));
                         }
                     }
                     // a debugger's write: ROM's too, as `write`'s
@@ -586,7 +603,7 @@ impl Board {
         {
             BusCycleError::Unserved(Address(request.address))
         } else {
-            BusCycleError::Unpeekable
+            BusCycleError::Unpeekable(Address(request.address))
         }
     }
 }

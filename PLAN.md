@@ -188,7 +188,8 @@ chip's, the board's), not a root `VERSION` that could be the crate's.
   what RAM took 0.03 s).  A board peripheral on one lane gets its
   bytes gathered, on its own addresses, a run where they are
   consecutive.  A decline declines the peripheral's whole run.  Both
-  decline by default, which is `BusCycleError::Unpeekable`, never a
+  decline by default, which is `BusCycleError::Unpeekable`, naming the
+  first byte declined, as `PeekError::Unpeekable` does, never a
   guess: only the peripheral knows which of its registers a look
   leaves alone (decided 2026-11-23).  The bare machine's `read` and
   `write`, gdb's memory access and a board peripheral's

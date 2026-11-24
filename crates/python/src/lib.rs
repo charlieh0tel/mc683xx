@@ -121,7 +121,8 @@ mod exceptions {
         UnpeekableError,
         BusCycleError,
         "Raised by peek where only a real bus cycle can tell: a peripheral, \
-         or a module register a read would change."
+         or a module register a read would change.  `address` is the first \
+         byte declined."
     );
 
     pyo3::create_exception!(

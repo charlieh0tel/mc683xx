@@ -7,7 +7,6 @@ use mc683xx_cpu32::Cycles;
 use mc683xx_mc68331::Mc68331;
 use mc683xx_target::Address;
 use mc683xx_target::FunctionCode;
-use mc683xx_target::Size;
 
 use super::AccessError;
 use super::Target;
@@ -31,22 +30,16 @@ impl Target for Mc68331 {
         function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<usize, AccessError<Infallible>> {
-        if self.peek_bytes(address, function_code, data).is_ok() {
-            return Ok(data.len());
-        }
-        // the bytes before the first that fails, a byte at a time
-        Ok((0..)
-            .zip(data.iter_mut())
-            .find_map(|(offset, slot)| {
-                match self.peek(address.offset(offset), Size::Byte, function_code) {
-                    Ok(byte) => {
-                        *slot = byte as u8;
-                        None
-                    }
-                    Err(_) => Some(offset as usize),
-                }
-            })
-            .unwrap_or(data.len()))
+        Ok(match self.peek_bytes(address, function_code, data) {
+            Ok(()) => data.len(),
+            // filled up to the byte it names, on the address lines
+            Err(error) => error.address().map_or(0, |failed| {
+                self.cpu()
+                    .memory
+                    .mask(Address(failed.0.wrapping_sub(address.0)))
+                    .0 as usize
+            }),
+        })
     }
 
     fn write_memory(
@@ -68,7 +61,7 @@ impl Target for Mc68331 {
         }
         // a peripheral's bytes among them: poked, a run at a time
         self.poke_bytes(address, function_code, data)
-            .map_err(|_| AccessError::Unserved(address))
+            .map_err(|error| AccessError::Unserved(error.address().unwrap_or(address)))
     }
 
     fn run_for(
