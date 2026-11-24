@@ -2126,8 +2126,8 @@ parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
   `read_memory.b|w|l ADDR expect V [mask M] [fc FC]` and
   `poll_memory.b|w|l ADDR mask M expect V timeout_ms N [fc FC]`; the
   clauses in any order, each once; numbers as `parse_integer` takes
-  them; a function code by name or number (`parse_function_code`,
-  as gdb's `monitor fc` takes one), printed by name.
+  them; a function code by name or number (`FunctionCode`'s
+  `FromStr`, as gdb's `monitor fc` takes one), printed by name.
   Parsing refuses what cannot work: a value wider than its access, an
   expected value outside its mask, a word or long access at an odd
   address, a word that names no function code and is no number from

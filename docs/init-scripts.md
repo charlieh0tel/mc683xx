@@ -63,7 +63,7 @@ and the runner's options take the same.
 
 `fc` takes a function code (CPU32RM 5.3, Table 5-1) by name, in any
 case, or by number, 0 to 7, in the number syntax above
-(`mc683xx_target::function_code::parse_function_code`):
+(`mc683xx_target::function_code::FunctionCode`'s `FromStr`):
 
 | Code | Name |
 | --- | --- |
