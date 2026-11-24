@@ -490,8 +490,14 @@ impl Cpu {
     /// takes the exceptions they raise, then trace, then an interrupt,
     /// in Table 6-2's order (CPU32RM 6.1.5).  A hook can stop it early,
     /// before an instruction or after one, and the bus after one
-    /// ([`Bus::stop_requested`]).  If the host moved PC since the last
-    /// run, the instruction there starts a block.
+    /// ([`Bus::stop_requested`]).  An exception
+    /// [`set_stop_on_exception`](Self::set_stop_on_exception) names, or
+    /// one an intercept hook takes, ends it [`Stop::Requested`], with no
+    /// detail: [`run_limited`](Self::run_limited) ends with its
+    /// [`End`](crate::End), as a host that sets those runs.  (A fault
+    /// stop is [`Stop::Fault`], its detail
+    /// [`fault_stop`](Self::fault_stop).)  If the host moved PC since the
+    /// last run, the instruction there starts a block.
     pub fn run_for(
         &mut self,
         bus: &mut dyn Bus,
