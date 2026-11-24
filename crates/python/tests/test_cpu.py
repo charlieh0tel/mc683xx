@@ -870,3 +870,16 @@ def test_a_vector_set_is_taken_wherever_vectors_are():
     cpu.add_intercept_hook(lambda intercepted: seen.append(intercepted.vector), mc683xx.VectorSet.INSTRUCTION)
     assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
     assert seen == [TRAP_0 + 1]
+
+
+def test_vector_names_rust_s_vector_numbers():
+    Vector = mc683xx.Vector
+    assert (Vector.BUS_ERROR, Vector.ZERO_DIVIDE, Vector.TRAP, Vector.FORMAT_ERROR) == (2, 5, 32, 14)
+    assert Vector.trap(7) == 39 and Vector.autovector(3) == 27
+    assert Vector.TRAP + 1 in mc683xx.VectorSet.INSTRUCTION
+    with pytest.raises(ValueError, match="TRAP #16"):
+        Vector.trap(16)
+    with pytest.raises(ValueError):
+        Vector.autovector(8)
+    with pytest.raises(TypeError):
+        Vector()

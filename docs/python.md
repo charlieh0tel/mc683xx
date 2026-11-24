@@ -44,7 +44,11 @@ rename renames the Python name with it.  The deliberate differences:
   (`Event.Reset(now, cause)`, `Frame.Data(bits)`), and so does
   `Pacing`, though it has `Display` and `FromStr`: its factor is a
   number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`
-  the text.  Such a value's `str()` is Rust's `Display` too (`Stop`,
+  the text.  An exception vector crosses as its number too, Rust's
+  `Vector` newtype of every `u8`; the class `Vector` holds Rust's
+  constants and constructors as numbers (`Vector.BUS_ERROR` is 2,
+  `Vector.trap(7)` 39, `Vector.autovector(3)` 27), and no value is a
+  `Vector`.  Such a value's `str()` is Rust's `Display` too (`Stop`,
   `End`, `Entry`, `Pacing`: `str(Stop.Budget())` is `"budget"`), and
   so is a struct's or an id's that has one (`FaultStop`, `HookId`,
   `ObserverId`, `PeripheralId`, `MemoryId`: `str(hook)` is `"hook 3"`, where its
@@ -1772,8 +1776,9 @@ in ascending order.  Rust's `with(vector)` is a Python keyword, so a
 vector is added by `union(VectorSet([vector]))`.
 
 ```python
-everything_but_trap_7 = mc683xx.VectorSet.INSTRUCTION.without(32 + 7)
-assert 32 + 7 not in everything_but_trap_7 and 32 + 1 in everything_but_trap_7
+everything_but_trap_7 = mc683xx.VectorSet.INSTRUCTION.without(mc683xx.Vector.trap(7))
+assert mc683xx.Vector.trap(7) not in everything_but_trap_7
+assert mc683xx.Vector.ZERO_DIVIDE in everything_but_trap_7
 bare.set_stop_on_exception(everything_but_trap_7)
 assert bare.stops_on_exception == everything_but_trap_7
 bare.set_stop_on_exception(mc683xx.VectorSet.NONE)

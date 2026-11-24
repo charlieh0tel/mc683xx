@@ -62,6 +62,7 @@ __all__ = [
     "ClockPhase",
     "Space",
     "HookId",
+    "Vector",
     "VectorSet",
     "Instruction",
     "MemoryAccess",
@@ -494,6 +495,37 @@ class HookId:
     `str()` is `hook 3`."""
 
     def __hash__(self) -> int: ...
+
+@final
+class Vector:
+    """Rust's `exception::Vector` constants and constructors, as vector
+    numbers (CPU32RM Table 6-1): a vector crosses as its number, so
+    `Vector` names numbers and is no type a value has."""
+
+    RESET_STACK_POINTER: ClassVar[int]
+    RESET_PROGRAM_COUNTER: ClassVar[int]
+    BUS_ERROR: ClassVar[int]
+    ADDRESS_ERROR: ClassVar[int]
+    ILLEGAL_INSTRUCTION: ClassVar[int]
+    ZERO_DIVIDE: ClassVar[int]
+    CHK: ClassVar[int]
+    TRAPCC: ClassVar[int]
+    PRIVILEGE_VIOLATION: ClassVar[int]
+    TRACE: ClassVar[int]
+    LINE_A: ClassVar[int]
+    LINE_F: ClassVar[int]
+    HARDWARE_BREAKPOINT: ClassVar[int]
+    FORMAT_ERROR: ClassVar[int]
+    UNINITIALIZED_INTERRUPT: ClassVar[int]
+    SPURIOUS_INTERRUPT: ClassVar[int]
+    TRAP: ClassVar[int]
+
+    @staticmethod
+    def trap(number: int) -> int:
+        """TRAP #`number`'s vector, 32 to 47; `ValueError` past 15."""
+    @staticmethod
+    def autovector(level: int) -> int:
+        """Interrupt level `level`'s autovector, 24 to 31."""
 
 @final
 class VectorSet:

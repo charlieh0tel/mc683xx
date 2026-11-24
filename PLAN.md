@@ -1056,7 +1056,10 @@ chip beside `Mc68331`.
   `stops_on_fault`, `set_stop_on_exception` and `stops_on_exception`
   (vectors as a `VectorSet`, Rust's, which replaced a `frozenset` in
   0.9.0 so the set's constants and `without` read as in Rust; an
-  iterable of numbers is taken too), `request_interrupt(pin, vector)`,
+  iterable of numbers is taken too; a vector is its number, `Vector`
+  naming Rust's constants as numbers, `Vector.BUS_ERROR`, a namespace
+  rather than a type, as vectors cross as numbers everywhere else),
+  `request_interrupt(pin, vector)`,
   `clear_interrupt`, `take_exception(vector, level=None)`, `reset`,
   `save`, `restore`.  `run_limited` gives a `LimitedRun(cycles, end)`,
   its `End` Rust's (`End.Stop(stop)`, `End.Reached()`,
