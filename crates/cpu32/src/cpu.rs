@@ -1943,7 +1943,7 @@ impl Core<'_> {
     /// Marks the cycles that follow as exception stacking's, or not.
     pub(crate) fn set_stacking(&mut self, stacking: bool) {
         self.cpu.stacking = stacking;
-        self.bus.stacking(stacking);
+        self.bus.set_stacking(stacking);
     }
 
     /// Records a stop the bus asks for after a cycle.

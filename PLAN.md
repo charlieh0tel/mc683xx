@@ -2456,7 +2456,7 @@ and `mc683xx.Machine` in Python (see Python).
   when the host asks with `Cpu::set_long_bus`; the chip never does, as
   the CPU32's 16-bit bus splits it), and so do the read and write
   hooks, whatever served it (see Hooks).  A peripheral sees whether exception
-  processing is stacking (`Bus::stacking`).
+  processing is stacking (`Bus::set_stacking`).
 - **Interrupts:** a request line per level 1 to 7 that the host sets
   with a vector or the autovector, level-sensitive until it clears it.
 - **Host exceptions:** `Cpu::take_exception(vector, level)` (and

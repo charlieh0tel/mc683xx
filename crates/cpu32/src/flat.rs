@@ -225,7 +225,7 @@ impl Bus for FlatBus {
         Some(self.write(access, value))
     }
 
-    fn stacking(&mut self, stacking: bool) {
+    fn set_stacking(&mut self, stacking: bool) {
         self.stacking = stacking;
     }
 
