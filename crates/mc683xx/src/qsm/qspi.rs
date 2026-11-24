@@ -6,20 +6,18 @@
 //! the bits an external master, the host, clocks while it holds PCS0/SS
 //! low.
 
-use std::any::Any;
 use std::fmt;
 
-use mc683xx_cpu32::cpu::state::Save;
 use mc683xx_cpu32::cycles::Cycle;
 use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::frequency::Frequency;
 
 use super::port::PortQs;
+use crate::peripheral::AnySpiPeripheral;
 use crate::peripheral::ClockPhase;
 use crate::peripheral::ClockPolarity;
 use crate::peripheral::QspiClock;
 use crate::peripheral::QspiTransfer;
-use crate::peripheral::SpiPeripheral;
 
 /// The QSPI RAM's bytes: receive, transmit and command (QSMRM 4.3.6).
 pub(super) const RAM_BYTES: usize = 0x50;
@@ -153,17 +151,6 @@ impl Shifted {
         }
     }
 }
-
-/// A QSPI peripheral the chip holds, which the host can get back by
-/// type (`Mc68331::qspi_peripheral` and `qspi_peripheral_mut` name it
-/// as their bound).  It says whether it saves ([`Save`]), as a chip's
-/// peripherals do: the chip's snapshot holds it.
-///
-/// Every [`SpiPeripheral`] that is [`Save`] and `'static` is one: a
-/// host implements those two, never this.
-pub trait AnySpiPeripheral: SpiPeripheral + Save + Any {}
-
-impl<T: SpiPeripheral + Save + Any> AnySpiPeripheral for T {}
 
 /// Where a queue entry is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

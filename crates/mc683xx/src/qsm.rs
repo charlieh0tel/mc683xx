@@ -21,7 +21,6 @@ use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 
 use self::port::PortQs;
-use self::qspi::AnySpiPeripheral;
 use self::qspi::Qspi;
 use self::sci::Frame;
 use self::sci::Sci;
@@ -31,6 +30,7 @@ use crate::module::InterruptRequest;
 use crate::module::Module;
 use crate::module::Peek;
 use crate::module::RegisterAccess;
+use crate::peripheral::AnySpiPeripheral;
 use crate::peripheral::Timed;
 use crate::pins::PortLevels;
 use crate::pins::PortState;

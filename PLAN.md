@@ -234,8 +234,8 @@ prefix; their directories keep the short names.
   peripheral; a snapshot with another count of peripherals is
   `StateError::Mismatch("peripherals")`.  The QSPI's peripheral
   (`Builder::set_qspi`) is held the same way: `Save` is a bound of the
-  attach (`AnySpiPeripheral`, in `mc683xx-modules`, since the QSM holds
-  it), and the chip's snapshot, not the QSM's, holds its bytes, so the
+  attach (`AnySpiPeripheral`, in `mc683xx-modules`'s `peripheral`
+  beside `AnyMappedPeripheral`, since the QSM holds it), and the chip's snapshot, not the QSM's, holds its bytes, so the
   QSM's format stays the module's own and the chip saves and puts back
   every host part in one place.  One that cannot save is named `the
   QSPI peripheral`; a snapshot with one where the chip has none, or none
