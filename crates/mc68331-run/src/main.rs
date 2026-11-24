@@ -399,7 +399,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         let ending = gdb::serve(&mut board, &mut turns, address, &interrupted)?;
         let killed = ending == Ending::Killed;
         if killed || interrupted.load(Ordering::SeqCst) {
-            let outcome = BoardRun::new(Stop::Requested, board.now());
+            let outcome = BoardRun::new(board.now(), Stop::Requested);
             eprintln!("{}", Line::new(CHIP, &board.stopped_record(outcome)));
             if let Some(saving) = saving.filter(|_| !killed) {
                 saving.save(&board)?;

@@ -4149,7 +4149,7 @@ fn a_board_in_background_mode_runs_to_its_end_as_time() {
     // past the RESET release the chip drives, a board event
     assert_eq!(
         board.run_until(until).unwrap(),
-        BoardRun::new(Stop::Background(Entry::Breakpoint), until)
+        BoardRun::new(until, Stop::Background(Entry::Breakpoint))
     );
     assert_eq!(board.chip().instructions(), instructions);
     let observed: Vec<Signal> = board
@@ -4180,7 +4180,7 @@ fn run_in_background(board: &mut Board<Mc68331>, until: Time) {
     let instructions = board.chip().instructions();
     assert_eq!(
         board.run_until(until).unwrap(),
-        BoardRun::new(Stop::Background(Entry::Breakpoint), until)
+        BoardRun::new(until, Stop::Background(Entry::Breakpoint))
     );
     assert_eq!(board.chip().instructions(), instructions);
 }

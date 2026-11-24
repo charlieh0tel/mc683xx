@@ -251,20 +251,21 @@ pub struct External {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct BoardRun {
-    /// Why: its time ran out ([`Stop::Budget`]), the CPU halted, a hook
-    /// stopped it, or the host or a peripheral asked ([`Stop::Requested`]).
-    pub stop: Stop,
     /// Board time at its end, never past the time it ran to, though
     /// the chip's last instruction may end past it.
     pub now: Time,
+    /// Why: its time ran out ([`Stop::Budget`]), the CPU halted, a hook
+    /// stopped it, or the host or a peripheral asked ([`Stop::Requested`]).
+    pub stop: Stop,
 }
 
 impl BoardRun {
-    /// A run that ended for `stop` at `now`: a board's own, or a host's
-    /// stand-in for one (a debugger that ended the session).
+    /// A run that ended at `now` for `stop`: a board's own, or a host's
+    /// stand-in for one (a debugger that ended the session).  Time
+    /// first, as [`Run::new`](mc683xx_cpu32::cpu::Run::new).
     #[must_use]
-    pub const fn new(stop: Stop, now: Time) -> Self {
-        Self { stop, now }
+    pub const fn new(now: Time, stop: Stop) -> Self {
+        Self { now, stop }
     }
 }
 
