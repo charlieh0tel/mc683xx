@@ -206,12 +206,25 @@ fn os_error(path: &Path, error: io::Error) -> PyErr {
     .unwrap_or_else(|raised: PyErr| raised)
 }
 
+/// A Cargo version as PEP 440 spells it, as maturin names the wheel:
+/// `0.9.0-alpha.1` is `0.9.0a1` (`-beta.N` `bN`, `-rc.N` `rcN`).
+fn pep440_version(cargo: &str) -> String {
+    let Some((release, pre)) = cargo.split_once('-') else {
+        return cargo.to_owned();
+    };
+    let pre = [("alpha.", "a"), ("beta.", "b"), ("rc.", "rc")]
+        .iter()
+        .find_map(|(cargo, pep)| pre.strip_prefix(cargo).map(|n| format!("{pep}{n}")))
+        .unwrap_or_else(|| format!("-{pre}"));
+    format!("{release}{pre}")
+}
+
 /// The module.
 #[pymodule]
 fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    // the package's version, the workspace's (docs/releasing.md); not in
-    // `__all__`, so a star import leaves it
-    module.setattr("__version__", env!("CARGO_PKG_VERSION"))?;
+    // the package's version, the workspace's (docs/releasing.md) as the
+    // wheel spells it; not in `__all__`, so a star import leaves it
+    module.setattr("__version__", pep440_version(env!("CARGO_PKG_VERSION")))?;
     module.add_class::<MachineView>()?;
     module.add_class::<FaultStopView>()?;
     module.add_class::<FaultCauseKind>()?;
@@ -290,4 +303,17 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
         module.py().get_type::<exceptions::TargetError>(),
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pep440_version;
+
+    #[test]
+    fn a_cargo_pre_release_reads_as_pep_440() {
+        assert_eq!(pep440_version("0.9.0"), "0.9.0");
+        assert_eq!(pep440_version("0.9.0-alpha.1"), "0.9.0a1");
+        assert_eq!(pep440_version("1.0.0-beta.2"), "1.0.0b2");
+        assert_eq!(pep440_version("1.0.0-rc.3"), "1.0.0rc3");
+    }
 }
