@@ -432,6 +432,7 @@ impl Cpu {
         self.idle = None;
         self.bare.breakpoint_pending = false;
         self.bare.trace_pending = None;
+        self.bare.exception_once = None;
         self.bare.end = None;
         self.fault_window = true;
         self.released = None;
@@ -519,6 +520,7 @@ impl Cpu {
         self.bare.end = None;
         let run = self.run_from_boundary(bus, interrupts, now, budget, limits);
         self.left_pc = self.registers.pc;
+        self.after_host_run();
         run
     }
 
@@ -1243,6 +1245,9 @@ impl Core<'_> {
         faulted: Option<Address>,
         level: Option<InterruptLevel>,
     ) -> Processed {
+        if self.cpu.exception_stops(vector, pc) {
+            return Processed::Stopped;
+        }
         let (resume, stall) = (self.cpu.resume, self.cpu.stall);
         let processed = self.process(vector, pc, faulted, level, false);
         if processed == Processed::Stopped {

@@ -1456,7 +1456,8 @@ assert bare.read_register("D0") == 6
   called; `begin` sets PC and forgets a hook stop's skip, so the
   hooks at `begin` fire even if the last run stopped there.  `end`,
   an `End` as Rust's, says why it ended: `End.Reached()`,
-  `End.Instructions()`, `End.Fault(fault)` (a `FaultStop`), or
+  `End.Instructions()`, `End.Fault(fault)` (a `FaultStop`),
+  `End.Exception(vector, pc)` (`set_stop_on_exception`), or
   `End.Stop(stop)` with a chip's `Stop` (the value a field named for
   it, `end.fault` and `end.stop`, not Rust's `_0`): `Budget()` (cycles),
   `Hook(hook)`, `Requested()` (`stop_request().request()`, from a
@@ -1636,12 +1637,37 @@ match bare.run_limited(begin=CALL, reach=CALL_RETURN).end:
 bare.set_stop_on_fault(False)
 ```
 
-To stop at any exception an instruction raises, with its vector and
-PC: intercept each such vector, and have the callback record
-`intercepted.vector` and `intercepted.pc`, call
-`stop_request().request()` and return `True`.  Nothing is stacked, PC
-is at the instruction, and the run ends `End.Stop(Stop.Requested())`.
-Faults are not intercepted: `set_stop_on_fault(True)` stops at them.
+`set_stop_on_exception(True)` (`stops_on_exception`, Rust's
+`Cpu::set_stop_on_exception`) stops the run at any exception the CPU
+is about to take, before anything is stacked: `End.Exception(vector,
+pc)`.  It covers an exception an instruction raises, a fault among
+them, a trace, a hardware breakpoint and an interrupt, once
+acknowledged, as its vector is then known; not a fault while stacking,
+nor `take_exception`'s.  An instruction's exception leaves the
+instruction undone and PC at it, as a fault stop does; a trace or a
+breakpoint is left pending, the instruction before it kept, and an
+interrupt is sampled and acknowledged again.  The next run takes that
+exception natively, once, with no stop for it; the host may instead
+take one of its own with `take_exception`.  A fault with
+`set_stop_on_fault(True)` is `End.Fault` instead, and an exception an
+intercept hook covers is the hook's: one no hook handles is taken
+natively, with no stop.
+
+```python
+bare.write(CALL, struct.pack(">2H", TRAP_7, RTS))
+bare.set_stop_on_exception(True)
+match bare.run_limited(begin=CALL, reach=CALL_RETURN).end:
+    case mc683xx.End.Exception(vector, pc):
+        assert (vector, pc) == (32 + 7, CALL) and bare.read_register("PC") == CALL
+    case end:
+        raise AssertionError(end)
+bare.set_stop_on_exception(False)
+```
+
+A stop at chosen exceptions alone is an intercept hook's: one that
+records `intercepted.vector` and `intercepted.pc`, calls
+`stop_request().request()` and returns `True` ends the run
+`End.Stop(Stop.Requested())`, nothing stacked, PC at the instruction.
 
 ```python
 stops: list[tuple[int, int]] = []
@@ -1716,6 +1742,7 @@ The port of a Unicorn harness is mechanical:
 | `UC_HOOK_MEM_READ` to watch | `add_read_hook`, after the instruction |
 | `UC_HOOK_MEM_INVALID`, `UC_MEM_WRITE_PROT` | `add_invalid_hook` (`reason` `BUS_ERROR` or `PROTECTED`), or `set_stop_on_fault` and `End.Fault` |
 | `UcError` on a fault | `set_stop_on_fault(True)`, `End.Fault(fault)`; by default the CPU takes the bus error exception |
+| `emu_stop()` in a `UC_HOOK_INTR` hook | `set_stop_on_exception(True)`, `End.Exception(vector, pc)`, before stacking |
 | `UC_HOOK_INTR` (`intno`) | `add_intercept_hook(f, vectors)` before stacking (the vector, not `intno`), or `add_exception_hook` after |
 | interrupts stacked by hand | `request_interrupt(pin, vector)` |
 | `hook_del(handle)` | `remove_hook(hook)` |

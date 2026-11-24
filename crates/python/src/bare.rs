@@ -330,6 +330,14 @@ pub(crate) enum EndView {
         /// The fault.
         fault: FaultStopView,
     },
+    /// An exception the CPU was about to take, with
+    /// `set_stop_on_exception`: nothing stacked.
+    Exception {
+        /// Its vector number.
+        vector: u8,
+        /// PC, where its processing begins when the run goes on.
+        pc: u32,
+    },
 }
 
 impl TryFrom<End> for EndView {
@@ -349,6 +357,10 @@ impl TryFrom<End> for EndView {
             End::Fault(fault) => Self::Fault {
                 fault: FaultStopView(fault),
             },
+            End::Exception { vector, pc } => Self::Exception {
+                vector: vector.0,
+                pc: pc.0,
+            },
             other => return Err(Error::run_end(other)),
         })
     }
@@ -361,6 +373,10 @@ impl From<EndView> for End {
             EndView::Reached() => Self::Reached,
             EndView::Instructions() => Self::Instructions,
             EndView::Fault { fault } => Self::Fault(fault.0),
+            EndView::Exception { vector, pc } => Self::Exception {
+                vector: Vector(vector),
+                pc: Address(pc),
+            },
         }
     }
 }
@@ -378,6 +394,7 @@ impl EndView {
             Self::Reached() => "End.Reached()".to_owned(),
             Self::Instructions() => "End.Instructions()".to_owned(),
             Self::Fault { fault } => format!("End.Fault({})", repr(py, fault.clone())?),
+            Self::Exception { vector, pc } => format!("End.Exception({vector}, {pc:#010x})"),
         })
     }
 }
@@ -818,6 +835,22 @@ impl MachineView {
     #[getter]
     fn stops_on_fault(&self) -> bool {
         self.machine.cpu.stops_on_fault()
+    }
+
+    /// Whether any exception the CPU is about to take, a trap, a fault,
+    /// a trace, a hardware breakpoint or an interrupt, stops the run
+    /// before anything is stacked (`End.Exception`).  The next run
+    /// takes it natively.  A fault with `set_stop_on_fault` is a fault
+    /// stop instead, and an intercept hook's exception is the hook's.
+    /// Off at first.
+    fn set_stop_on_exception(&mut self, stop: bool) {
+        self.machine.cpu.set_stop_on_exception(stop);
+    }
+
+    /// Whether any exception stops the run (`set_stop_on_exception`).
+    #[getter]
+    fn stops_on_exception(&self) -> bool {
+        self.machine.cpu.stops_on_exception()
     }
 
     /// Instructions run since the CPU was made.

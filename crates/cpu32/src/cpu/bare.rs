@@ -178,12 +178,20 @@ pub enum End {
     Fault(FaultStop),
     /// An intercepted exception.
     Intercepted(Intercepted),
+    /// An exception the CPU was about to take, with
+    /// [`Cpu::set_stop_on_exception`]: nothing stacked.
+    Exception {
+        /// Its vector.
+        vector: Vector,
+        /// PC, where its processing begins when the run goes on.
+        pc: Address,
+    },
 }
 
 /// A short lowercase name for each way a limited run ends, as
 /// [`Stop`]'s: its stop's name, or `reached`, `instructions`, `steps`,
-/// `fault` or `intercepted`.  The detail a variant holds (the fault, the
-/// exception) is not part of it.
+/// `fault`, `intercepted` or `exception`.  The detail a variant holds
+/// (the fault, the exception) is not part of it.
 impl fmt::Display for End {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -193,6 +201,7 @@ impl fmt::Display for End {
             Self::Steps => formatter.write_str("steps"),
             Self::Fault(_) => formatter.write_str("fault"),
             Self::Intercepted(_) => formatter.write_str("intercepted"),
+            Self::Exception { .. } => formatter.write_str("exception"),
         }
     }
 }
@@ -244,11 +253,17 @@ impl VectorSet {
 pub(crate) struct Bare {
     /// Stop on a fault rather than take it.
     pub(crate) stop_on_fault: bool,
+    /// Stop before any exception is taken.
+    pub(crate) stop_on_exception: bool,
     /// The vectors the intercept hooks cover.
     pub(crate) intercepted: VectorSet,
     /// An intercepted exception taken natively once: by the instruction
     /// at this address, when the instruction count is this.
     pub(crate) native_once: Option<(Address, u64)>,
+    /// The exception an exception stop ended the last run at, taken
+    /// with no stop once: at this PC, when the instruction count is
+    /// this.
+    pub(crate) exception_once: Option<(Address, u64)>,
     /// The end a fault or an intercept set, for `run_limited`.
     pub(crate) end: Option<End>,
     /// The last invalid access's reason, for a fault's cause.
@@ -398,6 +413,37 @@ impl Cpu {
     #[must_use]
     pub const fn stops_on_fault(&self) -> bool {
         self.bare.stop_on_fault
+    }
+
+    /// Whether any exception the CPU is about to take ends a run before
+    /// anything is stacked ([`End::Exception`]): off at first.  It
+    /// covers an exception an instruction raises (a trap, an illegal
+    /// instruction, a fault), a trace, a hardware breakpoint and an
+    /// interrupt, once acknowledged, as its vector is then known; not
+    /// a fault in exception processing, nor one
+    /// [`take_exception`](Self::take_exception) takes.  An instruction's
+    /// exception leaves the instruction undone, PC at it, as a fault
+    /// stop does ([`FaultStop`]); a trace or a hardware breakpoint is
+    /// left pending, the instruction before it kept, and an interrupt
+    /// is withdrawn, to be sampled and acknowledged again.  The next
+    /// run takes that exception natively, once, with no stop for it
+    /// (the host may instead take one of its own with `take_exception`,
+    /// and withdraw a trace left pending with
+    /// [`set_trace_pending`](Self::set_trace_pending)).  A fault with
+    /// [`set_stop_on_fault`](Self::set_stop_on_fault) is a fault stop
+    /// ([`End::Fault`]) instead, and an exception the intercept hooks
+    /// cover is theirs ([`add_intercept_hook`](Self::add_intercept_hook)):
+    /// one they all decline is taken natively, with no stop.
+    pub fn set_stop_on_exception(&mut self, stop: bool) {
+        self.bare.stop_on_exception = stop;
+        self.bare.exception_once = None;
+        self.update_capture();
+    }
+
+    /// Whether any exception stops a run.
+    #[must_use]
+    pub const fn stops_on_exception(&self) -> bool {
+        self.bare.stop_on_exception
     }
 
     /// Why the CPU halted, while it stays halted.
@@ -575,7 +621,8 @@ impl Cpu {
 
     /// Whether the registers are kept as each instruction begins.
     pub(crate) fn update_capture(&mut self) {
-        self.capture = self.bare.stop_on_fault || self.hooks.want_registers();
+        self.capture =
+            self.bare.stop_on_fault || self.bare.stop_on_exception || self.hooks.want_registers();
     }
 
     /// The end the bare host's settings make of an instruction that
@@ -598,23 +645,72 @@ impl Cpu {
         {
             return Some(self.fault_end(fault));
         }
-        let Err(exception @ (Exception::Short { .. } | Exception::Long { .. })) = step else {
-            return None;
+        let vector = match (step, fault) {
+            (_, Some(fault)) => fault.vector,
+            (Err(exception @ (Exception::Short { .. } | Exception::Long { .. })), None) => {
+                exception.vector()
+            }
+            (_, None) => return None,
         };
-        let vector = exception.vector();
-        let native = self.bare.native_once.take() == Some((instruction_pc, self.instructions));
-        if native || vector == Vector::TRACE || !self.bare.intercepted.contains(vector) {
+        // `rte`'s requeued trace is a trace, after the RTE completed
+        if vector == Vector::TRACE {
             return None;
         }
-        let intercepted = Intercepted {
+        if self.bare.native_once.take() == Some((instruction_pc, self.instructions)) {
+            return None;
+        }
+        if fault.is_none() && self.bare.intercepted.contains(vector) {
+            let intercepted = Intercepted {
+                vector,
+                pc: instruction_pc,
+            };
+            if !self.hooks.intercept(&intercepted) {
+                return None;
+            }
+            self.undo_instruction(instruction_pc);
+            return Some(End::Intercepted(intercepted));
+        }
+        if !self.exception_stops_at(instruction_pc) {
+            return None;
+        }
+        if fault.is_some() {
+            self.roll_back();
+        } else {
+            self.undo_instruction(instruction_pc);
+        }
+        Some(End::Exception {
             vector,
-            pc: instruction_pc,
-        };
-        if !self.hooks.intercept(&intercepted) {
-            return None;
+            pc: self.registers.pc,
+        })
+    }
+
+    /// Whether the exception of `vector`, about to be processed at an
+    /// instruction boundary with PC at `pc` (a trace, a hardware
+    /// breakpoint, an interrupt), stops the run instead
+    /// ([`set_stop_on_exception`](Self::set_stop_on_exception)): if so,
+    /// the run ends once this instruction ends.
+    pub(crate) fn exception_stops(&mut self, vector: Vector, pc: Address) -> bool {
+        if !self.exception_stops_at(pc) {
+            return false;
         }
-        self.undo_instruction(instruction_pc);
-        Some(End::Intercepted(intercepted))
+        self.end_with(End::Exception { vector, pc });
+        true
+    }
+
+    /// Whether an exception about to be processed with PC at `pc`
+    /// stops the run: exceptions stop it, and it is not the one the
+    /// last run stopped at, which is taken this once.
+    fn exception_stops_at(&mut self, pc: Address) -> bool {
+        self.bare.stop_on_exception
+            && self.bare.exception_once.take() != Some((pc, self.instructions))
+    }
+
+    /// What a host's run leaves for the next: after an exception stop,
+    /// that exception taken with no stop, once.
+    pub(crate) fn after_host_run(&mut self) {
+        if let Some(End::Exception { pc, .. }) = self.bare.end {
+            self.bare.exception_once = Some((pc, self.instructions));
+        }
     }
 
     /// Undoes the instruction at `instruction_pc` that raised an

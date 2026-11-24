@@ -359,6 +359,32 @@ def test_an_exception_no_hook_handles_is_taken_natively():
     assert cpu.read_register("SSP") == STACK - 4 - 8
 
 
+def test_an_exception_stop_stacks_nothing_and_the_run_on_takes_it():
+    cpu = machine(trap(1), RTS)
+    cpu.set_stop_on_exception(True)
+    assert cpu.stops_on_exception
+    match cpu.run_limited(reach=HANDLER).end:
+        case mc683xx.End.Exception(vector, pc):
+            assert (vector, pc) == (TRAP_0 + 1, CODE)
+        case end:
+            raise AssertionError(end)
+    end = mc683xx.End.Exception(TRAP_0 + 1, CODE)
+    assert (str(end), repr(end)) == ("exception", f"End.Exception({TRAP_0 + 1}, {CODE:#010x})")
+    assert cpu.read_register("SSP") == STACK - 4
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
+    assert cpu.read_register("SSP") == STACK - 4 - 8
+
+
+def test_an_interrupt_stops_once_acknowledged():
+    cpu = machine(NOP, RTS)
+    cpu.set_stop_on_exception(True)
+    cpu.request_interrupt(3, 0x40)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Exception(0x40, CODE)
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
+    cpu.set_stop_on_exception(False)
+    assert not cpu.stops_on_exception
+
+
 def test_a_fault_stops_the_run_with_nothing_stacked():
     cpu = machine(moveq(3, 1), MOVE_LONG_A0_TO_D0, RTS)
     cpu.set_stop_on_fault(True)

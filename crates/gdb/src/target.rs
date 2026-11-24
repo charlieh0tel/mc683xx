@@ -90,7 +90,7 @@ pub enum TargetRun {
     Requested,
     /// A fault stopped it rather than being taken
     /// ([`Cpu::set_stop_on_fault`]), or, on the bare CPU, an exception
-    /// its host handles did.
+    /// its host handles or stops at did.
     ///
     /// [`Cpu::set_stop_on_fault`]: mc683xx_cpu32::cpu::Cpu::set_stop_on_fault
     Fault,
@@ -428,7 +428,7 @@ impl Target for Machine {
         Ok(match run.end {
             End::Stop(stop) => stop.into(),
             End::Reached | End::Instructions | End::Steps => TargetRun::Quantum,
-            End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
+            End::Fault(_) | End::Intercepted(_) | End::Exception { .. } => TargetRun::Fault,
             _ => TargetRun::Requested,
         })
     }

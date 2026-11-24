@@ -257,7 +257,7 @@ BDM, below):
 | A stop condition (`monitor stop`) | `SIGTRAP`; `monitor stop` names it |
 | A peripheral's or the host's stop request | `SIGINT` |
 | A double bus fault halt | `SIGBUS`; it stays halted until a reset: `monitor reset`, or the watchdog's as time passes |
-| A fault stop (`monitor faults stop`, `set_stop_on_fault`) or a bare CPU's intercept (`add_intercept_hook`) | `SIGBUS` |
+| A fault stop (`monitor faults stop`, `set_stop_on_fault`) or a bare CPU's intercept (`add_intercept_hook`) or exception stop (`set_stop_on_exception`) | `SIGBUS` |
 
 A signal gdb passes back on continue (`signal SIGINT`) is dropped: the
 CPU has none.
