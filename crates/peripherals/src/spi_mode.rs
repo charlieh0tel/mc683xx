@@ -9,7 +9,7 @@ use mc683xx_modules::peripheral::QspiClock;
 /// A frame's first transfer in SPI mode `number`, of no bits
 /// (`Transfer::shifting` gives it its word).
 pub(crate) fn transfer(number: u8) -> Transfer {
-    let mode = Mode::numbered(number);
+    let mode = Mode::from_number(number);
     let clock = QspiClock::new(
         mode.polarity,
         mode.phase,
