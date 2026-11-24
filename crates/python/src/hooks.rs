@@ -94,36 +94,54 @@ pub(crate) fn register_dictionary<'py>(
     Ok(dictionary)
 }
 
+/// The registers a hook's argument carries.
+#[derive(Debug)]
+pub(crate) struct Captured(Registers);
+
+impl Captured {
+    /// Every register by name.
+    fn dictionary<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        register_dictionary(py, &self.0)
+    }
+}
+
 /// An instruction about to execute, as a code or block hook sees it.
 #[pyclass(name = "Instruction", module = "mc683xx", frozen)]
 #[derive(Debug)]
-pub(crate) struct InstructionView(Instruction);
+pub(crate) struct InstructionView {
+    /// Its address.
+    pc: Address,
+    /// The registers.
+    registers: Captured,
+    /// The long word at A7 (`hooks::Instruction::stack_top`).
+    stack_top: Option<u32>,
+}
 
 #[pymethods]
 impl InstructionView {
     /// Its address.
     #[getter]
     const fn pc(&self) -> u32 {
-        self.0.pc.0
+        self.pc.0
     }
 
     /// Every register by name, as `Mc68331.registers()` gives them.
     #[getter]
     fn registers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        register_dictionary(py, &self.0.registers)
+        self.registers.dictionary(py)
     }
 
     /// The long word at A7, in data space, if memory serves it; `None`
     /// if a peripheral would.
     #[getter]
-    fn stack_top(&self) -> Option<u32> {
-        self.0.stack_top
+    const fn stack_top(&self) -> Option<u32> {
+        self.stack_top
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         Ok(format!(
             "Instruction(pc={:#08x}, stack_top={})",
-            self.0.pc.0,
+            self.pc.0,
             repr(py, self.stack_top())?
         ))
     }
@@ -132,7 +150,7 @@ impl InstructionView {
 /// A read or write cycle that ended well, as a memory hook sees it.
 #[pyclass(name = "MemoryAccess", module = "mc683xx", frozen)]
 #[derive(Debug)]
-pub(crate) struct MemoryAccessView(MemoryAccess, Option<Registers>);
+pub(crate) struct MemoryAccessView(MemoryAccess, Option<Captured>);
 
 #[pymethods]
 impl MemoryAccessView {
@@ -187,7 +205,7 @@ impl MemoryAccessView {
     fn registers<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
         self.1
             .as_ref()
-            .map(|registers| register_dictionary(py, registers))
+            .map(|registers| registers.dictionary(py))
             .transpose()
     }
 
@@ -456,7 +474,7 @@ impl TryFrom<Invalid> for InvalidReason {
 /// sees it.
 #[pyclass(name = "InvalidAccess", module = "mc683xx", frozen)]
 #[derive(Debug)]
-pub(crate) struct InvalidAccessView(InvalidAccess, Option<Registers>);
+pub(crate) struct InvalidAccessView(InvalidAccess, Option<Captured>);
 
 #[pymethods]
 impl InvalidAccessView {
@@ -517,7 +535,7 @@ impl InvalidAccessView {
     fn registers<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyDict>>> {
         self.1
             .as_ref()
-            .map(|registers| register_dictionary(py, registers))
+            .map(|registers| registers.dictionary(py))
             .transpose()
     }
 
@@ -783,7 +801,16 @@ fn control(answer: PyResult<bool>, pending: &Pending) -> Control {
 
 /// A code or block hook's argument.
 pub(crate) fn instruction(instruction: &Instruction) -> InstructionView {
-    InstructionView(instruction.clone())
+    owned_instruction(instruction.clone())
+}
+
+/// A code or block hook's argument, from the instruction itself.
+pub(crate) fn owned_instruction(instruction: Instruction) -> InstructionView {
+    InstructionView {
+        pc: instruction.pc,
+        registers: Captured(instruction.registers),
+        stack_top: instruction.stack_top,
+    }
 }
 
 /// A read or write hook's argument.
@@ -802,7 +829,7 @@ pub(crate) const fn memory_access_with(
     access: MemoryAccess,
     registers: Registers,
 ) -> MemoryAccessView {
-    MemoryAccessView(access, Some(registers))
+    MemoryAccessView(access, Some(Captured(registers)))
 }
 
 /// An invalid access hook's argument on the bare CPU, as
@@ -811,7 +838,7 @@ pub(crate) const fn invalid_access_with(
     access: InvalidAccess,
     registers: Registers,
 ) -> InvalidAccessView {
-    InvalidAccessView(access, Some(registers))
+    InvalidAccessView(access, Some(Captured(registers)))
 }
 
 /// An exception hook's argument.

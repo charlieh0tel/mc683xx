@@ -498,7 +498,7 @@ impl MachineView {
 fn view(py: Python<'_>, context: Context, registers: &Registers) -> PyResult<Py<PyAny>> {
     Ok(match context {
         Context::Instruction(instruction) => {
-            Py::new(py, hooks::instruction(&instruction))?.into_any()
+            Py::new(py, hooks::owned_instruction(instruction))?.into_any()
         }
         Context::Memory(access) => {
             Py::new(py, hooks::memory_access_with(access, registers.clone()))?.into_any()
