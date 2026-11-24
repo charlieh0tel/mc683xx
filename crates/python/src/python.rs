@@ -81,6 +81,7 @@ use crate::hooks::InvalidAccessView;
 use crate::hooks::InvalidReason;
 use crate::hooks::MemoryAccessView;
 use crate::hooks::PendingReadView;
+use crate::hooks::PendingWriteView;
 use crate::mapped::BusCycleView;
 use crate::peripherals::ChannelView;
 use crate::peripherals::Frame;
@@ -291,6 +292,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<InstructionView>()?;
     module.add_class::<MemoryAccessView>()?;
     module.add_class::<PendingReadView>()?;
+    module.add_class::<PendingWriteView>()?;
     module.add_class::<InvalidAccessView>()?;
     module.add_class::<BusCycleKind>()?;
     module.add_class::<InvalidReason>()?;

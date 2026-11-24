@@ -67,6 +67,7 @@ __all__ = [
     "Instruction",
     "MemoryAccess",
     "PendingRead",
+    "PendingWrite",
     "InvalidAccess",
     "BusCycleKind",
     "Invalid",
@@ -546,7 +547,12 @@ class VectorSet:
     def __contains__(self, vector: object, /) -> bool: ...
     def is_empty(self) -> bool: ...
     def without(self, vector: int) -> VectorSet: ...
-    def union(self, other: VectorSet) -> VectorSet: ...
+    def union(self, other: VectorSet | Iterable[int]) -> VectorSet:
+        """The vectors in it or in `other`, a `VectorSet` or an iterable
+        of vector numbers."""
+    def difference(self, other: VectorSet | Iterable[int]) -> VectorSet:
+        """The vectors in it but not in `other`, a `VectorSet` or an
+        iterable of vector numbers."""
     def __iter__(self) -> Iterator[int]: ...
     def __len__(self) -> int: ...
     def __hash__(self) -> int: ...
@@ -761,6 +767,33 @@ class PendingRead:
         debugger reads them (supervisor space, no cycle, no peripheral),
         within the hook's call: `BusError` at a byte the core's memory
         does not serve, `RuntimeError` once the call is over."""
+    @property
+    def function_code(self) -> FunctionCode: ...
+    @property
+    def pc(self) -> int: ...
+    @property
+    def stacking(self) -> bool: ...
+
+@final
+class PendingWrite:
+    """An operand write the core's memory is about to store, as a
+    pre-write hook sees it, beside a bytearray copy of the bytes it is
+    to write, which is stored unless the store is dropped."""
+
+    @property
+    def address(self) -> int: ...
+    @property
+    def size(self) -> int:
+        """1, 2 or 4: the operand's bytes, however many cycles."""
+    def peek(self, address: int, length: int) -> bytes:
+        """`length` bytes of the core's memory from `address`, as
+        `PendingRead.peek`: memory as it is before the store."""
+    @property
+    def dropped(self) -> bool:
+        """Whether the store is dropped: by this hook or one before it."""
+    def set_dropped(self, dropped: bool) -> None:
+        """Drops the store, or, with `False`, keeps it after all, within
+        the hook's call: `RuntimeError` once the call is over."""
     @property
     def function_code(self) -> FunctionCode: ...
     @property
@@ -1129,6 +1162,12 @@ class Mc68331:
         begin: int = 0,
         end: int = ...,
     ) -> HookId: ...
+    def add_pre_write_hook(
+        self,
+        callback: Callable[[PendingWrite, bytearray], bool | None],
+        begin: int = 0,
+        end: int = ...,
+    ) -> HookId: ...
     def add_read_hook(
         self, callback: Callable[[MemoryAccess], bool | None], begin: int = 0, end: int = ...
     ) -> HookId: ...
@@ -1202,6 +1241,12 @@ class BoardChip:
     def add_pre_read_hook(
         self,
         callback: Callable[[PendingRead, bytearray], bool | None],
+        begin: int = 0,
+        end: int = ...,
+    ) -> HookId: ...
+    def add_pre_write_hook(
+        self,
+        callback: Callable[[PendingWrite, bytearray], bool | None],
         begin: int = 0,
         end: int = ...,
     ) -> HookId: ...
@@ -1442,6 +1487,12 @@ class Machine:
     def add_pre_read_hook(
         self,
         callback: Callable[[PendingRead, bytearray], bool | None],
+        begin: int = 0,
+        end: int = ...,
+    ) -> HookId: ...
+    def add_pre_write_hook(
+        self,
+        callback: Callable[[PendingWrite, bytearray], bool | None],
         begin: int = 0,
         end: int = ...,
     ) -> HookId: ...

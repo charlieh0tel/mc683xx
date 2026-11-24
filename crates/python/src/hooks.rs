@@ -7,6 +7,8 @@
 
 use std::cell::Cell;
 use std::ops::ControlFlow;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use mc683xx_cpu32::exception;
 use mc683xx_cpu32::hooks::Control;
@@ -18,10 +20,12 @@ use mc683xx_cpu32::hooks::Invalid;
 use mc683xx_cpu32::hooks::InvalidAccess;
 use mc683xx_cpu32::hooks::MemoryAccess;
 use mc683xx_cpu32::hooks::PendingRead;
+use mc683xx_cpu32::hooks::PendingWrite;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_target::Address;
 use pyo3::Bound;
+use pyo3::Py;
 use pyo3::PyAny;
 use pyo3::PyResult;
 use pyo3::Python;
@@ -42,6 +46,7 @@ use pyo3::types::PyTypeMethods;
 
 use crate::error::Error;
 use crate::function_code::FunctionCode;
+use crate::held::Held;
 use crate::mapped::Pending;
 use crate::python::opaque_repr;
 use crate::python::repr;
@@ -221,15 +226,7 @@ impl PendingReadView {
         address: u32,
         length: usize,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        if !LENT.is_set() || CALLS.get() != self.call {
-            return Err(PyRuntimeError::new_err(
-                "a PendingRead peeks only within its hook's call",
-            ));
-        }
-        let mut data = vec![0; length];
-        LENT.with(|memory| memory.read_bytes(Address(address), &mut data))
-            .map_err(Error::from)?;
-        Ok(PyBytes::new(py, &data))
+        peek(py, self.call, "PendingRead", address, length)
     }
 
     /// Its address, on the chip's address lines.
@@ -270,6 +267,116 @@ impl PendingReadView {
             repr(py, self.function_code())?
         ))
     }
+}
+
+/// An operand write the core's memory is about to store, as a pre-write
+/// hook sees it.
+#[pyclass(name = "PendingWrite", module = "mc683xx", frozen)]
+#[derive(Debug)]
+pub(crate) struct PendingWriteView {
+    /// The write.
+    write: PendingWrite,
+    /// The number of the hook call it was made for (`CALLS`).
+    call: u64,
+    /// Whether the store is dropped: the hook call's answer.
+    dropped: AtomicBool,
+}
+
+#[pymethods]
+impl PendingWriteView {
+    /// `length` bytes of the core's memory from `address`, as
+    /// `PendingRead.peek`: memory as it is before the store.
+    fn peek<'py>(
+        &self,
+        py: Python<'py>,
+        address: u32,
+        length: usize,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        peek(py, self.call, "PendingWrite", address, length)
+    }
+
+    /// Drops the store, or, with `False`, keeps it after all, while its
+    /// hook's call is under way: `RuntimeError` once the call is over.
+    fn set_dropped(&self, dropped: bool) -> PyResult<()> {
+        within(self.call, "PendingWrite", "drops")?;
+        self.dropped.store(dropped, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Whether the store is dropped: by this hook or one before it.
+    #[getter]
+    fn dropped(&self) -> bool {
+        self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// Its address, on the chip's address lines.
+    #[getter]
+    const fn address(&self) -> u32 {
+        self.write.address.0
+    }
+
+    /// Bytes in it: 1, 2 or 4, the operand's.
+    #[getter]
+    const fn size(&self) -> u32 {
+        self.write.size.bytes()
+    }
+
+    /// Its function code.
+    #[getter]
+    fn function_code(&self) -> FunctionCode {
+        self.write.function_code.into()
+    }
+
+    /// The address of the instruction it is part of.
+    #[getter]
+    const fn pc(&self) -> u32 {
+        self.write.pc.0
+    }
+
+    /// Whether exception processing is stacking a frame.
+    #[getter]
+    const fn stacking(&self) -> bool {
+        self.write.stacking
+    }
+
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "PendingWrite(address={:#08x}, size={}, function_code={}, dropped={})",
+            self.address(),
+            self.size(),
+            repr(py, self.function_code())?,
+            repr(py, self.dropped())?
+        ))
+    }
+}
+
+/// `RuntimeError` unless hook call `call` is under way, for a `class`
+/// that `does` something only within it.
+fn within(call: u64, class: &str, does: &str) -> PyResult<()> {
+    if !LENT.is_set() || CALLS.get() != call {
+        return Err(PyRuntimeError::new_err(format!(
+            "a {class} {does} only within its hook's call"
+        )));
+    }
+    Ok(())
+}
+
+/// `length` bytes of the core's memory from `address`, as a debugger
+/// reads them (supervisor space, no cycle, no peripheral), while hook
+/// call `call`, a `class`'s, is under way: `BusError` at a byte the
+/// core's memory does not serve, `RuntimeError` once the call is over.
+fn peek<'py>(
+    py: Python<'py>,
+    call: u64,
+    class: &str,
+    address: u32,
+    length: usize,
+) -> PyResult<Bound<'py, PyBytes>> {
+    within(call, class, "peeks")?;
+    let mut data = vec![0; length];
+    LENT.with(|memory| memory.read_bytes(Address(address), &mut data))
+        .map_err(Error::from)?;
+    Ok(PyBytes::new(py, &data))
 }
 
 /// A bus cycle's kind (CPU32RM 6.3).
@@ -552,17 +659,10 @@ where
     let callable = pending.keep(callable);
     Ok(move |context: &T| {
         Python::attach(|py| {
-            match callable
+            let answer = callable
                 .call1(py, (view(context),))
-                .and_then(|result| is_true(result.bind(py)))
-            {
-                Ok(false) => ControlFlow::Continue(()),
-                Ok(true) => ControlFlow::Break(()),
-                Err(error) => {
-                    pending.hold(error);
-                    ControlFlow::Break(())
-                }
-            }
+                .and_then(|result| is_true(result.bind(py)));
+            control(answer, &pending)
         })
     })
 }
@@ -583,34 +683,102 @@ pub(crate) fn pre_read_hook(
     Ok(
         move |read: &PendingRead, memory: &Memory, bytes: &mut [u8]| {
             Python::attach(|py| {
-                let data = PyByteArray::new(py, bytes);
-                let call = CALLS.get() + 1;
-                CALLS.set(call);
-                let view = PendingReadView { read: *read, call };
-                let answer = LENT
-                    .set(memory, || callable.call1(py, (view, data.clone().unbind())))
-                    .and_then(|result| is_true(result.bind(py)))
-                    .and_then(|stop| {
-                        let changed = data.to_vec();
-                        if changed.len() != bytes.len() {
-                            return Err(PyValueError::new_err(
-                                "a pre-read hook must keep the bytes' length",
-                            ));
-                        }
-                        bytes.copy_from_slice(&changed);
-                        Ok(stop)
-                    });
-                match answer {
-                    Ok(false) => ControlFlow::Continue(()),
-                    Ok(true) => ControlFlow::Break(()),
-                    Err(error) => {
-                        pending.hold(error);
-                        ControlFlow::Break(())
-                    }
-                }
+                let answer = lend(py, &callable, memory, bytes, "pre-read", |call| {
+                    Ok(PendingReadView { read: *read, call })
+                });
+                control(answer, &pending)
             })
         },
     )
+}
+
+/// `callable`, which must be callable, as a pre-write hook, called
+/// before the write as `callable(PendingWrite, bytearray)`, the memory
+/// lent to `PendingWrite.peek` for the call: what it leaves in the
+/// bytearray, which must keep its length, is stored, unless it called
+/// `PendingWrite.set_dropped(True)`.  `True`, or an exception, which
+/// waits in `pending`, stops the run; after an exception neither the
+/// bytes nor a drop are taken.
+pub(crate) fn pre_write_hook(
+    callable: &Bound<'_, PyAny>,
+    pending: Pending,
+) -> PyResult<impl FnMut(&mut PendingWrite, &Memory, &mut [u8]) -> Control + 'static> {
+    if !callable.is_callable() {
+        return Err(PyTypeError::new_err("a hook must be callable"));
+    }
+    let callable = pending.keep(callable);
+    Ok(
+        move |write: &mut PendingWrite, memory: &Memory, bytes: &mut [u8]| {
+            Python::attach(|py| {
+                let mut made = None;
+                let answer = lend(py, &callable, memory, bytes, "pre-write", |call| {
+                    let view = Py::new(
+                        py,
+                        PendingWriteView {
+                            write: *write,
+                            call,
+                            dropped: AtomicBool::new(write.dropped()),
+                        },
+                    )?;
+                    made = Some(view.clone_ref(py));
+                    Ok(view)
+                });
+                if answer.is_ok()
+                    && let Some(view) = made
+                {
+                    write.set_dropped(view.get().dropped.load(Ordering::Relaxed));
+                }
+                control(answer, &pending)
+            })
+        },
+    )
+}
+
+/// Calls `callable(view, data)`, `view` made with the call's number
+/// (`CALLS`), `data` a bytearray copy of `bytes`, with `memory` lent to
+/// the views' `peek` for the call: whether its result stops the run.
+/// What it leaves in `data`, which must keep its length, goes back into
+/// `bytes`; `kind` names the hook in the error if it does not.
+fn lend<V>(
+    py: Python<'_>,
+    callable: &Held,
+    memory: &Memory,
+    bytes: &mut [u8],
+    kind: &str,
+    view: impl FnOnce(u64) -> PyResult<V>,
+) -> PyResult<bool>
+where
+    (V, Py<PyByteArray>): for<'py> PyCallArgs<'py>,
+{
+    let data = PyByteArray::new(py, bytes);
+    let call = CALLS.get() + 1;
+    CALLS.set(call);
+    let stop = LENT
+        .set(memory, || {
+            callable.call1(py, (view(call)?, data.clone().unbind()))
+        })
+        .and_then(|result| is_true(result.bind(py)))?;
+    let changed = data.to_vec();
+    if changed.len() != bytes.len() {
+        return Err(PyValueError::new_err(format!(
+            "a {kind} hook must keep the bytes' length"
+        )));
+    }
+    bytes.copy_from_slice(&changed);
+    Ok(stop)
+}
+
+/// A hook's `answer` as the core takes it: `True` stops the run, and
+/// so does an exception, which waits in `pending`.
+fn control(answer: PyResult<bool>, pending: &Pending) -> Control {
+    match answer {
+        Ok(false) => ControlFlow::Continue(()),
+        Ok(true) => ControlFlow::Break(()),
+        Err(error) => {
+            pending.hold(error);
+            ControlFlow::Break(())
+        }
+    }
 }
 
 /// A code or block hook's argument.

@@ -163,9 +163,16 @@ impl VectorSetView {
         Self(self.0.without(Vector(vector)))
     }
 
-    /// The vectors in it or in `other`.
-    const fn union(&self, other: &Self) -> Self {
-        Self(self.0.union(other.0))
+    /// The vectors in it or in `other`, a `VectorSet` or an iterable of
+    /// vector numbers.
+    fn union(&self, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Ok(Self(self.0.union(numbers(other)?)))
+    }
+
+    /// The vectors in it but not in `other`, a `VectorSet` or an
+    /// iterable of vector numbers.
+    fn difference(&self, other: &Bound<'_, PyAny>) -> PyResult<Self> {
+        Ok(Self(self.0.difference(numbers(other)?)))
     }
 
     /// Its vector numbers, ascending (Rust's `iter`).

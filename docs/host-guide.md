@@ -1174,6 +1174,24 @@ but the exception hook cover an address range, on the address lines.
   (`Memory::peek`, a debugger's read).  The read hooks see the cycles after it, with the
   values the copy gave; a stop takes effect when the instruction
   ends.
+- `add_pre_write_hook(range, f(&mut PendingWrite, &Memory, &mut [u8]))`:
+  the pre-read hook's mirror, once before each operand write of 1, 2
+  or 4 bytes of a byte in `range` that the core's memory stores all of
+  (RAM its pages map; ROM's writes go to the bus), exception
+  processing's frame words included (`stacking`), before its first
+  cycle, with the memory as it was and a copy of the bytes it is to
+  write: what `f` leaves in the copy is stored, or nothing is, if `f`
+  calls `PendingWrite::set_dropped(true)`, for a device model that
+  takes what the firmware writes to RAM.  Each later hook sees the
+  bytes and the drop the earlier left, and may undo a drop.  The same
+  cases have no call as for a pre-read (a long with a byte the bus
+  takes, misaligned, refused by the pages' permissions, a debugger's
+  `Memory::write_bytes`).  The write hooks see the cycles after it,
+  with the bytes stored and, as `previous`, what they replaced; a
+  dropped store keeps its wait states, as the CPU still drove the
+  cycle and the modeled device latched it, but stores nothing, and the
+  write hooks see none of it.  A stop takes effect when the
+  instruction ends.
 - `add_read_hook`, `add_write_hook(range, f(&MemoryAccess))`: after
   each operand byte or word cycle (not fetches); a stop takes effect
   when the instruction ends.  The chip's long is two word cycles; a
@@ -1206,8 +1224,9 @@ read, write and execute per 2-Kbyte page in `Space::User` or
 and the invalid hooks see it as `Protected`.  That holds on pages a
 peripheral serves too: the cycle faults before the peripheral sees
 it, so a read-only peripheral needs no bus error of its own.  Hooks and permissions
-outlive the chip's remaps.  Hooks cost little when absent; a memory
-hook makes its pages leave the fast path.  The GDB stub
+outlive the chip's remaps.  Hooks cost little when absent; a read or
+write hook makes its pages leave the fast path, a pre-read hook for
+reads alone (fetches included), a pre-write hook for writes alone.  The GDB stub
 (`mc683xx-gdb`, `docs/gdb.md`) sets its breakpoints, watchpoints and
 steps as hooks like these.
 

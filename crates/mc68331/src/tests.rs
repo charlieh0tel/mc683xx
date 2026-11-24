@@ -4,6 +4,7 @@
 
 use mc683xx_modules::pins::PortLevels;
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
@@ -563,6 +564,45 @@ fn wired_patched(program: &[u16], patches: &[(u32, &[u16])]) -> Wired {
         shared,
         duart,
     }
+}
+
+#[test]
+fn a_pre_write_hook_replaces_or_drops_a_write_to_a_select_s_memory() {
+    let program = [
+        store_word(0x10_0000, 0x1234),
+        store_word(0x10_0002, 0x5678),
+        store_word(0xaaa, 0xaaaa),
+    ]
+    .concat();
+    let mut board = wired(&program);
+    let chip = &mut board.chip;
+    // run the program again, hooked
+    let first = START + 8 * WIRED_SELECTS.len() as u32;
+    chip.registers_mut().pc = Address(first);
+    chip.memory_mut(board.ram)[..4].fill(0);
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let into = Rc::clone(&seen);
+    chip.cpu_control().add_pre_write_hook(
+        Address(0)..=Address(0x10_ffff),
+        move |write, _, bytes| {
+            into.borrow_mut().push(write.address.0);
+            if write.address.0 == 0x10_0000 {
+                bytes.copy_from_slice(&[0xab, 0xcd]);
+            } else {
+                write.set_dropped(true);
+            }
+            ControlFlow::Continue(())
+        },
+    );
+    chip.run_for(Cycles::from_clocks(200));
+    // the flash's write is a peripheral's: no call
+    assert_eq!(*seen.borrow(), [0x10_0000, 0x10_0002]);
+    assert_eq!(chip.memory(board.ram)[..4], [0xab, 0xcd, 0x00, 0x00]);
+    let writes = &chip
+        .peripheral::<Recorder>(board.flash_writes)
+        .unwrap()
+        .writes;
+    assert_eq!(writes.len(), 2, "one each run");
 }
 
 #[test]
