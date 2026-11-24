@@ -204,6 +204,37 @@ def test_a_memory_hook_s_writes_land_after_the_instruction():
     assert seen == [(9, b"\x00\x09", False)]
 
 
+def test_a_pre_read_hook_patches_the_bytes_before_the_read():
+    cpu = machine(MOVE_LONG_A0_TO_D0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write(0x2000, struct.pack(">I", 0x11112222))
+    seen = []
+
+    def patch(read: mc683xx.PendingRead, data: bytearray) -> None:
+        seen.append((read.address, read.size, bytes(data), read.stacking))
+        data[1] = 0x99
+
+    cpu.add_pre_read_hook(patch, 0x2003, 0x2003)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+    assert cpu.read_register("D0") == 0x11112299
+    assert seen == [(0x2002, 2, b"\x22\x22", False)]
+    assert cpu.read(0x2000, 4) == bytes.fromhex("11112299")
+
+
+def test_a_truthy_pre_read_hook_stops_the_run_and_one_that_resizes_raises():
+    cpu = machine(MOVE_WORD_A0_TO_D0, NOP, RTS)
+    cpu.write_register("A0", 0x2000)
+    hook = cpu.add_pre_read_hook(lambda read, data: True, 0x2000, 0x2001)
+    run = cpu.run_limited(reach=RETURN)
+    assert run.end == mc683xx.End.Stop(mc683xx.Stop.Hook(hook))
+    assert cpu.read_register("PC") == CODE + 2
+    cpu.remove_hook(hook)
+    cpu.write_register("PC", CODE)
+    cpu.add_pre_read_hook(lambda read, data: data.append(0), 0x2000, 0x2001)
+    with pytest.raises(ValueError, match="length"):
+        cpu.run_limited(reach=RETURN)
+
+
 def test_a_memory_hook_sees_a_long_once_and_not_one_that_faults():
     # MOVE.L D0,-(SP); MOVE.L (SP)+,D1; MOVE.L D0,(A0) with A0 at RAM's
     # last word, so its second word is a bus error.

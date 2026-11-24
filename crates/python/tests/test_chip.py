@@ -922,6 +922,22 @@ def test_memory_hooks_see_reads_and_writes():
     assert chip.read_register("D1") == 0x1234
 
 
+def test_a_pre_read_hook_patches_ram_before_the_read():
+    builder, _, _ = board(ram_round_trip(), Recorder())
+    chip = builder.build()
+    chip.write_register("D0", 0x1234)
+    seen = []
+
+    def patch(read: mc683xx.PendingRead, data: bytearray) -> None:
+        seen.append((read.address, read.size, bytes(data)))
+        data[:] = b"\xab\xcd"
+
+    chip.add_pre_read_hook(patch, RAM_BASE, RAM_BASE + PAGE_BYTES - 1)
+    chip.run_for(4000)
+    assert seen == [(RAM_WORD, 2, b"\x12\x34")]
+    assert chip.read_register("D1") == 0xABCD
+
+
 def test_an_invalid_hook_and_an_exception_hook_see_a_bus_error():
     builder, _, _ = board(WIRING + [MOVE_WORD_ABSOLUTE_TO_D1, PERIPHERAL_BASE >> 16, 0x0020], Faulting())
     chip = builder.build()

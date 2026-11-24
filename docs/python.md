@@ -848,7 +848,8 @@ assert chip.now == 0
 ## Hooks, protection and tracing
 
 `add_code_hook(callback, begin=0, end=0xFFFFFFFF)` and its siblings
-`add_block_hook`, `add_read_hook`, `add_write_hook`, `add_invalid_hook`
+`add_block_hook`, `add_pre_read_hook`, `add_read_hook`,
+`add_write_hook`, `add_invalid_hook`
 (both ends of the range included), `add_exception_hook(callback)` and
 `add_exception_return_hook(callback)`,
 call a Python callable with what the Rust hook sees: an `Instruction`
@@ -1528,7 +1529,7 @@ assert bare.read_register("D0") == 6
 ### Hooks that change the CPU
 
 The hooks are the chip's (`add_code_hook`, `add_block_hook`,
-`add_read_hook`, `add_write_hook`, `add_invalid_hook`,
+`add_pre_read_hook`, `add_read_hook`, `add_write_hook`, `add_invalid_hook`,
 `add_exception_hook`, `add_exception_return_hook`, `remove_hook`), but on
 the bare `Machine` a callable
 may read and write registers and memory, map, protect and stop the
@@ -1541,10 +1542,46 @@ write takes effect:
 | Hook | Called | A register or memory write |
 | --- | --- | --- |
 | code, block | before the instruction | is seen by it; a PC write redirects, the instruction at the old PC not run, and the hooks at the new PC are called |
+| pre-read | within the cycle, before it reads | a change to its `data` is what the cycle reads; registers and other memory, as for read |
 | read, write | once the instruction has completed (a write hook sees memory written) | lands after the instruction, before the next |
 | invalid access | once the bus error exception is taken, PC the handler's (or the run stopped for it, with `stop_on_fault`) | lands before the handler's first instruction |
 | exception | once the frame is stacked and PC is the handler's | lands before the handler runs; writing SSP, SR and PC from the frame returns past it |
 | intercept hook | before anything is stacked, PC at the instruction | lands before the CPU goes on from PC |
+
+`add_pre_read_hook(callback, begin=0, end=0xFFFFFFFF)` (Rust's
+`Cpu::add_pre_read_hook`) calls `callback(PendingRead, data)` within
+each operand read cycle that the core's memory (RAM or ROM its pages
+map) serves of a byte in the range, before the cycle reads: `data` is
+a bytearray of the cycle's bytes (1 or 2: a long operand is two word
+cycles, each seen), and what the callable leaves in it, at the same
+length, is what the cycle reads, and stays in memory.  A
+`PendingRead` has `address`, `size`, `function_code`, `pc` and
+`stacking`.  It is a device model's way to patch a few bytes of RAM
+just before the firmware reads them.  Fetches, peripherals' reads,
+memory the decode serves off the core's pages (a select a peripheral
+shares), and looks with no cycle (`read`, `peek`, gdb) call no
+pre-read hook.  The read hooks see the cycle after it, the value it
+read.  On the bare `Machine`, unlike its other hooks, it runs within
+the run, so it must not call into the machine; a truthy result stops
+the run once the instruction completes.
+
+```python
+bare.write(0x6000, struct.pack(">H", 0x1111))
+
+
+def patch(read: mc683xx.PendingRead, data: bytearray) -> None:
+    """A device model's status word, fresh as the firmware reads it."""
+    data[:] = struct.pack(">H", 0x2222)
+
+
+patching = bare.add_pre_read_hook(patch, 0x6000, 0x6001)
+bare.write(CALL, struct.pack(">HIH", 0x3039, 0x6000, RTS))  # move.w $6000,d0
+bare.write(CALL_STACK - 4, struct.pack(">I", CALL_RETURN))
+bare.write_register("A7", CALL_STACK - 4)
+assert bare.run_limited(begin=CALL, reach=CALL_RETURN).end == mc683xx.End.Reached()
+assert bare.read_register("D0") & 0xFFFF == 0x2222
+bare.remove_hook(patching)
+```
 
 A read or write hook sees a long operand once, `size` 4 at its
 address, as a peripheral and a Unicorn hook do (memory or peripheral, MOVEM.L
@@ -1762,6 +1799,7 @@ The port of a Unicorn harness is mechanical:
 | `hook_add(UC_HOOK_MEM_READ, ...)` to feed a read | `add_peripheral(begin, end, peripheral)`: `read` answers before the read |
 | `hook_add(UC_HOOK_MEM_WRITE, ...)` before the write lands | `add_peripheral` `write`; or `add_write_hook`, after the instruction |
 | `UC_HOOK_MEM_READ` to watch | `add_read_hook`, after the instruction |
+| `UC_HOOK_MEM_READ` writing memory before the read | `add_pre_read_hook`, within the cycle |
 | `UC_HOOK_MEM_INVALID`, `UC_MEM_WRITE_PROT` | `add_invalid_hook` (`reason` `BUS_ERROR` or `PROTECTED`), or `set_stop_on_fault` and `End.Fault` |
 | `UcError` on a fault | `set_stop_on_fault(True)`, `End.Fault(fault)`; by default the CPU takes the bus error exception |
 | `emu_stop()` in a `UC_HOOK_INTR` hook | `set_stop_on_exception(None)` (or the vectors), `End.Exception(vector, pc)`, before stacking |

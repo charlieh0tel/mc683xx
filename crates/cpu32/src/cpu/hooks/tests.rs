@@ -20,6 +20,7 @@ use crate::hooks::ExceptionReturn;
 use crate::hooks::Invalid;
 use crate::hooks::InvalidAccess;
 use crate::hooks::MemoryAccess;
+use crate::hooks::PendingRead;
 use crate::instructions::tests::CODE;
 use crate::instructions::tests::NoBus;
 use crate::instructions::tests::NoInterrupts;
@@ -244,6 +245,75 @@ fn memory_hooks_see_each_word_cycle_and_stop_after_the_instruction() {
     // Fetches are not reads.
     assert_eq!(*reads.borrow(), [(DATA, 0x1234), (DATA + 2, 0x5678)]);
     assert_eq!(cpu.registers.data[1], 0x1234_5678);
+}
+
+#[test]
+fn a_pre_read_hook_changes_what_each_cycle_reads_before_the_read_hooks() {
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, NOP], &[]);
+    cpu.registers.set_address(0, DATA);
+    poke_long(&mut cpu, DATA, 0x1111_2222);
+    let pending = log();
+    let into = Rc::clone(&pending);
+    // the low word's second byte alone: its cycle is at DATA + 2
+    let id = cpu.add_pre_read_hook(
+        Address(DATA + 3)..=Address(DATA + 3),
+        move |read: &PendingRead, bytes: &mut [u8]| {
+            into.borrow_mut()
+                .push((read.address.0, read.size, bytes.to_vec()));
+            bytes[1] = 0x99;
+            ControlFlow::Break(())
+        },
+    );
+    let reads = log();
+    let into = Rc::clone(&reads);
+    cpu.add_read_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push(access.value);
+        ControlFlow::Continue(())
+    });
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(id));
+    assert_eq!(cpu.registers.pc.0, CODE + 2, "the instruction completed");
+    assert_eq!(cpu.registers.data[1], 0x1111_2299);
+    assert_eq!(
+        *pending.borrow(),
+        [(DATA + 2, Size::Word, vec![0x22, 0x22])]
+    );
+    assert_eq!(*reads.borrow(), [0x1111, 0x2299]);
+    // the change stays in memory, where a peek finds it, with no hook call
+    assert_eq!(
+        cpu.memory
+            .peek(Space::Supervisor, Address(DATA), Size::Long),
+        Some(0x1111_2299)
+    );
+    assert_eq!(pending.borrow().len(), 1);
+}
+
+#[test]
+fn a_pre_read_hook_sees_no_fetch_or_write() {
+    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT, NOP], &[]);
+    cpu.registers.set_address(0, DATA);
+    let calls = Rc::new(RefCell::new(0));
+    let into = Rc::clone(&calls);
+    cpu.add_pre_read_hook(everywhere(), move |_, _| {
+        *into.borrow_mut() += 1;
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 1);
+    step(&mut cpu, 1);
+    assert_eq!(*calls.borrow(), 0);
+}
+
+#[test]
+fn a_pre_read_hook_slows_only_its_pages_and_is_removed() {
+    let mut cpu = prepared(&[NOP], &[]);
+    let page = DATA + PAGE_BYTES;
+    let id = cpu.add_pre_read_hook(Address(page)..=Address(page), |_, _| {
+        ControlFlow::Continue(())
+    });
+    let word = |cpu: &Cpu, at| cpu.memory.read(Space::Supervisor, Address(at), Size::Word);
+    assert!(word(&cpu, page).is_none());
+    assert!(word(&cpu, DATA).is_some());
+    assert!(cpu.remove_hook(id));
+    assert!(!cpu.memory.is_special());
 }
 
 #[test]

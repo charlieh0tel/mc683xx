@@ -34,6 +34,7 @@ use mc683xx_cpu32::hooks::HookId;
 use mc683xx_cpu32::hooks::Instruction;
 use mc683xx_cpu32::hooks::InvalidAccess;
 use mc683xx_cpu32::hooks::MemoryAccess;
+use mc683xx_cpu32::hooks::PendingRead;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
@@ -444,6 +445,9 @@ pub(crate) struct MachineView {
     pending: Pending,
     /// The hooks that fired in the core run under way.
     queue: Queue,
+    /// The first pre-read hook whose callable, called within the core
+    /// run under way, stopped it.
+    pre_read_stop: Rc<Cell<Option<HookId>>>,
     /// The intercept hooks' callables, in the order installed, with the
     /// vectors each covers.
     intercepts: Vec<Intercept>,
@@ -576,6 +580,7 @@ impl MachineView {
             machine,
             pending,
             queue: Queue::default(),
+            pre_read_stop: Rc::default(),
             intercepts: Vec::new(),
             running: false,
         })
@@ -943,6 +948,37 @@ impl MachineView {
         )
     }
 
+    /// Calls `callback(PendingRead, data)` before each operand read cycle
+    /// the machine's memory serves of a byte from `begin` to `end`,
+    /// within the cycle, unlike the other hooks: `data` is a bytearray of
+    /// the bytes it is to read, and what the callable leaves in it is
+    /// what the cycle reads, and stays in memory.  A truthy result stops
+    /// the run once the instruction completes.
+    #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
+    fn add_pre_read_hook(
+        &mut self,
+        callback: &Bound<'_, PyAny>,
+        begin: u32,
+        end: u32,
+    ) -> PyResult<HookIdView> {
+        let mut called = hooks::pre_read_hook(callback, self.pending.clone())?;
+        let stopped = Rc::clone(&self.pre_read_stop);
+        let id = Rc::new(Cell::new(None));
+        let own = Rc::clone(&id);
+        let assigned = self.machine.cpu.add_pre_read_hook(
+            Address(begin)..=Address(end),
+            move |read: &PendingRead, bytes: &mut [u8]| {
+                let control = called(read, bytes);
+                if control.is_break() && stopped.get().is_none() {
+                    stopped.set(own.get());
+                }
+                control
+            },
+        );
+        id.set(Some(assigned));
+        Ok(HookIdView(assigned))
+    }
+
     /// Calls `callback(MemoryAccess)` for each operand read from `begin`
     /// to `end`, once the instruction has completed.
     #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
@@ -1095,6 +1131,7 @@ impl MachineView {
             };
             budget.spent = budget.spent.saturating_add(run.cycles.clocks());
             let pending = slf.borrow().pending.clone();
+            let pre_read_stop = slf.borrow().pre_read_stop.take();
             pending.check()?;
             let dispatched = match registers {
                 Some(registers) => Self::dispatch(slf, py, fired, &registers)?,
@@ -1106,6 +1143,9 @@ impl MachineView {
                 return Ok((budget.spent, requested));
             }
             match (run.end, dispatched) {
+                (_, Dispatched::Continue) if let Some(hook) = pre_read_stop => {
+                    return Ok((budget.spent, End::Stop(mc683xx_cpu32::Stop::Hook(hook))));
+                }
                 (End::Intercepted(interception), Dispatched::Continue) if !stop => {
                     Self::answer(slf, py, interception)?;
                     if slf.borrow().machine.stop_request().take() {

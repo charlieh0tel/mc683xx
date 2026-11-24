@@ -198,8 +198,9 @@ chip's, the board's), not a root `VERSION` that could be the crate's.
   replaced (`MemoryAccess::previous`), peeked before it on the slow
   path a watched page already takes; `None` for a peripheral's, where
   a read is a cycle.
-  `Cpu::add_code_hook`, `add_block_hook`, `add_read_hook`,
-  `add_write_hook`, `add_invalid_hook` (each over an address range),
+  `Cpu::add_code_hook`, `add_block_hook`, `add_pre_read_hook`,
+  `add_read_hook`, `add_write_hook`, `add_invalid_hook` (each over an
+  address range),
   `add_exception_hook`, `add_exception_return_hook` (`rte` of a four-
   or six-word frame, or of a format $C frame of a fault in an
   instruction; not one of a fault in exception processing, whose `rte`
@@ -872,7 +873,8 @@ chip beside `Mc68331`.
   and the value classes, which compare equal by value (`Frame`,
   `Output`, `Serial`, `Event`, `End`, `LimitedRun`, `FaultStop`), hash,
   so they key dicts and sets.
-- **Hooks:** `add_code_hook`, `add_block_hook`, `add_read_hook`,
+- **Hooks:** `add_code_hook`, `add_block_hook`, `add_pre_read_hook`,
+  `add_read_hook`,
   `add_write_hook` and `add_invalid_hook(callback, begin=0,
   end=0xFFFFFFFF)` (both ends included) and
   `add_exception_hook(callback)` install a Python callable as the
@@ -2383,6 +2385,25 @@ Adversarial review (2026-11-01):
   exception hooks once the frame is stacked and PC is the handler's.
   A stop from these takes effect when the instruction (or interrupt
   entry) ends.  Hook addresses are on the address lines (masked).
+- Pre-read hooks (`Cpu::add_pre_read_hook`, added for 0.9.0 at the
+  owner's call, against the recommendation to model such a device as a
+  peripheral that takes the memory): before an operand byte or word
+  read cycle the core's memory serves, of a byte in the hook's range,
+  each covering hook in the order installed gets the cycle
+  (`PendingRead`) and the bytes it is to read, a mutable slice of the
+  page's read backing, so a change is what the cycle reads and stays
+  in memory, as deterministic as the host's callback.  Per range,
+  removed by `remove_hook`, as the other memory hooks; a page with one
+  takes the slow path, as one with a read hook does, so a run with
+  none costs nothing more: the fast path is unchanged, and
+  `core/move_indirect`, `core/move_postincrement` and
+  `core/move_displacement` move within 2% either way, run to run,
+  before and after.  Not for fetches (code hooks are theirs), a cycle
+  the bus serves (a peripheral's has no bytes to patch; its own `read`
+  answers), nor a look with no cycle (`Memory::peek`, a debugger's
+  read), which is no cycle.  They run before the cycle, the read
+  hooks after it, seeing the value read.  A long operand is two word
+  cycles, each shown, with `set_long_bus` too.
 - A block starts after a change of flow (`Flow::Changed`), an
   exception, reset, restore, or a host jump: a run that finds PC
   other than where the last run, reset or restore left it (the core

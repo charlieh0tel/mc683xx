@@ -1160,6 +1160,15 @@ but the exception hook cover an address range, on the address lines.
   code hooks for it again, so a breakpoint can be stepped past.
 - `add_block_hook(range, f(&Instruction))`: before the first
   instruction of each straight-line block.
+- `add_pre_read_hook(range, f(&PendingRead, &mut [u8]))`: before each
+  operand byte or word cycle (not fetches) that the core's memory
+  serves (RAM or ROM its pages map) of a byte in `range`, with the
+  bytes the cycle is to read: what `f` leaves in them is what the cycle
+  reads, and stays in memory, for a device model that patches RAM just
+  before the firmware reads it.  Not for a peripheral's cycle, memory
+  the decode serves off the core's pages, or a look with no cycle
+  (`Memory::peek`, a debugger's read).  The read hooks see the cycle
+  after it; a stop takes effect when the instruction ends.
 - `add_read_hook`, `add_write_hook(range, f(&MemoryAccess))`: after
   each operand byte or word cycle (not fetches); a stop takes effect
   when the instruction ends.  The chip's long is two word cycles; a

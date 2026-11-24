@@ -64,6 +64,7 @@ __all__ = [
     "HookId",
     "Instruction",
     "MemoryAccess",
+    "PendingRead",
     "InvalidAccess",
     "BusCycleKind",
     "Invalid",
@@ -682,6 +683,23 @@ class MemoryAccess:
         `Machine`; always `None` on an `Mc68331` and a `Board`."""
 
 @final
+class PendingRead:
+    """An operand read cycle about to be served from memory, as a
+    pre-read hook sees it, beside a bytearray of the bytes it is to
+    read."""
+
+    @property
+    def address(self) -> int: ...
+    @property
+    def size(self) -> int: ...
+    @property
+    def function_code(self) -> FunctionCode: ...
+    @property
+    def pc(self) -> int: ...
+    @property
+    def stacking(self) -> bool: ...
+
+@final
 class InvalidAccess:
     """A bus cycle that ended in a bus error, as an invalid access hook
     sees it."""
@@ -1030,6 +1048,12 @@ class Mc68331:
     def add_block_hook(
         self, callback: Callable[[Instruction], object], begin: int = 0, end: int = ...
     ) -> HookId: ...
+    def add_pre_read_hook(
+        self,
+        callback: Callable[[PendingRead, bytearray], object],
+        begin: int = 0,
+        end: int = ...,
+    ) -> HookId: ...
     def add_read_hook(
         self, callback: Callable[[MemoryAccess], object], begin: int = 0, end: int = ...
     ) -> HookId: ...
@@ -1093,6 +1117,12 @@ class BoardChip:
     ) -> HookId: ...
     def add_block_hook(
         self, callback: Callable[[Instruction], object], begin: int = 0, end: int = ...
+    ) -> HookId: ...
+    def add_pre_read_hook(
+        self,
+        callback: Callable[[PendingRead, bytearray], object],
+        begin: int = 0,
+        end: int = ...,
     ) -> HookId: ...
     def add_read_hook(
         self, callback: Callable[[MemoryAccess], object], begin: int = 0, end: int = ...
@@ -1323,6 +1353,12 @@ class Machine:
     ) -> HookId: ...
     def add_block_hook(
         self, callback: Callable[[Instruction], object], begin: int = 0, end: int = ...
+    ) -> HookId: ...
+    def add_pre_read_hook(
+        self,
+        callback: Callable[[PendingRead, bytearray], object],
+        begin: int = 0,
+        end: int = ...,
     ) -> HookId: ...
     def add_read_hook(
         self, callback: Callable[[MemoryAccess], object], begin: int = 0, end: int = ...

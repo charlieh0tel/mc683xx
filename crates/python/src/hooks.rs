@@ -15,6 +15,7 @@ use mc683xx_cpu32::hooks::Instruction;
 use mc683xx_cpu32::hooks::Invalid;
 use mc683xx_cpu32::hooks::InvalidAccess;
 use mc683xx_cpu32::hooks::MemoryAccess;
+use mc683xx_cpu32::hooks::PendingRead;
 use mc683xx_cpu32::registers::Registers;
 use pyo3::Bound;
 use pyo3::PyAny;
@@ -22,9 +23,12 @@ use pyo3::PyResult;
 use pyo3::Python;
 use pyo3::call::PyCallArgs;
 use pyo3::exceptions::PyTypeError;
+use pyo3::exceptions::PyValueError;
 use pyo3::pyclass;
 use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
+use pyo3::types::PyByteArray;
+use pyo3::types::PyByteArrayMethods;
 use pyo3::types::PyDict;
 use pyo3::types::PyDictMethods;
 
@@ -170,6 +174,54 @@ impl MemoryAccessView {
             self.size(),
             repr(py, self.function_code())?,
             self.value()
+        ))
+    }
+}
+
+/// A read cycle about to be served from memory, as a pre-read hook sees
+/// it.
+#[pyclass(name = "PendingRead", module = "mc683xx", frozen)]
+#[derive(Debug)]
+pub(crate) struct PendingReadView(PendingRead);
+
+#[pymethods]
+impl PendingReadView {
+    /// Its address, on the chip's address lines.
+    #[getter]
+    const fn address(&self) -> u32 {
+        self.0.address.0
+    }
+
+    /// Bytes in it: 1 or 2.
+    #[getter]
+    const fn size(&self) -> u32 {
+        self.0.size.bytes()
+    }
+
+    /// Its function code.
+    #[getter]
+    fn function_code(&self) -> FunctionCode {
+        self.0.function_code.into()
+    }
+
+    /// The address of the instruction it is part of.
+    #[getter]
+    const fn pc(&self) -> u32 {
+        self.0.pc.0
+    }
+
+    /// Whether exception processing is stacking a frame.
+    #[getter]
+    const fn stacking(&self) -> bool {
+        self.0.stacking
+    }
+
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "PendingRead(address={:#08x}, size={}, function_code={})",
+            self.address(),
+            self.size(),
+            repr(py, self.function_code())?
         ))
     }
 }
@@ -441,6 +493,47 @@ where
                 .call1(py, (view(context),))
                 .and_then(|result| result.bind(py).is_truthy())
             {
+                Ok(false) => ControlFlow::Continue(()),
+                Ok(true) => ControlFlow::Break(()),
+                Err(error) => {
+                    pending.hold(error);
+                    ControlFlow::Break(())
+                }
+            }
+        })
+    })
+}
+
+/// `callable`, which must be callable, as a pre-read hook, called within
+/// the cycle as `callable(PendingRead, bytearray)`: what it leaves in
+/// the bytearray, which must keep its length, is what the cycle reads.
+/// A truthy result, or an exception, which waits in `pending`, stops
+/// the run.
+pub(crate) fn pre_read_hook(
+    callable: &Bound<'_, PyAny>,
+    pending: Pending,
+) -> PyResult<impl FnMut(&PendingRead, &mut [u8]) -> Control + 'static> {
+    if !callable.is_callable() {
+        return Err(PyTypeError::new_err("a hook must be callable"));
+    }
+    let callable = pending.keep(callable);
+    Ok(move |read: &PendingRead, bytes: &mut [u8]| {
+        Python::attach(|py| {
+            let data = PyByteArray::new(py, bytes);
+            let answer = callable
+                .call1(py, (PendingReadView(*read), data.clone().unbind()))
+                .and_then(|result| result.bind(py).is_truthy())
+                .and_then(|stop| {
+                    let changed = data.to_vec();
+                    if changed.len() != bytes.len() {
+                        return Err(PyValueError::new_err(
+                            "a pre-read hook must keep the bytes' length",
+                        ));
+                    }
+                    bytes.copy_from_slice(&changed);
+                    Ok(stop)
+                });
+            match answer {
                 Ok(false) => ControlFlow::Continue(()),
                 Ok(true) => ControlFlow::Break(()),
                 Err(error) => {
