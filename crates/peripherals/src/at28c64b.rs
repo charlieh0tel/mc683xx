@@ -792,6 +792,25 @@ impl Peripheral for At28c64b {
         Ok(())
     }
 
+    /// The cell, while no write cycle runs; during one a read polls
+    /// (DATA polling, the toggle bit: datasheet, Write Cycle Operation),
+    /// which only a cycle can do, so it declines.
+    fn peek(&self, access: PeripheralAccess, _: Moment) -> Option<u32> {
+        match self.writing {
+            Some(_) => None,
+            None => Some(access.read_byte(self.cells[Offset::new(access.address).index()])),
+        }
+    }
+
+    /// Stores the byte in its cell at once, through to the file, as a
+    /// programmer would: no write cycle, no data protection.  A failure
+    /// writing the file drops it, as a cycle's does ([`At28c64b::file_error`]).
+    fn poke(&mut self, access: PeripheralAccess, value: u32, _: Moment) -> bool {
+        let offset = Offset::new(access.address);
+        self.store_cell(offset, access.written_byte(value));
+        true
+    }
+
     fn next_event(&self, _: Moment) -> Option<Time> {
         self.writing
             .as_ref()
@@ -1103,6 +1122,28 @@ mod tests {
             peripheral.read(access, &mut Drive::new(Moment::new(now, SYSTEM_CLOCK))),
             Ok(0x1200)
         );
+    }
+
+    /// A peek gives the cell, a poke stores it at once, data protection
+    /// or not; a peek declines while a write cycle polls.
+    #[test]
+    fn a_peek_reads_a_cell_and_a_poke_programs_it() {
+        let mut peripheral = At28c64b::new(vec![0; SIZE], WRITE_CYCLE, true, None);
+        let access = |address| {
+            PeripheralAccess::new(
+                ChipSelect::Boot,
+                address,
+                Size::Byte,
+                FunctionCode::SupervisorData,
+            )
+        };
+        let moment = Moment::new(Time::ZERO, SYSTEM_CLOCK);
+        assert!(peripheral.poke(access(0x41).writing(true), 0x5a, moment));
+        assert_eq!(peripheral.cells()[0x41], 0x5a);
+        assert_eq!(peripheral.peek(access(0x41), moment), Some(0x5a));
+        assert!(peripheral.writing.is_none(), "no write cycle");
+        write(&mut peripheral, 0x40, 1, Time::ZERO);
+        assert_eq!(peripheral.peek(access(0x41), moment), None);
     }
 
     /// Past tBLC and tWC a byte starts a write cycle of its own.
