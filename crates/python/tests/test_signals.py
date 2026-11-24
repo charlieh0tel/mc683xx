@@ -20,6 +20,8 @@ STACK = 0x8000
 START = 0x400
 # bra.s to itself (CPU32RM 4).
 BRANCH_TO_SELF = 0x60FE
+# trap #0 (CPU32RM 4).
+TRAP_0 = 0x4E40
 ROM_BYTES = 64 << 10
 # When the alarm goes off, and how long the run may take to see it.
 ALARM_SECONDS = 0.05
@@ -129,7 +131,11 @@ def converse(port: int, bodies: list[str], done: threading.Event) -> list[bytes]
             gdb.sendall(packet(body))
             reply = b""
             while not re.search(rb"\$[^#]*#..", reply):
-                reply += gdb.recv(4096)
+                received = gdb.recv(4096)
+                if not received:
+                    # the stub closed the connection
+                    return replies
+                reply += received
             replies.append(reply)
         done.wait(timeout=PROMPTLY_SECONDS)
     return replies
@@ -157,6 +163,27 @@ def test_an_in_process_client_is_served() -> None:
     assert bare.serve_gdb("127.0.0.1:0", ready=ready) == mc683xx.Ending.DETACHED
     clients[0].join(timeout=PROMPTLY_SECONDS)
     assert len(replies) == 2 and b"OK" in replies[1]
+
+
+def test_an_exception_stop_is_a_trap_to_gdb() -> None:
+    bare = bare_cpu()
+    bare.write(START, struct.pack(">H", TRAP_0))
+    bare.set_stop_on_exception(True)
+    replies: list[bytes] = []
+    clients: list[threading.Thread] = []
+    done = threading.Event()
+    done.set()
+
+    def ready(port: int) -> None:
+        client = threading.Thread(target=lambda: replies.extend(converse(port, ["c", "D"], done)))
+        clients.append(client)
+        client.start()
+
+    assert bare.serve_gdb("127.0.0.1:0", ready=ready) == mc683xx.Ending.DETACHED
+    clients[0].join(timeout=PROMPTLY_SECONDS)
+    # SIGTRAP, gdb's 5
+    assert b"$S05#" in replies[0]
+    assert bare.read_register("PC") == START
 
 
 def test_a_signal_ends_a_session_waiting_for_gdb() -> None:

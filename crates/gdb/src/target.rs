@@ -87,10 +87,16 @@ pub enum TargetRun {
     Requested,
     /// A fault stopped it rather than being taken
     /// ([`Cpu::set_stop_on_fault`]), or, on the bare CPU, an exception
-    /// its host handles or stops at did.
+    /// its host handles did ([`Cpu::add_intercept_hook`]).
     ///
     /// [`Cpu::set_stop_on_fault`]: mc683xx_cpu32::Cpu::set_stop_on_fault
+    /// [`Cpu::add_intercept_hook`]: mc683xx_cpu32::Cpu::add_intercept_hook
     Fault,
+    /// On the bare CPU, an exception it was about to take stopped it
+    /// ([`Cpu::set_stop_on_exception`]).
+    ///
+    /// [`Cpu::set_stop_on_exception`]: mc683xx_cpu32::Cpu::set_stop_on_exception
+    Exception,
     /// A stop condition held ([`Target::conditions`]).
     Condition,
     /// A target under BDM control entered background mode, for the
@@ -433,7 +439,8 @@ impl Target for Machine {
         Ok(match run.end {
             End::Stop(stop) => stop.into(),
             End::Reached | End::Instructions | End::Steps => TargetRun::Quantum,
-            End::Fault(_) | End::Intercepted(_) | End::Exception { .. } => TargetRun::Fault,
+            End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
+            End::Exception { .. } => TargetRun::Exception,
             _ => TargetRun::Requested,
         })
     }

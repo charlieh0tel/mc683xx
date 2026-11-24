@@ -1219,6 +1219,7 @@ impl Target for Debugged<'_, '_> {
             End::Stop(stop) => stop.into(),
             End::Reached | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
+            End::Exception { .. } => TargetRun::Exception,
             other => return Err(Error::run_end(other).into()),
         })
     }
