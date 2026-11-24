@@ -174,6 +174,8 @@ pub(crate) mod watch {
     pub(crate) const WRITE: u8 = 1 << 3;
     /// A pre-read hook covers some of it.
     pub(crate) const PRE_READ: u8 = 1 << 4;
+    /// A pre-write hook covers some of it.
+    pub(crate) const PRE_WRITE: u8 = 1 << 5;
 }
 
 /// A region of host memory the core holds, as [`Memory::add_region`]
@@ -404,14 +406,12 @@ impl Slab {
         let entry = self.tables[space][index];
         let slow = self.watched[index] & (watch::READ | watch::WRITE) != 0
             || self.permissions[space][index] != Permissions::ALL;
-        self.fast[space][index] = if slow {
-            Page {
-                read: None,
-                write: None,
-                ..entry
-            }
-        } else {
-            entry
+        // a pre-write hook's page leaves the fast path for writes alone
+        let slow_write = slow || self.watched[index] & watch::PRE_WRITE != 0;
+        self.fast[space][index] = Page {
+            read: if slow { None } else { entry.read },
+            write: if slow_write { None } else { entry.write },
+            ..entry
         };
     }
 
@@ -1147,6 +1147,20 @@ impl Memory {
     pub(crate) fn write_served(&self, space: Space, address: Address) -> bool {
         self.locate(address)
             .is_some_and(|(slab, index, _)| slab.tables[space.index()][index].write.is_some())
+    }
+
+    /// The stall a write of `size` at `address` served here, hooked page
+    /// or not, would take, a long as two word writes, high word first,
+    /// with nothing written; [`None`] if any of it goes to the bus.
+    pub(crate) fn write_stall(&self, space: Space, address: Address, size: Size) -> Option<Cycles> {
+        if size == Size::Long {
+            let high = self.write_stall(space, address, Size::Word)?;
+            return Some(high + self.write_stall(space, address.offset(2), Size::Word)?);
+        }
+        let (slab, index, _) = self.locate(address)?;
+        let page = slab.tables[space.index()][index];
+        page.write?;
+        Some(stall(size, page.port, page.clocks()))
     }
 
     /// A byte or word write served here, hooked page or not, with its

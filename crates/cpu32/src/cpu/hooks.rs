@@ -22,6 +22,7 @@ use crate::hooks::Invalid;
 use crate::hooks::InvalidAccess;
 use crate::hooks::MemoryAccess;
 use crate::hooks::PendingRead;
+use crate::hooks::PendingWrite;
 use crate::interrupt::InterruptLevel;
 use crate::memory::Memory;
 use crate::memory::Permissions;
@@ -43,6 +44,10 @@ type MemoryHook = Callback<MemoryAccess>;
 /// A pre-read hook: given the read, the core's memory to look at, and
 /// the copy of the bytes it is to read that answers it.
 type PreReadHook = Box<dyn FnMut(&PendingRead, &Memory, &mut [u8]) -> Control>;
+/// A pre-write hook: given the write, which it may drop, the core's
+/// memory to look at, and the copy of the bytes it is to write that
+/// it stores.
+type PreWriteHook = Box<dyn FnMut(&mut PendingWrite, &Memory, &mut [u8]) -> Control>;
 /// An invalid access hook.
 type InvalidHook = Callback<InvalidAccess>;
 /// An exception hook.
@@ -77,6 +82,14 @@ fn call<T>(hooks: &mut [Ranged<Callback<T>>], address: Address, context: &T) -> 
     stopped
 }
 
+/// What the pre-write hooks made of an operand write.
+pub(super) enum PreWrite {
+    /// Store this value.
+    Store(u32),
+    /// Store nothing: a hook dropped it.
+    Dropped,
+}
+
 /// Where a run a code or block hook stopped resumes: before the hooks
 /// that already ran for the instruction at that address, once.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -100,6 +113,9 @@ pub(crate) struct Hooks {
     /// Before each operand read the core's memory serves whole, of a
     /// byte in range.
     pre_read: Vec<Ranged<PreReadHook>>,
+    /// Before each operand write the core's memory stores whole, of a
+    /// byte in range.
+    pre_write: Vec<Ranged<PreWriteHook>>,
     /// After each read cycle in range but fetches.
     read: Vec<Ranged<MemoryHook>>,
     /// After each write cycle in range.
@@ -122,6 +138,7 @@ impl fmt::Debug for Hooks {
             .field("code", &self.code.len())
             .field("block", &self.block.len())
             .field("pre_read", &self.pre_read.len())
+            .field("pre_write", &self.pre_write.len())
             .field("read", &self.read.len())
             .field("write", &self.write.len())
             .field("invalid", &self.invalid.len())
@@ -151,6 +168,7 @@ impl Hooks {
         ranges(&self.code, watch::CODE)
             .chain(ranges(&self.block, watch::BLOCK))
             .chain(ranges(&self.pre_read, watch::PRE_READ))
+            .chain(ranges(&self.pre_write, watch::PRE_WRITE))
             .chain(ranges(&self.read, watch::READ))
             .chain(ranges(&self.write, watch::WRITE))
     }
@@ -177,6 +195,7 @@ impl Hooks {
         retain(&mut self.code, id)
             | retain(&mut self.block, id)
             | retain(&mut self.pre_read, id)
+            | retain(&mut self.pre_write, id)
             | retain(&mut self.read, id)
             | retain(&mut self.write, id)
             | retain(&mut self.invalid, id)
@@ -269,6 +288,44 @@ impl Cpu {
     ) -> HookId {
         let id = self.hooks.allocate();
         self.hooks.pre_read.push(Ranged {
+            id,
+            range,
+            hook: Box::new(hook),
+        });
+        self.rewatch();
+        id
+    }
+
+    /// Calls `hook` once before each operand write in user or supervisor
+    /// space, of 1, 2 or 4 bytes, exception processing's stacking
+    /// included, that writes a byte in `range` and that the core's
+    /// memory (RAM its pages map) stores all of, with the write, the
+    /// core's memory to look at and a copy of the bytes it is to write:
+    /// what the hooks leave in the copy, in the order installed, is
+    /// stored, unless one dropped the store
+    /// ([`PendingWrite::set_dropped`]), which each later hook sees and
+    /// may undo.  As a pre-read hook, a device model that takes an
+    /// operand, so a long is one call whatever
+    /// [`set_long_bus`](Self::set_long_bus) says, one across two pages
+    /// the core's memory stores too; a long with a byte the bus takes
+    /// (a peripheral's, ROM, or memory the core's pages do not map) is
+    /// no call.  Not for a misaligned word or long (an address error),
+    /// a write its pages' permissions refuse (a fault), or a write with
+    /// no cycle (`Memory::write_bytes`, a debugger's).  The memory is
+    /// as it was before the store: the hook cannot change it.  Its
+    /// cycles follow, timed as the pages time them; the write hooks see
+    /// each with the value the copy gave it and, as `previous`, what it
+    /// replaced.  A dropped store's cycles take their time but write
+    /// nothing, and the write hooks see none of them.  Its pages leave
+    /// the fast path for writes, not reads.  If it stops the run, the
+    /// instruction completes first.
+    pub fn add_pre_write_hook(
+        &mut self,
+        range: RangeInclusive<Address>,
+        hook: impl FnMut(&mut PendingWrite, &Memory, &mut [u8]) -> Control + 'static,
+    ) -> HookId {
+        let id = self.hooks.allocate();
+        self.hooks.pre_write.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
@@ -393,6 +450,7 @@ impl Cpu {
         ranged(&hooks.code)
             || ranged(&hooks.block)
             || hooks.pre_read.iter().any(|hook| hook.id == id)
+            || hooks.pre_write.iter().any(|hook| hook.id == id)
             || memory(&hooks.read)
             || memory(&hooks.write)
             || hooks.invalid.iter().any(|hook| hook.id == id)
@@ -413,6 +471,7 @@ impl Cpu {
     pub(crate) fn rewatch(&mut self) {
         self.memory.set_watched(self.hooks.watched());
         self.pre_reading = !self.hooks.pre_read.is_empty();
+        self.pre_writing = !self.hooks.pre_write.is_empty();
         self.update_capture();
     }
 
@@ -629,6 +688,79 @@ impl Core<'_> {
                 .iter()
                 .fold(0, |value, &byte| value << 8 | u32::from(byte))
         })
+    }
+
+    /// The pre-write hooks for an operand write of `value`, `size` of
+    /// it, at `address` in `function_code`'s space, aligned, that the
+    /// core's memory stores all of and its pages' permissions allow:
+    /// each covering a byte of it, in the order installed, given the
+    /// write, the memory and a copy of its bytes.  What to store, or
+    /// [`PreWrite::Dropped`] with the store's stall charged; [`None`]
+    /// if no hook was called.
+    #[inline(never)]
+    pub(super) fn pre_write(
+        &mut self,
+        address: Address,
+        size: Size,
+        function_code: FunctionCode,
+        value: u32,
+    ) -> Option<PreWrite> {
+        if !self.pre_hooked(
+            address,
+            size,
+            function_code,
+            BusCycleKind::Write,
+            watch::PRE_WRITE,
+        ) {
+            return None;
+        }
+        let memory = &self.cpu.memory;
+        let length = size.bytes();
+        let at = |offset: u32| memory.mask(address.offset(offset));
+        let stall = memory.write_stall(Space::of(function_code), at(0), size)?;
+        let mut copy = value.to_be_bytes();
+        let bytes = &mut copy[(4 - length) as usize..];
+        let template = PendingWrite::new(
+            at(0),
+            size,
+            function_code,
+            self.cpu.instruction_pc,
+            self.cpu.stacking,
+        );
+        let mut dropped = false;
+        let mut called = false;
+        let mut stopped = None;
+        for hook in self
+            .cpu
+            .hooks
+            .pre_write
+            .iter_mut()
+            .filter(|hook| (0..length).any(|offset| hook.range.contains(&at(offset))))
+        {
+            called = true;
+            // each hook gets the write afresh, but for the drop
+            let mut write = template;
+            write.set_dropped(dropped);
+            if (hook.hook)(&mut write, memory, bytes).is_break() {
+                stopped.get_or_insert(hook.id);
+            }
+            dropped = write.dropped();
+        }
+        if let Some(id) = stopped {
+            self.cpu.stop_request.get_or_insert(Stop::Hook(id));
+        }
+        if !called {
+            return None;
+        }
+        if dropped {
+            self.cpu.stall += stall;
+            return Some(PreWrite::Dropped);
+        }
+        Some(PreWrite::Store(
+            bytes
+                .iter()
+                .fold(0, |value, &byte| value << 8 | u32::from(byte)),
+        ))
     }
 
     /// The read or write hooks, `bit`, for a cycle that ended well, on

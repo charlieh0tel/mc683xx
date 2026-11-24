@@ -100,6 +100,58 @@ pub struct PendingRead {
     pub stacking: bool,
 }
 
+/// An operand write in user or supervisor space the core's memory is
+/// about to store, as a pre-write hook sees it, before its first cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct PendingWrite {
+    /// Its address, on the chip's address lines.
+    pub address: Address,
+    /// Byte, word or long: the operand's, however many cycles it takes.
+    pub size: Size,
+    /// Its function code.
+    pub function_code: FunctionCode,
+    /// The address of the instruction it is part of.
+    pub pc: Address,
+    /// Whether it is exception processing stacking a frame.
+    pub stacking: bool,
+    /// Whether the store is dropped, as the hooks before left it.
+    dropped: bool,
+}
+
+impl PendingWrite {
+    /// A write of `size` at `address` in `function_code`'s space, part
+    /// of the instruction at `pc`, not dropped.
+    pub(crate) const fn new(
+        address: Address,
+        size: Size,
+        function_code: FunctionCode,
+        pc: Address,
+        stacking: bool,
+    ) -> Self {
+        Self {
+            address,
+            size,
+            function_code,
+            pc,
+            stacking,
+            dropped: false,
+        }
+    }
+
+    /// Whether the store is dropped: set by this hook or one before it.
+    #[must_use]
+    pub const fn dropped(&self) -> bool {
+        self.dropped
+    }
+
+    /// Drops the store, or, with `false`, keeps it after all: once the
+    /// hooks have run, a dropped store writes nothing.
+    pub const fn set_dropped(&mut self, dropped: bool) {
+        self.dropped = dropped;
+    }
+}
+
 /// Why a bus cycle was invalid.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]

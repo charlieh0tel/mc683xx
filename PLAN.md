@@ -210,8 +210,8 @@ chip's, the board's), not a root `VERSION` that could be the crate's.
   path a watched page already takes; `None` for a peripheral's, where
   a read is a cycle.
   `Cpu::add_code_hook`, `add_block_hook`, `add_pre_read_hook`,
-  `add_read_hook`, `add_write_hook`, `add_invalid_hook` (each over an
-  address range),
+  `add_pre_write_hook`, `add_read_hook`, `add_write_hook`,
+  `add_invalid_hook` (each over an address range),
   `add_exception_hook`, `add_exception_return_hook` (`rte` of a four-
   or six-word frame, or of a format $C frame of a fault in an
   instruction; not one of a fault in exception processing, whose `rte`
@@ -2439,6 +2439,46 @@ Adversarial review (2026-11-01):
   for its call alone, through a scoped thread-local (`scoped-tls`, no
   `unsafe` here); a `PendingRead` kept past it raises
   `RuntimeError`.
+- Pre-write hooks (`Cpu::add_pre_write_hook`, added for 0.9.0 at the
+  owner's call, sc batch 5, against the recommendation to defer it):
+  the pre-read hook's mirror, a device model that takes an operand
+  the firmware writes to RAM.  Before an operand write of 1, 2 or 4
+  bytes the core's memory stores all of, its pages' permissions
+  allowing it, of a byte in the hook's range, each covering hook in
+  the order installed gets the write (`&mut PendingWrite`), the
+  core's memory as `&Memory`, as it was before the store, and a copy
+  of the bytes to be written: what the hooks leave in the copy is
+  stored, unless one called `PendingWrite::set_dropped(true)` and no
+  later one undid it, in which case nothing is.  Dropping is a method
+  on the pending write, not a result, so a hook's result stays
+  `Control` (Python's `True`/`False`/`None`) and a hook can both drop
+  and stop; each hook gets the write afresh but for the drop, so a
+  hook cannot change what later hooks see of its address.  The same
+  cases make no call as for a pre-read: a long with a byte the bus
+  takes (ROM, whose writes go to the bus, included), a misaligned word
+  or long, a write its pages' permissions refuse, a debugger's
+  `Memory::write_bytes`.  Exception processing's stacking is included,
+  a word at a time, highest address first, `stacking` set: a host that
+  drops a frame word leaves memory as it was there.  The order: the
+  pre-write hooks, then the store's cycles, timed by their pages; the
+  write hooks see each with the bytes stored and, as
+  `MemoryAccess::previous`, the bytes it replaced (the hooks cannot
+  change memory, so that is memory before the instruction's store).
+  A dropped store makes no cycle and the write hooks see none, but its
+  stall is charged, so dropping does not change the run's time.  A
+  stop takes effect when the instruction ends.  Cost when absent: an
+  operand write first tries the fast tables, inline, and checks the
+  flag set while any pre-write hook is installed only where they miss
+  (a page with a hook, permissions or the bus's, a long across pages),
+  so pages with a pre-write hook leave the fast path for writes (not
+  reads).  The flag checked before the fast path, as pre-read's is,
+  cost the write kernels 4% to 10% (`core/pea_displacement` +8%,
+  `core/clr_indirect` +6%): not adopted.  As adopted, before and after
+  (two interleaved runs on one pinned core): `core/move_indirect`
+  +0.6%, `core/move_postincrement` +0.5%, `core/add_to_memory` +0.9%,
+  `core/bset_memory` no change, `core/clr_indirect` -1.6%,
+  `core/pea_displacement` -2.9%, `core/move_register` (no memory)
+  -5.5%, placement.
 - A block starts after a change of flow (`Flow::Changed`), an
   exception, reset, restore, or a host jump: a run that finds PC
   other than where the last run, reset or restore left it (the core

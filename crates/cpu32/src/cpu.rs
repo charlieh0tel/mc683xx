@@ -52,6 +52,7 @@ use bare::Bare;
 use bare::Limits;
 
 use crate::cpu::hooks::Hooks;
+use crate::cpu::hooks::PreWrite;
 use crate::cpu::hooks::Resume;
 use crate::hooks::HookId;
 
@@ -283,6 +284,8 @@ pub struct Cpu {
     long_operand: bool,
     /// Whether a pre-read hook is installed.
     pre_reading: bool,
+    /// Whether a pre-write hook is installed.
+    pre_writing: bool,
     /// The bare host's settings.
     pub(crate) bare: Box<Bare>,
 }
@@ -400,6 +403,7 @@ impl Cpu {
             long_bus: false,
             long_operand: false,
             pre_reading: false,
+            pre_writing: false,
             bare: Box::default(),
         }
     }
@@ -1675,6 +1679,46 @@ impl Core<'_> {
         function_code: FunctionCode,
         value: u32,
     ) -> Result<(), Fault> {
+        if function_code.is_memory_space() && (size == Size::Byte || !address.is_odd()) {
+            let space = Space::of(function_code);
+            let data = value & size.mask();
+            let stored = if size == Size::Long {
+                self.cpu.memory.write_long(space, address, data)
+            } else {
+                let at = self.cpu.memory.mask(address);
+                self.cpu.memory.write(space, at, size, data)
+            };
+            if let Some(stall) = stored {
+                self.cpu.stall += stall;
+                return Ok(());
+            }
+        }
+        self.slow_access_write(address, size, function_code, value)
+    }
+
+    /// [`access_write`](Self::access_write) where the fast tables do not
+    /// store it all (a page with a hook, permissions or the bus's, or a
+    /// long across pages): first the pre-write hooks, if any is
+    /// installed, then its cycles, if they did not drop it.  Out of
+    /// line, so the fast path checks no flag.
+    #[inline(never)]
+    fn slow_access_write(
+        &mut self,
+        address: Address,
+        size: Size,
+        function_code: FunctionCode,
+        value: u32,
+    ) -> Result<(), Fault> {
+        let value = if self.cpu.pre_writing
+            && let Some(pre_written) = self.pre_write(address, size, function_code, value)
+        {
+            match pre_written {
+                PreWrite::Store(stored) => stored,
+                PreWrite::Dropped => return Ok(()),
+            }
+        } else {
+            value
+        };
         self.store(address, size, function_code, value)
     }
 
