@@ -1153,7 +1153,8 @@ but the exception hook cover an address range, on the address lines.
   bare `Cpu` with `set_long_bus` (`flat::Machine`'s default) shows a
   long operand once, size `Long` at its address, and a long that
   faults midway not at all.  A write's `previous` is what it
-  replaced, read with no cycle before it; `None` for a read, for a
+  replaced, read with no cycle before it from the bytes it writes to
+  (a page's write backing, not its read one); `None` for a read, for a
   write in CPU space, and for a write the core's memory does not
   serve (a peripheral's).
 - `add_invalid_hook(range, f(&InvalidAccess))`: before a bus error is

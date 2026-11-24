@@ -830,7 +830,7 @@ assert chip.now == 0
 call a Python callable with what the Rust hook sees: an `Instruction`
 (`pc`, `registers`, `stack_top`), a `MemoryAccess` (`address`, `size`,
 `function_code`, `value`, and `previous`, what a write replaced, read
-with no cycle, `None` for a read, a CPU-space write or a peripheral's
+with no cycle from the bytes it writes to, `None` for a read, a CPU-space write or a peripheral's
 write; on the chip a
 long operand is two word cycles, on the bare `Machine` one access of
 4), an `InvalidAccess` (those, `cycle`, a

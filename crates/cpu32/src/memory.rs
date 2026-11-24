@@ -853,6 +853,13 @@ impl Memory {
         self.peek_in(space, address, size, |page| page.read)
     }
 
+    /// What a write of a byte, word or long would replace: the bytes
+    /// the pages write to, read with no bus cycle.  [`None`] if any of
+    /// it writes to the bus.  A word or long must be aligned.
+    pub(crate) fn peek_written(&self, space: Space, address: Address, size: Size) -> Option<u32> {
+        self.peek_in(space, address, size, |page| page.write)
+    }
+
     /// A byte, word or long of the bytes `backing` picks of each page,
     /// with no bus cycle: [`None`] if any of it has no such backing.  A
     /// word or long must be aligned.

@@ -29,7 +29,9 @@ use crate::instructions::tests::machine_with_clocks;
 use crate::instructions::tests::peek_long;
 use crate::instructions::tests::poke_long;
 use crate::instructions::tests::step;
+use crate::memory::Backing;
 use crate::memory::PAGE_BYTES;
+use crate::memory::Page;
 use crate::memory::Permissions;
 use crate::memory::Space;
 use crate::registers::status;
@@ -270,6 +272,61 @@ fn a_write_hook_sees_what_each_write_replaced_and_a_read_hook_none() {
             (0x1234, None),
             (0x5678, None),
         ]
+    );
+}
+
+/// The write hook's `(value, previous)` pairs for MOVE.L D0,(A0) at
+/// [`DATA`], its page mapped to read from bytes of `0xaa` (or from the
+/// bus if `read` is false) and to write to bytes of `0xbb`; the long
+/// seen once if `long_bus`.
+fn previous_through_split_page(read: bool, long_bus: bool) -> Vec<(u32, Option<u32>)> {
+    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT], &[]);
+    cpu.set_long_bus(long_bus);
+    cpu.registers.set_address(0, DATA);
+    cpu.registers.data[0] = 0x1234_5678;
+    let mut backing = |byte| {
+        Some(Backing {
+            region: cpu.memory.add_region(vec![byte; PAGE_BYTES as usize]),
+            offset: 0,
+        })
+    };
+    let rom = backing(0xaa);
+    let ram = backing(0xbb);
+    let page = Page::BUS.reading(rom.filter(|_| read)).writing(ram);
+    cpu.memory
+        .map(Space::Supervisor, Address(DATA), PAGE_BYTES, page)
+        .unwrap();
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_write_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push((access.value, access.previous));
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 1);
+    assert_eq!(
+        cpu.memory.region(ram.unwrap().region)[..4],
+        [0x12, 0x34, 0x56, 0x78]
+    );
+    seen.take()
+}
+
+#[test]
+fn a_write_hook_sees_what_the_write_backing_held_not_the_read_one() {
+    assert_eq!(
+        previous_through_split_page(true, false),
+        [(0x1234, Some(0xbbbb)), (0x5678, Some(0xbbbb))]
+    );
+    assert_eq!(
+        previous_through_split_page(true, true),
+        [(0x1234_5678, Some(0xbbbb_bbbb))]
+    );
+}
+
+#[test]
+fn a_write_hook_sees_what_write_only_ram_held() {
+    assert_eq!(
+        previous_through_split_page(false, false),
+        [(0x1234, Some(0xbbbb)), (0x5678, Some(0xbbbb))]
     );
 }
 
