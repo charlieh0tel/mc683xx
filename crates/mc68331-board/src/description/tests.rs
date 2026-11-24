@@ -488,24 +488,16 @@ fn removing_a_peripheral_names_the_nets_that_went_an_external_end_s_among_them()
 }
 
 #[test]
-fn a_lane_role_is_a_lane() {
-    let description = parse(&format!(
-        "{BASE}{}",
-        r#"
-[[peripheral]]
-name = "upper"
-type = "fixed"
-attach = [{ select = "CS2", role = "upper" }]
-
-[[peripheral]]
-name = "lower"
-type = "fixed"
-attach = [{ select = "CS2", lane = "lower" }]
-"#
-    ))
-    .unwrap();
+fn a_lane_is_not_a_role() {
+    let peripheral = |attachment: &str| {
+        parse(&format!(
+            "{BASE}[[peripheral]]\nname = \"latch\"\ntype = \"fixed\"\nattach = [{attachment}]\n"
+        ))
+    };
+    let description = peripheral(r#"{ select = "CS2", lane = "upper" }"#).unwrap();
     let upper = &description.peripherals[0].attachments[0];
     assert_eq!((upper.role, upper.lane), (Role::ReadWrite, Lane::Upper));
+    assert!(peripheral(r#"{ select = "CS2", role = "upper" }"#).is_err());
 }
 
 #[test]
@@ -749,7 +741,7 @@ attach = [{ select = "CS4", role = "write", lane = "lower" }]
 fn a_ports_lanes_state_one_width() {
     let lanes = |upper: &str, lower: &str, roles: (&str, &str)| {
         format!(
-            "{BASE}[[peripheral]]\nname = \"high\"\ntype = \"fixed\"\n{upper}attach = [{{ select = \"CS4\", role = \"{}\" }}]\n\n[[peripheral]]\nname = \"low\"\ntype = \"fixed\"\n{lower}attach = [{{ select = \"CS4\", role = \"{}\" }}]\n",
+            "{BASE}[[peripheral]]\nname = \"high\"\ntype = \"fixed\"\n{upper}attach = [{{ select = \"CS4\", {} }}]\n\n[[peripheral]]\nname = \"low\"\ntype = \"fixed\"\n{lower}attach = [{{ select = \"CS4\", {} }}]\n",
             roles.0, roles.1
         )
     };
@@ -757,7 +749,8 @@ fn a_ports_lanes_state_one_width() {
     let dsack1 = "dsack = \"DSACK1\"\n";
     let both = "dsack = \"both\"\n";
     let open = "dsack = \"open\"\n";
-    let message = parse(&lanes(dsack1, dsack0, ("upper", "lower")))
+    let halves = (r#"lane = "upper""#, r#"lane = "lower""#);
+    let message = parse(&lanes(dsack1, dsack0, halves))
         .unwrap_err()
         .to_string();
     assert_eq!(
@@ -765,10 +758,17 @@ fn a_ports_lanes_state_one_width() {
         "CS4: high and low share its lanes but their DSACK pins give different ports"
     );
     for (upper, lower) in [(dsack1, both), (dsack1, open), (open, dsack0), ("", dsack0)] {
-        assert!(parse(&lanes(upper, lower, ("upper", "lower"))).is_ok());
+        assert!(parse(&lanes(upper, lower, halves)).is_ok());
     }
     // a read and a write peripheral may answer with different pins
-    assert!(parse(&lanes(dsack1, dsack0, ("read", "write"))).is_ok());
+    assert!(
+        parse(&lanes(
+            dsack1,
+            dsack0,
+            (r#"role = "read""#, r#"role = "write""#)
+        ))
+        .is_ok()
+    );
 }
 
 #[test]

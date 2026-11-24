@@ -16,12 +16,11 @@ that added it, as an earlier one refuses the key as unknown.  Every
 the stock types (`docs/peripherals.md`) are under the same freeze:
 their names, parameters and ports (docs/releasing.md, Semver scope).
 
-Version 1 keeps two oddities for ever, which a version 2, if there is
-one, would drop: an attachment's lane also spelled as its role
-(`role = "upper"` for `lane = "upper"`), and two keys for which ADDR
-lines a part sees (a decoder's `address_bits`, which takes tied
-levels too, and an attachment's `lines`), which version 2 would make
-one.  No version 2 is planned.
+Version 1 keeps one oddity for ever, which a version 2, if there is
+one, would drop: two keys for which ADDR lines a part sees (a
+decoder's `address_bits`, which takes tied levels too, and an
+attachment's `lines`), which version 2 would make one.  No version 2
+is planned.
 
 Two words, used one way throughout: a **peripheral** is anything
 outside the chip that the board wires to it (a memory's command
@@ -93,8 +92,8 @@ size = 0x10000
 writable = true
 attach = [
   { select = "CS0", role = "read" },
-  { select = "CS2", role = "upper" },   # a lane: lane = "upper"
-  { select = "CS3", role = "lower" },
+  { select = "CS2", lane = "upper" },
+  { select = "CS3", lane = "lower" },
 ]
 
 [[decoder]]
@@ -354,8 +353,8 @@ and, for a select, a decoder output or a window:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `role` | `"read-write"` | `"read"`, `"write"`, `"read-write"`, or `"iack"` (acknowledge cycles, CPU space); `"upper"` and `"lower"` are lanes, read and written. |
-| `lane` | `"both"` | `"both"`, `"upper"` (DATA[15:8], even addresses) or `"lower"` (DATA[7:0], odd).  Not with a lane role. |
+| `role` | `"read-write"` | `"read"`, `"write"`, `"read-write"`, or `"iack"` (acknowledge cycles, CPU space). |
+| `lane` | `"both"` | `"both"`, `"upper"` (DATA[15:8], even addresses) or `"lower"` (DATA[7:0], odd). |
 | `lines` | `24` | The ADDR lines wired to the peripheral's address pins: a count, ADDR0 up, or a list of at most 24, the peripheral's A0 first (`[1, 2, 3, 4]`: ADDR1 to the peripheral's A0). |
 | `offset` | `0` | Added to the address the peripheral sees. |
 

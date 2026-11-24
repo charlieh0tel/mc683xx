@@ -54,7 +54,6 @@ use crate::registry::table_from_toml;
 use crate::schema;
 use crate::schema::Attachment;
 use crate::schema::Dsack;
-use crate::schema::FileRole;
 use crate::schema::Input;
 use crate::schema::Lines;
 use crate::schema::Tied;
@@ -1152,10 +1151,7 @@ fn read_memory(
                 "a memory takes only select, role and lane",
             ));
         };
-        let (role, _) = attachment
-            .role
-            .map_or((Role::ReadWrite, None), FileRole::split);
-        if role == Role::Iack {
+        if attachment.role == Some(Role::Iack) {
             return Err(attachment_error(
                 name,
                 index,
@@ -1261,13 +1257,8 @@ fn read_attachment(
     users: &mut Users,
 ) -> Result<AttachmentSpec, LoadError> {
     let error = |reason: &str| attachment_error(owner, index, reason);
-    let (role, implied) = attachment
-        .role
-        .map_or((Role::ReadWrite, None), FileRole::split);
-    let lane = match (implied, attachment.lane) {
-        (Some(_), Some(_)) => return Err(error("role upper or lower is a lane: give one")),
-        (implied, lane) => implied.or(lane).unwrap_or_default(),
-    };
+    let role = attachment.role.unwrap_or_default();
+    let lane = attachment.lane.unwrap_or_default();
     let lines = match &attachment.lines {
         None => (0..ADDRESS_LINES).collect(),
         Some(Lines::Count(count)) if *count <= ADDRESS_LINES => (0..*count).collect(),
@@ -1383,10 +1374,7 @@ fn bus_decode(attachment: &Attachment, role: Role) -> Result<Target, &'static st
             }
         }
         (None, None, Some(level)) => {
-            if attachment
-                .role
-                .is_some_and(|role| role.split().0 != Role::Iack)
-            {
+            if attachment.role.is_some_and(|role| role != Role::Iack) {
                 return Err("an iack attachment's role is iack");
             }
             BusDecode::Acknowledge(IrqPin::try_from(level).map_err(|_| "iack is a level, 1 to 7")?)
