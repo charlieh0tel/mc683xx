@@ -1525,7 +1525,7 @@ write takes effect:
 | read, write | once the instruction has completed (a write hook sees memory written) | lands after the instruction, before the next |
 | invalid access | once the bus error exception is taken, PC the handler's (or the run stopped for it, with `stop_on_fault`) | lands before the handler's first instruction |
 | exception | once the frame is stacked and PC is the handler's | lands before the handler runs; writing SSP, SR and PC from the frame returns past it |
-| intercept callback | before anything is stacked, PC at the instruction | lands before the CPU goes on from PC |
+| intercept hook | before anything is stacked, PC at the instruction | lands before the CPU goes on from PC |
 
 A read or write hook sees a long operand once, `size` 4 at its
 address, as a peripheral and a Unicorn hook do (memory or peripheral, MOVEM.L
@@ -1577,17 +1577,20 @@ bare.remove_hook(stubbed)
 
 ### Exceptions and faults
 
-A host-handled exception: `set_intercepted(vector, True)` intercepts
-the exceptions an instruction raises with `vector` (traps, illegal,
-line A and F, privilege, divide by zero, CHK, TRAPV, format error)
-before anything is stacked, for the host to handle (a stubbed kernel
-call, an emulated instruction, a stop), and
-`set_intercept_callback(callback)` answers them:
-`callback(Intercepted)` gets the `vector` and the instruction's `pc`,
-where PC is, its (An)+ and -(An) undone.  A truthy result means it
-handled it, and the run goes on from PC as the callable left it;
-otherwise, or with no callback (`set_intercept_callback(None)`), the
-CPU takes it natively.  `set_stop_on_fault(True)` (`stops_on_fault`)
+A host-handled exception: `add_intercept_hook(callback, vectors)`
+(Rust's `Cpu::add_intercept_hook`) intercepts the exceptions an
+instruction raises with a vector of `vectors` (traps, illegal, line A
+and F, privilege, divide by zero, CHK, TRAPV, format error) before
+anything is stacked, for the host to handle (a stubbed kernel call, an
+emulated instruction, a stop), and returns a `HookId` that
+`remove_hook` takes.  `callback(Intercepted)` gets the `vector` and
+the instruction's `pc`, where PC is, its (An)+ and -(An) undone.  A
+truthy result means it handled it, and the run goes on from PC as the
+callable left it; otherwise the next intercept hook covering the
+vector is called, in the order installed, and once none is left the
+CPU takes it natively.  Rust's hook returns `ControlFlow::Break` to
+end the run for its host instead, which `run_limited` does on its
+callable's behalf.  `set_stop_on_fault(True)` (`stops_on_fault`)
 stops the run on a bus or address error instead of taking it:
 `End.Fault(fault)`, its `FaultStop` giving the
 `kind` (`BusCycleKind`), the `cause` (`FaultCause.BUS_ERROR` for
@@ -1617,10 +1620,9 @@ def trap_1(intercepted: mc683xx.Intercepted) -> bool:
     return True
 
 
-bare.set_intercepted(32 + 1, True)
-bare.set_intercept_callback(trap_1)
+kernel_call = bare.add_intercept_hook(trap_1, [32 + 1])
 assert bare.run_limited(begin=CALL, reach=0x4000).end == mc683xx.End.Reached()
-bare.set_intercept_callback(None)
+bare.remove_hook(kernel_call)
 
 bare.set_stop_on_fault(True)
 bare.write(CALL, struct.pack(">2H", 0x2010, RTS))  # move.l (a0),d0
@@ -1652,13 +1654,11 @@ def stop_at(intercepted: mc683xx.Intercepted) -> bool:
 
 
 bare.write(CALL, struct.pack(">2H", TRAP_7, RTS))
-bare.set_intercepted(32 + 7, True)
-bare.set_intercept_callback(stop_at)
+stopping = bare.add_intercept_hook(stop_at, [32 + 7])
 run = bare.run_limited(begin=CALL, reach=CALL_RETURN)
 assert run.end == mc683xx.End.Stop(mc683xx.Stop.Requested())
 assert stops == [(32 + 7, CALL)] and bare.read_register("PC") == CALL
-bare.set_intercept_callback(None)
-bare.set_intercepted(32 + 7, False)
+bare.remove_hook(stopping)
 ```
 
 A peripheral's range protected read-only refuses a write before the
@@ -1716,7 +1716,7 @@ The port of a Unicorn harness is mechanical:
 | `UC_HOOK_MEM_READ` to watch | `add_read_hook`, after the instruction |
 | `UC_HOOK_MEM_INVALID`, `UC_MEM_WRITE_PROT` | `add_invalid_hook` (`reason` `BUS_ERROR` or `PROTECTED`), or `set_stop_on_fault` and `End.Fault` |
 | `UcError` on a fault | `set_stop_on_fault(True)`, `End.Fault(fault)`; by default the CPU takes the bus error exception |
-| `UC_HOOK_INTR` (`intno`) | `set_intercepted(vector, True)` and `set_intercept_callback(f)` before stacking (the vector, not `intno`), or `add_exception_hook` after |
+| `UC_HOOK_INTR` (`intno`) | `add_intercept_hook(f, vectors)` before stacking (the vector, not `intno`), or `add_exception_hook` after |
 | interrupts stacked by hand | `request_interrupt(pin, vector)` |
 | `hook_del(handle)` | `remove_hook(hook)` |
 | `ctl_flush_tb()` | nothing: there is no translation cache |

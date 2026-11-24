@@ -62,7 +62,7 @@ def collected(make: Callable[[], object]) -> int:
 
 class CpuHarness:
     """Unicorn's harness shape: the CPU, a peripheral, an intercept
-    callback and hooks, all its own bound methods."""
+    hook and hooks, all its own bound methods."""
 
     def __init__(self) -> None:
         self.cpu = mc683xx.Machine()
@@ -71,8 +71,7 @@ class CpuHarness:
         self.cpu.reset()
         self.cpu.add_code_hook(self.on_code)
         self.cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 1, self)
-        self.cpu.set_intercepted(TRAP_0, True)
-        self.cpu.set_intercept_callback(self.on_trap)
+        self.cpu.add_intercept_hook(self.on_trap, [TRAP_0])
         # A run, so that the hook's queue and a peripheral's exception
         # have held the harness too.
         self.cpu.run_limited(instructions=2)

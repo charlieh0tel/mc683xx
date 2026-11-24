@@ -110,7 +110,7 @@ means a change to:
   raise which, and the methods the module calls on a host's objects
   (a peripheral's, as the protocol classes `MappedPeripheral`,
   `SpiPeripheral` and `Peripheral` list them; a hook's callable, the
-  intercept callback among them);
+  intercept hook's among them);
 - the npm package's JavaScript and TypeScript API, through its
   `exports`, but `InitOutput`, the module's own exports, which is
   opaque;

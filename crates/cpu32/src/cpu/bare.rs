@@ -135,7 +135,8 @@ impl fmt::Display for FaultStop {
 }
 
 /// An exception an instruction raised that the host handles
-/// ([`Cpu::set_intercepted`]): nothing stacked, PC at the instruction.
+/// ([`Cpu::add_intercept_hook`]): nothing stacked, PC at the
+/// instruction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Intercepted {
@@ -219,16 +220,21 @@ impl VectorSet {
         self.0[(vector.0 >> 6) as usize] & 1 << (vector.0 & 63) != 0
     }
 
-    /// Adds or removes `vector`.
-    const fn set(&mut self, vector: Vector, member: bool) {
-        let bit = 1 << (vector.0 & 63);
-        let word = &mut self.0[(vector.0 >> 6) as usize];
-        *word = if member { *word | bit } else { *word & !bit };
+    /// It with `vector`.
+    pub(crate) const fn with(self, vector: Vector) -> Self {
+        let mut words = self.0;
+        words[(vector.0 >> 6) as usize] |= 1 << (vector.0 & 63);
+        Self(words)
     }
 
-    /// Whether it is empty.
-    const fn is_empty(self) -> bool {
-        self.0[0] | self.0[1] | self.0[2] | self.0[3] == 0
+    /// The vectors in it or in `other`.
+    pub(crate) const fn union(self, other: Self) -> Self {
+        Self([
+            self.0[0] | other.0[0],
+            self.0[1] | other.0[1],
+            self.0[2] | other.0[2],
+            self.0[3] | other.0[3],
+        ])
     }
 }
 
@@ -238,7 +244,7 @@ impl VectorSet {
 pub(crate) struct Bare {
     /// Stop on a fault rather than take it.
     pub(crate) stop_on_fault: bool,
-    /// The vectors intercepted.
+    /// The vectors the intercept hooks cover.
     pub(crate) intercepted: VectorSet,
     /// An intercepted exception taken natively once: by the instruction
     /// at this address, when the instruction count is this.
@@ -267,8 +273,8 @@ pub(crate) struct Bare {
 impl Cpu {
     /// Runs as [`run_for`](Self::run_for) does, but also until PC reaches
     /// `limits.reach`, `limits.instructions` have run, a fault stops it
-    /// (`set_stop_on_fault`) or an exception is intercepted
-    /// (`set_intercepted`).  With no cycle budget it runs until one of
+    /// (`set_stop_on_fault`) or an intercept hook does
+    /// (`add_intercept_hook`).  With no cycle budget it runs until one of
     /// those or a stop.
     pub fn run_limited(
         &mut self,
@@ -381,18 +387,6 @@ impl Cpu {
     pub fn set_stop_on_fault(&mut self, stop: bool) {
         self.bare.stop_on_fault = stop;
         self.update_capture();
-    }
-
-    /// Whether `vector`, raised by an instruction (a trap, an illegal
-    /// instruction, a divide by zero, but not a fault, a trace or an
-    /// interrupt), is a host-handled exception: it ends a limited run
-    /// before anything is stacked ([`End::Intercepted`]), its (An)+ and
-    /// -(An) undone and PC at the instruction, for the host to handle (a
-    /// stubbed kernel call, an emulated instruction) and run on from PC,
-    /// or to decline ([`take_natively_once`](Self::take_natively_once)).
-    /// None at first.
-    pub fn set_intercepted(&mut self, vector: Vector, intercepted: bool) {
-        self.bare.intercepted.set(vector, intercepted);
     }
 
     /// The fault the last run stopped for ([`Stop::Fault`],
@@ -567,14 +561,9 @@ impl Cpu {
         }
     }
 
-    /// Whether any vector is intercepted.
-    #[must_use]
-    pub const fn intercepts(&self) -> bool {
-        !self.bare.intercepted.is_empty()
-    }
-
     /// Lets the instruction at PC take an intercepted exception
-    /// natively, once, the next time it runs.
+    /// natively, once, the next time it runs: no intercept hook is
+    /// called for it.
     pub const fn take_natively_once(&mut self) {
         self.bare.native_once = Some((self.registers.pc, self.instructions));
     }
@@ -622,11 +611,15 @@ impl Cpu {
         if native || vector == Vector::TRACE || !self.bare.intercepted.contains(vector) {
             return None;
         }
-        self.undo_instruction(instruction_pc);
-        Some(End::Intercepted(Intercepted {
+        let intercepted = Intercepted {
             vector,
             pc: instruction_pc,
-        }))
+        };
+        if !self.hooks.intercept(&intercepted) {
+            return None;
+        }
+        self.undo_instruction(instruction_pc);
+        Some(End::Intercepted(intercepted))
     }
 
     /// Undoes the instruction at `instruction_pc` that raised an

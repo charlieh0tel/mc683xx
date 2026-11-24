@@ -170,7 +170,9 @@ fn a_bad_stack_pointer_stops_without_a_halt_and_the_run_goes_on() {
 #[test]
 fn an_intercepted_trap_stacks_nothing_and_can_be_taken_natively() {
     let mut machine = machine(&[TRAP_0]);
-    machine.cpu.set_intercepted(Vector::trap(0), true);
+    machine
+        .cpu
+        .add_intercept_hook([Vector::trap(0)], |_| ControlFlow::Break(()));
     assert_eq!(
         one(&mut machine),
         End::Intercepted(Intercepted {
@@ -185,6 +187,43 @@ fn an_intercepted_trap_stacks_nothing_and_can_be_taken_natively() {
     one(&mut machine);
     assert_eq!(machine.cpu.registers.pc.0, HANDLER);
     assert_eq!(machine.cpu.registers.ssp.0, STACK - 8);
+}
+
+#[test]
+fn intercept_hooks_are_called_in_order_until_one_stops_the_run() {
+    let mut machine = machine(&[TRAP_0, TRAP_0]);
+    let called = Rc::new(RefCell::new(Vec::new()));
+    let hook = |number: u8, stop: bool| {
+        let called = called.clone();
+        move |intercepted: &Intercepted| {
+            called.borrow_mut().push((number, intercepted.vector));
+            if stop {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        }
+    };
+    let trap = Vector::trap(0);
+    machine.cpu.add_intercept_hook([trap], hook(1, false));
+    let other = machine
+        .cpu
+        .add_intercept_hook([Vector::ZERO_DIVIDE], hook(2, true));
+    let third = machine.cpu.add_intercept_hook([trap], hook(3, true));
+    let fourth = machine.cpu.add_intercept_hook([trap], hook(4, true));
+    assert!(matches!(one(&mut machine), End::Intercepted(_)));
+    assert_eq!(*called.borrow(), [(1, trap), (3, trap)], "4 not called");
+    called.borrow_mut().clear();
+    assert!(machine.cpu.remove_hook(third));
+    assert!(matches!(one(&mut machine), End::Intercepted(_)));
+    assert_eq!(*called.borrow(), [(1, trap), (4, trap)]);
+    // all that cover it declining, it is taken natively
+    called.borrow_mut().clear();
+    assert!(machine.cpu.remove_hook(fourth));
+    assert!(machine.cpu.has_hook(other));
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(*called.borrow(), [(1, trap)]);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
 }
 
 #[test]
@@ -208,14 +247,15 @@ fn an_end_prints_its_short_name() {
 #[test]
 fn an_intercept_undoes_the_instruction_s_postincrement() {
     let mut machine = machine(&[DIVU_POSTINCREMENT]);
-    machine.cpu.set_intercepted(Vector::ZERO_DIVIDE, true);
+    machine
+        .cpu
+        .add_intercept_hook([Vector::ZERO_DIVIDE], |_| ControlFlow::Break(()));
     machine.cpu.registers.set_address(0, 0x2000);
     let end = one(&mut machine);
     assert!(
         matches!(end, End::Intercepted(Intercepted { vector, .. }) if vector == Vector::ZERO_DIVIDE)
     );
     assert_eq!(machine.cpu.registers.address(0), 0x2000);
-    assert!(machine.cpu.intercepts());
 }
 
 #[test]

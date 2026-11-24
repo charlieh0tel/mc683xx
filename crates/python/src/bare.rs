@@ -113,6 +113,17 @@ struct Fired {
 /// The hooks that fired in a core run, in order.
 type Queue = Rc<RefCell<Vec<Fired>>>;
 
+/// An intercept hook's callable and the vectors it covers.
+#[derive(Debug)]
+struct Intercept {
+    /// The hook.
+    id: HookId,
+    /// The vectors it covers.
+    vectors: Vec<u8>,
+    /// Its callable.
+    callable: Held,
+}
+
 /// A peripheral on a bare `Machine`, as `add_peripheral` returns it and
 /// `remove_peripheral` takes it (Rust's `PeripheralId`).
 #[pyclass(
@@ -269,9 +280,8 @@ impl FaultStopView {
     }
 }
 
-/// An exception an instruction raised that the intercept callback
-/// answers: nothing stacked, PC at the instruction (Rust's
-/// `bare::Intercepted`).
+/// An exception an instruction raised that an intercept hook answers:
+/// nothing stacked, PC at the instruction (Rust's `bare::Intercepted`).
 #[pyclass(name = "Intercepted", module = "mc683xx", frozen)]
 #[derive(Debug)]
 pub(crate) struct InterceptedView(Intercepted);
@@ -301,7 +311,7 @@ impl InterceptedView {
 
 /// How a limited run ended (Rust's `bare::End`).  No run ends for an
 /// intercepted exception: `run_limited` answers it through the intercept
-/// callback, or the CPU takes it natively.  A variant's value is a field
+/// hooks, or the CPU takes it natively.  A variant's value is a field
 /// named for it, not Rust's `_0`.
 #[pyclass(name = "End", module = "mc683xx", frozen, eq, hash)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -403,8 +413,9 @@ pub(crate) struct MachineView {
     pending: Pending,
     /// The hooks that fired in the core run under way.
     queue: Queue,
-    /// The callable that answers intercepted exceptions.
-    intercept: Option<Held>,
+    /// The intercept hooks' callables, in the order installed, with the
+    /// vectors each covers.
+    intercepts: Vec<Intercept>,
     /// Whether a run is under way.
     running: bool,
 }
@@ -532,7 +543,7 @@ impl MachineView {
             machine,
             pending,
             queue: Queue::default(),
-            intercept: None,
+            intercepts: Vec::new(),
             running: false,
         })
     }
@@ -766,31 +777,34 @@ impl MachineView {
         served
     }
 
-    /// Whether the exceptions an instruction raises with `vector` are
-    /// intercepted: before anything is stacked, PC at the instruction,
-    /// the run calls the intercept callback (`set_intercept_callback`),
-    /// or takes them natively if there is none.  None are at first.
-    fn set_intercepted(&mut self, vector: u8, intercepted: bool) {
-        self.machine
-            .cpu
-            .set_intercepted(Vector(vector), intercepted);
-    }
-
-    /// Calls `callback(Intercepted)` for each intercepted exception
-    /// (`set_intercepted`).  A truthy result means it handled it: the
-    /// CPU takes nothing and runs on from PC as the callable left it.
-    /// Otherwise the CPU takes it natively.  `None` takes every one
+    /// Calls `callback(Intercepted)` for each exception an instruction
+    /// raises with a vector of `vectors`, before anything is stacked, PC
+    /// at the instruction.  A truthy result means it handled it: the CPU
+    /// takes nothing and runs on from PC as the callable left it.
+    /// Otherwise the next hook that covers the vector is called, in the
+    /// order installed, and if none handles it the CPU takes it
     /// natively.
-    fn set_intercept_callback(&mut self, callback: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
-        if let Some(callback) = callback
-            && !callback.is_callable()
-        {
-            return Err(PyTypeError::new_err(
-                "an intercept callback must be callable",
-            ));
+    fn add_intercept_hook(
+        &mut self,
+        callback: &Bound<'_, PyAny>,
+        vectors: Vec<u8>,
+    ) -> PyResult<HookIdView> {
+        if !callback.is_callable() {
+            return Err(PyTypeError::new_err("a hook must be callable"));
         }
-        self.intercept = callback.map(|callback| self.pending.keep(callback));
-        Ok(())
+        let callable = self.pending.keep(callback);
+        let id = self
+            .machine
+            .cpu
+            .add_intercept_hook(vectors.iter().copied().map(Vector), |_| {
+                ControlFlow::Break(())
+            });
+        self.intercepts.push(Intercept {
+            id,
+            vectors,
+            callable,
+        });
+        Ok(HookIdView(id))
     }
 
     /// Whether a fault stops the run (`End.Fault`) rather
@@ -946,6 +960,7 @@ impl MachineView {
 
     /// Removes `hook`; whether it was installed.
     fn remove_hook(&mut self, hook: &HookIdView) -> bool {
+        self.intercepts.retain(|intercept| intercept.id != hook.0);
         self.machine.cpu.remove_hook(hook.0)
     }
 
@@ -1074,17 +1089,29 @@ impl MachineView {
         Ok(stopped.map_or(Dispatched::Continue, Dispatched::Stop))
     }
 
-    /// Asks `intercept`'s callable to answer `interception`; unless it
-    /// handled it, the instruction takes it natively when it reruns.
+    /// Asks the intercept hooks' callables covering `interception`'s
+    /// vector to answer it, in the order installed, until one handles
+    /// it; unless one did, the instruction takes it natively when it
+    /// reruns.  A hook an earlier callable removed is not called.
     fn answer(slf: &Bound<'_, Self>, py: Python<'_>, interception: Intercepted) -> PyResult<()> {
-        let callable = slf.borrow().intercept.clone();
-        let handled = match callable {
-            Some(callable) => callable
-                .call1(py, (InterceptedView(interception),))?
-                .bind(py)
-                .is_truthy()?,
-            None => false,
-        };
+        let covering: Vec<(HookId, Held)> = slf
+            .borrow()
+            .intercepts
+            .iter()
+            .filter(|intercept| intercept.vectors.contains(&interception.vector.0))
+            .map(|intercept| (intercept.id, intercept.callable.clone()))
+            .collect();
+        let mut handled = false;
+        for (id, callable) in covering {
+            if !slf.borrow().machine.cpu.has_hook(id) {
+                continue;
+            }
+            let answer = callable.call1(py, (InterceptedView(interception),))?;
+            if answer.bind(py).is_truthy()? {
+                handled = true;
+                break;
+            }
+        }
         if !handled {
             let mut this = slf.borrow_mut();
             if this.machine.cpu.registers.pc == interception.pc {
@@ -1267,7 +1294,9 @@ mod tests {
                 machine.cpu.set_stop_on_fault(true);
             }),
             end(&[TRAP_0], instructions, |machine| {
-                machine.cpu.set_intercepted(TRAP_0_VECTOR, true);
+                machine
+                    .cpu
+                    .add_intercept_hook([TRAP_0_VECTOR], |_| ControlFlow::Break(()));
             }),
         ];
         let mapped: Vec<_> = ends.into_iter().map(EndView::try_from).collect();

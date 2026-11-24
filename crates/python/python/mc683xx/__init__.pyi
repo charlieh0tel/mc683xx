@@ -2,7 +2,7 @@
 module (docs/python.md, PLAN.md Python).  `make python` checks them
 against the module with mypy's stubtest."""
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from os import PathLike
 from typing import ClassVar, Literal, Protocol, final
 
@@ -1265,8 +1265,9 @@ class Machine:
     def serve_gdb(
         self, address: str = ..., ready: Callable[[int], object] | None = None
     ) -> Ending: ...
-    def set_intercepted(self, vector: int, intercepted: bool) -> None: ...
-    def set_intercept_callback(self, callback: Callable[[Intercepted], object] | None) -> None: ...
+    def add_intercept_hook(
+        self, callback: Callable[[Intercepted], object], vectors: Iterable[int]
+    ) -> HookId: ...
     def set_stop_on_fault(self, stop: bool) -> None: ...
     @property
     def stops_on_fault(self) -> bool: ...

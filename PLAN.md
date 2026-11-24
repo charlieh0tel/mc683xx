@@ -1007,8 +1007,9 @@ chip beside `Mc68331`.
   `stop_request()` (a `StopRequest`, Rust's `bus::StopRequest`: a
   callable's request ends the run `Stop.Requested()` once the callables have
   run, one left from before a run is withdrawn as it starts),
-  `set_intercepted(vector, on)` and `set_intercept_callback(callable)`
-  (no callback: taken natively), `set_stop_on_fault` and
+  `add_intercept_hook(callable, vectors)` (a `HookId`; the hooks
+  covering a vector answer in the order installed, until one handles
+  it, and none handling, it is taken natively), `set_stop_on_fault` and
   `stops_on_fault`, `request_interrupt(pin, vector)`,
   `clear_interrupt`, `take_exception(vector, level=None)`, `reset`,
   `save`, `restore`.  `run_limited` gives a `LimitedRun(cycles, end)`,
@@ -2557,18 +2558,26 @@ and `mc683xx.Machine` in Python (see Python).
   - A trace RTE requeues from a format $C frame's TR (6.3.2.2) is
     kept as any trace is: a fault stacking it keeps the RTE, its
     rerun cycle not made again, and leaves the trace pending.
-- **Intercepts (host-handled exceptions):** `set_intercepted(vector)`:
-  an exception an instruction raises (traps, illegal, line A and F,
+- **Intercepts (host-handled exceptions):**
+  `add_intercept_hook(vectors, hook)`: an exception an instruction
+  raises with one of `vectors` (traps, illegal, line A and F,
   privilege, zero divide, CHK, TRAPV, format error; not faults, trace
-  or interrupts) ends the run before anything is stacked
-  (`End::Intercepted`), its (An)+ and -(An) undone, PC at the
-  instruction; flags it set (CHK's N) stay.  `take_natively_once` lets
+  or interrupts) calls the hook before anything is stacked; one that
+  stops the run ends it (`End::Intercepted`), its (An)+ and -(An)
+  undone, PC at the instruction; flags it set (CHK's N) stay.  Where
+  several cover a vector they are called in the order installed until
+  one stops the run, the rest not called, so one host answers each
+  exception; none stopping it, the CPU takes it natively.  A hook,
+  not a flag per vector or a single callback (decided 2026-11-23), so
+  the host's parts each install their own and `remove_hook` takes
+  them off as any hook.  `take_natively_once` lets
   the instruction at PC take it natively when it runs again, which the
   host uses for an exception it declines: the instruction reruns,
   exactly, as its effects were undone.  A general host feature (a
   stubbed kernel call, an emulated instruction, a stop at any
   exception), under semver like the rest of the API (decided for
-  0.9.0); Python answers it with an intercept callback within the run.
+  0.9.0); Python answers it with its intercept hooks' callables within
+  the run.
 - **Hook context:** memory and invalid access hooks see the
   instruction's address (`pc`) and whether the cycle stacks a frame
   (`stacking`); `Cpu::instruction_registers` holds the registers as

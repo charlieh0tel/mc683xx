@@ -310,20 +310,51 @@ def test_an_intercept_handles_or_declines_before_stacking():
             return True
         return False
 
-    cpu.set_intercepted(TRAP_0 + 1, True)
-    cpu.set_intercepted(TRAP_0 + 7, True)
-    cpu.set_intercept_callback(answer)
+    hook = cpu.add_intercept_hook(answer, [TRAP_0 + 1, TRAP_0 + 7])
+    assert isinstance(hook, mc683xx.HookId)
     run = cpu.run_limited(reach=HANDLER)
     assert run.end == mc683xx.End.Reached()
     assert seen == [(TRAP_0 + 1, CODE), (TRAP_0 + 7, CODE + 2)]
     # Declined, trap #7 was taken natively: its frame is stacked.
     assert cpu.read_register("SSP") == STACK - 4 - 8
-    cpu.set_intercept_callback(None)
+    assert cpu.remove_hook(hook)
+    assert not cpu.remove_hook(hook)
 
 
-def test_an_intercepted_exception_with_no_callback_is_taken_natively():
+def test_intercept_hooks_answer_in_order_until_one_handles():
+    cpu = machine(trap(1), trap(1), RTS)
+    called = []
+
+    def hook(number, handles):
+        def answer(intercepted):
+            called.append(number)
+            if handles:
+                cpu.write_register("PC", intercepted.pc + 2)
+            return handles
+
+        return answer
+
+    cpu.add_intercept_hook(hook(1, False), [TRAP_0 + 1])
+    cpu.add_intercept_hook(hook(2, False), [TRAP_0 + 2])
+    handling = cpu.add_intercept_hook(hook(3, True), [TRAP_0 + 1])
+    cpu.add_intercept_hook(hook(4, True), [TRAP_0 + 1])
+    # a handled trap is no instruction run: both answered, then RTS
+    assert cpu.run_limited(instructions=1).end == mc683xx.End.Instructions()
+    assert called == [1, 3, 1, 3]
+    assert cpu.read_register("PC") == RETURN
+    # removed, the next covering hook answers
+    cpu.remove_hook(handling)
+    called.clear()
+    cpu.write_register("A7", STACK - 4)
+    cpu.run_limited(begin=CODE, instructions=1)
+    assert called == [1, 4, 1, 4]
+    with pytest.raises(TypeError):
+        cpu.add_intercept_hook(42, [TRAP_0])
+
+
+def test_an_exception_no_hook_handles_is_taken_natively():
     cpu = machine(trap(1), RTS)
-    cpu.set_intercepted(TRAP_0 + 1, True)
+    cpu.add_intercept_hook(lambda intercepted: False, [TRAP_0 + 1])
     assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
     assert cpu.read_register("SSP") == STACK - 4 - 8
 
