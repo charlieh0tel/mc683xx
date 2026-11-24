@@ -1674,9 +1674,10 @@ bare.remove_hook(stubbed)
 A host-handled exception: `add_intercept_hook(callback, vectors=None)`
 (Rust's `Cpu::add_intercept_hook(vectors, hook)`, the callable first
 here as in every Python `add_*_hook`) intercepts the exceptions an
-instruction raises with a vector of `vectors`, an iterable of vector
-numbers or `None`, the default, for every vector, Rust's `VectorSet` (traps, illegal, line A
-and F, privilege, divide by zero, CHK, TRAPV, format error) before
+instruction raises with a vector of `vectors`, a `VectorSet`, an
+iterable of vector numbers or `None`, the default, for every vector
+(traps, illegal, line A and F, privilege, divide by zero, CHK, TRAPV,
+format error: `VectorSet.INSTRUCTION`) before
 anything is stacked, for the host to handle (a stubbed kernel call, an
 emulated instruction, a stop), and returns a `HookId` that
 `remove_hook` takes.  `callback(Intercepted)` gets the `vector` and
@@ -1735,9 +1736,10 @@ bare.set_stop_on_fault(False)
 `set_stop_on_exception(vectors)` (Rust's `Cpu::set_stop_on_exception`
 and its `VectorSet`) stops the run at an exception of one of `vectors`
 the CPU is about to take, before anything is stacked:
-`End.Exception(vector, pc)`.  `vectors` is an iterable of vector
-numbers, `None` for every vector, an empty one, as at first, for none;
-`stops_on_exception` gives them back as a `frozenset`.  It covers an exception an instruction raises, a fault among
+`End.Exception(vector, pc)`.  `vectors` is a `VectorSet` or an
+iterable of vector numbers, `None` for every vector, an empty one, as
+at first, for none; `stops_on_exception` gives them back as a
+`VectorSet`.  It covers an exception an instruction raises, a fault among
 them, a trace, a hardware breakpoint and an interrupt, once
 acknowledged, as its vector is then known; not a fault while stacking,
 nor `take_exception`'s.  An instruction's exception leaves the
@@ -1759,6 +1761,22 @@ match bare.run_limited(begin=CALL, reach=CALL_RETURN).end:
     case end:
         raise AssertionError(end)
 bare.set_stop_on_exception(set())
+```
+
+`VectorSet` is Rust's: `VectorSet(iterable)` of vector numbers,
+`VectorSet()` for none, the class constants `ALL`, `NONE` and
+`INSTRUCTION` (the exceptions an instruction raises, which an
+intercept hook can see), `contains(vector)` and `in`, `is_empty()`,
+`without(vector)`, `union(other)`, and iteration, giving its numbers
+in ascending order.  Rust's `with(vector)` is a Python keyword, so a
+vector is added by `union(VectorSet([vector]))`.
+
+```python
+everything_but_trap_7 = mc683xx.VectorSet.INSTRUCTION.without(32 + 7)
+assert 32 + 7 not in everything_but_trap_7 and 32 + 1 in everything_but_trap_7
+bare.set_stop_on_exception(everything_but_trap_7)
+assert bare.stops_on_exception == everything_but_trap_7
+bare.set_stop_on_exception(mc683xx.VectorSet.NONE)
 ```
 
 A stop at chosen exceptions alone is an intercept hook's: one that

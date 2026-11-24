@@ -64,7 +64,6 @@ use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
 use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
-use pyo3::types::PyFrozenSet;
 
 use crate::chip::Halt;
 
@@ -82,6 +81,7 @@ use crate::python::opaque_repr;
 use crate::python::repr;
 use crate::register::Register;
 use crate::requests::StopRequestView;
+use crate::vector::VectorSetView;
 use crate::vector::vector_set;
 
 /// Instructions a run goes between looks for Ctrl-C.
@@ -828,8 +828,8 @@ impl MachineView {
     }
 
     /// Calls `callback(Intercepted)` for each exception an instruction
-    /// raises with a vector of `vectors`, an iterable of vector numbers
-    /// or `None`, the default, for every vector, before anything is
+    /// raises with a vector of `vectors`, a `VectorSet`, an iterable of
+    /// vector numbers or `None`, the default, for every vector, before anything is
     /// stacked, PC at the instruction.  `True` means it handled it: the CPU takes
     /// nothing and runs on from PC as the callable left it.  Otherwise
     /// the next hook that covers the vector is called, in the order
@@ -872,8 +872,9 @@ impl MachineView {
 
     /// Which exceptions the CPU is about to take, a trap, a fault, a
     /// trace, a hardware breakpoint or an interrupt, stop the run before
-    /// anything is stacked (`End.Exception`): `vectors`, an iterable of
-    /// vector numbers, `None` for every vector, an empty one for none.
+    /// anything is stacked (`End.Exception`): `vectors`, a `VectorSet`
+    /// or an iterable of vector numbers, `None` for every vector, an
+    /// empty one for none.
     /// The next run takes it natively.  A fault with `set_stop_on_fault`
     /// is a fault stop instead, and an intercept hook's exception is the
     /// hook's.  None at first.
@@ -883,14 +884,11 @@ impl MachineView {
         Ok(())
     }
 
-    /// The vectors whose exceptions stop the run, as a frozenset
+    /// The vectors whose exceptions stop the run
     /// (`set_stop_on_exception`).
     #[getter]
-    fn stops_on_exception<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyFrozenSet>> {
-        PyFrozenSet::new(
-            py,
-            self.machine.cpu.stops_on_exception().iter().map(u8::from),
-        )
+    fn stops_on_exception(&self) -> VectorSetView {
+        VectorSetView(self.machine.cpu.stops_on_exception())
     }
 
     /// Instructions run since the CPU was made.

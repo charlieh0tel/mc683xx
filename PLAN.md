@@ -1053,7 +1053,10 @@ chip beside `Mc68331`.
   `add_intercept_hook(callable, vectors)` (a `HookId`; the hooks
   covering a vector answer in the order installed, until one handles
   it, and none handling, it is taken natively), `set_stop_on_fault` and
-  `stops_on_fault`, `set_stop_on_exception` and `stops_on_exception`, `request_interrupt(pin, vector)`,
+  `stops_on_fault`, `set_stop_on_exception` and `stops_on_exception`
+  (vectors as a `VectorSet`, Rust's, which replaced a `frozenset` in
+  0.9.0 so the set's constants and `without` read as in Rust; an
+  iterable of numbers is taken too), `request_interrupt(pin, vector)`,
   `clear_interrupt`, `take_exception(vector, level=None)`, `reset`,
   `save`, `restore`.  `run_limited` gives a `LimitedRun(cycles, end)`,
   its `End` Rust's (`End.Stop(stop)`, `End.Reached()`,

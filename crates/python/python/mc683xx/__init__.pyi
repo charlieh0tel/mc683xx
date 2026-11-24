@@ -2,7 +2,7 @@
 module (docs/python.md, PLAN.md Python).  `make python` checks them
 against the module with mypy's stubtest."""
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from os import PathLike
 from typing import ClassVar, Literal, Protocol, final
 
@@ -62,6 +62,7 @@ __all__ = [
     "ClockPhase",
     "Space",
     "HookId",
+    "VectorSet",
     "Instruction",
     "MemoryAccess",
     "PendingRead",
@@ -492,6 +493,30 @@ class HookId:
     """A hook, as `add_*_hook` returns it and `Stop.Hook` carries it;
     `str()` is `hook 3`."""
 
+    def __hash__(self) -> int: ...
+
+@final
+class VectorSet:
+    """A set of exception vectors, any of the 256 (Rust's
+    `exception::VectorSet`): which exceptions stop a run or an intercept
+    hook covers.  `VectorSet(iterable)` of vector numbers, or `ALL`,
+    `NONE` or `INSTRUCTION`; iterating gives its numbers, ascending.
+    Taken wherever vectors are, beside an iterable of numbers."""
+
+    ALL: ClassVar[VectorSet]
+    NONE: ClassVar[VectorSet]
+    INSTRUCTION: ClassVar[VectorSet]
+    """The vectors of the exceptions an instruction raises, the ones an
+    intercept hook can see (CPU32RM Table 6-2, groups 2 and 3)."""
+
+    def __new__(cls, vectors: Iterable[int] | None = None) -> VectorSet: ...
+    def contains(self, vector: int) -> bool: ...
+    def __contains__(self, vector: object, /) -> bool: ...
+    def is_empty(self) -> bool: ...
+    def without(self, vector: int) -> VectorSet: ...
+    def union(self, other: VectorSet) -> VectorSet: ...
+    def __iter__(self) -> Iterator[int]: ...
+    def __len__(self) -> int: ...
     def __hash__(self) -> int: ...
 
 @final
@@ -1367,7 +1392,7 @@ class Machine:
     def stops_on_fault(self) -> bool: ...
     def set_stop_on_exception(self, vectors: Iterable[int] | None) -> None: ...
     @property
-    def stops_on_exception(self) -> frozenset[int]: ...
+    def stops_on_exception(self) -> VectorSet: ...
     @property
     def instructions(self) -> int: ...
     @property

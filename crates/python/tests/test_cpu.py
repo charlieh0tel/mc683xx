@@ -411,7 +411,7 @@ def test_an_exception_no_hook_handles_is_taken_natively():
 def test_an_exception_stop_stacks_nothing_and_the_run_on_takes_it():
     cpu = machine(trap(1), RTS)
     cpu.set_stop_on_exception(None)
-    assert cpu.stops_on_exception == frozenset(range(256))
+    assert cpu.stops_on_exception == mc683xx.VectorSet.ALL
     match cpu.run_limited(reach=HANDLER).end:
         case mc683xx.End.Exception(vector, pc):
             assert (vector, pc) == (TRAP_0 + 1, CODE)
@@ -431,13 +431,14 @@ def test_an_interrupt_stops_once_acknowledged():
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Exception(0x40, CODE)
     assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
     cpu.set_stop_on_exception(set())
-    assert cpu.stops_on_exception == frozenset()
+    assert cpu.stops_on_exception == mc683xx.VectorSet.NONE
 
 
 def test_an_exception_stop_stops_only_the_vectors_set():
     cpu = machine(trap(1), RTS)
     cpu.set_stop_on_exception({TRAP_0 + 2})
-    assert cpu.stops_on_exception == {TRAP_0 + 2}
+    assert cpu.stops_on_exception == mc683xx.VectorSet([TRAP_0 + 2])
+    assert set(cpu.stops_on_exception) == {TRAP_0 + 2}
     assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
     cpu = machine(trap(1), RTS)
     cpu.set_stop_on_exception(vector for vector in [TRAP_0 + 1])
@@ -841,3 +842,31 @@ def test_false_and_none_do_not_stop_a_hook():
     cpu.add_code_hook(lambda instruction: False, CODE + 2, CODE + 2)
     cpu.add_code_hook(lambda instruction: None, CODE + 2, CODE + 2)
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+
+
+def test_a_vector_set_is_rust_s():
+    VectorSet = mc683xx.VectorSet
+    traps = VectorSet(range(32, 48))
+    assert VectorSet() == VectorSet.NONE and VectorSet.NONE.is_empty()
+    assert len(VectorSet.ALL) == 256 and list(VectorSet([39, 32])) == [32, 39]
+    assert 32 in traps and 31 not in traps and 300 not in traps and -1 not in traps and "x" not in traps
+    assert traps.contains(47) and not traps.without(47).contains(47)
+    assert traps.union(VectorSet([4])) == VectorSet([4, *range(32, 48)])
+    assert list(VectorSet.INSTRUCTION) == [4, 5, 6, 7, 8, 10, 11, 14, *range(32, 48)]
+    assert VectorSet(VectorSet.ALL) == VectorSet.ALL
+    assert repr(VectorSet.ALL) == "VectorSet.ALL"
+    assert repr(VectorSet([32, 39])) == "VectorSet([32, 39])"
+    assert len({VectorSet([1]), VectorSet([1])}) == 1
+    with pytest.raises(OverflowError):
+        VectorSet([256])
+
+
+def test_a_vector_set_is_taken_wherever_vectors_are():
+    cpu = machine(trap(1), RTS)
+    cpu.set_stop_on_exception(mc683xx.VectorSet.INSTRUCTION.without(TRAP_0 + 2))
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Exception(TRAP_0 + 1, CODE)
+    cpu.set_stop_on_exception(mc683xx.VectorSet.NONE)
+    seen = []
+    cpu.add_intercept_hook(lambda intercepted: seen.append(intercepted.vector), mc683xx.VectorSet.INSTRUCTION)
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
+    assert seen == [TRAP_0 + 1]
