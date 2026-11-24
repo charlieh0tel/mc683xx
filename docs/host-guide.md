@@ -1536,7 +1536,11 @@ beside `watch_code`, a hook that breaks ending the run `Stop::Hook`.
   `Board::take_received(name)` gives what reached one since the last
   call, with each value's time, and fails (`ReceiveError::Endpoint`)
   for an endpoint no net drives.
-- **Control from another thread.**  `Board::control() ->
+- **Control from another thread.**  A machine (`Cpu`, `Machine`,
+  `Mc68331`, `Board`, and a `Registry`) is not `Send`, by design: it
+  is built and run on one thread (PLAN.md, Decisions).  What it is
+  built from (`Description`, `Image`, `Script`, `Memory`) is `Send`,
+  so another thread may parse and read those.  `Board::control() ->
   control::BoardControl` is the board's thread-safe handle (`Send`,
   `Sync`, cheap to `Clone`; every call gives a handle to the one
   control), for a front end whose event loop is another thread:
