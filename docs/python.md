@@ -1782,9 +1782,24 @@ match bare.run_limited(begin=CALL, reach=CALL_RETURN).end:
     case mc683xx.End.Fault(fault):
         assert fault.cause == mc683xx.FaultCause.BUS_ERROR
         assert (fault.address, fault.size, fault.pc) == (0x90000000, 4, CALL)
+        stopped = fault
     case end:
         raise AssertionError(end)
 bare.set_stop_on_fault(False)
+```
+
+`str(fault)` is the full form, Rust's `Display`: the cause, the kind,
+the size, the address, the function code and the instruction's pc.
+To compare faults across runs where addresses differ (a relocated
+image, a different stack), print it without them from its fields,
+each enum's `str()` being Rust's `Display` too:
+
+```python
+assert str(stopped) == (
+    f"bus error: read of 4 bytes at 0x90000000 in supervisor-data, pc {CALL:#010x}"
+)
+summary = f"{stopped.cause}: {stopped.kind} of {stopped.size} bytes in {stopped.function_code}"
+assert summary == "bus error: read of 4 bytes in supervisor-data"
 ```
 
 `set_stop_on_exception(vectors)` (Rust's `Cpu::set_stop_on_exception`
