@@ -79,6 +79,14 @@ working fails `make ci`.
   (`ram_*`) and through a peripheral that peeks and pokes its own array
   (`peripheral_*`), as a host loads an image into a part.  Throughput
   is bytes.
+- `hooks/*` (`benches/hooks.rs`): what the hooks cost the core, on
+  the `nop`, `move_indirect` and `clr_indirect` kernels: `unhooked`;
+  `code_elsewhere` and `write_elsewhere`, a hook on two bytes of the
+  RAM's pages that no sled reaches, so it never fires; and
+  `code_everywhere`, a Rust code hook that does nothing, called on
+  every instruction.  `hooks/add_remove` adds and removes a code
+  hook on the RAM.  From Python, `crates/python/benches/hooks.py`
+  (Python hooks, below).
 - `*/short_runs`: 1000 runs of one clock each, the cost of a run call:
   `Cpu::run_for` alone, and `Mc68331::run_for` with its syncing.
 - `tables/*` (`benches/tables.rs`): building the 64K-entry instruction
@@ -701,3 +709,30 @@ benchmark 3% slower in fact.  What is left of a data access is the
 page walk itself (mask, slab, entry, region, bounds checks, about 20
 instructions); the compact entry is the next candidate once `cmpi`'s
 and `btst_immediate`'s cost is understood.
+
+## Hooks
+
+A hook costs nothing while none is installed; one installed costs
+what looking it up costs, and a Python one the call into Python.
+`crates/python/benches/hooks.py` measures the bare `Machine` from
+Python: a two-instruction loop (`move.w d0,(a0)`, `bra.s`) with no
+hook, a code hook outside it, a no-op code hook on every
+instruction, a no-op write hook, and write hooks that read A7; and
+adding and removing a code hook.  Built with `maturin develop
+--release`, pinned to one core:
+
+```
+taskset -c 16 python crates/python/benches/hooks.py
+```
+
+On the machine above, pinned to an efficiency core (16) while the
+performance cores' siblings were loaded, release builds, best of 7:
+
+| Case | Before |
+| --- | --- |
+| no hook | 37.6 M instructions/s |
+| code hook elsewhere | 34.2 M instructions/s |
+| no-op code hook, a call | 0.42 us |
+| no-op write hook, a call | 0.50 us |
+| write hook reading `registers['A7']`, a call | 5.39 us |
+| add and remove a code hook | 15.6 us |
