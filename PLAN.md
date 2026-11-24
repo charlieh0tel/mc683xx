@@ -897,7 +897,9 @@ chip beside `Mc68331`.
   `InvalidAccess` (those, `kind`, a `BusCycleKind`, `value` or `None`,
   `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`) or an
   `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`).  A
-  truthy result stops the run (`Stop.Hook(hook)`),
+  `True` result stops the run (`Stop.Hook(hook)`), `None` or `False`
+  does not, and any other raises `TypeError` (sc batch 4: a truthy
+  count or list stopped runs by mistake),
   where the Rust hook's `Break` would.  An exception it raises stops
   the run there too and is raised when `run_for` returns, as a peripheral's
   is, but without a stop request left behind.  The run holds the
@@ -1051,7 +1053,13 @@ chip beside `Mc68331`.
   `add_intercept_hook(callable, vectors)` (a `HookId`; the hooks
   covering a vector answer in the order installed, until one handles
   it, and none handling, it is taken natively), `set_stop_on_fault` and
-  `stops_on_fault`, `set_stop_on_exception` and `stops_on_exception`, `request_interrupt(pin, vector)`,
+  `stops_on_fault`, `set_stop_on_exception` and `stops_on_exception`
+  (vectors as a `VectorSet`, Rust's, which replaced a `frozenset` in
+  0.9.0 so the set's constants and `without` read as in Rust; an
+  iterable of numbers is taken too; a vector is its number, `Vector`
+  naming Rust's constants as numbers, `Vector.BUS_ERROR`, a namespace
+  rather than a type, as vectors cross as numbers everywhere else),
+  `request_interrupt(pin, vector)`,
   `clear_interrupt`, `take_exception(vector, level=None)`, `reset`,
   `save`, `restore`.  `run_limited` gives a `LimitedRun(cycles, end)`,
   its `End` Rust's (`End.Stop(stop)`, `End.Reached()`,
@@ -2401,22 +2409,36 @@ Adversarial review (2026-11-01):
 - Pre-read hooks (`Cpu::add_pre_read_hook`, added for 0.9.0 at the
   owner's call, against the recommendation to model such a device as a
   peripheral that takes the memory): before an operand byte or word
-  read cycle the core's memory serves, of a byte in the hook's range,
-  each covering hook in the order installed gets the cycle
-  (`PendingRead`) and the bytes it is to read, a mutable slice of the
-  page's read backing, so a change is what the cycle reads and stays
-  in memory, as deterministic as the host's callback.  Per range,
-  removed by `remove_hook`, as the other memory hooks; a page with one
-  takes the slow path, as one with a read hook does, so a run with
-  none costs nothing more: the fast path is unchanged, and
-  `core/move_indirect`, `core/move_postincrement` and
-  `core/move_displacement` move within 2% either way, run to run,
-  before and after.  Not for fetches (code hooks are theirs), a cycle
-  the bus serves (a peripheral's has no bytes to patch; its own `read`
-  answers), nor a look with no cycle (`Memory::peek`, a debugger's
-  read), which is no cycle.  They run before the cycle, the read
-  hooks after it, seeing the value read.  A long operand is two word
-  cycles, each shown, with `set_long_bus` too.
+  read the core's memory serves all of, of a byte in the hook's range,
+  each covering hook in the order installed gets the read
+  (`PendingRead`, 1, 2 or 4 bytes), the core's memory as `&Memory` to
+  look at, and a copy of the bytes it is to read: what the hooks leave
+  in the copy answers the read and is not stored (serve-only, sc batch
+  4: a hook that stored its answer left RAM other than the firmware
+  wrote it).  The copy and the shared `&Memory` cannot alias, so the
+  hook sees memory as it is and cannot change it.  A pre-read hook is
+  a device model that answers an operand; the read hooks observe bus
+  cycles (on the chip a long is one pre-read call, two word read hook
+  calls).  Operand-level, once
+  before the first cycle, whatever `set_long_bus` says (the read hooks
+  follow it): a long across two pages of memory is one call; a long
+  with a byte the bus serves is none, its cycles as usual, as the bus
+  has no bytes to copy until it runs them; a misaligned word or long,
+  an address error, is none, and so is a read a page's permissions
+  refuse, a fault, as its answer would be discarded.  The cycles
+  follow, timed by their pages, shown to the read hooks with the
+  served values.  Per range, removed by `remove_hook`, as the other
+  memory hooks.  Pages with one stay on the fast path: an operand read
+  checks one flag, set while any pre-read hook is installed, then the
+  pages' bits; a run with none costs that flag: `core/move_indirect`
+  +0.5%, `core/move_postincrement` no change detected,
+  `core/move_displacement` +0.3%, `core/move_indexed` +1.2%, before
+  and after.  Not for fetches (code hooks are theirs), nor a
+  look with no cycle (`Memory::peek`, a debugger's read).  Python's
+  `PendingRead.peek(address, length)` lends the memory to the callable
+  for its call alone, through a scoped thread-local (`scoped-tls`, no
+  `unsafe` here); a `PendingRead` kept past it raises
+  `RuntimeError`.
 - A block starts after a change of flow (`Flow::Changed`), an
   exception, reset, restore, or a host jump: a run that finds PC
   other than where the last run, reset or restore left it (the core
@@ -2625,7 +2647,8 @@ and `mc683xx.Machine` in Python (see Python).
 - **Intercepts (host-handled exceptions):**
   `add_intercept_hook(vectors, hook)`: an exception an instruction
   raises with one of `vectors` (traps, illegal, line A and F,
-  privilege, zero divide, CHK, TRAPV, format error; not faults, trace
+  privilege, zero divide, CHK, TRAPV, format error, CPU32RM Table
+  6-2's groups 2 and 3, `VectorSet::INSTRUCTION`; not faults, trace
   or interrupts) calls the hook before anything is stacked; one that
   stops the run ends it (`End::Intercepted`), its (An)+ and -(An)
   undone, PC at the instruction; flags it set (CHK's N) stay.  Where
@@ -3643,7 +3666,7 @@ host's QSPI peripheral, which a restore keeps).
 | Python mirrors the Rust types it wraps: `Run`, `LimitedRun` and `BoardRun`, `Stop` and `End` a class per variant (a variant's value a field named for it, `stop.hook`, `frame.data`, not `_0`; positional patterns still match), `Machine`, `HookId`, plain enums as enum classes | One name per item across both APIs (AGENTS.md); a host porting between them translates nothing.  A name a host writes when it wires (pin, chip select, net type, direction, register) crosses as its string, a value it matches on (kind, cause, port, channel, function code) as an enum class whatever its traits (amended 2026-11-23: the earlier "a type with `FromStr` crosses as its string" did not describe `Port`, `Channel`, `Input`, `Role`, `Lane` or `ResetCause`, and would have made `FunctionCode` the one value matched as a string); `End::Intercepted` and `End::Steps` have no Python variant, as the run answers an intercept and takes no step limit (decided 2026-10-24, before 0.1.0). |
 | A peripheral's Python exception stops the run after its instruction and is raised when `run_for` returns | The `MappedPeripheral` trait can report only BERR; the chip's `StopRequest` ends the run there, and the exception cannot cross it. |
 | A bare `Machine`'s hooks may write the CPU; their callables run between core runs | Unicorn's harness stubs routines and peripherals from hooks; queuing in the core and calling Python with nothing borrowed needs no `unsafe` and costs only hooks that fire. |
-| A Python hook stops the run on a truthy result; its exception stops it as `Break` and is raised when `run_for` returns | A breakpoint is `return True`; a hook returns `Control`, so it can stop where it is, with no stop request left for the next run. |
+| A Python hook stops the run on `True`, not on `None` or `False`, and raises `TypeError` on anything else; its exception stops it as `Break` and is raised when `run_for` returns | A breakpoint is `return True`; a hook returns `Control`, so it can stop where it is, with no stop request left for the next run. |
 | Hook stops before an instruction skip that instruction's hooks once on resume | A breakpoint must stop before the instruction yet let the next run past it. |
 | A snapshot taken at a hook stop keeps that hook's skip on restore | Restore resumes exactly where the run stopped; no block hook fires again at that instruction (decided 2026-10-23). |
 | GPT clock outputs high in the system clock the tap advances its counter in | GPTRM 5.1 gives no phase; ours lines a compare's pin action up with a rise (decided 2026-10-23). |

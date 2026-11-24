@@ -204,24 +204,42 @@ def test_a_memory_hook_s_writes_land_after_the_instruction():
     assert seen == [(9, b"\x00\x09", False)]
 
 
-def test_a_pre_read_hook_patches_the_bytes_before_the_read():
+def test_a_pre_read_hook_answers_the_long_from_its_copy_and_peeks_memory():
     cpu = machine(MOVE_LONG_A0_TO_D0, RTS)
     cpu.write_register("A0", 0x2000)
     cpu.poke_bytes(0x2000, struct.pack(">I", 0x11112222))
+    cpu.poke_bytes(0x2100, b"\x99")
     seen = []
+    kept = []
 
-    def patch(read: mc683xx.PendingRead, data: bytearray) -> None:
+    def answer(read: mc683xx.PendingRead, data: bytearray) -> None:
         seen.append((read.address, read.size, bytes(data), read.stacking))
-        data[1] = 0x99
+        data[3:] = read.peek(0x2100, 1)
+        kept.append(read)
 
-    cpu.add_pre_read_hook(patch, 0x2003, 0x2003)
+    cpu.add_pre_read_hook(answer, 0x2003, 0x2003)
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
     assert cpu.read_register("D0") == 0x11112299
-    assert seen == [(0x2002, 2, b"\x22\x22", False)]
-    assert cpu.peek_bytes(0x2000, 4) == bytes.fromhex("11112299")
+    assert seen == [(0x2000, 4, b"\x11\x11\x22\x22", False)]
+    assert cpu.peek_bytes(0x2000, 4) == bytes.fromhex("11112222")
+    with pytest.raises(RuntimeError, match="within its hook's call"):
+        kept[0].peek(0x2100, 1)
 
 
-def test_a_truthy_pre_read_hook_stops_the_run_and_one_that_resizes_raises():
+def test_a_pre_read_hook_s_peek_past_memory_raises_and_calling_the_machine_raises():
+    cpu = machine(MOVE_WORD_A0_TO_D0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.add_pre_read_hook(lambda read, data: read.peek(0xF00000, 2), 0x2000, 0x2001)
+    with pytest.raises(mc683xx.BusError):
+        cpu.run_limited(reach=RETURN)
+    cpu2 = machine(MOVE_WORD_A0_TO_D0, RTS)
+    cpu2.write_register("A0", 0x2000)
+    cpu2.add_pre_read_hook(lambda read, data: cpu2.peek_bytes(0x2000, 2), 0x2000, 0x2001)
+    with pytest.raises(RuntimeError):
+        cpu2.run_limited(reach=RETURN)
+
+
+def test_a_true_pre_read_hook_stops_the_run_and_one_that_resizes_raises():
     cpu = machine(MOVE_WORD_A0_TO_D0, NOP, RTS)
     cpu.write_register("A0", 0x2000)
     hook = cpu.add_pre_read_hook(lambda read, data: True, 0x2000, 0x2001)
@@ -259,7 +277,7 @@ def test_a_memory_hook_sees_a_long_once_and_not_one_that_faults():
     ]
 
 
-def test_a_truthy_hook_or_stop_ends_the_run():
+def test_a_true_hook_or_stop_ends_the_run():
     cpu = machine(NOP, NOP, RTS)
     hook = cpu.add_code_hook(lambda instruction: True, CODE + 2, CODE + 2)
     run = cpu.run_limited(reach=RETURN)
@@ -393,7 +411,7 @@ def test_an_exception_no_hook_handles_is_taken_natively():
 def test_an_exception_stop_stacks_nothing_and_the_run_on_takes_it():
     cpu = machine(trap(1), RTS)
     cpu.set_stop_on_exception(None)
-    assert cpu.stops_on_exception == frozenset(range(256))
+    assert cpu.stops_on_exception == mc683xx.VectorSet.ALL
     match cpu.run_limited(reach=HANDLER).end:
         case mc683xx.End.Exception(vector, pc):
             assert (vector, pc) == (TRAP_0 + 1, CODE)
@@ -413,13 +431,14 @@ def test_an_interrupt_stops_once_acknowledged():
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Exception(0x40, CODE)
     assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
     cpu.set_stop_on_exception(set())
-    assert cpu.stops_on_exception == frozenset()
+    assert cpu.stops_on_exception == mc683xx.VectorSet.NONE
 
 
 def test_an_exception_stop_stops_only_the_vectors_set():
     cpu = machine(trap(1), RTS)
     cpu.set_stop_on_exception({TRAP_0 + 2})
-    assert cpu.stops_on_exception == {TRAP_0 + 2}
+    assert cpu.stops_on_exception == mc683xx.VectorSet([TRAP_0 + 2])
+    assert set(cpu.stops_on_exception) == {TRAP_0 + 2}
     assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
     cpu = machine(trap(1), RTS)
     cpu.set_stop_on_exception(vector for vector in [TRAP_0 + 1])
@@ -795,3 +814,72 @@ def test_thousands_of_short_calls_a_second():
     rate = calls / (time.perf_counter() - start)
     print(f"{rate:.0f} calls per second")
     assert rate > 1000
+
+
+@pytest.mark.parametrize("result", [1, 0, "", [], "yes"])
+def test_a_hook_result_not_a_bool_or_none_raises_type_error(result):
+    cpu = machine(NOP, NOP, RTS)
+    cpu.add_code_hook(lambda instruction: result, CODE + 2, CODE + 2)
+    with pytest.raises(TypeError, match="True, False or None"):
+        cpu.run_limited(reach=RETURN)
+
+
+@pytest.mark.parametrize("result", [1, 2.0])
+def test_an_intercept_or_pre_read_hook_result_not_a_bool_raises_type_error(result):
+    cpu = machine(0x4E40, RTS)  # TRAP #0
+    cpu.add_intercept_hook(lambda intercepted: result)
+    with pytest.raises(TypeError, match="True, False or None"):
+        cpu.run_limited(reach=RETURN)
+    cpu = machine(MOVE_WORD_A0_TO_D0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.add_pre_read_hook(lambda read, data: result, 0x2000, 0x2001)
+    with pytest.raises(TypeError, match="True, False or None"):
+        cpu.run_limited(reach=RETURN)
+
+
+def test_false_and_none_do_not_stop_a_hook():
+    cpu = machine(NOP, NOP, RTS)
+    cpu.add_code_hook(lambda instruction: False, CODE + 2, CODE + 2)
+    cpu.add_code_hook(lambda instruction: None, CODE + 2, CODE + 2)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+
+
+def test_a_vector_set_is_rust_s():
+    VectorSet = mc683xx.VectorSet
+    traps = VectorSet(range(32, 48))
+    assert VectorSet() == VectorSet.NONE and VectorSet.NONE.is_empty()
+    assert len(VectorSet.ALL) == 256 and list(VectorSet([39, 32])) == [32, 39]
+    assert 32 in traps and 31 not in traps and 300 not in traps and -1 not in traps and "x" not in traps
+    assert traps.contains(47) and not traps.without(47).contains(47)
+    assert traps.union(VectorSet([4])) == VectorSet([4, *range(32, 48)])
+    assert list(VectorSet.INSTRUCTION) == [4, 5, 6, 7, 8, 10, 11, 14, *range(32, 48)]
+    assert VectorSet(VectorSet.ALL) == VectorSet.ALL
+    assert repr(VectorSet.ALL) == "VectorSet.ALL"
+    assert repr(VectorSet([32, 39])) == "VectorSet([32, 39])"
+    assert len({VectorSet([1]), VectorSet([1])}) == 1
+    with pytest.raises(OverflowError):
+        VectorSet([256])
+
+
+def test_a_vector_set_is_taken_wherever_vectors_are():
+    cpu = machine(trap(1), RTS)
+    cpu.set_stop_on_exception(mc683xx.VectorSet.INSTRUCTION.without(TRAP_0 + 2))
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Exception(TRAP_0 + 1, CODE)
+    cpu.set_stop_on_exception(mc683xx.VectorSet.NONE)
+    seen = []
+    cpu.add_intercept_hook(lambda intercepted: seen.append(intercepted.vector), mc683xx.VectorSet.INSTRUCTION)
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
+    assert seen == [TRAP_0 + 1]
+
+
+def test_vector_names_rust_s_vector_numbers():
+    Vector = mc683xx.Vector
+    assert (Vector.BUS_ERROR, Vector.ZERO_DIVIDE, Vector.TRAP, Vector.FORMAT_ERROR) == (2, 5, 32, 14)
+    assert Vector.trap(7) == 39 and Vector.autovector(3) == 27
+    assert Vector.TRAP + 1 in mc683xx.VectorSet.INSTRUCTION
+    with pytest.raises(ValueError, match="TRAP #16"):
+        Vector.trap(16)
+    with pytest.raises(ValueError):
+        Vector.autovector(8)
+    with pytest.raises(TypeError):
+        Vector()

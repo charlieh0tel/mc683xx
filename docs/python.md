@@ -44,7 +44,11 @@ rename renames the Python name with it.  The deliberate differences:
   (`Event.Reset(now, cause)`, `Frame.Data(bits)`), and so does
   `Pacing`, though it has `Display` and `FromStr`: its factor is a
   number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`
-  the text.  Such a value's `str()` is Rust's `Display` too (`Stop`,
+  the text.  An exception vector crosses as its number too, Rust's
+  `Vector` newtype of every `u8`; the class `Vector` holds Rust's
+  constants and constructors as numbers (`Vector.BUS_ERROR` is 2,
+  `Vector.trap(7)` 39, `Vector.autovector(3)` 27), and no value is a
+  `Vector`.  Such a value's `str()` is Rust's `Display` too (`Stop`,
   `End`, `Entry`, `Pacing`: `str(Stop.Budget())` is `"budget"`), and
   so is a struct's or an id's that has one (`FaultStop`, `HookId`,
   `ObserverId`, `PeripheralId`, `MemoryId`: `str(hook)` is `"hook 3"`, where its
@@ -875,8 +879,10 @@ long operand is two word cycles, on the bare `Machine` one access of
 an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`) or
 an `ExceptionReturn` (`vector`, `pc`, `sr`, `stack`: what `rte`
 restored, and the frame's address, its `ExceptionEntry`'s `stack`).
-Each returns a `HookId` for `remove_hook`.  A truthy result stops the
-run (`Stop.Hook(hook)`); a code hook's stop leaves its
+Each returns a `HookId` for `remove_hook`.  A callable returns `True`
+to stop the run (`Stop.Hook(hook)`), `None` (no `return`) or `False`
+not to; any other result raises `TypeError`, as Rust's hook returns a
+`ControlFlow`, not a number or a list; a code hook's stop leaves its
 instruction unexecuted, and the next run goes past it.  A hook's
 exception stops the run and is raised by `run_for`.  The run holds the
 chip, so a hook that calls into it raises `RuntimeError`; what it
@@ -1561,8 +1567,8 @@ The hooks are the chip's (`add_code_hook`, `add_block_hook`,
 `add_exception_hook`, `add_exception_return_hook`, `remove_hook`), but on
 the bare `Machine` a callable
 may read and write registers and memory, map, protect and stop the
-run (`stop_request().request()`), as a Unicorn hook does; a truthy
-result stops it too.  It
+run (`stop_request().request()`), as a Unicorn hook does; `True`
+stops it too.  It
 cannot `run_limited`.  A hook stops the core's run where it fires; `run_limited` calls
 the callables, in order, with nothing held, and goes on.  So when a
 write takes effect:
@@ -1570,44 +1576,58 @@ write takes effect:
 | Hook | Called | A register or memory write |
 | --- | --- | --- |
 | code, block | before the instruction | is seen by it; a PC write redirects, the instruction at the old PC not run, and the hooks at the new PC are called |
-| pre-read | within the cycle, before it reads | a change to its `data` is what the cycle reads; registers and other memory, as for read |
+| pre-read | within the run, before the read's first cycle | a change to its `data` answers the read, not stored; it reads memory with `PendingRead.peek`, and a call into the machine raises `RuntimeError` |
 | read, write | once the instruction has completed (a write hook sees memory written) | lands after the instruction, before the next |
 | invalid access | once the bus error exception is taken, PC the handler's (or the run stopped for it, with `stop_on_fault`) | lands before the handler's first instruction |
 | exception | once the frame is stacked and PC is the handler's | lands before the handler runs; writing SSP, SR and PC from the frame returns past it |
 | intercept hook | before anything is stacked, PC at the instruction | lands before the CPU goes on from PC |
 
 `add_pre_read_hook(callback, begin=0, end=0xFFFFFFFF)` (Rust's
-`Cpu::add_pre_read_hook`) calls `callback(PendingRead, data)` within
-each operand read cycle that the core's memory (RAM or ROM its pages
-map) serves of a byte in the range, before the cycle reads: `data` is
-a bytearray of the cycle's bytes (1 or 2: a long operand is two word
-cycles, each seen), and what the callable leaves in it, at the same
-length, is what the cycle reads, and stays in memory.  A
-`PendingRead` has `address`, `size`, `function_code`, `pc` and
-`stacking`.  It is a device model's way to patch a few bytes of RAM
-just before the firmware reads them.  Fetches, peripherals' reads,
-memory the decode serves off the core's pages (a select a peripheral
-shares), and looks with no cycle (`peek_bytes`, `peek`, gdb) call no
-pre-read hook.  The read hooks see the cycle after it, the value it
-read.  On the bare `Machine`, unlike its other hooks, it runs within
-the run, so it must not call into the machine; a truthy result stops
-the run once the instruction completes.
+`Cpu::add_pre_read_hook`) calls `callback(PendingRead, data)` once
+before each operand read of a byte in the range that the core's memory
+(RAM or ROM its pages map) serves all of, before its first cycle:
+`data` is a bytearray copy of the operand's bytes (1, 2 or 4: a long
+is one call), and what the callable leaves in it, at the same length,
+answers the read, and is not stored.  A `PendingRead` has `address`,
+`size`, `function_code`, `pc` and `stacking`, and
+`peek(address, length)`, the core's memory as a debugger reads it
+(supervisor space, no cycle, no peripheral), during the call: another
+register the firmware keeps in RAM, a port's image, say.  It is a
+device model's way to answer what the firmware reads of RAM.  A long
+across two pages of memory is one call; a long with a byte a
+peripheral serves, or memory the decode serves off the core's pages
+(a select a peripheral shares), is none, nor are fetches, misaligned
+words and longs, reads the pages' permissions refuse (a fault, whose
+answer would be discarded), and looks with no cycle (`peek_bytes`,
+`peek`, gdb).
+A pre-read hook is a device model that answers an operand; the read
+hooks observe bus cycles.  So on an `Mc68331` or a `Board`, whose long
+is two word cycles, a long read is one pre-read call and two read hook
+calls (size 2 each); on the bare `Machine`, which sees a long once,
+one of each.  The read hooks see the cycles after it, with the values `data` gave
+them.  On the bare `Machine`, unlike its other hooks, it runs within
+the run, so a call into the machine raises `RuntimeError`, and memory
+is `PendingRead.peek`'s; `True` stops the run once the
+instruction completes.
 
 ```python
 bare.poke_bytes(0x6000, struct.pack(">H", 0x1111))
 
 
-def patch(read: mc683xx.PendingRead, data: bytearray) -> None:
-    """A device model's status word, fresh as the firmware reads it."""
-    data[:] = struct.pack(">H", 0x2222)
+def status(read: mc683xx.PendingRead, data: bytearray) -> None:
+    """A device model's status word, from the image at 0x6100."""
+    (image,) = struct.unpack(">H", read.peek(0x6100, 2))
+    data[:] = struct.pack(">H", image ^ 0x3333)
 
 
-patching = bare.add_pre_read_hook(patch, 0x6000, 0x6001)
+bare.poke_bytes(0x6100, struct.pack(">H", 0x1111))
+patching = bare.add_pre_read_hook(status, 0x6000, 0x6001)
 bare.poke_bytes(CALL, struct.pack(">HIH", 0x3039, 0x6000, RTS))  # move.w $6000,d0
 bare.poke_bytes(CALL_STACK - 4, struct.pack(">I", CALL_RETURN))
 bare.write_register("A7", CALL_STACK - 4)
 assert bare.run_limited(begin=CALL, reach=CALL_RETURN).end == mc683xx.End.Reached()
 assert bare.read_register("D0") & 0xFFFF == 0x2222
+assert bare.peek_bytes(0x6000, 2) == struct.pack(">H", 0x1111)
 bare.remove_hook(patching)
 ```
 
@@ -1664,14 +1684,15 @@ bare.remove_hook(stubbed)
 A host-handled exception: `add_intercept_hook(callback, vectors=None)`
 (Rust's `Cpu::add_intercept_hook(vectors, hook)`, the callable first
 here as in every Python `add_*_hook`) intercepts the exceptions an
-instruction raises with a vector of `vectors`, an iterable of vector
-numbers or `None`, the default, for every vector, Rust's `VectorSet` (traps, illegal, line A
-and F, privilege, divide by zero, CHK, TRAPV, format error) before
+instruction raises with a vector of `vectors`, a `VectorSet`, an
+iterable of vector numbers or `None`, the default, for every vector
+(traps, illegal, line A and F, privilege, divide by zero, CHK, TRAPV,
+format error: `VectorSet.INSTRUCTION`) before
 anything is stacked, for the host to handle (a stubbed kernel call, an
 emulated instruction, a stop), and returns a `HookId` that
 `remove_hook` takes.  `callback(Intercepted)` gets the `vector` and
 the instruction's `pc`, where PC is, its (An)+ and -(An) undone.  A
-truthy result means it handled it, and the run goes on from PC as the
+`True` means it handled it, and the run goes on from PC as the
 callable left it; otherwise the next intercept hook covering the
 vector is called, in the order installed, and once none is left the
 CPU takes it natively.  Rust's hook returns `ControlFlow::Break` to
@@ -1725,9 +1746,10 @@ bare.set_stop_on_fault(False)
 `set_stop_on_exception(vectors)` (Rust's `Cpu::set_stop_on_exception`
 and its `VectorSet`) stops the run at an exception of one of `vectors`
 the CPU is about to take, before anything is stacked:
-`End.Exception(vector, pc)`.  `vectors` is an iterable of vector
-numbers, `None` for every vector, an empty one, as at first, for none;
-`stops_on_exception` gives them back as a `frozenset`.  It covers an exception an instruction raises, a fault among
+`End.Exception(vector, pc)`.  `vectors` is a `VectorSet` or an
+iterable of vector numbers, `None` for every vector, an empty one, as
+at first, for none; `stops_on_exception` gives them back as a
+`VectorSet`.  It covers an exception an instruction raises, a fault among
 them, a trace, a hardware breakpoint and an interrupt, once
 acknowledged, as its vector is then known; not a fault while stacking,
 nor `take_exception`'s.  An instruction's exception leaves the
@@ -1749,6 +1771,23 @@ match bare.run_limited(begin=CALL, reach=CALL_RETURN).end:
     case end:
         raise AssertionError(end)
 bare.set_stop_on_exception(set())
+```
+
+`VectorSet` is Rust's: `VectorSet(iterable)` of vector numbers,
+`VectorSet()` for none, the class constants `ALL`, `NONE` and
+`INSTRUCTION` (the exceptions an instruction raises, which an
+intercept hook can see), `contains(vector)` and `in`, `is_empty()`,
+`without(vector)`, `union(other)`, and iteration, giving its numbers
+in ascending order.  Rust's `with(vector)` is a Python keyword, so a
+vector is added by `union(VectorSet([vector]))`.
+
+```python
+everything_but_trap_7 = mc683xx.VectorSet.INSTRUCTION.without(mc683xx.Vector.trap(7))
+assert mc683xx.Vector.trap(7) not in everything_but_trap_7
+assert mc683xx.Vector.ZERO_DIVIDE in everything_but_trap_7
+bare.set_stop_on_exception(everything_but_trap_7)
+assert bare.stops_on_exception == everything_but_trap_7
+bare.set_stop_on_exception(mc683xx.VectorSet.NONE)
 ```
 
 A stop at chosen exceptions alone is an intercept hook's: one that
@@ -1821,7 +1860,7 @@ The port of a Unicorn harness is mechanical:
 | `mem_write(address, data)`, `mem_read(address, size)` | `poke_bytes(address, data)`, `peek_bytes(address, length)` |
 | `reg_write(UC_M68K_REG_D0, value)`, `reg_read` | `write_register("D0", value)`, `read_register("D0")` |
 | `emu_start(begin, until, timeout, count)` | `run_limited(begin=begin, reach=until, instructions=count, cycles=...)`: no host time |
-| `emu_stop()` in a hook | `stop_request().request()`, or return a truthy value |
+| `emu_stop()` in a hook | `stop_request().request()`, or return `True` |
 | `hook_add(UC_HOOK_CODE, f, begin=, end=)` | `add_code_hook(f, begin, end)`: `f(Instruction)`; `reach` before it |
 | `hook_add(UC_HOOK_BLOCK, ...)` | `add_block_hook` |
 | `hook_add(UC_HOOK_MEM_READ, ...)` to feed a read | `add_peripheral(begin, end, peripheral)`: `read` answers before the read |

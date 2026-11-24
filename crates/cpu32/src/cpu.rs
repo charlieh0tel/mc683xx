@@ -281,6 +281,8 @@ pub struct Cpu {
     /// [`long_bus`](Self::long_bus), so the memory hooks wait for the whole
     /// operand.
     long_operand: bool,
+    /// Whether a pre-read hook is installed.
+    pre_reading: bool,
     /// The bare host's settings.
     pub(crate) bare: Box<Bare>,
 }
@@ -397,6 +399,7 @@ impl Cpu {
             stacking: false,
             long_bus: false,
             long_operand: false,
+            pre_reading: false,
             bare: Box::default(),
         }
     }
@@ -849,6 +852,25 @@ fn exception_cost(vector: Vector, opcode: Option<u16>) -> ExceptionCost {
             timing::exception::TRACE.cycles,
         ))),
         _ => ExceptionCost::Beyond(timing::trap_taken(opcode)),
+    }
+}
+
+/// A fault of `vector` in a read cycle of kind `cycle` at `address`, of
+/// an operand of `size` in `function_code`'s space, `remaining` of it
+/// left.
+const fn read_fault(
+    vector: Vector,
+    address: Address,
+    remaining: Size,
+    size: Size,
+    function_code: FunctionCode,
+    cycle: BusCycleKind,
+) -> Fault {
+    let fault = Fault::new(vector, address, remaining, function_code, cycle);
+    if matches!(size, Size::Long) {
+        fault.of_long()
+    } else {
+        fault
     }
 }
 
@@ -1543,6 +1565,13 @@ impl Core<'_> {
         function_code: FunctionCode,
         cycle: BusCycleKind,
     ) -> Result<u32, Fault> {
+        if cycle == BusCycleKind::Read
+            && self.cpu.pre_reading
+            && !self.cpu.long_operand
+            && let Some(value) = self.pre_read(address, size, function_code)
+        {
+            return self.serve(address, size, function_code, value);
+        }
         if self.whole_long(size) {
             self.cpu.long_operand = true;
             let read = self.access_read(address, size, function_code, cycle);
@@ -1553,15 +1582,8 @@ impl Core<'_> {
             }
             return read;
         }
-        let fault = |vector, address, remaining| Fault {
-            vector,
-            address,
-            function_code,
-            size: remaining,
-            long: size == Size::Long,
-            kind: cycle,
-            data: 0,
-            read_modify_write: false,
+        let fault = |vector, address, remaining| {
+            read_fault(vector, address, remaining, size, function_code, cycle)
         };
         if size != Size::Byte && address.is_odd() {
             return Err(fault(Vector::ADDRESS_ERROR, address, size));
@@ -1592,6 +1614,56 @@ impl Core<'_> {
             self.cycle_read(address, size, function_code, cycle)
                 .ok_or_else(|| fault(Vector::BUS_ERROR, address, size))
         }
+    }
+
+    /// Reads `size` at `address` in `function_code`'s space, aligned, as
+    /// the pre-read hooks answered it, `value`: the cycles the core's
+    /// memory serves, a long as two word cycles, high word first, each
+    /// timed, refused as its page's permissions say, and shown to the
+    /// read hooks, but reading `value`'s bytes, not memory's.
+    #[cold]
+    #[inline(never)]
+    fn serve(
+        &mut self,
+        address: Address,
+        size: Size,
+        function_code: FunctionCode,
+        value: u32,
+    ) -> Result<u32, Fault> {
+        let cycle = BusCycleKind::Read;
+        let fault = |address, remaining| {
+            read_fault(
+                Vector::BUS_ERROR,
+                address,
+                remaining,
+                size,
+                function_code,
+                cycle,
+            )
+        };
+        let whole = self.whole_long(size);
+        self.cpu.long_operand = whole;
+        let served = |core: &mut Self, address: Address, size, value| {
+            let at = core.cpu.memory.mask(address);
+            core.special_read(at, size, function_code, cycle, Some(value))
+        };
+        let read = if size == Size::Long {
+            let low_address = address.offset(2);
+            served(self, address, Size::Word, value >> 16)
+                .ok_or_else(|| fault(address, Size::Long))
+                .and_then(|_| {
+                    served(self, low_address, Size::Word, value & 0xffff)
+                        .ok_or_else(|| fault(low_address, Size::Word))
+                })
+        } else {
+            served(self, address, size, value).ok_or_else(|| fault(address, size))
+        };
+        self.cpu.long_operand = false;
+        if whole && read.is_ok() {
+            let address = self.cpu.memory.mask(address);
+            self.watch_long(watch::READ, address, function_code, value, None);
+        }
+        read.map(|_| value)
     }
 
     /// Writes `value`, `size` of it, at `address` in `function_code`'s
@@ -1766,7 +1838,7 @@ impl Core<'_> {
         cycle: BusCycleKind,
     ) -> Option<u32> {
         if function_code.is_memory_space() && self.cpu.memory.is_special() {
-            return self.special_read(address, size, function_code, cycle);
+            return self.special_read(address, size, function_code, cycle, None);
         }
         self.bus_read(address, size, function_code, cycle)
     }

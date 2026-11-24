@@ -922,20 +922,21 @@ def test_memory_hooks_see_reads_and_writes():
     assert chip.read_register("D1") == 0x1234
 
 
-def test_a_pre_read_hook_patches_ram_before_the_read():
+def test_a_pre_read_hook_answers_a_read_of_ram_and_peeks_it():
     builder, _, _ = board(ram_round_trip(), Recorder())
     chip = builder.build()
     chip.write_register("D0", 0x1234)
     seen = []
 
-    def patch(read: mc683xx.PendingRead, data: bytearray) -> None:
-        seen.append((read.address, read.size, bytes(data)))
+    def answer(read: mc683xx.PendingRead, data: bytearray) -> None:
+        seen.append((read.address, read.size, bytes(data), read.peek(RAM_WORD, 2)))
         data[:] = b"\xab\xcd"
 
-    chip.add_pre_read_hook(patch, RAM_BASE, RAM_BASE + PAGE_BYTES - 1)
+    chip.add_pre_read_hook(answer, RAM_BASE, RAM_BASE + PAGE_BYTES - 1)
     chip.run_for(4000)
-    assert seen == [(RAM_WORD, 2, b"\x12\x34")]
+    assert seen == [(RAM_WORD, 2, b"\x12\x34", b"\x12\x34")]
     assert chip.read_register("D1") == 0xABCD
+    assert chip.peek_bytes(RAM_WORD, 2) == b"\x12\x34"
 
 
 def test_an_invalid_hook_and_an_exception_hook_see_a_bus_error():
@@ -1737,3 +1738,11 @@ def test_port_changes_written_in_one_instruction_come_in_port_order() -> None:
     keys = [(change[0], order.index(change[1])) for change in chip.take_port_changes()]
     assert len({port for _, port in keys}) > 1
     assert keys == sorted(keys)
+
+
+def test_a_chip_hook_result_not_a_bool_or_none_raises_type_error():
+    builder, _, _ = board(ram_round_trip(), Recorder())
+    chip = builder.build()
+    chip.add_code_hook(lambda instruction: 1)
+    with pytest.raises(TypeError, match="True, False or None"):
+        chip.run_for(4000)

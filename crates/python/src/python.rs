@@ -95,6 +95,8 @@ use crate::qspi::QspiTransfer;
 use crate::requests::DiversionView;
 use crate::requests::StopRequestView;
 use crate::requests::SyncRequestView;
+use crate::vector::VectorNumbers;
+use crate::vector::VectorSetView;
 
 impl From<Error> for PyErr {
     fn from(error: Error) -> Self {
@@ -284,6 +286,8 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<ClockPhase>()?;
     module.add_class::<Space>()?;
     module.add_class::<HookIdView>()?;
+    module.add_class::<VectorNumbers>()?;
+    module.add_class::<VectorSetView>()?;
     module.add_class::<InstructionView>()?;
     module.add_class::<MemoryAccessView>()?;
     module.add_class::<PendingReadView>()?;

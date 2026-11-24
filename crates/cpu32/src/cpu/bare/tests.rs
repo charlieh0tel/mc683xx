@@ -244,6 +244,26 @@ fn intercept_hooks_are_called_in_order_until_one_stops_the_run() {
 }
 
 #[test]
+fn an_intercept_hook_over_the_instruction_set_sees_an_illegal_not_a_fault() {
+    // ILLEGAL; MOVE.W (A0),D0 with A0 odd, an address error
+    let mut machine = machine(&[0x4afc, 0x3010]);
+    machine.cpu.registers.set_address(0, 1);
+    machine
+        .cpu
+        .add_intercept_hook(VectorSet::INSTRUCTION, |_| ControlFlow::Break(()));
+    assert_eq!(
+        one(&mut machine),
+        End::Intercepted(Intercepted {
+            vector: Vector::ILLEGAL_INSTRUCTION,
+            pc: Address(CODE),
+        })
+    );
+    machine.cpu.registers.pc = Address(CODE + 2);
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
 fn an_end_prints_its_short_name() {
     let intercepted = End::Intercepted(Intercepted {
         vector: Vector::trap(0),

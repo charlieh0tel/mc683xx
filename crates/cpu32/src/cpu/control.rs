@@ -19,6 +19,7 @@ use crate::hooks::Instruction;
 use crate::hooks::InvalidAccess;
 use crate::hooks::MemoryAccess;
 use crate::hooks::PendingRead;
+use crate::memory::Memory;
 use crate::memory::MemoryError;
 use crate::memory::Permissions;
 use crate::memory::Space;
@@ -67,7 +68,7 @@ impl<'a> CpuControl<'a> {
     pub fn add_pre_read_hook(
         &mut self,
         range: RangeInclusive<Address>,
-        hook: impl FnMut(&PendingRead, &mut [u8]) -> Control + 'static,
+        hook: impl FnMut(&PendingRead, &Memory, &mut [u8]) -> Control + 'static,
     ) -> HookId {
         self.cpu.add_pre_read_hook(range, hook)
     }

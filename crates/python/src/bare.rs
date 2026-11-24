@@ -37,6 +37,7 @@ use mc683xx_cpu32::hooks::MemoryAccess;
 use mc683xx_cpu32::hooks::PendingRead;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
+use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::Permissions;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
@@ -63,7 +64,6 @@ use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
 use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
-use pyo3::types::PyFrozenSet;
 
 use crate::chip::Halt;
 
@@ -81,6 +81,8 @@ use crate::python::opaque_repr;
 use crate::python::repr;
 use crate::register::Register;
 use crate::requests::StopRequestView;
+use crate::vector::VectorSetView;
+use crate::vector::vector_set;
 
 /// Instructions a run goes between looks for Ctrl-C.
 const QUANTUM: u64 = 100_000;
@@ -116,18 +118,6 @@ type Queue = Rc<RefCell<Vec<Fired>>>;
 
 /// The most bytes `Machine.peek_bytes` asks of the machine at once.
 const PEEK_CHUNK: usize = 1 << 24;
-
-/// The vectors an iterable of vector numbers names, every vector for
-/// `None`.
-fn vector_set(vectors: Option<&Bound<'_, PyAny>>) -> PyResult<VectorSet> {
-    let Some(vectors) = vectors else {
-        return Ok(VectorSet::ALL);
-    };
-    vectors
-        .try_iter()?
-        .map(|vector| vector?.extract::<u8>().map(Vector))
-        .collect()
-}
 
 /// An intercept hook's callable and the vectors it covers.
 #[derive(Debug)]
@@ -838,9 +828,9 @@ impl MachineView {
     }
 
     /// Calls `callback(Intercepted)` for each exception an instruction
-    /// raises with a vector of `vectors`, an iterable of vector numbers
-    /// or `None`, the default, for every vector, before anything is
-    /// stacked, PC at the instruction.  A truthy result means it handled it: the CPU takes
+    /// raises with a vector of `vectors`, a `VectorSet`, an iterable of
+    /// vector numbers or `None`, the default, for every vector, before anything is
+    /// stacked, PC at the instruction.  `True` means it handled it: the CPU takes
     /// nothing and runs on from PC as the callable left it.  Otherwise
     /// the next hook that covers the vector is called, in the order
     /// installed, and if none handles it the CPU takes it natively.
@@ -882,8 +872,9 @@ impl MachineView {
 
     /// Which exceptions the CPU is about to take, a trap, a fault, a
     /// trace, a hardware breakpoint or an interrupt, stop the run before
-    /// anything is stacked (`End.Exception`): `vectors`, an iterable of
-    /// vector numbers, `None` for every vector, an empty one for none.
+    /// anything is stacked (`End.Exception`): `vectors`, a `VectorSet`
+    /// or an iterable of vector numbers, `None` for every vector, an
+    /// empty one for none.
     /// The next run takes it natively.  A fault with `set_stop_on_fault`
     /// is a fault stop instead, and an intercept hook's exception is the
     /// hook's.  None at first.
@@ -893,14 +884,11 @@ impl MachineView {
         Ok(())
     }
 
-    /// The vectors whose exceptions stop the run, as a frozenset
+    /// The vectors whose exceptions stop the run
     /// (`set_stop_on_exception`).
     #[getter]
-    fn stops_on_exception<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyFrozenSet>> {
-        PyFrozenSet::new(
-            py,
-            self.machine.cpu.stops_on_exception().iter().map(u8::from),
-        )
+    fn stops_on_exception(&self) -> VectorSetView {
+        VectorSetView(self.machine.cpu.stops_on_exception())
     }
 
     /// Instructions run since the CPU was made.
@@ -967,12 +955,13 @@ impl MachineView {
         )
     }
 
-    /// Calls `callback(PendingRead, data)` before each operand read cycle
-    /// the machine's memory serves of a byte from `begin` to `end`,
-    /// within the cycle, unlike the other hooks: `data` is a bytearray of
-    /// the bytes it is to read, and what the callable leaves in it is
-    /// what the cycle reads, and stays in memory.  A truthy result stops
-    /// the run once the instruction completes.
+    /// Calls `callback(PendingRead, data)` before each operand read the
+    /// machine's memory serves all of, of a byte from `begin` to `end`,
+    /// within the run, unlike the other hooks: `data` is a bytearray
+    /// copy of the bytes it is to read, and what the callable leaves in
+    /// it answers the read, not stored; `PendingRead.peek` reads memory
+    /// meanwhile.  `True` stops the run once the instruction
+    /// completes.
     #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
     fn add_pre_read_hook(
         &mut self,
@@ -986,8 +975,8 @@ impl MachineView {
         let own = Rc::clone(&id);
         let assigned = self.machine.cpu.add_pre_read_hook(
             Address(begin)..=Address(end),
-            move |read: &PendingRead, bytes: &mut [u8]| {
-                let control = called(read, bytes);
+            move |read: &PendingRead, memory: &Memory, bytes: &mut [u8]| {
+                let control = called(read, memory, bytes);
                 if control.is_break() && stopped.get().is_none() {
                     stopped.set(own.get());
                 }
@@ -1200,7 +1189,7 @@ impl MachineView {
             }
             let argument = view(py, fired.context, registers)?;
             let result = fired.callable.call1(py, (argument,))?;
-            if result.bind(py).is_truthy()? {
+            if hooks::is_true(result.bind(py))? {
                 stopped.get_or_insert(fired.id);
             }
         }
@@ -1225,7 +1214,7 @@ impl MachineView {
                 continue;
             }
             let answer = callable.call1(py, (InterceptedView(interception),))?;
-            if answer.bind(py).is_truthy()? {
+            if hooks::is_true(answer.bind(py))? {
                 handled = true;
                 break;
             }
