@@ -59,22 +59,32 @@
     clippy::missing_panics_doc
 )]
 
-pub mod ad569;
-pub mod adc0838;
-pub mod at28c64b;
-pub mod buffer;
+mod ad569;
+mod adc0838;
+mod at28c64b;
+mod buffer;
 mod character;
 mod dac;
-pub mod latch;
-pub mod mc144110;
-pub mod mc6850;
-pub mod mc68681;
+mod latch;
+mod mc144110;
+mod mc6850;
+mod mc68681;
 mod noise;
 mod octal;
 mod shift_register;
-pub mod sipo;
+mod sipo;
 #[cfg(test)]
 mod spi_mode;
+
+pub use ad569::Ad569;
+pub use adc0838::Adc0838;
+pub use at28c64b::At28c64b;
+pub use buffer::Buffer;
+pub use latch::Latch;
+pub use mc6850::Mc6850;
+pub use mc68681::Mc68681;
+pub use mc144110::Mc144110;
+pub use sipo::Sipo;
 
 /// The chip's system clock a test's drives carry: 16.777216 MHz from
 /// power-on.  No stock part is on the chip's clocks.

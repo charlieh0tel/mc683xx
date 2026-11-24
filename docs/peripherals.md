@@ -36,12 +36,10 @@ with others.  It refuses, with `StateError::Invalid`, state no run
 could have saved, named under each peripheral.  Either way the peripheral is left
 as it was.
 
-Each type is public, in the module of its part
-(`mc683xx_peripherals::ad569::Ad569`, `adc0838::Adc0838`,
-`at28c64b::At28c64b`, `buffer::Buffer` for the 74x244,
-`latch::Latch` for the 74x373 and 74x374, `mc144110::Mc144110`,
-`mc6850::Mc6850`, `mc68681::Mc68681` for the MC68681 and SCC68692,
-`sipo::Sipo` for the 74x164), so a host reaches a peripheral's state
+Each type is public, at the crate's root
+(`mc683xx_peripherals::Ad569`, `Adc0838`, `At28c64b`, `Buffer` for
+the 74x244, `Latch` for the 74x373 and 74x374, `Mc144110`, `Mc6850`,
+`Mc68681` for the MC68681 and SCC68692, `Sipo` for the 74x164), so a host reaches a peripheral's state
 by type (`Board::peripheral::<Ad569>("efc")`) through read-only
 accessors: the latch's byte, OE and outputs; the buffer's inputs; the
 74x164's stages, cascade and CLR; the DACs' codes and volts; the

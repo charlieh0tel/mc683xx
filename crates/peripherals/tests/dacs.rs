@@ -20,9 +20,9 @@ use mc683xx_board::Options;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::Mc68331;
-use mc683xx_peripherals::ad569::Ad569;
-use mc683xx_peripherals::mc144110::Mc144110;
-use mc683xx_peripherals::sipo::Sipo;
+use mc683xx_peripherals::Ad569;
+use mc683xx_peripherals::Mc144110;
+use mc683xx_peripherals::Sipo;
 
 /// The initial stack pointer and program counter in the image.
 const STACK: u32 = 0x10_fffe;

@@ -21,7 +21,7 @@ use mc683xx_board::time::Time;
 use mc683xx_cpu32::Frequency;
 use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
-use mc683xx_peripherals::mc68681::Mc68681;
+use mc683xx_peripherals::Mc68681;
 
 /// The initial stack pointer: the top of the RAM on CS2.
 const STACK: u32 = 0x10_fffe;

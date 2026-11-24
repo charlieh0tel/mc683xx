@@ -16,7 +16,7 @@ use mc683xx_board::Environment;
 use mc683xx_board::Options;
 use mc683xx_board::time::Time;
 use mc683xx_mc68331::Mc68331;
-use mc683xx_peripherals::at28c64b::At28c64b;
+use mc683xx_peripherals::At28c64b;
 
 /// The initial stack pointer and program counter in the image.
 const STACK: u32 = 0x10_fffe;
