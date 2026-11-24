@@ -200,8 +200,9 @@ Crates:
 - Re-export only to give an item one short public path: a crate may
   lift an item out of a private module to its root (`mod board;` and
   `pub use board::Board;`), so a host writes `mc683xx_board::Board`,
-  not `mc683xx_board::board::Board`.  Every public item keeps exactly
-  one public path: never re-export from a public module, another
+  not `mc683xx_board::board::Board`, or to the private module's public
+  parent (`sim::ResetScope` from a private `sim::reset`).  Every public
+  item keeps exactly one public path: never re-export from a public module, another
   crate's items or a glob, and never `pub(crate) use` (import where
   needed instead).
 - Never employ a wildcard `use` statement on an enum when trying to

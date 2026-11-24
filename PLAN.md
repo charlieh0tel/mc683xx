@@ -130,7 +130,9 @@ right only qualified (`hooks::Instruction`, `time::Clock`,
 implements against (`peripheral`, `registry`, `adapter`), or where it
 is one of the manual's modules (`sim`, `qsm`, `gpt`).  A module is
 public whole or private whole, so every public item keeps one path
-(AGENTS.md, Rust Rules; decided 2026-11-24).  A layer's snapshot
+(AGENTS.md, Rust Rules; decided 2026-11-24).  A private module's items
+may also be lifted to its public parent, as a one-item submodule's
+are into `sim` (`sim::ResetScope`, `sim::ChipSelects`), never to both.  A layer's snapshot
 format version is `state::VERSION` in its crate (the core's, the
 chip's, the board's), not a root `VERSION` that could be the crate's.
 
