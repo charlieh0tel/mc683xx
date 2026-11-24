@@ -11,6 +11,9 @@
 use std::fmt;
 use std::mem;
 
+use serde::Deserialize;
+use serde::Serialize;
+
 use super::Core;
 use super::Cpu;
 use super::Halt;
@@ -252,7 +255,7 @@ impl VectorSet {
 /// count is `instructions`.  Another exception there, a trace a host
 /// withdrew and the trap after it, or a higher interrupt arriving
 /// since, is not this one.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct TakeOnce {
     /// The PC it is raised at: its instruction's, or the boundary's.
     pc: Address,
@@ -439,11 +442,15 @@ impl Cpu {
     /// stop does ([`FaultStop`]); a trace or a hardware breakpoint is
     /// left pending, the instruction before it kept, and an interrupt
     /// is withdrawn, to be sampled and acknowledged again.  The next
-    /// run takes that exception natively, once, with no stop for it;
-    /// another at that PC, the trap after a withdrawn trace or a higher
-    /// interrupt arriving since, stops the run (the host may instead take one of its own with `take_exception`,
+    /// run takes that exception natively, once, with no stop for it
+    /// (the host may instead take one of its own with `take_exception`,
     /// and withdraw a trace left pending with
-    /// [`set_trace_pending`](Self::set_trace_pending)).  A fault with
+    /// [`set_trace_pending`](Self::set_trace_pending)); another at that
+    /// PC, the trap after a withdrawn trace or a higher interrupt
+    /// arriving since, stops the run.  A snapshot holds that promise:
+    /// one saved at the stop takes the exception once wherever it is
+    /// restored, this set first, as setting it either way drops the
+    /// promise.  A fault with
     /// [`set_stop_on_fault`](Self::set_stop_on_fault) is a fault stop
     /// ([`End::Fault`]) instead, and an exception the intercept hooks
     /// cover is theirs ([`add_intercept_hook`](Self::add_intercept_hook)):

@@ -2626,7 +2626,11 @@ and `mc683xx.Machine` in Python (see Python).
   names, so running on is the default answer, and another exception
   there (the trap after a trace the host withdrew, a higher interrupt
   arriving since) is a stop of its own; `take_exception` is the
-  host's own.  Precedence, decided 2026-11-23: a fault with
+  host's own.  Both keys are CPU state a run's outcome depends on, as
+  the trace a stop leaves pending is, so a snapshot holds them: one
+  taken at a stop, restored anywhere, takes that exception once and
+  runs on, and one taken before it stops there again (decided
+  2026-11-24, review round 7).  Precedence, decided 2026-11-23: a fault with
   `set_stop_on_fault` is a fault stop, its detail the richer; then the
   intercept hooks, for the vectors they cover, an exception they all
   decline taken natively with no exception stop, as the host has seen
