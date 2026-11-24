@@ -355,9 +355,10 @@ impl Cpu {
     }
 
     /// Calls `hook` for each exception an instruction raises with a
-    /// vector of `vectors` ([`VectorSet::ALL`] for any: a trap, an
-    /// illegal instruction, a divide by zero, but not a fault, a trace
-    /// or an interrupt), before anything
+    /// vector of `vectors` ([`VectorSet::INSTRUCTION`] or
+    /// [`VectorSet::ALL`] for any: a trap, an illegal instruction, a
+    /// divide by zero, but not a fault, a trace or an interrupt), before
+    /// anything
     /// is stacked.  If it stops the run, the run ends
     /// ([`End::Intercepted`]) with the exception not taken, the
     /// instruction's (An)+ and -(An) undone and PC at it, for the host

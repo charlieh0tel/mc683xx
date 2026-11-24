@@ -2637,7 +2637,8 @@ and `mc683xx.Machine` in Python (see Python).
 - **Intercepts (host-handled exceptions):**
   `add_intercept_hook(vectors, hook)`: an exception an instruction
   raises with one of `vectors` (traps, illegal, line A and F,
-  privilege, zero divide, CHK, TRAPV, format error; not faults, trace
+  privilege, zero divide, CHK, TRAPV, format error, CPU32RM Table
+  6-2's groups 2 and 3, `VectorSet::INSTRUCTION`; not faults, trace
   or interrupts) calls the hook before anything is stacked; one that
   stops the run ends it (`End::Intercepted`), its (An)+ and -(An)
   undone, PC at the instruction; flags it set (CHK's N) stay.  Where

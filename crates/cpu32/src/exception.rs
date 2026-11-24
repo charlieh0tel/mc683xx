@@ -124,6 +124,29 @@ impl VectorSet {
     pub const NONE: Self = Self([0; SET_WORDS]);
     /// Every vector.
     pub const ALL: Self = Self([u64::MAX; SET_WORDS]);
+    /// The vectors of the exceptions an instruction raises, the ones an
+    /// intercept hook can see: CPU32RM Table 6-2's groups 2 and 3, the
+    /// illegal instruction (BKPT's too), zero divide, CHK and CHK2,
+    /// TRAPcc and TRAPV, privilege violation, line A and F, format error
+    /// (RTE's), and TRAP #0 to #15.  Not a fault, a trace, a hardware
+    /// breakpoint or an interrupt.
+    pub const INSTRUCTION: Self = {
+        let mut set = Self::NONE
+            .with(Vector::ILLEGAL_INSTRUCTION)
+            .with(Vector::ZERO_DIVIDE)
+            .with(Vector::CHK)
+            .with(Vector::TRAPCC)
+            .with(Vector::PRIVILEGE_VIOLATION)
+            .with(Vector::LINE_A)
+            .with(Vector::LINE_F)
+            .with(Vector::FORMAT_ERROR);
+        let mut number = 0;
+        while number < TRAP_VECTORS {
+            set = set.with(Vector::trap(number));
+            number += 1;
+        }
+        set
+    };
 
     /// The word and the bit in it that hold `vector`.
     const fn place(vector: Vector) -> (usize, u64) {
@@ -917,6 +940,22 @@ mod tests {
             (0..=u8::MAX).map(Vector).collect::<VectorSet>(),
             VectorSet::ALL
         );
+    }
+
+    #[test]
+    fn an_instruction_raises_groups_2_and_3() {
+        let instruction = VectorSet::INSTRUCTION;
+        assert_eq!(
+            instruction.iter().map(u8::from).collect::<Vec<_>>(),
+            [4, 5, 6, 7, 8, 10, 11, 14]
+                .into_iter()
+                .chain(32..48)
+                .collect::<Vec<_>>()
+        );
+        assert!(!instruction.contains(Vector::BUS_ERROR));
+        assert!(!instruction.contains(Vector::TRACE));
+        assert!(!instruction.contains(Vector::HARDWARE_BREAKPOINT));
+        assert!(!instruction.contains(Vector::SPURIOUS_INTERRUPT));
     }
 
     #[test]
