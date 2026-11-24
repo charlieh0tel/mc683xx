@@ -1792,7 +1792,7 @@ hand.  The keys are in `docs/board-files.md`.
   [--firmware PATH] [--image NAME=PATH] [--option NAME]
   [--set PERIPHERAL.KEY=VALUE]
   [--bind NAME=stdio|stdout|tty|pty|null|file:PATH]
-  [--trace bus-cycles,exceptions,pins,qspi,nets] [--watch-code ADDR]
+  [--trace bus-cycles,exceptions,pins,qspi,nets] [--watch-code ADDRESS]
   [--position S] [--seed N] [--work-dir DIR] [--restore FILE]
   [--save FILE] [--turn S] [--input-after S] [--gdb HOST:PORT]
   [--pace unpaced|realtime|FACTOR]`,
