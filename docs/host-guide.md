@@ -857,9 +857,9 @@ assert!(sent[0].start < sent[0].end);
 Every general-purpose port is keyed by one `port::Port`: `C`, `E`,
 `F` (the SIM's), `Gp` (the GPT's) and `Qs` (the QSM's).
 
-- Inputs: `set_pins(port, value, mask)` sets the levels the board
-  drives on the pins in `mask`, the others kept.  Port C has no inputs:
-  a `NoInputs`.
+- Inputs: `set_pins(port, pins)` sets the levels the board drives on
+  the pins a `PortLevels` drives (`PortLevels::new(driven, levels)`),
+  the others kept.  Port C has no inputs: a `NoInputs`.
 - Outputs: `outputs(port)` gives the pins a port drives and their
   levels, a `PortLevels` (its fields private; `PortLevels::new(driven,
   levels)`, read back with `driven()` and `levels()`, the levels zero on
@@ -906,7 +906,7 @@ let program = [
 .concat();
 let (builder, _) = firmware::booting(firmware::rom(&program));
 let mut chip = builder.build();
-chip.set_pins(Port::E, PE1, PE1).unwrap();
+chip.set_pins(Port::E, PortLevels::new(PE1, PE1)).unwrap();
 chip.run_for(Cycles::from_clocks(1000));
 assert_eq!(
     chip.outputs(Port::E),

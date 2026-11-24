@@ -475,7 +475,7 @@ surrounds the SoC with its board peripherals through:
   capture and pulse accumulator inputs (1 PPS-style signals).  Every
   general-purpose port is keyed by one `port::Port { C, E, F, Gp, Qs }`,
   the manual's port names: the host sets the levels it drives
-  (`set_pins(port, value, mask)`, and `set_gpt_input(input, level)`), reads
+  (`set_pins(port, pins)`, a `PortLevels` as `outputs(port)` gives, and `set_gpt_input(input, level)`), reads
   the levels the chip drives (`outputs(port)`, `pwm`) and the port's
   registers (`port(port)`, a `PortState`: latch, direction, assignment,
   the board's levels).  An edge the host makes takes effect at the
@@ -823,7 +823,7 @@ chip beside `Mc68331`.
   `now`, `halted`, `exception_taken` (a vector), `read_register`,
   `write_register`, `registers()`, `memory(n, offset, length)`,
   `set_memory` (a memory's own bytes, by offset), `peripheral(n)` (the
-  object back), `set_interrupt_pin`, `set_pins(Port, value, mask)`,
+  object back), `set_interrupt_pin`, `set_pins(Port, driven, levels)`,
   `outputs(Port)`, `port(Port)` (a `PortState`),
   `take_port_changes()` (`(now, Port, driven, levels)`, every port's),
   `system_hz`, `take_events()` (`Event.Reset`, `Event.ArbitrationTie`,

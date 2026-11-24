@@ -49,6 +49,7 @@ use mc683xx_mc68331::port::Port as ChipPort;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_modules::pins::PortLevels;
 use mc683xx_target::function_code::FunctionCode;
 
 use common::board;
@@ -1075,7 +1076,7 @@ fn run_chip(
             // takes it (GPTRM 6.1)
             captures.pop_front();
             let level = driven[GP].unwrap_or_default();
-            chip.set_pins(ChipPort::Gp, level | IC1, u8::MAX)
+            chip.set_pins(ChipPort::Gp, PortLevels::new(u8::MAX, level | IC1))
                 .expect("an input port");
             driven[GP] = Some(level);
         }
@@ -1087,8 +1088,11 @@ fn run_chip(
             run
         };
         if capture {
-            chip.set_pins(ChipPort::Gp, driven[GP].unwrap_or_default(), u8::MAX)
-                .expect("an input port");
+            chip.set_pins(
+                ChipPort::Gp,
+                PortLevels::new(u8::MAX, driven[GP].unwrap_or_default()),
+            )
+            .expect("an input port");
         }
         let origin = chip.instructions();
         for event in chip.take_events() {
@@ -1225,13 +1229,13 @@ fn drive_pins(
         driven[port] = Some(level);
         match port {
             0 => chip
-                .set_pins(ChipPort::E, level, u8::MAX)
+                .set_pins(ChipPort::E, PortLevels::new(u8::MAX, level))
                 .expect("an input port"),
             1 => chip
-                .set_pins(ChipPort::F, level, u8::MAX)
+                .set_pins(ChipPort::F, PortLevels::new(u8::MAX, level))
                 .expect("an input port"),
             GP => chip
-                .set_pins(ChipPort::Gp, level, u8::MAX)
+                .set_pins(ChipPort::Gp, PortLevels::new(u8::MAX, level))
                 .expect("an input port"),
             _ => {
                 chip.set_gpt_input(Input::Pai, level & PACTL_PAIS != 0);

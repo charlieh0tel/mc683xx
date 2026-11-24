@@ -1649,13 +1649,12 @@ chip_methods! {
         Ok(())
     }
 
-    /// The board drives the pins of `port` in `mask` (all of them by
-    /// default) to their levels in `value` now, the others as they
-    /// were; port C, with no inputs, raises `ValueError`.
-    #[pyo3(signature = (port, value, mask = u8::MAX))]
-    fn set_pins(&mut self, port: PortView, value: u8, mask: u8) -> PyResult<()> {
+    /// The board drives the pins of `port` in `driven` to their levels
+    /// in `levels` now, the others as they were (Rust's `PortLevels`,
+    /// flattened); port C, with no inputs, raises `ValueError`.
+    fn set_pins(&mut self, port: PortView, driven: u8, levels: u8) -> PyResult<()> {
         self.chip
-            .set_pins(port.into(), value, mask)
+            .set_pins(port.into(), PortLevels::new(driven, levels))
             .map_err(Error::from)?;
         self.pending.check()
     }

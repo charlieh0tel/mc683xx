@@ -2181,8 +2181,9 @@ fn an_external_clock_board_uses_the_sci_and_the_gpt() {
     let tcnt = |chip: &mut Mc68331| cycle(chip, GPT + 0x0a, Size::Word, None).unwrap().0;
     let before = tcnt(&mut chip);
     chip.run_for(Cycles::from_clocks(16 * 100));
-    chip.set_pins(Port::Gp, 0, 1 << 1).unwrap();
-    chip.set_pins(Port::Gp, 0xff, 0xff).unwrap();
+    chip.set_pins(Port::Gp, PortLevels::new(1 << 1, 0)).unwrap();
+    chip.set_pins(Port::Gp, PortLevels::new(0xff, 0xff))
+        .unwrap();
     let captured = cycle(&mut chip, GPT + 0x10, Size::Word, None).unwrap().0;
     assert!(
         captured >= before + 100 && captured <= before + 102,
@@ -2486,9 +2487,12 @@ fn the_host_sees_each_port_edge_and_drives_the_inputs() {
     program.extend(load_word(SIM + 0x10, 0));
     program.push(BRANCH_TO_SELF);
     let (mut chip, _) = booting(&program);
-    chip.set_pins(Port::E, 0x00, 0xff).unwrap();
-    chip.set_pins(Port::E, 0x02, 0x02).unwrap();
-    assert_eq!(chip.set_pins(Port::C, 0x00, 0xff), Err(NoInputs(Port::C)));
+    chip.set_pins(Port::E, PortLevels::new(0xff, 0x00)).unwrap();
+    chip.set_pins(Port::E, PortLevels::new(0x02, 0x02)).unwrap();
+    assert_eq!(
+        chip.set_pins(Port::C, PortLevels::new(0xff, 0x00)),
+        Err(NoInputs(Port::C))
+    );
     chip.run_for(Cycles::from_clocks(2000));
     assert_eq!(chip.cpu().registers.data[0] & 0xff, 0x02);
     assert_eq!(chip.port(Port::E), PortState::new(0x00, 0x01, 0xfe, 0x02));
@@ -2598,7 +2602,8 @@ fn set_pins_takes_the_scheduled_gpt_inputs_before_it_merges() {
         write_register(&mut chip, GPT + 0x1e, 0x0001);
         let now = chip.now();
         chip.schedule_gpt_input(now, pgp0, false);
-        chip.set_pins(Port::Gp, value, mask).unwrap();
+        chip.set_pins(Port::Gp, PortLevels::new(mask, value))
+            .unwrap();
         assert_eq!(chip.port(Port::Gp).pins, pins, "{value:#x} {mask:#x}");
         assert_eq!(
             cycle(&mut chip, GPT + 0x22, Size::Word, None).unwrap().0 & ic1f,

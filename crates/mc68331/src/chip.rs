@@ -1272,17 +1272,17 @@ impl Mc68331 {
         self.board.port(port)
     }
 
-    /// The board drives the pins of `port` in `mask` to their levels in
-    /// `value` now, the others as they were: an input capture on port
-    /// GP takes a selected edge (GPTRM 3.2).
+    /// The board drives `pins`' driven pins of `port` to their levels
+    /// now, the others as they were: an input capture on port GP takes
+    /// a selected edge (GPTRM 3.2).
     ///
     /// # Errors
     ///
     /// [`NoInputs`] for port C, which has no inputs, driving
     /// nothing.
-    pub fn set_pins(&mut self, port: Port, value: u8, mask: u8) -> Result<(), NoInputs> {
+    pub fn set_pins(&mut self, port: Port, pins: PortLevels) -> Result<(), NoInputs> {
         let now = self.now;
-        self.board.set_pins(port, value, mask, now)
+        self.board.set_pins(port, pins.levels(), pins.driven(), now)
     }
 
     /// The changes in what each port drives since the last call, in time

@@ -54,7 +54,8 @@ rename renames the Python name with it.  The deliberate differences:
   `take_output_changes()` likewise hands a change it cannot convert
   over as `(now, None, text)`.
 - **Tuples:** a struct of plain values a call returns is a tuple of its
-  fields, in order: `PortLevels` as `(driven, levels)`, a port's change
+  fields, in order, and one it takes is those fields as arguments:
+  `PortLevels` as `(driven, levels)` (`set_pins(port, driven, levels)`), a port's change
   as `(now, port, driven, levels)`, a PWM pin's as `(now, channel,
   level)`, a transmitted frame as `(start, frame)`, a QSPI slave
   shift's `Shifted` as `(miso, driven)`.  A struct of registers a host
@@ -643,9 +644,10 @@ what the chip drives within a run comes back as timed changes.
   `take_sci_transmitted() -> [(start, Frame)]`, each frame at its
   start bit.  A frame is the data bits
   as on the line, LSB first, parity included (`frame.data`).
-- Ports, by `Port.C`, `E`, `F`, `GP` or `QS`: `set_pins(port, value,
-  mask=0xFF)` drives the pins in `mask`, all by default (port C has
-  none to drive: `ValueError`);
+- Ports, by `Port.C`, `E`, `F`, `GP` or `QS`: `set_pins(port, driven,
+  levels)` drives the pins in `driven` to their levels in `levels`,
+  Rust's `PortLevels` flattened (port C has none to drive:
+  `ValueError`);
   `outputs(port)` as `(driven, levels)` masks, Rust's `PortLevels` as
   a pair Python unpacks; `port(port)`, a `PortState` (`latch`,
   `direction`, `assignment`, `pins`); `take_port_changes() -> [(now,
