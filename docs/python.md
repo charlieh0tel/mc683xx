@@ -110,7 +110,9 @@ rename renames the Python name with it.  The deliberate differences:
 - **Handles:** a chip's memories and peripherals, and a bare
   `Machine`'s peripheral, are the opaque `MemoryId` and `PeripheralId`
   the builder or the machine returns, as in Rust; an id a chip's
-  `Builder` never returned (another builder's) raises `IndexError`.
+  `Builder` never returned (another builder's) raises `KeyError`, as
+  an id is a key, not a position.  `Machine.remove_peripheral` of an
+  id it does not hold returns `False`, as Rust's does.
   `Mc68331.memory(memory,
   offset=0, length=None)` is Rust's `memory(id)`, sliced, and
   `set_memory(memory, offset, data)` writes what Rust writes through
@@ -129,7 +131,7 @@ rename renames the Python name with it.  The deliberate differences:
   is (`LoadError`, `RunError`, `StateError`, `TargetError`,
   `BusCycleError`, with `BusError` and `UnpeekableError` for its
   variants), a builtin
-  (`ValueError`, `IndexError`, `OSError`) where one fits.
+  (`ValueError`, `IndexError`, `KeyError`, `OSError`) where one fits.
 - **Python's own:** names with no Rust item behind them: `BoardChip`
   (`Board.chip`, the `Mc68331` methods over a board's chip), a board
   peripheral class's `PORTS` (its `PortSpec`s), and `__version__`.
@@ -1012,7 +1014,7 @@ chip.run_for(500)
   than it; a bare `Machine`'s `read` of more
   bytes than 32 bits of addresses; a name a `Board` lacks, a
   peripheral's, memory's, net's or endpoint's (an id a `Mc68331`'s
-  builder never gave is an `IndexError`).
+  builder never gave is a `KeyError`).
 - `mc683xx.BusCycleError`: a host cycle or peek that gave no value,
   Rust's `BusCycleError`, as one of its two subclasses:
   - `mc683xx.BusError`: a host cycle that ended in a bus error, or that
@@ -1045,8 +1047,8 @@ chip.run_for(500)
   every event: one it cannot convert (a kind the bindings lack, or a
   DSACK fault they do not know) is `Event.Unknown(now, text)`, `text`
   what happened as Rust prints it.
-- `IndexError`: a memory or peripheral id the builder never returned, or a memory range
-  past its end.
+- `IndexError`: a memory range past its end.
+- `KeyError`: a memory or peripheral id the builder never returned.
 - `OverflowError`: a run past the end of time.
 - `RuntimeError`: a spent builder, a hook calling into the chip, a
   bare `Machine`'s hook calling `run_limited` or `serve_gdb`, or gdb sending what
@@ -1068,7 +1070,7 @@ for mistake in (
     try:
         mistake()
         raise AssertionError("should raise")
-    except (ValueError, IndexError):
+    except (ValueError, KeyError):
         pass
 chip = builder.build()
 try:

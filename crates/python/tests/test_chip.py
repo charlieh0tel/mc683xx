@@ -402,7 +402,7 @@ def test_the_builder_s_ids_are_opaque():
         chip.memory(0)
     other = mc683xx.Builder()
     foreign = [other.unwired_peripheral(Recorder()) for _ in range(2)][-1]
-    with pytest.raises(IndexError, match="no peripheral"):
+    with pytest.raises(KeyError, match="no peripheral"):
         chip.peripheral(foreign)
 
 
@@ -429,7 +429,7 @@ def test_registers_and_memory():
         chip.set_memory(ram, RAM_BYTES - 1, b"\x00\x00")
     other = mc683xx.Builder()
     foreign = [other.fixed_memory(bytes(2048), base * 2048) for base in range(3)][-1]
-    with pytest.raises(IndexError):
+    with pytest.raises(KeyError, match="no memory"):
         chip.memory(foreign)
     assert chip.system_hz == 32768 * 256
 
@@ -445,7 +445,7 @@ def test_wiring_mistakes():
         builder.peripheral(Recorder(), ["CSBOOT"])
     with pytest.raises(TypeError):
         builder.peripheral(object(), ["CS2"])
-    with pytest.raises(IndexError):
+    with pytest.raises(KeyError):
         builder.set_interrupt(foreign_peripheral(), 1)
     with pytest.raises(ValueError):
         mc683xx.Builder(reference_hz=32768, external_hz=16_000_000)
@@ -788,7 +788,7 @@ def test_a_reset_scope_keeps_a_peripheral_out_of_the_watchdog_reset():
         mc683xx.ResetCause.EXTERNAL,
     ]
     builder.set_reset_scope(number, causes)
-    with pytest.raises(IndexError):
+    with pytest.raises(KeyError):
         builder.set_reset_scope(foreign_peripheral(), causes)
     chip = builder.build()
     # the watchdog's 2^9 EXTAL periods at 256 clocks
@@ -1433,7 +1433,7 @@ def test_a_peripheral_s_unassigned_dsack_is_an_event():
     builder = booting([])
     number = builder.peripheral(Recorder(0x1234), ["CS2"])
     builder.set_dsack(number, mc683xx.Dsack.BOTH)
-    with pytest.raises(IndexError):
+    with pytest.raises(KeyError):
         builder.set_dsack(foreign_peripheral(), mc683xx.Dsack.DSACK0)
     chip = builder.build()
     chip.bus_write(CSBAR2, 2, DSACK_BASE >> 8)
@@ -1567,7 +1567,7 @@ def test_a_peripheral_diverts_a_memory_to_another_and_back():
     chip = builder.build()
     chip.run_for(2000)
     assert [chip.read_register(f"D{n}") & 0xFFFF for n in range(3)] == [0x1111, 0xBEEF, 0x1111]
-    with pytest.raises(IndexError):
+    with pytest.raises(KeyError):
         switch.diversion.release(foreign_memory())
 
 

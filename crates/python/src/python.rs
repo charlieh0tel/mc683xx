@@ -17,6 +17,7 @@ use pyo3::PyErr;
 use pyo3::PyResult;
 use pyo3::Python;
 use pyo3::exceptions::PyIndexError;
+use pyo3::exceptions::PyKeyError;
 use pyo3::exceptions::PyNotImplementedError;
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyOverflowError;
@@ -97,7 +98,8 @@ impl From<Error> for PyErr {
     fn from(error: Error) -> Self {
         let message = error.to_string();
         match error {
-            Error::Unknown(_) | Error::Range { .. } => PyIndexError::new_err(message),
+            Error::Unknown(_) => PyKeyError::new_err(message),
+            Error::Range { .. } => PyIndexError::new_err(message),
             Error::Budget(_) => PyOverflowError::new_err(message),
             Error::Built => PyRuntimeError::new_err(message),
             Error::Unmapped { kind: RUN_END, .. } | Error::Run(_) | Error::Take(_) => {

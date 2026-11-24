@@ -467,14 +467,16 @@ class Lane:
 class PeripheralId:
     """A peripheral on a bare `Machine` or a chip, as `add_peripheral`
     or the chip `Builder`'s peripheral methods return it; `str()` is
-    `peripheral 3`."""
+    `peripheral 3`.  The chip's methods raise `KeyError` for one its
+    builder never returned."""
 
     def __hash__(self) -> int: ...
 
 @final
 class MemoryId:
     """Host memory wired into the chip, as the `Builder`'s `memory` and
-    `fixed_memory` return it; `str()` is `memory 2`."""
+    `fixed_memory` return it; `str()` is `memory 2`.  The chip's
+    methods raise `KeyError` for one its builder never returned."""
 
     def __hash__(self) -> int: ...
 

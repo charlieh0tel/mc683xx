@@ -930,6 +930,7 @@ chip beside `Mc68331`.
   it when it returns, the chip as it then is.  The bindings' own
   errors are `ValueError` (`StateError` and `LoadError` among them;
   a board file not read, the `OSError` its errno gives), `IndexError`,
+  `KeyError` (a chip id its builder never gave),
   `OverflowError`, `RuntimeError` (`TargetError` and `RunError` among
   them) and
   `NotImplementedError`; nothing

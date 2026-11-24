@@ -51,7 +51,7 @@ def test_the_reset_code_reaches_a_fixed_memory_and_a_reset_reloads_it() -> None:
     builder.set_reload_scope(data, [mc683xx.ResetCause.EXTERNAL])
     other = mc683xx.Builder()
     foreign = [other.fixed_memory(bytes(PAGE), base * PAGE) for base in range(4)][-1]
-    with pytest.raises(IndexError, match="no memory"):
+    with pytest.raises(KeyError, match="no memory"):
         builder.set_reload_scope(foreign, [])
     with pytest.raises(TypeError):
         builder.set_reload_scope(2, [])  # type: ignore[arg-type]
