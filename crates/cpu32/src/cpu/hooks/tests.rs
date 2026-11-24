@@ -479,7 +479,7 @@ fn an_invalid_access_hook_sees_a_bus_error_then_the_exception_is_taken() {
             address: Address(NOWHERE),
             size: Size::Word,
             function_code: FunctionCode::SupervisorData,
-            cycle: BusCycleKind::Write,
+            kind: BusCycleKind::Write,
             value: Some(0xabcd),
             reason: Invalid::BusError,
             pc: Address(CODE),
@@ -614,7 +614,7 @@ fn a_fetch_from_a_page_without_execute_is_a_bus_error() {
     let cycles = log();
     let into = Rc::clone(&cycles);
     cpu.add_invalid_hook(everywhere(), move |access: &InvalidAccess| {
-        into.borrow_mut().push((access.cycle, access.reason));
+        into.borrow_mut().push((access.kind, access.reason));
         ControlFlow::Continue(())
     });
     step(&mut cpu, 1);

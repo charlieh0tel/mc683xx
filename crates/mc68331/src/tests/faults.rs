@@ -41,7 +41,7 @@ fn a_fault_stop_ends_the_run_with_the_instruction_undone() {
     let run = chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(run.stop, Stop::Fault);
     let fault = chip.cpu().fault_stop().expect("a fault stop");
-    assert_eq!(fault.cycle, BusCycleKind::Read);
+    assert_eq!(fault.kind, BusCycleKind::Read);
     assert_eq!(fault.cause, FaultCause::AddressError);
     assert_eq!(fault.address, Address(ODD));
     assert_eq!(fault.registers.pc.0, START);
@@ -63,7 +63,7 @@ fn a_bus_monitor_timeout_stops_the_run_rather_than_halting() {
     let run = chip.run_for(Cycles::from_clocks(1));
     assert_eq!(run.stop, Stop::Fault);
     let fault = chip.cpu().fault_stop().expect("a fault stop");
-    assert_eq!(fault.cycle, BusCycleKind::Fetch);
+    assert_eq!(fault.kind, BusCycleKind::Fetch);
     assert_eq!(fault.cause, FaultCause::BusError);
     assert_eq!(chip.cpu().halted(), None, "no double bus fault");
 }
@@ -114,7 +114,7 @@ fn a_fault_stacking_the_interrupt_that_ends_lpstop_leaves_the_chip_asleep() {
     };
     assert_eq!(run.stop, Stop::Fault);
     assert_eq!(
-        chip.cpu().fault_stop().map(|fault| fault.cycle),
+        chip.cpu().fault_stop().map(|fault| fault.kind),
         Some(BusCycleKind::Write)
     );
     assert!(chip.cpu().stopped(), "LPSTOP not ended (CPU32RM 4.4)");

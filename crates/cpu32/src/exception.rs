@@ -146,7 +146,7 @@ pub struct Fault {
     /// Whether the operand was a long word: the SSW's LG.
     pub long: bool,
     /// The kind of cycle.
-    pub cycle: BusCycleKind,
+    pub kind: BusCycleKind,
     /// The data a write was to write, right-aligned (the frame's
     /// DBUF); zero for a read.
     pub data: u32,
@@ -156,7 +156,7 @@ pub struct Fault {
 }
 
 impl Fault {
-    /// A fault of `vector` in a `cycle` at `address` in
+    /// A fault of `vector` in a cycle of `kind` at `address` in
     /// `function_code`'s space, `size` of the operand remaining: not of
     /// a long operand, no data, not read-modify-write.
     #[must_use]
@@ -165,7 +165,7 @@ impl Fault {
         address: Address,
         function_code: FunctionCode,
         size: Size,
-        cycle: BusCycleKind,
+        kind: BusCycleKind,
     ) -> Self {
         Self {
             vector,
@@ -173,7 +173,7 @@ impl Fault {
             function_code,
             size,
             long: false,
-            cycle,
+            kind,
             data: 0,
             read_modify_write: false,
         }
@@ -512,7 +512,7 @@ pub(crate) const fn double_fault_ssw(fault: &Fault) -> u16 {
 
 /// The SSW's IN, RW and RM for `fault` (CPU32RM 6.3.1.2).
 const fn restart_bits(fault: &Fault) -> u16 {
-    let read = match fault.cycle {
+    let read = match fault.kind {
         BusCycleKind::Fetch => ssw::IN | ssw::RW,
         BusCycleKind::Read => ssw::RW,
         BusCycleKind::Write => 0,
@@ -647,7 +647,7 @@ impl Core<'_> {
             Recovery::Released => (ssw::RR | trace_bit(trace_pending), fault.address, 0),
             Recovery::Restart => (restart_bits(&fault), fault.address, 0),
             Recovery::Movem(movem) => {
-                let rerun = if fault.cycle == BusCycleKind::Write {
+                let rerun = if fault.kind == BusCycleKind::Write {
                     ssw::RR
                 } else {
                     0

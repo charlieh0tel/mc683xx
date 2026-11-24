@@ -89,7 +89,7 @@ fn a_fault_stops_the_run_with_the_registers_as_the_instruction_began() {
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.cycle, BusCycleKind::Read);
+    assert_eq!(fault.kind, BusCycleKind::Read);
     assert_eq!(fault.cause, FaultCause::BusError);
     assert_eq!(fault.address, Address(NOWHERE));
     assert_eq!(fault.size, Size::Long);
@@ -157,7 +157,7 @@ fn a_bad_stack_pointer_stops_without_a_halt_and_the_run_goes_on() {
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.cycle, BusCycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(fault.address, Address(NOWHERE - 2));
     assert_eq!(machine.cpu.registers.pc.0, CODE);
     assert_eq!(machine.cpu.registers.ssp.0, NOWHERE);
@@ -415,7 +415,7 @@ fn a_fault_stacking_a_pending_breakpoint_keeps_the_instruction_before_it() {
     let End::Fault(fault) = boundary_only(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.cycle, BusCycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(fault.address, Address(NOWHERE - 2));
     assert_eq!(fault.registers, bad_stack, "the MOVEQ kept");
     assert_eq!(machine.cpu.registers, bad_stack);
@@ -464,7 +464,7 @@ fn a_fault_stacking_a_breakpoint_after_stop_keeps_the_interrupt_before_it() {
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.cycle, BusCycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(fault.registers.pc.0, level_3, "the interrupt kept");
     assert_eq!(fault.registers.ssp.0, 0);
     assert_eq!(u8::from(fault.registers.interrupt_mask()), 3);
@@ -595,7 +595,7 @@ fn a_fault_stacking_a_trace_keeps_the_traced_instruction() {
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.cycle, BusCycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(fault.address, Address(NOWHERE - 2));
     assert_eq!(fault.registers.pc.0, CODE + 2, "the ADDQ kept");
     assert_eq!(fault.registers.sr(), status::S | status::T1);
@@ -676,7 +676,7 @@ fn a_fault_stacking_rte_s_requeued_trace_keeps_the_rte() {
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.cycle, BusCycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(fault.registers.pc.0, CODE + 2, "the RTE kept");
     assert_eq!(fault.registers.ssp.0, STACK);
     assert_eq!(word_at(&machine, COUNTER), 0x1234, "the write rerun");
@@ -857,7 +857,7 @@ fn a_fault_rewriting_rte_s_faulted_frame_stops_rather_than_halting() {
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault stop");
     };
-    assert_eq!(fault.cycle, BusCycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(fault.registers.pc.0, CODE, "the RTE undone");
     assert_eq!(fault.registers.ssp.0, frame_at);
     assert_eq!(machine.cpu.halted(), None);
@@ -1025,7 +1025,7 @@ fn a_fault_stacking_a_host_exception_stops_with_no_exception_entered() {
         panic!("no fault stop");
     };
     assert_eq!(fault.cause, FaultCause::BusError);
-    assert_eq!(fault.cycle, BusCycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(machine.cpu.registers, before);
     assert_eq!(machine.cpu.fault_stop(), None, "not a run's");
     // the instruction at PC runs, its hooks called

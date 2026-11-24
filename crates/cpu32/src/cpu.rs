@@ -1255,7 +1255,7 @@ impl Core<'_> {
         // An odd PC faults where a change of flow left it; that
         // instruction is the current one (6.2.3).
         let odd_pc = fault.vector == Vector::ADDRESS_ERROR
-            && fault.cycle == BusCycleKind::Fetch
+            && fault.kind == BusCycleKind::Fetch
             && fault.address == instruction_pc;
         let current_pc = if odd_pc { previous_pc } else { instruction_pc };
         self.take_fault(fault, Recovery::Restart, instruction_pc, current_pc, false);
@@ -1533,7 +1533,7 @@ impl Core<'_> {
             function_code,
             size: remaining,
             long: size == Size::Long,
-            cycle,
+            kind: cycle,
             data: 0,
             read_modify_write: false,
         };
@@ -1595,7 +1595,7 @@ impl Core<'_> {
             function_code,
             size: remaining,
             long: size == Size::Long,
-            cycle: BusCycleKind::Write,
+            kind: BusCycleKind::Write,
             data,
             read_modify_write: false,
         };

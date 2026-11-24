@@ -103,7 +103,7 @@ impl fmt::Display for FaultCause {
 #[non_exhaustive]
 pub struct FaultStop {
     /// Fetch, read or write.
-    pub cycle: BusCycleKind,
+    pub kind: BusCycleKind,
     /// Why.
     pub cause: FaultCause,
     /// The cycle's address, all 32 bits.
@@ -125,7 +125,7 @@ impl fmt::Display for FaultStop {
             formatter,
             "{}: {} of {} bytes at {} in {}, pc {}",
             self.cause,
-            self.cycle,
+            self.kind,
             self.size.bytes(),
             self.address,
             self.function_code,
@@ -647,7 +647,7 @@ impl Cpu {
         self.movem = None;
         self.resume = Some((self.registers.pc, Resume::Code));
         End::Fault(FaultStop {
-            cycle: fault.cycle,
+            kind: fault.kind,
             cause,
             address: fault.address,
             size: if fault.long { Size::Long } else { fault.size },

@@ -115,7 +115,7 @@ pub struct InvalidAccess {
     /// Its function code.
     pub function_code: FunctionCode,
     /// Fetch, read or write.
-    pub cycle: BusCycleKind,
+    pub kind: BusCycleKind,
     /// A write's value, right-aligned.
     pub value: Option<u32>,
     /// Why.
@@ -500,7 +500,7 @@ impl Core<'_> {
                 address,
                 size,
                 function_code,
-                cycle,
+                kind: cycle,
                 value: None,
                 reason: Invalid::Protected,
                 pc: self.cpu.instruction_pc,
@@ -533,7 +533,7 @@ impl Core<'_> {
                 address,
                 size,
                 function_code,
-                cycle: BusCycleKind::Write,
+                kind: BusCycleKind::Write,
                 value: Some(value),
                 reason: Invalid::Protected,
                 pc: self.cpu.instruction_pc,
@@ -662,7 +662,7 @@ impl Core<'_> {
             address,
             size,
             function_code,
-            cycle,
+            kind: cycle,
             value,
             reason: Invalid::BusError,
             pc: self.cpu.instruction_pc,

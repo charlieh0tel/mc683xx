@@ -616,7 +616,7 @@ fn outcome(
             _ if exception.vector() == Vector::ZERO_DIVIDE => Outcome::Ended(call.stopped),
             Exception::Fault(fault)
                 if fault.vector == Vector::BUS_ERROR
-                    && fault.cycle == BusCycleKind::Write
+                    && fault.kind == BusCycleKind::Write
                     && in_rom(fault.address.0) =>
             {
                 Outcome::Ended(call.stopped)
@@ -624,7 +624,7 @@ fn outcome(
             Exception::Fault(fault)
                 if !maps(fault.address.0)
                     || fault.vector == Vector::ADDRESS_ERROR
-                        && fault.cycle == BusCycleKind::Fetch =>
+                        && fault.kind == BusCycleKind::Fetch =>
             {
                 Outcome::Skipped(call.stopped)
             }

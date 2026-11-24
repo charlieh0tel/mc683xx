@@ -890,7 +890,7 @@ def test_an_invalid_hook_and_an_exception_hook_see_a_bus_error():
     run = chip.run_for(2000)
     assert run.stop == mc683xx.Stop.Hook(hook)
     (access,) = invalid
-    assert (access.address, access.size, access.cycle, access.value, access.reason) == (
+    assert (access.address, access.size, access.kind, access.value, access.reason) == (
         PERIPHERAL_BASE + 0x20, 2, mc683xx.BusCycleKind.READ, None, mc683xx.Invalid.BUS_ERROR,
     )
     (entry,) = entered
@@ -954,7 +954,7 @@ def test_a_write_to_a_protected_page_is_a_bus_error():
     chip.add_invalid_hook(lambda a: invalid.append(a) or True)
     chip.run_for(2000)
     (access,) = invalid
-    assert (access.address, access.cycle, access.reason) == (
+    assert (access.address, access.kind, access.reason) == (
         RAM_WORD, mc683xx.BusCycleKind.WRITE, mc683xx.Invalid.PROTECTED,
     )
     assert chip.read_register("PC") == BUS_ERROR_HANDLER
@@ -1586,7 +1586,7 @@ def test_a_fault_stop_ends_the_chip_s_run_with_the_instruction_undone():
     run = chip.run_for(1000)
     assert run.stop == mc683xx.Stop.Fault()
     fault = chip.fault_stop
-    assert (fault.cycle, fault.cause) == (mc683xx.BusCycleKind.READ, mc683xx.FaultCause.ADDRESS_ERROR)
+    assert (fault.kind, fault.cause) == (mc683xx.BusCycleKind.READ, mc683xx.FaultCause.ADDRESS_ERROR)
     assert (fault.address, fault.pc) == (START + 1, START)
     assert chip.registers()["PC"] == START
     chip.set_stop_on_fault(False)

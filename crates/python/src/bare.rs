@@ -181,8 +181,8 @@ pub(crate) struct FaultStopView(pub(crate) FaultStop);
 impl FaultStopView {
     /// Fetch, read or write.
     #[getter]
-    fn cycle(&self) -> BusCycleKind {
-        self.0.cycle.into()
+    fn kind(&self) -> BusCycleKind {
+        self.0.kind.into()
     }
 
     /// Why.
@@ -225,8 +225,8 @@ impl FaultStopView {
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         Ok(format!(
-            "FaultStop(cycle={}, cause={}, address={:#010x}, size={}, function_code={}, pc={:#010x})",
-            repr(py, self.cycle())?,
+            "FaultStop(kind={}, cause={}, address={:#010x}, size={}, function_code={}, pc={:#010x})",
+            repr(py, self.kind())?,
             repr(py, self.cause()?)?,
             self.address(),
             self.size(),

@@ -833,7 +833,7 @@ call a Python callable with what the Rust hook sees: an `Instruction`
 with no cycle from the bytes it writes to, `None` for a read, a CPU-space write or a peripheral's
 write; on the chip a
 long operand is two word cycles, on the bare `Machine` one access of
-4), an `InvalidAccess` (those, `cycle`, a
+4), an `InvalidAccess` (those, `kind`, a
 `BusCycleKind`, and `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`),
 an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`) or
 an `ExceptionReturn` (`vector`, `pc`, `sr`, `stack`: what `rte`
@@ -1545,7 +1545,7 @@ otherwise, or with no callback (`set_intercept_callback(None)`), the
 CPU takes it natively.  `set_stop_on_fault(True)` (`stops_on_fault`)
 stops the run on a bus or address error instead of taking it:
 `End.Fault(fault)`, its `FaultStop` giving the
-`cycle` (`BusCycleKind`), the `cause` (`FaultCause.BUS_ERROR` for
+`kind` (`BusCycleKind`), the `cause` (`FaultCause.BUS_ERROR` for
 unmapped or a peripheral's, `PROTECTED`, `ADDRESS_ERROR`), the whole
 `address`, `size`, `function_code`, `pc` and `registers`, which
 the CPU holds again, no frame stacked for the fault.  A fault while
