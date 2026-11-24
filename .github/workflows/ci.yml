@@ -15,7 +15,7 @@ jobs:
     # rust-toolchain.toml pins the compiler; an empty fmt-toolchain
     # makes the fmt job read it too.  Pinned to the commit tag v1 named
     # when pinned, as the actions are.
-    uses: charlieh0tel/deb-workflows/.github/workflows/rust-ci.yml@6eaca6cd76e65c14991d0906f74d802bb4f80195 # v1
+    uses: charlieh0tel/deb-workflows/.github/workflows/rust-ci.yml@7c4b23becb6d0a79ec6f23889eee567017e13081 # v1
     with:
       fmt-toolchain: ""
       audit: false
