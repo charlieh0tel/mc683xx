@@ -102,6 +102,34 @@ impl Vector {
     }
 }
 
+/// The vectors, as a bit set.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct VectorSet([u64; 4]);
+
+impl VectorSet {
+    /// Whether `vector` is in it.
+    pub(crate) const fn contains(self, vector: Vector) -> bool {
+        self.0[(vector.0 >> 6) as usize] & 1 << (vector.0 & 63) != 0
+    }
+
+    /// It with `vector`.
+    pub(crate) const fn with(self, vector: Vector) -> Self {
+        let mut words = self.0;
+        words[(vector.0 >> 6) as usize] |= 1 << (vector.0 & 63);
+        Self(words)
+    }
+
+    /// The vectors in it or in `other`.
+    pub(crate) const fn union(self, other: Self) -> Self {
+        Self([
+            self.0[0] | other.0[0],
+            self.0[1] | other.0[1],
+            self.0[2] | other.0[2],
+            self.0[3] | other.0[3],
+        ])
+    }
+}
+
 /// The kind of bus cycle a fault ended: what the SSW's IN and RW bits
 /// record of it (CPU32RM 6.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
