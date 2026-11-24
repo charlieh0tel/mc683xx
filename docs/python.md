@@ -313,7 +313,10 @@ assert chip.memory(ram, 0, 2) == b"\x12\x34"
 
 Registers are by name: `"D0"`-`"D7"`, `"A0"`-`"A7"`, `"PC"`, `"SR"`,
 `"CCR"`, `"USP"`, `"SSP"`, `"VBR"`, `"SFC"`, `"DFC"`, through
-`read_register`, `write_register` and `registers()`.
+`read_register`, `write_register` and `registers()`.  A register is 32
+bits: `write_register` raises `OverflowError` for a value outside 0 to
+2**32 - 1 (a negative one included; mask it, `value & 0xFFFFFFFF`), and
+`ValueError` for a name that is none of these.
 
 ## Running
 
@@ -1516,7 +1519,21 @@ the faulting word.
 address, `stacking`, whether exception processing is stacking a frame
 (flagged, not hidden), and `registers`, as the instruction began, or,
 while a trace, hardware breakpoint or interrupt taken after one stacks
-its frame, as that processing began.
+its frame, as that processing began.  `registers` is a dict on the bare
+`Machine` alone; on an `Mc68331` and a `Board`, whose hooks run without
+the registers kept, it is always `None`.  A write hook sees the
+stacking writes of each exception the CPU takes, `stacking` set: a hook
+after the program's own writes alone filters them out:
+
+```python
+program_writes: list[tuple[int, int]] = []
+
+
+def on_write(access: mc683xx.MemoryAccess) -> None:
+    if access.stacking:
+        return  # exception processing's frame, not the program's write
+    program_writes.append((access.address, access.value))
+```
 
 ```python
 calls: list[int] = []

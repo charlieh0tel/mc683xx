@@ -72,6 +72,26 @@ def test_a_call_runs_until_it_returns():
     assert run.cycles > 0
 
 
+def test_a_register_takes_32_bits():
+    cpu = machine()
+    for value in (-1, 1 << 32):
+        with pytest.raises(OverflowError):
+            cpu.write_register("D0", value)
+    cpu.write_register("D0", -1 & 0xFFFFFFFF)
+    assert cpu.read_register("D0") == 0xFFFFFFFF
+
+
+def test_a_write_hook_sees_stacking_flagged():
+    cpu = machine(trap(0))
+    writes = []
+    cpu.add_write_hook(lambda access: writes.append(access.stacking))
+    run = cpu.run_limited(reach=HANDLER)
+    assert run.end == mc683xx.End.Reached()
+    # the four-word frame, a word a cycle (CPU32RM 6.4.1), and no
+    # write of the program's own
+    assert writes == [True] * 4
+
+
 def test_limits_and_begin():
     cpu = machine(NOP, NOP, NOP, RTS)
     assert cpu.run_limited(instructions=2).end == mc683xx.End.Instructions()

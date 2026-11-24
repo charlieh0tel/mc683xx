@@ -1160,7 +1160,10 @@ but the exception hook cover an address range, on the address lines.
   replaced, read with no cycle before it from the bytes it writes to
   (a page's write backing, not its read one); `None` for a read, for a
   write in CPU space, and for a write the core's memory does not
-  serve (a peripheral's).
+  serve (a peripheral's).  A write hook sees exception processing's
+  stacking writes too, `stacking` set on each: a hook
+  that wants the program's own cycles alone returns early on
+  `access.stacking`.
 - `add_invalid_hook(range, f(&InvalidAccess))`: before a bus error is
   taken, with its reason, `Invalid::BusError` or `Invalid::Protected`.
 - `add_exception_hook(f(&ExceptionEntry))`: once the frame is stacked:
