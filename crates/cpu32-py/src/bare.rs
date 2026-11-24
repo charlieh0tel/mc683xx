@@ -37,6 +37,7 @@ use mc683xx_cpu32::flat::Machine;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
+use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_gdb::target::AccessError;
 use mc683xx_gdb::target::Target;
@@ -569,17 +570,27 @@ impl MachineView {
     /// and `write(cycle, value)`: it answers the cycles there that no
     /// mapped memory serves, before they land.  It saves as a chip's
     /// mapped peripheral does, through `save()` and `restore(bytes)`.
+    /// Its number, for `remove_peripheral`.
     fn add_peripheral(
         &mut self,
         begin: u32,
         end: u32,
         peripheral: &Bound<'_, PyAny>,
-    ) -> PyResult<()> {
+    ) -> PyResult<u64> {
         let peripheral = PythonMapped::mapped(peripheral, self.pending.clone())?;
-        self.machine
+        let id = self
+            .machine
             .add_peripheral(Address(begin)..=Address(end), Box::new(peripheral))
             .map_err(Error::from)?;
-        Ok(())
+        Ok(id.number())
+    }
+
+    /// Takes peripheral number `peripheral` off the bus: whether there
+    /// was one.
+    fn remove_peripheral(&mut self, peripheral: u64) -> bool {
+        self.machine
+            .remove_peripheral(PeripheralId::from_number(peripheral))
+            .is_some()
     }
 
     /// Register `name`: `D0`-`D7`, `A0`-`A7`, `PC`, `SR`, `CCR`, `USP`,

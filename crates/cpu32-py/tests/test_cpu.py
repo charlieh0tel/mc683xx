@@ -362,6 +362,15 @@ def test_a_peripheral_takes_a_long_whole_before_it_lands():
     assert register.value == 0x11223345
 
 
+def test_a_peripheral_removed_answers_no_more():
+    cpu = machine(MOVE_LONG_A0_TO_D0, RTS)
+    number = cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, Register())
+    assert cpu.remove_peripheral(number)
+    assert not cpu.remove_peripheral(number)
+    # the space is free again
+    assert cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 3, Register()) != number
+
+
 class Refusing:
     def read(self, cycle):
         raise mc683xx.BusError()

@@ -1415,7 +1415,9 @@ assert bare.read_register("D0") == 6
   to `end`, both included, byte-granular, no two overlapping.  A cycle
   no mapped memory serves and one peripheral covers goes to it, before it
   lands: the read's value is the peripheral's, the write is the peripheral's
-  to keep.  `protect` covers a peripheral's pages too, mapped or not: a
+  to keep.  It returns the peripheral's number, and
+  `remove_peripheral(number)` takes it off again, `False` if there was
+  none (Rust's `PeripheralId`, `remove_peripheral`).  `protect` covers a peripheral's pages too, mapped or not: a
   cycle they do not permit is a bus error before the peripheral sees
   it (`Invalid.PROTECTED`, `FaultCause.PROTECTED`), so a read-only
   peripheral needs no `BusError` of its own.  A `BusCycle` has `address` (32 bits), `size` (1, 2, or 4: a
