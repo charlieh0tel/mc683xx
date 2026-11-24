@@ -50,9 +50,10 @@ AT28C64B's cells, protection and tWC; the ACIA's control, status and
 receive data registers and RTS; the DUART's ACR, IMR, IVR, OPCR, OPR,
 ISR, input port, channel status registers and crystal.  A UART's
 registers are as of its last call.  Each type's parameter defaults are
-public constants on it (`Ad569::VREF_POSITIVE_VOLTS`,
-`Mc68681::X1`), typed as Rust carries a unit (`Span`, `Frequency`) though
-the parameter keys keep theirs (`write_cycle_us`, `x1_hz`).  These are the contract; `inspect` (below) is not.
+public constants on it (`Ad569::VREF_POSITIVE_VOLTS`, `Mc68681::X1`),
+typed as Rust carries a unit (`Span`, `Frequency`) though the
+parameter keys keep theirs (`write_cycle_us`, `x1_hz`).  These are the
+contract; `inspect` (below) is not.
 
 Each shows its state to a front end (`Peripheral::inspect`,
 `Board::inspect`; docs/host-guide.md, Front ends), read-only and
