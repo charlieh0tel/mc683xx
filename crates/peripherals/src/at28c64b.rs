@@ -794,7 +794,10 @@ impl Peripheral for At28c64b {
 
     /// The cell, while no write cycle runs; during one a read polls
     /// (DATA polling, the toggle bit: datasheet, Write Cycle Operation),
-    /// which only a cycle can do, so it declines.
+    /// which only a cycle can do, so it declines.  A cycle ends as the
+    /// model is next advanced or read, so it declines until then even
+    /// at a `moment` past the cycle's tWC; a board advances it before a
+    /// host's peek.
     fn peek(&self, access: PeripheralAccess, _: Moment) -> Option<u32> {
         match self.writing {
             Some(_) => None,
@@ -803,7 +806,9 @@ impl Peripheral for At28c64b {
     }
 
     /// Stores the byte in its cell at once, through to the file, as a
-    /// programmer would: no write cycle, no data protection.  A failure
+    /// programmer would: no write cycle, no data protection.  During a
+    /// write cycle that holds the byte's offset, the cycle wins: it
+    /// programs its byte over the poke as it ends.  A failure
     /// writing the file drops it, as a cycle's does ([`At28c64b::file_error`]).
     fn poke(&mut self, access: PeripheralAccess, value: u32, _: Moment) -> bool {
         let offset = Offset::new(access.address);

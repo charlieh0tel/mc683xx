@@ -26,7 +26,7 @@ mod tests;
 
 /// The format of [`Cpu::save`]'s bytes.  A change to what it saves
 /// changes it.
-pub const VERSION: u32 = 10;
+pub const VERSION: u32 = 11;
 
 /// Bytes of the version that starts every snapshot, little-endian.
 const VERSION_BYTES: usize = size_of::<u32>();

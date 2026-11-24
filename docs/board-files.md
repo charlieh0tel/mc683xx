@@ -553,7 +553,10 @@ re-exports another's types (`docs/host-guide.md`, Crates).
     whether it took it; both decline by default (`None`, `false`),
     which the chip's `peek` and `poke` and gdb's memory access report as
     unpeekable.  `MappedAdapter` passes them to its model's
-    `MappedPeripheral::peek` and `poke`.
+    `MappedPeripheral::peek` and `poke`.  A lazily advanced model, one
+    that brings its state up to date only inside `read`, declines
+    where catching up could change the answer, as the AT28C64B
+    declines during a write cycle.
   - Stop conditions, for a debugger and the emulator's alone
     ([docs/gdb.md](gdb.md), Stop conditions): `conditions()` lists
     what it offers (`condition::ConditionInfo::new(name, arguments,

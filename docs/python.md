@@ -1597,7 +1597,8 @@ bare.remove_hook(stubbed)
 ### Exceptions and faults
 
 A host-handled exception: `add_intercept_hook(callback, vectors)`
-(Rust's `Cpu::add_intercept_hook`) intercepts the exceptions an
+(Rust's `Cpu::add_intercept_hook(vectors, hook)`, the callable first
+here as in every Python `add_*_hook`) intercepts the exceptions an
 instruction raises with a vector of `vectors` (traps, illegal, line A
 and F, privilege, divide by zero, CHK, TRAPV, format error) before
 anything is stacked, for the host to handle (a stubbed kernel call, an

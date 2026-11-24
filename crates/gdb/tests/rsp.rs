@@ -972,6 +972,18 @@ fn monitor_faults_stop_the_chip_s_run() {
 }
 
 #[test]
+fn a_bare_cpu_s_exception_stop_is_a_trap() {
+    let mut machine = machine();
+    machine.write(Address(START), &bytes(&[0x4e40])).unwrap();
+    machine.cpu.set_stop_on_exception(true);
+    let (ending, replies) = session(&mut machine, vec![packet("c"), packet("k")]);
+    assert_eq!(ending.unwrap(), Ending::Killed);
+    // SIGTRAP, gdb's 5
+    assert_eq!(replies[0], "S05", "{replies:?}");
+    assert_eq!(machine.cpu.registers.pc.0, START, "the TRAP undone");
+}
+
+#[test]
 fn a_fault_stop_outranks_a_watch_hit_it_undid() {
     for resume in ["c", "s"] {
         let mut machine = machine();

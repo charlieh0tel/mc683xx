@@ -210,13 +210,13 @@ impl<T: Target> Session<'_, T> {
     }
 
     /// Whether a hit in the run that ended `ran` stands: unless a fault
-    /// stop undid the instruction it was in.  A hit stops the run as
+    /// or exception stop undid the instruction it was in.  A hit stops the run as
     /// its instruction ends, so a fault after it in the run is one
     /// stacking that instruction's trace, which keeps the instruction
     /// and leaves the trace pending (PLAN.md, Faults); any other undid
     /// it.
     fn survives(&mut self, ran: TargetRun) -> bool {
-        ran != TargetRun::Fault
+        !matches!(ran, TargetRun::Fault | TargetRun::Exception)
             || self
                 .target
                 .cpu_scope(|cpu| cpu.trace_pending().is_some())
@@ -319,11 +319,14 @@ impl<T: Target> Session<'_, T> {
 }
 
 /// The signal gdb is told for a stop that was none of the stub's
-/// ([docs/gdb.md, Stops](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md#stops)): the host's hook or a stop condition a
-/// trap, a halt or a fault a bus error, a request an interrupt.
+/// ([docs/gdb.md, Stops](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md#stops)): the host's hook, a stop condition or
+/// an exception stop a trap, a halt or a fault a bus error, a request
+/// an interrupt.
 const fn signaled(ran: TargetRun) -> SingleThreadStopReason<u32> {
     SingleThreadStopReason::Signal(match ran {
-        TargetRun::Quantum | TargetRun::Hook | TargetRun::Condition => Signal::SIGTRAP,
+        TargetRun::Quantum | TargetRun::Hook | TargetRun::Condition | TargetRun::Exception => {
+            Signal::SIGTRAP
+        }
         TargetRun::Background(Entry::DoubleBusFault { .. })
         | TargetRun::Halted
         | TargetRun::Fault => Signal::SIGBUS,

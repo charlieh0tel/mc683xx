@@ -490,7 +490,8 @@ From the datasheet's section 6:
   A peek gives the cell, outside a write cycle; during one it is
   declined, as a read then polls.  A poke programs the cell at once,
   through to `file`, as a programmer would: no write cycle, no tWC,
-  whatever the data protection.
+  whatever the data protection; a write cycle running that holds the
+  byte's offset programs its own byte over it as it ends.
 
 Where the datasheet is silent, the model chooses:
 

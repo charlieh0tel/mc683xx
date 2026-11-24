@@ -394,6 +394,31 @@ fn a_peek_and_a_poke_reach_a_peripheral_that_takes_them_with_no_cycle() {
 }
 
 #[test]
+fn a_poke_writes_rom_the_core_does_not_serve() {
+    let Board {
+        mut chip, recorder, ..
+    } = board(&[BRANCH_TO_SELF], None);
+    chip.peripheral_mut::<Recorder>(recorder).unwrap().peekable = true;
+    // CS1's recorder over the boot ROM too: the ROM no longer alone on
+    // its addresses, the core serves neither
+    write(
+        &mut chip,
+        CSBAR0 + SELECT_BYTES,
+        Size::Word,
+        BLOCK_64K.into(),
+    );
+    assert!(chip.read(Address(START), &mut [0; 2]).is_err());
+    chip.poke(Address(START), Size::Word, SUPERVISOR, u32::from(NOP))
+        .unwrap();
+    assert_eq!(peek(&chip, START, Size::Word), Ok(NOP.into()));
+    assert_eq!(
+        chip.peripheral::<Recorder>(recorder).unwrap().value,
+        u32::from(NOP),
+        "the recorder poked too"
+    );
+}
+
+#[test]
 fn the_host_sees_errors_by_kind() {
     let Board { mut chip, .. } = board(&[BRANCH_TO_SELF], None);
     assert_eq!(

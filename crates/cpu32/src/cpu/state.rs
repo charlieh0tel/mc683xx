@@ -7,6 +7,7 @@ use serde::Serialize;
 use crate::cpu::Cpu;
 use crate::cpu::Halt;
 use crate::cpu::Idle;
+use crate::cpu::bare::TakeOnce;
 use crate::cpu::hooks::Resume;
 use crate::cycles::Cycles;
 use crate::effective_address::Altered;
@@ -61,6 +62,12 @@ struct CpuState {
     breakpoint_pending: bool,
     /// The trace a fault stop left pending: its instruction's address.
     trace_pending: Option<Address>,
+    /// The intercepted exception [`Cpu::take_natively_once`] lets
+    /// through.
+    native_once: Option<TakeOnce>,
+    /// The exception an exception stop ended the last run at, which
+    /// the next takes with no stop.
+    exception_once: Option<TakeOnce>,
     /// [`Cpu::atemp`].
     atemp: u32,
     /// [`Cpu::pcc`].
@@ -144,6 +151,8 @@ impl Cpu {
             bdm_enabled: self.bdm_enabled,
             breakpoint_pending: self.bare.breakpoint_pending,
             trace_pending: self.bare.trace_pending,
+            native_once: self.bare.native_once,
+            exception_once: self.bare.exception_once,
             atemp: self.atemp,
             pcc: self.pcc,
             far: self.far,
@@ -204,6 +213,8 @@ impl Cpu {
         self.bdm_enabled = state.bdm_enabled;
         self.bare.breakpoint_pending = state.breakpoint_pending;
         self.bare.trace_pending = state.trace_pending;
+        self.bare.native_once = state.native_once;
+        self.bare.exception_once = state.exception_once;
         self.atemp = state.atemp;
         self.pcc = state.pcc;
         self.far = state.far;

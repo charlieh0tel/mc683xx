@@ -1153,7 +1153,7 @@ impl MachineView {
         if !handled {
             let mut this = slf.borrow_mut();
             if this.machine.cpu.registers.pc == interception.pc {
-                this.machine.cpu.take_natively_once();
+                this.machine.cpu.take_natively_once(interception.vector);
             }
         }
         Ok(())
@@ -1219,6 +1219,7 @@ impl Target for Debugged<'_, '_> {
             End::Stop(stop) => stop.into(),
             End::Reached | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
+            End::Exception { .. } => TargetRun::Exception,
             other => return Err(Error::run_end(other).into()),
         })
     }

@@ -135,9 +135,12 @@ impl Mc68331 {
 
     /// Stores `value`, right-aligned, where `bus_write` would, without a
     /// cycle, a byte at a time: memory's bytes as [`write`](Self::write)
-    /// writes them, ROM included, and a peripheral's through its
+    /// writes them, ROM included, whether the core serves the byte or
+    /// the decode reaches it, and a peripheral's through its
     /// [`MappedPeripheral::poke`], each that would take the byte.  A
-    /// module's register is not poked.
+    /// byte the core serves is written in supervisor space, whatever
+    /// `function_code`, as `write` writes it.  A module's register is
+    /// not poked.
     ///
     /// # Errors
     ///
@@ -350,18 +353,15 @@ impl Mc68331 {
                         return Err(BusCycleError::Unpeekable);
                     }
                 }
-                Wire::Memory(wired) => {
-                    if wired.writable {
-                        store(
-                            &mut self.cpu.memory,
-                            wired,
-                            address,
-                            Size::Byte,
-                            Lanes::BOTH,
-                            byte,
-                        );
-                    }
-                }
+                // a debugger's write: ROM's too, as `write`'s
+                Wire::Memory(wired) => store(
+                    &mut self.cpu.memory,
+                    wired,
+                    address,
+                    Size::Byte,
+                    Lanes::BOTH,
+                    byte,
+                ),
             }
         }
         Ok(())
