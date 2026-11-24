@@ -176,6 +176,8 @@ pub(crate) mod watch {
     pub(crate) const PRE_READ: u8 = 1 << 4;
     /// A pre-write hook covers some of it.
     pub(crate) const PRE_WRITE: u8 = 1 << 5;
+    /// A coverage covers some of it.
+    pub(crate) const COVERAGE: u8 = 1 << 6;
     /// The bits that take a page's cycles off the fast path, some of
     /// them.
     pub(crate) const SLOW: u8 = READ | WRITE | PRE_READ | PRE_WRITE;

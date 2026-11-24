@@ -10,6 +10,7 @@
 
 use std::fmt;
 use std::ops::ControlFlow;
+use std::ops::RangeInclusive;
 
 use crate::exception::BusCycleKind;
 use crate::exception::Vector;
@@ -222,4 +223,98 @@ pub struct ExceptionReturn {
     /// Its frame's lowest address, SSP as `rte` began: an
     /// [`ExceptionEntry`]'s `stack` for the same frame.
     pub stack: Address,
+}
+
+/// A coverage, as [`Cpu::add_coverage`] returns it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CoverageId(pub(crate) u64);
+
+/// `coverage` and its number, in adding order from 1: `coverage 2`.
+impl fmt::Display for CoverageId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "coverage {}", self.0)
+    }
+}
+
+/// The instructions executed in a range of addresses: a bit for each
+/// word of it, set when an instruction that starts there executes
+/// ([`Cpu::add_coverage`]).  Host instrumentation, as the hooks are:
+/// not part of a snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Coverage {
+    /// The first address, even.
+    start: Address,
+    /// The last address, on the address lines.
+    end: Address,
+    /// A bit for each word from `start`, the lowest bit of each the
+    /// lowest address.
+    words: Vec<u64>,
+}
+
+impl Coverage {
+    /// Bits in each of `words`.
+    const BITS: u32 = u64::BITS;
+
+    /// `range`, nothing executed, its end no further than `mask`, the
+    /// address lines'.
+    pub(crate) fn new(range: &RangeInclusive<Address>, mask: u32) -> Self {
+        let start = Address(range.start().0 & !1);
+        let end = Address(range.end().0.min(mask));
+        let count = if start > end {
+            0
+        } else {
+            u64::from((end.0 - start.0) / 2) + 1
+        };
+        Self {
+            start,
+            end,
+            words: vec![0; count.div_ceil(u64::from(Self::BITS)) as usize],
+        }
+    }
+
+    /// The addresses it covers.
+    #[must_use]
+    pub const fn range(&self) -> RangeInclusive<Address> {
+        self.start..=self.end
+    }
+
+    /// The word and bit of `address`, if it covers it and it is even.
+    fn bit(&self, address: Address) -> Option<(usize, u64)> {
+        if address.is_odd() || address < self.start || address > self.end {
+            return None;
+        }
+        let index = (address.0 - self.start.0) / 2;
+        Some(((index / Self::BITS) as usize, 1 << (index % Self::BITS)))
+    }
+
+    /// Records an instruction at `address` executed, if it covers it.
+    pub(crate) fn record(&mut self, address: Address) {
+        if let Some((word, bit)) = self.bit(address) {
+            self.words[word] |= bit;
+        }
+    }
+
+    /// Whether an instruction at `address` executed.
+    #[must_use]
+    pub fn contains(&self, address: Address) -> bool {
+        self.bit(address)
+            .is_some_and(|(word, bit)| self.words[word] & bit != 0)
+    }
+
+    /// The addresses of the instructions executed, in order.
+    pub fn addresses(&self) -> impl Iterator<Item = Address> + '_ {
+        self.words
+            .iter()
+            .enumerate()
+            .flat_map(move |(index, &word)| {
+                (0..Self::BITS)
+                    .filter(move |bit| word & 1 << bit != 0)
+                    .map(move |bit| self.start.offset(2 * (index as u32 * Self::BITS + bit)))
+            })
+    }
+
+    /// Forgets every instruction executed.
+    pub(crate) fn clear(&mut self) {
+        self.words.fill(0);
+    }
 }

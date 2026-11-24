@@ -3,15 +3,17 @@
 //! A chip keeps its core's memory map in step with its own decode: a
 //! host that remapped the core's memory, or ran the core itself, would
 //! leave the two apart.  [`CpuControl`] lends what a host may change
-//! without that: the registers, the hooks and the pages' permissions,
-//! which outlive the chip's remaps; the rest of the CPU it shows
-//! read-only, through `Deref`.
+//! without that: the registers, the hooks, the coverages and the pages'
+//! permissions, which outlive the chip's remaps; the rest of the CPU it
+//! shows read-only, through `Deref`.
 
 use std::ops::Deref;
 use std::ops::RangeInclusive;
 
 use super::Cpu;
 use crate::hooks::Control;
+use crate::hooks::Coverage;
+use crate::hooks::CoverageId;
 use crate::hooks::ExceptionEntry;
 use crate::hooks::ExceptionReturn;
 use crate::hooks::HookId;
@@ -129,6 +131,21 @@ impl<'a> CpuControl<'a> {
     /// [`Cpu::remove_hook`].
     pub fn remove_hook(&mut self, id: HookId) -> bool {
         self.cpu.remove_hook(id)
+    }
+
+    /// [`Cpu::add_coverage`].
+    pub fn add_coverage(&mut self, range: RangeInclusive<Address>) -> CoverageId {
+        self.cpu.add_coverage(range)
+    }
+
+    /// [`Cpu::clear_coverage`].
+    pub fn clear_coverage(&mut self, id: CoverageId) -> bool {
+        self.cpu.clear_coverage(id)
+    }
+
+    /// [`Cpu::remove_coverage`].
+    pub fn remove_coverage(&mut self, id: CoverageId) -> Option<Coverage> {
+        self.cpu.remove_coverage(id)
     }
 
     /// [`Cpu::set_stop_on_fault`]: a chip's or a board's run then ends

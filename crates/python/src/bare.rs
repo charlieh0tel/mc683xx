@@ -65,6 +65,7 @@ use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
 use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
+use pyo3::types::PySet;
 
 use crate::chip::Halt;
 
@@ -75,6 +76,7 @@ use crate::gdb;
 use crate::held::Held;
 use crate::hooks;
 use crate::hooks::BusCycleKind;
+use crate::hooks::CoverageIdView;
 use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::PythonMapped;
@@ -1119,6 +1121,47 @@ impl MachineView {
     fn remove_hook(&mut self, hook: &HookIdView) -> bool {
         self.intercepts.retain(|intercept| intercept.id != hook.0);
         self.machine.cpu.remove_hook(hook.0)
+    }
+
+    /// Records the address of each instruction from `begin` to `end`,
+    /// both included, as it executes (Rust's `Cpu::add_coverage`): a
+    /// bit for each word of the range, so cover the code, not all of
+    /// memory.  Not saved by `save`.
+    fn add_coverage(&mut self, begin: u32, end: u32) -> CoverageIdView {
+        CoverageIdView(self.machine.cpu.add_coverage(Address(begin)..=Address(end)))
+    }
+
+    /// The addresses of the instructions `coverage` recorded, as a set;
+    /// `None` if it was removed.
+    fn coverage<'py>(
+        &self,
+        py: Python<'py>,
+        coverage: CoverageIdView,
+    ) -> PyResult<Option<Bound<'py, PySet>>> {
+        self.machine
+            .cpu
+            .coverage(coverage.0)
+            .map(|recorded| hooks::covered(py, recorded))
+            .transpose()
+    }
+
+    /// Forgets what `coverage` recorded; whether it is there.
+    fn clear_coverage(&mut self, coverage: CoverageIdView) -> bool {
+        self.machine.cpu.clear_coverage(coverage.0)
+    }
+
+    /// Removes `coverage`: what it recorded, as `coverage` gives it, or
+    /// `None` if it was removed already.
+    fn remove_coverage<'py>(
+        &mut self,
+        py: Python<'py>,
+        coverage: CoverageIdView,
+    ) -> PyResult<Option<Bound<'py, PySet>>> {
+        self.machine
+            .cpu
+            .remove_coverage(coverage.0)
+            .map(|recorded| hooks::covered(py, &recorded))
+            .transpose()
     }
 
     /// The CPU's whole state as bytes: registers, memory, the clock, the

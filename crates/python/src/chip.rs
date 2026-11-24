@@ -50,6 +50,7 @@ use pyo3::pyclass;
 use pyo3::pymethods;
 use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
+use pyo3::types::PySet;
 
 use crate::bare::FaultStopView;
 use crate::bare::PeripheralIdView;
@@ -57,6 +58,7 @@ use crate::board::BoardView;
 use crate::error::Error;
 use crate::gdb;
 use crate::hooks;
+use crate::hooks::CoverageIdView;
 use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::PythonMapped;
@@ -1472,6 +1474,56 @@ macro_rules! chip_methods {
             /// Removes `hook`; whether it was installed.
             fn remove_hook(&mut self, py: Python<'_>, hook: &HookIdView) -> PyResult<bool> {
                 self.with_chip_mut(py, |chip, _| Ok(chip.cpu_control().remove_hook(hook.0)))
+            }
+
+            /// Records the address of each instruction from `begin` to
+            /// `end`, both included, on the address lines, as it
+            /// executes (Rust's `Cpu::add_coverage`): a bit for each
+            /// word of the range.  Not saved by `save`.
+            fn add_coverage(
+                &mut self,
+                py: Python<'_>,
+                begin: u32,
+                end: u32,
+            ) -> PyResult<CoverageIdView> {
+                self.with_chip_mut(py, |chip, _| {
+                    Ok(CoverageIdView(chip.cpu_control().add_coverage(addresses(begin, end))))
+                })
+            }
+
+            /// The addresses of the instructions `coverage` recorded, as a
+            /// set; `None` if it was removed.
+            fn coverage<'py>(
+                &self,
+                py: Python<'py>,
+                coverage: CoverageIdView,
+            ) -> PyResult<Option<Bound<'py, PySet>>> {
+                self.with_chip(py, |chip| {
+                    chip.cpu()
+                        .coverage(coverage.0)
+                        .map(|recorded| hooks::covered(py, recorded))
+                        .transpose()
+                })
+            }
+
+            /// Forgets what `coverage` recorded; whether it is there.
+            fn clear_coverage(&mut self, py: Python<'_>, coverage: CoverageIdView) -> PyResult<bool> {
+                self.with_chip_mut(py, |chip, _| Ok(chip.cpu_control().clear_coverage(coverage.0)))
+            }
+
+            /// Removes `coverage`: what it recorded, as `coverage` gives
+            /// it, or `None` if it was removed already.
+            fn remove_coverage<'py>(
+                &mut self,
+                py: Python<'py>,
+                coverage: CoverageIdView,
+            ) -> PyResult<Option<Bound<'py, PySet>>> {
+                self.with_chip_mut(py, |chip, _| {
+                    chip.cpu_control()
+                        .remove_coverage(coverage.0)
+                        .map(|recorded| hooks::covered(py, &recorded))
+                        .transpose()
+                })
             }
 
             /// Whether a bus or address error, the bus monitor's

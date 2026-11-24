@@ -1,6 +1,7 @@
 //! What the hooks cost the core (docs/performance.md, Hooks): kernels
-//! with a hook that never fires, one called on every instruction, and
-//! installing and removing one.
+//! with a hook that never fires, one called on every instruction, a
+//! coverage elsewhere and over the sled, and installing and removing a
+//! hook.
 
 use std::hint::black_box;
 use std::ops::ControlFlow;
@@ -17,6 +18,8 @@ use mc683xx_target::Address;
 
 /// A range on the RAM's page tables that no kernel's sled reaches.
 const ELSEWHERE: RangeInclusive<Address> = Address(0x3_8000)..=Address(0x3_8001);
+/// The sleds' addresses.
+const SLED: RangeInclusive<Address> = Address(bare::CODE)..=Address(0x1_ffff);
 /// Every address.
 const EVERYWHERE: RangeInclusive<Address> = Address(0)..=Address(u32::MAX);
 
@@ -28,7 +31,7 @@ const KERNELS: [&str; 3] = ["nop", "move_indirect", "clr_indirect"];
 type Install = fn(&mut Cpu);
 
 /// The cases: a name and the hooks it installs.
-const CASES: [(&str, Install); 4] = [
+const CASES: [(&str, Install); 6] = [
     ("unhooked", |_| {}),
     ("code_elsewhere", |cpu| {
         cpu.add_code_hook(ELSEWHERE, |_| ControlFlow::Continue(()));
@@ -38,6 +41,12 @@ const CASES: [(&str, Install); 4] = [
     }),
     ("code_everywhere", |cpu| {
         cpu.add_code_hook(EVERYWHERE, |_| ControlFlow::Continue(()));
+    }),
+    ("coverage_elsewhere", |cpu| {
+        cpu.add_coverage(ELSEWHERE);
+    }),
+    ("coverage_sled", |cpu| {
+        cpu.add_coverage(SLED);
     }),
 ];
 

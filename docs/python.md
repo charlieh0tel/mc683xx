@@ -893,6 +893,18 @@ dictionary, made at the first ask; `register(name)` reads one
 register without making it, the cheaper call in a hook that runs
 often.
 
+`add_coverage(begin, end)` (Rust's `Cpu::add_coverage`, on
+`Machine`, `Mc68331` and `Board.chip`) records natively, with no
+Python call, the address of each instruction from `begin` to `end`
+as it executes, a bit for each word of the range; it returns a
+`CoverageId`.  `coverage(id)` is the set of addresses recorded,
+`clear_coverage(id)` forgets them (whether there is such a
+coverage), and `remove_coverage(id)` removes it and returns its last
+set; both give `None` once it is removed.  An instruction outside
+every coverage costs nothing; one inside it a lookup.  Like the
+hooks, a coverage is not part of a snapshot: `save` leaves it out
+and `restore` leaves it as it was.
+
 `protect(space, start, length, permissions)` sets whole 2-Kbyte pages
 of `Space.USER` or `Space.SUPERVISOR` to a string of `r`, `w` and `x`;
 a cycle they do not permit is a bus error, `Invalid.PROTECTED` to the

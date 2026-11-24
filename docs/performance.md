@@ -85,7 +85,9 @@ working fails `make ci`.
   RAM's pages that no sled reaches, so it never fires; and
   `code_everywhere`, a Rust code hook that does nothing, called on
   every instruction.  `hooks/add_remove` adds and removes a code
-  hook on the RAM.  From Python, `crates/python/benches/hooks.py`
+  hook on the RAM; `coverage_elsewhere` and `coverage_sled` add a
+  coverage beside the sled or over it.  From Python,
+  `crates/python/benches/hooks.py`
   (Python hooks, below).
 - `*/short_runs`: 1000 runs of one clock each, the cost of a run call:
   `Cpu::run_for` alone, and `Mc68331::run_for` with its syncing.
@@ -770,3 +772,11 @@ With the quiet page a code hook that never fires costs `nop` about
 147-153 and 115-119 us); a write hook elsewhere costs a little
 more, as the registers are kept as each instruction begins for the
 write hooks to read.
+
+A coverage (`Cpu::add_coverage`) off the instructions' pages costs
+what a code hook there does (`hooks/nop_coverage_elsewhere` 161 us,
+`move_indirect_coverage_elsewhere` 147 us, against 150 and 144
+unhooked); over the whole sled, a bit set for every instruction,
+`nop` takes 236-238 us and `move_indirect` 188 us: about 4 ns an
+instruction on this core, where a Python code hook that does nothing
+costs about 280 ns.

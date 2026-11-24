@@ -2402,7 +2402,21 @@ Adversarial review (2026-11-01):
   fast entries); "special" is whether some page has a permission
   short of all, kept as permissions change, or some hook range is
   not empty (sc batch 6: every add and remove recomputed every
-  allocated slab, 15 us on 256 Kbytes, now 80 ns).  Invalid access and exception
+  allocated slab, 15 us on 256 Kbytes, now 80 ns).
+- Coverage (sc batch 6): `Cpu::add_coverage(range) -> CoverageId`
+  records natively the address of each instruction executed in the
+  range, a bit for each word (64 Kbytes a Mbyte of range, the end
+  clamped to the address lines), read out as a `Coverage`
+  (`addresses`, `contains`), cleared, removed; on `CpuControl` too, so
+  the chip and board have it.  It sets a page watch bit of its own, so
+  an instruction off its pages costs what it did (the quiet page) and
+  one on them the out-of-line lookup the code hooks use.  It records
+  an instruction once no code or block hook stopped the run before it
+  (a stopped one is recorded when it runs), never one a self-loop
+  stop leaves unexecuted.  Decided: not part of a snapshot, as the
+  hooks are not: it is host instrumentation, and a restore that
+  rewound it would lose what the runs since showed.  Edges (branch
+  pairs) are deferred to 1.x, additively.  Invalid access and exception
   hooks need no flag: bus errors and exceptions are slow already.
 - When hooks run: code and block hooks before the instruction; a stop
   there leaves it unexecuted, and the next run executes it without

@@ -1004,3 +1004,22 @@ def test_a_limited_run_can_end_at_a_self_loop_unexecuted():
     # not asked: the loop runs
     assert cpu.run_limited(instructions=10).end == mc683xx.End.Instructions()
     assert cpu.instructions == 11
+
+
+def test_a_coverage_records_the_instructions_run_in_its_range():
+    cpu = machine(NOP, ADDQ_LONG_1_D0, RTS)
+    coverage = cpu.add_coverage(CODE, CODE + 0xFF)
+    assert repr(coverage) == "CoverageId(1)" and str(coverage) == "coverage 1"
+    cpu.run_limited(reach=RETURN)
+    assert cpu.coverage(coverage) == {CODE, CODE + 2, CODE + 4}
+    assert cpu.clear_coverage(coverage)
+    assert cpu.coverage(coverage) == set()
+    cpu.poke_bytes(STACK - 4, struct.pack(">I", RETURN))
+    cpu.write_register("A7", STACK - 4)
+    cpu.run_limited(begin=CODE + 2, reach=RETURN)
+    # not saved: a restore leaves it as it was
+    cpu.restore(cpu.save())
+    assert cpu.remove_coverage(coverage) == {CODE + 2, CODE + 4}
+    assert cpu.coverage(coverage) is None
+    assert not cpu.clear_coverage(coverage)
+    assert cpu.remove_coverage(coverage) is None

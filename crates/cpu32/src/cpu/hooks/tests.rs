@@ -16,6 +16,7 @@ use crate::cycles::Cycles;
 use crate::exception::BusCycleKind;
 use crate::exception::Exception;
 use crate::exception::Vector;
+use crate::hooks::CoverageId;
 use crate::hooks::ExceptionEntry;
 use crate::hooks::ExceptionReturn;
 use crate::hooks::Invalid;
@@ -161,6 +162,72 @@ fn a_page_without_instruction_hooks_stays_quiet_until_one_is_added() {
     // The return's block start, on the code's page, was forgotten there.
     assert_eq!(*starts.borrow(), [HANDLER, HANDLER]);
     assert_eq!(*code.borrow(), [CODE + 4]);
+}
+
+/// MOVE.L #imm,D0: three words.
+const MOVE_IMMEDIATE_TO_D0: u16 = 0x203c;
+
+/// The addresses `coverage` recorded.
+fn covered(cpu: &Cpu, coverage: CoverageId) -> Vec<u32> {
+    cpu.coverage(coverage)
+        .expect("added")
+        .addresses()
+        .map(|address| address.0)
+        .collect()
+}
+
+#[test]
+fn a_coverage_records_each_instruction_start_in_its_range_once() {
+    // A three-word MOVE, a TRAP into a handler outside the range that
+    // returns, a NOP, run twice over.
+    let code = [MOVE_IMMEDIATE_TO_D0, 0x1234, 0x5678, TRAP, NOP];
+    let mut cpu = prepared(&code, &[NOP, RTE]);
+    let coverage = cpu.add_coverage(Address(CODE)..=Address(CODE + 0xff));
+    assert_eq!(coverage.to_string(), "coverage 1");
+    step(&mut cpu, 5);
+    cpu.registers.pc = Address(CODE);
+    step(&mut cpu, 5);
+    assert_eq!(covered(&cpu, coverage), [CODE, CODE + 6, CODE + 8]);
+    let recorded = cpu.coverage(coverage).unwrap();
+    assert!(recorded.contains(Address(CODE + 6)) && !recorded.contains(Address(CODE + 2)));
+    assert_eq!(recorded.range(), Address(CODE)..=Address(CODE + 0xff));
+    // cleared, it records afresh
+    assert!(cpu.clear_coverage(coverage));
+    assert!(covered(&cpu, coverage).is_empty());
+    cpu.registers.pc = Address(CODE + 8);
+    step(&mut cpu, 1);
+    assert_eq!(covered(&cpu, coverage), [CODE + 8]);
+    // removed, its record is handed back and its pages go quiet
+    let removed = cpu.remove_coverage(coverage).unwrap();
+    assert_eq!(removed.addresses().count(), 1);
+    assert!(cpu.coverage(coverage).is_none());
+    assert!(!cpu.clear_coverage(coverage));
+    assert!(cpu.remove_coverage(coverage).is_none());
+    assert!(!cpu.memory.is_special());
+}
+
+#[test]
+fn a_coverage_records_an_instruction_once_it_runs_past_a_hook_stop() {
+    let mut cpu = prepared(&[NOP, NOP], &[]);
+    let coverage = cpu.add_coverage(everywhere());
+    let hook = cpu.add_code_hook(Address(CODE + 2)..=Address(CODE + 2), |_| {
+        ControlFlow::Break(())
+    });
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(hook));
+    assert_eq!(covered(&cpu, coverage), [CODE]);
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
+    assert_eq!(covered(&cpu, coverage), [CODE, CODE + 2]);
+    // not part of a snapshot: a restore leaves it as it was
+    let snapshot = cpu.save().unwrap();
+    cpu.clear_coverage(coverage);
+    cpu.restore(&snapshot).unwrap();
+    assert!(covered(&cpu, coverage).is_empty());
+    // past the address lines: the range ends at their last address
+    assert_eq!(
+        cpu.coverage(coverage).unwrap().range(),
+        Address(0)..=Address(cpu.memory.mask(Address(u32::MAX)).0)
+    );
 }
 
 #[test]

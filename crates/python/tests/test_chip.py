@@ -905,6 +905,18 @@ def test_a_pc_write_after_a_stop_starts_a_block():
     assert starts[:2] == [START, second_move]
 
 
+def test_a_chip_s_coverage_records_its_instructions():
+    builder, _, _ = board(ram_round_trip(), Recorder())
+    chip = builder.build()
+    coverage = chip.add_coverage(START, START + 0xFF)
+    chip.run_for(2000)
+    covered = chip.coverage(coverage)
+    assert covered is not None and START in covered
+    assert all(START <= address <= START + 0xFF and address % 2 == 0 for address in covered)
+    assert chip.remove_coverage(coverage) == covered
+    assert chip.coverage(coverage) is None
+
+
 def test_memory_hooks_see_reads_and_writes():
     builder, _, _ = board(ram_round_trip(), Recorder())
     chip = builder.build()

@@ -13,6 +13,8 @@ use std::sync::atomic::Ordering;
 
 use mc683xx_cpu32::exception;
 use mc683xx_cpu32::hooks::Control;
+use mc683xx_cpu32::hooks::Coverage;
+use mc683xx_cpu32::hooks::CoverageId;
 use mc683xx_cpu32::hooks::ExceptionEntry;
 use mc683xx_cpu32::hooks::ExceptionReturn;
 use mc683xx_cpu32::hooks::HookId;
@@ -44,6 +46,7 @@ use pyo3::types::PyByteArrayMethods;
 use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
 use pyo3::types::PyDictMethods;
+use pyo3::types::PySet;
 use pyo3::types::PyString;
 use pyo3::types::PyTypeMethods;
 
@@ -83,6 +86,37 @@ impl HookIdView {
     fn __str__(&self) -> String {
         self.0.to_string()
     }
+}
+
+/// A coverage, as `add_coverage` returns it (Rust's
+/// `hooks::CoverageId`).
+#[pyclass(
+    name = "CoverageId",
+    module = "mc683xx",
+    frozen,
+    eq,
+    hash,
+    from_py_object
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct CoverageIdView(pub(crate) CoverageId);
+
+#[pymethods]
+impl CoverageIdView {
+    /// `CoverageId(2)`, from Rust's `Display`, `coverage 2`.
+    fn __repr__(&self) -> String {
+        opaque_repr("CoverageId", &self.0)
+    }
+
+    /// Rust's `Display`: `coverage 2`.
+    fn __str__(&self) -> String {
+        self.0.to_string()
+    }
+}
+
+/// The addresses of the instructions `coverage` recorded, as a set.
+pub(crate) fn covered<'py>(py: Python<'py>, coverage: &Coverage) -> PyResult<Bound<'py, PySet>> {
+    PySet::new(py, coverage.addresses().map(|address| address.0))
 }
 
 /// Every register in `registers` by name, the names interned once.
