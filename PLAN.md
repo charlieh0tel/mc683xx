@@ -2630,7 +2630,12 @@ and `mc683xx.Machine` in Python (see Python).
   the trace a stop leaves pending is, so a snapshot holds them: one
   taken at a stop, restored anywhere, takes that exception once and
   runs on, and one taken before it stops there again (decided
-  2026-11-24, review round 7).  Precedence, decided 2026-11-23: a fault with
+  2026-11-24, review round 7).  The exception stop's promise is the
+  stopped exception's: the next exception processed spends it, matching
+  or not, whatever the setting then, so none outlives the run on;
+  turning the setting off or on leaves it, so a snapshot restored
+  before or after turning it on runs on alike, and only reset and a
+  restore replace it.  Precedence, decided 2026-11-23: a fault with
   `set_stop_on_fault` is a fault stop, its detail the richer; then the
   intercept hooks, for the vectors they cover, an exception they all
   decline taken natively with no exception stop, as the host has seen

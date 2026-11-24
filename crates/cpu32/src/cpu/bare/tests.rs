@@ -1375,6 +1375,32 @@ fn a_snapshot_at_an_exception_stop_takes_it_once_and_runs_on() {
 }
 
 #[test]
+fn a_snapshot_at_an_exception_stop_restored_before_the_setting_runs_on() {
+    let mut machine = machine(&[TRAP_0]);
+    machine.cpu.set_stop_on_exception(true);
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
+    let at_stop = machine.save().unwrap();
+    let mut fresh = self::machine(&[TRAP_0]);
+    fresh.restore(&at_stop).unwrap();
+    fresh.cpu.set_stop_on_exception(true);
+    assert_eq!(one(&mut fresh), End::Instructions);
+    assert_eq!(fresh.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
+fn a_promise_kept_across_the_setting_off_and_on_is_spent_once() {
+    let mut machine = machine(&[TRAP_0, TRAP_0]);
+    machine.write(Address(HANDLER), &RTE.to_be_bytes()).unwrap();
+    machine.cpu.set_stop_on_exception(true);
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
+    machine.cpu.set_stop_on_exception(false);
+    machine.cpu.set_stop_on_exception(true);
+    assert_eq!(one(&mut machine), End::Instructions, "the trap, taken");
+    assert_eq!(one(&mut machine), End::Instructions, "the RTE");
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE + 2));
+}
+
+#[test]
 fn a_snapshot_keeps_take_natively_once() {
     let mut machine = machine(&[TRAP_0]);
     machine

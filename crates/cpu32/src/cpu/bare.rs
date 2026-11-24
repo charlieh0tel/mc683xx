@@ -447,17 +447,18 @@ impl Cpu {
     /// and withdraw a trace left pending with
     /// [`set_trace_pending`](Self::set_trace_pending)); another at that
     /// PC, the trap after a withdrawn trace or a higher interrupt
-    /// arriving since, stops the run.  A snapshot holds that promise:
-    /// one saved at the stop takes the exception once wherever it is
-    /// restored, this set first, as setting it either way drops the
-    /// promise.  A fault with
+    /// arriving since, stops the run.  The promise is the stopped
+    /// exception's: the next exception processed spends it, whether it
+    /// matches or not and whatever this setting is then; setting this
+    /// leaves it, and reset drops it.  A snapshot holds it: one saved at
+    /// the stop takes the exception once wherever it is restored, this
+    /// set before or after.  A fault with
     /// [`set_stop_on_fault`](Self::set_stop_on_fault) is a fault stop
     /// ([`End::Fault`]) instead, and an exception the intercept hooks
     /// cover is theirs ([`add_intercept_hook`](Self::add_intercept_hook)):
     /// one they all decline is taken natively, with no stop.
     pub fn set_stop_on_exception(&mut self, stop: bool) {
         self.bare.stop_on_exception = stop;
-        self.bare.exception_once = None;
         self.update_capture();
     }
 
@@ -723,9 +724,11 @@ impl Cpu {
     /// Whether an exception of `vector` about to be processed with PC
     /// at `pc` stops the run: exceptions stop it, and it is not the one
     /// the last run stopped at, which is taken this once.
+    /// The promise is spent by the first exception processed after it,
+    /// stopping or not, so none outlives the run on.
     fn exception_stops_at(&mut self, pc: Address, vector: Vector) -> bool {
-        self.bare.stop_on_exception
-            && self.bare.exception_once.take() != Some(self.take_once(pc, vector))
+        let once = self.bare.exception_once.take();
+        self.bare.stop_on_exception && once != Some(self.take_once(pc, vector))
     }
 
     /// The key of an exception of `vector` raised now with PC at `pc`.
