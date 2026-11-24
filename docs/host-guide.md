@@ -40,6 +40,15 @@ types) on `mc683xx-board`, `mc683xx-cpu32` (`BusError`, `PortSize`,
 `StateError`), `mc683xx-modules` (`QspiClock`, `Frame`) and
 `mc683xx-target`.
 
+Within a crate, the types a host names constantly are at its root
+(`mc683xx_board::Board`, `mc683xx_board::Description`,
+`mc683xx_mc68331::Mc68331`, `mc683xx_cpu32::Cpu`), and what a
+peripheral author names lives in its namespace: in `mc683xx-board`,
+`peripheral` (`Peripheral`, `Drive`, `PeripheralAccess`), `time`
+(`Time`, `Span`, `Moment`), `signal` (`Signal`), `registry`
+(`Registry`, `Parameters`, `Context`) and `spi` (`Slave`, `Mode`).
+Each item has that one path, never a second.
+
 The workspace releases as one: every crate at one version, depending
 on the others at exactly that version (`=X.Y.Z`,
 `docs/releasing.md`).  A host pins every `mc683xx-*` crate it depends
