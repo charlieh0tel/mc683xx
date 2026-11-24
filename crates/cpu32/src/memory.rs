@@ -865,9 +865,9 @@ impl Memory {
         Some((slab, page & SLAB_MASK, (address % PAGE_BYTES) as usize))
     }
 
-    /// A byte, word or long the core serves itself, read with no bus
-    /// cycle and no stall: what a hook sees of memory.  [`None`] if any
-    /// of it is on the bus.  A word or long must be aligned.
+    /// A byte, word or long the core serves itself, from the bytes the
+    /// pages read, with no bus cycle and no stall.  [`None`] if any of
+    /// it is on the bus.  A word or long must be aligned.
     #[must_use]
     pub fn peek(&self, space: Space, address: Address, size: Size) -> Option<u32> {
         self.peek_in(space, address, size, |page| page.read)
