@@ -8,7 +8,7 @@ import mc683xx
 # Each enum class, and whether its str is Rust's Display (else the name).
 ENUMS = [
     (mc683xx.Halt, True),
-    (mc683xx.Ending, False),
+    (mc683xx.Ending, True),
     (mc683xx.ResetCause, True),
     (mc683xx.FunctionCode, True),
     (mc683xx.Space, False),
@@ -48,7 +48,7 @@ def test_str_is_rust_s_display() -> None:
     assert str(mc683xx.ResetCause.WATCHDOG) == "watchdog"
     assert str(mc683xx.FunctionCode.SUPERVISOR_DATA) == "supervisor-data"
     assert str(mc683xx.BusCycleKind.FETCH) == "fetch"
-    assert str(mc683xx.Ending.HUNG_UP) == "HUNG_UP"
+    assert str(mc683xx.Ending.HUNG_UP) == "hung-up"
     assert mc683xx.Port.GP.name == "GP"
 
 

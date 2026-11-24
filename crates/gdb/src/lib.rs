@@ -83,6 +83,7 @@
     clippy::missing_panics_doc
 )]
 
+use std::fmt;
 use std::fmt::Display;
 
 use mc683xx_target::address::Address;
@@ -124,6 +125,17 @@ pub enum Ending {
     /// session that failed leaves it: an emulated one to its host, one
     /// under BDM control halted.
     HungUp,
+}
+
+/// `detached`, `killed` or `hung-up`.
+impl fmt::Display for Ending {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Detached => "detached",
+            Self::Killed => "killed",
+            Self::HungUp => "hung-up",
+        })
+    }
 }
 
 /// Why a session ended other than as gdb asked.
@@ -218,4 +230,16 @@ pub fn serve<T: Target, C: Connection>(
     connection: C,
 ) -> Result<Ending, SessionError<T::Error, C::Error>> {
     session::serve(target, connection)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Ending;
+
+    #[test]
+    fn an_ending_shows_as_one_word() {
+        assert_eq!(Ending::Detached.to_string(), "detached");
+        assert_eq!(Ending::Killed.to_string(), "killed");
+        assert_eq!(Ending::HungUp.to_string(), "hung-up");
+    }
 }
