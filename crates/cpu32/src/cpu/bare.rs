@@ -283,15 +283,10 @@ impl Cpu {
         now: Cycle,
         limits: Limits,
     ) -> LimitedRun {
-        if self.registers.pc != self.left_pc {
-            self.block_start = true;
-        }
-        self.bare.end = None;
         let budget = limits.cycles.unwrap_or(Cycle::MAX.since(now));
         let first = self.instructions;
         self.bare.exceptions_stepped = 0;
-        let run = self.run_from_boundary(bus, interrupts, now, budget, Some(limits));
-        self.left_pc = self.registers.pc;
+        let run = self.run_from_host(bus, interrupts, now, budget, Some(limits));
         let end = self.bare.end.clone().unwrap_or(End::Stop(run.stop));
         LimitedRun {
             cycles: run.cycles,

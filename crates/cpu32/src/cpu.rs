@@ -498,11 +498,26 @@ impl Cpu {
         now: Cycle,
         budget: Cycles,
     ) -> Run {
+        self.run_from_host(bus, interrupts, now, budget, None)
+    }
+
+    /// A run the host asked for, [`run_for`](Self::run_for)'s or
+    /// [`run_limited`](Self::run_limited)'s: the instruction at PC starts a
+    /// block if the host moved PC since the last run, and the last
+    /// run's end is forgotten.
+    fn run_from_host(
+        &mut self,
+        bus: &mut dyn Bus,
+        interrupts: &mut dyn Interrupts,
+        now: Cycle,
+        budget: Cycles,
+        limits: Option<Limits>,
+    ) -> Run {
         if self.registers.pc != self.left_pc {
             self.block_start = true;
         }
         self.bare.end = None;
-        let run = self.run_from_boundary(bus, interrupts, now, budget, None);
+        let run = self.run_from_boundary(bus, interrupts, now, budget, limits);
         self.left_pc = self.registers.pc;
         run
     }
