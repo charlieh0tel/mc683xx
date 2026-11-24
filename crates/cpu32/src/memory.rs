@@ -850,13 +850,27 @@ impl Memory {
     /// of it is on the bus.  A word or long must be aligned.
     #[must_use]
     pub fn peek(&self, space: Space, address: Address, size: Size) -> Option<u32> {
+        self.peek_in(space, address, size, |page| page.read)
+    }
+
+    /// A byte, word or long of the bytes `backing` picks of each page,
+    /// with no bus cycle: [`None`] if any of it has no such backing.  A
+    /// word or long must be aligned.
+    fn peek_in(
+        &self,
+        space: Space,
+        address: Address,
+        size: Size,
+        backing: fn(&Page) -> Option<Backing>,
+    ) -> Option<u32> {
         if size == Size::Long {
-            let high = self.read_backed(space, address, Size::Word)?.0;
-            let low = self.read_backed(space, address.offset(2), Size::Word)?.0;
+            let high = self.peek_in(space, address, Size::Word, backing)?;
+            let low = self.peek_in(space, address.offset(2), Size::Word, backing)?;
             return Some(high << 16 | low);
         }
-        self.read_backed(space, address, size)
-            .map(|(value, _)| value)
+        let (slab, index, within) = self.locate(address)?;
+        let backing = backing(&slab.tables[space.index()][index])?;
+        Some(self.value_at(backing, within, size))
     }
 
     /// Fills `bytes` from `address` up with no bus cycle, a debugger's
@@ -947,13 +961,18 @@ impl Memory {
     /// A read from `page`, `within` bytes into it.
     #[inline]
     fn read_in(&self, page: &Page, within: usize, size: Size) -> Option<(u32, Cycles)> {
-        let backing = page.read?;
+        let value = self.value_at(page.read?, within, size);
+        Some((value, stall(size, page.port, page.clocks())))
+    }
+
+    /// The byte or word `within` bytes into the page `backing` backs.
+    #[inline]
+    fn value_at(&self, backing: Backing, within: usize, size: Size) -> u32 {
         let bytes = &self.regions[backing.region.0][backing.offset as usize + within..];
-        let value = match size {
+        match size {
             Size::Byte => u32::from(bytes[0]),
             _ => u32::from(u16::from_be_bytes([bytes[0], bytes[1]])),
-        };
-        Some((value, stall(size, page.port, page.clocks())))
+        }
     }
 
     /// An even long's two word reads, high word first, with their stall,
