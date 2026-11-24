@@ -89,9 +89,10 @@ impl fmt::Display for FaultCause {
     }
 }
 
-/// A fault that stopped the run ([`Cpu::set_stop_on_fault`]): nothing
-/// stacked.  A fault in an instruction, its own exception's stacking
-/// included, rolls the registers back to its start.  A fault stacking
+/// A fault that stopped the run ([`Cpu::set_stop_on_fault`]): no frame
+/// stacked for it.  A fault in an instruction, its own exception's
+/// stacking included, rolls the registers back to its start, though a
+/// frame's writes before the fault stay written.  A fault stacking
 /// an exception taken after an instruction completed (a trace, a
 /// hardware breakpoint, an interrupt) keeps that instruction, the
 /// registers as the exception's processing began, and leaves the
