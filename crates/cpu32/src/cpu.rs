@@ -852,6 +852,25 @@ fn exception_cost(vector: Vector, opcode: Option<u16>) -> ExceptionCost {
     }
 }
 
+/// A fault of `vector` in a read cycle of kind `cycle` at `address`, of
+/// an operand of `size` in `function_code`'s space, `remaining` of it
+/// left.
+const fn read_fault(
+    vector: Vector,
+    address: Address,
+    remaining: Size,
+    size: Size,
+    function_code: FunctionCode,
+    cycle: BusCycleKind,
+) -> Fault {
+    let fault = Fault::new(vector, address, remaining, function_code, cycle);
+    if matches!(size, Size::Long) {
+        fault.of_long()
+    } else {
+        fault
+    }
+}
+
 /// The tables an instruction runs and is charged from, loaded once a
 /// run, not once an instruction.
 #[derive(Clone, Copy)]
@@ -1553,15 +1572,8 @@ impl Core<'_> {
             }
             return read;
         }
-        let fault = |vector, address, remaining| Fault {
-            vector,
-            address,
-            function_code,
-            size: remaining,
-            long: size == Size::Long,
-            kind: cycle,
-            data: 0,
-            read_modify_write: false,
+        let fault = |vector, address, remaining| {
+            read_fault(vector, address, remaining, size, function_code, cycle)
         };
         if size != Size::Byte && address.is_odd() {
             return Err(fault(Vector::ADDRESS_ERROR, address, size));
