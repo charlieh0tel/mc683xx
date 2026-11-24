@@ -40,6 +40,7 @@ use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::End;
 use mc683xx_cpu32::Limits;
 use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_target::Address;
 use mc683xx_target::Entry;
@@ -96,7 +97,10 @@ pub enum TargetRun {
     /// ([`Cpu::set_stop_on_exception`]).
     ///
     /// [`Cpu::set_stop_on_exception`]: mc683xx_cpu32::Cpu::set_stop_on_exception
-    Exception,
+    Exception {
+        /// The exception's vector.
+        vector: Vector,
+    },
     /// A stop condition held ([`Target::conditions`]).
     Condition,
     /// A target under BDM control entered background mode, for the
@@ -439,7 +443,7 @@ impl Target for Machine {
             End::Stop(stop) => stop.into(),
             End::Reached | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
-            End::Exception { .. } => TargetRun::Exception,
+            End::Exception { vector, .. } => TargetRun::Exception { vector },
             _ => TargetRun::Requested,
         })
     }

@@ -25,8 +25,10 @@ use mc683xx_board::Options;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Span;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::End;
 use mc683xx_cpu32::Limits;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::exception::VectorSet;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
 use mc683xx_cpu32::flat::Machine;
@@ -35,6 +37,7 @@ use mc683xx_gdb::AccessError;
 use mc683xx_gdb::Ending;
 use mc683xx_gdb::SessionError;
 use mc683xx_gdb::Target;
+use mc683xx_gdb::TargetRun;
 use mc683xx_gdb::connection;
 use mc683xx_gdb::connection::Connection;
 use mc683xx_gdb::connection::POLL_INTERVAL;
@@ -1020,6 +1023,25 @@ fn a_bare_cpu_s_exception_stop_is_a_trap() {
     // SIGTRAP, gdb's 5
     assert_eq!(replies[0], "S05", "{replies:?}");
     assert_eq!(machine.cpu.registers.pc.0, START, "the TRAP undone");
+}
+
+#[test]
+fn a_bare_cpu_s_exception_stop_names_its_vector() {
+    let mut machine = machine();
+    machine
+        .poke_bytes(
+            Address(START),
+            FunctionCode::SupervisorData,
+            &bytes(&[0x4e40]),
+        )
+        .unwrap();
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    assert_eq!(
+        Target::run_for(&mut machine, Cycles::from_clocks(100), &|| false),
+        Ok(TargetRun::Exception {
+            vector: Vector::trap(0)
+        })
+    );
 }
 
 #[test]

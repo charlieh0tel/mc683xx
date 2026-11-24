@@ -216,7 +216,7 @@ impl<T: Target> Session<'_, T> {
     /// and leaves the trace pending (PLAN.md, Faults); any other undid
     /// it.
     fn survives(&mut self, ran: TargetRun) -> bool {
-        !matches!(ran, TargetRun::Fault | TargetRun::Exception)
+        !matches!(ran, TargetRun::Fault | TargetRun::Exception { .. })
             || self
                 .target
                 .cpu_scope(|cpu| cpu.trace_pending().is_some())
@@ -324,9 +324,10 @@ impl<T: Target> Session<'_, T> {
 /// an interrupt.
 const fn signaled(ran: TargetRun) -> SingleThreadStopReason<u32> {
     SingleThreadStopReason::Signal(match ran {
-        TargetRun::Quantum | TargetRun::Hook | TargetRun::Condition | TargetRun::Exception => {
-            Signal::SIGTRAP
-        }
+        TargetRun::Quantum
+        | TargetRun::Hook
+        | TargetRun::Condition
+        | TargetRun::Exception { .. } => Signal::SIGTRAP,
         TargetRun::Background(Entry::DoubleBusFault { .. })
         | TargetRun::Halted
         | TargetRun::Fault => Signal::SIGBUS,
