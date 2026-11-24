@@ -864,8 +864,8 @@ assert chip.now == 0
 ## Hooks, protection and tracing
 
 `add_code_hook(callback, begin=0, end=0xFFFFFFFF)` and its siblings
-`add_block_hook`, `add_pre_read_hook`, `add_read_hook`,
-`add_write_hook`, `add_invalid_hook`
+`add_block_hook`, `add_pre_read_hook`, `add_pre_write_hook`,
+`add_read_hook`, `add_write_hook`, `add_invalid_hook`
 (both ends of the range included), `add_exception_hook(callback)` and
 `add_exception_return_hook(callback)`,
 call a Python callable with what the Rust hook sees: an `Instruction`
@@ -1563,8 +1563,9 @@ assert bare.read_register("D0") == 6
 ### Hooks that change the CPU
 
 The hooks are the chip's (`add_code_hook`, `add_block_hook`,
-`add_pre_read_hook`, `add_read_hook`, `add_write_hook`, `add_invalid_hook`,
-`add_exception_hook`, `add_exception_return_hook`, `remove_hook`), but on
+`add_pre_read_hook`, `add_pre_write_hook`, `add_read_hook`,
+`add_write_hook`, `add_invalid_hook`, `add_exception_hook`,
+`add_exception_return_hook`, `remove_hook`), but on
 the bare `Machine` a callable
 may read and write registers and memory, map, protect and stop the
 run (`stop_request().request()`), as a Unicorn hook does; `True`
@@ -1577,6 +1578,7 @@ write takes effect:
 | --- | --- | --- |
 | code, block | before the instruction | is seen by it; a PC write redirects, the instruction at the old PC not run, and the hooks at the new PC are called |
 | pre-read | within the run, before the read's first cycle | a change to its `data` answers the read, not stored; it reads memory with `PendingRead.peek`, and a call into the machine raises `RuntimeError` |
+| pre-write | within the run, before the write's first cycle | a change to its `data` is what is stored, and `set_dropped(True)` stores nothing; as a pre-read hook, it reads memory with `PendingWrite.peek`, and a call into the machine raises `RuntimeError` |
 | read, write | once the instruction has completed (a write hook sees memory written) | lands after the instruction, before the next |
 | invalid access | once the bus error exception is taken, PC the handler's (or the run stopped for it, with `stop_on_fault`) | lands before the handler's first instruction |
 | exception | once the frame is stacked and PC is the handler's | lands before the handler runs; writing SSP, SR and PC from the frame returns past it |
@@ -1629,6 +1631,48 @@ assert bare.run_limited(begin=CALL, reach=CALL_RETURN).end == mc683xx.End.Reache
 assert bare.read_register("D0") & 0xFFFF == 0x2222
 assert bare.peek_bytes(0x6000, 2) == struct.pack(">H", 0x1111)
 bare.remove_hook(patching)
+```
+
+`add_pre_write_hook(callback, begin=0, end=0xFFFFFFFF)` (Rust's
+`Cpu::add_pre_write_hook`) is its mirror, a device model's way to take
+what the firmware writes to RAM: `callback(PendingWrite, data)` once
+before each operand write of a byte in the range that the core's
+memory (RAM its pages map; a ROM's writes go to the bus) stores all
+of, before its first cycle, exception processing's frame words
+included (`stacking`).  `data` is a bytearray copy of the bytes to be
+written; what the callable leaves in it, at the same length, is
+stored, unless it calls `write.set_dropped(True)`, when nothing is.  A
+`PendingWrite` has `address`, `size`, `function_code`, `pc`,
+`stacking`, `dropped` and `peek(address, length)`, memory as it is
+before the store; `set_dropped` and `peek` raise `RuntimeError` once
+the call is over.  Hooks covering the write are called in the order
+installed, each seeing the bytes and the drop the earlier left (a later
+one may `set_dropped(False)`); one that raises leaves both as they
+were.  The cases with no call are a pre-read's.  The write hooks see
+the cycles after it, with the bytes stored and, as `previous`, what
+they replaced; a dropped store's cycles take their time but store
+nothing, and the write hooks see none of them.
+
+```python
+taken: list[int] = []
+
+
+def latch(write: mc683xx.PendingWrite, data: bytearray) -> None:
+    """A device model's command register: taken, not stored."""
+    (command,) = struct.unpack(">H", data)
+    taken.append(command)
+    write.set_dropped(True)
+
+
+bare.poke_bytes(0x6200, struct.pack(">H", 0x1111))
+latching = bare.add_pre_write_hook(latch, 0x6200, 0x6201)
+bare.poke_bytes(CALL, struct.pack(">HHIH", 0x33FC, 0x00A5, 0x6200, RTS))  # move.w #$a5,$6200
+bare.poke_bytes(CALL_STACK - 4, struct.pack(">I", CALL_RETURN))
+bare.write_register("A7", CALL_STACK - 4)
+assert bare.run_limited(begin=CALL, reach=CALL_RETURN).end == mc683xx.End.Reached()
+assert taken == [0x00A5]
+assert bare.peek_bytes(0x6200, 2) == struct.pack(">H", 0x1111)
+bare.remove_hook(latching)
 ```
 
 A read or write hook sees a long operand once, `size` 4 at its
@@ -1871,6 +1915,7 @@ The port of a Unicorn harness is mechanical:
 | `hook_add(UC_HOOK_MEM_WRITE, ...)` before the write lands | `add_peripheral` `write`; or `add_write_hook`, after the instruction |
 | `UC_HOOK_MEM_READ` to watch | `add_read_hook`, after the instruction |
 | `UC_HOOK_MEM_READ` writing memory before the read | `add_pre_read_hook`, within the cycle |
+| `UC_HOOK_MEM_WRITE` changing or undoing a write to RAM | `add_pre_write_hook`, within the cycle |
 | `UC_HOOK_MEM_INVALID`, `UC_MEM_WRITE_PROT` | `add_invalid_hook` (`reason` `BUS_ERROR` or `PROTECTED`), or `set_stop_on_fault` and `End.Fault` |
 | `UcError` on a fault | `set_stop_on_fault(True)`, `End.Fault(fault)`; by default the CPU takes the bus error exception |
 | `emu_stop()` in a `UC_HOOK_INTR` hook | `set_stop_on_exception(None)` (or the vectors), `End.Exception(vector, pc)`, before stacking |

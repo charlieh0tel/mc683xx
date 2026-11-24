@@ -939,6 +939,23 @@ def test_a_pre_read_hook_answers_a_read_of_ram_and_peeks_it():
     assert chip.peek_bytes(RAM_WORD, 2) == b"\x12\x34"
 
 
+def test_a_pre_write_hook_replaces_a_write_to_ram():
+    builder, _, _ = board(ram_round_trip(), Recorder())
+    chip = builder.build()
+    chip.write_register("D0", 0x1234)
+    seen = []
+
+    def replace(write: mc683xx.PendingWrite, data: bytearray) -> None:
+        seen.append((write.address, write.size, bytes(data), write.stacking))
+        data[:] = b"\xab\xcd"
+
+    chip.add_pre_write_hook(replace, RAM_BASE, RAM_BASE + PAGE_BYTES - 1)
+    chip.run_for(4000)
+    assert (RAM_WORD, 2, b"\x12\x34", False) in seen
+    assert chip.read_register("D1") == 0xABCD
+    assert chip.peek_bytes(RAM_WORD, 2) == b"\xab\xcd"
+
+
 def test_an_invalid_hook_and_an_exception_hook_see_a_bus_error():
     builder, _, _ = board(WIRING + [MOVE_WORD_ABSOLUTE_TO_D1, PERIPHERAL_BASE >> 16, 0x0020], Faulting())
     chip = builder.build()

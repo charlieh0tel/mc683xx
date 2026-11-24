@@ -253,6 +253,70 @@ def test_a_true_pre_read_hook_stops_the_run_and_one_that_resizes_raises():
         cpu.run_limited(reach=RETURN)
 
 
+def test_a_pre_write_hook_replaces_the_long_before_the_write_hook_sees_it():
+    cpu = machine(MOVE_LONG_D0_TO_A0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("D0", 0x12345678)
+    cpu.poke_bytes(0x2000, struct.pack(">I", 0x11112222))
+    seen = []
+    kept = []
+
+    def replace(write: mc683xx.PendingWrite, data: bytearray) -> None:
+        seen.append((write.address, write.size, bytes(data), write.peek(0x2000, 4), write.dropped))
+        data[3] = 0x99
+        kept.append(write)
+
+    cpu.add_pre_write_hook(replace, 0x2003, 0x2003)
+    writes = []
+    cpu.add_write_hook(lambda access: writes.append((access.size, access.value, access.previous)), 0x2000, 0x2003)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+    assert seen == [(0x2000, 4, bytes.fromhex("12345678"), bytes.fromhex("11112222"), False)]
+    assert writes == [(4, 0x12345699, 0x11112222)]
+    assert cpu.peek_bytes(0x2000, 4) == bytes.fromhex("12345699")
+    with pytest.raises(RuntimeError, match="within its hook's call"):
+        kept[0].set_dropped(True)
+    with pytest.raises(RuntimeError, match="within its hook's call"):
+        kept[0].peek(0x2000, 1)
+
+
+def test_a_dropped_store_writes_nothing_and_a_later_hook_sees_the_drop():
+    cpu = machine(MOVE_WORD_D0_TO_A0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("D0", 0x1234)
+    cpu.poke_bytes(0x2000, b"\x55\x66")
+    later = []
+    cpu.add_pre_write_hook(lambda write, data: write.set_dropped(True), 0x2000, 0x2001)
+    cpu.add_pre_write_hook(lambda write, data: later.append(write.dropped), 0x2000, 0x2001)
+    writes = []
+    cpu.add_write_hook(writes.append, 0x2000, 0x2001)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+    assert later == [True] and writes == []
+    assert cpu.peek_bytes(0x2000, 2) == b"\x55\x66"
+
+
+def test_a_true_pre_write_hook_stops_the_run_and_one_that_raises_drops_nothing():
+    cpu = machine(MOVE_WORD_D0_TO_A0, NOP, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("D0", 0x1234)
+    hook = cpu.add_pre_write_hook(lambda write, data: True, 0x2000, 0x2001)
+    run = cpu.run_limited(reach=RETURN)
+    assert run.end == mc683xx.End.Stop(mc683xx.Stop.Hook(hook))
+    assert cpu.read_register("PC") == CODE + 2
+    assert cpu.peek_bytes(0x2000, 2) == b"\x12\x34"
+    cpu.remove_hook(hook)
+    cpu.write_register("PC", CODE)
+    cpu.write_register("D0", 0x5678)
+
+    def fails(write: mc683xx.PendingWrite, data: bytearray) -> None:
+        write.set_dropped(True)
+        raise KeyError("model")
+
+    cpu.add_pre_write_hook(fails, 0x2000, 0x2001)
+    with pytest.raises(KeyError, match="model"):
+        cpu.run_limited(reach=RETURN)
+    assert cpu.peek_bytes(0x2000, 2) == b"\x56\x78"
+
+
 def test_a_memory_hook_sees_a_long_once_and_not_one_that_faults():
     # MOVE.L D0,-(SP); MOVE.L (SP)+,D1; MOVE.L D0,(A0) with A0 at RAM's
     # last word, so its second word is a bus error.
@@ -825,7 +889,7 @@ def test_a_hook_result_not_a_bool_or_none_raises_type_error(result):
 
 
 @pytest.mark.parametrize("result", [1, 2.0])
-def test_an_intercept_or_pre_read_hook_result_not_a_bool_raises_type_error(result):
+def test_an_intercept_or_pre_access_hook_result_not_a_bool_raises_type_error(result):
     cpu = machine(0x4E40, RTS)  # TRAP #0
     cpu.add_intercept_hook(lambda intercepted: result)
     with pytest.raises(TypeError, match="True, False or None"):
@@ -833,6 +897,11 @@ def test_an_intercept_or_pre_read_hook_result_not_a_bool_raises_type_error(resul
     cpu = machine(MOVE_WORD_A0_TO_D0, RTS)
     cpu.write_register("A0", 0x2000)
     cpu.add_pre_read_hook(lambda read, data: result, 0x2000, 0x2001)
+    with pytest.raises(TypeError, match="True, False or None"):
+        cpu.run_limited(reach=RETURN)
+    cpu = machine(MOVE_WORD_D0_TO_A0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.add_pre_write_hook(lambda write, data: result, 0x2000, 0x2001)
     with pytest.raises(TypeError, match="True, False or None"):
         cpu.run_limited(reach=RETURN)
 

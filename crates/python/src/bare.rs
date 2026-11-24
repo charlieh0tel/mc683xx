@@ -35,6 +35,7 @@ use mc683xx_cpu32::hooks::Instruction;
 use mc683xx_cpu32::hooks::InvalidAccess;
 use mc683xx_cpu32::hooks::MemoryAccess;
 use mc683xx_cpu32::hooks::PendingRead;
+use mc683xx_cpu32::hooks::PendingWrite;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::Memory;
@@ -451,7 +452,7 @@ pub(crate) struct MachineView {
     /// The hooks that fired in the core run under way.
     queue: Queue,
     /// The first hook whose callable, called within the core run under
-    /// way (a pre-read hook), stopped it.
+    /// way (a pre-read or pre-write hook), stopped it.
     in_run_stop: Rc<Cell<Option<HookId>>>,
     /// The intercept hooks' callables, in the order installed, with the
     /// vectors each covers.
@@ -990,6 +991,33 @@ impl MachineView {
             Address(begin)..=Address(end),
             move |read: &PendingRead, memory: &Memory, bytes: &mut [u8]| {
                 stopped_in_run(&stopped, &own, called(read, memory, bytes))
+            },
+        );
+        id.set(Some(assigned));
+        Ok(HookIdView(assigned))
+    }
+
+    /// Calls `callback(PendingWrite, data)` before each operand write the
+    /// machine's memory stores all of, of a byte from `begin` to `end`,
+    /// within the run, as `add_pre_read_hook`: `data` is a bytearray
+    /// copy of the bytes it is to write, and what the callable leaves in
+    /// it is stored, unless it calls `PendingWrite.set_dropped(True)`.
+    /// `True` stops the run once the instruction completes.
+    #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
+    fn add_pre_write_hook(
+        &mut self,
+        callback: &Bound<'_, PyAny>,
+        begin: u32,
+        end: u32,
+    ) -> PyResult<HookIdView> {
+        let mut called = hooks::pre_write_hook(callback, self.pending.clone())?;
+        let stopped = Rc::clone(&self.in_run_stop);
+        let id = Rc::new(Cell::new(None));
+        let own = Rc::clone(&id);
+        let assigned = self.machine.cpu.add_pre_write_hook(
+            Address(begin)..=Address(end),
+            move |write: &mut PendingWrite, memory: &Memory, bytes: &mut [u8]| {
+                stopped_in_run(&stopped, &own, called(write, memory, bytes))
             },
         );
         id.set(Some(assigned));

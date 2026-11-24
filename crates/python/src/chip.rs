@@ -1379,6 +1379,26 @@ macro_rules! chip_methods {
                 })
             }
 
+            /// Calls `callback(PendingWrite, data)` before each operand
+            /// write the core's memory stores all of, of a byte from
+            /// `begin` to `end`: `data` is a bytearray copy of the bytes it
+            /// is to write, and what the callable leaves in it is stored,
+            /// unless it calls `PendingWrite.set_dropped(True)`;
+            /// `PendingWrite.peek` reads memory meanwhile.  A `True` stops
+            /// the run once the instruction completes.
+            #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
+            fn add_pre_write_hook(
+                &mut self,
+                callback: &Bound<'_, PyAny>,
+                begin: u32,
+                end: u32,
+            ) -> PyResult<HookIdView> {
+                self.with_chip_mut(callback.py(), |chip, pending| {
+                    let hook = hooks::pre_write_hook(callback, pending.clone())?;
+                    Ok(HookIdView(chip.cpu_control().add_pre_write_hook(addresses(begin, end), hook)))
+                })
+            }
+
             /// Calls `callback(MemoryAccess)` after each operand read cycle
             /// from `begin` to `end`; `True` stops the run once
             /// the instruction completes.

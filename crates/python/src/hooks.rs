@@ -7,6 +7,8 @@
 
 use std::cell::Cell;
 use std::ops::ControlFlow;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 
 use mc683xx_cpu32::exception;
 use mc683xx_cpu32::hooks::Control;
@@ -18,6 +20,7 @@ use mc683xx_cpu32::hooks::Invalid;
 use mc683xx_cpu32::hooks::InvalidAccess;
 use mc683xx_cpu32::hooks::MemoryAccess;
 use mc683xx_cpu32::hooks::PendingRead;
+use mc683xx_cpu32::hooks::PendingWrite;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_target::Address;
@@ -262,6 +265,87 @@ impl PendingReadView {
             self.address(),
             self.size(),
             repr(py, self.function_code())?
+        ))
+    }
+}
+
+/// An operand write the core's memory is about to store, as a pre-write
+/// hook sees it.
+#[pyclass(name = "PendingWrite", module = "mc683xx", frozen)]
+#[derive(Debug)]
+pub(crate) struct PendingWriteView {
+    /// The write.
+    write: PendingWrite,
+    /// The number of the hook call it was made for (`CALLS`).
+    call: u64,
+    /// Whether the store is dropped: the hook call's answer.
+    dropped: AtomicBool,
+}
+
+#[pymethods]
+impl PendingWriteView {
+    /// `length` bytes of the core's memory from `address`, as
+    /// `PendingRead.peek`: memory as it is before the store.
+    fn peek<'py>(
+        &self,
+        py: Python<'py>,
+        address: u32,
+        length: usize,
+    ) -> PyResult<Bound<'py, PyBytes>> {
+        peek(py, self.call, "PendingWrite", address, length)
+    }
+
+    /// Drops the store, or, with `False`, keeps it after all, while its
+    /// hook's call is under way: `RuntimeError` once the call is over.
+    fn set_dropped(&self, dropped: bool) -> PyResult<()> {
+        within(self.call, "PendingWrite", "drops")?;
+        self.dropped.store(dropped, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Whether the store is dropped: by this hook or one before it.
+    #[getter]
+    fn dropped(&self) -> bool {
+        self.dropped.load(Ordering::Relaxed)
+    }
+
+    /// Its address, on the chip's address lines.
+    #[getter]
+    const fn address(&self) -> u32 {
+        self.write.address.0
+    }
+
+    /// Bytes in it: 1, 2 or 4, the operand's.
+    #[getter]
+    const fn size(&self) -> u32 {
+        self.write.size.bytes()
+    }
+
+    /// Its function code.
+    #[getter]
+    fn function_code(&self) -> FunctionCode {
+        self.write.function_code.into()
+    }
+
+    /// The address of the instruction it is part of.
+    #[getter]
+    const fn pc(&self) -> u32 {
+        self.write.pc.0
+    }
+
+    /// Whether exception processing is stacking a frame.
+    #[getter]
+    const fn stacking(&self) -> bool {
+        self.write.stacking
+    }
+
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "PendingWrite(address={:#08x}, size={}, function_code={}, dropped={})",
+            self.address(),
+            self.size(),
+            repr(py, self.function_code())?,
+            repr(py, self.dropped())?
         ))
     }
 }
@@ -600,8 +684,50 @@ pub(crate) fn pre_read_hook(
         move |read: &PendingRead, memory: &Memory, bytes: &mut [u8]| {
             Python::attach(|py| {
                 let answer = lend(py, &callable, memory, bytes, "pre-read", |call| {
-                    PendingReadView { read: *read, call }
+                    Ok(PendingReadView { read: *read, call })
                 });
+                control(answer, &pending)
+            })
+        },
+    )
+}
+
+/// `callable`, which must be callable, as a pre-write hook, called
+/// before the write as `callable(PendingWrite, bytearray)`, the memory
+/// lent to `PendingWrite.peek` for the call: what it leaves in the
+/// bytearray, which must keep its length, is stored, unless it called
+/// `PendingWrite.set_dropped(True)`.  `True`, or an exception, which
+/// waits in `pending`, stops the run; after an exception neither the
+/// bytes nor a drop are taken.
+pub(crate) fn pre_write_hook(
+    callable: &Bound<'_, PyAny>,
+    pending: Pending,
+) -> PyResult<impl FnMut(&mut PendingWrite, &Memory, &mut [u8]) -> Control + 'static> {
+    if !callable.is_callable() {
+        return Err(PyTypeError::new_err("a hook must be callable"));
+    }
+    let callable = pending.keep(callable);
+    Ok(
+        move |write: &mut PendingWrite, memory: &Memory, bytes: &mut [u8]| {
+            Python::attach(|py| {
+                let mut made = None;
+                let answer = lend(py, &callable, memory, bytes, "pre-write", |call| {
+                    let view = Py::new(
+                        py,
+                        PendingWriteView {
+                            write: *write,
+                            call,
+                            dropped: AtomicBool::new(write.dropped()),
+                        },
+                    )?;
+                    made = Some(view.clone_ref(py));
+                    Ok(view)
+                });
+                if answer.is_ok()
+                    && let Some(view) = made
+                {
+                    write.set_dropped(view.get().dropped.load(Ordering::Relaxed));
+                }
                 control(answer, &pending)
             })
         },
@@ -619,7 +745,7 @@ fn lend<V>(
     memory: &Memory,
     bytes: &mut [u8],
     kind: &str,
-    view: impl FnOnce(u64) -> V,
+    view: impl FnOnce(u64) -> PyResult<V>,
 ) -> PyResult<bool>
 where
     (V, Py<PyByteArray>): for<'py> PyCallArgs<'py>,
@@ -629,7 +755,7 @@ where
     CALLS.set(call);
     let stop = LENT
         .set(memory, || {
-            callable.call1(py, (view(call), data.clone().unbind()))
+            callable.call1(py, (view(call)?, data.clone().unbind()))
         })
         .and_then(|result| is_true(result.bind(py)))?;
     let changed = data.to_vec();

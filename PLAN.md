@@ -885,7 +885,7 @@ chip beside `Mc68331`.
   `Output`, `Serial`, `Event`, `End`, `LimitedRun`, `FaultStop`), hash,
   so they key dicts and sets.
 - **Hooks:** `add_code_hook`, `add_block_hook`, `add_pre_read_hook`,
-  `add_read_hook`,
+  `add_pre_write_hook`, `add_read_hook`,
   `add_write_hook` and `add_invalid_hook(callback, begin=0,
   end=0xFFFFFFFF)` (both ends included) and
   `add_exception_hook(callback)` install a Python callable as the
@@ -2478,7 +2478,12 @@ Adversarial review (2026-11-01):
   +0.6%, `core/move_postincrement` +0.5%, `core/add_to_memory` +0.9%,
   `core/bset_memory` no change, `core/clr_indirect` -1.6%,
   `core/pea_displacement` -2.9%, `core/move_register` (no memory)
-  -5.5%, placement.
+  -5.5%, placement.  Python's callable gets `(PendingWrite, data)`,
+  `data` a bytearray copy, and drops the store with
+  `PendingWrite.set_dropped(True)`, which, as `peek`, raises
+  `RuntimeError` once the call is over; its result keeps the
+  `True`/`False`/`None` rule.  A callable that raises leaves the bytes
+  and the drop as they were, and stops the run.
 - A block starts after a change of flow (`Flow::Changed`), an
   exception, reset, restore, or a host jump: a run that finds PC
   other than where the last run, reset or restore left it (the core
