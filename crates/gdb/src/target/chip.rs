@@ -56,10 +56,6 @@ impl Target for Mc68331 {
         {
             return Err(AccessError::Unserved(address));
         }
-        if Self::write(self, address, data).is_ok() {
-            return Ok(());
-        }
-        // a peripheral's bytes among them: poked, a run at a time
         self.poke_bytes(address, function_code, data)
             .map_err(|error| AccessError::Unserved(error.address().unwrap_or(address)))
     }

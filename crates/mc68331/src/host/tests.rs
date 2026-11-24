@@ -481,7 +481,12 @@ fn a_poke_writes_rom_the_core_does_not_serve() {
         Size::Word,
         BLOCK_64K.into(),
     );
-    assert!(chip.read(Address(START), &mut [0; 2]).is_err());
+    assert!(
+        chip.cpu
+            .memory
+            .read_bytes(Address(START), &mut [0; 2])
+            .is_err()
+    );
     chip.poke(Address(START), Size::Word, SUPERVISOR, u32::from(NOP))
         .unwrap();
     assert_eq!(peek(&chip, START, Size::Word), Ok(NOP.into()));

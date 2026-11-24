@@ -10,7 +10,6 @@ use mc683xx_cpu32::BusError;
 use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::PAGE_BYTES;
-use mc683xx_cpu32::memory::Unserved;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::Select;
 use mc683xx_modules::module;
@@ -234,14 +233,15 @@ impl Mc68331 {
     }
 
     /// Stores `data` from `address` up where `bus_write` would, without
-    /// a cycle: memory's bytes as [`write`](Self::write) writes them,
-    /// ROM included, whether the core serves the byte or the decode
-    /// reaches it, and a peripheral's through its
-    /// [`MappedPeripheral::poke`], one call for each run of bytes the
-    /// same wires would take, each that would take them.  A byte the
-    /// core serves is written in supervisor space, whatever
-    /// `function_code`, as `write` writes it.  A module's register is
-    /// not poked.  Each byte is on the address lines.
+    /// a cycle: memory's bytes, ROM included, whatever the pages'
+    /// permissions, whether the core serves the byte or the decode
+    /// reaches it (where the core serves a page's writes but not its
+    /// reads, a write-only select, into the memory it writes), and a
+    /// peripheral's through its [`MappedPeripheral::poke`], one call for
+    /// each run of bytes the same wires would take, each that would take
+    /// them.  A byte the core serves is written in supervisor space,
+    /// whatever `function_code`.  A module's register is not poked.
+    /// Each byte is on the address lines.
     ///
     /// # Errors
     ///
@@ -283,39 +283,6 @@ impl Mc68331 {
             done += count;
         }
         Ok(())
-    }
-    /// Fills `data` from `address` up, with no bus cycle, a debugger's
-    /// read: from the memories the core serves in supervisor space, as
-    /// the decode now maps them, whatever the pages' permissions; as the
-    /// bare machine's [`Machine::read`](mc683xx_cpu32::flat::Machine::read)
-    /// ([`Memory::read_bytes`](mc683xx_cpu32::memory::Memory::read_bytes)).
-    /// [`peek`](Self::peek) reads the modules' registers too.
-    ///
-    /// # Errors
-    ///
-    /// [`Unserved`] for the first byte the core does not serve a read of
-    /// (a peripheral's, or one a peripheral shares); `data` is then filled
-    /// up to it.
-    pub fn read(&self, address: Address, data: &mut [u8]) -> Result<(), Unserved> {
-        self.cpu.memory.read_bytes(address, data)
-    }
-
-    /// Writes `data` at `address` up, with no bus cycle, a debugger's
-    /// write: into the bytes [`read`](Self::read) reads, a ROM's
-    /// included, whatever the pages' permissions, so a read gives back
-    /// what was written; where the core serves a page's writes but not
-    /// its reads (a write-only select), into the memory it writes.  As
-    /// the bare machine's
-    /// [`Machine::write`](mc683xx_cpu32::flat::Machine::write)
-    /// ([`Memory::write_bytes`](mc683xx_cpu32::memory::Memory::write_bytes)).
-    ///
-    /// # Errors
-    ///
-    /// [`Unserved`] for a byte the core serves neither a read nor a
-    /// write of (a peripheral's, or one a peripheral shares); then
-    /// nothing is written.
-    pub fn write(&mut self, address: Address, data: &[u8]) -> Result<(), Unserved> {
-        self.cpu.memory.write_bytes(address, data)
     }
 
     /// The byte or word cycles of an access, each on the address lines
