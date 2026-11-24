@@ -223,15 +223,7 @@ impl PendingReadView {
         address: u32,
         length: usize,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        if !LENT.is_set() || CALLS.get() != self.call {
-            return Err(PyRuntimeError::new_err(
-                "a PendingRead peeks only within its hook's call",
-            ));
-        }
-        let mut data = vec![0; length];
-        LENT.with(|memory| memory.read_bytes(Address(address), &mut data))
-            .map_err(Error::from)?;
-        Ok(PyBytes::new(py, &data))
+        peek(py, self.call, "PendingRead", address, length)
     }
 
     /// Its address, on the chip's address lines.
@@ -272,6 +264,35 @@ impl PendingReadView {
             repr(py, self.function_code())?
         ))
     }
+}
+
+/// `RuntimeError` unless hook call `call` is under way, for a `class`
+/// that `does` something only within it.
+fn within(call: u64, class: &str, does: &str) -> PyResult<()> {
+    if !LENT.is_set() || CALLS.get() != call {
+        return Err(PyRuntimeError::new_err(format!(
+            "a {class} {does} only within its hook's call"
+        )));
+    }
+    Ok(())
+}
+
+/// `length` bytes of the core's memory from `address`, as a debugger
+/// reads them (supervisor space, no cycle, no peripheral), while hook
+/// call `call`, a `class`'s, is under way: `BusError` at a byte the
+/// core's memory does not serve, `RuntimeError` once the call is over.
+fn peek<'py>(
+    py: Python<'py>,
+    call: u64,
+    class: &str,
+    address: u32,
+    length: usize,
+) -> PyResult<Bound<'py, PyBytes>> {
+    within(call, class, "peeks")?;
+    let mut data = vec![0; length];
+    LENT.with(|memory| memory.read_bytes(Address(address), &mut data))
+        .map_err(Error::from)?;
+    Ok(PyBytes::new(py, &data))
 }
 
 /// A bus cycle's kind (CPU32RM 6.3).
