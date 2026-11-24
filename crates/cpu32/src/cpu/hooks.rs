@@ -78,9 +78,9 @@ pub struct MemoryAccess {
     /// The value read or written, right-aligned.
     pub value: u32,
     /// For a write, the value it replaced, right-aligned, read with no
-    /// cycle before it was written: [`None`] for a read, and for a
-    /// write the core's memory does not serve (a peripheral's: a read
-    /// there would be a cycle of its own).
+    /// cycle before it was written: [`None`] for a read, for a write in
+    /// CPU space, and for a write the core's memory does not serve (a
+    /// peripheral's: a read there would be a cycle of its own).
     pub previous: Option<u32>,
     /// The address of the instruction it is part of.
     pub pc: Address,
@@ -601,8 +601,9 @@ impl Core<'_> {
     /// hooks: the bytes the core's memory holds there, read with no
     /// cycle, while a write hook watches the page and the cycle is not
     /// part of a long operand seen once.  [`None`] otherwise, where the
-    /// memory does not serve the address, and for a word or long at an
-    /// odd address, which ends in an address error without writing.
+    /// memory does not serve the address, for a word or long at an odd
+    /// address, which ends in an address error without writing, and for
+    /// a cycle in CPU space, which replaces no memory.
     pub(super) fn previous(
         &self,
         address: Address,
@@ -610,6 +611,7 @@ impl Core<'_> {
         function_code: FunctionCode,
     ) -> Option<u32> {
         if self.cpu.long_operand
+            || !function_code.is_memory_space()
             || (size != Size::Byte && address.is_odd())
             || self.cpu.memory.watched(address) & watch::WRITE == 0
         {

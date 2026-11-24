@@ -128,7 +128,7 @@ impl MemoryAccessView {
     }
 
     /// For a write, the value it replaced, read with no cycle; `None`
-    /// for a read, and for a write to a peripheral.
+    /// for a read, a write in CPU space, and a write to a peripheral.
     #[getter]
     const fn previous(&self) -> Option<u32> {
         self.0.previous

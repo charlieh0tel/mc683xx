@@ -10,6 +10,10 @@ use super::ExceptionReturn;
 use super::Invalid;
 use super::InvalidAccess;
 use super::MemoryAccess;
+use crate::bus::Bus;
+use crate::bus::BusAccess;
+use crate::bus::BusError;
+use crate::bus::Read;
 use crate::cpu::Cpu;
 use crate::cpu::Stop;
 use crate::cycles::Cycle;
@@ -267,6 +271,44 @@ fn a_write_hook_sees_what_each_write_replaced_and_a_read_hook_none() {
             (0x5678, None),
         ]
     );
+}
+
+/// A bus that takes every write.
+#[derive(Debug)]
+struct Writable;
+
+impl Bus for Writable {
+    fn read(&mut self, _access: BusAccess) -> Result<Read, BusError> {
+        Err(BusError)
+    }
+
+    fn write(&mut self, _access: BusAccess, _value: u32) -> Result<Cycles, BusError> {
+        Ok(Cycles::ZERO)
+    }
+}
+
+#[test]
+fn a_write_hook_sees_no_previous_value_for_a_long_in_cpu_space() {
+    // MOVES.L D0,(A0) (CPU32RM 4.4, MOVES), with DFC 7.
+    let mut cpu = prepared(&[0x0e90, 0x0800], &[]);
+    cpu.set_long_bus(true);
+    cpu.registers.dfc = FunctionCode::CpuSpace;
+    cpu.registers.set_address(0, DATA);
+    poke_long(&mut cpu, DATA, 0xdead_beef);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_write_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut()
+            .push((access.function_code, access.previous));
+        ControlFlow::Continue(())
+    });
+    cpu.run_for(
+        &mut Writable,
+        &mut NoInterrupts,
+        Cycle::ZERO,
+        Cycles::from_clocks(1),
+    );
+    assert_eq!(*seen.borrow(), [(FunctionCode::CpuSpace, None)]);
 }
 
 #[test]
