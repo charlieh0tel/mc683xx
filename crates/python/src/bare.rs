@@ -1415,7 +1415,7 @@ mod tests {
             end(&[TRAP_0], instructions, |machine| {
                 machine
                     .cpu
-                    .add_intercept_hook(VectorSet::EMPTY.with(TRAP_0_VECTOR), |_| {
+                    .add_intercept_hook(VectorSet::NONE.with(TRAP_0_VECTOR), |_| {
                         ControlFlow::Break(())
                     });
             }),

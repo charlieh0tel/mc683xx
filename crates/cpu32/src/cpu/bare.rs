@@ -406,7 +406,7 @@ impl Cpu {
 
     /// The vectors whose exceptions, about to be taken, end a run before
     /// anything is stacked ([`End::Exception`]): [`VectorSet::ALL`] for
-    /// any, [`VectorSet::EMPTY`], as at first, for none.  It covers an
+    /// any, [`VectorSet::NONE`], as at first, for none.  It covers an
     /// exception an instruction raises (a trap, an illegal
     /// instruction, a fault), a trace, a hardware breakpoint and an
     /// interrupt, once acknowledged, as its vector is then known; not
