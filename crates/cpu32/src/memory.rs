@@ -176,6 +176,9 @@ pub(crate) mod watch {
     pub(crate) const PRE_READ: u8 = 1 << 4;
     /// A pre-write hook covers some of it.
     pub(crate) const PRE_WRITE: u8 = 1 << 5;
+    /// The bits that take a page's cycles off the fast path, some of
+    /// them.
+    pub(crate) const SLOW: u8 = READ | WRITE | PRE_READ | PRE_WRITE;
 }
 
 /// A region of host memory the core holds, as [`Memory::add_region`]
@@ -417,14 +420,12 @@ impl Slab {
         };
     }
 
-    /// Whether any page has a hook or less than [`Permissions::ALL`].
-    fn is_special(&self) -> bool {
-        self.watched.iter().any(|&bits| bits != 0)
-            || self
-                .permissions
-                .iter()
-                .flatten()
-                .any(|&permissions| permissions != Permissions::ALL)
+    /// Whether any page has less than [`Permissions::ALL`].
+    fn is_restricted(&self) -> bool {
+        self.permissions
+            .iter()
+            .flatten()
+            .any(|&permissions| permissions != Permissions::ALL)
     }
 }
 
@@ -478,6 +479,8 @@ pub struct Memory {
     /// Whether any page has a hook or less than [`Permissions::ALL`]:
     /// while not, no cycle or instruction looks either up.
     special: bool,
+    /// Whether any page has less than [`Permissions::ALL`].
+    restricted: bool,
     /// The page instruction fetch is on, while the tables keep it.
     fetch_page: Option<FetchPage>,
 }
@@ -545,6 +548,7 @@ impl Memory {
             unallocated: vec![0; slabs],
             watches: Vec::new(),
             special: false,
+            restricted: false,
             fetch_page: None,
         })
     }
@@ -715,7 +719,7 @@ impl Memory {
             }
             self.slab_mut(slab).permissions[space.index()][page & SLAB_MASK] = permissions;
         }
-        self.update_special();
+        self.update_restricted();
         self.refresh(space.index(), pages);
         Ok(())
     }
@@ -901,15 +905,63 @@ impl Memory {
                 table.copy_from_slice(entries);
             }
         }
+        self.update_restricted();
         let watches = mem::take(&mut self.watches);
         self.set_watched(watches.into_iter());
         Ok(())
     }
 
-    /// Recomputes `special`.
+    /// Recomputes `restricted` from the permissions, then `special`.
+    fn update_restricted(&mut self) {
+        self.restricted = self.slabs.iter().flatten().any(|slab| slab.is_restricted());
+        self.update_special();
+    }
+
+    /// Recomputes `special` from `restricted` and the hooks' ranges: a
+    /// range that is not empty sets a page's bit.
     fn update_special(&mut self) {
-        self.special = self.unallocated.iter().any(|&bits| bits != 0)
-            || self.slabs.iter().flatten().any(|slab| slab.is_special());
+        self.special = self.restricted
+            || self
+                .watches
+                .iter()
+                .any(|(range, _)| range.start() <= range.end());
+    }
+
+    /// Adds a hook's `range`, on the address lines, with its [`watch`]
+    /// `bit`: only its pages' bits change.
+    pub(crate) fn add_watch(&mut self, range: RangeInclusive<Address>, bit: u8) {
+        self.watches.push((range.clone(), bit));
+        self.rewatched(&range, bit);
+    }
+
+    /// Removes a hook's `range` with its [`watch`] `bit`, as
+    /// [`add_watch`](Self::add_watch) added it: only its pages' bits
+    /// change.
+    pub(crate) fn remove_watch(&mut self, range: &RangeInclusive<Address>, bit: u8) {
+        if let Some(index) = self
+            .watches
+            .iter()
+            .position(|(other, other_bit)| other == range && *other_bit == bit)
+        {
+            self.watches.remove(index);
+        }
+        self.rewatched(range, bit);
+    }
+
+    /// Brings the bits of `range`'s pages, `special` and, for a `bit`
+    /// the fast path minds, the pages' fast entries up to date after a
+    /// range with `bit` was added or removed.
+    fn rewatched(&mut self, range: &RangeInclusive<Address>, bit: u8) {
+        let (first, last) = range_pages(range, self.address_mask);
+        if first <= last {
+            self.rewatch_pages(first, last);
+            if bit & watch::SLOW != 0 {
+                for space in [Space::User, Space::Supervisor] {
+                    self.refresh(space.index(), first..last + 1);
+                }
+            }
+        }
+        self.update_special();
     }
 
     /// The number of the page `address` is in.
@@ -1206,6 +1258,8 @@ impl Memory {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::RangeInclusive;
+
     use super::Backing;
     use super::Memory;
     use super::MemoryError;
@@ -1215,6 +1269,7 @@ mod tests {
     use super::Permissions;
     use super::Space;
     use super::Unserved;
+    use super::watch;
     use crate::PortSize;
     use crate::cycles::Cycles;
     use mc683xx_target::Address;
@@ -1385,6 +1440,78 @@ mod tests {
             memory.read(Space::Supervisor, Address(2), Size::Word),
             Some((0xbeef, Cycles::ZERO))
         );
+    }
+
+    /// Memory on 24 lines with RAM in slabs 0 and 2, slab 1 not
+    /// allocated, user page 0 read-only.
+    fn watched_memory() -> Memory {
+        let mut memory = Memory::new(24).unwrap();
+        ram(&mut memory, 0, 0x4_0000);
+        ram(&mut memory, 0x40_0000, 0x4_0000);
+        memory
+            .protect(Space::User, Address(0), PAGE_BYTES, Permissions::READ)
+            .unwrap();
+        memory
+    }
+
+    /// Whether `one` and `other` have the same watch bits, fast entries
+    /// and `special`.
+    fn watching_alike(one: &Memory, other: &Memory) -> bool {
+        let slabs = |memory: &Memory| -> Vec<_> {
+            memory
+                .slabs
+                .iter()
+                .flatten()
+                .map(|slab| (slab.watched.to_vec(), slab.fast.map(Vec::from)))
+                .collect()
+        };
+        one.unallocated == other.unallocated
+            && one.special == other.special
+            && slabs(one) == slabs(other)
+    }
+
+    #[test]
+    fn watches_added_and_removed_one_at_a_time_mark_pages_as_all_at_once() {
+        let range = |start: u32, end: u32| Address(start)..=Address(end);
+        let watches = [
+            (range(0, 0x7ff), watch::CODE),
+            (range(0x1000, 0x1001), watch::WRITE),
+            (range(0x20_0000, 0x3f_ffff), watch::READ),
+            (range(0x1000, 0x1001), watch::WRITE),
+            (range(0x3f_f000, 0x40_1000), watch::PRE_READ),
+            (range(0x50_0000, 0x40_0000), watch::CODE),
+            (range(0x41_0000, 0x41_0000), watch::PRE_WRITE),
+            (range(0, u32::MAX), watch::BLOCK),
+        ];
+        let mut memory = watched_memory();
+        let mut added = Vec::new();
+        let check = |memory: &Memory, added: &[(RangeInclusive<Address>, u8)]| {
+            let mut all = watched_memory();
+            all.set_watched(added.iter().cloned());
+            assert!(watching_alike(memory, &all), "{added:?}");
+        };
+        for (range, bit) in &watches {
+            memory.add_watch(range.clone(), *bit);
+            added.push((range.clone(), *bit));
+            check(&memory, &added);
+        }
+        for index in [1, 7, 0, 4, 2, 3, 5, 6] {
+            let (range, bit) = &watches[index];
+            memory.remove_watch(range, *bit);
+            let at = added
+                .iter()
+                .position(|(other, other_bit)| other == range && other_bit == bit)
+                .unwrap();
+            added.remove(at);
+            check(&memory, &added);
+        }
+        assert!(memory.is_special(), "the read-only page");
+        let mut memory = Memory::new(24).unwrap();
+        ram(&mut memory, 0, 0x4_0000);
+        memory.add_watch(range(0x1000, 0x1001), watch::CODE);
+        assert!(memory.is_special());
+        memory.remove_watch(&range(0x1000, 0x1001), watch::CODE);
+        assert!(!memory.is_special());
     }
 
     #[test]

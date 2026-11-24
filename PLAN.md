@@ -2396,7 +2396,13 @@ Adversarial review (2026-11-01):
   code or block hook bit.  An instruction on it compares its page
   number and looks nothing up (sc batch 6: a ranged code hook that
   never hit cost every instruction an out-of-line page lookup, 67 to
-  54 M instructions/s); any change to the hooks forgets it.  Invalid access and exception
+  54 M instructions/s); any change to the hooks forgets it.
+  Installing or removing a ranged hook recomputes only its pages'
+  bits (and, for a bit that takes cycles off the fast path, their
+  fast entries); "special" is whether some page has a permission
+  short of all, kept as permissions change, or some hook range is
+  not empty (sc batch 6: every add and remove recomputed every
+  allocated slab, 15 us on 256 Kbytes, now 80 ns).  Invalid access and exception
   hooks need no flag: bus errors and exceptions are slow already.
 - When hooks run: code and block hooks before the instruction; a stop
   there leaves it unexecuted, and the next run executes it without

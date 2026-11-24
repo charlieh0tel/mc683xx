@@ -101,6 +101,16 @@ pub(crate) enum Resume {
     Code,
 }
 
+/// What [`Hooks::remove`] took out.
+enum Removed {
+    /// No hook had the id.
+    Nothing,
+    /// A hook that sets no [`watch`] bit.
+    Unwatched,
+    /// A hook over a range, with its [`watch`] bit.
+    Watched(RangeInclusive<Address>, u8),
+}
+
 /// The hooks installed, each kind in the order installed.
 #[derive(Default)]
 pub(crate) struct Hooks {
@@ -157,52 +167,45 @@ impl Hooks {
         HookId(self.next)
     }
 
-    /// The ranges the code, block and memory hooks cover, with their
-    /// [`watch`] bits.
-    fn watched(&self) -> impl Iterator<Item = (RangeInclusive<Address>, u8)> + '_ {
-        fn ranges<H>(
-            hooks: &[Ranged<H>],
-            bit: u8,
-        ) -> impl Iterator<Item = (RangeInclusive<Address>, u8)> + '_ {
-            hooks.iter().map(move |hook| (hook.range.clone(), bit))
-        }
-        ranges(&self.code, watch::CODE)
-            .chain(ranges(&self.block, watch::BLOCK))
-            .chain(ranges(&self.pre_read, watch::PRE_READ))
-            .chain(ranges(&self.pre_write, watch::PRE_WRITE))
-            .chain(ranges(&self.read, watch::READ))
-            .chain(ranges(&self.write, watch::WRITE))
-    }
-
     /// Whether a hook reads the registers as the instruction began.
     pub(crate) const fn want_registers(&self) -> bool {
         !self.read.is_empty() || !self.write.is_empty() || !self.invalid.is_empty()
     }
 
-    /// Removes the hook `id`; whether there was one.
-    fn remove(&mut self, id: HookId) -> bool {
-        fn retain<H>(hooks: &mut Vec<Ranged<H>>, id: HookId) -> bool {
+    /// Removes the hook `id`: what it was, if there was one.
+    fn remove(&mut self, id: HookId) -> Removed {
+        fn take<H>(hooks: &mut Vec<Ranged<H>>, id: HookId) -> Option<RangeInclusive<Address>> {
+            let index = hooks.iter().position(|hook| hook.id == id)?;
+            Some(hooks.remove(index).range)
+        }
+        fn take_unranged<T>(hooks: &mut Vec<T>, id: HookId, of: impl Fn(&T) -> HookId) -> bool {
             let before = hooks.len();
-            hooks.retain(|hook| hook.id != id);
+            hooks.retain(|hook| of(hook) != id);
             hooks.len() != before
         }
-        fn retain_unranged<H>(hooks: &mut Vec<(HookId, H)>, id: HookId) -> bool {
-            let before = hooks.len();
-            hooks.retain(|(other, _)| *other != id);
-            hooks.len() != before
+        let watched = [
+            (take(&mut self.code, id), watch::CODE),
+            (take(&mut self.block, id), watch::BLOCK),
+            (take(&mut self.pre_read, id), watch::PRE_READ),
+            (take(&mut self.pre_write, id), watch::PRE_WRITE),
+            (take(&mut self.read, id), watch::READ),
+            (take(&mut self.write, id), watch::WRITE),
+        ];
+        if let Some((range, bit)) = watched
+            .into_iter()
+            .find_map(|(range, bit)| range.map(|range| (range, bit)))
+        {
+            return Removed::Watched(range, bit);
         }
-        let intercepts = self.intercept.len();
-        self.intercept.retain(|(other, _, _)| *other != id);
-        retain(&mut self.code, id)
-            | retain(&mut self.block, id)
-            | retain(&mut self.pre_read, id)
-            | retain(&mut self.pre_write, id)
-            | retain(&mut self.read, id)
-            | retain(&mut self.write, id)
-            | retain(&mut self.invalid, id)
-            | retain_unranged(&mut self.exception, id)
-            | retain_unranged(&mut self.exception_return, id)
-            | (self.intercept.len() != intercepts)
+        let unwatched = take(&mut self.invalid, id).is_some()
+            | take_unranged(&mut self.exception, id, |(other, _)| *other)
+            | take_unranged(&mut self.exception_return, id, |(other, _)| *other)
+            | take_unranged(&mut self.intercept, id, |(other, _, _)| *other);
+        if unwatched {
+            Removed::Unwatched
+        } else {
+            Removed::Nothing
+        }
     }
 
     /// The vectors the intercept hooks cover.
@@ -235,12 +238,13 @@ impl Cpu {
         hook: impl FnMut(&Instruction) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
+        self.memory.add_watch(range.clone(), watch::CODE);
         self.hooks.code.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
         });
-        self.rewatch();
+        self.hooks_changed();
         id
     }
 
@@ -254,12 +258,13 @@ impl Cpu {
         hook: impl FnMut(&Instruction) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
+        self.memory.add_watch(range.clone(), watch::BLOCK);
         self.hooks.block.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
         });
-        self.rewatch();
+        self.hooks_changed();
         id
     }
 
@@ -290,12 +295,13 @@ impl Cpu {
         hook: impl FnMut(&PendingRead, &Memory, &mut [u8]) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
+        self.memory.add_watch(range.clone(), watch::PRE_READ);
         self.hooks.pre_read.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
         });
-        self.rewatch();
+        self.hooks_changed();
         id
     }
 
@@ -329,12 +335,13 @@ impl Cpu {
         hook: impl FnMut(&mut PendingWrite, &Memory, &mut [u8]) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
+        self.memory.add_watch(range.clone(), watch::PRE_WRITE);
         self.hooks.pre_write.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
         });
-        self.rewatch();
+        self.hooks_changed();
         id
     }
 
@@ -348,12 +355,13 @@ impl Cpu {
         hook: impl FnMut(&MemoryAccess) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
+        self.memory.add_watch(range.clone(), watch::READ);
         self.hooks.read.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
         });
-        self.rewatch();
+        self.hooks_changed();
         id
     }
 
@@ -365,12 +373,13 @@ impl Cpu {
         hook: impl FnMut(&MemoryAccess) -> Control + 'static,
     ) -> HookId {
         let id = self.hooks.allocate();
+        self.memory.add_watch(range.clone(), watch::WRITE);
         self.hooks.write.push(Ranged {
             id,
             range,
             hook: Box::new(hook),
         });
-        self.rewatch();
+        self.hooks_changed();
         id
     }
 
@@ -466,14 +475,18 @@ impl Cpu {
     /// Removes the hook `id`; whether it was installed.
     pub fn remove_hook(&mut self, id: HookId) -> bool {
         let removed = self.hooks.remove(id);
+        if let Removed::Watched(range, bit) = &removed {
+            self.memory.remove_watch(range, *bit);
+        }
         self.bare.intercepted = self.hooks.intercepted();
-        self.rewatch();
-        removed
+        self.hooks_changed();
+        !matches!(removed, Removed::Nothing)
     }
 
-    /// Sets the pages' hook bits from the hooks.
-    pub(crate) fn rewatch(&mut self) {
-        self.memory.set_watched(self.hooks.watched());
+    /// Brings what follows the hooks up to date, their pages' bits
+    /// having been: the quiet page forgotten, the flags of the
+    /// pre-access hooks, and whether the registers are captured.
+    fn hooks_changed(&mut self) {
         self.quiet_page = NO_PAGE;
         self.pre_reading = !self.hooks.pre_read.is_empty();
         self.pre_writing = !self.hooks.pre_write.is_empty();

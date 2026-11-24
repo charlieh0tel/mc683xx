@@ -763,6 +763,7 @@ before and after a change:
 | `hooks/move_indirect_code_elsewhere` | 173 us | 151-155 us | the quiet page |
 | `hooks/clr_indirect_code_elsewhere` | 131-141 us | 119 us | the quiet page |
 | `hooks/nop_write_elsewhere` | 213-260 us | 180-185 us | the quiet page |
+| `hooks/add_remove` | 15.1 us | 80 ns | one hook's pages rewatched |
 
 With the quiet page a code hook that never fires costs `nop` about
 7% and the kernels that touch memory 2 to 3% (`unhooked`: 155-160,
