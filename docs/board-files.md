@@ -531,8 +531,9 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   default, so a peripheral implements only the sides it is on; one with
   only net ports (an OCXO, a GPS engine, an oven) is as first-class
   as one on the bus.  The trait is `Any`: a host reaches its own peripheral's state
-  (a UI's widget) by its type with `Board::peripheral::<T>(name)` (a `Ref`,
-  `None` if it is not a `T`, `NoPeripheral` for a name the board lacks) or
+  (a UI's widget) by its type with `Board::peripheral::<T>(name)` (a `Ref`; a
+  `LookupError`, `NoPeripheral` for a name the board lacks or `NotA` for
+  a peripheral of another type) or
   `peripheral_mut`, and a `Box<dyn Peripheral>` upcasts to `Box<dyn Any>`.
   `inspect()` gives what a front end shows of it, an
   `inspect::Inspection` of named fields (empty by default;

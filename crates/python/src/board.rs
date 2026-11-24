@@ -19,6 +19,7 @@ use mc683xx_board::board::BoardRun;
 use mc683xx_board::board::BoardStopRequest;
 use mc683xx_board::board::BoardTracing;
 use mc683xx_board::board::External;
+use mc683xx_board::board::LookupError;
 use mc683xx_board::board::RunError;
 use mc683xx_board::chip::Chip;
 use mc683xx_board::description::Options;
@@ -1646,11 +1647,11 @@ impl BoardView {
     /// a Python peripheral; `ValueError` for a peripheral the board
     /// lacks.
     fn peripheral(&self, py: Python<'_>, name: &str) -> PyResult<Option<Py<PyAny>>> {
-        Ok(self
-            .board
-            .peripheral::<PythonPeripheral>(name)
-            .map_err(Error::from)?
-            .and_then(|peripheral| peripheral.object.object(py).ok()))
+        match self.board.peripheral::<PythonPeripheral>(name) {
+            Ok(peripheral) => Ok(peripheral.object.object(py).ok()),
+            Err(LookupError::NoPeripheral(error)) => Err(Error::from(error).into()),
+            Err(_) => Ok(None),
+        }
     }
 
     /// What the peripheral `name` shows a front end, as a dict (Rust's
