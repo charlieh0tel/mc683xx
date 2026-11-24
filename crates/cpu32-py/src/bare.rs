@@ -310,8 +310,24 @@ impl TryFrom<End> for EndView {
     }
 }
 
+impl From<EndView> for End {
+    fn from(end: EndView) -> Self {
+        match end {
+            EndView::Stop { stop } => Self::Stop(stop.into()),
+            EndView::Until() => Self::Until,
+            EndView::Instructions() => Self::Instructions,
+            EndView::Fault { fault } => Self::Fault(fault.0),
+        }
+    }
+}
+
 #[pymethods]
 impl EndView {
+    /// Rust's `Display`.
+    fn __str__(&self) -> String {
+        End::from(self.clone()).to_string()
+    }
+
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         Ok(match self {
             Self::Stop { stop } => format!("End.Stop({})", repr(py, *stop)?),

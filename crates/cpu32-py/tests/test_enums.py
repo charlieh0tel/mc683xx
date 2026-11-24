@@ -52,6 +52,18 @@ def test_str_is_rust_s_display() -> None:
     assert mc683xx.Port.GP.name == "GP"
 
 
+def test_a_class_per_variant_value_s_str_is_rust_s_display() -> None:
+    assert str(mc683xx.Stop.Budget()) == "budget"
+    assert str(mc683xx.Stop.Halted(mc683xx.Halt.DOUBLE_BUS_FAULT)) == "halted"
+    background = mc683xx.Stop.Background(mc683xx.Entry.DoubleBusFault(0x1234))
+    assert str(background) == "background"
+    assert str(mc683xx.Entry.DoubleBusFault(0x1234)) == "double bus fault, SSW 0x1234"
+    assert str(mc683xx.Entry.Breakpoint()) == "breakpoint"
+    assert str(mc683xx.End.Until()) == "until"
+    assert str(mc683xx.End.Stop(mc683xx.Stop.Requested())) == "requested"
+    assert repr(mc683xx.Stop.Budget()) == "Stop.Budget()"
+
+
 def test_value_classes_compare_and_hash_by_value() -> None:
     reset = mc683xx.Event.Reset(0, mc683xx.ResetCause.POWER_ON)
     assert reset == mc683xx.Event.Reset(0, mc683xx.ResetCause.POWER_ON)
