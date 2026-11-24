@@ -2470,8 +2470,9 @@ and `mc683xx.Machine` in Python (see Python).
   (type IV, or a double bus fault in a bus error's window, which taking
   vector 2 or 3 opens until the handler's first fetch, CPU32RM 6.2.2),
   or with
-  stop on fault returned as `TakeExceptionError::Fault`, the registers
-  and the hooks at PC as before.  Not on the chip, whose interrupts
+  stop on fault returned as `TakeExceptionError::Fault`: no exception
+  entered, the registers and the hooks at PC as before, the frame's
+  writes before the fault kept (memory is not rolled back).  Not on the chip, whose interrupts
   come from its modules and pins.
 - **Runs:** `Cpu::run_limited(limits)`: `until` (checked at each
   instruction boundary before an interrupt is taken or a hook called

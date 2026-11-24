@@ -1459,8 +1459,9 @@ assert bare.read_register("D0") == 6
   No clocks pass.  The exception hooks, and the write hooks on the
   stack, are called before it returns, their results stopping nothing.
   A halted CPU, or one in background mode, raises `RunError`, as
-  does a fault stacking the frame with `set_stop_on_fault(True)`,
-  nothing stacked; without it, the fault is a bus error the CPU takes,
+  does a fault stacking the frame with `set_stop_on_fault(True)`: no
+  exception entered, the registers rolled back, though what the frame's
+  writes before the fault wrote stays written; without it, the fault is a bus error the CPU takes,
   as in its own exception processing.
 - **Also:** `reset()` (the reset exception from the vectors at zero),
   `read_register`, `write_register`, `registers()`, `instructions`,

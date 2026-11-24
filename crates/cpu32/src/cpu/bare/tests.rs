@@ -1016,7 +1016,7 @@ fn a_halted_cpu_takes_no_host_exception() {
 }
 
 #[test]
-fn a_fault_stacking_a_host_exception_stops_with_nothing_stacked() {
+fn a_fault_stacking_a_host_exception_stops_with_no_exception_entered() {
     let mut machine = machine(&[NOP]);
     machine.cpu.set_stop_on_fault(true);
     machine.cpu.registers.ssp = Address(NOWHERE);
@@ -1110,6 +1110,22 @@ fn a_fault_stop_taking_a_host_bus_error_leaves_no_double_fault_armed() {
     one(&mut machine);
     assert_eq!(machine.cpu.halted(), None);
     assert_eq!(machine.cpu.registers.pc, Address(HANDLER));
+}
+
+#[test]
+fn a_fault_stop_reading_a_host_exception_s_vector_keeps_the_frame_written() {
+    let mut machine = machine(&[NOP]);
+    machine.cpu.set_stop_on_fault(true);
+    machine.cpu.registers.vbr = Address(NOWHERE);
+    let before = machine.cpu.registers.clone();
+    assert!(matches!(
+        machine.take_exception(Vector(32), None),
+        Err(TakeExceptionError::Fault(_))
+    ));
+    assert_eq!(machine.cpu.registers, before, "registers rolled back");
+    // the four-word frame was written before the vector read faulted
+    assert_eq!(word_at(&machine, STACK - 2), 0x0080);
+    assert_eq!(word_at(&machine, STACK - 4), CODE as u16);
 }
 
 #[test]

@@ -153,8 +153,9 @@ pub enum TakeExceptionError {
     #[error("the CPU executes nothing: {0}")]
     Idle(Stop),
     /// Stacking the frame or reading the vector faulted, with
-    /// [`Cpu::set_stop_on_fault`]: nothing stacked, the registers as
-    /// before.
+    /// [`Cpu::set_stop_on_fault`]: no exception entered, the registers
+    /// as before; what the frame's writes before the fault wrote stays
+    /// written.
     #[error("stopped at a fault: {0}")]
     Fault(FaultStop),
 }
@@ -317,8 +318,9 @@ impl Cpu {
     /// [`TakeExceptionError::Idle`] for a halted CPU, or one in
     /// background mode, which takes nothing, and
     /// [`TakeExceptionError::Fault`] for a fault that stops rather than
-    /// being taken ([`Cpu::set_stop_on_fault`]): the registers as
-    /// before, nothing stacked.
+    /// being taken ([`Cpu::set_stop_on_fault`]): no exception entered,
+    /// the registers rolled back, but memory and peripherals keep what
+    /// the frame's writes before the fault did to them.
     pub fn take_exception(
         &mut self,
         bus: &mut dyn Bus,
