@@ -348,7 +348,7 @@ pub(crate) enum EndView {
         /// PC, where its processing begins when the run goes on.
         pc: u32,
     },
-    /// PC at a self-loop, with `self_loop`: the loop not executed.
+    /// A self-loop ran, with `self_loop`: PC at it.
     SelfLoop {
         /// The loop's address.
         pc: u32,
@@ -792,8 +792,8 @@ impl MachineView {
     /// run `instructions`, its cycle estimate reaches `cycles`, a hook
     /// or the stop request stops it, a fault does
     /// (`set_stop_on_fault`), or the CPU
-    /// stops or halts, or, with `self_loop`, PC is at an instruction
-    /// that branches to itself (`End.SelfLoop`, Rust's
+    /// stops or halts, or, with `self_loop`, once an instruction that
+    /// branches to itself runs (`End.SelfLoop`, Rust's
     /// `Limits::self_loop`).  `begin` sets PC first and forgets a hook
     /// stop's skip, so the hooks at `begin` are called.  With no
     /// `cycles`, a `stop` instruction ends the run at once.

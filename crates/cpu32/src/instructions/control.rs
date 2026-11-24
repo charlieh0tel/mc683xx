@@ -56,7 +56,9 @@ fn control_address(core: &mut Core<'_>, opcode: u16) -> Result<Address, Exceptio
 
 /// JMP <ea>: the address to PC (CPU32RM 4.4, JMP).
 fn jmp(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
-    core.cpu.registers.pc = control_address(core, opcode)?;
+    let target = control_address(core, opcode)?;
+    core.cpu.registers.pc = target;
+    core.cpu.branched(target);
     Ok(Flow::Changed)
 }
 

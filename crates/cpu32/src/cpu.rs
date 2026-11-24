@@ -290,6 +290,9 @@ pub struct Cpu {
     pre_reading: bool,
     /// Whether a pre-write hook is installed.
     pre_writing: bool,
+    /// Whether the run under way ends at a self-loop
+    /// ([`Limits::self_loop`](bare::Limits::self_loop)).
+    self_loop: bool,
     /// The bare host's settings.
     pub(crate) bare: Box<Bare>,
 }
@@ -412,6 +415,7 @@ impl Cpu {
             long_operand: false,
             pre_reading: false,
             pre_writing: false,
+            self_loop: false,
             bare: Box::default(),
         }
     }
@@ -652,20 +656,10 @@ impl Cpu {
                         stop: Stop::Requested,
                     };
                 }
-                // the steps taken, or a self-loop: interrupts pending,
-                // then the end
-                let end = if limits.steps.is_some_and(|count| {
+                // the steps taken: interrupts pending, then the end
+                if limits.steps.is_some_and(|count| {
                     cpu.instructions - first + cpu.bare.exceptions_stepped >= count
                 }) {
-                    Some(bare::End::Steps)
-                } else if limits.self_loop && !cpu.stopped && cpu.at_self_loop() {
-                    Some(bare::End::SelfLoop {
-                        pc: cpu.registers.pc,
-                    })
-                } else {
-                    None
-                };
-                if let Some(end) = end {
                     if let Some(cycles) = core.step_boundary(interrupts, now + elapsed) {
                         elapsed += cycles;
                         if let Some(run) = requested(core.cpu, elapsed) {
@@ -673,7 +667,7 @@ impl Cpu {
                         }
                         continue;
                     }
-                    core.cpu.bare.end = Some(end);
+                    core.cpu.bare.end = Some(bare::End::Steps);
                     return Run {
                         cycles: elapsed,
                         stop: Stop::Requested,

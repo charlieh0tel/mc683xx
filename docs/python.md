@@ -1523,12 +1523,12 @@ assert bare.read_register("D0") == 6
   cycles=None, self_loop=False) -> LimitedRun`, Rust's `LimitedRun`: `cycles` and
   `end`.  `reach` is checked at each instruction
   boundary, before an interrupt is taken or the hooks there are
-  called; `self_loop` (Rust's `Limits::self_loop`) ends the run at an
-  instruction that branches to itself, unexecuted, as firmware idles
-  for an interrupt: BRA to itself (`.S`, `.W` or `.L`) or JMP
-  `(xxx).W` or `(xxx).L` of its own address, looked for once no
-  interrupt is due there (one due is taken first), before the hooks,
-  and not while T1 or T0 trace each time round; `begin` sets PC and forgets a hook stop's skip, so the
+  called; `self_loop` (Rust's `Limits::self_loop`) ends the run once
+  an instruction that branches to itself runs, as firmware idles for
+  an interrupt: BRA to itself (`.S`, `.W` or `.L`) or a JMP of its
+  own address.  The loop runs once, its cycles counted, PC left at
+  it; an interrupt due before it is taken first, as ever; not while
+  T1 or T0 trace each time round; `begin` sets PC and forgets a hook stop's skip, so the
   hooks at `begin` fire even if the last run stopped there.  `end`,
   an `End` as Rust's, says why it ended: `End.Reached()`,
   `End.Instructions()`, `End.Fault(fault)` (a `FaultStop`),

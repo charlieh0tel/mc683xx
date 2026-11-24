@@ -89,6 +89,10 @@ working fails `make ci`.
   coverage beside the sled or over it.  From Python,
   `crates/python/benches/hooks.py`
   (Python hooks, below).
+- `core/*_limited` (`benches/core.rs`): the `nop` and
+  `move_indirect` sleds run by `Cpu::run_limited`, their
+  instructions the limit, as a bare host runs: what the limits'
+  checks cost.
 - `*/short_runs`: 1000 runs of one clock each, the cost of a run call:
   `Cpu::run_for` alone, and `Mc68331::run_for` with its syncing.
 - `tables/*` (`benches/tables.rs`): building the 64K-entry instruction

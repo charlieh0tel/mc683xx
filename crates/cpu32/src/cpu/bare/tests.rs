@@ -1551,7 +1551,7 @@ fn to_self_loop(machine: &mut Machine, instructions: u64) -> LimitedRun {
 }
 
 #[test]
-fn a_branch_or_jump_to_itself_ends_a_run_that_asks_unexecuted() {
+fn a_branch_or_jump_to_itself_ends_a_run_that_asks_once_it_runs() {
     let at = CODE + 2;
     let codes: [&[u16]; 5] = [
         &[NOP, BRA_SELF],
@@ -1566,15 +1566,17 @@ fn a_branch_or_jump_to_itself_ends_a_run_that_asks_unexecuted() {
         let mut machine = machine(code);
         let run = to_self_loop(&mut machine, 100);
         assert_eq!(run.end, End::SelfLoop { pc: Address(at) }, "{code:x?}");
-        assert_eq!(machine.cpu.instructions(), 1, "{code:x?}: the loop not run");
-        assert_eq!(machine.cpu.registers.pc.0, at);
-        // the next run that asks ends at once
-        let run = to_self_loop(&mut machine, 100);
         assert_eq!(
-            (run.end, run.cycles),
-            (End::SelfLoop { pc: Address(at) }, Cycles::ZERO)
+            machine.cpu.instructions(),
+            2,
+            "{code:x?}: the loop run once"
         );
-        assert_eq!(machine.cpu.instructions(), 1);
+        assert_eq!(machine.cpu.registers.pc.0, at);
+        // the next run that asks runs it once more
+        let run = to_self_loop(&mut machine, 100);
+        assert_eq!(run.end, End::SelfLoop { pc: Address(at) });
+        assert!(run.cycles > Cycles::ZERO);
+        assert_eq!(machine.cpu.instructions(), 3);
     }
 }
 

@@ -993,17 +993,17 @@ def test_vector_names_rust_s_vector_numbers():
 BRA_SELF = 0x60FE  # BRA.S to itself
 
 
-def test_a_limited_run_can_end_at_a_self_loop_unexecuted():
+def test_a_limited_run_can_end_at_a_self_loop_once_it_runs():
     cpu = machine(NOP, BRA_SELF)
     run = cpu.run_limited(self_loop=True, instructions=100)
     assert run.end == mc683xx.End.SelfLoop(CODE + 2)
     assert isinstance(run.end, mc683xx.End.SelfLoop) and run.end.pc == CODE + 2
     assert repr(run.end) == f"End.SelfLoop({CODE + 2:#010x})"
     assert str(run.end) == "self-loop"
-    assert cpu.instructions == 1
-    # not asked: the loop runs
+    assert cpu.instructions == 2
+    # not asked: the loop runs on
     assert cpu.run_limited(instructions=10).end == mc683xx.End.Instructions()
-    assert cpu.instructions == 11
+    assert cpu.instructions == 12
 
 
 def test_a_coverage_records_the_instructions_run_in_its_range():

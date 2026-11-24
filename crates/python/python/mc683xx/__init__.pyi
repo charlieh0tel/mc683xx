@@ -631,8 +631,8 @@ class End:
 
     @final
     class SelfLoop(End):
-        """PC at an instruction that branches to itself, with
-        `run_limited(self_loop=True)`: the loop not executed."""
+        """An instruction that branches to itself ran, with
+        `run_limited(self_loop=True)`: PC at it."""
 
         __match_args__ = ("pc",)
         def __new__(cls, pc: int) -> End.SelfLoop: ...
