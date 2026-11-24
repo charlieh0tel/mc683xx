@@ -49,7 +49,12 @@ impl InterruptLevel {
 
     /// The level, 0 to 7, where `u8::from` cannot be called: a const
     /// context.
-    pub(crate) const fn get(self) -> u8 {
+    ///
+    /// Not part of the semver API: for the modules' and the chip's
+    /// const fns; a host converts with `u8::from`.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn get(self) -> u8 {
         self.0
     }
 
@@ -90,7 +95,12 @@ impl IrqPin {
 
     /// The level, 1 to 7, where `u8::from` cannot be called: a const
     /// context.
-    pub(crate) const fn get(self) -> u8 {
+    ///
+    /// Not part of the semver API: for the modules' and the chip's
+    /// const fns; a host converts with `u8::from`.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn get(self) -> u8 {
         self.0.0
     }
 }

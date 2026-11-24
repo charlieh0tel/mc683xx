@@ -211,8 +211,9 @@ Crates:
   - a checked value, some numbers not one (`InterruptLevel`, `IrqPin`,
     `PortGpPin`, `chip_select::Number`, `FunctionCode`), converts by
     `TryFrom<u8>`, failing with `No<Type>(pub u8)`, and `From<T> for
-    u8`; no `new` or `get` (a private `const fn` where a const context
-    needs one);
+    u8`; no public `new` or `get` (a private `const fn` where a const
+    context needs one, `#[doc(hidden)]` where another crate's does, as
+    `InterruptLevel::get` and `IrqPin::get`);
   - a wire or field encoding is a named pair, not `From`
     (`Register::code`/`from_code`, `Size::field`, `Entry::atemp`);
   - a register-order index is `index`/`from_index` (`ChipSelect`);
