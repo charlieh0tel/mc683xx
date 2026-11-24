@@ -313,11 +313,11 @@ fn write_register(chip: &mut Mc68331, address: u32, value: u16) {
 }
 
 #[test]
-fn a_pre_read_hook_patches_a_select_s_memory_before_the_cycle() {
-    // MOVE.W $0000,D0: the stack pointer's high word, patched
+fn a_pre_read_hook_answers_a_read_of_a_select_s_memory() {
+    // MOVE.W $0000,D0: the stack pointer's high word, answered
     let (mut chip, _) = booting(&[MOVE_WORD_FROM_ABSOLUTE, 0, 0, NOP]);
     chip.cpu_control()
-        .add_pre_read_hook(Address(0)..=Address(1), |read, bytes| {
+        .add_pre_read_hook(Address(0)..=Address(1), |read, _, bytes| {
             assert_eq!((read.address, read.size), (Address(0), Size::Word));
             bytes.copy_from_slice(&[0xab, 0xcd]);
             ControlFlow::Break(())
@@ -330,7 +330,11 @@ fn a_pre_read_hook_patches_a_select_s_memory_before_the_cycle() {
     let mut word = [0; 2];
     chip.peek_bytes(Address(0), FunctionCode::SupervisorData, &mut word)
         .unwrap();
-    assert_eq!(word, [0xab, 0xcd], "the change stays");
+    assert_eq!(
+        u16::from_be_bytes(word),
+        (STACK >> 16) as u16,
+        "memory is as it was"
+    );
 }
 
 #[test]

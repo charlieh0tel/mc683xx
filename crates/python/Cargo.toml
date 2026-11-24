@@ -19,7 +19,7 @@ workspace = true
 # (pyproject.toml); without it the crate is its Python-free parts, so
 # `cargo test` and `make ci` need no Python (PLAN.md, Python).
 [features]
-python = ["dep:pyo3", "dep:mc683xx-gdb"]
+python = ["dep:pyo3", "dep:mc683xx-gdb", "dep:scoped-tls"]
 
 [dependencies]
 mc683xx-board.workspace = true
@@ -31,3 +31,4 @@ mc683xx-modules.workspace = true
 mc683xx-peripherals.workspace = true
 pyo3 = { version = "0.30.1", optional = true }
 thiserror = "2.0.21"
+scoped-tls = { version = "1.0.1", optional = true }

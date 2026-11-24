@@ -402,7 +402,7 @@ impl Slab {
     /// Brings page `index` of space `space`'s fast table up to date.
     fn refresh(&mut self, space: usize, index: usize) {
         let entry = self.tables[space][index];
-        let slow = self.watched[index] & (watch::READ | watch::WRITE | watch::PRE_READ) != 0
+        let slow = self.watched[index] & (watch::READ | watch::WRITE) != 0
             || self.permissions[space][index] != Permissions::ALL;
         self.fast[space][index] = if slow {
             Page {
@@ -1048,25 +1048,6 @@ impl Memory {
             Size::Byte => u32::from(bytes[0]),
             _ => u32::from(u16::from_be_bytes([bytes[0], bytes[1]])),
         }
-    }
-
-    /// The bytes a read of `size` at `address` in `space` reads, from
-    /// its page's read backing, to change before the read: [`None`] if
-    /// the page has none, or the bytes cross it.
-    pub(crate) fn read_bytes_mut(
-        &mut self,
-        space: Space,
-        address: Address,
-        size: Size,
-    ) -> Option<&mut [u8]> {
-        let (slab, index, within) = self.locate(address)?;
-        let backing = slab.tables[space.index()][index].read?;
-        let length = size.bytes() as usize;
-        if within + length > PAGE_BYTES as usize {
-            return None;
-        }
-        let at = backing.offset as usize + within;
-        self.regions[backing.region.0].get_mut(at..at + length)
     }
 
     /// An even long's two word reads, high word first, with their stall,

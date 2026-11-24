@@ -2401,22 +2401,32 @@ Adversarial review (2026-11-01):
 - Pre-read hooks (`Cpu::add_pre_read_hook`, added for 0.9.0 at the
   owner's call, against the recommendation to model such a device as a
   peripheral that takes the memory): before an operand byte or word
-  read cycle the core's memory serves, of a byte in the hook's range,
-  each covering hook in the order installed gets the cycle
-  (`PendingRead`) and the bytes it is to read, a mutable slice of the
-  page's read backing, so a change is what the cycle reads and stays
-  in memory, as deterministic as the host's callback.  Per range,
-  removed by `remove_hook`, as the other memory hooks; a page with one
-  takes the slow path, as one with a read hook does, so a run with
-  none costs nothing more: the fast path is unchanged, and
-  `core/move_indirect`, `core/move_postincrement` and
-  `core/move_displacement` move within 2% either way, run to run,
-  before and after.  Not for fetches (code hooks are theirs), a cycle
-  the bus serves (a peripheral's has no bytes to patch; its own `read`
-  answers), nor a look with no cycle (`Memory::peek`, a debugger's
-  read), which is no cycle.  They run before the cycle, the read
-  hooks after it, seeing the value read.  A long operand is two word
-  cycles, each shown, with `set_long_bus` too.
+  read the core's memory serves all of, of a byte in the hook's range,
+  each covering hook in the order installed gets the read
+  (`PendingRead`, 1, 2 or 4 bytes), the core's memory as `&Memory` to
+  look at, and a copy of the bytes it is to read: what the hooks leave
+  in the copy answers the read and is not stored (serve-only, sc batch
+  4: a hook that stored its answer left RAM other than the firmware
+  wrote it).  The copy and the shared `&Memory` cannot alias, so the
+  hook sees memory as it is and cannot change it.  Operand-level, once
+  before the first cycle, whatever `set_long_bus` says (the read hooks
+  follow it): a long across two pages of memory is one call; a long
+  with a byte the bus serves is none, its cycles as usual, as the bus
+  has no bytes to copy until it runs them; a misaligned word or long,
+  an address error, is none.  The cycles follow, timed by their pages,
+  refused by their permissions, shown to the read hooks with the
+  served values.  Per range, removed by `remove_hook`, as the other
+  memory hooks.  Pages with one stay on the fast path: an operand read
+  checks one flag, set while any pre-read hook is installed, then the
+  pages' bits; a run with none costs that flag: `core/move_indirect`
+  +0.5%, `core/move_postincrement` no change detected,
+  `core/move_displacement` +0.3%, `core/move_indexed` +1.2%, before
+  and after.  Not for fetches (code hooks are theirs), nor a
+  look with no cycle (`Memory::peek`, a debugger's read).  Python's
+  `PendingRead.peek(address, length)` lends the memory to the callable
+  for its call alone, through a scoped thread-local (`scoped-tls`, no
+  `unsafe` here); a `PendingRead` kept past it raises
+  `RuntimeError`.
 - A block starts after a change of flow (`Flow::Changed`), an
   exception, reset, restore, or a host jump: a run that finds PC
   other than where the last run, reset or restore left it (the core

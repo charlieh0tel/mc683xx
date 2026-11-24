@@ -1570,44 +1570,52 @@ write takes effect:
 | Hook | Called | A register or memory write |
 | --- | --- | --- |
 | code, block | before the instruction | is seen by it; a PC write redirects, the instruction at the old PC not run, and the hooks at the new PC are called |
-| pre-read | within the cycle, before it reads | a change to its `data` is what the cycle reads; registers and other memory, as for read |
+| pre-read | within the run, before the read's first cycle | a change to its `data` answers the read, not stored; it reads memory with `PendingRead.peek`, and a call into the machine raises `RuntimeError` |
 | read, write | once the instruction has completed (a write hook sees memory written) | lands after the instruction, before the next |
 | invalid access | once the bus error exception is taken, PC the handler's (or the run stopped for it, with `stop_on_fault`) | lands before the handler's first instruction |
 | exception | once the frame is stacked and PC is the handler's | lands before the handler runs; writing SSP, SR and PC from the frame returns past it |
 | intercept hook | before anything is stacked, PC at the instruction | lands before the CPU goes on from PC |
 
 `add_pre_read_hook(callback, begin=0, end=0xFFFFFFFF)` (Rust's
-`Cpu::add_pre_read_hook`) calls `callback(PendingRead, data)` within
-each operand read cycle that the core's memory (RAM or ROM its pages
-map) serves of a byte in the range, before the cycle reads: `data` is
-a bytearray of the cycle's bytes (1 or 2: a long operand is two word
-cycles, each seen), and what the callable leaves in it, at the same
-length, is what the cycle reads, and stays in memory.  A
-`PendingRead` has `address`, `size`, `function_code`, `pc` and
-`stacking`.  It is a device model's way to patch a few bytes of RAM
-just before the firmware reads them.  Fetches, peripherals' reads,
-memory the decode serves off the core's pages (a select a peripheral
-shares), and looks with no cycle (`peek_bytes`, `peek`, gdb) call no
-pre-read hook.  The read hooks see the cycle after it, the value it
-read.  On the bare `Machine`, unlike its other hooks, it runs within
-the run, so it must not call into the machine; a truthy result stops
-the run once the instruction completes.
+`Cpu::add_pre_read_hook`) calls `callback(PendingRead, data)` once
+before each operand read of a byte in the range that the core's memory
+(RAM or ROM its pages map) serves all of, before its first cycle:
+`data` is a bytearray copy of the operand's bytes (1, 2 or 4: a long
+is one call), and what the callable leaves in it, at the same length,
+answers the read, and is not stored.  A `PendingRead` has `address`,
+`size`, `function_code`, `pc` and `stacking`, and
+`peek(address, length)`, the core's memory as a debugger reads it
+(supervisor space, no cycle, no peripheral), during the call: another
+register the firmware keeps in RAM, a port's image, say.  It is a
+device model's way to answer what the firmware reads of RAM.  A long
+across two pages of memory is one call; a long with a byte a
+peripheral serves, or memory the decode serves off the core's pages
+(a select a peripheral shares), is none, nor are fetches, misaligned
+words and longs, and looks with no cycle (`peek_bytes`, `peek`, gdb).
+The read hooks see the cycles after it, with the values `data` gave
+them.  On the bare `Machine`, unlike its other hooks, it runs within
+the run, so a call into the machine raises `RuntimeError`, and memory
+is `PendingRead.peek`'s; a truthy result stops the run once the
+instruction completes.
 
 ```python
 bare.poke_bytes(0x6000, struct.pack(">H", 0x1111))
 
 
-def patch(read: mc683xx.PendingRead, data: bytearray) -> None:
-    """A device model's status word, fresh as the firmware reads it."""
-    data[:] = struct.pack(">H", 0x2222)
+def status(read: mc683xx.PendingRead, data: bytearray) -> None:
+    """A device model's status word, from the image at 0x6100."""
+    (image,) = struct.unpack(">H", read.peek(0x6100, 2))
+    data[:] = struct.pack(">H", image ^ 0x3333)
 
 
-patching = bare.add_pre_read_hook(patch, 0x6000, 0x6001)
+bare.poke_bytes(0x6100, struct.pack(">H", 0x1111))
+patching = bare.add_pre_read_hook(status, 0x6000, 0x6001)
 bare.poke_bytes(CALL, struct.pack(">HIH", 0x3039, 0x6000, RTS))  # move.w $6000,d0
 bare.poke_bytes(CALL_STACK - 4, struct.pack(">I", CALL_RETURN))
 bare.write_register("A7", CALL_STACK - 4)
 assert bare.run_limited(begin=CALL, reach=CALL_RETURN).end == mc683xx.End.Reached()
 assert bare.read_register("D0") & 0xFFFF == 0x2222
+assert bare.peek_bytes(0x6000, 2) == struct.pack(">H", 0x1111)
 bare.remove_hook(patching)
 ```
 

@@ -690,14 +690,20 @@ class MemoryAccess:
 
 @final
 class PendingRead:
-    """An operand read cycle about to be served from memory, as a
-    pre-read hook sees it, beside a bytearray of the bytes it is to
-    read."""
+    """An operand read the core's memory is about to serve, as a
+    pre-read hook sees it, beside a bytearray copy of the bytes it is
+    to read, which answers it."""
 
     @property
     def address(self) -> int: ...
     @property
-    def size(self) -> int: ...
+    def size(self) -> int:
+        """1, 2 or 4: the operand's bytes, however many cycles."""
+    def peek(self, address: int, length: int) -> bytes:
+        """`length` bytes of the core's memory from `address`, as a
+        debugger reads them (supervisor space, no cycle, no peripheral),
+        within the hook's call: `BusError` at a byte the core's memory
+        does not serve, `RuntimeError` once the call is over."""
     @property
     def function_code(self) -> FunctionCode: ...
     @property

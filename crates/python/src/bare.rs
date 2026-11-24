@@ -37,6 +37,7 @@ use mc683xx_cpu32::hooks::MemoryAccess;
 use mc683xx_cpu32::hooks::PendingRead;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
+use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::Permissions;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
@@ -967,12 +968,13 @@ impl MachineView {
         )
     }
 
-    /// Calls `callback(PendingRead, data)` before each operand read cycle
-    /// the machine's memory serves of a byte from `begin` to `end`,
-    /// within the cycle, unlike the other hooks: `data` is a bytearray of
-    /// the bytes it is to read, and what the callable leaves in it is
-    /// what the cycle reads, and stays in memory.  A truthy result stops
-    /// the run once the instruction completes.
+    /// Calls `callback(PendingRead, data)` before each operand read the
+    /// machine's memory serves all of, of a byte from `begin` to `end`,
+    /// within the run, unlike the other hooks: `data` is a bytearray
+    /// copy of the bytes it is to read, and what the callable leaves in
+    /// it answers the read, not stored; `PendingRead.peek` reads memory
+    /// meanwhile.  A truthy result stops the run once the instruction
+    /// completes.
     #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
     fn add_pre_read_hook(
         &mut self,
@@ -986,8 +988,8 @@ impl MachineView {
         let own = Rc::clone(&id);
         let assigned = self.machine.cpu.add_pre_read_hook(
             Address(begin)..=Address(end),
-            move |read: &PendingRead, bytes: &mut [u8]| {
-                let control = called(read, bytes);
+            move |read: &PendingRead, memory: &Memory, bytes: &mut [u8]| {
+                let control = called(read, memory, bytes);
                 if control.is_break() && stopped.get().is_none() {
                     stopped.set(own.get());
                 }

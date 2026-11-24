@@ -1361,11 +1361,11 @@ macro_rules! chip_methods {
             }
 
             /// Calls `callback(PendingRead, data)` before each operand read
-            /// cycle the core's memory serves of a byte from `begin` to
-            /// `end`, within the cycle: `data` is a bytearray of the bytes
-            /// it is to read, and what the callable leaves in it is what
-            /// the cycle reads, and stays in memory.  A truthy result stops
-            /// the run once the instruction completes.
+            /// the core's memory serves all of, of a byte from `begin` to
+            /// `end`: `data` is a bytearray copy of the bytes it is to
+            /// read, and what the callable leaves in it answers the read,
+            /// not stored; `PendingRead.peek` reads memory meanwhile.  A
+            /// truthy result stops the run once the instruction completes.
             #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
             fn add_pre_read_hook(
                 &mut self,

@@ -922,20 +922,21 @@ def test_memory_hooks_see_reads_and_writes():
     assert chip.read_register("D1") == 0x1234
 
 
-def test_a_pre_read_hook_patches_ram_before_the_read():
+def test_a_pre_read_hook_answers_a_read_of_ram_and_peeks_it():
     builder, _, _ = board(ram_round_trip(), Recorder())
     chip = builder.build()
     chip.write_register("D0", 0x1234)
     seen = []
 
-    def patch(read: mc683xx.PendingRead, data: bytearray) -> None:
-        seen.append((read.address, read.size, bytes(data)))
+    def answer(read: mc683xx.PendingRead, data: bytearray) -> None:
+        seen.append((read.address, read.size, bytes(data), read.peek(RAM_WORD, 2)))
         data[:] = b"\xab\xcd"
 
-    chip.add_pre_read_hook(patch, RAM_BASE, RAM_BASE + PAGE_BYTES - 1)
+    chip.add_pre_read_hook(answer, RAM_BASE, RAM_BASE + PAGE_BYTES - 1)
     chip.run_for(4000)
-    assert seen == [(RAM_WORD, 2, b"\x12\x34")]
+    assert seen == [(RAM_WORD, 2, b"\x12\x34", b"\x12\x34")]
     assert chip.read_register("D1") == 0xABCD
+    assert chip.peek_bytes(RAM_WORD, 2) == b"\x12\x34"
 
 
 def test_an_invalid_hook_and_an_exception_hook_see_a_bus_error():

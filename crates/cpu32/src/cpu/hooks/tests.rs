@@ -14,6 +14,7 @@ use crate::cpu::Stop;
 use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::exception::BusCycleKind;
+use crate::exception::Exception;
 use crate::exception::Vector;
 use crate::hooks::ExceptionEntry;
 use crate::hooks::ExceptionReturn;
@@ -31,6 +32,7 @@ use crate::instructions::tests::peek_long;
 use crate::instructions::tests::poke_long;
 use crate::instructions::tests::step;
 use crate::memory::Backing;
+use crate::memory::Memory;
 use crate::memory::PAGE_BYTES;
 use crate::memory::Page;
 use crate::memory::Permissions;
@@ -247,20 +249,54 @@ fn memory_hooks_see_each_word_cycle_and_stop_after_the_instruction() {
     assert_eq!(cpu.registers.data[1], 0x1234_5678);
 }
 
+/// The pre-read hook's `(address, size, copy)`s.
+type PreReads = Vec<(Address, Size, Vec<u8>)>;
+
+/// The pre-read calls MOVE.L (A0),D1 makes with A0 at `at`, and D1
+/// after it, a hook covering `covered` setting the copy's last byte to
+/// 0x99, on `bus`, the long seen once if `long_bus`; with the read hooks'
+/// `(size, value)`s.
+fn pre_read_long(
+    at: u32,
+    covered: RangeInclusive<Address>,
+    bus: &mut impl Bus,
+    long_bus: bool,
+) -> (PreReads, u32, Vec<(Size, u32)>) {
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, NOP], &[]);
+    cpu.set_long_bus(long_bus);
+    cpu.registers.set_address(0, at);
+    let pending = log();
+    let into = Rc::clone(&pending);
+    cpu.add_pre_read_hook(covered, move |read: &PendingRead, _, bytes: &mut [u8]| {
+        into.borrow_mut()
+            .push((read.address, read.size, bytes.to_vec()));
+        bytes[bytes.len() - 1] = 0x99;
+        ControlFlow::Continue(())
+    });
+    let reads = log();
+    let into = Rc::clone(&reads);
+    cpu.add_read_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push((access.size, access.value));
+        ControlFlow::Continue(())
+    });
+    cpu.run_for(bus, &mut NoInterrupts, Cycle::ZERO, Cycles::from_clocks(1));
+    (pending.take(), cpu.registers.data[1], reads.take())
+}
+
 #[test]
-fn a_pre_read_hook_changes_what_each_cycle_reads_before_the_read_hooks() {
+fn a_pre_read_hook_answers_a_long_once_from_its_copy_before_the_read_hooks() {
     let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, NOP], &[]);
     cpu.registers.set_address(0, DATA);
     poke_long(&mut cpu, DATA, 0x1111_2222);
     let pending = log();
     let into = Rc::clone(&pending);
-    // the low word's second byte alone: its cycle is at DATA + 2
+    // the low word's second byte alone: one call for the whole long
     let id = cpu.add_pre_read_hook(
         Address(DATA + 3)..=Address(DATA + 3),
-        move |read: &PendingRead, bytes: &mut [u8]| {
+        move |read: &PendingRead, _, bytes: &mut [u8]| {
             into.borrow_mut()
                 .push((read.address.0, read.size, bytes.to_vec()));
-            bytes[1] = 0x99;
+            bytes[3] = 0x99;
             ControlFlow::Break(())
         },
     );
@@ -275,43 +311,115 @@ fn a_pre_read_hook_changes_what_each_cycle_reads_before_the_read_hooks() {
     assert_eq!(cpu.registers.data[1], 0x1111_2299);
     assert_eq!(
         *pending.borrow(),
-        [(DATA + 2, Size::Word, vec![0x22, 0x22])]
+        [(DATA, Size::Long, vec![0x11, 0x11, 0x22, 0x22])]
     );
     assert_eq!(*reads.borrow(), [0x1111, 0x2299]);
-    // the change stays in memory, where a peek finds it, with no hook call
+    // the copy answered the read; memory is as it was
     assert_eq!(
         cpu.memory
             .peek(Space::Supervisor, Address(DATA), Size::Long),
-        Some(0x1111_2299)
+        Some(0x1111_2222)
     );
-    assert_eq!(pending.borrow().len(), 1);
 }
 
 #[test]
-fn a_pre_read_hook_sees_no_fetch_or_write() {
-    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT, NOP], &[]);
+fn a_pre_read_hook_reads_other_memory_through_its_view() {
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, NOP], &[]);
     cpu.registers.set_address(0, DATA);
+    poke_long(&mut cpu, DATA + 0x10, 0x5555_6666);
+    cpu.add_pre_read_hook(
+        Address(DATA)..=Address(DATA),
+        |read: &PendingRead, memory: &Memory, bytes: &mut [u8]| {
+            let image = memory.peek(
+                Space::of(read.function_code),
+                Address(DATA + 0x10),
+                Size::Long,
+            );
+            bytes.copy_from_slice(&image.unwrap().to_be_bytes());
+            ControlFlow::Continue(())
+        },
+    );
+    step(&mut cpu, 1);
+    assert_eq!(cpu.registers.data[1], 0x5555_6666);
+}
+
+#[test]
+fn a_pre_read_hook_answers_a_long_bus_s_read_hooks_once() {
+    let (pending, d1, reads) = pre_read_long(DATA, everywhere(), &mut NoBus, true);
+    assert_eq!(pending, [(Address(DATA), Size::Long, vec![0; 4])]);
+    assert_eq!(d1, 0x99);
+    assert_eq!(reads, [(Size::Long, 0x99)]);
+}
+
+#[test]
+fn a_long_across_two_pages_of_memory_is_one_pre_read() {
+    let at = DATA + PAGE_BYTES - 2;
+    let next = Address(DATA + PAGE_BYTES);
+    let (pending, d1, reads) = pre_read_long(at, next..=next, &mut NoBus, false);
+    assert_eq!(pending, [(Address(at), Size::Long, vec![0; 4])]);
+    assert_eq!(d1, 0x99);
+    assert_eq!(reads, [(Size::Word, 0), (Size::Word, 0x99)]);
+}
+
+/// A bus that answers every read with [`ANSWER`].
+#[derive(Debug)]
+struct Answering;
+
+/// What [`Answering`] reads.
+const ANSWER: u32 = 0xabcd;
+
+impl Bus for Answering {
+    fn read(&mut self, _access: BusAccess) -> Result<Read, BusError> {
+        Ok(Read {
+            value: ANSWER,
+            stall: Cycles::ZERO,
+        })
+    }
+
+    fn write(&mut self, _access: BusAccess, _value: u32) -> Result<Cycles, BusError> {
+        Err(BusError)
+    }
+}
+
+#[test]
+fn a_long_into_the_bus_is_no_pre_read() {
+    let at = RAM_BYTES - 2;
+    let (pending, d1, reads) = pre_read_long(at, everywhere(), &mut Answering, false);
+    assert!(pending.is_empty());
+    assert_eq!(d1, ANSWER);
+    assert_eq!(reads, [(Size::Word, 0), (Size::Word, ANSWER)]);
+}
+
+#[test]
+fn a_pre_read_hook_sees_no_fetch_write_or_misaligned_read() {
+    // MOVE.L D0,(A0); MOVE.W (A1),D1 with A1 odd: an address error,
+    // whose vector, at 12, is a read the hook sees
+    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT, 0x3211, NOP], &[]);
+    cpu.registers.set_address(0, DATA);
+    cpu.registers.set_address(1, DATA + 1);
     let calls = Rc::new(RefCell::new(0));
     let into = Rc::clone(&calls);
-    cpu.add_pre_read_hook(everywhere(), move |_, _| {
+    cpu.add_pre_read_hook(Address(0)..=Address(DATA + 1), move |_, _, _| {
         *into.borrow_mut() += 1;
         ControlFlow::Continue(())
     });
-    step(&mut cpu, 1);
-    step(&mut cpu, 1);
-    assert_eq!(*calls.borrow(), 0);
+    step(&mut cpu, 2);
+    assert_eq!(
+        cpu.exception_taken().map(Exception::vector),
+        Some(Vector::ADDRESS_ERROR)
+    );
+    assert_eq!(*calls.borrow(), 1, "the vector's read alone");
 }
 
 #[test]
-fn a_pre_read_hook_slows_only_its_pages_and_is_removed() {
+fn a_pre_read_hook_slows_no_page_and_is_removed() {
     let mut cpu = prepared(&[NOP], &[]);
     let page = DATA + PAGE_BYTES;
-    let id = cpu.add_pre_read_hook(Address(page)..=Address(page), |_, _| {
+    let id = cpu.add_pre_read_hook(Address(page)..=Address(page), |_, _, _| {
         ControlFlow::Continue(())
     });
     let word = |cpu: &Cpu, at| cpu.memory.read(Space::Supervisor, Address(at), Size::Word);
-    assert!(word(&cpu, page).is_none());
-    assert!(word(&cpu, DATA).is_some());
+    assert!(word(&cpu, page).is_some());
     assert!(cpu.has_hook(id));
     assert!(cpu.remove_hook(id));
     assert!(!cpu.has_hook(id));

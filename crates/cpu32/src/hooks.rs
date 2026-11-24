@@ -83,15 +83,14 @@ pub struct MemoryAccess {
     pub stacking: bool,
 }
 
-/// A read cycle in user or supervisor space about to be served from
-/// the core's memory, as a pre-read hook sees it, with the bytes it is
-/// to read.
+/// An operand read in user or supervisor space the core's memory is
+/// about to serve, as a pre-read hook sees it, before its first cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct PendingRead {
     /// Its address, on the chip's address lines.
     pub address: Address,
-    /// Byte or word: a long operand is two word cycles.
+    /// Byte, word or long: the operand's, however many cycles it takes.
     pub size: Size,
     /// Its function code.
     pub function_code: FunctionCode,
