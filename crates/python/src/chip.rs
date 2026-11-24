@@ -1602,26 +1602,24 @@ chip_methods! {
         Ok(entry.map_err(Error::from)?.into())
     }
 
-    /// Memory number `memory`'s bytes.
-    fn memory<'py>(&self, py: Python<'py>, memory: usize) -> Result<Bound<'py, PyBytes>, Error> {
-        let id = self.wiring.borrow().memory(memory)?;
-        Ok(PyBytes::new(py, self.chip.memory(id)))
-    }
-
-    /// `length` bytes of memory number `memory` from `offset`.
-    fn read_memory<'py>(
+    /// Memory number `memory`'s bytes from `offset`: `length` of them,
+    /// or to its end.
+    #[pyo3(signature = (memory, offset = 0, length = None))]
+    fn memory<'py>(
         &self,
         py: Python<'py>,
         memory: usize,
         offset: usize,
-        length: usize,
+        length: Option<usize>,
     ) -> Result<Bound<'py, PyBytes>, Error> {
+        let id = self.wiring.borrow().memory(memory)?;
+        let length = length.unwrap_or_else(|| self.chip.memory(id).len().saturating_sub(offset));
         let (id, end) = self.span(memory, offset, length)?;
         Ok(PyBytes::new(py, &self.chip.memory(id)[offset..end]))
     }
 
     /// Writes `data` into memory number `memory` from `offset`.
-    fn write_memory(
+    fn set_memory(
         &mut self,
         memory: usize,
         offset: usize,

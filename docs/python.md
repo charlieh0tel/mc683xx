@@ -104,7 +104,12 @@ rename renames the Python name with it.  The deliberate differences:
   as `halted` is the CPU's `Halt` (`Cpu::halted`, likewise).  `reset_halted` is
   `reset_with_breakpoint()` then `background`.
 - **Handles:** memories and peripherals are the numbers `Builder`
-  returns, not `MemoryId` and `PeripheralId`; a Rust callback trait
+  returns, not `MemoryId` and `PeripheralId`.  `Mc68331.memory(memory,
+  offset=0, length=None)` is Rust's `memory(id)`, sliced, and
+  `set_memory(memory, offset, data)` writes what Rust writes through
+  `memory_mut(id)`, a slice Python cannot hold (`read_memory` and
+  `write_memory` are the `Cpu32Target` calls of a bus address, which
+  Python does not offer); a Rust callback trait
   (`MappedPeripheral`, `SpiPeripheral`, `Peripheral`, `Observer`) is a
   duck-typed object or callable.  The protocol classes
   `mc683xx.MappedPeripheral`, `SpiPeripheral` and `Peripheral` type the
@@ -129,7 +134,7 @@ Not offered, as a Python host has another way or no use for them:
 `Mc68331::set_clock_stop` and `set_output_stop` (a host's own
 scheduler's, as the board's); the `_mut` accessors and
 `cpu`, `sim`, `qsm` and `gpt` (registers by name, a module's registers
-through `bus_read` and `peek`, memory through `write_memory`);
+through `bus_read` and `peek`, memory through `set_memory`);
 `Builder::system_frequency`; `Board::run_until_quantized`;
 `StopRequest::take` (the run loop's).
 
@@ -246,7 +251,7 @@ chip = builder.build()  # the power-on reset
 assert chip.read_register("PC") == START
 run = chip.run_for(1000)
 assert run.stop == mc683xx.Stop.Budget()
-assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
+assert chip.memory(ram, 0, 2) == b"\x12\x34"
 ```
 
 - `Builder(data=0xFFFF, reference_hz=None, external_hz=None)`: the
@@ -255,8 +260,7 @@ assert chip.read_memory(ram, 0, 2) == b"\x12\x34"
   (`reference_hz`, 25000 to 50000, SIMRM 4.4.1; 32768 by default) or,
   with MODCLK low, an external clock (`external_hz`).
 - `memory(contents, pins, writable=True)`: RAM or ROM, a whole number
-  of 2-Kbyte pages; returns its number for `memory`, `read_memory` and
-  `write_memory`.
+  of 2-Kbyte pages; returns its number for `memory` and `set_memory`.
 - `fixed_memory(contents, base, writable=True)`: emulator-only memory
   at a fixed address on no pin, which takes the cycles there no chip
   select matches (the host guide's Fixed memory); a memory number as
@@ -463,7 +467,7 @@ number = builder.peripheral(interrupter, ["CS1", "CS10"])
 builder.set_interrupt(number, LEVEL)
 chip = builder.build()
 chip.run_for(5000)
-assert chip.read_memory(ram, 0, 2) == b"\xbe\xef", "the handler ran"
+assert chip.memory(ram, 0, 2) == b"\xbe\xef", "the handler ran"
 assert chip.peripheral(number) is interrupter
 [acknowledge] = interrupter.acknowledges
 assert (acknowledge.select, acknowledge.address) == ("CS10", 0xFFFFF1 + 2 * LEVEL)
@@ -802,7 +806,7 @@ for bar, base in ((SIM + 0x4C, RAM_BASE), (SIM + 0x50, PERIPHERAL_BASE)):
     chip.bus_write(bar, 2, base >> 8 | BLOCK_64K)
     chip.bus_write(bar + 2, 2, CSOR_FAST)
 chip.bus_write(RAM_BASE, 4, 0x12345678)
-assert chip.read_memory(ram, 0, 4) == b"\x12\x34\x56\x78"
+assert chip.memory(ram, 0, 4) == b"\x12\x34\x56\x78"
 assert chip.bus_read(RAM_BASE + 2, 2) == chip.peek(RAM_BASE + 2, 2) == 0x5678
 chip.bus_write(PERIPHERAL_BASE + VECTOR_REGISTER, 1, VECTOR)
 wired = chip.peripheral(number)
@@ -879,7 +883,7 @@ chip.set_tracing(exceptions=True)
 chip.run_for(1000)
 assert reasons == [mc683xx.Invalid.PROTECTED]
 assert vectors == [BUS_ERROR]
-assert chip.read_memory(ram, 0, 2) == b"\x00\x00"
+assert chip.memory(ram, 0, 2) == b"\x00\x00"
 assert any(isinstance(event, mc683xx.Event.Exception) for event in chip.take_events())
 ```
 

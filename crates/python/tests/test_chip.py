@@ -189,7 +189,7 @@ def test_bus_error_from_a_peripheral_takes_the_exception():
     # a format $C frame: its format and vector word at SP + 6 (CPU32RM
     # 6.4.3)
     sp = chip.read_register("A7")
-    (word,) = struct.unpack(">H", chip.read_memory(ram, sp - RAM_BASE + 6, 2))
+    (word,) = struct.unpack(">H", chip.memory(ram, sp - RAM_BASE + 6, 2))
     assert word == 0xC000 | 4 * BUS_ERROR
 
 
@@ -384,11 +384,16 @@ def test_registers_and_memory():
         chip.write_register("SR", 0x10000)
     with pytest.raises(ValueError):
         chip.read_register("D8")
-    chip.write_memory(ram, 0x10, b"\x01\x02")
-    assert chip.read_memory(ram, 0x10, 2) == b"\x01\x02"
+    chip.set_memory(ram, 0x10, b"\x01\x02")
+    assert chip.memory(ram, 0x10, 2) == b"\x01\x02"
     assert len(chip.memory(ram)) == RAM_BYTES
+    assert chip.memory(ram, RAM_BYTES - 2) == chip.memory(ram)[-2:]
     with pytest.raises(IndexError):
-        chip.read_memory(ram, RAM_BYTES - 1, 2)
+        chip.memory(ram, RAM_BYTES - 1, 2)
+    with pytest.raises(IndexError):
+        chip.memory(ram, RAM_BYTES + 1)
+    with pytest.raises(IndexError):
+        chip.set_memory(ram, RAM_BYTES - 1, b"\x00\x00")
     with pytest.raises(IndexError):
         chip.memory(7)
     assert chip.system_hz == 32768 * 256
@@ -812,7 +817,7 @@ def test_a_code_hook_stops_before_its_instruction():
     builder, ram, _ = board(ram_round_trip(), Recorder())
     chip = builder.build()
     chip.write_register("A7", RAM_BASE + 0x100)
-    chip.write_memory(ram, 0x100, struct.pack(">I", 0xCAFEF00D))
+    chip.set_memory(ram, 0x100, struct.pack(">I", 0xCAFEF00D))
     seen = []
 
     def at(instruction):
@@ -1247,7 +1252,7 @@ def test_the_host_reaches_memory_and_peripherals_through_the_decode():
     chip, ram, _ = mapped(peripheral)
     now = chip.now
     chip.bus_write(RAM_BASE, 4, 0x12345678)
-    assert chip.read_memory(ram, 0, 4) == b"\x12\x34\x56\x78"
+    assert chip.memory(ram, 0, 4) == b"\x12\x34\x56\x78"
     assert chip.bus_read(RAM_BASE, 4) == 0x12345678
     assert chip.peek(RAM_BASE + 2, 2) == 0x5678
     assert chip.peek(RAM_BASE + 2, 2, mc683xx.FunctionCode.SUPERVISOR_PROGRAM) == 0x5678

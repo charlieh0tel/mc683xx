@@ -821,8 +821,8 @@ chip beside `Mc68331`.
   bytes, `function_code` a `FunctionCode`, `SUPERVISOR_DATA` by default; `BusError`, `UnpeekableError`),
   `reset()`, `reset_for(ResetCause)`,
   `now`, `halted`, `exception_taken` (a vector), `read_register`,
-  `write_register`, `registers()`, `memory`, `read_memory`,
-  `write_memory` (a memory's own bytes, by offset), `peripheral(n)` (the
+  `write_register`, `registers()`, `memory(n, offset, length)`,
+  `set_memory` (a memory's own bytes, by offset), `peripheral(n)` (the
   object back), `set_interrupt_pin`, `set_pins(Port, value, mask)`,
   `outputs(Port)`, `port(Port)` (a `PortState`),
   `take_port_changes()` (`(now, Port, driven, levels)`, every port's),
