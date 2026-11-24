@@ -340,6 +340,9 @@ def test_a_fault_stops_the_run_with_nothing_stacked():
     assert (fault.kind, fault.cause) == (mc683xx.BusCycleKind.READ, mc683xx.FaultCause.BUS_ERROR)
     assert (fault.address, fault.size, fault.pc) == (0x90000000, 4, CODE + 2)
     assert fault.registers["D1"] == 3
+    # str() is Rust's Display, the address and PC in full
+    assert str(fault) == "bus error: read of 4 bytes at 0x90000000 in supervisor-data, pc 0x31400002"
+    assert str(mc683xx.End.Fault(fault)) == "fault"
     assert cpu.read_register("PC") == CODE + 2
     assert cpu.read_register("SSP") == STACK - 4
 

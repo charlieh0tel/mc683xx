@@ -47,6 +47,11 @@ impl HookIdView {
     fn __repr__(&self) -> String {
         opaque_repr("HookId", &self.0)
     }
+
+    /// Rust's `Display`: `hook 3`.
+    fn __str__(&self) -> String {
+        self.0.to_string()
+    }
 }
 
 /// Every register in `registers` by name.

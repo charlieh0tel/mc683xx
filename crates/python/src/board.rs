@@ -583,6 +583,11 @@ impl ObserverIdView {
     fn __repr__(&self) -> String {
         opaque_repr("ObserverId", &self.0)
     }
+
+    /// Rust's `Display`: `observer 2`.
+    fn __str__(&self) -> String {
+        self.0.to_string()
+    }
 }
 
 /// A Python observer on a net (`Board.observe`).

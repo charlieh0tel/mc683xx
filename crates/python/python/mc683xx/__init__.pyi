@@ -468,7 +468,8 @@ class PeripheralId:
 
 @final
 class HookId:
-    """A hook, as `add_*_hook` returns it and `Stop.Hook` carries it."""
+    """A hook, as `add_*_hook` returns it and `Stop.Hook` carries it;
+    `str()` is `hook 3`."""
 
     def __hash__(self) -> int: ...
 
@@ -1092,7 +1093,9 @@ class FaultCause:
 @final
 class FaultStop:
     """A fault that stopped a run (`set_stop_on_fault`), as `End.Fault`
-    and a chip's `fault_stop` carry it."""
+    and a chip's `fault_stop` carry it; `str()` is Rust's `Display`,
+    `bus error: write of 2 bytes at 0x90000000 in supervisor-data, pc
+    0x00001000`."""
 
     def __hash__(self) -> int: ...
     @property
@@ -1453,7 +1456,8 @@ class External:
 
 @final
 class ObserverId:
-    """An observer attached to a net, as `Board.observe` returns it."""
+    """An observer attached to a net, as `Board.observe` returns it;
+    `str()` is `observer 2`."""
 
     def __hash__(self) -> int: ...
 

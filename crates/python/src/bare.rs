@@ -250,6 +250,12 @@ impl FaultStopView {
         hooks::register_dictionary(py, &self.0.registers)
     }
 
+    /// Rust's `Display`: `bus error: write of 2 bytes at 0x90000000 in
+    /// supervisor-data, pc 0x00001000`.
+    fn __str__(&self) -> String {
+        self.0.to_string()
+    }
+
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         Ok(format!(
             "FaultStop(kind={}, cause={}, address={:#010x}, size={}, function_code={}, pc={:#010x})",

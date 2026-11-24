@@ -826,6 +826,7 @@ def test_a_code_hook_stops_before_its_instruction():
 
     hook = chip.add_code_hook(at, AFTER_WIRING, AFTER_WIRING)
     assert re.fullmatch(r"HookId\(\d+\)", repr(hook))
+    assert str(hook) == "hook " + repr(hook).removeprefix("HookId(").removesuffix(")")
     run = chip.run_for(2000)
     assert run.stop == mc683xx.Stop.Hook(hook)
     assert isinstance(run.stop, mc683xx.Stop.Hook) and run.stop.hook == hook

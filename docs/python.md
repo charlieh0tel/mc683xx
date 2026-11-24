@@ -45,9 +45,11 @@ rename renames the Python name with it.  The deliberate differences:
   `Pacing`, though it has `Display` and `FromStr`: its factor is a
   number, so `Pacing.Scaled(factor)` takes one and `Pacing.parse(text)`
   the text.  Such a value's `str()` is Rust's `Display` too (`Stop`,
-  `End`, `Entry`, `Pacing`: `str(Stop.Budget())` is `"budget"`);
-  `Event` and `DsackFault`, whose Rust variants a binding cannot
-  rebuild, keep the default, their `repr`.
+  `End`, `Entry`, `Pacing`: `str(Stop.Budget())` is `"budget"`), and
+  so is a struct's or an id's that has one (`FaultStop`, `HookId`,
+  `ObserverId`, `PeripheralId`: `str(hook)` is `"hook 3"`, where its
+  `repr` is `HookId(3)`); `Event` and `DsackFault`, whose Rust variants
+  a binding cannot rebuild, keep the default, their `repr`.
 - **Unknown values:** Python has a member Rust lacks:
   `Event.Unknown(now, text)`, an event the bindings cannot convert, so
   that `take_events()` hands every event over (Exceptions, below);
