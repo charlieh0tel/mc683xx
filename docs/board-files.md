@@ -724,11 +724,13 @@ re-exports another's types (`docs/host-guide.md`, Crates).
   `set_chip_selects(0xf)` and each transfer as a
   `QspiTransfer`, its time in system clocks.  `peripheral()` and `peripheral_mut()` give the model
   back (`Board::peripheral::<MappedAdapter<M>>`).  An adapted peripheral drives
-  no nets, unless its `MappedAdapter` is made `.driving(driver)`: then
-  `driver(&mut model, &mut Drive)` runs after each call that may change
-  the model (power-on, `read`, `write`, `reset`, `advance`) and drives
-  the ports the type was registered with from what the model shows (a
-  strobe's level), or stops the run.  The model implements `mc683xx_cpu32::cpu::state::Save` (`save()
+  no nets, unless its model implements `adapter::Driver` and its adapter
+  is made `.driving()`, as `adapter::Inspect` and `.inspecting()` show
+  its state: then the model's `drive(&mut Drive)` runs after each call
+  that may change the model (power-on, `reset`; a `MappedAdapter`'s
+  `read`, `write`, `advance`; a `SpiAdapter`'s transfer, select and
+  release) and drives the ports the type was registered with from what
+  the model shows (a strobe's level), or stops the run.  The model implements `mc683xx_cpu32::cpu::state::Save` (`save()
   -> bytes`, `restore(bytes)`, in its own versioned format), so it is in
   the board's snapshot, its bytes inside the adapter's own versioned
   snapshot; one that cannot save is `mc683xx_cpu32::unsavable!`, and the

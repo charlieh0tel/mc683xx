@@ -11,9 +11,10 @@
 //! system clocks for its time, reset and QSPI calls.  Its `advance`
 //! runs at the time its `next_event` gave, as a peripheral's does, where the
 //! chip calls a peripheral's at every sync point.  It drives nets only
-//! through a driver its adapter was made `driving` with, which reads the
-//! model and drives the adapter's ports after each call that may change
-//! the model; a model that needs more of the board is a [`Peripheral`].
+//! if it implements [`Driver`] and its adapter was made `driving`: its
+//! [`Driver::drive`] reads the model and drives the adapter's ports
+//! after each call that may change the model; a model that needs more
+//! of the board is a [`Peripheral`].
 //! The model
 //! implements [`Save`], so it is in the board's snapshot: one that cannot
 //! save is [`unsavable!`](mc683xx_cpu32::unsavable), and the board's save
@@ -91,8 +92,27 @@ fn inspect<D>(inspector: Option<Inspector<D>>, peripheral: &D) -> Inspection {
     inspector.map_or_else(Inspection::default, |inspect| inspect(peripheral))
 }
 
-/// A model's driver, if its adapter was made `driving`.
-type Driver<D> = fn(&mut D, &mut Drive<'_>);
+/// A model's outputs on the board, through its adapter's ports: a model
+/// of [`mc683xx_modules::peripheral`], which knows nothing of the board,
+/// drives nets through this, its adapter made `driving`.
+pub trait Driver {
+    /// Drives the adapter's ports from the model ([`Drive::drive`]), or
+    /// stops the run ([`Drive::stop`]); called after each adapter call
+    /// that may change the model.  By default nothing.
+    fn drive(&mut self, drive: &mut Drive<'_>) {
+        let _ = drive;
+    }
+}
+
+/// A model's [`Driver::drive`], if its adapter was made `driving`.
+type Driving<D> = fn(&mut D, &mut Drive<'_>);
+
+/// `driving` run on `peripheral` and `drive`, if the adapter has one.
+fn drive<D>(driving: Option<Driving<D>>, peripheral: &mut D, drive: &mut Drive<'_>) {
+    if let Some(driving) = driving {
+        driving(peripheral, drive);
+    }
+}
 
 /// A [`MappedPeripheral`] and [`Timed`] model on the bus as a peripheral.
 #[derive(Debug, Default)]
@@ -102,7 +122,7 @@ pub struct MappedAdapter<D> {
     /// Its inspection, if it shows one.
     inspector: Option<Inspector<D>>,
     /// What drives the adapter's nets from the model, if anything.
-    driver: Option<Driver<D>>,
+    driving: Option<Driving<D>>,
 }
 
 impl<D> MappedAdapter<D> {
@@ -111,7 +131,7 @@ impl<D> MappedAdapter<D> {
         Self {
             peripheral,
             inspector: None,
-            driver: None,
+            driving: None,
         }
     }
 
@@ -127,16 +147,17 @@ impl<D> MappedAdapter<D> {
         }
     }
 
-    /// It, `driver` driving its nets from the model: called with the
-    /// model and the call's [`Drive`] after each call that may change
-    /// the model (power-on, `read`, `write`, `reset`, `advance`), so a
-    /// model of [`mc683xx_modules::peripheral`], which knows nothing of
-    /// the board, drives the ports the adapter was registered with
-    /// ([`Drive::drive`]), or stops the run ([`Drive::stop`]).
+    /// It, driving its nets from the model: the model's
+    /// [`Driver::drive`] runs with the call's [`Drive`] after each call
+    /// that may change the model (power-on, `read`, `write`, `reset`,
+    /// `advance`) and drives the ports the adapter was registered with.
     #[must_use]
-    pub fn driving(self, driver: fn(&mut D, &mut Drive<'_>)) -> Self {
+    pub fn driving(self) -> Self
+    where
+        D: Driver,
+    {
         Self {
-            driver: Some(driver),
+            driving: Some(D::drive),
             ..self
         }
     }
@@ -153,9 +174,7 @@ impl<D> MappedAdapter<D> {
 
     /// The model's driver run on `drive`, if it has one.
     fn drive(&mut self, drive: &mut Drive<'_>) {
-        if let Some(driver) = self.driver {
-            driver(&mut self.peripheral, drive);
-        }
+        self::drive(self.driving, &mut self.peripheral, drive);
     }
 }
 
@@ -258,6 +277,8 @@ pub struct SpiAdapter<D> {
     peripheral: D,
     /// Its inspection, if it shows one.
     inspector: Option<Inspector<D>>,
+    /// What drives the adapter's nets from the model, if anything.
+    driving: Option<Driving<D>>,
 }
 
 impl<D> SpiAdapter<D> {
@@ -266,6 +287,7 @@ impl<D> SpiAdapter<D> {
         Self {
             peripheral,
             inspector: None,
+            driving: None,
         }
     }
 
@@ -281,6 +303,22 @@ impl<D> SpiAdapter<D> {
         }
     }
 
+    /// It, driving its nets from the model: the model's
+    /// [`Driver::drive`] runs with the call's [`Drive`] after each call
+    /// that may change the model (power-on, `reset`, `transfer`, a
+    /// select or release) and drives the ports the adapter was
+    /// registered with.
+    #[must_use]
+    pub fn driving(self) -> Self
+    where
+        D: Driver,
+    {
+        Self {
+            driving: Some(D::drive),
+            ..self
+        }
+    }
+
     /// The model.
     pub const fn peripheral(&self) -> &D {
         &self.peripheral
@@ -290,19 +328,31 @@ impl<D> SpiAdapter<D> {
     pub const fn peripheral_mut(&mut self) -> &mut D {
         &mut self.peripheral
     }
+
+    /// The model's driver run on `drive`, if it has one.
+    fn drive(&mut self, drive: &mut Drive<'_>) {
+        self::drive(self.driving, &mut self.peripheral, drive);
+    }
 }
 
 impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
+    fn power_on(&mut self, drive: &mut Drive<'_>) {
+        self.drive(drive);
+    }
+
     fn reset(&mut self, drive: &mut Drive<'_>) {
         self.peripheral.reset(cycle(drive));
+        self.drive(drive);
     }
 
     fn transfer(&mut self, transfer: Transfer, drive: &mut Drive<'_>) -> u16 {
-        self.peripheral.transfer(
+        let shifted = self.peripheral.transfer(
             QspiTransfer::new(transfer.out, transfer.bits, transfer.clock, cycle(drive))
                 .at_entry(transfer.entry)
                 .selecting(transfer.chip_selects),
-        )
+        );
+        self.drive(drive);
+        shifted
     }
 
     fn set_selected(&mut self, _: usize, selected: bool, drive: &mut Drive<'_>) {
@@ -312,6 +362,7 @@ impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
             RELEASED_LEVELS
         };
         self.peripheral.set_chip_selects(levels, cycle(drive));
+        self.drive(drive);
     }
 
     fn set_qspi_clock(&mut self, clock: QspiClock, moment: Moment) {
