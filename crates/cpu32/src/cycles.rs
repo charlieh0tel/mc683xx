@@ -128,6 +128,8 @@ pub struct Cycles(u64);
 impl Cycles {
     /// No time.
     pub const ZERO: Self = Self(0);
+    /// The most clocks there are.
+    pub const MAX: Self = Self(u64::MAX);
 
     /// `clocks` clock cycles.
     #[must_use]
@@ -217,7 +219,8 @@ mod tests {
 
     #[test]
     fn counts_saturate_on_request() {
-        let most = Cycles::from_clocks(u64::MAX);
+        let most = Cycles::MAX;
+        assert_eq!(most.clocks(), u64::MAX);
         assert_eq!(most.saturating_add(Cycles::from_clocks(1)), most);
         assert_eq!(
             Cycles::from_clocks(3).saturating_sub(Cycles::from_clocks(5)),
