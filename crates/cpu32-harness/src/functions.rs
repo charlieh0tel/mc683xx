@@ -801,8 +801,8 @@ mod tests {
                 exception: Exception::Fault(Fault::new(
                     vector,
                     Address(address),
-                    FunctionCode::SupervisorData,
                     Size::Word,
+                    FunctionCode::SupervisorData,
                     cycle,
                 )),
                 pc: 0x400,

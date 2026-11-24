@@ -156,15 +156,15 @@ pub struct Fault {
 }
 
 impl Fault {
-    /// A fault of `vector` in a cycle of `kind` at `address` in
-    /// `function_code`'s space, `size` of the operand remaining: not of
-    /// a long operand, no data, not read-modify-write.
+    /// A fault of `vector` in a cycle of `kind` at `address`, `size` of
+    /// the operand remaining, in `function_code`'s space: not of a long
+    /// operand, no data, not read-modify-write.
     #[must_use]
     pub const fn new(
         vector: Vector,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
+        function_code: FunctionCode,
         kind: BusCycleKind,
     ) -> Self {
         Self {
