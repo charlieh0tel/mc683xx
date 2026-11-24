@@ -76,6 +76,7 @@ use crate::hooks::BusCycleKind;
 use crate::hooks::HookIdView;
 use crate::mapped::Pending;
 use crate::mapped::PythonMapped;
+use crate::python::opaque_repr;
 use crate::python::repr;
 use crate::register::Register;
 use crate::requests::StopRequestView;
@@ -111,6 +112,32 @@ struct Fired {
 
 /// The hooks that fired in a core run, in order.
 type Queue = Rc<RefCell<Vec<Fired>>>;
+
+/// A peripheral on a bare `Machine`, as `add_peripheral` returns it and
+/// `remove_peripheral` takes it (Rust's `PeripheralId`).
+#[pyclass(
+    name = "PeripheralId",
+    module = "mc683xx",
+    frozen,
+    eq,
+    hash,
+    from_py_object
+)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct PeripheralIdView(PeripheralId);
+
+#[pymethods]
+impl PeripheralIdView {
+    /// `PeripheralId(3)`, from Rust's `Display`, `peripheral 3`.
+    fn __repr__(&self) -> String {
+        opaque_repr("PeripheralId", &self.0)
+    }
+
+    /// Rust's `Display`: `peripheral 3`.
+    fn __str__(&self) -> String {
+        self.0.to_string()
+    }
+}
 
 /// Why a fault was one.
 #[pyclass(
@@ -570,27 +597,25 @@ impl MachineView {
     /// and `write(cycle, value)`: it answers the cycles there that no
     /// mapped memory serves, before they land.  It saves as a chip's
     /// mapped peripheral does, through `save()` and `restore(bytes)`.
-    /// Its number, for `remove_peripheral`.
+    /// Its id, for `remove_peripheral`.
     fn add_peripheral(
         &mut self,
         begin: u32,
         end: u32,
         peripheral: &Bound<'_, PyAny>,
-    ) -> PyResult<u64> {
+    ) -> PyResult<PeripheralIdView> {
         let peripheral = PythonMapped::mapped(peripheral, self.pending.clone())?;
         let id = self
             .machine
             .add_peripheral(Address(begin)..=Address(end), Box::new(peripheral))
             .map_err(Error::from)?;
-        Ok(id.number())
+        Ok(PeripheralIdView(id))
     }
 
-    /// Takes peripheral number `peripheral` off the bus: whether there
-    /// was one.
-    fn remove_peripheral(&mut self, peripheral: u64) -> bool {
-        self.machine
-            .remove_peripheral(PeripheralId::from_number(peripheral))
-            .is_some()
+    /// Takes the peripheral `peripheral` off the bus: whether there was
+    /// one.
+    fn remove_peripheral(&mut self, peripheral: PeripheralIdView) -> bool {
+        self.machine.remove_peripheral(peripheral.0).is_some()
     }
 
     /// Register `name`: `D0`-`D7`, `A0`-`A7`, `PC`, `SR`, `CCR`, `USP`,

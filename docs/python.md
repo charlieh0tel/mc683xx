@@ -105,8 +105,9 @@ rename renames the Python name with it.  The deliberate differences:
   `background` property (`Cpu::background`, through `Mc68331::cpu`),
   as `halted` is the CPU's `Halt` (`Cpu::halted`, likewise).  `reset_halted` is
   `reset_with_breakpoint()` then `background`.
-- **Handles:** memories and peripherals are the numbers `Builder`
-  returns, not `MemoryId` and `PeripheralId`.  `Mc68331.memory(memory,
+- **Handles:** a chip's memories and peripherals are the numbers
+  `Builder` returns, not `MemoryId` and `PeripheralId`; a bare
+  `Machine`'s peripheral is an opaque `PeripheralId`, as in Rust.  `Mc68331.memory(memory,
   offset=0, length=None)` is Rust's `memory(id)`, sliced, and
   `set_memory(memory, offset, data)` writes what Rust writes through
   `memory_mut(id)`, a slice Python cannot hold (`read_memory` and
@@ -1429,9 +1430,10 @@ assert bare.read_register("D0") == 6
   no two overlapping.  A cycle no mapped memory serves and one
   peripheral covers goes to it, before it lands: the read's value is the
   peripheral's, the write is the peripheral's to keep.  It returns the
-  peripheral's number, and `remove_peripheral(peripheral)` takes it off again,
-  `False` if there was none (Rust's `PeripheralId`,
-  `remove_peripheral`).  `protect` covers a peripheral's pages too,
+  peripheral's id, an opaque `PeripheralId` (Rust's `PeripheralId`;
+  `str()` is its `Display`, `peripheral 3`), and
+  `remove_peripheral(peripheral)` takes it off again, `False` if there
+  was none.  `protect` covers a peripheral's pages too,
   mapped or not: a cycle they do not permit is a bus error before the
   peripheral sees it (`Invalid.PROTECTED`, `FaultCause.PROTECTED`), so a
   read-only peripheral needs no `BusError` of its own.  A `BusCycle` has

@@ -33,6 +33,7 @@ use crate::bare::FaultStopView;
 use crate::bare::InterceptedView;
 use crate::bare::LimitedRunView;
 use crate::bare::MachineView;
+use crate::bare::PeripheralIdView;
 use crate::board::AccessView;
 use crate::board::BoardRunView;
 use crate::board::BoardStopRequestView;
@@ -226,6 +227,7 @@ fn mc683xx(module: &Bound<'_, PyModule>) -> PyResult<()> {
     // wheel spells it; not in `__all__`, so a star import leaves it
     module.setattr("__version__", pep440_version(env!("CARGO_PKG_VERSION")))?;
     module.add_class::<MachineView>()?;
+    module.add_class::<PeripheralIdView>()?;
     module.add_class::<FaultStopView>()?;
     module.add_class::<FaultCauseKind>()?;
     module.add_class::<InterceptedView>()?;
