@@ -110,6 +110,9 @@ impl fmt::Display for Cycle {
 /// A count of system clocks: a span of the chip's time, a cost, a
 /// budget.  The CPU32RM gives every timing in clock cycles (CPU32RM 8).
 /// An instant is a [`Cycle`].
+///
+/// Its arithmetic saturates, as the board's `Span` does: `+` (and `+=`)
+/// at the most clocks there are, `-` (and `-=`) at zero.
 #[derive(
     Debug,
     Clone,
@@ -176,8 +179,16 @@ impl AddAssign for Cycles {
 impl Sub for Cycles {
     type Output = Self;
 
+    /// The difference, or zero if `other` is more.
     fn sub(self, other: Self) -> Self {
-        Self(self.0 - other.0)
+        self.saturating_sub(other)
+    }
+}
+
+impl SubAssign for Cycles {
+    /// As [`Sub`].
+    fn sub_assign(&mut self, other: Self) {
+        *self = *self - other;
     }
 }
 
@@ -229,6 +240,27 @@ mod tests {
             Cycles::from_clocks(3).saturating_sub(Cycles::from_clocks(5)),
             Cycles::ZERO
         );
+    }
+
+    #[test]
+    fn counts_saturate_at_zero_and_the_most_clocks() {
+        assert_eq!(Cycles::MAX + Cycles::from_clocks(1), Cycles::MAX);
+        assert_eq!(
+            Cycles::from_clocks(3) - Cycles::from_clocks(5),
+            Cycles::ZERO
+        );
+        assert_eq!(
+            Cycles::from_clocks(5) - Cycles::from_clocks(3),
+            Cycles::from_clocks(2)
+        );
+        let mut count = Cycles::from_clocks(3);
+        count -= Cycles::from_clocks(1);
+        assert_eq!(count, Cycles::from_clocks(2));
+        count -= Cycles::from_clocks(5);
+        assert_eq!(count, Cycles::ZERO);
+        count += Cycles::MAX;
+        count += Cycles::from_clocks(1);
+        assert_eq!(count, Cycles::MAX);
     }
 
     #[test]
