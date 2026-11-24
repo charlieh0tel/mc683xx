@@ -2,7 +2,9 @@
 //! `external.name` ([`docs/board-files.md`, Nets][board-files-net]).
 //!
 //! A chip pin's name is the chip's to check, when the board loads
-//! ([`ChipPin`]).
+//! ([`ChipPin`]); it is taken in any case and held in upper case, as
+//! the chip prints it, so one pin is one endpoint however a file
+//! writes it.
 //!
 //! [board-files-net]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/board-files.md#net
 //! [`ChipPin`]: crate::chip::ChipPin
@@ -23,7 +25,7 @@ pub(crate) enum Endpoint {
         /// The port.
         port: String,
     },
-    /// A chip pin, by the name after `chip.`: `chip.PIN`.
+    /// A chip pin, by the name after `chip.` in upper case: `chip.PIN`.
     Chip(String),
     /// A run-time endpoint the runner or host binds: `external.name`.
     External(String),
@@ -67,7 +69,7 @@ impl Endpoint {
             return None;
         }
         Some(match head {
-            CHIP => Self::Chip(tail.to_owned()),
+            CHIP => Self::Chip(tail.to_ascii_uppercase()),
             EXTERNAL => Self::External(tail.to_owned()),
             _ => Self::Peripheral {
                 peripheral: head.to_owned(),
@@ -116,6 +118,10 @@ mod tests {
         );
         assert_eq!(
             Endpoint::parse("chip.PGP0"),
+            Some(Endpoint::Chip("PGP0".to_owned()))
+        );
+        assert_eq!(
+            Endpoint::parse("chip.pgp0"),
             Some(Endpoint::Chip("PGP0".to_owned()))
         );
         assert_eq!(

@@ -700,6 +700,14 @@ fn every_mistake_names_what_is_wrong() {
             "already on net a",
         ),
         (
+            "[[net]]\nname = \"a\"\ntype = \"logic\"\nfrom = \"external.a\"\nto = [\"chip.PAI\"]\n[[net]]\nname = \"b\"\ntype = \"logic\"\nfrom = \"external.b\"\nto = [\"chip.pai\"]\n",
+            "chip.PAI is already on net a",
+        ),
+        (
+            "[[net]]\nname = \"a\"\ntype = \"logic\"\nfrom = \"chip.pe0\"\nto = [\"external.a\"]\n[[net]]\nname = \"b\"\ntype = \"logic\"\nfrom = \"chip.PE0\"\nto = [\"external.b\"]\n",
+            "chip.PE0 is already on net a",
+        ),
+        (
             "[[unconnected]]\nselect = \"CS0\"\n",
             "CS0: unconnected and ram",
         ),

@@ -58,7 +58,8 @@ pub(crate) mod sealed {
 
 /// A chip pin a net reaches, `chip.NAME` in a board file: the chip's own
 /// set, each with what it carries and which way it faces.  It prints
-/// as its name after `chip.` (`PE0`, `RESET`), and parses from it.
+/// as its name after `chip.` in upper case (`PE0`, `RESET`), and parses
+/// from it in any case.
 ///
 /// Sealed: a host cannot implement it.
 pub trait ChipPin:
