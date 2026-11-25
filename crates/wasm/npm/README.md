@@ -156,7 +156,9 @@ an ES module (TypeScript 5.8 and later); under `node16` it is an error
   `2n ** 64n - 1n`; one out of that range, or a `number`, throws.
 - Both give a `BoardRun`: `stop`, why it ended (`"budget"` its time ran
   out, `"stopped"`, `"halted"`, `"hook"`, `"requested"`,
-  `"background"`, `"fault"`, or `"unknown"` for a kind this release
+  `"background"`, `"fault"`, `"self-loop"` (a branch to itself ended
+  it; a page cannot ask for that yet), or `"unknown"` for a kind this
+  release
   does not name), and `now`.  `stop`'s TypeScript type, `StopKind`,
   lists the names but is open (`string & {}`): a minor release may
   add a kind, so a `switch` on it keeps a `default`.

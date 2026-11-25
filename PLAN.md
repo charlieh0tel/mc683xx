@@ -2745,7 +2745,8 @@ and `mc683xx.Machine` in Python (see Python).
   puts the setting back, so off it costs what it did.  The gdb stub
   reports it as `SIGTRAP` (`TargetRun::SelfLoop`), as an exception
   stop, a stop the program reached, not one asked from outside; the
-  wasm bindings, which cannot set it, name it `unknown`.
+  wasm bindings, which cannot set it, name it `"self-loop"` all the
+  same, so a page never meets an unknown stop.
 - **A stop and an end in one instruction** (review r13, N2): where an
   instruction both asks for a stop (a hook's, the bus's) and makes an
   end (a fault, an intercept, an exception stop, a self-loop),

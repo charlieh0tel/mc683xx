@@ -351,6 +351,7 @@ export type StopKind =
     | "requested"
     | "background"
     | "fault"
+    | "self-loop"
     | "unknown"
     | (string & {});
 "#;
@@ -368,6 +369,7 @@ const fn stop_name(stop: Stop) -> &'static str {
         Stop::Requested => "requested",
         Stop::Background(_) => "background",
         Stop::Fault => "fault",
+        Stop::SelfLoop => "self-loop",
         _ => "unknown",
     }
 }
@@ -533,6 +535,7 @@ mod stop_tests {
             Stop::Requested,
             Stop::Background(Entry::Breakpoint),
             Stop::Fault,
+            Stop::SelfLoop,
         ];
         for stop in stops {
             assert_eq!(stop_name(stop), stop.to_string());
