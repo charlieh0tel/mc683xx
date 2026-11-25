@@ -69,6 +69,7 @@ mod chip;
 ///         TargetRun::Quantum | TargetRun::Hook => true,
 ///         TargetRun::Halted | TargetRun::Requested | TargetRun::Fault => false,
 ///         TargetRun::Condition | TargetRun::Background(_) => false,
+///         TargetRun::SelfLoop => false,
 ///     }
 /// }
 /// ```
@@ -106,6 +107,11 @@ pub enum TargetRun {
     /// A target under BDM control entered background mode, for the
     /// entry given.
     Background(Entry),
+    /// A self-loop ended it, the host having set
+    /// [`Cpu::set_stop_at_self_loop`]: PC at the loop.
+    ///
+    /// [`Cpu::set_stop_at_self_loop`]: mc683xx_cpu32::Cpu::set_stop_at_self_loop
+    SelfLoop,
 }
 
 impl From<Stop> for TargetRun {
@@ -115,6 +121,7 @@ impl From<Stop> for TargetRun {
             Stop::Halted(_) | Stop::Background(_) => Self::Halted,
             Stop::Hook(_) => Self::Hook,
             Stop::Fault => Self::Fault,
+            Stop::SelfLoop => Self::SelfLoop,
             _ => Self::Requested,
         }
     }
@@ -444,6 +451,7 @@ impl Target for Machine {
             End::Reached | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
             End::Exception { vector, .. } => TargetRun::Exception { vector },
+            End::SelfLoop { .. } => TargetRun::SelfLoop,
             _ => TargetRun::Requested,
         })
     }

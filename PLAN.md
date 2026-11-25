@@ -2743,8 +2743,9 @@ and `mc683xx.Machine` in Python (see Python).
   flag the BRA and JMP handlers test is the setting at rest, and a
   limited run sets it to the setting or its `Limits::self_loop` and
   puts the setting back, so off it costs what it did.  The gdb stub
-  reports it as a stop request (`SIGINT`); the wasm bindings, which
-  cannot set it, name it `unknown`.
+  reports it as `SIGTRAP` (`TargetRun::SelfLoop`), as an exception
+  stop, a stop the program reached, not one asked from outside; the
+  wasm bindings, which cannot set it, name it `unknown`.
 - **A stop and an end in one instruction** (review r13, N2): where an
   instruction both asks for a stop (a hook's, the bus's) and makes an
   end (a fault, an intercept, an exception stop, a self-loop),

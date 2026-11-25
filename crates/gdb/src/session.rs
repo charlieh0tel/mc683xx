@@ -319,15 +319,16 @@ impl<T: Target> Session<'_, T> {
 }
 
 /// The signal gdb is told for a stop that was none of the stub's
-/// ([docs/gdb.md, Stops](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md#stops)): the host's hook, a stop condition or
-/// an exception stop a trap, a halt or a fault a bus error, a request
-/// an interrupt.
+/// ([docs/gdb.md, Stops](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md#stops)): the host's hook, a stop condition,
+/// an exception stop or a self-loop stop a trap, a halt or a fault a
+/// bus error, a request an interrupt.
 const fn signaled(ran: TargetRun) -> SingleThreadStopReason<u32> {
     SingleThreadStopReason::Signal(match ran {
         TargetRun::Quantum
         | TargetRun::Hook
         | TargetRun::Condition
-        | TargetRun::Exception { .. } => Signal::SIGTRAP,
+        | TargetRun::Exception { .. }
+        | TargetRun::SelfLoop => Signal::SIGTRAP,
         TargetRun::Background(Entry::DoubleBusFault { .. })
         | TargetRun::Halted
         | TargetRun::Fault => Signal::SIGBUS,

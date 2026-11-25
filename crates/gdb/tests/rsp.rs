@@ -28,6 +28,7 @@ use mc683xx_board::time::Span;
 use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::End;
 use mc683xx_cpu32::Limits;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::exception::VectorSet;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
@@ -1023,6 +1024,26 @@ fn a_bare_cpu_s_exception_stop_is_a_trap() {
     // SIGTRAP, gdb's 5
     assert_eq!(replies[0], "S05", "{replies:?}");
     assert_eq!(machine.cpu.registers.pc.0, START, "the TRAP undone");
+}
+
+#[test]
+fn a_self_loop_stop_is_a_trap() {
+    let mut machine = machine();
+    // BRA.S to itself (CPU32RM 4.4, BRA)
+    machine
+        .poke_bytes(
+            Address(START),
+            FunctionCode::SupervisorData,
+            &bytes(&[0x60fe]),
+        )
+        .unwrap();
+    machine.cpu.set_stop_at_self_loop(true);
+    let (ending, replies) = session(&mut machine, vec![packet("c"), packet("k")]);
+    assert_eq!(ending.unwrap(), Ending::Killed);
+    // SIGTRAP, gdb's 5, as an exception stop
+    assert_eq!(replies[0], "S05", "{replies:?}");
+    assert_eq!(machine.cpu.registers.pc.0, START);
+    assert_eq!(TargetRun::from(Stop::SelfLoop), TargetRun::SelfLoop);
 }
 
 #[test]

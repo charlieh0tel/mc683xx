@@ -265,8 +265,8 @@ BDM, below):
 A self-loop stop (`Limits::self_loop`, `run_limited(self_loop=True)`)
 is the stub's never: under gdb a branch to itself runs as the CPU runs
 it, and Ctrl-C stops it, unless the host set
-`set_stop_at_self_loop`, whose stop the stub reports as a stop
-request, `SIGINT`.
+`set_stop_at_self_loop`, whose stop the stub reports as `SIGTRAP`, as
+an exception stop.
 
 A signal gdb passes back on continue (`signal SIGINT`) is dropped: the
 CPU has none.
