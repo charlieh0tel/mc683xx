@@ -1330,19 +1330,27 @@ macro_rules! chip_methods {
             }
 
             /// Calls `callback(Instruction)` before each instruction at an
-            /// address from `begin` to `end`; `True` stops the run
+            /// address from `begin` to `end`, or with `opcode=(mask,
+            /// value)` before each whose first word, masked, is `value`
+            /// (Rust's `Cpu::add_opcode_hook`); `True` stops the run
             /// before it, and the next run executes it without calling the
             /// code hooks for it again.
-            #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
+            #[pyo3(signature = (callback, begin = 0, end = u32::MAX, opcode = None))]
             fn add_code_hook(
                 &mut self,
                 callback: &Bound<'_, PyAny>,
                 begin: u32,
                 end: u32,
+                opcode: Option<(u16, u16)>,
             ) -> PyResult<HookIdView> {
                 self.with_chip_mut(callback.py(), |chip, pending| {
                     let hook = hooks::hook(callback, pending.clone(), hooks::instruction)?;
-                    Ok(HookIdView(chip.cpu_control().add_code_hook(addresses(begin, end), hook)))
+                    let range = addresses(begin, end);
+                    let mut cpu = chip.cpu_control();
+                    Ok(HookIdView(match opcode {
+                        Some((mask, value)) => cpu.add_opcode_hook(range, mask, value, hook),
+                        None => cpu.add_code_hook(range, hook),
+                    }))
                 })
             }
 

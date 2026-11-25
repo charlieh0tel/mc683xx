@@ -56,6 +56,10 @@ pub struct Instruction {
     /// [`Address`]: it is one only where the code makes it one, as at a
     /// subroutine's first instruction, its return address.
     pub stack_top: Option<u32>,
+    /// Its first word, the opcode, in program space, if the core serves
+    /// it from memory (no bus cycle is run for it): [`None`] for an
+    /// instruction the bus would supply, or at an odd PC.
+    pub opcode: Option<u16>,
 }
 
 /// A bus cycle in user or supervisor space, as a memory hook sees it.

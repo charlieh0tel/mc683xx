@@ -168,6 +168,79 @@ fn a_page_without_instruction_hooks_stays_quiet_until_one_is_added() {
     assert_eq!(*code.borrow(), [CODE + 4]);
 }
 
+/// TRAP's opcodes, $4E40 to $4E4F: its mask.
+const TRAP_MASK: u16 = 0xfff0;
+
+#[test]
+fn an_opcode_hook_is_called_for_its_opcodes_alone_in_the_order_installed() {
+    // NOP, TRAP #0 into a handler of NOP, RTE, then TRAP #1
+    let mut cpu = prepared(&[NOP, TRAP, TRAP | 1], &[NOP, RTE]);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    let code = cpu.add_code_hook(Address(CODE + 2)..=Address(CODE + 2), move |instruction| {
+        into.borrow_mut()
+            .push(("code", instruction.pc.0, instruction.opcode));
+        ControlFlow::Continue(())
+    });
+    let into = Rc::clone(&seen);
+    let trap = cpu.add_opcode_hook(everywhere(), TRAP_MASK, TRAP, move |instruction| {
+        into.borrow_mut()
+            .push(("trap", instruction.pc.0, instruction.opcode));
+        ControlFlow::Break(())
+    });
+    let into = Rc::clone(&seen);
+    let rte = cpu.add_opcode_hook(everywhere(), 0xffff, RTE, move |instruction| {
+        into.borrow_mut()
+            .push(("rte", instruction.pc.0, instruction.opcode));
+        ControlFlow::Continue(())
+    });
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
+    // stopped before the TRAP, after the code hook installed before it
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(trap));
+    assert_eq!(cpu.registers.pc.0, CODE + 2);
+    // the next run executes it without calling the code hooks again
+    assert_eq!(step(&mut cpu, 3).stop, Stop::Budget);
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(trap));
+    assert_eq!(
+        *seen.borrow(),
+        [
+            ("code", CODE + 2, Some(TRAP)),
+            ("trap", CODE + 2, Some(TRAP)),
+            ("rte", HANDLER + 2, Some(RTE)),
+            ("trap", CODE + 4, Some(TRAP | 1)),
+        ]
+    );
+    // removed, its pages go quiet
+    for id in [code, trap, rte] {
+        assert!(cpu.remove_hook(id));
+    }
+    assert!(!cpu.memory.is_special());
+}
+
+#[test]
+fn an_opcode_hook_never_matches_an_instruction_the_bus_serves() {
+    let mut cpu = prepared(&[NOP], &[]);
+    cpu.registers.pc = Address(NOWHERE);
+    let calls = Rc::new(RefCell::new(0));
+    let into = Rc::clone(&calls);
+    cpu.add_opcode_hook(everywhere(), 0, 0, move |_| {
+        *into.borrow_mut() += 1;
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 1);
+    assert_eq!(*calls.borrow(), 0);
+    // a code hook there sees no opcode
+    let opcodes = log();
+    let into = Rc::clone(&opcodes);
+    cpu.add_code_hook(everywhere(), move |instruction| {
+        into.borrow_mut().push(instruction.opcode);
+        ControlFlow::Continue(())
+    });
+    cpu.registers.pc = Address(NOWHERE);
+    step(&mut cpu, 1);
+    assert_eq!(opcodes.borrow()[0], None);
+}
+
 /// MOVE.L #imm,D0: three words.
 const MOVE_IMMEDIATE_TO_D0: u16 = 0x203c;
 

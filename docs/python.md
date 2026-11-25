@@ -91,7 +91,10 @@ rename renames the Python name with it.  The deliberate differences:
   kind, pins)`, a `MemoryKind` (`Ram` or `Rom`) where Python takes a
   keyword's bool; `fixed_memory(contents, base, writable=True)`
   likewise (Rust's `(bytes, kind, base)`).  The bare `Machine`'s `map` takes the pages'
-  `permissions` too, Rust's `map` then `protect`.
+  `permissions` too, Rust's `map` then `protect`.  An opcode hook is
+  `add_code_hook(callback, begin, end, opcode=(mask, value))`, Rust's
+  sibling `add_opcode_hook(range, mask, value, hook)`: a filter on a
+  code hook, so a keyword on its method.
 - **Builtins:** an argument Rust names `id` or `bytes`, Python
   builtins, is named for what it holds: `remove_hook(hook)`,
   `unobserve(observer)`, `peripheral(peripheral)`,
@@ -869,7 +872,8 @@ assert chip.now == 0
 (both ends of the range included), `add_exception_hook(callback)` and
 `add_exception_return_hook(callback)`,
 call a Python callable with what the Rust hook sees: an `Instruction`
-(`pc`, `instruction`, `registers`, `stack_top`), a `MemoryAccess` (`address`, `size`,
+(`pc`, `instruction`, `registers`, `stack_top`, and `opcode`, its
+first word, `None` where a peripheral would supply it), a `MemoryAccess` (`address`, `size`,
 `function_code`, `value`, and `previous`, what a write replaced, read
 with no cycle from the bytes it writes to, `None` for a read, a CPU-space write or a peripheral's
 write; on the chip a
@@ -892,6 +896,16 @@ registers as the instruction began; `None` on the chip), is one
 dictionary, made at the first ask; `register(name)` reads one
 register without making it, the cheaper call in a hook that runs
 often.
+
+`add_code_hook(callback, begin, end, opcode=(mask, value))` calls
+`callback` only for an instruction whose first word, masked by `mask`,
+is `value` (`opcode=(0xFFF0, 0x4E40)` for every TRAP): the filter runs
+natively, so Python is called for the matches alone, and an
+instruction it does not match costs a page lookup and a compare.  The
+word is the one memory serves at PC, read with no cycle; an
+instruction a peripheral would supply never matches.  It is a code
+hook in all else: called in the code hooks' order, stopping the run
+before its instruction, removed by `remove_hook`.
 
 `instruction`, on an `Instruction` and on every access a hook sees
 (`MemoryAccess`, `PendingRead`, `PendingWrite`, `InvalidAccess`), is

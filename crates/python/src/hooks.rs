@@ -202,6 +202,8 @@ pub(crate) struct InstructionView {
     registers: Captured,
     /// The long word at A7 (`hooks::Instruction::stack_top`).
     stack_top: Option<u32>,
+    /// Its first word (`hooks::Instruction::opcode`).
+    opcode: Option<u16>,
 }
 
 #[pymethods]
@@ -236,6 +238,13 @@ impl InstructionView {
     #[getter]
     const fn stack_top(&self) -> Option<u32> {
         self.stack_top
+    }
+
+    /// Its first word, the opcode, if memory serves it; `None` if a
+    /// peripheral would.
+    #[getter]
+    const fn opcode(&self) -> Option<u16> {
+        self.opcode
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
@@ -959,6 +968,7 @@ pub(crate) fn owned_instruction(instruction: Instruction) -> InstructionView {
         instruction: instruction.instruction,
         registers: Captured::new(instruction.registers),
         stack_top: instruction.stack_top,
+        opcode: instruction.opcode,
     }
 }
 

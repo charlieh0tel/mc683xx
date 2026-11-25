@@ -1,7 +1,8 @@
 //! What the hooks cost the core (docs/performance.md, Hooks): kernels
-//! with a hook that never fires, one called on every instruction, a
-//! coverage elsewhere and over the sled, and installing and removing a
-//! hook.
+//! with a hook that never fires, one called on every instruction, an
+//! opcode hook elsewhere, over the sled matching nothing and matching
+//! everything, a coverage elsewhere and over the sled, and installing
+//! and removing a hook.
 
 use std::hint::black_box;
 use std::ops::ControlFlow;
@@ -30,8 +31,11 @@ const KERNELS: [&str; 3] = ["nop", "move_indirect", "clr_indirect"];
 /// The hooks a case installs.
 type Install = fn(&mut Cpu);
 
+/// An opcode no kernel runs: the F-line's last.
+const UNRUN: u16 = 0xffff;
+
 /// The cases: a name and the hooks it installs.
-const CASES: [(&str, Install); 6] = [
+const CASES: [(&str, Install); 9] = [
     ("unhooked", |_| {}),
     ("code_elsewhere", |cpu| {
         cpu.add_code_hook(ELSEWHERE, |_| ControlFlow::Continue(()));
@@ -41,6 +45,15 @@ const CASES: [(&str, Install); 6] = [
     }),
     ("code_everywhere", |cpu| {
         cpu.add_code_hook(EVERYWHERE, |_| ControlFlow::Continue(()));
+    }),
+    ("opcode_elsewhere", |cpu| {
+        cpu.add_opcode_hook(ELSEWHERE, u16::MAX, UNRUN, |_| ControlFlow::Continue(()));
+    }),
+    ("opcode_unmatched", |cpu| {
+        cpu.add_opcode_hook(SLED, u16::MAX, UNRUN, |_| ControlFlow::Continue(()));
+    }),
+    ("opcode_everywhere", |cpu| {
+        cpu.add_opcode_hook(EVERYWHERE, 0, 0, |_| ControlFlow::Continue(()));
     }),
     ("coverage_elsewhere", |cpu| {
         cpu.add_coverage(ELSEWHERE);

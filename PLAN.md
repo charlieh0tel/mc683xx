@@ -2418,6 +2418,19 @@ Adversarial review (2026-11-01):
   snapshot, as the hooks are not: it is host instrumentation, and a
   restore that rewound it would lose what the runs since showed.
   Edges (branch pairs) are deferred to 1.x, additively.
+- Opcode hooks (sc batch 7): `Cpu::add_opcode_hook(range, mask,
+  value, hook)`, a code hook called only where the instruction's first
+  word, masked, is `value`; Python's `add_code_hook(..., opcode=(mask,
+  value))`.  A sibling, not an argument to `add_code_hook`, so the
+  plain hook's callers stay as they are.  Kept in the code hooks' list
+  (one install order, one resume), with a watch bit of its own
+  (`OPCODE`): a page with plain code hooks calls them as before; a
+  page with opcode hooks alone peeks the word at PC (no cycle, so an
+  instruction from the bus never matches) and copies the registers
+  for a match only.  The filter is native because the Python call,
+  not the compare, is the cost (sc's line-A and TRAP dispatchers).
+  `Instruction::opcode` hands every code hook the word, as a hook
+  cannot read memory from Python while the run holds the chip.
 - Instruction number (sc batch 7): `Instruction`, `MemoryAccess`,
   `PendingRead`, `PendingWrite` and `InvalidAccess` carry
   `instruction`, `Cpu::instructions` as the instruction began: the

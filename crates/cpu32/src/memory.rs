@@ -180,6 +180,8 @@ pub(crate) mod watch {
     pub(crate) const PRE_WRITE: Bits = 1 << 5;
     /// A coverage covers some of it.
     pub(crate) const COVERAGE: Bits = 1 << 6;
+    /// An opcode hook, a code hook for some opcodes, covers some of it.
+    pub(crate) const OPCODE: Bits = 1 << 7;
     /// The bits that take a page's cycles off the fast path, some of
     /// them.
     pub(crate) const SLOW: Bits = READ | WRITE | PRE_READ | PRE_WRITE;

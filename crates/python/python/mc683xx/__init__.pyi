@@ -751,6 +751,10 @@ class Instruction:
         """Register `name`, as `read_register` names it."""
     @property
     def stack_top(self) -> int | None: ...
+    @property
+    def opcode(self) -> int | None:
+        """Its first word, if memory serves it; `None` if a peripheral
+        would."""
 
 @final
 class MemoryAccess:
@@ -1199,7 +1203,11 @@ class Mc68331:
     @property
     def instructions(self) -> int: ...
     def add_code_hook(
-        self, callback: Callable[[Instruction], bool | None], begin: int = 0, end: int = ...
+        self,
+        callback: Callable[[Instruction], bool | None],
+        begin: int = 0,
+        end: int = ...,
+        opcode: tuple[int, int] | None = None,
     ) -> HookId: ...
     def add_block_hook(
         self, callback: Callable[[Instruction], bool | None], begin: int = 0, end: int = ...
@@ -1288,7 +1296,11 @@ class BoardChip:
     def oc1(self) -> Output: ...
     def pwm_level(self, channel: Channel) -> bool: ...
     def add_code_hook(
-        self, callback: Callable[[Instruction], bool | None], begin: int = 0, end: int = ...
+        self,
+        callback: Callable[[Instruction], bool | None],
+        begin: int = 0,
+        end: int = ...,
+        opcode: tuple[int, int] | None = None,
     ) -> HookId: ...
     def add_block_hook(
         self, callback: Callable[[Instruction], bool | None], begin: int = 0, end: int = ...
@@ -1542,7 +1554,11 @@ class Machine:
     @property
     def exception_taken(self) -> int | None: ...
     def add_code_hook(
-        self, callback: Callable[[Instruction], bool | None], begin: int = 0, end: int = ...
+        self,
+        callback: Callable[[Instruction], bool | None],
+        begin: int = 0,
+        end: int = ...,
+        opcode: tuple[int, int] | None = None,
     ) -> HookId: ...
     def add_block_hook(
         self, callback: Callable[[Instruction], bool | None], begin: int = 0, end: int = ...

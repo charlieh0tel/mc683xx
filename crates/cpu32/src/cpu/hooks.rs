@@ -85,6 +85,49 @@ fn call<T>(hooks: &mut [Ranged<Callback<T>>], address: Address, context: &T) -> 
     stopped
 }
 
+/// The opcodes an opcode hook is called for: those whose first word,
+/// masked by `mask`, is `value`.
+#[derive(Debug, Clone, Copy)]
+struct Opcodes {
+    /// The bits compared.
+    mask: u16,
+    /// What they must be.
+    value: u16,
+}
+
+impl Opcodes {
+    /// Whether `opcode`, if known, is one of them.
+    fn matches(self, opcode: Option<u16>) -> bool {
+        opcode.is_some_and(|opcode| opcode & self.mask == self.value)
+    }
+}
+
+/// A code hook: its callback, called for every instruction in its
+/// range or, an opcode hook's, for those of some opcodes.
+struct CodeHook {
+    /// The opcodes, an opcode hook's; [`None`] for every instruction.
+    opcodes: Option<Opcodes>,
+    /// The callback.
+    callback: InstructionHook,
+}
+
+impl CodeHook {
+    /// Its [`watch`] bit.
+    const fn watch_bit(&self) -> watch::Bits {
+        if self.opcodes.is_some() {
+            watch::OPCODE
+        } else {
+            watch::CODE
+        }
+    }
+
+    /// Whether it is called for an instruction whose first word is
+    /// `opcode`, if known.
+    fn wants(&self, opcode: Option<u16>) -> bool {
+        self.opcodes.is_none_or(|opcodes| opcodes.matches(opcode))
+    }
+}
+
 /// What the pre-write hooks made of an operand write.
 pub(super) enum PreWrite {
     /// Store this value.
@@ -118,8 +161,8 @@ enum Removed {
 pub(crate) struct Hooks {
     /// The next [`HookId`].
     next: u64,
-    /// Before each instruction in range.
-    code: Vec<Ranged<InstructionHook>>,
+    /// Before each instruction in range, or each of some opcodes.
+    code: Vec<Ranged<CodeHook>>,
     /// Before each instruction in range that starts a block: the first
     /// after a change of flow, an exception, or reset.
     block: Vec<Ranged<InstructionHook>>,
@@ -191,8 +234,11 @@ impl Hooks {
             hooks.retain(|hook| of(hook) != id);
             hooks.len() != before
         }
+        if let Some(index) = self.code.iter().position(|hook| hook.id == id) {
+            let hook = self.code.remove(index);
+            return Removed::Watched(hook.range, hook.hook.watch_bit());
+        }
         let watched = [
-            (take(&mut self.code, id), watch::CODE),
             (take(&mut self.block, id), watch::BLOCK),
             (take(&mut self.pre_read, id), watch::PRE_READ),
             (take(&mut self.pre_write, id), watch::PRE_WRITE),
@@ -245,13 +291,41 @@ impl Cpu {
         range: RangeInclusive<Address>,
         hook: impl FnMut(&Instruction) -> Control + 'static,
     ) -> HookId {
+        self.add_filtered_code_hook(range, None, Box::new(hook))
+    }
+
+    /// Calls `hook` as a code hook does, but only before each
+    /// instruction at an address in `range` whose first word, the
+    /// opcode, masked by `mask`, is `value` (`0xfff0`, `0x4e40` for
+    /// every TRAP).  The opcode is the word the core's memory serves at
+    /// PC, read with no cycle, so an instruction the bus would supply (a
+    /// peripheral's) never matches.  The filter runs natively, before
+    /// the registers are copied for a call: an instruction it does not
+    /// match costs a lookup and a compare, and a page with no opcode
+    /// hook nothing.  Installed with the code hooks, it is called in
+    /// their order and stops the run as they do.
+    pub fn add_opcode_hook(
+        &mut self,
+        range: RangeInclusive<Address>,
+        mask: u16,
+        value: u16,
+        hook: impl FnMut(&Instruction) -> Control + 'static,
+    ) -> HookId {
+        let opcodes = Opcodes { mask, value };
+        self.add_filtered_code_hook(range, Some(opcodes), Box::new(hook))
+    }
+
+    /// Installs a code hook, an opcode hook if it has `opcodes`.
+    fn add_filtered_code_hook(
+        &mut self,
+        range: RangeInclusive<Address>,
+        opcodes: Option<Opcodes>,
+        callback: InstructionHook,
+    ) -> HookId {
         let id = self.hooks.allocate();
-        self.memory.add_watch(range.clone(), watch::CODE);
-        self.hooks.code.push(Ranged {
-            id,
-            range,
-            hook: Box::new(hook),
-        });
+        let hook = CodeHook { opcodes, callback };
+        self.memory.add_watch(range.clone(), hook.watch_bit());
+        self.hooks.code.push(Ranged { id, range, hook });
         self.hooks_changed();
         id
     }
@@ -518,7 +592,7 @@ impl Cpu {
         let hooks = &self.hooks;
         let ranged = |list: &[Ranged<InstructionHook>]| list.iter().any(|hook| hook.id == id);
         let memory = |list: &[Ranged<MemoryHook>]| list.iter().any(|hook| hook.id == id);
-        ranged(&hooks.code)
+        hooks.code.iter().any(|hook| hook.id == id)
             || ranged(&hooks.block)
             || hooks.pre_read.iter().any(|hook| hook.id == id)
             || hooks.pre_write.iter().any(|hook| hook.id == id)
@@ -576,13 +650,24 @@ impl Cpu {
         let watched = self.memory.watched(at);
         let resume = self.resume.take().filter(|&(address, _)| address == pc);
         let block_start = mem::take(&mut self.block_start);
-        if watched & (watch::CODE | watch::BLOCK | watch::COVERAGE) == 0 {
+        if watched & (watch::CODE | watch::OPCODE | watch::BLOCK | watch::COVERAGE) == 0 {
             self.quiet_page = self.memory.page_number(at);
             return None;
         }
         let block = block_start && watched & watch::BLOCK != 0 && resume.is_none();
-        let code =
-            watched & watch::CODE != 0 && resume.is_none_or(|(_, stage)| stage == Resume::Block);
+        let opcode = if watched & watch::OPCODE != 0 {
+            self.opcode()
+        } else {
+            None
+        };
+        // an opcode hook's page: the registers are copied for a match alone
+        let code = resume.is_none_or(|(_, stage)| stage == Resume::Block)
+            && (watched & watch::CODE != 0
+                || self.hooks.code.iter().any(|hook| {
+                    hook.hook.opcodes.is_some()
+                        && hook.range.contains(&at)
+                        && hook.hook.wants(opcode)
+                }));
         if block || code {
             let instruction = Instruction {
                 pc,
@@ -593,12 +678,13 @@ impl Cpu {
                     Address(self.registers.address(7)),
                     Size::Long,
                 ),
+                opcode: opcode.or_else(|| self.opcode()),
             };
             if block && let Some(id) = call(&mut self.hooks.block, at, &instruction) {
                 self.resume = Some((pc, Resume::Block));
                 return Some(id);
             }
-            if code && let Some(id) = call(&mut self.hooks.code, at, &instruction) {
+            if code && let Some(id) = self.call_code_hooks(at, &instruction) {
                 self.resume = Some((pc, Resume::Code));
                 return Some(id);
             }
@@ -609,6 +695,39 @@ impl Cpu {
             }
         }
         None
+    }
+}
+
+impl Cpu {
+    /// The word at PC in program space, if the core's memory serves it
+    /// and PC is even: the opcode the next instruction starts with.
+    fn opcode(&self) -> Option<u16> {
+        let pc = self.registers.pc;
+        if pc.is_odd() {
+            return None;
+        }
+        let space = Space::of(self.registers.program_space());
+        self.memory
+            .peek(space, pc, Size::Word)
+            .map(|word| word as u16)
+    }
+
+    /// Calls each code hook covering `at` that wants `instruction`'s
+    /// opcode, in the order installed; the first that stopped, if any
+    /// did.
+    fn call_code_hooks(&mut self, at: Address, instruction: &Instruction) -> Option<HookId> {
+        let mut stopped = None;
+        for hook in self
+            .hooks
+            .code
+            .iter_mut()
+            .filter(|hook| hook.range.contains(&at) && hook.hook.wants(instruction.opcode))
+        {
+            if (hook.hook.callback)(instruction).is_break() {
+                stopped.get_or_insert(hook.id);
+            }
+        }
+        stopped
     }
 }
 

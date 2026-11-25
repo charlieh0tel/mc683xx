@@ -953,20 +953,26 @@ impl MachineView {
     }
 
     /// Calls `callback(Instruction)` before each instruction from
-    /// `begin` to `end`; it may change the CPU, and a PC it writes is
-    /// where the run goes on, the instruction not run.
-    #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
+    /// `begin` to `end`, or with `opcode=(mask, value)` before each
+    /// whose first word, masked, is `value` (Rust's
+    /// `Cpu::add_opcode_hook`); it may change the CPU, and a PC it
+    /// writes is where the run goes on, the instruction not run.
+    #[pyo3(signature = (callback, begin = 0, end = u32::MAX, opcode = None))]
     fn add_code_hook(
         &mut self,
         callback: &Bound<'_, PyAny>,
         begin: u32,
         end: u32,
+        opcode: Option<(u16, u16)>,
     ) -> PyResult<HookIdView> {
         let range = Address(begin)..=Address(end);
         self.install(
             callback,
             |seen: &Instruction| Context::Instruction(seen.clone()),
-            |cpu, hook| cpu.add_code_hook(range, hook),
+            |cpu, hook| match opcode {
+                Some((mask, value)) => cpu.add_opcode_hook(range, mask, value, hook),
+                None => cpu.add_code_hook(range, hook),
+            },
         )
     }
 

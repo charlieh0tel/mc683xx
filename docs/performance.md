@@ -85,8 +85,10 @@ working fails `make ci`.
   RAM's pages that no sled reaches, so it never fires; and
   `code_everywhere`, a Rust code hook that does nothing, called on
   every instruction.  `hooks/add_remove` adds and removes a code
-  hook on the RAM; `coverage_elsewhere` and `coverage_sled` add a
-  coverage beside the sled or over it.  From Python,
+  hook on the RAM; `opcode_elsewhere`, `opcode_unmatched` and
+  `opcode_everywhere` an opcode hook beside the sled, over it matching
+  no opcode, and everywhere matching every one; `coverage_elsewhere`
+  and `coverage_sled` add a coverage beside the sled or over it.  From Python,
   `crates/python/benches/hooks.py`
   (Python hooks, below).
 - `core/*_limited` (`benches/core.rs`): the `nop` and
@@ -793,3 +795,24 @@ unhooked); over the whole sled, a bit set for every instruction,
 `nop` takes 236-238 us and `move_indirect` 188 us: about 4 ns an
 instruction on this core, where a Python code hook that does nothing
 costs about 280 ns.
+
+An opcode hook (`Cpu::add_opcode_hook`, sc batch 7), interleaved
+three times each on performance core 2 against the code before it:
+off the instructions' pages it costs what a code hook there does
+(`nop_opcode_elsewhere` 79-80 us, `nop_code_elsewhere` 80 us,
+`nop_unhooked` 78 us).  Over the sled, matching nothing,
+`nop_opcode_unmatched` takes 153 us and `move_indirect` 112 us
+against 78 and 71 unhooked: about 7.5 and 4 ns an instruction for
+the page lookup, the opcode's peek and the compare, where a no-op
+Rust code hook on every instruction costs 20 ns.  Matching every
+instruction it costs what that code hook does (298 against 282 us).
+`Instruction::opcode`, which every code hook's argument now carries,
+costs a code hook's call about 4 ns (`nop_code_everywhere` 238 to
+282 us), against the 160 ns of a no-op Python call.  From Python
+(`hooks.py`), the opcode hook matching the loop's `move.w` is called
+for it alone at 0.165 us a call (a plain code hook 0.161 us); one
+matching nothing runs the loop at 48.5 M instructions/s, against 78
+with no hook and 5.7 with a no-op code hook.  The pages with neither
+run as before: `none` executes the same host instructions (perf
+stat, 20 M emulated instructions: 6.0266 against 6.0268 G) in 4%
+more cycles, placement, as in sc batch 6.

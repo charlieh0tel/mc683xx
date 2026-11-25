@@ -1021,6 +1021,20 @@ def test_a_limited_run_can_end_at_a_self_loop_once_it_runs():
     assert cpu.instructions == 12
 
 
+def test_an_opcode_filtered_code_hook_sees_its_opcodes_alone() -> None:
+    cpu = machine(NOP, trap(0), trap(3))
+    seen: list[tuple[int, int | None]] = []
+    every: list[int | None] = []
+    cpu.add_code_hook(lambda instruction: seen.append((instruction.pc, instruction.opcode)), opcode=(0xFFF0, 0x4E40))
+    cpu.add_code_hook(lambda instruction: every.append(instruction.opcode), CODE, CODE + 0xFF)
+    cpu.run_limited(instructions=4)
+    # the first TRAP's handler is at HANDLER, whose zero words are no TRAP
+    assert seen == [(CODE + 2, trap(0))]
+    assert every == [NOP, trap(0)]
+    with pytest.raises(OverflowError):
+        cpu.add_code_hook(lambda instruction: None, opcode=(0x10000, 0))
+
+
 def test_a_coverage_records_the_instructions_run_in_its_range():
     cpu = machine(NOP, ADDQ_LONG_1_D0, RTS)
     coverage = cpu.add_coverage(CODE, CODE + 0xFF)

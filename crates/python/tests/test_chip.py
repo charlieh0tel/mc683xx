@@ -905,6 +905,20 @@ def test_a_pc_write_after_a_stop_starts_a_block():
     assert starts[:2] == [START, second_move]
 
 
+def test_a_chip_s_opcode_hook_stops_before_its_opcode_alone():
+    builder, _, _ = board(ram_round_trip(), Recorder())
+    chip = builder.build()
+    seen = []
+    hook = chip.add_code_hook(
+        lambda instruction: seen.append(instruction.opcode) or True,
+        opcode=(0xFFFF, MOVE_WORD_ABSOLUTE_TO_D1),
+    )
+    run = chip.run_for(2000)
+    assert run.stop == mc683xx.Stop.Hook(hook)
+    assert seen == [MOVE_WORD_ABSOLUTE_TO_D1]
+    assert chip.read_register("PC") == AFTER_WIRING + 6
+
+
 def test_a_chip_s_coverage_records_its_instructions():
     builder, _, _ = board(ram_round_trip(), Recorder())
     chip = builder.build()

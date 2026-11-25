@@ -58,6 +58,17 @@ impl<'a> CpuControl<'a> {
         self.cpu.add_code_hook(range, hook)
     }
 
+    /// [`Cpu::add_opcode_hook`].
+    pub fn add_opcode_hook(
+        &mut self,
+        range: RangeInclusive<Address>,
+        mask: u16,
+        value: u16,
+        hook: impl FnMut(&Instruction) -> Control + 'static,
+    ) -> HookId {
+        self.cpu.add_opcode_hook(range, mask, value, hook)
+    }
+
     /// [`Cpu::add_block_hook`].
     pub fn add_block_hook(
         &mut self,
