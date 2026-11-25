@@ -228,7 +228,9 @@ TARGET_DIR = $(eval TARGET_DIR := $$(TARGET_DIR_READ))$(TARGET_DIR)
 # $(1) as one shell word: single-quoted, each ' in it closed, escaped
 # and reopened.
 quote = '$(subst ','\'',$(1))'
-WASM_MODULE = $(TARGET_DIR)/wasm32-unknown-unknown/release/mc683xx_wasm.wasm
+# The profile the npm package's module is built in (Cargo.toml).
+WASM_PROFILE := wasm-release
+WASM_MODULE = $(TARGET_DIR)/wasm32-unknown-unknown/$(WASM_PROFILE)/mc683xx_wasm.wasm
 # The npm package `mc683xx`, ignored: the bindings bound by wasm-bindgen
 # for the web (web/, which examples/web loads), crates/wasm/npm's Node
 # entry, README and package.json (from cargo metadata, the workspace's
@@ -245,7 +247,7 @@ wasm: npm-package
 
 # Built --locked: a release's package is built from its tag's Cargo.lock.
 npm-package:
-	cargo build --locked --release --target wasm32-unknown-unknown -p mc683xx-wasm
+	cargo build --locked --profile $(WASM_PROFILE) --target wasm32-unknown-unknown -p mc683xx-wasm
 	rm -rf $(NPM_PACKAGE)
 	$(WASM_BINDGEN) --target web --remove-name-section --out-name mc683xx \
 		--out-dir $(NPM_PACKAGE)/web $(call quote,$(WASM_MODULE))

@@ -1020,3 +1020,28 @@ line brings the module to 2.595 MB (651.5 KB) but costs
 `write` brings it to 2.581 MB (650.8 KB) but leaves
 `core/add_to_memory` 2% and `chip/peripheral_move` 3% more cycles than
 v0.8.0.  Native speed was kept.
+
+### The npm package's module
+
+Built in the release profile, the npm package's module (wasm-bindgen,
+name section removed) grew to 2.646 MB, 655.3 KB gzipped, against
+v0.8.0's 2.624 MB (646.1 KB): the inlining that the native core is
+faster for.  `make npm-package` builds it in its own profile instead,
+`wasm-release` (Cargo.toml): release in two codegen units.  Native
+builds keep the release profile.  The module, and the demo's Mandelbrot
+under Node 22 (40 to 60 runs of it on one board, best and total wall
+time, and `perf stat` of the whole process), against v0.8.0's package:
+
+| Build | Raw | Gzipped | Best run | Instructions | Cycles |
+| --- | --- | --- | --- | --- | --- |
+| v0.8.0 (release) | 2.624 MB | 646.1 KB | 13.6-14.8 ms | 1.00 | 1.00 |
+| release | 2.646 MB | 655.3 KB | 13.3-13.8 ms | 0.981 | 0.97-0.99 |
+| `wasm-release`, 2 units | 2.506 MB | 632.1 KB | 13.3-13.7 ms | 0.989 | 0.98-1.01 |
+| 4 units | 2.576 MB | 649.8 KB | 14.0 ms | 0.988 | |
+| 1 unit | 2.198 MB | 575.7 KB | 16.4-16.6 ms | 1.094 | 1.17 |
+| 1 unit, fat LTO | 2.199 MB | 575.6 KB | 16.5 ms | 1.094 | 1.17 |
+| 1 unit, fat LTO, opt-level s | 1.730 MB | 493.1 KB | 17.9-18.1 ms | 1.233 | 1.21 |
+| 1 unit, fat LTO, opt-level z | 1.664 MB | 452.5 KB | 27.2-27.8 ms | 1.768 | 1.69 |
+
+Two units is the one smaller than v0.8.0's that runs no slower.
+`wasm-opt` (binaryen) is not part of the build.

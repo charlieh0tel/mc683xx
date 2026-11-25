@@ -3916,7 +3916,10 @@ host's QSPI peripheral, which a restore keeps).
   for a peripheral's image from the host's `read`), unpaced runs
   (`Pacer` reads no clock unpaced), and paced frames from the host's
   own clock (`Board::run_frame`, the board time due by its reading,
-  bounded by a slice).  Left:
+  bounded by a slice).  The npm package's module is built in its own
+  profile, `wasm-release` (release in two codegen units), smaller than
+  release's and no slower (0.9.0 audit, docs/performance.md); native
+  builds keep release.  Left:
   - Blocking pacing: `Pacer::delay` and `wait` read `Instant::now()`
     when paced, and `BoardControl::sleep` (`control.rs`) blocks on a
     `Condvar`; both panic there, so a browser host never calls them
