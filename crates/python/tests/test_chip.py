@@ -960,7 +960,7 @@ def test_a_pre_read_hook_answers_a_read_of_ram_and_peeks_it():
     seen = []
 
     def answer(read: mc683xx.PendingRead, data: bytearray) -> None:
-        seen.append((read.address, read.size, bytes(data), read.peek(RAM_WORD, 2)))
+        seen.append((read.address, read.size, bytes(data), read.peek_bytes(RAM_WORD, 2)))
         data[:] = b"\xab\xcd"
 
     chip.add_pre_read_hook(answer, RAM_BASE, RAM_BASE + PAGE_BYTES - 1)

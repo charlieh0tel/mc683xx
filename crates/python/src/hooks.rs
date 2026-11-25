@@ -362,7 +362,7 @@ impl PendingReadView {
     /// while its hook's call is under way: `BusError` at a byte the
     /// core's memory does not serve, `RuntimeError` once the call is
     /// over.
-    fn peek<'py>(
+    fn peek_bytes<'py>(
         &self,
         py: Python<'py>,
         address: u32,
@@ -436,8 +436,8 @@ pub(crate) struct PendingWriteView {
 #[pymethods]
 impl PendingWriteView {
     /// `length` bytes of the core's memory from `address`, as
-    /// `PendingRead.peek`: memory as it is before the store.
-    fn peek<'py>(
+    /// `PendingRead.peek_bytes`: memory as it is before the store.
+    fn peek_bytes<'py>(
         &self,
         py: Python<'py>,
         address: u32,
@@ -844,7 +844,7 @@ where
 
 /// `callable`, which must be callable, as a pre-read hook, called before
 /// the read as `callable(PendingRead, bytearray)`, the memory lent to
-/// `PendingRead.peek` for the call: what it leaves in the bytearray,
+/// `PendingRead.peek_bytes` for the call: what it leaves in the bytearray,
 /// which must keep its length, answers the read.  `True`, or an
 /// exception, which waits in `pending`, stops the run.
 pub(crate) fn pre_read_hook(
@@ -869,7 +869,7 @@ pub(crate) fn pre_read_hook(
 
 /// `callable`, which must be callable, as a pre-write hook, called
 /// before the write as `callable(PendingWrite, bytearray)`, the memory
-/// lent to `PendingWrite.peek` for the call: what it leaves in the
+/// lent to `PendingWrite.peek_bytes` for the call: what it leaves in the
 /// bytearray, which must keep its length, is stored, unless it called
 /// `PendingWrite.set_dropped(True)`.  `True`, or an exception, which
 /// waits in `pending`, stops the run; after an exception neither the

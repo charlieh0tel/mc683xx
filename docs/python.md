@@ -1653,8 +1653,8 @@ write takes effect:
 | Hook | Called | A register or memory write |
 | --- | --- | --- |
 | code, block | before the instruction | is seen by it; a PC write redirects, the instruction at the old PC not run, and the hooks at the new PC are called |
-| pre-read | within the run, before the read's first cycle | a change to its `data` answers the read, not stored; it reads memory with `PendingRead.peek`, and a call into the machine raises `RuntimeError` |
-| pre-write | within the run, before the write's first cycle | a change to its `data` is what is stored, and `set_dropped(True)` stores nothing; as a pre-read hook, it reads memory with `PendingWrite.peek`, and a call into the machine raises `RuntimeError` |
+| pre-read | within the run, before the read's first cycle | a change to its `data` answers the read, not stored; it reads memory with `PendingRead.peek_bytes`, and a call into the machine raises `RuntimeError` |
+| pre-write | within the run, before the write's first cycle | a change to its `data` is what is stored, and `set_dropped(True)` stores nothing; as a pre-read hook, it reads memory with `PendingWrite.peek_bytes`, and a call into the machine raises `RuntimeError` |
 | read, write | once the instruction has completed (a write hook sees memory written) | lands after the instruction, before the next |
 | invalid access | once the bus error exception is taken, PC the handler's (or the run stopped for it, with `stop_on_fault`) | lands before the handler's first instruction |
 | exception | once the frame is stacked and PC is the handler's | lands before the handler runs; writing SSP, SR and PC from the frame returns past it |
@@ -1668,7 +1668,7 @@ before each operand read of a byte in the range that the core's memory
 is one call), and what the callable leaves in it, at the same length,
 answers the read, and is not stored.  A `PendingRead` has `address`,
 `size`, `function_code`, `pc` and `stacking`, and
-`peek(address, length)`, the core's memory as a debugger reads it
+`peek_bytes(address, length)`, the core's memory as a debugger reads it
 (supervisor space, no cycle, no peripheral), during the call: another
 register the firmware keeps in RAM, a port's image, say.  It is a
 device model's way to answer what the firmware reads of RAM.  A long
@@ -1685,7 +1685,7 @@ calls (size 2 each); on the bare `Machine`, which sees a long once,
 one of each.  The read hooks see the cycles after it, with the values `data` gave
 them.  On the bare `Machine`, unlike its other hooks, it runs within
 the run, so a call into the machine raises `RuntimeError`, and memory
-is `PendingRead.peek`'s; `True` stops the run once the
+is `PendingRead.peek_bytes`'s; `True` stops the run once the
 instruction completes, `End.Stop(Stop.Hook(hook))`, unless the
 instruction ended the run otherwise, as in Rust: a fault stop
 (`End.Fault`), an exception stop (`End.Exception`) or a self-loop
@@ -1698,7 +1698,7 @@ bare.poke_bytes(0x6000, struct.pack(">H", 0x1111))
 
 def status(read: mc683xx.PendingRead, data: bytearray) -> None:
     """A device model's status word, from the image at 0x6100."""
-    (image,) = struct.unpack(">H", read.peek(0x6100, 2))
+    (image,) = struct.unpack(">H", read.peek_bytes(0x6100, 2))
     data[:] = struct.pack(">H", image ^ 0x3333)
 
 
@@ -1723,7 +1723,7 @@ included (`stacking`).  `data` is a bytearray copy of the bytes to be
 written; what the callable leaves in it, at the same length, is
 stored, unless it calls `write.set_dropped(True)`, when nothing is.  A
 `PendingWrite` has `address`, `size`, `function_code`, `pc`,
-`stacking`, `dropped` and `peek(address, length)`, memory as it is
+`stacking`, `dropped` and `peek_bytes(address, length)`, memory as it is
 before the store; `set_dropped` and `peek` raise `RuntimeError` once
 the call is over.  Hooks covering the write are called in the order
 installed, each seeing the bytes and the drop the earlier left (a later

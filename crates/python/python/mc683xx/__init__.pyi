@@ -811,7 +811,7 @@ class PendingRead:
     @property
     def size(self) -> int:
         """1, 2 or 4: the operand's bytes, however many cycles."""
-    def peek(self, address: int, length: int) -> bytes:
+    def peek_bytes(self, address: int, length: int) -> bytes:
         """`length` bytes of the core's memory from `address`, as a
         debugger reads them (supervisor space, no cycle, no peripheral),
         within the hook's call: `BusError` at a byte the core's memory
@@ -837,9 +837,9 @@ class PendingWrite:
     @property
     def size(self) -> int:
         """1, 2 or 4: the operand's bytes, however many cycles."""
-    def peek(self, address: int, length: int) -> bytes:
+    def peek_bytes(self, address: int, length: int) -> bytes:
         """`length` bytes of the core's memory from `address`, as
-        `PendingRead.peek`: memory as it is before the store."""
+        `PendingRead.peek_bytes`: memory as it is before the store."""
     @property
     def dropped(self) -> bool:
         """Whether the store is dropped: by this hook or one before it."""

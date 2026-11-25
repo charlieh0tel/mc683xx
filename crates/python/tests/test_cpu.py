@@ -257,7 +257,7 @@ def test_a_pre_read_hook_answers_the_long_from_its_copy_and_peeks_memory():
 
     def answer(read: mc683xx.PendingRead, data: bytearray) -> None:
         seen.append((read.address, read.size, bytes(data), read.stacking))
-        data[3:] = read.peek(0x2100, 1)
+        data[3:] = read.peek_bytes(0x2100, 1)
         kept.append(read)
 
     cpu.add_pre_read_hook(answer, 0x2003, 0x2003)
@@ -266,13 +266,13 @@ def test_a_pre_read_hook_answers_the_long_from_its_copy_and_peeks_memory():
     assert seen == [(0x2000, 4, b"\x11\x11\x22\x22", False)]
     assert cpu.peek_bytes(0x2000, 4) == bytes.fromhex("11112222")
     with pytest.raises(RuntimeError, match="within its hook's call"):
-        kept[0].peek(0x2100, 1)
+        kept[0].peek_bytes(0x2100, 1)
 
 
 def test_a_pre_read_hook_s_peek_past_memory_raises_and_calling_the_machine_raises():
     cpu = machine(MOVE_WORD_A0_TO_D0, RTS)
     cpu.write_register("A0", 0x2000)
-    cpu.add_pre_read_hook(lambda read, data: read.peek(0xF00000, 2), 0x2000, 0x2001)
+    cpu.add_pre_read_hook(lambda read, data: read.peek_bytes(0xF00000, 2), 0x2000, 0x2001)
     with pytest.raises(mc683xx.BusError):
         cpu.run_limited(reach=RETURN)
     cpu2 = machine(MOVE_WORD_A0_TO_D0, RTS)
@@ -305,7 +305,7 @@ def test_a_pre_write_hook_replaces_the_long_before_the_write_hook_sees_it():
     kept = []
 
     def replace(write: mc683xx.PendingWrite, data: bytearray) -> None:
-        seen.append((write.address, write.size, bytes(data), write.peek(0x2000, 4), write.dropped))
+        seen.append((write.address, write.size, bytes(data), write.peek_bytes(0x2000, 4), write.dropped))
         data[3] = 0x99
         kept.append(write)
 
@@ -319,7 +319,7 @@ def test_a_pre_write_hook_replaces_the_long_before_the_write_hook_sees_it():
     with pytest.raises(RuntimeError, match="within its hook's call"):
         kept[0].set_dropped(True)
     with pytest.raises(RuntimeError, match="within its hook's call"):
-        kept[0].peek(0x2000, 1)
+        kept[0].peek_bytes(0x2000, 1)
 
 
 def test_a_dropped_store_writes_nothing_and_a_later_hook_sees_the_drop():
