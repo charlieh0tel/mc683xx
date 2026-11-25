@@ -1,7 +1,10 @@
 //! What the hooks cost the core (docs/performance.md, Hooks): kernels
-//! with a hook that never fires, one called on every instruction, a
-//! coverage elsewhere and over the sled, and installing and removing a
-//! hook.
+//! with a hook that never fires, one called on every instruction, an
+//! opcode hook elsewhere, over the sled matching nothing and matching
+//! everything, an execute coverage elsewhere and over the sled, a read
+//! coverage over the data the kernels read and a write coverage over
+//! what they write, and installing
+//! and removing a hook.
 
 use std::hint::black_box;
 use std::ops::ControlFlow;
@@ -14,12 +17,17 @@ use criterion::criterion_main;
 use mc683xx_bench::bare;
 use mc683xx_bench::kernel;
 use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::hooks::CoverageKind;
 use mc683xx_target::Address;
 
 /// A range on the RAM's page tables that no kernel's sled reaches.
 const ELSEWHERE: RangeInclusive<Address> = Address(0x3_8000)..=Address(0x3_8001);
 /// The sleds' addresses.
 const SLED: RangeInclusive<Address> = Address(bare::CODE)..=Address(0x1_ffff);
+/// The data the indirect kernels read, at their A0.
+const DATA: RangeInclusive<Address> = Address(0x2_0000)..=Address(0x2_00ff);
+/// The output they write, at their A1.
+const OUTPUT: RangeInclusive<Address> = Address(0x3_0000)..=Address(0x3_00ff);
 /// Every address.
 const EVERYWHERE: RangeInclusive<Address> = Address(0)..=Address(u32::MAX);
 
@@ -30,8 +38,11 @@ const KERNELS: [&str; 3] = ["nop", "move_indirect", "clr_indirect"];
 /// The hooks a case installs.
 type Install = fn(&mut Cpu);
 
+/// An opcode no kernel runs: the F-line's last.
+const UNRUN: u16 = 0xffff;
+
 /// The cases: a name and the hooks it installs.
-const CASES: [(&str, Install); 6] = [
+const CASES: [(&str, Install); 11] = [
     ("unhooked", |_| {}),
     ("code_elsewhere", |cpu| {
         cpu.add_code_hook(ELSEWHERE, |_| ControlFlow::Continue(()));
@@ -42,11 +53,26 @@ const CASES: [(&str, Install); 6] = [
     ("code_everywhere", |cpu| {
         cpu.add_code_hook(EVERYWHERE, |_| ControlFlow::Continue(()));
     }),
+    ("opcode_elsewhere", |cpu| {
+        cpu.add_opcode_hook(ELSEWHERE, u16::MAX, UNRUN, |_| ControlFlow::Continue(()));
+    }),
+    ("opcode_unmatched", |cpu| {
+        cpu.add_opcode_hook(SLED, u16::MAX, UNRUN, |_| ControlFlow::Continue(()));
+    }),
+    ("opcode_everywhere", |cpu| {
+        cpu.add_opcode_hook(EVERYWHERE, 0, 0, |_| ControlFlow::Continue(()));
+    }),
     ("coverage_elsewhere", |cpu| {
-        cpu.add_coverage(ELSEWHERE);
+        cpu.add_coverage(ELSEWHERE, CoverageKind::Execute);
     }),
     ("coverage_sled", |cpu| {
-        cpu.add_coverage(SLED);
+        cpu.add_coverage(SLED, CoverageKind::Execute);
+    }),
+    ("read_coverage_data", |cpu| {
+        cpu.add_coverage(DATA, CoverageKind::Read);
+    }),
+    ("write_coverage_output", |cpu| {
+        cpu.add_coverage(OUTPUT, CoverageKind::Write);
     }),
 ];
 

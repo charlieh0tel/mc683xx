@@ -14,6 +14,7 @@ use super::Cpu;
 use crate::hooks::Control;
 use crate::hooks::Coverage;
 use crate::hooks::CoverageId;
+use crate::hooks::CoverageKind;
 use crate::hooks::ExceptionEntry;
 use crate::hooks::ExceptionReturn;
 use crate::hooks::HookId;
@@ -56,6 +57,17 @@ impl<'a> CpuControl<'a> {
         hook: impl FnMut(&Instruction) -> Control + 'static,
     ) -> HookId {
         self.cpu.add_code_hook(range, hook)
+    }
+
+    /// [`Cpu::add_opcode_hook`].
+    pub fn add_opcode_hook(
+        &mut self,
+        range: RangeInclusive<Address>,
+        mask: u16,
+        value: u16,
+        hook: impl FnMut(&Instruction) -> Control + 'static,
+    ) -> HookId {
+        self.cpu.add_opcode_hook(range, mask, value, hook)
     }
 
     /// [`Cpu::add_block_hook`].
@@ -134,8 +146,12 @@ impl<'a> CpuControl<'a> {
     }
 
     /// [`Cpu::add_coverage`].
-    pub fn add_coverage(&mut self, range: RangeInclusive<Address>) -> CoverageId {
-        self.cpu.add_coverage(range)
+    pub fn add_coverage(
+        &mut self,
+        range: RangeInclusive<Address>,
+        kind: CoverageKind,
+    ) -> CoverageId {
+        self.cpu.add_coverage(range, kind)
     }
 
     /// [`Cpu::clear_coverage`].
@@ -155,6 +171,14 @@ impl<'a> CpuControl<'a> {
     /// them, and sees them again when the instruction reruns.
     pub fn set_stop_on_fault(&mut self, stop: bool) {
         self.cpu.set_stop_on_fault(stop);
+    }
+
+    /// [`Cpu::set_stop_at_self_loop`]: a chip's or a board's run then
+    /// ends [`Stop::SelfLoop`](crate::cpu::Stop::SelfLoop) once a BRA or
+    /// JMP to itself has run, PC at it, as firmware idles waiting for an
+    /// interrupt.
+    pub fn set_stop_at_self_loop(&mut self, stop: bool) {
+        self.cpu.set_stop_at_self_loop(stop);
     }
 
     /// The permissions of `length` bytes from `start` in `space`, as

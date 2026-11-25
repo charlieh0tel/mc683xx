@@ -10,6 +10,7 @@ use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::Frequency;
 use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::hooks::CoverageKind;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory;
 use mc683xx_cpu32::memory::MemoryKind;
@@ -524,6 +525,8 @@ pub(crate) enum Stop {
     /// A fault stopped it rather than being taken (`set_stop_on_fault`):
     /// `fault_stop` says which.
     Fault(),
+    /// A self-loop ran (`set_stop_at_self_loop`): PC at it.
+    SelfLoop(),
 }
 
 /// Why the CPU entered background mode (Rust's
@@ -596,6 +599,7 @@ impl From<Stop> for mc683xx_cpu32::Stop {
             Stop::Requested() => Self::Requested,
             Stop::Background { entry } => Self::Background(entry.into()),
             Stop::Fault() => Self::Fault,
+            Stop::SelfLoop() => Self::SelfLoop,
         }
     }
 }
@@ -616,6 +620,7 @@ impl Stop {
             Self::Requested() => "Stop.Requested()".to_owned(),
             Self::Background { entry } => format!("Stop.Background({})", entry.__repr__()),
             Self::Fault() => "Stop.Fault()".to_owned(),
+            Self::SelfLoop() => "Stop.SelfLoop()".to_owned(),
         })
     }
 }
@@ -640,6 +645,7 @@ impl TryFrom<mc683xx_cpu32::Stop> for Stop {
                 entry: entry.into(),
             },
             mc683xx_cpu32::Stop::Fault => Self::Fault(),
+            mc683xx_cpu32::Stop::SelfLoop => Self::SelfLoop(),
             other => return Err(Error::run_end(other)),
         })
     }
@@ -1330,19 +1336,27 @@ macro_rules! chip_methods {
             }
 
             /// Calls `callback(Instruction)` before each instruction at an
-            /// address from `begin` to `end`; `True` stops the run
+            /// address from `begin` to `end`, or with `opcode=(mask,
+            /// value)` before each whose first word, masked, is `value`
+            /// (Rust's `Cpu::add_opcode_hook`); `True` stops the run
             /// before it, and the next run executes it without calling the
             /// code hooks for it again.
-            #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
+            #[pyo3(signature = (callback, begin = 0, end = u32::MAX, opcode = None))]
             fn add_code_hook(
                 &mut self,
                 callback: &Bound<'_, PyAny>,
                 begin: u32,
                 end: u32,
+                opcode: Option<(u16, u16)>,
             ) -> PyResult<HookIdView> {
                 self.with_chip_mut(callback.py(), |chip, pending| {
                     let hook = hooks::hook(callback, pending.clone(), hooks::instruction)?;
-                    Ok(HookIdView(chip.cpu_control().add_code_hook(addresses(begin, end), hook)))
+                    let range = addresses(begin, end);
+                    let mut cpu = chip.cpu_control();
+                    Ok(HookIdView(match opcode {
+                        Some((mask, value)) => cpu.add_opcode_hook(range, mask, value, hook),
+                        None => cpu.add_code_hook(range, hook),
+                    }))
                 })
             }
 
@@ -1476,23 +1490,27 @@ macro_rules! chip_methods {
                 self.with_chip_mut(py, |chip, _| Ok(chip.cpu_control().remove_hook(hook.0)))
             }
 
-            /// Records the address of each instruction from `begin` to
-            /// `end`, both included, on the address lines, as it
-            /// executes (Rust's `Cpu::add_coverage`): a bit for each
-            /// word of the range.  Not saved by `save`.
+            /// Records what `begin` to `end`, both included, on the
+            /// address lines, sees of `kind` (Rust's
+            /// `Cpu::add_coverage`): `"execute"`, each instruction's
+            /// address as it executes, `"read"` or `"write"`, each byte
+            /// an operand read or write cycle reaches; a `ValueError`
+            /// for another.  Not saved by `save`.
             fn add_coverage(
                 &mut self,
                 py: Python<'_>,
                 begin: u32,
                 end: u32,
+                kind: &str,
             ) -> PyResult<CoverageIdView> {
+                let kind = kind.parse::<CoverageKind>().map_err(Error::from)?;
                 self.with_chip_mut(py, |chip, _| {
-                    Ok(CoverageIdView(chip.cpu_control().add_coverage(addresses(begin, end))))
+                    Ok(CoverageIdView(chip.cpu_control().add_coverage(addresses(begin, end), kind)))
                 })
             }
 
-            /// The addresses of the instructions `coverage` recorded, as a
-            /// set; `None` if it was removed.
+            /// The addresses `coverage` recorded, as a set; `None` if it
+            /// was removed.
             fn coverage<'py>(
                 &self,
                 py: Python<'py>,
@@ -1541,6 +1559,23 @@ macro_rules! chip_methods {
             #[getter]
             fn stops_on_fault(&self, py: Python<'_>) -> PyResult<bool> {
                 self.with_chip(py, |chip| Ok(chip.cpu().stops_on_fault()))
+            }
+
+            /// Whether a run ends (`Stop.SelfLoop()`) once a BRA or JMP
+            /// to itself has run, PC at it, as firmware idles waiting for
+            /// an interrupt (Rust's `Cpu::set_stop_at_self_loop`).  Off at
+            /// first.
+            fn set_stop_at_self_loop(&mut self, py: Python<'_>, stop: bool) -> PyResult<()> {
+                self.with_chip_mut(py, |chip, _| {
+                    chip.cpu_control().set_stop_at_self_loop(stop);
+                    Ok(())
+                })
+            }
+
+            /// Whether a run ends at a self-loop (`set_stop_at_self_loop`).
+            #[getter]
+            fn stops_at_self_loop(&self, py: Python<'_>) -> PyResult<bool> {
+                self.with_chip(py, |chip| Ok(chip.cpu().stops_at_self_loop()))
             }
 
             /// The fault the last run stopped for (`Stop.Fault()`),

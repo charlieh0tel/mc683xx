@@ -2405,10 +2405,10 @@ Adversarial review (2026-11-01):
   allocated slab, 15 us on 256 Kbytes, now 80 ns).  Invalid access
   and exception hooks need no flag: bus errors and exceptions are
   slow already.
-- Coverage (sc batch 6): `Cpu::add_coverage(range) -> CoverageId`
-  records natively the address of each instruction executed in the
-  range, a bit for each word (64 Kbytes a Mbyte of range, the end
-  clamped to the address lines), read out as a `Coverage`
+- Coverage (sc batch 6, kinds sc batch 7): `Cpu::add_coverage(range,
+  kind) -> CoverageId`; `CoverageKind::Execute` records natively the
+  address of each instruction executed in the range, a bit for each
+  word, read out as a `Coverage`
   (`addresses`, `contains`), cleared, removed; on `CpuControl` too, so
   the chip and board have it.  It sets a page watch bit of its own, so
   an instruction off its pages costs what it did (the quiet page) and
@@ -2418,6 +2418,60 @@ Adversarial review (2026-11-01):
   snapshot, as the hooks are not: it is host instrumentation, and a
   restore that rewound it would lose what the runs since showed.
   Edges (branch pairs) are deferred to 1.x, additively.
+  Read and write kinds (sc batch 7) record a bit for each byte of
+  each cycle a read or write hook over it would see, so the two agree
+  by construction: memory's and a peripheral's alike (a peripheral's
+  register map is what a host most wants covered), exception
+  processing's included (a vector, a frame; `MemoryAccess::stacking`
+  tells the hooks apart, a bitmap cannot, and leaving them out would
+  hide the stack's use), fetches excluded (the execute kind covers
+  code), faulted cycles and dropped stores excluded, as the hooks see
+  none.  Recorded where the read and write hooks are called, so a
+  long a bare host sees once is its four bytes.  Their own watch bits
+  take their pages off the fast path for reads (fetches included) or
+  writes alone, as a pre-read or pre-write hook's do; elsewhere no
+  cost.  Storage (review r13, R2): a page's bits are allocated at the
+  first set, in a two-level table (slabs of 1024 pages from the
+  range's first page, each a page's bits, both allocated at their
+  first record), the page last recorded in held out of it, so a
+  record there, as most are, is a compare and a store: 0.9 ns an
+  instruction over the flat bitmap on an execute coverage of the
+  sled, where the table alone cost 2.3 ns and a `BTreeMap` 4.7 ns.  So a
+  coverage over all 32 bits holds 16 Kbytes of slab pointers and what
+  it recorded rather than 256 Mbytes; the range is normalized (N1): start rounded
+  up to the kind's unit, end clamped to the address lines, a range
+  starting past either empty (`range()` then `1..=0`), as the hooks'
+  ranges past the lines match nothing.  The Python kind is a string,
+  `"execute"`, `"read"`, `"write"`: a name the host writes (python.md,
+  Names).  It replaces alpha.8's `add_coverage(range)`.
+- Opcode hooks (sc batch 7): `Cpu::add_opcode_hook(range, mask,
+  value, hook)`, a code hook called only where the instruction's first
+  word, masked, is `value`; Python's `add_code_hook(..., opcode=(mask,
+  value))`.  A sibling, not an argument to `add_code_hook`, so the
+  plain hook's callers stay as they are.  Kept in the code hooks' list
+  (one install order, one resume), with a watch bit of its own
+  (`OPCODE`): a page with plain code hooks calls them as before; a
+  page with opcode hooks reads the word at PC through the fetch page
+  the opcode fetch then reuses, or else with no cycle, so an
+  instruction from the bus never matches (decided: the filter runs
+  before the fetch, and a bus read would be a cycle of its own), and
+  copies the registers for a match only.  The filter is native
+  because the Python call, not the compare, is the cost (sc's line-A
+  and TRAP dispatchers).  `Instruction::opcode` hands an opcode
+  hook the word, as a hook cannot read memory from Python while the
+  run holds the chip; a plain code or block hook's call has `None`
+  (decided: filling it for every code hook cost a no-op Rust hook on
+  every instruction 4 ns, 238 to 282 us on `nop`, coordinator's call;
+  mask 0 gives the word for every instruction memory serves).
+- Instruction number (sc batch 7): `Instruction`, `MemoryAccess`,
+  `PendingRead`, `PendingWrite` and `InvalidAccess` carry
+  `instruction`, `Cpu::instructions` as the instruction began: the
+  instructions run before it, so an instruction's code hooks and its
+  accesses carry the same number and a host pairs them without its
+  own counter.  Exception processing within an instruction's step (its
+  own exception, a fault, a trace after it) carries that
+  instruction's number, as the count takes it in; an interrupt, taken
+  between instructions and not counted, the next instruction's.
 - When hooks run: code and block hooks before the instruction; a stop
   there leaves it unexecuted, and the next run executes it without
   calling the hooks that already ran for it.  Memory hooks after each
@@ -2681,8 +2735,28 @@ and `mc683xx.Machine` in Python (see Python).
   from memory, the instruction left unexecuted, cost every limited run
   +1.6% host instructions (`core/nop_limited`, `hooks.py`'s run with
   no hook -4%) and was not kept.  The chip and board have no `Limits`
-  for hosts, so it is the bare CPU's (Python's
-  `Machine.run_limited(self_loop=True)`).
+  for hosts; for them (review r13, R1, the owner's call) the setting
+  `Cpu::set_stop_at_self_loop`, on `CpuControl` and Python's
+  `Mc68331` and `Board.chip`, ends every run at one, `Stop::SelfLoop`
+  (a new `Stop` variant, as `set_stop_on_fault`'s `Stop::Fault`; a
+  limited run's end stays `End::SelfLoop`).  One implementation: the
+  flag the BRA and JMP handlers test is the setting at rest, and a
+  limited run sets it to the setting or its `Limits::self_loop` and
+  puts the setting back, so off it costs what it did.  The gdb stub
+  reports it as `SIGTRAP` (`TargetRun::SelfLoop`), as an exception
+  stop, a stop the program reached, not one asked from outside; the
+  wasm bindings, which cannot set it, name it `"self-loop"` all the
+  same, so a page never meets an unknown stop.
+- **A stop and an end in one instruction** (review r13, N2): where an
+  instruction both asks for a stop (a hook's, the bus's) and makes an
+  end (a fault, an intercept, an exception stop, a self-loop),
+  `LimitedRun::end` is the end, and `run_for`'s `Run::stop` the stop
+  asked first, but a fault's `Stop::Fault`, which replaces any.
+  Decided: the end wins a limited run because it says what became of
+  the instruction (undone, intercepted, not taken), which a host must
+  act on, where a hook's stop only asked to pause; the unlimited run
+  has no detail to carry, so it keeps the first stop, as before.  The
+  Python `Machine`'s in-run hooks follow (B1).
 - **Faults:** `set_stop_on_fault`: a bus or address error ends the
   run (`End::Fault`; an unlimited run, `Stop::Fault`, before any other
   stop asked for in the instruction): fetch, read or write; bus error

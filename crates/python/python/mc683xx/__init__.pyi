@@ -246,6 +246,13 @@ class Stop:
 
         __match_args__ = ()
         def __new__(cls) -> Stop.Fault: ...
+
+    @final
+    class SelfLoop(Stop):
+        """A self-loop ran (`set_stop_at_self_loop`): PC at it."""
+
+        __match_args__ = ()
+        def __new__(cls) -> Stop.SelfLoop: ...
         def __len__(self) -> int: ...
         def __getitem__(self, key: int, /) -> object: ...
 
@@ -740,6 +747,10 @@ class Instruction:
     @property
     def pc(self) -> int: ...
     @property
+    def instruction(self) -> int:
+        """Its number: the instructions run before it, as `instructions`
+        counts them, from 0."""
+    @property
     def registers(self) -> dict[str, int]:
         """Every register by name: one dictionary, made at the first
         ask."""
@@ -747,6 +758,11 @@ class Instruction:
         """Register `name`, as `read_register` names it."""
     @property
     def stack_top(self) -> int | None: ...
+    @property
+    def opcode(self) -> int | None:
+        """Its first word, for an opcode hook's call
+        (`add_code_hook(..., opcode=(mask, value))`); `None` for a plain
+        code hook's or a block hook's."""
 
 @final
 class MemoryAccess:
@@ -764,6 +780,12 @@ class MemoryAccess:
     def previous(self) -> int | None: ...
     @property
     def pc(self) -> int: ...
+    @property
+    def instruction(self) -> int:
+        """The number of the instruction it is part of, its code hooks'
+        `Instruction.instruction`; exception processing's is the number
+        of the instruction that raised it or that a trace follows, an
+        interrupt's the next instruction's."""
     @property
     def stacking(self) -> bool:
         """Whether exception processing is stacking a frame: a hook
@@ -790,7 +812,7 @@ class PendingRead:
     @property
     def size(self) -> int:
         """1, 2 or 4: the operand's bytes, however many cycles."""
-    def peek(self, address: int, length: int) -> bytes:
+    def peek_bytes(self, address: int, length: int) -> bytes:
         """`length` bytes of the core's memory from `address`, as a
         debugger reads them (supervisor space, no cycle, no peripheral),
         within the hook's call: `BusError` at a byte the core's memory
@@ -799,6 +821,9 @@ class PendingRead:
     def function_code(self) -> FunctionCode: ...
     @property
     def pc(self) -> int: ...
+    @property
+    def instruction(self) -> int:
+        """As `MemoryAccess.instruction`."""
     @property
     def stacking(self) -> bool: ...
 
@@ -813,9 +838,9 @@ class PendingWrite:
     @property
     def size(self) -> int:
         """1, 2 or 4: the operand's bytes, however many cycles."""
-    def peek(self, address: int, length: int) -> bytes:
+    def peek_bytes(self, address: int, length: int) -> bytes:
         """`length` bytes of the core's memory from `address`, as
-        `PendingRead.peek`: memory as it is before the store."""
+        `PendingRead.peek_bytes`: memory as it is before the store."""
     @property
     def dropped(self) -> bool:
         """Whether the store is dropped: by this hook or one before it."""
@@ -826,6 +851,9 @@ class PendingWrite:
     def function_code(self) -> FunctionCode: ...
     @property
     def pc(self) -> int: ...
+    @property
+    def instruction(self) -> int:
+        """As `MemoryAccess.instruction`."""
     @property
     def stacking(self) -> bool: ...
 
@@ -848,6 +876,9 @@ class InvalidAccess:
     def reason(self) -> Invalid: ...
     @property
     def pc(self) -> int: ...
+    @property
+    def instruction(self) -> int:
+        """As `MemoryAccess.instruction`."""
     @property
     def stacking(self) -> bool:
         """Whether exception processing is stacking a frame."""
@@ -1180,7 +1211,11 @@ class Mc68331:
     @property
     def instructions(self) -> int: ...
     def add_code_hook(
-        self, callback: Callable[[Instruction], bool | None], begin: int = 0, end: int = ...
+        self,
+        callback: Callable[[Instruction], bool | None],
+        begin: int = 0,
+        end: int = ...,
+        opcode: tuple[int, int] | None = None,
     ) -> HookId: ...
     def add_block_hook(
         self, callback: Callable[[Instruction], bool | None], begin: int = 0, end: int = ...
@@ -1211,10 +1246,11 @@ class Mc68331:
         self, callback: Callable[[ExceptionReturn], bool | None]
     ) -> HookId: ...
     def remove_hook(self, hook: HookId) -> bool: ...
-    def add_coverage(self, begin: int, end: int) -> CoverageId:
-        """Records the address of each instruction from `begin` to `end`
-        as it executes: a bit for each word of the range.  Not saved by
-        `save`."""
+    def add_coverage(self, begin: int, end: int, kind: str) -> CoverageId:
+        """Records what `begin` to `end` sees of `kind`: `"execute"`, each
+        instruction's address as it executes, a bit for each word;
+        `"read"` or `"write"`, each byte an operand read or write cycle
+        reaches.  `ValueError` for another kind.  Not saved by `save`."""
     def coverage(self, coverage: CoverageId) -> set[int] | None: ...
     def clear_coverage(self, coverage: CoverageId) -> bool: ...
     def remove_coverage(self, coverage: CoverageId) -> set[int] | None: ...
@@ -1223,6 +1259,9 @@ class Mc68331:
     def stops_on_fault(self) -> bool: ...
     @property
     def fault_stop(self) -> FaultStop | None: ...
+    def set_stop_at_self_loop(self, stop: bool) -> None: ...
+    @property
+    def stops_at_self_loop(self) -> bool: ...
     def protect(self, space: Space, start: int, length: int, permissions: str) -> None: ...
     def save(self) -> bytes: ...
     def restore(self, snapshot: bytes | bytearray) -> None: ...
@@ -1269,7 +1308,11 @@ class BoardChip:
     def oc1(self) -> Output: ...
     def pwm_level(self, channel: Channel) -> bool: ...
     def add_code_hook(
-        self, callback: Callable[[Instruction], bool | None], begin: int = 0, end: int = ...
+        self,
+        callback: Callable[[Instruction], bool | None],
+        begin: int = 0,
+        end: int = ...,
+        opcode: tuple[int, int] | None = None,
     ) -> HookId: ...
     def add_block_hook(
         self, callback: Callable[[Instruction], bool | None], begin: int = 0, end: int = ...
@@ -1300,10 +1343,11 @@ class BoardChip:
         self, callback: Callable[[ExceptionReturn], bool | None]
     ) -> HookId: ...
     def remove_hook(self, hook: HookId) -> bool: ...
-    def add_coverage(self, begin: int, end: int) -> CoverageId:
-        """Records the address of each instruction from `begin` to `end`
-        as it executes: a bit for each word of the range.  Not saved by
-        `save`."""
+    def add_coverage(self, begin: int, end: int, kind: str) -> CoverageId:
+        """Records what `begin` to `end` sees of `kind`: `"execute"`, each
+        instruction's address as it executes, a bit for each word;
+        `"read"` or `"write"`, each byte an operand read or write cycle
+        reaches.  `ValueError` for another kind.  Not saved by `save`."""
     def coverage(self, coverage: CoverageId) -> set[int] | None: ...
     def clear_coverage(self, coverage: CoverageId) -> bool: ...
     def remove_coverage(self, coverage: CoverageId) -> set[int] | None: ...
@@ -1312,6 +1356,9 @@ class BoardChip:
     def stops_on_fault(self) -> bool: ...
     @property
     def fault_stop(self) -> FaultStop | None: ...
+    def set_stop_at_self_loop(self, stop: bool) -> None: ...
+    @property
+    def stops_at_self_loop(self) -> bool: ...
     def protect(self, space: Space, start: int, length: int, permissions: str) -> None: ...
 
 @final
@@ -1523,7 +1570,11 @@ class Machine:
     @property
     def exception_taken(self) -> int | None: ...
     def add_code_hook(
-        self, callback: Callable[[Instruction], bool | None], begin: int = 0, end: int = ...
+        self,
+        callback: Callable[[Instruction], bool | None],
+        begin: int = 0,
+        end: int = ...,
+        opcode: tuple[int, int] | None = None,
     ) -> HookId: ...
     def add_block_hook(
         self, callback: Callable[[Instruction], bool | None], begin: int = 0, end: int = ...
@@ -1554,10 +1605,11 @@ class Machine:
         self, callback: Callable[[ExceptionReturn], bool | None]
     ) -> HookId: ...
     def remove_hook(self, hook: HookId) -> bool: ...
-    def add_coverage(self, begin: int, end: int) -> CoverageId:
-        """Records the address of each instruction from `begin` to `end`
-        as it executes: a bit for each word of the range.  Not saved by
-        `save`."""
+    def add_coverage(self, begin: int, end: int, kind: str) -> CoverageId:
+        """Records what `begin` to `end` sees of `kind`: `"execute"`, each
+        instruction's address as it executes, a bit for each word;
+        `"read"` or `"write"`, each byte an operand read or write cycle
+        reaches.  `ValueError` for another kind.  Not saved by `save`."""
     def coverage(self, coverage: CoverageId) -> set[int] | None: ...
     def clear_coverage(self, coverage: CoverageId) -> bool: ...
     def remove_coverage(self, coverage: CoverageId) -> set[int] | None: ...

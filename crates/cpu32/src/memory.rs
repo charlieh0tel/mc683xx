@@ -23,7 +23,7 @@ use mc683xx_target::Size;
 /// Table 7-2), so a page never straddles two blocks.
 pub const PAGE_BYTES: u32 = 1 << PAGE_SHIFT;
 /// log2 of [`PAGE_BYTES`].
-const PAGE_SHIFT: u32 = 11;
+pub(crate) const PAGE_SHIFT: u32 = 11;
 /// Clocks in the fastest bus cycle (CPU32RM 8.1.5).
 const FASTEST_CLOCKS: u8 = 2;
 
@@ -164,23 +164,36 @@ pub struct ParsePermissionsError(String);
 ///
 /// [PLAN.md, Hooks]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#hooks
 pub(crate) mod watch {
+    /// A page's bits.
+    pub(crate) type Bits = u16;
     /// A code hook covers some of it.
-    pub(crate) const CODE: u8 = 1;
+    pub(crate) const CODE: Bits = 1;
     /// A block hook covers some of it.
-    pub(crate) const BLOCK: u8 = 1 << 1;
+    pub(crate) const BLOCK: Bits = 1 << 1;
     /// A read hook covers some of it.
-    pub(crate) const READ: u8 = 1 << 2;
+    pub(crate) const READ: Bits = 1 << 2;
     /// A write hook covers some of it.
-    pub(crate) const WRITE: u8 = 1 << 3;
+    pub(crate) const WRITE: Bits = 1 << 3;
     /// A pre-read hook covers some of it.
-    pub(crate) const PRE_READ: u8 = 1 << 4;
+    pub(crate) const PRE_READ: Bits = 1 << 4;
     /// A pre-write hook covers some of it.
-    pub(crate) const PRE_WRITE: u8 = 1 << 5;
-    /// A coverage covers some of it.
-    pub(crate) const COVERAGE: u8 = 1 << 6;
+    pub(crate) const PRE_WRITE: Bits = 1 << 5;
+    /// An execute coverage covers some of it.
+    pub(crate) const EXECUTE_COVERAGE: Bits = 1 << 6;
+    /// An opcode hook, a code hook for some opcodes, covers some of it.
+    pub(crate) const OPCODE: Bits = 1 << 7;
+    /// A read coverage covers some of it.
+    pub(crate) const READ_COVERAGE: Bits = 1 << 8;
+    /// A write coverage covers some of it.
+    pub(crate) const WRITE_COVERAGE: Bits = 1 << 9;
+    /// The bits that take a page's reads off the fast path, fetches
+    /// included: a read or write hook takes both.
+    pub(crate) const SLOW_READ: Bits = READ | WRITE | PRE_READ | READ_COVERAGE;
+    /// The bits that take a page's writes off the fast path.
+    pub(crate) const SLOW_WRITE: Bits = READ | WRITE | PRE_WRITE | WRITE_COVERAGE;
     /// The bits that take a page's cycles off the fast path, some of
     /// them.
-    pub(crate) const SLOW: u8 = READ | WRITE | PRE_READ | PRE_WRITE;
+    pub(crate) const SLOW: Bits = SLOW_READ | SLOW_WRITE;
 }
 
 /// A region of host memory the core holds, as [`Memory::add_region`]
@@ -388,7 +401,7 @@ struct Slab {
     /// Each page's permissions, by [`Space::index`].
     permissions: [[Permissions; SLAB_PAGES]; 2],
     /// Each page's [`watch`] bits, in both spaces.
-    watched: [u8; SLAB_PAGES],
+    watched: [watch::Bits; SLAB_PAGES],
 }
 
 impl Slab {
@@ -409,12 +422,11 @@ impl Slab {
     /// Brings page `index` of space `space`'s fast table up to date.
     fn refresh(&mut self, space: usize, index: usize) {
         let entry = self.tables[space][index];
-        let slow = self.watched[index] & (watch::READ | watch::WRITE) != 0
-            || self.permissions[space][index] != Permissions::ALL;
-        // a pre-read or pre-write hook's page leaves the fast path for
-        // reads (fetches included) or writes alone
-        let slow_read = slow || self.watched[index] & watch::PRE_READ != 0;
-        let slow_write = slow || self.watched[index] & watch::PRE_WRITE != 0;
+        let restricted = self.permissions[space][index] != Permissions::ALL;
+        // a pre-access hook's or a read or write coverage's page leaves
+        // the fast path for reads (fetches included) or writes alone
+        let slow_read = restricted || self.watched[index] & watch::SLOW_READ != 0;
+        let slow_write = restricted || self.watched[index] & watch::SLOW_WRITE != 0;
         self.fast[space][index] = Page {
             read: if slow_read { None } else { entry.read },
             write: if slow_write { None } else { entry.write },
@@ -474,10 +486,10 @@ pub struct Memory {
     slabs: Vec<Option<Box<Slab>>>,
     /// The [`watch`] bits of each slab not allocated: those of the hooks
     /// covering any of it.
-    unallocated: Vec<u8>,
+    unallocated: Vec<watch::Bits>,
     /// The hooks' address ranges with their [`watch`] bits, on the
     /// address lines, for a slab allocated after they were set.
-    watches: Vec<(RangeInclusive<Address>, u8)>,
+    watches: Vec<(RangeInclusive<Address>, watch::Bits)>,
     /// Whether any page has a hook or less than [`Permissions::ALL`]:
     /// while not, no cycle or instruction looks either up.
     special: bool,
@@ -504,9 +516,9 @@ impl fmt::Debug for Memory {
 /// Sets in `watched`, the bits of the pages from `first` on, each of
 /// `ranges`' bits over the pages its addresses reach, on lines `mask`.
 fn watch_pages(
-    watched: &mut [u8],
+    watched: &mut [watch::Bits],
     first: usize,
-    ranges: &[(RangeInclusive<Address>, u8)],
+    ranges: &[(RangeInclusive<Address>, watch::Bits)],
     mask: u32,
 ) {
     for (range, bit) in ranges {
@@ -778,7 +790,7 @@ impl Memory {
 
     /// The [`watch`] bits of the page `address` is in: of its slab, if
     /// that is not allocated.
-    pub(crate) fn watched(&self, address: Address) -> u8 {
+    pub(crate) fn watched(&self, address: Address) -> watch::Bits {
         let page = self.page_number(address);
         self.slabs[page >> SLAB_SHIFT]
             .as_deref()
@@ -791,7 +803,7 @@ impl Memory {
     /// its bit, on the address lines.
     pub(crate) fn set_watched(
         &mut self,
-        ranges: impl Iterator<Item = (RangeInclusive<Address>, u8)>,
+        ranges: impl Iterator<Item = (RangeInclusive<Address>, watch::Bits)>,
     ) {
         self.watches = ranges.collect();
         self.rewatch_pages(0, self.pages - 1);
@@ -931,7 +943,7 @@ impl Memory {
 
     /// Adds a hook's `range`, on the address lines, with its [`watch`]
     /// `bit`: only its pages' bits change.
-    pub(crate) fn add_watch(&mut self, range: RangeInclusive<Address>, bit: u8) {
+    pub(crate) fn add_watch(&mut self, range: RangeInclusive<Address>, bit: watch::Bits) {
         self.watches.push((range.clone(), bit));
         self.rewatched(&range, bit);
     }
@@ -939,7 +951,7 @@ impl Memory {
     /// Removes a hook's `range` with its [`watch`] `bit`, as
     /// [`add_watch`](Self::add_watch) added it: only its pages' bits
     /// change.
-    pub(crate) fn remove_watch(&mut self, range: &RangeInclusive<Address>, bit: u8) {
+    pub(crate) fn remove_watch(&mut self, range: &RangeInclusive<Address>, bit: watch::Bits) {
         if let Some(index) = self
             .watches
             .iter()
@@ -953,7 +965,7 @@ impl Memory {
     /// Brings the bits of `range`'s pages, `special` and, for a `bit`
     /// the fast path minds, the pages' fast entries up to date after a
     /// range with `bit` was added or removed.
-    fn rewatched(&mut self, range: &RangeInclusive<Address>, bit: u8) {
+    fn rewatched(&mut self, range: &RangeInclusive<Address>, bit: watch::Bits) {
         let (first, last) = range_pages(range, self.address_mask);
         if first <= last {
             self.rewatch_pages(first, last);
@@ -1487,7 +1499,7 @@ mod tests {
         ];
         let mut memory = watched_memory();
         let mut added = Vec::new();
-        let check = |memory: &Memory, added: &[(RangeInclusive<Address>, u8)]| {
+        let check = |memory: &Memory, added: &[(RangeInclusive<Address>, watch::Bits)]| {
             let mut all = watched_memory();
             all.set_watched(added.iter().cloned());
             assert!(watching_alike(memory, &all), "{added:?}");

@@ -28,6 +28,7 @@ use mc683xx_cpu32::exception::VectorSet;
 use mc683xx_cpu32::flat;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_cpu32::hooks::Control;
+use mc683xx_cpu32::hooks::CoverageKind;
 use mc683xx_cpu32::hooks::ExceptionEntry;
 use mc683xx_cpu32::hooks::ExceptionReturn;
 use mc683xx_cpu32::hooks::HookId;
@@ -953,20 +954,26 @@ impl MachineView {
     }
 
     /// Calls `callback(Instruction)` before each instruction from
-    /// `begin` to `end`; it may change the CPU, and a PC it writes is
-    /// where the run goes on, the instruction not run.
-    #[pyo3(signature = (callback, begin = 0, end = u32::MAX))]
+    /// `begin` to `end`, or with `opcode=(mask, value)` before each
+    /// whose first word, masked, is `value` (Rust's
+    /// `Cpu::add_opcode_hook`); it may change the CPU, and a PC it
+    /// writes is where the run goes on, the instruction not run.
+    #[pyo3(signature = (callback, begin = 0, end = u32::MAX, opcode = None))]
     fn add_code_hook(
         &mut self,
         callback: &Bound<'_, PyAny>,
         begin: u32,
         end: u32,
+        opcode: Option<(u16, u16)>,
     ) -> PyResult<HookIdView> {
         let range = Address(begin)..=Address(end);
         self.install(
             callback,
             |seen: &Instruction| Context::Instruction(seen.clone()),
-            |cpu, hook| cpu.add_code_hook(range, hook),
+            |cpu, hook| match opcode {
+                Some((mask, value)) => cpu.add_opcode_hook(range, mask, value, hook),
+                None => cpu.add_code_hook(range, hook),
+            },
         )
     }
 
@@ -1123,16 +1130,22 @@ impl MachineView {
         self.machine.cpu.remove_hook(hook.0)
     }
 
-    /// Records the address of each instruction from `begin` to `end`,
-    /// both included, as it executes (Rust's `Cpu::add_coverage`): a
-    /// bit for each word of the range, so cover the code, not all of
-    /// memory.  Not saved by `save`.
-    fn add_coverage(&mut self, begin: u32, end: u32) -> CoverageIdView {
-        CoverageIdView(self.machine.cpu.add_coverage(Address(begin)..=Address(end)))
+    /// Records what `begin` to `end`, both included, sees of `kind`
+    /// (Rust's `Cpu::add_coverage`): `"execute"`, each instruction's
+    /// address as it executes, `"read"` or `"write"`, each byte an
+    /// operand read or write cycle reaches; a `ValueError` for another.
+    /// Not saved by `save`.
+    fn add_coverage(&mut self, begin: u32, end: u32, kind: &str) -> PyResult<CoverageIdView> {
+        let kind = kind.parse::<CoverageKind>().map_err(Error::from)?;
+        Ok(CoverageIdView(
+            self.machine
+                .cpu
+                .add_coverage(Address(begin)..=Address(end), kind),
+        ))
     }
 
-    /// The addresses of the instructions `coverage` recorded, as a set;
-    /// `None` if it was removed.
+    /// The addresses `coverage` recorded, as a set; `None` if it was
+    /// removed.
     fn coverage<'py>(
         &self,
         py: Python<'py>,
@@ -1259,12 +1272,21 @@ impl MachineView {
             if halt() {
                 return Ok((budget.spent, requested));
             }
+            // An in-run hook's stop is the run's end unless the same
+            // instruction ended it otherwise, as in Rust: a fault, an
+            // exception stop or a self-loop keeps its end, and an
+            // intercept is answered first.
+            let in_run_end = |hook| Ok((budget.spent, End::Stop(mc683xx_cpu32::Stop::Hook(hook))));
             match (run.end, dispatched) {
-                (_, Dispatched::Continue) if let Some(hook) = in_run_stop => {
-                    return Ok((budget.spent, End::Stop(mc683xx_cpu32::Stop::Hook(hook))));
-                }
+                (
+                    End::Stop(mc683xx_cpu32::Stop::Hook(_) | mc683xx_cpu32::Stop::Requested),
+                    Dispatched::Continue,
+                ) if let Some(hook) = in_run_stop => return in_run_end(hook),
                 (End::Intercepted(interception), Dispatched::Continue) if !stop => {
                     Self::answer(slf, py, interception)?;
+                    if let Some(hook) = in_run_stop {
+                        return in_run_end(hook);
+                    }
                     if stop_request.take() {
                         return Ok((budget.spent, requested));
                     }

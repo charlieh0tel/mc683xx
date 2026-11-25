@@ -905,15 +905,31 @@ def test_a_pc_write_after_a_stop_starts_a_block():
     assert starts[:2] == [START, second_move]
 
 
+def test_a_chip_s_opcode_hook_stops_before_its_opcode_alone():
+    builder, _, _ = board(ram_round_trip(), Recorder())
+    chip = builder.build()
+    seen = []
+    hook = chip.add_code_hook(
+        lambda instruction: seen.append(instruction.opcode) or True,
+        opcode=(0xFFFF, MOVE_WORD_ABSOLUTE_TO_D1),
+    )
+    run = chip.run_for(2000)
+    assert run.stop == mc683xx.Stop.Hook(hook)
+    assert seen == [MOVE_WORD_ABSOLUTE_TO_D1]
+    assert chip.read_register("PC") == AFTER_WIRING + 6
+
+
 def test_a_chip_s_coverage_records_its_instructions():
     builder, _, _ = board(ram_round_trip(), Recorder())
     chip = builder.build()
-    coverage = chip.add_coverage(START, START + 0xFF)
+    coverage = chip.add_coverage(START, START + 0xFF, "execute")
+    written = chip.add_coverage(RAM_BASE, RAM_BASE + PAGE_BYTES - 1, "write")
     chip.run_for(2000)
     covered = chip.coverage(coverage)
     assert covered is not None and START in covered
     assert all(START <= address <= START + 0xFF and address % 2 == 0 for address in covered)
     assert chip.remove_coverage(coverage) == covered
+    assert chip.coverage(written) == {RAM_WORD, RAM_WORD + 1}
     assert chip.coverage(coverage) is None
 
 
@@ -944,7 +960,7 @@ def test_a_pre_read_hook_answers_a_read_of_ram_and_peeks_it():
     seen = []
 
     def answer(read: mc683xx.PendingRead, data: bytearray) -> None:
-        seen.append((read.address, read.size, bytes(data), read.peek(RAM_WORD, 2)))
+        seen.append((read.address, read.size, bytes(data), read.peek_bytes(RAM_WORD, 2)))
         data[:] = b"\xab\xcd"
 
     chip.add_pre_read_hook(answer, RAM_BASE, RAM_BASE + PAGE_BYTES - 1)
@@ -1749,6 +1765,19 @@ def test_a_fault_stop_ends_the_chip_s_run_with_the_instruction_undone():
     chip.set_stop_on_fault(False)
     assert chip.run_for(1000).stop != mc683xx.Stop.Fault()
     assert chip.fault_stop is None
+
+
+def test_a_chip_s_run_ends_at_a_self_loop_with_the_setting() -> None:
+    chip = booting([NOP, short_branch(BRA_SHORT, 1)]).build()
+    assert not chip.stops_at_self_loop
+    chip.set_stop_at_self_loop(True)
+    assert chip.stops_at_self_loop
+    run = chip.run_for(100_000)
+    assert run.stop == mc683xx.Stop.SelfLoop()
+    assert repr(run.stop) == "Stop.SelfLoop()" and str(run.stop) == "self-loop"
+    assert run.cycles < 100_000
+    chip.set_stop_at_self_loop(False)
+    assert chip.run_for(1000).stop == mc683xx.Stop.Budget()
 
 
 def test_port_changes_written_in_one_instruction_come_in_port_order() -> None:

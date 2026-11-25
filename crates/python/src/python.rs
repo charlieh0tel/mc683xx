@@ -136,6 +136,7 @@ impl From<Error> for PyErr {
             | Error::Clock
             | Error::Frequency(_)
             | Error::Permissions(_)
+            | Error::CoverageKind(_)
             | Error::CycleSize(_)
             | Error::PortWidth(_)
             | Error::Length(_)

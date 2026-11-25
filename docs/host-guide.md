@@ -1152,9 +1152,20 @@ Hooks are closures on the core (`Mc68331::cpu_control()`), each returning
 but the exception hook cover an address range, on the address lines.
 
 - `add_code_hook(range, f(&Instruction))`: before each instruction,
-  with its PC, the registers and the long at the stack top.  A stop
+  with its PC, its number (`instruction`, the instructions run before
+  it, `Cpu::instructions`), the registers and the long at the stack
+  top.  A stop
   leaves it unexecuted; the next run executes it without calling the
   code hooks for it again, so a breakpoint can be stepped past.
+- `add_opcode_hook(range, mask, value, f(&Instruction))`: a code
+  hook called only before an instruction whose first word, masked by
+  `mask`, is `value` (`0xfff0`, `0x4e40` for every TRAP), the word the
+  core's memory serves at PC, given it as `Instruction::opcode`
+  (`None` in a plain code or block hook's call); an instruction the
+  bus would supply never matches.  Mask 0 calls it for every
+  instruction memory serves, with its word.  The filter runs before
+  the registers are copied, so an instruction it does not match costs
+  a lookup and a compare, and a page with no opcode hook nothing.
 - `add_block_hook(range, f(&Instruction))`: before the first
   instruction of each straight-line block.
 - `add_pre_read_hook(range, f(&PendingRead, &Memory, &mut [u8]))`:
@@ -1204,7 +1215,12 @@ but the exception hook cover an address range, on the address lines.
   serve (a peripheral's).  A write hook sees exception processing's
   stacking writes too, `stacking` set on each: a hook
   that wants the program's own cycles alone returns early on
-  `access.stacking`.
+  `access.stacking`.  Each access a hook sees (`MemoryAccess`,
+  `PendingRead`, `PendingWrite`, `InvalidAccess`) carries the number
+  of its instruction, `instruction`, as that instruction's code hooks
+  see it: exception processing's, that of the instruction that raised
+  it or that a trace follows; an interrupt's, taken between
+  instructions, the next one's.
 - `add_invalid_hook(range, f(&InvalidAccess))`: before a bus error is
   taken, with its reason, `Invalid::BusError` or `Invalid::Protected`.
 - `add_exception_hook(f(&ExceptionEntry))`: once the frame is stacked:
@@ -1216,11 +1232,19 @@ but the exception hook cover an address range, on the address lines.
   or the trace handler's where the restored SR sets T1 or T0, as `rte`
   takes the trace exception in the same step (CPU32RM 6.2.10).
 - `remove_hook(id)`.
-- `add_coverage(range) -> CoverageId`: no callback; a bit for each
-  word of the range, set as an instruction starting there executes,
-  read with `cpu().coverage(id)` (a `Coverage`: `addresses()`,
-  `contains(address)`), forgotten with `clear_coverage(id)`, handed
-  back by `remove_coverage(id)`.  Not part of a snapshot.
+- `add_coverage(range, CoverageKind) -> CoverageId`: no callback.
+  `Execute`, a bit for each word of the range, set as an instruction
+  starting there executes; `Read` and `Write`, a bit for each byte,
+  set by each cycle a read or write hook there would see (memory's or
+  a peripheral's, exception processing's included; not fetches, CPU
+  space, faulted cycles or dropped stores).  Read with
+  `cpu().coverage(id)` (a `Coverage`: `kind()`, `range()`,
+  `addresses()`, `contains(address)`), forgotten with
+  `clear_coverage(id)`, handed back by `remove_coverage(id)`.  It
+  allocates a page's bits at the first set, so it holds what it
+  recorded, not its range; a read or write coverage's pages leave the
+  fast path for reads (fetches included) or writes alone.  Not part
+  of a snapshot.
 
 `cpu_control().protect(space, start, length, Permissions)` sets
 read, write and execute per 2-Kbyte page in `Space::User` or
@@ -1297,6 +1321,11 @@ assert_eq!(*vectors.borrow(), [BUS_ERROR]);
 assert_eq!(chip.memory(ram)[..2], [0, 0]);
 assert_eq!(chip.cpu().registers.pc.0, firmware::HANDLER);
 ```
+
+`cpu_control().set_stop_at_self_loop(true)` ends a run
+`Stop::SelfLoop` once a BRA or JMP to itself has run, PC at it, as
+firmware idles waiting for an interrupt: a bare host's
+`Limits::self_loop` as a setting, with one detection for both.
 
 `cpu_control().set_stop_on_fault(true)` stops a run at a bus or
 address error, the bus monitor's included, instead of taking it: the

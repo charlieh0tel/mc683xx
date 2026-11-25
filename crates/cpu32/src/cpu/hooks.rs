@@ -17,6 +17,7 @@ use crate::exception::VectorSet;
 use crate::hooks::Control;
 use crate::hooks::Coverage;
 use crate::hooks::CoverageId;
+use crate::hooks::CoverageKind;
 use crate::hooks::ExceptionEntry;
 use crate::hooks::ExceptionReturn;
 use crate::hooks::HookId;
@@ -85,6 +86,49 @@ fn call<T>(hooks: &mut [Ranged<Callback<T>>], address: Address, context: &T) -> 
     stopped
 }
 
+/// The opcodes an opcode hook is called for: those whose first word,
+/// masked by `mask`, is `value`.
+#[derive(Debug, Clone, Copy)]
+struct Opcodes {
+    /// The bits compared.
+    mask: u16,
+    /// What they must be.
+    value: u16,
+}
+
+impl Opcodes {
+    /// Whether `opcode`, if known, is one of them.
+    fn matches(self, opcode: Option<u16>) -> bool {
+        opcode.is_some_and(|opcode| opcode & self.mask == self.value)
+    }
+}
+
+/// A code hook: its callback, called for every instruction in its
+/// range or, an opcode hook's, for those of some opcodes.
+struct CodeHook {
+    /// The opcodes, an opcode hook's; [`None`] for every instruction.
+    opcodes: Option<Opcodes>,
+    /// The callback.
+    callback: InstructionHook,
+}
+
+impl CodeHook {
+    /// Its [`watch`] bit.
+    const fn watch_bit(&self) -> watch::Bits {
+        if self.opcodes.is_some() {
+            watch::OPCODE
+        } else {
+            watch::CODE
+        }
+    }
+
+    /// Whether it is called for an instruction whose first word is
+    /// `opcode`, if known.
+    fn wants(&self, opcode: Option<u16>) -> bool {
+        self.opcodes.is_none_or(|opcodes| opcodes.matches(opcode))
+    }
+}
+
 /// What the pre-write hooks made of an operand write.
 pub(super) enum PreWrite {
     /// Store this value.
@@ -103,6 +147,15 @@ pub(crate) enum Resume {
     Code,
 }
 
+/// The [`watch`] bit of a coverage of `kind`.
+const fn coverage_bit(kind: CoverageKind) -> watch::Bits {
+    match kind {
+        CoverageKind::Execute => watch::EXECUTE_COVERAGE,
+        CoverageKind::Read => watch::READ_COVERAGE,
+        CoverageKind::Write => watch::WRITE_COVERAGE,
+    }
+}
+
 /// What [`Hooks::remove`] took out.
 enum Removed {
     /// No hook had the id.
@@ -110,7 +163,7 @@ enum Removed {
     /// A hook that sets no [`watch`] bit.
     Unwatched,
     /// A hook over a range, with its [`watch`] bit.
-    Watched(RangeInclusive<Address>, u8),
+    Watched(RangeInclusive<Address>, watch::Bits),
 }
 
 /// The hooks installed, each kind in the order installed.
@@ -118,8 +171,8 @@ enum Removed {
 pub(crate) struct Hooks {
     /// The next [`HookId`].
     next: u64,
-    /// Before each instruction in range.
-    code: Vec<Ranged<InstructionHook>>,
+    /// Before each instruction in range, or each of some opcodes.
+    code: Vec<Ranged<CodeHook>>,
     /// Before each instruction in range that starts a block: the first
     /// after a change of flow, an exception, or reset.
     block: Vec<Ranged<InstructionHook>>,
@@ -191,8 +244,11 @@ impl Hooks {
             hooks.retain(|hook| of(hook) != id);
             hooks.len() != before
         }
+        if let Some(index) = self.code.iter().position(|hook| hook.id == id) {
+            let hook = self.code.remove(index);
+            return Removed::Watched(hook.range, hook.hook.watch_bit());
+        }
         let watched = [
-            (take(&mut self.code, id), watch::CODE),
             (take(&mut self.block, id), watch::BLOCK),
             (take(&mut self.pre_read, id), watch::PRE_READ),
             (take(&mut self.pre_write, id), watch::PRE_WRITE),
@@ -245,13 +301,41 @@ impl Cpu {
         range: RangeInclusive<Address>,
         hook: impl FnMut(&Instruction) -> Control + 'static,
     ) -> HookId {
+        self.add_filtered_code_hook(range, None, Box::new(hook))
+    }
+
+    /// Calls `hook` as a code hook does, but only before each
+    /// instruction at an address in `range` whose first word, the
+    /// opcode, masked by `mask`, is `value` (`0xfff0`, `0x4e40` for
+    /// every TRAP).  The opcode is the word the core's memory serves at
+    /// PC, read with no cycle, so an instruction the bus would supply (a
+    /// peripheral's) never matches.  The filter runs natively, before
+    /// the registers are copied for a call: an instruction it does not
+    /// match costs a lookup and a compare, and a page with no opcode
+    /// hook nothing.  Installed with the code hooks, it is called in
+    /// their order and stops the run as they do.
+    pub fn add_opcode_hook(
+        &mut self,
+        range: RangeInclusive<Address>,
+        mask: u16,
+        value: u16,
+        hook: impl FnMut(&Instruction) -> Control + 'static,
+    ) -> HookId {
+        let opcodes = Opcodes { mask, value };
+        self.add_filtered_code_hook(range, Some(opcodes), Box::new(hook))
+    }
+
+    /// Installs a code hook, an opcode hook if it has `opcodes`.
+    fn add_filtered_code_hook(
+        &mut self,
+        range: RangeInclusive<Address>,
+        opcodes: Option<Opcodes>,
+        callback: InstructionHook,
+    ) -> HookId {
         let id = self.hooks.allocate();
-        self.memory.add_watch(range.clone(), watch::CODE);
-        self.hooks.code.push(Ranged {
-            id,
-            range,
-            hook: Box::new(hook),
-        });
+        let hook = CodeHook { opcodes, callback };
+        self.memory.add_watch(range.clone(), hook.watch_bit());
+        self.hooks.code.push(Ranged { id, range, hook });
         self.hooks_changed();
         id
     }
@@ -462,18 +546,43 @@ impl Cpu {
         id
     }
 
-    /// Records in a new coverage the address of each instruction in
-    /// `range`, on the address lines, as it executes, once no code or
-    /// block hook stopped the run before it: a bit for each word of the
-    /// range (64 Kbytes for each Mbyte), so cover the code, not all of
-    /// memory.  An instruction outside every coverage's pages costs
-    /// what it did; one on them costs a lookup.  Not part of a
-    /// snapshot, which neither saves nor restores it, as the hooks.
-    pub fn add_coverage(&mut self, range: RangeInclusive<Address>) -> CoverageId {
+    /// Records in a new coverage what `range`, on the address lines,
+    /// sees of `kind`:
+    ///
+    /// - [`CoverageKind::Execute`]: the address of each instruction that
+    ///   starts in it as it executes, once no code or block hook stopped
+    ///   the run before it, a bit for each word.
+    /// - [`CoverageKind::Read`]: each byte of each operand read cycle a
+    ///   read hook over it would see ([`add_read_hook`]), a bit for each
+    ///   byte: memory's or a peripheral's, in user or supervisor space,
+    ///   exception processing's (vectors, `rte`'s frame) included, once
+    ///   it ended well; not a fetch, a cycle in CPU space, or one that
+    ///   faulted.  A long seen once ([`set_long_bus`]) is its four bytes.
+    /// - [`CoverageKind::Write`]: likewise each byte of each write cycle
+    ///   a write hook would see, exception stacking included; not a store
+    ///   a pre-write hook dropped.
+    ///
+    /// A page's bits are allocated when the first is set, so a coverage
+    /// holds what it recorded, not its range.  The start is rounded up
+    /// to a word for an execute coverage, the end clamped to the address
+    /// lines; a range starting past either is empty.  An instruction or
+    /// a cycle outside every coverage's pages costs what it did; an
+    /// instruction on an execute coverage's costs a lookup, and a read
+    /// or write coverage's pages leave the fast path for reads (fetches
+    /// included) or writes alone.  Not part of a snapshot, which neither
+    /// saves nor restores it, as the hooks.
+    ///
+    /// [`add_read_hook`]: Self::add_read_hook
+    /// [`set_long_bus`]: Self::set_long_bus
+    pub fn add_coverage(
+        &mut self,
+        range: RangeInclusive<Address>,
+        kind: CoverageKind,
+    ) -> CoverageId {
         self.hooks.next_coverage += 1;
         let id = CoverageId(self.hooks.next_coverage);
-        let coverage = Coverage::new(&range, self.memory.address_mask);
-        self.memory.add_watch(range.clone(), watch::COVERAGE);
+        let coverage = Coverage::new(&range, self.memory.address_mask, kind);
+        self.memory.add_watch(range.clone(), coverage_bit(kind));
         self.hooks.coverage.push((id, range, coverage));
         self.hooks_changed();
         id
@@ -488,7 +597,7 @@ impl Cpu {
             .find_map(|(other, _, coverage)| (*other == id).then_some(coverage))
     }
 
-    /// Forgets the instructions coverage `id` recorded; whether there
+    /// Forgets what coverage `id` recorded; whether there
     /// is one.
     pub fn clear_coverage(&mut self, id: CoverageId) -> bool {
         self.hooks
@@ -507,7 +616,8 @@ impl Cpu {
             .iter()
             .position(|(other, _, _)| *other == id)?;
         let (_, range, coverage) = self.hooks.coverage.remove(index);
-        self.memory.remove_watch(&range, watch::COVERAGE);
+        self.memory
+            .remove_watch(&range, coverage_bit(coverage.kind()));
         self.hooks_changed();
         Some(coverage)
     }
@@ -518,7 +628,7 @@ impl Cpu {
         let hooks = &self.hooks;
         let ranged = |list: &[Ranged<InstructionHook>]| list.iter().any(|hook| hook.id == id);
         let memory = |list: &[Ranged<MemoryHook>]| list.iter().any(|hook| hook.id == id);
-        ranged(&hooks.code)
+        hooks.code.iter().any(|hook| hook.id == id)
             || ranged(&hooks.block)
             || hooks.pre_read.iter().any(|hook| hook.id == id)
             || hooks.pre_write.iter().any(|hook| hook.id == id)
@@ -576,38 +686,98 @@ impl Cpu {
         let watched = self.memory.watched(at);
         let resume = self.resume.take().filter(|&(address, _)| address == pc);
         let block_start = mem::take(&mut self.block_start);
-        if watched & (watch::CODE | watch::BLOCK | watch::COVERAGE) == 0 {
+        if watched & (watch::CODE | watch::OPCODE | watch::BLOCK | watch::EXECUTE_COVERAGE) == 0 {
             self.quiet_page = self.memory.page_number(at);
             return None;
         }
         let block = block_start && watched & watch::BLOCK != 0 && resume.is_none();
-        let code =
-            watched & watch::CODE != 0 && resume.is_none_or(|(_, stage)| stage == Resume::Block);
+        let opcode = if watched & watch::OPCODE != 0 {
+            self.opcode()
+        } else {
+            None
+        };
+        // an opcode hook's page: the registers are copied for a match alone
+        let code = resume.is_none_or(|(_, stage)| stage == Resume::Block)
+            && (watched & watch::CODE != 0
+                || self.hooks.code.iter().any(|hook| {
+                    hook.hook.opcodes.is_some()
+                        && hook.range.contains(&at)
+                        && hook.hook.wants(opcode)
+                }));
         if block || code {
-            let instruction = Instruction {
+            let mut instruction = Instruction {
                 pc,
+                instruction: self.instructions,
                 registers: self.registers.clone(),
                 stack_top: self.memory.peek(
                     Space::of(self.registers.data_space()),
                     Address(self.registers.address(7)),
                     Size::Long,
                 ),
+                opcode: None,
             };
             if block && let Some(id) = call(&mut self.hooks.block, at, &instruction) {
                 self.resume = Some((pc, Resume::Block));
                 return Some(id);
             }
-            if code && let Some(id) = call(&mut self.hooks.code, at, &instruction) {
+            if code && let Some(id) = self.call_code_hooks(at, &mut instruction, opcode) {
                 self.resume = Some((pc, Resume::Code));
                 return Some(id);
             }
         }
-        if watched & watch::COVERAGE != 0 {
+        if watched & watch::EXECUTE_COVERAGE != 0 {
             for (_, _, coverage) in &mut self.hooks.coverage {
-                coverage.record(at);
+                if coverage.kind() == CoverageKind::Execute {
+                    coverage.record(at);
+                }
             }
         }
         None
+    }
+}
+
+impl Cpu {
+    /// The word at PC in program space, if the core's memory serves it
+    /// and PC is even: the opcode the next instruction starts with.
+    /// Read through the fetch page, as the opcode fetch that follows
+    /// will (which then finds the page cached), else with no cycle.
+    fn opcode(&mut self) -> Option<u16> {
+        let pc = self.registers.pc;
+        if pc.is_odd() {
+            return None;
+        }
+        let space = Space::of(self.registers.program_space());
+        if let Some((word, _)) = self.memory.fetch(space, pc) {
+            return Some(word);
+        }
+        self.memory
+            .peek(space, pc, Size::Word)
+            .map(|word| word as u16)
+    }
+
+    /// Calls each code hook covering `at` that wants `opcode`, the
+    /// instruction's first word if an opcode hook covers its page, in
+    /// the order installed, an opcode hook's `instruction` with the
+    /// word, a plain one's without: the first that stopped, if any did.
+    fn call_code_hooks(
+        &mut self,
+        at: Address,
+        instruction: &mut Instruction,
+        opcode: Option<u16>,
+    ) -> Option<HookId> {
+        let mut stopped = None;
+        for hook in self
+            .hooks
+            .code
+            .iter_mut()
+            .filter(|hook| hook.range.contains(&at) && hook.hook.wants(opcode))
+        {
+            instruction.opcode = hook.hook.opcodes.and(opcode);
+            if (hook.hook.callback)(instruction).is_break() {
+                stopped.get_or_insert(hook.id);
+            }
+        }
+        stopped
     }
 }
 
@@ -627,14 +797,8 @@ impl Core<'_> {
     ) -> Option<u32> {
         if !self.permitted(address, function_code, cycle) {
             self.invalid(InvalidAccess {
-                address,
-                size,
-                function_code,
-                kind: cycle,
-                value: None,
                 reason: Invalid::Protected,
-                pc: self.cpu.instruction_pc,
-                stacking: self.cpu.stacking,
+                ..self.invalid_access(address, size, function_code, cycle, None)
             });
             return None;
         }
@@ -661,14 +825,14 @@ impl Core<'_> {
     ) -> Option<()> {
         if !self.permitted(address, function_code, BusCycleKind::Write) {
             self.invalid(InvalidAccess {
-                address,
-                size,
-                function_code,
-                kind: BusCycleKind::Write,
-                value: Some(value),
                 reason: Invalid::Protected,
-                pc: self.cpu.instruction_pc,
-                stacking: self.cpu.stacking,
+                ..self.invalid_access(
+                    address,
+                    size,
+                    function_code,
+                    BusCycleKind::Write,
+                    Some(value),
+                )
             });
             return None;
         }
@@ -712,7 +876,7 @@ impl Core<'_> {
         size: Size,
         function_code: FunctionCode,
         cycle: BusCycleKind,
-        bit: u8,
+        bit: watch::Bits,
     ) -> bool {
         if !function_code.is_memory_space() || (size != Size::Byte && address.is_odd()) {
             return false;
@@ -760,6 +924,7 @@ impl Core<'_> {
             size,
             function_code,
             pc: self.cpu.instruction_pc,
+            instruction: self.cpu.instructions,
             stacking: self.cpu.stacking,
         };
         let mut called = false;
@@ -821,6 +986,7 @@ impl Core<'_> {
             size,
             function_code,
             self.cpu.instruction_pc,
+            self.cpu.instructions,
             self.cpu.stacking,
         );
         let mut dropped = false;
@@ -859,10 +1025,14 @@ impl Core<'_> {
         ))
     }
 
-    /// The read or write hooks, `bit`, for a cycle that ended well, on
-    /// a page that has them.
-    fn watch(&mut self, bit: u8, access: MemoryAccess) {
-        if self.cpu.long_operand || self.cpu.memory.watched(access.address) & bit == 0 {
+    /// The read or write coverages and hooks, `bit`, for a cycle that
+    /// ended well, on a page that has them.
+    fn watch(&mut self, bit: watch::Bits, access: MemoryAccess) {
+        if self.cpu.long_operand {
+            return;
+        }
+        self.cover(bit, &access);
+        if self.cpu.memory.watched(access.address) & bit == 0 {
             return;
         }
         let hooks = if bit == watch::READ {
@@ -875,12 +1045,33 @@ impl Core<'_> {
         }
     }
 
+    /// Records `access`, a cycle the read or write hooks, `bit`, would
+    /// see, in the read or write coverages covering a byte of it.
+    fn cover(&mut self, bit: watch::Bits, access: &MemoryAccess) {
+        let (coverage, kind) = if bit == watch::READ {
+            (watch::READ_COVERAGE, CoverageKind::Read)
+        } else {
+            (watch::WRITE_COVERAGE, CoverageKind::Write)
+        };
+        let memory = &self.cpu.memory;
+        let last = memory.mask(access.address.offset(access.size.bytes() - 1));
+        if (memory.watched(access.address) | memory.watched(last)) & coverage == 0 {
+            return;
+        }
+        let mask = memory.address_mask;
+        for (_, _, covering) in &mut self.cpu.hooks.coverage {
+            if covering.kind() == kind {
+                covering.record_bytes(access.address, access.size, mask);
+            }
+        }
+    }
+
     /// The read or write hooks, `bit`, for a long operand seen once
     /// ([`Cpu::set_long_bus`]), a write's `previous` value as
     /// [`previous`](Self::previous) found it.
     pub(super) fn watch_long(
         &mut self,
-        bit: u8,
+        bit: watch::Bits,
         address: Address,
         function_code: FunctionCode,
         value: u32,
@@ -934,6 +1125,7 @@ impl Core<'_> {
             value,
             previous,
             pc: self.cpu.instruction_pc,
+            instruction: self.cpu.instructions,
             stacking: self.cpu.stacking,
         }
     }
@@ -956,6 +1148,7 @@ impl Core<'_> {
             value,
             reason: Invalid::BusError,
             pc: self.cpu.instruction_pc,
+            instruction: self.cpu.instructions,
             stacking: self.cpu.stacking,
         }
     }

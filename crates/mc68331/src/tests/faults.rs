@@ -54,6 +54,27 @@ fn a_fault_stop_ends_the_run_with_the_instruction_undone() {
     assert_eq!(chip.cpu().fault_stop(), None);
 }
 
+/// BRA.S to itself (CPU32RM 4.4, BRA).
+const BRA_SELF: u16 = 0x60fe;
+
+#[test]
+fn a_chip_s_run_ends_at_a_self_loop_with_the_setting() {
+    let (mut chip, _) = booting(&[NOP, BRA_SELF]);
+    chip.cpu_control().set_stop_at_self_loop(true);
+    let run = chip.run_for(Cycles::from_clocks(100_000));
+    assert_eq!(run.stop, Stop::SelfLoop);
+    assert!(run.cycles < Cycles::from_clocks(100_000));
+    let at = chip.cpu().registers.pc;
+    // each run runs the loop once more, then ends
+    assert_eq!(
+        chip.run_for(Cycles::from_clocks(100_000)).stop,
+        Stop::SelfLoop
+    );
+    assert_eq!(chip.cpu().registers.pc, at);
+    chip.cpu_control().set_stop_at_self_loop(false);
+    assert_eq!(chip.run_for(Cycles::from_clocks(1000)).stop, Stop::Budget);
+}
+
 #[test]
 fn a_bus_monitor_timeout_stops_the_run_rather_than_halting() {
     let (mut chip, _) = booting(&[NOP]);

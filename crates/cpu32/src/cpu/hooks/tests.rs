@@ -16,7 +16,9 @@ use crate::cycles::Cycles;
 use crate::exception::BusCycleKind;
 use crate::exception::Exception;
 use crate::exception::Vector;
+use crate::hooks::Coverage;
 use crate::hooks::CoverageId;
+use crate::hooks::CoverageKind;
 use crate::hooks::ExceptionEntry;
 use crate::hooks::ExceptionReturn;
 use crate::hooks::Invalid;
@@ -33,6 +35,10 @@ use crate::instructions::tests::machine_with_clocks;
 use crate::instructions::tests::peek_long;
 use crate::instructions::tests::poke_long;
 use crate::instructions::tests::step;
+use crate::interrupt::Acknowledge;
+use crate::interrupt::Acknowledged;
+use crate::interrupt::InterruptLevel;
+use crate::interrupt::Interrupts;
 use crate::memory::Backing;
 use crate::memory::Memory;
 use crate::memory::PAGE_BYTES;
@@ -164,6 +170,80 @@ fn a_page_without_instruction_hooks_stays_quiet_until_one_is_added() {
     assert_eq!(*code.borrow(), [CODE + 4]);
 }
 
+/// TRAP's opcodes, $4E40 to $4E4F: its mask.
+const TRAP_MASK: u16 = 0xfff0;
+
+#[test]
+fn an_opcode_hook_is_called_for_its_opcodes_alone_in_the_order_installed() {
+    // NOP, TRAP #0 into a handler of NOP, RTE, then TRAP #1
+    let mut cpu = prepared(&[NOP, TRAP, TRAP | 1], &[NOP, RTE]);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    let code = cpu.add_code_hook(Address(CODE + 2)..=Address(CODE + 2), move |instruction| {
+        into.borrow_mut()
+            .push(("code", instruction.pc.0, instruction.opcode));
+        ControlFlow::Continue(())
+    });
+    let into = Rc::clone(&seen);
+    let trap = cpu.add_opcode_hook(everywhere(), TRAP_MASK, TRAP, move |instruction| {
+        into.borrow_mut()
+            .push(("trap", instruction.pc.0, instruction.opcode));
+        ControlFlow::Break(())
+    });
+    let into = Rc::clone(&seen);
+    let rte = cpu.add_opcode_hook(everywhere(), 0xffff, RTE, move |instruction| {
+        into.borrow_mut()
+            .push(("rte", instruction.pc.0, instruction.opcode));
+        ControlFlow::Continue(())
+    });
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
+    // stopped before the TRAP, after the code hook installed before it
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(trap));
+    assert_eq!(cpu.registers.pc.0, CODE + 2);
+    // the next run executes it without calling the code hooks again
+    assert_eq!(step(&mut cpu, 3).stop, Stop::Budget);
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(trap));
+    assert_eq!(
+        *seen.borrow(),
+        [
+            // a plain code hook's call reads no opcode
+            ("code", CODE + 2, None),
+            ("trap", CODE + 2, Some(TRAP)),
+            ("rte", HANDLER + 2, Some(RTE)),
+            ("trap", CODE + 4, Some(TRAP | 1)),
+        ]
+    );
+    // removed, its pages go quiet
+    for id in [code, trap, rte] {
+        assert!(cpu.remove_hook(id));
+    }
+    assert!(!cpu.memory.is_special());
+}
+
+#[test]
+fn an_opcode_hook_never_matches_an_instruction_the_bus_serves() {
+    let mut cpu = prepared(&[NOP], &[]);
+    cpu.registers.pc = Address(NOWHERE);
+    let calls = Rc::new(RefCell::new(0));
+    let into = Rc::clone(&calls);
+    cpu.add_opcode_hook(everywhere(), 0, 0, move |_| {
+        *into.borrow_mut() += 1;
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 1);
+    assert_eq!(*calls.borrow(), 0);
+    // nor is a code hook there given one
+    let opcodes = log();
+    let into = Rc::clone(&opcodes);
+    cpu.add_code_hook(everywhere(), move |instruction| {
+        into.borrow_mut().push(instruction.opcode);
+        ControlFlow::Continue(())
+    });
+    cpu.registers.pc = Address(NOWHERE);
+    step(&mut cpu, 1);
+    assert_eq!(opcodes.borrow()[0], None);
+}
+
 /// MOVE.L #imm,D0: three words.
 const MOVE_IMMEDIATE_TO_D0: u16 = 0x203c;
 
@@ -182,7 +262,7 @@ fn a_coverage_records_each_instruction_start_in_its_range_once() {
     // returns, a NOP, run twice over.
     let code = [MOVE_IMMEDIATE_TO_D0, 0x1234, 0x5678, TRAP, NOP];
     let mut cpu = prepared(&code, &[NOP, RTE]);
-    let coverage = cpu.add_coverage(Address(CODE)..=Address(CODE + 0xff));
+    let coverage = cpu.add_coverage(Address(CODE)..=Address(CODE + 0xff), CoverageKind::Execute);
     assert_eq!(coverage.to_string(), "coverage 1");
     step(&mut cpu, 5);
     cpu.registers.pc = Address(CODE);
@@ -209,7 +289,7 @@ fn a_coverage_records_each_instruction_start_in_its_range_once() {
 #[test]
 fn a_coverage_records_an_instruction_once_it_runs_past_a_hook_stop() {
     let mut cpu = prepared(&[NOP, NOP], &[]);
-    let coverage = cpu.add_coverage(everywhere());
+    let coverage = cpu.add_coverage(everywhere(), CoverageKind::Execute);
     let hook = cpu.add_code_hook(Address(CODE + 2)..=Address(CODE + 2), |_| {
         ControlFlow::Break(())
     });
@@ -227,6 +307,210 @@ fn a_coverage_records_an_instruction_once_it_runs_past_a_hook_stop() {
     assert_eq!(
         cpu.coverage(coverage).unwrap().range(),
         Address(0)..=Address(cpu.memory.mask(Address(u32::MAX)).0)
+    );
+}
+
+#[test]
+fn a_coverage_holds_only_the_pages_it_recorded() {
+    let mut cpu = prepared(&[NOP, NOP], &[]);
+    let coverage = cpu.add_coverage(everywhere(), CoverageKind::Execute);
+    assert_eq!(cpu.coverage(coverage).unwrap().pages_held(), 0);
+    step(&mut cpu, 2);
+    assert_eq!(cpu.coverage(coverage).unwrap().pages_held(), 1);
+    cpu.clear_coverage(coverage);
+    assert_eq!(cpu.coverage(coverage).unwrap().pages_held(), 0);
+}
+
+#[test]
+fn a_coverage_s_range_starts_on_a_word_and_ends_on_the_address_lines() {
+    let mask = 0x00ff_ffff;
+    let range = |start: u32, end: u32, kind| {
+        Coverage::new(&(Address(start)..=Address(end)), mask, kind).range()
+    };
+    let execute = CoverageKind::Execute;
+    // an odd start rounds up, not down onto the word before
+    assert_eq!(
+        range(0x1001, 0x10ff, execute),
+        Address(0x1002)..=Address(0x10ff)
+    );
+    assert_eq!(
+        range(0x1001, 0x10ff, CoverageKind::Read),
+        Address(0x1001)..=Address(0x10ff)
+    );
+    assert_eq!(
+        range(0x1000, u32::MAX, execute),
+        Address(0x1000)..=Address(mask)
+    );
+    // empty: past its end, past the lines, or nothing after rounding
+    for (start, end) in [(0x2000, 0x1000), (0x0100_0000, u32::MAX), (0x1001, 0x1001)] {
+        let empty = range(start, end, execute);
+        assert!(empty.is_empty(), "{start:#x}..={end:#x}");
+        let mut coverage = Coverage::new(&(Address(start)..=Address(end)), mask, execute);
+        coverage.record(Address(start));
+        assert_eq!(coverage.addresses().count(), 0);
+    }
+    assert!(range(u32::MAX, u32::MAX, execute).is_empty());
+}
+
+#[test]
+fn a_coverage_reads_out_its_pages_in_order_whichever_it_recorded_last() {
+    let range = Address(0)..=Address(0x00ff_ffff);
+    let mut coverage = Coverage::new(&range, 0x00ff_ffff, CoverageKind::Read);
+    // three pages, two slabs apart, the middle one last
+    let addresses = [
+        0x0040_0001,
+        0x1000,
+        0x0040_0000,
+        0x0020_0800,
+        0x1001,
+        0x0020_0801,
+    ];
+    for address in addresses {
+        coverage.record(Address(address));
+    }
+    let mut sorted = addresses.to_vec();
+    sorted.sort_unstable();
+    let read = |coverage: &Coverage| coverage.addresses().map(|a| a.0).collect::<Vec<_>>();
+    assert_eq!(read(&coverage), sorted);
+    assert_eq!(coverage.pages_held(), 3);
+    assert!(coverage.contains(Address(0x0020_0801)) && coverage.contains(Address(0x1000)));
+    assert!(!coverage.contains(Address(0x1002)));
+    // alike however its pages are held
+    let mut again = Coverage::new(&range, 0x00ff_ffff, CoverageKind::Read);
+    for address in sorted.iter().rev() {
+        again.record(Address(*address));
+    }
+    assert_eq!(again, coverage);
+    coverage.clear();
+    assert_eq!(read(&coverage), Vec::<u32>::new());
+    assert_eq!(coverage.pages_held(), 0);
+    assert_ne!(again, coverage);
+}
+
+#[test]
+fn coverage_kinds_print_and_parse() {
+    for (kind, name) in [
+        (CoverageKind::Execute, "execute"),
+        (CoverageKind::Read, "read"),
+        (CoverageKind::Write, "write"),
+    ] {
+        assert_eq!(kind.to_string(), name);
+        assert_eq!(name.parse::<CoverageKind>(), Ok(kind));
+    }
+    let error = "fetch".parse::<CoverageKind>().unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "no coverage kind \"fetch\": give execute, read or write"
+    );
+}
+
+#[test]
+fn read_and_write_coverages_record_each_byte_a_read_or_write_hook_would_see() {
+    // MOVE.L D0,(A0); MOVE.L (A0),D1; MOVE.B D0,(A1); TRAP into a
+    // handler of NOPs
+    let move_byte_d0_to_a1 = 0x1280;
+    let code = [
+        MOVE_D0_TO_INDIRECT,
+        MOVE_INDIRECT_TO_D1,
+        move_byte_d0_to_a1,
+        TRAP,
+    ];
+    let mut cpu = prepared(&code, &[NOP, NOP]);
+    cpu.registers.set_address(0, DATA);
+    cpu.registers.set_address(1, DATA + 0x11);
+    let reads = cpu.add_coverage(everywhere(), CoverageKind::Read);
+    let writes = cpu.add_coverage(
+        Address(STACK - 0x100)..=Address(DATA + 0xff),
+        CoverageKind::Write,
+    );
+    let instructions = cpu.add_coverage(everywhere(), CoverageKind::Execute);
+    step(&mut cpu, 4);
+    // the long read, and the TRAP's vector, read in exception
+    // processing; not the fetches
+    let vector = Vector::trap(0).offset();
+    assert_eq!(
+        covered(&cpu, reads),
+        [
+            vector,
+            vector + 1,
+            vector + 2,
+            vector + 3,
+            DATA,
+            DATA + 1,
+            DATA + 2,
+            DATA + 3
+        ]
+    );
+    // the TRAP's four-word frame below STACK, the long and the byte
+    let mut expected: Vec<u32> = (STACK - 8..STACK).collect();
+    expected.extend([DATA, DATA + 1, DATA + 2, DATA + 3, DATA + 0x11]);
+    assert_eq!(covered(&cpu, writes), expected);
+    assert_eq!(
+        covered(&cpu, instructions),
+        [CODE, CODE + 2, CODE + 4, CODE + 6]
+    );
+    assert!(cpu.coverage(writes).unwrap().contains(Address(DATA + 0x11)));
+    assert!(!cpu.coverage(writes).unwrap().contains(Address(DATA + 0x10)));
+    assert_eq!(cpu.coverage(reads).unwrap().kind(), CoverageKind::Read);
+    // removed, the pages go back on the fast path
+    for coverage in [reads, writes, instructions] {
+        assert!(cpu.remove_coverage(coverage).is_some());
+    }
+    assert!(!cpu.memory.is_special());
+}
+
+#[test]
+fn a_read_coverage_records_a_peripheral_s_read_and_not_a_dropped_write() {
+    // MOVE.L (A0),D1 from the bus; MOVE.L D0,(A1) into RAM, dropped
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, 0x2280, NOP], &[]);
+    cpu.registers.set_address(0, NOWHERE);
+    cpu.registers.set_address(1, DATA);
+    let reads = cpu.add_coverage(everywhere(), CoverageKind::Read);
+    let writes = cpu.add_coverage(everywhere(), CoverageKind::Write);
+    cpu.add_pre_write_hook(everywhere(), |write: &mut PendingWrite, _, _| {
+        write.set_dropped(true);
+        ControlFlow::Continue(())
+    });
+    for _ in 0..2 {
+        cpu.run_for(
+            &mut Answering,
+            &mut NoInterrupts,
+            Cycle::ZERO,
+            Cycles::from_clocks(1),
+        );
+    }
+    assert_eq!(cpu.registers.pc.0, CODE + 4);
+    assert_eq!(
+        covered(&cpu, reads),
+        (NOWHERE..NOWHERE + 4).collect::<Vec<_>>()
+    );
+    assert!(covered(&cpu, writes).is_empty());
+}
+
+#[test]
+fn a_read_coverage_slows_its_page_s_reads_alone() {
+    let mut cpu = prepared(&[NOP], &[]);
+    let space = Space::Supervisor;
+    let read = cpu.add_coverage(Address(DATA)..=Address(DATA), CoverageKind::Read);
+    assert!(cpu.memory.read(space, Address(DATA), Size::Word).is_none());
+    assert!(
+        cpu.memory
+            .write(space, Address(DATA), Size::Word, 0)
+            .is_some()
+    );
+    cpu.remove_coverage(read);
+    let write = cpu.add_coverage(Address(DATA)..=Address(DATA), CoverageKind::Write);
+    assert!(cpu.memory.read(space, Address(DATA), Size::Word).is_some());
+    assert!(
+        cpu.memory
+            .write(space, Address(DATA), Size::Word, 0)
+            .is_none()
+    );
+    cpu.remove_coverage(write);
+    assert!(
+        cpu.memory
+            .write(space, Address(DATA), Size::Word, 0)
+            .is_some()
     );
 }
 
@@ -718,6 +1002,96 @@ fn a_pre_write_hook_sees_exception_stacking_word_by_word() {
     assert_eq!(stored(&cpu, STACK - 4) & 0xffff, 0xabcd);
 }
 
+/// An interrupt source requesting level 1, autovectored.
+struct LevelOne;
+
+impl Interrupts for LevelOne {
+    fn level(&self) -> InterruptLevel {
+        InterruptLevel::try_from(1).unwrap()
+    }
+
+    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycle) -> Acknowledged {
+        Acknowledge::Autovector.into()
+    }
+}
+
+#[test]
+fn each_hook_sees_the_number_of_the_instruction_it_is_part_of() {
+    // NOP; MOVE.L D0,(A0); TRAP #0 into a handler of NOPs
+    let mut cpu = prepared(&[NOP, MOVE_D0_TO_INDIRECT, TRAP], &[NOP, NOP]);
+    cpu.registers.set_address(0, DATA);
+    let code = log();
+    let into = Rc::clone(&code);
+    cpu.add_code_hook(everywhere(), move |instruction| {
+        into.borrow_mut()
+            .push((instruction.pc.0, instruction.instruction));
+        ControlFlow::Continue(())
+    });
+    let writes = log();
+    let into = Rc::clone(&writes);
+    cpu.add_write_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut()
+            .push((access.address.0, access.instruction, access.stacking));
+        ControlFlow::Continue(())
+    });
+    let reads = log();
+    let into = Rc::clone(&reads);
+    cpu.add_read_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push(access.instruction);
+        ControlFlow::Continue(())
+    });
+    let pre = log();
+    let into = Rc::clone(&pre);
+    cpu.add_pre_read_hook(everywhere(), move |read: &PendingRead, _, _| {
+        into.borrow_mut().push(read.instruction);
+        ControlFlow::Continue(())
+    });
+    let into = Rc::clone(&pre);
+    cpu.add_pre_write_hook(everywhere(), move |write: &mut PendingWrite, _, _| {
+        into.borrow_mut().push(write.instruction);
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 4);
+    assert_eq!(cpu.instructions(), 4);
+    assert_eq!(
+        *code.borrow(),
+        [(CODE, 0), (CODE + 2, 1), (CODE + 4, 2), (HANDLER, 3)]
+    );
+    // the MOVE's two words, then the TRAP's frame, stacked as it ends
+    assert_eq!(
+        writes.borrow()[..3],
+        [(DATA, 1, false), (DATA + 2, 1, false), (STACK - 2, 2, true)]
+    );
+    assert_eq!(writes.borrow().len(), 6);
+    assert!(
+        writes.borrow()[2..]
+            .iter()
+            .all(|&(_, number, _)| number == 2)
+    );
+    // the TRAP's vector, the only operand read
+    assert!(!reads.borrow().is_empty() && reads.borrow().iter().all(|&number| number == 2));
+    // the pre-access hooks: the MOVE's long, the vector, the frame
+    assert_eq!(pre.borrow()[0], 1);
+    assert!(pre.borrow()[1..].iter().all(|&number| number == 2));
+    // an interrupt, between instructions: the next one's number
+    cpu.registers.set_sr(status::S);
+    writes.borrow_mut().clear();
+    cpu.run_for(
+        &mut NoBus,
+        &mut LevelOne,
+        Cycle::ZERO,
+        Cycles::from_clocks(1),
+    );
+    assert_eq!(cpu.instructions(), 4);
+    assert_eq!(writes.borrow().len(), 4);
+    assert!(
+        writes
+            .borrow()
+            .iter()
+            .all(|&(_, number, stacking)| number == 4 && stacking)
+    );
+}
+
 /// A bus that takes every write.
 #[derive(Debug)]
 struct Taking;
@@ -1060,7 +1434,7 @@ fn a_long_onto_the_bus_writes_its_high_word_then_faults_on_its_low() {
 
 #[test]
 fn an_invalid_access_hook_sees_a_bus_error_then_the_exception_is_taken() {
-    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT], &[]);
+    let mut cpu = prepared(&[NOP, MOVE_D0_TO_INDIRECT], &[]);
     cpu.registers.set_address(0, NOWHERE);
     cpu.registers.data[0] = 0xabcd_0123;
     let seen = log();
@@ -1069,7 +1443,7 @@ fn an_invalid_access_hook_sees_a_bus_error_then_the_exception_is_taken() {
         into.borrow_mut().push(*access);
         ControlFlow::Break(())
     });
-    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(id));
+    assert_eq!(step(&mut cpu, 2).stop, Stop::Hook(id));
     assert_eq!(cpu.registers.pc.0, HANDLER);
     assert_eq!(
         *seen.borrow(),
@@ -1080,7 +1454,8 @@ fn an_invalid_access_hook_sees_a_bus_error_then_the_exception_is_taken() {
             kind: BusCycleKind::Write,
             value: Some(0xabcd),
             reason: Invalid::BusError,
-            pc: Address(CODE),
+            pc: Address(CODE + 2),
+            instruction: 1,
             stacking: false,
         }]
     );

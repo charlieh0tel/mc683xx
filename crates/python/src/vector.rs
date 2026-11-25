@@ -13,6 +13,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::pyclass;
 use pyo3::pymethods;
 use pyo3::types::PyAnyMethods;
+use pyo3::types::PyInt;
 use pyo3::types::PyIterator;
 use pyo3::types::PyList;
 
@@ -83,15 +84,15 @@ impl VectorNumbers {
     const TRAP: u8 = Vector::TRAP.0;
 
     /// TRAP #`number`'s vector, 32 to 47 for `number` 0 to 15;
-    /// `ValueError` past 15.
+    /// `ValueError` for any other number, however large.
     #[staticmethod]
-    fn trap(number: u8) -> PyResult<u8> {
-        if number >= TRAP_VECTORS {
-            return Err(PyValueError::new_err(format!(
+    fn trap(number: &Bound<'_, PyInt>) -> PyResult<u8> {
+        match number.extract::<u8>() {
+            Ok(number) if number < TRAP_VECTORS => Ok(Vector::trap(number).0),
+            _ => Err(PyValueError::new_err(format!(
                 "no TRAP #{number}: give 0 to 15"
-            )));
+            ))),
         }
-        Ok(Vector::trap(number).0)
     }
 
     /// The autovector of interrupt level `level`, 0 to 7: 24 to 31.
@@ -141,15 +142,17 @@ impl VectorSetView {
     }
 
     /// Whether vector `vector` is in it; `False` for a number that is
-    /// no vector.
-    fn contains(&self, vector: i64) -> bool {
-        u8::try_from(vector).is_ok_and(|vector| self.0.contains(Vector(vector)))
+    /// no vector, however large.
+    fn contains(&self, vector: &Bound<'_, PyInt>) -> bool {
+        vector
+            .extract::<u8>()
+            .is_ok_and(|vector| self.0.contains(Vector(vector)))
     }
 
     /// `vector in set`: `contains`, `False` for what is no number.
     fn __contains__(&self, vector: &Bound<'_, PyAny>) -> bool {
         vector
-            .extract::<i64>()
+            .cast::<PyInt>()
             .is_ok_and(|vector| self.contains(vector))
     }
 

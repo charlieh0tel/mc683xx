@@ -9,12 +9,16 @@
 //! [PLAN.md, Hooks]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#hooks
 
 use std::fmt;
+use std::iter;
 use std::ops::ControlFlow;
 use std::ops::RangeInclusive;
+use std::str::FromStr;
 
 use crate::exception::BusCycleKind;
 use crate::exception::Vector;
 use crate::interrupt::InterruptLevel;
+use crate::memory::PAGE_BYTES;
+use crate::memory::PAGE_SHIFT;
 use crate::registers::Registers;
 use mc683xx_target::Address;
 use mc683xx_target::FunctionCode;
@@ -46,6 +50,9 @@ pub type Control = ControlFlow<()>;
 pub struct Instruction {
     /// Its address.
     pub pc: Address,
+    /// Its number: the instructions run before it, as
+    /// [`Cpu::instructions`] counts them, from 0.
+    pub instruction: u64,
     /// The registers.
     pub registers: Registers,
     /// The long word at A7, in data space, if the core serves it from
@@ -53,6 +60,13 @@ pub struct Instruction {
     /// [`Address`]: it is one only where the code makes it one, as at a
     /// subroutine's first instruction, its return address.
     pub stack_top: Option<u32>,
+    /// Its first word, the opcode, in program space, for an opcode
+    /// hook's call ([`Cpu::add_opcode_hook`]): the word the core's
+    /// memory serves at PC, read with no bus cycle.  [`None`] for a code
+    /// or block hook's call, which reads no memory for it; an opcode
+    /// hook of mask 0 is called for every instruction memory serves,
+    /// with its word.
+    pub opcode: Option<u16>,
 }
 
 /// A bus cycle in user or supervisor space, as a memory hook sees it.
@@ -80,6 +94,12 @@ pub struct MemoryAccess {
     pub previous: Option<u32>,
     /// The address of the instruction it is part of.
     pub pc: Address,
+    /// The number of the instruction it is part of, its code hooks'
+    /// [`Instruction::instruction`]: the instructions run before it
+    /// ([`Cpu::instructions`]).  Exception processing's is the number
+    /// of the instruction that raised it or that a trace follows;
+    /// an interrupt's, taken between instructions, the next one's.
+    pub instruction: u64,
     /// Whether it is exception processing stacking a frame.
     pub stacking: bool,
 }
@@ -97,6 +117,12 @@ pub struct PendingRead {
     pub function_code: FunctionCode,
     /// The address of the instruction it is part of.
     pub pc: Address,
+    /// The number of the instruction it is part of, its code hooks'
+    /// [`Instruction::instruction`]: the instructions run before it
+    /// ([`Cpu::instructions`]).  Exception processing's is the number
+    /// of the instruction that raised it or that a trace follows;
+    /// an interrupt's, taken between instructions, the next one's.
+    pub instruction: u64,
     /// Whether it is exception processing stacking a frame.
     pub stacking: bool,
 }
@@ -114,6 +140,12 @@ pub struct PendingWrite {
     pub function_code: FunctionCode,
     /// The address of the instruction it is part of.
     pub pc: Address,
+    /// The number of the instruction it is part of, its code hooks'
+    /// [`Instruction::instruction`]: the instructions run before it
+    /// ([`Cpu::instructions`]).  Exception processing's is the number
+    /// of the instruction that raised it or that a trace follows;
+    /// an interrupt's, taken between instructions, the next one's.
+    pub instruction: u64,
     /// Whether it is exception processing stacking a frame.
     pub stacking: bool,
     /// Whether the store is dropped, as the hooks before left it.
@@ -122,12 +154,13 @@ pub struct PendingWrite {
 
 impl PendingWrite {
     /// A write of `size` at `address` in `function_code`'s space, part
-    /// of the instruction at `pc`, not dropped.
+    /// of the instruction at `pc`, number `instruction`, not dropped.
     pub(crate) const fn new(
         address: Address,
         size: Size,
         function_code: FunctionCode,
         pc: Address,
+        instruction: u64,
         stacking: bool,
     ) -> Self {
         Self {
@@ -135,6 +168,7 @@ impl PendingWrite {
             size,
             function_code,
             pc,
+            instruction,
             stacking,
             dropped: false,
         }
@@ -185,6 +219,12 @@ pub struct InvalidAccess {
     pub reason: Invalid,
     /// The address of the instruction it is part of.
     pub pc: Address,
+    /// The number of the instruction it is part of, its code hooks'
+    /// [`Instruction::instruction`]: the instructions run before it
+    /// ([`Cpu::instructions`]).  Exception processing's is the number
+    /// of the instruction that raised it or that a trace follows;
+    /// an interrupt's, taken between instructions, the next one's.
+    pub instruction: u64,
     /// Whether it is exception processing stacking a frame.
     pub stacking: bool,
 }
@@ -236,85 +276,276 @@ impl fmt::Display for CoverageId {
     }
 }
 
-/// The instructions executed in a range of addresses: a bit for each
-/// word of it, set when an instruction that starts there executes
-/// ([`Cpu::add_coverage`]).  Host instrumentation, as the hooks are:
-/// not part of a snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Coverage {
-    /// The first address, even.
-    start: Address,
-    /// The last address, on the address lines.
-    end: Address,
-    /// A bit for each word from `start`, the lowest bit of each the
-    /// lowest address.
-    words: Vec<u64>,
+/// What a coverage records ([`Cpu::add_coverage`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum CoverageKind {
+    /// Each instruction executed: a bit for each word, set when an
+    /// instruction that starts there executes.
+    Execute,
+    /// Each byte read: a bit for each byte, set by each operand read
+    /// cycle a read hook over it would see.
+    Read,
+    /// Each byte written: a bit for each byte, set by each write cycle
+    /// a write hook over it would see.
+    Write,
 }
 
-impl Coverage {
-    /// Bits in each of `words`.
-    const BITS: u32 = u64::BITS;
+impl CoverageKind {
+    /// The kinds, in order, with their names.
+    const NAMES: [(Self, &'static str); 3] = [
+        (Self::Execute, "execute"),
+        (Self::Read, "read"),
+        (Self::Write, "write"),
+    ];
 
-    /// `range`, nothing executed, its end no further than `mask`, the
-    /// address lines'.
-    pub(crate) fn new(range: &RangeInclusive<Address>, mask: u32) -> Self {
-        let start = Address(range.start().0 & !1);
-        let end = Address(range.end().0.min(mask));
-        let count = if start > end {
-            0
-        } else {
-            u64::from((end.0 - start.0) / 2) + 1
-        };
+    /// log2 of the bytes each bit stands for: a word for instructions,
+    /// a byte for reads and writes.
+    const fn shift(self) -> u32 {
+        match self {
+            Self::Execute => 1,
+            Self::Read | Self::Write => 0,
+        }
+    }
+}
+
+/// `execute`, `read` or `write`.
+impl fmt::Display for CoverageKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (_, name) = Self::NAMES
+            .iter()
+            .find(|(kind, _)| kind == self)
+            .expect("every kind is named");
+        formatter.write_str(name)
+    }
+}
+
+/// `execute`, `read` or `write`, as [`Display`](fmt::Display) prints it.
+impl FromStr for CoverageKind {
+    type Err = ParseCoverageKindError;
+
+    fn from_str(text: &str) -> Result<Self, ParseCoverageKindError> {
+        Self::NAMES
+            .iter()
+            .find(|(_, name)| *name == text)
+            .map(|&(kind, _)| kind)
+            .ok_or_else(|| ParseCoverageKindError(text.to_owned()))
+    }
+}
+
+/// Text that names no [`CoverageKind`].
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no coverage kind {0:?}: give execute, read or write")]
+pub struct ParseCoverageKindError(String);
+
+/// What a range of addresses saw executed, read or written
+/// ([`Cpu::add_coverage`]): a bit for each word (execute) or byte (read,
+/// write) of it, kept a page at a time, a page's bits allocated when the
+/// first of them is set, so it holds what was recorded, not the range.
+/// Host instrumentation, as the hooks are: not part of a snapshot.
+#[derive(Debug, Clone)]
+pub struct Coverage {
+    /// What it records.
+    kind: CoverageKind,
+    /// Its first and last addresses, on the address lines, the first
+    /// even for [`CoverageKind::Execute`]; [`None`] for an empty range.
+    bounds: Option<(Address, Address)>,
+    /// The number of the page its first address is in.
+    first: u32,
+    /// Each run of [`Coverage::SLAB`] pages from `first`, allocated at
+    /// its first record: each page's bits, allocated at its first
+    /// record, the lowest bit of each `u64` the lowest address.
+    slabs: Vec<Option<Box<[Option<PageBits>]>>>,
+    /// The page last recorded in, its number from `first` and its bits,
+    /// out of `slabs` while it is here: a record on it, as most are,
+    /// looks no table up.
+    hot: Option<(u32, PageBits)>,
+}
+
+/// A page's bits: one for each byte, or each word, in the low half.
+type PageBits = Box<[u64; Coverage::PAGE_WORDS]>;
+
+/// Alike if they cover the same range with the same kind and recorded
+/// the same addresses, wherever their pages are held.
+impl PartialEq for Coverage {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.bounds == other.bounds
+            && self.addresses().eq(other.addresses())
+    }
+}
+
+impl Eq for Coverage {}
+
+impl Coverage {
+    /// Bits in each `u64` of a page's.
+    const BITS: u32 = u64::BITS;
+    /// The `u64`s of a page's bits: one bit for each byte.
+    const PAGE_WORDS: usize = (PAGE_BYTES / u64::BITS) as usize;
+    /// Pages in a slab of the table.
+    const SLAB: u32 = 1024;
+
+    /// `kind` over `range`, nothing recorded: its start rounded up to a
+    /// word for [`CoverageKind::Execute`], its end no further than
+    /// `mask`, the address lines'; empty if its start is past its end
+    /// or the lines.
+    pub(crate) fn new(range: &RangeInclusive<Address>, mask: u32, kind: CoverageKind) -> Self {
+        let step = 1 << kind.shift();
+        let start = range.start().0.checked_next_multiple_of(step);
+        let end = range.end().0.min(mask);
+        let bounds = start
+            .filter(|&start| start <= end)
+            .map(|start| (Address(start), Address(end)));
+        let (first, slabs) = bounds.map_or((0, 0), |(start, end)| {
+            let (first, last) = (start.0 >> PAGE_SHIFT, end.0 >> PAGE_SHIFT);
+            (first, (last - first) / Self::SLAB + 1)
+        });
         Self {
-            start,
-            end,
-            words: vec![0; count.div_ceil(u64::from(Self::BITS)) as usize],
+            kind,
+            bounds,
+            first,
+            slabs: vec![None; slabs as usize],
+            hot: None,
         }
     }
 
-    /// The addresses it covers.
+    /// What it records.
+    #[must_use]
+    pub const fn kind(&self) -> CoverageKind {
+        self.kind
+    }
+
+    /// The addresses it covers: empty (its start past its end) if none.
     #[must_use]
     pub const fn range(&self) -> RangeInclusive<Address> {
-        self.start..=self.end
+        match self.bounds {
+            Some((start, end)) => start..=end,
+            None => Address(1)..=Address(0),
+        }
     }
 
-    /// The word and bit of `address`, if it covers it and it is even.
-    fn bit(&self, address: Address) -> Option<(usize, u64)> {
-        if address.is_odd() || address < self.start || address > self.end {
+    /// The page, from `first`, and the bit's index in it of `address`,
+    /// if it covers it, and it is even for [`CoverageKind::Execute`].
+    #[inline]
+    fn locate(&self, address: Address) -> Option<(u32, u32)> {
+        let (start, end) = self.bounds?;
+        let shift = self.kind.shift();
+        if address < start || address > end || address.0 & ((1 << shift) - 1) != 0 {
             return None;
         }
-        let index = (address.0 - self.start.0) / 2;
-        Some(((index / Self::BITS) as usize, 1 << (index % Self::BITS)))
+        Some((
+            (address.0 >> PAGE_SHIFT) - self.first,
+            (address.0 % PAGE_BYTES) >> shift,
+        ))
     }
 
-    /// Records an instruction at `address` executed, if it covers it.
+    /// The table's place for page `page`, from `first`, its slab
+    /// allocated now if it was not.
+    fn place(&mut self, page: u32) -> &mut Option<PageBits> {
+        let pages = self.slabs[(page / Self::SLAB) as usize]
+            .get_or_insert_with(|| vec![None; Self::SLAB as usize].into_boxed_slice());
+        &mut pages[(page % Self::SLAB) as usize]
+    }
+
+    /// Records `address`, if it covers it.
+    #[inline]
     pub(crate) fn record(&mut self, address: Address) {
-        if let Some((word, bit)) = self.bit(address) {
-            self.words[word] |= bit;
+        let Some((page, index)) = self.locate(address) else {
+            return;
+        };
+        let bits = match &mut self.hot {
+            Some((hot, bits)) if *hot == page => bits,
+            _ => self.heat(page),
+        };
+        bits[(index / Self::BITS) as usize] |= 1 << (index % Self::BITS);
+    }
+
+    /// Makes page `page`, from `first`, the hot page, the last one put
+    /// back in the table: its bits, allocated now if they were not.
+    #[cold]
+    #[inline(never)]
+    fn heat(&mut self, page: u32) -> &mut PageBits {
+        if let Some((cooled, bits)) = self.hot.take() {
+            *self.place(cooled) = Some(bits);
+        }
+        let bits = self
+            .place(page)
+            .take()
+            .unwrap_or_else(|| Box::new([0; Self::PAGE_WORDS]));
+        &mut self.hot.insert((page, bits)).1
+    }
+
+    /// Records each byte of `size` from `address`, on lines `mask`, it
+    /// covers.
+    pub(crate) fn record_bytes(&mut self, address: Address, size: Size, mask: u32) {
+        for offset in 0..size.bytes() {
+            self.record(Address(address.0.wrapping_add(offset) & mask));
         }
     }
 
-    /// Whether an instruction at `address` executed.
+    /// The bits of page `page`, from `first`, if any are set.
+    fn bits(&self, page: u32) -> Option<&PageBits> {
+        match &self.hot {
+            Some((hot, bits)) if *hot == page => Some(bits),
+            _ => self.slabs[(page / Self::SLAB) as usize]
+                .as_ref()
+                .and_then(|pages| pages[(page % Self::SLAB) as usize].as_ref()),
+        }
+    }
+
+    /// Whether `address` was recorded.
     #[must_use]
     pub fn contains(&self, address: Address) -> bool {
-        self.bit(address)
-            .is_some_and(|(word, bit)| self.words[word] & bit != 0)
-    }
-
-    /// The addresses of the instructions executed, in order.
-    pub fn addresses(&self) -> impl Iterator<Item = Address> + '_ {
-        self.words
-            .iter()
-            .enumerate()
-            .flat_map(move |(index, &word)| {
-                (0..Self::BITS)
-                    .filter(move |bit| word & 1 << bit != 0)
-                    .map(move |bit| self.start.offset(2 * (index as u32 * Self::BITS + bit)))
+        self.locate(address).is_some_and(|(page, index)| {
+            self.bits(page).is_some_and(|bits| {
+                bits[(index / Self::BITS) as usize] & 1 << (index % Self::BITS) != 0
             })
+        })
     }
 
-    /// Forgets every instruction executed.
+    /// The pages that hold bits, from `first`, with their bits, in
+    /// order.
+    fn held(&self) -> impl Iterator<Item = (u32, &PageBits)> + '_ {
+        let tabled = self.slabs.iter().enumerate().flat_map(|(slab, pages)| {
+            pages.iter().flat_map(move |pages| {
+                pages.iter().enumerate().filter_map(move |(page, bits)| {
+                    bits.as_ref()
+                        .map(|bits| (slab as u32 * Self::SLAB + page as u32, bits))
+                })
+            })
+        });
+        // the hot page among the table's, in order
+        let mut tabled = tabled.peekable();
+        let mut hot = self.hot.as_ref().map(|(page, bits)| (*page, bits));
+        iter::from_fn(move || match (tabled.peek(), hot) {
+            (Some(&(page, _)), Some((warm, _))) if warm < page => hot.take(),
+            (Some(_), _) => tabled.next(),
+            (None, _) => hot.take(),
+        })
+    }
+
+    /// The addresses recorded, in order.
+    pub fn addresses(&self) -> impl Iterator<Item = Address> + '_ {
+        let shift = self.kind.shift();
+        self.held().flat_map(move |(page, bits)| {
+            let base = (self.first + page) << PAGE_SHIFT;
+            bits.iter().enumerate().flat_map(move |(word, &value)| {
+                (0..Self::BITS)
+                    .filter(move |bit| value & 1 << bit != 0)
+                    .map(move |bit| Address(base | (word as u32 * Self::BITS + bit) << shift))
+            })
+        })
+    }
+
+    /// Forgets everything recorded.
     pub(crate) fn clear(&mut self) {
-        self.words.fill(0);
+        self.slabs.fill(None);
+        self.hot = None;
+    }
+
+    /// The pages whose bits it holds.
+    #[cfg(test)]
+    pub(crate) fn pages_held(&self) -> usize {
+        self.held().count()
     }
 }

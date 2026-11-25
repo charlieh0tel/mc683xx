@@ -263,8 +263,10 @@ BDM, below):
 | A bare CPU's exception stop (`set_stop_on_exception`): a trap, a trace or an interrupt about to be taken, not only a fault | `SIGTRAP` |
 
 A self-loop stop (`Limits::self_loop`, `run_limited(self_loop=True)`)
-is a limited run's alone: the stub's runs never ask for it, so under
-gdb a branch to itself runs as the CPU runs it, and Ctrl-C stops it.
+is the stub's never: under gdb a branch to itself runs as the CPU runs
+it, and Ctrl-C stops it, unless the host set
+`set_stop_at_self_loop`, whose stop the stub reports as `SIGTRAP`, as
+an exception stop.
 
 A signal gdb passes back on continue (`signal SIGINT`) is dropped: the
 CPU has none.

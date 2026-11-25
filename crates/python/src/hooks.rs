@@ -114,7 +114,7 @@ impl CoverageIdView {
     }
 }
 
-/// The addresses of the instructions `coverage` recorded, as a set.
+/// The addresses `coverage` recorded, as a set.
 pub(crate) fn covered<'py>(py: Python<'py>, coverage: &Coverage) -> PyResult<Bound<'py, PySet>> {
     PySet::new(py, coverage.addresses().map(|address| address.0))
 }
@@ -196,10 +196,14 @@ impl Captured {
 pub(crate) struct InstructionView {
     /// Its address.
     pc: Address,
+    /// Its number (`hooks::Instruction::instruction`).
+    instruction: u64,
     /// The registers.
     registers: Captured,
     /// The long word at A7 (`hooks::Instruction::stack_top`).
     stack_top: Option<u32>,
+    /// Its first word (`hooks::Instruction::opcode`).
+    opcode: Option<u16>,
 }
 
 #[pymethods]
@@ -208,6 +212,13 @@ impl InstructionView {
     #[getter]
     const fn pc(&self) -> u32 {
         self.pc.0
+    }
+
+    /// Its number: the instructions run before it, as `instructions`
+    /// counts them, from 0.
+    #[getter]
+    const fn instruction(&self) -> u64 {
+        self.instruction
     }
 
     /// Every register by name, as `Mc68331.registers()` gives them: one
@@ -227,6 +238,14 @@ impl InstructionView {
     #[getter]
     const fn stack_top(&self) -> Option<u32> {
         self.stack_top
+    }
+
+    /// Its first word, the opcode, for an opcode hook's call
+    /// (`add_code_hook(..., opcode=(mask, value))`); `None` for a plain
+    /// code hook's or a block hook's.
+    #[getter]
+    const fn opcode(&self) -> Option<u16> {
+        self.opcode
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
@@ -282,6 +301,15 @@ impl MemoryAccessView {
         self.0.pc.0
     }
 
+    /// The number of the instruction it is part of, its code hooks'
+    /// `Instruction.instruction`; exception processing's is the
+    /// number of the instruction that raised it or that a trace follows,
+    /// an interrupt's the next instruction's.
+    #[getter]
+    const fn instruction(&self) -> u64 {
+        self.0.instruction
+    }
+
     /// Whether exception processing is stacking a frame.
     #[getter]
     const fn stacking(&self) -> bool {
@@ -335,7 +363,7 @@ impl PendingReadView {
     /// while its hook's call is under way: `BusError` at a byte the
     /// core's memory does not serve, `RuntimeError` once the call is
     /// over.
-    fn peek<'py>(
+    fn peek_bytes<'py>(
         &self,
         py: Python<'py>,
         address: u32,
@@ -366,6 +394,15 @@ impl PendingReadView {
     #[getter]
     const fn pc(&self) -> u32 {
         self.read.pc.0
+    }
+
+    /// The number of the instruction it is part of, its code hooks'
+    /// `Instruction.instruction`; exception processing's is the
+    /// number of the instruction that raised it or that a trace follows,
+    /// an interrupt's the next instruction's.
+    #[getter]
+    const fn instruction(&self) -> u64 {
+        self.read.instruction
     }
 
     /// Whether exception processing is stacking a frame.
@@ -400,8 +437,8 @@ pub(crate) struct PendingWriteView {
 #[pymethods]
 impl PendingWriteView {
     /// `length` bytes of the core's memory from `address`, as
-    /// `PendingRead.peek`: memory as it is before the store.
-    fn peek<'py>(
+    /// `PendingRead.peek_bytes`: memory as it is before the store.
+    fn peek_bytes<'py>(
         &self,
         py: Python<'py>,
         address: u32,
@@ -446,6 +483,15 @@ impl PendingWriteView {
     #[getter]
     const fn pc(&self) -> u32 {
         self.write.pc.0
+    }
+
+    /// The number of the instruction it is part of, its code hooks'
+    /// `Instruction.instruction`; exception processing's is the
+    /// number of the instruction that raised it or that a trace follows,
+    /// an interrupt's the next instruction's.
+    #[getter]
+    const fn instruction(&self) -> u64 {
+        self.write.instruction
     }
 
     /// Whether exception processing is stacking a frame.
@@ -616,6 +662,15 @@ impl InvalidAccessView {
     #[getter]
     const fn pc(&self) -> u32 {
         self.0.pc.0
+    }
+
+    /// The number of the instruction it is part of, its code hooks'
+    /// `Instruction.instruction`; exception processing's is the
+    /// number of the instruction that raised it or that a trace follows,
+    /// an interrupt's the next instruction's.
+    #[getter]
+    const fn instruction(&self) -> u64 {
+        self.0.instruction
     }
 
     /// Whether exception processing is stacking a frame.
@@ -790,7 +845,7 @@ where
 
 /// `callable`, which must be callable, as a pre-read hook, called before
 /// the read as `callable(PendingRead, bytearray)`, the memory lent to
-/// `PendingRead.peek` for the call: what it leaves in the bytearray,
+/// `PendingRead.peek_bytes` for the call: what it leaves in the bytearray,
 /// which must keep its length, answers the read.  `True`, or an
 /// exception, which waits in `pending`, stops the run.
 pub(crate) fn pre_read_hook(
@@ -815,7 +870,7 @@ pub(crate) fn pre_read_hook(
 
 /// `callable`, which must be callable, as a pre-write hook, called
 /// before the write as `callable(PendingWrite, bytearray)`, the memory
-/// lent to `PendingWrite.peek` for the call: what it leaves in the
+/// lent to `PendingWrite.peek_bytes` for the call: what it leaves in the
 /// bytearray, which must keep its length, is stored, unless it called
 /// `PendingWrite.set_dropped(True)`.  `True`, or an exception, which
 /// waits in `pending`, stops the run; after an exception neither the
@@ -911,8 +966,10 @@ pub(crate) fn instruction(instruction: &Instruction) -> InstructionView {
 pub(crate) fn owned_instruction(instruction: Instruction) -> InstructionView {
     InstructionView {
         pc: instruction.pc,
+        instruction: instruction.instruction,
         registers: Captured::new(instruction.registers),
         stack_top: instruction.stack_top,
+        opcode: instruction.opcode,
     }
 }
 

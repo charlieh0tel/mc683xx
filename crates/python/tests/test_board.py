@@ -279,9 +279,13 @@ def test_a_board_s_chip_reads_and_hooks_as_a_chip_does(tmp_path: Path) -> None:
     assert isinstance(chip, mc683xx.BoardChip)
     seen: list[int] = []
     hook = chip.add_code_hook(lambda instruction: seen.append(instruction.pc), START, START)
+    # a mask of 0: every opcode memory serves
+    opcodes: list[int | None] = []
+    filtered = chip.add_code_hook(lambda instruction: opcodes.append(instruction.opcode), START, START, opcode=(0, 0))
     board.run_for(seconds=0.0001)
     assert seen == [START]
-    assert chip.remove_hook(hook)
+    assert len(opcodes) == 1 and opcodes[0] is not None
+    assert chip.remove_hook(hook) and chip.remove_hook(filtered)
     assert chip.read_register("SSP") <= STACK
     assert chip.registers()["PC"] == chip.read_register("PC")
     assert chip.peek(CSBAR1, 2) == CS1_BAR

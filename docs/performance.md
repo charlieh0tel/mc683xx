@@ -85,8 +85,13 @@ working fails `make ci`.
   RAM's pages that no sled reaches, so it never fires; and
   `code_everywhere`, a Rust code hook that does nothing, called on
   every instruction.  `hooks/add_remove` adds and removes a code
-  hook on the RAM; `coverage_elsewhere` and `coverage_sled` add a
-  coverage beside the sled or over it.  From Python,
+  hook on the RAM; `opcode_elsewhere`, `opcode_unmatched` and
+  `opcode_everywhere` an opcode hook beside the sled, over it matching
+  no opcode, and everywhere matching every one; `coverage_elsewhere`
+  and `coverage_sled` add an execute coverage beside the sled or over
+  it, `read_coverage_data` a read coverage over the data the kernels
+  read (A0's) and `write_coverage_output` a write coverage over what
+  they write (A1's).  From Python,
   `crates/python/benches/hooks.py`
   (Python hooks, below).
 - `core/*_limited` (`benches/core.rs`): the `nop` and
@@ -793,3 +798,60 @@ unhooked); over the whole sled, a bit set for every instruction,
 `nop` takes 236-238 us and `move_indirect` 188 us: about 4 ns an
 instruction on this core, where a Python code hook that does nothing
 costs about 280 ns.
+
+Coverage kinds (sc batch 7), on performance core 2, three interleaved
+runs against the code before them (`unhooked` 77.8, 70.7 and 53-55 us
+both): an execute coverage now holds a page's bits only once one is
+set (review r13, R2).  The page last recorded in is held out of the
+table, so a record there, as most are, looks no table up: the sled
+costs 0.9 ns an instruction over the flat bitmap (`nop_coverage_sled`
+116 to 125 us, `move_indirect` 94 to 99, `clr_indirect` 71 to 76,
+interleaved), where the table alone cost 2.3 ns (139, 106 and 81) and
+a `BTreeMap` of pages 4.7 ns (167, 112 and 91); neither was kept.  A read or write coverage off the
+cycles' pages costs nothing (`nop_read_coverage_data` and
+`nop_write_coverage_output` 81 us, as `nop_code_elsewhere`;
+`clr_indirect_read_coverage_data` 56 us, the kernel writing alone).
+Over the data a kernel reads or writes it takes that access off the
+fast path and records its bytes: `move_indirect_read_coverage_data`
+120 us and `write_coverage_output` 126 us against 71, about 5 ns an
+access, and `clr_indirect_write_coverage_output` 140 against 53 us,
+about 9 ns a write, where a no-op Python write hook costs 180 ns.
+
+An opcode hook (`Cpu::add_opcode_hook`, sc batch 7), interleaved
+three times each on performance core 2 against the code before it:
+off the instructions' pages it costs what a code hook there does
+(`nop_opcode_elsewhere` 79-80 us, `nop_code_elsewhere` 80 us,
+`nop_unhooked` 78 us).  Over the sled, matching nothing,
+`nop_opcode_unmatched` takes 129 us and `move_indirect` 100 us
+against 78 and 71 unhooked: about 5 and 3 ns an instruction for the
+page lookup, reading the opcode through the fetch page (which the
+opcode fetch then finds cached; a cycle-free peek instead cost 154
+and 113) and the compare, where a no-op Rust code hook on every
+instruction costs 16 ns.  Matching every instruction it costs about
+what that code hook does (251 against 237 us).  A plain code hook's
+`Instruction` carries no opcode: filling it for every code hook cost
+a no-op Rust hook on every instruction 4 ns (`nop_code_everywhere`
+238 to 271-282 us, `move_indirect` 146 to 169, `clr_indirect` 115 to
+131), and without it they are back where they were (237, 148 and 114
+against 239, 146 and 115 for the code before round 14, interleaved).  From Python
+(`hooks.py`), the opcode hook matching the loop's `move.w` is called
+for it alone at 0.165 us a call (a plain code hook 0.161 us); one
+matching nothing runs the loop at 48.5 M instructions/s, against 78
+with no hook and 5.7 with a no-op code hook.  The pages with neither
+run as before: `none` executes the same host instructions (perf
+stat, 20 M emulated instructions: 6.0266 against 6.0268 G) in 4%
+more cycles, placement, as in sc batch 6.
+
+### Profiling a hook-heavy Python host
+
+Profile a host whose time goes to Python hooks with `perf`, not
+`py-spy --native`: in a smartclock harness run, `py-spy --native`
+failed to unwind 58% of its samples through the extension's frames
+and the hook dispatch between them, leaving most of the time
+unattributed.  `perf record --call-graph dwarf` unwinds the native
+frames from their debug information, and with Python 3.12 or later
+`python -X perf` (or `PYTHONPERFSUPPORT=1`) names the Python frames
+too, so one profile shows the core, the dispatch and the callables
+together.  Build the module with debug information for it
+(`CARGO_PROFILE_RELEASE_DEBUG=true maturin develop --release`);
+sampling needs a `perf_event_paranoid` that allows it.

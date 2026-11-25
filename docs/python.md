@@ -25,7 +25,8 @@ rename renames the Python name with it.  The deliberate differences:
 - **Names and values:** what a host *names* when it wires crosses as
   its string, in and out, whatever the Rust type: a chip select
   (`"CSBOOT"`, `"CS0"`), a net type (`"serial"`), a port direction
-  (`"in-out"`), a register (`"D0"`, `"SR"`, by Python's own names).
+  (`"in-out"`), a register (`"D0"`, `"SR"`, by Python's own names), a
+  coverage's kind (`"execute"`, `"read"`, `"write"`).
   What a host *matches on* is a class whose members are the Rust
   enum's variants, whatever traits the Rust type has (`Display` and
   `FromStr` included): a kind, a cause, a port, a channel, a reason, a
@@ -91,7 +92,10 @@ rename renames the Python name with it.  The deliberate differences:
   kind, pins)`, a `MemoryKind` (`Ram` or `Rom`) where Python takes a
   keyword's bool; `fixed_memory(contents, base, writable=True)`
   likewise (Rust's `(bytes, kind, base)`).  The bare `Machine`'s `map` takes the pages'
-  `permissions` too, Rust's `map` then `protect`.
+  `permissions` too, Rust's `map` then `protect`.  An opcode hook is
+  `add_code_hook(callback, begin, end, opcode=(mask, value))`, Rust's
+  sibling `add_opcode_hook(range, mask, value, hook)`: a filter on a
+  code hook, so a keyword on its method.
 - **Builtins:** an argument Rust names `id` or `bytes`, Python
   builtins, is named for what it holds: `remove_hook(hook)`,
   `unobserve(observer)`, `peripheral(peripheral)`,
@@ -869,7 +873,9 @@ assert chip.now == 0
 (both ends of the range included), `add_exception_hook(callback)` and
 `add_exception_return_hook(callback)`,
 call a Python callable with what the Rust hook sees: an `Instruction`
-(`pc`, `registers`, `stack_top`), a `MemoryAccess` (`address`, `size`,
+(`pc`, `instruction`, `registers`, `stack_top`, and `opcode`, its
+first word for an opcode hook, `None` for a plain code hook or a block
+hook, which read no memory for it), a `MemoryAccess` (`address`, `size`,
 `function_code`, `value`, and `previous`, what a write replaced, read
 with no cycle from the bytes it writes to, `None` for a read, a CPU-space write or a peripheral's
 write; on the chip a
@@ -879,7 +885,10 @@ long operand is two word cycles, on the bare `Machine` one access of
 an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`) or
 an `ExceptionReturn` (`vector`, `pc`, `sr`, `stack`: what `rte`
 restored, and the frame's address, its `ExceptionEntry`'s `stack`).
-Each returns a `HookId` for `remove_hook`.  A callable returns `True`
+Each returns a `HookId` for `remove_hook`.  Installing or removing a
+ranged hook recomputes the pages its range reaches, so a bounded
+range, the code or data it watches, makes both cheap (a few pages:
+0.2 us); the default, every address, walks every page mapped.  A callable returns `True`
 to stop the run (`Stop.Hook(hook)`), `None` (no `return`) or `False`
 not to; any other result raises `TypeError`, as Rust's hook returns a
 `ControlFlow`, not a number or a list; a code hook's stop leaves its
@@ -893,17 +902,57 @@ dictionary, made at the first ask; `register(name)` reads one
 register without making it, the cheaper call in a hook that runs
 often.
 
-`add_coverage(begin, end)` (Rust's `Cpu::add_coverage`, on
+`add_code_hook(callback, begin, end, opcode=(mask, value))` calls
+`callback` only for an instruction whose first word, masked by `mask`,
+is `value` (`opcode=(0xFFF0, 0x4E40)` for every TRAP): the filter runs
+natively, so Python is called for the matches alone, and an
+instruction it does not match costs a page lookup and a compare.  The
+word is the one memory serves at PC, read with no cycle; an
+instruction a peripheral would supply never matches.  It is a code
+hook in all else: called in the code hooks' order, stopping the run
+before its instruction, removed by `remove_hook`.  Its `Instruction`
+carries the word as `opcode`; `opcode=(0, 0)` calls a hook for every
+instruction memory serves, with its word.  An instruction fetched
+from the bus (a peripheral's) never matches, whatever the mask.
+
+`instruction`, on an `Instruction` and on every access a hook sees
+(`MemoryAccess`, `PendingRead`, `PendingWrite`, `InvalidAccess`), is
+the instruction's number: the instructions run before it, as
+`instructions` counts them, from 0, the same for an instruction's
+code hooks and each access it makes, so a host matches the two up.
+Exception processing's accesses carry the number of the instruction
+that raised the exception or that a trace follows (a TRAP's frame is
+the TRAP's); an interrupt's, taken between instructions, the next
+instruction's.
+
+`add_coverage(begin, end, kind)` (Rust's `Cpu::add_coverage`, on
 `Machine`, `Mc68331` and `Board.chip`) records natively, with no
-Python call, the address of each instruction from `begin` to `end`
-as it executes, a bit for each word of the range; it returns a
-`CoverageId`.  `coverage(id)` is the set of addresses recorded,
-`clear_coverage(id)` forgets them (whether there is such a
+Python call, what `begin` to `end` sees of `kind`, a string, as Rust's
+`CoverageKind` prints (another raises `ValueError`):
+
+- `"execute"`: the address of each instruction that starts there, as
+  it executes, a bit for each word;
+- `"read"`: each byte of each operand read cycle a read hook there
+  would see, a bit for each byte: memory's or a peripheral's,
+  exception processing's (a vector, `rte`'s frame) included; not a
+  fetch, a cycle in CPU space, or one that faulted; a long a bare
+  `Machine` reads whole is its four bytes;
+- `"write"`: likewise each byte of each write cycle, exception
+  stacking included; not a store a pre-write hook dropped.
+
+It returns a `CoverageId`.  `coverage(id)` is the set of addresses
+recorded, `clear_coverage(id)` forgets them (whether there is such a
 coverage), and `remove_coverage(id)` removes it and returns its last
-set; both give `None` once it is removed.  An instruction outside
-every coverage costs nothing; one inside it a lookup.  Like the
-hooks, a coverage is not part of a snapshot: `save` leaves it out
-and `restore` leaves it as it was.
+set; both give `None` once it is removed.  A coverage holds a page's
+bits once one is set, so its memory follows what it recorded, not
+its range; the range's start is rounded up to a word for
+`"execute"` and its end clamped to the address lines.  An
+instruction or cycle outside every coverage costs nothing; an
+instruction inside an execute coverage a lookup, and a read or
+write coverage's pages leave the fast path for reads (fetches
+included) or writes alone.  Like the hooks, a coverage is not part
+of a snapshot: `save` leaves it out and `restore` leaves it as it
+was.
 
 `protect(space, start, length, permissions)` sets whole 2-Kbyte pages
 of `Space.USER` or `Space.SUPERVISOR` to a string of `r`, `w` and `x`;
@@ -942,6 +991,14 @@ assert vectors == [BUS_ERROR]
 assert chip.memory(ram, 0, 2) == b"\x00\x00"
 assert any(isinstance(event, mc683xx.Event.Exception) for event in chip.take_events())
 ```
+
+`set_stop_at_self_loop(True)` (`stops_at_self_loop`; on a board's
+`board.chip` too; Rust's `Cpu::set_stop_at_self_loop`) ends a run
+`Stop.SelfLoop()` once a BRA or JMP to itself has run, PC at it, as
+firmware idles waiting for an interrupt: the bare `Machine`'s
+`run_limited(self_loop=True)` as a setting, the same detection, so a
+harness need not run out the budget there.  Each run runs the loop
+once more, so time moves.
 
 `set_stop_on_fault(True)` (`stops_on_fault`; on a board's
 `board.chip` too) stops a run at a bus or address error, the bus
@@ -1539,7 +1596,10 @@ assert bare.read_register("D0") == 6
   `Hook(hook)`, `Requested()` (`stop_request().request()`, from a
   callable or a peripheral), `Stopped()` (a `stop` or `lpstop`
   instruction: with no `cycles` it ends the run at once), or
-  `Halted(halt)`.  Rust's `End::Intercepted` never ends a Python run:
+  `Halted(halt)`.  An instruction that made an end of its own (a
+  fault, an exception stop, a self-loop) while a hook asked to stop
+  ends the run at that end, not `End.Stop(Stop.Hook(...))`, as in
+  Rust.  Rust's `End::Intercepted` never ends a Python run:
   `run_limited` answers an intercepted exception within it (below).
   Rust's `Limits::steps`, which serves the chip's BDM step, has no
   argument here, nor `End::Steps` a variant.  A stop requested
@@ -1600,8 +1660,8 @@ write takes effect:
 | Hook | Called | A register or memory write |
 | --- | --- | --- |
 | code, block | before the instruction | is seen by it; a PC write redirects, the instruction at the old PC not run, and the hooks at the new PC are called |
-| pre-read | within the run, before the read's first cycle | a change to its `data` answers the read, not stored; it reads memory with `PendingRead.peek`, and a call into the machine raises `RuntimeError` |
-| pre-write | within the run, before the write's first cycle | a change to its `data` is what is stored, and `set_dropped(True)` stores nothing; as a pre-read hook, it reads memory with `PendingWrite.peek`, and a call into the machine raises `RuntimeError` |
+| pre-read | within the run, before the read's first cycle | a change to its `data` answers the read, not stored; it reads memory with `PendingRead.peek_bytes`, and a call into the machine raises `RuntimeError` |
+| pre-write | within the run, before the write's first cycle | a change to its `data` is what is stored, and `set_dropped(True)` stores nothing; as a pre-read hook, it reads memory with `PendingWrite.peek_bytes`, and a call into the machine raises `RuntimeError` |
 | read, write | once the instruction has completed (a write hook sees memory written) | lands after the instruction, before the next |
 | invalid access | once the bus error exception is taken, PC the handler's (or the run stopped for it, with `stop_on_fault`) | lands before the handler's first instruction |
 | exception | once the frame is stacked and PC is the handler's | lands before the handler runs; writing SSP, SR and PC from the frame returns past it |
@@ -1615,7 +1675,7 @@ before each operand read of a byte in the range that the core's memory
 is one call), and what the callable leaves in it, at the same length,
 answers the read, and is not stored.  A `PendingRead` has `address`,
 `size`, `function_code`, `pc` and `stacking`, and
-`peek(address, length)`, the core's memory as a debugger reads it
+`peek_bytes(address, length)`, the core's memory as a debugger reads it
 (supervisor space, no cycle, no peripheral), during the call: another
 register the firmware keeps in RAM, a port's image, say.  It is a
 device model's way to answer what the firmware reads of RAM.  A long
@@ -1632,8 +1692,12 @@ calls (size 2 each); on the bare `Machine`, which sees a long once,
 one of each.  The read hooks see the cycles after it, with the values `data` gave
 them.  On the bare `Machine`, unlike its other hooks, it runs within
 the run, so a call into the machine raises `RuntimeError`, and memory
-is `PendingRead.peek`'s; `True` stops the run once the
-instruction completes.
+is `PendingRead.peek_bytes`'s; `True` stops the run once the
+instruction completes, `End.Stop(Stop.Hook(hook))`, unless the
+instruction ended the run otherwise, as in Rust: a fault stop
+(`End.Fault`), an exception stop (`End.Exception`) or a self-loop
+keeps its end, and an intercept is answered first, then the run ends
+at the hook's stop.
 
 ```python
 bare.poke_bytes(0x6000, struct.pack(">H", 0x1111))
@@ -1641,7 +1705,7 @@ bare.poke_bytes(0x6000, struct.pack(">H", 0x1111))
 
 def status(read: mc683xx.PendingRead, data: bytearray) -> None:
     """A device model's status word, from the image at 0x6100."""
-    (image,) = struct.unpack(">H", read.peek(0x6100, 2))
+    (image,) = struct.unpack(">H", read.peek_bytes(0x6100, 2))
     data[:] = struct.pack(">H", image ^ 0x3333)
 
 
@@ -1666,7 +1730,7 @@ included (`stacking`).  `data` is a bytearray copy of the bytes to be
 written; what the callable leaves in it, at the same length, is
 stored, unless it calls `write.set_dropped(True)`, when nothing is.  A
 `PendingWrite` has `address`, `size`, `function_code`, `pc`,
-`stacking`, `dropped` and `peek(address, length)`, memory as it is
+`stacking`, `dropped` and `peek_bytes(address, length)`, memory as it is
 before the store; `set_dropped` and `peek` raise `RuntimeError` once
 the call is over.  Hooks covering the write are called in the order
 installed, each seeing the bytes and the drop the earlier left (a later
@@ -1706,7 +1770,7 @@ second word faults is not seen at all; the invalid access hook sees
 the faulting word.
 
 `MemoryAccess` and `InvalidAccess` carry `pc`, the instruction's
-address, `stacking`, whether exception processing is stacking a frame
+address, `instruction`, its number, `stacking`, whether exception processing is stacking a frame
 (flagged, not hidden), and `registers`, as the instruction began, or,
 while a trace, hardware breakpoint or interrupt taken after one stacks
 its frame, as that processing began.  `registers` is a dict on the bare

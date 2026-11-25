@@ -27,6 +27,9 @@ RAM_BYTES = 0x10000
 LOOP = (0x3080, 0x60FC)
 # An address no instruction of the loop is at.
 ELSEWHERE = 0x100000
+# The loop's move.w, and an opcode it does not run.
+MOVE_WORD = LOOP[0]
+UNRUN = 0xFFFF
 
 
 def machine() -> mc683xx.Machine:
@@ -69,6 +72,12 @@ def install(cpu: mc683xx.Machine, case: str) -> bool:
         if not hasattr(mc683xx.MemoryAccess, "register"):
             return False
         cpu.add_write_hook(register_a7)
+    elif case in ("opcode", "opcode_unmatched"):
+        value = MOVE_WORD if case == "opcode" else UNRUN
+        try:
+            cpu.add_code_hook(no_op, opcode=(0xFFFF, value))
+        except TypeError:
+            return False
     elif case == "install_remove":
         pass
     else:
@@ -79,6 +88,7 @@ def install(cpu: mc683xx.Machine, case: str) -> bool:
 # Hook calls per instruction in each case.
 CALLS = {
     "code": 1.0,
+    "opcode": 0.5,
     "write": 0.5,
     "write_registers": 0.5,
     "write_register": 0.5,
@@ -88,6 +98,8 @@ CASES = (
     "none",
     "code_elsewhere",
     "code",
+    "opcode_unmatched",
+    "opcode",
     "write",
     "write_registers",
     "write_register",

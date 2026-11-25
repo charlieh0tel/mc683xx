@@ -1581,6 +1581,38 @@ fn a_branch_or_jump_to_itself_ends_a_run_that_asks_once_it_runs() {
 }
 
 #[test]
+fn the_self_loop_setting_ends_a_limited_run_and_its_stop_is_its_own() {
+    let mut machine = machine(&[NOP, BRA_SELF]);
+    assert!(!machine.cpu.stops_at_self_loop());
+    machine.cpu.set_stop_at_self_loop(true);
+    assert!(machine.cpu.stops_at_self_loop());
+    let unasked = Limits {
+        instructions: Some(100),
+        ..Limits::default()
+    };
+    let run = machine.run_limited(unasked);
+    assert_eq!(
+        run.end,
+        End::SelfLoop {
+            pc: Address(CODE + 2)
+        }
+    );
+    assert_eq!(machine.cpu.instructions(), 2);
+    // the setting outlives the run; off, the loop runs on
+    assert!(machine.cpu.stops_at_self_loop());
+    machine.cpu.set_stop_at_self_loop(false);
+    assert_eq!(machine.run_limited(unasked).end, End::Instructions);
+    // a run that asks still ends there with the setting off
+    assert_eq!(
+        to_self_loop(&mut machine, 100).end,
+        End::SelfLoop {
+            pc: Address(CODE + 2)
+        }
+    );
+    assert_eq!(Stop::SelfLoop.to_string(), "self-loop");
+}
+
+#[test]
 fn a_self_loop_runs_on_unasked_traced_or_branching_elsewhere() {
     // not asked
     let mut unasked = machine(&[BRA_SELF]);

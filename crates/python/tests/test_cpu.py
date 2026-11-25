@@ -92,6 +92,21 @@ def test_a_write_hook_sees_stacking_flagged():
     assert writes == [True] * 4
 
 
+def test_each_hook_sees_the_number_of_its_instruction() -> None:
+    cpu = machine(NOP, MOVE_WORD_D0_TO_A0, trap(0))
+    cpu.write_register("A0", 0x2000)
+    seen: list[tuple[str, int]] = []
+    cpu.add_code_hook(lambda instruction: seen.append(("code", instruction.instruction)))
+    cpu.add_write_hook(lambda access: seen.append(("write", access.instruction)))
+    cpu.add_pre_write_hook(lambda write, data: seen.append(("pre", write.instruction)))
+    cpu.run_limited(reach=HANDLER)
+    assert cpu.instructions == 3
+    assert seen[:5] == [("code", 0), ("code", 1), ("pre", 1), ("write", 1), ("code", 2)]
+    # the TRAP's frame, part of the TRAP, number 2
+    assert {seen_by for seen_by, _ in seen[5:]} == {"pre", "write"}
+    assert all(number == 2 for _, number in seen[5:])
+
+
 def test_limits_and_begin():
     cpu = machine(NOP, NOP, NOP, RTS)
     assert cpu.run_limited(instructions=2).end == mc683xx.End.Instructions()
@@ -242,7 +257,7 @@ def test_a_pre_read_hook_answers_the_long_from_its_copy_and_peeks_memory():
 
     def answer(read: mc683xx.PendingRead, data: bytearray) -> None:
         seen.append((read.address, read.size, bytes(data), read.stacking))
-        data[3:] = read.peek(0x2100, 1)
+        data[3:] = read.peek_bytes(0x2100, 1)
         kept.append(read)
 
     cpu.add_pre_read_hook(answer, 0x2003, 0x2003)
@@ -251,13 +266,13 @@ def test_a_pre_read_hook_answers_the_long_from_its_copy_and_peeks_memory():
     assert seen == [(0x2000, 4, b"\x11\x11\x22\x22", False)]
     assert cpu.peek_bytes(0x2000, 4) == bytes.fromhex("11112222")
     with pytest.raises(RuntimeError, match="within its hook's call"):
-        kept[0].peek(0x2100, 1)
+        kept[0].peek_bytes(0x2100, 1)
 
 
 def test_a_pre_read_hook_s_peek_past_memory_raises_and_calling_the_machine_raises():
     cpu = machine(MOVE_WORD_A0_TO_D0, RTS)
     cpu.write_register("A0", 0x2000)
-    cpu.add_pre_read_hook(lambda read, data: read.peek(0xF00000, 2), 0x2000, 0x2001)
+    cpu.add_pre_read_hook(lambda read, data: read.peek_bytes(0xF00000, 2), 0x2000, 0x2001)
     with pytest.raises(mc683xx.BusError):
         cpu.run_limited(reach=RETURN)
     cpu2 = machine(MOVE_WORD_A0_TO_D0, RTS)
@@ -290,7 +305,7 @@ def test_a_pre_write_hook_replaces_the_long_before_the_write_hook_sees_it():
     kept = []
 
     def replace(write: mc683xx.PendingWrite, data: bytearray) -> None:
-        seen.append((write.address, write.size, bytes(data), write.peek(0x2000, 4), write.dropped))
+        seen.append((write.address, write.size, bytes(data), write.peek_bytes(0x2000, 4), write.dropped))
         data[3] = 0x99
         kept.append(write)
 
@@ -304,7 +319,7 @@ def test_a_pre_write_hook_replaces_the_long_before_the_write_hook_sees_it():
     with pytest.raises(RuntimeError, match="within its hook's call"):
         kept[0].set_dropped(True)
     with pytest.raises(RuntimeError, match="within its hook's call"):
-        kept[0].peek(0x2000, 1)
+        kept[0].peek_bytes(0x2000, 1)
 
 
 def test_a_dropped_store_writes_nothing_and_a_later_hook_sees_the_drop():
@@ -460,6 +475,64 @@ def test_an_intercept_handles_or_declines_before_stacking():
     assert cpu.read_register("SSP") == STACK - 4 - 8
     assert cpu.remove_hook(hook)
     assert not cpu.remove_hook(hook)
+
+
+# CHK.W (A0),D0 (CPU32RM 4, CHK); MOVE.L (A0),(A1).
+CHK_WORD_A0_D0 = 0x4190
+MOVE_LONG_A0_TO_A1 = 0x2290
+CHK = 6
+
+
+def stopping_pre_read(cpu: mc683xx.Machine) -> mc683xx.HookId:
+    """A pre-read hook on the word at 0x2000 that stops the run."""
+    return cpu.add_pre_read_hook(lambda read, data: True, 0x2000, 0x2001)
+
+
+def test_an_in_run_stop_leaves_a_fault_stop_of_the_same_instruction_its_end() -> None:
+    cpu = machine(MOVE_LONG_A0_TO_A1, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("A1", RETURN)
+    cpu.set_stop_on_fault(True)
+    stopping_pre_read(cpu)
+    run = cpu.run_limited(reach=RETURN)
+    assert isinstance(run.end, mc683xx.End.Fault), run.end
+    assert run.end.fault.address == RETURN
+    assert cpu.read_register("PC") == CODE
+
+
+def test_an_in_run_stop_leaves_an_exception_stop_of_the_same_instruction_its_end() -> None:
+    cpu = machine(CHK_WORD_A0_D0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("D0", 5)
+    cpu.set_stop_on_exception([CHK])
+    hook = stopping_pre_read(cpu)
+    run = cpu.run_limited(reach=RETURN)
+    assert run.end == mc683xx.End.Exception(CHK, CODE)
+    # the stop's promise, not spent: the next run takes it, with no stop
+    assert cpu.remove_hook(hook)
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
+
+
+def test_an_in_run_stop_still_answers_an_intercept_of_the_same_instruction() -> None:
+    cpu = machine(CHK_WORD_A0_D0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("D0", 5)
+    answered: list[int] = []
+
+    def answer(intercepted: mc683xx.Intercepted) -> bool:
+        answered.append(intercepted.vector)
+        cpu.write_register("PC", intercepted.pc + 2)
+        return True
+
+    cpu.add_intercept_hook(answer, [CHK])
+    hook = stopping_pre_read(cpu)
+    run = cpu.run_limited(reach=RETURN)
+    assert answered == [CHK]
+    assert run.end == mc683xx.End.Stop(mc683xx.Stop.Hook(hook))
+    # handled: the CHK does not run again
+    assert cpu.read_register("PC") == CODE + 2
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+    assert answered == [CHK]
 
 
 def test_intercept_hooks_answer_in_order_until_one_handles():
@@ -948,6 +1021,11 @@ def test_a_vector_set_is_rust_s():
     assert len(VectorSet.ALL) == 256 and list(VectorSet([39, 32])) == [32, 39]
     assert 32 in traps and 31 not in traps and 300 not in traps and -1 not in traps and "x" not in traps
     assert traps.contains(47) and not traps.without(47).contains(47)
+    # a number past any vector is in no set, however large
+    assert not traps.contains(2**70) and 2**70 not in traps and not traps.contains(-1)
+    for number in (16, 300, 2**70, -1):
+        with pytest.raises(ValueError, match="no TRAP"):
+            mc683xx.Vector.trap(number)
     assert traps.union(VectorSet([4])) == VectorSet([4, *range(32, 48)])
     assert traps.union([4]) == traps.union(VectorSet([4]))
     assert traps.difference(VectorSet(range(33, 48))) == VectorSet([32])
@@ -1006,9 +1084,27 @@ def test_a_limited_run_can_end_at_a_self_loop_once_it_runs():
     assert cpu.instructions == 12
 
 
+def test_an_opcode_filtered_code_hook_sees_its_opcodes_alone() -> None:
+    cpu = machine(NOP, trap(0), trap(3))
+    seen: list[tuple[int, int | None]] = []
+    every: list[int | None] = []
+    plain: list[int | None] = []
+    cpu.add_code_hook(lambda instruction: seen.append((instruction.pc, instruction.opcode)), opcode=(0xFFF0, 0x4E40))
+    cpu.add_code_hook(lambda instruction: every.append(instruction.opcode), CODE, CODE + 0xFF, opcode=(0, 0))
+    cpu.add_code_hook(lambda instruction: plain.append(instruction.opcode), CODE, CODE + 0xFF)
+    cpu.run_limited(instructions=4)
+    # the first TRAP's handler is at HANDLER, whose zero words are no TRAP
+    assert seen == [(CODE + 2, trap(0))]
+    # mask 0: every instruction, with its word; a plain hook reads none
+    assert every == [NOP, trap(0)]
+    assert plain == [None, None]
+    with pytest.raises(OverflowError):
+        cpu.add_code_hook(lambda instruction: None, opcode=(0x10000, 0))
+
+
 def test_a_coverage_records_the_instructions_run_in_its_range():
     cpu = machine(NOP, ADDQ_LONG_1_D0, RTS)
-    coverage = cpu.add_coverage(CODE, CODE + 0xFF)
+    coverage = cpu.add_coverage(CODE, CODE + 0xFF, "execute")
     assert repr(coverage) == "CoverageId(1)" and str(coverage) == "coverage 1"
     cpu.run_limited(reach=RETURN)
     assert cpu.coverage(coverage) == {CODE, CODE + 2, CODE + 4}
@@ -1023,3 +1119,16 @@ def test_a_coverage_records_the_instructions_run_in_its_range():
     assert cpu.coverage(coverage) is None
     assert not cpu.clear_coverage(coverage)
     assert cpu.remove_coverage(coverage) is None
+
+
+def test_read_and_write_coverages_record_the_bytes_operands_reach() -> None:
+    cpu = machine(MOVE_LONG_A0_TO_D0, MOVE_WORD_D0_TO_A0, RTS)
+    cpu.write_register("A0", 0x2000)
+    reads = cpu.add_coverage(0x1000, 0x2FFF, "read")
+    writes = cpu.add_coverage(0x1000, 0x2FFF, "write")
+    cpu.run_limited(reach=RETURN)
+    # the long read whole, the word written; not the code's fetches
+    assert cpu.coverage(reads) == {0x2000, 0x2001, 0x2002, 0x2003}
+    assert cpu.coverage(writes) == {0x2000, 0x2001}
+    with pytest.raises(ValueError, match="no coverage kind"):
+        cpu.add_coverage(0, 1, "fetch")
