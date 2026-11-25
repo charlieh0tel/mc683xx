@@ -261,6 +261,8 @@ pub(crate) struct TakeOnce {
 pub(crate) struct Bare {
     /// Stop on a fault rather than take it.
     pub(crate) stop_on_fault: bool,
+    /// End every run at a self-loop ([`Cpu::set_stop_at_self_loop`]).
+    pub(crate) stop_at_self_loop: bool,
     /// The vectors whose exceptions stop a run before they are taken.
     pub(crate) stop_on_exception: VectorSet,
     /// The vectors the intercept hooks cover.
@@ -308,9 +310,9 @@ impl Cpu {
         let budget = limits.cycles.unwrap_or(Cycle::MAX.since(now));
         let first = self.instructions;
         self.bare.exceptions_stepped = 0;
-        self.self_loop = limits.self_loop;
+        self.self_loop = limits.self_loop || self.bare.stop_at_self_loop;
         let run = self.run_from_host(bus, interrupts, now, budget, Some(limits));
-        self.self_loop = false;
+        self.self_loop = self.bare.stop_at_self_loop;
         let end = self.bare.end.clone().unwrap_or(End::Stop(run.stop));
         LimitedRun {
             cycles: run.cycles,
@@ -422,6 +424,24 @@ impl Cpu {
     #[must_use]
     pub const fn stops_on_fault(&self) -> bool {
         self.bare.stop_on_fault
+    }
+
+    /// Whether every run, [`run_for`](Self::run_for)'s and so a chip's
+    /// and a board's too, ends at a self-loop, [`Stop::SelfLoop`] (a
+    /// limited run's end [`End::SelfLoop`]), as
+    /// [`Limits::self_loop`] ends a limited run: off at first.  The same
+    /// detection, so the same loops (a BRA or JMP to itself, untraced)
+    /// and the loop run once; its cost when off is the flag a taken
+    /// BRA or JMP tests anyway.
+    pub const fn set_stop_at_self_loop(&mut self, stop: bool) {
+        self.bare.stop_at_self_loop = stop;
+        self.self_loop = stop;
+    }
+
+    /// Whether every run ends at a self-loop.
+    #[must_use]
+    pub const fn stops_at_self_loop(&self) -> bool {
+        self.bare.stop_at_self_loop
     }
 
     /// The vectors whose exceptions, about to be taken, end a run before
@@ -641,7 +661,8 @@ impl Cpu {
     }
 
     /// A BRA or JMP taken to `target`: if it is its own address, a
-    /// self-loop, which ends a run that asks ([`Limits::self_loop`]).
+    /// self-loop, which ends a run that asks ([`Limits::self_loop`],
+    /// [`Cpu::set_stop_at_self_loop`]).
     #[inline(always)]
     pub(crate) fn branched(&mut self, target: Address) {
         if self.self_loop && target == self.instruction_pc {
@@ -649,8 +670,8 @@ impl Cpu {
         }
     }
 
-    /// Ends the run at the self-loop just executed at `pc`, if
-    /// [`Limits::self_loop`] asked and SR's T1 and T0 are clear.
+    /// Ends the run at the self-loop just executed at `pc`, if the run
+    /// asked and SR's T1 and T0 are clear.
     #[cold]
     #[inline(never)]
     fn end_at_self_loop(&mut self, pc: Address) {
@@ -812,12 +833,22 @@ impl Cpu {
     }
 
     /// Ends the run at `end` once this instruction ends: a fault's
-    /// [`Stop::Fault`] before any other stop asked for in it.
+    /// [`Stop::Fault`] before any other stop asked for in it, and a
+    /// self-loop's [`Stop::SelfLoop`] or another end's
+    /// [`Stop::Requested`] unless one was (a hook's, say).  A limited
+    /// run's [`End`] is `end` all the same: the end an instruction made
+    /// wins there over a stop asked in it, while
+    /// [`run_for`](Cpu::run_for)'s [`Run::stop`](crate::Run) keeps the
+    /// first stop.
     pub(crate) fn end_with(&mut self, end: End) {
-        if matches!(end, End::Fault(_)) {
-            self.stop_request = Some(Stop::Fault);
-        } else {
-            self.stop_request.get_or_insert(Stop::Requested);
+        match end {
+            End::Fault(_) => self.stop_request = Some(Stop::Fault),
+            End::SelfLoop { .. } => {
+                self.stop_request.get_or_insert(Stop::SelfLoop);
+            }
+            _ => {
+                self.stop_request.get_or_insert(Stop::Requested);
+            }
         }
         self.bare.end = Some(end);
     }

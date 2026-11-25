@@ -1321,6 +1321,11 @@ assert_eq!(chip.memory(ram)[..2], [0, 0]);
 assert_eq!(chip.cpu().registers.pc.0, firmware::HANDLER);
 ```
 
+`cpu_control().set_stop_at_self_loop(true)` ends a run
+`Stop::SelfLoop` once a BRA or JMP to itself has run, PC at it, as
+firmware idles waiting for an interrupt: a bare host's
+`Limits::self_loop` as a setting, with one detection for both.
+
 `cpu_control().set_stop_on_fault(true)` stops a run at a bus or
 address error, the bus monitor's included, instead of taking it: the
 run ends `Stop::Fault` and `cpu().fault_stop()` says which cycle

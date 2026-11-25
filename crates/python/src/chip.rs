@@ -525,6 +525,8 @@ pub(crate) enum Stop {
     /// A fault stopped it rather than being taken (`set_stop_on_fault`):
     /// `fault_stop` says which.
     Fault(),
+    /// A self-loop ran (`set_stop_at_self_loop`): PC at it.
+    SelfLoop(),
 }
 
 /// Why the CPU entered background mode (Rust's
@@ -597,6 +599,7 @@ impl From<Stop> for mc683xx_cpu32::Stop {
             Stop::Requested() => Self::Requested,
             Stop::Background { entry } => Self::Background(entry.into()),
             Stop::Fault() => Self::Fault,
+            Stop::SelfLoop() => Self::SelfLoop,
         }
     }
 }
@@ -617,6 +620,7 @@ impl Stop {
             Self::Requested() => "Stop.Requested()".to_owned(),
             Self::Background { entry } => format!("Stop.Background({})", entry.__repr__()),
             Self::Fault() => "Stop.Fault()".to_owned(),
+            Self::SelfLoop() => "Stop.SelfLoop()".to_owned(),
         })
     }
 }
@@ -641,6 +645,7 @@ impl TryFrom<mc683xx_cpu32::Stop> for Stop {
                 entry: entry.into(),
             },
             mc683xx_cpu32::Stop::Fault => Self::Fault(),
+            mc683xx_cpu32::Stop::SelfLoop => Self::SelfLoop(),
             other => return Err(Error::run_end(other)),
         })
     }
@@ -1554,6 +1559,23 @@ macro_rules! chip_methods {
             #[getter]
             fn stops_on_fault(&self, py: Python<'_>) -> PyResult<bool> {
                 self.with_chip(py, |chip| Ok(chip.cpu().stops_on_fault()))
+            }
+
+            /// Whether a run ends (`Stop.SelfLoop()`) once a BRA or JMP
+            /// to itself has run, PC at it, as firmware idles waiting for
+            /// an interrupt (Rust's `Cpu::set_stop_at_self_loop`).  Off at
+            /// first.
+            fn set_stop_at_self_loop(&mut self, py: Python<'_>, stop: bool) -> PyResult<()> {
+                self.with_chip_mut(py, |chip, _| {
+                    chip.cpu_control().set_stop_at_self_loop(stop);
+                    Ok(())
+                })
+            }
+
+            /// Whether a run ends at a self-loop (`set_stop_at_self_loop`).
+            #[getter]
+            fn stops_at_self_loop(&self, py: Python<'_>) -> PyResult<bool> {
+                self.with_chip(py, |chip| Ok(chip.cpu().stops_at_self_loop()))
             }
 
             /// The fault the last run stopped for (`Stop.Fault()`),

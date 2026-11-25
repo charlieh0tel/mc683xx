@@ -985,6 +985,14 @@ assert chip.memory(ram, 0, 2) == b"\x00\x00"
 assert any(isinstance(event, mc683xx.Event.Exception) for event in chip.take_events())
 ```
 
+`set_stop_at_self_loop(True)` (`stops_at_self_loop`; on a board's
+`board.chip` too; Rust's `Cpu::set_stop_at_self_loop`) ends a run
+`Stop.SelfLoop()` once a BRA or JMP to itself has run, PC at it, as
+firmware idles waiting for an interrupt: the bare `Machine`'s
+`run_limited(self_loop=True)` as a setting, the same detection, so a
+harness need not run out the budget there.  Each run runs the loop
+once more, so time moves.
+
 `set_stop_on_fault(True)` (`stops_on_fault`; on a board's
 `board.chip` too) stops a run at a bus or address error, the bus
 monitor's included, instead of taking it: the run ends

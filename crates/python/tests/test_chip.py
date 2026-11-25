@@ -1767,6 +1767,19 @@ def test_a_fault_stop_ends_the_chip_s_run_with_the_instruction_undone():
     assert chip.fault_stop is None
 
 
+def test_a_chip_s_run_ends_at_a_self_loop_with_the_setting() -> None:
+    chip = booting([NOP, short_branch(BRA_SHORT, 1)]).build()
+    assert not chip.stops_at_self_loop
+    chip.set_stop_at_self_loop(True)
+    assert chip.stops_at_self_loop
+    run = chip.run_for(100_000)
+    assert run.stop == mc683xx.Stop.SelfLoop()
+    assert repr(run.stop) == "Stop.SelfLoop()" and str(run.stop) == "self-loop"
+    assert run.cycles < 100_000
+    chip.set_stop_at_self_loop(False)
+    assert chip.run_for(1000).stop == mc683xx.Stop.Budget()
+
+
 def test_port_changes_written_in_one_instruction_come_in_port_order() -> None:
     # MOVEM.W D0-D5,-(A0) from the SIM's port block writes its registers
     # downward in one instruction: port F's before port E's, all stamped

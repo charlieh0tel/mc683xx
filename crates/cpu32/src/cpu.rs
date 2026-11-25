@@ -81,11 +81,13 @@ pub enum Stop {
     /// or the exception processing after one, began:
     /// [`Cpu::fault_stop`] says which fault.
     Fault,
+    /// A self-loop ran ([`Cpu::set_stop_at_self_loop`]): PC at it.
+    SelfLoop,
 }
 
 /// A short lowercase name for each kind of stop, for a host to branch
-/// on: `budget`, `stopped`, `halted`, `hook`, `requested`, `background`
-/// or `fault`.  The detail a variant holds (the halt, the hook, the
+/// on: `budget`, `stopped`, `halted`, `hook`, `requested`, `background`,
+/// `fault` or `self-loop`.  The detail a variant holds (the halt, the hook, the
 /// entry) is not part of it.
 impl fmt::Display for Stop {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -97,6 +99,7 @@ impl fmt::Display for Stop {
             Self::Requested => "requested",
             Self::Background(_) => "background",
             Self::Fault => "fault",
+            Self::SelfLoop => "self-loop",
         })
     }
 }
@@ -290,7 +293,8 @@ pub struct Cpu {
     pre_reading: bool,
     /// Whether a pre-write hook is installed.
     pre_writing: bool,
-    /// Whether the run under way ends at a self-loop
+    /// Whether the run under way ends at a self-loop: the setting
+    /// ([`Cpu::set_stop_at_self_loop`]) or a limited run's
     /// ([`Limits::self_loop`](bare::Limits::self_loop)).
     self_loop: bool,
     /// The bare host's settings.
@@ -2878,6 +2882,7 @@ mod tests {
             (Stop::Requested, "requested"),
             (Stop::Background(Entry::Background), "background"),
             (Stop::Fault, "fault"),
+            (Stop::SelfLoop, "self-loop"),
         ];
         for (stop, name) in names {
             assert_eq!(stop.to_string(), name);

@@ -173,6 +173,14 @@ impl<'a> CpuControl<'a> {
         self.cpu.set_stop_on_fault(stop);
     }
 
+    /// [`Cpu::set_stop_at_self_loop`]: a chip's or a board's run then
+    /// ends [`Stop::SelfLoop`](crate::cpu::Stop::SelfLoop) once a BRA or
+    /// JMP to itself has run, PC at it, as firmware idles waiting for an
+    /// interrupt.
+    pub fn set_stop_at_self_loop(&mut self, stop: bool) {
+        self.cpu.set_stop_at_self_loop(stop);
+    }
+
     /// The permissions of `length` bytes from `start` in `space`, as
     /// [`Memory::protect`](crate::memory::Memory::protect) sets them.
     ///

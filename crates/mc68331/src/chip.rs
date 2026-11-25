@@ -849,6 +849,8 @@ impl Mc68331 {
                         match run.end {
                             End::Stop(stop) => (Run::new(run.cycles, stop), false),
                             End::Fault(_) => (Run::new(run.cycles, Stop::Fault), false),
+                            // the setting's, as no chip limit asks for one
+                            End::SelfLoop { .. } => (Run::new(run.cycles, Stop::SelfLoop), false),
                             _ => (Run::new(run.cycles, Stop::Requested), true),
                         }
                     }

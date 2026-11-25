@@ -2726,8 +2726,16 @@ and `mc683xx.Machine` in Python (see Python).
   from memory, the instruction left unexecuted, cost every limited run
   +1.6% host instructions (`core/nop_limited`, `hooks.py`'s run with
   no hook -4%) and was not kept.  The chip and board have no `Limits`
-  for hosts, so it is the bare CPU's (Python's
-  `Machine.run_limited(self_loop=True)`).
+  for hosts; for them (review r13, R1, the owner's call) the setting
+  `Cpu::set_stop_at_self_loop`, on `CpuControl` and Python's
+  `Mc68331` and `Board.chip`, ends every run at one, `Stop::SelfLoop`
+  (a new `Stop` variant, as `set_stop_on_fault`'s `Stop::Fault`; a
+  limited run's end stays `End::SelfLoop`).  One implementation: the
+  flag the BRA and JMP handlers test is the setting at rest, and a
+  limited run sets it to the setting or its `Limits::self_loop` and
+  puts the setting back, so off it costs what it did.  The gdb stub
+  reports it as a stop request (`SIGINT`); the wasm bindings, which
+  cannot set it, name it `unknown`.
 - **Faults:** `set_stop_on_fault`: a bus or address error ends the
   run (`End::Fault`; an unlimited run, `Stop::Fault`, before any other
   stop asked for in the instruction): fetch, read or write; bus error
