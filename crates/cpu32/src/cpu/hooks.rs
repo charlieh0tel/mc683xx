@@ -110,7 +110,7 @@ enum Removed {
     /// A hook that sets no [`watch`] bit.
     Unwatched,
     /// A hook over a range, with its [`watch`] bit.
-    Watched(RangeInclusive<Address>, u8),
+    Watched(RangeInclusive<Address>, watch::Bits),
 }
 
 /// The hooks installed, each kind in the order installed.
@@ -712,7 +712,7 @@ impl Core<'_> {
         size: Size,
         function_code: FunctionCode,
         cycle: BusCycleKind,
-        bit: u8,
+        bit: watch::Bits,
     ) -> bool {
         if !function_code.is_memory_space() || (size != Size::Byte && address.is_odd()) {
             return false;
@@ -861,7 +861,7 @@ impl Core<'_> {
 
     /// The read or write hooks, `bit`, for a cycle that ended well, on
     /// a page that has them.
-    fn watch(&mut self, bit: u8, access: MemoryAccess) {
+    fn watch(&mut self, bit: watch::Bits, access: MemoryAccess) {
         if self.cpu.long_operand || self.cpu.memory.watched(access.address) & bit == 0 {
             return;
         }
@@ -880,7 +880,7 @@ impl Core<'_> {
     /// [`previous`](Self::previous) found it.
     pub(super) fn watch_long(
         &mut self,
-        bit: u8,
+        bit: watch::Bits,
         address: Address,
         function_code: FunctionCode,
         value: u32,
