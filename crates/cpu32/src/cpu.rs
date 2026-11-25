@@ -559,7 +559,9 @@ impl Cpu {
             self.block_start = true;
         }
         self.bare.end = None;
-        let budget = budget.min(Cycle::MAX.since(now).saturating_sub(HEADROOM));
+        // Cycle::MAX.since(now) less HEADROOM, in one subtraction
+        let room = (Cycle::MAX.clocks() - HEADROOM.clocks()).saturating_sub(now.clocks());
+        let budget = budget.min(Cycles::from_clocks(room));
         let run = self.run_from_boundary(bus, interrupts, now, budget, limits);
         self.left_pc = self.registers.pc;
         self.after_host_run();
