@@ -5,6 +5,7 @@ use mc683xx_cpu32::BusError;
 use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::bus::MOST_WAIT;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -15,6 +16,7 @@ use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::state::Stateless;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Dsack;
+use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_target::Address;
@@ -143,16 +145,17 @@ fn a_bus_peripherals_dsack_waits_sizes_and_is_checked_against_pepar() {
 }
 
 #[test]
-fn wait_states_near_the_most_clocks_saturate_a_cycles_cost() {
-    // DSACK0: a word is two byte cycles of 2^63 clocks each
+fn wait_states_beyond_the_most_wait_count_as_it() {
+    // DSACK0: a word is two byte cycles, each of the most wait states
     let huge = || Recorder {
         wait: Some((1 << 63) - 3),
         ..Recorder::answering(0x1234)
     };
     let (mut chip, _) = decoding(huge(), Dsack::Dsack0);
+    let byte = Termination::external_clocks(MOST_WAIT).clocks();
     assert_eq!(
         cycle(&mut chip, WINDOW, Size::Word, None),
-        Ok((0x3434, u64::MAX))
+        Ok((0x3434, 2 * byte))
     );
     assert_eq!(
         chip.bus_read(Address(WINDOW), Size::Long, FunctionCode::SupervisorData),

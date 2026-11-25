@@ -141,7 +141,7 @@ impl Cpu {
             registers: self.registers.clone(),
             instruction_pc: self.instruction_pc,
             previous_pc: self.previous_pc,
-            last_tail: self.last_tail,
+            last_tail: self.last_tail_byte(),
             stall: self.stall,
             extra: self.extra,
             refund: self.refund,
@@ -200,7 +200,7 @@ impl Cpu {
         self.registers = state.registers;
         self.instruction_pc = state.instruction_pc;
         self.previous_pc = state.previous_pc;
-        self.last_tail = state.last_tail;
+        self.last_tail = u32::from(state.last_tail);
         self.stall = state.stall;
         self.extra = state.extra;
         self.refund = state.refund;

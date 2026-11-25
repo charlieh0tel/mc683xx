@@ -10,6 +10,7 @@ use std::mem;
 use crate::BusError;
 use crate::bus::Bus;
 use crate::bus::BusAccess;
+use crate::bus::MOST_WAIT;
 use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::effective_address::Altered;
@@ -173,6 +174,13 @@ impl Run {
     }
 }
 
+/// The clocks a run keeps from [`Cycle::MAX`]: a run's budget ends this
+/// far short of it, so a run never starts within it, and the core sums a
+/// run's clocks, each instruction's bounded by
+/// [`MOST_WAIT`](crate::bus::MOST_WAIT) a bus cycle, without checking
+/// for overflow.  2^48 clocks, 557 years at 16 MHz.
+pub const HEADROOM: Cycles = Cycles::from_clocks(1 << 48);
+
 /// The CPU32: its registers, its memory, and what timing and exception
 /// processing carry from one instruction to the next.
 #[derive(Debug)]
@@ -187,8 +195,16 @@ pub struct Cpu {
     /// instruction PC an address error on an odd PC stacks (CPU32RM
     /// 6.2.3).
     previous_pc: Address,
-    /// The tail of the last instruction, for overlap (CPU32RM 8.1.6).
-    last_tail: u8,
+    /// The tail of the last instruction, for overlap (CPU32RM 8.1.6):
+    /// a [`Cost::tail`](timing::Cost), held as a `u32` so the run loop
+    /// stores it as wide as the compiler may load it.  Stored as a
+    /// `u8`, it could be loaded four bytes wide (as it was in 0.9.0's
+    /// alphas), and a load wider than the store before it waits for
+    /// that store to retire instead of forwarding from it, once every
+    /// instruction ([docs/performance.md, Store forwarding]).
+    ///
+    /// [docs/performance.md, Store forwarding]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/performance.md#store-forwarding
+    last_tail: u32,
     /// Clocks the instruction's bus cycles took beyond the tables'.
     stall: Cycles,
     /// Clocks an instruction adds to its table entry for what the
@@ -465,11 +481,7 @@ impl Cpu {
         self.block_start = true;
         self.resume = None;
         self.leave_loop_mode();
-        let mut core = Core {
-            cpu: self,
-            bus,
-            now,
-        };
+        let mut core = Core::new(self, bus, now);
         let vector = |core: &mut Core<'_>, vector: Vector| {
             core.read(
                 Address(vector.offset()),
@@ -547,6 +559,9 @@ impl Cpu {
             self.block_start = true;
         }
         self.bare.end = None;
+        // Cycle::MAX.since(now) less HEADROOM, in one subtraction
+        let room = (Cycle::MAX.clocks() - HEADROOM.clocks()).saturating_sub(now.clocks());
+        let budget = budget.min(Cycles::from_clocks(room));
         let run = self.run_from_boundary(bus, interrupts, now, budget, limits);
         self.left_pc = self.registers.pc;
         self.after_host_run();
@@ -589,14 +604,10 @@ impl Cpu {
         limits: Option<Limits>,
     ) -> Run {
         self.stop_request = None;
-        let mut core = Core {
-            cpu: self,
-            bus,
-            now,
-        };
+        let mut core = Core::new(self, bus, now);
         let traced = core.pending_trace();
         let taken = if core.cpu.bare.breakpoint_pending && core.cpu.stop_request.is_none() {
-            core.now = now + traced;
+            core.elapsed = traced;
             traced + core.pending_breakpoint()
         } else {
             traced
@@ -638,11 +649,7 @@ impl Cpu {
         let tables = Tables::load();
         let requested =
             |cpu: &mut Self, cycles| cpu.stop_request.take().map(|stop| Run { cycles, stop });
-        let mut core = Core {
-            cpu: self,
-            bus,
-            now,
-        };
+        let mut core = Core::new(self, bus, now);
         let mut elapsed = Cycles::ZERO;
         while elapsed < budget {
             let cpu = &mut *core.cpu;
@@ -664,8 +671,8 @@ impl Cpu {
                 if limits.steps.is_some_and(|count| {
                     cpu.instructions - first + cpu.bare.exceptions_stepped >= count
                 }) {
-                    if let Some(cycles) = core.step_boundary(interrupts, now + elapsed) {
-                        elapsed += cycles;
+                    if let Some(cycles) = core.step_boundary(interrupts, elapsed) {
+                        elapsed = elapsed.plain_add(cycles);
                         if let Some(run) = requested(core.cpu, elapsed) {
                             return run;
                         }
@@ -678,8 +685,8 @@ impl Cpu {
                     };
                 }
             }
-            if let Some(cycles) = core.boundary(interrupts, now + elapsed) {
-                elapsed += cycles;
+            if let Some(cycles) = core.boundary(interrupts, elapsed) {
+                elapsed = elapsed.plain_add(cycles);
                 if let Some(run) = requested(core.cpu, elapsed) {
                     return run;
                 }
@@ -702,7 +709,7 @@ impl Cpu {
                     stop: Stop::Hook(id),
                 };
             }
-            elapsed += core.step(tables);
+            elapsed = elapsed.plain_add(core.step(tables));
             let cpu = &mut *core.cpu;
             cpu.instructions += 1;
             if cpu.stop_request.is_some() {
@@ -814,9 +821,34 @@ impl Cpu {
     /// Charges `cost` after the last instruction, less their overlap
     /// (CPU32RM 8.1.6).
     fn spend(&mut self, cost: timing::Cost) -> Cycles {
-        let overlap = self.last_tail.min(cost.head);
-        self.last_tail = cost.tail;
-        Cycles::from_clocks(u64::from(cost.cycles.saturating_sub(u16::from(overlap))))
+        let overlap = self.last_tail.min(u32::from(cost.head));
+        self.last_tail = u32::from(cost.tail);
+        Cycles::from_clocks(u64::from(u32::from(cost.cycles).saturating_sub(overlap)))
+    }
+
+    /// Adds `cycles`, at most a page's or [`MOST_WAIT`], to the
+    /// instruction's stall.
+    pub(crate) const fn add_stall(&mut self, cycles: Cycles) {
+        self.stall = self.stall.plain_add(cycles);
+    }
+
+    /// Adds a bus's or an interrupt acknowledge's wait states to the
+    /// instruction's stall, at most [`MOST_WAIT`].
+    fn add_bus_stall(&mut self, cycles: Cycles) {
+        self.add_stall(cycles.min(MOST_WAIT));
+    }
+
+    /// `cost`, an instruction's or an exception's clocks, with the
+    /// stall and the extra clocks it took.
+    const fn total(&self, cost: Cycles) -> Cycles {
+        cost.plain_add(self.stall).plain_add(self.extra)
+    }
+
+    /// The tail of the last instruction as the tables give it: only
+    /// [`spend`](Self::spend), reset and restore set it, from a `u8`
+    /// or zero.
+    const fn last_tail_byte(&self) -> u8 {
+        self.last_tail as u8
     }
 }
 
@@ -925,25 +957,44 @@ pub(crate) struct Core<'a> {
     pub(crate) cpu: &'a mut Cpu,
     /// The bus.
     bus: &'a mut dyn Bus,
-    /// When the instruction started.
-    now: Cycle,
+    /// When the run began.
+    began: Cycle,
+    /// The clocks from `began` to the instruction's start: kept apart,
+    /// as the run loop moves it every instruction and the instant
+    /// (`now`) is wanted only by a bus cycle or an exception.
+    elapsed: Cycles,
 }
 
-impl Core<'_> {
+impl<'a> Core<'a> {
+    /// A core for `cpu` on `bus` at `now`.
+    pub(crate) fn new(cpu: &'a mut Cpu, bus: &'a mut dyn Bus, now: Cycle) -> Self {
+        Self {
+            cpu,
+            bus,
+            began: now,
+            elapsed: Cycles::ZERO,
+        }
+    }
+
+    /// When the instruction started.
+    pub(crate) fn now(&self) -> Cycle {
+        self.began + self.elapsed
+    }
+
     /// The address of the instruction executing.
     pub(crate) const fn instruction_pc(&self) -> Address {
         self.cpu.instruction_pc
     }
 
     /// Adds clocks the timing table cannot know from the opcode.
-    pub(crate) fn charge(&mut self, cycles: Cycles) {
-        self.cpu.extra += cycles;
+    pub(crate) const fn charge(&mut self, cycles: Cycles) {
+        self.cpu.extra = self.cpu.extra.plain_add(cycles);
     }
 
     /// Takes clocks from the instruction's table entry the opcode
     /// cannot tell it does without.
-    pub(crate) fn refund(&mut self, cycles: Cycles) {
-        self.cpu.refund += cycles;
+    pub(crate) const fn refund(&mut self, cycles: Cycles) {
+        self.cpu.refund = self.cpu.refund.plain_add(cycles);
     }
 
     /// Charges `entry`, the table entry of a word executed in BKPT's
@@ -985,14 +1036,14 @@ impl Core<'_> {
 
     /// The tail of the instruction before this one (CPU32RM 8.1.6).
     pub(crate) const fn last_tail(&self) -> u8 {
-        self.cpu.last_tail
+        self.cpu.last_tail_byte()
     }
 
     /// Asserts RESET for the `reset` instruction (CPU32RM 4.4, RESET):
     /// the chip resets its external peripherals and other modules, and may
     /// ask the run to stop after it, as after a cycle.
     pub(crate) fn reset_instruction(&mut self) {
-        self.bus.reset_instruction(self.now);
+        self.bus.reset_instruction(self.now());
         self.bus_stop_requested();
     }
 
@@ -1034,19 +1085,19 @@ impl Core<'_> {
             .map(|resume| resume.progress)
     }
 
-    /// The boundary before an instruction, at `now`: the registers
+    /// The boundary before an instruction, `elapsed` into the run: the registers
     /// captured if asked, the stall, the extra and refunded clocks and
     /// the exception taken cleared, then an interrupt taken if one is
     /// due: its cycles, if one was.  Always inlined, as `step` is.
     #[inline(always)]
-    fn boundary(&mut self, interrupts: &mut dyn Interrupts, now: Cycle) -> Option<Cycles> {
+    fn boundary(&mut self, interrupts: &mut dyn Interrupts, elapsed: Cycles) -> Option<Cycles> {
         let cpu = &mut *self.cpu;
         cpu.capture_began();
         cpu.stall = Cycles::ZERO;
         cpu.extra = Cycles::ZERO;
         cpu.refund = Cycles::ZERO;
         cpu.taken = None;
-        self.now = now;
+        self.elapsed = elapsed;
         let processed = self.interrupt(interrupts)?;
         let cpu = &mut *self.cpu;
         cpu.leave_loop_mode();
@@ -1054,7 +1105,8 @@ impl Core<'_> {
             // charged when it is taken on resume
             return Some(Cycles::ZERO);
         }
-        Some(cpu.spend(timing::exception::INTERRUPT) + cpu.stall + cpu.extra)
+        let cycles = cpu.spend(timing::exception::INTERRUPT);
+        Some(cpu.total(cycles))
     }
 
     /// [`boundary`](Self::boundary) where a step ends: out of line, so
@@ -1064,11 +1116,15 @@ impl Core<'_> {
     /// ends as if this look had not been made.
     #[cold]
     #[inline(never)]
-    fn step_boundary(&mut self, interrupts: &mut dyn Interrupts, now: Cycle) -> Option<Cycles> {
+    fn step_boundary(
+        &mut self,
+        interrupts: &mut dyn Interrupts,
+        elapsed: Cycles,
+    ) -> Option<Cycles> {
         let cpu = &*self.cpu;
         let began = cpu.capture.then(|| cpu.began.clone());
         let left = (cpu.stall, cpu.extra, cpu.refund, cpu.taken);
-        let taken = self.boundary(interrupts, now);
+        let taken = self.boundary(interrupts, elapsed);
         if taken.is_none() {
             let cpu = &mut *self.cpu;
             (cpu.stall, cpu.extra, cpu.refund, cpu.taken) = left;
@@ -1127,7 +1183,7 @@ impl Core<'_> {
             cpu.stopped = flow == Flow::Stop;
             cpu.loopable = cpu.loopable_after(flow, instruction_pc);
             let cycles = cpu.spend(tables.cost(opcode));
-            return cycles.saturating_sub(cpu.refund) + cpu.stall + cpu.extra;
+            return cpu.total(cycles.saturating_sub(cpu.refund));
         }
         self.step_exceptional(step, Some(opcode), trace, previous_pc, tables)
     }
@@ -1250,7 +1306,7 @@ impl Core<'_> {
         // A refund is never more than the table entry it is taken
         // from; saturating keeps an exception's cost in place of that
         // entry from going below zero.  The stall is bus time, kept.
-        cycles.saturating_sub(self.cpu.refund) + self.cpu.stall + self.cpu.extra
+        self.cpu.total(cycles.saturating_sub(self.cpu.refund))
     }
 
     /// Trace exception processing (CPU32RM 6.2.10) after the instruction
@@ -1395,9 +1451,9 @@ impl Core<'_> {
         interrupts: &mut dyn Interrupts,
         level: InterruptLevel,
     ) -> Processed {
-        let acknowledged = interrupts.acknowledge(level, self.now);
+        let acknowledged = interrupts.acknowledge(level, self.now());
         self.bus_stop_requested();
-        self.cpu.stall += acknowledged.stall;
+        self.cpu.add_bus_stall(acknowledged.stall);
         let vector = match acknowledged.answer {
             Acknowledge::Vector(vector) => vector,
             Acknowledge::Autovector => Vector::autovector(level),
@@ -1458,7 +1514,7 @@ impl Core<'_> {
         }
         self.cpu.bare.exceptions_stepped += 1;
         let cycles = self.cpu.spend(timing::exception::TRACE);
-        cycles + self.cpu.stall + self.cpu.extra
+        self.cpu.total(cycles)
     }
 
     /// A breakpoint pending as a run starts, at an instruction boundary
@@ -1490,7 +1546,7 @@ impl Core<'_> {
             // vector 12 taken: a step of its own, up to its handler
             self.cpu.bare.exceptions_stepped += 1;
         }
-        cycles + self.cpu.stall + self.cpu.extra
+        self.cpu.total(cycles)
     }
 
     /// A pending hardware breakpoint acknowledged, background mode
@@ -1594,7 +1650,7 @@ impl Core<'_> {
                 self.cpu.memory.read(space, at, size)
             };
             if let Some((value, stall)) = read {
-                self.cpu.stall += stall;
+                self.cpu.add_stall(stall);
                 return Ok(value);
             }
         }
@@ -1604,9 +1660,11 @@ impl Core<'_> {
     /// [`access_read`](Self::access_read) where the fast tables do not
     /// serve it all (a page with a hook, permissions or the bus's, or a
     /// long across pages): first the pre-read hooks, if any is
-    /// installed, then its cycles, reading what they answered.  Out of
-    /// line, so the fast path checks no flag.
-    #[inline(never)]
+    /// installed, then its cycles, reading what they answered.  Past
+    /// the fast tables' miss, so the fast path checks no flag; left to
+    /// the compiler to inline, which saves a peripheral's read a call
+    /// (docs/performance.md, The 0.9.0 audit).
+    #[inline]
     fn slow_access_read(
         &mut self,
         address: Address,
@@ -1643,14 +1701,10 @@ impl Core<'_> {
         {
             return read.ok_or_else(|| fault(Vector::BUS_ERROR, address, Size::Long));
         }
+        // access_read's fast tables missed it: a long reads as two
+        // words, which a long across pages may find there; anything
+        // else goes on to the slow path, not looked up there again
         if size == Size::Long {
-            if function_code.is_memory_space()
-                && let Some((value, stall)) =
-                    self.cpu.memory.read_long(Space::of(function_code), address)
-            {
-                self.cpu.stall += stall;
-                return Ok(value);
-            }
             let high = self
                 .cycle_read(address, Size::Word, function_code, cycle)
                 .ok_or_else(|| fault(Vector::BUS_ERROR, address, Size::Long))?;
@@ -1660,7 +1714,8 @@ impl Core<'_> {
                 .ok_or_else(|| fault(Vector::BUS_ERROR, low_address, Size::Word))?;
             Ok(high << 16 | low)
         } else {
-            self.cycle_read(address, size, function_code, cycle)
+            let at = self.cpu.memory.mask(address);
+            self.slow_read(at, size, function_code, cycle)
                 .ok_or_else(|| fault(Vector::BUS_ERROR, address, size))
         }
     }
@@ -1734,7 +1789,7 @@ impl Core<'_> {
                 self.cpu.memory.write(space, at, size, data)
             };
             if let Some(stall) = stored {
-                self.cpu.stall += stall;
+                self.cpu.add_stall(stall);
                 return Ok(());
             }
         }
@@ -1806,23 +1861,16 @@ impl Core<'_> {
         {
             return written.ok_or_else(|| fault(Vector::BUS_ERROR, address, Size::Long));
         }
+        // access_write's fast tables missed it, as in slow_access_read
         if size == Size::Long {
-            if function_code.is_memory_space()
-                && let Some(stall) =
-                    self.cpu
-                        .memory
-                        .write_long(Space::of(function_code), address, data)
-            {
-                self.cpu.stall += stall;
-                return Ok(());
-            }
             self.cycle_write(address, Size::Word, function_code, data >> 16)
                 .ok_or_else(|| fault(Vector::BUS_ERROR, address, Size::Long))?;
             let low_address = address.offset(2);
             self.cycle_write(low_address, Size::Word, function_code, data & 0xffff)
                 .ok_or_else(|| fault(Vector::BUS_ERROR, low_address, Size::Word))
         } else {
-            self.cycle_write(address, size, function_code, data)
+            let at = self.cpu.memory.mask(address);
+            self.slow_write(at, size, function_code, data)
                 .ok_or_else(|| fault(Vector::BUS_ERROR, address, size))
         }
     }
@@ -1881,7 +1929,7 @@ impl Core<'_> {
         }
         let space = Space::of(self.cpu.registers.program_space());
         let (word, stall) = self.cpu.memory.fetch(space, pc)?;
-        self.cpu.stall += stall;
+        self.cpu.add_stall(stall);
         self.cpu.registers.pc = pc.offset(2);
         Some(word)
     }
@@ -1919,7 +1967,7 @@ impl Core<'_> {
         if function_code.is_memory_space() {
             let space = Space::of(function_code);
             if let Some((value, stall)) = self.cpu.memory.read(space, address, size) {
-                self.cpu.stall += stall;
+                self.cpu.add_stall(stall);
                 return Some(value);
             }
         }
@@ -1955,7 +2003,7 @@ impl Core<'_> {
     ) -> Option<u32> {
         let space = Space::of(function_code);
         if let Some((value, stall)) = self.cpu.memory.read_backed(space, address, size) {
-            self.cpu.stall += stall;
+            self.cpu.add_stall(stall);
             return Some(value);
         }
         self.bus_read(address, size, function_code, cycle)
@@ -1974,7 +2022,7 @@ impl Core<'_> {
         let read = self.bus.read_with_memory(access, &mut self.cpu.memory);
         self.bus_stop_requested();
         if let Ok(read) = read {
-            self.cpu.stall += read.stall;
+            self.cpu.add_bus_stall(read.stall);
             return Some(read.value);
         }
         self.invalid(self.invalid_access(address, size, function_code, cycle, None));
@@ -1994,7 +2042,7 @@ impl Core<'_> {
         if function_code.is_memory_space() {
             let space = Space::of(function_code);
             if let Some(stall) = self.cpu.memory.write(space, address, size, value) {
-                self.cpu.stall += stall;
+                self.cpu.add_stall(stall);
                 return Some(());
             }
         }
@@ -2028,7 +2076,7 @@ impl Core<'_> {
     ) -> Option<()> {
         let space = Space::of(function_code);
         if let Some(stall) = self.cpu.memory.write_backed(space, address, size, value) {
-            self.cpu.stall += stall;
+            self.cpu.add_stall(stall);
             return Some(());
         }
         self.bus_write(address, size, function_code, value)
@@ -2049,7 +2097,7 @@ impl Core<'_> {
             .write_with_memory(access, value, &mut self.cpu.memory);
         self.bus_stop_requested();
         if let Ok(stall) = written {
-            self.cpu.stall += stall;
+            self.cpu.add_bus_stall(stall);
             return Some(());
         }
         let access = self.invalid_access(
@@ -2087,7 +2135,7 @@ impl Core<'_> {
         self.bus_stop_requested();
         match read {
             Ok(read) => {
-                self.cpu.stall += read.stall;
+                self.cpu.add_bus_stall(read.stall);
                 Some(Some(read.value))
             }
             Err(BusError) => {
@@ -2121,7 +2169,7 @@ impl Core<'_> {
         self.bus_stop_requested();
         match written {
             Ok(stall) => {
-                self.cpu.stall += stall;
+                self.cpu.add_bus_stall(stall);
                 Some(Some(()))
             }
             Err(BusError) => {
@@ -2152,8 +2200,8 @@ impl Core<'_> {
     }
 
     /// A bus cycle at `address`, stamped with the instruction's start.
-    const fn access(&self, address: Address, size: Size, function_code: FunctionCode) -> BusAccess {
-        BusAccess::new(address, size, function_code, self.now)
+    fn access(&self, address: Address, size: Size, function_code: FunctionCode) -> BusAccess {
+        BusAccess::new(address, size, function_code, self.now())
     }
 }
 
@@ -2164,8 +2212,10 @@ mod tests {
     use super::Halt;
     use super::Stop;
     use crate::BusError;
+    use crate::HEADROOM;
     use crate::bus::Bus;
     use crate::bus::BusAccess;
+    use crate::bus::MOST_WAIT;
     use crate::bus::Read;
     use crate::cycles::Cycle;
     use crate::cycles::Cycles;
@@ -2362,33 +2412,114 @@ mod tests {
     #[derive(Debug, Default)]
     struct AcknowledgeStops(Rc<Cell<bool>>);
 
-    /// A bus whose every read answers $3434 after half the most clocks
-    /// there are.
-    struct Slowest;
+    /// A bus whose every read answers $3434 and every write is taken,
+    /// each after `stall` clocks, whole longs too while `long`.
+    struct Slow {
+        /// The wait states of each cycle.
+        stall: Cycles,
+        /// Whether it takes a long in one access.
+        long: bool,
+    }
 
-    impl Bus for Slowest {
+    impl Bus for Slow {
         fn read(&mut self, _access: BusAccess) -> Result<Read, BusError> {
-            Ok(Read::new(0x3434).stalled(Cycles::from_clocks(1 << 63)))
+            Ok(Read::new(0x3434).stalled(self.stall))
         }
 
         fn write(&mut self, _access: BusAccess, _value: u32) -> Result<Cycles, BusError> {
-            Err(BusError)
+            Ok(self.stall)
+        }
+
+        fn read_long(&mut self, _access: BusAccess) -> Option<Result<Read, BusError>> {
+            self.long
+                .then(|| Ok(Read::new(0x3434_3434).stalled(self.stall)))
+        }
+
+        fn write_long(
+            &mut self,
+            _access: BusAccess,
+            _value: u32,
+        ) -> Option<Result<Cycles, BusError>> {
+            self.long.then_some(Ok(self.stall))
+        }
+    }
+
+    /// The cycles of `code`'s first instruction, A0 at an address the
+    /// bus serves, on a bus whose cycles stall `stall`, whole longs in
+    /// one access if `long`.
+    fn cycles_on_bus(code: &[u16], stall: u64, long: bool) -> Cycles {
+        let mut cpu = machine(code);
+        cpu.set_long_bus(long);
+        cpu.registers.set_address(0, 0x10_0000);
+        let mut bus = Slow {
+            stall: Cycles::from_clocks(stall),
+            long,
+        };
+        cpu.run_for(
+            &mut bus,
+            &mut NoInterrupts,
+            Cycle::ZERO,
+            Cycles::from_clocks(1),
+        )
+        .cycles
+    }
+
+    #[test]
+    fn a_bus_cycle_s_wait_states_count_at_most_the_most_wait() {
+        // MOVE.L (A0),D1 and MOVE.L D0,(A0): two word cycles each, or
+        // one long cycle on a bus that takes longs whole
+        for code in [0x2210, MOVE_D0_TO_INDIRECT] {
+            let unstalled = cycles_on_bus(&[code], 0, false);
+            let most = MOST_WAIT.clocks();
+            for stall in [most, most + 1, 1 << 63, u64::MAX] {
+                assert_eq!(
+                    cycles_on_bus(&[code], stall, false),
+                    Cycles::from_clocks(unstalled.clocks() + 2 * most),
+                    "{code:04x}, {stall}"
+                );
+            }
+            let unstalled = cycles_on_bus(&[code], 0, true);
+            assert_eq!(
+                cycles_on_bus(&[code], u64::MAX, true),
+                Cycles::from_clocks(unstalled.clocks() + most),
+                "{code:04x} as one long cycle"
+            );
         }
     }
 
     #[test]
-    fn an_instruction_s_stalls_saturate_its_cost() {
-        // MOVE.L (A0),D1: two word reads from the bus
-        let mut cpu = machine(&[0x2210]);
-        cpu.registers.set_address(0, 0x10_0000);
-        let run = cpu.run_for(
-            &mut Slowest,
-            &mut NoInterrupts,
-            Cycle::ZERO,
-            Cycles::from_clocks(1),
+    fn an_acknowledge_s_wait_states_count_at_most_the_most_wait() {
+        let taken = |stall| {
+            let mut cpu = prepared(&[NOP], 0);
+            let mut source = Source::new(3, Acknowledge::Autovector);
+            source.stall = Cycles::from_clocks(stall);
+            cpu.run_for(&mut NoBus, &mut source, Cycle::ZERO, Cycles::from_clocks(1))
+                .cycles
+        };
+        let most = MOST_WAIT.clocks();
+        assert_eq!(
+            taken(u64::MAX),
+            Cycles::from_clocks(taken(0).clocks() + most)
         );
-        assert_eq!(run.cycles, Cycles::MAX);
-        assert_eq!(cpu.registers.data[1], 0x3434_3434);
+        assert_eq!(taken(1 << 63), taken(most));
+    }
+
+    #[test]
+    fn a_run_keeps_the_headroom_from_the_last_clock() {
+        let run = |now: Cycle| {
+            let mut cpu = machine(&[NOP, NOP, NOP, NOP]);
+            let run = cpu.run_for(&mut NoBus, &mut NoInterrupts, now, Cycles::MAX);
+            (run.cycles, run.stop, cpu.instructions())
+        };
+        let edge = Cycle::MAX - HEADROOM;
+        // none left: nothing runs
+        assert_eq!(run(edge), (Cycles::ZERO, Stop::Budget, 0));
+        assert_eq!(run(Cycle::MAX), (Cycles::ZERO, Stop::Budget, 0));
+        // three clocks left: two NOPs, the second ending past them
+        assert_eq!(
+            run(edge - Cycles::from_clocks(3)),
+            (Cycles::from_clocks(4), Stop::Budget, 2)
+        );
     }
 
     impl Bus for AcknowledgeStops {
@@ -2567,11 +2698,7 @@ mod tests {
         let mut cpu = prepared(&[RTE], status::S);
         cpu.instruction_pc = Address(CODE);
         let mut bus = NoBus;
-        let mut core = Core {
-            cpu: &mut cpu,
-            bus: &mut bus,
-            now: Cycle::ZERO,
-        };
+        let mut core = Core::new(&mut cpu, &mut bus, Cycle::ZERO);
         core.movem_progress(3, Address(0x3006));
         let Err(crate::exception::Exception::Fault(fault)) = core.write_unreleased(
             Address(0x0001_0000),
@@ -2608,11 +2735,7 @@ mod tests {
         // An instruction elsewhere leaves it; the one at its PC finds
         // it, once.
         cpu.instruction_pc = Address(CODE + 2);
-        let mut core = Core {
-            cpu: &mut cpu,
-            bus: &mut bus,
-            now: Cycle::ZERO,
-        };
+        let mut core = Core::new(&mut cpu, &mut bus, Cycle::ZERO);
         assert_eq!(core.movem_continuation(), None);
         core.cpu.instruction_pc = Address(CODE);
         assert_eq!(core.movem_continuation(), Some(progress));

@@ -1016,7 +1016,7 @@ impl Memory {
         space: Space,
         address: Address,
         size: Size,
-        backing: fn(&Page) -> Option<Backing>,
+        backing: impl Fn(&Page) -> Option<Backing> + Copy,
     ) -> Option<u32> {
         if size == Size::Long {
             let high = self.peek_in(space, address, Size::Word, backing)?;
@@ -1095,7 +1095,7 @@ impl Memory {
     /// A byte or word read the fast path serves, with its stall, or
     /// [`None`] if it takes the slow path or goes to the bus.  A word is
     /// aligned, so it never leaves a page.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn read(&self, space: Space, address: Address, size: Size) -> Option<(u32, Cycles)> {
         let (slab, index, within) = self.locate(address)?;
         self.read_in(&slab.fast[space.index()][index], within, size)
@@ -1134,7 +1134,7 @@ impl Memory {
     /// if the fast path serves both from one page: [`None`] if it takes
     /// the slow path, goes to the bus or crosses a page, with no read
     /// made.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn read_long(&self, space: Space, address: Address) -> Option<(u32, Cycles)> {
         let (slab, index, within) = self.locate(address)?;
         let page = &slab.fast[space.index()][index];
@@ -1150,7 +1150,7 @@ impl Memory {
     /// An even long's two word writes, high word first, with their
     /// stall, if the fast path serves both on one page, as
     /// [`read_long`](Self::read_long).
-    #[inline]
+    #[inline(always)]
     pub(crate) fn write_long(
         &mut self,
         space: Space,
@@ -1210,7 +1210,7 @@ impl Memory {
 
     /// A byte or word write the fast path serves, with its stall, or
     /// [`None`] if it takes the slow path or goes to the bus.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn write(
         &mut self,
         space: Space,

@@ -5,6 +5,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::bus::MOST_WAIT;
 use mc683xx_cpu32::peripheral::Select;
 
 use crate::sim::chip_selects::DSACK_FAST;
@@ -182,12 +183,17 @@ impl Termination {
     }
 
     /// The clocks of a cycle an external DSACK ends after `wait`
-    /// states.
+    /// states, at most [`MOST_WAIT`] of them.
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
     #[must_use]
     pub const fn external_clocks(wait: Cycles) -> Cycles {
+        let wait = if wait.clocks() > MOST_WAIT.clocks() {
+            MOST_WAIT
+        } else {
+            wait
+        };
         Cycles::from_clocks(ZERO_WAIT_CLOCKS as u64).saturating_add(wait)
     }
 }
@@ -219,11 +225,24 @@ impl Dsack {
 
 #[cfg(test)]
 mod tests {
+    use mc683xx_cpu32::Cycles;
+    use mc683xx_cpu32::bus::MOST_WAIT;
     use mc683xx_cpu32::peripheral::Select;
 
     use super::ChipSelect;
     use super::NoChipSelectNumber;
     use super::Number;
+    use super::Termination;
+
+    #[test]
+    fn an_external_cycle_s_wait_states_count_at_most_the_most_wait() {
+        let clocks = |wait| Termination::external_clocks(Cycles::from_clocks(wait)).clocks();
+        let most = MOST_WAIT.clocks();
+        assert_eq!(clocks(5), clocks(0) + 5);
+        assert_eq!(clocks(most), clocks(0) + most);
+        assert_eq!(clocks(most + 1), clocks(most));
+        assert_eq!(clocks(u64::MAX), clocks(most));
+    }
 
     #[test]
     fn eleven_numbered_selects() {

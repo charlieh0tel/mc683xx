@@ -146,6 +146,15 @@ impl Cycles {
         self.0
     }
 
+    /// The sum, unchecked: for the core's own sums of an instruction's
+    /// clocks and a run's, which [`MOST_WAIT`](crate::bus::MOST_WAIT)
+    /// and [`HEADROOM`](crate::HEADROOM) keep far from [`Cycles::MAX`],
+    /// so the run loop pays no saturation (docs/performance.md, The
+    /// 0.9.0 audit).  A debug build panics where it would overflow.
+    pub(crate) const fn plain_add(self, other: Self) -> Self {
+        Self(self.0 + other.0)
+    }
+
     /// The sum, or the most clocks there are.
     #[must_use]
     pub const fn saturating_add(self, other: Self) -> Self {
