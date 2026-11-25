@@ -187,8 +187,16 @@ pub struct Cpu {
     /// instruction PC an address error on an odd PC stacks (CPU32RM
     /// 6.2.3).
     previous_pc: Address,
-    /// The tail of the last instruction, for overlap (CPU32RM 8.1.6).
-    last_tail: u8,
+    /// The tail of the last instruction, for overlap (CPU32RM 8.1.6):
+    /// a [`Cost::tail`](timing::Cost), held as a `u32` so the run loop
+    /// stores it as wide as the compiler may load it.  Stored as a
+    /// `u8`, it could be loaded four bytes wide (as it was in 0.9.0's
+    /// alphas), and a load wider than the store before it waits for
+    /// that store to retire instead of forwarding from it, once every
+    /// instruction ([docs/performance.md, Store forwarding]).
+    ///
+    /// [docs/performance.md, Store forwarding]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/performance.md#store-forwarding
+    last_tail: u32,
     /// Clocks the instruction's bus cycles took beyond the tables'.
     stall: Cycles,
     /// Clocks an instruction adds to its table entry for what the
@@ -814,9 +822,16 @@ impl Cpu {
     /// Charges `cost` after the last instruction, less their overlap
     /// (CPU32RM 8.1.6).
     fn spend(&mut self, cost: timing::Cost) -> Cycles {
-        let overlap = self.last_tail.min(cost.head);
-        self.last_tail = cost.tail;
-        Cycles::from_clocks(u64::from(cost.cycles.saturating_sub(u16::from(overlap))))
+        let overlap = self.last_tail.min(u32::from(cost.head));
+        self.last_tail = u32::from(cost.tail);
+        Cycles::from_clocks(u64::from(u32::from(cost.cycles).saturating_sub(overlap)))
+    }
+
+    /// The tail of the last instruction as the tables give it: only
+    /// [`spend`](Self::spend), reset and restore set it, from a `u8`
+    /// or zero.
+    const fn last_tail_byte(&self) -> u8 {
+        self.last_tail as u8
     }
 }
 
@@ -985,7 +1000,7 @@ impl Core<'_> {
 
     /// The tail of the instruction before this one (CPU32RM 8.1.6).
     pub(crate) const fn last_tail(&self) -> u8 {
-        self.cpu.last_tail
+        self.cpu.last_tail_byte()
     }
 
     /// Asserts RESET for the `reset` instruction (CPU32RM 4.4, RESET):

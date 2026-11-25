@@ -763,9 +763,10 @@ before the changes below and after them:
 
 (core 2: a performance core, measured once the machine was quiet.)
 The run with no hook runs the same host instructions before and
-after, to within 0.2% (`perf stat` of 20 million instructions),
-in 4% more cycles: code placement, which moved it from -1% to -5%
-between builds of the same code on both kinds of core.
+after, to within 0.2% (`perf stat` of 20 million instructions), in
+4% more cycles: not placement, as first recorded, but a
+store-forwarding stall the self-loop stop brought in, fixed since
+(The 0.9.0 audit, below).
 
 The changes:
 
@@ -851,7 +852,8 @@ matching nothing runs the loop at 48.5 M instructions/s, against 78
 with no hook and 5.7 with a no-op code hook.  The pages with neither
 run as before: `none` executes the same host instructions (perf
 stat, 20 M emulated instructions: 6.0266 against 6.0268 G) in 4%
-more cycles, placement, as in sc batch 6.
+more cycles, both builds taking sc batch 6's store-forwarding stall
+on every instruction (The 0.9.0 audit, below).
 
 ### Profiling a hook-heavy Python host
 
@@ -866,3 +868,40 @@ too, so one profile shows the core, the dispatch and the callables
 together.  Build the module with debug information for it
 (`CARGO_PROFILE_RELEASE_DEBUG=true maturin develop --release`);
 sampling needs a `perf_event_paranoid` that allows it.
+
+## The 0.9.0 audit
+
+The 0.9.0 alphas against v0.8.0, kernel by kernel, with `perf stat`
+on `benches/examples/iterations.rs` (a fixed count of a kernel's
+iterations), pinned to a performance core.  Instruction counts are
+exact: the same build gives the same count to within 0.01%, so a
+change in them is work, never placement.  Cycles show the rest, and
+`perf stat`'s other events say why: on this shared machine criterion's
+medians moved 15% to 40% from run to run, where cycles moved 1% to 2%.
+5000 iterations each, three interleaved runs, cycles and instructions
+in G.
+
+### Store forwarding
+
+From `adcc8fc4` (the self-loop stop, round 12) every instruction took
+a store-forwarding stall (`ld_blocks.store_forward`, about one per
+emulated instruction, against tens before it).  The run loop's
+`spend` stores the last instruction's tail, a `u8`, with a one-byte
+store, and the next instruction loaded it four bytes wide, which a
+store-to-load forward cannot serve: the load waits for the store to
+retire.  The self-loop flag added a field to `Cpu`, the layout moved,
+and the compiler widened that load.  The 10% more cycles with the same
+instructions that round 12 measured on `core/nop` and `core/moveq`,
+and the Python run with no hook falling from 80.8 to 77.4 M
+instructions/s (Hooks, above), were this, not placement.  `last_tail`
+is now held as a `u32`, so the store is as wide as any load of it:
+
+| Kernel | v0.8.0 | alpha.9 | `last_tail` as `u32` | Stalls before, after |
+| --- | --- | --- | --- | --- |
+| `core/nop` | 1.31 | 1.48 | 1.38-1.41 | 50.0 M, 40 |
+| `core/moveq` | 1.40-1.45 | 1.49-1.51 | 1.48 | 49.9 M, 35 |
+| `core/move_indirect` | 1.27 | 1.36 | 1.35 | 13.1 M, 47 |
+| `chip/flash_nop` | 0.74 | 0.83 | 0.77 | 7.5 M, 0.14 M |
+
+The rest of each difference from v0.8.0 is host instructions: work
+the alphas added.
