@@ -905,3 +905,17 @@ is now held as a `u32`, so the store is as wide as any load of it:
 
 The rest of each difference from v0.8.0 is host instructions: work
 the alphas added.
+
+### The instant an instruction starts at
+
+From `72f5c38a` (`Cycle` split from `Cycles`, 0.9.0) the run loop
+computed the instant each instruction starts at, `now + elapsed`,
+before every instruction, and `Cycle`'s `+` saturates: +1.9% host
+instructions on `core/nop`.  Only a bus cycle, an interrupt's
+acknowledge and an exception read the instant, so `Core` now keeps
+the run's start and the clocks elapsed apart and adds them when one
+of those asks.  Host instructions on 1000 iterations (`perf stat`),
+before and after: `core/nop` 1.725 and 1.665 G (-3.5%),
+`core/move_indirect` 1.707 and 1.677 G (-1.8%),
+`chip/flash_nop` under the PIT's interrupts 1.048 and 1.020 G
+(-2.7%), `chip/peripheral_move` 1.238 and 1.236 G.

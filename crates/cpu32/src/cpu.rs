@@ -596,7 +596,7 @@ impl Cpu {
         let mut core = Core::new(self, bus, now);
         let traced = core.pending_trace();
         let taken = if core.cpu.bare.breakpoint_pending && core.cpu.stop_request.is_none() {
-            core.now = now + traced;
+            core.elapsed = traced;
             traced + core.pending_breakpoint()
         } else {
             traced
@@ -660,7 +660,7 @@ impl Cpu {
                 if limits.steps.is_some_and(|count| {
                     cpu.instructions - first + cpu.bare.exceptions_stepped >= count
                 }) {
-                    if let Some(cycles) = core.step_boundary(interrupts, now + elapsed) {
+                    if let Some(cycles) = core.step_boundary(interrupts, elapsed) {
                         elapsed += cycles;
                         if let Some(run) = requested(core.cpu, elapsed) {
                             return run;
@@ -674,7 +674,7 @@ impl Cpu {
                     };
                 }
             }
-            if let Some(cycles) = core.boundary(interrupts, now + elapsed) {
+            if let Some(cycles) = core.boundary(interrupts, elapsed) {
                 elapsed += cycles;
                 if let Some(run) = requested(core.cpu, elapsed) {
                     return run;
@@ -928,19 +928,28 @@ pub(crate) struct Core<'a> {
     pub(crate) cpu: &'a mut Cpu,
     /// The bus.
     bus: &'a mut dyn Bus,
-    /// When the instruction started.
-    now: Cycle,
+    /// When the run began.
+    began: Cycle,
+    /// The clocks from `began` to the instruction's start: kept apart,
+    /// as the run loop moves it every instruction and the instant
+    /// (`now`) is wanted only by a bus cycle or an exception.
+    elapsed: Cycles,
 }
 
 impl<'a> Core<'a> {
     /// A core for `cpu` on `bus` at `now`.
     pub(crate) fn new(cpu: &'a mut Cpu, bus: &'a mut dyn Bus, now: Cycle) -> Self {
-        Self { cpu, bus, now }
+        Self {
+            cpu,
+            bus,
+            began: now,
+            elapsed: Cycles::ZERO,
+        }
     }
 
     /// When the instruction started.
-    pub(crate) const fn now(&self) -> Cycle {
-        self.now
+    pub(crate) fn now(&self) -> Cycle {
+        self.began + self.elapsed
     }
 
     /// The address of the instruction executing.
@@ -1047,19 +1056,19 @@ impl<'a> Core<'a> {
             .map(|resume| resume.progress)
     }
 
-    /// The boundary before an instruction, at `now`: the registers
+    /// The boundary before an instruction, `elapsed` into the run: the registers
     /// captured if asked, the stall, the extra and refunded clocks and
     /// the exception taken cleared, then an interrupt taken if one is
     /// due: its cycles, if one was.  Always inlined, as `step` is.
     #[inline(always)]
-    fn boundary(&mut self, interrupts: &mut dyn Interrupts, now: Cycle) -> Option<Cycles> {
+    fn boundary(&mut self, interrupts: &mut dyn Interrupts, elapsed: Cycles) -> Option<Cycles> {
         let cpu = &mut *self.cpu;
         cpu.capture_began();
         cpu.stall = Cycles::ZERO;
         cpu.extra = Cycles::ZERO;
         cpu.refund = Cycles::ZERO;
         cpu.taken = None;
-        self.now = now;
+        self.elapsed = elapsed;
         let processed = self.interrupt(interrupts)?;
         let cpu = &mut *self.cpu;
         cpu.leave_loop_mode();
@@ -1077,11 +1086,15 @@ impl<'a> Core<'a> {
     /// ends as if this look had not been made.
     #[cold]
     #[inline(never)]
-    fn step_boundary(&mut self, interrupts: &mut dyn Interrupts, now: Cycle) -> Option<Cycles> {
+    fn step_boundary(
+        &mut self,
+        interrupts: &mut dyn Interrupts,
+        elapsed: Cycles,
+    ) -> Option<Cycles> {
         let cpu = &*self.cpu;
         let began = cpu.capture.then(|| cpu.began.clone());
         let left = (cpu.stall, cpu.extra, cpu.refund, cpu.taken);
-        let taken = self.boundary(interrupts, now);
+        let taken = self.boundary(interrupts, elapsed);
         if taken.is_none() {
             let cpu = &mut *self.cpu;
             (cpu.stall, cpu.extra, cpu.refund, cpu.taken) = left;
@@ -2165,7 +2178,7 @@ impl<'a> Core<'a> {
     }
 
     /// A bus cycle at `address`, stamped with the instruction's start.
-    const fn access(&self, address: Address, size: Size, function_code: FunctionCode) -> BusAccess {
+    fn access(&self, address: Address, size: Size, function_code: FunctionCode) -> BusAccess {
         BusAccess::new(address, size, function_code, self.now())
     }
 }
