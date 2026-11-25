@@ -919,3 +919,42 @@ before and after: `core/nop` 1.725 and 1.665 G (-3.5%),
 `core/move_indirect` 1.707 and 1.677 G (-1.8%),
 `chip/flash_nop` under the PIT's interrupts 1.048 and 1.020 G
 (-2.7%), `chip/peripheral_move` 1.238 and 1.236 G.
+
+### The memory path
+
+Two changes made each operand access longer.  `4563a28d` (round 11)
+tried the fast tables first, inline, and sent a miss to the slow
+path, which looked them up again before going to the bus: +5.5% host
+instructions on `chip/peripheral_move`.  And `Memory::read` and
+`write`, once inlined into the cycle functions, were now calls of
+their own from `access_read` and `access_write`.  A miss now goes
+from the slow path straight to the bus or the hooked page, a long
+across pages still trying each word's page, and the fast accessors
+are always inlined.  Host instructions on 1000 iterations, v0.8.0 /
+before / after:
+
+| Kernel | v0.8.0 | Before | After |
+| --- | --- | --- | --- |
+| `core/move_indirect` | 1.585 | 1.677 | 1.547 |
+| `core/add_to_memory` | 1.352 | 1.432 | 1.289 |
+| `core/move_displacement` | 1.078 | 1.152 | 1.061 |
+| `chip/ram_move` | 0.658 | 0.695 | 0.655 |
+| `chip/peripheral_move` | 1.152 | 1.236 | 1.186 |
+
+Either change alone moved some kernels the wrong way (the inlining
+alone left `core/move_displacement` at 1.161, the lookup alone
+`core/move_indirect` at 1.705): the compiler's inlining shifts with
+each.
+
+### Placement
+
+The same machine code can take 11% more cycles where it lands: built
+from the same source, `core/nop`'s `run_instructions` was byte for
+byte the same in two builds, starting on a 64-byte boundary in one
+(1.30 G cycles for 5000 iterations) and 48 bytes past one in the
+other (1.45 G).  Built with every function aligned to 64 bytes
+(`RUSTFLAGS="-C llvm-args=-align-all-functions=6"`), the second takes
+1.31 G.  Stable Rust cannot align one function, so a host build gets
+whichever placement its link gives; instruction counts, which do not
+move with it, are what the audit judges work by, and cycles are
+compared between builds aligned that way.

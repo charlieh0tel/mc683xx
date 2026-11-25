@@ -2524,7 +2524,11 @@ Adversarial review (2026-11-01):
   placement.  Re-measured on a quiet performance core (sc batch 6),
   the change's parent and itself interleaved: `core/nop` 80.8 and
   80.6 us, `core/moveq` 85.0 and 85.1 us, the same; on an efficiency
-  core +2% and +2 to +6%, as before: placement there, not work.  Not for fetches (code hooks are theirs), nor a
+  core +2% and +2 to +6%, as before: placement there, not work.
+  Counted with `perf stat` (0.9.0 audit, docs/performance.md), the
+  change cost host instructions: +1.0% on `core/move_indirect` and
+  +5.5% on `chip/peripheral_move`, a miss looking the fast tables up
+  again in the slow path; that second look is gone.  Not for fetches (code hooks are theirs), nor a
   look with no cycle (`Memory::peek`, a debugger's read).  Python's
   `PendingRead.peek(address, length)` lends the memory to the callable
   for its call alone, through a scoped thread-local (`scoped-tls`, no
