@@ -1430,8 +1430,13 @@ impl<'a> Core<'a> {
     /// of the one due, if one was.
     #[inline]
     fn interrupt(&mut self, interrupts: &mut dyn Interrupts) -> Option<Processed> {
-        let level = interrupts.level();
+        // Read before the call, not after it: read just after it, SR
+        // took memory-ordering machine clears, as many as the layout of
+        // the build gave ([docs/performance.md, Machine clears]).
+        //
+        // [docs/performance.md, Machine clears]: https://github.com/charlieh0tel/mc683xx/blob/main/docs/performance.md#machine-clears
         let mask = self.cpu.registers.interrupt_mask().0;
+        let level = interrupts.level();
         let due = if level == InterruptLevel::NONMASKABLE {
             self.cpu.sampled_level != level || self.cpu.sampled_mask == MASK_ALL && mask < MASK_ALL
         } else {

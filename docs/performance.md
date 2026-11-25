@@ -959,6 +959,33 @@ whichever placement its link gives; instruction counts, which do not
 move with it, are what the audit judges work by, and cycles are
 compared between builds aligned that way.
 
+### Machine clears
+
+The 0.9.0 alphas ran real firmware 1% to 2% slower than v0.8.0 in
+cycles, with 0.2% fewer host instructions, and some links ran 2% slower
+than others built from the same source.  Eight builds a side, each
+with its own `-C metadata=` seed, so each links differently, show what
+was different: the alphas took twice v0.8.0's memory-ordering machine
+clears (`machine_clears.memory_ordering`; the pipeline flushed and
+restarted), and how many twice was moved with the link.  Most were at
+one load: the interrupt mask (SR's high byte) that `Core::interrupt`
+read at every instruction boundary, just after the indirect call to
+`Interrupts::level`.  v0.8.0 read it at the same point and took few
+clears there.  The alphas' new fields had moved `Registers` 16 bytes
+down in `Cpu`, which took SR off the cache line that holds the stall
+and the extra clocks.  Why the load clears is not known for certain:
+the processor predicts whether a load may run ahead of older stores
+from a table indexed by the load's instruction address, which would explain why
+the count moves with the link.  Read before the call, the load takes
+next to no clears, whatever the link.  `demo/mandelbrot`, 60 iterations, eight seeds a side, the median
+of 5 rotated runs each (cycles in G; clears in M):
+
+| Build | Cycles, seed mean | Seeds' range | Clears |
+| --- | --- | --- | --- |
+| v0.8.0 | 1.693 | 1.685-1.697 | 0.34-0.35 |
+| alpha.10 | 1.699 (+0.3%) | 1.695-1.701 | 0.54-0.68 |
+| mask read first | 1.672 (-1.3%) | 1.669-1.674 | 0.29-0.31 |
+
 ### Saturating sums
 
 `ca2df4d8` (round 2) made `Cycles`' `+` saturate, as a peripheral's
