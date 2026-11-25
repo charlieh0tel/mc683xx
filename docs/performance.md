@@ -820,14 +820,18 @@ three times each on performance core 2 against the code before it:
 off the instructions' pages it costs what a code hook there does
 (`nop_opcode_elsewhere` 79-80 us, `nop_code_elsewhere` 80 us,
 `nop_unhooked` 78 us).  Over the sled, matching nothing,
-`nop_opcode_unmatched` takes 153 us and `move_indirect` 112 us
-against 78 and 71 unhooked: about 7.5 and 4 ns an instruction for
-the page lookup, the opcode's peek and the compare, where a no-op
-Rust code hook on every instruction costs 20 ns.  Matching every
-instruction it costs what that code hook does (298 against 282 us).
-`Instruction::opcode`, which every code hook's argument now carries,
-costs a code hook's call about 4 ns (`nop_code_everywhere` 238 to
-282 us), against the 160 ns of a no-op Python call.  From Python
+`nop_opcode_unmatched` takes 129 us and `move_indirect` 100 us
+against 78 and 71 unhooked: about 5 and 3 ns an instruction for the
+page lookup, reading the opcode through the fetch page (which the
+opcode fetch then finds cached; a cycle-free peek instead cost 154
+and 113) and the compare, where a no-op Rust code hook on every
+instruction costs 16 ns.  Matching every instruction it costs about
+what that code hook does (251 against 237 us).  A plain code hook's
+`Instruction` carries no opcode: filling it for every code hook cost
+a no-op Rust hook on every instruction 4 ns (`nop_code_everywhere`
+238 to 271-282 us, `move_indirect` 146 to 169, `clr_indirect` 115 to
+131), and without it they are back where they were (237, 148 and 114
+against 239, 146 and 115 for the code before round 14, interleaved).  From Python
 (`hooks.py`), the opcode hook matching the loop's `move.w` is called
 for it alone at 0.165 us a call (a plain code hook 0.161 us); one
 matching nothing runs the loop at 48.5 M instructions/s, against 78

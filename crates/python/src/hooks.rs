@@ -240,8 +240,9 @@ impl InstructionView {
         self.stack_top
     }
 
-    /// Its first word, the opcode, if memory serves it; `None` if a
-    /// peripheral would.
+    /// Its first word, the opcode, for an opcode hook's call
+    /// (`add_code_hook(..., opcode=(mask, value))`); `None` for a plain
+    /// code hook's or a block hook's.
     #[getter]
     const fn opcode(&self) -> Option<u16> {
         self.opcode

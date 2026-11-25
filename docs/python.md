@@ -874,7 +874,8 @@ assert chip.now == 0
 `add_exception_return_hook(callback)`,
 call a Python callable with what the Rust hook sees: an `Instruction`
 (`pc`, `instruction`, `registers`, `stack_top`, and `opcode`, its
-first word, `None` where a peripheral would supply it), a `MemoryAccess` (`address`, `size`,
+first word for an opcode hook, `None` for a plain code hook or a block
+hook, which read no memory for it), a `MemoryAccess` (`address`, `size`,
 `function_code`, `value`, and `previous`, what a write replaced, read
 with no cycle from the bytes it writes to, `None` for a read, a CPU-space write or a peripheral's
 write; on the chip a
@@ -909,7 +910,10 @@ instruction it does not match costs a page lookup and a compare.  The
 word is the one memory serves at PC, read with no cycle; an
 instruction a peripheral would supply never matches.  It is a code
 hook in all else: called in the code hooks' order, stopping the run
-before its instruction, removed by `remove_hook`.
+before its instruction, removed by `remove_hook`.  Its `Instruction`
+carries the word as `opcode`; `opcode=(0, 0)` calls a hook for every
+instruction memory serves, with its word.  An instruction fetched
+from the bus (a peripheral's) never matches, whatever the mask.
 
 `instruction`, on an `Instruction` and on every access a hook sees
 (`MemoryAccess`, `PendingRead`, `PendingWrite`, `InvalidAccess`), is

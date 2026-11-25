@@ -1088,12 +1088,16 @@ def test_an_opcode_filtered_code_hook_sees_its_opcodes_alone() -> None:
     cpu = machine(NOP, trap(0), trap(3))
     seen: list[tuple[int, int | None]] = []
     every: list[int | None] = []
+    plain: list[int | None] = []
     cpu.add_code_hook(lambda instruction: seen.append((instruction.pc, instruction.opcode)), opcode=(0xFFF0, 0x4E40))
-    cpu.add_code_hook(lambda instruction: every.append(instruction.opcode), CODE, CODE + 0xFF)
+    cpu.add_code_hook(lambda instruction: every.append(instruction.opcode), CODE, CODE + 0xFF, opcode=(0, 0))
+    cpu.add_code_hook(lambda instruction: plain.append(instruction.opcode), CODE, CODE + 0xFF)
     cpu.run_limited(instructions=4)
     # the first TRAP's handler is at HANDLER, whose zero words are no TRAP
     assert seen == [(CODE + 2, trap(0))]
+    # mask 0: every instruction, with its word; a plain hook reads none
     assert every == [NOP, trap(0)]
+    assert plain == [None, None]
     with pytest.raises(OverflowError):
         cpu.add_code_hook(lambda instruction: None, opcode=(0x10000, 0))
 

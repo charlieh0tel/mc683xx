@@ -206,7 +206,8 @@ fn an_opcode_hook_is_called_for_its_opcodes_alone_in_the_order_installed() {
     assert_eq!(
         *seen.borrow(),
         [
-            ("code", CODE + 2, Some(TRAP)),
+            // a plain code hook's call reads no opcode
+            ("code", CODE + 2, None),
             ("trap", CODE + 2, Some(TRAP)),
             ("rte", HANDLER + 2, Some(RTE)),
             ("trap", CODE + 4, Some(TRAP | 1)),
@@ -231,7 +232,7 @@ fn an_opcode_hook_never_matches_an_instruction_the_bus_serves() {
     });
     step(&mut cpu, 1);
     assert_eq!(*calls.borrow(), 0);
-    // a code hook there sees no opcode
+    // nor is a code hook there given one
     let opcodes = log();
     let into = Rc::clone(&opcodes);
     cpu.add_code_hook(everywhere(), move |instruction| {

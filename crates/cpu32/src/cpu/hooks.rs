@@ -705,7 +705,7 @@ impl Cpu {
                         && hook.hook.wants(opcode)
                 }));
         if block || code {
-            let instruction = Instruction {
+            let mut instruction = Instruction {
                 pc,
                 instruction: self.instructions,
                 registers: self.registers.clone(),
@@ -714,13 +714,13 @@ impl Cpu {
                     Address(self.registers.address(7)),
                     Size::Long,
                 ),
-                opcode: opcode.or_else(|| self.opcode()),
+                opcode: None,
             };
             if block && let Some(id) = call(&mut self.hooks.block, at, &instruction) {
                 self.resume = Some((pc, Resume::Block));
                 return Some(id);
             }
-            if code && let Some(id) = self.call_code_hooks(at, &instruction) {
+            if code && let Some(id) = self.call_code_hooks(at, &mut instruction, opcode) {
                 self.resume = Some((pc, Resume::Code));
                 return Some(id);
             }
@@ -739,28 +739,40 @@ impl Cpu {
 impl Cpu {
     /// The word at PC in program space, if the core's memory serves it
     /// and PC is even: the opcode the next instruction starts with.
-    fn opcode(&self) -> Option<u16> {
+    /// Read through the fetch page, as the opcode fetch that follows
+    /// will (which then finds the page cached), else with no cycle.
+    fn opcode(&mut self) -> Option<u16> {
         let pc = self.registers.pc;
         if pc.is_odd() {
             return None;
         }
         let space = Space::of(self.registers.program_space());
+        if let Some((word, _)) = self.memory.fetch(space, pc) {
+            return Some(word);
+        }
         self.memory
             .peek(space, pc, Size::Word)
             .map(|word| word as u16)
     }
 
-    /// Calls each code hook covering `at` that wants `instruction`'s
-    /// opcode, in the order installed; the first that stopped, if any
-    /// did.
-    fn call_code_hooks(&mut self, at: Address, instruction: &Instruction) -> Option<HookId> {
+    /// Calls each code hook covering `at` that wants `opcode`, the
+    /// instruction's first word if an opcode hook covers its page, in
+    /// the order installed, an opcode hook's `instruction` with the
+    /// word, a plain one's without: the first that stopped, if any did.
+    fn call_code_hooks(
+        &mut self,
+        at: Address,
+        instruction: &mut Instruction,
+        opcode: Option<u16>,
+    ) -> Option<HookId> {
         let mut stopped = None;
         for hook in self
             .hooks
             .code
             .iter_mut()
-            .filter(|hook| hook.range.contains(&at) && hook.hook.wants(instruction.opcode))
+            .filter(|hook| hook.range.contains(&at) && hook.hook.wants(opcode))
         {
+            instruction.opcode = hook.hook.opcodes.and(opcode);
             if (hook.hook.callback)(instruction).is_break() {
                 stopped.get_or_insert(hook.id);
             }

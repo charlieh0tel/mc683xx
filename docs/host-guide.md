@@ -1153,18 +1153,19 @@ but the exception hook cover an address range, on the address lines.
 
 - `add_code_hook(range, f(&Instruction))`: before each instruction,
   with its PC, its number (`instruction`, the instructions run before
-  it, `Cpu::instructions`), the registers, the long at the stack top
-  and its first word (`opcode`, where the core's memory serves it).
-  A stop
+  it, `Cpu::instructions`), the registers and the long at the stack
+  top.  A stop
   leaves it unexecuted; the next run executes it without calling the
   code hooks for it again, so a breakpoint can be stepped past.
 - `add_opcode_hook(range, mask, value, f(&Instruction))`: a code
   hook called only before an instruction whose first word, masked by
   `mask`, is `value` (`0xfff0`, `0x4e40` for every TRAP), the word the
-  core's memory serves at PC (`Instruction::opcode`; an instruction
-  the bus would supply never matches).  The filter runs before the
-  registers are copied, so an instruction it does not match costs a
-  lookup and a compare, and a page with no opcode hook nothing.
+  core's memory serves at PC, given it as `Instruction::opcode`
+  (`None` in a plain code or block hook's call); an instruction the
+  bus would supply never matches.  Mask 0 calls it for every
+  instruction memory serves, with its word.  The filter runs before
+  the registers are copied, so an instruction it does not match costs
+  a lookup and a compare, and a page with no opcode hook nothing.
 - `add_block_hook(range, f(&Instruction))`: before the first
   instruction of each straight-line block.
 - `add_pre_read_hook(range, f(&PendingRead, &Memory, &mut [u8]))`:

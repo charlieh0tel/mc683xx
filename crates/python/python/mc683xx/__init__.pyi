@@ -760,8 +760,9 @@ class Instruction:
     def stack_top(self) -> int | None: ...
     @property
     def opcode(self) -> int | None:
-        """Its first word, if memory serves it; `None` if a peripheral
-        would."""
+        """Its first word, for an opcode hook's call
+        (`add_code_hook(..., opcode=(mask, value))`); `None` for a plain
+        code hook's or a block hook's."""
 
 @final
 class MemoryAccess:
