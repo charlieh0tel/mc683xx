@@ -16,7 +16,9 @@ use crate::cycles::Cycles;
 use crate::exception::BusCycleKind;
 use crate::exception::Exception;
 use crate::exception::Vector;
+use crate::hooks::Coverage;
 use crate::hooks::CoverageId;
+use crate::hooks::CoverageKind;
 use crate::hooks::ExceptionEntry;
 use crate::hooks::ExceptionReturn;
 use crate::hooks::Invalid;
@@ -259,7 +261,7 @@ fn a_coverage_records_each_instruction_start_in_its_range_once() {
     // returns, a NOP, run twice over.
     let code = [MOVE_IMMEDIATE_TO_D0, 0x1234, 0x5678, TRAP, NOP];
     let mut cpu = prepared(&code, &[NOP, RTE]);
-    let coverage = cpu.add_coverage(Address(CODE)..=Address(CODE + 0xff));
+    let coverage = cpu.add_coverage(Address(CODE)..=Address(CODE + 0xff), CoverageKind::Execute);
     assert_eq!(coverage.to_string(), "coverage 1");
     step(&mut cpu, 5);
     cpu.registers.pc = Address(CODE);
@@ -286,7 +288,7 @@ fn a_coverage_records_each_instruction_start_in_its_range_once() {
 #[test]
 fn a_coverage_records_an_instruction_once_it_runs_past_a_hook_stop() {
     let mut cpu = prepared(&[NOP, NOP], &[]);
-    let coverage = cpu.add_coverage(everywhere());
+    let coverage = cpu.add_coverage(everywhere(), CoverageKind::Execute);
     let hook = cpu.add_code_hook(Address(CODE + 2)..=Address(CODE + 2), |_| {
         ControlFlow::Break(())
     });
@@ -304,6 +306,175 @@ fn a_coverage_records_an_instruction_once_it_runs_past_a_hook_stop() {
     assert_eq!(
         cpu.coverage(coverage).unwrap().range(),
         Address(0)..=Address(cpu.memory.mask(Address(u32::MAX)).0)
+    );
+}
+
+#[test]
+fn a_coverage_holds_only_the_pages_it_recorded() {
+    let mut cpu = prepared(&[NOP, NOP], &[]);
+    let coverage = cpu.add_coverage(everywhere(), CoverageKind::Execute);
+    assert_eq!(cpu.coverage(coverage).unwrap().pages_held(), 0);
+    step(&mut cpu, 2);
+    assert_eq!(cpu.coverage(coverage).unwrap().pages_held(), 1);
+    cpu.clear_coverage(coverage);
+    assert_eq!(cpu.coverage(coverage).unwrap().pages_held(), 0);
+}
+
+#[test]
+fn a_coverage_s_range_starts_on_a_word_and_ends_on_the_address_lines() {
+    let mask = 0x00ff_ffff;
+    let range = |start: u32, end: u32, kind| {
+        Coverage::new(&(Address(start)..=Address(end)), mask, kind).range()
+    };
+    let execute = CoverageKind::Execute;
+    // an odd start rounds up, not down onto the word before
+    assert_eq!(
+        range(0x1001, 0x10ff, execute),
+        Address(0x1002)..=Address(0x10ff)
+    );
+    assert_eq!(
+        range(0x1001, 0x10ff, CoverageKind::Read),
+        Address(0x1001)..=Address(0x10ff)
+    );
+    assert_eq!(
+        range(0x1000, u32::MAX, execute),
+        Address(0x1000)..=Address(mask)
+    );
+    // empty: past its end, past the lines, or nothing after rounding
+    for (start, end) in [(0x2000, 0x1000), (0x0100_0000, u32::MAX), (0x1001, 0x1001)] {
+        let empty = range(start, end, execute);
+        assert!(empty.is_empty(), "{start:#x}..={end:#x}");
+        let mut coverage = Coverage::new(&(Address(start)..=Address(end)), mask, execute);
+        coverage.record(Address(start));
+        assert_eq!(coverage.addresses().count(), 0);
+    }
+    assert!(range(u32::MAX, u32::MAX, execute).is_empty());
+}
+
+#[test]
+fn coverage_kinds_print_and_parse() {
+    for (kind, name) in [
+        (CoverageKind::Execute, "execute"),
+        (CoverageKind::Read, "read"),
+        (CoverageKind::Write, "write"),
+    ] {
+        assert_eq!(kind.to_string(), name);
+        assert_eq!(name.parse::<CoverageKind>(), Ok(kind));
+    }
+    let error = "fetch".parse::<CoverageKind>().unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "no coverage kind \"fetch\": give execute, read or write"
+    );
+}
+
+#[test]
+fn read_and_write_coverages_record_each_byte_a_read_or_write_hook_would_see() {
+    // MOVE.L D0,(A0); MOVE.L (A0),D1; MOVE.B D0,(A1); TRAP into a
+    // handler of NOPs
+    let move_byte_d0_to_a1 = 0x1280;
+    let code = [
+        MOVE_D0_TO_INDIRECT,
+        MOVE_INDIRECT_TO_D1,
+        move_byte_d0_to_a1,
+        TRAP,
+    ];
+    let mut cpu = prepared(&code, &[NOP, NOP]);
+    cpu.registers.set_address(0, DATA);
+    cpu.registers.set_address(1, DATA + 0x11);
+    let reads = cpu.add_coverage(everywhere(), CoverageKind::Read);
+    let writes = cpu.add_coverage(
+        Address(STACK - 0x100)..=Address(DATA + 0xff),
+        CoverageKind::Write,
+    );
+    let instructions = cpu.add_coverage(everywhere(), CoverageKind::Execute);
+    step(&mut cpu, 4);
+    // the long read, and the TRAP's vector, read in exception
+    // processing; not the fetches
+    let vector = Vector::trap(0).offset();
+    assert_eq!(
+        covered(&cpu, reads),
+        [
+            vector,
+            vector + 1,
+            vector + 2,
+            vector + 3,
+            DATA,
+            DATA + 1,
+            DATA + 2,
+            DATA + 3
+        ]
+    );
+    // the TRAP's four-word frame below STACK, the long and the byte
+    let mut expected: Vec<u32> = (STACK - 8..STACK).collect();
+    expected.extend([DATA, DATA + 1, DATA + 2, DATA + 3, DATA + 0x11]);
+    assert_eq!(covered(&cpu, writes), expected);
+    assert_eq!(
+        covered(&cpu, instructions),
+        [CODE, CODE + 2, CODE + 4, CODE + 6]
+    );
+    assert!(cpu.coverage(writes).unwrap().contains(Address(DATA + 0x11)));
+    assert!(!cpu.coverage(writes).unwrap().contains(Address(DATA + 0x10)));
+    assert_eq!(cpu.coverage(reads).unwrap().kind(), CoverageKind::Read);
+    // removed, the pages go back on the fast path
+    for coverage in [reads, writes, instructions] {
+        assert!(cpu.remove_coverage(coverage).is_some());
+    }
+    assert!(!cpu.memory.is_special());
+}
+
+#[test]
+fn a_read_coverage_records_a_peripheral_s_read_and_not_a_dropped_write() {
+    // MOVE.L (A0),D1 from the bus; MOVE.L D0,(A1) into RAM, dropped
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, 0x2280, NOP], &[]);
+    cpu.registers.set_address(0, NOWHERE);
+    cpu.registers.set_address(1, DATA);
+    let reads = cpu.add_coverage(everywhere(), CoverageKind::Read);
+    let writes = cpu.add_coverage(everywhere(), CoverageKind::Write);
+    cpu.add_pre_write_hook(everywhere(), |write: &mut PendingWrite, _, _| {
+        write.set_dropped(true);
+        ControlFlow::Continue(())
+    });
+    for _ in 0..2 {
+        cpu.run_for(
+            &mut Answering,
+            &mut NoInterrupts,
+            Cycle::ZERO,
+            Cycles::from_clocks(1),
+        );
+    }
+    assert_eq!(cpu.registers.pc.0, CODE + 4);
+    assert_eq!(
+        covered(&cpu, reads),
+        (NOWHERE..NOWHERE + 4).collect::<Vec<_>>()
+    );
+    assert!(covered(&cpu, writes).is_empty());
+}
+
+#[test]
+fn a_read_coverage_slows_its_page_s_reads_alone() {
+    let mut cpu = prepared(&[NOP], &[]);
+    let space = Space::Supervisor;
+    let read = cpu.add_coverage(Address(DATA)..=Address(DATA), CoverageKind::Read);
+    assert!(cpu.memory.read(space, Address(DATA), Size::Word).is_none());
+    assert!(
+        cpu.memory
+            .write(space, Address(DATA), Size::Word, 0)
+            .is_some()
+    );
+    cpu.remove_coverage(read);
+    let write = cpu.add_coverage(Address(DATA)..=Address(DATA), CoverageKind::Write);
+    assert!(cpu.memory.read(space, Address(DATA), Size::Word).is_some());
+    assert!(
+        cpu.memory
+            .write(space, Address(DATA), Size::Word, 0)
+            .is_none()
+    );
+    cpu.remove_coverage(write);
+    assert!(
+        cpu.memory
+            .write(space, Address(DATA), Size::Word, 0)
+            .is_some()
     );
 }
 

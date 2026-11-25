@@ -17,6 +17,7 @@ use mc683xx_board::signal::ParseKindError;
 use mc683xx_cpu32::TakeExceptionError;
 use mc683xx_cpu32::flat::MapError;
 use mc683xx_cpu32::flat::PeekError;
+use mc683xx_cpu32::hooks::ParseCoverageKindError;
 use mc683xx_cpu32::interrupt::NoInterruptLevel;
 use mc683xx_cpu32::interrupt::NoIrqPin;
 use mc683xx_cpu32::memory::MemoryError;
@@ -106,6 +107,9 @@ pub(crate) enum Error {
     /// once.
     #[error(transparent)]
     Permissions(#[from] ParsePermissionsError),
+    /// A coverage kind that is not `execute`, `read` or `write`.
+    #[error(transparent)]
+    CoverageKind(#[from] ParseCoverageKindError),
     /// The chip refused the wiring.
     #[error(transparent)]
     Build(#[from] BuildError),

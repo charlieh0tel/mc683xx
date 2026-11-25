@@ -10,6 +10,7 @@ use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::Frequency;
 use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::hooks::CoverageKind;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory;
 use mc683xx_cpu32::memory::MemoryKind;
@@ -1484,23 +1485,27 @@ macro_rules! chip_methods {
                 self.with_chip_mut(py, |chip, _| Ok(chip.cpu_control().remove_hook(hook.0)))
             }
 
-            /// Records the address of each instruction from `begin` to
-            /// `end`, both included, on the address lines, as it
-            /// executes (Rust's `Cpu::add_coverage`): a bit for each
-            /// word of the range.  Not saved by `save`.
+            /// Records what `begin` to `end`, both included, on the
+            /// address lines, sees of `kind` (Rust's
+            /// `Cpu::add_coverage`): `"execute"`, each instruction's
+            /// address as it executes, `"read"` or `"write"`, each byte
+            /// an operand read or write cycle reaches; a `ValueError`
+            /// for another.  Not saved by `save`.
             fn add_coverage(
                 &mut self,
                 py: Python<'_>,
                 begin: u32,
                 end: u32,
+                kind: &str,
             ) -> PyResult<CoverageIdView> {
+                let kind = kind.parse::<CoverageKind>().map_err(Error::from)?;
                 self.with_chip_mut(py, |chip, _| {
-                    Ok(CoverageIdView(chip.cpu_control().add_coverage(addresses(begin, end))))
+                    Ok(CoverageIdView(chip.cpu_control().add_coverage(addresses(begin, end), kind)))
                 })
             }
 
-            /// The addresses of the instructions `coverage` recorded, as a
-            /// set; `None` if it was removed.
+            /// The addresses `coverage` recorded, as a set; `None` if it
+            /// was removed.
             fn coverage<'py>(
                 &self,
                 py: Python<'py>,

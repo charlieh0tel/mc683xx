@@ -2405,10 +2405,10 @@ Adversarial review (2026-11-01):
   allocated slab, 15 us on 256 Kbytes, now 80 ns).  Invalid access
   and exception hooks need no flag: bus errors and exceptions are
   slow already.
-- Coverage (sc batch 6): `Cpu::add_coverage(range) -> CoverageId`
-  records natively the address of each instruction executed in the
-  range, a bit for each word (64 Kbytes a Mbyte of range, the end
-  clamped to the address lines), read out as a `Coverage`
+- Coverage (sc batch 6, kinds sc batch 7): `Cpu::add_coverage(range,
+  kind) -> CoverageId`; `CoverageKind::Execute` records natively the
+  address of each instruction executed in the range, a bit for each
+  word, read out as a `Coverage`
   (`addresses`, `contains`), cleared, removed; on `CpuControl` too, so
   the chip and board have it.  It sets a page watch bit of its own, so
   an instruction off its pages costs what it did (the quiet page) and
@@ -2418,7 +2418,30 @@ Adversarial review (2026-11-01):
   snapshot, as the hooks are not: it is host instrumentation, and a
   restore that rewound it would lose what the runs since showed.
   Edges (branch pairs) are deferred to 1.x, additively.
-- Opcode hooks (sc batch 7): `Cpu::add_opcode_hook(range, mask,
+  Read and write kinds (sc batch 7) record a bit for each byte of
+  each cycle a read or write hook over it would see, so the two agree
+  by construction: memory's and a peripheral's alike (a peripheral's
+  register map is what a host most wants covered), exception
+  processing's included (a vector, a frame; `MemoryAccess::stacking`
+  tells the hooks apart, a bitmap cannot, and leaving them out would
+  hide the stack's use), fetches excluded (the execute kind covers
+  code), faulted cycles and dropped stores excluded, as the hooks see
+  none.  Recorded where the read and write hooks are called, so a
+  long a bare host sees once is its four bytes.  Their own watch bits
+  take their pages off the fast path for reads (fetches included) or
+  writes alone, as a pre-read or pre-write hook's do; elsewhere no
+  cost.  Storage (review r13, R2): a page's bits are allocated at the
+  first set, in a two-level table (slabs of 1024 pages from the
+  range's first page, each a page's bits, both allocated at their
+  first record: a lookup is two indexings, where a `BTreeMap` cost an
+  execute coverage over the sled 4.7 ns an instruction more), so a
+  coverage over all 32 bits holds 16 Kbytes of slab pointers and what
+  it recorded rather than 256 Mbytes; the range is normalized (N1): start rounded
+  up to the kind's unit, end clamped to the address lines, a range
+  starting past either empty (`range()` then `1..=0`), as the hooks'
+  ranges past the lines match nothing.  The Python kind is a string,
+  `"execute"`, `"read"`, `"write"`: a name the host writes (python.md,
+  Names).  It replaces alpha.8's `add_coverage(range)`.- Opcode hooks (sc batch 7): `Cpu::add_opcode_hook(range, mask,
   value, hook)`, a code hook called only where the instruction's first
   word, masked, is `value`; Python's `add_code_hook(..., opcode=(mask,
   value))`.  A sibling, not an argument to `add_code_hook`, so the

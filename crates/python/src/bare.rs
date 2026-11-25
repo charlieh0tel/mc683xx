@@ -28,6 +28,7 @@ use mc683xx_cpu32::exception::VectorSet;
 use mc683xx_cpu32::flat;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_cpu32::hooks::Control;
+use mc683xx_cpu32::hooks::CoverageKind;
 use mc683xx_cpu32::hooks::ExceptionEntry;
 use mc683xx_cpu32::hooks::ExceptionReturn;
 use mc683xx_cpu32::hooks::HookId;
@@ -1129,16 +1130,22 @@ impl MachineView {
         self.machine.cpu.remove_hook(hook.0)
     }
 
-    /// Records the address of each instruction from `begin` to `end`,
-    /// both included, as it executes (Rust's `Cpu::add_coverage`): a
-    /// bit for each word of the range, so cover the code, not all of
-    /// memory.  Not saved by `save`.
-    fn add_coverage(&mut self, begin: u32, end: u32) -> CoverageIdView {
-        CoverageIdView(self.machine.cpu.add_coverage(Address(begin)..=Address(end)))
+    /// Records what `begin` to `end`, both included, sees of `kind`
+    /// (Rust's `Cpu::add_coverage`): `"execute"`, each instruction's
+    /// address as it executes, `"read"` or `"write"`, each byte an
+    /// operand read or write cycle reaches; a `ValueError` for another.
+    /// Not saved by `save`.
+    fn add_coverage(&mut self, begin: u32, end: u32, kind: &str) -> PyResult<CoverageIdView> {
+        let kind = kind.parse::<CoverageKind>().map_err(Error::from)?;
+        Ok(CoverageIdView(
+            self.machine
+                .cpu
+                .add_coverage(Address(begin)..=Address(end), kind),
+        ))
     }
 
-    /// The addresses of the instructions `coverage` recorded, as a set;
-    /// `None` if it was removed.
+    /// The addresses `coverage` recorded, as a set; `None` if it was
+    /// removed.
     fn coverage<'py>(
         &self,
         py: Python<'py>,

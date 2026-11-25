@@ -25,7 +25,8 @@ rename renames the Python name with it.  The deliberate differences:
 - **Names and values:** what a host *names* when it wires crosses as
   its string, in and out, whatever the Rust type: a chip select
   (`"CSBOOT"`, `"CS0"`), a net type (`"serial"`), a port direction
-  (`"in-out"`), a register (`"D0"`, `"SR"`, by Python's own names).
+  (`"in-out"`), a register (`"D0"`, `"SR"`, by Python's own names), a
+  coverage's kind (`"execute"`, `"read"`, `"write"`).
   What a host *matches on* is a class whose members are the Rust
   enum's variants, whatever traits the Rust type has (`Display` and
   `FromStr` included): a kind, a cause, a port, a channel, a reason, a
@@ -917,17 +918,34 @@ that raised the exception or that a trace follows (a TRAP's frame is
 the TRAP's); an interrupt's, taken between instructions, the next
 instruction's.
 
-`add_coverage(begin, end)` (Rust's `Cpu::add_coverage`, on
+`add_coverage(begin, end, kind)` (Rust's `Cpu::add_coverage`, on
 `Machine`, `Mc68331` and `Board.chip`) records natively, with no
-Python call, the address of each instruction from `begin` to `end`
-as it executes, a bit for each word of the range; it returns a
-`CoverageId`.  `coverage(id)` is the set of addresses recorded,
-`clear_coverage(id)` forgets them (whether there is such a
+Python call, what `begin` to `end` sees of `kind`, a string, as Rust's
+`CoverageKind` prints (another raises `ValueError`):
+
+- `"execute"`: the address of each instruction that starts there, as
+  it executes, a bit for each word;
+- `"read"`: each byte of each operand read cycle a read hook there
+  would see, a bit for each byte: memory's or a peripheral's,
+  exception processing's (a vector, `rte`'s frame) included; not a
+  fetch, a cycle in CPU space, or one that faulted; a long a bare
+  `Machine` reads whole is its four bytes;
+- `"write"`: likewise each byte of each write cycle, exception
+  stacking included; not a store a pre-write hook dropped.
+
+It returns a `CoverageId`.  `coverage(id)` is the set of addresses
+recorded, `clear_coverage(id)` forgets them (whether there is such a
 coverage), and `remove_coverage(id)` removes it and returns its last
-set; both give `None` once it is removed.  An instruction outside
-every coverage costs nothing; one inside it a lookup.  Like the
-hooks, a coverage is not part of a snapshot: `save` leaves it out
-and `restore` leaves it as it was.
+set; both give `None` once it is removed.  A coverage holds a page's
+bits once one is set, so its memory follows what it recorded, not
+its range; the range's start is rounded up to a word for
+`"execute"` and its end clamped to the address lines.  An
+instruction or cycle outside every coverage costs nothing; an
+instruction inside an execute coverage a lookup, and a read or
+write coverage's pages leave the fast path for reads (fetches
+included) or writes alone.  Like the hooks, a coverage is not part
+of a snapshot: `save` leaves it out and `restore` leaves it as it
+was.
 
 `protect(space, start, length, permissions)` sets whole 2-Kbyte pages
 of `Space.USER` or `Space.SUPERVISOR` to a string of `r`, `w` and `x`;

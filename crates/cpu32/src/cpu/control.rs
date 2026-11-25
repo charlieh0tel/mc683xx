@@ -14,6 +14,7 @@ use super::Cpu;
 use crate::hooks::Control;
 use crate::hooks::Coverage;
 use crate::hooks::CoverageId;
+use crate::hooks::CoverageKind;
 use crate::hooks::ExceptionEntry;
 use crate::hooks::ExceptionReturn;
 use crate::hooks::HookId;
@@ -145,8 +146,12 @@ impl<'a> CpuControl<'a> {
     }
 
     /// [`Cpu::add_coverage`].
-    pub fn add_coverage(&mut self, range: RangeInclusive<Address>) -> CoverageId {
-        self.cpu.add_coverage(range)
+    pub fn add_coverage(
+        &mut self,
+        range: RangeInclusive<Address>,
+        kind: CoverageKind,
+    ) -> CoverageId {
+        self.cpu.add_coverage(range, kind)
     }
 
     /// [`Cpu::clear_coverage`].

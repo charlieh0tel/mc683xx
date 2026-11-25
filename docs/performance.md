@@ -88,7 +88,10 @@ working fails `make ci`.
   hook on the RAM; `opcode_elsewhere`, `opcode_unmatched` and
   `opcode_everywhere` an opcode hook beside the sled, over it matching
   no opcode, and everywhere matching every one; `coverage_elsewhere`
-  and `coverage_sled` add a coverage beside the sled or over it.  From Python,
+  and `coverage_sled` add an execute coverage beside the sled or over
+  it, `read_coverage_data` a read coverage over the data the kernels
+  read (A0's) and `write_coverage_output` a write coverage over what
+  they write (A1's).  From Python,
   `crates/python/benches/hooks.py`
   (Python hooks, below).
 - `core/*_limited` (`benches/core.rs`): the `nop` and
@@ -795,6 +798,22 @@ unhooked); over the whole sled, a bit set for every instruction,
 `nop` takes 236-238 us and `move_indirect` 188 us: about 4 ns an
 instruction on this core, where a Python code hook that does nothing
 costs about 280 ns.
+
+Coverage kinds (sc batch 7), on performance core 2, three interleaved
+runs against the code before them (`unhooked` 77.8, 70.7 and 53-55 us
+both): an execute coverage now holds a page's bits only once one is
+set (review r13, R2), which costs the sled 2 ns an instruction over
+the flat bitmap (`nop_coverage_sled` 120 to 141 us, `move_indirect`
+96 to 106, `clr_indirect` 74 to 81; a `BTreeMap` of pages cost 167,
+112 and 91, and was not kept).  A read or write coverage off the
+cycles' pages costs nothing (`nop_read_coverage_data` and
+`nop_write_coverage_output` 81 us, as `nop_code_elsewhere`;
+`clr_indirect_read_coverage_data` 56 us, the kernel writing alone).
+Over the data a kernel reads or writes it takes that access off the
+fast path and records its bytes: `move_indirect_read_coverage_data`
+126 us and `write_coverage_output` 130 us against 71, about 6 ns an
+access, and `clr_indirect_write_coverage_output` 148 against 53 us,
+about 9.5 ns a write, where a no-op Python write hook costs 180 ns.
 
 An opcode hook (`Cpu::add_opcode_hook`, sc batch 7), interleaved
 three times each on performance core 2 against the code before it:

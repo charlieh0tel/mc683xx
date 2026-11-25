@@ -23,7 +23,7 @@ use mc683xx_target::Size;
 /// Table 7-2), so a page never straddles two blocks.
 pub const PAGE_BYTES: u32 = 1 << PAGE_SHIFT;
 /// log2 of [`PAGE_BYTES`].
-const PAGE_SHIFT: u32 = 11;
+pub(crate) const PAGE_SHIFT: u32 = 11;
 /// Clocks in the fastest bus cycle (CPU32RM 8.1.5).
 const FASTEST_CLOCKS: u8 = 2;
 
@@ -178,13 +178,22 @@ pub(crate) mod watch {
     pub(crate) const PRE_READ: Bits = 1 << 4;
     /// A pre-write hook covers some of it.
     pub(crate) const PRE_WRITE: Bits = 1 << 5;
-    /// A coverage covers some of it.
-    pub(crate) const COVERAGE: Bits = 1 << 6;
+    /// An execute coverage covers some of it.
+    pub(crate) const EXECUTE_COVERAGE: Bits = 1 << 6;
     /// An opcode hook, a code hook for some opcodes, covers some of it.
     pub(crate) const OPCODE: Bits = 1 << 7;
+    /// A read coverage covers some of it.
+    pub(crate) const READ_COVERAGE: Bits = 1 << 8;
+    /// A write coverage covers some of it.
+    pub(crate) const WRITE_COVERAGE: Bits = 1 << 9;
+    /// The bits that take a page's reads off the fast path, fetches
+    /// included: a read or write hook takes both.
+    pub(crate) const SLOW_READ: Bits = READ | WRITE | PRE_READ | READ_COVERAGE;
+    /// The bits that take a page's writes off the fast path.
+    pub(crate) const SLOW_WRITE: Bits = READ | WRITE | PRE_WRITE | WRITE_COVERAGE;
     /// The bits that take a page's cycles off the fast path, some of
     /// them.
-    pub(crate) const SLOW: Bits = READ | WRITE | PRE_READ | PRE_WRITE;
+    pub(crate) const SLOW: Bits = SLOW_READ | SLOW_WRITE;
 }
 
 /// A region of host memory the core holds, as [`Memory::add_region`]
@@ -413,12 +422,11 @@ impl Slab {
     /// Brings page `index` of space `space`'s fast table up to date.
     fn refresh(&mut self, space: usize, index: usize) {
         let entry = self.tables[space][index];
-        let slow = self.watched[index] & (watch::READ | watch::WRITE) != 0
-            || self.permissions[space][index] != Permissions::ALL;
-        // a pre-read or pre-write hook's page leaves the fast path for
-        // reads (fetches included) or writes alone
-        let slow_read = slow || self.watched[index] & watch::PRE_READ != 0;
-        let slow_write = slow || self.watched[index] & watch::PRE_WRITE != 0;
+        let restricted = self.permissions[space][index] != Permissions::ALL;
+        // a pre-access hook's or a read or write coverage's page leaves
+        // the fast path for reads (fetches included) or writes alone
+        let slow_read = restricted || self.watched[index] & watch::SLOW_READ != 0;
+        let slow_write = restricted || self.watched[index] & watch::SLOW_WRITE != 0;
         self.fast[space][index] = Page {
             read: if slow_read { None } else { entry.read },
             write: if slow_write { None } else { entry.write },

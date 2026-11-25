@@ -1037,7 +1037,7 @@ def test_an_opcode_filtered_code_hook_sees_its_opcodes_alone() -> None:
 
 def test_a_coverage_records_the_instructions_run_in_its_range():
     cpu = machine(NOP, ADDQ_LONG_1_D0, RTS)
-    coverage = cpu.add_coverage(CODE, CODE + 0xFF)
+    coverage = cpu.add_coverage(CODE, CODE + 0xFF, "execute")
     assert repr(coverage) == "CoverageId(1)" and str(coverage) == "coverage 1"
     cpu.run_limited(reach=RETURN)
     assert cpu.coverage(coverage) == {CODE, CODE + 2, CODE + 4}
@@ -1052,3 +1052,16 @@ def test_a_coverage_records_the_instructions_run_in_its_range():
     assert cpu.coverage(coverage) is None
     assert not cpu.clear_coverage(coverage)
     assert cpu.remove_coverage(coverage) is None
+
+
+def test_read_and_write_coverages_record_the_bytes_operands_reach() -> None:
+    cpu = machine(MOVE_LONG_A0_TO_D0, MOVE_WORD_D0_TO_A0, RTS)
+    cpu.write_register("A0", 0x2000)
+    reads = cpu.add_coverage(0x1000, 0x2FFF, "read")
+    writes = cpu.add_coverage(0x1000, 0x2FFF, "write")
+    cpu.run_limited(reach=RETURN)
+    # the long read whole, the word written; not the code's fetches
+    assert cpu.coverage(reads) == {0x2000, 0x2001, 0x2002, 0x2003}
+    assert cpu.coverage(writes) == {0x2000, 0x2001}
+    with pytest.raises(ValueError, match="no coverage kind"):
+        cpu.add_coverage(0, 1, "fetch")

@@ -922,12 +922,14 @@ def test_a_chip_s_opcode_hook_stops_before_its_opcode_alone():
 def test_a_chip_s_coverage_records_its_instructions():
     builder, _, _ = board(ram_round_trip(), Recorder())
     chip = builder.build()
-    coverage = chip.add_coverage(START, START + 0xFF)
+    coverage = chip.add_coverage(START, START + 0xFF, "execute")
+    written = chip.add_coverage(RAM_BASE, RAM_BASE + PAGE_BYTES - 1, "write")
     chip.run_for(2000)
     covered = chip.coverage(coverage)
     assert covered is not None and START in covered
     assert all(START <= address <= START + 0xFF and address % 2 == 0 for address in covered)
     assert chip.remove_coverage(coverage) == covered
+    assert chip.coverage(written) == {RAM_WORD, RAM_WORD + 1}
     assert chip.coverage(coverage) is None
 
 

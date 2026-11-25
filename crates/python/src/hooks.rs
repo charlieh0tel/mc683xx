@@ -114,7 +114,7 @@ impl CoverageIdView {
     }
 }
 
-/// The addresses of the instructions `coverage` recorded, as a set.
+/// The addresses `coverage` recorded, as a set.
 pub(crate) fn covered<'py>(py: Python<'py>, coverage: &Coverage) -> PyResult<Bound<'py, PySet>> {
     PySet::new(py, coverage.addresses().map(|address| address.0))
 }
