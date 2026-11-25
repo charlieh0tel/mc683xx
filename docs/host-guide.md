@@ -397,7 +397,12 @@ refuses.
   when it is asked, so a peripheral that answers its writes apart from
   its reads, or a select shared by a read-only and a write-only one,
   times each direction by its own.  Each wait state costs the
-  CPU a clock, so slow peripherals cost what they do on the board.
+  CPU a clock, so slow peripherals cost what they do on the board;
+  wait states beyond `mc683xx_cpu32::bus::MOST_WAIT` (2^32 clocks) per
+  bus cycle count as `MOST_WAIT`, a bare `Bus`'s and an interrupt
+  acknowledge's too, and a run never starts within
+  `mc683xx_cpu32::HEADROOM` (2^48 clocks) of `Cycle::MAX`, so the core
+  sums its clocks unchecked (PLAN.md, Decisions).
   `Builder::set_dsack(peripheral, Dsack)` (`Dsack` and `Termination` are in
   `mc683xx_modules::chip_select`) states which DSACK pins it drives:
   the chip then checks PEPAR at each such cycle (a pin assigned as

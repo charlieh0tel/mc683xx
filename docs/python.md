@@ -396,7 +396,8 @@ value)`, and optionally:
 
 - `wait_states(cycle) -> int | None`: on a select with an external
   DSACK, the wait states before the peripheral asserts DSACK, or `None`
-  for none at all (the bus monitor ends the cycle).
+  for none at all (the bus monitor ends the cycle).  Beyond 2^32
+  clocks (`MOST_WAIT` in Rust) a cycle's wait states count as 2^32.
 - `dsack_port(cycle) -> int | None`: the port this cycle's DSACK gives,
   `16` (DSACK1) or `8` (DSACK0 alone), for a peripheral whose pins
   differ cycle by cycle; `None`, or no such method, leaves it to

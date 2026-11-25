@@ -958,3 +958,29 @@ other (1.45 G).  Built with every function aligned to 64 bytes
 whichever placement its link gives; instruction counts, which do not
 move with it, are what the audit judges work by, and cycles are
 compared between builds aligned that way.
+
+### Saturating sums
+
+`ca2df4d8` (round 2) made `Cycles`' `+` saturate, as a peripheral's
+wait states may be any count: five saturating adds an instruction in
+the core (the opcode fetch's stall, each access's, the instruction's
+stall and extra clocks, the run's elapsed clocks), +7.6% host
+instructions on `core/nop`, +4.7% on the memory kernels.  The core now
+bounds what it sums instead: wait states beyond `MOST_WAIT` (2^32
+clocks) per bus cycle count as `MOST_WAIT`, and a run never starts
+within `HEADROOM` (2^48 clocks) of `Cycle::MAX`, so its sums are plain
+adds (PLAN.md, Decisions); `Cycles`' public `+` still saturates.  Host
+instructions, v0.8.0 / before / after, 1000 iterations (10 for the
+demo):
+
+| Kernel | v0.8.0 | Before | After |
+| --- | --- | --- | --- |
+| `core/nop` | 1.595 | 1.665 | 1.535 |
+| `core/moveq` | 1.755 | 1.825 | 1.695 |
+| `core/move_indirect` | 1.585 | 1.547 | 1.470 |
+| `core/add_to_memory` | 1.352 | 1.289 | 1.238 |
+| `chip/flash_nop` | 0.976 | 1.011 | 0.946 |
+| `chip/flash_nop`, PIT interrupting | 0.985 | 1.020 | 0.959 |
+| `chip/ram_move` | 0.658 | 0.655 | 0.627 |
+| `chip/peripheral_move` | 1.152 | 1.186 | 1.173 |
+| `demo/mandelbrot` | 1.558 | 1.606 | 1.529 |

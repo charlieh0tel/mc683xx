@@ -707,7 +707,8 @@ pub trait Peripheral: Any {
     /// 7.10.3), the wait states before the peripheral asserts DSACK, or
     /// [`None`] if it never does, asked at `moment`, when the cycle's
     /// instruction started, before the cycle's `read` or `write`.  By
-    /// default it answers at once.
+    /// default it answers at once.  Beyond
+    /// [`MOST_WAIT`](mc683xx_cpu32::bus::MOST_WAIT) they count as it.
     fn wait_states(&mut self, access: PeripheralAccess, moment: Moment) -> Option<Cycles> {
         Some(Cycles::ZERO)
     }

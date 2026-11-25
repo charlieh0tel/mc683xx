@@ -16,6 +16,13 @@ use mc683xx_target::Size;
 /// wait states, a 16-bit port (CPU32RM 8.1.5, 8.3).
 const TABLE_CLOCKS: u64 = 2;
 
+/// The most wait states a bus cycle counts: a peripheral's, a bus's
+/// or an interrupt acknowledge's beyond it count as this, about 4.5
+/// minutes at 16 MHz.  Bounded, an instruction's clocks are, and the
+/// core sums them without checking for overflow (PLAN.md, Decisions:
+/// the chip's time).
+pub const MOST_WAIT: Cycles = Cycles::from_clocks(1 << 32);
+
 /// The LPSTOP broadcast: a CPU space write of the interrupt mask to
 /// $3FFFE, type 0011 (MC68331UM 4.5.4.2, Figure 4-13; CPU32RM
 /// 5.3.1.4).
@@ -70,7 +77,7 @@ pub struct Read {
     /// The value, right-aligned.
     pub value: u32,
     /// The clocks it took beyond the timing tables' two-clock cycle
-    /// (see [`stall`]).
+    /// (see [`stall`]); beyond [`MOST_WAIT`] they count as it.
     pub stall: Cycles,
 }
 

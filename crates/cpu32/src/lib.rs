@@ -63,6 +63,7 @@ mod timing;
 pub use bus_error::BusError;
 pub use bus_error::PortSize;
 pub use cpu::Cpu;
+pub use cpu::HEADROOM;
 pub use cpu::Halt;
 pub use cpu::Run;
 pub use cpu::Stop;
