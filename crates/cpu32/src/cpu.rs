@@ -1658,9 +1658,11 @@ impl<'a> Core<'a> {
     /// [`access_read`](Self::access_read) where the fast tables do not
     /// serve it all (a page with a hook, permissions or the bus's, or a
     /// long across pages): first the pre-read hooks, if any is
-    /// installed, then its cycles, reading what they answered.  Out of
-    /// line, so the fast path checks no flag.
-    #[inline(never)]
+    /// installed, then its cycles, reading what they answered.  Past
+    /// the fast tables' miss, so the fast path checks no flag; left to
+    /// the compiler to inline, which saves a peripheral's read a call
+    /// (docs/performance.md, The 0.9.0 audit).
+    #[inline]
     fn slow_access_read(
         &mut self,
         address: Address,

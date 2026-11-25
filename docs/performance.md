@@ -998,3 +998,25 @@ against alpha.8, before (round 14) and after: no hook 5.434, 5.434 and
 2.549 G for 1 M; a no-op write hook 1.587, 1.632 and 1.537 G.  The
 code hook's remaining 0.4% is its argument's new fields
 (`instruction`, `opcode`, round 14).
+
+### A peripheral's read, and the wasm module
+
+`slow_access_read`, past the fast tables' miss, is the compiler's to
+inline into `access_read`, which saves a peripheral's read a call:
+host instructions on `chip/peripheral_move` 1.152 (v0.8.0), 1.173
+before, 1.161 G after, 1000 iterations; the other kernels as before
+but `core/move_indirect`, 1.470 to 1.482 G (v0.8.0 1.585).
+`chip/peripheral_move` stays 0.8% above v0.8.0 in host instructions,
+1% below it in cycles.
+
+The web build's module (wasm-bindgen, name section removed) is 2.646
+MB, 655.3 KB gzipped, against v0.8.0's 2.624 MB (646.1 KB) and
+alpha.9's 2.588 MB (650.7 KB): the fast accessors inlined into
+`access_write` (The memory path) let the compiler inline the operand
+write into every instruction handler.  Keeping `Core::write` out of
+line brings the module to 2.595 MB (651.5 KB) but costs
+`core/add_to_memory` 9% in cycles (3% more than v0.8.0) and
+`core/pea_displacement` 2%; inlining `access_write` into an inlined
+`write` brings it to 2.581 MB (650.8 KB) but leaves
+`core/add_to_memory` 2% and `chip/peripheral_move` 3% more cycles than
+v0.8.0.  Native speed was kept.
