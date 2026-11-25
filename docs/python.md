@@ -1675,7 +1675,11 @@ one of each.  The read hooks see the cycles after it, with the values `data` gav
 them.  On the bare `Machine`, unlike its other hooks, it runs within
 the run, so a call into the machine raises `RuntimeError`, and memory
 is `PendingRead.peek`'s; `True` stops the run once the
-instruction completes.
+instruction completes, `End.Stop(Stop.Hook(hook))`, unless the
+instruction ended the run otherwise, as in Rust: a fault stop
+(`End.Fault`), an exception stop (`End.Exception`) or a self-loop
+keeps its end, and an intercept is answered first, then the run ends
+at the hook's stop.
 
 ```python
 bare.poke_bytes(0x6000, struct.pack(">H", 0x1111))

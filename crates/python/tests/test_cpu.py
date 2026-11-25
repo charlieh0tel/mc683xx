@@ -477,6 +477,64 @@ def test_an_intercept_handles_or_declines_before_stacking():
     assert not cpu.remove_hook(hook)
 
 
+# CHK.W (A0),D0 (CPU32RM 4, CHK); MOVE.L (A0),(A1).
+CHK_WORD_A0_D0 = 0x4190
+MOVE_LONG_A0_TO_A1 = 0x2290
+CHK = 6
+
+
+def stopping_pre_read(cpu: mc683xx.Machine) -> mc683xx.HookId:
+    """A pre-read hook on the word at 0x2000 that stops the run."""
+    return cpu.add_pre_read_hook(lambda read, data: True, 0x2000, 0x2001)
+
+
+def test_an_in_run_stop_leaves_a_fault_stop_of_the_same_instruction_its_end() -> None:
+    cpu = machine(MOVE_LONG_A0_TO_A1, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("A1", RETURN)
+    cpu.set_stop_on_fault(True)
+    stopping_pre_read(cpu)
+    run = cpu.run_limited(reach=RETURN)
+    assert isinstance(run.end, mc683xx.End.Fault), run.end
+    assert run.end.fault.address == RETURN
+    assert cpu.read_register("PC") == CODE
+
+
+def test_an_in_run_stop_leaves_an_exception_stop_of_the_same_instruction_its_end() -> None:
+    cpu = machine(CHK_WORD_A0_D0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("D0", 5)
+    cpu.set_stop_on_exception([CHK])
+    hook = stopping_pre_read(cpu)
+    run = cpu.run_limited(reach=RETURN)
+    assert run.end == mc683xx.End.Exception(CHK, CODE)
+    # the stop's promise, not spent: the next run takes it, with no stop
+    assert cpu.remove_hook(hook)
+    assert cpu.run_limited(reach=HANDLER).end == mc683xx.End.Reached()
+
+
+def test_an_in_run_stop_still_answers_an_intercept_of_the_same_instruction() -> None:
+    cpu = machine(CHK_WORD_A0_D0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("D0", 5)
+    answered: list[int] = []
+
+    def answer(intercepted: mc683xx.Intercepted) -> bool:
+        answered.append(intercepted.vector)
+        cpu.write_register("PC", intercepted.pc + 2)
+        return True
+
+    cpu.add_intercept_hook(answer, [CHK])
+    hook = stopping_pre_read(cpu)
+    run = cpu.run_limited(reach=RETURN)
+    assert answered == [CHK]
+    assert run.end == mc683xx.End.Stop(mc683xx.Stop.Hook(hook))
+    # handled: the CHK does not run again
+    assert cpu.read_register("PC") == CODE + 2
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+    assert answered == [CHK]
+
+
 def test_intercept_hooks_answer_in_order_until_one_handles():
     cpu = machine(trap(1), trap(1), RTS)
     called = []

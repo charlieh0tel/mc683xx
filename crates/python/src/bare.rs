@@ -1272,12 +1272,21 @@ impl MachineView {
             if halt() {
                 return Ok((budget.spent, requested));
             }
+            // An in-run hook's stop is the run's end unless the same
+            // instruction ended it otherwise, as in Rust: a fault, an
+            // exception stop or a self-loop keeps its end, and an
+            // intercept is answered first.
+            let in_run_end = |hook| Ok((budget.spent, End::Stop(mc683xx_cpu32::Stop::Hook(hook))));
             match (run.end, dispatched) {
-                (_, Dispatched::Continue) if let Some(hook) = in_run_stop => {
-                    return Ok((budget.spent, End::Stop(mc683xx_cpu32::Stop::Hook(hook))));
-                }
+                (
+                    End::Stop(mc683xx_cpu32::Stop::Hook(_) | mc683xx_cpu32::Stop::Requested),
+                    Dispatched::Continue,
+                ) if let Some(hook) = in_run_stop => return in_run_end(hook),
                 (End::Intercepted(interception), Dispatched::Continue) if !stop => {
                     Self::answer(slf, py, interception)?;
+                    if let Some(hook) = in_run_stop {
+                        return in_run_end(hook);
+                    }
                     if stop_request.take() {
                         return Ok((budget.spent, requested));
                     }
