@@ -9,6 +9,7 @@
 //! [PLAN.md, Hooks]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#hooks
 
 use std::fmt;
+use std::iter;
 use std::ops::ControlFlow;
 use std::ops::RangeInclusive;
 use std::str::FromStr;
@@ -342,7 +343,7 @@ pub struct ParseCoverageKindError(String);
 /// write) of it, kept a page at a time, a page's bits allocated when the
 /// first of them is set, so it holds what was recorded, not the range.
 /// Host instrumentation, as the hooks are: not part of a snapshot.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Coverage {
     /// What it records.
     kind: CoverageKind,
@@ -355,10 +356,26 @@ pub struct Coverage {
     /// its first record: each page's bits, allocated at its first
     /// record, the lowest bit of each `u64` the lowest address.
     slabs: Vec<Option<Box<[Option<PageBits>]>>>,
+    /// The page last recorded in, its number from `first` and its bits,
+    /// out of `slabs` while it is here: a record on it, as most are,
+    /// looks no table up.
+    hot: Option<(u32, PageBits)>,
 }
 
 /// A page's bits: one for each byte, or each word, in the low half.
 type PageBits = Box<[u64; Coverage::PAGE_WORDS]>;
+
+/// Alike if they cover the same range with the same kind and recorded
+/// the same addresses, wherever their pages are held.
+impl PartialEq for Coverage {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind
+            && self.bounds == other.bounds
+            && self.addresses().eq(other.addresses())
+    }
+}
+
+impl Eq for Coverage {}
 
 impl Coverage {
     /// Bits in each `u64` of a page's.
@@ -388,6 +405,7 @@ impl Coverage {
             bounds,
             first,
             slabs: vec![None; slabs as usize],
+            hot: None,
         }
     }
 
@@ -406,32 +424,55 @@ impl Coverage {
         }
     }
 
-    /// The slab, the page in it and the bit's index in the page of
-    /// `address`, if it covers it, and it is even for
-    /// [`CoverageKind::Execute`].
-    fn locate(&self, address: Address) -> Option<(usize, usize, u32)> {
+    /// The page, from `first`, and the bit's index in it of `address`,
+    /// if it covers it, and it is even for [`CoverageKind::Execute`].
+    #[inline]
+    fn locate(&self, address: Address) -> Option<(u32, u32)> {
         let (start, end) = self.bounds?;
         let shift = self.kind.shift();
         if address < start || address > end || address.0 & ((1 << shift) - 1) != 0 {
             return None;
         }
-        let page = (address.0 >> PAGE_SHIFT) - self.first;
         Some((
-            (page / Self::SLAB) as usize,
-            (page % Self::SLAB) as usize,
+            (address.0 >> PAGE_SHIFT) - self.first,
             (address.0 % PAGE_BYTES) >> shift,
         ))
     }
 
+    /// The table's place for page `page`, from `first`, its slab
+    /// allocated now if it was not.
+    fn place(&mut self, page: u32) -> &mut Option<PageBits> {
+        let pages = self.slabs[(page / Self::SLAB) as usize]
+            .get_or_insert_with(|| vec![None; Self::SLAB as usize].into_boxed_slice());
+        &mut pages[(page % Self::SLAB) as usize]
+    }
+
     /// Records `address`, if it covers it.
+    #[inline]
     pub(crate) fn record(&mut self, address: Address) {
-        let Some((slab, page, index)) = self.locate(address) else {
+        let Some((page, index)) = self.locate(address) else {
             return;
         };
-        let pages = self.slabs[slab]
-            .get_or_insert_with(|| vec![None; Self::SLAB as usize].into_boxed_slice());
-        let bits = pages[page].get_or_insert_with(|| Box::new([0; Self::PAGE_WORDS]));
+        let bits = match &mut self.hot {
+            Some((hot, bits)) if *hot == page => bits,
+            _ => self.heat(page),
+        };
         bits[(index / Self::BITS) as usize] |= 1 << (index % Self::BITS);
+    }
+
+    /// Makes page `page`, from `first`, the hot page, the last one put
+    /// back in the table: its bits, allocated now if they were not.
+    #[cold]
+    #[inline(never)]
+    fn heat(&mut self, page: u32) -> &mut PageBits {
+        if let Some((cooled, bits)) = self.hot.take() {
+            *self.place(cooled) = Some(bits);
+        }
+        let bits = self
+            .place(page)
+            .take()
+            .unwrap_or_else(|| Box::new([0; Self::PAGE_WORDS]));
+        &mut self.hot.insert((page, bits)).1
     }
 
     /// Records each byte of `size` from `address`, on lines `mask`, it
@@ -442,23 +483,30 @@ impl Coverage {
         }
     }
 
+    /// The bits of page `page`, from `first`, if any are set.
+    fn bits(&self, page: u32) -> Option<&PageBits> {
+        match &self.hot {
+            Some((hot, bits)) if *hot == page => Some(bits),
+            _ => self.slabs[(page / Self::SLAB) as usize]
+                .as_ref()
+                .and_then(|pages| pages[(page % Self::SLAB) as usize].as_ref()),
+        }
+    }
+
     /// Whether `address` was recorded.
     #[must_use]
     pub fn contains(&self, address: Address) -> bool {
-        self.locate(address).is_some_and(|(slab, page, index)| {
-            self.slabs[slab]
-                .as_ref()
-                .and_then(|pages| pages[page].as_ref())
-                .is_some_and(|bits| {
-                    bits[(index / Self::BITS) as usize] & 1 << (index % Self::BITS) != 0
-                })
+        self.locate(address).is_some_and(|(page, index)| {
+            self.bits(page).is_some_and(|bits| {
+                bits[(index / Self::BITS) as usize] & 1 << (index % Self::BITS) != 0
+            })
         })
     }
 
-    /// The addresses recorded, in order.
-    pub fn addresses(&self) -> impl Iterator<Item = Address> + '_ {
-        let shift = self.kind.shift();
-        let pages = self.slabs.iter().enumerate().flat_map(|(slab, pages)| {
+    /// The pages that hold bits, from `first`, with their bits, in
+    /// order.
+    fn held(&self) -> impl Iterator<Item = (u32, &PageBits)> + '_ {
+        let tabled = self.slabs.iter().enumerate().flat_map(|(slab, pages)| {
             pages.iter().flat_map(move |pages| {
                 pages.iter().enumerate().filter_map(move |(page, bits)| {
                     bits.as_ref()
@@ -466,7 +514,20 @@ impl Coverage {
                 })
             })
         });
-        pages.flat_map(move |(page, bits)| {
+        // the hot page among the table's, in order
+        let mut tabled = tabled.peekable();
+        let mut hot = self.hot.as_ref().map(|(page, bits)| (*page, bits));
+        iter::from_fn(move || match (tabled.peek(), hot) {
+            (Some(&(page, _)), Some((warm, _))) if warm < page => hot.take(),
+            (Some(_), _) => tabled.next(),
+            (None, _) => hot.take(),
+        })
+    }
+
+    /// The addresses recorded, in order.
+    pub fn addresses(&self) -> impl Iterator<Item = Address> + '_ {
+        let shift = self.kind.shift();
+        self.held().flat_map(move |(page, bits)| {
             let base = (self.first + page) << PAGE_SHIFT;
             bits.iter().enumerate().flat_map(move |(word, &value)| {
                 (0..Self::BITS)
@@ -479,15 +540,12 @@ impl Coverage {
     /// Forgets everything recorded.
     pub(crate) fn clear(&mut self) {
         self.slabs.fill(None);
+        self.hot = None;
     }
 
     /// The pages whose bits it holds.
     #[cfg(test)]
     pub(crate) fn pages_held(&self) -> usize {
-        self.slabs
-            .iter()
-            .flatten()
-            .map(|pages| pages.iter().flatten().count())
-            .sum()
+        self.held().count()
     }
 }

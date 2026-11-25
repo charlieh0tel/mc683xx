@@ -2433,8 +2433,10 @@ Adversarial review (2026-11-01):
   cost.  Storage (review r13, R2): a page's bits are allocated at the
   first set, in a two-level table (slabs of 1024 pages from the
   range's first page, each a page's bits, both allocated at their
-  first record: a lookup is two indexings, where a `BTreeMap` cost an
-  execute coverage over the sled 4.7 ns an instruction more), so a
+  first record), the page last recorded in held out of it, so a
+  record there, as most are, is a compare and a store: 0.9 ns an
+  instruction over the flat bitmap on an execute coverage of the
+  sled, where the table alone cost 2.3 ns and a `BTreeMap` 4.7 ns.  So a
   coverage over all 32 bits holds 16 Kbytes of slab pointers and what
   it recorded rather than 256 Mbytes; the range is normalized (N1): start rounded
   up to the kind's unit, end clamped to the address lines, a range

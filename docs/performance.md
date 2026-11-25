@@ -802,18 +802,20 @@ costs about 280 ns.
 Coverage kinds (sc batch 7), on performance core 2, three interleaved
 runs against the code before them (`unhooked` 77.8, 70.7 and 53-55 us
 both): an execute coverage now holds a page's bits only once one is
-set (review r13, R2), which costs the sled 2 ns an instruction over
-the flat bitmap (`nop_coverage_sled` 120 to 141 us, `move_indirect`
-96 to 106, `clr_indirect` 74 to 81; a `BTreeMap` of pages cost 167,
-112 and 91, and was not kept).  A read or write coverage off the
+set (review r13, R2).  The page last recorded in is held out of the
+table, so a record there, as most are, looks no table up: the sled
+costs 0.9 ns an instruction over the flat bitmap (`nop_coverage_sled`
+116 to 125 us, `move_indirect` 94 to 99, `clr_indirect` 71 to 76,
+interleaved), where the table alone cost 2.3 ns (139, 106 and 81) and
+a `BTreeMap` of pages 4.7 ns (167, 112 and 91); neither was kept.  A read or write coverage off the
 cycles' pages costs nothing (`nop_read_coverage_data` and
 `nop_write_coverage_output` 81 us, as `nop_code_elsewhere`;
 `clr_indirect_read_coverage_data` 56 us, the kernel writing alone).
 Over the data a kernel reads or writes it takes that access off the
 fast path and records its bytes: `move_indirect_read_coverage_data`
-126 us and `write_coverage_output` 130 us against 71, about 6 ns an
-access, and `clr_indirect_write_coverage_output` 148 against 53 us,
-about 9.5 ns a write, where a no-op Python write hook costs 180 ns.
+120 us and `write_coverage_output` 126 us against 71, about 5 ns an
+access, and `clr_indirect_write_coverage_output` 140 against 53 us,
+about 9 ns a write, where a no-op Python write hook costs 180 ns.
 
 An opcode hook (`Cpu::add_opcode_hook`, sc batch 7), interleaved
 three times each on performance core 2 against the code before it:

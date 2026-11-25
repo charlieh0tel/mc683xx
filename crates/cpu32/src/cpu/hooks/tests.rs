@@ -353,6 +353,41 @@ fn a_coverage_s_range_starts_on_a_word_and_ends_on_the_address_lines() {
 }
 
 #[test]
+fn a_coverage_reads_out_its_pages_in_order_whichever_it_recorded_last() {
+    let range = Address(0)..=Address(0x00ff_ffff);
+    let mut coverage = Coverage::new(&range, 0x00ff_ffff, CoverageKind::Read);
+    // three pages, two slabs apart, the middle one last
+    let addresses = [
+        0x0040_0001,
+        0x1000,
+        0x0040_0000,
+        0x0020_0800,
+        0x1001,
+        0x0020_0801,
+    ];
+    for address in addresses {
+        coverage.record(Address(address));
+    }
+    let mut sorted = addresses.to_vec();
+    sorted.sort_unstable();
+    let read = |coverage: &Coverage| coverage.addresses().map(|a| a.0).collect::<Vec<_>>();
+    assert_eq!(read(&coverage), sorted);
+    assert_eq!(coverage.pages_held(), 3);
+    assert!(coverage.contains(Address(0x0020_0801)) && coverage.contains(Address(0x1000)));
+    assert!(!coverage.contains(Address(0x1002)));
+    // alike however its pages are held
+    let mut again = Coverage::new(&range, 0x00ff_ffff, CoverageKind::Read);
+    for address in sorted.iter().rev() {
+        again.record(Address(*address));
+    }
+    assert_eq!(again, coverage);
+    coverage.clear();
+    assert_eq!(read(&coverage), Vec::<u32>::new());
+    assert_eq!(coverage.pages_held(), 0);
+    assert_ne!(again, coverage);
+}
+
+#[test]
 fn coverage_kinds_print_and_parse() {
     for (kind, name) in [
         (CoverageKind::Execute, "execute"),
