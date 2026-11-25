@@ -627,14 +627,8 @@ impl Core<'_> {
     ) -> Option<u32> {
         if !self.permitted(address, function_code, cycle) {
             self.invalid(InvalidAccess {
-                address,
-                size,
-                function_code,
-                kind: cycle,
-                value: None,
                 reason: Invalid::Protected,
-                pc: self.cpu.instruction_pc,
-                stacking: self.cpu.stacking,
+                ..self.invalid_access(address, size, function_code, cycle, None)
             });
             return None;
         }
@@ -661,14 +655,14 @@ impl Core<'_> {
     ) -> Option<()> {
         if !self.permitted(address, function_code, BusCycleKind::Write) {
             self.invalid(InvalidAccess {
-                address,
-                size,
-                function_code,
-                kind: BusCycleKind::Write,
-                value: Some(value),
                 reason: Invalid::Protected,
-                pc: self.cpu.instruction_pc,
-                stacking: self.cpu.stacking,
+                ..self.invalid_access(
+                    address,
+                    size,
+                    function_code,
+                    BusCycleKind::Write,
+                    Some(value),
+                )
             });
             return None;
         }
