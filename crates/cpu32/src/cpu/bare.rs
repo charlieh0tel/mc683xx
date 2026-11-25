@@ -234,7 +234,12 @@ pub struct LimitedRun {
     /// The cycles it took.  With no budget, a CPU that `stop` stopped
     /// takes none waiting.
     pub cycles: Cycles,
-    /// Why it ended.
+    /// Why it ended.  Where an instruction both asked for a stop (a
+    /// hook's, the bus's) and made an end of its own (a fault, an
+    /// intercept, an exception stop, a self-loop), the end wins: it is
+    /// that end, not [`End::Stop`].  [`Cpu::run_for`]'s
+    /// [`Run::stop`](crate::Run) keeps the stop asked first instead, but
+    /// a fault's [`Stop::Fault`], which wins there too.
     pub end: End,
     /// The steps it took, as [`Limits::steps`] counts them.
     pub steps: u64,

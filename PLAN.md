@@ -2736,6 +2736,16 @@ and `mc683xx.Machine` in Python (see Python).
   puts the setting back, so off it costs what it did.  The gdb stub
   reports it as a stop request (`SIGINT`); the wasm bindings, which
   cannot set it, name it `unknown`.
+- **A stop and an end in one instruction** (review r13, N2): where an
+  instruction both asks for a stop (a hook's, the bus's) and makes an
+  end (a fault, an intercept, an exception stop, a self-loop),
+  `LimitedRun::end` is the end, and `run_for`'s `Run::stop` the stop
+  asked first, but a fault's `Stop::Fault`, which replaces any.
+  Decided: the end wins a limited run because it says what became of
+  the instruction (undone, intercepted, not taken), which a host must
+  act on, where a hook's stop only asked to pause; the unlimited run
+  has no detail to carry, so it keeps the first stop, as before.  The
+  Python `Machine`'s in-run hooks follow (B1).
 - **Faults:** `set_stop_on_fault`: a bus or address error ends the
   run (`End::Fault`; an unlimited run, `Stop::Fault`, before any other
   stop asked for in the instruction): fetch, read or write; bus error

@@ -1589,7 +1589,10 @@ assert bare.read_register("D0") == 6
   `Hook(hook)`, `Requested()` (`stop_request().request()`, from a
   callable or a peripheral), `Stopped()` (a `stop` or `lpstop`
   instruction: with no `cycles` it ends the run at once), or
-  `Halted(halt)`.  Rust's `End::Intercepted` never ends a Python run:
+  `Halted(halt)`.  An instruction that made an end of its own (a
+  fault, an exception stop, a self-loop) while a hook asked to stop
+  ends the run at that end, not `End.Stop(Stop.Hook(...))`, as in
+  Rust.  Rust's `End::Intercepted` never ends a Python run:
   `run_limited` answers an intercepted exception within it (below).
   Rust's `Limits::steps`, which serves the chip's BDM step, has no
   argument here, nor `End::Steps` a variant.  A stop requested
