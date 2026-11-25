@@ -984,3 +984,17 @@ demo):
 | `chip/ram_move` | 0.658 | 0.655 | 0.627 |
 | `chip/peripheral_move` | 1.152 | 1.186 | 1.173 |
 | `demo/mandelbrot` | 1.558 | 1.606 | 1.529 |
+
+### Hooks from Python
+
+`4f41351a` (round 2) read `Memory::peek` through a function pointer
+picking each page's backing, called for each word: a code hook's
+`stack_top` and a long's check for a bus that takes it whole paid an
+indirect call or two.  It is a generic now, inlined.  With the other
+changes above, a `move.l`, `addq`, `bra` loop on the bare `Machine`
+from Python, one `run_limited` call (`perf stat`), host instructions
+against alpha.8, before (round 14) and after: no hook 5.434, 5.434 and
+5.047 G for 20 M instructions; a no-op code hook 2.540, 2.597 and
+2.549 G for 1 M; a no-op write hook 1.587, 1.632 and 1.537 G.  The
+code hook's remaining 0.4% is its argument's new fields
+(`instruction`, `opcode`, round 14).

@@ -1016,7 +1016,7 @@ impl Memory {
         space: Space,
         address: Address,
         size: Size,
-        backing: fn(&Page) -> Option<Backing>,
+        backing: impl Fn(&Page) -> Option<Backing> + Copy,
     ) -> Option<u32> {
         if size == Size::Long {
             let high = self.peek_in(space, address, Size::Word, backing)?;
