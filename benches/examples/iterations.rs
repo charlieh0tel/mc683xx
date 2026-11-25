@@ -10,13 +10,17 @@
 //!     target/release/examples/iterations chip ram_move idle 5000
 //! taskset -c 2 perf stat -e instructions:u,cycles:u \
 //!     target/release/examples/iterations demo mandelbrot 20
+//! taskset -c 2 perf stat -e instructions:u,cycles:u \
+//!     target/release/examples/iterations short chip 5000
 //! ```
 //!
 //! `core NAME COUNT` runs a `benches/core.rs` kernel's iteration,
 //! `chip NAME LOAD COUNT` a `benches/chip.rs` one's under a load:
 //! `idle`, `pit_masked`, `pit_interrupting`, `qspi_words`,
 //! `qspi_bytes` or `qspi_bytes_deferred`; `demo mandelbrot COUNT`
-//! `benches/demo.rs`'s, the demo board's firmware.  It prints the
+//! `benches/demo.rs`'s, the demo board's firmware; `short core|chip
+//! COUNT` the `short_runs` benchmarks' iteration, 1000 runs of one
+//! clock, the cost of a run call.  It prints the
 //! clocks run (the bytes printed, for the demo), so the work cannot be
 //! optimized away.
 
@@ -31,10 +35,15 @@ use mc683xx_bench::demo::Demo;
 use mc683xx_bench::demo::MANDELBROT;
 use mc683xx_bench::kernel;
 use mc683xx_bench::kernel::Kernel;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 
 /// How to call it.
-const USAGE: &str =
-    "usage: iterations core NAME COUNT | chip NAME LOAD COUNT | demo mandelbrot COUNT";
+const USAGE: &str = "usage: iterations core NAME COUNT | chip NAME LOAD COUNT | \
+                     demo mandelbrot COUNT | short core|chip COUNT";
+
+/// Runs of one clock each in a `short` iteration, as `short_runs`'.
+const SHORT_RUNS: u64 = 1000;
 
 /// The load named `name`.
 fn load(name: &str) -> Option<Load> {
@@ -70,6 +79,39 @@ fn run(arguments: &[String]) -> Option<u64> {
             let mut chip = Board::new(kernel(board::KERNELS, name)?, load(load_name)?);
             (0..count)
                 .map(|_| chip.iteration(black_box(board::BUDGET)).clocks())
+                .sum()
+        }
+        [kind, layer] if kind == "short" && layer == "core" => {
+            let mut cpu = bare::machine(&kernel::CORE[0]);
+            let clock = Cycles::from_clocks(1);
+            (0..count)
+                .map(|_| {
+                    bare::prepare(&mut cpu);
+                    (0..SHORT_RUNS)
+                        .map(|_| {
+                            cpu.run_for(
+                                &mut bare::NoBus,
+                                &mut bare::NoInterrupts,
+                                Cycle::ZERO,
+                                black_box(clock),
+                            )
+                            .cycles
+                            .clocks()
+                        })
+                        .sum::<u64>()
+                })
+                .sum()
+        }
+        [kind, layer] if kind == "short" && layer == "chip" => {
+            let mut chip = Board::new(&board::KERNELS[0], Load::Idle);
+            let clock = Cycles::from_clocks(1);
+            (0..count)
+                .map(|_| {
+                    chip.prepare();
+                    (0..SHORT_RUNS)
+                        .map(|_| chip.chip.run_for(black_box(clock)).cycles.clocks())
+                        .sum::<u64>()
+                })
                 .sum()
         }
         [kind, name] if kind == "demo" && name == "mandelbrot" => {
