@@ -1021,6 +1021,11 @@ def test_a_vector_set_is_rust_s():
     assert len(VectorSet.ALL) == 256 and list(VectorSet([39, 32])) == [32, 39]
     assert 32 in traps and 31 not in traps and 300 not in traps and -1 not in traps and "x" not in traps
     assert traps.contains(47) and not traps.without(47).contains(47)
+    # a number past any vector is in no set, however large
+    assert not traps.contains(2**70) and 2**70 not in traps and not traps.contains(-1)
+    for number in (16, 300, 2**70, -1):
+        with pytest.raises(ValueError, match="no TRAP"):
+            mc683xx.Vector.trap(number)
     assert traps.union(VectorSet([4])) == VectorSet([4, *range(32, 48)])
     assert traps.union([4]) == traps.union(VectorSet([4]))
     assert traps.difference(VectorSet(range(33, 48))) == VectorSet([32])
