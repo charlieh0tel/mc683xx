@@ -586,6 +586,7 @@ impl Cpu {
         if block || code {
             let instruction = Instruction {
                 pc,
+                instruction: self.instructions,
                 registers: self.registers.clone(),
                 stack_top: self.memory.peek(
                     Space::of(self.registers.data_space()),
@@ -754,6 +755,7 @@ impl Core<'_> {
             size,
             function_code,
             pc: self.cpu.instruction_pc,
+            instruction: self.cpu.instructions,
             stacking: self.cpu.stacking,
         };
         let mut called = false;
@@ -815,6 +817,7 @@ impl Core<'_> {
             size,
             function_code,
             self.cpu.instruction_pc,
+            self.cpu.instructions,
             self.cpu.stacking,
         );
         let mut dropped = false;
@@ -928,6 +931,7 @@ impl Core<'_> {
             value,
             previous,
             pc: self.cpu.instruction_pc,
+            instruction: self.cpu.instructions,
             stacking: self.cpu.stacking,
         }
     }
@@ -950,6 +954,7 @@ impl Core<'_> {
             value,
             reason: Invalid::BusError,
             pc: self.cpu.instruction_pc,
+            instruction: self.cpu.instructions,
             stacking: self.cpu.stacking,
         }
     }

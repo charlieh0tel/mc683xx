@@ -1152,7 +1152,9 @@ Hooks are closures on the core (`Mc68331::cpu_control()`), each returning
 but the exception hook cover an address range, on the address lines.
 
 - `add_code_hook(range, f(&Instruction))`: before each instruction,
-  with its PC, the registers and the long at the stack top.  A stop
+  with its PC, its number (`instruction`, the instructions run before
+  it, `Cpu::instructions`), the registers and the long at the stack
+  top.  A stop
   leaves it unexecuted; the next run executes it without calling the
   code hooks for it again, so a breakpoint can be stepped past.
 - `add_block_hook(range, f(&Instruction))`: before the first
@@ -1204,7 +1206,12 @@ but the exception hook cover an address range, on the address lines.
   serve (a peripheral's).  A write hook sees exception processing's
   stacking writes too, `stacking` set on each: a hook
   that wants the program's own cycles alone returns early on
-  `access.stacking`.
+  `access.stacking`.  Each access a hook sees (`MemoryAccess`,
+  `PendingRead`, `PendingWrite`, `InvalidAccess`) carries the number
+  of its instruction, `instruction`, as that instruction's code hooks
+  see it: exception processing's, that of the instruction that raised
+  it or that a trace follows; an interrupt's, taken between
+  instructions, the next one's.
 - `add_invalid_hook(range, f(&InvalidAccess))`: before a bus error is
   taken, with its reason, `Invalid::BusError` or `Invalid::Protected`.
 - `add_exception_hook(f(&ExceptionEntry))`: once the frame is stacked:

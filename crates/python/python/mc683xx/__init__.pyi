@@ -740,6 +740,10 @@ class Instruction:
     @property
     def pc(self) -> int: ...
     @property
+    def instruction(self) -> int:
+        """Its number: the instructions run before it, as `instructions`
+        counts them, from 0."""
+    @property
     def registers(self) -> dict[str, int]:
         """Every register by name: one dictionary, made at the first
         ask."""
@@ -764,6 +768,12 @@ class MemoryAccess:
     def previous(self) -> int | None: ...
     @property
     def pc(self) -> int: ...
+    @property
+    def instruction(self) -> int:
+        """The number of the instruction it is part of, its code hooks'
+        `Instruction.instruction`; exception processing's is the number
+        of the instruction that raised it or that a trace follows, an
+        interrupt's the next instruction's."""
     @property
     def stacking(self) -> bool:
         """Whether exception processing is stacking a frame: a hook
@@ -800,6 +810,9 @@ class PendingRead:
     @property
     def pc(self) -> int: ...
     @property
+    def instruction(self) -> int:
+        """As `MemoryAccess.instruction`."""
+    @property
     def stacking(self) -> bool: ...
 
 @final
@@ -827,6 +840,9 @@ class PendingWrite:
     @property
     def pc(self) -> int: ...
     @property
+    def instruction(self) -> int:
+        """As `MemoryAccess.instruction`."""
+    @property
     def stacking(self) -> bool: ...
 
 @final
@@ -848,6 +864,9 @@ class InvalidAccess:
     def reason(self) -> Invalid: ...
     @property
     def pc(self) -> int: ...
+    @property
+    def instruction(self) -> int:
+        """As `MemoryAccess.instruction`."""
     @property
     def stacking(self) -> bool:
         """Whether exception processing is stacking a frame."""

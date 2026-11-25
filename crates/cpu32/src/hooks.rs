@@ -46,6 +46,9 @@ pub type Control = ControlFlow<()>;
 pub struct Instruction {
     /// Its address.
     pub pc: Address,
+    /// Its number: the instructions run before it, as
+    /// [`Cpu::instructions`] counts them, from 0.
+    pub instruction: u64,
     /// The registers.
     pub registers: Registers,
     /// The long word at A7, in data space, if the core serves it from
@@ -80,6 +83,12 @@ pub struct MemoryAccess {
     pub previous: Option<u32>,
     /// The address of the instruction it is part of.
     pub pc: Address,
+    /// The number of the instruction it is part of, its code hooks'
+    /// [`Instruction::instruction`]: the instructions run before it
+    /// ([`Cpu::instructions`]).  Exception processing's is the number
+    /// of the instruction that raised it or that a trace follows;
+    /// an interrupt's, taken between instructions, the next one's.
+    pub instruction: u64,
     /// Whether it is exception processing stacking a frame.
     pub stacking: bool,
 }
@@ -97,6 +106,12 @@ pub struct PendingRead {
     pub function_code: FunctionCode,
     /// The address of the instruction it is part of.
     pub pc: Address,
+    /// The number of the instruction it is part of, its code hooks'
+    /// [`Instruction::instruction`]: the instructions run before it
+    /// ([`Cpu::instructions`]).  Exception processing's is the number
+    /// of the instruction that raised it or that a trace follows;
+    /// an interrupt's, taken between instructions, the next one's.
+    pub instruction: u64,
     /// Whether it is exception processing stacking a frame.
     pub stacking: bool,
 }
@@ -114,6 +129,12 @@ pub struct PendingWrite {
     pub function_code: FunctionCode,
     /// The address of the instruction it is part of.
     pub pc: Address,
+    /// The number of the instruction it is part of, its code hooks'
+    /// [`Instruction::instruction`]: the instructions run before it
+    /// ([`Cpu::instructions`]).  Exception processing's is the number
+    /// of the instruction that raised it or that a trace follows;
+    /// an interrupt's, taken between instructions, the next one's.
+    pub instruction: u64,
     /// Whether it is exception processing stacking a frame.
     pub stacking: bool,
     /// Whether the store is dropped, as the hooks before left it.
@@ -122,12 +143,13 @@ pub struct PendingWrite {
 
 impl PendingWrite {
     /// A write of `size` at `address` in `function_code`'s space, part
-    /// of the instruction at `pc`, not dropped.
+    /// of the instruction at `pc`, number `instruction`, not dropped.
     pub(crate) const fn new(
         address: Address,
         size: Size,
         function_code: FunctionCode,
         pc: Address,
+        instruction: u64,
         stacking: bool,
     ) -> Self {
         Self {
@@ -135,6 +157,7 @@ impl PendingWrite {
             size,
             function_code,
             pc,
+            instruction,
             stacking,
             dropped: false,
         }
@@ -185,6 +208,12 @@ pub struct InvalidAccess {
     pub reason: Invalid,
     /// The address of the instruction it is part of.
     pub pc: Address,
+    /// The number of the instruction it is part of, its code hooks'
+    /// [`Instruction::instruction`]: the instructions run before it
+    /// ([`Cpu::instructions`]).  Exception processing's is the number
+    /// of the instruction that raised it or that a trace follows;
+    /// an interrupt's, taken between instructions, the next one's.
+    pub instruction: u64,
     /// Whether it is exception processing stacking a frame.
     pub stacking: bool,
 }

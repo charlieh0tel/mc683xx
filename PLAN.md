@@ -2418,6 +2418,15 @@ Adversarial review (2026-11-01):
   snapshot, as the hooks are not: it is host instrumentation, and a
   restore that rewound it would lose what the runs since showed.
   Edges (branch pairs) are deferred to 1.x, additively.
+- Instruction number (sc batch 7): `Instruction`, `MemoryAccess`,
+  `PendingRead`, `PendingWrite` and `InvalidAccess` carry
+  `instruction`, `Cpu::instructions` as the instruction began: the
+  instructions run before it, so an instruction's code hooks and its
+  accesses carry the same number and a host pairs them without its
+  own counter.  Exception processing within an instruction's step (its
+  own exception, a fault, a trace after it) carries that
+  instruction's number, as the count takes it in; an interrupt, taken
+  between instructions and not counted, the next instruction's.
 - When hooks run: code and block hooks before the instruction; a stop
   there leaves it unexecuted, and the next run executes it without
   calling the hooks that already ran for it.  Memory hooks after each

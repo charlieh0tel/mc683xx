@@ -92,6 +92,21 @@ def test_a_write_hook_sees_stacking_flagged():
     assert writes == [True] * 4
 
 
+def test_each_hook_sees_the_number_of_its_instruction() -> None:
+    cpu = machine(NOP, MOVE_WORD_D0_TO_A0, trap(0))
+    cpu.write_register("A0", 0x2000)
+    seen: list[tuple[str, int]] = []
+    cpu.add_code_hook(lambda instruction: seen.append(("code", instruction.instruction)))
+    cpu.add_write_hook(lambda access: seen.append(("write", access.instruction)))
+    cpu.add_pre_write_hook(lambda write, data: seen.append(("pre", write.instruction)))
+    cpu.run_limited(reach=HANDLER)
+    assert cpu.instructions == 3
+    assert seen[:5] == [("code", 0), ("code", 1), ("pre", 1), ("write", 1), ("code", 2)]
+    # the TRAP's frame, part of the TRAP, number 2
+    assert {seen_by for seen_by, _ in seen[5:]} == {"pre", "write"}
+    assert all(number == 2 for _, number in seen[5:])
+
+
 def test_limits_and_begin():
     cpu = machine(NOP, NOP, NOP, RTS)
     assert cpu.run_limited(instructions=2).end == mc683xx.End.Instructions()

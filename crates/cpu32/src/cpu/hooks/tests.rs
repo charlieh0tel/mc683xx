@@ -33,6 +33,10 @@ use crate::instructions::tests::machine_with_clocks;
 use crate::instructions::tests::peek_long;
 use crate::instructions::tests::poke_long;
 use crate::instructions::tests::step;
+use crate::interrupt::Acknowledge;
+use crate::interrupt::Acknowledged;
+use crate::interrupt::InterruptLevel;
+use crate::interrupt::Interrupts;
 use crate::memory::Backing;
 use crate::memory::Memory;
 use crate::memory::PAGE_BYTES;
@@ -718,6 +722,96 @@ fn a_pre_write_hook_sees_exception_stacking_word_by_word() {
     assert_eq!(stored(&cpu, STACK - 4) & 0xffff, 0xabcd);
 }
 
+/// An interrupt source requesting level 1, autovectored.
+struct LevelOne;
+
+impl Interrupts for LevelOne {
+    fn level(&self) -> InterruptLevel {
+        InterruptLevel::try_from(1).unwrap()
+    }
+
+    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycle) -> Acknowledged {
+        Acknowledge::Autovector.into()
+    }
+}
+
+#[test]
+fn each_hook_sees_the_number_of_the_instruction_it_is_part_of() {
+    // NOP; MOVE.L D0,(A0); TRAP #0 into a handler of NOPs
+    let mut cpu = prepared(&[NOP, MOVE_D0_TO_INDIRECT, TRAP], &[NOP, NOP]);
+    cpu.registers.set_address(0, DATA);
+    let code = log();
+    let into = Rc::clone(&code);
+    cpu.add_code_hook(everywhere(), move |instruction| {
+        into.borrow_mut()
+            .push((instruction.pc.0, instruction.instruction));
+        ControlFlow::Continue(())
+    });
+    let writes = log();
+    let into = Rc::clone(&writes);
+    cpu.add_write_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut()
+            .push((access.address.0, access.instruction, access.stacking));
+        ControlFlow::Continue(())
+    });
+    let reads = log();
+    let into = Rc::clone(&reads);
+    cpu.add_read_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push(access.instruction);
+        ControlFlow::Continue(())
+    });
+    let pre = log();
+    let into = Rc::clone(&pre);
+    cpu.add_pre_read_hook(everywhere(), move |read: &PendingRead, _, _| {
+        into.borrow_mut().push(read.instruction);
+        ControlFlow::Continue(())
+    });
+    let into = Rc::clone(&pre);
+    cpu.add_pre_write_hook(everywhere(), move |write: &mut PendingWrite, _, _| {
+        into.borrow_mut().push(write.instruction);
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 4);
+    assert_eq!(cpu.instructions(), 4);
+    assert_eq!(
+        *code.borrow(),
+        [(CODE, 0), (CODE + 2, 1), (CODE + 4, 2), (HANDLER, 3)]
+    );
+    // the MOVE's two words, then the TRAP's frame, stacked as it ends
+    assert_eq!(
+        writes.borrow()[..3],
+        [(DATA, 1, false), (DATA + 2, 1, false), (STACK - 2, 2, true)]
+    );
+    assert_eq!(writes.borrow().len(), 6);
+    assert!(
+        writes.borrow()[2..]
+            .iter()
+            .all(|&(_, number, _)| number == 2)
+    );
+    // the TRAP's vector, the only operand read
+    assert!(!reads.borrow().is_empty() && reads.borrow().iter().all(|&number| number == 2));
+    // the pre-access hooks: the MOVE's long, the vector, the frame
+    assert_eq!(pre.borrow()[0], 1);
+    assert!(pre.borrow()[1..].iter().all(|&number| number == 2));
+    // an interrupt, between instructions: the next one's number
+    cpu.registers.set_sr(status::S);
+    writes.borrow_mut().clear();
+    cpu.run_for(
+        &mut NoBus,
+        &mut LevelOne,
+        Cycle::ZERO,
+        Cycles::from_clocks(1),
+    );
+    assert_eq!(cpu.instructions(), 4);
+    assert_eq!(writes.borrow().len(), 4);
+    assert!(
+        writes
+            .borrow()
+            .iter()
+            .all(|&(_, number, stacking)| number == 4 && stacking)
+    );
+}
+
 /// A bus that takes every write.
 #[derive(Debug)]
 struct Taking;
@@ -1060,7 +1154,7 @@ fn a_long_onto_the_bus_writes_its_high_word_then_faults_on_its_low() {
 
 #[test]
 fn an_invalid_access_hook_sees_a_bus_error_then_the_exception_is_taken() {
-    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT], &[]);
+    let mut cpu = prepared(&[NOP, MOVE_D0_TO_INDIRECT], &[]);
     cpu.registers.set_address(0, NOWHERE);
     cpu.registers.data[0] = 0xabcd_0123;
     let seen = log();
@@ -1069,7 +1163,7 @@ fn an_invalid_access_hook_sees_a_bus_error_then_the_exception_is_taken() {
         into.borrow_mut().push(*access);
         ControlFlow::Break(())
     });
-    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(id));
+    assert_eq!(step(&mut cpu, 2).stop, Stop::Hook(id));
     assert_eq!(cpu.registers.pc.0, HANDLER);
     assert_eq!(
         *seen.borrow(),
@@ -1080,7 +1174,8 @@ fn an_invalid_access_hook_sees_a_bus_error_then_the_exception_is_taken() {
             kind: BusCycleKind::Write,
             value: Some(0xabcd),
             reason: Invalid::BusError,
-            pc: Address(CODE),
+            pc: Address(CODE + 2),
+            instruction: 1,
             stacking: false,
         }]
     );

@@ -869,7 +869,7 @@ assert chip.now == 0
 (both ends of the range included), `add_exception_hook(callback)` and
 `add_exception_return_hook(callback)`,
 call a Python callable with what the Rust hook sees: an `Instruction`
-(`pc`, `registers`, `stack_top`), a `MemoryAccess` (`address`, `size`,
+(`pc`, `instruction`, `registers`, `stack_top`), a `MemoryAccess` (`address`, `size`,
 `function_code`, `value`, and `previous`, what a write replaced, read
 with no cycle from the bytes it writes to, `None` for a read, a CPU-space write or a peripheral's
 write; on the chip a
@@ -892,6 +892,16 @@ registers as the instruction began; `None` on the chip), is one
 dictionary, made at the first ask; `register(name)` reads one
 register without making it, the cheaper call in a hook that runs
 often.
+
+`instruction`, on an `Instruction` and on every access a hook sees
+(`MemoryAccess`, `PendingRead`, `PendingWrite`, `InvalidAccess`), is
+the instruction's number: the instructions run before it, as
+`instructions` counts them, from 0, the same for an instruction's
+code hooks and each access it makes, so a host matches the two up.
+Exception processing's accesses carry the number of the instruction
+that raised the exception or that a trace follows (a TRAP's frame is
+the TRAP's); an interrupt's, taken between instructions, the next
+instruction's.
 
 `add_coverage(begin, end)` (Rust's `Cpu::add_coverage`, on
 `Machine`, `Mc68331` and `Board.chip`) records natively, with no
@@ -1706,7 +1716,7 @@ second word faults is not seen at all; the invalid access hook sees
 the faulting word.
 
 `MemoryAccess` and `InvalidAccess` carry `pc`, the instruction's
-address, `stacking`, whether exception processing is stacking a frame
+address, `instruction`, its number, `stacking`, whether exception processing is stacking a frame
 (flagged, not hidden), and `registers`, as the instruction began, or,
 while a trace, hardware breakpoint or interrupt taken after one stacks
 its frame, as that processing began.  `registers` is a dict on the bare

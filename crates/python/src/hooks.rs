@@ -196,6 +196,8 @@ impl Captured {
 pub(crate) struct InstructionView {
     /// Its address.
     pc: Address,
+    /// Its number (`hooks::Instruction::instruction`).
+    instruction: u64,
     /// The registers.
     registers: Captured,
     /// The long word at A7 (`hooks::Instruction::stack_top`).
@@ -208,6 +210,13 @@ impl InstructionView {
     #[getter]
     const fn pc(&self) -> u32 {
         self.pc.0
+    }
+
+    /// Its number: the instructions run before it, as `instructions`
+    /// counts them, from 0.
+    #[getter]
+    const fn instruction(&self) -> u64 {
+        self.instruction
     }
 
     /// Every register by name, as `Mc68331.registers()` gives them: one
@@ -280,6 +289,15 @@ impl MemoryAccessView {
     #[getter]
     const fn pc(&self) -> u32 {
         self.0.pc.0
+    }
+
+    /// The number of the instruction it is part of, its code hooks'
+    /// `Instruction.instruction`; exception processing's is the
+    /// number of the instruction that raised it or that a trace follows,
+    /// an interrupt's the next instruction's.
+    #[getter]
+    const fn instruction(&self) -> u64 {
+        self.0.instruction
     }
 
     /// Whether exception processing is stacking a frame.
@@ -368,6 +386,15 @@ impl PendingReadView {
         self.read.pc.0
     }
 
+    /// The number of the instruction it is part of, its code hooks'
+    /// `Instruction.instruction`; exception processing's is the
+    /// number of the instruction that raised it or that a trace follows,
+    /// an interrupt's the next instruction's.
+    #[getter]
+    const fn instruction(&self) -> u64 {
+        self.read.instruction
+    }
+
     /// Whether exception processing is stacking a frame.
     #[getter]
     const fn stacking(&self) -> bool {
@@ -446,6 +473,15 @@ impl PendingWriteView {
     #[getter]
     const fn pc(&self) -> u32 {
         self.write.pc.0
+    }
+
+    /// The number of the instruction it is part of, its code hooks'
+    /// `Instruction.instruction`; exception processing's is the
+    /// number of the instruction that raised it or that a trace follows,
+    /// an interrupt's the next instruction's.
+    #[getter]
+    const fn instruction(&self) -> u64 {
+        self.write.instruction
     }
 
     /// Whether exception processing is stacking a frame.
@@ -616,6 +652,15 @@ impl InvalidAccessView {
     #[getter]
     const fn pc(&self) -> u32 {
         self.0.pc.0
+    }
+
+    /// The number of the instruction it is part of, its code hooks'
+    /// `Instruction.instruction`; exception processing's is the
+    /// number of the instruction that raised it or that a trace follows,
+    /// an interrupt's the next instruction's.
+    #[getter]
+    const fn instruction(&self) -> u64 {
+        self.0.instruction
     }
 
     /// Whether exception processing is stacking a frame.
@@ -911,6 +956,7 @@ pub(crate) fn instruction(instruction: &Instruction) -> InstructionView {
 pub(crate) fn owned_instruction(instruction: Instruction) -> InstructionView {
     InstructionView {
         pc: instruction.pc,
+        instruction: instruction.instruction,
         registers: Captured::new(instruction.registers),
         stack_top: instruction.stack_top,
     }
