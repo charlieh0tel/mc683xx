@@ -8,13 +8,17 @@
 //!     target/release/examples/iterations core nop 5000
 //! taskset -c 2 perf stat -e instructions:u,cycles:u \
 //!     target/release/examples/iterations chip ram_move idle 5000
+//! taskset -c 2 perf stat -e instructions:u,cycles:u \
+//!     target/release/examples/iterations demo mandelbrot 20
 //! ```
 //!
 //! `core NAME COUNT` runs a `benches/core.rs` kernel's iteration,
 //! `chip NAME LOAD COUNT` a `benches/chip.rs` one's under a load:
 //! `idle`, `pit_masked`, `pit_interrupting`, `qspi_words`,
-//! `qspi_bytes` or `qspi_bytes_deferred`.  It prints the clocks run,
-//! so the work cannot be optimized away.
+//! `qspi_bytes` or `qspi_bytes_deferred`; `demo mandelbrot COUNT`
+//! `benches/demo.rs`'s, the demo board's firmware.  It prints the
+//! clocks run (the bytes printed, for the demo), so the work cannot be
+//! optimized away.
 
 use std::hint::black_box;
 use std::process::ExitCode;
@@ -23,11 +27,14 @@ use mc683xx_bench::bare;
 use mc683xx_bench::board;
 use mc683xx_bench::board::Board;
 use mc683xx_bench::board::Load;
+use mc683xx_bench::demo::Demo;
+use mc683xx_bench::demo::MANDELBROT;
 use mc683xx_bench::kernel;
 use mc683xx_bench::kernel::Kernel;
 
 /// How to call it.
-const USAGE: &str = "usage: iterations core NAME COUNT | chip NAME LOAD COUNT";
+const USAGE: &str =
+    "usage: iterations core NAME COUNT | chip NAME LOAD COUNT | demo mandelbrot COUNT";
 
 /// The load named `name`.
 fn load(name: &str) -> Option<Load> {
@@ -64,6 +71,10 @@ fn run(arguments: &[String]) -> Option<u64> {
             (0..count)
                 .map(|_| chip.iteration(black_box(board::BUDGET)).clocks())
                 .sum()
+        }
+        [kind, name] if kind == "demo" && name == "mandelbrot" => {
+            let mut demo = Demo::new(MANDELBROT);
+            (0..count).map(|_| demo.iteration().len() as u64).sum()
         }
         _ => return None,
     };
