@@ -884,7 +884,10 @@ long operand is two word cycles, on the bare `Machine` one access of
 an `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`) or
 an `ExceptionReturn` (`vector`, `pc`, `sr`, `stack`: what `rte`
 restored, and the frame's address, its `ExceptionEntry`'s `stack`).
-Each returns a `HookId` for `remove_hook`.  A callable returns `True`
+Each returns a `HookId` for `remove_hook`.  Installing or removing a
+ranged hook recomputes the pages its range reaches, so a bounded
+range, the code or data it watches, makes both cheap (a few pages:
+0.2 us); the default, every address, walks every page mapped.  A callable returns `True`
 to stop the run (`Stop.Hook(hook)`), `None` (no `return`) or `False`
 not to; any other result raises `TypeError`, as Rust's hook returns a
 `ControlFlow`, not a number or a list; a code hook's stop leaves its
