@@ -835,3 +835,17 @@ with no hook and 5.7 with a no-op code hook.  The pages with neither
 run as before: `none` executes the same host instructions (perf
 stat, 20 M emulated instructions: 6.0266 against 6.0268 G) in 4%
 more cycles, placement, as in sc batch 6.
+
+### Profiling a hook-heavy Python host
+
+Profile a host whose time goes to Python hooks with `perf`, not
+`py-spy --native`: in a smartclock harness run, `py-spy --native`
+failed to unwind 58% of its samples through the extension's frames
+and the hook dispatch between them, leaving most of the time
+unattributed.  `perf record --call-graph dwarf` unwinds the native
+frames from their debug information, and with Python 3.12 or later
+`python -X perf` (or `PYTHONPERFSUPPORT=1`) names the Python frames
+too, so one profile shows the core, the dispatch and the callables
+together.  Build the module with debug information for it
+(`CARGO_PROFILE_RELEASE_DEBUG=true maturin develop --release`);
+sampling needs a `perf_event_paranoid` that allows it.
