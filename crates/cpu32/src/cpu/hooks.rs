@@ -1015,7 +1015,7 @@ impl Core<'_> {
             return None;
         }
         if dropped {
-            self.cpu.stall += stall;
+            self.cpu.add_stall(stall);
             return Some(PreWrite::Dropped);
         }
         Some(PreWrite::Store(

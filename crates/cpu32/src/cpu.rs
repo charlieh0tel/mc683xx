@@ -815,6 +815,17 @@ impl Cpu {
         Cycles::from_clocks(u64::from(u32::from(cost.cycles).saturating_sub(overlap)))
     }
 
+    /// Adds `cycles` to the instruction's stall.
+    pub(crate) fn add_stall(&mut self, cycles: Cycles) {
+        self.stall += cycles;
+    }
+
+    /// `cost`, an instruction's or an exception's clocks, with the
+    /// stall and the extra clocks it took.
+    fn total(&self, cost: Cycles) -> Cycles {
+        cost + self.stall + self.extra
+    }
+
     /// The tail of the last instruction as the tables give it: only
     /// [`spend`](Self::spend), reset and restore set it, from a `u8`
     /// or zero.
@@ -1076,7 +1087,8 @@ impl<'a> Core<'a> {
             // charged when it is taken on resume
             return Some(Cycles::ZERO);
         }
-        Some(cpu.spend(timing::exception::INTERRUPT) + cpu.stall + cpu.extra)
+        let cycles = cpu.spend(timing::exception::INTERRUPT);
+        Some(cpu.total(cycles))
     }
 
     /// [`boundary`](Self::boundary) where a step ends: out of line, so
@@ -1153,7 +1165,7 @@ impl<'a> Core<'a> {
             cpu.stopped = flow == Flow::Stop;
             cpu.loopable = cpu.loopable_after(flow, instruction_pc);
             let cycles = cpu.spend(tables.cost(opcode));
-            return cycles.saturating_sub(cpu.refund) + cpu.stall + cpu.extra;
+            return cpu.total(cycles.saturating_sub(cpu.refund));
         }
         self.step_exceptional(step, Some(opcode), trace, previous_pc, tables)
     }
@@ -1276,7 +1288,7 @@ impl<'a> Core<'a> {
         // A refund is never more than the table entry it is taken
         // from; saturating keeps an exception's cost in place of that
         // entry from going below zero.  The stall is bus time, kept.
-        cycles.saturating_sub(self.cpu.refund) + self.cpu.stall + self.cpu.extra
+        self.cpu.total(cycles.saturating_sub(self.cpu.refund))
     }
 
     /// Trace exception processing (CPU32RM 6.2.10) after the instruction
@@ -1423,7 +1435,7 @@ impl<'a> Core<'a> {
     ) -> Processed {
         let acknowledged = interrupts.acknowledge(level, self.now());
         self.bus_stop_requested();
-        self.cpu.stall += acknowledged.stall;
+        self.cpu.add_stall(acknowledged.stall);
         let vector = match acknowledged.answer {
             Acknowledge::Vector(vector) => vector,
             Acknowledge::Autovector => Vector::autovector(level),
@@ -1484,7 +1496,7 @@ impl<'a> Core<'a> {
         }
         self.cpu.bare.exceptions_stepped += 1;
         let cycles = self.cpu.spend(timing::exception::TRACE);
-        cycles + self.cpu.stall + self.cpu.extra
+        self.cpu.total(cycles)
     }
 
     /// A breakpoint pending as a run starts, at an instruction boundary
@@ -1516,7 +1528,7 @@ impl<'a> Core<'a> {
             // vector 12 taken: a step of its own, up to its handler
             self.cpu.bare.exceptions_stepped += 1;
         }
-        cycles + self.cpu.stall + self.cpu.extra
+        self.cpu.total(cycles)
     }
 
     /// A pending hardware breakpoint acknowledged, background mode
@@ -1620,7 +1632,7 @@ impl<'a> Core<'a> {
                 self.cpu.memory.read(space, at, size)
             };
             if let Some((value, stall)) = read {
-                self.cpu.stall += stall;
+                self.cpu.add_stall(stall);
                 return Ok(value);
             }
         }
@@ -1757,7 +1769,7 @@ impl<'a> Core<'a> {
                 self.cpu.memory.write(space, at, size, data)
             };
             if let Some(stall) = stored {
-                self.cpu.stall += stall;
+                self.cpu.add_stall(stall);
                 return Ok(());
             }
         }
@@ -1897,7 +1909,7 @@ impl<'a> Core<'a> {
         }
         let space = Space::of(self.cpu.registers.program_space());
         let (word, stall) = self.cpu.memory.fetch(space, pc)?;
-        self.cpu.stall += stall;
+        self.cpu.add_stall(stall);
         self.cpu.registers.pc = pc.offset(2);
         Some(word)
     }
@@ -1935,7 +1947,7 @@ impl<'a> Core<'a> {
         if function_code.is_memory_space() {
             let space = Space::of(function_code);
             if let Some((value, stall)) = self.cpu.memory.read(space, address, size) {
-                self.cpu.stall += stall;
+                self.cpu.add_stall(stall);
                 return Some(value);
             }
         }
@@ -1971,7 +1983,7 @@ impl<'a> Core<'a> {
     ) -> Option<u32> {
         let space = Space::of(function_code);
         if let Some((value, stall)) = self.cpu.memory.read_backed(space, address, size) {
-            self.cpu.stall += stall;
+            self.cpu.add_stall(stall);
             return Some(value);
         }
         self.bus_read(address, size, function_code, cycle)
@@ -1990,7 +2002,7 @@ impl<'a> Core<'a> {
         let read = self.bus.read_with_memory(access, &mut self.cpu.memory);
         self.bus_stop_requested();
         if let Ok(read) = read {
-            self.cpu.stall += read.stall;
+            self.cpu.add_stall(read.stall);
             return Some(read.value);
         }
         self.invalid(self.invalid_access(address, size, function_code, cycle, None));
@@ -2010,7 +2022,7 @@ impl<'a> Core<'a> {
         if function_code.is_memory_space() {
             let space = Space::of(function_code);
             if let Some(stall) = self.cpu.memory.write(space, address, size, value) {
-                self.cpu.stall += stall;
+                self.cpu.add_stall(stall);
                 return Some(());
             }
         }
@@ -2044,7 +2056,7 @@ impl<'a> Core<'a> {
     ) -> Option<()> {
         let space = Space::of(function_code);
         if let Some(stall) = self.cpu.memory.write_backed(space, address, size, value) {
-            self.cpu.stall += stall;
+            self.cpu.add_stall(stall);
             return Some(());
         }
         self.bus_write(address, size, function_code, value)
@@ -2065,7 +2077,7 @@ impl<'a> Core<'a> {
             .write_with_memory(access, value, &mut self.cpu.memory);
         self.bus_stop_requested();
         if let Ok(stall) = written {
-            self.cpu.stall += stall;
+            self.cpu.add_stall(stall);
             return Some(());
         }
         let access = self.invalid_access(
@@ -2103,7 +2115,7 @@ impl<'a> Core<'a> {
         self.bus_stop_requested();
         match read {
             Ok(read) => {
-                self.cpu.stall += read.stall;
+                self.cpu.add_stall(read.stall);
                 Some(Some(read.value))
             }
             Err(BusError) => {
@@ -2137,7 +2149,7 @@ impl<'a> Core<'a> {
         self.bus_stop_requested();
         match written {
             Ok(stall) => {
-                self.cpu.stall += stall;
+                self.cpu.add_stall(stall);
                 Some(Some(()))
             }
             Err(BusError) => {
