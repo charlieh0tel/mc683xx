@@ -914,7 +914,11 @@ hook in all else: called in the code hooks' order, stopping the run
 before its instruction, removed by `remove_hook`.  Its `Instruction`
 carries the word as `opcode`; `opcode=(0, 0)` calls a hook for every
 instruction memory serves, with its word.  An instruction fetched
-from the bus (a peripheral's) never matches, whatever the mask.
+from the bus (a peripheral's) never matches, whatever the mask.  The
+filter costs every instruction in the hook's range, matched or not, so
+an opcode hook over a whole program slows every instruction a little;
+it pays where it replaces a hook called far more often than its
+matches, not one called about as often as the program runs.
 
 `instruction`, on an `Instruction` and on every access a hook sees
 (`MemoryAccess`, `PendingRead`, `PendingWrite`, `InvalidAccess`), is

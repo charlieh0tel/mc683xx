@@ -184,7 +184,7 @@ chip's, the board's), not a root `VERSION` that could be the crate's.
   is split where the memory or peripheral reaching its bytes changes,
   and each peripheral called once with its run, so loading a 512-Kbyte
   image into a host peripheral is one call, not one a byte (decided
-  for 0.9.0, sc's batch 3b: a byte form from Python took 3.2 s for
+  for 0.9.0, a byte form from Python took 3.2 s for
   what RAM took 0.03 s).  A board peripheral on one lane gets its
   bytes gathered, on its own addresses, a run where they are
   consecutive.  A decline declines the peripheral's whole run.  Both
@@ -898,7 +898,7 @@ chip beside `Mc68331`.
   `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`) or an
   `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`).  A
   `True` result stops the run (`Stop.Hook(hook)`), `None` or `False`
-  does not, and any other raises `TypeError` (sc batch 4: a truthy
+  does not, and any other raises `TypeError` (a truthy
   count or list stopped runs by mistake),
   where the Rust hook's `Break` would.  An exception it raises stops
   the run there too and is raised when `run_for` returns, as a peripheral's
@@ -2394,18 +2394,18 @@ Adversarial review (2026-11-01):
   looking for code and block hooks.  While it is set, the CPU keeps
   the quiet page: the last page an instruction was found on with no
   code or block hook bit.  An instruction on it compares its page
-  number and looks nothing up (sc batch 6: a ranged code hook that
+  number and looks nothing up (a ranged code hook that
   never hit cost every instruction an out-of-line page lookup, 67 to
   54 M instructions/s); any change to the hooks forgets it.
   Installing or removing a ranged hook recomputes only its pages'
   bits (and, for a bit that takes cycles off the fast path, their
   fast entries); "special" is whether some page has a permission
   short of all, kept as permissions change, or some hook range is
-  not empty (sc batch 6: every add and remove recomputed every
+  not empty (every add and remove recomputed every
   allocated slab, 15 us on 256 Kbytes, now 80 ns).  Invalid access
   and exception hooks need no flag: bus errors and exceptions are
   slow already.
-- Coverage (sc batch 6, kinds sc batch 7): `Cpu::add_coverage(range,
+- Coverage : `Cpu::add_coverage(range,
   kind) -> CoverageId`; `CoverageKind::Execute` records natively the
   address of each instruction executed in the range, a bit for each
   word, read out as a `Coverage`
@@ -2418,7 +2418,7 @@ Adversarial review (2026-11-01):
   snapshot, as the hooks are not: it is host instrumentation, and a
   restore that rewound it would lose what the runs since showed.
   Edges (branch pairs) are deferred to 1.x, additively.
-  Read and write kinds (sc batch 7) record a bit for each byte of
+  Read and write kinds record a bit for each byte of
   each cycle a read or write hook over it would see, so the two agree
   by construction: memory's and a peripheral's alike (a peripheral's
   register map is what a host most wants covered), exception
@@ -2444,7 +2444,7 @@ Adversarial review (2026-11-01):
   ranges past the lines match nothing.  The Python kind is a string,
   `"execute"`, `"read"`, `"write"`: a name the host writes (python.md,
   Names).  It replaces alpha.8's `add_coverage(range)`.
-- Opcode hooks (sc batch 7): `Cpu::add_opcode_hook(range, mask,
+- Opcode hooks: `Cpu::add_opcode_hook(range, mask,
   value, hook)`, a code hook called only where the instruction's first
   word, masked, is `value`; Python's `add_code_hook(..., opcode=(mask,
   value))`.  A sibling, not an argument to `add_code_hook`, so the
@@ -2456,14 +2456,14 @@ Adversarial review (2026-11-01):
   instruction from the bus never matches (decided: the filter runs
   before the fetch, and a bus read would be a cycle of its own), and
   copies the registers for a match only.  The filter is native
-  because the Python call, not the compare, is the cost (sc's line-A
+  because the Python call, not the compare, is the cost (a host's line-A
   and TRAP dispatchers).  `Instruction::opcode` hands an opcode
   hook the word, as a hook cannot read memory from Python while the
   run holds the chip; a plain code or block hook's call has `None`
   (decided: filling it for every code hook cost a no-op Rust hook on
   every instruction 4 ns, 238 to 282 us on `nop`, coordinator's call;
   mask 0 gives the word for every instruction memory serves).
-- Instruction number (sc batch 7): `Instruction`, `MemoryAccess`,
+- Instruction number: `Instruction`, `MemoryAccess`,
   `PendingRead`, `PendingWrite` and `InvalidAccess` carry
   `instruction`, `Cpu::instructions` as the instruction began: the
   instructions run before it, so an instruction's code hooks and its
@@ -2492,9 +2492,8 @@ Adversarial review (2026-11-01):
   each covering hook in the order installed gets the read
   (`PendingRead`, 1, 2 or 4 bytes), the core's memory as `&Memory` to
   look at, and a copy of the bytes it is to read: what the hooks leave
-  in the copy answers the read and is not stored (serve-only, sc batch
-  4: a hook that stored its answer left RAM other than the firmware
-  wrote it).  The copy and the shared `&Memory` cannot alias, so the
+  in the copy answers the read and is not stored (serve-only: a hook
+  that stored its answer left RAM other than the firmware wrote it).  The copy and the shared `&Memory` cannot alias, so the
   hook sees memory as it is and cannot change it.  A pre-read hook is
   a device model that answers an operand; the read hooks observe bus
   cycles (on the chip a long is one pre-read call, two word read hook
@@ -2507,7 +2506,7 @@ Adversarial review (2026-11-01):
   refuse, a fault, as its answer would be discarded.  The cycles
   follow, timed by their pages, shown to the read hooks with the
   served values.  Per range, removed by `remove_hook`, as the other
-  memory hooks.  Cost when absent, as pre-write's (sc batch 5): an
+  memory hooks.  Cost when absent, as pre-write's: an
   operand read first tries the fast tables, inline, and checks the
   flag set while any pre-read hook is installed only where they miss,
   so pages with a pre-read hook leave the fast path for reads,
@@ -2521,7 +2520,7 @@ Adversarial review (2026-11-01):
   `core/add_to_memory` +1.0%, `core/tst` -1.0%, `core/cmpi` -2.2%,
   `core/btst_immediate` no change; `core/nop` and `core/moveq`, which
   read no operand, +3% to +7%, with `run_instructions` the same size:
-  placement.  Re-measured on a quiet performance core (sc batch 6),
+  placement.  Re-measured on a quiet performance core,
   the change's parent and itself interleaved: `core/nop` 80.8 and
   80.6 us, `core/moveq` 85.0 and 85.1 us, the same; on an efficiency
   core +2% and +2 to +6%, as before: placement there, not work.
@@ -2535,7 +2534,7 @@ Adversarial review (2026-11-01):
   `unsafe` here); a `PendingRead` kept past it raises
   `RuntimeError`.
 - Pre-write hooks (`Cpu::add_pre_write_hook`, added for 0.9.0 at the
-  owner's call, sc batch 5, against the recommendation to defer it):
+  owner's call, against the recommendation to defer it):
   the pre-read hook's mirror, a device model that takes an operand
   the firmware writes to RAM.  Before an operand write of 1, 2 or 4
   bytes the core's memory stores all of, its pages' permissions
@@ -2561,7 +2560,7 @@ Adversarial review (2026-11-01):
   change memory, so that is memory before the instruction's store).
   A dropped store keeps its wait states: the CPU still drove the
   cycle, and the device the hook models latched it rather than the
-  memory (decided sc batch 5), so dropping does not change the run's
+  memory (decided for 0.9.0), so dropping does not change the run's
   time; the core makes no cycle of it, and the write hooks see none.  A
   stop takes effect when the instruction ends.  Cost when absent: an
   operand write first tries the fast tables, inline, and checks the
@@ -2715,7 +2714,7 @@ and `mc683xx.Machine` in Python (see Python).
   monomorphized twice, stopped `step` being inlined and cost 20% on
   `core/nop`.  `clear_resume` forgets a hook stop's skip, so a run
   from where a hook stopped calls it again.
-- **Self-loop stop** (sc batch 6, opt-in): `Limits::self_loop` ends
+- **Self-loop stop** (opt-in): `Limits::self_loop` ends
   the run (`End::SelfLoop { pc }`) once an instruction that branches
   to itself executes, BRA with a displacement of -2 (8, 16 or 32
   bits) or a JMP of its own address, as firmware idles waiting for an

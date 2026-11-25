@@ -811,7 +811,7 @@ unhooked); over the whole sled, a bit set for every instruction,
 instruction on this core, where a Python code hook that does nothing
 costs about 280 ns.
 
-Coverage kinds (sc batch 7), on performance core 2, three interleaved
+Coverage kinds, on performance core 2, three interleaved
 runs against the code before them (`unhooked` 77.8, 70.7 and 53-55 us
 both): an execute coverage now holds a page's bits only once one is
 set (review r13, R2).  The page last recorded in is held out of the
@@ -829,7 +829,7 @@ fast path and records its bytes: `move_indirect_read_coverage_data`
 access, and `clr_indirect_write_coverage_output` 140 against 53 us,
 about 9 ns a write, where a no-op Python write hook costs 180 ns.
 
-An opcode hook (`Cpu::add_opcode_hook`, sc batch 7), interleaved
+An opcode hook (`Cpu::add_opcode_hook`), interleaved
 three times each on performance core 2 against the code before it:
 off the instructions' pages it costs what a code hook there does
 (`nop_opcode_elsewhere` 79-80 us, `nop_code_elsewhere` 80 us,
@@ -852,7 +852,7 @@ matching nothing runs the loop at 48.5 M instructions/s, against 78
 with no hook and 5.7 with a no-op code hook.  The pages with neither
 run as before: `none` executes the same host instructions (perf
 stat, 20 M emulated instructions: 6.0266 against 6.0268 G) in 4%
-more cycles, both builds taking sc batch 6's store-forwarding stall
+more cycles, both builds taking the store-forwarding stall
 on every instruction (The 0.9.0 audit, below).
 
 ### Profiling a hook-heavy Python host
