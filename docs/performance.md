@@ -20,6 +20,17 @@ not run them; its clippy compiles them, and its tests run the shared
 setup's own tests (`benches/src/lib.rs`), so a kernel that stops
 working fails `make ci`.
 
+Criterion's times move with the machine's load and clock.  For a
+count that does not, `benches/examples/iterations.rs` runs a fixed
+count of a `core/*` or `chip/*` kernel's iterations under `perf
+stat`, whose host instruction count is the same from run to run:
+
+```
+cargo build --profile bench -p mc683xx-bench --example iterations
+taskset -c 2 perf stat -e instructions:u,cycles:u \
+    target/release/examples/iterations core nop 5000
+```
+
 ## What is measured
 
 - `core/*` (`benches/core.rs`): the core alone, on 256 Kbytes of
