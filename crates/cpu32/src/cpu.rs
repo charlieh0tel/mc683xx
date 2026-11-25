@@ -473,11 +473,7 @@ impl Cpu {
         self.block_start = true;
         self.resume = None;
         self.leave_loop_mode();
-        let mut core = Core {
-            cpu: self,
-            bus,
-            now,
-        };
+        let mut core = Core::new(self, bus, now);
         let vector = |core: &mut Core<'_>, vector: Vector| {
             core.read(
                 Address(vector.offset()),
@@ -597,11 +593,7 @@ impl Cpu {
         limits: Option<Limits>,
     ) -> Run {
         self.stop_request = None;
-        let mut core = Core {
-            cpu: self,
-            bus,
-            now,
-        };
+        let mut core = Core::new(self, bus, now);
         let traced = core.pending_trace();
         let taken = if core.cpu.bare.breakpoint_pending && core.cpu.stop_request.is_none() {
             core.now = now + traced;
@@ -646,11 +638,7 @@ impl Cpu {
         let tables = Tables::load();
         let requested =
             |cpu: &mut Self, cycles| cpu.stop_request.take().map(|stop| Run { cycles, stop });
-        let mut core = Core {
-            cpu: self,
-            bus,
-            now,
-        };
+        let mut core = Core::new(self, bus, now);
         let mut elapsed = Cycles::ZERO;
         while elapsed < budget {
             let cpu = &mut *core.cpu;
@@ -944,7 +932,17 @@ pub(crate) struct Core<'a> {
     now: Cycle,
 }
 
-impl Core<'_> {
+impl<'a> Core<'a> {
+    /// A core for `cpu` on `bus` at `now`.
+    pub(crate) fn new(cpu: &'a mut Cpu, bus: &'a mut dyn Bus, now: Cycle) -> Self {
+        Self { cpu, bus, now }
+    }
+
+    /// When the instruction started.
+    pub(crate) const fn now(&self) -> Cycle {
+        self.now
+    }
+
     /// The address of the instruction executing.
     pub(crate) const fn instruction_pc(&self) -> Address {
         self.cpu.instruction_pc
@@ -1007,7 +1005,7 @@ impl Core<'_> {
     /// the chip resets its external peripherals and other modules, and may
     /// ask the run to stop after it, as after a cycle.
     pub(crate) fn reset_instruction(&mut self) {
-        self.bus.reset_instruction(self.now);
+        self.bus.reset_instruction(self.now());
         self.bus_stop_requested();
     }
 
@@ -1410,7 +1408,7 @@ impl Core<'_> {
         interrupts: &mut dyn Interrupts,
         level: InterruptLevel,
     ) -> Processed {
-        let acknowledged = interrupts.acknowledge(level, self.now);
+        let acknowledged = interrupts.acknowledge(level, self.now());
         self.bus_stop_requested();
         self.cpu.stall += acknowledged.stall;
         let vector = match acknowledged.answer {
@@ -2168,7 +2166,7 @@ impl Core<'_> {
 
     /// A bus cycle at `address`, stamped with the instruction's start.
     const fn access(&self, address: Address, size: Size, function_code: FunctionCode) -> BusAccess {
-        BusAccess::new(address, size, function_code, self.now)
+        BusAccess::new(address, size, function_code, self.now())
     }
 }
 
@@ -2582,11 +2580,7 @@ mod tests {
         let mut cpu = prepared(&[RTE], status::S);
         cpu.instruction_pc = Address(CODE);
         let mut bus = NoBus;
-        let mut core = Core {
-            cpu: &mut cpu,
-            bus: &mut bus,
-            now: Cycle::ZERO,
-        };
+        let mut core = Core::new(&mut cpu, &mut bus, Cycle::ZERO);
         core.movem_progress(3, Address(0x3006));
         let Err(crate::exception::Exception::Fault(fault)) = core.write_unreleased(
             Address(0x0001_0000),
@@ -2623,11 +2617,7 @@ mod tests {
         // An instruction elsewhere leaves it; the one at its PC finds
         // it, once.
         cpu.instruction_pc = Address(CODE + 2);
-        let mut core = Core {
-            cpu: &mut cpu,
-            bus: &mut bus,
-            now: Cycle::ZERO,
-        };
+        let mut core = Core::new(&mut cpu, &mut bus, Cycle::ZERO);
         assert_eq!(core.movem_continuation(), None);
         core.cpu.instruction_pc = Address(CODE);
         assert_eq!(core.movem_continuation(), Some(progress));

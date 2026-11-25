@@ -373,12 +373,7 @@ impl Cpu {
             self.fault_window = true;
         }
         let pc = self.registers.pc;
-        Core {
-            cpu: self,
-            bus,
-            now,
-        }
-        .process(vector, pc, None, level, false);
+        Core::new(self, bus, now).process(vector, pc, None, level, false);
         self.stop_request = None;
         if let Some(End::Fault(fault)) = self.bare.end.take() {
             // the instruction at PC not begun: its hooks still to run

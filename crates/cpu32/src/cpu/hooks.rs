@@ -1184,7 +1184,7 @@ impl Core<'_> {
             stack,
             level,
         };
-        self.bus.exception_entered(&entry, self.now);
+        self.bus.exception_entered(&entry, self.now());
         for (id, hook) in &mut self.cpu.hooks.exception {
             if hook(&entry).is_break() {
                 self.cpu.stop_request.get_or_insert(Stop::Hook(*id));
