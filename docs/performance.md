@@ -1026,6 +1026,16 @@ against alpha.8, before (round 14) and after: no hook 5.434, 5.434 and
 code hook's remaining 0.4% is its argument's new fields
 (`instruction`, `opcode`, round 14).
 
+A hook that reads a register by name (`access.register("A7")`) parsed
+the name by comparing it with each of the 16 names in turn, A7 last:
+5% to 7% of such a hook's cycles, with many of its uops missing the
+uop cache.  It is read from the name's two bytes now.  The same loop
+with a write hook calling `register("A7")`, eight `-C metadata=` seeds
+a side, each run with its module at each of the 8 placements ASLR
+gives it (Placement against the interpreter, below), M instructions/s,
+the seeds' mean: alpha.8 9.71, alpha.11 9.36, with the parse 10.20;
+every seed of it above every seed of alpha.8.
+
 ### A peripheral's read, and the wasm module
 
 `slow_access_read`, past the fast tables' miss, is the compiler's to
