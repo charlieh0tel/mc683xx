@@ -1050,8 +1050,8 @@ chip beside `Mc68331`.
   `stop_request()` (a `StopRequest`, Rust's `StopRequest`: a
   callable's request ends the run `Stop.Requested()` once the callables have
   run, one no run took, made between runs or where the run ends for
-  another reason, stays pending for the next, as `flat::Machine` keeps
-  it, decided 2026-11-26),
+  another reason, stays pending, and ends the next run at once, as
+  every machine's does, decided 2026-11-26),
   `add_intercept_hook(callable, vectors)` (a `HookId`; the hooks
   covering a vector answer in the order installed, until one handles
   it, and none handling, it is taken natively), `set_stop_on_fault` and
@@ -2605,8 +2605,14 @@ Adversarial review (2026-11-01):
   that ends `Stop::Requested` takes a request.  One made where the run
   ends for another reason at the same boundary (a hook's stop, a fault,
   a halt, an exception stop, the run's own limits) stays pending, so
-  the host sees that end and the request both, and the next run ends
-  for it.  The chip keeps the request its core took in the quantum
+  the host sees that end and the request both.  A request pending when
+  a run starts ends it at once, before its first instruction, and takes
+  the request (smartclock's review): a stop asked before the run began
+  means nothing runs, and as the end consumes the request, a host
+  looping on runs cannot livelock.  The check is once per run call, at
+  its start, not per instruction: `iterations` under
+  `perf stat -e instructions:u` counts the same as before the rule
+  (`core nop`, `chip ram_move idle`, `short chip`, `demo mandelbrot`).  The chip keeps the request its core took in the quantum
   (`stop_taken`) and puts it back as the run ends otherwise; the
   board's loop takes its own only with `Stop::Requested`.  The bare
   machine's `take_exception` and `reset` leave the request as it was:

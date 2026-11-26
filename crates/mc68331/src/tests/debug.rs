@@ -331,6 +331,18 @@ fn a_stop_the_host_asks_for_in_a_step_fails_it() {
 }
 
 #[test]
+fn a_stop_pending_as_a_step_starts_fails_it_before_its_instruction() {
+    let (mut chip, request) = chip_and_stop(&[MOVEQ_1_D0, BRANCH_TO_SELF]);
+    chip.reset_halted().unwrap();
+    request.request();
+    assert_eq!(chip.step(), Err(TargetError::Stopped));
+    assert_eq!(chip.read_register(Register::D0), Ok(0), "nothing ran");
+    assert_eq!(chip.read_system_register(SystemRegister::Rpc), Ok(START));
+    assert_eq!(Cpu32Target::halted(&mut chip), Ok(Some(Entry::Breakpoint)));
+    assert!(!request.pending(), "taken");
+}
+
+#[test]
 fn a_stop_the_host_asks_for_in_a_stepped_bgnd_fails_it() {
     // BGND enters background mode itself (CPU32RM 7.2.2.2), before
     // another cycle looks at the request

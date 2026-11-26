@@ -13,6 +13,7 @@ use crate::cpu::bare::End;
 use crate::cpu::bare::FaultCause;
 use crate::cpu::bare::Limits;
 use crate::cycles::Cycle;
+use crate::cycles::Cycles;
 use crate::exception::Vector;
 use crate::hooks::Instruction;
 use crate::hooks::MemoryAccess;
@@ -1421,25 +1422,28 @@ fn nops() -> (Machine, StopRequest) {
     (machine, stop)
 }
 
-/// Asserts that the next run ends [`Stop::Requested`] after one
-/// instruction, taking the request, and the run after it reaches
-/// [`RETURN`].
-fn ends_after_one_instruction(machine: &mut Machine) {
+/// Asserts that the next run ends [`Stop::Requested`] at once, before
+/// its first instruction, taking the request, and the run after it
+/// reaches [`RETURN`].
+fn ends_at_once(machine: &mut Machine) {
     let before = machine.cpu.instructions();
     let pc = machine.cpu.registers.pc;
+    let now = machine.now();
     let run = machine.run_limited(reaching_return());
     assert_eq!(run.end, End::Stop(Stop::Requested));
-    assert_eq!(machine.cpu.instructions(), before + 1);
-    assert_eq!(machine.cpu.registers.pc, Address(pc.0 + 2));
+    assert_eq!(run.cycles, Cycles::ZERO);
+    assert_eq!(machine.cpu.instructions(), before);
+    assert_eq!(machine.cpu.registers.pc, pc);
+    assert_eq!(machine.now(), now);
     assert!(!machine.stop_request().pending(), "taken");
     assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
 }
 
 #[test]
-fn a_stop_left_between_runs_ends_the_next_after_its_first_instruction() {
+fn a_stop_left_between_runs_ends_the_next_at_once() {
     let (mut machine, stop) = nops();
     stop.request();
-    ends_after_one_instruction(&mut machine);
+    ends_at_once(&mut machine);
 }
 
 #[test]
@@ -1457,38 +1461,19 @@ fn a_stop_asked_in_a_hook_that_ends_the_run_stays_pending() {
     assert_eq!(run.end, End::Stop(Stop::Hook(hook)));
     assert!(stop.pending());
     machine.cpu.remove_hook(hook);
-    ends_after_one_instruction(&mut machine);
+    ends_at_once(&mut machine);
 }
 
 #[test]
-fn a_stop_left_pending_stays_through_a_run_that_ends_before_its_first_instruction() {
+fn a_stop_left_pending_ends_a_run_before_its_own_limits() {
     let (mut machine, stop) = nops();
     stop.request();
     let at_code = Limits {
         reach: Some(Address(CODE)),
         ..Limits::default()
     };
-    assert_eq!(machine.run_limited(at_code).end, End::Reached);
-    let none = Limits {
-        instructions: Some(0),
-        ..Limits::default()
-    };
-    assert_eq!(machine.run_limited(none).end, End::Instructions);
-    assert!(stop.pending());
-    ends_after_one_instruction(&mut machine);
-}
-
-#[test]
-fn a_stop_left_pending_stays_through_a_run_its_own_limit_ends_at_one_instruction() {
-    let (mut machine, stop) = nops();
-    stop.request();
-    let one = Limits {
-        instructions: Some(1),
-        ..Limits::default()
-    };
-    assert_eq!(machine.run_limited(one).end, End::Instructions);
-    assert!(stop.pending());
-    ends_after_one_instruction(&mut machine);
+    assert_eq!(machine.run_limited(at_code).end, End::Stop(Stop::Requested));
+    assert!(!stop.pending());
 }
 
 /// A peripheral that asks the run to stop at each cycle.
@@ -1526,8 +1511,10 @@ fn a_stop_asked_in_an_instruction_that_faults_stays_pending() {
     let run = machine.run_limited(reaching_return());
     assert!(matches!(run.end, End::Fault(_)), "{:?}", run.end);
     assert!(stop.pending());
-    machine.cpu.registers.set_address(1, DATA);
-    ends_after_one_instruction(&mut machine);
+    let run = machine.run_limited(reaching_return());
+    assert_eq!(run.end, End::Stop(Stop::Requested));
+    assert_eq!(machine.cpu.registers.pc, Address(CODE), "at once");
+    assert!(!stop.pending());
 }
 
 #[test]

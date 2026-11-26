@@ -780,44 +780,39 @@ impl Machine {
         })
     }
 
-    /// Runs until `limits` or a stop ([`Cpu::run_limited`]).  A stop
-    /// left pending from before the run ([`stop_request`](Self::stop_request))
-    /// ends it after its first instruction, [`Stop::Requested`], taken;
-    /// a run that ends sooner for another reason (a hook, a fault, its
-    /// own limits) leaves it pending.  So does a run that ends for
-    /// another reason in the instruction whose cycle asked (a fault, an
-    /// exception stop): only a run that ends [`Stop::Requested`] takes
-    /// the request.
+    /// Runs until `limits` or a stop ([`Cpu::run_limited`]).  Only a run
+    /// that ends [`Stop::Requested`] takes the stop request
+    /// ([`stop_request`](Self::stop_request)): one asked where the run
+    /// ends for another reason (a hook's stop, a fault or an exception
+    /// stop in the instruction that asked, its own limits) stays
+    /// pending.  A request pending when a run starts ends it at once,
+    /// before its first instruction, and takes the request: no
+    /// instruction runs and no time passes.
     pub fn run_limited(&mut self, limits: Limits) -> LimitedRun {
-        let asked = self.bus.stop.pending();
-        let first = if asked {
-            Limits {
-                instructions: Some(limits.instructions.map_or(1, |count| count.min(1))),
-                ..limits
-            }
-        } else {
-            limits
-        };
+        if self.bus.stop.pending() {
+            return self.stop_left();
+        }
         let run = self
             .cpu
-            .run_limited(&mut self.bus, &mut self.requests, self.now, first);
+            .run_limited(&mut self.bus, &mut self.requests, self.now, limits);
         self.now += run.cycles;
-        // ended by the cap, not by the host's own limit
-        let run = if asked
-            && run.end == End::Instructions
-            && limits.instructions.is_none_or(|count| count > 1)
-        {
-            LimitedRun {
-                end: End::Stop(Stop::Requested),
-                ..run
-            }
-        } else {
-            run
-        };
         if run.end == End::Stop(Stop::Requested) {
             self.bus.stop.withdraw();
         }
         run
+    }
+
+    /// A run that a stop request left pending ends at once: the request
+    /// taken, nothing run.
+    #[cold]
+    #[inline(never)]
+    fn stop_left(&mut self) -> LimitedRun {
+        self.bus.stop.withdraw();
+        LimitedRun {
+            cycles: Cycles::ZERO,
+            end: End::Stop(Stop::Requested),
+            steps: 0,
+        }
     }
 
     /// The CPU's clock: the cycles the runs took.

@@ -408,13 +408,14 @@ def test_pending_reads_a_stop_request_and_withdraw_clears_it():
     assert not stop.pending
 
 
-def ends_after_one_instruction(cpu: mc683xx.Machine, **limits) -> None:
-    """The next run ends `Stop.Requested()` after one instruction, the
-    request taken."""
-    before = cpu.instructions
+def ends_at_once(cpu: mc683xx.Machine, **limits) -> None:
+    """The next run ends `Stop.Requested()` at once, before its first
+    instruction, no time passing, the request taken."""
+    before = (cpu.instructions, cpu.read_register("PC"))
     run = cpu.run_limited(**limits)
     assert run.end == mc683xx.End.Stop(mc683xx.Stop.Requested()), run.end
-    assert cpu.instructions == before + 1
+    assert run.cycles == 0
+    assert (cpu.instructions, cpu.read_register("PC")) == before
     assert not cpu.stop_request().pending
 
 
@@ -433,11 +434,10 @@ def asking_once(cpu: mc683xx.Machine, answer=None):
     return ask
 
 
-def test_a_stop_left_between_runs_ends_the_next_after_one_instruction():
+def test_a_stop_left_between_runs_ends_the_next_at_once():
     cpu = machine(NOP, NOP, RTS)
     cpu.stop_request().request()
-    ends_after_one_instruction(cpu, reach=RETURN)
-    assert cpu.read_register("PC") == CODE + 2
+    ends_at_once(cpu, reach=RETURN)
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
 
 
@@ -446,7 +446,7 @@ def test_a_stop_asked_where_a_hook_stops_the_run_stays_pending():
     hook = cpu.add_code_hook(asking_once(cpu, True), CODE + 2, CODE + 2)
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Stop(mc683xx.Stop.Hook(hook))
     assert cpu.stop_request().pending
-    ends_after_one_instruction(cpu, reach=RETURN)
+    ends_at_once(cpu, reach=RETURN)
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
 
 
@@ -457,7 +457,7 @@ def test_a_stop_asked_where_an_in_run_hook_stops_the_run_stays_pending():
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Stop(mc683xx.Stop.Hook(hook))
     assert cpu.stop_request().pending
     assert cpu.remove_hook(hook)
-    ends_after_one_instruction(cpu, reach=RETURN)
+    ends_at_once(cpu, reach=RETURN)
 
 
 def test_a_stop_asked_in_an_instruction_that_faults_stays_pending():
@@ -468,9 +468,7 @@ def test_a_stop_asked_in_an_instruction_that_faults_stays_pending():
     cpu.add_pre_read_hook(asking_once(cpu), 0x2000, 0x2001)
     assert isinstance(cpu.run_limited(reach=RETURN).end, mc683xx.End.Fault)
     assert cpu.stop_request().pending
-    cpu.write_register("A1", 0x3000)
-    ends_after_one_instruction(cpu, reach=RETURN)
-    assert cpu.read_register("PC") == CODE + 2
+    ends_at_once(cpu, reach=RETURN)
 
 
 def test_a_stop_asked_in_an_instruction_an_exception_stop_ends_stays_pending():
@@ -481,8 +479,7 @@ def test_a_stop_asked_in_an_instruction_an_exception_stop_ends_stays_pending():
     cpu.add_pre_read_hook(asking_once(cpu), 0x2000, 0x2001)
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Exception(CHK, CODE)
     assert cpu.stop_request().pending
-    cpu.poke_bytes(HANDLER, words(NOP, NOP))
-    ends_after_one_instruction(cpu)
+    ends_at_once(cpu)
 
 
 @pytest.mark.parametrize(
@@ -499,7 +496,7 @@ def test_a_stop_asked_in_a_callable_where_the_run_s_limit_ends_it_stays_pending(
     assert cpu.run_limited(**limits).end == end
     assert cpu.read_register("PC") == CODE + 2
     assert cpu.stop_request().pending
-    ends_after_one_instruction(cpu, reach=RETURN)
+    ends_at_once(cpu, reach=RETURN)
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
 
 

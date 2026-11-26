@@ -220,9 +220,14 @@ impl Cpu32Target for Mc68331 {
     /// then a breakpoint, as BKPT asserted at the next boundary would
     /// make (CPU32RM 7.2.2.1): PCC the instruction executed, if one was.
     /// A stepped STOP or LPSTOP leaves the CPU running, as T1 does
-    /// (CPU32RM 6.2.10).
+    /// (CPU32RM 6.2.10).  A stop request pending as it starts fails it,
+    /// [`TargetError::Stopped`], at once, taken, nothing run.
     fn step(&mut self) -> Result<Entry, TargetError> {
         self.command()?;
+        // a stop pending as the step starts: nothing runs
+        if self.take_stop_left() {
+            return Err(TargetError::Stopped);
+        }
         self.resume();
         let mut limits = Limits::default();
         limits.steps = Some(1);

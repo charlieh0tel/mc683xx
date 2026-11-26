@@ -321,7 +321,10 @@ request.  One the run does not end for stays pending: one made between
 runs (in a `reset` that `Mc68331::reset` calls, say), or one made
 during a run that ends for another reason at the same boundary (a
 hook's stop, a fault, a halt, an exception stop, the run's own limits).
-A pending request ends the next run.  A host reusing a machine checks
+A request pending when a run starts ends it at once, before its first
+instruction, and takes the request: the run ends `Stop::Requested`
+with no instruction run and no time passed.  A host reusing a machine
+checks
 `pending`, which reads the request without taking it, or calls
 `withdraw()` before its next run.  The bare machine's `take_exception`
 and `reset` leave a pending request as it was and drop one a

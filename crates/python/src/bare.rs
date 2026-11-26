@@ -846,10 +846,10 @@ impl MachineView {
     /// The handle by which the host asks the run to stop: from a hook's
     /// callable, once the callables for this stop have been called; from
     /// a peripheral, once its instruction ends.  A request no run took
-    /// stays pending, and ends the next run after its first instruction:
-    /// one made between runs, or one made where the run ends for
-    /// another reason (a hook's stop, a fault, an exception stop, its
-    /// limits).
+    /// stays pending (one made where the run ends for another reason: a
+    /// hook's stop, a fault, an exception stop, its limits), and a
+    /// request pending when a run starts ends it at once, before its
+    /// first instruction, and takes the request.
     fn stop_request(&self) -> StopRequestView {
         StopRequestView(self.machine.stop_request())
     }

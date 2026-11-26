@@ -14,10 +14,12 @@ use std::rc::Rc;
 ///
 /// Only a run that ends [`Stop::Requested`](crate::cpu::Stop::Requested)
 /// takes the request, on the bare machine and the chip alike.  One the
-/// run does not end for stays pending, and ends the next run: one made
+/// run does not end for stays pending: one made
 /// between runs, or one made during a run that ends for another reason
 /// at the same boundary (a hook's stop, a fault, a halt, an exception
-/// stop, the run's own limits).  A host reusing a machine checks
+/// stop, the run's own limits).  A request pending when a run starts
+/// ends it at once, before its first instruction, and takes the
+/// request.  A host reusing a machine checks
 /// [`pending`](Self::pending) or calls [`withdraw`](Self::withdraw)
 /// before its next run.
 #[derive(Debug, Clone, Default)]

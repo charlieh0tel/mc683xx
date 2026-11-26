@@ -13,6 +13,7 @@ use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::Frequency;
 use mc683xx_cpu32::Halt;
+use mc683xx_cpu32::Run;
 use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
@@ -1387,10 +1388,9 @@ fn a_stop_asked_at_a_reset_that_halts_ends_the_run_with_the_halt() {
         panic!("{events:?}");
     };
     assert_eq!(chip.now(), reset, "the run ends at the reset");
-    // the request left pending: the next run ends for it, with no
-    // instruction to run
+    // the request left pending: the next run ends for it at once
     let run = chip.run_for(Cycles::from_clocks(100));
-    assert_eq!(run.stop, Stop::Requested);
+    assert_eq!(run, Run::new(Cycles::ZERO, Stop::Requested));
     let budget = Cycles::from_clocks(100);
     let run = chip.run_for(budget);
     assert_eq!(run.stop, Stop::Halted(Halt::DoubleBusFault));
@@ -4120,12 +4120,37 @@ fn booting_with_stop(program: &[u16]) -> (Mc68331, StopRequest) {
     (builder.build(), stop)
 }
 
-/// Asserts that the chip's next run ends [`Stop::Requested`], the
-/// request taken.
-fn ends_for_the_request(chip: &mut Mc68331, stop: &StopRequest) {
+/// Asserts that the chip's next run ends [`Stop::Requested`] at once,
+/// before its first instruction, no time passing, the request taken.
+fn ends_at_once(chip: &mut Mc68331, stop: &StopRequest) {
+    let before = chip.instructions();
+    let now = chip.now();
+    let pc = chip.cpu().registers.pc;
     let run = chip.run_for(Cycles::from_clocks(10_000));
-    assert_eq!(run.stop, Stop::Requested);
+    assert_eq!(run, Run::new(Cycles::ZERO, Stop::Requested));
+    assert_eq!(chip.instructions(), before);
+    assert_eq!(chip.now(), now);
+    assert_eq!(chip.cpu().registers.pc, pc);
     assert!(!stop.pending(), "taken");
+}
+
+#[test]
+fn a_stop_left_between_runs_ends_the_next_at_once() {
+    let (mut chip, stop) = booting_with_stop(&[NOP; 8]);
+    stop.request();
+    ends_at_once(&mut chip, &stop);
+    assert_eq!(chip.run_for(Cycles::from_clocks(10)).stop, Stop::Budget);
+}
+
+#[test]
+fn a_stop_left_between_runs_ends_a_halted_chip_s_next_at_once() {
+    let mut builder = Builder::default();
+    builder.peripheral(Faulting, &[ChipSelect::Boot]).unwrap();
+    let stop = builder.stop_request();
+    let mut chip = builder.build();
+    assert!(chip.cpu().halted().is_some());
+    stop.request();
+    ends_at_once(&mut chip, &stop);
 }
 
 #[test]
@@ -4143,7 +4168,7 @@ fn a_stop_asked_where_a_hook_stops_the_run_stays_pending() {
     );
     assert!(stop.pending());
     chip.cpu_control().remove_hook(id);
-    ends_for_the_request(&mut chip, &stop);
+    ends_at_once(&mut chip, &stop);
 }
 
 #[test]

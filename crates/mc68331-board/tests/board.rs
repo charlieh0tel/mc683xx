@@ -3225,7 +3225,8 @@ attach = [{ select = "CSBOOT" }]
     stop.request();
     let until = Time::from_picos(1_000_000_000);
     assert_eq!(board.run_until(until).unwrap().stop, Stop::Requested);
-    assert!(board.now() < until);
+    assert_eq!(board.now(), Time::ZERO, "at once");
+    assert_eq!(board.chip().instructions(), 0);
     drop(board);
     // Once the board is gone, a request does nothing.
     stop.request();
@@ -3253,7 +3254,13 @@ attach = [{ select = "CSBOOT" }]
     let until = Time::from_picos(1_000_000_000);
     assert_eq!(board.run_until(until).unwrap().stop, Stop::Hook(id));
     board.cpu_control().remove_hook(id);
+    let (before, now) = (board.chip().instructions(), board.now());
     assert_eq!(board.run_until(until).unwrap().stop, Stop::Requested);
+    assert_eq!(
+        (board.chip().instructions(), board.now()),
+        (before, now),
+        "at once"
+    );
     let now = board.now();
     assert_eq!(board.run_until(until).unwrap().stop, Stop::Budget);
     assert!(board.now() > now);

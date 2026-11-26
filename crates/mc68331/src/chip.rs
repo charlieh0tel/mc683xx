@@ -774,11 +774,22 @@ impl Mc68331 {
     /// spends its budget as time passes for the SIM, the modules and
     /// the peripherals without the CPU, ending [`Stop::Halted`] unless a
     /// reset, the watchdog's say, restarts the CPU (MC68331UM 4.2.10;
-    /// [PLAN.md], A halted CPU).
+    /// [PLAN.md], A halted CPU).  A stop request pending when the run
+    /// starts ends it at once, before its first instruction, and takes
+    /// the request: no instruction runs and no time passes.
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
     pub fn run_for(&mut self, budget: Cycles) -> Run {
+        if self.take_stop_left() {
+            return Run::new(Cycles::ZERO, Stop::Requested);
+        }
         self.run(budget, None).run
+    }
+
+    /// Whether a stop request was left pending as a run starts, taking
+    /// it: the run ends at once, nothing run and no time passed.
+    pub(crate) fn take_stop_left(&mut self) -> bool {
+        self.board.stop_request.pending() && self.board.take_stop()
     }
 
     /// [`run_for`](Self::run_for), the CPU's quanta limited by `limits`
