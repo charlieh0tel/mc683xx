@@ -19,6 +19,8 @@ use crate::bus::BusAccess;
 use crate::bus::LPSTOP_BROADCAST;
 use crate::bus::Read;
 use crate::cpu::Cpu;
+use crate::cpu::Stop;
+use crate::cpu::bare::End;
 use crate::cpu::bare::LimitedRun;
 use crate::cpu::bare::Limits;
 use crate::cpu::bare::TakeExceptionError;
@@ -268,8 +270,9 @@ impl Bus for FlatBus {
         self.stacking = stacking;
     }
 
+    // Left for `Machine::run_limited` to take once the run ends for it.
     fn stop_requested(&mut self) -> bool {
-        self.stop.take()
+        self.stop.pending()
     }
 }
 
@@ -737,13 +740,30 @@ impl Machine {
     /// The reset exception (CPU32RM 6.2.1): SSP and PC from the long
     /// words at zero; a fault reading them halts the CPU, as
     /// [`Cpu::reset`] says.
+    /// A stop left pending stays, and one a peripheral asks for in its
+    /// cycles is dropped, with no run to stop.
     pub fn reset(&mut self) {
-        self.cpu.reset(&mut self.bus, self.now);
+        self.keeping_stop(|machine| machine.cpu.reset(&mut machine.bus, machine.now));
+    }
+
+    /// `call`, which runs no instructions, the stop request left as it
+    /// was: one asked for in its cycles is dropped, one left from before
+    /// kept for the next run.
+    fn keeping_stop<R>(&mut self, call: impl FnOnce(&mut Self) -> R) -> R {
+        let asked = self.bus.stop.pending();
+        let result = call(self);
+        self.bus.stop.withdraw();
+        if asked {
+            self.bus.stop.request();
+        }
+        result
     }
 
     /// Takes the exception of `vector` now, the interrupt mask set to
     /// `level` if given, whatever it was ([`Cpu::take_exception`]): the
-    /// frame stacked, PC at the handler, the clock unmoved.
+    /// frame stacked, PC at the handler, the clock unmoved.  A stop left
+    /// pending stays, and one a peripheral asks for in its cycles is
+    /// dropped, as [`reset`](Self::reset) leaves them.
     ///
     /// # Errors
     ///
@@ -753,16 +773,50 @@ impl Machine {
         vector: Vector,
         level: Option<InterruptLevel>,
     ) -> Result<(), TakeExceptionError> {
-        self.cpu
-            .take_exception(&mut self.bus, self.now, vector, level)
+        self.keeping_stop(|machine| {
+            machine
+                .cpu
+                .take_exception(&mut machine.bus, machine.now, vector, level)
+        })
     }
 
-    /// Runs until `limits` or a stop ([`Cpu::run_limited`]).
+    /// Runs until `limits` or a stop ([`Cpu::run_limited`]).  A stop
+    /// left pending from before the run ([`stop_request`](Self::stop_request))
+    /// ends it after its first instruction, [`Stop::Requested`], taken;
+    /// a run that ends sooner for another reason (a hook, a fault, its
+    /// own limits) leaves it pending.  So does a run that ends for
+    /// another reason in the instruction whose cycle asked (a fault, an
+    /// exception stop): only a run that ends [`Stop::Requested`] takes
+    /// the request.
     pub fn run_limited(&mut self, limits: Limits) -> LimitedRun {
+        let asked = self.bus.stop.pending();
+        let first = if asked {
+            Limits {
+                instructions: Some(limits.instructions.map_or(1, |count| count.min(1))),
+                ..limits
+            }
+        } else {
+            limits
+        };
         let run = self
             .cpu
-            .run_limited(&mut self.bus, &mut self.requests, self.now, limits);
+            .run_limited(&mut self.bus, &mut self.requests, self.now, first);
         self.now += run.cycles;
+        // ended by the cap, not by the host's own limit
+        let run = if asked
+            && run.end == End::Instructions
+            && limits.instructions.is_none_or(|count| count > 1)
+        {
+            LimitedRun {
+                end: End::Stop(Stop::Requested),
+                ..run
+            }
+        } else {
+            run
+        };
+        if run.end == End::Stop(Stop::Requested) {
+            self.bus.stop.withdraw();
+        }
         run
     }
 

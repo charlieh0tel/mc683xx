@@ -7,6 +7,7 @@ use super::Machine;
 use super::MapError;
 use super::PeekError;
 use crate::BusError;
+use crate::StopRequest;
 use crate::cpu::Stop;
 use crate::cpu::bare::End;
 use crate::cpu::bare::FaultCause;
@@ -1411,4 +1412,155 @@ fn a_peripheral_that_declines_is_unpeekable() {
         format!("not peekable at {}", Address(BYTES))
     );
     assert_eq!(unpeekable.address(), Address(BYTES));
+}
+
+/// A machine running [`NOP`]s to [`RETURN`], and its stop request.
+fn nops() -> (Machine, StopRequest) {
+    let machine = machine(&[NOP, NOP, NOP, RTS]);
+    let stop = machine.stop_request();
+    (machine, stop)
+}
+
+/// Asserts that the next run ends [`Stop::Requested`] after one
+/// instruction, taking the request, and the run after it reaches
+/// [`RETURN`].
+fn ends_after_one_instruction(machine: &mut Machine) {
+    let before = machine.cpu.instructions();
+    let pc = machine.cpu.registers.pc;
+    let run = machine.run_limited(reaching_return());
+    assert_eq!(run.end, End::Stop(Stop::Requested));
+    assert_eq!(machine.cpu.instructions(), before + 1);
+    assert_eq!(machine.cpu.registers.pc, Address(pc.0 + 2));
+    assert!(!machine.stop_request().pending(), "taken");
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
+}
+
+#[test]
+fn a_stop_left_between_runs_ends_the_next_after_its_first_instruction() {
+    let (mut machine, stop) = nops();
+    stop.request();
+    ends_after_one_instruction(&mut machine);
+}
+
+#[test]
+fn a_stop_asked_in_a_hook_that_ends_the_run_stays_pending() {
+    let (mut machine, stop) = nops();
+    let asking = stop.clone();
+    let hook = machine.cpu.add_code_hook(
+        Address(CODE + 2)..=Address(CODE + 2),
+        move |_: &Instruction| {
+            asking.request();
+            ControlFlow::Break(())
+        },
+    );
+    let run = machine.run_limited(reaching_return());
+    assert_eq!(run.end, End::Stop(Stop::Hook(hook)));
+    assert!(stop.pending());
+    machine.cpu.remove_hook(hook);
+    ends_after_one_instruction(&mut machine);
+}
+
+#[test]
+fn a_stop_left_pending_stays_through_a_run_that_ends_before_its_first_instruction() {
+    let (mut machine, stop) = nops();
+    stop.request();
+    let at_code = Limits {
+        reach: Some(Address(CODE)),
+        ..Limits::default()
+    };
+    assert_eq!(machine.run_limited(at_code).end, End::Reached);
+    let none = Limits {
+        instructions: Some(0),
+        ..Limits::default()
+    };
+    assert_eq!(machine.run_limited(none).end, End::Instructions);
+    assert!(stop.pending());
+    ends_after_one_instruction(&mut machine);
+}
+
+#[test]
+fn a_stop_left_pending_stays_through_a_run_its_own_limit_ends_at_one_instruction() {
+    let (mut machine, stop) = nops();
+    stop.request();
+    let one = Limits {
+        instructions: Some(1),
+        ..Limits::default()
+    };
+    assert_eq!(machine.run_limited(one).end, End::Instructions);
+    assert!(stop.pending());
+    ends_after_one_instruction(&mut machine);
+}
+
+/// A peripheral that asks the run to stop at each cycle.
+#[derive(Debug)]
+struct Asking(StopRequest);
+
+crate::unsavable!(Asking, "an asking peripheral");
+
+impl MappedPeripheral for Asking {
+    fn read(&mut self, _: BusCycle) -> Result<u32, BusError> {
+        self.0.request();
+        Ok(0)
+    }
+
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), BusError> {
+        self.0.request();
+        Ok(())
+    }
+}
+
+#[test]
+fn a_stop_asked_in_an_instruction_that_faults_stays_pending() {
+    // MOVE.L (A0),(A1) (CPU32RM 4, MOVE): the read asks, the write faults
+    let mut machine = machine(&[0x2290, NOP, NOP, RTS]);
+    let stop = machine.stop_request();
+    machine
+        .add_peripheral(
+            Address(PERIPHERAL - 1)..=Address(PERIPHERAL + 0xfe),
+            Box::new(Asking(stop.clone())),
+        )
+        .unwrap();
+    machine.cpu.registers.set_address(0, PERIPHERAL - 1);
+    machine.cpu.registers.set_address(1, RETURN);
+    machine.cpu.set_stop_on_fault(true);
+    let run = machine.run_limited(reaching_return());
+    assert!(matches!(run.end, End::Fault(_)), "{:?}", run.end);
+    assert!(stop.pending());
+    machine.cpu.registers.set_address(1, DATA);
+    ends_after_one_instruction(&mut machine);
+}
+
+#[test]
+fn a_host_exception_keeps_a_stop_left_pending_and_drops_its_own() {
+    let (mut machine, stop) = nops();
+    // the stack on a peripheral that asks at each cycle
+    let stack = PERIPHERAL - 1;
+    machine
+        .add_peripheral(
+            Address(stack)..=Address(stack + 0xff),
+            Box::new(Asking(stop.clone())),
+        )
+        .unwrap();
+    machine.cpu.registers.ssp = Address(stack + 0x80);
+    machine.take_exception(Vector(USER_VECTOR), None).unwrap();
+    assert!(!stop.pending(), "asked in its cycles: dropped");
+    stop.request();
+    machine.cpu.registers.ssp = Address(stack + 0x80);
+    machine.take_exception(Vector(USER_VECTOR), None).unwrap();
+    assert!(stop.pending(), "left from before: kept");
+}
+
+#[test]
+fn a_reset_keeps_a_stop_left_pending_and_drops_its_own() {
+    let mut machine = Machine::new(super::ADDRESS_BITS).unwrap();
+    let stop = machine.stop_request();
+    // the reset vectors on a peripheral that asks at each cycle
+    machine
+        .add_peripheral(Address(0)..=Address(7), Box::new(Asking(stop.clone())))
+        .unwrap();
+    machine.reset();
+    assert!(!stop.pending(), "asked in its cycles: dropped");
+    stop.request();
+    machine.reset();
+    assert!(stop.pending(), "left from before: kept");
 }

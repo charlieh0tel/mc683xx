@@ -321,6 +321,19 @@ does not stop for it; `pending` says whether one is left, without
 taking it.  One made in a host bus cycle (Host bus cycles)
 is dropped, with no run to stop.
 
+The bare machine (`flat::Machine`) keeps a request between runs too:
+one left pending as `run_limited` starts ends the run after its first
+instruction, `Stop::Requested`.  Only a run that ends
+`Stop::Requested` takes a request: one made during a run that ends for
+another reason at the same boundary stays pending (made in a hook's
+closure that stops the run, in the cycles of an instruction that
+faults or makes an exception stop, or before a run its own limits end
+before its first instruction), where the chip takes it with the other
+stop.  A host reusing a machine checks `pending` or calls `withdraw()`
+before its next run.
+`take_exception` and `reset` leave a pending request as it was and drop
+one a peripheral asks for in their cycles.
+
 ```rust
 use mc683xx_cpu32::BusError;
 use mc683xx_cpu32::Cycles;
