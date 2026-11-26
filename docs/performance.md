@@ -1035,6 +1035,36 @@ What it does not reach:
   build to the next.  That is expected, not a regression; compare
   builds over all eight places.
 
+### Comparing placements
+
+`scripts/placement-bench.sh BASE CANDIDATE` compares two revisions
+across placements, so a difference it reports is the code's, not one
+link's.  Opt-in, it gates nothing; x86_64 Linux, with `make python`'s
+`.venv` for the Python cases.  For each side it builds `-n` (8)
+modules, each relinked with its functions in another order (rust-lld's
+`--shuffle-sections`, given to the final link alone, so the build's
+own flags, the alignment above among them, stay).  `-C metadata=`
+seeds do not do this: across eight of them the hook dispatch stayed
+within 0x200 bytes.  It runs each build at each of the module's eight
+places (ASLR off, 2 MB to 14 MB mapped before the import), the builds
+in rotated order at every place, pinned to `-c` (2), each run once the
+CPU and its sibling are idle; `-k` picks the case: `write_register`,
+`write`, `code`, `none`, a bare `Machine`'s `move.l`, `addq`, `bra`
+loop, or `kernel ARGS` for `benches/examples/iterations.rs` (both
+revisions must have it; one place, runs per G cycles with `perf`).
+Eight builds a side take about 5 minutes to build and 6 minutes a case
+to run.
+
+Reading it: a row a build, its rate at each place, their mean and its
+worst place.  The verdict is the difference of the sides' means of the
+builds' means, with an exact permutation test over them: `p` is the
+share of all splits of the 2N builds into two sides that differ as
+much, so with 8 a side `p` below 0.05 says the difference is not the
+placements'.  A place much slower than the rest on every build of a
+side is the interpreter alias (Placement against the interpreter);
+judge it apart, since it follows where the dispatch lands and the
+interpreter's build.  Work goes under `target/placement-bench/`.
+
 ### Machine clears
 
 The 0.9.0 alphas ran real firmware 1% to 2% slower than v0.8.0 in
