@@ -959,7 +959,37 @@ whichever placement its link gives; instruction counts, which do not
 move with it, are what the audit judges work by, and cycles are
 compared between builds aligned that way.
 
-### Machine clears
+### Placement against the interpreter
+
+A Python host's hook calls run the module's code and the interpreter's
+in turn, so where one lands against the other moves cycles too.  Two
+effects showed up in the 0.9.0 audit's write hook loop (a `move.l`,
+`addq`, `bra` loop on the bare `Machine`, a write hook on the store):
+
+- Run to run, in one build.  uv's interpreters
+  (python-build-standalone) are linked without PIE: `python3.12`'s code
+  sits at the same address in every process, its object allocation and
+  deallocation (`_PyObject_Malloc`, `tupledealloc`, `long_dealloc`)
+  around `0x1801000` in 3.12.15.  The kernel maps the extension module
+  2 MB-aligned at a random base, so its code takes one of eight places
+  modulo 16 MB.  Where the module's hook dispatch
+  (`MachineView::run_dispatching`, `dispatch`) falls on the same
+  addresses modulo 16 MB as that interpreter code, the two evict each
+  other's entries in the branch target buffer: `baclears.any` goes from
+  0.06 M to 8 M a run and the run takes 10% to 15% more cycles.  One run
+  in eight under ASLR lands there; which place is the bad one depends on
+  the module's own layout, so alpha.8 had one too, milder.  A host sees
+  it as some runs of the same build 10% to 20% slower than the rest;
+  the module's base, in `/proc/<pid>/maps`, modulo `0x1000000`, tells
+  the place, and `perf stat -e baclears.any` the effect.  To compare
+  builds without it, run with ASLR off (`setarch -R`) and move the
+  module through the places by mapping 2 MB to 14 MB before the import,
+  as the audit did.
+- Build to build.  The module's hot code and the interpreter's share the
+  uop cache, so a change that moves the module's code moves how many
+  uops come from it (`idq.dsb_uops` against `idq.mite_uops`): a no-op
+  write hook lost 2.8% to `ac361722`, which changed the watch bits from
+  8 to 16 bits wide and 0.05% of host instructions, every seed alike.
 
 The 0.9.0 alphas ran real firmware 1% to 2% slower than v0.8.0 in
 cycles, with 0.2% fewer host instructions, and some links ran 2% slower
@@ -1032,7 +1062,7 @@ the name by comparing it with each of the 16 names in turn, A7 last:
 uop cache.  It is read from the name's two bytes now.  The same loop
 with a write hook calling `register("A7")`, eight `-C metadata=` seeds
 a side, each run with its module at each of the 8 placements ASLR
-gives it (Placement against the interpreter, below), M instructions/s,
+gives it (Placement against the interpreter, above), M instructions/s,
 the seeds' mean: alpha.8 9.71, alpha.11 9.36, with the parse 10.20;
 every seed of it above every seed of alpha.8.
 
