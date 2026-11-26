@@ -954,10 +954,10 @@ byte the same in two builds, starting on a 64-byte boundary in one
 (1.30 G cycles for 5000 iterations) and 48 bytes past one in the
 other (1.45 G).  Built with every function aligned to 64 bytes
 (`RUSTFLAGS="-C llvm-args=-align-all-functions=6"`), the second takes
-1.31 G.  Stable Rust cannot align one function, so a host build gets
-whichever placement its link gives; instruction counts, which do not
-move with it, are what the audit judges work by, and cycles are
-compared between builds aligned that way.
+1.31 G.  Stable Rust cannot align one function; the workspace's builds
+align them all now (Function alignment, below).  Instruction counts,
+which do not move with placement, are what the audit judges work by,
+and cycles are compared between builds aligned that way.
 
 ### Placement against the interpreter
 
@@ -996,6 +996,44 @@ effects showed up in the 0.9.0 audit's write hook loop (a `move.l`,
   uops come from it (`idq.dsb_uops` against `idq.mite_uops`): a no-op
   write hook lost 2.8% to `ac361722`, which changed the watch bits from
   8 to 16 bits wide and 0.05% of host instructions, every seed alike.
+
+### Function alignment
+
+`.cargo/config.toml` builds every function on a 64-byte boundary on
+x86_64 (`-C llvm-args=-align-all-functions=6`), not on wasm32, where it
+means nothing: the module's place against the uop cache then no longer
+moves with each link.  Eight `-C metadata=` seeds a side, each at each
+of the module's 8 places (above), the write hook loop in M
+instructions/s, the seeds' mean over the places (and the worst place of
+any seed):
+
+| Build | Write hook calling `register("A7")` | No-op write hook |
+| --- | --- | --- |
+| alpha.8 | 9.70 (8.79) | 14.15 (11.20) |
+| 18ffdc7d, unaligned | 10.18 (8.15) | 13.63 (12.07) |
+| 18ffdc7d, aligned | 10.53 (9.78) | 14.00 (11.88) |
+
+The bindings' own functions aligned alone (as maturin's rustc arguments)
+gave 10.74 and 13.82: the core's hot code, not theirs, needs it.  No
+hooks and a code hook were within 0.6% aligned or not.  It helps the
+native path too: the Rust kernels (`benches/examples/iterations.rs`,
+four seeds) took 0.6% (`chip/ram_move`) to 2.7%
+(`chip/peripheral_move`) fewer cycles, `demo/mandelbrot` 0.8%, and
+varied less from seed to seed.  It costs the extension module 3.8%
+stripped (5.35 to 5.55 MB); the wheel, compressed, is the same size.
+
+What it does not reach:
+
+- A `RUSTFLAGS` environment variable replaces it, as it replaces any
+  configured rustflags; add the flag to it.
+- Cargo reads it from the directory it runs in, this workspace: a crate
+  depending on ours from crates.io, and a wheel pip builds from the
+  sdist, do not get it.  A native host that wants it adds the flag to
+  its own `.cargo/config.toml` or `RUSTFLAGS`.
+- It moves the hook dispatch in the module, so the place where it
+  aliases the interpreter (above) can move or change strength from one
+  build to the next.  That is expected, not a regression; compare
+  builds over all eight places.
 
 ### Machine clears
 
