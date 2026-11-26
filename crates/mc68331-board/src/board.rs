@@ -2276,6 +2276,10 @@ impl<C: Chip> Board<C> {
     /// net it observes ([`Observer::restored`]), nets in file order, a
     /// net's observers in the order attached.
     ///
+    /// It withdraws a pending stop request, the board's and one a
+    /// [`BoardControl`] asked from another thread, since it replaces the
+    /// board's state.
+    ///
     /// On an error the board is unchanged, and no observer is told: its
     /// own state is checked first,
     /// then each peripheral's snapshot by restoring it, each peripheral
@@ -2342,6 +2346,7 @@ impl<C: Chip> Board<C> {
         self.shared.writes.borrow_mut().clear();
         self.shared.diverted.set(false);
         self.shared.stop.set(false);
+        self.control.withdraw_stop();
         self.leave_frames();
         self.tell_restored();
         Ok(())

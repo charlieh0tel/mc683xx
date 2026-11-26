@@ -670,6 +670,17 @@ fn a_snapshot_restores_memory_registers_and_requests() {
     assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
 }
 
+#[test]
+fn a_restore_withdraws_a_stop_left_pending() {
+    let mut machine = machine(&[MOVEQ_1_D0, RTS]);
+    let snapshot = machine.save().unwrap();
+    let stop = machine.stop_request();
+    stop.request();
+    machine.restore(&snapshot).unwrap();
+    assert!(!stop.pending());
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
+}
+
 /// The format of a [`Latch`]'s snapshot.
 const LATCH_VERSION: u32 = 1;
 

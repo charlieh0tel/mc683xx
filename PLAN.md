@@ -2620,7 +2620,9 @@ Adversarial review (2026-11-01):
   (`stop_taken`) and puts it back as the run ends otherwise; the
   board's loop takes its own only with `Stop::Requested`.  The bare
   machine's `take_exception` and `reset` leave the request as it was:
-  they have no run to stop.
+  they have no run to stop.  `restore` withdraws it on every machine,
+  a `BoardControl`'s stop from another thread included: the state it
+  belonged to is gone.
 - Cost when absent (`make bench`'s `core/*`, pinned to one
   performance core, before and after run in turn, on a loaded host
   whose results vary by up to 2x between runs): `nop` +6%,

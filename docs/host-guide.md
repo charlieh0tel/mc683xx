@@ -326,7 +326,10 @@ instruction, and takes the request: the run ends `Stop::Requested`
 with no instruction run and no time passed.  A host reusing a machine
 checks
 `pending`, which reads the request without taking it, or calls
-`withdraw()` before its next run.  The bare machine's `take_exception`
+`withdraw()` before its next run.  `restore` withdraws a pending
+request on every machine, including one asked from another thread
+(`BoardControl::stop`), since it replaces the machine's state.  The
+bare machine's `take_exception`
 and `reset` leave a pending request as it was and drop one a
 peripheral asks for in their cycles.
 

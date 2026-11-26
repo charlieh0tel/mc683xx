@@ -847,7 +847,8 @@ impl Machine {
     /// order.  On an error it is unchanged: each peripheral's snapshot is
     /// checked by restoring it, each peripheral saved first and the ones
     /// restored put back if a later one or the core (restored last)
-    /// refuses ([`restore_each`]).
+    /// refuses ([`restore_each`]).  It withdraws a pending stop request,
+    /// as the state it replaces is gone.
     ///
     /// # Errors
     ///
@@ -875,6 +876,7 @@ impl Machine {
         })?;
         self.now = state.now;
         self.requests = state.requests;
+        self.bus.stop.withdraw();
         Ok(())
     }
 }
