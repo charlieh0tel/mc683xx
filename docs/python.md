@@ -1608,8 +1608,18 @@ assert bare.read_register("D0") == 6
   Rust.  Rust's `End::Intercepted` never ends a Python run:
   `run_limited` answers an intercepted exception within it (below).
   Rust's `Limits::steps`, which serves the chip's BDM step, has no
-  argument here, nor `End::Steps` a variant.  A stop requested
-  between runs is withdrawn as the next starts.  Each variant class has
+  argument here, nor `End::Steps` a variant.  A stop request no run
+  took stays pending, and ends the next run `Stop.Requested()` after
+  its first instruction, as Rust's `flat::Machine` keeps it: one made
+  between runs, or one made where the run ends for another reason at
+  the same boundary (in a callable whose hook stops the run, or that
+  returns `True`; in a callable of the instruction that faults or makes
+  an exception stop; at the run's `reach` or `instructions`).  Only a
+  run that ends `Stop.Requested()` takes it, so the host sees the other
+  end and the request both; a host reusing a machine checks
+  `stop_request().pending` or calls `withdraw()` before its next run.
+  The binding's own stops (a hook's, a peripheral's exception) leave no
+  request behind.  Each variant class has
   `__match_args__`, its fields in order, so a `match` takes an end
   apart, nested as deep as it goes, with no predicate methods:
 

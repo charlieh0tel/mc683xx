@@ -1049,7 +1049,9 @@ chip beside `Mc68331`.
   `run_limited(begin=, reach=, instructions=, cycles=)`,
   `stop_request()` (a `StopRequest`, Rust's `StopRequest`: a
   callable's request ends the run `Stop.Requested()` once the callables have
-  run, one left from before a run is withdrawn as it starts),
+  run, one no run took, made between runs or where the run ends for
+  another reason, stays pending for the next, as `flat::Machine` keeps
+  it, decided 2026-11-26),
   `add_intercept_hook(callable, vectors)` (a `HookId`; the hooks
   covering a vector answer in the order installed, until one handles
   it, and none handling, it is taken natively), `set_stop_on_fault` and

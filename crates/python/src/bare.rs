@@ -574,6 +574,16 @@ impl Budget {
         limits.self_loop = self.self_loop;
         Ok(limits)
     }
+
+    /// The end the run makes at this boundary for its limits, `executed`
+    /// instructions run and PC at `pc`, if one: a limit spent, then
+    /// `reach`, as the next turn would find them.
+    fn ended(&self, executed: u64, pc: Address) -> Option<End> {
+        match self.remaining(executed) {
+            Err(end) => Some(end),
+            Ok(_) => (self.reach == Some(pc)).then_some(End::Reached),
+        }
+    }
 }
 
 #[pymethods]
@@ -815,7 +825,6 @@ impl MachineView {
                 this.machine.cpu.registers.pc = Address(begin);
                 this.machine.cpu.clear_resume();
             }
-            this.machine.stop_request().withdraw();
             this.machine.cpu.instructions()
         };
         let budget = Budget {
@@ -836,8 +845,11 @@ impl MachineView {
 
     /// The handle by which the host asks the run to stop: from a hook's
     /// callable, once the callables for this stop have been called; from
-    /// a peripheral, once its instruction ends.  A request left from
-    /// before a run is withdrawn as `run_limited` starts.
+    /// a peripheral, once its instruction ends.  A request no run took
+    /// stays pending, and ends the next run after its first instruction:
+    /// one made between runs, or one made where the run ends for
+    /// another reason (a hook's stop, a fault, an exception stop, its
+    /// limits).
     fn stop_request(&self) -> StopRequestView {
         StopRequestView(self.machine.stop_request())
     }
@@ -1267,7 +1279,9 @@ impl MachineView {
                 None => Dispatched::Continue,
             };
             spare = fired;
-            let stop = stop_request.take();
+            // A request the run does not end for, as it ends for another
+            // reason at this boundary, stays pending for the next run.
+            let asked = stop_request.pending();
             let requested = End::Stop(mc683xx_cpu32::Stop::Requested);
             if halt() {
                 return Ok((budget.spent, requested));
@@ -1282,7 +1296,7 @@ impl MachineView {
                     End::Stop(mc683xx_cpu32::Stop::Hook(_) | mc683xx_cpu32::Stop::Requested),
                     Dispatched::Continue,
                 ) if let Some(hook) = in_run_stop => return in_run_end(hook),
-                (End::Intercepted(interception), Dispatched::Continue) if !stop => {
+                (End::Intercepted(interception), Dispatched::Continue) if !asked => {
                     Self::answer(slf, py, interception)?;
                     if let Some(hook) = in_run_stop {
                         return in_run_end(hook);
@@ -1291,13 +1305,42 @@ impl MachineView {
                         return Ok((budget.spent, requested));
                     }
                 }
-                (End::Stop(mc683xx_cpu32::Stop::Hook(_)), Dispatched::Continue) if !stop => {}
-                // A quantum's end, or the run's, which `remaining` finds.
-                (End::Instructions, Dispatched::Continue) if !stop => py.check_signals()?,
+                // A turn's end for the callables, or a quantum's; the
+                // run's own limits, which `ended` finds, end it first.
+                (
+                    end @ (End::Stop(mc683xx_cpu32::Stop::Hook(_)) | End::Instructions),
+                    Dispatched::Continue,
+                ) => {
+                    if asked {
+                        let ended = {
+                            let this = slf.borrow();
+                            budget.ended(
+                                this.machine.cpu.instructions(),
+                                this.machine.cpu.registers.pc,
+                            )
+                        };
+                        if let Some(end) = ended {
+                            return Ok((budget.spent, end));
+                        }
+                        stop_request.withdraw();
+                        return Ok((budget.spent, requested));
+                    }
+                    if end == End::Instructions {
+                        py.check_signals()?;
+                    }
+                }
                 (_, Dispatched::Stop(hook)) => {
                     return Ok((budget.spent, End::Stop(mc683xx_cpu32::Stop::Hook(hook))));
                 }
-                (_, Dispatched::Continue) if stop => return Ok((budget.spent, requested)),
+                // the run ends for a request, which takes one asked with it;
+                // an intercept the request leaves for the next run to rerun
+                (
+                    End::Stop(mc683xx_cpu32::Stop::Requested) | End::Intercepted(_),
+                    Dispatched::Continue,
+                ) => {
+                    stop_request.withdraw();
+                    return Ok((budget.spent, requested));
+                }
                 (end, Dispatched::Continue) => return Ok((budget.spent, end)),
             }
         }
