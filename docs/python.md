@@ -328,22 +328,20 @@ assert chip.memory(ram, 0, 2) == b"\x12\x34"
   `bus_write`) is dropped, with no run to stop.
   One rule holds on the chip, a board and the bare `Machine`, as in
   Rust: only a run that ends `Stop.Requested()` takes a request.  One
-  the run does not end for stays pending: one
-  made between runs (in a `reset` the host's `chip.reset()` calls,
-  say), or one made where the run ends for another reason at the same
-  boundary (a hook's stop, a callable that returns `True`, a fault, a
-  halt, an exception stop, the run's own limits), so the host sees that
-  end and the request both.  A request pending when a run starts ends
-  it at once, before its first instruction, and takes the request.  A
-  host reusing a machine checks the
-  `pending` property, which reads the request without taking it, or
-  calls `withdraw()` before its next run.  `restore` withdraws a
-  pending request on every machine, including one asked from another
-  thread (`BoardControl.stop()`), since it replaces the machine's state.
-  The chip's and the bare
-  `Machine`'s own stops for a peripheral's exception leave no request
-  behind, a host's asked with one stays, and `pending` is the host's
-  alone.
+  the run does not end for stays pending: one made between runs (in a
+  `reset` the host's `chip.reset()` calls, say), or one made where the
+  run ends for another reason at the same boundary (a hook's stop, a
+  callable that returns `True`, a fault, a halt, an exception stop, the
+  run's own limits), so the host sees that end and the request both.
+  A request pending when a run starts ends it at once, before its
+  first instruction, and takes the request.  A host reusing a machine
+  checks the `pending` property, which reads the request without
+  taking it, or calls `withdraw()` before its next run.  `restore`
+  withdraws a pending request, including one asked from another thread
+  (`BoardControl.stop()`), since it replaces the machine's state.  The
+  chip's and the bare `Machine`'s own stops for a peripheral's
+  exception leave no request behind, a host's asked with one stays,
+  and `pending` is the host's alone.
 - `build()` spends the builder; a second call raises `RuntimeError`.
 
 Registers are by name: `"D0"`-`"D7"`, `"A0"`-`"A7"`, `"PC"`, `"SR"`,
