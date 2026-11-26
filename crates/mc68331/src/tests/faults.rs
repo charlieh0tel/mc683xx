@@ -217,7 +217,7 @@ fn stop_on_fault_is_the_host_s_setting_not_the_snapshot_s() {
 }
 
 #[test]
-fn a_stop_asked_in_a_faulting_instruction_is_taken_with_the_fault() {
+fn a_stop_asked_in_a_faulting_instruction_stays_pending() {
     // MOVE.W $0000,$0401: the read asks the run to stop, the write faults
     let mut builder = Builder::default();
     builder
@@ -236,14 +236,16 @@ fn a_stop_asked_in_a_faulting_instruction_is_taken_with_the_fault() {
             ControlFlow::Continue(())
         });
     assert_eq!(chip.run_for(Cycles::from_clocks(1000)).stop, Stop::Fault);
-    // past the MOVE: the next run is the host's own
+    // past the MOVE: only a run that ends for the request takes it
     chip.cpu_control().registers_mut().pc = Address(START + 10);
+    let run = chip.run_for(Cycles::from_clocks(1000));
+    assert_eq!(run.stop, Stop::Requested, "{run:?}");
     let run = chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(run.stop, Stop::Budget, "{run:?}");
 }
 
 #[test]
-fn a_stop_asked_with_a_hook_stop_is_taken_with_it() {
+fn a_stop_asked_with_a_hook_stop_stays_pending() {
     // MOVE.W $0000,$2000: the read asks the run to stop, and its hook
     // stops it
     let mut builder = Builder::default();
@@ -266,6 +268,8 @@ fn a_stop_asked_with_a_hook_stop_is_taken_with_it() {
         Stop::Hook(_)
     ));
     chip.cpu_control().registers_mut().pc = Address(START + 10);
+    let run = chip.run_for(Cycles::from_clocks(1000));
+    assert_eq!(run.stop, Stop::Requested, "{run:?}");
     let run = chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(run.stop, Stop::Budget, "{run:?}");
 }

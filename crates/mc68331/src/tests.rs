@@ -1387,7 +1387,10 @@ fn a_stop_asked_at_a_reset_that_halts_ends_the_run_with_the_halt() {
         panic!("{events:?}");
     };
     assert_eq!(chip.now(), reset, "the run ends at the reset");
-    // the request was taken with the halt
+    // the request left pending: the next run ends for it, with no
+    // instruction to run
+    let run = chip.run_for(Cycles::from_clocks(100));
+    assert_eq!(run.stop, Stop::Requested);
     let budget = Cycles::from_clocks(100);
     let run = chip.run_for(budget);
     assert_eq!(run.stop, Stop::Halted(Halt::DoubleBusFault));
@@ -4098,4 +4101,76 @@ fn port_qs_changes_keep_their_times_however_the_run_is_cut() {
     );
     assert!(whole.windows(2).all(|pair| pair[0].0 < pair[1].0));
     assert_eq!(port_qs_toggles(7), whole);
+}
+
+/// MOVE.W $000001,D0: an address error (CPU32RM 6.2.4).
+const ODD_LOAD: [u16; 3] = [MOVE_WORD_FROM_ABSOLUTE, 0, 1];
+
+/// A chip booting `program`, and its stop request.
+fn booting_with_stop(program: &[u16]) -> (Mc68331, StopRequest) {
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    let stop = builder.stop_request();
+    (builder.build(), stop)
+}
+
+/// Asserts that the chip's next run ends [`Stop::Requested`], the
+/// request taken.
+fn ends_for_the_request(chip: &mut Mc68331, stop: &StopRequest) {
+    let run = chip.run_for(Cycles::from_clocks(10_000));
+    assert_eq!(run.stop, Stop::Requested);
+    assert!(!stop.pending(), "taken");
+}
+
+#[test]
+fn a_stop_asked_where_a_hook_stops_the_run_stays_pending() {
+    let (mut chip, stop) = booting_with_stop(&[NOP, NOP, NOP, NOP]);
+    let at = Address(START + 2);
+    let asking = stop.clone();
+    let id = chip.cpu_control().add_code_hook(at..=at, move |_| {
+        asking.request();
+        ControlFlow::Break(())
+    });
+    assert_eq!(
+        chip.run_for(Cycles::from_clocks(10_000)).stop,
+        Stop::Hook(id)
+    );
+    assert!(stop.pending());
+    chip.cpu_control().remove_hook(id);
+    ends_for_the_request(&mut chip, &stop);
+}
+
+#[test]
+fn a_stop_asked_in_an_instruction_that_faults_stays_pending() {
+    let (mut chip, stop) = booting_with_stop(&[ODD_LOAD, [NOP; 3]].concat());
+    let at = Address(START);
+    let asking = stop.clone();
+    chip.cpu_control().add_code_hook(at..=at, move |_| {
+        asking.request();
+        ControlFlow::Continue(())
+    });
+    chip.cpu_control().set_stop_on_fault(true);
+    assert_eq!(chip.run_for(Cycles::from_clocks(10_000)).stop, Stop::Fault);
+    assert!(stop.pending());
+}
+
+#[test]
+fn a_stop_asked_by_a_peripheral_in_an_instruction_that_faults_stays_pending() {
+    // MOVE.W (CS1_BASE).L,($000001).L: the read asks, the write faults
+    let program = [0x33f9, (CS1_BASE >> 16) as u16, CS1_BASE as u16, 0, 1];
+    let mut kept = None;
+    let (mut chip, _, _) = with_peripheral(&program, |stop| {
+        kept = Some(stop.clone());
+        OnesStopper(stop)
+    });
+    let stop = kept.unwrap();
+    chip.cpu_control().set_stop_on_fault(true);
+    assert_eq!(chip.run_for(Cycles::from_clocks(10_000)).stop, Stop::Fault);
+    assert!(stop.pending());
 }

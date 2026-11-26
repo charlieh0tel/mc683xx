@@ -1035,7 +1035,11 @@ impl<C: Chip> Board<C> {
                 _ => {
                     self.catch_up(next);
                     self.settle()?;
-                    self.take_stop();
+                    // only a run that ends for the request takes it: one
+                    // asked where it ends for another reason stays pending
+                    if stop == Stop::Requested {
+                        self.take_stop();
+                    }
                     return Ok(self.outcome(stop));
                 }
             }

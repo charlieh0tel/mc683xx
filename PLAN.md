@@ -1716,7 +1716,8 @@ hand.  The keys are in `docs/board-files.md`.
   `next_event` or `interrupt_request`).  The loop looks for a request
   before each quantum and after asking the peripherals' `next_event`, and
   withdraws the chip's when it stops for one, so the next run does not
-  stop for it again.  `send` drives the nets the endpoint drives
+  stop for it again; a run that ends for another reason leaves both
+  pending.  `send` drives the nets the endpoint drives
   whose type carries the value, and fails (`SendError`) if there are
   none, so a typo or a value of the wrong type is not silently
   dropped; `take_received` likewise fails (`NoReceiver`) for an
@@ -2599,19 +2600,17 @@ Adversarial review (2026-11-01):
   a peripheral's `advance` asked, or at a reset the run takes (the
   watchdog's, the halt monitor's) if a peripheral's `reset` asked,
   before the first instruction after it.  The Python bindings use it: a peripheral's
-  exception stops the run there.  The bare machine (`flat::Machine`)
-  keeps a request no run has taken, as the chip keeps one made between
-  runs (decided 2026-11-26): one pending as `run_limited` starts ends
-  the run after its first instruction, and only a run that ends
-  `Stop::Requested` takes it: one that ends for another reason at the
-  same boundary (a hook's stop, a fault or an exception stop in the
-  instruction whose cycle asked, its own limits) leaves it pending, so
-  the host sees that end and the request both.  The chip takes a
-  request with a hook's or a fault's stop instead.  The core asks the
-  bus only after a cycle it ends, so without the first rule a request
-  left over waited for the next peripheral cycle, in whatever run that
-  came.  `take_exception` and `reset` leave the request as it
-  was: they have no run to stop.
+  exception stops the run there.  One rule on the chip, a board and
+  the bare machine (`flat::Machine`), decided 2026-11-26: only a run
+  that ends `Stop::Requested` takes a request.  One made where the run
+  ends for another reason at the same boundary (a hook's stop, a fault,
+  a halt, an exception stop, the run's own limits) stays pending, so
+  the host sees that end and the request both, and the next run ends
+  for it.  The chip keeps the request its core took in the quantum
+  (`stop_taken`) and puts it back as the run ends otherwise; the
+  board's loop takes its own only with `Stop::Requested`.  The bare
+  machine's `take_exception` and `reset` leave the request as it was:
+  they have no run to stop.
 - Cost when absent (`make bench`'s `core/*`, pinned to one
   performance core, before and after run in turn, on a loaded host
   whose results vary by up to 2x between runs): `nop` +6%,

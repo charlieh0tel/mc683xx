@@ -227,19 +227,19 @@ impl Cpu32Target for Mc68331 {
         let mut limits = Limits::default();
         limits.steps = Some(1);
         let start = self.now;
-        let (completed, asked) = loop {
+        let completed = loop {
             let ran = self.run(STEP_BUDGET, Some(&mut limits));
             if ran.limited {
-                break (true, ran.asked);
+                break true;
             }
             // a sync ends a run early, the step not done: it goes on
             if ran.run.stop != Stop::Budget || self.now.since(start) >= STEP_BUDGET {
-                break (false, ran.asked);
+                break false;
             }
         };
-        // a stop the host asked for in the step's last quantum, taken
-        // with the stop that ended it or still waiting
-        let stopped = asked | self.board.take_stop();
+        // a stop the host asked for in the step's last quantum, left
+        // pending by the stop that ended it or still waiting: the step's
+        let stopped = self.board.take_stop();
         let completed = if completed && self.board.sim.low_power().is_some() {
             // a stepped LPSTOP: the modules awake, then the interrupts
             // pending at its end, unless a hook or a fault stops them

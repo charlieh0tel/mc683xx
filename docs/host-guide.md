@@ -312,27 +312,20 @@ the run stops once the instruction whose cycle asked ends, between
 quanta if `advance` asked, or at a reset within the run (the
 watchdog's, say) if `reset` asked, before the first instruction after
 it, with `Stop::Requested`.  Any of a peripheral's calls may ask, in
-the run's thread.  The request is
-taken by the stop.  One made between runs (in a `reset` that
-`Mc68331::reset` calls) stays, and ends the next run after its first
-instruction; a host whose own run loop stopped for the same
-reason before the chip ran withdraws it (`withdraw`), so the next run
-does not stop for it; `pending` says whether one is left, without
-taking it.  One made in a host bus cycle (Host bus cycles)
+the run's thread.  One made in a host bus cycle (Host bus cycles)
 is dropped, with no run to stop.
 
-The bare machine (`flat::Machine`) keeps a request between runs too:
-one left pending as `run_limited` starts ends the run after its first
-instruction, `Stop::Requested`.  Only a run that ends
-`Stop::Requested` takes a request: one made during a run that ends for
-another reason at the same boundary stays pending (made in a hook's
-closure that stops the run, in the cycles of an instruction that
-faults or makes an exception stop, or before a run its own limits end
-before its first instruction), where the chip takes it with the other
-stop.  A host reusing a machine checks `pending` or calls `withdraw()`
-before its next run.
-`take_exception` and `reset` leave a pending request as it was and drop
-one a peripheral asks for in their cycles.
+One rule holds on the chip, a board and the bare machine
+(`flat::Machine`): only a run that ends `Stop::Requested` takes a
+request.  One the run does not end for stays pending: one made between
+runs (in a `reset` that `Mc68331::reset` calls, say), or one made
+during a run that ends for another reason at the same boundary (a
+hook's stop, a fault, a halt, an exception stop, the run's own limits).
+A pending request ends the next run.  A host reusing a machine checks
+`pending`, which reads the request without taking it, or calls
+`withdraw()` before its next run.  The bare machine's `take_exception`
+and `reset` leave a pending request as it was and drop one a
+peripheral asks for in their cycles.
 
 ```rust
 use mc683xx_cpu32::BusError;

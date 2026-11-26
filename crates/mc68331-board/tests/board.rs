@@ -3231,6 +3231,34 @@ attach = [{ select = "CSBOOT" }]
     stop.request();
 }
 
+#[test]
+fn a_stop_asked_where_a_hook_stops_the_board_s_run_stays_pending() {
+    let rom = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+"#;
+    let mut board = board("stop-with-hook", rom, &[NOP; 16]);
+    let stop = board.stop_request();
+    let at = Address(START + 2);
+    let id = board.cpu_control().add_code_hook(at..=at, move |_| {
+        stop.request();
+        ControlFlow::Break(())
+    });
+    let until = Time::from_picos(1_000_000_000);
+    assert_eq!(board.run_until(until).unwrap().stop, Stop::Hook(id));
+    board.cpu_control().remove_hook(id);
+    assert_eq!(board.run_until(until).unwrap().stop, Stop::Requested);
+    let now = board.now();
+    assert_eq!(board.run_until(until).unwrap().stop, Stop::Budget);
+    assert!(board.now() > now);
+}
+
 /// A latch on a select: Q0 follows bit 0 of each byte written.
 #[derive(Debug, Default)]
 struct BitLatch;

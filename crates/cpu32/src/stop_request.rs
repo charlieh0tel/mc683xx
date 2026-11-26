@@ -12,12 +12,12 @@ use std::rc::Rc;
 /// one request, which the stop clears.  The bare machine and the chip
 /// each give one.
 ///
-/// A request no run has taken stays pending, and ends the next run
-/// after its first instruction: one made between runs, or, on the bare
-/// machine, one made during a run that ends for another reason at the
-/// same boundary (a hook's stop, a fault or an exception stop in the
-/// instruction that asked, its own limits), which the chip takes
-/// with that stop instead.  A host reusing a machine checks
+/// Only a run that ends [`Stop::Requested`](crate::cpu::Stop::Requested)
+/// takes the request, on the bare machine and the chip alike.  One the
+/// run does not end for stays pending, and ends the next run: one made
+/// between runs, or one made during a run that ends for another reason
+/// at the same boundary (a hook's stop, a fault, a halt, an exception
+/// stop, the run's own limits).  A host reusing a machine checks
 /// [`pending`](Self::pending) or calls [`withdraw`](Self::withdraw)
 /// before its next run.
 #[derive(Debug, Clone, Default)]
