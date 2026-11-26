@@ -1063,7 +1063,10 @@ much, so with 8 a side `p` below 0.05 says the difference is not the
 placements'.  A place much slower than the rest on every build of a
 side is the interpreter alias (Placement against the interpreter);
 judge it apart, since it follows where the dispatch lands and the
-interpreter's build.  Work goes under `target/placement-bench/`.
+interpreter's build; a Python case's output names the interpreter it
+ran under (version, path, and EXEC or DYN, fixed addresses or PIE), so
+two runs compare only under the same one.  Work goes under
+`target/placement-bench/`.
 
 ### Machine clears
 

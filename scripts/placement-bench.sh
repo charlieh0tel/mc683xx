@@ -181,6 +181,16 @@ for rep in range(reps):
 
 unit = ("runs/G cycles" if perf else "runs/s") if kernel else "M instructions/s"
 print(f"{case}: {unit}, the median of {reps} at each place; higher is faster")
+if not kernel:
+    # The interpreter alias depends on the python build (docs/performance.md,
+    # Placement against the interpreter), so name the one measured: its
+    # executable's ELF type is EXEC (fixed addresses) or DYN (PIE).
+    executable, version = subprocess.run(
+        [python, "-c", "import platform, sys; print(sys.executable); print(platform.python_version())"],
+        capture_output=True, text=True, check=True).stdout.splitlines()
+    with open(os.path.realpath(executable), "rb") as binary:
+        elf_type = {2: "EXEC", 3: "DYN"}.get(int.from_bytes(binary.read(18)[16:18], "little"), "?")
+    print(f"python {version} at {os.path.realpath(executable)}, {elf_type}")
 print("build      " + " ".join(f"slot{s:<4d}" for s in slots) + "    mean   worst" + ("  cycles(M)" if perf else ""))
 means = {side: [] for side in sides}
 worsts = {side: [] for side in sides}
