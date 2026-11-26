@@ -219,6 +219,8 @@ pub(crate) struct ChipBuilder {
     wiring: Rc<RefCell<Wiring>>,
     /// Where the peripherals' exceptions wait.
     pending: Pending,
+    /// The host's stop request, which the binding asks too.
+    stop: StopRequestView,
 }
 
 impl ChipBuilder {
@@ -270,11 +272,13 @@ impl ChipBuilder {
             (None, None) => ClockSource::default(),
         };
         let builder = Builder::new(Configuration::new(data, clock));
-        let pending = Pending::new(builder.stop_request());
+        let stop = StopRequestView::new(builder.stop_request());
+        let pending = Pending::new(stop.clone());
         Ok(Self {
             builder: Some(builder),
             wiring: Rc::default(),
             pending,
+            stop,
         })
     }
 
@@ -431,7 +435,8 @@ impl ChipBuilder {
     /// The handle by which the host's peripherals ask the chip's runs to
     /// stop (`Stop.Requested()`), for them to hold.
     fn stop_request(&mut self) -> Result<StopRequestView, Error> {
-        Ok(StopRequestView(self.builder()?.stop_request()))
+        self.builder()?;
+        Ok(self.stop.clone())
     }
 
     /// The handle by which the host's peripherals end the chip's runs

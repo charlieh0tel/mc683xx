@@ -541,6 +541,42 @@ def test_the_binding_s_own_stops_leave_no_request_for_the_next_run():
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
 
 
+def faulting_on(cpu: mc683xx.Machine, peripheral: mc683xx.MappedPeripheral) -> None:
+    """MOVE.L (A0),(A1) at CODE: A0 on `peripheral`, A1 where nothing
+    is mapped, a fault stopping the run."""
+    cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 0xFF, peripheral)
+    cpu.write_register("A0", PERIPHERAL)
+    cpu.write_register("A1", RETURN)
+    cpu.set_stop_on_fault(True)
+
+
+def test_a_peripheral_s_exception_where_a_fault_ends_the_run_leaves_no_request():
+    cpu = machine(MOVE_LONG_A0_TO_A1, NOP, RTS)
+    faulting_on(cpu, Raising())
+    with pytest.raises(KeyError):
+        cpu.run_limited(reach=RETURN)
+    assert not cpu.stop_request().pending
+    cpu.write_register("PC", CODE + 2)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+
+
+def test_a_host_s_stop_asked_with_a_peripheral_s_exception_stays_pending():
+    cpu = machine(MOVE_LONG_A0_TO_A1, NOP, RTS)
+    stop = cpu.stop_request()
+
+    class AskingRaising(Raising):
+        def read(self, cycle):
+            stop.request()
+            raise KeyError("read")
+
+    faulting_on(cpu, AskingRaising())
+    with pytest.raises(KeyError):
+        cpu.run_limited(reach=RETURN)
+    assert stop.pending
+    cpu.write_register("PC", CODE + 2)
+    ends_at_once(cpu, reach=RETURN)
+
+
 def test_a_peripheral_s_exception_leaves_no_request_for_the_next_run():
     cpu = machine(MOVE_WORD_A0_TO_D0, NOP, NOP, RTS)
     cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 0xFF, Raising())

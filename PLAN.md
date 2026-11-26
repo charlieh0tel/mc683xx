@@ -2600,7 +2600,11 @@ Adversarial review (2026-11-01):
   a peripheral's `advance` asked, or at a reset the run takes (the
   watchdog's, the halt monitor's) if a peripheral's `reset` asked,
   before the first instruction after it.  The Python bindings use it: a peripheral's
-  exception stops the run there.  One rule on the chip, a board and
+  exception stops the run there.  The chip's and the bare machine's
+  bindings track who asked (`StopRequestView`: the host through its
+  handle, the binding for the exception) and, as each call into the
+  target returns (`Pending::check`), withdraw the binding's own unless
+  the host asked too, so the rule below keeps only a host's request.  One rule on the chip, a board and
   the bare machine (`flat::Machine`), decided 2026-11-26: only a run
   that ends `Stop::Requested` takes a request.  One made where the run
   ends for another reason at the same boundary (a hook's stop, a fault,

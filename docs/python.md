@@ -337,7 +337,10 @@ assert chip.memory(ram, 0, 2) == b"\x12\x34"
   it at once, before its first instruction, and takes the request.  A
   host reusing a machine checks the
   `pending` property, which reads the request without taking it, or
-  calls `withdraw()` before its next run.
+  calls `withdraw()` before its next run.  The chip's and the bare
+  `Machine`'s own stops for a peripheral's exception leave no request
+  behind, a host's asked with one stays, and `pending` is the host's
+  alone.
 - `build()` spends the builder; a second call raises `RuntimeError`.
 
 Registers are by name: `"D0"`-`"D7"`, `"A0"`-`"A7"`, `"PC"`, `"SR"`,

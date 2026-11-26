@@ -224,6 +224,53 @@ def test_a_peripheral_exception_is_raised_by_run():
     assert run.stop == mc683xx.Stop.Budget()
 
 
+class BrokenWrite(Recorder):
+    def write(self, cycle, value):
+        raise ZeroDivisionError
+
+
+# MOVE.W (RAM_BASE).L,(PERIPHERAL_BASE + $20).L
+RAM_TO_PERIPHERAL = [0x33F9, RAM_BASE >> 16, 0, PERIPHERAL_BASE >> 16, 0x0020]
+
+
+def test_a_peripheral_exception_where_a_hook_stops_the_run_leaves_no_request():
+    # the read's hook stops the run, the write raises
+    builder, _, _ = board(WIRING + RAM_TO_PERIPHERAL, BrokenWrite())
+    stop = builder.stop_request()
+    chip = builder.build()
+    hook = chip.add_read_hook(lambda access: True, RAM_BASE, RAM_BASE + 1)
+    with pytest.raises(ZeroDivisionError):
+        chip.run_for(2000)
+    assert not stop.pending
+    assert chip.remove_hook(hook)
+    assert chip.run_for(100).stop == mc683xx.Stop.Budget()
+
+
+class AskingBrokenWrite(Recorder):
+    """Asks the run to stop through `stop`, then raises, at each write."""
+
+    stop = None
+
+    def write(self, cycle, value):
+        self.stop.request()
+        raise ZeroDivisionError
+
+
+def test_a_host_s_stop_asked_with_a_peripheral_exception_stays_pending():
+    peripheral = AskingBrokenWrite()
+    builder, _, _ = board(WIRING + RAM_TO_PERIPHERAL, peripheral)
+    peripheral.stop = builder.stop_request()
+    chip = builder.build()
+    hook = chip.add_read_hook(lambda access: True, RAM_BASE, RAM_BASE + 1)
+    with pytest.raises(ZeroDivisionError):
+        chip.run_for(2000)
+    assert peripheral.stop.pending
+    assert chip.remove_hook(hook)
+    run = chip.run_for(100)
+    assert (run.stop, run.cycles) == (mc683xx.Stop.Requested(), 0)
+    assert not peripheral.stop.pending
+
+
 def test_tracing_sees_peripheral_cycles_and_exceptions():
     program = WIRING + [
         MOVE_WORD_ABSOLUTE_TO_D1, PERIPHERAL_BASE >> 16, 0x0020,

@@ -48,12 +48,13 @@ use crate::function_code::FunctionCode;
 use crate::held::Held;
 use crate::held::Holdings;
 use crate::python::repr;
+use crate::requests::StopRequestView;
 
 /// Whose run a peripheral's exception stops.
 #[derive(Debug, Clone)]
 enum Stopper {
-    /// The chip's or the bare CPU's.
-    Core(StopRequest),
+    /// The chip's or the bare CPU's, which the host shares.
+    Core(StopRequestView),
     /// A board's, once it is loaded: its peripherals are made, and may fail,
     /// before it has one.
     Board(Rc<RefCell<Option<BoardStopRequest>>>),
@@ -61,7 +62,7 @@ enum Stopper {
 
 impl Default for Stopper {
     fn default() -> Self {
-        Self::Core(StopRequest::default())
+        Self::Core(StopRequestView::new(StopRequest::default()))
     }
 }
 
@@ -86,7 +87,7 @@ pub(crate) struct Pending {
 impl Pending {
     /// Nothing waiting, for a chip or a bare CPU whose runs `stop`
     /// stops.
-    pub(crate) fn new(stop: StopRequest) -> Self {
+    pub(crate) fn new(stop: StopRequestView) -> Self {
         Self {
             stop: Stopper::Core(stop),
             ..Self::default()
@@ -118,7 +119,7 @@ impl Pending {
             return;
         }
         match &self.stop {
-            Stopper::Core(stop) => stop.request(),
+            Stopper::Core(stop) => stop.ask(),
             Stopper::Board(slot) => {
                 if let Some(stop) = &*slot.borrow() {
                     stop.request();
@@ -155,8 +156,13 @@ impl Pending {
         });
     }
 
-    /// The waiting exception, if any, as the call's result.
+    /// The waiting exception, if any, as the call's result; the stop
+    /// the binding asked for it, done with, withdrawn unless the host
+    /// asked too.
     pub(crate) fn check(&self) -> PyResult<()> {
+        if let Stopper::Core(stop) = &self.stop {
+            stop.settle();
+        }
         let Some(value) = self.error.borrow_mut().take() else {
             return Ok(());
         };

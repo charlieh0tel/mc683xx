@@ -460,6 +460,8 @@ pub(crate) struct MachineView {
     machine: Machine,
     /// Where the peripherals' exceptions wait.
     pending: Pending,
+    /// The host's stop request, which the binding asks too.
+    stop: StopRequestView,
     /// The hooks that fired in the core run under way.
     queue: Queue,
     /// The first hook whose callable, called within the core run under
@@ -605,10 +607,12 @@ impl MachineView {
     #[pyo3(signature = (*, address_bits = flat::ADDRESS_BITS))]
     fn new(address_bits: u32) -> Result<Self, Error> {
         let machine = Machine::new(address_bits)?;
-        let pending = Pending::new(machine.stop_request());
+        let stop = StopRequestView::new(machine.stop_request());
+        let pending = Pending::new(stop.clone());
         Ok(Self {
             machine,
             pending,
+            stop,
             queue: Queue::default(),
             in_run_stop: Rc::default(),
             intercepts: Vec::new(),
@@ -851,7 +855,7 @@ impl MachineView {
     /// request pending when a run starts ends it at once, before its
     /// first instruction, and takes the request.
     fn stop_request(&self) -> StopRequestView {
-        StopRequestView(self.machine.stop_request())
+        self.stop.clone()
     }
 
     /// Waits for gdb at `address` (`host:port`, port 0 picks one),
