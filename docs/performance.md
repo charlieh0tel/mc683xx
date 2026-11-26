@@ -978,18 +978,26 @@ effects showed up in the 0.9.0 audit's write hook loop (a `move.l`,
   other's entries in the branch target buffer: `baclears.any` goes from
   0.06 M to 8 M a run and the run takes 10% to 15% more cycles.  One run
   in eight under ASLR lands there; which place is the bad one depends on
-  the module's own layout, so alpha.8 had one too, milder.  A host sees
-  it as some runs of the same build 10% to 20% slower than the rest;
-  the module's base, in `/proc/<pid>/maps`, modulo `0x1000000`, tells
-  the place, and `perf stat -e baclears.any` the effect.  To compare
-  builds without it, run with ASLR off (`setarch -R`) and move the
-  module through the places by mapping 2 MB to 14 MB before the import,
-  as the audit did.
+  the module's own layout, so alpha.8 had one too, milder.
+
+  How a host tells it hit it: the mode is the whole process's, from the
+  import on, so a hook-heavy process runs throughout up to about a
+  quarter below its usual rate, where another run of the same build on
+  the same input does not.  `perf stat -e baclears.any` shows it
+  outright, millions against tens of thousands; the module's base, in
+  `/proc/<pid>/maps`, modulo `0x1000000`, names the place.  The
+  workaround is to run again, which lands elsewhere seven times in
+  eight; when benchmarking, run with ASLR off (`setarch -R`), which
+  gives the same place every run, and to compare builds fairly move
+  the module through all eight places by mapping 2 MB to 14 MB before
+  the import.
 - Build to build.  The module's hot code and the interpreter's share the
   uop cache, so a change that moves the module's code moves how many
   uops come from it (`idq.dsb_uops` against `idq.mite_uops`): a no-op
   write hook lost 2.8% to `ac361722`, which changed the watch bits from
   8 to 16 bits wide and 0.05% of host instructions, every seed alike.
+
+### Machine clears
 
 The 0.9.0 alphas ran real firmware 1% to 2% slower than v0.8.0 in
 cycles, with 0.2% fewer host instructions, and some links ran 2% slower
