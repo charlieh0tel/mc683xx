@@ -326,7 +326,8 @@ assert chip.memory(ram, 0, 2) == b"\x12\x34"
   reset the run takes (the watchdog's, say), before the first
   instruction after it.  A request made between runs (in a `reset`
   the host's `chip.reset()` calls) stays, and the next run ends after
-  its first instruction, unless the host calls `withdraw()` first.
+  its first instruction, unless the host calls `withdraw()` first;
+  the `pending` property says whether one is left, without taking it.
   One made in a host bus cycle (`bus_read`, `bus_write`) is dropped,
   with no run to stop.
 - `build()` spends the builder; a second call raises `RuntimeError`.

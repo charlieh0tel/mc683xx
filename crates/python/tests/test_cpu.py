@@ -397,6 +397,17 @@ def test_a_true_hook_or_stop_ends_the_run():
     assert cpu.read_register("PC") == CODE + 4
 
 
+def test_pending_reads_a_stop_request_and_withdraw_clears_it():
+    cpu = machine(NOP, RTS)
+    stop = cpu.stop_request()
+    assert not stop.pending
+    stop.request()
+    assert stop.pending and cpu.stop_request().pending
+    assert stop.pending, "reading leaves it"
+    stop.withdraw()
+    assert not stop.pending
+
+
 def test_a_stop_requested_between_runs_is_withdrawn():
     cpu = machine(NOP, NOP, RTS)
     cpu.stop_request().request()

@@ -317,7 +317,8 @@ taken by the stop.  One made between runs (in a `reset` that
 `Mc68331::reset` calls) stays, and ends the next run after its first
 instruction; a host whose own run loop stopped for the same
 reason before the chip ran withdraws it (`withdraw`), so the next run
-does not stop for it.  One made in a host bus cycle (Host bus cycles)
+does not stop for it; `pending` says whether one is left, without
+taking it.  One made in a host bus cycle (Host bus cycles)
 is dropped, with no run to stop.
 
 ```rust

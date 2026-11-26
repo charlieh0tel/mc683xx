@@ -26,10 +26,37 @@ impl StopRequest {
         self.0.set(false);
     }
 
+    /// Whether a stop is asked for that no run has taken and the host
+    /// has not withdrawn, the request left as it is.
+    #[must_use]
+    pub fn pending(&self) -> bool {
+        self.0.get()
+    }
+
     /// Whether a stop is asked for, clearing the request: for the run
     /// loop that serves it ([`Bus::stop_requested`](crate::bus::Bus::stop_requested)).
     #[must_use = "a stop taken and dropped is lost"]
     pub fn take(&self) -> bool {
         self.0.replace(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StopRequest;
+
+    #[test]
+    fn pending_reads_the_request_and_take_clears_it() {
+        let request = StopRequest::default();
+        let clone = request.clone();
+        assert!(!request.pending());
+        clone.request();
+        assert!(request.pending());
+        assert!(request.pending(), "reading leaves it");
+        assert!(request.take());
+        assert!(!clone.pending());
+        clone.request();
+        request.withdraw();
+        assert!(!clone.pending());
     }
 }

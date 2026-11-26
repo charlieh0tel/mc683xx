@@ -36,6 +36,13 @@ impl StopRequestView {
         self.0.withdraw();
     }
 
+    /// Whether a stop is asked for that no run has taken and the host
+    /// has not withdrawn, the request left as it is.
+    #[getter]
+    fn pending(&self) -> bool {
+        self.0.pending()
+    }
+
     fn __repr__(&self) -> &'static str {
         "StopRequest()"
     }
