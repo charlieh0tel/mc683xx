@@ -110,14 +110,25 @@ impl fmt::Display for Register {
 }
 
 /// The register [`Register`]'s `Display` names, in any case.
+///
+/// Read from the name's two bytes, not by comparing it with each name:
+/// a host hook asks for a register by name on every call.
 impl FromStr for Register {
     type Err = ParseRegisterError;
 
     fn from_str(name: &str) -> Result<Self, ParseRegisterError> {
-        Self::ALL
-            .into_iter()
-            .find(|candidate| candidate.name().eq_ignore_ascii_case(name))
-            .ok_or(ParseRegisterError {})
+        let &[bank, number] = name.as_bytes() else {
+            return Err(ParseRegisterError {});
+        };
+        let first = match bank.to_ascii_lowercase() {
+            b'd' => Self::D0,
+            b'a' => Self::A0,
+            _ => return Err(ParseRegisterError {}),
+        };
+        if !(b'0'..=b'7').contains(&number) {
+            return Err(ParseRegisterError {});
+        }
+        Ok(Self::ALL[usize::from(first.code()) + usize::from(number - b'0')])
     }
 }
 
@@ -306,5 +317,25 @@ mod tests {
             "pc".parse::<SystemRegister>(),
             Err(ParseSystemRegisterError {})
         );
+    }
+
+    #[test]
+    fn registers_parse_from_their_names_alone() {
+        for register in Register::ALL {
+            let name = register.to_string();
+            assert_eq!(name.to_ascii_uppercase().parse(), Ok(register));
+            let mixed = [name[..1].to_ascii_uppercase(), name[1..].to_string()].concat();
+            assert_eq!(mixed.parse(), Ok(register));
+        }
+        for text in [
+            "", "d", "a", "7", "d8", "a9", "d/", "x0", "e0", "b7", "d00", "a7 ", " a7", "da",
+            "d\u{e9}", "\u{e9}0", "sp", "pc",
+        ] {
+            assert_eq!(
+                text.parse::<Register>(),
+                Err(ParseRegisterError {}),
+                "{text:?}"
+            );
+        }
     }
 }

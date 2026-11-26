@@ -1,0 +1,9 @@
+# Every function on a 64-byte boundary, on x86_64 alone: where a hot
+# function starts against the uop cache's and the branch predictor's
+# lines moves its cycles by several percent from link to link, and the
+# alignment makes that the same for every link (docs/performance.md,
+# Function alignment).  Not wasm32, where it means nothing.  A RUSTFLAGS
+# environment variable replaces this, as it replaces any configured
+# rustflags; a crate depending on ours from crates.io does not read it.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "llvm-args=-align-all-functions=6"]

@@ -954,10 +954,116 @@ byte the same in two builds, starting on a 64-byte boundary in one
 (1.30 G cycles for 5000 iterations) and 48 bytes past one in the
 other (1.45 G).  Built with every function aligned to 64 bytes
 (`RUSTFLAGS="-C llvm-args=-align-all-functions=6"`), the second takes
-1.31 G.  Stable Rust cannot align one function, so a host build gets
-whichever placement its link gives; instruction counts, which do not
-move with it, are what the audit judges work by, and cycles are
-compared between builds aligned that way.
+1.31 G.  Stable Rust cannot align one function; the workspace's builds
+align them all now (Function alignment, below).  Instruction counts,
+which do not move with placement, are what the audit judges work by,
+and cycles are compared between builds aligned that way.
+
+### Placement against the interpreter
+
+A Python host's hook calls run the module's code and the interpreter's
+in turn, so where one lands against the other moves cycles too.  Two
+effects showed up in the 0.9.0 audit's write hook loop (a `move.l`,
+`addq`, `bra` loop on the bare `Machine`, a write hook on the store):
+
+- Run to run, in one build.  uv's interpreters
+  (python-build-standalone) are linked without PIE: `python3.12`'s code
+  sits at the same address in every process, its object allocation and
+  deallocation (`_PyObject_Malloc`, `tupledealloc`, `long_dealloc`)
+  around `0x1801000` in 3.12.15.  The kernel maps the extension module
+  2 MB-aligned at a random base, so its code takes one of eight places
+  modulo 16 MB.  Where the module's hook dispatch
+  (`MachineView::run_dispatching`, `dispatch`) falls on the same
+  addresses modulo 16 MB as that interpreter code, the two evict each
+  other's entries in the branch target buffer: `baclears.any` goes from
+  0.06 M to 8 M a run and the run takes 10% to 15% more cycles.  One run
+  in eight under ASLR lands there; which place is the bad one depends on
+  the module's own layout, so alpha.8 had one too, milder.
+
+  How a host tells it hit it: the mode is the whole process's, from the
+  import on, so a hook-heavy process runs throughout up to about a
+  quarter below its usual rate, where another run of the same build on
+  the same input does not.  `perf stat -e baclears.any` shows it
+  outright, millions against tens of thousands; the module's base, in
+  `/proc/<pid>/maps`, modulo `0x1000000`, names the place.  The
+  workaround is to run again, which lands elsewhere seven times in
+  eight; when benchmarking, run with ASLR off (`setarch -R`), which
+  gives the same place every run, and to compare builds fairly move
+  the module through all eight places by mapping 2 MB to 14 MB before
+  the import.
+- Build to build.  The module's hot code and the interpreter's share the
+  uop cache, so a change that moves the module's code moves how many
+  uops come from it (`idq.dsb_uops` against `idq.mite_uops`): a no-op
+  write hook lost 2.8% to `ac361722`, which changed the watch bits from
+  8 to 16 bits wide and 0.05% of host instructions, every seed alike.
+
+### Function alignment
+
+`.cargo/config.toml` builds every function on a 64-byte boundary on
+x86_64 (`-C llvm-args=-align-all-functions=6`), not on wasm32, where it
+means nothing: the module's place against the uop cache then no longer
+moves with each link.  Eight `-C metadata=` seeds a side, each at each
+of the module's 8 places (above), the write hook loop in M
+instructions/s, the seeds' mean over the places (and the worst place of
+any seed):
+
+| Build | Write hook calling `register("A7")` | No-op write hook |
+| --- | --- | --- |
+| alpha.8 | 9.70 (8.79) | 14.15 (11.20) |
+| 18ffdc7d, unaligned | 10.18 (8.15) | 13.63 (12.07) |
+| 18ffdc7d, aligned | 10.53 (9.78) | 14.00 (11.88) |
+
+The bindings' own functions aligned alone (as maturin's rustc arguments)
+gave 10.74 and 13.82: the core's hot code, not theirs, needs it.  No
+hooks and a code hook were within 0.6% aligned or not.  It helps the
+native path too: the Rust kernels (`benches/examples/iterations.rs`,
+four seeds) took 0.6% (`chip/ram_move`) to 2.7%
+(`chip/peripheral_move`) fewer cycles, `demo/mandelbrot` 0.8%, and
+varied less from seed to seed.  It costs the extension module 3.8%
+stripped (5.35 to 5.55 MB); the wheel, compressed, is the same size.
+
+What it does not reach:
+
+- A `RUSTFLAGS` environment variable replaces it, as it replaces any
+  configured rustflags; add the flag to it.
+- Cargo reads it from the directory it runs in, this workspace: a crate
+  depending on ours from crates.io, and a wheel pip builds from the
+  sdist, do not get it.  A native host that wants it adds the flag to
+  its own `.cargo/config.toml` or `RUSTFLAGS`.
+- It moves the hook dispatch in the module, so the place where it
+  aliases the interpreter (above) can move or change strength from one
+  build to the next.  That is expected, not a regression; compare
+  builds over all eight places.
+
+### Comparing placements
+
+`scripts/placement-bench.sh BASE CANDIDATE` compares two revisions
+across placements, so a difference it reports is the code's, not one
+link's.  Opt-in, it gates nothing; x86_64 Linux, with `make python`'s
+`.venv` for the Python cases.  For each side it builds `-n` (8)
+modules, each relinked with its functions in another order (rust-lld's
+`--shuffle-sections`, given to the final link alone, so the build's
+own flags, the alignment above among them, stay).  `-C metadata=`
+seeds do not do this: across eight of them the hook dispatch stayed
+within 0x200 bytes.  It runs each build at each of the module's eight
+places (ASLR off, 2 MB to 14 MB mapped before the import), the builds
+in rotated order at every place, pinned to `-c` (2), each run once the
+CPU and its sibling are idle; `-k` picks the case: `write_register`,
+`write`, `code`, `none`, a bare `Machine`'s `move.l`, `addq`, `bra`
+loop, or `kernel ARGS` for `benches/examples/iterations.rs` (both
+revisions must have it; one place, runs per G cycles with `perf`).
+Eight builds a side take about 5 minutes to build and 6 minutes a case
+to run.
+
+Reading it: a row a build, its rate at each place, their mean and its
+worst place.  The verdict is the difference of the sides' means of the
+builds' means, with an exact permutation test over them: `p` is the
+share of all splits of the 2N builds into two sides that differ as
+much, so with 8 a side `p` below 0.05 says the difference is not the
+placements'.  A place much slower than the rest on every build of a
+side is the interpreter alias (Placement against the interpreter);
+judge it apart, since it follows where the dispatch lands and the
+interpreter's build.  Work goes under `target/placement-bench/`.
 
 ### Machine clears
 
@@ -1025,6 +1131,16 @@ against alpha.8, before (round 14) and after: no hook 5.434, 5.434 and
 2.549 G for 1 M; a no-op write hook 1.587, 1.632 and 1.537 G.  The
 code hook's remaining 0.4% is its argument's new fields
 (`instruction`, `opcode`, round 14).
+
+A hook that reads a register by name (`access.register("A7")`) parsed
+the name by comparing it with each of the 16 names in turn, A7 last:
+5% to 7% of such a hook's cycles, with many of its uops missing the
+uop cache.  It is read from the name's two bytes now.  The same loop
+with a write hook calling `register("A7")`, eight `-C metadata=` seeds
+a side, each run with its module at each of the 8 placements ASLR
+gives it (Placement against the interpreter, above), M instructions/s,
+the seeds' mean: alpha.8 9.71, alpha.11 9.36, with the parse 10.20;
+every seed of it above every seed of alpha.8.
 
 ### A peripheral's read, and the wasm module
 
