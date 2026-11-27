@@ -50,6 +50,20 @@ Claude <noreply@anthropic.com>'
 expect pass messages 'Fix the PIT prescaler'
 expect pass messages 'Credit Claude Monet in the examples'
 expect pass messages '# Co-Authored-By: an editor comment'
+expect pass messages 'Bump an action
+
+Signed-off-by: dependabot[bot] <support@github.com>
+Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>'
+expect refuse messages 'Fix it
+
+Co-authored-by: Ann Smith <ann@example.com>'
+expect refuse messages 'Fix it
+
+Co-authored-by: dependabot[bot] <x@example.com>'
+expect refuse messages 'Bump an action
+
+Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>
+Co-Authored-By: Claude <noreply@anthropic.com>'
 expect refuse messages 'Fix it
 
 Co-Authored-By: Claude <noreply@anthropic.com>'
