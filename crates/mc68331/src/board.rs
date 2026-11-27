@@ -8,12 +8,11 @@ use std::collections::BTreeSet;
 use std::fmt;
 use std::mem;
 
-use mc683xx_cpu32::bus::BusError;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::bus::LPSTOP_BROADCAST;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::Acknowledged;
@@ -26,11 +25,13 @@ use mc683xx_cpu32::memory::Page;
 use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::peripheral::BusCycle;
-use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
+use mc683xx_cpu32::state::StateError;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::module;
 use mc683xx_modules::module::Module;
+use mc683xx_modules::peripheral::AnyMappedPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::peripheral::iack_address;
@@ -38,18 +39,17 @@ use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::sim::BLOCK;
+use mc683xx_modules::sim::DecodeRequest;
+use mc683xx_modules::sim::Lanes;
 use mc683xx_modules::sim::MODULE_SPACE_BYTES;
+use mc683xx_modules::sim::Match;
 use mc683xx_modules::sim::ResetCause;
+use mc683xx_modules::sim::Selects;
 use mc683xx_modules::sim::Sim;
-use mc683xx_modules::sim::chip_selects::DecodeRequest;
-use mc683xx_modules::sim::chip_selects::Lanes;
-use mc683xx_modules::sim::chip_selects::Match;
-use mc683xx_modules::sim::chip_selects::Selects;
-use mc683xx_modules::sim::chip_selects::Termination;
 use mc683xx_modules::sim::ports::PortName;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 use crate::chip::Diversion;
 use crate::chip::OutputHorizon;
@@ -59,13 +59,13 @@ use crate::event::ChipTracing;
 use crate::event::DsackFault;
 use crate::event::Event;
 use crate::gpt::Gpt;
-use crate::port::NoInputsError;
+use crate::port::NoInputs;
 use crate::port::OutputChange;
 use crate::port::Port;
 use crate::port::PortChange;
-use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_modules::sim::chip_selects::Dsack;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_cpu32::StopRequest;
+use mc683xx_modules::chip_select::Dsack;
+use mc683xx_modules::sim::ResetScope;
 
 /// The 68331's address lines, ADDR\[23:0\] (MC68331UM 4.4.1.1).
 pub(crate) const ADDRESS_LINES: u32 = 24;
@@ -94,14 +94,8 @@ const TABLE_CLOCKS: u8 = 2;
 /// wait states that costs nothing beyond the timing tables, as an
 /// internal module's cycle does.  It has no DSACK: the chip has no such
 /// decode.
-pub(crate) const FIXED_TIMING: (PortSize, u8) = (PortSize::Bits16, TABLE_CLOCKS);
-
-/// A host peripheral the chip holds: a peripheral on chip-select pins with its
-/// own time, in the chip's snapshot, which the host can get back by
-/// type.
-pub(crate) trait Peripheral: MappedPeripheral + Timed + Save + Any {}
-
-impl<T: MappedPeripheral + Timed + Save + Any> Peripheral for T {}
+pub(crate) const FIXED_TIMING: (PortSize, Cycles) =
+    (PortSize::Bits16, Cycles::from_clocks(TABLE_CLOCKS as u64));
 
 /// A module the chip holds, which the host can get back by type.
 pub(crate) trait Part: Module + Any {}
@@ -136,7 +130,7 @@ pub(crate) struct FixedMemory {
     pub(crate) memory: HostMemory,
     /// Its port and the clocks of each of its cycles
     /// ([`FIXED_TIMING`] unless the host set them).
-    pub(crate) timing: (PortSize, u8),
+    pub(crate) timing: (PortSize, Cycles),
 }
 
 impl HostMemory {
@@ -212,7 +206,7 @@ pub(crate) struct Board {
     /// the QSM, then the GPT.
     pub(crate) modules: Vec<Box<dyn Part>>,
     /// The host's peripherals.
-    pub(crate) peripherals: Vec<Box<dyn Peripheral>>,
+    pub(crate) peripherals: Vec<Box<dyn AnyMappedPeripheral>>,
     /// The resets each peripheral sees, by its index in `peripherals`.
     pub(crate) reset_scopes: Vec<ResetScope>,
     /// The resets the QSPI's peripheral sees.
@@ -260,7 +254,7 @@ pub(crate) struct Board {
     /// The host's peripherals' request to end the run early.
     pub(crate) sync_request: SyncRequest,
     /// Where the run's quantum in progress ends.
-    pub(crate) quantum_end: Cycles,
+    pub(crate) quantum_end: Cycle,
     /// Whether an access to the SIM or a module moved its next event
     /// before `quantum_end`, so the quantum ends after the instruction.
     pub(crate) sync: bool,
@@ -305,7 +299,7 @@ pub(crate) struct Board {
     /// The interrupt mask LPSTOP broadcast, and when, if the last
     /// acknowledge woke the MCU from low-power stop; not saved, as
     /// `acknowledged` is not.
-    pub(crate) woke: Option<(InterruptLevel, Cycles)>,
+    pub(crate) woke: Option<(InterruptLevel, Cycle)>,
     /// The earliest next event of the SIM and the modules, while
     /// `modules_next_stale` is clear: the run asks for it every quantum,
     /// and it moves only at an access to the SIM or a module, an
@@ -313,7 +307,7 @@ pub(crate) struct Board {
     /// or an advance that reaches it (an advance short of a next event
     /// finds nothing to move it).  The peripherals' are the host's, asked
     /// every quantum.
-    pub(crate) modules_next: Option<Cycles>,
+    pub(crate) modules_next: Option<Cycle>,
     /// Whether `modules_next` needs recomputing.
     pub(crate) modules_next_stale: bool,
 }
@@ -333,11 +327,11 @@ impl fmt::Debug for Board {
 /// How a bus cycle ended well: its value, right-aligned, and its
 /// clocks, those of both byte cycles when a word goes to an 8-bit port
 /// (each up to a select's, `u8`).
-type Ended = Result<(u32, u16), BusError>;
+type Ended = Result<(u32, Cycles), BusError>;
 
 impl Board {
     /// The pins `port` drives and their levels at `now`.
-    pub(crate) fn outputs(&self, port: Port, now: Cycles) -> PortLevels {
+    pub(crate) fn outputs(&self, port: Port, now: Cycle) -> PortLevels {
         self.outputs_with(port, |gpt| gpt.port_outputs(now))
     }
 
@@ -370,17 +364,17 @@ impl Board {
         port: Port,
         value: u8,
         mask: u8,
-        now: Cycles,
-    ) -> Result<(), NoInputsError> {
+        now: Cycle,
+    ) -> Result<(), NoInputs> {
         match port {
-            Port::C => return Err(NoInputsError(port)),
+            Port::C => return Err(NoInputs(port)),
             Port::E => {
                 self.modules_changed();
-                self.sim.set_port_pins(PortName::E, value, mask);
+                self.sim.set_port_pins(PortName::E, value, mask, now);
             }
             Port::F => {
                 self.modules_changed();
-                self.sim.set_port_pins(PortName::F, value, mask);
+                self.sim.set_port_pins(PortName::F, value, mask, now);
             }
             Port::Gp => self.module_mut::<Gpt>(GPT).set_port_pins(value, mask, now),
             Port::Qs => self.module_mut::<Qsm>(QSM).set_port_pins(value, mask, now),
@@ -412,7 +406,7 @@ impl Board {
         &mut self,
         gpt: Vec<T>,
         port: impl Fn(PortChange) -> T,
-        order: impl Fn(&T) -> (Cycles, Port),
+        order: impl Fn(&T) -> (Cycle, Port),
     ) -> Vec<T> {
         let sim = self.sim.take_output_changes();
         let qs = self.module_mut::<Qsm>(QSM).take_output_changes();
@@ -460,7 +454,7 @@ impl Board {
     /// The earliest next event of the SIM, the modules and the peripherals,
     /// the SIM's and the modules' recomputed only when they may have
     /// moved.
-    pub(crate) fn next_event(&mut self) -> Option<Cycles> {
+    pub(crate) fn next_event(&mut self) -> Option<Cycle> {
         let modules = self.modules_next();
         let peripherals = self
             .peripherals
@@ -471,7 +465,7 @@ impl Board {
 
     /// The earliest next event of the SIM and the modules, recomputed
     /// only when it may have moved.
-    fn modules_next(&mut self) -> Option<Cycles> {
+    fn modules_next(&mut self) -> Option<Cycle> {
         if self.modules_next_stale {
             self.modules_next = self.modules_next_event();
             self.modules_next_stale = false;
@@ -485,7 +479,7 @@ impl Board {
     }
 
     /// The earliest next event of the SIM and the modules.
-    fn modules_next_event(&self) -> Option<Cycles> {
+    fn modules_next_event(&self) -> Option<Cycle> {
         let modules = self.modules.iter().filter_map(|module| module.next_event());
         self.sim.next_event().into_iter().chain(modules).min()
     }
@@ -496,8 +490,23 @@ impl Board {
         mem::take(&mut self.stop_taken) | self.stop_request.take()
     }
 
+    /// Whether the host asked the run to stop, taken by the core or not
+    /// yet, the request left as it is.
+    pub(crate) fn stop_pending(&self) -> bool {
+        self.stop_taken || self.stop_request.pending()
+    }
+
+    /// Leaves a stop the core took pending for the next run, as the run
+    /// ends for another reason: only a run that ends
+    /// [`Stop::Requested`](mc683xx_cpu32::Stop::Requested) takes it.
+    pub(crate) fn keep_stop(&mut self) {
+        if mem::take(&mut self.stop_taken) {
+            self.stop_request.request();
+        }
+    }
+
     /// Brings everything to `now`, the SIM first.
-    pub(crate) fn advance(&mut self, now: Cycles) {
+    pub(crate) fn advance(&mut self, now: Cycle) {
         self.level_stale = true;
         if self.modules_next.is_some_and(|next| next <= now) {
             self.modules_next_stale = true;
@@ -518,12 +527,11 @@ impl Board {
         let level = |outputs: PortLevels| outputs.pin_levels(u8::MAX);
         let qsm = self.module::<Qsm>(QSM);
         let (port_gp, pwm) = self.module::<Gpt>(GPT).reported_outputs();
-        let pwm_mask = u8::from(stop.pwm_a) | u8::from(stop.pwm_b) << 1;
         // port GP as the output changes last reported it
         let outputs = |port| self.outputs_with(port, |_| port_gp);
         Seen {
             ports: Port::ALL.map(|port| level(outputs(port)) & stop.port(port)),
-            pwm: pwm & pwm_mask,
+            pwm: pwm & stop.pwm_mask(),
             frames: if stop.txd { qsm.untaken_frames() } else { 0 },
         }
     }
@@ -543,7 +551,7 @@ impl Board {
     /// The earliest a watched output may change after `now`, a cycle's
     /// start ([`OutputHorizon`]): `now` if a write in its instruction
     /// changed one already, as the quantum then ends after it.
-    fn output_horizon_at(&mut self, now: Cycles) -> Option<Cycles> {
+    fn output_horizon_at(&mut self, now: Cycle) -> Option<Cycle> {
         let stop = self.output_stop;
         if stop == OutputStop::default() {
             return None;
@@ -551,10 +559,9 @@ impl Board {
         if self.output_moved {
             return Some(now);
         }
-        let pwm = u8::from(stop.pwm_a) | u8::from(stop.pwm_b) << 1;
-        let fast = self
-            .module::<Gpt>(GPT)
-            .next_fast_edge(now, pwm, stop.port(Port::Gp));
+        let fast =
+            self.module::<Gpt>(GPT)
+                .next_fast_edge(now, stop.pwm_mask(), stop.port(Port::Gp));
         self.modules_next().into_iter().chain(fast).min()
     }
 
@@ -562,7 +569,7 @@ impl Board {
     /// path of the boards that do not ask.
     #[cold]
     #[inline(never)]
-    fn publish_output_horizon(&mut self, now: Cycles) {
+    fn publish_output_horizon(&mut self, now: Cycle) {
         let horizon = self.output_horizon_at(now);
         self.output_horizon.set(horizon);
     }
@@ -579,13 +586,13 @@ impl Board {
     /// The SIM's system clock may have changed (SYNCR, or a reset): the
     /// QSM learns it.
     pub(crate) fn clock_changed(&mut self) {
-        let frequency = self.sim.clock().frequency();
+        let frequency = self.sim.system_clock().frequency();
         self.module_mut::<Qsm>(QSM).set_system_clock(frequency);
     }
 
     /// The modules, and the peripherals `cause` reaches, see RESET at
     /// `now`.
-    pub(crate) fn reset_others(&mut self, now: Cycles, cause: ResetCause) {
+    pub(crate) fn reset_others(&mut self, now: Cycle, cause: ResetCause) {
         self.modules_changed();
         for module in &mut self.modules {
             module.reset(now);
@@ -604,7 +611,7 @@ impl Board {
     /// reloads is reloaded after the instruction, its quantum ending
     /// there, as it ends if the modules' resets move a next event before
     /// the sync point.
-    pub(crate) fn reset_instruction(&mut self, now: Cycles) {
+    pub(crate) fn reset_instruction(&mut self, now: Cycle) {
         self.sim.system_reset();
         self.reset_others(now, ResetCause::System);
         self.sync_at(self.modules_next_event());
@@ -648,7 +655,7 @@ impl Board {
         address: u32,
         function_code: FunctionCode,
     ) -> Option<FixedMemory> {
-        if function_code.is_cpu_space() {
+        if function_code == FunctionCode::CpuSpace {
             return None;
         }
         self.fixed
@@ -684,6 +691,39 @@ impl Board {
             })
     }
 
+    /// What a cycle `request` describes reaches on the external bus, in
+    /// the order a read's lanes take them: each asserted select's wire
+    /// (a diverted memory's peripheral in its place), then each
+    /// peripheral on no select, with the cycle each sees at `now`.
+    pub(crate) fn takers(&self, request: DecodeRequest, now: Cycle) -> Vec<(Wire, BusCycle)> {
+        let cycle = BusCycle::new(
+            Address(request.address),
+            request.size,
+            request.function_code,
+            now,
+        )
+        .writing(request.write);
+        let selected = self
+            .sim
+            .chip_selects()
+            .matches(request)
+            .filter(|found| found.asserted)
+            .filter_map(|found| {
+                let wire = match self.wiring[found.select.index()]? {
+                    Wire::Memory(wired) => self
+                        .diverted_to(wired.region)
+                        .map_or(Wire::Memory(wired), Wire::Peripheral),
+                    wire @ Wire::Peripheral(_) => wire,
+                };
+                Some((wire, cycle.through(found.select.into())))
+            });
+        let bus = self
+            .bus_takers(request.address, request.function_code)
+            .into_iter()
+            .map(|peripheral| (Wire::Peripheral(peripheral), cycle));
+        selected.chain(bus).collect()
+    }
+
     /// Whether a peripheral on no select takes a cycle at `address` in
     /// `function_code`'s space.
     pub(crate) fn bus_takes(&self, address: u32, function_code: FunctionCode) -> bool {
@@ -717,7 +757,7 @@ impl Board {
         address: u32,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
         write: Option<u32>,
     ) -> Ended {
         let ended = self.decoded_cycle(
@@ -802,19 +842,19 @@ impl Board {
         address: u32,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
         write: Option<u32>,
     ) -> Ended {
         self.level_stale = true;
-        if function_code.is_cpu_space() {
+        if function_code == FunctionCode::CpuSpace {
             if let Some(value) = write
                 && address == LPSTOP_BROADCAST.0
             {
                 self.low_power_stop(
-                    InterruptLevel::new((value & LPSTOP_MASK) as u8).unwrap_or_default(),
+                    InterruptLevel::try_from((value & LPSTOP_MASK) as u8).unwrap_or_default(),
                     now,
                 );
-                return Ok((0, TABLE_CLOCKS.into()));
+                return Ok((0, Cycles::from_clocks(TABLE_CLOCKS.into())));
             }
         } else if let Some(offset) = address
             .checked_sub(self.sim.module_base().0)
@@ -829,7 +869,7 @@ impl Board {
             {
                 self.rebuild(memory);
             }
-            return Ok((value, TABLE_CLOCKS.into()));
+            return Ok((value, Cycles::from_clocks(TABLE_CLOCKS.into())));
         }
         self.external(memory, address, size, function_code, now, write)
     }
@@ -841,7 +881,7 @@ impl Board {
         offset: u32,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
         write: Option<u32>,
     ) -> Option<u32> {
         self.modules_changed();
@@ -855,13 +895,13 @@ impl Board {
             let value = match write {
                 None => self.sim.read(access(BLOCK)),
                 Some(value) => {
-                    let frequency = self.sim.clock().frequency();
+                    let frequency = self.sim.system_clock().frequency();
                     let written = self.sim.write(access(BLOCK), value)?;
                     self.decode_changed |= written.decode;
                     if written.decode {
                         self.clock_changed();
                     }
-                    if self.clock_stop && self.sim.clock().frequency() != frequency {
+                    if self.clock_stop && self.sim.system_clock().frequency() != frequency {
                         // the quantum ends after the instruction
                         self.clock_moved = true;
                         self.sync = true;
@@ -890,7 +930,7 @@ impl Board {
     /// the quantum ends after the instruction, so the run syncs there
     /// as it would have had the event been known at the quantum's start
     /// (PLAN.md, Peripherals).
-    fn sync_at(&mut self, next: Option<Cycles>) {
+    fn sync_at(&mut self, next: Option<Cycle>) {
         self.sync |= next.is_some_and(|next| next < self.quantum_end);
     }
 
@@ -898,8 +938,11 @@ impl Board {
     /// port size its DSACK gives for dynamic bus sizing: its own DSACK
     /// at its port field (SIMRM 7.6), or with an external DSACK its
     /// peripheral's (memory answers at once, at the field's size).
-    fn dsack(&mut self, found: Match, cycle: BusCycle) -> Option<(u8, PortSize)> {
-        if let Some(clocks) = found.termination.clocks(self.sim.clock().eclk_divisor()) {
+    fn dsack(&mut self, found: Match, cycle: BusCycle) -> Option<(Cycles, PortSize)> {
+        if let Some(clocks) = found
+            .termination
+            .clocks(self.sim.system_clock().eclk_divisor())
+        {
             return Some((clocks, found.port));
         }
         if !found.asserted {
@@ -909,7 +952,7 @@ impl Board {
             Wire::Peripheral(peripheral) => {
                 self.peripheral_dsack(peripheral, cycle, Some(found.port))
             }
-            Wire::Memory(_) => Some((Termination::external_clocks(0), found.port)),
+            Wire::Memory(_) => Some((Termination::external_clocks(Cycles::ZERO), found.port)),
         }
     }
 
@@ -921,7 +964,7 @@ impl Board {
         peripheral: usize,
         cycle: BusCycle,
         field: Option<PortSize>,
-    ) -> Option<(u8, PortSize)> {
+    ) -> Option<(Cycles, PortSize)> {
         let port = self.dsack_port(peripheral, cycle, field)?;
         self.peripherals[peripheral]
             .wait_states(cycle)
@@ -958,7 +1001,7 @@ impl Board {
             {
                 Some(select) => DsackFault::Unassigned { select },
                 None => DsackFault::BusUnassigned {
-                    peripheral: PeripheralId::from(peripheral as u64),
+                    peripheral: PeripheralId::from_number(peripheral as u64),
                 },
             };
             self.tell_dsack(peripheral, TOLD_UNASSIGNED, cycle.now, fault);
@@ -973,7 +1016,7 @@ impl Board {
     }
 
     /// `fault` of `peripheral` at `now`, if not yet told.
-    fn tell_dsack(&mut self, peripheral: usize, told: u8, now: Cycles, fault: DsackFault) {
+    fn tell_dsack(&mut self, peripheral: usize, told: u8, now: Cycle, fault: DsackFault) {
         if self.dsack_told[peripheral] & told == 0 {
             self.dsack_told[peripheral] |= told;
             self.events.push(Event::Dsack { now, fault });
@@ -994,7 +1037,7 @@ impl Board {
         address: u32,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
         write: Option<u32>,
     ) -> Ended {
         let request = DecodeRequest {
@@ -1035,7 +1078,7 @@ impl Board {
             if self.bus_monitor().is_some_and(|limit| clocks > limit) {
                 return Err(BusError);
             }
-            let cycles: u16 = if size == Size::Word && port == PortSize::Bits8 {
+            let cycles: u64 = if size == Size::Word && port == PortSize::Bits8 {
                 2
             } else {
                 1
@@ -1048,14 +1091,14 @@ impl Board {
                 (None, Some(memory)) => load(memory, fixed.memory, address, size),
                 _ => 0,
             };
-            return Ok((value, cycles * u16::from(clocks)));
+            return Ok((value, Cycles::from_clocks(cycles * clocks.clocks())));
         }
         if self.publish_output_horizon {
             self.publish_output_horizon(now);
         }
         let bus_cycle =
             BusCycle::new(Address(address), size, function_code, now).writing(write.is_some());
-        let mut first: Option<(u8, PortSize)> = None;
+        let mut first: Option<(Cycles, PortSize)> = None;
         for &candidate in found.iter().flatten() {
             let cycle = bus_cycle.through(candidate.select.into());
             first = first_dsack(first, self.dsack(candidate, cycle));
@@ -1138,7 +1181,7 @@ impl Board {
                 }
             }
         }
-        Ok((value, clocks.into()))
+        Ok((value, clocks))
     }
 
     /// The level of the highest IRQ pin asserted with its interrupt
@@ -1149,13 +1192,13 @@ impl Board {
             .iter()
             .filter(|(peripheral, _)| self.peripherals[*peripheral].interrupt_request())
             .fold(self.interrupt_pins, |pins, (_, level)| {
-                pins | 1 << level.get()
+                pins | 1 << u8::from(*level)
             });
-        (1..=InterruptLevel::NONMASKABLE.get())
+        (1..=u8::from(InterruptLevel::NONMASKABLE))
             .rev()
-            .filter_map(IrqPin::new)
-            .find(|&pin| driven & 1 << pin.get() != 0 && self.sim.interrupt_pin(pin))
-            .map_or(InterruptLevel::NONE, IrqPin::level)
+            .filter_map(|level| IrqPin::try_from(level).ok())
+            .find(|&pin| driven & 1 << u8::from(pin) != 0 && self.sim.interrupt_pin(pin))
+            .map_or(InterruptLevel::NONE, InterruptLevel::from)
     }
 
     /// The highest level requested of the CPU, recomputed only when a
@@ -1204,7 +1247,7 @@ impl Board {
     /// the sources requesting it (SIMRM 6.3), the SIM's timer before
     /// its IRQ pins (MC68331UM 4.7.3).  No contender is a spurious
     /// interrupt.
-    pub(crate) fn acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged {
+    pub(crate) fn acknowledge(&mut self, level: InterruptLevel, now: Cycle) -> Acknowledged {
         self.modules_changed();
         self.woke = self.sim.low_power().map(|mask| (mask, now));
         self.wake(now);
@@ -1278,7 +1321,7 @@ impl Board {
 
     /// The bus monitor's period in clocks, if it watches cycles now
     /// (SIMRM 3.2, 6.4.3).
-    fn bus_monitor(&self) -> Option<u8> {
+    fn bus_monitor(&self) -> Option<Cycles> {
         self.sim
             .bus_monitor()
             .filter(|_| !self.sim.freezes_bus_monitor())
@@ -1288,7 +1331,7 @@ impl Board {
     /// the SIM, the GPT and the QSM told, their next events found anew.
     /// Whether it changed, so the decode, which the bus monitor's
     /// period shapes, wants a rebuild.
-    pub(crate) fn set_freeze(&mut self, frozen: bool, now: Cycles) -> bool {
+    pub(crate) fn set_freeze(&mut self, frozen: bool, now: Cycle) -> bool {
         if self.frozen == frozen {
             return false;
         }
@@ -1304,7 +1347,7 @@ impl Board {
     /// Low-power stop at `now`, the interrupt mask LPSTOP broadcast
     /// `mask` (MC68331UM 4.5.4.2): the SIM's watchdog and the other
     /// modules' clocks stop (4.2.12, 4.3.4).
-    pub(crate) fn low_power_stop(&mut self, mask: InterruptLevel, now: Cycles) {
+    pub(crate) fn low_power_stop(&mut self, mask: InterruptLevel, now: Cycle) {
         self.modules_changed();
         self.sim.low_power_stop(mask, now);
         self.module_mut::<Gpt>(GPT).set_low_power(true, now);
@@ -1316,7 +1359,7 @@ impl Board {
     /// (MC68331UM 4.2.12, 4.3.4), their next events found anew, before
     /// the sync point ending the quantum.  A reset ends it by resetting
     /// them.
-    pub(crate) fn wake(&mut self, now: Cycles) {
+    pub(crate) fn wake(&mut self, now: Cycle) {
         if self.sim.low_power().is_some() {
             self.sim.wake(now);
             self.module_mut::<Gpt>(GPT).set_low_power(false, now);
@@ -1331,11 +1374,11 @@ impl Board {
     /// peripheral's vector costs its cycle's clocks, a bus monitor time-out
     /// its period; an autovector costs none beyond the interrupt's
     /// (PLAN.md).
-    fn external_acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged {
+    fn external_acknowledge(&mut self, level: InterruptLevel, now: Cycle) -> Acknowledged {
         let address = iack_address(level);
         let request = DecodeRequest {
             address: address.0,
-            function_code: FunctionCode::CPU_SPACE,
+            function_code: FunctionCode::CpuSpace,
             write: false,
             size: Size::Byte,
         };
@@ -1344,7 +1387,7 @@ impl Board {
             .chip_selects()
             .matches(request)
             .any(|found| found.autovector)
-            || self.sim.autovector_pin() && self.autovector_levels & 1 << level.get() != 0
+            || self.sim.autovector_pin() && self.autovector_levels & 1 << u8::from(level) != 0
         {
             return Acknowledge::Autovector.into();
         }
@@ -1352,7 +1395,7 @@ impl Board {
             None,
             address.0,
             Size::Byte,
-            FunctionCode::CPU_SPACE,
+            FunctionCode::CpuSpace,
             now,
             None,
         ) {
@@ -1362,10 +1405,8 @@ impl Board {
             // no DSACK in time: the bus monitor's BERR ends the cycle
             // at its period (SIMRM 3.2, 6.4.3); with BME clear, a bus
             // error at once (PLAN.md, A cycle no DSACK ends)
-            Err(BusError) => Acknowledged::new(Acknowledge::Spurious).stalled(
-                self.bus_monitor()
-                    .map_or(Cycles::ZERO, |limit| stall(limit.into())),
-            ),
+            Err(BusError) => Acknowledged::new(Acknowledge::Spurious)
+                .stalled(self.bus_monitor().map_or(Cycles::ZERO, stall)),
         }
     }
 
@@ -1397,8 +1438,8 @@ impl Board {
                 continue;
             }
             for (space, function_code) in [
-                (Space::User, FunctionCode::USER_DATA),
-                (Space::Supervisor, FunctionCode::SUPERVISOR_DATA),
+                (Space::User, FunctionCode::UserData),
+                (Space::Supervisor, FunctionCode::SupervisorData),
             ] {
                 let read = self.served(address, function_code, false);
                 let write = self
@@ -1435,7 +1476,7 @@ impl Board {
         address: u32,
         function_code: FunctionCode,
         write: bool,
-    ) -> Option<(Backing, (PortSize, u8))> {
+    ) -> Option<(Backing, (PortSize, Cycles))> {
         let kinds = [
             (address, Size::Byte),
             (address + 1, Size::Byte),
@@ -1469,7 +1510,7 @@ impl Board {
     pub(crate) fn memory_alone(
         &self,
         request: DecodeRequest,
-    ) -> Option<(HostMemory, (PortSize, u8))> {
+    ) -> Option<(HostMemory, (PortSize, Cycles))> {
         if self.bus_takes(request.address, request.function_code) {
             return None;
         }
@@ -1484,8 +1525,8 @@ impl Board {
                 })
                 .map(|fixed| (fixed.memory, fixed.timing));
         }
-        let eclk = self.sim.clock().eclk_divisor();
-        let mut first: Option<(u8, PortSize)> = None;
+        let eclk = self.sim.system_clock().eclk_divisor();
+        let mut first: Option<(Cycles, PortSize)> = None;
         let mut wired = None;
         let mut lanes = Lanes {
             upper: false,
@@ -1499,7 +1540,7 @@ impl Board {
             };
             let clocks = match (found.termination.clocks(eclk), wire) {
                 (Some(clocks), _) => Some(clocks),
-                (None, Some(Wire::Memory(_))) => Some(Termination::external_clocks(0)),
+                (None, Some(Wire::Memory(_))) => Some(Termination::external_clocks(Cycles::ZERO)),
                 (None, Some(Wire::Peripheral(_))) => return None,
                 (None, None) => None,
             };
@@ -1555,8 +1596,8 @@ const fn page(address: u32) -> usize {
 
 /// The clocks of a cycle of `clocks` beyond the timing tables' bus
 /// cycle: what the core adds to an instruction or interrupt.
-pub(crate) fn stall(clocks: u16) -> Cycles {
-    Cycles::from_clocks(u64::from(clocks.saturating_sub(TABLE_CLOCKS.into())))
+pub(crate) const fn stall(clocks: Cycles) -> Cycles {
+    clocks.saturating_sub(Cycles::from_clocks(TABLE_CLOCKS as u64))
 }
 
 /// Whether `source` arbitrates with the SIM's IARB.
@@ -1572,9 +1613,9 @@ const fn is_sim(source: Source) -> bool {
 /// does not matter.  A select's own DSACK is the pin its port field
 /// names (SIMRM 7.6).
 fn first_dsack(
-    first: Option<(u8, PortSize)>,
-    response: Option<(u8, PortSize)>,
-) -> Option<(u8, PortSize)> {
+    first: Option<(Cycles, PortSize)>,
+    response: Option<(Cycles, PortSize)>,
+) -> Option<(Cycles, PortSize)> {
     match (first, response) {
         (Some((earliest, port)), Some((clocks, other))) if clocks == earliest => {
             let wired = if port == PortSize::Bits16 || other == PortSize::Bits16 {
@@ -1622,7 +1663,7 @@ pub(crate) fn load(memory: &Memory, wired: HostMemory, address: u32, size: Size)
 }
 
 /// A byte or word into host memory, on the `lanes` the select strobes.
-fn store(
+pub(crate) fn store(
     memory: &mut Memory,
     wired: HostMemory,
     address: u32,

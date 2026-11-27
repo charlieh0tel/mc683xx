@@ -78,43 +78,10 @@ impl Mode {
         Self { polarity, phase }
     }
 
-    /// SPI mode `number`, 0 to 3, by the common numbering the QSMRM
-    /// does not use: CPOL its bit 1, CPHA its bit 0.  Higher bits are
-    /// ignored.
-    #[must_use]
-    pub const fn numbered(number: u8) -> Self {
-        Self {
-            polarity: if number & 0b10 == 0 {
-                ClockPolarity::IdleLow
-            } else {
-                ClockPolarity::IdleHigh
-            },
-            phase: if number & 0b01 == 0 {
-                ClockPhase::CaptureLeading
-            } else {
-                ClockPhase::ChangeLeading
-            },
-        }
-    }
-
     /// The mode `clock` shifts in.
     #[must_use]
     pub const fn of(clock: QspiClock) -> Self {
         Self::new(clock.polarity, clock.phase)
-    }
-
-    /// Its number, as `numbered` takes it.
-    #[must_use]
-    pub const fn number(self) -> u8 {
-        let polarity = match self.polarity {
-            ClockPolarity::IdleLow => 0,
-            ClockPolarity::IdleHigh => 0b10,
-        };
-        let phase = match self.phase {
-            ClockPhase::CaptureLeading => 0,
-            ClockPhase::ChangeLeading => 0b01,
-        };
-        polarity | phase
     }
 
     /// Each bit's first SCK edge, away from the idle level.
@@ -149,6 +116,57 @@ impl Mode {
         self.capture().opposite()
     }
 }
+
+/// SPI mode `number`, 0 to 3, by the common numbering the QSMRM does
+/// not use: CPOL its bit 1, CPHA its bit 0.
+impl TryFrom<u8> for Mode {
+    type Error = NoMode;
+
+    fn try_from(number: u8) -> Result<Self, NoMode> {
+        if number > MODE_MAX {
+            return Err(NoMode(number));
+        }
+        Ok(Self {
+            polarity: if number & MODE_CPOL == 0 {
+                ClockPolarity::IdleLow
+            } else {
+                ClockPolarity::IdleHigh
+            },
+            phase: if number & MODE_CPHA == 0 {
+                ClockPhase::CaptureLeading
+            } else {
+                ClockPhase::ChangeLeading
+            },
+        })
+    }
+}
+
+/// Its number, as [`Mode::try_from`] takes it.
+impl From<Mode> for u8 {
+    fn from(mode: Mode) -> Self {
+        let polarity = match mode.polarity {
+            ClockPolarity::IdleLow => 0,
+            ClockPolarity::IdleHigh => MODE_CPOL,
+        };
+        let phase = match mode.phase {
+            ClockPhase::CaptureLeading => 0,
+            ClockPhase::ChangeLeading => MODE_CPHA,
+        };
+        polarity | phase
+    }
+}
+
+/// A number no SPI mode has: past 3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no SPI mode {0}: give 0 to 3")]
+pub struct NoMode(pub u8);
+
+/// The highest SPI mode number.
+const MODE_MAX: u8 = 3;
+/// CPOL's bit in an SPI mode number.
+const MODE_CPOL: u8 = 0b10;
+/// CPHA's bit in an SPI mode number.
+const MODE_CPHA: u8 = 0b01;
 
 /// A slave's edges, as its datasheet gives them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -246,8 +264,8 @@ pub fn exchange<S: Slave + ?Sized>(transfer: Transfer, edges: Edges, slave: &mut
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::cycles::Cycles;
-    use mc683xx_cpu32::frequency::Frequency;
+    use mc683xx_cpu32::Cycles;
+    use mc683xx_cpu32::Frequency;
     use mc683xx_modules::peripheral::ClockPhase;
     use mc683xx_modules::peripheral::ClockPolarity;
     use mc683xx_modules::peripheral::QspiClock;
@@ -255,13 +273,14 @@ mod tests {
     use super::Edge;
     use super::Edges;
     use super::Mode;
+    use super::NoMode;
     use super::Slave;
     use super::exchange;
     use crate::peripheral::Transfer;
 
     /// A transfer in SPI mode `number`, a frame's first.
     fn transfer(number: u8) -> Transfer {
-        let mode = Mode::numbered(number);
+        let mode = Mode::try_from(number).unwrap();
         let clock = QspiClock::new(
             mode.polarity,
             mode.phase,
@@ -320,18 +339,23 @@ mod tests {
             (Edge::Falling, Edge::Rising, Edge::Falling),
         ];
         for (number, (leading, capture, change)) in (0..4).zip(edges) {
-            let mode = Mode::numbered(number);
+            let mode = Mode::try_from(number).unwrap();
             assert_eq!(
                 (mode.leading(), mode.capture(), mode.change()),
                 (leading, capture, change),
                 "mode {number}"
             );
-            assert_eq!(mode.number(), number);
+            assert_eq!(u8::from(mode), number);
         }
         assert_eq!(
-            Mode::numbered(3),
-            Mode::new(ClockPolarity::IdleHigh, ClockPhase::ChangeLeading)
+            Mode::try_from(3),
+            Ok(Mode::new(
+                ClockPolarity::IdleHigh,
+                ClockPhase::ChangeLeading
+            ))
         );
+        assert_eq!(Mode::try_from(4), Err(NoMode(4)));
+        assert_eq!(NoMode(4).to_string(), "no SPI mode 4: give 0 to 3");
     }
 
     #[test]

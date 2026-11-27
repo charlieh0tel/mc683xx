@@ -10,8 +10,8 @@ use crate::instructions::Table;
 use crate::instructions::data_movement::low_register;
 use crate::timing;
 use crate::timing::Decrement;
-use mc683xx_target::address::Address;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Size;
 
 /// Bcc, BRA and BSR: 0110 cccc dddddddd (CPU32RM 4.4, Bcc, BRA, BSR).
 const BRANCH_MASK: u16 = 0xf000;
@@ -91,7 +91,7 @@ fn branch(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
     };
     let target = base.offset(displacement);
     match condition(opcode) {
-        ALWAYS => {}
+        ALWAYS => core.cpu.branched(target),
         SUBROUTINE => push_return(core)?,
         condition if flags::test(&core.cpu.registers, condition) => {
             core.charge(timing::branch_taken(size));
@@ -171,7 +171,7 @@ mod tests {
     use crate::instructions::tests::peek_long;
     use crate::instructions::tests::step;
     use crate::registers::status;
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     /// A stack in the test RAM.
     const STACK: u32 = 0x4000;

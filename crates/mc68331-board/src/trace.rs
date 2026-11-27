@@ -4,7 +4,7 @@
 //! chip's [`Chip::TYPE`] its prefix: a versioned text contract, the
 //! same run giving the same bytes ([`docs/tracing.md`][tracing]).
 //!
-//! A record's time is `cycle`, a [`Cycles`] count of the chip's system
+//! A record's time is `cycle`, a [`Cycle`] on the chip's system
 //! clock, for what happens on the chip, or `now`, a board [`Time`], for
 //! what happens on the board's nets; a pin record has both.  Two
 //! fields print under keys other than their names, the text's keys
@@ -15,14 +15,14 @@
 
 use std::fmt;
 
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_modules::peripheral::ClockPhase;
 use mc683xx_modules::peripheral::ClockPolarity;
-use mc683xx_target::address::Address;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Size;
 
 #[cfg(doc)]
 use crate::chip::Chip;
@@ -30,12 +30,12 @@ use crate::signal::Signal;
 use crate::time::Time;
 
 /// The text's version, which [`header`] gives.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 /// Longs in a code record's stack.
 pub const STACK_LONGS: usize = 8;
 
 /// A trace's first line, for a run of `chip` (its [`Chip::TYPE`]): the
-/// format, its version and the chip, `# mc683xx trace 3 chip=mc68331`.
+/// format, its version and the chip, `# mc683xx trace 4 chip=mc68331`.
 #[must_use]
 pub fn header(chip: &str) -> String {
     format!("# mc683xx trace {VERSION} chip={chip}")
@@ -102,7 +102,7 @@ impl fmt::Display for NetRecord {
 #[non_exhaustive]
 pub struct BusCycleRecord {
     /// When its instruction started.
-    pub cycle: Cycles,
+    pub cycle: Cycle,
     /// That instruction's address.
     pub pc: Address,
     /// Whether it wrote.
@@ -120,7 +120,7 @@ pub struct BusCycleRecord {
 #[non_exhaustive]
 pub struct ExceptionRecord {
     /// When its frame was stacked.
-    pub cycle: Cycles,
+    pub cycle: Cycle,
     /// Its vector.
     pub vector: Vector,
     /// The PC its frame stacked.
@@ -136,7 +136,7 @@ pub struct ExceptionRecord {
 #[non_exhaustive]
 pub struct PinRecord {
     /// The system clock it takes effect at.
-    pub cycle: Cycles,
+    pub cycle: Cycle,
     /// Its board time.
     pub now: Time,
     /// The pin, by its name after `chip.`.
@@ -150,7 +150,7 @@ pub struct PinRecord {
 #[non_exhaustive]
 pub struct QspiRecord {
     /// When it started.
-    pub cycle: Cycles,
+    pub cycle: Cycle,
     /// PCS\[3:0\]'s levels, printed as `pcs`.
     pub chip_selects: u8,
     /// Bits shifted.
@@ -170,7 +170,7 @@ pub struct QspiRecord {
 #[non_exhaustive]
 pub struct CodeRecord {
     /// Now.
-    pub cycle: Cycles,
+    pub cycle: Cycle,
     /// Its address.
     pub pc: Address,
     /// SR.
@@ -188,7 +188,7 @@ pub struct CodeRecord {
 #[non_exhaustive]
 pub struct PositionRecord {
     /// Now.
-    pub cycle: Cycles,
+    pub cycle: Cycle,
     /// PC.
     pub pc: Address,
     /// SR.
@@ -206,7 +206,7 @@ pub struct PositionRecord {
 #[non_exhaustive]
 pub struct StoppedRecord {
     /// Now.
-    pub cycle: Cycles,
+    pub cycle: Cycle,
     /// Instructions run since power-on.
     pub instructions: u64,
     /// Why, printed as `reason`.
@@ -247,7 +247,7 @@ pub enum Record {
 impl Record {
     /// Its cycle.
     #[must_use]
-    pub const fn cycle(&self) -> Cycles {
+    pub const fn cycle(&self) -> Cycle {
         match self {
             Self::BusCycle(record) => record.cycle,
             Self::Exception(record) => record.cycle,
@@ -267,19 +267,6 @@ fn longs(values: impl Iterator<Item = Option<u32>>) -> String {
         .map(|value| value.map_or_else(|| "--------".to_owned(), |value| format!("{value:08x}")))
         .collect::<Vec<_>>()
         .join(",")
-}
-
-/// A stop's reason as `stopped` names it.
-const fn reason(stop: Stop) -> &'static str {
-    match stop {
-        Stop::Budget | Stop::Stopped => "budget",
-        Stop::Halted(_) => "halted",
-        Stop::Hook(_) => "hook",
-        Stop::Requested => "requested",
-        Stop::Background(_) => "background",
-        Stop::Fault => "fault",
-        _ => "other",
-    }
 }
 
 /// `bus-cycle key=value ...`, after a [`Line`]'s prefix
@@ -328,7 +315,7 @@ impl fmt::Display for ExceptionRecord {
             None => formatter.write_str("------")?,
         }
         if let Some(level) = self.level {
-            write!(formatter, " level={}", level.get())?;
+            write!(formatter, " level={}", u8::from(level))?;
         }
         Ok(())
     }
@@ -420,7 +407,7 @@ impl fmt::Display for StoppedRecord {
             "stopped cycle={} instructions={} reason={}",
             self.cycle.clocks(),
             self.instructions,
-            reason(self.stop)
+            self.stop
         )
     }
 }
@@ -445,17 +432,17 @@ impl fmt::Display for Record {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::cpu::Stop;
-    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_cpu32::Cycle;
+    use mc683xx_cpu32::Stop;
 
+    use mc683xx_cpu32::Frequency;
     use mc683xx_cpu32::exception::Vector;
-    use mc683xx_cpu32::frequency::Frequency;
     use mc683xx_cpu32::interrupt::InterruptLevel;
     use mc683xx_modules::peripheral::ClockPhase;
     use mc683xx_modules::peripheral::ClockPolarity;
     use mc683xx_modules::qsm::sci::Frame;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::Size;
 
     use super::BusCycleRecord;
     use super::CodeRecord;
@@ -476,7 +463,7 @@ mod tests {
     #[test]
     fn records_print_as_docs_tracing_shows() {
         let peripheral = Record::BusCycle(BusCycleRecord {
-            cycle: Cycles::from_clocks(42),
+            cycle: Cycle::from_clocks(42),
             pc: Address(0x1_5f88),
             write: false,
             address: Address(0x20_0003),
@@ -488,7 +475,7 @@ mod tests {
             "bus-cycle cycle=42 pc=0x00015f88 access=read address=0x00200003 size=1 value=0x04"
         );
         let word = Record::BusCycle(BusCycleRecord {
-            cycle: Cycles::from_clocks(42),
+            cycle: Cycle::from_clocks(42),
             pc: Address(0x1_5f88),
             write: true,
             address: Address(0x20_0003),
@@ -503,7 +490,7 @@ mod tests {
             value: None,
             write: false,
             ..BusCycleRecord {
-                cycle: Cycles::from_clocks(1),
+                cycle: Cycle::from_clocks(1),
                 pc: Address(0),
                 write: false,
                 address: Address(0),
@@ -513,18 +500,18 @@ mod tests {
         });
         assert!(berr.to_string().ends_with("value=berr"));
         let exception = Record::Exception(ExceptionRecord {
-            cycle: Cycles::from_clocks(7),
+            cycle: Cycle::from_clocks(7),
             vector: Vector(66),
             pc: Address(0x100),
             sr: Some(0x2000),
-            level: InterruptLevel::new(5),
+            level: InterruptLevel::try_from(5).ok(),
         });
         assert_eq!(
             exception.to_string(),
             "exception cycle=7 vector=66 pc=0x00000100 sr=0x2000 level=5"
         );
         let pin = Record::Pin(PinRecord {
-            cycle: Cycles::from_clocks(1677),
+            cycle: Cycle::from_clocks(1677),
             now: Time::from_picos(100_000_037),
             pin: "PGP0",
             level: true,
@@ -534,7 +521,7 @@ mod tests {
             "pin cycle=1677 time=100000037 pin=PGP0 level=1"
         );
         let qspi = Record::Qspi(QspiRecord {
-            cycle: Cycles::from_clocks(90_210),
+            cycle: Cycle::from_clocks(90_210),
             chip_selects: 7,
             bits: 16,
             out: 0x8000,
@@ -547,7 +534,7 @@ mod tests {
             "qspi cycle=90210 pcs=0x7 bits=16 out=0x8000 in=0xffff cpol=1 cpha=1"
         );
         let code = Record::Code(CodeRecord {
-            cycle: Cycles::from_clocks(5),
+            cycle: Cycle::from_clocks(5),
             pc: Address(0x1234),
             sr: 0x2700,
             data: [0; 8],
@@ -559,7 +546,7 @@ mod tests {
              stack=00000001,--------,--------,--------,--------,--------,--------,--------"
         ));
         let position = Record::Position(PositionRecord {
-            cycle: Cycles::from_clocks(1),
+            cycle: Cycle::from_clocks(1),
             pc: Address(2),
             sr: 0x2700,
             vbr: Address(0),
@@ -571,7 +558,7 @@ mod tests {
             "position cycle=1 pc=0x00000002 sr=0x2700 vbr=0x00000000 a7=0x0010fffc instructions=9"
         );
         let stopped = Record::Stopped(StoppedRecord {
-            cycle: Cycles::from_clocks(3),
+            cycle: Cycle::from_clocks(3),
             instructions: 1,
             stop: Stop::Budget,
         });
@@ -579,6 +566,13 @@ mod tests {
             stopped.to_string(),
             "stopped cycle=3 instructions=1 reason=budget"
         );
+        // the CPU stopped through the run's end is not its budget
+        let stopped = Record::Stopped(StoppedRecord {
+            cycle: Cycle::from_clocks(3),
+            instructions: 1,
+            stop: Stop::Stopped,
+        });
+        assert!(stopped.to_string().ends_with(" reason=stopped"));
     }
 
     #[test]
@@ -617,7 +611,7 @@ mod tests {
     #[test]
     fn a_line_names_its_chip() {
         let stopped = Record::Stopped(StoppedRecord {
-            cycle: Cycles::from_clocks(3),
+            cycle: Cycle::from_clocks(3),
             instructions: 1,
             stop: Stop::Budget,
         });
@@ -625,6 +619,6 @@ mod tests {
             Line::new("mc68331", &stopped).to_string(),
             "mc68331: stopped cycle=3 instructions=1 reason=budget"
         );
-        assert_eq!(header("mc68331"), "# mc683xx trace 3 chip=mc68331");
+        assert_eq!(header("mc68331"), "# mc683xx trace 4 chip=mc68331");
     }
 }

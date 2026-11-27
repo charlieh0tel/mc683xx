@@ -24,7 +24,7 @@ const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 /// FNV-1a's 64-bit prime.
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 /// Bytes of the version that starts every snapshot, little-endian
-/// (`mc683xx_cpu32::cpu::state::encode`).
+/// (`mc683xx_cpu32::state::encode`).
 const VERSION_BYTES: usize = size_of::<u32>();
 /// The line that names the versions.
 const VERSIONS: &str = "versions";
@@ -37,7 +37,7 @@ fn fnv1a(bytes: &[u8]) -> u64 {
 }
 
 /// The format version a part's snapshot (a module's, a peripheral's)
-/// starts with.  A layer's (`mc683xx_cpu32::cpu::state::Layer`) starts
+/// starts with.  A layer's (`mc683xx_cpu32::state::Layer`) starts
 /// with its header instead; a test names its `VERSION`.
 ///
 /// # Panics

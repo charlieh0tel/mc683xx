@@ -94,7 +94,7 @@ fn the_example_board_echoes_its_console() {
     assert!(output.status.success(), "{stderr}");
     assert_eq!(output.stdout, b"hello");
     assert!(
-        stderr.starts_with("# mc683xx trace 3 chip=mc68331\n"),
+        stderr.starts_with("# mc683xx trace 4 chip=mc68331\n"),
         "{stderr}"
     );
     assert!(
@@ -119,7 +119,8 @@ fn the_example_board_echoes_its_console() {
 fn cycles_end_the_run_within_an_instruction_of_them() {
     let directory = board("cycles", &echo::image());
     let file = directory.join("echo.toml");
-    let output = runner(&[file.to_str().unwrap(), "--cycles", "100"], b"");
+    // the one number syntax: 0x64 is 100
+    let output = runner(&[file.to_str().unwrap(), "--cycles", "0x64"], b"");
     let stderr = String::from_utf8(output.stderr).unwrap();
     assert!(output.status.success(), "{stderr}");
     let cycle: u64 = stderr
@@ -249,8 +250,11 @@ fn a_halt_and_a_wrong_command_have_their_status() {
     let usage = runner(&[file.to_str().unwrap(), "--bind", "console=telnet"], b"");
     assert_eq!(usage.status.code(), Some(2));
     let wrong = [
-        ["--turn-us", "18446744073709551615"],
-        ["--turn-us", "0"],
+        ["--turn", "18446745"],
+        ["--turn", "0"],
+        ["--turn", "1e-13"],
+        ["--turn", "9.99e-7"],
+        ["--turn", "nan"],
         ["--seconds", "nan"],
         ["--seconds", "-inf"],
         ["--seconds", "-1"],
@@ -259,6 +263,10 @@ fn a_halt_and_a_wrong_command_have_their_status() {
         ["--pace", "fast"],
         ["--pace", "0"],
         ["--pace", "-2"],
+        ["--cycles", "0100"],
+        ["--cycles", "18446744073709551616"],
+        ["--seed", "-1"],
+        ["--watch-code", "$400"],
     ];
     for [flag, value] in wrong {
         let usage = runner(&[file.to_str().unwrap(), flag, value], b"");
@@ -483,7 +491,7 @@ fn tty_takes_keystrokes_raw_and_ctrl_bracket_ends_the_run_and_restores_it() {
         .unwrap();
     let mut stderr = BufReader::new(child.stderr.take().unwrap());
     let mut line = String::new();
-    while !line.contains("bound name=console tty") {
+    while !line.contains("mc68331: bound name=console tty=1") {
         line.clear();
         assert_ne!(stderr.read_line(&mut line).unwrap(), 0, "never bound");
     }
@@ -752,6 +760,24 @@ fn gdb_runs_the_board_until_it_detaches() {
 }
 
 #[test]
+fn gdb_hanging_up_lets_the_run_go_on() {
+    let directory = board("gdb-hang-up", &echo::image());
+    let (child, mut gdb) = gdb_session(&directory.join("echo.toml"), &[]);
+    assert!(exchange(&mut gdb, &packet("?")).starts_with("T05"));
+    gdb.write_all(&packet("c")).unwrap();
+    drop(gdb);
+    let output = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(output.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("mc683xx-run: gdb hung up; running on as if it detached\n"),
+        "{stderr}"
+    );
+    assert!(stderr.ends_with("reason=budget\n"), "{stderr}");
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn a_packet_the_stub_cannot_parse_ends_only_the_session() {
     for bad in ["M0,4:zz", "Z0,zz,2"] {
         let directory = board("gdb-bad", &echo::image());
@@ -775,8 +801,8 @@ fn gdb_is_waited_for_before_piped_input_is_read() {
         &[
             "--bind",
             "console=stdio",
-            "--turn-us",
-            "100",
+            "--turn",
+            "0.0001",
             "--input-after",
             "0.0005",
         ],

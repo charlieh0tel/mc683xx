@@ -1,7 +1,7 @@
 //! An image to load: segments of bytes at addresses, and an entry
 //! point.
 
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 /// Bytes in the CPU32's 32-bit address space (CPU32RM 5.3).
 const ADDRESS_SPACE: u64 = 1 << 32;
@@ -136,7 +136,9 @@ impl Image {
         Ok(Self { segments, entry })
     }
 
-    /// `data` at `address`, a raw binary, with no entry point.
+    /// `data` at `address`, a raw binary, with no entry point.  It
+    /// takes the bytes, unlike the parsing constructors' borrowed text,
+    /// as they become the one segment as they are, with no copy.
     ///
     /// # Errors
     /// `data` is empty or runs past the top of the address space.
@@ -170,7 +172,7 @@ impl Image {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     use super::Image;
     use super::ImageError;

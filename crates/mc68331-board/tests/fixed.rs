@@ -5,14 +5,14 @@ use std::env;
 use std::fs;
 use std::process;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
 
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::time::Time;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 /// The initial stack pointer and program counter in the boot ROM.
 const STACK: u32 = 0x10_fffe;

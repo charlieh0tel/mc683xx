@@ -4,31 +4,33 @@
 
 use mc683xx_modules::pins::PortLevels;
 use std::cell::Cell;
+use std::cell::RefCell;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu;
-use mc683xx_cpu32::cpu::Halt;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::state::Layer;
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::Stateless;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::Halt;
+use mc683xx_cpu32::Run;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::exception::Vector;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::exception::VectorSet;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Space;
-use mc683xx_cpu32::memory::Unserved;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::Select;
+use mc683xx_cpu32::state::Layer;
+use mc683xx_cpu32::state::Save;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::Stateless;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::module;
@@ -43,9 +45,10 @@ use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::clock::ClockSource;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
 use snapshot_golden::version_of;
 
 use crate::board;
@@ -64,15 +67,16 @@ use crate::gpt::Input;
 use crate::gpt::PortGpPin;
 use crate::gpt::PwmChange;
 use crate::gpt::pwm::Channel;
-use crate::port::NoInputsError;
+use crate::host::BusCycleError;
+use crate::port::NoInputs;
 use crate::port::Port;
 use crate::port::PortChange;
 use crate::state;
-use mc683xx_cpu32::bus::StopRequest;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::PeripheralId;
-use mc683xx_modules::sim::chip_selects::Dsack;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::chip_select::Dsack;
+use mc683xx_modules::sim::ResetScope;
 
 mod bus;
 mod debug;
@@ -103,7 +107,7 @@ const GPT: u32 = 0xff_f900;
 const ROM_BYTES: usize = 64 << 10;
 
 fn cs(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).unwrap())
+    ChipSelect::Numbered(Number::try_from(number).unwrap())
 }
 
 /// CS`number` as a cycle carries it.
@@ -164,7 +168,7 @@ struct Recorder {
     /// What it reads as.
     value: u32,
     /// Its wait states on an externally terminated select.
-    wait: Option<u8>,
+    wait: Option<u64>,
     /// Whether it asks for an interrupt.
     interrupt: bool,
     /// The resets it saw.
@@ -192,15 +196,15 @@ impl MappedPeripheral for Recorder {
         Ok(())
     }
 
-    fn wait_states(&mut self, _: BusCycle) -> Option<u8> {
-        self.wait
+    fn wait_states(&mut self, _: BusCycle) -> Option<Cycles> {
+        self.wait.map(Cycles::from_clocks)
     }
 
     fn interrupt_request(&self) -> bool {
         self.interrupt
     }
 
-    fn reset(&mut self, _: Cycles) {
+    fn reset(&mut self, _: Cycle) {
         self.resets += 1;
     }
 }
@@ -214,9 +218,9 @@ impl Timed for Recorder {}
 #[derive(Debug)]
 struct Alarm {
     /// Its event.
-    at: Cycles,
+    at: Cycle,
     /// The times it was advanced to.
-    advanced: Rc<Cell<Option<Cycles>>>,
+    advanced: Rc<Cell<Option<Cycle>>>,
 }
 
 impl MappedPeripheral for Alarm {
@@ -232,11 +236,11 @@ impl MappedPeripheral for Alarm {
 mc683xx_cpu32::unsavable!(Alarm, "an alarm");
 
 impl Timed for Alarm {
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         (self.advanced.get().is_none()).then_some(self.at)
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         if now >= self.at && self.advanced.get().is_none() {
             self.advanced.set(Some(now));
         }
@@ -281,18 +285,20 @@ fn cycle_in(
     address: u32,
     size: Size,
     write: Option<u32>,
-) -> Result<(u32, u16), BusError> {
+) -> Result<(u32, u64), BusError> {
     let Mc68331 {
         cpu, board, now, ..
     } = chip;
-    board.cycle(
-        Some(&mut cpu.memory),
-        address,
-        size,
-        function_code,
-        *now,
-        write,
-    )
+    board
+        .cycle(
+            Some(&mut cpu.memory),
+            address,
+            size,
+            function_code,
+            *now,
+            write,
+        )
+        .map(|(value, clocks)| (value, clocks.clocks()))
 }
 
 /// A supervisor data cycle straight to the board.
@@ -301,8 +307,8 @@ fn cycle(
     address: u32,
     size: Size,
     write: Option<u32>,
-) -> Result<(u32, u16), BusError> {
-    cycle_in(chip, FunctionCode::SUPERVISOR_DATA, address, size, write)
+) -> Result<(u32, u64), BusError> {
+    cycle_in(chip, FunctionCode::SupervisorData, address, size, write)
 }
 
 fn write_register(chip: &mut Mc68331, address: u32, value: u16) {
@@ -310,8 +316,34 @@ fn write_register(chip: &mut Mc68331, address: u32, value: u16) {
 }
 
 #[test]
+fn a_pre_read_hook_answers_a_read_of_a_select_s_memory() {
+    // MOVE.W $0000,D0: the stack pointer's high word, answered
+    let (mut chip, _) = booting(&[MOVE_WORD_FROM_ABSOLUTE, 0, 0, NOP]);
+    chip.cpu_control()
+        .add_pre_read_hook(Address(0)..=Address(1), |read, _, bytes| {
+            assert_eq!((read.address, read.size), (Address(0), Size::Word));
+            bytes.copy_from_slice(&[0xab, 0xcd]);
+            ControlFlow::Break(())
+        });
+    assert!(matches!(
+        chip.run_for(Cycles::from_clocks(1000)).stop,
+        Stop::Hook(_)
+    ));
+    assert_eq!(chip.cpu().registers.data[0] & 0xffff, 0xabcd);
+    let mut word = [0; 2];
+    chip.peek_bytes(Address(0), FunctionCode::SupervisorData, &mut word)
+        .unwrap();
+    assert_eq!(
+        u16::from_be_bytes(word),
+        (STACK >> 16) as u16,
+        "memory is as it was"
+    );
+}
+
+#[test]
 fn csboot_serves_the_reset_vectors_with_13_wait_states() {
-    let (mut chip, _) = booting(&[NOP]);
+    let (mut chip, rom) = booting(&[NOP]);
+    assert_eq!(rom.to_string(), "memory 0");
     assert_eq!(chip.cpu().halted(), None);
     assert_eq!(chip.cpu().registers.ssp.0, STACK);
     assert_eq!(chip.cpu().registers.pc.0, START);
@@ -323,7 +355,7 @@ fn csboot_serves_the_reset_vectors_with_13_wait_states() {
     assert_eq!(
         chip.take_events(),
         [Event::Reset {
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
             cause: ResetCause::PowerOn
         }]
     );
@@ -345,8 +377,8 @@ fn nothing_answers_outside_the_selects() {
         None,
         0,
         Size::Word,
-        FunctionCode::CPU_SPACE,
-        Cycles::ZERO,
+        FunctionCode::CpuSpace,
+        Cycle::ZERO,
         None,
     );
     assert_eq!(breakpoint, Err(BusError));
@@ -354,12 +386,12 @@ fn nothing_answers_outside_the_selects() {
         None,
         0x3_fffe,
         Size::Word,
-        FunctionCode::CPU_SPACE,
-        Cycles::ZERO,
+        FunctionCode::CpuSpace,
+        Cycle::ZERO,
         Some(5),
     );
-    assert_eq!(lpstop, Ok((0, 2)));
-    assert_eq!(board.sim.low_power(), InterruptLevel::new(5));
+    assert_eq!(lpstop, Ok((0, Cycles::from_clocks(2))));
+    assert_eq!(board.sim.low_power(), InterruptLevel::try_from(5).ok());
 }
 
 #[test]
@@ -408,12 +440,12 @@ fn user_mode_sim_cycles_go_external() {
         Some(&mut cpu.memory),
         SIM + 0x04,
         Size::Word,
-        FunctionCode::USER_DATA,
-        Cycles::ZERO,
+        FunctionCode::UserData,
+        Cycle::ZERO,
         None,
     );
     // CSBOOT's 1-Mbyte block from $F00000 repeats the ROM
-    assert_eq!(user, Ok((u32::from(NOP), 16)));
+    assert_eq!(user, Ok((u32::from(NOP), Cycles::from_clocks(16))));
 }
 
 /// A synthetic map with every kind of select the decode handles
@@ -523,7 +555,7 @@ fn wired_patched(program: &[u16], patches: &[(u32, &[u16])]) -> Wired {
     let duart = builder
         .peripheral(Recorder::answering(0x40), &[cs(8), cs(10)])
         .unwrap();
-    builder.set_interrupt(duart, IrqPin::new(1).unwrap());
+    builder.set_interrupt(duart, IrqPin::try_from(1).unwrap());
     let mut chip = builder.build();
     chip.run_for(Cycles::from_clocks(40 * WIRED_SELECTS.len() as u64));
     assert_eq!(chip.cpu().halted(), None);
@@ -534,6 +566,45 @@ fn wired_patched(program: &[u16], patches: &[(u32, &[u16])]) -> Wired {
         shared,
         duart,
     }
+}
+
+#[test]
+fn a_pre_write_hook_replaces_or_drops_a_write_to_a_select_s_memory() {
+    let program = [
+        store_word(0x10_0000, 0x1234),
+        store_word(0x10_0002, 0x5678),
+        store_word(0xaaa, 0xaaaa),
+    ]
+    .concat();
+    let mut board = wired(&program);
+    let chip = &mut board.chip;
+    // run the program again, hooked
+    let first = START + 8 * WIRED_SELECTS.len() as u32;
+    chip.registers_mut().pc = Address(first);
+    chip.memory_mut(board.ram)[..4].fill(0);
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let into = Rc::clone(&seen);
+    chip.cpu_control().add_pre_write_hook(
+        Address(0)..=Address(0x10_ffff),
+        move |write, _, bytes| {
+            into.borrow_mut().push(write.address.0);
+            if write.address.0 == 0x10_0000 {
+                bytes.copy_from_slice(&[0xab, 0xcd]);
+            } else {
+                write.set_dropped(true);
+            }
+            ControlFlow::Continue(())
+        },
+    );
+    chip.run_for(Cycles::from_clocks(200));
+    // the flash's write is a peripheral's: no call
+    assert_eq!(*seen.borrow(), [0x10_0000, 0x10_0002]);
+    assert_eq!(chip.memory(board.ram)[..4], [0xab, 0xcd, 0x00, 0x00]);
+    let writes = &chip
+        .peripheral::<Recorder>(board.flash_writes)
+        .unwrap()
+        .writes;
+    assert_eq!(writes.len(), 2, "one each run");
 }
 
 #[test]
@@ -601,7 +672,7 @@ fn wired_timing() {
     assert_eq!(cycle(chip, 0x0f_0000, Size::Word, None), Ok((0, 7)));
     // RAM is supervisor space only
     assert_eq!(
-        cycle_in(chip, FunctionCode::USER_DATA, 0x10_0000, Size::Word, None),
+        cycle_in(chip, FunctionCode::UserData, 0x10_0000, Size::Word, None),
         Err(BusError)
     );
     // ROM is read only on CSBOOT, so a write there goes to CS6
@@ -621,10 +692,10 @@ fn the_duart_is_vectored_through_cs10() {
     chip.peripheral_mut::<Recorder>(board.duart)
         .unwrap()
         .interrupt = true;
-    let level = InterruptLevel::new(1).unwrap();
+    let level = InterruptLevel::try_from(1).unwrap();
     assert_eq!(chip.board.level(), level);
     assert_eq!(
-        chip.board.acknowledge(level, Cycles::ZERO).answer,
+        chip.board.acknowledge(level, Cycle::ZERO).answer,
         Acknowledge::Vector(Vector(0x40))
     );
     let reads = &chip.peripheral::<Recorder>(board.duart).unwrap().reads;
@@ -632,7 +703,7 @@ fn the_duart_is_vectored_through_cs10() {
     assert_eq!(acknowledge.select, on(10));
     assert_eq!(acknowledge.address, Address(0xff_fff3));
     assert_eq!(acknowledge.size, Size::Byte);
-    assert_eq!(acknowledge.function_code, FunctionCode::CPU_SPACE);
+    assert_eq!(acknowledge.function_code, FunctionCode::CpuSpace);
     // PFPAR clear makes IRQ1 a port pin
     write_register(chip, SIM + 0x1e, 0x00fd);
     assert_eq!(chip.board.level(), InterruptLevel::NONE);
@@ -655,7 +726,7 @@ fn another_board() {
     let ram = builder
         .memory(vec![0; 32 << 10], MemoryKind::Ram, &[cs(1)])
         .unwrap();
-    builder.set_autovector(IrqPin::new(3).unwrap());
+    builder.set_autovector(IrqPin::try_from(3).unwrap());
     let mut chip = builder.build();
     // a word fetch is two 16-clock byte cycles
     assert_eq!(
@@ -667,7 +738,7 @@ fn another_board() {
     write_register(&mut chip, SIM + 0x50, 0x2003);
     write_register(&mut chip, SIM + 0x52, 0x7b90);
     let user = |chip: &mut Mc68331, write| {
-        cycle_in(chip, FunctionCode::USER_DATA, 0x20_8002, Size::Word, write)
+        cycle_in(chip, FunctionCode::UserData, 0x20_8002, Size::Word, write)
     };
     assert_eq!(user(&mut chip, Some(0xbeef)), Ok((0, 2)));
     assert_eq!(user(&mut chip, None), Ok((0xbeef, 2)));
@@ -682,17 +753,21 @@ fn another_board() {
         "supervisor"
     );
     // IRQ3 with AVEC (PE2) tied for level 3; IRQ4 answered by nothing
-    let three = IrqPin::new(3).unwrap();
+    let three = IrqPin::try_from(3).unwrap();
     chip.set_interrupt_pin(three, true);
     assert_eq!(
-        chip.board.acknowledge(three.level(), Cycles::ZERO).answer,
+        chip.board
+            .acknowledge(InterruptLevel::from(three), Cycle::ZERO)
+            .answer,
         Acknowledge::Autovector
     );
-    let four = IrqPin::new(4).unwrap();
+    let four = IrqPin::try_from(4).unwrap();
     chip.set_interrupt_pin(four, true);
-    assert_eq!(chip.board.level(), four.level());
+    assert_eq!(chip.board.level(), InterruptLevel::from(four));
     assert_eq!(
-        chip.board.acknowledge(four.level(), Cycles::ZERO).answer,
+        chip.board
+            .acknowledge(InterruptLevel::from(four), Cycle::ZERO)
+            .answer,
         Acknowledge::Spurious
     );
 }
@@ -845,7 +920,7 @@ fn a_peripherals_dsack_is_checked_against_pepar() {
     assert_eq!(
         chip.take_events(),
         [Event::Dsack {
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
             fault: DsackFault::Unassigned { select: cs(2) }
         }]
     );
@@ -943,7 +1018,10 @@ fn a_split_word_cycle_counts_both_bytes_clocks() {
         cycle(&mut chip, 0x60_0000, Size::Word, None),
         Ok((0x3434, 2 * 203))
     );
-    assert_eq!(stall(2 * 203), Cycles::from_clocks(2 * 203 - 2));
+    assert_eq!(
+        stall(Cycles::from_clocks(2 * 203)),
+        Cycles::from_clocks(2 * 203 - 2)
+    );
 }
 
 /// A peripheral whose writes divert a memory to another peripheral and back:
@@ -1116,14 +1194,14 @@ fn the_periodic_timer_interrupts_on_time() {
     // level 6, vector $50, PITM 1: 4 EXTAL periods of 256 clocks
     write_register(&mut chip, SIM + 0x22, 0x0650);
     write_register(&mut chip, SIM + 0x24, 0x0001);
-    let period = Cycles::from_clocks(4 * 256);
+    let period = Cycle::from_clocks(4 * 256);
     assert_eq!(chip.board.next_event(), Some(period));
     chip.run_for(Cycles::from_clocks(period.clocks() - 32));
     assert_eq!(chip.board.level(), InterruptLevel::NONE);
     let run = chip.run_for(Cycles::from_clocks(32));
     assert!(chip.now() >= period);
     assert_eq!(run.stop, Stop::Budget);
-    let six = InterruptLevel::new(6).unwrap();
+    let six = InterruptLevel::try_from(6).unwrap();
     assert_eq!(chip.board.level(), six);
     assert_eq!(
         chip.board.acknowledge(six, chip.now()).answer,
@@ -1143,7 +1221,7 @@ fn the_format_matches_its_golden() {
         )
         .unwrap();
     builder.unwired_peripheral(Fixed);
-    builder.qspi(Selected::default());
+    builder.set_qspi(Selected::default());
     let mut chip = builder.build();
     write_register(&mut chip, SIM + 0x22, 0x0650);
     write_register(&mut chip, SIM + 0x24, 0x0001);
@@ -1154,10 +1232,10 @@ fn the_format_matches_its_golden() {
         "chip",
         &[
             ("chip", state::VERSION),
-            ("cpu", cpu::state::VERSION),
+            ("cpu", mc683xx_cpu32::state::VERSION),
             ("qsm", module(board::QSM)),
             ("gpt", module(board::GPT)),
-            ("stateless", cpu::state::STATELESS_VERSION),
+            ("stateless", mc683xx_cpu32::state::STATELESS_VERSION),
         ],
         &chip.save().unwrap(),
     );
@@ -1174,7 +1252,7 @@ fn a_run_syncs_at_the_next_event() {
         )
         .unwrap();
     let advanced = Rc::new(Cell::new(None));
-    let at = Cycles::from_clocks(1000);
+    let at = Cycle::from_clocks(1000);
     builder.unwired_peripheral(Alarm {
         at,
         advanced: Rc::clone(&advanced),
@@ -1217,6 +1295,148 @@ fn the_watchdog_resets_the_chip_unless_serviced() {
     assert!(chip.cpu().registers.pc >= Address(START));
 }
 
+/// A peripheral that asks the run to stop at every reset but the
+/// power-on reset the build makes.
+#[derive(Debug)]
+struct ResetStopper {
+    /// The chip's stop request.
+    stop: StopRequest,
+    /// The resets it saw.
+    resets: usize,
+}
+
+impl MappedPeripheral for ResetStopper {
+    fn read(&mut self, _: BusCycle) -> Result<u32, BusError> {
+        Ok(0)
+    }
+
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), BusError> {
+        Ok(())
+    }
+
+    fn reset(&mut self, _: Cycle) {
+        self.resets += 1;
+        if self.resets > 1 {
+            self.stop.request();
+        }
+    }
+}
+
+mc683xx_cpu32::unsavable!(ResetStopper, "a reset stopper");
+
+impl Timed for ResetStopper {}
+
+#[test]
+fn a_stop_asked_at_a_reset_in_a_run_ends_it_before_the_next_instruction() {
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(&[NOP], ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    let stop = builder.stop_request();
+    let stopper = builder.unwired_peripheral(ResetStopper { stop, resets: 0 });
+    let mut chip = builder.build();
+    chip.take_events();
+    // the watchdog's time-out, 2^9 EXTAL periods at 256 clocks, resets
+    // the chip within the run
+    let run = chip.run_for(Cycles::from_clocks(2 * 512 * 256));
+    assert_eq!(run.stop, Stop::Requested);
+    let events = chip.take_events();
+    let [
+        Event::Reset {
+            now: reset,
+            cause: ResetCause::Watchdog,
+        },
+    ] = events[..]
+    else {
+        panic!("{events:?}");
+    };
+    assert_eq!(chip.now(), reset, "the run ends at the reset");
+    assert_eq!(
+        chip.cpu().registers.pc,
+        Address(START),
+        "before the first instruction after it"
+    );
+    assert_eq!(chip.peripheral::<ResetStopper>(stopper).unwrap().resets, 2);
+    // the request was taken: the next run goes on
+    let run = chip.run_for(Cycles::from_clocks(100));
+    assert_eq!(run.stop, Stop::Budget);
+}
+
+#[test]
+fn a_stop_asked_at_a_reset_that_halts_ends_the_run_with_the_halt() {
+    // every vector fetch faults: halted out of power-on, then again at
+    // the watchdog's reset, 2^9 EXTAL periods at 256 clocks on
+    let mut builder = Builder::default();
+    builder.peripheral(Faulting, &[ChipSelect::Boot]).unwrap();
+    let stop = builder.stop_request();
+    builder.unwired_peripheral(ResetStopper { stop, resets: 0 });
+    let mut chip = builder.build();
+    chip.take_events();
+    let run = chip.run_for(Cycles::from_clocks(2 * 512 * 256));
+    assert_eq!(run.stop, Stop::Halted(Halt::DoubleBusFault));
+    let events = chip.take_events();
+    let [
+        Event::Reset {
+            now: reset,
+            cause: ResetCause::Watchdog,
+        },
+    ] = events[..]
+    else {
+        panic!("{events:?}");
+    };
+    assert_eq!(chip.now(), reset, "the run ends at the reset");
+    // the request left pending: the next run ends for it at once
+    let run = chip.run_for(Cycles::from_clocks(100));
+    assert_eq!(run, Run::new(Cycles::ZERO, Stop::Requested));
+    let budget = Cycles::from_clocks(100);
+    let run = chip.run_for(budget);
+    assert_eq!(run.stop, Stop::Halted(Halt::DoubleBusFault));
+    assert_eq!(run.cycles, budget);
+}
+
+#[test]
+fn a_stop_asked_at_a_reset_leaves_no_watched_output_to_end_the_next_run() {
+    // PFPAR 0, DDRF bit 0 an output, PORTF bit 0 low (as
+    // a_watched_output_change_ends_the_run); the watchdog's reset puts
+    // PF0 back to an input, high, and asks the run to stop
+    let program = [
+        store_byte(SIM + 0x1f, 0),
+        store_byte(SIM + 0x1d, 1),
+        store_byte(SIM + 0x19, 0),
+    ]
+    .concat();
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(&program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    let stop = builder.stop_request();
+    builder.unwired_peripheral(ResetStopper { stop, resets: 0 });
+    let mut chip = builder.build();
+    let mut watched = OutputStop::default();
+    watched.set_port(Port::F, 1);
+    chip.set_output_stop(watched);
+    let run = chip.run_for(Cycles::from_clocks(1_000));
+    let first = run.cycles;
+    assert_eq!(run.stop, Stop::Budget, "PF0 low ends the run");
+    assert_eq!(chip.outputs(Port::F), PortLevels::new(1, 0));
+    let run = chip.run_for(Cycles::from_clocks(2 * 512 * 256));
+    assert_eq!(run.stop, Stop::Requested, "at the reset");
+    assert_ne!(chip.outputs(Port::F), PortLevels::new(1, 0));
+    // the reset's change was seen with it: the run ends where PF0 goes
+    // low again, as out of power-on
+    let run = chip.run_for(Cycles::from_clocks(1_000));
+    assert_eq!(run.cycles, first);
+    assert_eq!(chip.outputs(Port::F), PortLevels::new(1, 0));
+}
+
 #[test]
 fn a_host_reset_sets_rsr_to_its_cause_alone() {
     // RSR one bit per source (SIMRM 8.2.8)
@@ -1241,11 +1461,11 @@ fn a_test_reset_keeps_the_system_clock() {
     // no CLKRST for the test submodule's reset (SIMRM Table 8-1)
     let (mut chip, _) = booting(&[NOP]);
     write_register(&mut chip, SIM + 0x04, 0xcf00);
-    let fast = chip.sim().clock().frequency();
+    let fast = chip.sim().system_clock().frequency();
     chip.reset_for(ResetCause::Test);
-    assert_eq!(chip.sim().clock().frequency(), fast);
+    assert_eq!(chip.sim().system_clock().frequency(), fast);
     chip.reset_for(ResetCause::LossOfClock);
-    assert_ne!(chip.sim().clock().frequency(), fast);
+    assert_ne!(chip.sim().system_clock().frequency(), fast);
 }
 
 #[test]
@@ -1346,7 +1566,7 @@ fn the_watchdog_resets_a_halted_chip() {
     assert_eq!(run.stop, Stop::Halted(Halt::DoubleBusFault));
     let halted = chip.now();
     assert!(
-        halted < Cycles::from_clocks(10_000),
+        halted < Cycle::from_clocks(10_000),
         "the run ends at the halt"
     );
     chip.take_events();
@@ -1354,7 +1574,7 @@ fn the_watchdog_resets_a_halted_chip() {
     let run = chip.run_for(timeout);
     let events = chip.take_events();
     assert!(
-        matches!(events[..], [Event::Reset { now: at, cause: ResetCause::Watchdog }, ..] if at <= timeout),
+        matches!(events[..], [Event::Reset { now: at, cause: ResetCause::Watchdog }, ..] if at.since_power_on() <= timeout),
         "{events:?}"
     );
     assert_eq!(
@@ -1381,7 +1601,7 @@ fn a_halt_monitor_reset_that_slows_the_clock_ends_the_run() {
         chip.run_for(Cycles::from_clocks(100_000)).stop,
         Stop::Budget
     );
-    assert_eq!(chip.sim().clock().frequency().hz(), 16_777_216);
+    assert_eq!(chip.sim().system_clock().frequency().hz(), 16_777_216);
     chip.take_events();
     let run = chip.run_for(Cycles::from_clocks(100_000));
     let events = chip.take_events();
@@ -1395,7 +1615,7 @@ fn a_halt_monitor_reset_that_slows_the_clock_ends_the_run() {
         )),
         "{events:?}"
     );
-    assert_eq!(chip.sim().clock().frequency().hz(), 8_388_608);
+    assert_eq!(chip.sim().system_clock().frequency().hz(), 8_388_608);
     assert!(
         run.cycles < Cycles::from_clocks(1_000),
         "ends at the reset: {:?}",
@@ -1406,7 +1626,7 @@ fn a_halt_monitor_reset_that_slows_the_clock_ends_the_run() {
 #[test]
 fn iarb_arbitrates_the_sim_qsm_and_gpt_at_one_level() {
     let (mut chip, _) = booting(&[NOP]);
-    let five = InterruptLevel::new(5).unwrap();
+    let five = InterruptLevel::try_from(5).unwrap();
     // the PIT at level 5, vector $42, on the SIM's IARB $F
     write_register(&mut chip, SIM + 0x22, 0x0542);
     write_register(&mut chip, SIM + 0x24, 0x0001);
@@ -1471,14 +1691,14 @@ fn iarb_arbitrates_the_sim_qsm_and_gpt_at_one_level() {
 fn the_reset_instruction_resets_the_peripherals_not_the_sim() {
     let mut board = wired(&[]);
     let chip = &mut board.chip;
-    chip.board.reset_instruction(Cycles::from_clocks(7));
+    chip.board.reset_instruction(Cycle::from_clocks(7));
     assert_eq!(chip.sim().reset_status(), 0x02);
     assert_eq!(chip.sim().chip_selects().base(cs(0)), 0x1004);
     assert_eq!(chip.peripheral::<Recorder>(board.duart).unwrap().resets, 2);
     assert_eq!(
         chip.take_events().last(),
         Some(&Event::Reset {
-            now: Cycles::from_clocks(7),
+            now: Cycle::from_clocks(7),
             cause: ResetCause::System
         })
     );
@@ -1491,10 +1711,10 @@ fn a_faster_clock_keeps_extal_time() {
     write_register(&mut chip, SIM + 0x04, 0xcf00);
     write_register(&mut chip, SIM + 0x22, 0x0650);
     write_register(&mut chip, SIM + 0x24, 0x0008);
-    assert_eq!(chip.sim().clock().frequency().hz(), 16_777_216);
+    assert_eq!(chip.sim().system_clock().frequency().hz(), 16_777_216);
     assert_eq!(
         chip.board.next_event(),
-        Some(Cycles::from_clocks(8 * 4 * 512))
+        Some(Cycle::from_clocks(8 * 4 * 512))
     );
 }
 
@@ -1517,7 +1737,7 @@ fn a_clock_change_can_end_the_run() {
         "after the write: {:?}",
         run.cycles
     );
-    assert_eq!(chip.sim().clock().frequency().hz(), 16_777_216);
+    assert_eq!(chip.sim().system_clock().frequency().hz(), 16_777_216);
     assert!(
         chip.run_for(budget).cycles >= budget,
         "and on, with no change"
@@ -1580,7 +1800,7 @@ fn the_reset_instruction_ends_a_run_watching_reset_from_fast_memory() {
     assert_eq!(
         chip.take_events().last(),
         Some(&Event::Reset {
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
             cause: ResetCause::System
         })
     );
@@ -1621,11 +1841,11 @@ impl SpiPeripheral for Framed {
         0
     }
 
-    fn set_chip_selects(&mut self, levels: u8, _: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, _: Cycle) {
         self.levels.push(levels);
     }
 
-    fn reset(&mut self, _: Cycles) {
+    fn reset(&mut self, _: Cycle) {
         self.resets += 1;
     }
 }
@@ -1650,7 +1870,7 @@ fn two_entries(scope: ResetScope) -> Mc68331 {
             &[ChipSelect::Boot],
         )
         .unwrap();
-    builder.qspi(Framed::default());
+    builder.set_qspi(Framed::default());
     builder.set_qspi_reset_scope(scope);
     let mut chip = builder.build();
     chip.run_for(Cycles::from_clocks(4000));
@@ -1696,7 +1916,7 @@ fn the_firmware_talks_on_the_sci_and_the_qspi() {
             &[ChipSelect::Boot],
         )
         .unwrap();
-    builder.qspi(Selected::default());
+    builder.set_qspi(Selected::default());
     let mut chip = builder.build();
     chip.run_for(Cycles::from_clocks(2000));
     let sent = chip.take_sci_transmitted();
@@ -1741,7 +1961,7 @@ impl SpiPeripheral for Clocked {
         0
     }
 
-    fn set_clock(&mut self, clock: QspiClock, _: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, _: Cycle) {
         self.told.push(clock);
     }
 }
@@ -1756,7 +1976,7 @@ fn the_qspi_peripheral_sees_syncr_in_the_baud() {
             &[ChipSelect::Boot],
         )
         .unwrap();
-    builder.qspi(Clocked::default());
+    builder.set_qspi(Clocked::default());
     let mut chip = builder.build();
     // SYNCR $CF00: 16.78 MHz; SPBR 84: 100 kHz (QSMRM Table 4-3)
     write_register(&mut chip, SIM + 0x04, 0xcf00);
@@ -1767,7 +1987,7 @@ fn the_qspi_peripheral_sees_syncr_in_the_baud() {
     let clocks = &chip.qspi_peripheral::<Clocked>().unwrap().told;
     assert_eq!(clocks.len(), 1);
     assert_eq!(clocks[0].system_clock.hz(), 16_777_216);
-    assert_eq!(clocks[0].baud().hz(), 99_864);
+    assert_eq!(clocks[0].baud().unwrap().hz(), 99_864);
     // the entry's 8 bits at 168 clocks each, and the delays
     chip.run_for(Cycles::from_clocks(4_000));
     let clocked = chip.qspi_peripheral::<Clocked>().unwrap();
@@ -1838,7 +2058,7 @@ fn takes_vector(program: &[u16], vector: u8, level: u8) -> Mc68331 {
     chip.registers_mut().set_sr(0x2000);
     chip.run_for(Cycles::from_clocks(20_000));
     assert_eq!(chip.memory(board.ram)[..2], [0xbe, 0xef], "the handler ran");
-    assert_eq!(chip.cpu().registers.interrupt_mask().get(), level);
+    assert_eq!(u8::from(chip.cpu().registers.interrupt_mask()), level);
     let frame = (chip.cpu().registers.ssp.0 - RAM) as usize;
     let format_vector = &chip.memory(board.ram)[frame + 6..frame + 8];
     assert_eq!(
@@ -1870,7 +2090,7 @@ fn a_gpt_interrupt_reaches_its_handler() {
     program.extend(store_word(GPT + 0x20, 0x0800));
     let chip = takes_vector(&program, 0x64, 4);
     // taken at the compare: TCNT at the system clock / 4
-    assert!(chip.now() >= Cycles::from_clocks(4 * 0x1000));
+    assert!(chip.now() >= Cycle::from_clocks(4 * 0x1000));
 }
 
 /// LPSTOP #$2000 (CPU32RM 4, LPSTOP): low-power stop at mask 0.
@@ -1881,7 +2101,7 @@ fn tcnt(chip: &Mc68331) -> u32 {
     chip.peek(
         Address(GPT + 0x0a),
         Size::Word,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
     )
     .unwrap()
 }
@@ -1911,7 +2131,7 @@ fn in_lpstop_only_the_pit_wakes_and_the_gpt_and_qsm_stop() {
     });
     while chip.sim().low_power().is_none() {
         chip.run_for(Cycles::from_clocks(16));
-        assert!(chip.now() < Cycles::from_clocks(20_000), "never stopped");
+        assert!(chip.now() < Cycle::from_clocks(20_000), "never stopped");
         assert_eq!(chip.cpu().halted(), None);
     }
     let (stopped, counted) = (chip.now(), tcnt(chip));
@@ -1932,7 +2152,10 @@ fn in_lpstop_only_the_pit_wakes_and_the_gpt_and_qsm_stop() {
         assert_eq!(chip.cpu().halted(), None);
     };
     let (woke, vector, level) = taken;
-    assert_eq!((vector, level), (Vector(0x50), InterruptLevel::new(6)));
+    assert_eq!(
+        (vector, level),
+        (Vector(0x50), InterruptLevel::try_from(6).ok())
+    );
     assert!(woke > stopped + Cycles::from_clocks(60_000), "{woke:?}");
     assert_eq!(chip.sim().low_power(), None);
     // TCNT, at the system clock / 4, stood still from the stop to the
@@ -1948,7 +2171,7 @@ fn in_lpstop_only_the_pit_wakes_and_the_gpt_and_qsm_stop() {
 
 /// When the first interrupt of `program`, at mask 0, is taken, the chip
 /// run `budget` clocks at a time.
-fn first_interrupt(program: &[u16], vector: u8, budget: Cycles) -> Cycles {
+fn first_interrupt(program: &[u16], vector: u8, budget: Cycles) -> Cycle {
     let (entry, address) = vector_to_handler(vector);
     let handler = store_word(RAM, 0xbeef);
     let mut board = wired_patched(program, &[(entry, &address), (HANDLER, &handler)]);
@@ -2007,7 +2230,7 @@ fn an_external_clock_board_uses_the_sci_and_the_gpt() {
         )
         .unwrap();
     let mut chip = builder.build();
-    assert_eq!(chip.sim().clock().frequency().hz(), 16_000_000);
+    assert_eq!(chip.sim().system_clock().frequency().hz(), 16_000_000);
     write_register(&mut chip, QSM + 0x08, 52);
     write_register(&mut chip, QSM + 0x0a, 0x0004);
     chip.sci_receive(Frame::Data(0x55));
@@ -2026,8 +2249,9 @@ fn an_external_clock_board_uses_the_sci_and_the_gpt() {
     let tcnt = |chip: &mut Mc68331| cycle(chip, GPT + 0x0a, Size::Word, None).unwrap().0;
     let before = tcnt(&mut chip);
     chip.run_for(Cycles::from_clocks(16 * 100));
-    chip.set_pins(Port::Gp, 0, 1 << 1).unwrap();
-    chip.set_pins(Port::Gp, 0xff, 0xff).unwrap();
+    chip.set_pins(Port::Gp, PortLevels::new(1 << 1, 0)).unwrap();
+    chip.set_pins(Port::Gp, PortLevels::new(0xff, 0xff))
+        .unwrap();
     let captured = cycle(&mut chip, GPT + 0x10, Size::Word, None).unwrap().0;
     assert!(
         captured >= before + 100 && captured <= before + 102,
@@ -2089,7 +2313,7 @@ impl Duart {
 
 impl MappedPeripheral for Duart {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, BusError> {
-        if cycle.function_code.is_cpu_space() {
+        if cycle.function_code == FunctionCode::CpuSpace {
             self.acknowledges.push(cycle);
             return Ok(self.vector.into());
         }
@@ -2105,11 +2329,11 @@ impl MappedPeripheral for Duart {
         Ok(())
     }
 
-    fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
-        Some(if cycle.function_code.is_cpu_space() {
-            self.wait
+    fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
+        Some(if cycle.function_code == FunctionCode::CpuSpace {
+            Cycles::from_clocks(self.wait.into())
         } else {
-            0
+            Cycles::ZERO
         })
     }
 
@@ -2117,7 +2341,7 @@ impl MappedPeripheral for Duart {
         self.mask != 0
     }
 
-    fn reset(&mut self, _: Cycles) {
+    fn reset(&mut self, _: Cycle) {
         *self = Self::new(self.wait);
     }
 }
@@ -2190,7 +2414,7 @@ fn duart_board(wait: u8, protection: Option<u16>) -> (Mc68331, MemoryId, Periphe
     let duart = builder
         .peripheral(Duart::new(wait), &[cs(8), cs(10)])
         .unwrap();
-    builder.set_interrupt(duart, IrqPin::new(2).unwrap());
+    builder.set_interrupt(duart, IrqPin::try_from(2).unwrap());
     let mut chip = builder.build();
     chip.run_for(Cycles::from_clocks(5000));
     (chip, ram, duart)
@@ -2203,7 +2427,7 @@ fn taken_vector(chip: &Mc68331, ram: MemoryId) -> (u16, u8) {
     let format_vector = &chip.memory(ram)[frame + 6..frame + 8];
     (
         u16::from_be_bytes([format_vector[0], format_vector[1]]) / 4,
-        chip.cpu().registers.interrupt_mask().get(),
+        u8::from(chip.cpu().registers.interrupt_mask()),
     )
 }
 
@@ -2219,12 +2443,12 @@ fn a_duart_vectors_its_interrupt_through_a_chip_select() {
     // CPU space type $F, level 2 on ADDR[3:1] (MC68331UM 4.5.4)
     assert_eq!(acknowledge.address, Address(0xff_fff5));
     assert_eq!(acknowledge.size, Size::Byte);
-    assert_eq!(acknowledge.function_code, FunctionCode::CPU_SPACE);
+    assert_eq!(acknowledge.function_code, FunctionCode::CpuSpace);
 }
 
 #[test]
 fn a_duarts_wait_states_at_its_acknowledge_cost_time() {
-    let two = InterruptLevel::new(2).unwrap();
+    let two = InterruptLevel::try_from(2).unwrap();
     let stall = |wait| {
         // the handler leaves the mask at 2 and the DUART requesting
         let (mut chip, _, _) = duart_board(wait, None);
@@ -2244,7 +2468,7 @@ fn a_duarts_wait_states_at_its_acknowledge_cost_time() {
 
 #[test]
 fn a_spurious_acknowledge_costs_the_bus_monitors_period() {
-    let two = InterruptLevel::new(2).unwrap();
+    let two = InterruptLevel::try_from(2).unwrap();
     // the DUART too slow to answer: BME with BMT 16 and 32 clocks
     // (SIMRM 3.2, Table 3-1), less the tables' 2
     for (wait, protection, stall) in [(20, 0x0006, 14), (40, 0x0005, 30)] {
@@ -2331,11 +2555,11 @@ fn the_host_sees_each_port_edge_and_drives_the_inputs() {
     program.extend(load_word(SIM + 0x10, 0));
     program.push(BRANCH_TO_SELF);
     let (mut chip, _) = booting(&program);
-    chip.set_pins(Port::E, 0x00, 0xff).unwrap();
-    chip.set_pins(Port::E, 0x02, 0x02).unwrap();
+    chip.set_pins(Port::E, PortLevels::new(0xff, 0x00)).unwrap();
+    chip.set_pins(Port::E, PortLevels::new(0x02, 0x02)).unwrap();
     assert_eq!(
-        chip.set_pins(Port::C, 0x00, 0xff),
-        Err(NoInputsError(Port::C))
+        chip.set_pins(Port::C, PortLevels::new(0xff, 0x00)),
+        Err(NoInputs(Port::C))
     );
     chip.run_for(Cycles::from_clocks(2000));
     assert_eq!(chip.cpu().registers.data[0] & 0xff, 0x02);
@@ -2383,18 +2607,18 @@ fn gpt_output_edges_keep_their_times_across_quanta() {
     write_register(&mut chip, GPT + 0x26, 0x0001);
     let mut ports = Vec::new();
     let mut pwm = Vec::new();
-    while chip.now() < Cycles::from_clocks(1100) {
+    while chip.now() < Cycle::from_clocks(1100) {
         chip.run_for(Cycles::from_clocks(37));
         ports.extend(chip.take_port_changes());
         pwm.extend(chip.take_pwm_changes());
     }
     let gp = |at, driven, levels| PortChange {
-        now: Cycles::from_clocks(at),
+        now: Cycle::from_clocks(at),
         port: Port::Gp,
         outputs: PortLevels::new(driven, levels),
     };
     let b = |at, level| PwmChange {
-        now: Cycles::from_clocks(at),
+        now: Cycle::from_clocks(at),
         channel: Channel::B,
         level,
     };
@@ -2418,10 +2642,10 @@ fn a_scheduled_gpt_input_edge_is_captured_inside_a_run() {
     let (mut chip, _) = booting(&[NOP]);
     // EDGE1 rising (GPTRM 3.2)
     write_register(&mut chip, GPT + 0x1e, 0x0001);
-    let pgp0 = Input::PortGp(PortGpPin::new(0).unwrap());
-    chip.schedule_gpt_input(Cycles::from_clocks(1001), pgp0, false);
-    chip.schedule_gpt_input(Cycles::from_clocks(2001), pgp0, true);
-    assert_eq!(chip.board.next_event(), Some(Cycles::from_clocks(1001)));
+    let pgp0 = Input::PortGp(PortGpPin::try_from(0).unwrap());
+    chip.schedule_gpt_input(Cycle::from_clocks(1001), pgp0, false);
+    chip.schedule_gpt_input(Cycle::from_clocks(2001), pgp0, true);
+    assert_eq!(chip.board.next_event(), Some(Cycle::from_clocks(1001)));
     chip.run_for(Cycles::from_clocks(5000));
     assert_eq!(
         cycle(&mut chip, GPT + 0x0e, Size::Word, None).unwrap().0,
@@ -2431,7 +2655,7 @@ fn a_scheduled_gpt_input_edge_is_captured_inside_a_run() {
 
 #[test]
 fn set_pins_takes_the_scheduled_gpt_inputs_before_it_merges() {
-    let pgp0 = Input::PortGp(PortGpPin::new(0).unwrap());
+    let pgp0 = Input::PortGp(PortGpPin::try_from(0).unwrap());
     // TFLG1 IC1F (GPTRM 7.1.2.1)
     let ic1f = 0x0100;
     for (value, mask, pins, flags) in [
@@ -2446,7 +2670,8 @@ fn set_pins_takes_the_scheduled_gpt_inputs_before_it_merges() {
         write_register(&mut chip, GPT + 0x1e, 0x0001);
         let now = chip.now();
         chip.schedule_gpt_input(now, pgp0, false);
-        chip.set_pins(Port::Gp, value, mask).unwrap();
+        chip.set_pins(Port::Gp, PortLevels::new(mask, value))
+            .unwrap();
         assert_eq!(chip.port(Port::Gp).pins, pins, "{value:#x} {mask:#x}");
         assert_eq!(
             cycle(&mut chip, GPT + 0x22, Size::Word, None).unwrap().0 & ic1f,
@@ -2507,16 +2732,19 @@ mc683xx_cpu32::unsavable!(Stopper, "a stopper");
 impl Timed for Stopper {}
 
 #[test]
-fn a_write_writes_rom_and_refuses_what_the_core_does_not_serve() {
+fn a_byte_poke_writes_rom_and_refuses_a_modules_register() {
     let (mut chip, _) = booting(&[NOP, NOP]);
-    chip.write(Address(START), &[0x4e, 0x75]).unwrap();
-    assert_eq!(
-        chip.peek(Address(START), Size::Word, FunctionCode::SUPERVISOR_DATA),
-        Ok(0x4e75)
-    );
-    // the SIM's registers are the chip's, not memory the core serves
+    chip.poke_bytes(Address(START), FunctionCode::SupervisorData, &[0x4e, 0x75])
+        .unwrap();
+    let mut read = [0; 2];
+    chip.peek_bytes(Address(START), FunctionCode::SupervisorData, &mut read)
+        .unwrap();
+    assert_eq!(read, [0x4e, 0x75]);
     let simcr = Address(0x00ff_fa00);
-    assert_eq!(chip.write(simcr, &[0]), Err(Unserved(simcr)));
+    assert_eq!(
+        chip.poke_bytes(simcr, FunctionCode::SupervisorData, &[0]),
+        Err(BusCycleError::Unpeekable(simcr))
+    );
 }
 
 /// CSOR for CS0 or CS1: as [`CS1_FAST`], R/W (bits 12:11) reads only
@@ -2559,11 +2787,15 @@ fn a_write_to_write_only_ram_lands_in_it_for_the_firmware_to_read() {
         BRANCH_TO_SELF,
     ]);
     let at = Address(CS0_BASE + offset);
-    chip.write(at, &[0x12, 0x34]).unwrap();
+    chip.poke_bytes(at, FunctionCode::SupervisorData, &[0x12, 0x34])
+        .unwrap();
     assert_eq!(chip.memory(ram)[offset as usize..][..2], [0x12, 0x34]);
-    // the page's reads go to the bus: nothing to read back there
+    // the page's reads reach nothing: nothing to read back there
     let mut read = [0; 2];
-    assert_eq!(chip.read(at, &mut read), Err(Unserved(at)));
+    assert!(
+        chip.peek_bytes(at, FunctionCode::SupervisorData, &mut read)
+            .is_err()
+    );
     // the firmware reads it through the select that reads it
     chip.run_for(Cycles::from_clocks(100));
     assert_eq!(chip.cpu().registers.data[0] & 0xffff, 0x1234);
@@ -2593,11 +2825,12 @@ fn a_write_to_a_page_reading_rom_and_writing_ram_patches_the_rom() {
     write_register(&mut chip, SIM + 0x52, CS_READS_FAST);
     let offset = 0x10;
     let at = CS0_BASE + offset;
-    chip.write(Address(at), &[0x4e, 0x75]).unwrap();
+    chip.poke_bytes(Address(at), FunctionCode::SupervisorData, &[0x4e, 0x75])
+        .unwrap();
     assert_eq!(chip.memory(rom)[offset as usize..][..2], [0x4e, 0x75]);
     assert_eq!(chip.memory(ram)[offset as usize..][..2], [0, 0]);
     assert_eq!(
-        chip.peek(Address(at), Size::Word, FunctionCode::SUPERVISOR_DATA),
+        chip.peek(Address(at), Size::Word, FunctionCode::SupervisorData),
         Ok(0x4e75)
     );
     // the CPU's write still goes to the RAM
@@ -2626,41 +2859,24 @@ fn a_write_to_a_page_reading_a_peripheral_and_writing_ram_lands_in_the_ram() {
     write_register(&mut chip, SIM + 0x50, CS0_BAR);
     write_register(&mut chip, SIM + 0x52, CS_READS_FAST);
     let at = Address(CS0_BASE);
-    chip.write(at, &[0xab]).unwrap();
+    chip.poke_bytes(at, FunctionCode::SupervisorData, &[0xab])
+        .unwrap();
     assert_eq!(chip.memory(ram)[0], 0xab);
-    let mut read = [0; 1];
-    assert_eq!(chip.read(at, &mut read), Err(Unserved(at)));
 }
 
 #[test]
-fn a_write_to_a_peripheral_is_unserved() {
-    let (mut chip, _, _) = with_peripheral(&[NOP], |_| Counter::default());
-    let at = Address(CS1_BASE);
-    assert_eq!(chip.write(at, &[1]), Err(Unserved(at)));
-}
-
-#[test]
-fn a_read_reads_rom_and_refuses_what_the_core_does_not_serve() {
-    let (mut chip, _) = booting(&[NOP, NOP]);
-    chip.write(Address(START), &[0x4e, 0x75]).unwrap();
-    let mut read = [0; 2];
-    chip.read(Address(START), &mut read).unwrap();
-    assert_eq!(read, [0x4e, 0x75]);
-    let simcr = Address(0x00ff_fa00);
-    assert_eq!(chip.read(simcr, &mut read), Err(Unserved(simcr)));
-}
-
-#[test]
-fn a_read_and_a_write_cross_pages() {
+fn a_byte_peek_and_poke_cross_pages() {
     let (mut chip, _) = booting(&[NOP, NOP]);
     let bytes: Vec<u8> = (0..3 * PAGE_BYTES).map(|at| at as u8 ^ 0x5a).collect();
-    chip.write(Address(START), &bytes).unwrap();
+    chip.poke_bytes(Address(START), FunctionCode::SupervisorData, &bytes)
+        .unwrap();
     let mut read = vec![0; bytes.len()];
-    chip.read(Address(START), &mut read).unwrap();
+    chip.peek_bytes(Address(START), FunctionCode::SupervisorData, &mut read)
+        .unwrap();
     assert_eq!(read, bytes);
     let last = START + 3 * PAGE_BYTES - 2;
     assert_eq!(
-        chip.peek(Address(last), Size::Word, FunctionCode::SUPERVISOR_DATA),
+        chip.peek(Address(last), Size::Word, FunctionCode::SupervisorData),
         Ok(u32::from(u16::from_be_bytes([
             bytes[bytes.len() - 2],
             bytes[bytes.len() - 1]
@@ -2678,7 +2894,7 @@ fn a_hook_stops_the_chip_run() {
     let run = chip.run_for(Cycles::from_clocks(10_000));
     assert_eq!(run.stop, Stop::Hook(id));
     assert_eq!(chip.cpu().registers.pc.0, START + 2);
-    assert!(chip.now() < Cycles::from_clocks(10_000));
+    assert!(chip.now() < Cycle::from_clocks(10_000));
     // On past it.
     assert_eq!(chip.run_for(Cycles::from_clocks(100)).stop, Stop::Budget);
 }
@@ -2739,7 +2955,7 @@ fn a_request_the_host_moves_between_runs_is_seen() {
     // a stack the peripheral takes the frame's writes on
     chip.registers_mut().ssp = Address(CS1_BASE + 0x1000);
     chip.set_tracing(ChipTracing {
-        accesses: false,
+        bus_cycles: false,
         exceptions: true,
     });
     chip.run_for(Cycles::from_clocks(100));
@@ -2748,7 +2964,7 @@ fn a_request_the_host_moves_between_runs_is_seen() {
     assert!(
         chip.take_events().iter().any(|event| matches!(
             event,
-            Event::Exception { entry, .. } if entry.level == Some(seven.level())
+            Event::Exception { entry, .. } if entry.level == Some(InterruptLevel::from(seven))
         )),
         "level 7 taken"
     );
@@ -2807,7 +3023,7 @@ struct Horizons {
     /// The chip's handle.
     horizon: OutputHorizon,
     /// What it held at the last cycle, if one came.
-    seen: Rc<Cell<Option<Option<Cycles>>>>,
+    seen: Rc<Cell<Option<Option<Cycle>>>>,
 }
 
 impl MappedPeripheral for Horizons {
@@ -2833,7 +3049,7 @@ fn horizons(
     setup: fn(&mut Mc68331),
     stop: OutputStop,
     publish: bool,
-) -> (Mc68331, Rc<Cell<Option<Option<Cycles>>>>) {
+) -> (Mc68331, Rc<Cell<Option<Option<Cycle>>>>) {
     let mut builder = Builder::default();
     builder
         .memory(
@@ -2858,7 +3074,7 @@ fn horizons(
 }
 
 /// What a read of CS1 at the chip's time sees as its horizon.
-fn horizon_seen(chip: &mut Mc68331, seen: &Cell<Option<Option<Cycles>>>) -> Option<Cycles> {
+fn horizon_seen(chip: &mut Mc68331, seen: &Cell<Option<Option<Cycle>>>) -> Option<Cycle> {
     cycle(chip, CS1_BASE, Size::Word, None).unwrap();
     seen.take().expect("a cycle")
 }
@@ -2880,7 +3096,7 @@ fn a_peripheral_learns_when_a_watched_output_may_next_change() {
     let (mut chip, seen) = horizons(compare, pgp4, true);
     assert_eq!(
         horizon_seen(&mut chip, &seen),
-        Some(Cycles::from_clocks(4 * 0x10))
+        Some(Cycle::from_clocks(4 * 0x10))
     );
     // PF0 an output driven low (MC68331UM D.3.11): the change is the
     // host's after the instruction, so now
@@ -2893,7 +3109,7 @@ fn a_peripheral_learns_when_a_watched_output_may_next_change() {
 #[test]
 fn a_reported_pwm_edge_bounds_the_output_horizon() {
     let mut pwm_b = OutputStop::default();
-    pwm_b.pwm_b = true;
+    pwm_b.set_pwm(Channel::B, true);
     // PWMB $01: high for 2 of every 512 clocks from 512, no event marking
     // its edges
     let duty = |chip: &mut Mc68331| write_register(chip, GPT + 0x26, 0x0001);
@@ -2901,13 +3117,17 @@ fn a_reported_pwm_edge_bounds_the_output_horizon() {
     // the SIM's next event, the watchdog's out of reset, alone
     let modules = horizon_seen(&mut chip, &seen);
     assert!(
-        modules > Some(Cycles::from_clocks(512)),
+        modules > Some(Cycle::from_clocks(512)),
         "edges not reported"
     );
     chip.set_report_pwm_edges(Channel::B, true);
     assert_eq!(
         horizon_seen(&mut chip, &seen),
-        Some(Cycles::from_clocks(512))
+        Some(Cycle::from_clocks(512))
+    );
+    assert_eq!(
+        chip.pwm_level(Channel::B),
+        chip.gpt().pwm_level(Channel::B, chip.now())
     );
 }
 
@@ -2923,13 +3143,13 @@ fn tracing_reports_peripheral_cycles_and_exceptions() {
     chip.registers_mut().ssp = Address(CS1_BASE + 0x1000);
     chip.take_events();
     chip.set_tracing(ChipTracing {
-        accesses: true,
+        bus_cycles: true,
         exceptions: true,
     });
     let before = chip.instructions();
     chip.run_for(Cycles::from_clocks(2000));
     let events = chip.take_events();
-    let Some(&Event::Access {
+    let Some(&Event::BusCycle {
         address,
         write,
         value,
@@ -2939,7 +3159,7 @@ fn tracing_reports_peripheral_cycles_and_exceptions() {
         panic!("an access first: {events:?}");
     };
     assert_eq!(address, Address(CS1_BASE + 2));
-    assert_eq!((write, value), (false, Some(0x1234)));
+    assert_eq!((write, value), (false, 0x1234));
     assert!(events.iter().any(|event| matches!(
         event,
         Event::Exception { entry, .. }
@@ -2956,7 +3176,7 @@ fn tracing_reports_peripheral_cycles_and_exceptions() {
 #[derive(Debug)]
 struct StopAt {
     /// When, until it has.
-    at: Option<Cycles>,
+    at: Option<Cycle>,
     /// The chip's stop request.
     stop: StopRequest,
 }
@@ -2974,11 +3194,11 @@ impl MappedPeripheral for StopAt {
 mc683xx_cpu32::unsavable!(StopAt, "a stopper");
 
 impl Timed for StopAt {
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         self.at
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         if self.at.is_some_and(|at| now >= at) {
             self.at = None;
             self.stop.request();
@@ -2998,13 +3218,13 @@ fn a_model_stops_the_run_between_quanta() {
         .unwrap();
     let stop = builder.stop_request();
     builder.unwired_peripheral(StopAt {
-        at: Some(Cycles::from_clocks(1000)),
+        at: Some(Cycle::from_clocks(1000)),
         stop,
     });
     let mut chip = builder.build();
     let run = chip.run_for(Cycles::from_clocks(10_000));
     assert_eq!(run.stop, Stop::Requested);
-    assert!(chip.now() >= Cycles::from_clocks(1000) && chip.now() < Cycles::from_clocks(1100));
+    assert!(chip.now() >= Cycle::from_clocks(1000) && chip.now() < Cycle::from_clocks(1100));
 }
 
 /// A peripheral that reads as a count of its reads, which it saves.
@@ -3082,7 +3302,7 @@ fn copying_with(more: impl FnOnce(&mut Builder)) -> (Mc68331, MemoryId, Peripher
     write_register(&mut chip, SIM + 0x4e, CS1_FAST);
     write_register(&mut chip, SIM + 0x50, CS1_BAR);
     write_register(&mut chip, SIM + 0x52, CS1_FAST);
-    chip.registers_mut().set_address(0, CS0_BASE);
+    chip.registers_mut().set_register(Register::A0, CS0_BASE);
     chip.registers_mut().data[0] = 9;
     (chip, ram, counter)
 }
@@ -3090,7 +3310,7 @@ fn copying_with(more: impl FnOnce(&mut Builder)) -> (Mc68331, MemoryId, Peripher
 /// The trace of `budget` clocks, and what the run leaves.
 fn traced(chip: &mut Mc68331, ram: MemoryId, budget: u64) -> (Vec<Event>, Vec<u8>, Vec<u8>) {
     chip.set_tracing(ChipTracing {
-        accesses: true,
+        bus_cycles: true,
         exceptions: true,
     });
     chip.take_events();
@@ -3202,7 +3422,7 @@ fn a_snapshot_of_fixed_memories_elsewhere_is_refused_and_changes_nothing() {
     let at = |base: u32| {
         copying_with(|builder| {
             builder
-                .fixed_memory(Address(base), vec![0; 64 << 10], MemoryKind::Ram)
+                .fixed_memory(vec![0; 64 << 10], MemoryKind::Ram, Address(base))
                 .unwrap();
         })
         .0
@@ -3249,7 +3469,7 @@ fn a_restore_rebuilds_the_page_tables_from_the_chips_own_wiring() {
         chip
     };
     let pages = |chip: &Mc68331| {
-        [CS0_BASE, CS1_BASE].map(|base| chip.cpu().memory.entry(Space::Supervisor, Address(base)))
+        [CS0_BASE, CS1_BASE].map(|base| chip.cpu().memory.page(Space::Supervisor, Address(base)))
     };
     let chip = wired(0, 1);
     let snapshot = chip.save().unwrap();
@@ -3381,7 +3601,7 @@ impl SpiPeripheral for Tally {
 
 /// [`copying`]'s board with a [`Tally`] of `count` on the QSPI.
 fn tallying(count: u16) -> (Mc68331, MemoryId, PeripheralId) {
-    copying_with(|builder| builder.qspi(Tally(count)))
+    copying_with(|builder| builder.set_qspi(Tally(count)))
 }
 
 /// The count of the [`Tally`] on `chip`'s QSPI.
@@ -3422,7 +3642,7 @@ fn a_qspi_peripheral_that_cannot_save_fails_the_save_and_restore_naming_it() {
 
     let (saving, _, _) = tallying(0);
     let snapshot = saving.save().unwrap();
-    let (mut unsaving, _, _) = copying_with(|builder| builder.qspi(Unsaving));
+    let (mut unsaving, _, _) = copying_with(|builder| builder.set_qspi(Unsaving));
     let unsupported =
         StateError::unsupported("an unsaving model").of_peripheral("the QSPI peripheral");
     assert_eq!(
@@ -3520,11 +3740,11 @@ fn a_module_that_cannot_save_refuses_the_snapshot() {
             None
         }
 
-        fn acknowledge(&mut self, _: InterruptLevel, _: Cycles) -> Option<Vector> {
+        fn acknowledge(&mut self, _: InterruptLevel, _: Cycle) -> Option<Vector> {
             None
         }
 
-        fn reset(&mut self, _: Cycles) {}
+        fn reset(&mut self, _: Cycle) {}
 
         fn save(&self) -> Result<Vec<u8>, StateError> {
             Err(StateError::unsupported("a module"))
@@ -3609,7 +3829,7 @@ fn interrupt_trace() -> Wired {
 
 /// The D0 values [`interrupt_trace`] logged.
 fn trace_log(board: &Wired) -> Vec<u32> {
-    let end = (board.chip.cpu().registers.address(0) - RAM) as usize;
+    let end = (board.chip.cpu().registers.register(Register::A0) - RAM) as usize;
     board.chip.memory(board.ram)[(TRACE_LOG - RAM) as usize..end]
         .chunks(4)
         .map(|long| u32::from_be_bytes([long[0], long[1], long[2], long[3]]))
@@ -3676,7 +3896,7 @@ fn new_code_runs_however_the_host_writes_it() {
     chip.bus_write(
         Address(START),
         Size::Word,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
         moveq_to_d0(2).into(),
     )
     .unwrap();
@@ -3724,7 +3944,7 @@ fn a_pin_wired_twice_is_named_as_the_manual_names_it() {
 
 /// When the GPT's OC1 interrupt, armed before LPSTOP and due after the
 /// PIT wakes the chip, is taken, the chip run `budget` clocks at a time.
-fn oc1_after_wake(budget: Cycles) -> Cycles {
+fn oc1_after_wake(budget: Cycles) -> Cycle {
     let mut program: Vec<u16> = Vec::new();
     // the watchdog off; the GPT at IARB 6, level 4, vectors from $60;
     // OC1 at TCNT + $80 with OC1I (GPTRM 3.2, 4.3); the PIT at level 6,
@@ -3833,7 +4053,7 @@ fn a_stop_asked_in_an_instruction_that_also_syncs_is_kept() {
 /// What port QS drives, change by change, while firmware toggles PQS1
 /// with a delay loop between, the watchdog off, run to 20,000 clocks
 /// `step` at a time.
-fn port_qs_toggles(step: u64) -> Vec<(Cycles, PortLevels)> {
+fn port_qs_toggles(step: u64) -> Vec<(Cycle, PortLevels)> {
     let mut program: Vec<u16> = Vec::new();
     // the watchdog off; PQSPAR all general-purpose, DDRQS PQS1 an
     // output (QSMRM 3.3.2, 3.3.3)
@@ -3856,7 +4076,7 @@ fn port_qs_toggles(step: u64) -> Vec<(Cycles, PortLevels)> {
     let (mut chip, _) = booting(&program);
     let mut changes = Vec::new();
     for target in (step..=20_000).step_by(step as usize) {
-        chip.run_until(Cycles::from_clocks(target));
+        chip.run_until(Cycle::from_clocks(target));
         changes.extend(
             chip.take_port_changes()
                 .into_iter()
@@ -3882,4 +4102,121 @@ fn port_qs_changes_keep_their_times_however_the_run_is_cut() {
     );
     assert!(whole.windows(2).all(|pair| pair[0].0 < pair[1].0));
     assert_eq!(port_qs_toggles(7), whole);
+}
+
+/// MOVE.W $000001,D0: an address error (CPU32RM 6.2.4).
+const ODD_LOAD: [u16; 3] = [MOVE_WORD_FROM_ABSOLUTE, 0, 1];
+
+/// A chip booting `program`, and its stop request.
+fn booting_with_stop(program: &[u16]) -> (Mc68331, StopRequest) {
+    let mut builder = Builder::default();
+    builder
+        .memory(
+            image(program, ROM_BYTES),
+            MemoryKind::Rom,
+            &[ChipSelect::Boot],
+        )
+        .unwrap();
+    let stop = builder.stop_request();
+    (builder.build(), stop)
+}
+
+/// Asserts that the chip's next run ends [`Stop::Requested`] at once,
+/// before its first instruction, no time passing, the request taken.
+fn ends_at_once(chip: &mut Mc68331, stop: &StopRequest) {
+    let before = chip.instructions();
+    let now = chip.now();
+    let pc = chip.cpu().registers.pc;
+    let run = chip.run_for(Cycles::from_clocks(10_000));
+    assert_eq!(run, Run::new(Cycles::ZERO, Stop::Requested));
+    assert_eq!(chip.instructions(), before);
+    assert_eq!(chip.now(), now);
+    assert_eq!(chip.cpu().registers.pc, pc);
+    assert!(!stop.pending(), "taken");
+}
+
+#[test]
+fn a_stop_left_between_runs_ends_the_next_at_once() {
+    let (mut chip, stop) = booting_with_stop(&[NOP; 8]);
+    stop.request();
+    ends_at_once(&mut chip, &stop);
+    assert_eq!(chip.run_for(Cycles::from_clocks(10)).stop, Stop::Budget);
+}
+
+#[test]
+fn a_stop_left_between_runs_ends_a_halted_chip_s_next_at_once() {
+    let mut builder = Builder::default();
+    builder.peripheral(Faulting, &[ChipSelect::Boot]).unwrap();
+    let stop = builder.stop_request();
+    let mut chip = builder.build();
+    assert!(chip.cpu().halted().is_some());
+    stop.request();
+    ends_at_once(&mut chip, &stop);
+}
+
+#[test]
+fn a_stop_asked_where_a_hook_stops_the_run_stays_pending() {
+    let (mut chip, stop) = booting_with_stop(&[NOP, NOP, NOP, NOP]);
+    let at = Address(START + 2);
+    let asking = stop.clone();
+    let id = chip.cpu_control().add_code_hook(at..=at, move |_| {
+        asking.request();
+        ControlFlow::Break(())
+    });
+    assert_eq!(
+        chip.run_for(Cycles::from_clocks(10_000)).stop,
+        Stop::Hook(id)
+    );
+    assert!(stop.pending());
+    chip.cpu_control().remove_hook(id);
+    ends_at_once(&mut chip, &stop);
+}
+
+#[test]
+fn a_stop_asked_in_an_instruction_that_faults_stays_pending() {
+    let (mut chip, stop) = booting_with_stop(&[ODD_LOAD, [NOP; 3]].concat());
+    let at = Address(START);
+    let asking = stop.clone();
+    chip.cpu_control().add_code_hook(at..=at, move |_| {
+        asking.request();
+        ControlFlow::Continue(())
+    });
+    chip.cpu_control().set_stop_on_fault(true);
+    assert_eq!(chip.run_for(Cycles::from_clocks(10_000)).stop, Stop::Fault);
+    assert!(stop.pending());
+}
+
+#[test]
+fn a_stop_asked_in_an_instruction_an_exception_stop_ends_stays_pending() {
+    // the address error's exception stops the run, reported as a
+    // request, but not the host's: its request stays
+    let (mut chip, stop) = booting_with_stop(&[ODD_LOAD, [NOP; 3]].concat());
+    let at = Address(START);
+    let asking = stop.clone();
+    chip.cpu_control().add_code_hook(at..=at, move |_| {
+        asking.request();
+        ControlFlow::Continue(())
+    });
+    chip.cpu
+        .set_stop_on_exception(VectorSet::NONE.with(Vector::ADDRESS_ERROR));
+    let run = chip.run_for(Cycles::from_clocks(10_000));
+    assert_eq!(run.stop, Stop::Requested);
+    assert_eq!(chip.cpu().registers.pc.0, START, "nothing stacked");
+    assert!(stop.pending());
+    ends_at_once(&mut chip, &stop);
+}
+
+#[test]
+fn a_stop_asked_by_a_peripheral_in_an_instruction_that_faults_stays_pending() {
+    // MOVE.W (CS1_BASE).L,($000001).L: the read asks, the write faults
+    let program = [0x33f9, (CS1_BASE >> 16) as u16, CS1_BASE as u16, 0, 1];
+    let mut kept = None;
+    let (mut chip, _, _) = with_peripheral(&program, |stop| {
+        kept = Some(stop.clone());
+        OnesStopper(stop)
+    });
+    let stop = kept.unwrap();
+    chip.cpu_control().set_stop_on_fault(true);
+    assert_eq!(chip.run_for(Cycles::from_clocks(10_000)).stop, Stop::Fault);
+    assert!(stop.pending());
 }

@@ -2,14 +2,15 @@ use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
 
-use mc683xx_cpu32::cpu::state::Layer;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode_layer;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cpu::state::encode_layer;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
-use mc683xx_mc68331::port::Port;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::state::Layer;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode_layer;
+use mc683xx_cpu32::state::encode;
+use mc683xx_cpu32::state::encode_layer;
+use mc683xx_mc68331::Port;
 
 use super::Board;
 use super::BoardState;
@@ -19,16 +20,16 @@ use crate::builtin::Divider;
 use crate::builtin::EdgeCounter;
 use crate::description::Description;
 use crate::description::Options;
+use crate::environment::Environment;
 use crate::mc68331::Pin;
 use crate::mc68331::PortPin;
 use crate::peripheral::Peripheral;
-use crate::registry::Environment;
 use crate::registry::Registry;
 use crate::signal::Signal;
 use crate::time::Time;
 use crate::time::TimeBase;
 use crate::wiring::QspiState;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 /// A board of a clock divided onto an edge counter, its ROM empty;
 /// the counter restores before the divider.
@@ -164,7 +165,7 @@ fn a_state_no_run_could_save_is_refused() {
         ),
         (
             edited(&snapshot, |state| {
-                state.base = TimeBase::new(Cycles::ZERO, Time::ZERO, Frequency::from_nanohertz(0));
+                state.base = TimeBase::new(Cycle::ZERO, Time::ZERO, Frequency::from_nanohertz(0));
             }),
             StateError::invalid("the system clock's frequency"),
         ),
@@ -282,4 +283,16 @@ fn a_refusing_peripheral_is_not_rolled_back_and_the_ones_before_it_are() {
     );
     assert_eq!(restores.get(), 1, "asked once, not to take its backup");
     assert_eq!(board.save().unwrap(), before);
+}
+
+#[test]
+fn a_chip_level_stop_request_ends_the_board_s_run() {
+    let mut board = divided();
+    let now = board.now();
+    board.shared.chip_stop.request();
+    let run = board.run_until(Time::from_picos(2_000_000)).unwrap();
+    assert_eq!((run.stop, run.now), (Stop::Requested, now), "at once");
+    assert!(!board.shared.chip_stop.pending(), "taken");
+    let run = board.run_until(Time::from_picos(2_000_000)).unwrap();
+    assert_eq!(run.stop, Stop::Budget);
 }

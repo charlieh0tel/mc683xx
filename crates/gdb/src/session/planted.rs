@@ -18,8 +18,8 @@
 //! then uncertain, its word BGND, the original or a mix of their bytes,
 //! and is put back from any of these.
 
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 
 use super::Session;
 use crate::target::AccessError;

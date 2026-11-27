@@ -6,23 +6,23 @@ use std::cell::RefCell;
 use std::io;
 use std::rc::Rc;
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::memory::MemoryKind;
+use mc683xx_gdb::Bdm;
 use mc683xx_gdb::Ending;
 use mc683xx_gdb::SessionError;
-use mc683xx_gdb::bdm::Bdm;
 use mc683xx_gdb::serve;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::debug::TargetError;
+use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_mc68331::TargetError;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
-use mc683xx_target::size::Size;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
 use wire::Send;
 use wire::Wire;
 use wire::bytes;
@@ -91,7 +91,9 @@ impl Cpu32Target for Running {
     fn halted(&mut self) -> Result<Option<Entry>, TargetError> {
         if Cpu32Target::halted(&mut self.0)?.is_none() {
             if let Some((at, word)) = self.3.take() {
-                self.0.write(Address(at), &word).unwrap();
+                self.0
+                    .poke_bytes(Address(at), FunctionCode::SupervisorData, &word)
+                    .unwrap();
             }
             self.0.run_for(LOOK);
         }
@@ -175,7 +177,7 @@ fn chip() -> Running {
         .memory(rom, MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), ram, MemoryKind::Ram)
+        .fixed_memory(ram, MemoryKind::Ram, Address(RAM))
         .unwrap();
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
@@ -204,7 +206,7 @@ fn word(target: &mut Running, address: u32) -> [u8; 2] {
         .read_memory(
             Address(address),
             Size::Word,
-            FunctionCode::SUPERVISOR_DATA,
+            FunctionCode::SupervisorData,
             &mut word,
         )
         .unwrap();
@@ -303,7 +305,7 @@ fn monitor_sets_the_function_code_and_resets() {
         &mut target,
         vec![
             packet("s"),
-            packet(&format!("qRcmd,{}", hex("fc 6"))),
+            packet(&format!("qRcmd,{}", hex("fc Supervisor-Program"))),
             packet(&format!("qRcmd,{}", hex("fc 9"))),
             packet(&format!("qRcmd,{}", hex("reset"))),
             packet("g"),
@@ -316,22 +318,22 @@ fn monitor_sets_the_function_code_and_resets() {
             .iter()
             .any(|reply| *reply == format!("O{}", hex(text)))
     };
-    assert!(said("fc 6\n"));
-    assert!(said("fc takes a function code, 0 to 7\n"));
+    assert!(said("fc supervisor-program (6)\n"));
+    assert!(said("fc takes a function code: a name or 0 to 7\n"));
     assert_eq!(registers(replies.last().unwrap())[PC], START, "reset");
 }
 
 #[test]
-fn a_session_lost_while_running_halts_and_cleans_up() {
+fn a_hang_up_while_running_halts_and_cleans_up() {
     // a breakpoint the program never reaches, then a continue, then
-    // nothing: the connection ends with the target running
+    // nothing: gdb hangs up with the target running
     let mut target = chip();
     let never = START + 0x40;
     let (ending, _) = session(
         &mut target,
         vec![packet(&format!("Z0,{never:x},2")), packet("c")],
     );
-    assert!(matches!(ending, Err(SessionError::Connection { .. })));
+    assert_eq!(ending.unwrap(), Ending::HungUp);
     assert!(
         Cpu32Target::halted(&mut target.0).unwrap().is_some(),
         "halted"
@@ -438,16 +440,16 @@ fn a_breakpoint_the_program_wrote_over_is_the_program_s() {
 /// a module of its own, where the stub's `Target` does not shadow the
 /// chip's `Cpu32Target`.
 mod unsteppable {
-    use mc683xx_cpu32::cycles::Cycles;
-    use mc683xx_gdb::bdm::Bdm;
-    use mc683xx_gdb::target::AccessError;
-    use mc683xx_gdb::target::Target;
-    use mc683xx_gdb::target::TargetRun;
-    use mc683xx_mc68331::debug::TargetError;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::register::Register;
-    use mc683xx_target::register::SystemRegister;
+    use mc683xx_cpu32::Cycles;
+    use mc683xx_gdb::AccessError;
+    use mc683xx_gdb::Bdm;
+    use mc683xx_gdb::Target;
+    use mc683xx_gdb::TargetRun;
+    use mc683xx_mc68331::TargetError;
+    use mc683xx_target::Address;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Register;
+    use mc683xx_target::SystemRegister;
 
     use super::Running;
 
@@ -624,11 +626,26 @@ fn uncleaned(ending: Vec<Send>) -> SessionError<TargetError, io::Error> {
 }
 
 #[test]
-fn a_lost_session_that_cannot_put_a_breakpoint_back_reports_both() {
-    let error = uncleaned(Vec::new());
+fn a_failed_connection_that_cannot_put_a_breakpoint_back_reports_both() {
+    let error = uncleaned(vec![Send::Fail]);
     assert!(
         matches!(error, SessionError::Connection { .. }),
         "{error:?}"
+    );
+}
+
+#[test]
+fn a_hang_up_that_cannot_put_a_breakpoint_back_reports_it() {
+    let mut target = chip();
+    target.2 = Some(STORE_PC);
+    let (ending, _) = session(&mut target, vec![packet(&format!("Z0,{STORE_PC:x},2"))]);
+    assert!(
+        matches!(&ending, Err(SessionError::Unrestored(at)) if *at == [Address(STORE_PC)]),
+        "{ending:?}"
+    );
+    assert!(
+        Cpu32Target::halted(&mut target.0).unwrap().is_some(),
+        "not resumed"
     );
 }
 

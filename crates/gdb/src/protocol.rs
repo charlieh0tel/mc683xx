@@ -5,8 +5,10 @@ use std::fmt::Display;
 
 use gdbstub::arch::Arch;
 use gdbstub::conn::ConnectionExt;
+use gdbstub::stub::DisconnectReason;
 use gdbstub::stub::GdbStubError;
 
+use crate::Ending;
 use crate::SessionError;
 use crate::arch::Cpu32;
 use crate::connection::Connection;
@@ -56,21 +58,29 @@ impl<C: Connection> ConnectionExt for Adapted<C> {
     }
 }
 
-/// gdbstub's error as ours.
-pub(crate) fn failure<E: Display, C: Display>(error: GdbStubError<E, C>) -> SessionError<E, C> {
+/// How gdbstub's session on a `C` ended, as ours: gdb's detach or
+/// kill, gdb hanging up, or gdbstub's error as ours.
+pub(crate) fn ended<E: Display, C: Connection>(
+    served: Result<DisconnectReason, GdbStubError<E, C::Error>>,
+) -> Result<Ending, SessionError<E, C::Error>> {
+    let error = match served {
+        Ok(DisconnectReason::Kill) => return Ok(Ending::Killed),
+        Ok(_) => return Ok(Ending::Detached),
+        Err(error) => error,
+    };
     let text = error.to_string();
     if error.is_connection_error() {
-        return error
-            .into_connection_error()
-            .map_or(SessionError::Protocol(text), |(error, _)| {
-                SessionError::Connection { error }
-            });
+        return match error.into_connection_error() {
+            Some((error, _)) if C::hung_up(&error) => Ok(Ending::HungUp),
+            Some((error, _)) => Err(SessionError::Connection { error }),
+            None => Err(SessionError::Protocol(text)),
+        };
     }
-    error
+    Err(error
         .into_target_error()
         .map_or(SessionError::Protocol(text), |error| SessionError::Target {
             error,
-        })
+        }))
 }
 
 /// `length` bytes of the architecture's description at `offset`, into

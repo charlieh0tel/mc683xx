@@ -3,12 +3,17 @@
 //! module keeps, the cycles a peripheral on no select decodes, and the
 //! QSPI's peripherals.
 
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use std::any::Any;
+
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
+use mc683xx_cpu32::peripheral::MappedPeripheral;
+use mc683xx_cpu32::state::Save;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 
 /// An interrupt acknowledge's CPU-space address but the level in
 /// ADDR\[3:1\]: every other line set (MC68331UM 4.7.4, Figure 4-19).
@@ -18,8 +23,8 @@ const IACK_LEVEL_SHIFT: u32 = 1;
 
 /// The address of an interrupt acknowledge cycle at `level`.
 #[must_use]
-pub const fn iack_address(level: InterruptLevel) -> Address {
-    Address(IACK_ADDRESS | (level.get() as u32) << IACK_LEVEL_SHIFT)
+pub fn iack_address(level: InterruptLevel) -> Address {
+    Address(IACK_ADDRESS | u32::from(u8::from(level)) << IACK_LEVEL_SHIFT)
 }
 
 /// The cycles a peripheral on no chip select takes by its own decode of
@@ -50,7 +55,7 @@ impl BusDecode {
                 function_code.is_memory_space() && address.0.wrapping_sub(base.0) < length
             }
             Self::Acknowledge(pin) => {
-                function_code.is_cpu_space() && address == iack_address(pin.level())
+                function_code == FunctionCode::CpuSpace && address == iack_address(pin.into())
             }
         }
     }
@@ -64,14 +69,26 @@ impl BusDecode {
 /// own.
 pub trait Timed {
     /// When it next changes on its own, if it will.
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         None
     }
     /// Brings it to `now`.
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         let _ = now;
     }
 }
+
+/// A mapped peripheral the chip holds, which the host can get back by
+/// type (`mc683xx-mc68331`'s `Builder::peripheral`, `bus_peripheral`
+/// and `unwired_peripheral` name it as their bound).  It keeps its own
+/// time ([`Timed`]) and says whether it saves ([`Save`]): the chip's
+/// snapshot holds it.
+///
+/// Every [`MappedPeripheral`] that is [`Timed`], [`Save`] and `'static`
+/// is one: a host implements those three, never this.
+pub trait AnyMappedPeripheral: MappedPeripheral + Timed + Save + Any {}
+
+impl<T: MappedPeripheral + Timed + Save + Any> AnyMappedPeripheral for T {}
 
 /// SCK's level between transfers (QSMRM 4.3.1, CPOL).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -108,7 +125,7 @@ pub struct QspiClock {
     /// System clocks in an SCK period, 2 x SPBR (QSMRM equation 4-1).
     pub period: Cycles,
     /// The system clock's frequency (MC68331UM 4.3).
-    #[serde(with = "mc683xx_cpu32::frequency::hertz")]
+    #[serde(with = "mc683xx_cpu32::hertz")]
     pub system_clock: Frequency,
 }
 
@@ -131,10 +148,18 @@ impl QspiClock {
     }
 
     /// SCK's frequency, the system clock / (2 x SPBR) (QSMRM equation
-    /// 4-1), rounded down.
+    /// 4-1), rounded down; `None` for a zero period, which the QSM never
+    /// tells (it stops its baud rate generator below SPBR 2).
     #[must_use]
-    pub const fn baud(self) -> Frequency {
-        Frequency::from_nanohertz(self.system_clock.nanohertz() / self.period.clocks())
+    pub const fn baud(self) -> Option<Frequency> {
+        match self
+            .system_clock
+            .nanohertz()
+            .checked_div(self.period.clocks())
+        {
+            Some(nanohertz) => Some(Frequency::from_nanohertz(nanohertz)),
+            None => None,
+        }
     }
 }
 
@@ -170,14 +195,14 @@ pub struct QspiTransfer {
     /// SCK period.
     pub clock: QspiClock,
     /// When it ends.
-    pub now: Cycles,
+    pub now: Cycle,
 }
 
 impl QspiTransfer {
     /// A transfer of `bits` of `out`, shifted with `clock`, ending at
     /// `now`: queue entry 0, PCS\[3:0\] all low.
     #[must_use]
-    pub const fn new(out: u16, bits: u8, clock: QspiClock, now: Cycles) -> Self {
+    pub const fn new(out: u16, bits: u8, clock: QspiClock, now: Cycle) -> Self {
         Self {
             entry: 0,
             chip_selects: 0,
@@ -213,7 +238,7 @@ impl QspiTransfer {
 /// it sees every transfer and every change of the PCS levels, whatever
 /// they select.  On a board of `mc683xx-board` peripherals, the board's
 /// PCS decode is this peripheral, and each peripheral sees only its own
-/// select (`Peripheral::select`).
+/// select (`Peripheral::set_selected`).
 pub trait SpiPeripheral {
     /// Shifts the transfer's `bits` of `out` to the peripheral its
     /// `chip_selects` select, most significant bit first, in its clock's
@@ -225,7 +250,7 @@ pub trait SpiPeripheral {
     /// RESET reaches it at `now`, as the chip's QSPI reset scope says
     /// (`Builder::set_qspi_reset_scope`; every reset by default, SIMRM 8.2).
     /// By default nothing changes.
-    fn reset(&mut self, now: Cycles) {
+    fn reset(&mut self, now: Cycle) {
         let _ = now;
     }
 
@@ -235,7 +260,7 @@ pub trait SpiPeripheral {
     /// framed by its select sees the frame start and end here, as the
     /// levels it decodes go to its code and away.  Levels that do not
     /// change are not told.  By default nothing changes.
-    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycle) {
         let _ = (levels, now);
     }
 
@@ -244,7 +269,7 @@ pub trait SpiPeripheral {
     /// CPOL, CPHA or SPBR, or the system clock, changed.  A peripheral
     /// that checks its SPI mode or its fastest SCK does it here.  By
     /// default nothing changes.
-    fn set_clock(&mut self, clock: QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, now: Cycle) {
         let _ = (clock, now);
     }
 
@@ -259,5 +284,33 @@ pub trait SpiPeripheral {
     /// peripherals and asks for no interrupt or stop.
     fn deferrable(&self) -> bool {
         false
+    }
+}
+
+/// A QSPI peripheral the chip holds, which the host can get back by
+/// type (`Mc68331::qspi_peripheral` and `qspi_peripheral_mut` name it
+/// as their bound).  It says whether it saves ([`Save`]), as a chip's
+/// peripherals do: the chip's snapshot holds it.
+///
+/// Every [`SpiPeripheral`] that is [`Save`] and `'static` is one: a
+/// host implements those two, never this.
+pub trait AnySpiPeripheral: SpiPeripheral + Save + Any {}
+
+impl<T: SpiPeripheral + Save + Any> AnySpiPeripheral for T {}
+
+#[cfg(test)]
+mod tests {
+    use mc683xx_cpu32::interrupt::InterruptLevel;
+    use mc683xx_target::Address;
+
+    use super::iack_address;
+
+    #[test]
+    fn an_acknowledge_s_address_carries_its_level_in_addr_3_1() {
+        assert_eq!(
+            iack_address(InterruptLevel::NONMASKABLE),
+            Address(0xff_ffff)
+        );
+        assert_eq!(iack_address(InterruptLevel::NONE), Address(0xff_fff1));
     }
 }

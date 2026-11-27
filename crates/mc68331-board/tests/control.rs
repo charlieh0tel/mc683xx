@@ -12,23 +12,23 @@ use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
 
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
-use mc683xx_board::error::SendError;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
+use mc683xx_board::SendError;
 use mc683xx_board::pacing::Factor;
 use mc683xx_board::pacing::Pacing;
 use mc683xx_board::pacing::QUANTUM;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_cpu32::Stop;
+use mc683xx_mc68331::Mc68331;
 
 /// A millisecond in picoseconds.
 const MILLISECOND: u64 = PICOSECONDS_PER_SECOND / 1000;
@@ -71,7 +71,7 @@ to = ["chip.PGP1"]
 
 /// The pacing at `factor`.
 fn scaled(factor: f64) -> Pacing {
-    Pacing::Scaled(Factor::new(factor).unwrap())
+    Pacing::Scaled(Factor::try_from(factor).unwrap())
 }
 
 /// The board.
@@ -142,6 +142,23 @@ fn a_direct_send_lands_after_inputs_queued_before_it() {
     board.run_until(Time::from_picos(MILLISECOND)).unwrap();
     let values: Vec<Signal> = seen.borrow().iter().map(|seen| seen.2).collect();
     assert_eq!(values, [Signal::Level(true), Signal::Level(false)]);
+}
+
+#[test]
+fn a_restore_withdraws_a_stop_asked_from_another_thread_or_the_board_s() {
+    let mut board = board();
+    let snapshot = board.save().unwrap();
+    let control = board.control();
+    let stop = board.stop_request();
+    thread::spawn(move || control.stop()).join().unwrap();
+    stop.request();
+    board.restore(&snapshot).unwrap();
+    assert!(!board.control().stopping());
+    let outcome = board.run_until(Time::from_picos(MILLISECOND)).unwrap();
+    assert_eq!(
+        (outcome.stop, outcome.now),
+        (Stop::Budget, Time::from_picos(MILLISECOND))
+    );
 }
 
 #[test]

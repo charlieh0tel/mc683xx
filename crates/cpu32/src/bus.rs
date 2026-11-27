@@ -1,19 +1,27 @@
 //! The external bus: every cycle the core does not serve from its own
 //! memory goes here.
 
-use std::cell::Cell;
-use std::rc::Rc;
-
-use crate::cpu::hooks::ExceptionEntry;
+use crate::BusError;
+use crate::PortSize;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
+use crate::hooks::ExceptionEntry;
 use crate::memory::Memory;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use crate::memory::Page;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// Clocks in the bus cycle the timing tables assume: two clocks, no
 /// wait states, a 16-bit port (CPU32RM 8.1.5, 8.3).
 const TABLE_CLOCKS: u64 = 2;
+
+/// The most wait states a bus cycle counts: a peripheral's, a bus's
+/// or an interrupt acknowledge's beyond it count as this, about 4.5
+/// minutes at 16 MHz.  Bounded, an instruction's clocks are, and the
+/// core sums them without checking for overflow (PLAN.md, Decisions:
+/// the chip's time).
+pub const MOST_WAIT: Cycles = Cycles::from_clocks(1 << 32);
 
 /// The LPSTOP broadcast: a CPU space write of the interrupt mask to
 /// $3FFFE, type 0011 (MC68331UM 4.5.4.2, Figure 4-13; CPU32RM
@@ -37,7 +45,7 @@ pub struct BusAccess {
     /// Its address space.
     pub function_code: FunctionCode,
     /// When it starts, on the board's clock.
-    pub now: Cycles,
+    pub now: Cycle,
 }
 
 impl BusAccess {
@@ -48,7 +56,7 @@ impl BusAccess {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
     ) -> Self {
         Self {
             address,
@@ -69,7 +77,7 @@ pub struct Read {
     /// The value, right-aligned.
     pub value: u32,
     /// The clocks it took beyond the timing tables' two-clock cycle
-    /// (see [`stall`]).
+    /// (see [`stall`]); beyond [`MOST_WAIT`] they count as it.
     pub stall: Cycles,
 }
 
@@ -88,52 +96,6 @@ impl Read {
     pub const fn stalled(self, stall: Cycles) -> Self {
         Self { stall, ..self }
     }
-}
-
-/// A handle by which the host asks a run to stop.
-///
-/// The host's peripherals, or anything else of the host's, stop the run
-/// after the instruction whose cycle asked, or, on the chip, at the
-/// sync point if no instruction is running
-/// ([`Stop::Requested`](crate::cpu::Stop::Requested)).  Clones share
-/// one request, which the stop clears.  The bare machine and the chip
-/// each give one.
-#[derive(Debug, Clone, Default)]
-pub struct StopRequest(Rc<Cell<bool>>);
-
-impl StopRequest {
-    /// Asks the run to stop.
-    pub fn request(&self) {
-        self.0.set(true);
-    }
-
-    /// Withdraws a request the run has not taken: for a host whose own
-    /// run loop stopped for it first, between runs.
-    pub fn withdraw(&self) {
-        self.0.set(false);
-    }
-
-    /// Whether a stop is asked for, clearing the request: for the run
-    /// loop that serves it ([`Bus::stop_requested`]).
-    #[must_use = "a stop taken and dropped is lost"]
-    pub fn take(&self) -> bool {
-        self.0.replace(false)
-    }
-}
-
-/// The cycle ended in a bus error (BERR, CPU32RM 6.2.2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("bus error")]
-pub struct BusError;
-
-/// The width of the port a cycle reaches, which DSACK reports and the
-/// CPU32 sizes its cycles to (MC68331UM 4.4.2, dynamic bus sizing).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum PortSize {
-    /// An 8-bit port: a word takes two byte cycles.
-    Bits8,
-    /// A 16-bit port.
-    Bits16,
 }
 
 /// The external bus, as the chip and the host's peripherals answer it.
@@ -192,14 +154,14 @@ pub trait Bus {
     /// The `reset` instruction asserted RESET at `now` (CPU32RM 4,
     /// RESET; SIMRM 8.2.6): the chip resets its external peripherals and
     /// its modules other than the CPU.
-    fn reset_instruction(&mut self, now: Cycles) {
+    fn reset_instruction(&mut self, now: Cycle) {
         let _ = now;
     }
 
     /// The CPU entered an exception in the instruction or interrupt
     /// entry that started at `now`, for the chip's trace.  By default
     /// nothing.
-    fn exception_entered(&mut self, entry: &ExceptionEntry, now: Cycles) {
+    fn exception_entered(&mut self, entry: &ExceptionEntry, now: Cycle) {
         let _ = (entry, now);
     }
 
@@ -221,7 +183,7 @@ pub trait Bus {
 
     /// Exception processing starts or ends stacking a frame: the write
     /// cycles between are its.  By default nothing.
-    fn stacking(&mut self, stacking: bool) {
+    fn set_stacking(&mut self, stacking: bool) {
         let _ = stacking;
     }
 
@@ -238,14 +200,18 @@ pub trait Bus {
 }
 
 /// The clocks a byte or word cycle of `size` takes beyond the timing
-/// tables' assumption, on a `port` whose cycles take `clocks` each.
+/// tables' assumption, on a `port` whose cycles take `clocks` each, at
+/// most a page's ([`Page::MOST_CLOCKS`]).
+///
+/// [`Page::MOST_CLOCKS`]: crate::memory::Page::MOST_CLOCKS
 #[must_use]
-pub fn stall(size: Size, port: PortSize, clocks: u8) -> Cycles {
+pub fn stall(size: Size, port: PortSize, clocks: Cycles) -> Cycles {
+    debug_assert!(clocks <= Page::MOST_CLOCKS, "more clocks than a page holds");
     let cycles = match (size, port) {
         (Size::Word, PortSize::Bits8) => 2,
         _ => 1,
     };
-    Cycles::from_clocks((cycles * u64::from(clocks)).saturating_sub(TABLE_CLOCKS))
+    Cycles::from_clocks((cycles * clocks.clocks()).saturating_sub(TABLE_CLOCKS))
 }
 
 #[cfg(test)]
@@ -253,38 +219,42 @@ mod tests {
     use super::BusAccess;
     use super::PortSize;
     use super::stall;
+    use crate::cycles::Cycle;
     use crate::cycles::Cycles;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     #[test]
     fn an_access_holds_what_it_was_built_with() {
         let access = BusAccess::new(
             Address(0x400),
             Size::Word,
-            FunctionCode::SUPERVISOR_PROGRAM,
-            Cycles::from_clocks(7),
+            FunctionCode::SupervisorProgram,
+            Cycle::from_clocks(7),
         );
         assert_eq!(access.address, Address(0x400));
         assert_eq!(access.size, Size::Word);
-        assert_eq!(access.function_code, FunctionCode::SUPERVISOR_PROGRAM);
-        assert_eq!(access.now, Cycles::from_clocks(7));
+        assert_eq!(access.function_code, FunctionCode::SupervisorProgram);
+        assert_eq!(access.now, Cycle::from_clocks(7));
     }
 
     #[test]
     fn a_two_clock_word_costs_what_the_tables_say() {
-        assert_eq!(stall(Size::Word, PortSize::Bits16, 2), Cycles::ZERO);
+        assert_eq!(
+            stall(Size::Word, PortSize::Bits16, Cycles::from_clocks(2)),
+            Cycles::ZERO
+        );
     }
 
     #[test]
     fn a_word_on_an_8_bit_port_is_two_cycles() {
         assert_eq!(
-            stall(Size::Word, PortSize::Bits8, 3),
+            stall(Size::Word, PortSize::Bits8, Cycles::from_clocks(3)),
             Cycles::from_clocks(4)
         );
         assert_eq!(
-            stall(Size::Byte, PortSize::Bits8, 3),
+            stall(Size::Byte, PortSize::Bits8, Cycles::from_clocks(3)),
             Cycles::from_clocks(1)
         );
     }

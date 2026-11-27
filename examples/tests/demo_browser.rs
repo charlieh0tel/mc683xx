@@ -11,21 +11,21 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
-use mc683xx_board::board::Board;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
+use mc683xx_board::Board;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::pacing::Factor;
 use mc683xx_board::pacing::Pacing;
 use mc683xx_board::pacing::QUANTUM;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_cpu32::Stop;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
 
 /// The board file, as a page would fetch it.
@@ -94,7 +94,7 @@ fn the_demo_board_runs_from_bytes_and_a_host_clock() {
     assert!(text.contains(BANNER), "{text:?}");
     assert!(text.ends_with("> "), "{text:?}");
 
-    control.set_pacing(Pacing::Scaled(Factor::new(FACTOR).unwrap()));
+    control.set_pacing(Pacing::Scaled(Factor::try_from(FACTOR).unwrap()));
     let mut typed = TYPED.iter();
     let mut wall = Duration::from_secs(1000);
     let start = board.now();

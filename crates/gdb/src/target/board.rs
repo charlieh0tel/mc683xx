@@ -1,17 +1,16 @@
 //! A board as the stub's target: its chip, run with the board's peripherals
 //! and nets.
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
+use mc683xx_board::RunError;
 use mc683xx_board::condition::Conditions;
-use mc683xx_board::error::RunError;
 use mc683xx_board::time::Span;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_modules::sim::ResetCause;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Stop;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 
 use super::AccessError;
 use super::Target;
@@ -44,11 +43,11 @@ impl Target for Board<Mc68331> {
         Target::write_memory(self.chip_mut(), address, function_code, data).map_err(widen)
     }
 
-    /// Runs the board to the board time `cycles` past the chip's now,
+    /// Runs the board to the board time `budget` past the chip's now,
     /// and at least a picosecond, so the board's peripherals and nets keep
     /// time with the chip.
-    fn run_for(&mut self, cycles: Cycles, _hit: &dyn Fn() -> bool) -> Result<TargetRun, RunError> {
-        let chip = self.chip().now() + cycles;
+    fn run_for(&mut self, budget: Cycles, _hit: &dyn Fn() -> bool) -> Result<TargetRun, RunError> {
+        let chip = self.chip().now() + budget;
         let until = self
             .system_clock()
             .time(chip)
@@ -61,11 +60,11 @@ impl Target for Board<Mc68331> {
     }
 
     /// An external reset, as the board asserting RESET makes it
-    /// ([`Board::reset_for`]): the chip's reset and the RESET it then
+    /// ([`Board::reset`]): the chip's reset and the RESET it then
     /// drives on the board's nets, now.  Nothing while the board holds
     /// RESET low.
     fn reset(&mut self) -> Result<TargetReset, RunError> {
-        self.reset_for(ResetCause::External);
+        Board::reset(self);
         Ok(TargetReset::Done)
     }
 

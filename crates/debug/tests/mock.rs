@@ -2,24 +2,24 @@
 //! where a test asks: a byte that drops writes, a byte that bus-errors,
 //! a status bit that sets after some reads.
 
-use mc683xx_debug::image::Image;
-use mc683xx_debug::image::Segment;
-use mc683xx_debug::load::LoadError;
-use mc683xx_debug::load::LoadOptions;
-use mc683xx_debug::load::OddEdges;
-use mc683xx_debug::load::Verification;
+use mc683xx_debug::Image;
+use mc683xx_debug::ImageLoadError;
+use mc683xx_debug::LoadOptions;
+use mc683xx_debug::OddEdges;
+use mc683xx_debug::Segment;
+use mc683xx_debug::Verification;
 use mc683xx_debug::script::Command;
 use mc683xx_debug::script::CommandError;
 use mc683xx_debug::script::Script;
 use mc683xx_debug::script::ScriptError;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
 use mc683xx_target::Unsupported;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
-use mc683xx_target::size::Size;
 
 /// Bytes of the mock's memory, from address 0.
 const MEMORY_BYTES: usize = 0x1000;
@@ -262,7 +262,7 @@ fn a_load_writes_words_in_supervisor_data_verifies_and_sets_rpc() {
     assert!(
         mock.calls
             .iter()
-            .all(|call| call.function_code == FunctionCode::SUPERVISOR_DATA)
+            .all(|call| call.function_code == FunctionCode::SupervisorData)
     );
     assert_eq!(
         report.to_string(),
@@ -286,7 +286,7 @@ fn odd_edges_are_refused_before_any_write_or_written_in_bytes() {
     assert!(
         matches!(
             error,
-            LoadError::OddEdge {
+            ImageLoadError::OddEdge {
                 address: Address(0x201)
             }
         ),
@@ -296,7 +296,7 @@ fn odd_edges_are_refused_before_any_write_or_written_in_bytes() {
 
     let mut options = LoadOptions::default();
     options.odd_edges = OddEdges::Bytes;
-    options.function_code = FunctionCode::SUPERVISOR_PROGRAM;
+    options.function_code = FunctionCode::SupervisorProgram;
     let report = image.load(&mut mock, &options).unwrap();
     assert_eq!(report.entry, None);
     assert_eq!(mock.rpc, 0, "no entry, RPC alone");
@@ -313,7 +313,7 @@ fn odd_edges_are_refused_before_any_write_or_written_in_bytes() {
     assert!(
         mock.calls
             .iter()
-            .all(|call| call.function_code == FunctionCode::SUPERVISOR_PROGRAM)
+            .all(|call| call.function_code == FunctionCode::SupervisorProgram)
     );
 
     let mut mock = Mock::new();
@@ -324,7 +324,7 @@ fn odd_edges_are_refused_before_any_write_or_written_in_bytes() {
     assert!(
         matches!(
             error,
-            LoadError::OddEdge {
+            ImageLoadError::OddEdge {
                 address: Address(0x302)
             }
         ),
@@ -342,7 +342,7 @@ fn a_byte_that_does_not_take_its_write_fails_verification() {
     assert!(
         matches!(
             error,
-            LoadError::Verify {
+            ImageLoadError::Verify {
                 address: Address(0x305),
                 wrote: 6,
                 read: 0,
@@ -370,7 +370,7 @@ fn a_failed_write_or_read_back_names_its_call() {
     assert!(
         matches!(
             error,
-            LoadError::Write {
+            ImageLoadError::Write {
                 address: Address(0x200),
                 bytes: 256,
                 error: MockError::Bus(Address(0x250)),
@@ -389,7 +389,7 @@ fn a_failed_write_or_read_back_names_its_call() {
     assert!(
         matches!(
             error,
-            LoadError::Read {
+            ImageLoadError::Read {
                 address: Address(0x300),
                 bytes: 256,
                 error: MockError::Bus(Address(0x350)),
@@ -420,28 +420,28 @@ fn a_script_writes_and_checks_in_order() {
             Call {
                 write: true,
                 address: Address(0x100),
-                function_code: FunctionCode::SUPERVISOR_DATA,
+                function_code: FunctionCode::SupervisorData,
                 size: Size::Long,
                 bytes: 4,
             },
             Call {
                 write: true,
                 address: Address(0x105),
-                function_code: FunctionCode::USER_DATA,
+                function_code: FunctionCode::UserData,
                 size: Size::Byte,
                 bytes: 1,
             },
             Call {
                 write: false,
                 address: Address(0x102),
-                function_code: FunctionCode::SUPERVISOR_DATA,
+                function_code: FunctionCode::SupervisorData,
                 size: Size::Word,
                 bytes: 2,
             },
             Call {
                 write: false,
                 address: Address(0x100),
-                function_code: FunctionCode::SUPERVISOR_DATA,
+                function_code: FunctionCode::SupervisorData,
                 size: Size::Long,
                 bytes: 4,
             },

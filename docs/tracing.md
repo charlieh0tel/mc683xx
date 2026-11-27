@@ -8,7 +8,9 @@ same bytes, so two runs' traces, or a trace and one another tool
 writes in this format, diff line for line.  The records are the API;
 the text is one output of them: `trace::Line`'s `Display`, the chip's
 name and the record's `Display`.  `Board::set_tracing` chooses what is
-recorded, `Board::watch_code` adds a code watch, and
+recorded, `Board::watch_code` adds a code watch (a data watch is a
+hook through `Board::cpu_control`, which ends the run rather than
+recording), and
 `Board::take_trace` gives the records in cycle order.
 
 ## The text
@@ -26,7 +28,7 @@ are an MC68331's.  Lines that start with `#` are comments: a trace
 starts with
 
 ```
-# mc683xx trace 3 chip=mc68331
+# mc683xx trace 4 chip=mc68331
 ```
 
 the format, its version (`trace::VERSION`, `trace::header`) and the
@@ -132,7 +134,8 @@ mc68331: position cycle=838860 pc=0x00004e22 sr=0x2000 vbr=0x00000000 a7=0x0010f
 
 `cycle`, `pc`, `sr`, `vbr`, `a7`, and `instructions`, the instructions
 run since power-on.  The runner writes one every `--position SECONDS`
-of board time.
+of board time; a host makes one with `Board::position_record`, as
+`Board::stopped_record` makes a `stopped` one.
 
 ### `stopped`: the run ended
 
@@ -140,9 +143,10 @@ of board time.
 mc68331: stopped cycle=1677721 instructions=420001 reason=budget
 ```
 
-`cycle`, `instructions`, and `reason`: `budget`, `halted`, `hook`,
-`requested`, `background` or `fault` (`other` for a stop a later core
-adds).
+`cycle`, `instructions`, and `reason`, the stop's `Display`:
+`budget`, `stopped` (the CPU in `stop` or `lpstop` through the run's
+end), `halted`, `hook`, `requested`, `background` or `fault`; a stop
+a later core adds prints its own name.
 
 ## Net lines
 
@@ -166,3 +170,8 @@ mc68331: net time=1000000 name=pps level=1
 
 The runner writes what reaches a binding that takes no serial data the
 same way: `mc68331: external name=NAME time=PS` and the value's fields.
+It says where it bound an endpoint to a terminal, once, before the
+run: `mc68331: bound name=NAME pty=PATH`, the pseudo-terminal's slave
+a client opens, or `mc68331: bound name=NAME tty=1`, the terminal on
+standard input.  Lines prefixed by the runner's own name
+(`mc683xx-run: ...`) are messages, not records, and may change.

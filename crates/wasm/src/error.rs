@@ -3,12 +3,13 @@
 
 use js_sys::RangeError;
 use js_sys::TypeError;
-use mc683xx_board::error::LoadError;
-use mc683xx_board::error::ReceiveError;
-use mc683xx_board::error::RunError;
-use mc683xx_board::error::SendError;
+use mc683xx_board::LoadError;
+use mc683xx_board::NoMemory;
+use mc683xx_board::NoReceiver;
+use mc683xx_board::RunError;
+use mc683xx_board::SendError;
 use mc683xx_board::pacing::ParsePacingError;
-use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::state::StateError;
 use wasm_bindgen::JsValue;
 
 /// A call the bindings or the board refuse; it is thrown as a JavaScript
@@ -59,13 +60,13 @@ pub enum Error {
     Send(#[from] SendError),
     /// A take from an endpoint no net drives.
     #[error(transparent)]
-    Receive(#[from] ReceiveError),
+    Receive(#[from] NoReceiver),
     /// A board that cannot save, or a snapshot it refuses.
     #[error(transparent)]
     State(#[from] StateError),
     /// A memory the board lacks.
-    #[error("no memory {0:?}")]
-    Memory(String),
+    #[error(transparent)]
+    Memory(#[from] NoMemory),
 }
 
 /// The JavaScript error an [`Error`] is thrown as, which a page may
@@ -91,12 +92,12 @@ impl Error {
             | Self::Bytes { .. } => Thrown::Type,
             Self::Picoseconds(_) | Self::Wall(_) => Thrown::Range,
             Self::Load(_) => Thrown::Named("LoadError"),
-            Self::ParsePacing(_) => Thrown::Named("PacingError"),
+            Self::ParsePacing(_) => Thrown::Named("ParsePacingError"),
             Self::Run(_) => Thrown::Named("RunError"),
             Self::Send(_) => Thrown::Named("SendError"),
-            Self::Receive(_) => Thrown::Named("ReceiveError"),
+            Self::Receive(_) => Thrown::Named("NoReceiver"),
             Self::State(_) => Thrown::Named("StateError"),
-            Self::Memory(_) => Thrown::Named("MemoryError"),
+            Self::Memory(_) => Thrown::Named("NoMemory"),
         }
     }
 }

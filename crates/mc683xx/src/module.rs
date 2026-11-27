@@ -3,12 +3,14 @@
 //! A part composes its own (the MC68331's QSM and GPT, MC68331UM Table
 //! D-1) behind [`Module`], and the chip routes their register cycles
 //! and arbitrates their interrupt requests (SIMRM 6.3).
+//!
+//! Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
 
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
-use mc683xx_target::size::Size;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_target::Size;
 
 use crate::peripheral::Timed;
 
@@ -52,7 +54,7 @@ pub struct RegisterAccess {
     /// cycle's FC2).
     pub supervisor: bool,
     /// When it starts.
-    pub now: Cycles,
+    pub now: Cycle,
 }
 
 impl RegisterAccess {
@@ -144,9 +146,9 @@ pub mod sealed {
 /// a host reaches them through the chip.  So this does not compile:
 ///
 /// ```compile_fail,E0277
-/// use mc683xx_cpu32::cpu::state::StateError;
-/// use mc683xx_cpu32::cycles::Cycles;
+/// use mc683xx_cpu32::Cycle;
 /// use mc683xx_cpu32::interrupt::InterruptLevel;
+/// use mc683xx_cpu32::state::StateError;
 /// use mc683xx_modules::module::Block;
 /// use mc683xx_modules::module::InterruptRequest;
 /// use mc683xx_modules::module::Module;
@@ -174,10 +176,10 @@ pub mod sealed {
 ///     fn request(&self) -> Option<InterruptRequest> {
 ///         None
 ///     }
-///     fn acknowledge(&mut self, _: InterruptLevel, _: Cycles) -> Option<Vector> {
+///     fn acknowledge(&mut self, _: InterruptLevel, _: Cycle) -> Option<Vector> {
 ///         None
 ///     }
-///     fn reset(&mut self, _: Cycles) {}
+///     fn reset(&mut self, _: Cycle) {}
 ///     fn save(&self) -> Result<Vec<u8>, StateError> {
 ///         Ok(Vec::new())
 ///     }
@@ -202,12 +204,12 @@ pub trait Module: Timed + sealed::Sealed {
     fn request(&self) -> Option<InterruptRequest>;
     /// The CPU acknowledges `level` and the module won arbitration:
     /// its vector, or `None` if it has none to give.
-    fn acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Option<Vector>;
+    fn acknowledge(&mut self, level: InterruptLevel, now: Cycle) -> Option<Vector>;
     /// The chip's reset, or the `reset` instruction's (SIMRM 8.2.6).
-    fn reset(&mut self, now: Cycles);
+    fn reset(&mut self, now: Cycle);
 
     /// Its whole state as a snapshot, versioned
-    /// ([`mc683xx_cpu32::cpu::state`]'s `encode`), for the chip's.
+    /// ([`mc683xx_cpu32::state`]'s `encode`), for the chip's.
     ///
     /// # Errors
     ///

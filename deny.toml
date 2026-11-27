@@ -23,7 +23,7 @@ allow = [
 confidence-threshold = 0.93
 
 [licenses.private]
-# The unpublished members (cpu32-py, the harness, the oracles, the
+# The unpublished members (mc683xx-python, the harness, the oracles, the
 # benches and examples) are the project's own.
 ignore = true
 

@@ -2,15 +2,15 @@
 
 use std::fmt;
 
-use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::hooks::ExceptionEntry;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// Something the chip did that the host may want to know of, each at
 /// its time.  More kinds may come, and a kind more fields: a host's
@@ -22,7 +22,7 @@ pub enum Event {
     #[non_exhaustive]
     Reset {
         /// When.
-        now: Cycles,
+        now: Cycle,
         /// Why.
         cause: ResetCause,
     },
@@ -34,21 +34,21 @@ pub enum Event {
     #[non_exhaustive]
     ArbitrationTie {
         /// When the level was acknowledged.
-        now: Cycles,
+        now: Cycle,
         /// The level acknowledged.
         level: InterruptLevel,
         /// The IARB value they shared.
         arbitration: u8,
     },
     /// A bus cycle the core sent to the chip, while
-    /// [`ChipTracing::accesses`] is set: one it could not serve from its
+    /// [`ChipTracing::bus_cycles`] is set: one it could not serve from its
     /// own memory, a module register's, a peripheral's, or host memory a
     /// peripheral shares a select with.  RAM and ROM the core serves are
     /// not traced; memory hooks see those.
     #[non_exhaustive]
-    Access {
+    BusCycle {
         /// When its instruction started.
-        now: Cycles,
+        now: Cycle,
         /// Its address, on the address lines.
         address: Address,
         /// Byte or word.
@@ -57,9 +57,9 @@ pub enum Event {
         function_code: FunctionCode,
         /// Whether it wrote.
         write: bool,
-        /// The value read or written, right-aligned; `None` for a read
-        /// that ended in a bus error.
-        value: Option<u32>,
+        /// The value read or written, right-aligned; 0 for a read that
+        /// ended in a bus error.
+        value: u32,
         /// Whether it ended in a bus error.
         bus_error: bool,
     },
@@ -68,7 +68,7 @@ pub enum Event {
     #[non_exhaustive]
     Exception {
         /// When the instruction or interrupt entry it ended started.
-        now: Cycles,
+        now: Cycle,
         /// The exception.
         entry: ExceptionEntry,
     },
@@ -80,7 +80,7 @@ pub enum Event {
     #[non_exhaustive]
     Dsack {
         /// When.
-        now: Cycles,
+        now: Cycle,
         /// How.
         fault: DsackFault,
     },
@@ -89,11 +89,11 @@ pub enum Event {
 impl Event {
     /// When it happened.
     #[must_use]
-    pub const fn now(&self) -> Cycles {
+    pub const fn now(&self) -> Cycle {
         match *self {
             Self::Reset { now, .. }
             | Self::ArbitrationTie { now, .. }
-            | Self::Access { now, .. }
+            | Self::BusCycle { now, .. }
             | Self::Exception { now, .. }
             | Self::Dsack { now, .. } => now,
         }
@@ -108,22 +108,25 @@ impl fmt::Display for Event {
             Self::ArbitrationTie {
                 level, arbitration, ..
             } => write!(formatter, "arbitration tie at {level}, IARB {arbitration}"),
-            Self::Access {
+            Self::BusCycle {
                 address,
                 size,
                 function_code,
                 write,
                 value,
+                bus_error,
                 ..
             } => {
                 let direction = if *write { "write" } else { "read" };
                 write!(
                     formatter,
-                    "{size} {direction} at {address}, FC {function_code}"
+                    "{direction} of {} bytes at {address} in {function_code}",
+                    size.bytes()
                 )?;
-                match value {
-                    Some(value) => write!(formatter, ": {value:#x}"),
-                    None => formatter.write_str(": bus error"),
+                if *bus_error {
+                    formatter.write_str(": bus error")
+                } else {
+                    write!(formatter, ": {value:#x}")
                 }
             }
             Self::Exception { entry, .. } => {
@@ -174,50 +177,63 @@ impl fmt::Display for DsackFault {
 /// off by default: each costs a little on every cycle or exception.
 ///
 /// It may gain fields: build one from [`ChipTracing::default()`] and set
-/// those it needs (`let mut x = ChipTracing::default(); x.accesses = ...;`).
+/// those it needs (`let mut x = ChipTracing::default(); x.bus_cycles = ...;`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct ChipTracing {
-    /// Each bus cycle that reaches the chip ([`Event::Access`]).
-    pub accesses: bool,
+    /// Each bus cycle that reaches the chip ([`Event::BusCycle`]).
+    pub bus_cycles: bool,
     /// Each exception entered ([`Event::Exception`]).
     pub exceptions: bool,
 }
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::cycles::Cycles;
+    use mc683xx_cpu32::Cycle;
     use mc683xx_modules::chip_select::ChipSelect;
     use mc683xx_modules::sim::ResetCause;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     use super::DsackFault;
     use super::Event;
 
     #[test]
     fn an_event_prints_what_happened_and_tells_when() {
-        let now = Cycles::from_clocks(7);
+        let now = Cycle::from_clocks(7);
         let reset = Event::Reset {
             now,
             cause: ResetCause::PowerOn,
         };
         assert_eq!(reset.now(), now);
         assert_eq!(reset.to_string(), "reset (power-on)");
-        let access = Event::Access {
+        let cycle = Event::BusCycle {
             now,
             address: Address(0x10),
             size: Size::Word,
-            function_code: FunctionCode::SUPERVISOR_DATA,
+            function_code: FunctionCode::SupervisorData,
             write: false,
-            value: None,
+            value: 0,
             bus_error: true,
         };
-        assert_eq!(access.now(), now);
+        assert_eq!(cycle.now(), now);
         assert_eq!(
-            access.to_string(),
-            "word read at 0x00000010, FC 5: bus error"
+            cycle.to_string(),
+            "read of 2 bytes at 0x00000010 in supervisor-data: bus error"
+        );
+        let cycle = Event::BusCycle {
+            now,
+            address: Address(0x10),
+            size: Size::Word,
+            function_code: FunctionCode::SupervisorData,
+            write: false,
+            value: 0x1234,
+            bus_error: false,
+        };
+        assert_eq!(
+            cycle.to_string(),
+            "read of 2 bytes at 0x00000010 in supervisor-data: 0x1234"
         );
         let dsack = Event::Dsack {
             now,

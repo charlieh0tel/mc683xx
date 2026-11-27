@@ -6,27 +6,29 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
+use std::fmt::Write;
 use std::mem;
 use std::ops::Range;
 use std::ops::RangeInclusive;
+use std::str::FromStr;
 
-use crate::bus::PortSize;
+use crate::PortSize;
 use crate::bus::stall;
 use crate::cycles::Cycles;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// Bytes in a page: the smallest chip-select block, 2K (SIMRM 7.3,
 /// Table 7-2), so a page never straddles two blocks.
 pub const PAGE_BYTES: u32 = 1 << PAGE_SHIFT;
 /// log2 of [`PAGE_BYTES`].
-const PAGE_SHIFT: u32 = 11;
+pub(crate) const PAGE_SHIFT: u32 = 11;
 /// Clocks in the fastest bus cycle (CPU32RM 8.1.5).
 const FASTEST_CLOCKS: u8 = 2;
 
 /// Whether the CPU may write a memory a host wires in: the chip's
-/// builder's (`mc683xx_mc68331::chip::Builder::memory`) and a board's.
+/// builder's (`mc683xx_mc68331::Builder::memory`) and a board's.
 /// Non-exhaustive: a kind may be added (a write-once memory, say), and
 /// [`writable`](Self::writable) answers for each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -113,19 +115,85 @@ impl Permissions {
     }
 }
 
+/// Each permission's letter, in the order `Display` writes them.
+const PERMISSION_LETTERS: [(char, Permissions); 3] = [
+    ('r', Permissions::READ),
+    ('w', Permissions::WRITE),
+    ('x', Permissions::EXECUTE),
+];
+
+/// Their letters, `r` (operand reads), `w` (operand writes) and `x`
+/// (instruction fetches), in that order: `rwx`, `rx`, and nothing for
+/// [`Permissions::NONE`].
+impl fmt::Display for Permissions {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        PERMISSION_LETTERS
+            .iter()
+            .filter(|&&(_, permission)| self.contains(permission))
+            .try_for_each(|&(letter, _)| formatter.write_char(letter))
+    }
+}
+
+/// The permissions named by their letters, as `Display` writes them,
+/// each at most once, in any order and case: `rwx`, `XR`, and the empty
+/// string for none.
+impl FromStr for Permissions {
+    type Err = ParsePermissionsError;
+
+    fn from_str(text: &str) -> Result<Self, ParsePermissionsError> {
+        text.chars().try_fold(Self::NONE, |permissions, letter| {
+            PERMISSION_LETTERS
+                .iter()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case(&letter))
+                .map(|&(_, permission)| permission)
+                .filter(|&permission| !permissions.contains(permission))
+                .map(|permission| permissions.union(permission))
+                .ok_or_else(|| ParsePermissionsError(text.to_owned()))
+        })
+    }
+}
+
+/// Text that names no permissions: a letter not `r`, `w` or `x`, or one
+/// twice.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no permissions {0:?}: give r, w and x, each at most once")]
+pub struct ParsePermissionsError(String);
+
 /// The hooks a page has, as bits: the core looks hooks up only on a
 /// page whose bit is set ([PLAN.md, Hooks]).
 ///
 /// [PLAN.md, Hooks]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#hooks
 pub(crate) mod watch {
+    /// A page's bits.
+    pub(crate) type Bits = u16;
     /// A code hook covers some of it.
-    pub(crate) const CODE: u8 = 1;
+    pub(crate) const CODE: Bits = 1;
     /// A block hook covers some of it.
-    pub(crate) const BLOCK: u8 = 1 << 1;
+    pub(crate) const BLOCK: Bits = 1 << 1;
     /// A read hook covers some of it.
-    pub(crate) const READ: u8 = 1 << 2;
+    pub(crate) const READ: Bits = 1 << 2;
     /// A write hook covers some of it.
-    pub(crate) const WRITE: u8 = 1 << 3;
+    pub(crate) const WRITE: Bits = 1 << 3;
+    /// A pre-read hook covers some of it.
+    pub(crate) const PRE_READ: Bits = 1 << 4;
+    /// A pre-write hook covers some of it.
+    pub(crate) const PRE_WRITE: Bits = 1 << 5;
+    /// An execute coverage covers some of it.
+    pub(crate) const EXECUTE_COVERAGE: Bits = 1 << 6;
+    /// An opcode hook, a code hook for some opcodes, covers some of it.
+    pub(crate) const OPCODE: Bits = 1 << 7;
+    /// A read coverage covers some of it.
+    pub(crate) const READ_COVERAGE: Bits = 1 << 8;
+    /// A write coverage covers some of it.
+    pub(crate) const WRITE_COVERAGE: Bits = 1 << 9;
+    /// The bits that take a page's reads off the fast path, fetches
+    /// included: a read or write hook takes both.
+    pub(crate) const SLOW_READ: Bits = READ | WRITE | PRE_READ | READ_COVERAGE;
+    /// The bits that take a page's writes off the fast path.
+    pub(crate) const SLOW_WRITE: Bits = READ | WRITE | PRE_WRITE | WRITE_COVERAGE;
+    /// The bits that take a page's cycles off the fast path, some of
+    /// them.
+    pub(crate) const SLOW: Bits = SLOW_READ | SLOW_WRITE;
 }
 
 /// A region of host memory the core holds, as [`Memory::add_region`]
@@ -134,6 +202,26 @@ pub(crate) mod watch {
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]
 pub struct RegionId(usize);
+
+impl RegionId {
+    /// Its number, as [`Display`](fmt::Display) prints it: its slot in
+    /// the core's regions.
+    ///
+    /// Not part of the semver API: for the workspace's crates whose ids
+    /// wrap one.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn number(self) -> usize {
+        self.0
+    }
+}
+
+/// `region` and its number: `region 2`.
+impl fmt::Display for RegionId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "region {}", self.0)
+    }
+}
 
 /// The bytes a page reads or writes: [`region`](Self::region) from
 /// `offset` on.
@@ -164,8 +252,10 @@ pub struct Page {
     pub write: Option<Backing>,
     /// The port width of the memory behind it.
     pub port: PortSize,
-    /// Clocks in each of its bus cycles, wait states included.
-    pub clocks: u8,
+    /// Clocks in each of its bus cycles, wait states included: a
+    /// `u8`, not [`Cycles`], to keep the page tables small (PLAN.md,
+    /// Memory).
+    clocks: u8,
 }
 
 impl Page {
@@ -176,6 +266,9 @@ impl Page {
         port: PortSize::Bits16,
         clocks: FASTEST_CLOCKS,
     };
+
+    /// The longest bus cycle a page holds.
+    pub const MOST_CLOCKS: Cycles = Cycles::from_clocks(u8::MAX as u64);
 
     /// The page, its reads going to `read`, or to the bus if `None`.
     #[must_use]
@@ -191,13 +284,28 @@ impl Page {
 
     /// The page, the memory behind it `port` wide, each of its bus
     /// cycles `clocks` long, wait states included.
+    ///
+    /// # Panics
+    ///
+    /// If `clocks` is more than [`Page::MOST_CLOCKS`]: no select's timing
+    /// comes near it, an ECLK cycle, the longest, being 24 at most.
     #[must_use]
-    pub const fn timed(self, port: PortSize, clocks: u8) -> Self {
+    pub const fn timed(self, port: PortSize, clocks: Cycles) -> Self {
+        assert!(
+            clocks.clocks() <= Self::MOST_CLOCKS.clocks(),
+            "more clocks than a page holds"
+        );
         Self {
             port,
-            clocks,
+            clocks: clocks.clocks() as u8,
             ..self
         }
+    }
+
+    /// Clocks in each of its bus cycles, wait states included.
+    #[must_use]
+    pub const fn clocks(&self) -> Cycles {
+        Cycles::from_clocks(self.clocks as u64)
     }
 }
 
@@ -230,7 +338,7 @@ pub enum MemoryError {
 /// machine's or the chip's: not memory the core serves (nothing mapped
 /// there, or a peripheral's).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("{0} is not memory the core serves")]
+#[error("no memory at {0}")]
 pub struct Unserved(pub Address);
 
 /// What a memory's regions hold, for tests that it frees what it
@@ -293,7 +401,7 @@ struct Slab {
     /// Each page's permissions, by [`Space::index`].
     permissions: [[Permissions; SLAB_PAGES]; 2],
     /// Each page's [`watch`] bits, in both spaces.
-    watched: [u8; SLAB_PAGES],
+    watched: [watch::Bits; SLAB_PAGES],
 }
 
 impl Slab {
@@ -314,27 +422,24 @@ impl Slab {
     /// Brings page `index` of space `space`'s fast table up to date.
     fn refresh(&mut self, space: usize, index: usize) {
         let entry = self.tables[space][index];
-        let slow = self.watched[index] & (watch::READ | watch::WRITE) != 0
-            || self.permissions[space][index] != Permissions::ALL;
-        self.fast[space][index] = if slow {
-            Page {
-                read: None,
-                write: None,
-                ..entry
-            }
-        } else {
-            entry
+        let restricted = self.permissions[space][index] != Permissions::ALL;
+        // a pre-access hook's or a read or write coverage's page leaves
+        // the fast path for reads (fetches included) or writes alone
+        let slow_read = restricted || self.watched[index] & watch::SLOW_READ != 0;
+        let slow_write = restricted || self.watched[index] & watch::SLOW_WRITE != 0;
+        self.fast[space][index] = Page {
+            read: if slow_read { None } else { entry.read },
+            write: if slow_write { None } else { entry.write },
+            ..entry
         };
     }
 
-    /// Whether any page has a hook or less than [`Permissions::ALL`].
-    fn is_special(&self) -> bool {
-        self.watched.iter().any(|&bits| bits != 0)
-            || self
-                .permissions
-                .iter()
-                .flatten()
-                .any(|&permissions| permissions != Permissions::ALL)
+    /// Whether any page has less than [`Permissions::ALL`].
+    fn is_restricted(&self) -> bool {
+        self.permissions
+            .iter()
+            .flatten()
+            .any(|&permissions| permissions != Permissions::ALL)
     }
 }
 
@@ -381,13 +486,15 @@ pub struct Memory {
     slabs: Vec<Option<Box<Slab>>>,
     /// The [`watch`] bits of each slab not allocated: those of the hooks
     /// covering any of it.
-    unallocated: Vec<u8>,
+    unallocated: Vec<watch::Bits>,
     /// The hooks' address ranges with their [`watch`] bits, on the
     /// address lines, for a slab allocated after they were set.
-    watches: Vec<(RangeInclusive<Address>, u8)>,
+    watches: Vec<(RangeInclusive<Address>, watch::Bits)>,
     /// Whether any page has a hook or less than [`Permissions::ALL`]:
     /// while not, no cycle or instruction looks either up.
     special: bool,
+    /// Whether any page has less than [`Permissions::ALL`].
+    restricted: bool,
     /// The page instruction fetch is on, while the tables keep it.
     fetch_page: Option<FetchPage>,
 }
@@ -409,9 +516,9 @@ impl fmt::Debug for Memory {
 /// Sets in `watched`, the bits of the pages from `first` on, each of
 /// `ranges`' bits over the pages its addresses reach, on lines `mask`.
 fn watch_pages(
-    watched: &mut [u8],
+    watched: &mut [watch::Bits],
     first: usize,
-    ranges: &[(RangeInclusive<Address>, u8)],
+    ranges: &[(RangeInclusive<Address>, watch::Bits)],
     mask: u32,
 ) {
     for (range, bit) in ranges {
@@ -455,6 +562,7 @@ impl Memory {
             unallocated: vec![0; slabs],
             watches: Vec::new(),
             special: false,
+            restricted: false,
             fetch_page: None,
         })
     }
@@ -625,7 +733,7 @@ impl Memory {
             }
             self.slab_mut(slab).permissions[space.index()][page & SLAB_MASK] = permissions;
         }
-        self.update_special();
+        self.update_restricted();
         self.refresh(space.index(), pages);
         Ok(())
     }
@@ -639,10 +747,10 @@ impl Memory {
             })
     }
 
-    /// The entry of the page `address` is in: [`Page::BUS`] if none is
-    /// mapped.
+    /// The page `address` is in, as its table entry maps it:
+    /// [`Page::BUS`] if none is mapped.
     #[must_use]
-    pub fn entry(&self, space: Space, address: Address) -> Page {
+    pub fn page(&self, space: Space, address: Address) -> Page {
         self.locate(address).map_or(Page::BUS, |(slab, index, _)| {
             slab.tables[space.index()][index]
         })
@@ -682,7 +790,7 @@ impl Memory {
 
     /// The [`watch`] bits of the page `address` is in: of its slab, if
     /// that is not allocated.
-    pub(crate) fn watched(&self, address: Address) -> u8 {
+    pub(crate) fn watched(&self, address: Address) -> watch::Bits {
         let page = self.page_number(address);
         self.slabs[page >> SLAB_SHIFT]
             .as_deref()
@@ -695,30 +803,42 @@ impl Memory {
     /// its bit, on the address lines.
     pub(crate) fn set_watched(
         &mut self,
-        ranges: impl Iterator<Item = (RangeInclusive<Address>, u8)>,
+        ranges: impl Iterator<Item = (RangeInclusive<Address>, watch::Bits)>,
     ) {
         self.watches = ranges.collect();
-        self.unallocated.fill(0);
+        self.rewatch_pages(0, self.pages - 1);
+        self.update_special();
+        self.refresh_all();
+    }
+
+    /// Recomputes from the hooks' ranges the [`watch`] bits of pages
+    /// `first` to `last`, those of an allocated slab, and the bits of
+    /// each slab not allocated that they are in: those of the ranges
+    /// reaching any of it.
+    fn rewatch_pages(&mut self, first: usize, last: usize) {
         let mask = self.address_mask;
-        for (range, bit) in &self.watches {
-            let (first, last) = range_pages(range, mask);
-            if first > last {
-                continue;
-            }
-            for slab in first >> SLAB_SHIFT..=last >> SLAB_SHIFT {
-                if self.slabs[slab].is_none() {
-                    self.unallocated[slab] |= bit;
+        for number in first >> SLAB_SHIFT..=last >> SLAB_SHIFT {
+            let base = number * SLAB_PAGES;
+            let end = base + SLAB_PAGES - 1;
+            match self.slabs[number].as_deref_mut() {
+                Some(slab) => {
+                    let from = first.max(base);
+                    let pages = &mut slab.watched[from - base..=last.min(end) - base];
+                    pages.fill(0);
+                    watch_pages(pages, from, &self.watches, mask);
+                }
+                None => {
+                    self.unallocated[number] = self
+                        .watches
+                        .iter()
+                        .filter(|(range, _)| {
+                            let (start, stop) = range_pages(range, mask);
+                            start <= stop && start <= end && stop >= base
+                        })
+                        .fold(0, |bits, (_, bit)| bits | bit);
                 }
             }
         }
-        for (number, slab) in self.slabs.iter_mut().enumerate() {
-            if let Some(slab) = slab.as_deref_mut() {
-                slab.watched.fill(0);
-                watch_pages(&mut slab.watched, number * SLAB_PAGES, &self.watches, mask);
-            }
-        }
-        self.update_special();
-        self.refresh_all();
     }
 
     /// Brings every allocated slab's fast tables up to date.
@@ -799,19 +919,67 @@ impl Memory {
                 table.copy_from_slice(entries);
             }
         }
+        self.update_restricted();
         let watches = mem::take(&mut self.watches);
         self.set_watched(watches.into_iter());
         Ok(())
     }
 
-    /// Recomputes `special`.
+    /// Recomputes `restricted` from the permissions, then `special`.
+    fn update_restricted(&mut self) {
+        self.restricted = self.slabs.iter().flatten().any(|slab| slab.is_restricted());
+        self.update_special();
+    }
+
+    /// Recomputes `special` from `restricted` and the hooks' ranges: a
+    /// range that is not empty sets a page's bit.
     fn update_special(&mut self) {
-        self.special = self.unallocated.iter().any(|&bits| bits != 0)
-            || self.slabs.iter().flatten().any(|slab| slab.is_special());
+        self.special = self.restricted
+            || self
+                .watches
+                .iter()
+                .any(|(range, _)| range.start() <= range.end());
+    }
+
+    /// Adds a hook's `range`, on the address lines, with its [`watch`]
+    /// `bit`: only its pages' bits change.
+    pub(crate) fn add_watch(&mut self, range: RangeInclusive<Address>, bit: watch::Bits) {
+        self.watches.push((range.clone(), bit));
+        self.rewatched(&range, bit);
+    }
+
+    /// Removes a hook's `range` with its [`watch`] `bit`, as
+    /// [`add_watch`](Self::add_watch) added it: only its pages' bits
+    /// change.
+    pub(crate) fn remove_watch(&mut self, range: &RangeInclusive<Address>, bit: watch::Bits) {
+        if let Some(index) = self
+            .watches
+            .iter()
+            .position(|(other, other_bit)| other == range && *other_bit == bit)
+        {
+            self.watches.remove(index);
+        }
+        self.rewatched(range, bit);
+    }
+
+    /// Brings the bits of `range`'s pages, `special` and, for a `bit`
+    /// the fast path minds, the pages' fast entries up to date after a
+    /// range with `bit` was added or removed.
+    fn rewatched(&mut self, range: &RangeInclusive<Address>, bit: watch::Bits) {
+        let (first, last) = range_pages(range, self.address_mask);
+        if first <= last {
+            self.rewatch_pages(first, last);
+            if bit & watch::SLOW != 0 {
+                for space in [Space::User, Space::Supervisor] {
+                    self.refresh(space.index(), first..last + 1);
+                }
+            }
+        }
+        self.update_special();
     }
 
     /// The number of the page `address` is in.
-    const fn page_number(&self, address: Address) -> usize {
+    pub(crate) const fn page_number(&self, address: Address) -> usize {
         ((address.0 & self.address_mask) >> PAGE_SHIFT) as usize
     }
 
@@ -825,18 +993,39 @@ impl Memory {
         Some((slab, page & SLAB_MASK, (address % PAGE_BYTES) as usize))
     }
 
-    /// A byte, word or long the core serves itself, read with no bus
-    /// cycle and no stall: what a hook sees of memory.  [`None`] if any
-    /// of it is on the bus.  A word or long must be aligned.
+    /// A byte, word or long the core serves itself, from the bytes the
+    /// pages read, with no bus cycle and no stall.  [`None`] if any of
+    /// it is on the bus.  A word or long must be aligned.
     #[must_use]
     pub fn peek(&self, space: Space, address: Address, size: Size) -> Option<u32> {
+        self.peek_in(space, address, size, |page| page.read)
+    }
+
+    /// What a write of a byte, word or long would replace: the bytes
+    /// the pages write to, read with no bus cycle.  [`None`] if any of
+    /// it writes to the bus.  A word or long must be aligned.
+    pub(crate) fn peek_written(&self, space: Space, address: Address, size: Size) -> Option<u32> {
+        self.peek_in(space, address, size, |page| page.write)
+    }
+
+    /// A byte, word or long of the bytes `backing` picks of each page,
+    /// with no bus cycle: [`None`] if any of it has no such backing.  A
+    /// word or long must be aligned.
+    fn peek_in(
+        &self,
+        space: Space,
+        address: Address,
+        size: Size,
+        backing: impl Fn(&Page) -> Option<Backing> + Copy,
+    ) -> Option<u32> {
         if size == Size::Long {
-            let high = self.read_backed(space, address, Size::Word)?.0;
-            let low = self.read_backed(space, address.offset(2), Size::Word)?.0;
+            let high = self.peek_in(space, address, Size::Word, backing)?;
+            let low = self.peek_in(space, address.offset(2), Size::Word, backing)?;
             return Some(high << 16 | low);
         }
-        self.read_backed(space, address, size)
-            .map(|(value, _)| value)
+        let (slab, index, within) = self.locate(address)?;
+        let backing = backing(&slab.tables[space.index()][index])?;
+        Some(self.value_at(backing, within, size))
     }
 
     /// Fills `bytes` from `address` up with no bus cycle, a debugger's
@@ -897,7 +1086,7 @@ impl Memory {
         backing: fn(&Page) -> Option<Backing>,
     ) -> Result<(RegionId, usize, usize), Unserved> {
         let at = address.offset(done as u32);
-        let backing = backing(&self.entry(Space::Supervisor, at)).ok_or(Unserved(at))?;
+        let backing = backing(&self.page(Space::Supervisor, at)).ok_or(Unserved(at))?;
         let within = self.mask(at).0 % PAGE_BYTES;
         let count = ((PAGE_BYTES - within) as usize).min(length - done);
         Ok((backing.region, (backing.offset + within) as usize, count))
@@ -906,7 +1095,7 @@ impl Memory {
     /// A byte or word read the fast path serves, with its stall, or
     /// [`None`] if it takes the slow path or goes to the bus.  A word is
     /// aligned, so it never leaves a page.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn read(&self, space: Space, address: Address, size: Size) -> Option<(u32, Cycles)> {
         let (slab, index, within) = self.locate(address)?;
         self.read_in(&slab.fast[space.index()][index], within, size)
@@ -927,24 +1116,29 @@ impl Memory {
     /// A read from `page`, `within` bytes into it.
     #[inline]
     fn read_in(&self, page: &Page, within: usize, size: Size) -> Option<(u32, Cycles)> {
-        let backing = page.read?;
+        let value = self.value_at(page.read?, within, size);
+        Some((value, stall(size, page.port, page.clocks())))
+    }
+
+    /// The byte or word `within` bytes into the page `backing` backs.
+    #[inline]
+    fn value_at(&self, backing: Backing, within: usize, size: Size) -> u32 {
         let bytes = &self.regions[backing.region.0][backing.offset as usize + within..];
-        let value = match size {
+        match size {
             Size::Byte => u32::from(bytes[0]),
             _ => u32::from(u16::from_be_bytes([bytes[0], bytes[1]])),
-        };
-        Some((value, stall(size, page.port, page.clocks)))
+        }
     }
 
     /// An even long's two word reads, high word first, with their stall,
     /// if the fast path serves both from one page: [`None`] if it takes
     /// the slow path, goes to the bus or crosses a page, with no read
     /// made.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn read_long(&self, space: Space, address: Address) -> Option<(u32, Cycles)> {
         let (slab, index, within) = self.locate(address)?;
         let page = &slab.fast[space.index()][index];
-        let (backing, word) = (page.read?, stall(Size::Word, page.port, page.clocks));
+        let (backing, word) = (page.read?, stall(Size::Word, page.port, page.clocks()));
         let at = backing.offset as usize + Self::long_within(within)?;
         let bytes = &self.regions[backing.region.0][at..at + 4];
         Some((
@@ -956,7 +1150,7 @@ impl Memory {
     /// An even long's two word writes, high word first, with their
     /// stall, if the fast path serves both on one page, as
     /// [`read_long`](Self::read_long).
-    #[inline]
+    #[inline(always)]
     pub(crate) fn write_long(
         &mut self,
         space: Space,
@@ -965,7 +1159,7 @@ impl Memory {
     ) -> Option<Cycles> {
         let (slab, index, within) = self.locate(address)?;
         let page = slab.fast[space.index()][index];
-        let (backing, word) = (page.write?, stall(Size::Word, page.port, page.clocks));
+        let (backing, word) = (page.write?, stall(Size::Word, page.port, page.clocks()));
         let at = backing.offset as usize + Self::long_within(within)?;
         self.regions[backing.region.0][at..at + 4].copy_from_slice(&value.to_be_bytes());
         Some(word + word)
@@ -1008,7 +1202,7 @@ impl Memory {
             page,
             region: backing.region.0,
             offset: backing.offset as usize,
-            stall: stall(Size::Word, entry.port, entry.clocks),
+            stall: stall(Size::Word, entry.port, entry.clocks()),
         };
         self.fetch_page = Some(cached);
         Some(cached)
@@ -1016,7 +1210,7 @@ impl Memory {
 
     /// A byte or word write the fast path serves, with its stall, or
     /// [`None`] if it takes the slow path or goes to the bus.
-    #[inline]
+    #[inline(always)]
     pub(crate) fn write(
         &mut self,
         space: Space,
@@ -1033,6 +1227,20 @@ impl Memory {
     pub(crate) fn write_served(&self, space: Space, address: Address) -> bool {
         self.locate(address)
             .is_some_and(|(slab, index, _)| slab.tables[space.index()][index].write.is_some())
+    }
+
+    /// The stall a write of `size` at `address` served here, hooked page
+    /// or not, would take, a long as two word writes, high word first,
+    /// with nothing written; [`None`] if any of it goes to the bus.
+    pub(crate) fn write_stall(&self, space: Space, address: Address, size: Size) -> Option<Cycles> {
+        if size == Size::Long {
+            let high = self.write_stall(space, address, Size::Word)?;
+            return Some(high + self.write_stall(space, address.offset(2), Size::Word)?);
+        }
+        let (slab, index, _) = self.locate(address)?;
+        let page = slab.tables[space.index()][index];
+        page.write?;
+        Some(stall(size, page.port, page.clocks()))
     }
 
     /// A byte or word write served here, hooked page or not, with its
@@ -1052,7 +1260,7 @@ impl Memory {
     /// A write to `page`, `within` bytes into it.
     #[inline]
     fn write_in(&mut self, page: Page, within: usize, size: Size, value: u32) -> Option<Cycles> {
-        let (backing, cost) = (page.write?, stall(size, page.port, page.clocks));
+        let (backing, cost) = (page.write?, stall(size, page.port, page.clocks()));
         let bytes = &mut self.regions[backing.region.0][backing.offset as usize + within..];
         match size {
             Size::Byte => bytes[0] = value as u8,
@@ -1064,27 +1272,58 @@ impl Memory {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::RangeInclusive;
+
     use super::Backing;
     use super::Memory;
     use super::MemoryError;
     use super::PAGE_BYTES;
     use super::Page;
+    use super::ParsePermissionsError;
+    use super::Permissions;
     use super::Space;
     use super::Unserved;
-    use crate::bus::PortSize;
+    use super::watch;
+    use crate::PortSize;
     use crate::cycles::Cycles;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::Size;
+
+    #[test]
+    fn permissions_print_in_order_and_parse_in_any_order_and_case() {
+        let read_execute = Permissions::READ.union(Permissions::EXECUTE);
+        for (permissions, text) in [
+            (Permissions::NONE, ""),
+            (Permissions::WRITE, "w"),
+            (read_execute, "rx"),
+            (Permissions::ALL, "rwx"),
+        ] {
+            assert_eq!(permissions.to_string(), text);
+            assert_eq!(text.parse(), Ok(permissions));
+        }
+        assert_eq!("XR".parse(), Ok(read_execute));
+        assert_eq!("xWr".parse(), Ok(Permissions::ALL));
+    }
+
+    #[test]
+    fn other_letters_and_repeats_name_no_permissions() {
+        for text in ["rr", "rwz", "-", " r"] {
+            let error = text.parse::<Permissions>().unwrap_err();
+            assert_eq!(error, ParsePermissionsError(text.to_owned()));
+            assert_eq!(
+                error.to_string(),
+                format!("no permissions {text:?}: give r, w and x, each at most once")
+            );
+        }
+    }
 
     fn ram(memory: &mut Memory, at: u32, bytes: u32) {
         let region = memory.add_region(vec![0; bytes as usize]);
         let backing = Some(Backing { region, offset: 0 });
-        let page = Page {
-            read: backing,
-            write: backing,
-            port: PortSize::Bits16,
-            clocks: 2,
-        };
+        let page = Page::BUS
+            .reading(backing)
+            .writing(backing)
+            .timed(PortSize::Bits16, Cycles::from_clocks(2));
         memory
             .map(Space::Supervisor, Address(at), bytes, page)
             .unwrap();
@@ -1113,6 +1352,10 @@ mod tests {
         let mut memory = Memory::new(24).unwrap();
         let rom = memory.add_region(vec![0; PAGE_BYTES as usize]);
         let ram = memory.add_region(vec![0; PAGE_BYTES as usize]);
+        assert_eq!(
+            (rom.to_string(), ram.to_string()),
+            ("region 0".to_owned(), "region 1".to_owned())
+        );
         let backing = |region| Some(Backing { region, offset: 0 });
         // a ROM that reads, the RAM under it that takes the writes
         let page = Page::BUS.reading(backing(rom)).writing(backing(ram));
@@ -1211,6 +1454,78 @@ mod tests {
             memory.read(Space::Supervisor, Address(2), Size::Word),
             Some((0xbeef, Cycles::ZERO))
         );
+    }
+
+    /// Memory on 24 lines with RAM in slabs 0 and 2, slab 1 not
+    /// allocated, user page 0 read-only.
+    fn watched_memory() -> Memory {
+        let mut memory = Memory::new(24).unwrap();
+        ram(&mut memory, 0, 0x4_0000);
+        ram(&mut memory, 0x40_0000, 0x4_0000);
+        memory
+            .protect(Space::User, Address(0), PAGE_BYTES, Permissions::READ)
+            .unwrap();
+        memory
+    }
+
+    /// Whether `one` and `other` have the same watch bits, fast entries
+    /// and `special`.
+    fn watching_alike(one: &Memory, other: &Memory) -> bool {
+        let slabs = |memory: &Memory| -> Vec<_> {
+            memory
+                .slabs
+                .iter()
+                .flatten()
+                .map(|slab| (slab.watched.to_vec(), slab.fast.map(Vec::from)))
+                .collect()
+        };
+        one.unallocated == other.unallocated
+            && one.special == other.special
+            && slabs(one) == slabs(other)
+    }
+
+    #[test]
+    fn watches_added_and_removed_one_at_a_time_mark_pages_as_all_at_once() {
+        let range = |start: u32, end: u32| Address(start)..=Address(end);
+        let watches = [
+            (range(0, 0x7ff), watch::CODE),
+            (range(0x1000, 0x1001), watch::WRITE),
+            (range(0x20_0000, 0x3f_ffff), watch::READ),
+            (range(0x1000, 0x1001), watch::WRITE),
+            (range(0x3f_f000, 0x40_1000), watch::PRE_READ),
+            (range(0x50_0000, 0x40_0000), watch::CODE),
+            (range(0x41_0000, 0x41_0000), watch::PRE_WRITE),
+            (range(0, u32::MAX), watch::BLOCK),
+        ];
+        let mut memory = watched_memory();
+        let mut added = Vec::new();
+        let check = |memory: &Memory, added: &[(RangeInclusive<Address>, watch::Bits)]| {
+            let mut all = watched_memory();
+            all.set_watched(added.iter().cloned());
+            assert!(watching_alike(memory, &all), "{added:?}");
+        };
+        for (range, bit) in &watches {
+            memory.add_watch(range.clone(), *bit);
+            added.push((range.clone(), *bit));
+            check(&memory, &added);
+        }
+        for index in [1, 7, 0, 4, 2, 3, 5, 6] {
+            let (range, bit) = &watches[index];
+            memory.remove_watch(range, *bit);
+            let at = added
+                .iter()
+                .position(|(other, other_bit)| other == range && other_bit == bit)
+                .unwrap();
+            added.remove(at);
+            check(&memory, &added);
+        }
+        assert!(memory.is_special(), "the read-only page");
+        let mut memory = Memory::new(24).unwrap();
+        ram(&mut memory, 0, 0x4_0000);
+        memory.add_watch(range(0x1000, 0x1001), watch::CODE);
+        assert!(memory.is_special());
+        memory.remove_watch(&range(0x1000, 0x1001), watch::CODE);
+        assert!(!memory.is_special());
     }
 
     #[test]

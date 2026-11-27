@@ -2,12 +2,16 @@
 //! documentation, so `cargo test` compiles and runs each of its Rust
 //! blocks as a doctest.  `firmware` is the little the examples share:
 //! a ROM image and the few instructions their programs need.  `gdb`
-//! holds `docs/gdb.md`'s, the same way.  `echo` is the example board's
-//! firmware, `boards/echo.bin`.
+//! holds `docs/gdb.md`'s, the same way, and `init_scripts`
+//! `docs/init-scripts.md`'s.  `echo` is the example board's firmware,
+//! `boards/echo.bin`.
 #![doc = include_str!("../../docs/host-guide.md")]
 
 #[doc = include_str!("../../docs/gdb.md")]
 pub mod gdb {}
+
+#[doc = include_str!("../../docs/init-scripts.md")]
+pub mod init_scripts {}
 
 pub mod echo;
 pub mod firmware;

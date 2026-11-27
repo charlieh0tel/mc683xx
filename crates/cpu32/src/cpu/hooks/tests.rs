@@ -5,15 +5,27 @@ use std::rc::Rc;
 use std::time::Duration;
 use std::time::Instant;
 
-use super::ExceptionEntry;
-use super::Invalid;
-use super::InvalidAccess;
-use super::MemoryAccess;
+use crate::BusError;
+use crate::bus::Bus;
+use crate::bus::BusAccess;
+use crate::bus::Read;
 use crate::cpu::Cpu;
 use crate::cpu::Stop;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
-use crate::exception::CycleKind;
+use crate::exception::BusCycleKind;
+use crate::exception::Exception;
 use crate::exception::Vector;
+use crate::hooks::Coverage;
+use crate::hooks::CoverageId;
+use crate::hooks::CoverageKind;
+use crate::hooks::ExceptionEntry;
+use crate::hooks::ExceptionReturn;
+use crate::hooks::Invalid;
+use crate::hooks::InvalidAccess;
+use crate::hooks::MemoryAccess;
+use crate::hooks::PendingRead;
+use crate::hooks::PendingWrite;
 use crate::instructions::tests::CODE;
 use crate::instructions::tests::NoBus;
 use crate::instructions::tests::NoInterrupts;
@@ -23,12 +35,20 @@ use crate::instructions::tests::machine_with_clocks;
 use crate::instructions::tests::peek_long;
 use crate::instructions::tests::poke_long;
 use crate::instructions::tests::step;
+use crate::interrupt::Acknowledge;
+use crate::interrupt::Acknowledged;
+use crate::interrupt::InterruptLevel;
+use crate::interrupt::Interrupts;
+use crate::memory::Backing;
+use crate::memory::Memory;
 use crate::memory::PAGE_BYTES;
+use crate::memory::Page;
 use crate::memory::Permissions;
 use crate::memory::Space;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use crate::registers::status;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// NOP.
 const NOP: u16 = 0x4e71;
@@ -122,6 +142,379 @@ fn a_block_hook_sees_each_block_start() {
 }
 
 #[test]
+fn a_page_without_instruction_hooks_stays_quiet_until_one_is_added() {
+    // A TRAP into a handler that returns, twice, the handler's page
+    // alone with a block hook, over its NOP and RTE.
+    let mut cpu = prepared(&[NOP, TRAP, NOP, TRAP], &[NOP, RTE]);
+    let starts = log();
+    let into = Rc::clone(&starts);
+    cpu.add_block_hook(
+        Address(HANDLER)..=Address(HANDLER + 3),
+        move |instruction| {
+            into.borrow_mut().push(instruction.pc.0);
+            ControlFlow::Continue(())
+        },
+    );
+    // NOP, TRAP, the handler's NOP and RTE, back on the quiet page
+    step(&mut cpu, 4);
+    assert_eq!(cpu.registers.pc.0, CODE + 4);
+    let code = log();
+    let into = Rc::clone(&code);
+    cpu.add_code_hook(Address(CODE + 4)..=Address(CODE + 4), move |instruction| {
+        into.borrow_mut().push(instruction.pc.0);
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 4);
+    // The return's block start, on the code's page, was forgotten there.
+    assert_eq!(*starts.borrow(), [HANDLER, HANDLER]);
+    assert_eq!(*code.borrow(), [CODE + 4]);
+}
+
+/// TRAP's opcodes, $4E40 to $4E4F: its mask.
+const TRAP_MASK: u16 = 0xfff0;
+
+#[test]
+fn an_opcode_hook_is_called_for_its_opcodes_alone_in_the_order_installed() {
+    // NOP, TRAP #0 into a handler of NOP, RTE, then TRAP #1
+    let mut cpu = prepared(&[NOP, TRAP, TRAP | 1], &[NOP, RTE]);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    let code = cpu.add_code_hook(Address(CODE + 2)..=Address(CODE + 2), move |instruction| {
+        into.borrow_mut()
+            .push(("code", instruction.pc.0, instruction.opcode));
+        ControlFlow::Continue(())
+    });
+    let into = Rc::clone(&seen);
+    let trap = cpu.add_opcode_hook(everywhere(), TRAP_MASK, TRAP, move |instruction| {
+        into.borrow_mut()
+            .push(("trap", instruction.pc.0, instruction.opcode));
+        ControlFlow::Break(())
+    });
+    let into = Rc::clone(&seen);
+    let rte = cpu.add_opcode_hook(everywhere(), 0xffff, RTE, move |instruction| {
+        into.borrow_mut()
+            .push(("rte", instruction.pc.0, instruction.opcode));
+        ControlFlow::Continue(())
+    });
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
+    // stopped before the TRAP, after the code hook installed before it
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(trap));
+    assert_eq!(cpu.registers.pc.0, CODE + 2);
+    // the next run executes it without calling the code hooks again
+    assert_eq!(step(&mut cpu, 3).stop, Stop::Budget);
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(trap));
+    assert_eq!(
+        *seen.borrow(),
+        [
+            // a plain code hook's call reads no opcode
+            ("code", CODE + 2, None),
+            ("trap", CODE + 2, Some(TRAP)),
+            ("rte", HANDLER + 2, Some(RTE)),
+            ("trap", CODE + 4, Some(TRAP | 1)),
+        ]
+    );
+    // removed, its pages go quiet
+    for id in [code, trap, rte] {
+        assert!(cpu.remove_hook(id));
+    }
+    assert!(!cpu.memory.is_special());
+}
+
+#[test]
+fn an_opcode_hook_never_matches_an_instruction_the_bus_serves() {
+    let mut cpu = prepared(&[NOP], &[]);
+    cpu.registers.pc = Address(NOWHERE);
+    let calls = Rc::new(RefCell::new(0));
+    let into = Rc::clone(&calls);
+    cpu.add_opcode_hook(everywhere(), 0, 0, move |_| {
+        *into.borrow_mut() += 1;
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 1);
+    assert_eq!(*calls.borrow(), 0);
+    // nor is a code hook there given one
+    let opcodes = log();
+    let into = Rc::clone(&opcodes);
+    cpu.add_code_hook(everywhere(), move |instruction| {
+        into.borrow_mut().push(instruction.opcode);
+        ControlFlow::Continue(())
+    });
+    cpu.registers.pc = Address(NOWHERE);
+    step(&mut cpu, 1);
+    assert_eq!(opcodes.borrow()[0], None);
+}
+
+/// MOVE.L #imm,D0: three words.
+const MOVE_IMMEDIATE_TO_D0: u16 = 0x203c;
+
+/// The addresses `coverage` recorded.
+fn covered(cpu: &Cpu, coverage: CoverageId) -> Vec<u32> {
+    cpu.coverage(coverage)
+        .expect("added")
+        .addresses()
+        .map(|address| address.0)
+        .collect()
+}
+
+#[test]
+fn a_coverage_records_each_instruction_start_in_its_range_once() {
+    // A three-word MOVE, a TRAP into a handler outside the range that
+    // returns, a NOP, run twice over.
+    let code = [MOVE_IMMEDIATE_TO_D0, 0x1234, 0x5678, TRAP, NOP];
+    let mut cpu = prepared(&code, &[NOP, RTE]);
+    let coverage = cpu.add_coverage(Address(CODE)..=Address(CODE + 0xff), CoverageKind::Execute);
+    assert_eq!(coverage.to_string(), "coverage 1");
+    step(&mut cpu, 5);
+    cpu.registers.pc = Address(CODE);
+    step(&mut cpu, 5);
+    assert_eq!(covered(&cpu, coverage), [CODE, CODE + 6, CODE + 8]);
+    let recorded = cpu.coverage(coverage).unwrap();
+    assert!(recorded.contains(Address(CODE + 6)) && !recorded.contains(Address(CODE + 2)));
+    assert_eq!(recorded.range(), Address(CODE)..=Address(CODE + 0xff));
+    // cleared, it records afresh
+    assert!(cpu.clear_coverage(coverage));
+    assert!(covered(&cpu, coverage).is_empty());
+    cpu.registers.pc = Address(CODE + 8);
+    step(&mut cpu, 1);
+    assert_eq!(covered(&cpu, coverage), [CODE + 8]);
+    // removed, its record is handed back and its pages go quiet
+    let removed = cpu.remove_coverage(coverage).unwrap();
+    assert_eq!(removed.addresses().count(), 1);
+    assert!(cpu.coverage(coverage).is_none());
+    assert!(!cpu.clear_coverage(coverage));
+    assert!(cpu.remove_coverage(coverage).is_none());
+    assert!(!cpu.memory.is_special());
+}
+
+#[test]
+fn a_coverage_records_an_instruction_once_it_runs_past_a_hook_stop() {
+    let mut cpu = prepared(&[NOP, NOP], &[]);
+    let coverage = cpu.add_coverage(everywhere(), CoverageKind::Execute);
+    let hook = cpu.add_code_hook(Address(CODE + 2)..=Address(CODE + 2), |_| {
+        ControlFlow::Break(())
+    });
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(hook));
+    assert_eq!(covered(&cpu, coverage), [CODE]);
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
+    assert_eq!(covered(&cpu, coverage), [CODE, CODE + 2]);
+    // not part of a snapshot: a restore leaves it as it was
+    let snapshot = cpu.save().unwrap();
+    cpu.clear_coverage(coverage);
+    cpu.restore(&snapshot).unwrap();
+    assert!(covered(&cpu, coverage).is_empty());
+    // past the address lines: the range ends at their last address
+    assert_eq!(
+        cpu.coverage(coverage).unwrap().range(),
+        Address(0)..=Address(cpu.memory.mask(Address(u32::MAX)).0)
+    );
+}
+
+#[test]
+fn a_coverage_holds_only_the_pages_it_recorded() {
+    let mut cpu = prepared(&[NOP, NOP], &[]);
+    let coverage = cpu.add_coverage(everywhere(), CoverageKind::Execute);
+    assert_eq!(cpu.coverage(coverage).unwrap().pages_held(), 0);
+    step(&mut cpu, 2);
+    assert_eq!(cpu.coverage(coverage).unwrap().pages_held(), 1);
+    cpu.clear_coverage(coverage);
+    assert_eq!(cpu.coverage(coverage).unwrap().pages_held(), 0);
+}
+
+#[test]
+fn a_coverage_s_range_starts_on_a_word_and_ends_on_the_address_lines() {
+    let mask = 0x00ff_ffff;
+    let range = |start: u32, end: u32, kind| {
+        Coverage::new(&(Address(start)..=Address(end)), mask, kind).range()
+    };
+    let execute = CoverageKind::Execute;
+    // an odd start rounds up, not down onto the word before
+    assert_eq!(
+        range(0x1001, 0x10ff, execute),
+        Address(0x1002)..=Address(0x10ff)
+    );
+    assert_eq!(
+        range(0x1001, 0x10ff, CoverageKind::Read),
+        Address(0x1001)..=Address(0x10ff)
+    );
+    assert_eq!(
+        range(0x1000, u32::MAX, execute),
+        Address(0x1000)..=Address(mask)
+    );
+    // empty: past its end, past the lines, or nothing after rounding
+    for (start, end) in [(0x2000, 0x1000), (0x0100_0000, u32::MAX), (0x1001, 0x1001)] {
+        let empty = range(start, end, execute);
+        assert!(empty.is_empty(), "{start:#x}..={end:#x}");
+        let mut coverage = Coverage::new(&(Address(start)..=Address(end)), mask, execute);
+        coverage.record(Address(start));
+        assert_eq!(coverage.addresses().count(), 0);
+    }
+    assert!(range(u32::MAX, u32::MAX, execute).is_empty());
+}
+
+#[test]
+fn a_coverage_reads_out_its_pages_in_order_whichever_it_recorded_last() {
+    let range = Address(0)..=Address(0x00ff_ffff);
+    let mut coverage = Coverage::new(&range, 0x00ff_ffff, CoverageKind::Read);
+    // three pages, two slabs apart, the middle one last
+    let addresses = [
+        0x0040_0001,
+        0x1000,
+        0x0040_0000,
+        0x0020_0800,
+        0x1001,
+        0x0020_0801,
+    ];
+    for address in addresses {
+        coverage.record(Address(address));
+    }
+    let mut sorted = addresses.to_vec();
+    sorted.sort_unstable();
+    let read = |coverage: &Coverage| coverage.addresses().map(|a| a.0).collect::<Vec<_>>();
+    assert_eq!(read(&coverage), sorted);
+    assert_eq!(coverage.pages_held(), 3);
+    assert!(coverage.contains(Address(0x0020_0801)) && coverage.contains(Address(0x1000)));
+    assert!(!coverage.contains(Address(0x1002)));
+    // alike however its pages are held
+    let mut again = Coverage::new(&range, 0x00ff_ffff, CoverageKind::Read);
+    for address in sorted.iter().rev() {
+        again.record(Address(*address));
+    }
+    assert_eq!(again, coverage);
+    coverage.clear();
+    assert_eq!(read(&coverage), Vec::<u32>::new());
+    assert_eq!(coverage.pages_held(), 0);
+    assert_ne!(again, coverage);
+}
+
+#[test]
+fn coverage_kinds_print_and_parse() {
+    for (kind, name) in [
+        (CoverageKind::Execute, "execute"),
+        (CoverageKind::Read, "read"),
+        (CoverageKind::Write, "write"),
+    ] {
+        assert_eq!(kind.to_string(), name);
+        assert_eq!(name.parse::<CoverageKind>(), Ok(kind));
+    }
+    let error = "fetch".parse::<CoverageKind>().unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "no coverage kind \"fetch\": give execute, read or write"
+    );
+}
+
+#[test]
+fn read_and_write_coverages_record_each_byte_a_read_or_write_hook_would_see() {
+    // MOVE.L D0,(A0); MOVE.L (A0),D1; MOVE.B D0,(A1); TRAP into a
+    // handler of NOPs
+    let move_byte_d0_to_a1 = 0x1280;
+    let code = [
+        MOVE_D0_TO_INDIRECT,
+        MOVE_INDIRECT_TO_D1,
+        move_byte_d0_to_a1,
+        TRAP,
+    ];
+    let mut cpu = prepared(&code, &[NOP, NOP]);
+    cpu.registers.set_address(0, DATA);
+    cpu.registers.set_address(1, DATA + 0x11);
+    let reads = cpu.add_coverage(everywhere(), CoverageKind::Read);
+    let writes = cpu.add_coverage(
+        Address(STACK - 0x100)..=Address(DATA + 0xff),
+        CoverageKind::Write,
+    );
+    let instructions = cpu.add_coverage(everywhere(), CoverageKind::Execute);
+    step(&mut cpu, 4);
+    // the long read, and the TRAP's vector, read in exception
+    // processing; not the fetches
+    let vector = Vector::trap(0).offset();
+    assert_eq!(
+        covered(&cpu, reads),
+        [
+            vector,
+            vector + 1,
+            vector + 2,
+            vector + 3,
+            DATA,
+            DATA + 1,
+            DATA + 2,
+            DATA + 3
+        ]
+    );
+    // the TRAP's four-word frame below STACK, the long and the byte
+    let mut expected: Vec<u32> = (STACK - 8..STACK).collect();
+    expected.extend([DATA, DATA + 1, DATA + 2, DATA + 3, DATA + 0x11]);
+    assert_eq!(covered(&cpu, writes), expected);
+    assert_eq!(
+        covered(&cpu, instructions),
+        [CODE, CODE + 2, CODE + 4, CODE + 6]
+    );
+    assert!(cpu.coverage(writes).unwrap().contains(Address(DATA + 0x11)));
+    assert!(!cpu.coverage(writes).unwrap().contains(Address(DATA + 0x10)));
+    assert_eq!(cpu.coverage(reads).unwrap().kind(), CoverageKind::Read);
+    // removed, the pages go back on the fast path
+    for coverage in [reads, writes, instructions] {
+        assert!(cpu.remove_coverage(coverage).is_some());
+    }
+    assert!(!cpu.memory.is_special());
+}
+
+#[test]
+fn a_read_coverage_records_a_peripheral_s_read_and_not_a_dropped_write() {
+    // MOVE.L (A0),D1 from the bus; MOVE.L D0,(A1) into RAM, dropped
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, 0x2280, NOP], &[]);
+    cpu.registers.set_address(0, NOWHERE);
+    cpu.registers.set_address(1, DATA);
+    let reads = cpu.add_coverage(everywhere(), CoverageKind::Read);
+    let writes = cpu.add_coverage(everywhere(), CoverageKind::Write);
+    cpu.add_pre_write_hook(everywhere(), |write: &mut PendingWrite, _, _| {
+        write.set_dropped(true);
+        ControlFlow::Continue(())
+    });
+    for _ in 0..2 {
+        cpu.run_for(
+            &mut Answering,
+            &mut NoInterrupts,
+            Cycle::ZERO,
+            Cycles::from_clocks(1),
+        );
+    }
+    assert_eq!(cpu.registers.pc.0, CODE + 4);
+    assert_eq!(
+        covered(&cpu, reads),
+        (NOWHERE..NOWHERE + 4).collect::<Vec<_>>()
+    );
+    assert!(covered(&cpu, writes).is_empty());
+}
+
+#[test]
+fn a_read_coverage_slows_its_page_s_reads_alone() {
+    let mut cpu = prepared(&[NOP], &[]);
+    let space = Space::Supervisor;
+    let read = cpu.add_coverage(Address(DATA)..=Address(DATA), CoverageKind::Read);
+    assert!(cpu.memory.read(space, Address(DATA), Size::Word).is_none());
+    assert!(
+        cpu.memory
+            .write(space, Address(DATA), Size::Word, 0)
+            .is_some()
+    );
+    cpu.remove_coverage(read);
+    let write = cpu.add_coverage(Address(DATA)..=Address(DATA), CoverageKind::Write);
+    assert!(cpu.memory.read(space, Address(DATA), Size::Word).is_some());
+    assert!(
+        cpu.memory
+            .write(space, Address(DATA), Size::Word, 0)
+            .is_none()
+    );
+    cpu.remove_coverage(write);
+    assert!(
+        cpu.memory
+            .write(space, Address(DATA), Size::Word, 0)
+            .is_some()
+    );
+}
+
+#[test]
 fn a_block_hook_stop_resumes_into_the_code_hooks() {
     let mut cpu = prepared(&[NOP], &[]);
     let code = log();
@@ -205,7 +598,7 @@ fn a_reset_starts_a_block() {
     let (mut cpu, starts) = stopping_at_the_second();
     poke_long(&mut cpu, Vector::RESET_STACK_POINTER.offset(), STACK);
     poke_long(&mut cpu, Vector::RESET_PROGRAM_COUNTER.offset(), CODE + 2);
-    cpu.reset(&mut NoBus, Cycles::ZERO).unwrap();
+    cpu.reset(&mut NoBus, Cycle::ZERO);
     // The stop's skip is gone: the code hook stops again.
     assert!(matches!(step(&mut cpu, 1).stop, Stop::Hook(_)));
     assert_eq!(*starts.borrow(), [CODE, CODE + 2]);
@@ -235,6 +628,716 @@ fn memory_hooks_see_each_word_cycle_and_stop_after_the_instruction() {
     // Fetches are not reads.
     assert_eq!(*reads.borrow(), [(DATA, 0x1234), (DATA + 2, 0x5678)]);
     assert_eq!(cpu.registers.data[1], 0x1234_5678);
+}
+
+/// The pre-read hook's `(address, size, copy)`s.
+type PreReads = Vec<(Address, Size, Vec<u8>)>;
+
+/// The pre-read calls MOVE.L (A0),D1 makes with A0 at `at`, and D1
+/// after it, a hook covering `covered` setting the copy's last byte to
+/// 0x99, on `bus`, the long seen once if `long_bus`; with the read hooks'
+/// `(size, value)`s.
+fn pre_read_long(
+    at: u32,
+    covered: RangeInclusive<Address>,
+    bus: &mut impl Bus,
+    long_bus: bool,
+) -> (PreReads, u32, Vec<(Size, u32)>) {
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, NOP], &[]);
+    cpu.set_long_bus(long_bus);
+    cpu.registers.set_address(0, at);
+    let pending = log();
+    let into = Rc::clone(&pending);
+    cpu.add_pre_read_hook(covered, move |read: &PendingRead, _, bytes: &mut [u8]| {
+        into.borrow_mut()
+            .push((read.address, read.size, bytes.to_vec()));
+        bytes[bytes.len() - 1] = 0x99;
+        ControlFlow::Continue(())
+    });
+    let reads = log();
+    let into = Rc::clone(&reads);
+    cpu.add_read_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push((access.size, access.value));
+        ControlFlow::Continue(())
+    });
+    cpu.run_for(bus, &mut NoInterrupts, Cycle::ZERO, Cycles::from_clocks(1));
+    (pending.take(), cpu.registers.data[1], reads.take())
+}
+
+#[test]
+fn a_pre_read_hook_answers_a_long_once_from_its_copy_before_the_read_hooks() {
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, NOP], &[]);
+    cpu.registers.set_address(0, DATA);
+    poke_long(&mut cpu, DATA, 0x1111_2222);
+    let pending = log();
+    let into = Rc::clone(&pending);
+    // the low word's second byte alone: one call for the whole long
+    let id = cpu.add_pre_read_hook(
+        Address(DATA + 3)..=Address(DATA + 3),
+        move |read: &PendingRead, _, bytes: &mut [u8]| {
+            into.borrow_mut()
+                .push((read.address.0, read.size, bytes.to_vec()));
+            bytes[3] = 0x99;
+            ControlFlow::Break(())
+        },
+    );
+    let reads = log();
+    let into = Rc::clone(&reads);
+    cpu.add_read_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push(access.value);
+        ControlFlow::Continue(())
+    });
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(id));
+    assert_eq!(cpu.registers.pc.0, CODE + 2, "the instruction completed");
+    assert_eq!(cpu.registers.data[1], 0x1111_2299);
+    assert_eq!(
+        *pending.borrow(),
+        [(DATA, Size::Long, vec![0x11, 0x11, 0x22, 0x22])]
+    );
+    assert_eq!(*reads.borrow(), [0x1111, 0x2299]);
+    // the copy answered the read; memory is as it was
+    assert_eq!(
+        cpu.memory
+            .peek(Space::Supervisor, Address(DATA), Size::Long),
+        Some(0x1111_2222)
+    );
+}
+
+#[test]
+fn a_pre_read_hook_reads_other_memory_through_its_view() {
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, NOP], &[]);
+    cpu.registers.set_address(0, DATA);
+    poke_long(&mut cpu, DATA + 0x10, 0x5555_6666);
+    cpu.add_pre_read_hook(
+        Address(DATA)..=Address(DATA),
+        |read: &PendingRead, memory: &Memory, bytes: &mut [u8]| {
+            let image = memory.peek(
+                Space::of(read.function_code),
+                Address(DATA + 0x10),
+                Size::Long,
+            );
+            bytes.copy_from_slice(&image.unwrap().to_be_bytes());
+            ControlFlow::Continue(())
+        },
+    );
+    step(&mut cpu, 1);
+    assert_eq!(cpu.registers.data[1], 0x5555_6666);
+}
+
+#[test]
+fn a_pre_read_hook_answers_a_long_bus_s_read_hooks_once() {
+    let (pending, d1, reads) = pre_read_long(DATA, everywhere(), &mut NoBus, true);
+    assert_eq!(pending, [(Address(DATA), Size::Long, vec![0; 4])]);
+    assert_eq!(d1, 0x99);
+    assert_eq!(reads, [(Size::Long, 0x99)]);
+}
+
+#[test]
+fn a_long_across_two_pages_of_memory_is_one_pre_read() {
+    let at = DATA + PAGE_BYTES - 2;
+    let next = Address(DATA + PAGE_BYTES);
+    let (pending, d1, reads) = pre_read_long(at, next..=next, &mut NoBus, false);
+    assert_eq!(pending, [(Address(at), Size::Long, vec![0; 4])]);
+    assert_eq!(d1, 0x99);
+    assert_eq!(reads, [(Size::Word, 0), (Size::Word, 0x99)]);
+}
+
+/// A bus that answers every read with [`ANSWER`].
+#[derive(Debug)]
+struct Answering;
+
+/// What [`Answering`] reads.
+const ANSWER: u32 = 0xabcd;
+
+impl Bus for Answering {
+    fn read(&mut self, _access: BusAccess) -> Result<Read, BusError> {
+        Ok(Read {
+            value: ANSWER,
+            stall: Cycles::ZERO,
+        })
+    }
+
+    fn write(&mut self, _access: BusAccess, _value: u32) -> Result<Cycles, BusError> {
+        Err(BusError)
+    }
+}
+
+#[test]
+fn a_long_into_the_bus_is_no_pre_read() {
+    let at = RAM_BYTES - 2;
+    let (pending, d1, reads) = pre_read_long(at, everywhere(), &mut Answering, false);
+    assert!(pending.is_empty());
+    assert_eq!(d1, ANSWER);
+    assert_eq!(reads, [(Size::Word, 0), (Size::Word, ANSWER)]);
+}
+
+#[test]
+fn a_pre_read_hook_sees_no_fetch_write_or_misaligned_read() {
+    // MOVE.L D0,(A0); MOVE.W (A1),D1 with A1 odd: an address error,
+    // whose vector, at 12, is a read the hook sees
+    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT, 0x3211, NOP], &[]);
+    cpu.registers.set_address(0, DATA);
+    cpu.registers.set_address(1, DATA + 1);
+    let calls = Rc::new(RefCell::new(0));
+    let into = Rc::clone(&calls);
+    cpu.add_pre_read_hook(Address(0)..=Address(DATA + 1), move |_, _, _| {
+        *into.borrow_mut() += 1;
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 2);
+    assert_eq!(
+        cpu.exception_taken().map(Exception::vector),
+        Some(Vector::ADDRESS_ERROR)
+    );
+    assert_eq!(*calls.borrow(), 1, "the vector's read alone");
+}
+
+#[test]
+fn a_pre_read_hook_skips_a_read_its_page_s_permissions_refuse() {
+    // a long whose second word's page refuses reads: a fault, no call
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, NOP], &[]);
+    cpu.registers.set_address(0, DATA + PAGE_BYTES - 2);
+    cpu.memory
+        .protect(
+            Space::Supervisor,
+            Address(DATA + PAGE_BYTES),
+            PAGE_BYTES,
+            Permissions::WRITE,
+        )
+        .unwrap();
+    let calls = Rc::new(RefCell::new(0));
+    let into = Rc::clone(&calls);
+    cpu.add_pre_read_hook(
+        Address(DATA)..=Address(DATA + 2 * PAGE_BYTES),
+        move |_, _, _| {
+            *into.borrow_mut() += 1;
+            ControlFlow::Continue(())
+        },
+    );
+    step(&mut cpu, 1);
+    assert_eq!(
+        cpu.exception_taken().map(Exception::vector),
+        Some(Vector::BUS_ERROR)
+    );
+    assert_eq!(*calls.borrow(), 0);
+}
+
+#[test]
+fn a_pre_read_hook_slows_its_page_s_reads_alone_and_is_removed() {
+    let mut cpu = prepared(&[NOP], &[]);
+    let page = DATA + PAGE_BYTES;
+    let id = cpu.add_pre_read_hook(Address(page)..=Address(page), |_, _, _| {
+        ControlFlow::Continue(())
+    });
+    let word = |cpu: &Cpu, at| cpu.memory.read(Space::Supervisor, Address(at), Size::Word);
+    assert!(word(&cpu, page).is_none());
+    assert!(word(&cpu, DATA).is_some());
+    assert!(
+        cpu.memory
+            .write(Space::Supervisor, Address(page), Size::Word, 0)
+            .is_some()
+    );
+    assert!(cpu.has_hook(id));
+    assert!(cpu.remove_hook(id));
+    assert!(!cpu.has_hook(id));
+    assert!(!cpu.memory.is_special());
+}
+
+/// A write hook's `(address, size, value, previous)`s.
+type Writes = Rc<RefCell<Vec<(u32, Size, u32, Option<u32>)>>>;
+
+/// A write hook everywhere on `cpu` that logs each write.
+fn log_writes(cpu: &mut Cpu) -> Writes {
+    let writes = log();
+    let into = Rc::clone(&writes);
+    cpu.add_write_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut()
+            .push((access.address.0, access.size, access.value, access.previous));
+        ControlFlow::Continue(())
+    });
+    writes
+}
+
+/// The long word at `at` in supervisor space, hooked page or not.
+fn stored(cpu: &Cpu, at: u32) -> u32 {
+    cpu.memory
+        .peek(Space::Supervisor, Address(at), Size::Long)
+        .expect("RAM")
+}
+
+/// A machine running MOVE.L D0,(A0) with A0 at `at`, D0 `0x1234_5678`
+/// and `0x1111_2222` in memory there, the long seen once if `long_bus`.
+fn writing_long(at: u32, long_bus: bool) -> Cpu {
+    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT, NOP], &[]);
+    cpu.set_long_bus(long_bus);
+    cpu.registers.set_address(0, at);
+    cpu.registers.data[0] = 0x1234_5678;
+    if at + 4 <= RAM_BYTES {
+        poke_long(&mut cpu, at, 0x1111_2222);
+    }
+    cpu
+}
+
+#[test]
+fn a_pre_write_hook_replaces_a_long_once_before_the_write_hooks() {
+    let mut cpu = writing_long(DATA, false);
+    let pending = log();
+    let into = Rc::clone(&pending);
+    // the low word's second byte alone: one call for the whole long
+    let id = cpu.add_pre_write_hook(
+        Address(DATA + 3)..=Address(DATA + 3),
+        move |write: &mut PendingWrite, memory: &Memory, bytes: &mut [u8]| {
+            let before = memory.peek(Space::Supervisor, write.address, Size::Long);
+            into.borrow_mut()
+                .push((write.address.0, write.size, bytes.to_vec(), before));
+            bytes[3] = 0x99;
+            ControlFlow::Break(())
+        },
+    );
+    let writes = log_writes(&mut cpu);
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(id));
+    assert_eq!(cpu.registers.pc.0, CODE + 2, "the instruction completed");
+    assert_eq!(
+        *pending.borrow(),
+        [(
+            DATA,
+            Size::Long,
+            vec![0x12, 0x34, 0x56, 0x78],
+            Some(0x1111_2222)
+        )]
+    );
+    // the write hooks see what was stored, and what it replaced
+    assert_eq!(
+        *writes.borrow(),
+        [
+            (DATA, Size::Word, 0x1234, Some(0x1111)),
+            (DATA + 2, Size::Word, 0x5699, Some(0x2222))
+        ]
+    );
+    assert_eq!(stored(&cpu, DATA), 0x1234_5699);
+}
+
+#[test]
+fn a_pre_write_hook_replaces_a_long_bus_s_write_once() {
+    let mut cpu = writing_long(DATA, true);
+    cpu.add_pre_write_hook(everywhere(), |_, _, bytes: &mut [u8]| {
+        bytes.copy_from_slice(&[0xca, 0xfe, 0xf0, 0x0d]);
+        ControlFlow::Continue(())
+    });
+    let writes = log_writes(&mut cpu);
+    step(&mut cpu, 1);
+    assert_eq!(
+        *writes.borrow(),
+        [(DATA, Size::Long, 0xcafe_f00d, Some(0x1111_2222))]
+    );
+}
+
+#[test]
+fn a_dropped_store_writes_nothing_and_takes_its_time() {
+    let unhooked = step(&mut writing_long(DATA, false), 1).cycles;
+    let mut cpu = writing_long(DATA, false);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_pre_write_hook(everywhere(), |write: &mut PendingWrite, _, _| {
+        write.set_dropped(true);
+        ControlFlow::Continue(())
+    });
+    // a later hook sees the drop, and its bytes go nowhere
+    cpu.add_pre_write_hook(everywhere(), move |write: &mut PendingWrite, _, bytes| {
+        into.borrow_mut().push(write.dropped());
+        bytes.fill(0xff);
+        ControlFlow::Continue(())
+    });
+    let writes = log_writes(&mut cpu);
+    let run = step(&mut cpu, 1);
+    assert_eq!(*seen.borrow(), [true]);
+    assert!(writes.borrow().is_empty());
+    assert_eq!(stored(&cpu, DATA), 0x1111_2222);
+    assert_eq!(cpu.registers.pc.0, CODE + 2);
+    assert_eq!(run.cycles, unhooked);
+}
+
+#[test]
+fn a_later_pre_write_hook_may_keep_a_dropped_store() {
+    let mut cpu = writing_long(DATA, false);
+    cpu.add_pre_write_hook(everywhere(), |write: &mut PendingWrite, _, _| {
+        write.set_dropped(true);
+        ControlFlow::Continue(())
+    });
+    cpu.add_pre_write_hook(everywhere(), |write: &mut PendingWrite, _, _| {
+        write.set_dropped(false);
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 1);
+    assert_eq!(stored(&cpu, DATA), 0x1234_5678);
+}
+
+#[test]
+fn a_pre_write_hook_sees_exception_stacking_word_by_word() {
+    let mut cpu = prepared(&[TRAP], &[NOP]);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    let frame = Address(STACK - 8)..=Address(STACK - 1);
+    cpu.add_pre_write_hook(frame, move |write: &mut PendingWrite, _, bytes| {
+        into.borrow_mut()
+            .push((write.address.0, write.size, write.stacking));
+        // the frame's highest word
+        if write.address.0 == STACK - 2 {
+            bytes.copy_from_slice(&[0xab, 0xcd]);
+        }
+        ControlFlow::Continue(())
+    });
+    let writes = log_writes(&mut cpu);
+    step(&mut cpu, 1);
+    assert_eq!(
+        *seen.borrow(),
+        [
+            (STACK - 2, Size::Word, true),
+            (STACK - 4, Size::Word, true),
+            (STACK - 6, Size::Word, true),
+            (STACK - 8, Size::Word, true)
+        ]
+    );
+    assert_eq!(writes.borrow()[0].2, 0xabcd);
+    assert_eq!(stored(&cpu, STACK - 4) & 0xffff, 0xabcd);
+}
+
+/// An interrupt source requesting level 1, autovectored.
+struct LevelOne;
+
+impl Interrupts for LevelOne {
+    fn level(&self) -> InterruptLevel {
+        InterruptLevel::try_from(1).unwrap()
+    }
+
+    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycle) -> Acknowledged {
+        Acknowledge::Autovector.into()
+    }
+}
+
+#[test]
+fn each_hook_sees_the_number_of_the_instruction_it_is_part_of() {
+    // NOP; MOVE.L D0,(A0); TRAP #0 into a handler of NOPs
+    let mut cpu = prepared(&[NOP, MOVE_D0_TO_INDIRECT, TRAP], &[NOP, NOP]);
+    cpu.registers.set_address(0, DATA);
+    let code = log();
+    let into = Rc::clone(&code);
+    cpu.add_code_hook(everywhere(), move |instruction| {
+        into.borrow_mut()
+            .push((instruction.pc.0, instruction.instruction));
+        ControlFlow::Continue(())
+    });
+    let writes = log();
+    let into = Rc::clone(&writes);
+    cpu.add_write_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut()
+            .push((access.address.0, access.instruction, access.stacking));
+        ControlFlow::Continue(())
+    });
+    let reads = log();
+    let into = Rc::clone(&reads);
+    cpu.add_read_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push(access.instruction);
+        ControlFlow::Continue(())
+    });
+    let pre = log();
+    let into = Rc::clone(&pre);
+    cpu.add_pre_read_hook(everywhere(), move |read: &PendingRead, _, _| {
+        into.borrow_mut().push(read.instruction);
+        ControlFlow::Continue(())
+    });
+    let into = Rc::clone(&pre);
+    cpu.add_pre_write_hook(everywhere(), move |write: &mut PendingWrite, _, _| {
+        into.borrow_mut().push(write.instruction);
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 4);
+    assert_eq!(cpu.instructions(), 4);
+    assert_eq!(
+        *code.borrow(),
+        [(CODE, 0), (CODE + 2, 1), (CODE + 4, 2), (HANDLER, 3)]
+    );
+    // the MOVE's two words, then the TRAP's frame, stacked as it ends
+    assert_eq!(
+        writes.borrow()[..3],
+        [(DATA, 1, false), (DATA + 2, 1, false), (STACK - 2, 2, true)]
+    );
+    assert_eq!(writes.borrow().len(), 6);
+    assert!(
+        writes.borrow()[2..]
+            .iter()
+            .all(|&(_, number, _)| number == 2)
+    );
+    // the TRAP's vector, the only operand read
+    assert!(!reads.borrow().is_empty() && reads.borrow().iter().all(|&number| number == 2));
+    // the pre-access hooks: the MOVE's long, the vector, the frame
+    assert_eq!(pre.borrow()[0], 1);
+    assert!(pre.borrow()[1..].iter().all(|&number| number == 2));
+    // an interrupt, between instructions: the next one's number
+    cpu.registers.set_sr(status::S);
+    writes.borrow_mut().clear();
+    cpu.run_for(
+        &mut NoBus,
+        &mut LevelOne,
+        Cycle::ZERO,
+        Cycles::from_clocks(1),
+    );
+    assert_eq!(cpu.instructions(), 4);
+    assert_eq!(writes.borrow().len(), 4);
+    assert!(
+        writes
+            .borrow()
+            .iter()
+            .all(|&(_, number, stacking)| number == 4 && stacking)
+    );
+}
+
+/// A bus that takes every write.
+#[derive(Debug)]
+struct Taking;
+
+impl Bus for Taking {
+    fn read(&mut self, _access: BusAccess) -> Result<Read, BusError> {
+        Err(BusError)
+    }
+
+    fn write(&mut self, _access: BusAccess, _value: u32) -> Result<Cycles, BusError> {
+        Ok(Cycles::ZERO)
+    }
+}
+
+#[test]
+fn a_long_into_the_bus_is_no_pre_write() {
+    let mut cpu = writing_long(RAM_BYTES - 2, false);
+    let calls = Rc::new(RefCell::new(0));
+    let into = Rc::clone(&calls);
+    cpu.add_pre_write_hook(everywhere(), move |_, _, _| {
+        *into.borrow_mut() += 1;
+        ControlFlow::Continue(())
+    });
+    cpu.run_for(
+        &mut Taking,
+        &mut NoInterrupts,
+        Cycle::ZERO,
+        Cycles::from_clocks(1),
+    );
+    assert_eq!(*calls.borrow(), 0);
+    assert_eq!(cpu.registers.pc.0, CODE + 2);
+}
+
+#[test]
+fn a_pre_write_hook_sees_no_read_or_misaligned_write() {
+    // MOVE.L (A0),D1; MOVE.W D0,(A1) with A1 odd: an address error,
+    // whose frame's words are writes the hook sees
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1, 0x3280 | 1 << 9, NOP], &[]);
+    cpu.registers.set_address(0, DATA);
+    cpu.registers.set_address(1, DATA + 1);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_pre_write_hook(everywhere(), move |write: &mut PendingWrite, _, _| {
+        into.borrow_mut().push(write.stacking);
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 2);
+    assert_eq!(
+        cpu.exception_taken().map(Exception::vector),
+        Some(Vector::ADDRESS_ERROR)
+    );
+    assert!(!seen.borrow().is_empty());
+    assert!(seen.borrow().iter().all(|&stacking| stacking));
+}
+
+#[test]
+fn a_pre_write_hook_skips_a_write_its_page_s_permissions_refuse() {
+    // a long whose second word's page refuses writes: a fault, no call
+    let mut cpu = writing_long(DATA + PAGE_BYTES - 2, false);
+    cpu.memory
+        .protect(
+            Space::Supervisor,
+            Address(DATA + PAGE_BYTES),
+            PAGE_BYTES,
+            Permissions::READ,
+        )
+        .unwrap();
+    let calls = Rc::new(RefCell::new(0));
+    let into = Rc::clone(&calls);
+    cpu.add_pre_write_hook(
+        Address(DATA)..=Address(DATA + 2 * PAGE_BYTES),
+        move |_, _, _| {
+            *into.borrow_mut() += 1;
+            ControlFlow::Continue(())
+        },
+    );
+    step(&mut cpu, 1);
+    assert_eq!(
+        cpu.exception_taken().map(Exception::vector),
+        Some(Vector::BUS_ERROR)
+    );
+    assert_eq!(*calls.borrow(), 0);
+}
+
+#[test]
+fn a_long_across_two_pages_of_memory_is_one_pre_write() {
+    let at = DATA + PAGE_BYTES - 2;
+    let mut cpu = writing_long(at, false);
+    let next = Address(DATA + PAGE_BYTES);
+    let calls = log();
+    let into = Rc::clone(&calls);
+    cpu.add_pre_write_hook(next..=next, move |write: &mut PendingWrite, _, bytes| {
+        into.borrow_mut().push((write.address.0, write.size));
+        bytes[0] = 0x99;
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 1);
+    assert_eq!(*calls.borrow(), [(at, Size::Long)]);
+    assert_eq!(stored(&cpu, at), 0x9934_5678);
+}
+
+#[test]
+fn a_pre_write_hook_slows_its_page_s_writes_alone_and_is_removed() {
+    let mut cpu = prepared(&[NOP], &[]);
+    let page = DATA + PAGE_BYTES;
+    let id = cpu.add_pre_write_hook(Address(page)..=Address(page), |_, _, _| {
+        ControlFlow::Continue(())
+    });
+    let write = |cpu: &mut Cpu, at| {
+        cpu.memory
+            .write(Space::Supervisor, Address(at), Size::Word, 0)
+            .is_some()
+    };
+    assert!(!write(&mut cpu, page));
+    assert!(write(&mut cpu, DATA));
+    assert!(
+        cpu.memory
+            .read(Space::Supervisor, Address(page), Size::Word)
+            .is_some()
+    );
+    assert!(cpu.has_hook(id));
+    assert!(cpu.remove_hook(id));
+    assert!(!cpu.has_hook(id));
+    assert!(!cpu.memory.is_special());
+}
+
+#[test]
+fn a_write_hook_sees_what_each_write_replaced_and_a_read_hook_none() {
+    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT, MOVE_INDIRECT_TO_D1], &[]);
+    cpu.registers.set_address(0, DATA);
+    cpu.registers.data[0] = 0x1234_5678;
+    poke_long(&mut cpu, DATA, 0xdead_beef);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_write_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push((access.value, access.previous));
+        ControlFlow::Continue(())
+    });
+    let into = Rc::clone(&seen);
+    cpu.add_read_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push((access.value, access.previous));
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 2);
+    assert_eq!(
+        *seen.borrow(),
+        [
+            (0x1234, Some(0xdead)),
+            (0x5678, Some(0xbeef)),
+            (0x1234, None),
+            (0x5678, None),
+        ]
+    );
+}
+
+/// The write hook's `(value, previous)` pairs for MOVE.L D0,(A0) at
+/// [`DATA`], its page mapped to read from bytes of `0xaa` (or from the
+/// bus if `read` is false) and to write to bytes of `0xbb`; the long
+/// seen once if `long_bus`.
+fn previous_through_split_page(read: bool, long_bus: bool) -> Vec<(u32, Option<u32>)> {
+    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT], &[]);
+    cpu.set_long_bus(long_bus);
+    cpu.registers.set_address(0, DATA);
+    cpu.registers.data[0] = 0x1234_5678;
+    let mut backing = |byte| {
+        Some(Backing {
+            region: cpu.memory.add_region(vec![byte; PAGE_BYTES as usize]),
+            offset: 0,
+        })
+    };
+    let rom = backing(0xaa);
+    let ram = backing(0xbb);
+    let page = Page::BUS.reading(rom.filter(|_| read)).writing(ram);
+    cpu.memory
+        .map(Space::Supervisor, Address(DATA), PAGE_BYTES, page)
+        .unwrap();
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_write_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut().push((access.value, access.previous));
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 1);
+    assert_eq!(
+        cpu.memory.region(ram.unwrap().region)[..4],
+        [0x12, 0x34, 0x56, 0x78]
+    );
+    seen.take()
+}
+
+#[test]
+fn a_write_hook_sees_what_the_write_backing_held_not_the_read_one() {
+    assert_eq!(
+        previous_through_split_page(true, false),
+        [(0x1234, Some(0xbbbb)), (0x5678, Some(0xbbbb))]
+    );
+    assert_eq!(
+        previous_through_split_page(true, true),
+        [(0x1234_5678, Some(0xbbbb_bbbb))]
+    );
+}
+
+#[test]
+fn a_write_hook_sees_what_write_only_ram_held() {
+    assert_eq!(
+        previous_through_split_page(false, false),
+        [(0x1234, Some(0xbbbb)), (0x5678, Some(0xbbbb))]
+    );
+}
+
+/// A bus that takes every write.
+#[derive(Debug)]
+struct Writable;
+
+impl Bus for Writable {
+    fn read(&mut self, _access: BusAccess) -> Result<Read, BusError> {
+        Err(BusError)
+    }
+
+    fn write(&mut self, _access: BusAccess, _value: u32) -> Result<Cycles, BusError> {
+        Ok(Cycles::ZERO)
+    }
+}
+
+#[test]
+fn a_write_hook_sees_no_previous_value_for_a_long_in_cpu_space() {
+    // MOVES.L D0,(A0) (CPU32RM 4.4, MOVES), with DFC 7.
+    let mut cpu = prepared(&[0x0e90, 0x0800], &[]);
+    cpu.set_long_bus(true);
+    cpu.registers.dfc = FunctionCode::CpuSpace;
+    cpu.registers.set_address(0, DATA);
+    poke_long(&mut cpu, DATA, 0xdead_beef);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_write_hook(everywhere(), move |access: &MemoryAccess| {
+        into.borrow_mut()
+            .push((access.function_code, access.previous));
+        ControlFlow::Continue(())
+    });
+    cpu.run_for(
+        &mut Writable,
+        &mut NoInterrupts,
+        Cycle::ZERO,
+        Cycles::from_clocks(1),
+    );
+    assert_eq!(*seen.borrow(), [(FunctionCode::CpuSpace, None)]);
 }
 
 #[test]
@@ -331,7 +1434,7 @@ fn a_long_onto_the_bus_writes_its_high_word_then_faults_on_its_low() {
 
 #[test]
 fn an_invalid_access_hook_sees_a_bus_error_then_the_exception_is_taken() {
-    let mut cpu = prepared(&[MOVE_D0_TO_INDIRECT], &[]);
+    let mut cpu = prepared(&[NOP, MOVE_D0_TO_INDIRECT], &[]);
     cpu.registers.set_address(0, NOWHERE);
     cpu.registers.data[0] = 0xabcd_0123;
     let seen = log();
@@ -340,18 +1443,19 @@ fn an_invalid_access_hook_sees_a_bus_error_then_the_exception_is_taken() {
         into.borrow_mut().push(*access);
         ControlFlow::Break(())
     });
-    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(id));
+    assert_eq!(step(&mut cpu, 2).stop, Stop::Hook(id));
     assert_eq!(cpu.registers.pc.0, HANDLER);
     assert_eq!(
         *seen.borrow(),
         [InvalidAccess {
             address: Address(NOWHERE),
             size: Size::Word,
-            function_code: FunctionCode::SUPERVISOR_DATA,
-            cycle: CycleKind::Write,
+            function_code: FunctionCode::SupervisorData,
+            kind: BusCycleKind::Write,
             value: Some(0xabcd),
             reason: Invalid::BusError,
-            pc: Address(CODE),
+            pc: Address(CODE + 2),
+            instruction: 1,
             stacking: false,
         }]
     );
@@ -376,6 +1480,60 @@ fn an_exception_hook_sees_the_entry_and_stops_before_the_handler() {
             handler: Address(HANDLER),
             stack: Address(STACK - 8),
             level: None,
+        }]
+    );
+}
+
+#[test]
+fn an_exception_return_hook_sees_the_frame_it_pops_and_stops_after_rte() {
+    let mut cpu = prepared(&[TRAP, NOP], &[RTE]);
+    let sr = status::S | status::Z;
+    cpu.registers.set_sr(sr);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    let id = cpu.add_exception_return_hook(move |exception_return: &ExceptionReturn| {
+        into.borrow_mut().push(*exception_return);
+        ControlFlow::Break(())
+    });
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Budget);
+    assert_eq!(step(&mut cpu, 1).stop, Stop::Hook(id));
+    // CPU32RM 6.2.12: SR and PC restored, the four words deallocated
+    assert_eq!(cpu.registers.pc.0, CODE + 2);
+    assert_eq!(cpu.registers.ssp.0, STACK);
+    assert_eq!(
+        *seen.borrow(),
+        [ExceptionReturn {
+            vector: Vector::TRAP,
+            pc: Address(CODE + 2),
+            sr,
+            stack: Address(STACK - 8),
+        }]
+    );
+    assert!(cpu.remove_hook(id));
+    assert!(!cpu.has_hook(id));
+}
+
+#[test]
+fn an_exception_return_hook_sees_a_bus_error_frame_returned_from() {
+    let mut cpu = prepared(&[MOVE_INDIRECT_TO_D1], &[RTE]);
+    cpu.registers.set_sr(status::S);
+    cpu.registers.set_address(0, NOWHERE);
+    let seen = log();
+    let into = Rc::clone(&seen);
+    cpu.add_exception_return_hook(move |exception_return: &ExceptionReturn| {
+        into.borrow_mut().push(*exception_return);
+        ControlFlow::Continue(())
+    });
+    step(&mut cpu, 2);
+    // CPU32RM 6.3.2: the twelve-word frame's RTE restarts the MOVE
+    let bus_error_frame = 24;
+    assert_eq!(
+        *seen.borrow(),
+        [ExceptionReturn {
+            vector: Vector::BUS_ERROR,
+            pc: Address(CODE),
+            sr: status::S,
+            stack: Address(STACK - bus_error_frame),
         }]
     );
 }
@@ -429,11 +1587,14 @@ fn a_fetch_from_a_page_without_execute_is_a_bus_error() {
     let cycles = log();
     let into = Rc::clone(&cycles);
     cpu.add_invalid_hook(everywhere(), move |access: &InvalidAccess| {
-        into.borrow_mut().push((access.cycle, access.reason));
+        into.borrow_mut().push((access.kind, access.reason));
         ControlFlow::Continue(())
     });
     step(&mut cpu, 1);
-    assert_eq!(*cycles.borrow(), [(CycleKind::Fetch, Invalid::Protected)]);
+    assert_eq!(
+        *cycles.borrow(),
+        [(BusCycleKind::Fetch, Invalid::Protected)]
+    );
     assert_eq!(cpu.registers.pc.0, HANDLER);
 }
 
@@ -449,7 +1610,7 @@ fn time_nops(cpu: &mut Cpu, instructions: usize) -> Duration {
             let start = Instant::now();
             for _ in 0..instructions / 1000 {
                 cpu.registers.pc = Address(CODE);
-                cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycles::ZERO, BUDGET);
+                cpu.run_for(&mut NoBus, &mut NoInterrupts, Cycle::ZERO, BUDGET);
             }
             start.elapsed()
         })

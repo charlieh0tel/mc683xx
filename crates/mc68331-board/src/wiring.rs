@@ -13,21 +13,23 @@ use std::cell::RefCell;
 use std::mem;
 use std::rc::Rc;
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_cpu32::cpu::state::Stateless;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
+use mc683xx_cpu32::state::Stateless;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::peripheral::floating_miso;
-use mc683xx_target::address::Address;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -45,6 +47,7 @@ use crate::peripheral::PeripheralAccess;
 use crate::peripheral::Role;
 use crate::peripheral::Transfer;
 use crate::signal::Signal;
+use crate::time::Moment;
 use crate::time::Time;
 use crate::time::TimeBase;
 use crate::trace;
@@ -75,6 +78,12 @@ pub(crate) struct Shared {
     pub(crate) diverted: Cell<bool>,
     /// Whether a peripheral asked the run to stop.
     pub(crate) stop: Cell<bool>,
+    /// Whether a stop was asked that its asker withdraws once its call
+    /// returns, unless another asked too: a binding's, for its
+    /// peripheral's exception ([`BoardStopRequest::request_transient`]).
+    ///
+    /// [`BoardStopRequest::request_transient`]: crate::board::BoardStopRequest::request_transient
+    pub(crate) transient_stop: Cell<bool>,
     /// The conditions that held since the board's run began, in order.
     pub(crate) fired: RefCell<Vec<Firing>>,
     /// The chip's stop request, for a peripheral that asks during a cycle.
@@ -122,8 +131,13 @@ pub(crate) struct SharedMemory {
 
 impl Shared {
     /// Board time at `cycles`.
-    pub(crate) fn time(&self, cycles: Cycles) -> Time {
+    pub(crate) fn time(&self, cycles: Cycle) -> Time {
         self.base.get().time(cycles)
+    }
+
+    /// The moment `now`, on the chip's clocks as of the quantum running.
+    pub(crate) fn moment(&self, now: Time) -> Moment {
+        Moment::new(now, self.base.get())
     }
 
     /// Calls `call` on peripheral `peripheral` at `now`, and keeps what it
@@ -135,8 +149,7 @@ impl Shared {
         call: impl FnOnce(&mut dyn Peripheral, &mut Drive<'_>) -> R,
     ) -> R {
         let sampler = |port: usize, at: Time| self.sample(peripheral, port, at);
-        let base = self.base.get();
-        let mut drive = Drive::with_sampler(now, base, &sampler);
+        let mut drive = Drive::with_sampler(self.moment(now), &sampler);
         let result = call(
             self.peripherals[peripheral].borrow_mut().as_mut(),
             &mut drive,
@@ -150,9 +163,8 @@ impl Shared {
         if let Some(quantum_end) = self.quantum_end.get()
             && (driving.driven.iter().any(|driven| driven.at < quantum_end)
                 || !driving.writes.is_empty()
-                || self.peripherals[peripheral]
-                    .borrow()
-                    .next_event(base)
+                || self
+                    .next_event(peripheral, now)
                     .is_some_and(|next| next < quantum_end))
         {
             self.requests.sync();
@@ -179,10 +191,33 @@ impl Shared {
         result
     }
 
+    /// When peripheral `peripheral` next changes on its own, if it will,
+    /// asked at `now`.
+    pub(crate) fn next_event(&self, peripheral: usize, now: Time) -> Option<Time> {
+        self.peripherals[peripheral]
+            .borrow()
+            .next_event(self.moment(now))
+    }
+
     /// Asks the board's run to stop, and the chip's within it.
     pub(crate) fn request_stop(&self) {
         self.stop.set(true);
         self.chip_stop.request();
+    }
+
+    /// Asks the board's run to stop, and the chip's within it, for its
+    /// asker to withdraw once its call returns.
+    pub(crate) fn request_transient_stop(&self) {
+        self.transient_stop.set(true);
+        self.chip_stop.request();
+    }
+
+    /// Withdraws the transient stop, and the chip's unless the board's
+    /// own is asked too.
+    pub(crate) fn withdraw_transient_stop(&self) {
+        if self.transient_stop.take() && !self.stop.get() {
+            self.chip_stop.withdraw();
+        }
     }
 
     /// `peripheral` takes a memory, or releases it, as `claim` says.
@@ -213,14 +248,13 @@ impl Shared {
     /// chip's sensed outputs' next change.
     fn horizon(&self, peripheral: usize, now: Time) -> Option<Time> {
         let run = self.run_horizon.get()?;
-        let base = self.base.get();
         let events = self
             .peripherals
             .iter()
             .enumerate()
             .filter(|&(index, _)| index != peripheral)
             .filter_map(|(_, other)| match other.try_borrow() {
-                Ok(other) => other.next_event(base),
+                Ok(other) => other.next_event(self.moment(now)),
                 Err(_) => Some(now),
             });
         let outbox = self.outbox.borrow();
@@ -234,7 +268,7 @@ impl Shared {
         let net = (*self.analog_inputs.get(peripheral)?.get(port)?)?;
         if let Some((source, source_port)) = self.net_drivers[net]
             && let Ok(mut source) = self.peripherals[source].try_borrow_mut()
-            && let Some(value) = source.sample(source_port, at)
+            && let Some(value) = source.analog_output(source_port, self.moment(at))
         {
             return Some(value);
         }
@@ -296,12 +330,37 @@ pub(crate) struct Routes(pub(crate) Vec<Route>);
 /// A piece of a cycle for one peripheral: the route, and the byte or word.
 type Piece<'a> = (&'a Route, Size, Lane);
 
+/// A run of a debugger's access for one peripheral: bytes of the access
+/// at `first`, `first + step` and so on, at consecutive addresses of
+/// the peripheral's from `address`.
+#[derive(Debug, Clone, Copy)]
+struct Run<'a> {
+    /// The route that takes them.
+    route: &'a Route,
+    /// The first byte's index in the access.
+    first: usize,
+    /// The step from one byte's index to the next: 1 on both lanes, 2
+    /// on one.
+    step: usize,
+    /// How many.
+    count: usize,
+    /// The first byte's address on the peripheral's own lines.
+    address: u32,
+}
+
+impl Run<'_> {
+    /// The indices in the access of its bytes.
+    fn indices(&self) -> impl Iterator<Item = usize> {
+        (self.first..).step_by(self.step).take(self.count)
+    }
+}
+
 impl Routes {
     /// The pieces of `cycle` and who takes each, by its space and
     /// direction: the peripheral on both lanes, or a byte to the
     /// peripheral on each lane the cycle drives.
     fn pieces(&self, cycle: BusCycle) -> Vec<Piece<'_>> {
-        let cpu_space = cycle.function_code.is_cpu_space();
+        let cpu_space = cycle.function_code == FunctionCode::CpuSpace;
         let taking = || {
             self.0
                 .iter()
@@ -325,27 +384,96 @@ impl Routes {
             .collect()
     }
 
+    /// The runs of a debugger's access of `length` bytes from `cycle`'s
+    /// address and who takes each, by its space and direction: the
+    /// peripheral on both lanes, or the one on each lane, every other
+    /// byte; split where the peripheral's addresses stop being
+    /// consecutive.  A byte no peripheral drives is in none.
+    fn runs(&self, cycle: BusCycle, length: usize) -> Vec<Run<'_>> {
+        let cpu_space = cycle.function_code == FunctionCode::CpuSpace;
+        let taking = |lane: Lane| {
+            self.0
+                .iter()
+                .find(|route| route.takes(cpu_space, cycle.write) && route.lane == lane)
+        };
+        let mut runs = Vec::new();
+        if let Some(route) = taking(Lane::Both) {
+            Self::split(route, cycle, 0, 1, length, &mut runs);
+            return runs;
+        }
+        // the upper lane carries the even addresses (SIMRM 5.3.3)
+        let odd = (cycle.address.0 & 1) as usize;
+        for (lane, first) in [(Lane::Upper, odd), (Lane::Lower, 1 - odd)] {
+            if let Some(route) = taking(lane) {
+                Self::split(route, cycle, first, 2, length, &mut runs);
+            }
+        }
+        runs
+    }
+
+    /// `route`'s runs of the bytes of an access of `length` from
+    /// `cycle`'s address at `first`, `first + step` and so on.
+    fn split<'a>(
+        route: &'a Route,
+        cycle: BusCycle,
+        first: usize,
+        step: usize,
+        length: usize,
+        runs: &mut Vec<Run<'a>>,
+    ) {
+        let address = |index: usize| route.address(cycle.address.0.wrapping_add(index as u32));
+        let mut start = first;
+        while start < length {
+            let base = address(start);
+            let count = (1..)
+                .take_while(|&count| {
+                    let index = start + count * step;
+                    index < length && address(index) == base.wrapping_add(count as u32)
+                })
+                .count()
+                + 1;
+            runs.push(Run {
+                route,
+                first: start,
+                step,
+                count,
+                address: base,
+            });
+            start += count * step;
+        }
+    }
+
     /// `route`'s access for a piece of `cycle`.
-    fn access(shared: &Shared, route: &Route, cycle: BusCycle, size: Size) -> PeripheralAccess {
-        let address = route.address(cycle.address.0);
-        let now = shared.time(cycle.now);
+    fn access(route: &Route, cycle: BusCycle, size: Size) -> PeripheralAccess {
+        Self::access_at(route, cycle, route.address(cycle.address.0), size)
+    }
+
+    /// `route`'s access for `cycle` at `address`, on the peripheral's own
+    /// lines, of `size`.
+    fn access_at(route: &Route, cycle: BusCycle, address: u32, size: Size) -> PeripheralAccess {
         match cycle
             .select
             .and_then(|select| ChipSelect::try_from(select).ok())
         {
-            Some(select) => PeripheralAccess::new(select, address, size, cycle.function_code, now),
-            None => PeripheralAccess::unselected(address, size, cycle.function_code, now),
+            Some(select) => PeripheralAccess::new(select, address, size, cycle.function_code),
+            None => PeripheralAccess::unselected(address, size, cycle.function_code),
         }
         .through(route.attachment, route.role, route.lane)
         .writing(cycle.write)
     }
 
-    /// `route`'s access for a piece of `cycle` it reads or writes, with
-    /// its horizon if it asks.
-    fn sampled(shared: &Shared, route: &Route, cycle: BusCycle, size: Size) -> PeripheralAccess {
-        let mut access = Self::access(shared, route, cycle, size);
+    /// `route`'s access for a piece of `cycle` it reads or writes at
+    /// `now`, with its horizon if it asks.
+    fn sampled(
+        shared: &Shared,
+        route: &Route,
+        cycle: BusCycle,
+        size: Size,
+        now: Time,
+    ) -> PeripheralAccess {
+        let mut access = Self::access(route, cycle, size);
         if route.horizon {
-            access.horizon = shared.horizon(route.peripheral, access.now);
+            access.horizon = shared.horizon(route.peripheral, now);
         }
         access
     }
@@ -371,18 +499,14 @@ impl Routes {
     /// peripheral drives.
     pub(crate) fn read(&self, shared: &Shared, cycle: BusCycle) -> Result<u32, BusError> {
         let cycle = cycle.writing(false);
+        let now = shared.time(cycle.now);
         let pieces = self.pieces(cycle);
         let read = pieces.iter().try_fold(0, |value, &(route, size, lane)| {
-            let access = Self::sampled(shared, route, cycle, size);
-            let read = shared.call(route.peripheral, access.now, |peripheral, drive| {
+            let access = Self::sampled(shared, route, cycle, size, now);
+            let read = shared.call(route.peripheral, now, |peripheral, drive| {
                 peripheral.read(access, drive)
             })?;
-            Ok(value
-                | match lane {
-                    Lane::Upper if cycle.size != Size::Byte => (read & 0xff) << 8,
-                    Lane::Both => read,
-                    _ => read & 0xff,
-                })
+            Ok(value | Self::on_lane(read, cycle.size, lane))
         });
         Self::traced(shared, cycle, read.ok(), !pieces.is_empty());
         read
@@ -396,42 +520,104 @@ impl Routes {
         value: u32,
     ) -> Result<(), BusError> {
         let cycle = cycle.writing(true);
+        let now = shared.time(cycle.now);
         let pieces = self.pieces(cycle);
         Self::traced(shared, cycle, Some(value), !pieces.is_empty());
         for (route, size, lane) in pieces {
-            let access = Self::sampled(shared, route, cycle, size);
-            let data = match lane {
-                Lane::Upper if cycle.size != Size::Byte => value >> 8 & 0xff,
-                Lane::Both => value,
-                _ => value & 0xff,
-            };
-            shared.call(route.peripheral, access.now, |peripheral, drive| {
+            let access = Self::sampled(shared, route, cycle, size, now);
+            let data = Self::lane_data(value, cycle.size, lane);
+            shared.call(route.peripheral, now, |peripheral, drive| {
                 peripheral.write(access, data, drive)
             })?;
         }
         Ok(())
     }
 
+    /// Fills `data` with what byte reads from `cycle`'s address up would
+    /// return, with none of their side effects: each run's peripheral's
+    /// peek, 0 where no peripheral drives.  Whether every one could.
+    pub(crate) fn peek(&self, shared: &Shared, cycle: BusCycle, data: &mut [u8]) -> bool {
+        let cycle = cycle.writing(false);
+        let moment = shared.moment(shared.time(cycle.now));
+        data.fill(0);
+        self.runs(cycle, data.len()).into_iter().all(|run| {
+            let access = Self::access_at(run.route, cycle, run.address, Size::Byte);
+            let mut bytes = vec![0; run.count];
+            let peeked = shared.peripherals[run.route.peripheral]
+                .try_borrow()
+                .is_ok_and(|peripheral| peripheral.peek(access, &mut bytes, moment));
+            for (index, byte) in run.indices().zip(bytes) {
+                data[index] = byte;
+            }
+            peeked
+        })
+    }
+
+    /// Stores `data` where byte writes from `cycle`'s address up would,
+    /// with none of their side effects: each run's peripheral pokes its
+    /// bytes.  Whether every one took them.
+    pub(crate) fn poke(&self, shared: &Shared, cycle: BusCycle, data: &[u8]) -> bool {
+        let cycle = cycle.writing(true);
+        let moment = shared.moment(shared.time(cycle.now));
+        self.runs(cycle, data.len()).into_iter().all(|run| {
+            let access = Self::access_at(run.route, cycle, run.address, Size::Byte);
+            let bytes: Vec<u8> = run.indices().map(|index| data[index]).collect();
+            shared.peripherals[run.route.peripheral]
+                .try_borrow_mut()
+                .is_ok_and(|mut peripheral| peripheral.poke(access, &bytes, moment))
+        })
+    }
+
+    /// A piece's value `read` on `lane`, placed in a cycle of `size`.
+    const fn on_lane(read: u32, size: Size, lane: Lane) -> u32 {
+        match lane {
+            Lane::Upper if !matches!(size, Size::Byte) => (read & 0xff) << 8,
+            Lane::Both => read,
+            _ => read & 0xff,
+        }
+    }
+
+    /// A cycle of `size`'s `value` as the piece on `lane` takes it.
+    const fn lane_data(value: u32, size: Size, lane: Lane) -> u32 {
+        match lane {
+            Lane::Upper if !matches!(size, Size::Byte) => value >> 8 & 0xff,
+            Lane::Both => value,
+            _ => value & 0xff,
+        }
+    }
+
     /// The port the first peripheral to take the cycle, in its
     /// direction, gives it, if it says cycle by cycle.
     pub(crate) fn dsack_port(&self, shared: &Shared, cycle: BusCycle) -> Option<PortSize> {
-        let &(route, size, _) = self.pieces(cycle).first()?;
-        let access = Self::access(shared, route, cycle, size);
-        shared.peripherals[route.peripheral]
-            .borrow_mut()
-            .dsack_port(access, shared.base.get())
+        self.ask_first(shared, cycle, |peripheral, access, moment| {
+            peripheral.dsack_port(access, moment)
+        })
+        .flatten()
     }
 
     /// The wait states of the first peripheral to take the cycle, in
     /// its direction.
-    pub(crate) fn wait_states(&self, shared: &Shared, cycle: BusCycle) -> Option<u8> {
-        let Some(&(route, size, _)) = self.pieces(cycle).first() else {
-            return Some(0);
-        };
-        let access = Self::access(shared, route, cycle, size);
-        shared.peripherals[route.peripheral]
-            .borrow_mut()
-            .wait_states(access, shared.base.get())
+    pub(crate) fn wait_states(&self, shared: &Shared, cycle: BusCycle) -> Option<Cycles> {
+        self.ask_first(shared, cycle, |peripheral, access, moment| {
+            peripheral.wait_states(access, moment)
+        })
+        .unwrap_or(Some(Cycles::ZERO))
+    }
+
+    /// `ask` of the first peripheral to take `cycle`, in its direction,
+    /// with its access and the cycle's moment: [`None`] if none takes it.
+    fn ask_first<R>(
+        &self,
+        shared: &Shared,
+        cycle: BusCycle,
+        ask: impl FnOnce(&mut dyn Peripheral, PeripheralAccess, Moment) -> R,
+    ) -> Option<R> {
+        let &(route, size, _) = self.pieces(cycle).first()?;
+        Some(ask(
+            shared.peripherals[route.peripheral].borrow_mut().as_mut(),
+            Self::access(route, cycle, size),
+            shared.moment(shared.time(cycle.now)),
+        ))
     }
 }
 
@@ -452,7 +638,15 @@ impl MappedPeripheral for SelectRouter {
         self.routes.write(&self.shared, cycle, value)
     }
 
-    fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        self.routes.peek(&self.shared, cycle, data)
+    }
+
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
+        self.routes.poke(&self.shared, cycle, data)
+    }
+
+    fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
         self.routes.wait_states(&self.shared, cycle)
     }
 
@@ -484,6 +678,12 @@ pub(crate) struct DecoderRouter {
 impl DecoderRouter {
     /// The peripherals `address` selects, or [`None`] for an undecoded code.
     fn routes(&self, address: u32) -> Option<&Routes> {
+        let routes = &self.routes[self.output(address)];
+        (!routes.0.is_empty()).then_some(routes)
+    }
+
+    /// The output `address` selects.
+    fn output(&self, address: u32) -> usize {
         let code = self
             .inputs
             .iter()
@@ -495,8 +695,32 @@ impl DecoderRouter {
                 };
                 code | usize::from(level) << bit
             });
-        let routes = &self.routes[self.outputs[code] as usize];
-        (!routes.0.is_empty()).then_some(routes)
+        self.outputs[code] as usize
+    }
+
+    /// Each run of a debugger's access of `length` bytes from `address`
+    /// that selects one output: its first byte's index and its length.
+    fn decoded_runs(&self, address: u32, length: usize) -> Vec<(usize, usize)> {
+        let output = |index: usize| self.output(address.wrapping_add(index as u32));
+        let mut runs = Vec::new();
+        let mut start = 0;
+        while start < length {
+            let selected = output(start);
+            let count = (start + 1..length)
+                .find(|&index| output(index) != selected)
+                .unwrap_or(length)
+                - start;
+            runs.push((start, count));
+            start += count;
+        }
+        runs
+    }
+
+    /// `cycle` moved on to its byte `index` of an access.
+    fn at(cycle: BusCycle, index: usize) -> BusCycle {
+        let mut moved = cycle;
+        moved.address = cycle.address.offset(index as u32);
+        moved
     }
 
     /// An undecoded cycle's end: open bus or BERR.
@@ -524,9 +748,35 @@ impl MappedPeripheral for DecoderRouter {
         }
     }
 
-    fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
+    /// Each run of bytes one output selects from its peripherals; an
+    /// undecoded code's declines.
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        self.decoded_runs(cycle.address.0, data.len())
+            .into_iter()
+            .all(|(start, count)| {
+                let cycle = Self::at(cycle, start);
+                self.routes(cycle.address.0).is_some_and(|routes| {
+                    routes.peek(&self.shared, cycle, &mut data[start..start + count])
+                })
+            })
+    }
+
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
+        self.decoded_runs(cycle.address.0, data.len())
+            .into_iter()
+            .all(|(start, count)| {
+                let cycle = Self::at(cycle, start);
+                self.routes(cycle.address.0).is_some_and(|routes| {
+                    routes.poke(&self.shared, cycle, &data[start..start + count])
+                })
+            })
+    }
+
+    fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
         self.routes(cycle.address.0)
-            .map_or(Some(0), |routes| routes.wait_states(&self.shared, cycle))
+            .map_or(Some(Cycles::ZERO), |routes| {
+                routes.wait_states(&self.shared, cycle)
+            })
     }
 
     fn dsack_port(&mut self, cycle: BusCycle) -> Option<PortSize> {
@@ -557,7 +807,15 @@ impl MappedPeripheral for BusRouter {
         self.routes.write(&self.shared, cycle, value)
     }
 
-    fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        self.routes.peek(&self.shared, cycle, data)
+    }
+
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
+        self.routes.poke(&self.shared, cycle, data)
+    }
+
+    fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
         self.routes.wait_states(&self.shared, cycle)
     }
 
@@ -595,7 +853,6 @@ impl MemoryRouter {
             cycle.address.0 % memory.length,
             cycle.size,
             cycle.function_code,
-            self.shared.time(cycle.now),
         )
         .through(attachment, role, Lane::Both)
         .writing(role == Role::Write);
@@ -606,20 +863,22 @@ impl MemoryRouter {
 impl MappedPeripheral for MemoryRouter {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, BusError> {
         let (peripheral, name, access) = self.access(cycle, Role::Read).ok_or(BusError)?;
-        self.shared
-            .call(peripheral, access.now, |peripheral, drive| {
-                peripheral.memory_read(&name, access, drive)
-            })
+        self.shared.call(
+            peripheral,
+            self.shared.time(cycle.now),
+            |peripheral, drive| peripheral.memory_read(&name, access, drive),
+        )
     }
 
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
         let Some((peripheral, name, access)) = self.access(cycle, Role::Write) else {
             return Ok(());
         };
-        self.shared
-            .call(peripheral, access.now, |peripheral, drive| {
-                peripheral.memory_write(&name, access, value, drive)
-            })
+        self.shared.call(
+            peripheral,
+            self.shared.time(cycle.now),
+            |peripheral, drive| peripheral.memory_write(&name, access, value, drive),
+        )
     }
 }
 
@@ -650,7 +909,7 @@ impl MappedPeripheral for PeripheralPins {
             .is_ok_and(|peripheral| peripheral.interrupt_request())
     }
 
-    fn reset(&mut self, now: Cycles) {
+    fn reset(&mut self, now: Cycle) {
         let now = self.shared.time(now);
         self.shared.call(self.peripheral, now, |peripheral, drive| {
             peripheral.reset(drive)
@@ -790,7 +1049,7 @@ impl SpiPeripheral for QspiRouter {
         input
     }
 
-    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycle) {
         let now = self.shared.time(now);
         let was = self
             .shared
@@ -806,7 +1065,7 @@ impl SpiPeripheral for QspiRouter {
                 }
                 self.shared
                     .call(target.peripheral, now, |peripheral, drive| {
-                        peripheral.select(target.attachment, after, drive);
+                        peripheral.set_selected(target.attachment, after, drive);
                     });
             }
         }
@@ -815,7 +1074,7 @@ impl SpiPeripheral for QspiRouter {
         }
     }
 
-    fn set_clock(&mut self, clock: QspiClock, now: Cycles) {
+    fn set_clock(&mut self, clock: QspiClock, now: Cycle) {
         let now = self.shared.time(now);
         let mut told: Vec<usize> = Vec::new();
         for target in &self.targets {
@@ -823,7 +1082,7 @@ impl SpiPeripheral for QspiRouter {
                 told.push(target.peripheral);
                 self.shared.peripherals[target.peripheral]
                     .borrow_mut()
-                    .set_qspi_clock(clock, now, self.shared.base.get());
+                    .set_qspi_clock(clock, self.shared.moment(now));
             }
         }
     }

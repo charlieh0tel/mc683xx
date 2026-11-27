@@ -1,15 +1,15 @@
 //! BDM's serial interface: `Mc68331::bdm_exchange` (CPU32RM 7.2.7,
 //! 7.2.8).
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
-use mc683xx_target::size::Size;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
 
 use super::BRANCH_TO_SELF;
 use super::ROM_BYTES;
@@ -17,7 +17,7 @@ use super::START;
 use super::image;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
-use crate::debug::serial::NOT_IN_BACKGROUND;
+use crate::serial::NOT_IN_BACKGROUND;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_target::serial::BUS_ERROR;
 use mc683xx_target::serial::COMPLETE;
@@ -77,11 +77,11 @@ fn chip(program: &[u16]) -> Mc68331 {
         )
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
+        .fixed_memory(vec![0; RAM_BYTES], MemoryKind::Ram, Address(RAM))
         .unwrap();
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
-    let data = u32::from(FunctionCode::SUPERVISOR_DATA.get());
+    let data = u32::from(u8::from(FunctionCode::SupervisorData));
     chip.write_system_register(SystemRegister::Sfc, data)
         .unwrap();
     chip.write_system_register(SystemRegister::Dfc, data)
@@ -206,7 +206,7 @@ fn memory_through_read_write_dump_and_fill() {
     chip.read_memory(
         Address(RAM),
         Size::Byte,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
         &mut back,
     )
     .unwrap();
@@ -273,7 +273,7 @@ fn call_stacks_rpc_or_answers_berr_and_stays() {
         chip.bus_read(
             Address(RAM + 0xFC),
             Size::Long,
-            FunctionCode::SUPERVISOR_DATA
+            FunctionCode::SupervisorData
         ),
         Ok(START + 2)
     );

@@ -3,25 +3,32 @@
 //! A chip keeps its core's memory map in step with its own decode: a
 //! host that remapped the core's memory, or ran the core itself, would
 //! leave the two apart.  [`CpuControl`] lends what a host may change
-//! without that: the registers, the hooks and the pages' permissions,
-//! which outlive the chip's remaps; the rest of the CPU it shows
-//! read-only, through `Deref`.
+//! without that: the registers, the hooks, the coverages and the pages'
+//! permissions, which outlive the chip's remaps; the rest of the CPU it
+//! shows read-only, through `Deref`.
 
 use std::ops::Deref;
 use std::ops::RangeInclusive;
 
 use super::Cpu;
-use super::hooks::Control;
-use super::hooks::ExceptionEntry;
-use super::hooks::HookId;
-use super::hooks::Instruction;
-use super::hooks::InvalidAccess;
-use super::hooks::MemoryAccess;
+use crate::hooks::Control;
+use crate::hooks::Coverage;
+use crate::hooks::CoverageId;
+use crate::hooks::CoverageKind;
+use crate::hooks::ExceptionEntry;
+use crate::hooks::ExceptionReturn;
+use crate::hooks::HookId;
+use crate::hooks::Instruction;
+use crate::hooks::InvalidAccess;
+use crate::hooks::MemoryAccess;
+use crate::hooks::PendingRead;
+use crate::hooks::PendingWrite;
+use crate::memory::Memory;
 use crate::memory::MemoryError;
 use crate::memory::Permissions;
 use crate::memory::Space;
 use crate::registers::Registers;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 /// A CPU lent by what runs it (a chip, a board, the gdb stub's target):
 /// its registers, hooks, page permissions and fault stops to change,
@@ -52,6 +59,17 @@ impl<'a> CpuControl<'a> {
         self.cpu.add_code_hook(range, hook)
     }
 
+    /// [`Cpu::add_opcode_hook`].
+    pub fn add_opcode_hook(
+        &mut self,
+        range: RangeInclusive<Address>,
+        mask: u16,
+        value: u16,
+        hook: impl FnMut(&Instruction) -> Control + 'static,
+    ) -> HookId {
+        self.cpu.add_opcode_hook(range, mask, value, hook)
+    }
+
     /// [`Cpu::add_block_hook`].
     pub fn add_block_hook(
         &mut self,
@@ -59,6 +77,24 @@ impl<'a> CpuControl<'a> {
         hook: impl FnMut(&Instruction) -> Control + 'static,
     ) -> HookId {
         self.cpu.add_block_hook(range, hook)
+    }
+
+    /// [`Cpu::add_pre_read_hook`].
+    pub fn add_pre_read_hook(
+        &mut self,
+        range: RangeInclusive<Address>,
+        hook: impl FnMut(&PendingRead, &Memory, &mut [u8]) -> Control + 'static,
+    ) -> HookId {
+        self.cpu.add_pre_read_hook(range, hook)
+    }
+
+    /// [`Cpu::add_pre_write_hook`].
+    pub fn add_pre_write_hook(
+        &mut self,
+        range: RangeInclusive<Address>,
+        hook: impl FnMut(&mut PendingWrite, &Memory, &mut [u8]) -> Control + 'static,
+    ) -> HookId {
+        self.cpu.add_pre_write_hook(range, hook)
     }
 
     /// [`Cpu::add_read_hook`].
@@ -96,9 +132,36 @@ impl<'a> CpuControl<'a> {
         self.cpu.add_exception_hook(hook)
     }
 
+    /// [`Cpu::add_exception_return_hook`].
+    pub fn add_exception_return_hook(
+        &mut self,
+        hook: impl FnMut(&ExceptionReturn) -> Control + 'static,
+    ) -> HookId {
+        self.cpu.add_exception_return_hook(hook)
+    }
+
     /// [`Cpu::remove_hook`].
     pub fn remove_hook(&mut self, id: HookId) -> bool {
         self.cpu.remove_hook(id)
+    }
+
+    /// [`Cpu::add_coverage`].
+    pub fn add_coverage(
+        &mut self,
+        range: RangeInclusive<Address>,
+        kind: CoverageKind,
+    ) -> CoverageId {
+        self.cpu.add_coverage(range, kind)
+    }
+
+    /// [`Cpu::clear_coverage`].
+    pub fn clear_coverage(&mut self, id: CoverageId) -> bool {
+        self.cpu.clear_coverage(id)
+    }
+
+    /// [`Cpu::remove_coverage`].
+    pub fn remove_coverage(&mut self, id: CoverageId) -> Option<Coverage> {
+        self.cpu.remove_coverage(id)
     }
 
     /// [`Cpu::set_stop_on_fault`]: a chip's or a board's run then ends
@@ -108,6 +171,14 @@ impl<'a> CpuControl<'a> {
     /// them, and sees them again when the instruction reruns.
     pub fn set_stop_on_fault(&mut self, stop: bool) {
         self.cpu.set_stop_on_fault(stop);
+    }
+
+    /// [`Cpu::set_stop_at_self_loop`]: a chip's or a board's run then
+    /// ends [`Stop::SelfLoop`](crate::cpu::Stop::SelfLoop) once a BRA or
+    /// JMP to itself has run, PC at it, as firmware idles waiting for an
+    /// interrupt.
+    pub fn set_stop_at_self_loop(&mut self, stop: bool) {
+        self.cpu.set_stop_at_self_loop(stop);
     }
 
     /// The permissions of `length` bytes from `start` in `space`, as
@@ -145,7 +216,7 @@ mod tests {
     use crate::memory::PAGE_BYTES;
     use crate::memory::Permissions;
     use crate::memory::Space;
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     #[test]
     fn it_changes_registers_hooks_permissions_and_fault_stops_and_shows_the_rest() {

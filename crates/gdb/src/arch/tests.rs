@@ -3,7 +3,8 @@ use std::convert::Infallible;
 use gdbstub::arch::Registers as _;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_cpu32::registers::status;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
+use mc683xx_target::Register;
 
 use super::GdbRegisters;
 use super::PS;
@@ -79,7 +80,7 @@ fn clearing_s_makes_sp_the_user_stack_pointer() {
     gdb.core[PS] = 0;
     gdb.store(&mut registers);
     assert!(!registers.is_supervisor());
-    assert_eq!(registers.address(7), 0x1000);
+    assert_eq!(registers.register(Register::A7), 0x1000);
     assert_eq!(registers.ssp.0, 0x2000);
 }
 

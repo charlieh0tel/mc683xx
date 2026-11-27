@@ -2,12 +2,13 @@
 //! selects a bus cycle asserts, from CSPAR0-1, CSBARBT, CSBAR0-10,
 //! CSORBT and CSOR0-10, and how each would end the cycle.
 
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_cpu32::PortSize;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 use crate::chip_select::ChipSelect;
+use crate::chip_select::Termination;
 
 /// All twelve selects, CSBOOT first.
 const SELECTS: usize = ChipSelect::COUNT;
@@ -106,7 +107,7 @@ const SPACE_USER: u16 = 0b01;
 /// SPACE: supervisor space.
 const SPACE_SUPERVISOR: u16 = 0b10;
 /// DSACK: fast termination.
-const DSACK_FAST: u16 = 0b1110;
+pub(crate) const DSACK_FAST: u16 = 0b1110;
 /// DSACK: the peripheral asserts it.
 const DSACK_EXTERNAL: u16 = 0b1111;
 /// CSORBT out of reset: asynchronous, both bytes, read and write, AS,
@@ -124,11 +125,6 @@ const CPU_SPACE_IACK: u32 = 0xf;
 const IACK_LEVEL_SHIFT: u32 = 1;
 /// The level, unshifted.
 const IACK_LEVEL_MASK: u32 = 0b111;
-/// Clocks in a bus cycle with no wait states and fast termination
-/// (SIMRM 7.5.1, 7.7; MC68331UM 4.5).
-const ZERO_WAIT_CLOCKS: u8 = 3;
-/// Clocks in a fast-termination cycle.
-const FAST_CLOCKS: u8 = 2;
 
 /// A bus cycle the selects decode.
 ///
@@ -166,7 +162,7 @@ impl DecodeRequest {
     /// The interrupt level an interrupt acknowledge cycle carries, if
     /// it is one.
     const fn acknowledge_level(self) -> Option<u8> {
-        if self.function_code.is_cpu_space()
+        if matches!(self.function_code, FunctionCode::CpuSpace)
             && self.address >> CPU_SPACE_TYPE_SHIFT & CPU_SPACE_TYPE_MASK == CPU_SPACE_IACK
         {
             Some((self.address >> IACK_LEVEL_SHIFT & IACK_LEVEL_MASK) as u8)
@@ -177,6 +173,9 @@ impl DecodeRequest {
 }
 
 /// The data bus byte lanes a select takes part on.
+///
+/// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Lanes {
     /// DATA\[15:8\].
@@ -223,47 +222,6 @@ impl Lanes {
     }
 }
 
-/// How a select would end a cycle it matches (SIMRM 7.5, 7.7).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Termination {
-    /// Internal DSACK after two clocks.
-    Fast,
-    /// Internal DSACK after this many wait states, 0 to 13.
-    WaitStates(u8),
-    /// The peripheral asserts DSACK.
-    External,
-    /// MODE set: the cycle runs on ECLK.
-    Eclk,
-}
-
-impl Termination {
-    /// The most wait states DSACK encodes: the field's values below
-    /// fast termination's.
-    pub const MOST_WAIT_STATES: u8 = DSACK_FAST as u8 - 1;
-
-    /// The cycle's clocks, if the select ends it: ECLK cycles are
-    /// charged an ECLK period and half again, the average wait to
-    /// synchronize being half a period (our choice, [PLAN.md]).
-    ///
-    /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
-    #[must_use]
-    pub const fn clocks(self, eclk_divisor: u64) -> Option<u8> {
-        match self {
-            Self::Fast => Some(FAST_CLOCKS),
-            Self::WaitStates(wait) => Some(ZERO_WAIT_CLOCKS + wait),
-            Self::External => None,
-            Self::Eclk => Some((eclk_divisor + eclk_divisor / 2) as u8),
-        }
-    }
-
-    /// The clocks of a cycle an external DSACK ends after `wait`
-    /// states.
-    #[must_use]
-    pub const fn external_clocks(wait: u8) -> u8 {
-        ZERO_WAIT_CLOCKS.saturating_add(wait)
-    }
-}
-
 /// A select a cycle matches.
 ///
 /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
@@ -287,6 +245,9 @@ pub struct Match {
 }
 
 /// A set of selects, bit `n` for the select of [`ChipSelect::index`] `n`.
+///
+/// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+#[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Selects(u16);
 
@@ -372,10 +333,11 @@ impl ChipSelects {
         }
     }
 
-    /// CSPAR`register`, 0 or 1.
+    /// The chip-select pin assignment registers, CSPAR0 (CSBOOT and CS0
+    /// to CS5, MC68331UM D.3.23) then CSPAR1 (CS6 to CS10, D.3.24).
     #[must_use]
-    pub const fn pin_assignment(&self, register: usize) -> u16 {
-        self.pins[register]
+    pub const fn pin_assignments(&self) -> [u16; 2] {
+        self.pins
     }
 
     /// CSPAR`register` written.
@@ -430,6 +392,9 @@ impl ChipSelects {
 
     /// The block of each enabled select outside CPU space: its first
     /// address and its length.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     pub fn blocks(&self) -> impl Iterator<Item = (Address, u32)> + '_ {
         self.selects
             .iter()
@@ -476,6 +441,9 @@ impl ChipSelects {
     /// The selects whose blocks hold `address`, enabled or not.  A
     /// block is at least 2 Kbytes and aligned to its size, so this is
     /// the same for every address of an aligned 2-Kbyte page.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     #[must_use]
     pub fn at(&self, address: Address) -> Selects {
         let bits = self
@@ -502,7 +470,7 @@ impl ChipSelects {
             return None;
         }
         let space = registers.field(CSOR_SPACE_SHIFT);
-        let space_matches = if request.function_code.is_cpu_space() {
+        let space_matches = if request.function_code == FunctionCode::CpuSpace {
             space == SPACE_CPU
         } else if request.function_code.is_supervisor() {
             space & SPACE_SUPERVISOR != 0
@@ -561,56 +529,32 @@ impl ChipSelects {
     }
 }
 
-/// The DSACK pins a peripheral drives on an externally terminated select.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Dsack {
-    /// DSACK0: an 8-bit port (SIMRM Table 5-2).
-    Dsack0,
-    /// DSACK1: a 16-bit port.
-    Dsack1,
-    /// Both: reserved, taken as a 16-bit port.
-    Both,
-}
-
-impl Dsack {
-    /// Whether it drives DSACK0.
-    #[must_use]
-    pub const fn drives_dsack0(self) -> bool {
-        matches!(self, Self::Dsack0 | Self::Both)
-    }
-
-    /// Whether it drives DSACK1.
-    #[must_use]
-    pub const fn drives_dsack1(self) -> bool {
-        matches!(self, Self::Dsack1 | Self::Both)
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     use super::ChipSelects;
     use super::DecodeRequest;
     use super::Lanes;
-    use super::Termination;
     use crate::chip_select::ChipSelect;
     use crate::chip_select::Number;
-    use mc683xx_cpu32::bus::PortSize;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use crate::chip_select::Termination;
+    use mc683xx_cpu32::Cycles;
+    use mc683xx_cpu32::PortSize;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     /// DATA\[15:0\] left high by the pull-ups.
     const PULLED_UP: u16 = 0xffff;
 
     fn cs(number: u8) -> ChipSelect {
-        ChipSelect::Numbered(Number::new(number).unwrap())
+        ChipSelect::Numbered(Number::try_from(number).unwrap())
     }
 
     fn read(address: u32, size: Size) -> DecodeRequest {
         DecodeRequest {
             address,
-            function_code: FunctionCode::SUPERVISOR_PROGRAM,
+            function_code: FunctionCode::SupervisorProgram,
             write: false,
             size,
         }
@@ -623,13 +567,11 @@ mod tests {
     #[test]
     fn reset_pins_follow_the_data_bus() {
         let selects = ChipSelects::new(PULLED_UP);
-        assert_eq!(selects.pin_assignment(0), 0x3fff);
-        assert_eq!(selects.pin_assignment(1), 0x03ff);
+        assert_eq!(selects.pin_assignments(), [0x3fff, 0x03ff]);
         // DATA0 low: an 8-bit boot ROM; DATA5 low: CS8 to CS6 address
         // lines (SIMRM Tables 7-6, 7-7)
         let selects = ChipSelects::new(!0b10_0001);
-        assert_eq!(selects.pin_assignment(0), 0x3ffe);
-        assert_eq!(selects.pin_assignment(1), 0x03d5);
+        assert_eq!(selects.pin_assignments(), [0x3ffe, 0x03d5]);
     }
 
     #[test]
@@ -640,16 +582,19 @@ mod tests {
         assert_eq!(found[0].select, ChipSelect::Boot);
         assert_eq!(found[0].port, PortSize::Bits16);
         assert_eq!(found[0].termination, Termination::WaitStates(13));
-        assert_eq!(found[0].termination.clocks(8), Some(16));
+        assert_eq!(
+            found[0].termination.clocks(8),
+            Some(Cycles::from_clocks(16))
+        );
         assert!(selected(&selects, read(0xf_fffe, Size::Word)).len() == 1);
         assert!(selected(&selects, read(0x10_0000, Size::Word)).is_empty());
         let user = DecodeRequest {
-            function_code: FunctionCode::USER_DATA,
+            function_code: FunctionCode::UserData,
             ..read(0x100, Size::Byte)
         };
         assert_eq!(selected(&selects, user), [ChipSelect::Boot]);
         let cpu = DecodeRequest {
-            function_code: FunctionCode::CPU_SPACE,
+            function_code: FunctionCode::CpuSpace,
             ..read(0x100, Size::Byte)
         };
         assert!(selected(&selects, cpu).is_empty());
@@ -706,7 +651,10 @@ mod tests {
         assert_eq!(found[0].select, cs(5));
         assert_eq!(found[0].port, PortSize::Bits8);
         assert_eq!(found[0].termination, Termination::WaitStates(12));
-        assert_eq!(found[0].termination.clocks(8), Some(15));
+        assert_eq!(
+            found[0].termination.clocks(8),
+            Some(Cycles::from_clocks(15))
+        );
     }
 
     #[test]
@@ -717,7 +665,7 @@ mod tests {
         selects.write_base(cs(10), 0xfff8);
         selects.write_option(cs(10), 0x2bc4);
         let acknowledge = |level: u32| DecodeRequest {
-            function_code: FunctionCode::CPU_SPACE,
+            function_code: FunctionCode::CpuSpace,
             ..read(0xff_fff1 | level << 1, Size::Byte)
         };
         let found: Vec<_> = selects.matches(acknowledge(2)).collect();
@@ -753,7 +701,7 @@ mod tests {
         selects.write_option(cs(1), 0x6810);
         assert!(selected(&selects, read(0x20_0000, Size::Word)).is_empty());
         let user = DecodeRequest {
-            function_code: FunctionCode::USER_DATA,
+            function_code: FunctionCode::UserData,
             ..read(0x20_0000, Size::Word)
         };
         assert_eq!(selected(&selects, user), [cs(1)]);
@@ -798,7 +746,7 @@ mod tests {
             for write in [false, true] {
                 let request = DecodeRequest {
                     address,
-                    function_code: FunctionCode::SUPERVISOR_DATA,
+                    function_code: FunctionCode::SupervisorData,
                     write,
                     size: Size::Word,
                 };

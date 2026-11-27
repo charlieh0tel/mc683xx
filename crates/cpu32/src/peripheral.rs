@@ -5,20 +5,24 @@
 //!
 //! [`Machine::add_peripheral`]: crate::flat::Machine::add_peripheral
 
-use crate::bus::BusError;
-use crate::bus::PortSize;
-use crate::cpu::state::Save;
+use std::fmt;
+
+use crate::BusError;
+use crate::PortSize;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use crate::state::Save;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// A chip-select pin by the chip's own number for it: which select
 /// carried a cycle.  The chip names its pins
 /// (`mc683xx-modules`'s `ChipSelect` converts to and from it); the bare
-/// machine has none.
+/// machine has none.  Every number is one, as the core sees it, so its
+/// field is public, as [`Address`]'s.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Select(u8);
+pub struct Select(pub u8);
 
 impl From<u8> for Select {
     fn from(number: u8) -> Self {
@@ -57,7 +61,7 @@ pub struct BusCycle {
     pub write: bool,
     /// When it starts (on the bare machine, when its instruction
     /// started), on the system clock.
-    pub now: Cycles,
+    pub now: Cycle,
     /// The chip select asserted, on a chip: a peripheral wired to
     /// several (separate read and write selects, byte-lane selects)
     /// sees which.  [`None`] on the bare machine.
@@ -76,7 +80,7 @@ impl BusCycle {
         address: Address,
         size: Size,
         function_code: FunctionCode,
-        now: Cycles,
+        now: Cycle,
     ) -> Self {
         Self {
             address,
@@ -116,7 +120,7 @@ impl BusCycle {
 /// On a chip it is wired to chip-select pins, and the chip times the
 /// cycle from the select's option register (SIMRM 7.10.3); an interrupt
 /// acknowledge cycle reaches it as a CPU-space byte read
-/// ([`FunctionCode::CPU_SPACE`]) on a select programmed for it (SIMRM
+/// ([`FunctionCode::CpuSpace`]) on a select programmed for it (SIMRM
 /// 7.8.1), and the vector is the value it returns.  On the bare
 /// machine it covers a byte range and sees `read` and `write` alone:
 /// the machine has no DSACK, no IRQ wiring and no RESET pin, so the
@@ -146,9 +150,9 @@ pub trait MappedPeripheral: Save {
     /// `None` if it never does and the bus monitor ends the cycle.
     /// Asked before the cycle's `read` or `write`.  By default it
     /// answers at once.
-    fn wait_states(&mut self, cycle: BusCycle) -> Option<u8> {
+    fn wait_states(&mut self, cycle: BusCycle) -> Option<Cycles> {
         let _ = cycle;
-        Some(0)
+        Some(Cycles::ZERO)
     }
 
     /// With an external DSACK, the port this cycle's DSACK gives, for a
@@ -178,25 +182,79 @@ pub trait MappedPeripheral: Save {
 
     /// RESET asserted at `now`: a reset of the chip, or the `reset`
     /// instruction (SIMRM 8.2).  By default nothing changes.
-    fn reset(&mut self, now: Cycles) {
+    fn reset(&mut self, now: Cycle) {
         let _ = now;
+    }
+
+    /// Fills `data` with what byte read cycles from `cycle.address` up
+    /// would return now, one byte an address, with none of their side
+    /// effects (a flag a read clears, a FIFO a read pops): a debugger's
+    /// look, as the bare machine's
+    /// [`peek_bytes`](crate::flat::Machine::peek_bytes),
+    /// a chip's `peek` and gdb's memory reads take it.  `cycle` is the
+    /// first byte's, a read of size [`Size::Byte`]; every byte of `data`
+    /// is the peripheral's, and an access across several peripherals or
+    /// memory calls each once with its own bytes.  Whether it could; by
+    /// default it declines, as only a real cycle can tell, and the look
+    /// fails as unpeekable, all of `data` with it.  A lazily advanced
+    /// model, one that brings its state up to date only inside `read`,
+    /// declines where catching up could change the answer, as `&self`
+    /// cannot catch up.
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        let _ = (cycle, data);
+        false
+    }
+
+    /// Stores `data` where byte write cycles from `cycle.address` up
+    /// would, one byte an address, with none of their side effects (a
+    /// command it starts, a transmitter it loads): a debugger's poke,
+    /// as the bare machine's
+    /// [`poke_bytes`](crate::flat::Machine::poke_bytes), a
+    /// chip's `poke` and gdb's memory writes make it.  `cycle` is the
+    /// first byte's, a write of size [`Size::Byte`], and every byte is
+    /// the peripheral's, as for `peek`.  Whether it took them; by
+    /// default it declines, and the poke fails as unpeekable.  One that
+    /// declines should store none of them.  A lazily advanced model
+    /// declines where state it has yet to settle would change what a
+    /// byte becomes.
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
+        let _ = (cycle, data);
+        false
     }
 }
 
 /// A mapped peripheral, as the bare machine's
 /// [`add_peripheral`](crate::flat::Machine::add_peripheral) and a
-/// chip's `Builder::peripheral` return it.
+/// chip's `Builder::peripheral` return it: a host receives one and
+/// gives it back, and cannot make one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PeripheralId(u64);
 
-impl From<u64> for PeripheralId {
-    fn from(number: u64) -> Self {
+impl PeripheralId {
+    /// The id numbered `number` by whatever added the peripheral.
+    ///
+    /// Not part of the semver API: for the workspace's crates that add
+    /// peripherals.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn from_number(number: u64) -> Self {
         Self(number)
+    }
+
+    /// Its number, as [`from_number`](Self::from_number) took it.
+    ///
+    /// Not part of the semver API: for the workspace's crates that add
+    /// peripherals.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn number(self) -> u64 {
+        self.0
     }
 }
 
-impl From<PeripheralId> for u64 {
-    fn from(id: PeripheralId) -> Self {
-        id.0
+/// `peripheral` and its number: `peripheral 3`.
+impl fmt::Display for PeripheralId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "peripheral {}", self.0)
     }
 }

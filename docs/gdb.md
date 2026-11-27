@@ -3,8 +3,8 @@
 The `mc683xx-gdb` crate (`crates/gdb`) is a GDB remote stub: gdb's
 remote serial protocol, through the `gdbstub` crate, over the bare
 CPU (`mc683xx_cpu32::flat::Machine`), the chip
-(`mc683xx_mc68331::chip::Mc68331`), a board
-(`mc683xx_board::board::Board`), or any `Cpu32Target`, a BDM pod on
+(`mc683xx_mc68331::Mc68331`), a board
+(`mc683xx_board::Board`), or any `Cpu32Target`, a BDM pod on
 silicon among them (Over BDM, below).  gdb connects over TCP,
 reads and writes registers and memory, sets breakpoints and
 watchpoints, steps, continues and interrupts.  `PLAN.md` (Debugger)
@@ -64,9 +64,11 @@ at most 20 ms with a look for gdb's bytes between, so Ctrl-C in gdb
 is not kept waiting.  While gdb has the board stopped its time stands
 still, and a continue starts the pacing again from there; steps are
 never paced.  As without gdb, the wall clock decides only how long
-the runner sleeps.  A session that fails (gdb gone without detaching, or a
-packet the stub cannot parse) is said on standard error and ends as a
-detach does: the run, its trace and `--save` go on.  Ctrl-C to the
+the runner sleeps.  gdb hanging up (exiting, or its link lost,
+without a detach or a kill) and a session that fails (a packet the
+stub cannot parse) are said on standard error and end as a detach
+does: the run, its trace and `--save` go on, and the exit status is
+the run's.  Ctrl-C to the
 runner, while it waits for gdb or while gdb holds the board, ends the
 session and the run, `stopped reason=requested` and exit status 4,
 `--save` still saving.  Piped standard
@@ -79,7 +81,8 @@ free port, which the line names.
 
 `serve_gdb(address="127.0.0.1:1234", ready=None)` on `mc683xx.Machine`,
 `Mc68331` and `Board` (`docs/python.md`, Debugging with gdb) hands the
-target to gdb mid-run and returns `Ending.DETACHED` or `Ending.KILLED`; the
+target to gdb mid-run and returns `Ending.DETACHED`, `Ending.KILLED` or
+`Ending.HUNG_UP`; the
 harness then has it back, as gdb left it.  `ready(port)` is called
 once it listens.  The Python peripherals and hooks run under gdb as
 in `run_for`, and an exception from one ends the session and is raised.
@@ -94,20 +97,21 @@ watchpoints go with it.
 ## From Rust
 
 ```rust,no_run
-use mc683xx_target::address::Address;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_gdb::Ending;
 use mc683xx_gdb::connection;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // The reset vectors, then the program: `bra.s` to itself.
     let image = [0, 0, 0x80, 0, 0, 0, 0x04, 0, 0x60, 0xfe];
     let mut machine = Machine::new(ADDRESS_BITS)?;
     machine.map(Address(0), 0x1_0000, &[])?;
-    machine.write(Address(0), &image[..8])?;
-    machine.write(Address(0x400), &image[8..])?;
-    machine.reset().map_err(|halt| halt.to_string())?;
+    machine.poke_bytes(Address(0), FunctionCode::SupervisorData, &image[..8])?;
+    machine.poke_bytes(Address(0x400), FunctionCode::SupervisorData, &image[8..])?;
+    machine.reset();
     let connection = connection::accept("127.0.0.1:1234", |address| {
         eprintln!("waiting for gdb on {address}");
         Ok::<(), std::io::Error>(())
@@ -123,48 +127,53 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   `ready` with the address it listens at (port 0 picks one), and takes
   one connection.
 - `serve(target, connection)` serves gdb until it detaches
-  (`Ending::Detached`) or kills the target (`Ending::Killed`).  The
+  (`Ending::Detached`), kills the target (`Ending::Killed`) or hangs
+  up (`Ending::HungUp`: it closed the connection without either, as
+  when it exits; a host takes it as the session's normal end).  The
   target is halted first and stays where it is until gdb continues or
   steps it; an emulated one runs only inside `serve`.  Detach leaves
   an emulated target to its host and resumes one under BDM control;
-  kill leaves either halted.  Any `connection::Connection` serves: a
+  kill leaves either halted, and a hang-up one under BDM control.  Any `connection::Connection` serves: a
   `TcpStream`, a `connection::Polled` one, a borrowed one (`&mut`),
   or a host's own, the tests' in-memory one among them.  A connection
   gives `write_all`, `flush`, `read` (the next byte, waiting for it),
   `peek` (the next byte if one has come, not waiting: the stub looks
   for gdb's Ctrl-C between a run's quanta) and `start` (called as the
-  session starts; a `TcpStream` turns off Nagle's delay).  The stub's
+  session starts; a `TcpStream` turns off Nagle's delay), and says
+  which of its errors is gdb hanging up (`hung_up`; for a `TcpStream`
+  and a `Polled` one, the connection at its end, reset, aborted or no
+  longer connected, or a write into a closed one; none by default).  The stub's
   API names no type of the `gdbstub` crate it is built on.
 - `SessionError`: a call on the target failed (`Target`, a board's
   peripheral that stalled, a pod's lost link), the connection did
-  (`Connection`, gdb gone without detaching), or gdb sent what the stub
+  other than by gdb hanging up (`Connection`), or gdb sent what the stub
   could not take (`Protocol`); breakpoints planted could not be put
   back (`Unrestored`); or the session failed and cleaning up after it
   failed too (`Uncleaned`, both kept).  `Ending`, `SessionError`,
-  `target::TargetRun` and `target::AccessError` are
-  `#[non_exhaustive]`: a match on one needs a wildcard arm.
+  `TargetRun`, `TargetReset`, `AccessError` and
+  `connection::PollError` are `#[non_exhaustive]`: a match on one needs a wildcard arm.
 - Features: `mc68331` (the chip as a target) and `board` (a board,
   and the chip with it), both on by default.  A bare-CPU host takes
   `default-features = false` and builds without the chip and board
   crates.
-- `target::Target` is the one trait `serve` takes.  The bare CPU,
+- `Target` is the one trait `serve` takes.  The bare CPU,
   the chip and a board implement it, and a host with a run loop of its
   own implements it, delegating to one of them (`mc683xx-run` and the
   Python bindings do): `cpu_scope` (`Some` of a call with the
   `CpuControl`: registers and hooks), `read_memory` and `write_memory`
   (memory at an `Address` in a function code's space, with no bus
-  cycle; a `target::AccessError` for a byte not served),
-  `run_for(cycles, hit)` (a quantum, its end a `target::TargetRun`) and
+  cycle; a `AccessError` for a byte not served),
+  `run_for(budget, hit)` (a quantum, its end a `TargetRun`) and
   `reset`.  The register methods default to `cpu_scope`'s; `resume`
   and `halt` default to an emulated target's, which runs only as the
   stub runs it.  `native_step` gives a target's own step
-  (`target::NativeStep`); without one the stub steps by a hook, and a
+  (`NativeStep`); without one the stub steps by a hook, and a
   target with neither that nor `cpu_scope` cannot step: gdb is offered
   none (`vCont?` lists no `s`), and gdbstub refuses a bare `s`, which
   ends the session as a `Protocol` error.  With the `board` feature, `conditions` gives
   the target's stop conditions (`mc683xx_board::condition::Conditions`,
   a board's; none by default), for `monitor stop`.
-- `bdm::Bdm::new(&mut target)` is any `mc683xx_target::Cpu32Target` as a
+- `Bdm::new(&mut target)` is any `mc683xx_target::Cpu32Target` as a
   `Target`: no `cpu_scope`, its own registers, memory, run control and
   step.  What a target gives decides what gdb gets:
 
@@ -195,19 +204,20 @@ and leaves the rest; one that ends within a register is refused with
 
 An emulated target's memory is reached with no bus cycle, so a
 debugger's look never has a peripheral's side effect.  Accesses are in
-supervisor data space unless `monitor fc N` names another: the chip
+supervisor data space unless `monitor fc FC` names another: the chip
 reads in that space through its decode and writes in supervisor space
-alone, and the bare CPU has one space whatever the code.
+alone, and the bare CPU has one memory space whatever the code, which
+it gives a peripheral's `peek` or `poke` (`Machine::peek_bytes`).
 
 | Access | Reads | Writes |
 | --- | --- | --- |
 | RAM and ROM the core serves | yes | yes, ROM included, whatever the page permissions |
 | The chip's module registers (SIM, QSM, GPT) | yes, as a peek (`Module::peek`): no flag armed or cleared | no |
-| A peripheral (a peripheral on a select, a bare CPU's host peripheral) | no: `E0e` | no: `E0e` |
+| A peripheral (a peripheral on a select, a bare CPU's host peripheral, a board's) | as its `peek` gives it (`MappedPeripheral::peek`, a board peripheral's `Peripheral::peek`), a call for each run of its bytes; one that declines, the default, `E0e` | as its `poke` takes it, a call for each run; one that declines, the default, `E0e`, the bytes before it written |
 | Memory a peripheral shares a select with, or a memory a peripheral has taken | no | no |
 | Nothing | no | no |
 
-On the chip a byte is what the decode reaches now (`Mc68331::peek`),
+On the chip a byte is what the decode reaches now (`Mc68331::peek_bytes`),
 so the memory map is the firmware's: out of reset only CSBOOT
 decodes.  A read stops at the first byte it cannot give; gdb shows
 what came before it.  To make a real cycle, with its side effects, a
@@ -249,16 +259,26 @@ BDM, below):
 | A stop condition (`monitor stop`) | `SIGTRAP`; `monitor stop` names it |
 | A peripheral's or the host's stop request | `SIGINT` |
 | A double bus fault halt | `SIGBUS`; it stays halted until a reset: `monitor reset`, or the watchdog's as time passes |
-| A fault stop (`monitor faults stop`, `set_stop_on_fault`) or a bare CPU's intercept (`set_intercepted`) | `SIGBUS` |
+| A fault stop (`monitor faults stop`, `set_stop_on_fault`) or a bare CPU's intercept (`add_intercept_hook`) | `SIGBUS` |
+| A bare CPU's exception stop (`set_stop_on_exception`): a trap, a trace or an interrupt about to be taken, not only a fault | `SIGTRAP` |
+
+A self-loop stop (`Limits::self_loop`, `run_limited(self_loop=True)`)
+is the stub's never: under gdb a branch to itself runs as the CPU runs
+it, and Ctrl-C stops it, unless the host set
+`set_stop_at_self_loop`, whose stop the stub reports as `SIGTRAP`, as
+an exception stop.
 
 A signal gdb passes back on continue (`signal SIGINT`) is dropped: the
 CPU has none.
 
 ## Monitor commands
 
-- `monitor fc` shows the address space memory is read and written in,
-  supervisor data (5) to begin with, and `monitor fc N` sets it (0 to
-  7).
+- `monitor fc` shows the address space memory is read and written in
+  by name and number, `fc supervisor-data (5)` to begin with, and
+  `monitor fc FC` sets it: a name, in any case (`user-data`,
+  `user-program`, `supervisor-data`, `supervisor-program`,
+  `cpu-space`, `reserved0`, `reserved3`, `reserved4`), or a number
+  from 0 to 7 (decimal, `0x` or `0b`, as `parse_integer` takes it).
 - `monitor faults` shows whether a bus or address error stops the run
   (`stop`) or is taken as an exception by the firmware (`take`, at
   first), and the fault that last stopped it; `monitor faults stop` and
@@ -389,7 +409,7 @@ it, kill leaves it halted.
   original does not read back) is the session's error,
   `SessionError::Unrestored`, naming where, and a detach then leaves
   the target halted rather than resume it over BGND.  A session that
-  failed already (gdb gone, a packet it could not take) and then
+  failed already (a connection's failure, a packet it could not take) and then
   cannot halt the target or put a breakpoint back reports both,
   `SessionError::Uncleaned`.
 - **Steps** are `Cpu32Target::step`: one instruction, or into an

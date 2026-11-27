@@ -1,12 +1,12 @@
 //! The system integration module (SIMRM; MC68331UM 4): configuration
-//! and protection, the clock and board time, the chip selects, the I/O
+//! and protection, the clock and chip time, the chip selects, the I/O
 //! ports and the reset status.
 //!
 //! The chip that holds it routes its register cycles here, decodes the
 //! bus from its chip selects, and arbitrates the interrupts it
 //! requests.
 
-pub mod chip_selects;
+pub(crate) mod chip_selects;
 pub mod clock;
 /// The SIM's general-purpose ports.
 ///
@@ -15,21 +15,32 @@ pub mod clock;
 #[doc(hidden)]
 pub mod ports;
 mod protection;
-pub mod reset;
+mod reset;
+
+pub use chip_selects::ChipSelects;
+#[doc(hidden)]
+pub use chip_selects::DecodeRequest;
+#[doc(hidden)]
+pub use chip_selects::Lanes;
+#[doc(hidden)]
+pub use chip_selects::Match;
+#[doc(hidden)]
+pub use chip_selects::Selects;
+pub use reset::ResetScope;
 
 use std::fmt;
 use std::mem;
 use std::str::FromStr;
 
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
-use mc683xx_target::address::Address;
-use mc683xx_target::size::Size;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_target::Address;
+use mc683xx_target::Size;
 
-use self::chip_selects::ChipSelects;
 use self::clock::ClockSource;
 use self::clock::SystemClock;
 use self::ports::Change;
@@ -145,9 +156,10 @@ const PEPAR_AVEC: u8 = 1 << 2;
 /// A reset's cause, as RSR records it (MC68331UM D.3.4).  The chip
 /// raises neither LOC nor TST: its synthesizer never loses its
 /// reference (PLAN.md, Clock synthesizer) and the test submodule is
-/// factory test only; a host's reset scopes may name them.
+/// factory test only; a host's reset scopes may name them.  RSR fixes
+/// the set, so it is exhaustive; the variants are in RSR's bit order,
+/// high to low, as [`ResetCause::ALL`] is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[non_exhaustive]
 pub enum ResetCause {
     /// RESET driven by the board: EXT.
     External,
@@ -157,10 +169,10 @@ pub enum ResetCause {
     Watchdog,
     /// The halt monitor, on a double bus fault: HLT.
     HaltMonitor,
-    /// The `reset` instruction: SYS.
-    System,
     /// Loss of the clock's reference: LOC.
     LossOfClock,
+    /// The `reset` instruction: SYS.
+    System,
     /// The test submodule, in system test: TST.
     Test,
 }
@@ -290,7 +302,7 @@ pub struct Sim {
     simcr: u16,
     /// Whether MM's one write has happened.
     mm_written: bool,
-    /// The clock synthesizer and board time.
+    /// The clock synthesizer and chip time.
     clock: SystemClock,
     /// RSR.
     reset_status: u8,
@@ -318,7 +330,7 @@ pub struct Sim {
     frozen: bool,
     /// What ports C, E and F drive, each change with its time, until
     /// the host takes them.
-    output_changes: Vec<(Cycles, Change)>,
+    output_changes: Vec<(Cycle, Change)>,
 }
 
 impl Sim {
@@ -328,7 +340,7 @@ impl Sim {
     /// the chip with; a SIM on its own is not a host's to build.
     #[doc(hidden)]
     #[must_use]
-    pub fn new(configuration: Configuration, now: Cycles) -> Self {
+    pub fn new(configuration: Configuration, now: Cycle) -> Self {
         let modclk = configuration.clock.modclk();
         let protection = ProtectionControl::new(modclk);
         let clock = SystemClock::new(configuration.clock, now);
@@ -380,7 +392,7 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn reset(&mut self, cause: ResetCause, now: Cycles) {
+    pub fn reset(&mut self, cause: ResetCause, now: Cycle) {
         let before = self.all_outputs();
         let output_changes = mem::take(&mut self.output_changes);
         let configuration = self.configuration;
@@ -451,9 +463,11 @@ impl Sim {
         self.reset_request.take()
     }
 
-    /// The clock and board time.
+    /// The system clock as the SIM makes it: its source, SYNCR and
+    /// frequency, counted in [`Cycle`]s.  A board's
+    /// `Board::system_clock` is the same clock on board time.
     #[must_use]
-    pub const fn clock(&self) -> &SystemClock {
+    pub const fn system_clock(&self) -> &SystemClock {
         &self.clock
     }
 
@@ -486,11 +500,14 @@ impl Sim {
         (self.simcr & SIMCR_IARB_MASK) as u8
     }
 
-    /// The bus monitor's period for internal-to-external cycles, in
-    /// system clocks, if BME enables it (SIMRM 3.2).
+    /// The bus monitor's period for internal-to-external cycles, if
+    /// BME enables it (SIMRM 3.2).
     #[must_use]
-    pub const fn bus_monitor(&self) -> Option<u8> {
-        self.protection.bus_monitor()
+    pub const fn bus_monitor(&self) -> Option<Cycles> {
+        match self.protection.bus_monitor() {
+            Some(clocks) => Some(Cycles::from_clocks(clocks as u64)),
+            None => None,
+        }
     }
 
     /// Whether the halt monitor resets the MCU on a double bus fault
@@ -540,12 +557,15 @@ impl Sim {
     }
 
     /// The board drives the pins of `port` in `mask` to their levels in
-    /// `value`, the others as they were.  Port C has no inputs.
+    /// `value` at `now`, the others as they were.  Port C has no inputs.
+    /// The SIM's ports keep no history, so `now` changes nothing: it is
+    /// here as on the other modules' `set_port_pins`.
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles
     /// the chip with; a host drives the chip's ports.
     #[doc(hidden)]
-    pub const fn set_port_pins(&mut self, port: PortName, value: u8, mask: u8) {
+    #[expect(unused_variables, reason = "a chip-level callback takes its time last")]
+    pub const fn set_port_pins(&mut self, port: PortName, value: u8, mask: u8, now: Cycle) {
         let port = match port {
             PortName::C => return,
             PortName::E => &mut self.port_e,
@@ -561,7 +581,7 @@ impl Sim {
 
     /// Records the ports whose outputs differ from `before` as
     /// changing at `now`.
-    fn record_outputs(&mut self, before: [PortLevels; PortName::ALL.len()], now: Cycles) {
+    fn record_outputs(&mut self, before: [PortLevels; PortName::ALL.len()], now: Cycle) {
         for (port, before) in PortName::ALL.into_iter().zip(before) {
             let outputs = self.outputs(port);
             if outputs != before {
@@ -576,15 +596,15 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn take_output_changes(&mut self) -> Vec<(Cycles, Change)> {
+    pub fn take_output_changes(&mut self) -> Vec<(Cycle, Change)> {
         mem::take(&mut self.output_changes)
     }
 
     /// Whether IRQ`level`'s pin has its interrupt function (PFPAR,
     /// MC68331UM Table D-5).
     #[must_use]
-    pub const fn interrupt_pin(&self, pin: IrqPin) -> bool {
-        self.port_f.assignment & 1 << pin.get() != 0
+    pub fn interrupt_pin(&self, pin: IrqPin) -> bool {
+        self.port_f.assignment & 1 << u8::from(pin) != 0
     }
 
     /// Whether PE2 is the AVEC input (PEPAR, MC68331UM Table D-4).
@@ -625,7 +645,7 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn low_power_stop(&mut self, mask: InterruptLevel, now: Cycles) {
+    pub fn low_power_stop(&mut self, mask: InterruptLevel, now: Cycle) {
         self.low_power = Some(mask);
         self.counters_changed(self.clock.tick(now));
     }
@@ -634,7 +654,7 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn wake(&mut self, now: Cycles) {
+    pub fn wake(&mut self, now: Cycle) {
         if self.low_power.take().is_some() {
             self.counters_changed(self.clock.tick(now));
         }
@@ -644,13 +664,16 @@ impl Sim {
     ///
     /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
     #[doc(hidden)]
-    pub fn set_freeze(&mut self, frozen: bool, now: Cycles) {
+    pub fn set_freeze(&mut self, frozen: bool, now: Cycle) {
         self.frozen = frozen;
         self.counters_changed(self.clock.tick(now));
     }
 
     /// Whether FREEZE stops the bus monitor now: asserted, with FRZBM
     /// (MC68331UM 4.2.13).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
     #[must_use]
     pub const fn freezes_bus_monitor(&self) -> bool {
         self.frozen && self.simcr & SIMCR_FRZBM != 0
@@ -709,7 +732,7 @@ impl Sim {
     fn read_word(&self, offset: u32) -> u16 {
         match offset {
             SIMCR => self.simcr,
-            SYNCR => self.clock.syncr(),
+            SYNCR => self.clock.synthesizer_control(),
             RSR => self.reset_status.into(),
             PORTE0 | PORTE1 => self.port_e.data().into(),
             DDRE => self.port_e.direction.into(),
@@ -721,8 +744,8 @@ impl Sim {
             PICR => self.timer.control,
             PITR => self.timer.timing,
             PORTC => self.port_c.into(),
-            CSPAR0 => self.chip_selects.pin_assignment(0),
-            CSPAR1 => self.chip_selects.pin_assignment(1),
+            CSPAR0 => self.chip_selects.pin_assignments()[0],
+            CSPAR1 => self.chip_selects.pin_assignments()[1],
             CSBARBT..CHIP_SELECTS_END => match Self::select_at(offset) {
                 (select, false) => self.chip_selects.base(select),
                 (select, true) => self.chip_selects.option(select),
@@ -734,7 +757,7 @@ impl Sim {
     }
 
     /// The register word at the even `offset` written with `value`.
-    fn write_word(&mut self, offset: u32, value: u16, now: Cycles) -> Written {
+    fn write_word(&mut self, offset: u32, value: u16, now: Cycle) -> Written {
         let low = value as u8;
         let mut written = Written::default();
         match offset {
@@ -865,7 +888,7 @@ impl Sim {
 }
 
 impl Timed for Sim {
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         [self.timer.end(), self.watchdog.deadline()]
             .into_iter()
             .flatten()
@@ -873,7 +896,7 @@ impl Timed for Sim {
             .min()
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         let tick = self.clock.tick(now);
         self.timer.advance(tick);
         if self

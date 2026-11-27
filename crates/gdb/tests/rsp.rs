@@ -18,20 +18,27 @@ use std::rc::Rc;
 use std::sync::mpsc;
 use std::thread;
 
-use mc683xx_board::board::Board;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Board;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Span;
-use mc683xx_cpu32::cpu::bare::End;
-use mc683xx_cpu32::cpu::bare::Limits;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::End;
+use mc683xx_cpu32::Limits;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::exception::Vector;
+use mc683xx_cpu32::exception::VectorSet;
 use mc683xx_cpu32::flat::ADDRESS_BITS;
 use mc683xx_cpu32::flat::Machine;
 use mc683xx_cpu32::memory::MemoryKind;
+use mc683xx_gdb::AccessError;
 use mc683xx_gdb::Ending;
 use mc683xx_gdb::SessionError;
+use mc683xx_gdb::Target;
+use mc683xx_gdb::TargetRun;
 use mc683xx_gdb::connection;
 use mc683xx_gdb::connection::Connection;
 use mc683xx_gdb::connection::POLL_INTERVAL;
@@ -39,13 +46,14 @@ use mc683xx_gdb::connection::PollError;
 use mc683xx_gdb::connection::Waiter;
 use mc683xx_gdb::connection::accept_polled;
 use mc683xx_gdb::serve;
-use mc683xx_gdb::target::Target;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::event::Event;
+use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::Event;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
 use wire::Send;
 use wire::Wire;
 use wire::bytes;
@@ -112,10 +120,18 @@ fn machine() -> Machine {
     let mut machine = Machine::new(ADDRESS_BITS).unwrap();
     machine.map(Address(0), MAPPED, &[]).unwrap();
     let vectors = [STACK.to_be_bytes(), START.to_be_bytes()].concat();
-    machine.write(Address(0), &vectors).unwrap();
-    machine.write(Address(START), &bytes(&PROGRAM)).unwrap();
-    machine.reset().unwrap();
-    machine.cpu.registers.set_address(0, STORE);
+    machine
+        .poke_bytes(Address(0), FunctionCode::SupervisorData, &vectors)
+        .unwrap();
+    machine
+        .poke_bytes(
+            Address(START),
+            FunctionCode::SupervisorData,
+            &bytes(&PROGRAM),
+        )
+        .unwrap();
+    machine.reset();
+    machine.cpu.registers.set_register(Register::A0, STORE);
     machine
 }
 
@@ -303,7 +319,13 @@ fn read_watchpoints_see_reads() {
     let mut machine = machine();
     // move.l (a0),d1, then branch to itself.
     let reader = [0x2210, 0x60fe];
-    machine.write(Address(START), &bytes(&reader)).unwrap();
+    machine
+        .poke_bytes(
+            Address(START),
+            FunctionCode::SupervisorData,
+            &bytes(&reader),
+        )
+        .unwrap();
     let (ending, replies) = session(
         &mut machine,
         vec![packet(&format!("Z3,{STORE:x},4")), packet("c"), packet("D")],
@@ -312,6 +334,23 @@ fn read_watchpoints_see_reads() {
     assert_eq!(replies[0], "OK");
     assert_eq!(replies[1], format!("T05thread:01;rwatch:{STORE:x};"));
     assert_eq!(machine.cpu.registers.pc.0, START + 2);
+}
+
+#[test]
+fn a_stop_pending_ends_a_step_or_a_continue_before_any_instruction() {
+    let mut machine = machine();
+    let stop = machine.stop_request();
+    stop.request();
+    let (ending, replies) = session(&mut machine, vec![packet("s"), packet("D")]);
+    ending.unwrap();
+    assert_eq!(replies[0], "S02");
+    assert_eq!(machine.cpu.instructions(), 0);
+    assert!(!stop.pending());
+    stop.request();
+    let (ending, replies) = session(&mut machine, vec![packet("c"), packet("s"), packet("D")]);
+    ending.unwrap();
+    assert_eq!(replies[..2], ["S02", "S05"]);
+    assert_eq!(machine.cpu.instructions(), 1);
 }
 
 #[test]
@@ -373,7 +412,7 @@ fn its_hooks_go_with_the_session() {
             packet(&format!("Z2,{STORE:x},4")),
         ],
     );
-    assert!(matches!(ending, Err(SessionError::Connection { .. })));
+    assert_eq!(ending.unwrap(), Ending::HungUp);
     let mut limits = Limits::default();
     limits.instructions = Some(20);
     let run = machine.run_limited(limits);
@@ -393,6 +432,22 @@ fn chip() -> Mc68331 {
         .memory(rom, MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     builder.build()
+}
+
+#[test]
+fn a_chip_access_stops_at_the_byte_it_names() {
+    let mut chip = chip();
+    let supervisor = FunctionCode::SupervisorData;
+    // CSBOOT's 1-Mbyte block out of reset (SIMRM 7.10.2), nothing past it
+    let past = Address(0x0010_0000);
+    let mut read = [0; 4];
+    let got = Target::read_memory(&mut chip, past.before(2), supervisor, &mut read);
+    assert!(matches!(got, Ok(2)), "{got:?}");
+    let written = Target::write_memory(&mut chip, past.before(1), supervisor, &[1, 2]);
+    assert!(
+        matches!(written, Err(AccessError::Unserved(at)) if at == past),
+        "{written:?}"
+    );
 }
 
 #[test]
@@ -443,16 +498,16 @@ fn monitor_fc_names_the_space_memory_goes_to() {
             .iter()
             .any(|reply| *reply == format!("O{}", hex(text)))
     };
-    assert!(said(&replies, "fc 5\n"));
-    assert!(said(&replies, "fc 6\n"));
+    assert!(said(&replies, "fc supervisor-data (5)\n"));
+    assert!(said(&replies, "fc supervisor-program (6)\n"));
     assert!(replies.iter().any(|reply| reply == "7005"));
     let mut chip = chip();
     let (ending, replies) = session(
         &mut chip,
         vec![
-            packet(&format!("qRcmd,{}", hex("fc 7"))),
+            packet(&format!("qRcmd,{}", hex("fc cpu-space"))),
             packet(&format!("M{STORE:x},2:abcd")),
-            packet(&format!("qRcmd,{}", hex("fc 6"))),
+            packet(&format!("qRcmd,{}", hex("fc 0x6"))),
             packet(&format!("M{STORE:x},2:abcd")),
             packet("D"),
         ],
@@ -694,18 +749,23 @@ struct Counting {
     last: usize,
 }
 
+/// The idle that ended the session.
+#[derive(Debug, thiserror::Error)]
+#[error("idle {0}")]
+struct Idled(usize);
+
 impl Waiter for Counting {
-    type Error = usize;
+    type Error = Idled;
 
     fn wait<R: marker::Send>(&mut self, wait: impl FnOnce() -> R + marker::Send) -> R {
         self.waits += 1;
         wait()
     }
 
-    fn idle(&mut self) -> Result<(), usize> {
+    fn idle(&mut self) -> Result<(), Idled> {
         self.idles += 1;
         if self.idles == self.last {
-            Err(self.idles)
+            Err(Idled(self.idles))
         } else {
             Ok(())
         }
@@ -720,7 +780,7 @@ fn a_polled_wait_ends_when_the_host_says() {
         last: 3,
     };
     let accepted = accept_polled("127.0.0.1:0", |_| Ok(()), waiter);
-    assert!(matches!(accepted, Err(PollError::Host(3))));
+    assert!(matches!(accepted, Err(PollError::Host(Idled(3)))));
 }
 
 /// A host's error that has a cause.
@@ -845,6 +905,61 @@ fn a_tcp_stream_serves_a_run_and_its_ctrl_c() {
     assert!(machine.cpu.instructions() > 4);
 }
 
+#[test]
+fn gdb_closing_a_tcp_stream_mid_run_hangs_up() {
+    let (sender, port) = mpsc::channel();
+    let client = thread::spawn(move || {
+        let port: u16 = port.recv().unwrap();
+        let mut gdb = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        io::Write::write_all(&mut gdb, b"$c#63").unwrap();
+        let mut ack = [0];
+        io::Read::read_exact(&mut gdb, &mut ack).unwrap();
+        // gdb exits without a detach or a kill
+    });
+    let mut machine = machine();
+    let stream = connection::accept("127.0.0.1:0", |at| {
+        sender.send(at.port()).unwrap();
+        Ok::<(), io::Error>(())
+    })
+    .unwrap();
+    assert_eq!(serve(&mut machine, stream).unwrap(), Ending::HungUp);
+    client.join().unwrap();
+}
+
+#[test]
+fn gdb_closing_a_polled_connection_hangs_up() {
+    let (sender, port) = mpsc::channel();
+    let client = thread::spawn(move || {
+        let port: u16 = port.recv().unwrap();
+        drop(TcpStream::connect(("127.0.0.1", port)).unwrap());
+    });
+    let waiter = Counting {
+        waits: 0,
+        idles: 0,
+        last: usize::MAX,
+    };
+    let connection = accept_polled(
+        "127.0.0.1:0",
+        |at| {
+            sender.send(at.port()).unwrap();
+            Ok(())
+        },
+        waiter,
+    )
+    .unwrap();
+    assert_eq!(serve(&mut machine(), connection).unwrap(), Ending::HungUp);
+    client.join().unwrap();
+}
+
+#[test]
+fn a_connection_that_fails_ends_the_session_with_its_error() {
+    let (ending, _) = session(&mut machine(), vec![packet("?"), Send::Fail]);
+    assert!(
+        matches!(&ending, Err(SessionError::Connection { error }) if error.kind() == io::ErrorKind::Other),
+        "{ending:?}"
+    );
+}
+
 /// An odd address, which the program's long store faults at (CPU32RM
 /// 6.2.3).
 const ODD: u32 = 0x2001;
@@ -885,7 +1000,7 @@ where
     assert_eq!(
         said[2],
         format!(
-            "faults stop\nstopped at address error: write of 4 bytes at {}, fc 5, pc {}\n",
+            "faults stop\nstopped at address error: write of 4 bytes at {} in supervisor-data, pc {}\n",
             Address(ODD),
             Address(STORE_PC)
         )
@@ -895,7 +1010,7 @@ where
 #[test]
 fn monitor_faults_stop_the_bare_cpu_s_run() {
     let mut machine = machine();
-    machine.cpu.registers.set_address(0, ODD);
+    machine.cpu.registers.set_register(Register::A0, ODD);
     monitor_faults_stop_the_run(&mut machine);
     assert_eq!(machine.cpu.registers.pc.0, STORE_PC);
 }
@@ -903,9 +1018,68 @@ fn monitor_faults_stop_the_bare_cpu_s_run() {
 #[test]
 fn monitor_faults_stop_the_chip_s_run() {
     let mut chip = chip();
-    chip.cpu_control().registers_mut().set_address(0, ODD);
+    chip.cpu_control()
+        .registers_mut()
+        .set_register(Register::A0, ODD);
     monitor_faults_stop_the_run(&mut chip);
     assert_eq!(chip.cpu().registers.pc.0, STORE_PC);
+}
+
+#[test]
+fn a_bare_cpu_s_exception_stop_is_a_trap() {
+    let mut machine = machine();
+    machine
+        .poke_bytes(
+            Address(START),
+            FunctionCode::SupervisorData,
+            &bytes(&[0x4e40]),
+        )
+        .unwrap();
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    let (ending, replies) = session(&mut machine, vec![packet("c"), packet("k")]);
+    assert_eq!(ending.unwrap(), Ending::Killed);
+    // SIGTRAP, gdb's 5
+    assert_eq!(replies[0], "S05", "{replies:?}");
+    assert_eq!(machine.cpu.registers.pc.0, START, "the TRAP undone");
+}
+
+#[test]
+fn a_self_loop_stop_is_a_trap() {
+    let mut machine = machine();
+    // BRA.S to itself (CPU32RM 4.4, BRA)
+    machine
+        .poke_bytes(
+            Address(START),
+            FunctionCode::SupervisorData,
+            &bytes(&[0x60fe]),
+        )
+        .unwrap();
+    machine.cpu.set_stop_at_self_loop(true);
+    let (ending, replies) = session(&mut machine, vec![packet("c"), packet("k")]);
+    assert_eq!(ending.unwrap(), Ending::Killed);
+    // SIGTRAP, gdb's 5, as an exception stop
+    assert_eq!(replies[0], "S05", "{replies:?}");
+    assert_eq!(machine.cpu.registers.pc.0, START);
+    assert_eq!(TargetRun::from(Stop::SelfLoop), TargetRun::SelfLoop);
+}
+
+#[test]
+fn a_bare_cpu_s_exception_stop_names_its_vector() {
+    let mut machine = machine();
+    machine
+        .poke_bytes(
+            Address(START),
+            FunctionCode::SupervisorData,
+            &bytes(&[0x4e40]),
+        )
+        .unwrap();
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    assert_eq!(
+        Target::run_for(&mut machine, Cycles::from_clocks(100), &|| false),
+        Ok(TargetRun::Exception {
+            vector: Vector::trap(0)
+        })
+    );
 }
 
 #[test]
@@ -914,7 +1088,13 @@ fn a_fault_stop_outranks_a_watch_hit_it_undid() {
         let mut machine = machine();
         // TRAP #0, SSP 4: its frame's first words go to 2 and 0,
         // watched, then below zero, where nothing maps
-        machine.write(Address(START), &bytes(&[0x4e40])).unwrap();
+        machine
+            .poke_bytes(
+                Address(START),
+                FunctionCode::SupervisorData,
+                &bytes(&[0x4e40]),
+            )
+            .unwrap();
         machine.cpu.registers.ssp = Address(4);
         machine.cpu.set_stop_on_fault(true);
         let (ending, replies) = session(
@@ -938,7 +1118,13 @@ fn a_watch_hit_in_an_instruction_kept_through_its_trace_s_fault_is_reported() {
         // ADDQ.W #1,(A0) traced (T1), SSP where nothing maps: the ADDQ
         // completes, its trace's stacking faults (CPU32RM 6.2.10), and
         // the ADDQ is kept, its trace pending
-        machine.write(Address(START), &bytes(&[0x5250])).unwrap();
+        machine
+            .poke_bytes(
+                Address(START),
+                FunctionCode::SupervisorData,
+                &bytes(&[0x5250]),
+            )
+            .unwrap();
         machine.cpu.registers.set_sr(0xa700);
         machine.cpu.registers.ssp = Address(UNMAPPED);
         machine.cpu.set_stop_on_fault(true);

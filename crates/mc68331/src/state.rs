@@ -1,20 +1,20 @@
 //! Save and restore the chip ([PLAN.md], State): the core's snapshot,
 //! the SIM, the modules', the host's peripherals' and the QSPI peripheral's
-//! snapshots, board time and the pins the host drives.
+//! snapshots, chip time and the pins the host drives.
 //!
 //! The wiring is the builder's, so a snapshot restores into a chip
 //! built the same way.
 //!
 //! [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
 
-use mc683xx_cpu32::cpu::Halt;
-use mc683xx_cpu32::cpu::state::Layer;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode_layer;
-use mc683xx_cpu32::cpu::state::encode_layer;
-use mc683xx_cpu32::cpu::state::restore_each;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Halt;
 use mc683xx_cpu32::memory::RegionId;
+use mc683xx_cpu32::state::Layer;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode_layer;
+use mc683xx_cpu32::state::encode_layer;
+use mc683xx_cpu32::state::restore_each;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::sim::Sim;
 use serde::Deserialize;
@@ -28,7 +28,7 @@ use crate::debug::serial::Serial;
 /// The format of [`Mc68331::save`]'s bytes.  The core's, the modules',
 /// the peripherals' and the QSPI peripheral's snapshots inside carry their
 /// own.
-pub const VERSION: u32 = 18;
+pub const VERSION: u32 = 20;
 
 /// What the QSPI's peripheral's save and restore errors name.
 const QSPI_PERIPHERAL: &str = "the QSPI peripheral";
@@ -47,7 +47,7 @@ struct ChipState {
     /// The QSPI's peripheral's snapshot, if the builder attached one.
     qspi: Option<Vec<u8>>,
     /// Now, on the system clock.
-    now: Cycles,
+    now: Cycle,
     /// Why the CPU halted, while it stays halted: the core's state's,
     /// kept for the format; restore takes the core's.
     halt: Option<Halt>,
@@ -121,7 +121,7 @@ impl Mc68331 {
     /// The chip's whole state as a snapshot: the core (registers,
     /// memory, run-loop timing), the SIM, the modules, every peripheral
     /// and the QSPI's peripheral
-    /// ([`Save`](mc683xx_cpu32::cpu::state::Save)), board time and the
+    /// ([`Save`](mc683xx_cpu32::state::Save)), chip time and the
     /// IRQ pins.  Not the host's hooks, tracing or events not yet taken.
     ///
     /// # Errors

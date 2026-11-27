@@ -7,6 +7,7 @@
 //! [plan-boards]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#boards
 
 use std::any::Any;
+use std::any::type_name;
 use std::array;
 use std::cell::Cell;
 use std::cell::Ref;
@@ -24,23 +25,25 @@ use std::rc::Rc;
 use std::rc::Weak;
 use std::time::Duration;
 
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
-use mc683xx_cpu32::cpu::hooks::HookId;
-use mc683xx_cpu32::cpu::state::Layer;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode_layer;
-use mc683xx_cpu32::cpu::state::encode_layer;
-use mc683xx_cpu32::cpu::state::restore_each;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::hooks::ExceptionEntry;
+use mc683xx_cpu32::hooks::HookId;
 use mc683xx_cpu32::memory::Space;
+use mc683xx_cpu32::state::Layer;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode_layer;
+use mc683xx_cpu32::state::encode_layer;
+use mc683xx_cpu32::state::restore_each;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::sim::ResetCause;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::size::Size;
+use mc683xx_target::Entry;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -51,6 +54,7 @@ use crate::chip::MemoryPlace;
 use crate::chip::MemoryPlan;
 use crate::chip::takes;
 use crate::condition::Condition;
+use crate::condition::ConditionError;
 use crate::condition::ConditionId;
 use crate::condition::ConditionInfo;
 use crate::condition::ConditionToken;
@@ -61,30 +65,26 @@ use crate::condition::level;
 use crate::control::BoardControl;
 use crate::control::Endpoints;
 use crate::description::Description;
+use crate::description::LoadError;
 use crate::description::NetSpec;
 use crate::description::Options;
 use crate::description::Target;
 use crate::description::port_of;
 use crate::endpoint::Endpoint;
-use crate::error::ConditionError;
-use crate::error::LoadError;
-use crate::error::NetError;
-use crate::error::ReceiveError;
-use crate::error::RunError;
-use crate::error::SendError;
+use crate::environment::Environment;
 use crate::inspect::Inspection;
 use crate::observe::Attached;
 use crate::observe::Observer;
 use crate::observe::ObserverId;
 use crate::pacing::Pacer;
 use crate::pacing::QUANTUM;
-use crate::registry::Environment;
 use crate::registry::PortSpec;
 use crate::registry::Registry;
 use crate::schema::Undecoded;
 use crate::signal::Direction;
 use crate::signal::Kind;
 use crate::signal::Signal;
+use crate::state::VERSION;
 use crate::time::Clock;
 use crate::time::NonZeroSpan;
 use crate::time::Span;
@@ -109,10 +109,6 @@ use crate::wiring::Routes;
 use crate::wiring::SelectRouter;
 use crate::wiring::Shared;
 use crate::wiring::SharedMemory;
-
-/// The format of [`Board::save`]'s bytes.  The chip's and the peripherals'
-/// snapshots inside carry their own.
-pub const VERSION: u32 = 22;
 
 /// The levels on PCS\[3:0\] before the QSPI drives them: high.
 const PCS_IDLE: u8 = 0xf;
@@ -188,7 +184,7 @@ struct Ahead<P> {
     /// When it comes.
     at: Time,
     /// The clock the chip holds it for.
-    cycles: Cycles,
+    cycle: Cycle,
     /// The pin.
     pin: P,
     /// The level.
@@ -253,20 +249,21 @@ pub struct External {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct BoardRun {
-    /// Why: its time ran out ([`Stop::Budget`]), the CPU halted, a hook
-    /// stopped it, or the host or a peripheral asked ([`Stop::Requested`]).
-    pub stop: Stop,
     /// Board time at its end, never past the time it ran to, though
     /// the chip's last instruction may end past it.
     pub now: Time,
+    /// Why: its time ran out ([`Stop::Budget`]), the CPU halted, a hook
+    /// stopped it, or the host or a peripheral asked ([`Stop::Requested`]).
+    pub stop: Stop,
 }
 
 impl BoardRun {
-    /// A run that ended for `stop` at `now`: a board's own, or a host's
-    /// stand-in for one (a debugger that ended the session).
+    /// A run that ended at `now` for `stop`: a board's own, or a host's
+    /// stand-in for one (a debugger that ended the session).  Time
+    /// first, as [`Run::new`](mc683xx_cpu32::Run::new).
     #[must_use]
-    pub const fn new(stop: Stop, now: Time) -> Self {
-        Self { stop, now }
+    pub const fn new(now: Time, stop: Stop) -> Self {
+        Self { now, stop }
     }
 }
 
@@ -581,6 +578,28 @@ impl BoardStopRequest {
             shared.request_stop();
         }
     }
+
+    /// Asks the run to stop, as [`request`](Self::request) does, for a
+    /// binding whose peripheral raised: it withdraws the request once
+    /// its call into the board returns
+    /// ([`withdraw_transient`](Self::withdraw_transient)), so only the
+    /// host's survives the run.  Not part of the semver API.
+    #[doc(hidden)]
+    pub fn request_transient(&self) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.request_transient_stop();
+        }
+    }
+
+    /// Withdraws a [`request_transient`](Self::request_transient) the
+    /// run did not take, leaving a [`request`](Self::request) pending.
+    /// Not part of the semver API.
+    #[doc(hidden)]
+    pub fn withdraw_transient(&self) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.withdraw_transient_stop();
+        }
+    }
 }
 
 impl fmt::Debug for BoardStopRequest {
@@ -677,7 +696,7 @@ impl<C: Chip> Board<C> {
         let mut builder = C::builder(&section)?;
         let shared = Rc::new(Shared {
             base: Cell::new(TimeBase::new(
-                Cycles::ZERO,
+                Cycle::ZERO,
                 Time::ZERO,
                 builder.system_frequency(),
             )),
@@ -689,6 +708,7 @@ impl<C: Chip> Board<C> {
             writes: RefCell::default(),
             diverted: Cell::new(false),
             stop: Cell::new(false),
+            transient_stop: Cell::new(false),
             fired: RefCell::default(),
             chip_stop: builder.stop_request(),
             requests: builder.requests(),
@@ -751,7 +771,7 @@ impl<C: Chip> Board<C> {
             shared
                 .base
                 .get()
-                .moved(Cycles::ZERO, chip.system_frequency()),
+                .moved(Cycle::ZERO, chip.system_frequency()),
         );
         let mut sources: BTreeMap<Source<C::Pin>, Vec<usize>> = BTreeMap::new();
         for (index, net) in nets.iter().enumerate() {
@@ -926,7 +946,7 @@ impl<C: Chip> Board<C> {
                     .qspi_deferrable()
             });
             *shared.qspi.borrow_mut() = Some(QspiState::new(PCS_IDLE, targets.len()));
-            builder.qspi(QspiRouter {
+            builder.set_qspi(QspiRouter {
                 shared: Rc::clone(shared),
                 targets,
                 deferrable,
@@ -957,20 +977,20 @@ impl<C: Chip> Board<C> {
         self.collect();
     }
 
-    /// Runs the board to `until`, or until the CPU halts or enters
+    /// Runs the board to `deadline`, or until the CPU halts or enters
     /// background mode, a hook stops it, or the host or a peripheral asks
     /// it to stop.  At each sync point it takes what its
     /// [`control`](Self::control) holds.  A board whose CPU is already
-    /// halted or in background mode runs to `until` as time passes
+    /// halted or in background mode runs to `deadline` as time passes
     /// without the CPU ([`Chip::run_for`]), ending [`Stop::Halted`] or
     /// [`Stop::Background`] if it still is.
     ///
     /// # Errors
     ///
     /// A peripheral that stalls the board ([`RunError::Stalled`]).
-    pub fn run_until(&mut self, until: Time) -> Result<BoardRun, RunError> {
+    pub fn run_until(&mut self, deadline: Time) -> Result<BoardRun, RunError> {
         self.leave_frames();
-        self.run_to(until)
+        self.run_to(deadline)
     }
 
     /// Ends [`run_frame`](Self::run_frame)'s pacing, for the next frame
@@ -980,7 +1000,7 @@ impl<C: Chip> Board<C> {
     }
 
     /// The run loop under every run: [`run_until`](Self::run_until)'s.
-    fn run_to(&mut self, until: Time) -> Result<BoardRun, RunError> {
+    fn run_to(&mut self, deadline: Time) -> Result<BoardRun, RunError> {
         // a condition that held between runs is the stop still asked
         if !self.shared.stop.get() {
             self.shared.fired.borrow_mut().clear();
@@ -991,10 +1011,12 @@ impl<C: Chip> Board<C> {
             if self.take_stop() {
                 return Ok(self.outcome(Stop::Requested));
             }
-            if self.now >= until {
+            if self.now >= deadline {
                 return Ok(self.outcome(self.idle().unwrap_or(Stop::Budget)));
             }
-            let next = self.next_event().map_or(until, |next| next.min(until));
+            let next = self
+                .next_event()
+                .map_or(deadline, |next| next.min(deadline));
             // a peripheral's `next_event` may have asked (`BoardStopRequest`)
             if self.take_stop() {
                 return Ok(self.outcome(Stop::Requested));
@@ -1006,13 +1028,13 @@ impl<C: Chip> Board<C> {
                 self.now = self.now.max(next);
                 continue;
             }
-            let target = self.shared.base.get().cycles(next);
+            let target = self.shared.base.get().cycle(next);
             let idle = self.idle();
             let stop = if target > self.chip.now() {
                 self.shared.quantum_end.set(Some(next));
-                let queued = self.first_change().map_or(until, |at| at.min(until));
+                let queued = self.first_change().map_or(deadline, |at| at.min(deadline));
                 self.shared.run_horizon.set(Some(queued));
-                let stop = self.chip.run_for(self.chip.now().until(target)).stop;
+                let stop = self.chip.run_for(target.since(self.chip.now())).stop;
                 self.shared.quantum_end.set(None);
                 self.shared.run_horizon.set(None);
                 stop
@@ -1036,7 +1058,11 @@ impl<C: Chip> Board<C> {
                 _ => {
                     self.catch_up(next);
                     self.settle()?;
-                    self.take_stop();
+                    // only a run that ends for the request takes it: one
+                    // asked where it ends for another reason stays pending
+                    if stop == Stop::Requested {
+                        self.take_stop();
+                    }
                     return Ok(self.outcome(stop));
                 }
             }
@@ -1052,12 +1078,15 @@ impl<C: Chip> Board<C> {
             .or_else(|| cpu.background().map(Stop::Background))
     }
 
-    /// Whether a peripheral or the host asked the run to stop; withdraws the
-    /// request, the chip's with it, so the next run does not stop for
-    /// it again.
+    /// Whether a peripheral or the host asked the run to stop, the
+    /// board's request or the chip's, taking what it serves: the run
+    /// ends [`Stop::Requested`] for either, so the next does not stop
+    /// for it again.
     fn take_stop(&self) -> bool {
-        self.shared.chip_stop.withdraw();
-        self.shared.stop.take()
+        let board = self.shared.stop.take();
+        let transient = self.shared.transient_stop.take();
+        let chip = self.shared.chip_stop.take();
+        board || transient || chip
     }
 
     /// Board time to the chip's, but no later than `next`, where the
@@ -1098,7 +1127,7 @@ impl<C: Chip> Board<C> {
         if self.hooks.watches.contains(&id) {
             let cpu = self.chip.cpu();
             let registers = &cpu.registers;
-            let a7 = registers.address(7);
+            let a7 = registers.register(Register::A7);
             let space = Space::of(registers.data_space());
             let stack = array::from_fn(|index| {
                 let at = Address(a7).offset(4 * index as u32);
@@ -1109,7 +1138,9 @@ impl<C: Chip> Board<C> {
                 pc: registers.pc,
                 sr: registers.sr(),
                 data: registers.data,
-                address: array::from_fn(|index| registers.address(index)),
+                address: array::from_fn(|index| {
+                    registers.register(Register::ALL[usize::from(Register::A0.code()) + index])
+                }),
                 stack,
             }));
             return true;
@@ -1128,16 +1159,25 @@ impl<C: Chip> Board<C> {
         id
     }
 
+    /// The CPU's registers, hooks and page permissions, to change, as
+    /// the chip lends them ([`Chip::cpu_control`]): a data watch
+    /// (`add_write_hook`, `add_read_hook`) beside
+    /// [`watch_code`](Self::watch_code).  A hook that breaks ends the
+    /// run [`Stop::Hook`] after its instruction.
+    pub fn cpu_control(&mut self) -> CpuControl<'_> {
+        self.chip.cpu_control()
+    }
+
     /// Where the CPU is now, as a `position` record.
     #[must_use]
-    pub fn position(&self) -> PositionRecord {
+    pub fn position_record(&self) -> PositionRecord {
         let registers = &self.chip.cpu().registers;
         PositionRecord {
             cycle: self.chip.now(),
             pc: registers.pc,
             sr: registers.sr(),
             vbr: registers.vbr,
-            a7: Address(registers.address(7)),
+            a7: Address(registers.register(Register::A7)),
             instructions: self.chip.instructions(),
         }
     }
@@ -1167,16 +1207,16 @@ impl<C: Chip> Board<C> {
         self.control.clone()
     }
 
-    /// Runs the board for `span` from now.
+    /// Runs the board for `budget` of board time from now.
     ///
     /// # Errors
     ///
     /// What [`Board::run_until`] fails with.
-    pub fn run_for(&mut self, span: Span) -> Result<BoardRun, RunError> {
-        self.run_until(self.now + span)
+    pub fn run_for(&mut self, budget: Span) -> Result<BoardRun, RunError> {
+        self.run_until(self.now + budget)
     }
 
-    /// Runs the board to `until` as [`run_until`](Self::run_until) does, in quanta
+    /// Runs the board to `deadline` as [`run_until`](Self::run_until) does, in quanta
     /// of `quantum` of board time, calling `before` before
     /// each: a host's loop, for its Ctrl-C checks or its pacing.  A
     /// series of runs to rising times is one long run, so the quanta
@@ -1186,19 +1226,19 @@ impl<C: Chip> Board<C> {
     /// it is, [`Stop::Requested`].  A frame `before` runs
     /// ([`run_frame`](Self::run_frame)) leaves the pacing ended, as any
     /// other run does.  A [`NonZeroSpan`] is never zero, so the loop always
-    /// comes to `until`.
+    /// comes to `deadline`.
     ///
     /// # Errors
     ///
     /// As [`run_until`](Self::run_until).
     pub fn run_until_quantized(
         &mut self,
-        until: Time,
+        deadline: Time,
         quantum: NonZeroSpan,
         before: impl FnMut(&mut Self) -> ControlFlow<()>,
     ) -> Result<BoardRun, RunError> {
         self.leave_frames();
-        let outcome = self.run_quantized(until, quantum, before);
+        let outcome = self.run_quantized(deadline, quantum, before);
         // a frame `before` ran paced no more than its own run
         self.leave_frames();
         outcome
@@ -1207,7 +1247,7 @@ impl<C: Chip> Board<C> {
     /// The quantum loop: [`run_until_quantized`](Self::run_until_quantized)'s.
     fn run_quantized(
         &mut self,
-        until: Time,
+        deadline: Time,
         quantum: NonZeroSpan,
         mut before: impl FnMut(&mut Self) -> ControlFlow<()>,
     ) -> Result<BoardRun, RunError> {
@@ -1215,17 +1255,17 @@ impl<C: Chip> Board<C> {
             if before(self).is_break() {
                 return Ok(self.outcome(Stop::Requested));
             }
-            let target = (self.now + quantum.get()).min(until);
+            let target = (self.now + quantum.get()).min(deadline);
             let idle = self.idle();
             let outcome = self.run_to(target)?;
             let quantized = outcome.stop == Stop::Budget || idle == Some(outcome.stop);
-            if !quantized || self.now >= until {
+            if !quantized || self.now >= deadline {
                 return Ok(outcome);
             }
         }
     }
 
-    /// Runs the board to `until` as [`run_until_quantized`](Self::run_until_quantized)
+    /// Runs the board to `deadline` as [`run_until_quantized`](Self::run_until_quantized)
     /// does, in quanta of `quantum`
     /// ([`pacing::QUANTUM`](crate::pacing::QUANTUM) is a good one), paced
     /// by its control's [`Pacing`](crate::pacing::Pacing), read before
@@ -1233,7 +1273,7 @@ impl<C: Chip> Board<C> {
     /// ahead of wall time times the pacing's factor, waking for a stop
     /// or a change of pacing.  Wall time decides only how long it
     /// sleeps, so the run is the same whatever the pacing.  A run that
-    /// reaches `until` waits once more after its last quantum, so it
+    /// reaches `deadline` waits once more after its last quantum, so it
     /// returns no earlier than wall time says, and short paced runs in a
     /// loop are paced too.  A stop through the control ends it at the
     /// next sync point, without waiting out the sleep.
@@ -1243,16 +1283,16 @@ impl<C: Chip> Board<C> {
     /// As [`run_until`](Self::run_until).
     pub fn run_until_paced(
         &mut self,
-        until: Time,
+        deadline: Time,
         quantum: NonZeroSpan,
     ) -> Result<BoardRun, RunError> {
         let control = self.control.clone();
         let mut pacer = Pacer::new();
-        let outcome = self.run_until_quantized(until, quantum, |board| {
+        let outcome = self.run_until_quantized(deadline, quantum, |board| {
             pacer.wait(board.now, &control);
             ControlFlow::Continue(())
         })?;
-        if self.now >= until {
+        if self.now >= deadline {
             pacer.wait(self.now, &control);
         }
         Ok(outcome)
@@ -1262,11 +1302,11 @@ impl<C: Chip> Board<C> {
     /// sleep (a browser's `requestAnimationFrame` and `performance.now()`,
     /// a GUI's timer): to the board time due by the host's clock reading
     /// `wall` under the control's pacing, but no more
-    /// than `bound` of board time, a frame's bound however far
+    /// than `budget` of board time, a frame's bound however far
     /// behind the host is (a hidden page): a frame so bounded drops the
     /// time it missed, and the next frames are paced from where it
     /// ended.  Unpaced, it runs
-    /// `bound`.  Paced, the first frame, and the first after the
+    /// `budget`.  Paced, the first frame, and the first after the
     /// control's [`set_pacing`](BoardControl::set_pacing) to another
     /// pacing, any other run (even of no time) or a successful
     /// [`restore`](Self::restore), runs nothing: it starts the pacing
@@ -1281,8 +1321,8 @@ impl<C: Chip> Board<C> {
     /// # Errors
     ///
     /// As [`run_until`](Self::run_until).
-    pub fn run_frame(&mut self, wall: Duration, bound: Span) -> Result<BoardRun, RunError> {
-        self.run_frame_with(wall, bound, |_| ControlFlow::Continue(()))
+    pub fn run_frame(&mut self, wall: Duration, budget: Span) -> Result<BoardRun, RunError> {
+        self.run_frame_with(wall, budget, |_| ControlFlow::Continue(()))
     }
 
     /// Runs a frame as [`run_frame`](Self::run_frame) does, calling
@@ -1300,15 +1340,15 @@ impl<C: Chip> Board<C> {
     pub fn run_frame_with(
         &mut self,
         wall: Duration,
-        bound: Span,
+        budget: Span,
         before: impl FnMut(&mut Self) -> ControlFlow<()>,
     ) -> Result<BoardRun, RunError> {
         let (pacing, pacings) = self.control.pacing_set();
         let (mut pacer, generation) = self.frames.take(pacings);
-        let bound = self.now + bound;
+        let bound = self.now + budget;
         let due = pacer.due(self.now, pacing, wall);
-        let until = due.map_or(bound, |due| due.min(bound));
-        let outcome = self.run_quantized(until, QUANTUM, before);
+        let deadline = due.map_or(bound, |due| due.min(bound));
+        let outcome = self.run_quantized(deadline, QUANTUM, before);
         if due.is_some_and(|due| due > bound) {
             pacer.restart(self.now, pacing, wall);
         }
@@ -1326,13 +1366,9 @@ impl<C: Chip> Board<C> {
 
     /// The earliest change waiting or peripheral's next event.
     fn next_event(&self) -> Option<Time> {
-        let base = self.shared.base.get();
         let change = self.first_change();
-        let peripheral = self
-            .shared
-            .peripherals
-            .iter()
-            .filter_map(|peripheral| peripheral.borrow().next_event(base))
+        let peripheral = (0..self.shared.peripherals.len())
+            .filter_map(|index| self.shared.next_event(index, self.now))
             .min();
         change.into_iter().chain(peripheral).min()
     }
@@ -1356,14 +1392,11 @@ impl<C: Chip> Board<C> {
                 .first_key_value()
                 .map(|(&key, _)| key)
                 .filter(|&(at, _)| at <= self.now);
-            let base = self.shared.base.get();
-            let peripheral = self
-                .shared
-                .peripherals
-                .iter()
-                .enumerate()
-                .filter_map(|(index, peripheral)| {
-                    peripheral.borrow().next_event(base).map(|at| (at, index))
+            let peripheral = (0..self.shared.peripherals.len())
+                .filter_map(|index| {
+                    self.shared
+                        .next_event(index, self.now)
+                        .map(|at| (at, index))
                 })
                 .filter(|&(at, _)| at <= self.now)
                 .min();
@@ -1528,12 +1561,12 @@ impl<C: Chip> Board<C> {
     /// `signal` on [`ChipPin::scheduled`] input `pin` from `at`, at its
     /// clock, kept until it comes in case the clocks move first.
     fn schedule(&mut self, pin: C::Pin, signal: Signal, at: Time) {
-        let cycles = self.shared.base.get().cycles(at);
-        self.chip.input(pin, signal, cycles);
-        if cycles > self.chip.now() {
+        let cycle = self.shared.base.get().cycle(at);
+        self.chip.input(pin, signal, cycle);
+        if cycle > self.chip.now() {
             self.ahead.push(Ahead {
                 at,
-                cycles,
+                cycle,
                 pin,
                 signal,
             });
@@ -1551,7 +1584,7 @@ impl<C: Chip> Board<C> {
         self.chip.unschedule_inputs();
         let now = self.chip.now();
         for ahead in mem::take(&mut self.ahead) {
-            if ahead.cycles > now {
+            if ahead.cycle > now {
                 self.schedule(ahead.pin, ahead.signal, ahead.at);
             }
         }
@@ -1560,8 +1593,8 @@ impl<C: Chip> Board<C> {
     /// `signal` on chip input `pin` from `at`.
     fn apply(&mut self, pin: C::Pin, signal: Signal, at: Time) {
         if pin != C::RESET {
-            let at_cycles = self.shared.base.get().cycles(at);
-            self.chip.input(pin, signal, at_cycles);
+            let at_cycle = self.shared.base.get().cycle(at);
+            self.chip.input(pin, signal, at_cycle);
             return;
         }
         if let Signal::Level(level) = signal {
@@ -1579,9 +1612,9 @@ impl<C: Chip> Board<C> {
             (true, false) => self.chip.reset_for(ResetCause::External),
             (false, true) => {
                 let base = self.shared.base.get();
-                let cycles = self.chip.now();
-                let at = at.max(base.time(cycles));
-                self.move_base(TimeBase::new(cycles, at, base.frequency()));
+                let cycle = self.chip.now();
+                let at = at.max(base.time(cycle));
+                self.move_base(TimeBase::new(cycle, at, base.frequency()));
                 if breakpoint {
                     self.chip.reset_with_breakpoint();
                 } else {
@@ -1591,6 +1624,14 @@ impl<C: Chip> Board<C> {
             _ => {}
         }
         self.reset_in = level;
+    }
+
+    /// RESET driven by the board now:
+    /// [`reset_for`](Self::reset_for)`(`[`ResetCause::External`]`)`, BKPT
+    /// high as it rises, so background mode is disabled (CPU32RM 7.2.1).
+    /// Nothing while the board holds RESET low.
+    pub fn reset(&mut self) {
+        self.reset_for(ResetCause::External);
     }
 
     /// A reset now for `cause`, as its source makes it
@@ -1698,7 +1739,7 @@ impl<C: Chip> Board<C> {
             self.events.push(event);
         }
         let now = self.chip.now();
-        self.ahead.retain(|ahead| ahead.cycles > now);
+        self.ahead.retain(|ahead| ahead.cycle > now);
         self.move_base(base.moved(now, frequency));
         let moved = self.clocks.iter().any(|(&pin, clock)| {
             self.chip
@@ -1712,7 +1753,8 @@ impl<C: Chip> Board<C> {
 
     /// The chip's system clock on board time, as of the last quantum's
     /// end: where a peripheral converts between board time and the chip's
-    /// clocks.
+    /// clocks.  The SIM's `Sim::system_clock` is the same clock as the
+    /// chip counts it.
     #[must_use]
     pub fn system_clock(&self) -> TimeBase {
         self.shared.base.get()
@@ -1738,7 +1780,7 @@ impl<C: Chip> Board<C> {
             };
             let clock = self.clocks.get(&pin).map_or_else(
                 || Clock::new(frequency, at),
-                |clock| clock.retuned(at, frequency),
+                |clock| clock.retuned(frequency, at),
             );
             self.clocks.insert(pin, clock);
             self.drive(&Source::Chip(pin), at, Signal::Clock(clock));
@@ -1751,7 +1793,7 @@ impl<C: Chip> Board<C> {
             && let Signal::Level(level) = signal
         {
             self.records.push(Record::Pin(trace::PinRecord {
-                cycle: self.shared.base.get().cycles(at),
+                cycle: self.shared.base.get().cycle(at),
                 now: at,
                 pin: pin.name(),
                 level,
@@ -1779,26 +1821,34 @@ impl<C: Chip> Board<C> {
         &mut self.chip
     }
 
-    /// The peripheral `name`, if there is one and it is a `P`: a host's
-    /// own peripheral's state, by its type.
-    #[must_use]
-    pub fn peripheral<P: Any>(&self, name: &str) -> Option<Ref<'_, P>> {
-        let cell = &self.shared.peripherals[self.peripheral_index(name)?];
+    /// The peripheral `name`, a `P`: a host's own peripheral's state, by
+    /// its type.
+    ///
+    /// # Errors
+    ///
+    /// [`LookupError::NoPeripheral`] if the board has no peripheral
+    /// `name`, [`LookupError::NotA`] if it is not a `P`.
+    pub fn peripheral<P: Any>(&self, name: &str) -> Result<Ref<'_, P>, LookupError> {
+        let cell = &self.shared.peripherals[self.named_peripheral(name)?];
         Ref::filter_map(cell.borrow(), |peripheral| {
             let peripheral: &dyn Any = peripheral.as_ref();
             peripheral.downcast_ref::<P>()
         })
-        .ok()
+        .map_err(|_| LookupError::not_a::<P>(name))
     }
 
-    /// The peripheral `name`, to change, if there is one and it is a `P`.
-    pub fn peripheral_mut<P: Any>(&mut self, name: &str) -> Option<RefMut<'_, P>> {
-        let cell = &self.shared.peripherals[self.peripheral_index(name)?];
+    /// The peripheral `name`, a `P`, to change.
+    ///
+    /// # Errors
+    ///
+    /// As [`peripheral`](Self::peripheral).
+    pub fn peripheral_mut<P: Any>(&mut self, name: &str) -> Result<RefMut<'_, P>, LookupError> {
+        let cell = &self.shared.peripherals[self.named_peripheral(name)?];
         RefMut::filter_map(cell.borrow_mut(), |peripheral| {
             let peripheral: &mut dyn Any = peripheral.as_mut();
             peripheral.downcast_mut::<P>()
         })
-        .ok()
+        .map_err(|_| LookupError::not_a::<P>(name))
     }
 
     /// The index of the peripheral `name`.
@@ -1808,36 +1858,61 @@ impl<C: Chip> Board<C> {
             .position(|peripheral| peripheral.name == name)
     }
 
+    /// The index of the peripheral `name`, or [`NoPeripheral`].
+    fn named_peripheral(&self, name: &str) -> Result<usize, NoPeripheral> {
+        self.peripheral_index(name)
+            .ok_or_else(|| NoPeripheral(name.to_owned()))
+    }
+
     /// What the peripheral `name` shows a front end
-    /// ([`Peripheral::inspect`]), if there is one.
+    /// ([`Peripheral::inspect`]).
+    ///
+    /// # Errors
+    ///
+    /// [`NoPeripheral`] if the board has no peripheral `name`.
     ///
     /// [`Peripheral::inspect`]: crate::peripheral::Peripheral::inspect
-    #[must_use]
-    pub fn inspect(&self, name: &str) -> Option<Inspection> {
-        let cell = &self.shared.peripherals[self.peripheral_index(name)?];
-        Some(cell.borrow().inspect())
+    pub fn inspect(&self, name: &str) -> Result<Inspection, NoPeripheral> {
+        let cell = &self.shared.peripherals[self.named_peripheral(name)?];
+        Ok(cell.borrow().inspect())
     }
 
-    /// The marking of the peripheral `name`, if its peripheral gives one.
-    #[must_use]
-    pub fn marking(&self, name: &str) -> Option<&str> {
-        self.peripherals
-            .iter()
-            .find(|peripheral| peripheral.name == name)?
+    /// The marking of the peripheral `name`, `None` if the file gives it
+    /// none.
+    ///
+    /// # Errors
+    ///
+    /// [`NoPeripheral`] if the board has no peripheral `name`.
+    pub fn marking(&self, name: &str) -> Result<Option<&str>, NoPeripheral> {
+        Ok(self.peripherals[self.named_peripheral(name)?]
             .marking
-            .as_deref()
+            .as_deref())
     }
 
-    /// The memory `name`'s bytes, if there is one.
-    #[must_use]
-    pub fn memory(&self, name: &str) -> Option<&[u8]> {
-        self.memories.get(name).map(|&id| self.chip.memory(id))
+    /// The memory `name`'s bytes.
+    ///
+    /// # Errors
+    ///
+    /// [`NoMemory`] if the board has no memory `name`.
+    pub fn memory(&self, name: &str) -> Result<&[u8], NoMemory> {
+        let id = *self
+            .memories
+            .get(name)
+            .ok_or_else(|| NoMemory(name.to_owned()))?;
+        Ok(self.chip.memory(id))
     }
 
-    /// The memory `name`'s bytes, to change, if there is one.
-    pub fn memory_mut(&mut self, name: &str) -> Option<&mut [u8]> {
-        let id = *self.memories.get(name)?;
-        Some(self.chip.memory_mut(id))
+    /// The memory `name`'s bytes, to change.
+    ///
+    /// # Errors
+    ///
+    /// [`NoMemory`] if the board has no memory `name`.
+    pub fn memory_mut(&mut self, name: &str) -> Result<&mut [u8], NoMemory> {
+        let id = *self
+            .memories
+            .get(name)
+            .ok_or_else(|| NoMemory(name.to_owned()))?;
+        Ok(self.chip.memory_mut(id))
     }
 
     /// The run-time endpoints the nets name, by name and then type:
@@ -1906,7 +1981,7 @@ impl<C: Chip> Board<C> {
     /// # Errors
     ///
     /// As [`send`](Self::send).
-    pub fn check_send(&self, name: &str, signal: &Signal) -> Result<(), SendError> {
+    pub fn check_send(&self, name: &str, signal: Signal) -> Result<(), SendError> {
         self.control.endpoints().carrying(name, signal).map(drop)
     }
 
@@ -1914,7 +1989,7 @@ impl<C: Chip> Board<C> {
     /// without the control.
     fn drive_endpoint(&mut self, name: &str, signal: Signal) -> Result<(), SendError> {
         let source = Source::External(name.to_owned());
-        let carrying = self.control.endpoints().carrying(name, &signal)?;
+        let carrying = self.control.endpoints().carrying(name, signal)?;
         let at = self.now;
         for net in carrying {
             self.drive_net(net, &source, at, signal);
@@ -1943,16 +2018,16 @@ impl<C: Chip> Board<C> {
     ///
     /// # Errors
     ///
-    /// Taking nothing, if no net drives it ([`ReceiveError::Endpoint`]),
-    /// so a typo is not silently an endpoint that never receives.
-    pub fn take_received(&mut self, name: &str) -> Result<Vec<(Time, Signal)>, ReceiveError> {
+    /// Taking nothing, if no net drives it ([`NoReceiver`]), so a typo
+    /// is not silently an endpoint that never receives.
+    pub fn take_received(&mut self, name: &str) -> Result<Vec<(Time, Signal)>, NoReceiver> {
         let driven = self.nets.iter().any(|net| {
             net.sinks
                 .iter()
                 .any(|sink| matches!(sink, Sink::External(sink) if sink == name))
         });
         if !driven {
-            return Err(ReceiveError::Endpoint(name.to_owned()));
+            return Err(NoReceiver(name.to_owned()));
         }
         Ok(self.received.remove(name).unwrap_or_default())
     }
@@ -1963,11 +2038,11 @@ impl<C: Chip> Board<C> {
     }
 
     /// The index of the net `name`.
-    fn net_index(&self, name: &str) -> Result<usize, NetError> {
+    fn net_index(&self, name: &str) -> Result<usize, NoNet> {
         self.nets
             .iter()
             .position(|net| net.name == name)
-            .ok_or_else(|| NetError::Unknown(name.to_owned()))
+            .ok_or_else(|| NoNet(name.to_owned()))
     }
 
     /// The value the net `name` last carried, [`None`] before its first
@@ -1975,8 +2050,8 @@ impl<C: Chip> Board<C> {
     ///
     /// # Errors
     ///
-    /// A board with no net `name` ([`NetError::Unknown`]).
-    pub fn net_value(&self, name: &str) -> Result<Option<Signal>, NetError> {
+    /// A board with no net `name` ([`NoNet`]).
+    pub fn net_value(&self, name: &str) -> Result<Option<Signal>, NoNet> {
         let net = self.net_index(name)?;
         Ok(self.shared.last.borrow()[net])
     }
@@ -1997,10 +2072,10 @@ impl<C: Chip> Board<C> {
     ///
     /// # Errors
     ///
-    /// A board with no net `name` ([`NetError::Unknown`]).
+    /// A board with no net `name` ([`NoNet`]).
     ///
     /// [`observe::Observer`]: crate::observe::Observer
-    pub fn observe(&mut self, name: &str, observer: impl Observer) -> Result<ObserverId, NetError> {
+    pub fn observe(&mut self, name: &str, observer: impl Observer) -> Result<ObserverId, NoNet> {
         let net = self.net_index(name)?;
         let id = ObserverId(self.next_observer);
         self.next_observer += 1;
@@ -2227,6 +2302,10 @@ impl<C: Chip> Board<C> {
     /// net it observes ([`Observer::restored`]), nets in file order, a
     /// net's observers in the order attached.
     ///
+    /// It withdraws a pending stop request, the board's and one a
+    /// [`BoardControl`] asked from another thread, since it replaces the
+    /// board's state.
+    ///
     /// On an error the board is unchanged, and no observer is told: its
     /// own state is checked first,
     /// then each peripheral's snapshot by restoring it, each peripheral
@@ -2293,6 +2372,8 @@ impl<C: Chip> Board<C> {
         self.shared.writes.borrow_mut().clear();
         self.shared.diverted.set(false);
         self.shared.stop.set(false);
+        self.shared.transient_stop.set(false);
+        self.control.withdraw_stop();
         self.leave_frames();
         self.tell_restored();
         Ok(())
@@ -2462,6 +2543,97 @@ fn resolve_nets<P: ChipPin>(
         })
         .collect()
 }
+
+/// A peripheral name the board does not have ([`Board::inspect`],
+/// [`Board::marking`], [`LookupError::NoPeripheral`]).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no peripheral {0:?}")]
+pub struct NoPeripheral(pub String);
+
+/// Why [`Board::peripheral`] or [`Board::peripheral_mut`] found no
+/// peripheral of the type asked for.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum LookupError {
+    /// The board has no peripheral of the name.
+    #[error(transparent)]
+    NoPeripheral(#[from] NoPeripheral),
+    /// The peripheral of the name is of another type.
+    #[error("peripheral {name:?} is not a {expected}")]
+    NotA {
+        /// The peripheral's name.
+        name: String,
+        /// The type asked for, as [`type_name`] gives it.
+        expected: &'static str,
+    },
+}
+
+impl LookupError {
+    /// The peripheral `name` is not a `P`.
+    fn not_a<P>(name: &str) -> Self {
+        Self::NotA {
+            name: name.to_owned(),
+            expected: type_name::<P>(),
+        }
+    }
+}
+
+/// A memory name the board does not have ([`Board::memory`]).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no memory {0:?}")]
+pub struct NoMemory(pub String);
+
+/// Why a run could not go on.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum RunError {
+    /// A peripheral whose `advance` left its `next_event` at or before the
+    /// time it was advanced to, `repeats` times running: it breaks
+    /// [`Peripheral::advance`]'s contract, and the board would never get past
+    /// `at`.
+    ///
+    /// [`Peripheral::advance`]: crate::peripheral::Peripheral::advance
+    #[error("{peripheral}: advanced to {at} {repeats} times, its next event never past it")]
+    Stalled {
+        /// The peripheral.
+        peripheral: String,
+        /// The time it was advanced to.
+        at: Time,
+        /// The advances.
+        repeats: u32,
+    },
+}
+
+/// Why a run-time endpoint could not drive a value ([`Board::send`]).
+///
+/// [`Board::send`]: crate::board::Board::send
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SendError {
+    /// The board has no `external.name` that drives a net.
+    #[error("external.{0} drives no net")]
+    Endpoint(String),
+    /// It drives only nets of `kinds`, none of which carries the value.
+    #[error("external.{endpoint} drives {} nets only, which do not carry the value", kinds.iter().map(ToString::to_string).collect::<Vec<_>>().join(" and "))]
+    Kind {
+        /// The endpoint's name.
+        endpoint: String,
+        /// The types of the nets it drives.
+        kinds: Vec<Kind>,
+    },
+}
+
+/// A run-time endpoint name no net drives, so nothing it could receive
+/// ([`Board::take_received`]).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no net drives external.{0}")]
+pub struct NoReceiver(pub String);
+
+/// A net name the board does not have ([`Board::observe`],
+/// [`Board::net_value`]).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("no net {0:?}")]
+pub struct NoNet(pub String);
 
 #[cfg(test)]
 mod tests;

@@ -144,39 +144,6 @@ pub(crate) enum Lines {
     List(Vec<u8>),
 }
 
-/// A role as the file writes it: a role, or a lane alone, which is
-/// that lane read and written.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub(crate) enum FileRole {
-    /// `read`.
-    Read,
-    /// `write`.
-    Write,
-    /// `read-write`.
-    ReadWrite,
-    /// `iack`.
-    Iack,
-    /// `upper`: `lane = "upper"`.
-    Upper,
-    /// `lower`: `lane = "lower"`.
-    Lower,
-}
-
-impl FileRole {
-    /// The role, and the lane it implies.
-    pub(crate) const fn split(self) -> (Role, Option<Lane>) {
-        match self {
-            Self::Read => (Role::Read, None),
-            Self::Write => (Role::Write, None),
-            Self::ReadWrite => (Role::ReadWrite, None),
-            Self::Iack => (Role::Iack, None),
-            Self::Upper => (Role::ReadWrite, Some(Lane::Upper)),
-            Self::Lower => (Role::ReadWrite, Some(Lane::Lower)),
-        }
-    }
-}
-
 /// One attachment: exactly one of `select`, `decoder` and `qspi`.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -195,18 +162,20 @@ pub(crate) struct Attachment {
     /// The PCS pins the code compares.
     pub(crate) mask: Option<u8>,
     /// Its role.
-    pub(crate) role: Option<FileRole>,
+    pub(crate) role: Option<Role>,
     /// Its lane.
     pub(crate) lane: Option<Lane>,
     /// Address lines wired.
     pub(crate) lines: Option<Lines>,
-    /// Added to the address.
-    pub(crate) offset: Option<u32>,
+    /// Added to the address.  Integers here are `u64`, as a memory's,
+    /// so a value out of range is the attachment's error, not a
+    /// syntax error.
+    pub(crate) offset: Option<u64>,
     /// On no select: the first address of the window its own decode
     /// takes.
-    pub(crate) base: Option<u32>,
+    pub(crate) base: Option<u64>,
     /// The window's bytes.
-    pub(crate) size: Option<u32>,
+    pub(crate) size: Option<u64>,
     /// On no select: the interrupt level whose acknowledges it takes.
     pub(crate) iack: Option<u8>,
 }
@@ -396,6 +365,16 @@ pub(crate) enum Endpoints {
     Many(Vec<String>),
 }
 
+impl Endpoints {
+    /// The endpoints, one or several.
+    pub(crate) fn into_vec(self) -> Vec<String> {
+        match self {
+            Self::One(one) => vec![one],
+            Self::Many(many) => many,
+        }
+    }
+}
+
 /// `[[net]]`.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -413,5 +392,5 @@ pub(crate) struct Net {
     /// Its drivers.
     pub(crate) from: Endpoints,
     /// Its sinks.
-    pub(crate) to: Vec<String>,
+    pub(crate) to: Endpoints,
 }

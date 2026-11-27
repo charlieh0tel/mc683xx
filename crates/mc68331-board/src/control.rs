@@ -20,7 +20,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use crate::error::SendError;
+use crate::board::SendError;
 use crate::pacing::Pacing;
 use crate::signal::Kind;
 use crate::signal::Signal;
@@ -33,7 +33,7 @@ pub(crate) struct Endpoints(pub(crate) BTreeMap<String, Vec<(usize, Kind)>>);
 
 impl Endpoints {
     /// The nets the endpoint `name` drives that carry `signal`.
-    pub(crate) fn carrying(&self, name: &str, signal: &Signal) -> Result<Vec<usize>, SendError> {
+    pub(crate) fn carrying(&self, name: &str, signal: Signal) -> Result<Vec<usize>, SendError> {
         let nets = self
             .0
             .get(name)
@@ -95,7 +95,7 @@ pub(crate) type Taken = (bool, Vec<(String, Signal)>);
 /// event loop) may hold it.  The run takes what it holds at each sync point
 /// (the end of each of the chip's quanta, and so of each of a paced run's), on the
 /// board's thread: a stop ends the run there
-/// ([`Stop::Requested`](mc683xx_cpu32::cpu::Stop::Requested)), as a
+/// ([`Stop::Requested`](mc683xx_cpu32::Stop::Requested)), as a
 /// [`BoardStopRequest`](crate::board::BoardStopRequest)'s does, and the
 /// inputs are driven there, at that board time, in the order queued.  So a
 /// run is the same for the same inputs at the same board times; an input
@@ -143,7 +143,7 @@ impl BoardControl {
     /// [`SendError::Endpoint`] if it drives no net,
     /// [`SendError::Kind`] if none it drives carries `signal`.
     pub fn send(&self, name: &str, signal: Signal) -> Result<(), SendError> {
-        self.0.endpoints.carrying(name, &signal)?;
+        self.0.endpoints.carrying(name, signal)?;
         self.state().inputs.push((name.to_owned(), signal));
         self.0.pending.store(true, Ordering::Release);
         Ok(())
@@ -197,6 +197,12 @@ impl BoardControl {
     /// The endpoints a value may be sent to.
     pub(crate) fn endpoints(&self) -> &Endpoints {
         &self.0.endpoints
+    }
+
+    /// Withdraws a stop asked and not yet taken, as a restore does; the
+    /// inputs queued stay.
+    pub(crate) fn withdraw_stop(&self) {
+        self.state().stop = false;
     }
 
     /// What waits for the run, taken, if anything does.

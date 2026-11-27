@@ -1,23 +1,27 @@
 //! Peripherals on no chip select, which take cycles by their own decode
 //! of the address bus.
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::state::Stateless;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::bus::MOST_WAIT;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
+use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
+use mc683xx_cpu32::state::Stateless;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::chip_select::Dsack;
+use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_modules::sim::chip_selects::Dsack;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 use super::NOP;
 use super::ROM_BYTES;
@@ -33,7 +37,7 @@ use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::event::DsackFault;
 use crate::event::Event;
-use crate::host::AccessError;
+use crate::host::BusCycleError;
 use mc683xx_cpu32::memory::MemoryKind;
 
 /// Where the bus peripheral's window is: above CSBOOT's reset block,
@@ -50,13 +54,18 @@ fn decoding<D: MappedPeripheral + Timed + Stateless + 'static>(
     peripheral: D,
     pins: Dsack,
 ) -> (Mc68331, PeripheralId) {
+    decoding_running(&[NOP], peripheral, pins)
+}
+
+/// [`decoding`], booting into `code`.
+fn decoding_running<D: MappedPeripheral + Timed + Stateless + 'static>(
+    code: &[u16],
+    peripheral: D,
+    pins: Dsack,
+) -> (Mc68331, PeripheralId) {
     let mut builder = Builder::default();
     builder
-        .memory(
-            image(&[NOP], ROM_BYTES),
-            MemoryKind::Rom,
-            &[ChipSelect::Boot],
-        )
+        .memory(image(code, ROM_BYTES), MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     let id = builder
         .bus_peripheral(
@@ -66,12 +75,12 @@ fn decoding<D: MappedPeripheral + Timed + Stateless + 'static>(
                     base: Address(WINDOW),
                     length: WINDOW_BYTES,
                 },
-                BusDecode::Acknowledge(IrqPin::new(4).unwrap()),
+                BusDecode::Acknowledge(IrqPin::try_from(4).unwrap()),
             ],
             pins,
         )
         .unwrap();
-    builder.set_interrupt(id, IrqPin::new(4).unwrap());
+    builder.set_interrupt(id, IrqPin::try_from(4).unwrap());
     (builder.build(), id)
 }
 
@@ -94,12 +103,12 @@ fn a_bus_peripheral_takes_its_window_and_nothing_else() {
     assert_eq!(recorder.writes[0].1, 0xabcd);
     // CPU space at the window's address is not its window
     assert_eq!(
-        cycle_in(&mut chip, FunctionCode::CPU_SPACE, WINDOW, Size::Byte, None),
+        cycle_in(&mut chip, FunctionCode::CpuSpace, WINDOW, Size::Byte, None),
         Err(BusError)
     );
     assert_eq!(
-        chip.peek(Address(WINDOW), Size::Word, FunctionCode::SUPERVISOR_DATA),
-        Err(AccessError::Unpeekable),
+        chip.peek(Address(WINDOW), Size::Word, FunctionCode::SupervisorData),
+        Err(BusCycleError::Unpeekable(Address(WINDOW))),
         "a peripheral answers there"
     );
 }
@@ -129,9 +138,28 @@ fn a_bus_peripherals_dsack_waits_sizes_and_is_checked_against_pepar() {
     assert_eq!(
         chip.take_events(),
         [Event::Dsack {
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
             fault: DsackFault::BusUnassigned { peripheral: id }
         }]
+    );
+}
+
+#[test]
+fn wait_states_beyond_the_most_wait_count_as_it() {
+    // DSACK0: a word is two byte cycles, each of the most wait states
+    let huge = || Recorder {
+        wait: Some((1 << 63) - 3),
+        ..Recorder::answering(0x1234)
+    };
+    let (mut chip, _) = decoding(huge(), Dsack::Dsack0);
+    let byte = Termination::external_clocks(MOST_WAIT).clocks();
+    assert_eq!(
+        cycle(&mut chip, WINDOW, Size::Word, None),
+        Ok((0x3434, 2 * byte))
+    );
+    assert_eq!(
+        chip.bus_read(Address(WINDOW), Size::Long, FunctionCode::SupervisorData),
+        Ok(0x3434_3434)
     );
 }
 
@@ -139,21 +167,21 @@ fn a_bus_peripherals_dsack_waits_sizes_and_is_checked_against_pepar() {
 fn a_bus_peripheral_gives_the_vector_of_its_acknowledge() {
     let (mut chip, id) = decoding(Recorder::answering(0x48), Dsack::Dsack1);
     chip.peripheral_mut::<Recorder>(id).unwrap().interrupt = true;
-    let four = IrqPin::new(4).unwrap().level();
+    let four = InterruptLevel::from(IrqPin::try_from(4).unwrap());
     assert_eq!(chip.board.level(), four);
     assert_eq!(
-        chip.board.acknowledge(four, Cycles::ZERO).answer,
+        chip.board.acknowledge(four, Cycle::ZERO).answer,
         Acknowledge::Vector(Vector(0x48))
     );
-    let three = IrqPin::new(3).unwrap().level();
+    let three = InterruptLevel::from(IrqPin::try_from(3).unwrap());
     assert_eq!(
-        chip.board.acknowledge(three, Cycles::ZERO).answer,
+        chip.board.acknowledge(three, Cycle::ZERO).answer,
         Acknowledge::Spurious,
         "not its level"
     );
     let reads = &chip.peripheral::<Recorder>(id).unwrap().reads;
     assert_eq!(reads.len(), 1);
-    assert_eq!(reads[0].function_code, FunctionCode::CPU_SPACE);
+    assert_eq!(reads[0].function_code, FunctionCode::CpuSpace);
     assert_eq!(reads[0].address, Address(0xff_fff9));
 }
 
@@ -224,7 +252,7 @@ fn a_bus_peripheral_takes_a_fixed_memorys_cycles() {
         )
         .unwrap();
     let fixed = builder
-        .fixed_memory(Address(WINDOW), vec![0x5a; 2048], MemoryKind::Ram)
+        .fixed_memory(vec![0x5a; 2048], MemoryKind::Ram, Address(WINDOW))
         .unwrap();
     let id = builder
         .bus_peripheral(
@@ -326,7 +354,7 @@ fn the_core_leaves_a_bus_window_inside_a_fixed_memory_to_the_peripheral() {
         )
         .unwrap();
     builder
-        .fixed_memory(Address(WINDOW), vec![0x5a; 2048], MemoryKind::Ram)
+        .fixed_memory(vec![0x5a; 2048], MemoryKind::Ram, Address(WINDOW))
         .unwrap();
     builder
         .bus_peripheral(

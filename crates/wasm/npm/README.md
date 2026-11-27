@@ -11,7 +11,7 @@ board file format
 ([docs/board-files.md](https://github.com/charlieh0tel/mc683xx/blob/main/docs/board-files.md))
 and the example boards.
 
-Early: 0.x, and the API may change between minor versions.
+Beta: the API may still change before 1.0.
 
 ## Install
 
@@ -102,9 +102,10 @@ them:
 - `RangeError`: an argument of the right type out of its range
   (picoseconds, a clock reading);
 - an `Error` named `LoadError` (a board file or a board that does not
-  load), `PacingError` (a pacing that does not parse), `RunError` (a
-  run that fails), `SendError` and `ReceiveError` (an endpoint no
-  serial net takes or drives), `MemoryError` (no such memory) or
+  load), `ParsePacingError` (a pacing that does not parse), `RunError` (a
+  run that fails), `SendError` (an endpoint no serial net takes),
+  `NoReceiver` (an endpoint no serial net drives), `NoMemory` (no
+  such memory) or
   `StateError` (a board that cannot save, or a snapshot it refuses).
 
 Its `message` is for people: its text may change in any release, and
@@ -155,7 +156,9 @@ an ES module (TypeScript 5.8 and later); under `node16` it is an error
   `2n ** 64n - 1n`; one out of that range, or a `number`, throws.
 - Both give a `BoardRun`: `stop`, why it ended (`"budget"` its time ran
   out, `"stopped"`, `"halted"`, `"hook"`, `"requested"`,
-  `"background"`, `"fault"`, or `"unknown"` for a kind this release
+  `"background"`, `"fault"`, `"self-loop"` (a branch to itself ended
+  it; a page cannot ask for that yet), or `"unknown"` for a kind this
+  release
   does not name), and `now`.  `stop`'s TypeScript type, `StopKind`,
   lists the names but is open (`string & {}`): a minor release may
   add a kind, so a `switch` on it keeps a `default`.

@@ -17,9 +17,9 @@ use crate::instructions::Table;
 use crate::registers::Registers;
 use crate::timing;
 use crate::timing::AddressTable;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// MOVEQ: 0111 rrr0 dddddddd (CPU32RM 4.4, MOVEQ).
 const MOVEQ_MASK: u16 = 0xf100;
@@ -570,8 +570,8 @@ pub(super) mod tests {
     use crate::memory::Space;
     use crate::registers::status;
     use crate::timing;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::Size;
 
     /// The supervisor stack's top in [`prepared`] machines.
     pub(crate) const STACK: u32 = 0x6000;

@@ -28,10 +28,11 @@ use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_board::time::Moment;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -46,9 +47,6 @@ const VERSION: u32 = 1;
 const BUS: usize = LINES;
 /// The inputs' levels until nets drive them, a one high.
 const LEVELS: &str = "levels";
-/// Their default: every input high, a switch bank's open positions on
-/// pull-ups.
-const OPEN: u8 = 0xff;
 
 /// Registers the buffer: ports `A0` to `A7`, logic inputs, and `A`, a
 /// bus input.
@@ -62,19 +60,30 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), RegistryError> {
     })
 }
 
-/// An octal buffer.
+/// An octal buffer, `74x244`, as a host reads it by type
+/// (`Board::peripheral::<Buffer>`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-struct Buffer {
+pub struct Buffer {
     /// The levels on A0 to A7, a one high.
     inputs: u8,
 }
 
 impl Buffer {
+    /// `levels`' default: every input high, a switch bank's open
+    /// positions on pull-ups.
+    pub const LEVELS: u8 = 0xff;
+
     /// From `levels` (all high).
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         Ok(Self {
-            inputs: context.parameters.integer(LEVELS)?.unwrap_or(OPEN),
+            inputs: context.parameters.integer(LEVELS)?.unwrap_or(Self::LEVELS),
         })
+    }
+
+    /// The levels on A0 to A7, a one high: the byte a read gives.
+    #[must_use]
+    pub const fn inputs(&self) -> u8 {
+        self.inputs
     }
 }
 
@@ -85,6 +94,13 @@ impl Peripheral for Buffer {
 
     fn write(&mut self, _: PeripheralAccess, _: u32, _: &mut Drive<'_>) -> Result<(), BusError> {
         Ok(())
+    }
+
+    /// Its inputs at every address, as a read gives them: a read has no
+    /// side effect.
+    fn peek(&self, _: PeripheralAccess, data: &mut [u8], _: Moment) -> bool {
+        data.fill(self.inputs);
+        true
     }
 
     fn input(&mut self, port: usize, signal: Signal, _: &mut Drive<'_>) {
@@ -126,12 +142,12 @@ mod tests {
     use crate::SYSTEM_CLOCK;
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::signal::Signal;
+    use mc683xx_board::time::Moment;
     use mc683xx_board::time::Time;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Size;
 
     use super::BUS;
     use super::Buffer;
-    use super::OPEN;
     use super::VERSION;
     use crate::octal::tests::access;
 
@@ -139,27 +155,40 @@ mod tests {
     fn read(buffer: &mut Buffer, size: Size) -> u32 {
         buffer
             .read(
-                access(size, Time::ZERO),
-                &mut Drive::new(Time::ZERO, SYSTEM_CLOCK),
+                access(size),
+                &mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
             )
             .unwrap()
     }
 
     #[test]
+    fn a_peek_is_a_read_and_a_poke_is_declined() {
+        let mut buffer = Buffer { inputs: 0xa5 };
+        let moment = Moment::new(Time::ZERO, SYSTEM_CLOCK);
+        let mut peeked = [0; 2];
+        assert!(buffer.peek(access(Size::Byte), &mut peeked, moment));
+        let byte = read(&mut buffer, Size::Byte) as u8;
+        assert_eq!(peeked, [byte, byte]);
+        assert!(!buffer.poke(access(Size::Byte), &[0], moment));
+    }
+
+    #[test]
     fn it_reads_its_inputs_and_ignores_writes() {
-        let mut buffer = Buffer { inputs: OPEN };
+        let mut buffer = Buffer {
+            inputs: Buffer::LEVELS,
+        };
         assert_eq!(read(&mut buffer, Size::Byte), 0xff);
         buffer.input(
             3,
             Signal::Level(false),
-            &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
+            &mut Drive::new(Moment::new(Time::from_picos(1), SYSTEM_CLOCK)),
         );
         assert_eq!(read(&mut buffer, Size::Byte), 0xf7);
         buffer
             .write(
-                access(Size::Byte, Time::from_picos(2)),
+                access(Size::Byte),
                 0,
-                &mut Drive::new(Time::from_picos(2), SYSTEM_CLOCK),
+                &mut Drive::new(Moment::new(Time::from_picos(2), SYSTEM_CLOCK)),
             )
             .unwrap();
         assert_eq!(
@@ -179,17 +208,19 @@ mod tests {
 
     #[test]
     fn its_bus_input_sets_every_line() {
-        let mut buffer = Buffer { inputs: OPEN };
+        let mut buffer = Buffer {
+            inputs: Buffer::LEVELS,
+        };
         buffer.input(
             BUS,
             Signal::Bus(0x1a5),
-            &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
+            &mut Drive::new(Moment::new(Time::from_picos(1), SYSTEM_CLOCK)),
         );
         assert_eq!(read(&mut buffer, Size::Byte), 0xa5);
         buffer.input(
             0,
             Signal::Level(false),
-            &mut Drive::new(Time::from_picos(2), SYSTEM_CLOCK),
+            &mut Drive::new(Moment::new(Time::from_picos(2), SYSTEM_CLOCK)),
         );
         assert_eq!(read(&mut buffer, Size::Byte), 0xa4);
     }
@@ -197,7 +228,9 @@ mod tests {
     #[test]
     fn it_restores_what_it_saved() {
         let buffer = Buffer { inputs: 0x3c };
-        let mut restored = Buffer { inputs: OPEN };
+        let mut restored = Buffer {
+            inputs: Buffer::LEVELS,
+        };
         restored.restore(&buffer.save().unwrap()).unwrap();
         assert_eq!(restored, buffer);
     }

@@ -5,23 +5,18 @@ use std::rc::Rc;
 
 use super::Machine;
 use super::MapError;
-use crate::bus::BusError;
+use super::PeekError;
+use crate::BusError;
+use crate::StopRequest;
 use crate::cpu::Stop;
 use crate::cpu::bare::End;
+use crate::cpu::bare::FaultCause;
 use crate::cpu::bare::Limits;
-use crate::cpu::hooks::Instruction;
-use crate::cpu::hooks::MemoryAccess;
-use crate::cpu::state;
-use crate::cpu::state::Layer;
-use crate::cpu::state::Save;
-use crate::cpu::state::StateError;
-use crate::cpu::state::Stateless;
-use crate::cpu::state::decode;
-use crate::cpu::state::decode_layer;
-use crate::cpu::state::encode;
-use crate::cpu::state::encode_layer;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::exception::Vector;
+use crate::hooks::Instruction;
+use crate::hooks::MemoryAccess;
 use crate::interrupt::IrqPin;
 use crate::memory::Backing;
 use crate::memory::PAGE_BYTES;
@@ -32,9 +27,18 @@ use crate::memory::Unserved;
 use crate::peripheral::BusCycle;
 use crate::peripheral::MappedPeripheral;
 use crate::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use crate::state;
+use crate::state::Layer;
+use crate::state::Save;
+use crate::state::StateError;
+use crate::state::Stateless;
+use crate::state::decode;
+use crate::state::decode_layer;
+use crate::state::encode;
+use crate::state::encode_layer;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// RAM from zero.
 const RAM: u32 = 0x1_0000;
@@ -58,6 +62,8 @@ const MOVEQ_2_D0: u16 = 0x7002;
 const MOVE_LONG_A0_TO_D0: u16 = 0x2010;
 /// MOVE.L D0,(A0).
 const MOVE_LONG_D0_TO_A0: u16 = 0x2080;
+/// MOVE.L D0,(A1).
+const MOVE_LONG_D0_TO_A1: u16 = 0x2280;
 /// MOVE.W (A0),D0.
 const MOVE_WORD_A0_TO_D0: u16 = 0x3010;
 /// STOP #$2000.
@@ -81,7 +87,11 @@ fn machine(code: &[u16]) -> Machine {
         .map(Address(CODE), PAGE_BYTES, &bytes(code))
         .unwrap();
     machine
-        .write(Address(STACK - 4), &RETURN.to_be_bytes())
+        .poke_bytes(
+            Address(STACK - 4),
+            FunctionCode::SupervisorData,
+            &RETURN.to_be_bytes(),
+        )
         .unwrap();
     machine.cpu.registers.set_sr(status::S);
     machine.cpu.registers.ssp = Address(STACK - 4);
@@ -89,21 +99,22 @@ fn machine(code: &[u16]) -> Machine {
     machine
 }
 
-/// Until [`RETURN`].
-const fn until_return() -> Limits {
+/// Limits reaching [`RETURN`].
+const fn reaching_return() -> Limits {
     Limits {
         cycles: None,
         instructions: None,
         steps: None,
-        until: Some(Address(RETURN)),
+        reach: Some(Address(RETURN)),
+        self_loop: false,
     }
 }
 
 #[test]
 fn a_call_at_a_high_address_runs_until_it_returns() {
     let mut machine = machine(&[MOVEQ_1_D0, RTS]);
-    let run = machine.run_limited(until_return());
-    assert_eq!(run.end, End::Until);
+    let run = machine.run_limited(reaching_return());
+    assert_eq!(run.end, End::Reached);
     assert_eq!(machine.cpu.registers.data[0], 1);
     assert_eq!(machine.cpu.registers.pc.0, RETURN);
     assert_eq!(machine.cpu.instructions(), 2);
@@ -115,7 +126,7 @@ fn an_instruction_limit_stops_the_run() {
     let mut machine = machine(&[NOP, NOP, NOP, RTS]);
     let run = machine.run_limited(Limits {
         instructions: Some(2),
-        ..until_return()
+        ..reaching_return()
     });
     assert_eq!(run.end, End::Instructions);
     assert_eq!(machine.cpu.registers.pc.0, CODE + 4);
@@ -133,19 +144,19 @@ fn until_is_checked_before_the_code_hooks_there() {
             ControlFlow::Break(())
         });
     let at_code = Limits {
-        until: Some(Address(CODE)),
+        reach: Some(Address(CODE)),
         ..Limits::default()
     };
-    assert_eq!(machine.run_limited(at_code).end, End::Until);
+    assert_eq!(machine.run_limited(at_code).end, End::Reached);
     assert_eq!(*called.borrow(), 0);
-    let run = machine.run_limited(until_return());
+    let run = machine.run_limited(reaching_return());
     assert!(matches!(run.end, End::Stop(crate::cpu::Stop::Hook(_))));
     assert_eq!(*called.borrow(), 1);
     // A resume skips the hook; clearing the skip calls it again.
     machine.cpu.clear_resume();
-    machine.run_limited(until_return());
+    machine.run_limited(reaching_return());
     assert_eq!(*called.borrow(), 2);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     assert_eq!(*called.borrow(), 2);
 }
 
@@ -160,22 +171,26 @@ fn maps_do_not_overlap_and_unmapped_bytes_are_refused() {
     );
     let mut buffer = [0; 4];
     assert_eq!(
-        machine.read(Address(RAM - 2), &mut buffer),
-        Err(Unserved(Address(RAM)))
+        machine.peek_bytes(Address(RAM - 2), FunctionCode::SupervisorData, &mut buffer),
+        Err(PeekError::Unserved(Unserved(Address(RAM))))
     );
     assert_eq!(
-        machine.write(Address(RAM - 2), &[1; 4]),
-        Err(Unserved(Address(RAM)))
+        machine.poke_bytes(Address(RAM - 2), FunctionCode::SupervisorData, &[1; 4]),
+        Err(PeekError::Unserved(Unserved(Address(RAM))))
     );
-    machine.read(Address(RAM - 4), &mut buffer).unwrap();
+    machine
+        .peek_bytes(Address(RAM - 4), FunctionCode::SupervisorData, &mut buffer)
+        .unwrap();
     assert_eq!(buffer, [0; 4], "a refused write writes nothing");
     machine.unmap(Address(0), RAM).unwrap();
     assert_eq!(
-        machine.read(Address(0), &mut buffer),
-        Err(Unserved(Address(0)))
+        machine.peek_bytes(Address(0), FunctionCode::SupervisorData, &mut buffer),
+        Err(PeekError::Unserved(Unserved(Address(0))))
     );
     machine.map(Address(0), PAGE_BYTES, &[7]).unwrap();
-    machine.read(Address(0), &mut buffer[..1]).unwrap();
+    machine
+        .peek_bytes(Address(0), FunctionCode::SupervisorData, &mut buffer[..1])
+        .unwrap();
     assert_eq!(buffer[0], 7);
 }
 
@@ -206,7 +221,10 @@ fn spare_pages(machine: &Machine) -> Vec<Option<u8>> {
         .map(|page| {
             let mut byte = [0];
             let at = Address(SPARE + page * PAGE_BYTES);
-            machine.read(at, &mut byte).ok().map(|()| byte[0])
+            machine
+                .peek_bytes(at, FunctionCode::SupervisorData, &mut byte)
+                .ok()
+                .map(|()| byte[0])
         })
         .collect()
 }
@@ -233,7 +251,7 @@ fn mapping_and_unmapping_again_and_again_holds_no_more() {
     assert_eq!(after.regions, before.regions);
     assert_eq!(after.bytes, before.bytes);
     assert_eq!(after.slots, before.slots + 2);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
 }
 
 #[test]
@@ -254,7 +272,11 @@ fn a_partial_unmap_splits_or_trims_a_map_and_keeps_the_rest() {
     assert_eq!(spare_pages(&machine), [Some(0), None, None, Some(3)]);
     assert_eq!(machine.cpu.memory.held().bytes, MACHINE_BYTES + 2 * page);
     machine
-        .write(Address(SPARE + 3 * PAGE_BYTES), &[7])
+        .poke_bytes(
+            Address(SPARE + 3 * PAGE_BYTES),
+            FunctionCode::SupervisorData,
+            &[7],
+        )
         .unwrap();
     assert_eq!(spare_pages(&machine), [Some(0), None, None, Some(7)]);
     // Both parts in one unmap, with the unmapped page between them.
@@ -287,26 +309,34 @@ fn a_trimmed_map_keeps_its_permissions_and_serves_the_core() {
     );
     machine.cpu.registers.set_address(0, last.0);
     machine
-        .write(Address(CODE), &bytes(&[MOVE_WORD_A0_TO_D0, RTS]))
+        .poke_bytes(
+            Address(CODE),
+            FunctionCode::SupervisorData,
+            &bytes(&[MOVE_WORD_A0_TO_D0, RTS]),
+        )
         .unwrap();
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     assert_eq!(machine.cpu.registers.data[0], 0x0303);
 }
 
 #[test]
 fn code_mapped_again_where_it_was_unmapped_is_fetched_anew() {
     let mut machine = machine(&[MOVEQ_1_D0, RTS]);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     machine.unmap(Address(CODE), PAGE_BYTES).unwrap();
     machine
         .map(Address(CODE), PAGE_BYTES, &bytes(&[MOVEQ_2_D0, RTS]))
         .unwrap();
     machine
-        .write(Address(STACK - 4), &RETURN.to_be_bytes())
+        .poke_bytes(
+            Address(STACK - 4),
+            FunctionCode::SupervisorData,
+            &RETURN.to_be_bytes(),
+        )
         .unwrap();
     machine.cpu.registers.ssp = Address(STACK - 4);
     machine.cpu.registers.pc = Address(CODE);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     assert_eq!(machine.cpu.registers.data[0], 2);
 }
 
@@ -315,7 +345,7 @@ fn spare_entry(machine: &Machine, space: Space, page: u32) -> Page {
     machine
         .cpu
         .memory
-        .entry(space, Address(SPARE + page * PAGE_BYTES))
+        .page(space, Address(SPARE + page * PAGE_BYTES))
 }
 
 #[test]
@@ -329,11 +359,7 @@ fn unmap_leaves_the_bytes_of_a_region_the_host_mapped() {
         .add_region([5, 6].map(|byte| [byte; PAGE_BYTES as usize]).concat());
     let backing = |offset| Backing { region, offset };
     for (at, offset, length) in [(0, 0, 2), (2, PAGE_BYTES, 1)] {
-        let page = Page {
-            read: Some(backing(offset)),
-            write: None,
-            ..Page::BUS
-        };
+        let page = Page::BUS.reading(Some(backing(offset)));
         machine
             .cpu
             .memory
@@ -352,12 +378,14 @@ fn unmap_leaves_the_bytes_of_a_region_the_host_mapped() {
     machine.unmap(host_page(3), PAGE_BYTES).unwrap();
     assert_eq!(machine.cpu.memory.held(), held);
     let mut byte = [0];
-    machine.read(host_page(2), &mut byte).unwrap();
+    machine
+        .peek_bytes(host_page(2), FunctionCode::SupervisorData, &mut byte)
+        .unwrap();
     assert_eq!(byte, [6]);
     assert_eq!(spare_pages(&machine), [Some(0), Some(1), Some(2), Some(3)]);
     assert_eq!(
-        machine.read(host_page(0), &mut byte),
-        Err(Unserved(host_page(0)))
+        machine.peek_bytes(host_page(0), FunctionCode::SupervisorData, &mut byte),
+        Err(PeekError::Unserved(Unserved(host_page(0))))
     );
 }
 
@@ -368,7 +396,13 @@ fn a_snapshot_restores_after_a_partial_unmap_only_if_taken_after_it() {
     machine.unmap(Address(SPARE), PAGE_BYTES).unwrap();
     let after = machine.save().unwrap();
     assert!(machine.restore(&before).is_err());
-    machine.write(Address(SPARE + PAGE_BYTES), &[9]).unwrap();
+    machine
+        .poke_bytes(
+            Address(SPARE + PAGE_BYTES),
+            FunctionCode::SupervisorData,
+            &[9],
+        )
+        .unwrap();
     machine.restore(&after).unwrap();
     assert_eq!(spare_pages(&machine), [None, Some(1), Some(2), Some(3)]);
 }
@@ -409,7 +443,7 @@ fn a_peripheral_takes_a_long_in_one_access() {
         )
         .unwrap();
     machine.cpu.registers.set_address(0, PERIPHERAL + 1);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     assert_eq!(machine.cpu.registers.data[0], PERIPHERAL + 1);
     let cycles = cycles.borrow();
     assert_eq!(cycles.len(), 2);
@@ -417,6 +451,62 @@ fn a_peripheral_takes_a_long_in_one_access() {
     assert_eq!(cycles[1], (cycles[1].0, Some(PERIPHERAL + 1)));
     assert_eq!(cycles[1].0.size, Size::Long);
     assert!(!cycles[1].0.stacking);
+}
+
+#[test]
+fn a_write_hook_sees_a_long_s_previous_value_but_not_a_peripheral_s() {
+    let mut machine = machine(&[MOVE_LONG_D0_TO_A0, MOVE_LONG_D0_TO_A1, RTS]);
+    machine
+        .add_peripheral(
+            Address(PERIPHERAL)..=Address(PERIPHERAL + 0xff),
+            Box::new(Logger::default()),
+        )
+        .unwrap();
+    machine
+        .poke_bytes(
+            Address(DATA),
+            FunctionCode::SupervisorData,
+            &0x1122_3344_u32.to_be_bytes(),
+        )
+        .unwrap();
+    machine.cpu.registers.data[0] = 0x1234_5678;
+    machine.cpu.registers.set_address(0, DATA);
+    machine.cpu.registers.set_address(1, PERIPHERAL + 1);
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let into = Rc::clone(&seen);
+    machine
+        .cpu
+        .add_write_hook(Address(0)..=Address(u32::MAX), move |access| {
+            into.borrow_mut()
+                .push((access.address.0, access.size, access.previous));
+            ControlFlow::Continue(())
+        });
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
+    assert_eq!(
+        *seen.borrow(),
+        [
+            (DATA, Size::Long, Some(0x1122_3344)),
+            (PERIPHERAL + 1, Size::Long, None),
+        ]
+    );
+}
+
+#[test]
+fn a_watched_odd_long_write_at_a_region_s_last_byte_is_an_address_error() {
+    let mut machine = machine(&[MOVE_LONG_D0_TO_A0, RTS]);
+    let last = SPARE + PAGE_BYTES - 1;
+    machine.map(Address(SPARE), PAGE_BYTES, &[]).unwrap();
+    machine.cpu.add_write_hook(
+        Address(SPARE)..=Address(last),
+        |_| ControlFlow::Continue(()),
+    );
+    machine.cpu.set_stop_on_fault(true);
+    machine.cpu.registers.set_address(0, last);
+    let End::Fault(fault) = machine.run_limited(reaching_return()).end else {
+        panic!("no fault");
+    };
+    assert_eq!(fault.cause, FaultCause::AddressError);
+    assert_eq!(fault.address, Address(last));
 }
 
 #[test]
@@ -430,7 +520,7 @@ fn a_word_past_a_peripheral_s_end_is_a_bus_error() {
         .unwrap();
     machine.cpu.set_stop_on_fault(true);
     machine.cpu.registers.set_address(0, PERIPHERAL + 1);
-    let End::Fault(fault) = machine.run_limited(until_return()).end else {
+    let End::Fault(fault) = machine.run_limited(reaching_return()).end else {
         panic!("no fault");
     };
     assert_eq!(fault.address, Address(PERIPHERAL + 1));
@@ -440,6 +530,13 @@ fn a_word_past_a_peripheral_s_end_is_a_bus_error() {
             Box::new(Logger::default())
         ),
         Err(MapError::Overlap(Address(PERIPHERAL)))
+    );
+    assert_eq!(
+        machine.add_peripheral(
+            Address(PERIPHERAL + 0x10)..=Address(PERIPHERAL + 0xf),
+            Box::new(Logger::default())
+        ),
+        Err(MapError::Empty(Address(PERIPHERAL + 0x10)))
     );
 }
 
@@ -481,8 +578,9 @@ fn bkpt_with_no_cpu_space_responder_is_illegal() {
         .unwrap();
     let handler = vbr + 0x1000;
     machine
-        .write(
+        .poke_bytes(
             Address(vbr + Vector::ILLEGAL_INSTRUCTION.offset()),
+            FunctionCode::SupervisorData,
             &handler.to_be_bytes(),
         )
         .unwrap();
@@ -506,18 +604,28 @@ fn bkpt_with_no_cpu_space_responder_is_illegal() {
 fn a_requested_interrupt_is_taken_through_its_vector() {
     let mut machine = machine(&[NOP, RTS]);
     machine
-        .write(Address(u32::from(USER_VECTOR) * 4), &HANDLER.to_be_bytes())
+        .poke_bytes(
+            Address(u32::from(USER_VECTOR) * 4),
+            FunctionCode::SupervisorData,
+            &HANDLER.to_be_bytes(),
+        )
         .unwrap();
-    machine.write(Address(HANDLER), &bytes(&STOP)).unwrap();
-    machine.request_interrupt(IrqPin::new(3).unwrap(), Some(Vector(USER_VECTOR)));
+    machine
+        .poke_bytes(
+            Address(HANDLER),
+            FunctionCode::SupervisorData,
+            &bytes(&STOP),
+        )
+        .unwrap();
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), Some(Vector(USER_VECTOR)));
     let run = machine.run_limited(Limits {
-        until: Some(Address(HANDLER)),
+        reach: Some(Address(HANDLER)),
         ..Limits::default()
     });
-    assert_eq!(run.end, End::Until);
+    assert_eq!(run.end, End::Reached);
     assert_eq!(machine.cpu.instructions(), 0, "taken before the first");
-    assert_eq!(machine.cpu.registers.interrupt_mask().get(), 3);
-    machine.clear_interrupt(IrqPin::new(3).unwrap());
+    assert_eq!(u8::from(machine.cpu.registers.interrupt_mask()), 3);
+    machine.clear_interrupt(IrqPin::try_from(3).unwrap());
     // With no budget, a stop does not wait.
     let run = machine.run_limited(Limits::default());
     assert_eq!(run.end, End::Stop(crate::cpu::Stop::Stopped));
@@ -526,8 +634,8 @@ fn a_requested_interrupt_is_taken_through_its_vector() {
 #[test]
 fn the_format_matches_its_golden() {
     let mut machine = machine(&[MOVEQ_1_D0, RTS]);
-    machine.run_limited(until_return());
-    machine.request_interrupt(IrqPin::new(3).unwrap(), Some(Vector(0x40)));
+    machine.run_limited(reaching_return());
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), Some(Vector(0x40)));
     machine
         .add_peripheral(Address(PERIPHERAL)..=Address(PERIPHERAL), Box::new(Fixed))
         .unwrap();
@@ -547,15 +655,30 @@ fn the_format_matches_its_golden() {
 fn a_snapshot_restores_memory_registers_and_requests() {
     let mut machine = machine(&[MOVEQ_1_D0, RTS]);
     let snapshot = machine.save().unwrap();
-    machine.run_limited(until_return());
-    machine.write(Address(0x100), &[9]).unwrap();
+    machine.run_limited(reaching_return());
+    machine
+        .poke_bytes(Address(0x100), FunctionCode::SupervisorData, &[9])
+        .unwrap();
     machine.restore(&snapshot).unwrap();
     assert_eq!(machine.cpu.registers.pc.0, CODE);
     assert_eq!(machine.cpu.registers.data[0], 0);
     let mut byte = [0];
-    machine.read(Address(0x100), &mut byte).unwrap();
+    machine
+        .peek_bytes(Address(0x100), FunctionCode::SupervisorData, &mut byte)
+        .unwrap();
     assert_eq!(byte, [0]);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
+}
+
+#[test]
+fn a_restore_withdraws_a_stop_left_pending() {
+    let mut machine = machine(&[MOVEQ_1_D0, RTS]);
+    let snapshot = machine.save().unwrap();
+    let stop = machine.stop_request();
+    stop.request();
+    machine.restore(&snapshot).unwrap();
+    assert!(!stop.pending());
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
 }
 
 /// The format of a [`Latch`]'s snapshot.
@@ -639,8 +762,8 @@ fn peripheral_at(machine: &mut Machine, address: u32) -> (&mut dyn MappedPeriphe
     let cycle = BusCycle::new(
         Address(address),
         Size::Long,
-        FunctionCode::SUPERVISOR_DATA,
-        Cycles::ZERO,
+        FunctionCode::SupervisorData,
+        Cycle::ZERO,
     );
     (wired.peripheral.as_mut(), cycle)
 }
@@ -818,7 +941,11 @@ fn stacking_writes_are_flagged_to_hooks() {
     let mut machine = machine(&[0x4e40]);
     let trap = u32::from(Vector::trap(0).0) * 4;
     machine
-        .write(Address(trap), &HANDLER.to_be_bytes())
+        .poke_bytes(
+            Address(trap),
+            FunctionCode::SupervisorData,
+            &HANDLER.to_be_bytes(),
+        )
         .unwrap();
     let seen = Rc::new(RefCell::new(Vec::new()));
     let into = Rc::clone(&seen);
@@ -830,7 +957,7 @@ fn stacking_writes_are_flagged_to_hooks() {
         },
     );
     machine.run_limited(Limits {
-        until: Some(Address(HANDLER)),
+        reach: Some(Address(HANDLER)),
         ..Limits::default()
     });
     let seen = seen.borrow();
@@ -844,9 +971,21 @@ fn stacking_writes_are_flagged_to_hooks() {
 #[test]
 fn a_reset_reads_the_vectors() {
     let mut machine = machine(&[NOP]);
-    machine.write(Address(0), &STACK.to_be_bytes()).unwrap();
-    machine.write(Address(4), &CODE.to_be_bytes()).unwrap();
-    machine.reset().unwrap();
+    machine
+        .poke_bytes(
+            Address(0),
+            FunctionCode::SupervisorData,
+            &STACK.to_be_bytes(),
+        )
+        .unwrap();
+    machine
+        .poke_bytes(
+            Address(4),
+            FunctionCode::SupervisorData,
+            &CODE.to_be_bytes(),
+        )
+        .unwrap();
+    machine.reset();
     assert_eq!(machine.cpu.registers.pc.0, CODE);
     assert_eq!(machine.cpu.registers.ssp.0, STACK);
 }
@@ -907,12 +1046,16 @@ fn hooked(code: &[u16]) -> Vec<Seen> {
     machine.cpu.registers.set_address(0, DATA);
     machine.cpu.registers.set_address(6, 0x0bad_cafe);
     machine
-        .write(Address(DATA), &0x1122_3344_5566_7788_u64.to_be_bytes())
+        .poke_bytes(
+            Address(DATA),
+            FunctionCode::SupervisorData,
+            &0x1122_3344_5566_7788_u64.to_be_bytes(),
+        )
         .unwrap();
     let log = Rc::default();
     let rts = Address(CODE).offset(2 * (code.len() as u32 - 1));
     watch_ram(&mut machine, &log, rts);
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     log.take()
 }
 
@@ -984,7 +1127,7 @@ fn a_long_that_faults_on_its_second_word_is_not_seen() {
                 into.borrow_mut().push((access.address.0, access.size));
                 ControlFlow::Continue(())
             });
-        let End::Fault(fault) = machine.run_limited(until_return()).end else {
+        let End::Fault(fault) = machine.run_limited(reaching_return()).end else {
             panic!("no fault");
         };
         assert_eq!(fault.address, Address(RAM));
@@ -1001,7 +1144,7 @@ fn without_the_long_bus_a_hook_sees_a_long_as_two_words() {
     machine.cpu.registers.set_address(0, DATA);
     let log = Rc::default();
     watch_ram(&mut machine, &log, Address(CODE + 2));
-    assert_eq!(machine.run_limited(until_return()).end, End::Until);
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
     assert_eq!(
         log.take(),
         [
@@ -1009,4 +1152,413 @@ fn without_the_long_bus_a_hook_sees_a_long_as_two_words() {
             (DATA + 2, Size::Word, 0x5678, true)
         ]
     );
+}
+
+/// Where [`Bytes`] are: just past [`machine`]'s RAM.
+const BYTES: u32 = RAM;
+
+/// Bytes a debugger peeks and pokes with no cycle, from `base`, each
+/// call's first address and length noted in `calls`, its function code
+/// in `codes`.
+#[derive(Debug, Default)]
+struct Bytes {
+    /// Its first address.
+    base: u32,
+    /// The bytes.
+    bytes: [u8; 4],
+    /// Each peek's and poke's first address and length, in order.
+    calls: Rc<RefCell<Vec<(u32, usize)>>>,
+    /// Each peek's and poke's function code, in order.
+    codes: Rc<RefCell<Vec<FunctionCode>>>,
+}
+
+impl Bytes {
+    /// Bytes at [`BYTES`], their calls noted in `calls`.
+    fn at_bytes(calls: &Rc<RefCell<Vec<(u32, usize)>>>) -> Box<Self> {
+        Box::new(Self {
+            base: BYTES,
+            calls: Rc::clone(calls),
+            ..Self::default()
+        })
+    }
+
+    /// The index in `bytes` of a call at `cycle` of `length`, noted.
+    fn noted(&self, cycle: BusCycle, length: usize) -> usize {
+        assert_eq!(cycle.size, Size::Byte);
+        self.calls.borrow_mut().push((cycle.address.0, length));
+        self.codes.borrow_mut().push(cycle.function_code);
+        (cycle.address.0 - self.base) as usize
+    }
+}
+
+impl Stateless for Bytes {}
+
+impl MappedPeripheral for Bytes {
+    fn read(&mut self, _: BusCycle) -> Result<u32, BusError> {
+        Err(BusError)
+    }
+
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), BusError> {
+        Err(BusError)
+    }
+
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        assert!(!cycle.write);
+        let at = self.noted(cycle, data.len());
+        data.copy_from_slice(&self.bytes[at..at + data.len()]);
+        true
+    }
+
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
+        assert!(cycle.write);
+        let at = self.noted(cycle, data.len());
+        self.bytes[at..at + data.len()].copy_from_slice(data);
+        true
+    }
+}
+
+#[test]
+fn a_debugger_s_access_peeks_and_pokes_a_peripheral() {
+    let mut machine = machine(&[NOP]);
+    let range = Address(BYTES)..=Address(BYTES + 3);
+    let calls = Rc::default();
+    machine
+        .add_peripheral(range, Bytes::at_bytes(&calls))
+        .unwrap();
+    machine
+        .poke_bytes(
+            Address(BYTES),
+            FunctionCode::SupervisorData,
+            &[0x12, 0x34, 0x56, 0x78],
+        )
+        .unwrap();
+    let mut bytes = [0; 4];
+    machine
+        .peek_bytes(Address(BYTES), FunctionCode::SupervisorData, &mut bytes)
+        .unwrap();
+    assert_eq!(bytes, [0x12, 0x34, 0x56, 0x78]);
+    // memory and the peripheral in one access, across the boundary
+    machine
+        .poke_bytes(Address(BYTES - 1), FunctionCode::SupervisorData, &[9, 8])
+        .unwrap();
+    let mut across = [0; 2];
+    machine
+        .peek_bytes(
+            Address(BYTES - 1),
+            FunctionCode::SupervisorData,
+            &mut across,
+        )
+        .unwrap();
+    assert_eq!(across, [9, 8]);
+    // past the peripheral, nothing: no byte written
+    assert_eq!(
+        machine.poke_bytes(Address(BYTES + 3), FunctionCode::SupervisorData, &[1, 2]),
+        Err(PeekError::Unserved(Unserved(Address(BYTES + 4))))
+    );
+    machine
+        .peek_bytes(
+            Address(BYTES + 3),
+            FunctionCode::SupervisorData,
+            &mut across[..1],
+        )
+        .unwrap();
+    assert_eq!(across[0], 0x78);
+    // one call for each access's run of the peripheral's bytes
+    assert_eq!(
+        *calls.borrow(),
+        [
+            (BYTES, 4),
+            (BYTES, 4),
+            (BYTES, 1),
+            (BYTES, 1),
+            (BYTES + 3, 1)
+        ]
+    );
+}
+
+#[test]
+fn a_debugger_s_access_gives_a_peripheral_its_function_code() {
+    let mut machine = machine(&[NOP]);
+    let codes = Rc::default();
+    let bytes = Box::new(Bytes {
+        base: BYTES,
+        codes: Rc::clone(&codes),
+        ..Bytes::default()
+    });
+    machine
+        .add_peripheral(Address(BYTES)..=Address(BYTES + 3), bytes)
+        .unwrap();
+    machine
+        .poke_bytes(Address(BYTES), FunctionCode::UserData, &[1])
+        .unwrap();
+    machine
+        .peek_bytes(Address(BYTES), FunctionCode::UserProgram, &mut [0])
+        .unwrap();
+    assert_eq!(
+        *codes.borrow(),
+        [FunctionCode::UserData, FunctionCode::UserProgram]
+    );
+}
+
+#[test]
+fn a_debugger_s_access_calls_each_peripheral_once_with_its_bytes() {
+    let mut machine = machine(&[NOP]);
+    let (first, second) = (Rc::default(), Rc::default());
+    machine
+        .add_peripheral(Address(BYTES)..=Address(BYTES + 3), Bytes::at_bytes(&first))
+        .unwrap();
+    let next = Box::new(Bytes {
+        base: BYTES + 4,
+        calls: Rc::clone(&second),
+        ..Bytes::default()
+    });
+    machine
+        .add_peripheral(Address(BYTES + 4)..=Address(BYTES + 7), next)
+        .unwrap();
+    let image = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    machine
+        .poke_bytes(Address(BYTES - 1), FunctionCode::SupervisorData, &image)
+        .unwrap();
+    let mut back = [0; 9];
+    machine
+        .peek_bytes(Address(BYTES - 1), FunctionCode::SupervisorData, &mut back)
+        .unwrap();
+    assert_eq!(back, image);
+    assert_eq!(*first.borrow(), [(BYTES, 4), (BYTES, 4)]);
+    assert_eq!(*second.borrow(), [(BYTES + 4, 4), (BYTES + 4, 4)]);
+}
+
+#[test]
+fn memory_mapped_inside_a_peripheral_s_range_splits_its_run() {
+    let mut machine = machine(&[NOP]);
+    let calls = Rc::default();
+    let window = PAGE_BYTES * 3;
+    let base = 0x0010_0000;
+    let peripheral = Box::new(Wide {
+        base,
+        bytes: vec![0; window as usize],
+        calls: Rc::clone(&calls),
+    });
+    machine
+        .add_peripheral(Address(base)..=Address(base + window - 1), peripheral)
+        .unwrap();
+    machine
+        .map(Address(base + PAGE_BYTES), PAGE_BYTES, &[])
+        .unwrap();
+    let image: Vec<u8> = (0..window).map(|byte| byte as u8).collect();
+    machine
+        .poke_bytes(Address(base), FunctionCode::SupervisorData, &image)
+        .unwrap();
+    let mut back = vec![0; window as usize];
+    machine
+        .peek_bytes(Address(base), FunctionCode::SupervisorData, &mut back)
+        .unwrap();
+    assert_eq!(back, image);
+    let page = PAGE_BYTES as usize;
+    assert_eq!(
+        *calls.borrow(),
+        [
+            (base, page),
+            (base + 2 * PAGE_BYTES, page),
+            (base, page),
+            (base + 2 * PAGE_BYTES, page)
+        ]
+    );
+}
+
+/// [`Bytes`] of any length.
+#[derive(Debug)]
+struct Wide {
+    /// Its first address.
+    base: u32,
+    /// The bytes.
+    bytes: Vec<u8>,
+    /// Each peek's and poke's first address and length, in order.
+    calls: Rc<RefCell<Vec<(u32, usize)>>>,
+}
+
+impl Stateless for Wide {}
+
+impl MappedPeripheral for Wide {
+    fn read(&mut self, _: BusCycle) -> Result<u32, BusError> {
+        Err(BusError)
+    }
+
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), BusError> {
+        Err(BusError)
+    }
+
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        self.calls.borrow_mut().push((cycle.address.0, data.len()));
+        let at = (cycle.address.0 - self.base) as usize;
+        data.copy_from_slice(&self.bytes[at..at + data.len()]);
+        true
+    }
+
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
+        self.calls.borrow_mut().push((cycle.address.0, data.len()));
+        let at = (cycle.address.0 - self.base) as usize;
+        self.bytes[at..at + data.len()].copy_from_slice(data);
+        true
+    }
+}
+
+#[test]
+fn a_peripheral_that_declines_is_unpeekable() {
+    let mut machine = machine(&[NOP]);
+    machine
+        .add_peripheral(Address(BYTES)..=Address(BYTES + 3), Box::new(Latch(1)))
+        .unwrap();
+    let mut bytes = [0; 2];
+    let unpeekable = PeekError::Unpeekable(Address(BYTES));
+    assert_eq!(
+        machine.peek_bytes(Address(BYTES - 1), FunctionCode::SupervisorData, &mut bytes),
+        Err(unpeekable)
+    );
+    assert_eq!(
+        machine.poke_bytes(Address(BYTES), FunctionCode::SupervisorData, &[1]),
+        Err(unpeekable)
+    );
+    assert_eq!(
+        unpeekable.to_string(),
+        format!("not peekable at {}", Address(BYTES))
+    );
+    assert_eq!(unpeekable.address(), Address(BYTES));
+}
+
+/// A machine running [`NOP`]s to [`RETURN`], and its stop request.
+fn nops() -> (Machine, StopRequest) {
+    let machine = machine(&[NOP, NOP, NOP, RTS]);
+    let stop = machine.stop_request();
+    (machine, stop)
+}
+
+/// Asserts that the next run ends [`Stop::Requested`] at once, before
+/// its first instruction, taking the request, and the run after it
+/// reaches [`RETURN`].
+fn ends_at_once(machine: &mut Machine) {
+    let before = machine.cpu.instructions();
+    let pc = machine.cpu.registers.pc;
+    let now = machine.now();
+    let run = machine.run_limited(reaching_return());
+    assert_eq!(run.end, End::Stop(Stop::Requested));
+    assert_eq!(run.cycles, Cycles::ZERO);
+    assert_eq!(machine.cpu.instructions(), before);
+    assert_eq!(machine.cpu.registers.pc, pc);
+    assert_eq!(machine.now(), now);
+    assert!(!machine.stop_request().pending(), "taken");
+    assert_eq!(machine.run_limited(reaching_return()).end, End::Reached);
+}
+
+#[test]
+fn a_stop_left_between_runs_ends_the_next_at_once() {
+    let (mut machine, stop) = nops();
+    stop.request();
+    ends_at_once(&mut machine);
+}
+
+#[test]
+fn a_stop_asked_in_a_hook_that_ends_the_run_stays_pending() {
+    let (mut machine, stop) = nops();
+    let asking = stop.clone();
+    let hook = machine.cpu.add_code_hook(
+        Address(CODE + 2)..=Address(CODE + 2),
+        move |_: &Instruction| {
+            asking.request();
+            ControlFlow::Break(())
+        },
+    );
+    let run = machine.run_limited(reaching_return());
+    assert_eq!(run.end, End::Stop(Stop::Hook(hook)));
+    assert!(stop.pending());
+    machine.cpu.remove_hook(hook);
+    ends_at_once(&mut machine);
+}
+
+#[test]
+fn a_stop_left_pending_ends_a_run_before_its_own_limits() {
+    let (mut machine, stop) = nops();
+    stop.request();
+    let at_code = Limits {
+        reach: Some(Address(CODE)),
+        ..Limits::default()
+    };
+    assert_eq!(machine.run_limited(at_code).end, End::Stop(Stop::Requested));
+    assert!(!stop.pending());
+}
+
+/// A peripheral that asks the run to stop at each cycle.
+#[derive(Debug)]
+struct Asking(StopRequest);
+
+crate::unsavable!(Asking, "an asking peripheral");
+
+impl MappedPeripheral for Asking {
+    fn read(&mut self, _: BusCycle) -> Result<u32, BusError> {
+        self.0.request();
+        Ok(0)
+    }
+
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), BusError> {
+        self.0.request();
+        Ok(())
+    }
+}
+
+#[test]
+fn a_stop_asked_in_an_instruction_that_faults_stays_pending() {
+    // MOVE.L (A0),(A1) (CPU32RM 4, MOVE): the read asks, the write faults
+    let mut machine = machine(&[0x2290, NOP, NOP, RTS]);
+    let stop = machine.stop_request();
+    machine
+        .add_peripheral(
+            Address(PERIPHERAL - 1)..=Address(PERIPHERAL + 0xfe),
+            Box::new(Asking(stop.clone())),
+        )
+        .unwrap();
+    machine.cpu.registers.set_address(0, PERIPHERAL - 1);
+    machine.cpu.registers.set_address(1, RETURN);
+    machine.cpu.set_stop_on_fault(true);
+    let run = machine.run_limited(reaching_return());
+    assert!(matches!(run.end, End::Fault(_)), "{:?}", run.end);
+    assert!(stop.pending());
+    let run = machine.run_limited(reaching_return());
+    assert_eq!(run.end, End::Stop(Stop::Requested));
+    assert_eq!(machine.cpu.registers.pc, Address(CODE), "at once");
+    assert!(!stop.pending());
+}
+
+#[test]
+fn a_host_exception_keeps_a_stop_left_pending_and_drops_its_own() {
+    let (mut machine, stop) = nops();
+    // the stack on a peripheral that asks at each cycle
+    let stack = PERIPHERAL - 1;
+    machine
+        .add_peripheral(
+            Address(stack)..=Address(stack + 0xff),
+            Box::new(Asking(stop.clone())),
+        )
+        .unwrap();
+    machine.cpu.registers.ssp = Address(stack + 0x80);
+    machine.take_exception(Vector(USER_VECTOR), None).unwrap();
+    assert!(!stop.pending(), "asked in its cycles: dropped");
+    stop.request();
+    machine.cpu.registers.ssp = Address(stack + 0x80);
+    machine.take_exception(Vector(USER_VECTOR), None).unwrap();
+    assert!(stop.pending(), "left from before: kept");
+}
+
+#[test]
+fn a_reset_keeps_a_stop_left_pending_and_drops_its_own() {
+    let mut machine = Machine::new(super::ADDRESS_BITS).unwrap();
+    let stop = machine.stop_request();
+    // the reset vectors on a peripheral that asks at each cycle
+    machine
+        .add_peripheral(Address(0)..=Address(7), Box::new(Asking(stop.clone())))
+        .unwrap();
+    machine.reset();
+    assert!(!stop.pending(), "asked in its cycles: dropped");
+    stop.request();
+    machine.reset();
+    assert!(stop.pending(), "left from before: kept");
 }

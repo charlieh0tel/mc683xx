@@ -4,6 +4,7 @@ use mc683xx_board::inspect::Value;
 use mc683xx_board::peripheral::Drive;
 
 use crate::SYSTEM_CLOCK;
+use mc683xx_board::Environment;
 use mc683xx_board::peripheral::Driven;
 use mc683xx_board::peripheral::Lane;
 use mc683xx_board::peripheral::Peripheral;
@@ -11,7 +12,6 @@ use mc683xx_board::peripheral::PeripheralAccess;
 use mc683xx_board::peripheral::Role;
 use mc683xx_board::registry::ConstructError;
 use mc683xx_board::registry::Context;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::ParameterError;
 use mc683xx_board::registry::Parameters;
 use mc683xx_board::registry::Registry;
@@ -19,23 +19,24 @@ use mc683xx_board::signal::Direction;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Moment;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::encode;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::qsm::sci::Frame;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
-use super::Acia;
 use super::CTS;
 use super::Clock;
 use super::DCD;
 use super::IRQ;
+use super::Mc6850;
 use super::NAME;
 use super::Overrun;
 use super::RTS;
@@ -97,15 +98,15 @@ const fn ps(picoseconds: u64) -> Span {
 /// An ACIA under test.
 struct Bench {
     /// The peripheral.
-    acia: Acia,
+    acia: Mc6850,
 }
 
 impl Bench {
     /// Powered on, both clocks at `CLOCK_HZ`.
     fn new() -> Self {
         let clock = Clock { hz: CLOCK_HZ };
-        let mut acia = Acia::new(clock, clock);
-        acia.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
+        let mut acia = Mc6850::new(clock, clock);
+        acia.power_on(&mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)));
         Self { acia }
     }
 
@@ -117,25 +118,24 @@ impl Bench {
         bench
     }
 
-    /// An access to `register` at `now` through `role`.
-    fn access(register: u8, role: Role, now: Time) -> PeripheralAccess {
-        let select = ChipSelect::Numbered(Number::new(8).unwrap());
+    /// An access to `register` through `role`.
+    fn access(register: u8, role: Role) -> PeripheralAccess {
+        let select = ChipSelect::Numbered(Number::try_from(8).unwrap());
         PeripheralAccess::new(
             select,
             u32::from(register),
             Size::Byte,
-            FunctionCode::SUPERVISOR_DATA,
-            now,
+            FunctionCode::SupervisorData,
         )
         .through(0, role, Lane::Both)
     }
 
     /// `register` written `value` at `now`: what it drove.
     fn write(&mut self, register: u8, value: u8, now: Time) -> Vec<Driven> {
-        let mut drive = Drive::new(now, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(now, SYSTEM_CLOCK));
         self.acia
             .write(
-                Self::access(register, Role::ReadWrite, now),
+                Self::access(register, Role::ReadWrite),
                 u32::from(value),
                 &mut drive,
             )
@@ -145,15 +145,15 @@ impl Bench {
 
     /// `register` read at `now`.
     fn read(&mut self, register: u8, now: Time) -> u8 {
-        let mut drive = Drive::new(now, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(now, SYSTEM_CLOCK));
         self.acia
-            .read(Self::access(register, Role::ReadWrite, now), &mut drive)
+            .read(Self::access(register, Role::ReadWrite), &mut drive)
             .unwrap() as u8
     }
 
     /// `signal` into `port` at `now`: what it drove.
     fn input(&mut self, port: usize, signal: Signal, now: Time) -> Vec<Driven> {
-        let mut drive = Drive::new(now, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(now, SYSTEM_CLOCK));
         self.acia.input(port, signal, &mut drive);
         drive.finish().driven
     }
@@ -163,14 +163,14 @@ impl Bench {
         let mut driven = Vec::new();
         while let Some(next) = self
             .acia
-            .next_event(SYSTEM_CLOCK)
+            .next_event(Moment::new(Time::ZERO, SYSTEM_CLOCK))
             .filter(|&next| next <= until)
         {
-            let mut drive = Drive::new(next, SYSTEM_CLOCK);
+            let mut drive = Drive::new(Moment::new(next, SYSTEM_CLOCK));
             self.acia.advance(&mut drive);
             driven.extend(drive.finish().driven);
         }
-        let mut drive = Drive::new(until, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(until, SYSTEM_CLOCK));
         self.acia.advance(&mut drive);
         driven.extend(drive.finish().driven);
         driven
@@ -272,8 +272,8 @@ fn the_clocks_are_required_parameters() {
 #[test]
 fn it_powers_on_in_its_first_master_reset() {
     let clock = Clock { hz: CLOCK_HZ };
-    let mut acia = Acia::new(clock, clock);
-    let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+    let mut acia = Mc6850::new(clock, clock);
+    let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
     acia.power_on(&mut drive);
     assert_eq!(levels(&drive.finish().driven), [(RTS, true), (IRQ, true)]);
     let mut bench = Bench { acia };
@@ -517,10 +517,10 @@ fn dcd_latches_its_rise_until_a_status_and_a_data_read() {
     assert!(other.acia.interrupt_request());
     // after the status read, the data read clears it
     let driven_read = {
-        let mut drive = Drive::new(now, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(now, SYSTEM_CLOCK));
         bench
             .acia
-            .read(Bench::access(DATA, Role::ReadWrite, now), &mut drive)
+            .read(Bench::access(DATA, Role::ReadWrite), &mut drive)
             .unwrap();
         drive.finish().driven
     };
@@ -601,14 +601,19 @@ fn the_interrupts_follow_their_enables() {
     bench.read(DATA, Time::from_picos(2 * CHARACTER));
     assert!(!bench.acia.interrupt_request());
     // the ACIA gives no vector
-    let iack = Bench::access(0, Role::Iack, Time::ZERO);
+    let iack = Bench::access(0, Role::Iack);
     assert_eq!(
         bench
             .acia
-            .read(iack, &mut Drive::new(Time::ZERO, SYSTEM_CLOCK)),
+            .read(iack, &mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK))),
         Err(BusError)
     );
-    assert_eq!(bench.acia.wait_states(iack, SYSTEM_CLOCK), None);
+    assert_eq!(
+        bench
+            .acia
+            .wait_states(iack, Moment::new(Time::ZERO, SYSTEM_CLOCK)),
+        None
+    );
 }
 
 /// CR6:5: RTS low but with `10`; `11` sends a break, frames a character
@@ -685,7 +690,7 @@ fn a_restore_refuses_other_clocks_and_a_state_no_run_holds() {
     let before = bench.acia.state.clone();
     let slow = Clock { hz: CLOCK_HZ / 2 };
     let fast = Clock { hz: CLOCK_HZ };
-    for other in [Acia::new(slow, fast), Acia::new(fast, slow)] {
+    for other in [Mc6850::new(slow, fast), Mc6850::new(fast, slow)] {
         assert!(matches!(
             bench.acia.restore(&other.save().unwrap()),
             Err(StateError::Mismatch(_))
@@ -761,10 +766,9 @@ fn a_word_cycle_carries_the_register_on_data_15_8() {
         ChipSelect::Boot,
         u32::from(STATUS),
         Size::Word,
-        FunctionCode::SUPERVISOR_DATA,
-        Time::ZERO,
+        FunctionCode::SupervisorData,
     );
-    let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+    let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
     bench.acia.write(access, 0x1500, &mut drive).unwrap();
     assert_eq!(
         bench.acia.state.control, RUN,

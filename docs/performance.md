@@ -20,6 +20,17 @@ not run them; its clippy compiles them, and its tests run the shared
 setup's own tests (`benches/src/lib.rs`), so a kernel that stops
 working fails `make ci`.
 
+Criterion's times move with the machine's load and clock.  For a
+count that does not, `benches/examples/iterations.rs` runs a fixed
+count of a `core/*` or `chip/*` kernel's iterations under `perf
+stat`, whose host instruction count is the same from run to run:
+
+```
+cargo build --profile bench -p mc683xx-bench --example iterations
+taskset -c 2 perf stat -e instructions:u,cycles:u \
+    target/release/examples/iterations core nop 5000
+```
+
 ## What is measured
 
 - `core/*` (`benches/core.rs`): the core alone, on 256 Kbytes of
@@ -74,6 +85,30 @@ working fails `make ci`.
   0.36 ms of the board time, and the PIT's 279 interrupts run about
   2,500 instructions: over 99% of the instructions are the command's
   computation and its writes to SCDR.
+- `access/*` (`benches/access.rs`): a debugger's access with no bus
+  cycle, a bare machine's `poke_bytes` and `peek_bytes` of 512 Kbytes, into RAM
+  (`ram_*`) and through a peripheral that peeks and pokes its own array
+  (`peripheral_*`), as a host loads an image into a part.  Throughput
+  is bytes.
+- `hooks/*` (`benches/hooks.rs`): what the hooks cost the core, on
+  the `nop`, `move_indirect` and `clr_indirect` kernels: `unhooked`;
+  `code_elsewhere` and `write_elsewhere`, a hook on two bytes of the
+  RAM's pages that no sled reaches, so it never fires; and
+  `code_everywhere`, a Rust code hook that does nothing, called on
+  every instruction.  `hooks/add_remove` adds and removes a code
+  hook on the RAM; `opcode_elsewhere`, `opcode_unmatched` and
+  `opcode_everywhere` an opcode hook beside the sled, over it matching
+  no opcode, and everywhere matching every one; `coverage_elsewhere`
+  and `coverage_sled` add an execute coverage beside the sled or over
+  it, `read_coverage_data` a read coverage over the data the kernels
+  read (A0's) and `write_coverage_output` a write coverage over what
+  they write (A1's).  From Python,
+  `crates/python/benches/hooks.py`
+  (Python hooks, below).
+- `core/*_limited` (`benches/core.rs`): the `nop` and
+  `move_indirect` sleds run by `Cpu::run_limited`, their
+  instructions the limit, as a bare host runs: what the limits'
+  checks cost.
 - `*/short_runs`: 1000 runs of one clock each, the cost of a run call:
   `Cpu::run_for` alone, and `Mc68331::run_for` with its syncing.
 - `tables/*` (`benches/tables.rs`): building the 64K-entry instruction
@@ -696,3 +731,463 @@ benchmark 3% slower in fact.  What is left of a data access is the
 page walk itself (mask, slab, entry, region, bounds checks, about 20
 instructions); the compact entry is the next candidate once `cmpi`'s
 and `btst_immediate`'s cost is understood.
+
+## Hooks
+
+A hook costs nothing while none is installed; one installed costs
+what looking it up costs, and a Python one the call into Python.
+`crates/python/benches/hooks.py` measures the bare `Machine` from
+Python: a two-instruction loop (`move.w d0,(a0)`, `bra.s`) with no
+hook, a code hook outside it, a no-op code hook on every
+instruction, a no-op write hook, and write hooks that read A7; and
+adding and removing a code hook.  Built with `maturin develop
+--release`, pinned to one core:
+
+```
+taskset -c 16 python crates/python/benches/hooks.py
+```
+
+On the machine above, pinned to an efficiency core (16) while the
+performance cores' siblings were loaded, release builds, best of 7,
+before the changes below and after them:
+
+| Case | Before | After | Before, core 2 | After, core 2 |
+| --- | --- | --- | --- | --- |
+| no hook | 38.7 M instructions/s | 36.6 M instructions/s | 80.8 M instructions/s | 77.4 M instructions/s |
+| code hook elsewhere | 34.6 M instructions/s | 35.7 M instructions/s | 68.9 M instructions/s | 75.6 M instructions/s |
+| no-op code hook, a call | 0.42 us | 0.27-0.29 us | 0.25 us | 0.16 us |
+| no-op write hook, a call | 0.50 us | 0.32-0.34 us | 0.30 us | 0.18 us |
+| write hook reading `registers['A7']`, a call | 5.2-5.3 us | 2.2 us | 2.6 us | 0.82-0.85 us |
+| write hook reading `register('A7')`, a call | | 0.70 us | | 0.25 us |
+| add and remove a code hook | 15.5 us | 0.42 us | 7.1 us | 0.24 us |
+
+(core 2: a performance core, measured once the machine was quiet.)
+The run with no hook runs the same host instructions before and
+after, to within 0.2% (`perf stat` of 20 million instructions), in
+4% more cycles: not placement, as first recorded, but a
+store-forwarding stall the self-loop stop brought in, fixed since
+(The 0.9.0 audit, below).
+
+The changes:
+
+- A hook argument's register dictionary is made at the first ask
+  and kept, its keys interned once: a hook that reads
+  `registers['A7']` no longer allocates 24 strings, and one that
+  reads `register('A7')` makes no dictionary.
+- The bare `Machine`'s run borrows itself once a turn, not five
+  times: each borrow of an `unsendable` class checks the thread
+  (`std::thread::current`), which with the borrow flag was about a
+  quarter of a no-op hook's cost.  The handles that stay the
+  machine's (its pending exception, its stop request) are taken
+  once a run, and the first hook a turn fired is not looked up
+  again, as nothing can have removed it.
+- The queue of hooks fired keeps its allocation from turn to turn.
+- An instruction on a page with no code or block hook compares its
+  page number with the quiet page's and looks nothing up (below).
+- Adding or removing a hook rewatches only its own pages.
+
+`benches/hooks.rs`, on the same core, two interleaved runs each,
+before and after a change:
+
+| Benchmark | Before | After | Change |
+| --- | --- | --- | --- |
+| `hooks/nop_code_elsewhere` | 200-205 us | 174 us | the quiet page |
+| `hooks/move_indirect_code_elsewhere` | 173 us | 151-155 us | the quiet page |
+| `hooks/clr_indirect_code_elsewhere` | 131-141 us | 119 us | the quiet page |
+| `hooks/nop_write_elsewhere` | 213-260 us | 180-185 us | the quiet page |
+| `hooks/add_remove` | 15.1 us | 80 ns | one hook's pages rewatched |
+
+With the quiet page a code hook that never fires costs `nop` about
+7% and the kernels that touch memory 2 to 3% (`unhooked`: 155-160,
+147-153 and 115-119 us); a write hook elsewhere costs a little
+more, as the registers are kept as each instruction begins for the
+write hooks to read.
+
+A coverage (`Cpu::add_coverage`) off the instructions' pages costs
+what a code hook there does (`hooks/nop_coverage_elsewhere` 161 us,
+`move_indirect_coverage_elsewhere` 147 us, against 150 and 144
+unhooked); over the whole sled, a bit set for every instruction,
+`nop` takes 236-238 us and `move_indirect` 188 us: about 4 ns an
+instruction on this core, where a Python code hook that does nothing
+costs about 280 ns.
+
+Coverage kinds, on performance core 2, three interleaved
+runs against the code before them (`unhooked` 77.8, 70.7 and 53-55 us
+both): an execute coverage now holds a page's bits only once one is
+set (review r13, R2).  The page last recorded in is held out of the
+table, so a record there, as most are, looks no table up: the sled
+costs 0.9 ns an instruction over the flat bitmap (`nop_coverage_sled`
+116 to 125 us, `move_indirect` 94 to 99, `clr_indirect` 71 to 76,
+interleaved), where the table alone cost 2.3 ns (139, 106 and 81) and
+a `BTreeMap` of pages 4.7 ns (167, 112 and 91); neither was kept.  A read or write coverage off the
+cycles' pages costs nothing (`nop_read_coverage_data` and
+`nop_write_coverage_output` 81 us, as `nop_code_elsewhere`;
+`clr_indirect_read_coverage_data` 56 us, the kernel writing alone).
+Over the data a kernel reads or writes it takes that access off the
+fast path and records its bytes: `move_indirect_read_coverage_data`
+120 us and `write_coverage_output` 126 us against 71, about 5 ns an
+access, and `clr_indirect_write_coverage_output` 140 against 53 us,
+about 9 ns a write, where a no-op Python write hook costs 180 ns.
+
+An opcode hook (`Cpu::add_opcode_hook`), interleaved
+three times each on performance core 2 against the code before it:
+off the instructions' pages it costs what a code hook there does
+(`nop_opcode_elsewhere` 79-80 us, `nop_code_elsewhere` 80 us,
+`nop_unhooked` 78 us).  Over the sled, matching nothing,
+`nop_opcode_unmatched` takes 129 us and `move_indirect` 100 us
+against 78 and 71 unhooked: about 5 and 3 ns an instruction for the
+page lookup, reading the opcode through the fetch page (which the
+opcode fetch then finds cached; a cycle-free peek instead cost 154
+and 113) and the compare, where a no-op Rust code hook on every
+instruction costs 16 ns.  Matching every instruction it costs about
+what that code hook does (251 against 237 us).  A plain code hook's
+`Instruction` carries no opcode: filling it for every code hook cost
+a no-op Rust hook on every instruction 4 ns (`nop_code_everywhere`
+238 to 271-282 us, `move_indirect` 146 to 169, `clr_indirect` 115 to
+131), and without it they are back where they were (237, 148 and 114
+against 239, 146 and 115 for the code before round 14, interleaved).  From Python
+(`hooks.py`), the opcode hook matching the loop's `move.w` is called
+for it alone at 0.165 us a call (a plain code hook 0.161 us); one
+matching nothing runs the loop at 48.5 M instructions/s, against 78
+with no hook and 5.7 with a no-op code hook.  The pages with neither
+run as before: `none` executes the same host instructions (perf
+stat, 20 M emulated instructions: 6.0266 against 6.0268 G) in 4%
+more cycles, both builds taking the store-forwarding stall
+on every instruction (The 0.9.0 audit, below).
+
+### Profiling a hook-heavy Python host
+
+Profile a host whose time goes to Python hooks with `perf`, not
+`py-spy --native`: in a smartclock harness run, `py-spy --native`
+failed to unwind 58% of its samples through the extension's frames
+and the hook dispatch between them, leaving most of the time
+unattributed.  `perf record --call-graph dwarf` unwinds the native
+frames from their debug information, and with Python 3.12 or later
+`python -X perf` (or `PYTHONPERFSUPPORT=1`) names the Python frames
+too, so one profile shows the core, the dispatch and the callables
+together.  Build the module with debug information for it
+(`CARGO_PROFILE_RELEASE_DEBUG=true maturin develop --release`);
+sampling needs a `perf_event_paranoid` that allows it.
+
+## The 0.9.0 audit
+
+The 0.9.0 alphas against v0.8.0, kernel by kernel, with `perf stat`
+on `benches/examples/iterations.rs` (a fixed count of a kernel's
+iterations), pinned to a performance core.  Instruction counts are
+exact: the same build gives the same count to within 0.01%, so a
+change in them is work, never placement.  Cycles show the rest, and
+`perf stat`'s other events say why: on this shared machine criterion's
+medians moved 15% to 40% from run to run, where cycles moved 1% to 2%.
+5000 iterations each, three interleaved runs, cycles and instructions
+in G.
+
+### Store forwarding
+
+From `adcc8fc4` (the self-loop stop, round 12) every instruction took
+a store-forwarding stall (`ld_blocks.store_forward`, about one per
+emulated instruction, against tens before it).  The run loop's
+`spend` stores the last instruction's tail, a `u8`, with a one-byte
+store, and the next instruction loaded it four bytes wide, which a
+store-to-load forward cannot serve: the load waits for the store to
+retire.  The self-loop flag added a field to `Cpu`, the layout moved,
+and the compiler widened that load.  The 10% more cycles with the same
+instructions that round 12 measured on `core/nop` and `core/moveq`,
+and the Python run with no hook falling from 80.8 to 77.4 M
+instructions/s (Hooks, above), were this, not placement.  `last_tail`
+is now held as a `u32`, so the store is as wide as any load of it:
+
+| Kernel | v0.8.0 | alpha.9 | `last_tail` as `u32` | Stalls before, after |
+| --- | --- | --- | --- | --- |
+| `core/nop` | 1.31 | 1.48 | 1.38-1.41 | 50.0 M, 40 |
+| `core/moveq` | 1.40-1.45 | 1.49-1.51 | 1.48 | 49.9 M, 35 |
+| `core/move_indirect` | 1.27 | 1.36 | 1.35 | 13.1 M, 47 |
+| `chip/flash_nop` | 0.74 | 0.83 | 0.77 | 7.5 M, 0.14 M |
+
+The rest of each difference from v0.8.0 is host instructions: work
+the alphas added.
+
+### The instant an instruction starts at
+
+From `72f5c38a` (`Cycle` split from `Cycles`, 0.9.0) the run loop
+computed the instant each instruction starts at, `now + elapsed`,
+before every instruction, and `Cycle`'s `+` saturates: +1.9% host
+instructions on `core/nop`.  Only a bus cycle, an interrupt's
+acknowledge and an exception read the instant, so `Core` now keeps
+the run's start and the clocks elapsed apart and adds them when one
+of those asks.  Host instructions on 1000 iterations (`perf stat`),
+before and after: `core/nop` 1.725 and 1.665 G (-3.5%),
+`core/move_indirect` 1.707 and 1.677 G (-1.8%),
+`chip/flash_nop` under the PIT's interrupts 1.048 and 1.020 G
+(-2.7%), `chip/peripheral_move` 1.238 and 1.236 G.
+
+### The memory path
+
+Two changes made each operand access longer.  `4563a28d` (round 11)
+tried the fast tables first, inline, and sent a miss to the slow
+path, which looked them up again before going to the bus: +5.5% host
+instructions on `chip/peripheral_move`.  And `Memory::read` and
+`write`, once inlined into the cycle functions, were now calls of
+their own from `access_read` and `access_write`.  A miss now goes
+from the slow path straight to the bus or the hooked page, a long
+across pages still trying each word's page, and the fast accessors
+are always inlined.  Host instructions on 1000 iterations, v0.8.0 /
+before / after:
+
+| Kernel | v0.8.0 | Before | After |
+| --- | --- | --- | --- |
+| `core/move_indirect` | 1.585 | 1.677 | 1.547 |
+| `core/add_to_memory` | 1.352 | 1.432 | 1.289 |
+| `core/move_displacement` | 1.078 | 1.152 | 1.061 |
+| `chip/ram_move` | 0.658 | 0.695 | 0.655 |
+| `chip/peripheral_move` | 1.152 | 1.236 | 1.186 |
+
+Either change alone moved some kernels the wrong way (the inlining
+alone left `core/move_displacement` at 1.161, the lookup alone
+`core/move_indirect` at 1.705): the compiler's inlining shifts with
+each.
+
+### Placement
+
+The same machine code can take 11% more cycles where it lands: built
+from the same source, `core/nop`'s `run_instructions` was byte for
+byte the same in two builds, starting on a 64-byte boundary in one
+(1.30 G cycles for 5000 iterations) and 48 bytes past one in the
+other (1.45 G).  Built with every function aligned to 64 bytes
+(`RUSTFLAGS="-C llvm-args=-align-all-functions=6"`), the second takes
+1.31 G.  Stable Rust cannot align one function; the workspace's builds
+align them all now (Function alignment, below).  Instruction counts,
+which do not move with placement, are what the audit judges work by,
+and cycles are compared between builds aligned that way.
+
+### Placement against the interpreter
+
+A Python host's hook calls run the module's code and the interpreter's
+in turn, so where one lands against the other moves cycles too.  Two
+effects showed up in the 0.9.0 audit's write hook loop (a `move.l`,
+`addq`, `bra` loop on the bare `Machine`, a write hook on the store):
+
+- Run to run, in one build.  uv's interpreters
+  (python-build-standalone) are linked without PIE: `python3.12`'s code
+  sits at the same address in every process, its object allocation and
+  deallocation (`_PyObject_Malloc`, `tupledealloc`, `long_dealloc`)
+  around `0x1801000` in 3.12.15.  The kernel maps the extension module
+  2 MB-aligned at a random base, so its code takes one of eight places
+  modulo 16 MB.  Where the module's hook dispatch
+  (`MachineView::run_dispatching`, `dispatch`) falls on the same
+  addresses modulo 16 MB as that interpreter code, the two evict each
+  other's entries in the branch target buffer: `baclears.any` goes from
+  0.06 M to 8 M a run and the run takes 10% to 15% more cycles.  One run
+  in eight under ASLR lands there; which place is the bad one depends on
+  the module's own layout, so alpha.8 had one too, milder.
+
+  How a host tells it hit it: the mode is the whole process's, from the
+  import on, so a hook-heavy process runs throughout up to about a
+  quarter below its usual rate, where another run of the same build on
+  the same input does not.  `perf stat -e baclears.any` shows it
+  outright, millions against tens of thousands; the module's base, in
+  `/proc/<pid>/maps`, modulo `0x1000000`, names the place.  The
+  workaround is to run again, which lands elsewhere seven times in
+  eight; when benchmarking, run with ASLR off (`setarch -R`), which
+  gives the same place every run, and to compare builds fairly move
+  the module through all eight places by mapping 2 MB to 14 MB before
+  the import.
+- Build to build.  The module's hot code and the interpreter's share the
+  uop cache, so a change that moves the module's code moves how many
+  uops come from it (`idq.dsb_uops` against `idq.mite_uops`): a no-op
+  write hook lost 2.8% to `ac361722`, which changed the watch bits from
+  8 to 16 bits wide and 0.05% of host instructions, every seed alike.
+
+### Function alignment
+
+`.cargo/config.toml` builds every function on a 64-byte boundary on
+x86_64 (`-C llvm-args=-align-all-functions=6`), not on wasm32, where it
+means nothing: the module's place against the uop cache then no longer
+moves with each link.  Eight `-C metadata=` seeds a side, each at each
+of the module's 8 places (above), the write hook loop in M
+instructions/s, the seeds' mean over the places (and the worst place of
+any seed):
+
+| Build | Write hook calling `register("A7")` | No-op write hook |
+| --- | --- | --- |
+| alpha.8 | 9.70 (8.79) | 14.15 (11.20) |
+| 18ffdc7d, unaligned | 10.18 (8.15) | 13.63 (12.07) |
+| 18ffdc7d, aligned | 10.53 (9.78) | 14.00 (11.88) |
+
+The bindings' own functions aligned alone (as maturin's rustc arguments)
+gave 10.74 and 13.82: the core's hot code, not theirs, needs it.  No
+hooks and a code hook were within 0.6% aligned or not.  It helps the
+native path too: the Rust kernels (`benches/examples/iterations.rs`,
+four seeds) took 0.6% (`chip/ram_move`) to 2.7%
+(`chip/peripheral_move`) fewer cycles, `demo/mandelbrot` 0.8%, and
+varied less from seed to seed.  It costs the extension module 3.8%
+stripped (5.35 to 5.55 MB); the wheel, compressed, is the same size.
+
+What it does not reach:
+
+- A `RUSTFLAGS` environment variable replaces it, as it replaces any
+  configured rustflags; add the flag to it.
+- Cargo reads it from the directory it runs in, this workspace: a crate
+  depending on ours from crates.io, and a wheel pip builds from the
+  sdist, do not get it.  A native host that wants it adds the flag to
+  its own `.cargo/config.toml` or `RUSTFLAGS`.
+- It moves the hook dispatch in the module, so the place where it
+  aliases the interpreter (above) can move or change strength from one
+  build to the next.  That is expected, not a regression; compare
+  builds over all eight places.
+
+### Comparing placements
+
+`scripts/placement-bench.sh BASE CANDIDATE` compares two revisions
+across placements, so a difference it reports is the code's, not one
+link's.  Opt-in, it gates nothing; x86_64 Linux, with `make python`'s
+`.venv` for the Python cases.  For each side it builds `-n` (8)
+modules, each relinked with its functions in another order (rust-lld's
+`--shuffle-sections`, given to the final link alone, so the build's
+own flags, the alignment above among them, stay).  `-C metadata=`
+seeds do not do this: across eight of them the hook dispatch stayed
+within 0x200 bytes.  It runs each build at each of the module's eight
+places (ASLR off, 2 MB to 14 MB mapped before the import), the builds
+in rotated order at every place, pinned to `-c` (2), each run once the
+CPU and its sibling are idle; `-k` picks the case: `write_register`,
+`write`, `code`, `none`, a bare `Machine`'s `move.l`, `addq`, `bra`
+loop, or `kernel ARGS` for `benches/examples/iterations.rs` (both
+revisions must have it; one place, runs per G cycles with `perf`).
+Eight builds a side take about 5 minutes to build and 6 minutes a case
+to run.
+
+Reading it: a row a build, its rate at each place, their mean and its
+worst place.  The verdict is the difference of the sides' means of the
+builds' means, with an exact permutation test over them: `p` is the
+share of all splits of the 2N builds into two sides that differ as
+much, so with 8 a side `p` below 0.05 says the difference is not the
+placements'.  A place much slower than the rest on every build of a
+side is the interpreter alias (Placement against the interpreter);
+judge it apart, since it follows where the dispatch lands and the
+interpreter's build; a Python case's output names the interpreter it
+ran under (version, path, and EXEC or DYN, fixed addresses or PIE), so
+two runs compare only under the same one.  Work goes under
+`target/placement-bench/`.
+
+### Machine clears
+
+The 0.9.0 alphas ran real firmware 1% to 2% slower than v0.8.0 in
+cycles, with 0.2% fewer host instructions, and some links ran 2% slower
+than others built from the same source.  Eight builds a side, each
+with its own `-C metadata=` seed, so each links differently, show what
+was different: the alphas took twice v0.8.0's memory-ordering machine
+clears (`machine_clears.memory_ordering`; the pipeline flushed and
+restarted), and how many twice was moved with the link.  Most were at
+one load: the interrupt mask (SR's high byte) that `Core::interrupt`
+read at every instruction boundary, just after the indirect call to
+`Interrupts::level`.  v0.8.0 read it at the same point and took few
+clears there.  The alphas' new fields had moved `Registers` 16 bytes
+down in `Cpu`, which took SR off the cache line that holds the stall
+and the extra clocks.  Why the load clears is not known for certain:
+the processor predicts whether a load may run ahead of older stores
+from a table indexed by the load's instruction address, which would explain why
+the count moves with the link.  Read before the call, the load takes
+next to no clears, whatever the link.  `demo/mandelbrot`, 60 iterations, eight seeds a side, the median
+of 5 rotated runs each (cycles in G; clears in M):
+
+| Build | Cycles, seed mean | Seeds' range | Clears |
+| --- | --- | --- | --- |
+| v0.8.0 | 1.693 | 1.685-1.697 | 0.34-0.35 |
+| alpha.10 | 1.699 (+0.3%) | 1.695-1.701 | 0.54-0.68 |
+| mask read first | 1.672 (-1.3%) | 1.669-1.674 | 0.29-0.31 |
+
+### Saturating sums
+
+`ca2df4d8` (round 2) made `Cycles`' `+` saturate, as a peripheral's
+wait states may be any count: five saturating adds an instruction in
+the core (the opcode fetch's stall, each access's, the instruction's
+stall and extra clocks, the run's elapsed clocks), +7.6% host
+instructions on `core/nop`, +4.7% on the memory kernels.  The core now
+bounds what it sums instead: wait states beyond `MOST_WAIT` (2^32
+clocks) per bus cycle count as `MOST_WAIT`, and a run never starts
+within `HEADROOM` (2^48 clocks) of `Cycle::MAX`, so its sums are plain
+adds (PLAN.md, Decisions); `Cycles`' public `+` still saturates.  Host
+instructions, v0.8.0 / before / after, 1000 iterations (10 for the
+demo):
+
+| Kernel | v0.8.0 | Before | After |
+| --- | --- | --- | --- |
+| `core/nop` | 1.595 | 1.665 | 1.535 |
+| `core/moveq` | 1.755 | 1.825 | 1.695 |
+| `core/move_indirect` | 1.585 | 1.547 | 1.470 |
+| `core/add_to_memory` | 1.352 | 1.289 | 1.238 |
+| `chip/flash_nop` | 0.976 | 1.011 | 0.946 |
+| `chip/flash_nop`, PIT interrupting | 0.985 | 1.020 | 0.959 |
+| `chip/ram_move` | 0.658 | 0.655 | 0.627 |
+| `chip/peripheral_move` | 1.152 | 1.186 | 1.173 |
+| `demo/mandelbrot` | 1.558 | 1.606 | 1.529 |
+
+### Hooks from Python
+
+`4f41351a` (round 2) read `Memory::peek` through a function pointer
+picking each page's backing, called for each word: a code hook's
+`stack_top` and a long's check for a bus that takes it whole paid an
+indirect call or two.  It is a generic now, inlined.  With the other
+changes above, a `move.l`, `addq`, `bra` loop on the bare `Machine`
+from Python, one `run_limited` call (`perf stat`), host instructions
+against alpha.8, before (round 14) and after: no hook 5.434, 5.434 and
+5.047 G for 20 M instructions; a no-op code hook 2.540, 2.597 and
+2.549 G for 1 M; a no-op write hook 1.587, 1.632 and 1.537 G.  The
+code hook's remaining 0.4% is its argument's new fields
+(`instruction`, `opcode`, round 14).
+
+A hook that reads a register by name (`access.register("A7")`) parsed
+the name by comparing it with each of the 16 names in turn, A7 last:
+5% to 7% of such a hook's cycles, with many of its uops missing the
+uop cache.  It is read from the name's two bytes now.  The same loop
+with a write hook calling `register("A7")`, eight `-C metadata=` seeds
+a side, each run with its module at each of the 8 placements ASLR
+gives it (Placement against the interpreter, above), M instructions/s,
+the seeds' mean: alpha.8 9.71, alpha.11 9.36, with the parse 10.20;
+every seed of it above every seed of alpha.8.
+
+### A peripheral's read, and the wasm module
+
+`slow_access_read`, past the fast tables' miss, is the compiler's to
+inline into `access_read`, which saves a peripheral's read a call:
+host instructions on `chip/peripheral_move` 1.152 (v0.8.0), 1.173
+before, 1.161 G after, 1000 iterations; the other kernels as before
+but `core/move_indirect`, 1.470 to 1.482 G (v0.8.0 1.585).
+`chip/peripheral_move` stays 0.8% above v0.8.0 in host instructions,
+1% below it in cycles.
+
+The web build's module (wasm-bindgen, name section removed) is 2.646
+MB, 655.3 KB gzipped, against v0.8.0's 2.624 MB (646.1 KB) and
+alpha.9's 2.588 MB (650.7 KB): the fast accessors inlined into
+`access_write` (The memory path) let the compiler inline the operand
+write into every instruction handler.  Keeping `Core::write` out of
+line brings the module to 2.595 MB (651.5 KB) but costs
+`core/add_to_memory` 9% in cycles (3% more than v0.8.0) and
+`core/pea_displacement` 2%; inlining `access_write` into an inlined
+`write` brings it to 2.581 MB (650.8 KB) but leaves
+`core/add_to_memory` 2% and `chip/peripheral_move` 3% more cycles than
+v0.8.0.  Native speed was kept.
+
+### The npm package's module
+
+Built in the release profile, the npm package's module (wasm-bindgen,
+name section removed) grew to 2.646 MB, 655.3 KB gzipped, against
+v0.8.0's 2.624 MB (646.1 KB): the inlining that the native core is
+faster for.  `make npm-package` builds it in its own profile instead,
+`wasm-release` (Cargo.toml): release in two codegen units.  Native
+builds keep the release profile.  The module, and the demo's Mandelbrot
+under Node 22 (40 to 60 runs of it on one board, best and total wall
+time, and `perf stat` of the whole process), against v0.8.0's package:
+
+| Build | Raw | Gzipped | Best run | Instructions | Cycles |
+| --- | --- | --- | --- | --- | --- |
+| v0.8.0 (release) | 2.624 MB | 646.1 KB | 13.6-14.8 ms | 1.00 | 1.00 |
+| release | 2.646 MB | 655.3 KB | 13.3-13.8 ms | 0.981 | 0.97-0.99 |
+| `wasm-release`, 2 units | 2.506 MB | 632.1 KB | 13.3-13.7 ms | 0.989 | 0.98-1.01 |
+| 4 units | 2.576 MB | 649.8 KB | 14.0 ms | 0.988 | |
+| 1 unit | 2.198 MB | 575.7 KB | 16.4-16.6 ms | 1.094 | 1.17 |
+| 1 unit, fat LTO | 2.199 MB | 575.6 KB | 16.5 ms | 1.094 | 1.17 |
+| 1 unit, fat LTO, opt-level s | 1.730 MB | 493.1 KB | 17.9-18.1 ms | 1.233 | 1.21 |
+| 1 unit, fat LTO, opt-level z | 1.664 MB | 452.5 KB | 27.2-27.8 ms | 1.768 | 1.69 |
+
+Two units is the one smaller than v0.8.0's that runs no slower.
+`wasm-opt` (binaryen) is not part of the build.

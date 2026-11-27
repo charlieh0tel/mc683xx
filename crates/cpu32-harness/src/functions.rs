@@ -22,10 +22,11 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use mc683xx_cpu32::exception::CycleKind;
+use mc683xx_cpu32::exception::BusCycleKind;
 use mc683xx_cpu32::exception::Exception;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::registers::status;
+use mc683xx_target::Register;
 use regex::Regex;
 use serde_json::Value;
 
@@ -477,12 +478,8 @@ fn run(
         function.address,
         laid_out.sp,
         |registers| {
-            for (index, &value) in starting.iter().enumerate() {
-                if index < registers.data.len() {
-                    registers.data[index] = value;
-                } else {
-                    registers.set_address(index - registers.data.len(), value);
-                }
+            for (&register, &value) in Register::ALL.iter().zip(&starting) {
+                registers.set_register(register, value);
             }
         },
         observe,
@@ -584,13 +581,7 @@ fn outcome(
     match call.stopped {
         Stopped::Returned => {
             let registers = &call.registers;
-            let value = |index: usize| {
-                if index < registers.data.len() {
-                    registers.data[index]
-                } else {
-                    registers.address(index - registers.data.len())
-                }
-            };
+            let value = |index: usize| registers.register(Register::ALL[index]);
             let mut broken: Vec<String> = preserves
                 .iter()
                 .filter(|&&index| value(index) != starting[index])
@@ -625,14 +616,15 @@ fn outcome(
             _ if exception.vector() == Vector::ZERO_DIVIDE => Outcome::Ended(call.stopped),
             Exception::Fault(fault)
                 if fault.vector == Vector::BUS_ERROR
-                    && fault.cycle == CycleKind::Write
+                    && fault.kind == BusCycleKind::Write
                     && in_rom(fault.address.0) =>
             {
                 Outcome::Ended(call.stopped)
             }
             Exception::Fault(fault)
                 if !maps(fault.address.0)
-                    || fault.vector == Vector::ADDRESS_ERROR && fault.cycle == CycleKind::Fetch =>
+                    || fault.vector == Vector::ADDRESS_ERROR
+                        && fault.kind == BusCycleKind::Fetch =>
             {
                 Outcome::Skipped(call.stopped)
             }
@@ -759,14 +751,15 @@ pub fn observed_verdict(
 #[cfg(test)]
 mod tests {
     use cpu32_oracle::state::State;
-    use mc683xx_cpu32::exception::CycleKind;
+    use mc683xx_cpu32::exception::BusCycleKind;
     use mc683xx_cpu32::exception::Exception;
     use mc683xx_cpu32::exception::Fault;
     use mc683xx_cpu32::exception::Vector;
     use mc683xx_cpu32::registers::Registers;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Register;
+    use mc683xx_target::Size;
 
     use super::Corpus;
     use super::Outcome;
@@ -788,9 +781,8 @@ mod tests {
         let mut registers = Registers::default();
         registers.set_sr(SUPERVISOR);
         let starting = starting_registers();
-        registers.data.copy_from_slice(&starting[..8]);
-        for (number, &value) in starting[8..].iter().enumerate() {
-            registers.set_address(number, value);
+        for (&register, &value) in Register::ALL.iter().zip(&starting) {
+            registers.set_register(register, value);
         }
         registers.ssp = Address(sp + 4);
         Call {
@@ -803,14 +795,14 @@ mod tests {
 
     /// A call that ended at a fault of `vector` in a `cycle` at
     /// `address`.
-    fn faulted(vector: Vector, cycle: CycleKind, address: u32) -> Call {
+    fn faulted(vector: Vector, cycle: BusCycleKind, address: u32) -> Call {
         Call {
             stopped: Stopped::Exception {
                 exception: Exception::Fault(Fault::new(
                     vector,
                     Address(address),
-                    FunctionCode::SUPERVISOR_DATA,
                     Size::Word,
+                    FunctionCode::SupervisorData,
                     cycle,
                 )),
                 pc: 0x400,
@@ -834,16 +826,16 @@ mod tests {
             ..returned(0)
         };
         assert!(matches!(classify(&zero_divide), Outcome::Ended(_)));
-        let write_to_rom = faulted(Vector::BUS_ERROR, CycleKind::Write, 0x30);
+        let write_to_rom = faulted(Vector::BUS_ERROR, BusCycleKind::Write, 0x30);
         assert!(matches!(classify(&write_to_rom), Outcome::Ended(_)));
-        let beyond = faulted(Vector::BUS_ERROR, CycleKind::Read, 0x11_0000);
+        let beyond = faulted(Vector::BUS_ERROR, BusCycleKind::Read, 0x11_0000);
         assert!(matches!(classify(&beyond), Outcome::Skipped(_)));
-        let odd_jump = faulted(Vector::ADDRESS_ERROR, CycleKind::Fetch, 0x401);
+        let odd_jump = faulted(Vector::ADDRESS_ERROR, BusCycleKind::Fetch, 0x401);
         assert!(matches!(classify(&odd_jump), Outcome::Skipped(_)));
-        let odd_read = faulted(Vector::ADDRESS_ERROR, CycleKind::Read, 0x401);
+        let odd_read = faulted(Vector::ADDRESS_ERROR, BusCycleKind::Read, 0x401);
         assert!(matches!(classify(&odd_read), Outcome::Misaligned(_)));
         // A bus error inside the map is the core's or the runner's.
-        let read_of_rom = faulted(Vector::BUS_ERROR, CycleKind::Read, 0x400);
+        let read_of_rom = faulted(Vector::BUS_ERROR, BusCycleKind::Read, 0x400);
         assert!(matches!(
             classify(&read_of_rom),
             Outcome::Exception(_, 0x400)

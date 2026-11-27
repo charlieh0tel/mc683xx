@@ -18,15 +18,18 @@ use std::path::PathBuf;
 
 use cpu32_harness::layout;
 use cpu32_harness::layout::FIRMWARE;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::event::Event;
+use mc683xx_mc68331::Event;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
 
 use common::board;
 
@@ -130,7 +133,7 @@ fn select_of(cycle: BusCycle) -> ChipSelect {
 fn select_name(select: ChipSelect) -> String {
     match select {
         ChipSelect::Boot => "CSBOOT".to_owned(),
-        ChipSelect::Numbered(number) => format!("CS{}", number.get()),
+        ChipSelect::Numbered(number) => format!("CS{}", u8::from(number)),
     }
 }
 
@@ -174,12 +177,12 @@ impl MappedPeripheral for Stub {
             .reads
             .entry((select_of(cycle), cycle.address.0))
             .or_default() += 1;
-        let space = cycle.function_code.get();
+        let space = u8::from(cycle.function_code);
         Ok((0..cycle.size.bytes()).fold(0, |value, byte| {
             let at = cycle.address.0.wrapping_add(byte);
-            let fixed = FIXED_READS
-                .iter()
-                .find(|&&(address, _)| address == at && !cycle.function_code.is_cpu_space());
+            let fixed = FIXED_READS.iter().find(|&&(address, _)| {
+                address == at && cycle.function_code != FunctionCode::CpuSpace
+            });
             let byte = fixed.map_or_else(
                 || {
                     self.bytes
@@ -207,7 +210,7 @@ impl MappedPeripheral for Stub {
         if log.len() < LOG_BYTES {
             log.push(value as u8);
         }
-        let space = cycle.function_code.get();
+        let space = u8::from(cycle.function_code);
         let bytes = cycle.size.bytes();
         for byte in 0..bytes {
             let shift = 8 * (bytes - 1 - byte);
@@ -234,10 +237,7 @@ fn select_registers(chip: &Mc68331) -> ([u16; 2], [(u16, u16); SELECTS]) {
         let select = ChipSelect::from_index(index).expect("a select");
         *entry = (selects.base(select), selects.option(select));
     }
-    (
-        [selects.pin_assignment(0), selects.pin_assignment(1)],
-        registers,
-    )
+    (selects.pin_assignments(), registers)
 }
 
 /// What one image's boot did.
@@ -250,7 +250,7 @@ struct Boot {
     /// The PCs of the last `TAIL_INSTRUCTIONS`, tallied.
     tail: BTreeMap<u32, u64>,
     /// Milestones reached, with the time.
-    reached: Vec<(&'static str, Cycles)>,
+    reached: Vec<(&'static str, Cycle)>,
 }
 
 /// Boots `image` for `seconds` of emulated time, tracing as it goes.
@@ -266,7 +266,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
         .collect();
     let (builder, stub, _) = board(bytes, Stub::default());
     let mut chip = builder.build();
-    let hz = chip.sim().clock().frequency().hz();
+    let hz = chip.sim().system_clock().frequency().hz();
     let mut trace = Boot::default();
     let mut registers = select_registers(&chip);
     let mut vbr = chip.cpu().registers.vbr;
@@ -284,7 +284,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
     );
     let mut budget_end = None;
     loop {
-        let hz_now = chip.sim().clock().frequency().hz();
+        let hz_now = chip.sim().system_clock().frequency().hz();
         if budget_end.is_none() || hz_now != hz {
             // the end is a time, at the clock the firmware sets
             let elapsed = chip.now().clocks();
@@ -392,7 +392,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
         "{name}: end at clock {} ({hz} Hz at reset, {} Hz now), {} instructions, PC {:#x}, \
          SR {:#06x}, SSP {:#x}, USP {:#x}, VBR {:#x}",
         chip.now().clocks(),
-        chip.sim().clock().frequency().hz(),
+        chip.sim().system_clock().frequency().hz(),
         trace.instructions,
         registers.pc,
         registers.sr(),
@@ -403,7 +403,10 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
     println!("{name}: D {:x?}", registers.data);
     println!(
         "{name}: A {:x?}",
-        (0..8).map(|n| registers.address(n)).collect::<Vec<_>>()
+        Register::ALL[usize::from(Register::A0.code())..]
+            .iter()
+            .map(|&register| registers.register(register))
+            .collect::<Vec<_>>()
     );
     println!("{name}: exceptions by vector: {:?}", trace.exceptions);
     let mut tail: Vec<_> = trace.tail.iter().collect();
@@ -420,7 +423,7 @@ fn boot(image: &Image, bytes: Vec<u8>, seconds: f64) -> Boot {
                 if *write { "write" } else { "read" },
                 cycle.address,
                 cycle.size,
-                cycle.function_code.get(),
+                u8::from(cycle.function_code),
                 cycle.now.clocks()
             );
         }

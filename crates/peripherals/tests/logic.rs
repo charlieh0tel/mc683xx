@@ -8,14 +8,16 @@ use std::process;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
 
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_peripherals::Buffer;
+use mc683xx_peripherals::Latch;
 
 /// The initial stack pointer and program counter in the image.
 const STACK: u32 = 0x10_fffe;
@@ -183,6 +185,11 @@ fn the_cpu_writes_the_latch_onto_nets_and_reads_the_buffer() {
         0xf1,
         "the file's levels, A0 from the endpoint"
     );
+    // read by type
+    let latch = *board.peripheral::<Latch>("u1").unwrap();
+    assert_eq!((latch.latched(), latch.output_enabled()), (WRITTEN, true));
+    assert_eq!(latch.outputs(), WRITTEN);
+    assert_eq!(board.peripheral::<Buffer>("u2").unwrap().inputs(), 0xf1);
     let snapshot = board.save().unwrap();
     let mut restored = self::board();
     restored.restore(&snapshot).unwrap();

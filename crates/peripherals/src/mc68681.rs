@@ -47,12 +47,14 @@ use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Moment;
 use mc683xx_board::time::Time;
-use mc683xx_board::time::TimeBase;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -168,14 +170,17 @@ enum Variant {
 /// Registers `mc68681`.
 pub(crate) fn register_mc68681(registry: &mut Registry) -> Result<(), RegistryError> {
     registry.register(MC68681, ports(), |context| {
-        Ok(Box::new(Duart::from_parameters(context, Variant::Mc68681)?))
+        Ok(Box::new(Mc68681::from_parameters(
+            context,
+            Variant::Mc68681,
+        )?))
     })
 }
 
 /// Registers `scc68692`.
 pub(crate) fn register_scc68692(registry: &mut Registry) -> Result<(), RegistryError> {
     registry.register(SCC68692, ports(), |context| {
-        Ok(Box::new(Duart::from_parameters(
+        Ok(Box::new(Mc68681::from_parameters(
             context,
             Variant::Scc68692,
         )?))
@@ -201,13 +206,13 @@ fn ports() -> Vec<PortSpec> {
 struct State {
     /// Channels A and B.
     channels: [Channel; 2],
-    /// ACR (4.2.13).
+    /// ACR, the auxiliary control register (4.2.13).
     acr: u8,
-    /// IMR (4.2.16).
+    /// IMR, the interrupt mask register (4.2.16).
     imr: u8,
-    /// IVR (4.2.19).
+    /// IVR, the interrupt vector register (4.2.19).
     ivr: u8,
-    /// OPCR (4.2.11).
+    /// OPCR, the output port configuration register (4.2.11).
     opcr: u8,
     /// OPR (4.2.12).
     opr: u8,
@@ -295,9 +300,11 @@ impl Default for State {
     }
 }
 
-/// A DUART on the board.
+/// A DUART on the board, `mc68681` or `scc68692`, as a host reads it
+/// by type (`Board::peripheral::<Mc68681>`): its registers as of its
+/// last call.
 #[derive(Debug)]
-struct Duart {
+pub struct Mc68681 {
     /// Which peripheral.
     variant: Variant,
     /// X1/CLK.
@@ -310,7 +317,11 @@ struct Duart {
     watches: Watches,
 }
 
-impl Duart {
+impl Mc68681 {
+    /// The `x1_hz` parameter's default: the 3.6864 MHz the baud rate
+    /// tables are for (1.2).
+    pub const X1: Frequency = Frequency::from_hz(X1_DEFAULT_HZ);
+
     /// A DUART out of reset, from `x1_hz`, X1/CLK's frequency.
     fn from_parameters(context: &Context<'_>, variant: Variant) -> Result<Self, ParameterError> {
         let hz = context.parameters.integer(X1_HZ)?.unwrap_or(X1_DEFAULT_HZ);
@@ -375,8 +386,56 @@ impl Duart {
         self.state.inputs & 1 << CTS_PINS[channel] == 0
     }
 
+    /// X1/CLK's frequency.
+    #[must_use]
+    pub const fn x1(&self) -> Frequency {
+        Frequency::from_hz(self.crystal.hz)
+    }
+
+    /// SRA or SRB, channel `channel`'s status register (4.2.3), 0 for
+    /// A, as a read would show it.
+    ///
+    /// # Panics
+    ///
+    /// If `channel` is not 0 or 1.
+    #[must_use]
+    pub fn channel_status(&self, channel: usize) -> u8 {
+        self.state.channels[channel].status()
+    }
+
+    /// ACR, the auxiliary control register (4.2.13).
+    #[must_use]
+    pub const fn auxiliary_control(&self) -> u8 {
+        self.state.acr
+    }
+
+    /// IMR, the interrupt mask register (4.2.16).
+    #[must_use]
+    pub const fn interrupt_mask(&self) -> u8 {
+        self.state.imr
+    }
+
+    /// IVR, the interrupt vector register (4.2.19).
+    #[must_use]
+    pub const fn interrupt_vector(&self) -> u8 {
+        self.state.ivr
+    }
+
+    /// OPCR, the output port configuration register (4.2.11).
+    #[must_use]
+    pub const fn output_port_configuration(&self) -> u8 {
+        self.state.opcr
+    }
+
+    /// OPR, the output port register (4.2.12): a one drives its pin low (1.7).
+    #[must_use]
+    pub const fn output_port(&self) -> u8 {
+        self.state.opr
+    }
+
     /// ISR (4.2.15).
-    fn interrupt_status(&self) -> u8 {
+    #[must_use]
+    pub fn interrupt_status(&self) -> u8 {
         let [a, b] = &self.state.channels;
         let channel = |channel: &Channel| {
             [
@@ -426,8 +485,10 @@ impl Duart {
     }
 
     /// The input port read (Table 4-5, INPUT PORT): bit 7 one, bit 6
-    /// IACK's level, high, since a register read is no acknowledge.
-    fn input_port(&self) -> u8 {
+    /// IACK's level, high, since a register read is no acknowledge;
+    /// bits 5:0 IP5-IP0.
+    #[must_use]
+    pub const fn input_port(&self) -> u8 {
         INPUT_BIT_7 | INPUT_BIT_6 | self.state.inputs & INPUT_PINS_MASK
     }
 
@@ -728,9 +789,9 @@ impl Duart {
     }
 }
 
-impl Peripheral for Duart {
+impl Peripheral for Mc68681 {
     fn read(&mut self, access: PeripheralAccess, drive: &mut Drive<'_>) -> Result<u32, BusError> {
-        self.run_until(access.now);
+        self.run_until(drive.now());
         let value = if access.role == Role::Iack {
             // the IVR while IRQ is asserted; otherwise the DUART ignores
             // IACK and nothing ends the cycle (2.11)
@@ -738,7 +799,7 @@ impl Peripheral for Duart {
                 .then_some(u32::from(self.state.ivr))
                 .ok_or(BusError)
         } else {
-            Ok(access.read_byte(self.read_register(Self::register(&access), access.now)))
+            Ok(access.read_byte(self.read_register(Self::register(&access), drive.now())))
         };
         self.sync(drive);
         value
@@ -750,19 +811,19 @@ impl Peripheral for Duart {
         value: u32,
         drive: &mut Drive<'_>,
     ) -> Result<(), BusError> {
-        self.run_until(access.now);
+        self.run_until(drive.now());
         if access.role == Role::Iack {
             return Err(BusError);
         }
         let value = access.written_byte(value);
-        self.write_register(Self::register(&access), value, access.now);
+        self.write_register(Self::register(&access), value, drive.now());
         self.sync(drive);
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: Moment) -> Option<Cycles> {
         // no DTACK for an acknowledge with no interrupt pending (2.11)
-        (access.role != Role::Iack || self.interrupting()).then_some(0)
+        (access.role != Role::Iack || self.interrupting()).then_some(Cycles::ZERO)
     }
 
     fn interrupt_request(&self) -> bool {
@@ -798,7 +859,7 @@ impl Peripheral for Duart {
         self.sync(drive);
     }
 
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         let source = self.source();
         let opcr = self.state.opcr;
         let every = opcr >> OPCR_OP3_SHIFT & OPCR_FIELD_MASK == OP3_COUNTER;

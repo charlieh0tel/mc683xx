@@ -30,16 +30,17 @@ use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Moment;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_board::time::TimeBase;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::frequency::Frequency;
-use mc683xx_cpu32::frequency::NANOHERTZ_PER_HERTZ;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::NANOHERTZ_PER_HERTZ;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use mc683xx_modules::qsm::sci::Frame;
 use serde::Deserialize;
 use serde::Serialize;
@@ -359,10 +360,12 @@ impl State {
     }
 }
 
-/// An MC6850 on the board.  It has no RESET input: only a master reset
-/// resets it, so a board reset changes nothing.
+/// An MC6850 on the board, `mc6850`, as a host reads it by type
+/// (`Board::peripheral::<Mc6850>`): its registers as of its last call.
+/// It has no RESET input: only a master reset resets it, so a board
+/// reset changes nothing.
 #[derive(Debug)]
-struct Acia {
+pub struct Mc6850 {
     /// Tx CLK.
     tx_clock: Clock,
     /// Rx CLK.
@@ -373,7 +376,7 @@ struct Acia {
     transmitted: Vec<(Time, Serial)>,
 }
 
-impl Acia {
+impl Mc6850 {
     /// From `tx_clk_hz` and `rx_clk_hz`.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         let clock = |key| {
@@ -435,8 +438,23 @@ impl Acia {
         !state.in_master_reset() && (receive || transmit)
     }
 
-    /// The status register (Status Register).
-    fn status(&self) -> u8 {
+    /// The control register.
+    #[must_use]
+    pub const fn control(&self) -> u8 {
+        self.state.control
+    }
+
+    /// The receive data register, kept after it is read (Receive Data
+    /// Register).
+    #[must_use]
+    pub const fn receive_data(&self) -> u8 {
+        self.state.data
+    }
+
+    /// The status register, as a read would show it, without a read's
+    /// effects (Status Register).
+    #[must_use]
+    pub fn status(&self) -> u8 {
         let state = &self.state;
         [
             (self.receive_full(), SR_RDRF),
@@ -453,7 +471,8 @@ impl Acia {
     /// RTS's level: high with CR6:5 `10`, and through the first master
     /// reset (Peripheral/Modem Control, Request-to-Send; Device
     /// Operation, Master Reset).
-    const fn rts_high(&self) -> bool {
+    #[must_use]
+    pub const fn rts_high(&self) -> bool {
         let state = &self.state;
         (state.first_reset && state.in_master_reset())
             || transmit_control(state.control) == TRANSMIT_RTS_HIGH
@@ -729,7 +748,7 @@ impl Acia {
     }
 }
 
-impl Peripheral for Acia {
+impl Peripheral for Mc6850 {
     /// RS low reads the status register, high the receive data register.
     /// The MC6850 gives no vector: an acknowledge through an `iack`
     /// attachment ends in BERR.
@@ -737,7 +756,7 @@ impl Peripheral for Acia {
         if access.role == Role::Iack {
             return Err(BusError);
         }
-        self.run_until(access.now);
+        self.run_until(drive.now());
         let value = if access.address & RS == 0 {
             self.read_status()
         } else {
@@ -758,19 +777,19 @@ impl Peripheral for Acia {
         if access.role == Role::Iack {
             return Err(BusError);
         }
-        self.run_until(access.now);
+        self.run_until(drive.now());
         let value = access.written_byte(value);
         if access.address & RS == 0 {
-            self.write_control(value, access.now);
+            self.write_control(value, drive.now());
         } else {
-            self.write_data(value, access.now);
+            self.write_data(value, drive.now());
         }
         self.sync(drive);
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
-        (access.role != Role::Iack).then_some(0)
+    fn wait_states(&mut self, access: PeripheralAccess, _: Moment) -> Option<Cycles> {
+        (access.role != Role::Iack).then_some(Cycles::ZERO)
     }
 
     fn interrupt_request(&self) -> bool {
@@ -801,7 +820,7 @@ impl Peripheral for Acia {
         self.sync(drive);
     }
 
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         self.next_internal()
     }
 
@@ -853,7 +872,7 @@ impl Peripheral for Acia {
 
 /// Registers `mc6850`.
 pub(crate) fn register(registry: &mut Registry) -> Result<(), RegistryError> {
-    registry.register(NAME, Acia::ports(), |context| {
-        Ok(Box::new(Acia::from_parameters(context)?))
+    registry.register(NAME, Mc6850::ports(), |context| {
+        Ok(Box::new(Mc6850::from_parameters(context)?))
     })
 }

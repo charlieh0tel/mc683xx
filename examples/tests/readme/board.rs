@@ -1,11 +1,11 @@
 use std::error::Error;
 use std::path::Path;
 
-use mc683xx_board::board::Board;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Board;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::time::Time;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let registry = mc683xx_peripherals::registry();
@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         &registry,
         &Environment::default(),
     )?;
-    let run = board.run_until(Time::from_seconds(1))?;
-    println!("{:?} at {:?}", run.stop, run.now);
+    let run = board.run_until(Time::from_secs(1))?;
+    println!("{} at {}", run.stop, run.now);
     Ok(())
 }

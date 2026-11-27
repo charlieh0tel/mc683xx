@@ -6,16 +6,16 @@
 
 use std::path::Path;
 
-use mc683xx_board::board::Board;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Board;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_cpu32::Stop;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
 
 /// The board file, from this crate's directory.
@@ -26,7 +26,7 @@ const CONSOLE: &str = "console";
 /// a byte a 1 ms turn.
 const TURN: Span = Span::from_millis(1);
 /// The longest the boot or a command may take to its prompt: 2 s.
-const LONGEST: Span = Span::from_seconds(2);
+const LONGEST: Span = Span::from_secs(2);
 /// What ends a command's output: the next prompt.
 const PROMPT: &[u8] = b"> ";
 /// The Mandelbrot command, its line as typed.

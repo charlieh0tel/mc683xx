@@ -11,20 +11,20 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 use cpu32_oracle::state::State;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::Read;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::memory::Backing;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Page;
 use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use crate::decode::Case;
 use crate::differences;
@@ -49,7 +49,7 @@ const VECTOR_BYTES: u32 = 4;
 /// `(d8, PC, Xn)`.
 const INDEXED: &str = "Xn)";
 /// The clocks of a RAM cycle: the fastest (CPU32RM 8.1.5).
-const RAM_CLOCKS: u8 = 2;
+const RAM_CLOCKS: Cycles = Cycles::from_clocks(2);
 
 /// A bus with nothing on it: an access outside the case's RAM is a bus
 /// error, so a stray access shows.

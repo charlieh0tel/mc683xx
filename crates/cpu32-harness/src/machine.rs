@@ -4,11 +4,12 @@
 use std::mem;
 
 use cpu32_oracle::state::State;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Halt;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::bus::Bus;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Halt;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Exception;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::Acknowledge;
@@ -17,7 +18,8 @@ use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::Interrupts;
 use mc683xx_cpu32::memory::Memory;
 use mc683xx_cpu32::registers::Registers;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
+use mc683xx_target::Register;
 
 /// The 68331's address lines, ADDR[23:0] (MC68331UM 4.4.1.1).
 pub const ADDRESS_BITS: u32 = 24;
@@ -34,7 +36,7 @@ impl Interrupts for NoInterrupts {
         InterruptLevel::NONE
     }
 
-    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycles) -> Acknowledged {
+    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycle) -> Acknowledged {
         Acknowledge::Spurious.into()
     }
 }
@@ -62,13 +64,24 @@ pub fn renew(cpu: &mut Cpu) {
     *cpu = Cpu::new(mem::replace(&mut cpu.memory, placeholder));
 }
 
+/// A0-A6, as `State::address` holds them; A7 is USP or SSP.
+const ADDRESS_REGISTERS: [Register; 7] = [
+    Register::A0,
+    Register::A1,
+    Register::A2,
+    Register::A3,
+    Register::A4,
+    Register::A5,
+    Register::A6,
+];
+
 /// Sets the core's registers to `state`, SR first so A7 lands in the
 /// right stack pointer.
 pub fn load(registers: &mut Registers, state: &State) {
     registers.set_sr(state.sr);
     registers.data = state.data;
-    for (number, value) in state.address.iter().enumerate() {
-        registers.set_address(number, *value);
+    for (&register, &value) in ADDRESS_REGISTERS.iter().zip(&state.address) {
+        registers.set_register(register, value);
     }
     registers.usp = Address(state.usp);
     registers.ssp = Address(state.ssp);
@@ -80,7 +93,7 @@ pub fn load(registers: &mut Registers, state: &State) {
 pub fn capture(registers: &Registers) -> State {
     State {
         data: registers.data,
-        address: std::array::from_fn(|number| registers.address(number)),
+        address: ADDRESS_REGISTERS.map(|register| registers.register(register)),
         usp: registers.usp.0,
         ssp: registers.ssp.0,
         sr: registers.sr(),
@@ -90,7 +103,7 @@ pub fn capture(registers: &Registers) -> State {
 
 /// Runs one instruction: a budget of one cycle runs exactly one.
 pub fn step(cpu: &mut Cpu, bus: &mut dyn Bus) -> Ended {
-    let run = cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1));
+    let run = cpu.run_for(bus, &mut NoInterrupts, Cycle::ZERO, Cycles::from_clocks(1));
     // The exception first: taking it may halt the core, as on a stack
     // the case does not map.
     match (cpu.exception_taken(), run.stop) {

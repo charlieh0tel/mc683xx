@@ -18,8 +18,7 @@ with the core, not after it.
 
 First user: `smartclock-emu` and the smartclock firmware harness
 ([smartclock](https://github.com/charlieh0tel/smartclock)), replacing
-Unicorn.  Unicorn is GPL-2.0-only, which keeps
-`smartclock-emu` a feature-gated local tool, and its m68k has bugs the
+Unicorn.  Unicorn is GPL-2.0-only, and its m68k has bugs the
 harness works around (lazy condition codes marked computed before they
 are).
 
@@ -88,17 +87,18 @@ Out:
   bus and IPL/IACK traits.
 - `mc683xx-mc68331` (`crates/mc68331`): GPT; composes the core and the
   modules into the chip.
-- `cpu32-py`: PyO3 bindings, the Python module `mc683xx` (see
+- `mc683xx-python`: PyO3 bindings, the Python module `mc683xx` (see
   Python); `publish = false`, released as the PyPI wheel.
 - `mc683xx-wasm` (`crates/wasm`): `wasm-bindgen` bindings, a board
   from JavaScript (see Open, WebAssembly); `publish = false`, released
   as the npm package `mc683xx`.
-- `examples` (`mc683xx-examples`, `publish = false`): the host
-  guide, `docs/host-guide.md`, as its crate documentation, so its
-  examples are doctests `make ci` runs.
+- `examples` (`mc683xx-examples`, `publish = false`): the examples of
+  the host guide (its crate documentation), `docs/gdb.md` and
+  `docs/init-scripts.md` as doctests `make ci` runs, and the example
+  boards and their firmware.
 - `mc683xx-board` (`crates/mc68331-board`): board files and the board
   around a 683xx chip: peripherals from a registry, decoders, nets and
-  board time (see Boards), generic over the chip (`chip::Chip`), the
+  board time (see Boards), generic over the chip (`Chip`), the
   MC68331's implementation behind its default feature `mc68331`.
 - `mc683xx-run` (`crates/mc68331-run`): the runner, the workspace's one
   binary, for a board file (see Boards).
@@ -107,8 +107,10 @@ Out:
   scripts over any `Cpu32Target` (see Loading).
 - `mc683xx-peripherals` (`crates/peripherals`): stock chips as board-file peripherals
   (see Stock peripherals).
-- `cpu32-harness`, `cpu32-oracle`: instruction-level tests against
-  SingleStepTests and Musashi (see Verification); `publish = false`.
+- `cpu32-harness`, `cpu32-oracle`: test-only: SingleStepTests, the
+  differential runs against Musashi and Unicorn, the firmware function
+  corpus, boot smoke and boot diff (see Verification); `publish =
+  false`.
 - `snapshot-golden`: the snapshot formats' golden-file checks (see
   State); test-only, `publish = false`.
 
@@ -119,10 +121,29 @@ Out:
 (`docs/releasing.md`).  The published crates share the `mc683xx-`
 prefix; their directories keep the short names.
 
+Each crate's root holds what the crate is named for and what a host
+writes beside it: the type, its builder, its run result and its
+errors, lifted out of private modules (`mc683xx_target::Address`,
+`mc683xx_board::Board`).  A module stays public where its names read
+right only qualified (`hooks::Instruction`, `time::Clock`,
+`serial::NOT_READY`), where it is the sub-API one kind of author
+implements against (`peripheral`, `registry`, `adapter`), or where it
+is one of the manual's modules (`sim`, `qsm`, `gpt`).  A module is
+public whole or private whole, so every public item keeps one path
+(AGENTS.md, Rust Rules; decided 2026-11-24).  A private module's items
+may also be lifted to its public parent, as a one-item submodule's
+are into `sim` (`sim::ResetScope`, `sim::ChipSelects`), never to both.  A layer's snapshot
+format version is `state::VERSION` in its crate (the core's, the
+chip's, the board's), not a root `VERSION` that could be the crate's.
+
 ## Interface
 
 - **Registers:** read and write every one: D0-D7, A0-A7, PC, SR, SSP,
-  USP, VBR, SFC, DFC.
+  USP, VBR, SFC, DFC.  `Registers` takes the target crate's names
+  (`register(Register)`, `system_register(SystemRegister)`), so the
+  chip's BDM, gdb and Python map none themselves; background mode's
+  RPC, PCC, ATEMP and FAR are not the programming model's and answer
+  `None` (`BackgroundOnly` to a write).
 - **Memory:** the host wires RAM, ROM and peripherals to chip-select pins
   (see Peripherals), and, emulator-only, memory at a fixed address on
   no pin (Fixed memory, below).  RAM and ROM are served in the core; peripherals get
@@ -139,12 +160,13 @@ prefix; their directories keep the short names.
   the halt monitor's resets as they come, time passing while the CPU
   is halted (A halted CPU); `take_events` reports resets and IARB
   ties.  A run overshoots its budget by up to an
-  instruction, so `Mc68331::run_until(target)` runs to the first
+  instruction, so `Mc68331::run_until(deadline)` runs to the first
   instruction boundary at or after a time instead: its end depends
-  only on the chip and the target, so a series of them is one long
+  only on the chip and the deadline, so a series of them is one long
   run however the host cuts it.
-- **Host bus access:** `Mc68331::bus_read`, `bus_write` and `peek`
-  (`mc683xx_mc68331::host`) reach the bus as a debugger does (BDM's memory
+- **Host bus access:** `Mc68331::bus_read`, `bus_write`, `peek` and
+  `peek_bytes`
+  (`crates/mc68331/src/host.rs`) reach the bus as a debugger does (BDM's memory
   commands, CPU32RM 7), by address, size and function code, through
   the chip's decode: module registers at MM's base, and whatever a
   chip select reaches.  `bus_read` and `bus_write` are real cycles at
@@ -154,17 +176,47 @@ prefix; their directories keep the short names.
   through `Module::peek` (required, as `save` is), the SIM's reads
   have none, and memory answers byte by byte where memory alone
   answers the cycle (`Board::memory_alone`, the page-table rule).  A
-  peripheral's bytes are `AccessError::Unpeekable`, never a guess.
-  Errors are typed: `Unmapped`, `BusError`, `Misaligned`, `Width`.
+  peripheral answers for its own bytes through the optional
+  `MappedPeripheral::peek(cycle, data)`, the first that the decode
+  would have drive the bytes answering; `poke` (`Mc68331::poke`,
+  `poke_bytes`) stores bytes in each the decode would write to.  Both
+  take a range, a byte an address from `cycle.address` up: an access
+  is split where the memory or peripheral reaching its bytes changes,
+  and each peripheral called once with its run, so loading a 512-Kbyte
+  image into a host peripheral is one call, not one a byte (decided
+  for 0.9.0, a byte form from Python took 3.2 s for
+  what RAM took 0.03 s).  A board peripheral on one lane gets its
+  bytes gathered, on its own addresses, a run where they are
+  consecutive.  A decline declines the peripheral's whole run.  Both
+  decline by default, which is `BusCycleError::Unpeekable`, naming the
+  first byte declined, as `PeekError::Unpeekable` does, never a
+  guess: only the peripheral knows which of its registers a look
+  leaves alone (decided 2026-11-23).  The bare machine's `peek_bytes`
+  and `poke_bytes`, gdb's memory access and a board peripheral's
+  (`Peripheral::peek`, `poke`, through `MappedAdapter` and the board's
+  routers) take the same path.  A poke is not all-or-nothing where a
+  peripheral is involved: a peripheral cannot be asked whether it
+  would take bytes without taking them.
+  Errors are typed: `Unserved`, `BusError`, `Misaligned` (each with
+  its address), `Width`.
 - **Interrupts:** the host sets an IPL level; the core calls the
   host's IACK callback when it accepts, for a vector or autovector.
 - **Peripherals:** see below.
 - **Hooks:** plain in-process callbacks, cheap when absent: code
   address (with registers and top of stack), block, memory read and
-  write, invalid access, exception taken.  Any hook can stop `run_for`.
-  `Cpu::add_code_hook`, `add_block_hook`, `add_read_hook`,
-  `add_write_hook`, `add_invalid_hook` (each over an address range),
-  `add_exception_hook`, `remove_hook`; the chip's through
+  write, invalid access, exception taken, exception returned from.  Any
+  hook can stop `run_for`.  A write hook sees the value the write
+  replaced (`MemoryAccess::previous`), peeked before it on the slow
+  path a watched page already takes; `None` for a peripheral's, where
+  a read is a cycle.
+  `Cpu::add_code_hook`, `add_block_hook`, `add_pre_read_hook`,
+  `add_pre_write_hook`, `add_read_hook`, `add_write_hook`,
+  `add_invalid_hook` (each over an address range),
+  `add_exception_hook`, `add_exception_return_hook` (`rte` of a four-
+  or six-word frame, or of a format $C frame of a fault in an
+  instruction; not one of a fault in exception processing, whose `rte`
+  takes the faulted exception again, CPU32RM 6.3.2.7), `remove_hook`;
+  the chip's through
   `Mc68331::cpu_control`, a `CpuControl` that lends the registers, the
   hooks and the pages' permissions and shows the rest read-only, so a
   host cannot remap the core's memory apart from the chip's decode or
@@ -176,8 +228,8 @@ prefix; their directories keep the short names.
   a page does not permit is a bus error, shown to the invalid access
   hooks as `Invalid::Protected`.
 - **Tracing:** peripheral accesses, exceptions taken, instruction count.
-  The chip's events carry them: `Mc68331::set_tracing(Tracing {
-  accesses, exceptions })`, both off at first, adds `Event::Access`
+  The chip's events carry them: `Mc68331::set_tracing(ChipTracing {
+  bus_cycles, exceptions })`, both off at first, adds `Event::BusCycle`
   for each bus cycle the core sends the chip (module registers,
   peripherals, memory a peripheral shares a select with; not RAM and ROM the
   core serves, which memory hooks see) and `Event::Exception` for
@@ -199,7 +251,7 @@ prefix; their directories keep the short names.
   tables from its own wiring rather than take the snapshot's.
   Every peripheral attached to the chip (`Builder::peripheral`, `unwired_peripheral`) or the
   bare `Machine` (`add_peripheral`) says whether it saves:
-  `mc683xx_cpu32::cpu::state::Save` is a bound of the attach, as `Timed`
+  `mc683xx_cpu32::state::Save` is a bound of the attach, as `Timed`
   is, both its methods required, so that no peripheral saves what its own
   `restore` refuses: a peripheral gives both,
   `mc683xx_cpu32::unsavable!(X, "its role")` is one that cannot save
@@ -218,9 +270,9 @@ prefix; their directories keep the short names.
   its first address, `the peripheral at 0xf00000`), as the board names a
   peripheral; a snapshot with another count of peripherals is
   `StateError::Mismatch("peripherals")`.  The QSPI's peripheral
-  (`Builder::qspi`) is held the same way: `Save` is a bound of the
-  attach (`AnySpiPeripheral`, in `mc683xx-modules`, since the QSM holds
-  it), and the chip's snapshot, not the QSM's, holds its bytes, so the
+  (`Builder::set_qspi`) is held the same way: `Save` is a bound of the
+  attach (`AnySpiPeripheral`, in `mc683xx-modules`'s `peripheral`
+  beside `AnyMappedPeripheral`, since the QSM holds it), and the chip's snapshot, not the QSM's, holds its bytes, so the
   QSM's format stays the module's own and the chip saves and puts back
   every host part in one place.  One that cannot save is named `the
   QSPI peripheral`; a snapshot with one where the chip has none, or none
@@ -329,8 +381,8 @@ surrounds the SoC with its board peripherals through:
   not wire every peripheral to it: `Builder::set_reset_scope` names the
   causes that reach a peripheral (a `ResetScope`), all by default.
   smartclock's DUART, for one, sees no watchdog reset.
-- **Fixed memory (emulator-only):** `Builder::fixed_memory(base,
-  bytes, kind)` maps memory at a fixed, page-aligned address on no
+- **Fixed memory (emulator-only):** `Builder::fixed_memory(bytes,
+  kind, base)` maps memory at a fixed, page-aligned address on no
   select, for code and data a host maps beside an image it leaves as
   it is (a consumer's hybrid boot loads rewritten routines at $600000
   and their data at $6F0000 and diverts the image's calls there).
@@ -366,7 +418,7 @@ surrounds the SoC with its board peripherals through:
   byte of a 16-bit port; the value read is the vector, after the
   peripheral's wait states on an external DSACK.  A bus error, or a DSACK
   later than the bus monitor allows, is the spurious vector.
-- **QSPI:** the host's `SpiPeripheral` (`Builder::qspi`) sees each
+- **QSPI:** the host's `SpiPeripheral` (`Builder::set_qspi`) sees each
   transfer that DDRQS gives SCK for (QSM, below; `QspiTransfer`: the
   queue entry, the levels on PCS[3:0],
   the word and its bits, and the serial clock it is shifted with, its
@@ -376,7 +428,7 @@ surrounds the SoC with its board peripherals through:
   decodes them to a peripheral number (smartclock does) is the host's.
   It is the one peripheral, so it sees every level change; on a board
   of `mc683xx-board` peripherals the board's PCS decode is it, and each peripheral
-  sees only its own select (`Peripheral::select`), the canonical framing
+  sees only its own select (`Peripheral::set_selected`), the canonical framing
   there.  `reset` is RESET by `Builder::set_qspi_reset_scope`
   (all causes by default; smartclock's DACs clear on RESET).
   Each queue entry takes the time SPCR0's baud and SPCR1's delays give
@@ -458,9 +510,9 @@ surrounds the SoC with its board peripherals through:
   a frame after its time (2026-10-23).
 - **Pins:** port and module pins in and out, including GPT input
   capture and pulse accumulator inputs (1 PPS-style signals).  Every
-  general-purpose port is keyed by one `port::Port { C, E, F, Gp, Qs }`,
+  general-purpose port is keyed by one `Port { C, E, F, Gp, Qs }`,
   the manual's port names: the host sets the levels it drives
-  (`set_pins(port, value, mask)`, and `set_gpt_input(input, level)`), reads
+  (`set_pins(port, pins)`, a `PortLevels` as `outputs(port)` gives, and `set_gpt_input(input, level)`), reads
   the levels the chip drives (`outputs(port)`, `pwm`) and the port's
   registers (`port(port)`, a `PortState`: latch, direction, assignment,
   the board's levels).  An edge the host makes takes effect at the
@@ -610,7 +662,12 @@ type of the same name takes precedence.  A board's
 own logic (an FPGA's design, a custom panel) stays with its host.
 Each peripheral's ports, parameters and the choices where its datasheet is
 silent are in `docs/peripherals.md`; the datasheets are in
-`third_party/datasheets/`.  The larger choices:
+`third_party/datasheets/`.  Every stock type is public, with read-only
+accessors for its state and its parameter defaults as constants, so
+a host reads a peripheral by type (`Board::peripheral::<T>`) and
+writes a default once; `inspect` is for a front end and not a
+contract (decided 2026-11, for 0.9.0, over hiding `At28c64b`, then
+the one public type).  The larger choices:
 - *Logic peripherals.*  `74x374` and `74x373` are one model: strobed by a
   write cycle, the edge-triggered register and the transparent latch
   both hold the byte written from the cycle's end, and the '373's
@@ -761,16 +818,19 @@ silent are in `docs/peripherals.md`; the datasheets are in
 
 ### Python
 
-`cpu32-py` builds the Python module `mc683xx` with PyO3 and maturin
-(`crates/cpu32-py/pyproject.toml`, abi3 from Python 3.12).  The
+`mc683xx-python` builds the Python module `mc683xx` with PyO3 and maturin
+(`crates/python/pyproject.toml`, abi3 from Python 3.12).  The
 module is named for the family, not the part: a 68332 would add its
 chip beside `Mc68331`.
 
 - **Names:** each Python item has its Rust item's name and words
   (AGENTS.md); where Python's ways differ the binding says so
-  (docs/python.md, Names): a Rust type with `Display` and `FromStr`
-  crosses as its string, any other enum as a Python enum class (a
-  class per variant when they carry data), never as a string; a struct
+  (docs/python.md, Names): a name a host writes when it wires (a pin,
+  a chip select, a net type, a direction, a register) crosses as its
+  string; a value a host matches on (a kind, a cause, a port, a
+  channel, a function code) as a Python enum class, whatever the Rust
+  type's traits (a class per variant when they carry data), never as
+  a string nor an `int`; a struct
   of plain values a call returns as a tuple of its fields (a port's
   outputs a `(driven, levels)` pair); a frequency an `int` named `_hz`
   in whole hertz or `_nanohertz`; a setter `set_*`, never a writable
@@ -786,25 +846,27 @@ chip beside `Mc68331`.
   `set_reset_scope(peripheral, [ResetCause])`, `set_dsack(peripheral, Dsack)`,
   `set_qspi_reset_scope([ResetCause])`, and the handles a peripheral holds,
   `stop_request()`, `sync_request()` and `diversion()` (a `Diversion`
-  by memory and peripheral numbers); `build()` gives
+  by memory and peripheral ids); `build()` gives
   an `Mc68331` through its power-on reset.  Pins are the manual's
   names, `"CSBOOT"`, `"CS0"`-`"CS10"`; registers too, `"D0"`-`"A7"`,
   `"PC"`, `"SR"`, `"CCR"`, `"USP"`, `"SSP"`, `"VBR"`, `"SFC"`, `"DFC"`.
-  Memories and peripherals are the numbers `Builder` returned.
+  Memories and peripherals are the opaque `MemoryId` and
+  `PeripheralId` `Builder` returned, as in Rust (decided 2026-11-24;
+  they were numbers).
 - **The chip:** `run_for(budget) -> Run(cycles, stop)`, Rust's
-  `cpu::Run`, its `Stop` a class per variant as Rust's (`Stop.Budget()`,
+  `Run`, its `Stop` a class per variant as Rust's (`Stop.Budget()`,
   `Stop.Halted(halt)`, `Stop.Hook(hook)`, ...),
-  `run_until(target)`, `bus_read`, `bus_write`, `peek` (`size` in
-  bytes, `function_code` 5 by default; `BusError`, `UnpeekableError`),
+  `run_until(deadline)`, `bus_read`, `bus_write`, `peek` (`size` in
+  bytes, `function_code` a `FunctionCode`, `SUPERVISOR_DATA` by default; `BusError`, `UnpeekableError`),
   `reset()`, `reset_for(ResetCause)`,
   `now`, `halted`, `exception_taken` (a vector), `read_register`,
-  `write_register`, `registers()`, `memory`, `read_memory`,
-  `write_memory` (a memory's own bytes, by offset), `peripheral(n)` (the
-  object back), `set_interrupt_pin`, `set_pins(Port, value, mask)`,
+  `write_register`, `registers()`, `memory(n, offset, length)`,
+  `set_memory` (a memory's own bytes, by offset), `peripheral(n)` (the
+  object back), `set_interrupt_pin`, `set_pins(Port, driven, levels)`,
   `outputs(Port)`, `port(Port)` (a `PortState`),
   `take_port_changes()` (`(now, Port, driven, levels)`, every port's),
   `system_hz`, `take_events()` (`Event.Reset`, `Event.ArbitrationTie`,
-  `Event.Dsack`, `Event.Unknown`, and with `set_tracing(accesses=, exceptions=)` `Event.Access` and
+  `Event.Dsack`, `Event.Unknown`, and with `set_tracing(bus_cycles=, exceptions=)` `Event.BusCycle` and
   `Event.Exception`), `instructions`.
   Background debug mode (below) is `reset_with_breakpoint()`,
   `assert_breakpoint() -> bool`, the
@@ -819,20 +881,25 @@ chip beside `Mc68331`.
   `reset_with_breakpoint()`, `assert_breakpoint()`, `halt()` and
   `go()`, and its `chip` only `background`.
   `Stop`, `Halt` and `ResetCause` are enums; they, the other enums
-  and the value classes that compare equal (`Frame`, `Output`,
-  `Serial`) hash, so they key dicts and sets.
-- **Hooks:** `add_code_hook`, `add_block_hook`, `add_read_hook`,
+  and the value classes, which compare equal by value (`Frame`,
+  `Output`, `Serial`, `Event`, `End`, `LimitedRun`, `FaultStop`), hash,
+  so they key dicts and sets.
+- **Hooks:** `add_code_hook`, `add_block_hook`, `add_pre_read_hook`,
+  `add_pre_write_hook`, `add_read_hook`,
   `add_write_hook` and `add_invalid_hook(callback, begin=0,
   end=0xFFFFFFFF)` (both ends included) and
   `add_exception_hook(callback)` install a Python callable as the
   Rust hook and return a `HookId`; `remove_hook(hook) -> bool`.
   The callable gets what the Rust hook does: an `Instruction` (`pc`,
   `registers` as `registers()` gives them, `stack_top`), a
-  `MemoryAccess` (`address`, `size`, `function_code`, `value`), an
-  `InvalidAccess` (those, `cycle`, a `CycleKind`, `value` or `None`,
+  `MemoryAccess` (`address`, `size`, `function_code`, `value`,
+  `previous`, `pc`, `stacking`, `registers`), an
+  `InvalidAccess` (those, `kind`, a `BusCycleKind`, `value` or `None`,
   `reason`, an `Invalid`: `BUS_ERROR` or `PROTECTED`) or an
   `ExceptionEntry` (`vector`, `pc`, `handler`, `stack`, `level`).  A
-  truthy result stops the run (`Stop.Hook(hook)`),
+  `True` result stops the run (`Stop.Hook(hook)`), `None` or `False`
+  does not, and any other raises `TypeError` (a truthy
+  count or list stopped runs by mistake),
   where the Rust hook's `Break` would.  An exception it raises stops
   the run there too and is raised when `run_for` returns, as a peripheral's
   is, but without a stop request left behind.  The run holds the
@@ -846,14 +913,14 @@ chip beside `Mc68331`.
   and `restore(bytes)`, as a Python board peripheral is; one without
   them makes `save` raise `StateError` naming it (`peripheral 0: a Python
   peripheral cannot save its state`), and an exception either raises is
-  raised.  The QSPI's peripheral (`Builder.qspi`) is in it the same
+  raised.  The QSPI's peripheral (`Builder.set_qspi`) is in it the same
   way, named `the QSPI peripheral`; hooks stay across a restore.
   A snapshot of another format or other hardware, or bytes that do
   not decode, raise `mc683xx.StateError` (a `ValueError`); a module
   that cannot save, `NotImplementedError`.
 - **Peripherals:** any object with `read(cycle) -> int` and `write(cycle,
   value)`, and optionally `wait_states(cycle) -> int | None`,
-  `interrupt_request() -> bool`, `reset(now)`, `next_event() -> int |
+  `dsack_port(cycle) -> int | None`, `interrupt_request() -> bool`, `reset(now)`, `next_event() -> int |
   None` and `advance(now)`, the `MappedPeripheral` and `Timed` traits' methods;
   a missing one takes the trait's default.  A model on no pin needs
   neither `read` nor `write`.  The methods are looked up once, when
@@ -863,7 +930,7 @@ chip beside `Mc68331`.
   its `__init__.py`): each declares its required methods, its
   docstring the optional ones, as `typing.Protocol` has no optional
   member (decided 2026-11-21).  A `BusCycle` carries `select`, `address`, `size`
-  (bytes), `function_code` and `now`.  A read's value must fit the
+  (bytes), `function_code` (a `FunctionCode`) and `now`.  A read's value must fit the
   cycle.
 - **Errors:** raising `mc683xx.BusError` in `read` or `write` asserts
   BERR.  Any other exception from a peripheral (a `KeyboardInterrupt`
@@ -878,6 +945,7 @@ chip beside `Mc68331`.
   it when it returns, the chip as it then is.  The bindings' own
   errors are `ValueError` (`StateError` and `LoadError` among them;
   a board file not read, the `OSError` its errno gives), `IndexError`,
+  `KeyError` (a chip id its builder never gave),
   `OverflowError`, `RuntimeError` (`TargetError` and `RunError` among
   them) and
   `NotImplementedError`; nothing
@@ -937,7 +1005,7 @@ chip beside `Mc68331`.
   python` builds a `.venv`, runs clippy and the adapter's Rust tests
   with `python` (they embed the interpreter), `maturin develop`s the
   module into the venv, and runs `pytest`, `stubtest` and mypy.
-- **QSM and GPT:** `Builder.qspi(object)` puts an object with
+- **QSM and GPT:** `Builder.set_qspi(object)` puts an object with
   `transfer(transfer) -> int` (an `mc683xx.QspiTransfer`, as the Rust
   one) and optionally
   `set_chip_selects(levels, now)`, `set_clock(clock, now)`,
@@ -962,7 +1030,7 @@ chip beside `Mc68331`.
   `gpt::Input`).  The modules' registers are the firmware's,
   through the bus; the host reads their pins, and their registers
   only through `bus_read` and `peek`.
-- **Type stubs:** `crates/cpu32-py/python/mc683xx/__init__.pyi`,
+- **Type stubs:** `crates/python/python/mc683xx/__init__.pyi`,
   with `py.typed` and an `__init__.py` that takes the compiled
   module's names (`mc683xx.mc683xx`), a maturin `python-source`
   package, so a wheel built from the sdist carries them too; written
@@ -974,21 +1042,32 @@ chip beside `Mc68331`.
   pass `mypy --strict` against the stubs.
 - **Bare CPU:** `Machine(address_bits=32)`, `mc683xx_cpu32::flat::Machine` bound
   (see Bare CPU; docs/python.md, Bare CPU, with the Unicorn mapping):
-  `map`, `unmap`, `protect` (`start, length`), `read`, `write`,
+  `map`, `unmap`, `protect` (`start, length`), `peek_bytes`, `poke_bytes`,
   `add_peripheral(begin, end, object)` (`read(BusCycle)`,
-  `write(BusCycle, value)`), registers as the chip's,
-  `run_limited(begin=, until=, instructions=, cycles=)`,
-  `stop_request()` (a `StopRequest`, Rust's `bus::StopRequest`: a
+  `write(BusCycle, value)`; it returns the peripheral's number) and
+  `remove_peripheral(id)`, registers as the chip's,
+  `run_limited(begin=, reach=, instructions=, cycles=)`,
+  `stop_request()` (a `StopRequest`, Rust's `StopRequest`: a
   callable's request ends the run `Stop.Requested()` once the callables have
-  run, one left from before a run is withdrawn as it starts),
-  `set_intercepted(vector, on)` and `set_intercept_callback(callable)`
-  (no callback: taken natively), `set_stop_on_fault` and
-  `stops_on_fault`, `set_deviations(Deviations)` and `deviations`,
-  `request_interrupt(pin, vector)`, `clear_interrupt`, `reset`,
+  run, one no run took, made between runs or where the run ends for
+  another reason, stays pending, and ends the next run at once, as
+  every machine's does, decided 2026-11-26),
+  `add_intercept_hook(callable, vectors)` (a `HookId`; the hooks
+  covering a vector answer in the order installed, until one handles
+  it, and none handling, it is taken natively), `set_stop_on_fault` and
+  `stops_on_fault`, `set_stop_on_exception` and `stops_on_exception`
+  (vectors as a `VectorSet`, Rust's, which replaced a `frozenset` in
+  0.9.0 so the set's constants and `without` read as in Rust; an
+  iterable of numbers is taken too; a vector is its number, `Vector`
+  naming Rust's constants as numbers, `Vector.BUS_ERROR`, a namespace
+  rather than a type, as vectors cross as numbers everywhere else),
+  `request_interrupt(pin, vector)`,
+  `clear_interrupt`, `take_exception(vector, level=None)`, `reset`,
   `save`, `restore`.  `run_limited` gives a `LimitedRun(cycles, end)`,
-  its `End` Rust's (`End.Stop(stop)`, `End.Until()`,
-  `End.Instructions()`, `End.Fault(fault)`, their values the fields
-  `stop` and `fault`) less `End::Intercepted`, which the run answers
+  its `End` Rust's (`End.Stop(stop)`, `End.Reached()`,
+  `End.Instructions()`, `End.Fault(fault)`, `End.Exception(vector,
+  pc)`, their values the fields `stop`, `fault`, `vector` and `pc`)
+  less `End::Intercepted`, which the run answers
   within it.  Its hooks may write the
   CPU (decided 2026-10-23; the chip keeps the copy model):
   a Rust hook only queues what it saw and stops the core's run, and
@@ -1000,8 +1079,8 @@ chip beside `Mc68331`.
   from Python in a release build (`test_cpu.py`), 15,000 constructions
   with 64 Kbytes mapped.
 - **gdb:** `serve_gdb(address, ready=None)` on `Mc68331`, `Board` and
-  `Machine` serves gdb (see Debugger) until it detaches or kills the
-  target (an `Ending`: `DETACHED`, `KILLED`), so a harness hands control to
+  `Machine` serves gdb (see Debugger) until it detaches, kills the
+  target or hangs up (an `Ending`: `DETACHED`, `KILLED`, `HUNG_UP`), so a harness hands control to
   gdb mid-run and gets it back.  It blocks, holding the target;
   `ready(port)` is called once it listens, before the target is
   held, so a test starts its client then (port 0 picks one) and may
@@ -1023,18 +1102,18 @@ chip beside `Mc68331`.
   (docs/python.md, Board files), `PORTS` a list of `(name, kind,
   direction)`, as `PortSpec`.  A serial frame crosses as an
   `mc683xx.Serial` (`Serial(frame, baud_nanohertz, bits)`,
-  `Serial.timed`, `Serial.untimed`, as Rust's), or, for code written
-  before timed frames, as its data alone: a peripheral opts in with
-  `TIMED_SERIAL`, `take_received` with `timed`, so old classes keep
-  working.  A QSPI peripheral's `transfer(transfer, drive)` gets an
-  `mc683xx.Transfer`, as the Rust peripheral's, and `set_qspi_clock(clock, now)`
-  as the Rust peripheral is told it.
+  `Serial.timed`, `Serial.untimed`, as Rust's), always, in and out
+  (an untimed one may be sent as its data, an `int`, `None` a break).
+  A QSPI peripheral's `transfer(transfer, drive)` gets an
+  `mc683xx.Transfer`, as the Rust peripheral's, and `set_qspi_clock(clock,
+  moment)` as the Rust peripheral is told it; a call with no drive takes
+  an `mc683xx.Moment` last, as Rust's does.
   `externals()` gives `mc683xx.External`s, name, type and direction
-  as the Rust `External`; each is its name as a string and equals
-  it, so code that took the names keeps working.  `observe(net,
+  as the Rust `External`, equal by value.  `observe(net,
   callback)` is `Board::observe` (Boards, Front ends), its
   `ObserverId` for `unobserve`; `inspect(name)` is `Board::inspect`, as
-  a dict.  `reset_for(ResetCause)` is `Board::reset_for`;
+  a dict.  `reset()` and `reset_for(ResetCause)` are `Board::reset`
+  and `reset_for`;
   `reset_with_breakpoint`, `assert_breakpoint`, `halt` and `go` are
   `Board`'s (Background debug mode).
   `control()` is `Board::control`, an `mc683xx.BoardControl`
@@ -1053,7 +1132,7 @@ and the nets that join them.  The rule: **the file says what is wired
 where and how the chip is configured, never what a peripheral does.**
 Peripheral behavior lives in the host's code, behind the registry; this
 repository ships only small generic peripherals for tests and examples.
-`mc683xx_mc68331::chip::Builder` stays the underlying API: a loaded board is
+`mc683xx_mc68331::Builder` stays the underlying API: a loaded board is
 Builder calls plus the layers below, and a host can still build by
 hand.  The keys are in `docs/board-files.md`.
 
@@ -1061,14 +1140,16 @@ hand.  The keys are in `docs/board-files.md`.
   none, is refused with a typed error.  Unknown keys are errors
   (serde's `deny_unknown_fields`), with the line, but every table takes
   a `note` the loader ignores, for provenance and confidence.
-  Version 1 is frozen from 0.1.0, the first release: from then a change
-  that makes a version 1 file mean something else, or refuses one, is
-  version 2.  A minor release may add a key to version 1; a file
-  using it needs at least that release, and every 1.x release reads
-  every version 1 file.  Before it the schema changed and stayed version 1, since
-  no release read the earlier form: `[[device]]` became
-  `[[peripheral]]` and `[chip] type` became required (2026-10-24), and
-  smartclock's six board files are the consumer's to convert.  `[board]` names the board (`name`,
+  Version 1 is frozen from 1.0.0: from then a change that makes a
+  version 1 file mean something else, or refuses one, is version 2.
+  A minor release may add a key to version 1; a file using it needs
+  at least that release, and every 1.x release reads every version 1
+  file.  Before 1.0.0 a minor release may change version 1 in place,
+  its release notes carrying the migration (decided 2026-11, 0.9.0,
+  when `role = "upper"` and `"lower"` went; Decisions): `[[device]]`
+  became `[[peripheral]]` and `[chip] type` became required before
+  0.1.0 (2026-10-24), and 0.9.0 refuses a lane as a `role`.
+  `[board]` names the board (`name`,
   `title`: what a host chooses it by), the firmware `images` it takes,
   the default first, and the `options` a run may enable.  Any memory,
   decoder, peripheral, unconnected select or net may carry `option =
@@ -1076,7 +1157,7 @@ hand.  The keys are in `docs/board-files.md`.
   board with and without an option (the 58503A's front panel).  A
   net's endpoints on a peripheral left off go with it.
 - **Chip:** the board is generic over the chip it is built around,
-  `Board<C: chip::Chip>`, and `[chip]` holds `type`, the chip's name
+  `Board<C: Chip>`, and `[chip]` holds `type`, the chip's name
   (`"mc68331"`, `Chip::TYPE`), required (`LoadError::NoChip`; a file
   names what it is built around, as a schematic does, rather than a
   host guessing), another than the one the board is loaded as
@@ -1093,8 +1174,8 @@ hand.  The keys are in `docs/board-files.md`.
   reload scope, a router per select or decoder with its DSACK pins,
   each peripheral's IRQ output and reset scope on no pin, the QSPI's
   PCS decode), running for a budget with its sync and stop requests
-  (`chip::Requests`, the stop the core's `StopRequest`), the system
-  clock and the clock outputs, its pins (`ChipPin`: name, kind,
+  (`Requests`, the stop the core's `StopRequest`), the system
+  clock and the clock outputs, its pins (`ChipPin`: printed and parsed by name, kind,
   direction, and whether it takes a level ahead at its time), the
   outputs it watches, its events and the RESET pulse each reset
   drives, the CPU, and its snapshot.  The board's generic code names
@@ -1115,8 +1196,8 @@ hand.  The keys are in `docs/board-files.md`.
   `Board<Mc68331>`, or is generic over `Board<C: Chip>`, and calls the
   chip's methods, but implements none of them; the plumbing only the
   board calls (`Chip::builder`, `input`, `collect`, the output watches,
-  the diversions, `ChipPin::pcs` and `scheduled`, `Requests`, the
-  memory plans, `BoardMapped`, `BoardSpi`, `Mc68331Builder`) is
+  the diversions, `ChipPin::name`, `pcs` and `scheduled`, `Requests`, the
+  memory plans, `Mc68331Builder`) is
   `#[doc(hidden)]`, outside semver (decided 2026-11-21).  The board's snapshot holds the chip's pins (its outputs'
   last levels, its clock outputs' clocks) in the chip's own pin
   type, and the levels the board drives on the chip's inputs are the
@@ -1145,7 +1226,7 @@ hand.  The keys are in `docs/board-files.md`.
   stays on the fast path.  While the command logic programs, erases
   or is in autoselect mode it takes the array (`Drive::take_memory`):
   the chip diverts the memory's cycles to a peripheral that passes them
-  to the peripheral (`mc683xx_mc68331::chip::Diversion`, asked within a cycle and
+  to the peripheral (`mc683xx_mc68331::Diversion`, asked within a cycle and
   made as it ends, the page tables rebuilt), so status and autoselect
   reads see the peripheral, until it releases the array.  Chosen over a
   read hook on every fetch, which would cost the fast path always.
@@ -1349,11 +1430,21 @@ hand.  The keys are in `docs/board-files.md`.
   (`adapter::MappedAdapter`, `SpiAdapter`) that converts cycles and times
   through the board's `TimeBase`, so smartclock's models serve both a
   hand-built chip and a board.  An adapted model implements
-  `mc683xx_cpu32::cpu::state::Save`, as every peripheral does, and is in
+  `mc683xx_cpu32::state::Save`, as every peripheral does, and is in
   the board's snapshot: a trait, not serde, so a model keeps its own
   format and versions it, and one with state it cannot serialize (a
   file handle) is `unsavable!`, which the board's save names.  One
-  constructor, `new`: the adapter needs no opt-in.
+  constructor, `new`: the adapter needs no opt-in.  A model drives
+  nets through its adapter: one that implements `adapter::Driver`, its
+  `MappedAdapter` or `SpiAdapter` made `driving()`, as `Inspect` and
+  `inspecting()` show its state, has `drive` run after each call that
+  may change the model (power-on, reset, and a mapped model's read,
+  write and advance or a QSPI model's transfer, select and release),
+  so a model written against the chip's traits needs no wrapping
+  `Peripheral` to drive a net (decided for 0.9.0, over folding
+  `Timed` into `MappedPeripheral`: `Timed` stays `Module`'s
+  supertrait, and the bare machine takes untimed models; a trait, as
+  `Inspect` is, not a function pointer).
 - **Nets:** named and typed, `{ name, type, from, to = [...] }`.
   Types: `logic` (a level whose state matters), `edge` (a level whose
   changes' times matter, 1 PPS), `clock` (a frequency in nanohertz
@@ -1362,9 +1453,12 @@ hand.  The keys are in `docs/board-files.md`.
   exactly, so a consumer counts and times edges across it with no
   rounding), `serial` (UART frames, `signal::Serial`: an `sci::Frame`
   timed from its start bit, with its baud and length, so a receiver
-  times either edge; one direction, so a link is two nets), `analog` (an `f64`; data only, never time; a
+  times either edge, both zero for an untimed frame, a host's
+  character, kept as a documented sentinel over an `Option` of the
+  pair, which every receiver would unwrap alike (decided 2026-11, for
+  0.9.0); one direction, so a link is two nets), `analog` (an `f64`; data only, never time; a
   sink samples it at its own time, which asks the driver's
-  `Peripheral::sample` then, so a value that moves continuously, a warming
+  `Peripheral::analog_output` then, so a value that moves continuously, a warming
   oven, need not be driven at every change), `bus` (parallel lines as
   one word, so an ADC's byte into an FPGA changes in one drive, not
   eight).  One driver, except on a `wired-and` net: open drain with a
@@ -1410,7 +1504,8 @@ hand.  The keys are in `docs/board-files.md`.
   DSACK, AVEC and MODCLK are configuration, not endpoints.
 - **Reset by cause:** a host resets the chip as a given source would,
   `Mc68331::reset_for(ResetCause)` and `Board::reset_for` (the
-  `Chip` trait's `reset_for`, which replaced its `reset()`), so a
+  `Chip` trait's `reset_for`, which replaced its `reset()`; the chip's
+  and the board's `reset()` are their `reset_for(External)`), so a
   board's reset control (a front panel's, say) gives the firmware the
   restart it tells apart by RSR: a warm one for the watchdog's SW, a
   cold one for EXT (SIMRM 8.2, Table 8-1; RSR one bit per source, SIMRM
@@ -1448,9 +1543,10 @@ hand.  The keys are in `docs/board-files.md`.
 - **Board time:** `Time`, integer picoseconds in a `u64` (213 days),
   with no floats in scheduling.  A span of it is a `Span`, picoseconds
   too, its field private (`from_picos`, `from_nanos`, `from_micros`,
-  `from_millis`, `from_seconds`, `from_seconds_f64`, `checked_from_seconds_f64`; `picos`,
-  `seconds_f64`), so a time and a span cannot be mixed up: `Time +
-  Span` and `Time - Span` are times, `Time - Time` a `Span` (and
+  `from_millis`, `from_secs`, `from_secs_f64`, `checked_from_secs_f64`; `picos`,
+  `secs_f64`: std `Duration`'s names, decided 2026-11 for 0.9.0), so a
+  time and a span cannot be mixed up: `Time + Span` and `Time - Span`
+  are times, `Time - Time` a `Span` (and
   `Time::since_power_on` a time's own, not `time - Time::ZERO`), `Span`s
   add and scale by counts, all saturating as `Time` does.  Every API
   taking or giving a span takes a `Span` (`Board::run_for`,
@@ -1462,26 +1558,31 @@ hand.  The keys are in `docs/board-files.md`.
   peripherals' next events and the drives in flight, in (time, sequence)
   order, and runs the chip with `run_for(budget)` in quanta that end at
   the earliest of them.  Chip cycles convert to board time from an
-  anchor (`TimeBase`: cycles, time, system clock), public so peripherals
-  convert as the board does, moved only at a sync point in
+  anchor (`TimeBase`: a chip `Cycle`, its time, the system clock;
+  `Board::system_clock`, the same clock the SIM makes and counts in
+  `Cycle`s as `Sim::system_clock`, each layer viewing it in its own
+  time), public so peripherals convert as the board does, moved only
+  at a sync point in
   which the frequency changed (SYNCR, a reset), so it never drifts;
   toward the chip a time rounds up to the first clock at or after it
   (Peripherals, GPT input edges), toward the board a clock rounds
-  down.  A peripheral gets the anchor with every call that has a time:
-  in its `Drive` (`Drive::system_clock`), and as an argument to those
-  without one (`next_event`, `wait_states`, `dsack_port`,
-  `set_qspi_clock`): a part keeps no base between calls and unwraps
-  none, and no notification of a change is needed, since the board
-  asks `next_event` again whenever it needs it (decided 2026-11, for
-  0.8.0).  `sample` and `interrupt_request` take none: a value on
-  board time, not a conversion.  A call's own time follows the same
-  rule: one given a `Drive` takes it from `drive.now()` and has no time
-  argument (`read`, `write`, `memory_read`, `memory_write`, `power_on`,
-  `reset`, `transfer`, `select`, `input`, `advance`); one without takes
-  it as an argument (`sample(port, now)`, `set_qspi_clock(clock, now,
-  system_clock)`) or in its access (`PeripheralAccess::now`, for
-  `wait_states` and `dsack_port`), so no call has two times to
-  disagree.  A part the chip
+  down.  A peripheral gets its time and the anchor together, as a
+  `time::Moment` (`now()`, `system_clock()`, `cycle()`, the chip's
+  clock at it rounded up), with every call: one given a `Drive` takes it
+  from the drive (`Drive::moment`, `Drive::now` for the time alone) and
+  has no time argument (`read`, `write`, `memory_read`, `memory_write`,
+  `power_on`, `reset`, `transfer`, `set_selected`, `input`, `advance`);
+  one without takes `moment: Moment` last (`wait_states`, `dsack_port`,
+  `set_qspi_clock`, `analog_output`, `next_event`).  So no call has two
+  times to disagree (a `PeripheralAccess` carries none), a part keeps
+  no base between calls and unwraps none, and no notification of a
+  change is needed, since the board asks `next_event` again whenever it
+  needs it.  `interrupt_request` takes none: a level now, not a
+  conversion (decided 2026-11, for 0.9.0: `Moment` replaced
+  `PeripheralAccess::now`, `Drive::system_clock` and the bare
+  `system_clock`/`now` arguments, five ways a peripheral got its time;
+  `Peripheral::sample` became `analog_output`, the drive's `sample`
+  reading it, and `select` `set_selected`).  A part the chip
   does not clock (an oscillator, an oven, a GPS engine) that counts in
   cycles counts on `TimeBase::steady(frequency)`, clock zero at
   power-on and never moved: on the chip's base it would fall behind
@@ -1548,13 +1649,17 @@ hand.  The keys are in `docs/board-files.md`.
   run, which the board records and goes on from), pin edges with
   their clock and board time, QSPI transfers, positions and the run's
   end.  The text, `CHIP: KIND key=value ...` after a `# mc683xx trace
-  2 chip=CHIP` header, the chip's `Chip::TYPE` the prefix, is
+  4 chip=CHIP` header, the chip's `Chip::TYPE` the prefix, is
   smartclock-emu's shape, so a smartclock run and a board run diff
   line for line.  smartclock-emu's own traces call a bus cycle
   `device`; boot-diff reads that dialect.
 - **Run-time endpoints stay out of the file:** the file names them,
-  the runner binds them (`--bind host=stdio`, `stdout`, `pty`,
-  `null`, `file:PATH`).
+  the runner binds them (`--bind host=stdio`, `stdout`, `tty`, `pty`,
+  `null`, `file:PATH`).  Its standard error holds two kinds of line:
+  records, prefixed by the chip (the trace, `external` values, where a
+  `pty` or `tty` was `bound`; docs/tracing.md, semver-covered), and
+  messages, prefixed by the runner (`mc683xx-run: ...`), which are
+  not.
   Paths for working copies (an EEPROM's), the seed and the run length
   are runner options, handed to constructors as an `Environment`;
   every noise model draws from the one seed (each peripheral its own
@@ -1584,30 +1689,39 @@ hand.  The keys are in `docs/board-files.md`.
   instruction, and the board moves the base and its time there.  The
   synthesizer locks at once here (always SLOCK), so the change is at
   the write.
-- **Run loop:** `Board::run_until(until)` is the library's, for hosts to
+- **Run loop:** `Board::run_until(deadline)` is the library's, for hosts to
   embed (smartclock-emu builds its own command on it); `send` and
   `take_received` move values through run-time endpoints between
-  runs.  `Board::run_until_quantized(until, quantum, before)` runs it in quanta
+  runs.  A run's limit is named alike at every layer: a span is its
+  `budget` (`Board::run_for(budget)`, `run_frame(wall, budget)`, the
+  chip's `run_for(budget)`, gdb's `Target::run_for(budget, hit)`), an
+  instant its `deadline` (`run_until(deadline)` and its `_quantized`
+  and `_paced` forms, the chip's `run_until(deadline)`), as std's
+  `recv_deadline`; Python's board keeps `seconds=`/`picoseconds=`
+  (decided 2026-11, for 0.9.0).
+  `Board::run_until_quantized(deadline, quantum, before)` runs it in quanta
   of board time (a `time::NonZeroSpan`: a quantum of 0 would never end,
   so the type has none, and a host's zero is its own error, Python's
   `ValueError`, not a picosecond), calling `before` before each (the Python bindings'
   Ctrl-C checks), `Break` ending it `Stop::Requested`; a board halted
   or in background mode before a quantum goes on to the next, so the
-  quanta change nothing.  `run_until` on such a board runs to `until`
+  quanta change nothing.  `run_until` on such a board runs to `deadline`
   as time passes without the CPU, as the chip's run does, and ends
   `Halted` or `Background` if the CPU still is.
-  `Board::stop_request()` is the host's `board::BoardStopRequest`
+  `Board::stop_request()` is the host's `BoardStopRequest`
   (not the core's: it holds the board weakly, so a peripheral may keep
   it, and stops the board's loop as well as the chip), which stops the
   run as a peripheral's `Drive::stop` does: for a peripheral that fails
   in a call with no `Drive` (the Python bindings' peripherals, in
   `next_event` or `interrupt_request`).  The loop looks for a request
-  before each quantum and after asking the peripherals' `next_event`, and
-  withdraws the chip's when it stops for one, so the next run does not
-  stop for it again.  `send` drives the nets the endpoint drives
+  before each quantum and after asking the peripherals' `next_event`,
+  its own or the chip's (one asked of the chip directly ends the board's
+  run too), and takes both when it stops for one, so the next run does
+  not stop for it again; a run that ends for another reason leaves both
+  pending.  `send` drives the nets the endpoint drives
   whose type carries the value, and fails (`SendError`) if there are
   none, so a typo or a value of the wrong type is not silently
-  dropped; `take_received` likewise fails (`ReceiveError`) for an
+  dropped; `take_received` likewise fails (`NoReceiver`) for an
   endpoint no net drives, rather than giving nothing for ever; the runner refuses at start-up a binding with
   input (stdio with standard input, a pty) to an endpoint that drives
   no serial net, naming it, and binds such an endpoint only to
@@ -1621,7 +1735,7 @@ hand.  The keys are in `docs/board-files.md`.
   library does not panic on a host's bug).  The bound allows a peripheral
   several events at one time; counting per peripheral, not per loop, keeps
   two stuck peripherals from resetting each other.  A run's end is never
-  past its `until`, though the chip's last instruction may end past
+  past its `deadline`, though the chip's last instruction may end past
   it, as a quantum's does.  `run_until` returns
   `Result<BoardRun, RunError>`.
 - **Front ends:** a TUI or GUI is the host's, outside this
@@ -1672,7 +1786,7 @@ hand.  The keys are in `docs/board-files.md`.
   `inspecting` as `saving` takes `Save`: an opt-in, since stable Rust
   cannot ask whether a model implements a trait, and the modules crate
   stays free of the board's types.
-  `Board::control() -> control::BoardControl` is the board's one
+  `Board::control() -> BoardControl` is the board's one
   thread-safe handle (an `Arc` of an atomic flag, a mutex and a
   condition variable; `Send`, `Sync`, `Clone`), for a front end whose
   event loop is another thread: `stop()`, `send(name, signal)`, checked
@@ -1690,7 +1804,7 @@ hand.  The keys are in `docs/board-files.md`.
   live UI's input lands at the sync point after it is queued, timed
   by when the UI sent it, which is inherent to live input.  Pacing
   (`pacing::Pacing`: `Unpaced`, the default, `RealTime`, `Scaled(Factor)`
-  board seconds a wall second, finite and above 0 by construction) is host-side only: `Board::run_until_paced(until,
+  board seconds a wall second, finite and above 0 by construction) is host-side only: `Board::run_until_paced(deadline,
   quantum)` runs as `run_until_quantized` does (`pacing::QUANTUM`, 5 ms, a good
   quantum) and, before each quantum, a `pacing::Pacer` sleeps until board
   time is no longer ahead of wall time times the factor, waking for a
@@ -1704,7 +1818,7 @@ hand.  The keys are in `docs/board-files.md`.
   held back and runs unpaced until it catches up; a new factor or a
   restore starts the pacing again from where the board is.  A host
   with its own clock that cannot sleep (a browser) runs the board a
-  frame at a time (`Board::run_frame(wall, bound)`): to the time
+  frame at a time (`Board::run_frame(wall, budget)`): to the time
   the board's own pacer says is due by the clock's reading
   (`Pacer::due`), bounded by the frame's slice.  A frame so bounded
   drops the time it missed: the pacing starts again from where it
@@ -1733,14 +1847,17 @@ hand.  The keys are in `docs/board-files.md`.
   [--firmware PATH] [--image NAME=PATH] [--option NAME]
   [--set PERIPHERAL.KEY=VALUE]
   [--bind NAME=stdio|stdout|tty|pty|null|file:PATH]
-  [--trace bus-cycles,exceptions,pins,qspi,nets] [--watch-code ADDR]
+  [--trace bus-cycles,exceptions,pins,qspi,nets] [--watch-code ADDRESS]
   [--position S] [--seed N] [--work-dir DIR] [--restore FILE]
-  [--save FILE] [--turn-us N] [--input-after S] [--gdb HOST:PORT]
+  [--save FILE] [--turn S] [--input-after S] [--gdb HOST:PORT]
   [--pace unpaced|realtime|FACTOR]`,
   a thin command on
   the run loop with the built-in types only: it runs in turns of
   board time, between which input goes in and output comes out, and
-  ends with a `stopped` record.  Without `--seconds` (or with
+  ends with a `stopped` record.  `--cycles`, `--watch-code` and
+  `--seed` take the one number syntax (`parse_integer`): bare digits
+  are decimal.
+  Without `--seconds` (or with
   `--seconds inf`) or `--cycles` it runs until Ctrl-C, gdb, a halt
   or a stop ends it.  With `--cycles` the last turn ends at
   that cycle's board time, so the run ends within an instruction of
@@ -1752,7 +1869,9 @@ hand.  The keys are in `docs/board-files.md`.
   old snapshot is replaced whole or not at all, and a second Ctrl-C
   removes the temporary file and leaves the target as it was.  Exit status 0 when the run spent its
   time, 1 for a board or file error, 2 for a wrong command, 3 when the
-  CPU halted, 4 when a hook or a peripheral stopped it, or Ctrl-C did.
+  CPU halted, 4 when a hook, a peripheral or a fault (`--stop-on-fault`)
+  stopped it, gdb killed it, or Ctrl-C did; 130 when a second Ctrl-C
+  ended the process at once.
   `--pace` paces the turns against wall time (`Board::run_until_paced`'s
   pacing, the run the same whatever it is), and under `--gdb` the
   stub's quanta while gdb has the board running: its `Target`'s
@@ -1773,9 +1892,10 @@ hand.  The keys are in `docs/board-files.md`.
   them): Ctrl-C while waiting for gdb, or while gdb holds the board,
   ends the session and the run, with the `stopped` record and
   `--save`, at the next wait.  A wrong command
-  includes seconds (`--seconds`, `--position`, `--input-after`) that
-  are not finite or are negative, and a `--turn-us` of 0 or one longer
-  than a `Span` holds.  Piped input is read
+  includes seconds (`--seconds`, `--position`, `--input-after`,
+  `--turn`) that are not finite or are negative, and a `--turn` that
+  is zero picoseconds or longer than a `Span` holds.  Every time flag
+  is seconds of board time, `--turn` (1 ms by default) too.  Piped input is read
   whole and fed a byte a turn from `--input-after`, so a run with it
   is reproducible; a terminal's or a pty's is not.  It is read when
   input first goes in, after `--gdb` has said where it waits, and the
@@ -1838,10 +1958,7 @@ Adversarial review of the board layer (2026-10-23):
   nets in file order, one seed: the same file, image, seed and
   bindings give the same run.  A binding to a terminal or pty is host
   timed, so a run with live input is not reproducible; piped input is
-  fed one frame per turn of fixed length, which is.  A SYNCR write
-  moves the cycle-to-time anchor only at the sync point, so board
-  time drifts by at most that quantum at the old rate; firmware writes
-  SYNCR once, at boot, before any edge matters.
+  fed one frame per turn of fixed length, which is.
 - *Latency.*  A peripheral's drive within the chip's run reaches the chip
   by the next instruction, and a chip output on a sensed net reaches
   its peripherals after the instruction that changed it, so a loop from the
@@ -1852,18 +1969,20 @@ Adversarial review of the board layer (2026-10-23):
 `mc683xx-gdb` serves gdb's remote serial protocol through the
 `gdbstub` crate (MIT OR Apache-2.0, a Cargo dependency like any other,
 so not in `third_party/NOTICE`, and named nowhere in the public API):
-one session, `serve`, over one trait, `target::Target`, on a
+one session, `serve`, over one trait, `Target`, on a
 `connection::Connection`, the stub's own trait, which it adapts to
-gdbstub's.  An emulated target gives `cpu_scope` (registers and
+gdbstub's.  `Target`, `Connection` and `Waiter` each bound their
+`Error` on `std::error::Error`, as `Cpu32Target` does, so `serve`
+needs no `where` clause to print a `SessionError`.  An emulated target gives `cpu_scope` (registers and
 hooks), `read_memory` and `write_memory` (memory with no bus cycle, in
-a function code's space), `run_for(cycles, hit)` (a quantum) and
+a function code's space), `run_for(budget, hit)` (a quantum) and
 `reset`; the trait's other methods (registers, `resume`, `halt`)
 default to it, and it steps by a hook.  A target that steps by its own
 means gives `native_step`, a `NativeStep`; one with neither cannot step
 and gdb is offered no step, never a step that does not move.  The bare CPU (`flat::Machine`), the chip and a
 board implement it; the runner (`--gdb`) and the Python bindings
 (`serve_gdb` on `Machine`, `Mc68331` and `Board`) implement it over
-those, keeping their own work between quanta.  `bdm::Bdm` makes any
+those, keeping their own work between quanta.  `Bdm` makes any
 `Cpu32Target` one (Over BDM, below).  docs/gdb.md is the guide.  The chip's and the board's
 `Target` impls are features (`mc68331`, `board`), on by default, so a
 bare-CPU host builds the stub without the chip and board crates; the
@@ -1885,11 +2004,21 @@ checks the bare build.
   ends it, as a `Protocol` error: gdbstub has no reply for one.  The
   runner takes a failed session (`Connection` or `Protocol`) as a
   detach, said on standard error, so one bad packet does not cost the
-  run; a `Target` error, the board's, still ends it.
+  run; a `Target` error, the board's, still ends it.  gdb hanging up
+  (its exit, or a lost link, without a detach or a kill) is how a
+  session most often ends, so it is not an error: `Ending::HungUp`,
+  after the same cleanup, when the connection's error is one its
+  `Connection::hung_up` names (a `TcpStream`'s or a `Polled` one's at
+  its end, reset or aborted, or a broken pipe); a target under BDM
+  control is left halted, as after a failed session, and a host exits
+  as after a detach.  The runner says so on standard error and runs
+  on.
 - **Memory:** supervisor data space unless `monitor fc` names
   another, no bus cycle: memory the core
   serves (ROM too, so `load` works), module registers read through
-  `Module::peek`; peripherals neither read nor written (`E0e`).  A
+  `Module::peek`; a peripheral read and written through its `peek` and
+  `poke`, a call for each run of its bytes, `E0e` where it declines,
+  as it does by default.  A
   debugger's look never has a side effect; a host wanting real cycles
   makes them with `bus_read` and `bus_write`.
 - **Breakpoints and watchpoints:** code hooks for `Z0` and `Z1`,
@@ -1907,7 +2036,7 @@ checks the bare build.
 - **Stops gdb did not ask for:** the host's own hook stops are
   `SIGTRAP`, a halt and a bare host's fault stop `SIGBUS`, a stop
   request `SIGINT`.
-- **Over BDM** (2026-11-01): `bdm::Bdm`, any `Cpu32Target` as a
+- **Over BDM** (2026-11-01): `Bdm`, any `Cpu32Target` as a
   `Target`, so a host driving silicon through a BDM pod has gdb.  It
   gives no `cpu_scope`, so the session plants BGND for a breakpoint,
   read back and refused in ROM, has no hardware breakpoints or
@@ -1944,7 +2073,7 @@ checks the bare build.
   peripherals stop the run where something outside the CPU happens,
   which no breakpoint or watchpoint reaches (a DUART's character, a
   net's edge).  `mc683xx_board::condition` holds the protocol, gdb's
-  only through `target::Target::conditions` (the `board` feature): a
+  only through `Target::conditions` (the `board` feature): a
   `Condition` parsed from `monitor stop`'s words (`net NET CHANGE`,
   `peripheral NAME CONDITION [ARGUMENTS]`), armed on the board
   (`Conditions`, which `Board` implements) until disarmed.  A net's is
@@ -2008,7 +2137,7 @@ Adversarial review (2026-10-24):
   gdb as `SIGTRAP`.  Firmware's own `bkpt` is the CPU32's (CPU32RM
   4, BKPT), never gdb's: breakpoints never touch memory.
 - *What it needs of the core.*  Nothing new: `instructions()`,
-  `add_code_hook` and the memory hooks, `Memory::entry` and
+  `add_code_hook` and the memory hooks, `Memory::page` and
   `region_mut` for pokes, `Mc68331::peek` for peeks.
 
 ### Loading
@@ -2022,7 +2151,7 @@ binary, text for S-records and scripts) and opens no files, so its
 parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
 2026-11-21).
 
-- **Images:** `image::Image`, segments in address order, apart (ones
+- **Images:** `Image`, segments in address order, apart (ones
   that touch are joined) and not empty, and an optional entry point.
   From S-records (M68000PRM Appendix C): S1-S3 data, S0 ignored, S5
   and S6 counts checked (S6, a 24-bit count, is not in the manual but
@@ -2043,7 +2172,7 @@ parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
   times over and ask gigabytes of the host (decided 2026-11-02).
   S-records cannot: each data byte is two characters of the text.
 - **Load:** `Image::load(target, options)`: word writes in supervisor
-  data space (FC 5) unless the options name another; a segment's odd
+  data space unless the options name another; a segment's odd
   start or end byte refused before anything is written unless the
   options say byte writes (CPU32RM 6.2.3: a word at an odd address is
   an address error); calls of at most 256 bytes, so a failure names a
@@ -2054,16 +2183,20 @@ parse errors hold no `io::Error` and stay `Clone` and `Eq` (decided
   ELF `.bss` (memory past a segment's file bytes) is not written, as
   gdb's `load` leaves it.  `LoadReport` gives the segments, the bytes,
   the entry and whether it verified.
-- **Init scripts:** `script::Script`, one command a line, `#`
-  comments and blank lines: `write_memory.b|w|l ADDR VALUE [fc N]`,
+- **Init scripts:** (docs/init-scripts.md, the language's guide; a
+  format under semver) `script::Script`, one command a line, `#`
+  comments and blank lines: `write_memory.b|w|l ADDR VALUE [fc FC]`,
   `write_register NAME VALUE`, `write_system_register NAME VALUE`
   (names as the target crate's `FromStr` takes them),
-  `read_memory.b|w|l ADDR expect V [mask M] [fc N]` and
-  `poll_memory.b|w|l ADDR mask M expect V timeout_ms N [fc N]`; the
-  clauses in any order, each once; numbers hex with `0x` or decimal.
+  `read_memory.b|w|l ADDR expect V [mask M] [fc FC]` and
+  `poll_memory.b|w|l ADDR mask M expect V timeout_ms N [fc FC]`; the
+  clauses in any order, each once; numbers as `parse_integer` takes
+  them; a function code by name or number (`FunctionCode`'s
+  `FromStr`, as gdb's `monitor fc` takes one), printed by name.
   Parsing refuses what cannot work: a value wider than its access, an
   expected value outside its mask, a word or long access at an odd
-  address, a function code past 7.  A parse error carries its line; a
+  address, a word that names no function code and is no number from
+  0 to 7.  A parse error carries its line; a
   run error its line, the command (printed back as a script writes
   it) and the target's error, the value read or the timeout.  A
   script prints as its commands, a line each, which parse back to
@@ -2150,6 +2283,15 @@ Adversarial review (2026-11-01):
   `Bus`.  Per-page permissions and hook bits live in tables beside
   the entries, not in them, so the chip's rebuilds from the decode
   leave them; the host sets permissions, the hooks set their bits.
+- A page's bus-cycle clocks are a `u8` in the entry, the one count of
+  system clocks the API does not hold as `Cycles` (decided 2026-11,
+  for 0.9.0): the entries stay small for the fast path.  It is private
+  behind `Page::clocks() -> Cycles`; `Page::timed(port, Cycles)`
+  asserts it fits (`Page::MOST_CLOCKS`, 255, where an ECLK cycle, the
+  longest a select times, is 24), and `bus::stall` debug-asserts it.
+  `Termination::WaitStates` holds a `u8` too, but it is DSACK's field,
+  a count of wait states a select encodes (0 to
+  `Termination::MOST_WAIT_STATES`, 13), not of clocks.
 - The tables are two-level: a directory of slabs of 1024 pages (2
   Mbytes), each allocated when a map or a protection first reaches it;
   a page in no slab is on the bus with every permission, and a hook
@@ -2206,10 +2348,11 @@ Adversarial review (2026-11-01):
   is our choice.  It serves only what the fast table serves, so a
   hooked or protected page still fetches through the slow path.
 - A debugger's cycle-free read and write (`Memory::read_bytes`,
-  `write_bytes`; the bare `Machine::read` and `write` and the chip's
-  `Mc68331::read` and `write` are both these) go to the bytes a
-  supervisor page reads, whatever its permissions.  So a write then a
-  read give back what was written, and what the CPU reads and runs is
+  `write_bytes`; the bare `Machine::peek_bytes` and `poke_bytes` and
+  the chip's `Mc68331::peek_bytes` and `poke_bytes` reach memory
+  through these)
+  go to the bytes a supervisor page reads, whatever its permissions.
+  So a write then a read give back what was written, and what the CPU reads and runs is
   what the debugger wrote: a ROM's bytes, where its page writes to the
   bus, and a ROM's, not the RAM's, where a page reads one memory and
   writes another, as patching code needs.  A read of a page that reads
@@ -2252,8 +2395,87 @@ Adversarial review (2026-11-01):
   the real table's memory and the hooks.  So a cycle on other RAM
   costs what it did; an instruction tests one flag, `Memory`'s
   "special" (some page has a hook bit or a permission), before
-  looking for code and block hooks.  Invalid access and exception
-  hooks need no flag: bus errors and exceptions are slow already.
+  looking for code and block hooks.  While it is set, the CPU keeps
+  the quiet page: the last page an instruction was found on with no
+  code or block hook bit.  An instruction on it compares its page
+  number and looks nothing up (a ranged code hook that
+  never hit cost every instruction an out-of-line page lookup, 67 to
+  54 M instructions/s); any change to the hooks forgets it.
+  Installing or removing a ranged hook recomputes only its pages'
+  bits (and, for a bit that takes cycles off the fast path, their
+  fast entries); "special" is whether some page has a permission
+  short of all, kept as permissions change, or some hook range is
+  not empty (every add and remove recomputed every
+  allocated slab, 15 us on 256 Kbytes, now 80 ns).  Invalid access
+  and exception hooks need no flag: bus errors and exceptions are
+  slow already.
+- Coverage : `Cpu::add_coverage(range,
+  kind) -> CoverageId`; `CoverageKind::Execute` records natively the
+  address of each instruction executed in the range, a bit for each
+  word, read out as a `Coverage`
+  (`addresses`, `contains`), cleared, removed; on `CpuControl` too, so
+  the chip and board have it.  It sets a page watch bit of its own, so
+  an instruction off its pages costs what it did (the quiet page) and
+  one on them the out-of-line lookup the code hooks use.  It records
+  an instruction once no code or block hook stopped the run before it
+  (a stopped one is recorded when it runs).  Decided: not part of a
+  snapshot, as the hooks are not: it is host instrumentation, and a
+  restore that rewound it would lose what the runs since showed.
+  Edges (branch pairs) are deferred past 0.9.0, additively.
+  Read and write kinds record a bit for each byte of
+  each cycle a read or write hook over it would see, so the two agree
+  by construction: memory's and a peripheral's alike (a peripheral's
+  register map is what a host most wants covered), exception
+  processing's included (a vector, a frame; `MemoryAccess::stacking`
+  tells the hooks apart, a bitmap cannot, and leaving them out would
+  hide the stack's use), fetches excluded (the execute kind covers
+  code), faulted cycles and dropped stores excluded, as the hooks see
+  none.  Recorded where the read and write hooks are called, so a
+  long a bare host sees once is its four bytes.  Their own watch bits
+  take their pages off the fast path for reads (fetches included) or
+  writes alone, as a pre-read or pre-write hook's do; elsewhere no
+  cost.  Storage (review r13, R2): a page's bits are allocated at the
+  first set, in a two-level table (slabs of 1024 pages from the
+  range's first page, each a page's bits, both allocated at their
+  first record), the page last recorded in held out of it, so a
+  record there, as most are, is a compare and a store: 0.9 ns an
+  instruction over the flat bitmap on an execute coverage of the
+  sled, where the table alone cost 2.3 ns and a `BTreeMap` 4.7 ns.  So a
+  coverage over all 32 bits holds 16 Kbytes of slab pointers and what
+  it recorded rather than 256 Mbytes; the range is normalized (N1): start rounded
+  up to the kind's unit, end clamped to the address lines, a range
+  starting past either empty (`range()` then `1..=0`), as the hooks'
+  ranges past the lines match nothing.  The Python kind is a string,
+  `"execute"`, `"read"`, `"write"`: a name the host writes (python.md,
+  Names).  It replaces alpha.8's `add_coverage(range)`.
+- Opcode hooks: `Cpu::add_opcode_hook(range, mask,
+  value, hook)`, a code hook called only where the instruction's first
+  word, masked, is `value`; Python's `add_code_hook(..., opcode=(mask,
+  value))`.  A sibling, not an argument to `add_code_hook`, so the
+  plain hook's callers stay as they are.  Kept in the code hooks' list
+  (one install order, one resume), with a watch bit of its own
+  (`OPCODE`): a page with plain code hooks calls them as before; a
+  page with opcode hooks reads the word at PC through the fetch page
+  the opcode fetch then reuses, or else with no cycle, so an
+  instruction from the bus never matches (decided: the filter runs
+  before the fetch, and a bus read would be a cycle of its own), and
+  copies the registers for a match only.  The filter is native
+  because the Python call, not the compare, is the cost (a host's line-A
+  and TRAP dispatchers).  `Instruction::opcode` hands an opcode
+  hook the word, as a hook cannot read memory from Python while the
+  run holds the chip; a plain code or block hook's call has `None`
+  (decided: filling it for every code hook cost a no-op Rust hook on
+  every instruction 4 ns, 238 to 282 us on `nop`, coordinator's call;
+  mask 0 gives the word for every instruction memory serves).
+- Instruction number: `Instruction`, `MemoryAccess`,
+  `PendingRead`, `PendingWrite` and `InvalidAccess` carry
+  `instruction`, `Cpu::instructions` as the instruction began: the
+  instructions run before it, so an instruction's code hooks and its
+  accesses carry the same number and a host pairs them without its
+  own counter.  Exception processing within an instruction's step (its
+  own exception, a fault, a trace after it) carries that
+  instruction's number, as the count takes it in; an interrupt, taken
+  between instructions and not counted, the next instruction's.
 - When hooks run: code and block hooks before the instruction; a stop
   there leaves it unexecuted, and the next run executes it without
   calling the hooks that already ran for it.  Memory hooks after each
@@ -2267,6 +2489,101 @@ Adversarial review (2026-11-01):
   exception hooks once the frame is stacked and PC is the handler's.
   A stop from these takes effect when the instruction (or interrupt
   entry) ends.  Hook addresses are on the address lines (masked).
+- Pre-read hooks (`Cpu::add_pre_read_hook`, added for 0.9.0 at the
+  owner's call, against the recommendation to model such a device as a
+  peripheral that takes the memory): before an operand byte or word
+  read the core's memory serves all of, of a byte in the hook's range,
+  each covering hook in the order installed gets the read
+  (`PendingRead`, 1, 2 or 4 bytes), the core's memory as `&Memory` to
+  look at, and a copy of the bytes it is to read: what the hooks leave
+  in the copy answers the read and is not stored (serve-only: a hook
+  that stored its answer left RAM other than the firmware wrote it).  The copy and the shared `&Memory` cannot alias, so the
+  hook sees memory as it is and cannot change it.  A pre-read hook is
+  a device model that answers an operand; the read hooks observe bus
+  cycles (on the chip a long is one pre-read call, two word read hook
+  calls).  Operand-level, once
+  before the first cycle, whatever `set_long_bus` says (the read hooks
+  follow it): a long across two pages of memory is one call; a long
+  with a byte the bus serves is none, its cycles as usual, as the bus
+  has no bytes to copy until it runs them; a misaligned word or long,
+  an address error, is none, and so is a read a page's permissions
+  refuse, a fault, as its answer would be discarded.  The cycles
+  follow, timed by their pages, shown to the read hooks with the
+  served values.  Per range, removed by `remove_hook`, as the other
+  memory hooks.  Cost when absent, as pre-write's: an
+  operand read first tries the fast tables, inline, and checks the
+  flag set while any pre-read hook is installed only where they miss,
+  so pages with a pre-read hook leave the fast path for reads,
+  fetches included (not writes).  Before, the flag was checked ahead
+  of the fast path and such pages stayed on it, at `core/move_indirect`
+  +0.5%, `core/move_indexed` +1.2%.  Before and after the change (two
+  interleaved runs on one pinned core, on a shared machine, so +-2% is
+  noise): `core/move_indirect` -2.5% and +1.4%, `core/move_displacement`
+  -1.9% and +1.4%, `core/move_indexed` +0.5% and +2.5%,
+  `core/move_immediate_absolute` +0.2%, `core/move_postincrement` -3%,
+  `core/add_to_memory` +1.0%, `core/tst` -1.0%, `core/cmpi` -2.2%,
+  `core/btst_immediate` no change; `core/nop` and `core/moveq`, which
+  read no operand, +3% to +7%, with `run_instructions` the same size:
+  placement.  Re-measured on a quiet performance core,
+  the change's parent and itself interleaved: `core/nop` 80.8 and
+  80.6 us, `core/moveq` 85.0 and 85.1 us, the same; on an efficiency
+  core +2% and +2 to +6%, as before: placement there, not work.
+  Counted with `perf stat` (0.9.0 audit, docs/performance.md), the
+  change cost host instructions: +1.0% on `core/move_indirect` and
+  +5.5% on `chip/peripheral_move`, a miss looking the fast tables up
+  again in the slow path; that second look is gone.  Not for fetches (code hooks are theirs), nor a
+  look with no cycle (`Memory::peek`, a debugger's read).  Python's
+  `PendingRead.peek(address, length)` lends the memory to the callable
+  for its call alone, through a scoped thread-local (`scoped-tls`, no
+  `unsafe` here); a `PendingRead` kept past it raises
+  `RuntimeError`.
+- Pre-write hooks (`Cpu::add_pre_write_hook`, added for 0.9.0 at the
+  owner's call, against the recommendation to defer it):
+  the pre-read hook's mirror, a device model that takes an operand
+  the firmware writes to RAM.  Before an operand write of 1, 2 or 4
+  bytes the core's memory stores all of, its pages' permissions
+  allowing it, of a byte in the hook's range, each covering hook in
+  the order installed gets the write (`&mut PendingWrite`), the
+  core's memory as `&Memory`, as it was before the store, and a copy
+  of the bytes to be written: what the hooks leave in the copy is
+  stored, unless one called `PendingWrite::set_dropped(true)` and no
+  later one undid it, in which case nothing is.  Dropping is a method
+  on the pending write, not a result, so a hook's result stays
+  `Control` (Python's `True`/`False`/`None`) and a hook can both drop
+  and stop; each hook gets the write afresh but for the drop, so a
+  hook cannot change what later hooks see of its address.  The same
+  cases make no call as for a pre-read: a long with a byte the bus
+  takes (ROM, whose writes go to the bus, included), a misaligned word
+  or long, a write its pages' permissions refuse, a debugger's
+  `Memory::write_bytes`.  Exception processing's stacking is included,
+  a word at a time, highest address first, `stacking` set: a host that
+  drops a frame word leaves memory as it was there.  The order: the
+  pre-write hooks, then the store's cycles, timed by their pages; the
+  write hooks see each with the bytes stored and, as
+  `MemoryAccess::previous`, the bytes it replaced (the hooks cannot
+  change memory, so that is memory before the instruction's store).
+  A dropped store keeps its wait states: the CPU still drove the
+  cycle, and the device the hook models latched it rather than the
+  memory (decided for 0.9.0), so dropping does not change the run's
+  time; the core makes no cycle of it, and the write hooks see none.  A
+  stop takes effect when the instruction ends.  Cost when absent: an
+  operand write first tries the fast tables, inline, and checks the
+  flag set while any pre-write hook is installed only where they miss
+  (a page with a hook, permissions or the bus's, a long across pages),
+  so pages with a pre-write hook leave the fast path for writes (not
+  reads).  The flag checked before the fast path, as pre-read's was,
+  cost the write kernels 4% to 10% (`core/pea_displacement` +8%,
+  `core/clr_indirect` +6%): not adopted.  As adopted, before and after
+  (two interleaved runs on one pinned core): `core/move_indirect`
+  +0.6%, `core/move_postincrement` +0.5%, `core/add_to_memory` +0.9%,
+  `core/bset_memory` no change, `core/clr_indirect` -1.6%,
+  `core/pea_displacement` -2.9%, `core/move_register` (no memory)
+  -5.5%, placement.  Python's callable gets `(PendingWrite, data)`,
+  `data` a bytearray copy, and drops the store with
+  `PendingWrite.set_dropped(True)`, which, as `peek`, raises
+  `RuntimeError` once the call is over; its result keeps the
+  `True`/`False`/`None` rule.  A callable that raises leaves the bytes
+  and the drop as they were, and stops the run.
 - A block starts after a change of flow (`Flow::Changed`), an
   exception, reset, restore, or a host jump: a run that finds PC
   other than where the last run, reset or restore left it (the core
@@ -2280,9 +2597,40 @@ Adversarial review (2026-11-01):
 - The bus can ask for a stop too (`Bus::stop_requested`, asked after
   each cycle it ends, after the `reset` instruction's RESET and after
   an interrupt acknowledge): the chip's `StopRequest` handle, for its
-  peripherals, ends the run after that instruction, or between quanta if
-  a peripheral's `advance` asked.  The Python bindings use it: a peripheral's
-  exception stops the run there.
+  peripherals, ends the run after that instruction, between quanta if
+  a peripheral's `advance` asked, or at a reset the run takes (the
+  watchdog's, the halt monitor's) if a peripheral's `reset` asked,
+  before the first instruction after it.  The Python bindings use it: a peripheral's
+  exception stops the run there.  The chip's and the bare machine's
+  bindings track who asked (`StopRequestView`: the host through its
+  handle, the binding for the exception) and, as each call into the
+  target returns (`Pending::check`), withdraw the binding's own unless
+  the host asked too, so the rule below keeps only a host's request.
+  The board's binding asks a transient stop
+  (`BoardStopRequest::request_transient`, hidden), which the board's
+  loop takes as it takes the others and the binding withdraws
+  (`withdraw_transient`) unless the board's own stop is asked too.  One rule on the chip, a board and
+  the bare machine (`flat::Machine`), decided 2026-11-26: only a run
+  that ends `Stop::Requested` takes a request.  One made where the run
+  ends for another reason at the same boundary (a hook's stop, a fault,
+  a halt, an exception stop, the run's own limits) stays pending, so
+  the host sees that end and the request both.  A request pending when
+  a run starts ends it at once, before its first instruction, and takes
+  the request (smartclock's review): a stop asked before the run began
+  means nothing runs, and as the end consumes the request, a host
+  looping on runs cannot livelock.  The check is once per run call, at
+  its start, not per instruction: `iterations` under
+  `perf stat -e instructions:u` counts the same as before the rule
+  (`core nop`, `chip ram_move idle`, `short chip`, `demo mandelbrot`).  The chip keeps the request its core took in the quantum
+  (`stop_taken`) and puts it back as the run ends otherwise, an
+  exception stop included, which its run reports as `Stop::Requested`
+  (r9) but tells from a request by the core's own end
+  (`Cpu::ended_itself`, hidden); the
+  board's loop takes its own only with `Stop::Requested`.  The bare
+  machine's `take_exception` and `reset` leave the request as it was:
+  they have no run to stop.  `restore` withdraws it on every machine,
+  a `BoardControl`'s stop from another thread included: the state it
+  belonged to is gone.
 - Cost when absent (`make bench`'s `core/*`, pinned to one
   performance core, before and after run in turn, on a loaded host
   whose results vary by up to 2x between runs): `nop` +6%,
@@ -2374,10 +2722,24 @@ and `mc683xx.Machine` in Python (see Python).
   when the host asks with `Cpu::set_long_bus`; the chip never does, as
   the CPU32's 16-bit bus splits it), and so do the read and write
   hooks, whatever served it (see Hooks).  A peripheral sees whether exception
-  processing is stacking (`Bus::stacking`).
+  processing is stacking (`Bus::set_stacking`).
 - **Interrupts:** a request line per level 1 to 7 that the host sets
   with a vector or the autovector, level-sensitive until it clears it.
-- **Runs:** `Cpu::run_limited(limits)`: `until` (checked at each
+- **Host exceptions:** `Cpu::take_exception(vector, level)` (and
+  `Machine`'s, Python's `take_exception(vector, level=None)`), between
+  runs: the core's own exception processing (`process`, CPU32RM 6.1.3),
+  a four-word format $0 frame of SR and PC, the mask set to `level`
+  whatever it was, the exception hooks and `Bus::exception_entered`
+  called; STOP ended, no clocks charged.  A hook's or peripheral's stop
+  asked for in it has no run to end and is dropped.  A fault in it is
+  taken as in any exception processing (type IV, or a double bus fault
+  in a bus error's window, which taking vector 2 or 3 opens until the
+  handler's first fetch, CPU32RM 6.2.2), or with stop on fault returned
+  as `TakeExceptionError::Fault`: no exception entered, the registers
+  and the hooks at PC as before, the frame's writes before the fault
+  kept (memory is not rolled back).  Not on the chip, whose interrupts
+  come from its modules and pins.
+- **Runs:** `Cpu::run_limited(limits)`: `reach` (checked at each
   instruction boundary before an interrupt is taken or a hook called
   there), `instructions`, and an optional cycle budget; with none, a
   `stop` ends the run at once instead of waiting it out.  The limit
@@ -2385,15 +2747,63 @@ and `mc683xx.Machine` in Python (see Python).
   monomorphized twice, stopped `step` being inlined and cost 20% on
   `core/nop`.  `clear_resume` forgets a hook stop's skip, so a run
   from where a hook stopped calls it again.
+- **Self-loop stop** (opt-in): `Limits::self_loop` ends
+  the run (`End::SelfLoop { pc }`) once an instruction that branches
+  to itself executes, BRA with a displacement of -2 (8, 16 or 32
+  bits) or a JMP of its own address, as firmware idles waiting for an
+  interrupt, so a harness need not run out its budget there.
+  Decided: the loop runs once, its cycles counted, and the run ends
+  after it, PC at it (as the CPU does; each run that asks runs it
+  once more, so time moves); an interrupt due at its boundary is taken
+  before it, as ever, so the run ends there only with none due; not
+  while T1 or T0 is set, as a traced loop takes a trace exception
+  each time round, so it is not idle.  The code and block hooks before
+  it run as for any instruction.  DBcc to itself counts down and
+  ends, so it is not one; `stop`/`lpstop` already end a run without a
+  budget.  No exception is involved, so `set_stop_on_exception` and
+  intercepts do not meet it.  The gdb stub's runs never ask for it.
+  The BRA and JMP handlers look for it, testing a flag the limited
+  run sets only when the branch is to its own address, so no other
+  instruction, and no run that does not ask, pays for it: host
+  instructions per iteration are those without it but for
+  `core/bra_self`'s +1.5% (`perf stat`, 2N - N).  A test in the run
+  loop's limit checks before each boundary, looked for with no cycle
+  from memory, the instruction left unexecuted, cost every limited run
+  +1.6% host instructions (`core/nop_limited`, `hooks.py`'s run with
+  no hook -4%) and was not kept.  The chip and board have no `Limits`
+  for hosts; for them (review r13, R1, the owner's call) the setting
+  `Cpu::set_stop_at_self_loop`, on `CpuControl` and Python's
+  `Mc68331` and `Board.chip`, ends every run at one, `Stop::SelfLoop`
+  (a new `Stop` variant, as `set_stop_on_fault`'s `Stop::Fault`; a
+  limited run's end stays `End::SelfLoop`).  One implementation: the
+  flag the BRA and JMP handlers test is the setting at rest, and a
+  limited run sets it to the setting or its `Limits::self_loop` and
+  puts the setting back, so off it costs what it did.  The gdb stub
+  reports it as `SIGTRAP` (`TargetRun::SelfLoop`), as an exception
+  stop, a stop the program reached, not one asked from outside; the
+  wasm bindings, which cannot set it, name it `"self-loop"` all the
+  same, so a page never meets an unknown stop.
+- **A stop and an end in one instruction** (review r13, N2): where an
+  instruction both asks for a stop (a hook's, the bus's) and makes an
+  end (a fault, an intercept, an exception stop, a self-loop),
+  `LimitedRun::end` is the end, and `run_for`'s `Run::stop` the stop
+  asked first, but a fault's `Stop::Fault`, which replaces any.
+  Decided: the end wins a limited run because it says what became of
+  the instruction (undone, intercepted, not taken), which a host must
+  act on, where a hook's stop only asked to pause; the unlimited run
+  has no detail to carry, so it keeps the first stop, as before.  The
+  Python `Machine`'s in-run hooks follow (B1).
 - **Faults:** `set_stop_on_fault`: a bus or address error ends the
   run (`End::Fault`; an unlimited run, `Stop::Fault`, before any other
   stop asked for in the instruction): fetch, read or write; bus error
   (unmapped or a peripheral's), protected, or address error; the whole
-  address; nothing stacked.  `Cpu::fault_stop` holds it until the next
-  run starts.  A fault while stacking (a bad SSP) stops the same
-  way instead of a double bus fault, so the host fixes SSP and goes on
-  with no reset, and so does one in `rte` loading a format $C frame
-  or rewriting its faulted frame (6.2.12): the RTE is undone.  What the stop keeps:
+  address; no frame stacked for the fault.  `Cpu::fault_stop` holds
+  it until the next run starts.  A fault while stacking (a bad SSP)
+  stops the same way instead of a double bus fault, so the host fixes
+  SSP and goes on with no reset; the frame's writes before the fault
+  stay written, as the registers roll back but memory does not.  So
+  does one in `rte` loading a format $C frame or rewriting its
+  faulted frame (6.2.12): the RTE is undone.  What the stop keeps:
   - A fault in an instruction, its own exception's stacking included
     (a TRAP's, a CHK's), rolls the registers back to its start: it
     reruns, as a TRAP does, when the run goes on.
@@ -2454,15 +2864,67 @@ and `mc683xx.Machine` in Python (see Python).
   - A trace RTE requeues from a format $C frame's TR (6.3.2.2) is
     kept as any trace is: a fault stacking it keeps the RTE, its
     rerun cycle not made again, and leaves the trace pending.
-- **Intercepts:** `set_intercepted(vector)`: an exception an
-  instruction raises (traps, illegal, line A and F, privilege, zero
-  divide, CHK, TRAPV, format error; not faults, trace or interrupts)
-  ends the run before anything is stacked (`End::Intercepted`), its
-  (An)+ and -(An) undone, PC at the instruction; flags it set (CHK's
-  N) stay.  `take_natively_once` lets the instruction at PC take it
-  natively when it runs again, which the host uses for an exception it
-  declines: the instruction reruns, exactly, as its effects were
-  undone.
+- **Intercepts (host-handled exceptions):**
+  `add_intercept_hook(vectors, hook)`: an exception an instruction
+  raises with one of `vectors` (traps, illegal, line A and F,
+  privilege, zero divide, CHK, TRAPV, format error, CPU32RM Table
+  6-2's groups 2 and 3, `VectorSet::INSTRUCTION`; not faults, trace
+  or interrupts) calls the hook before anything is stacked; one that
+  stops the run ends it (`End::Intercepted`), its (An)+ and -(An)
+  undone, PC at the instruction; flags it set (CHK's N) stay.  Where
+  several cover a vector they are called in the order installed until
+  one stops the run, the rest not called, so one host answers each
+  exception; none stopping it, the CPU takes it natively.  A hook,
+  not a flag per vector or a single callback (decided 2026-11-23), so
+  the host's parts each install their own and `remove_hook` takes
+  them off as any hook.  `take_natively_once` lets
+  the instruction at PC take it natively when it runs again, which the
+  host uses for an exception it declines: the instruction reruns,
+  exactly, as its effects were undone.  A general host feature (a
+  stubbed kernel call, an emulated instruction, a stop at any
+  exception), under semver like the rest of the API (decided for
+  0.9.0); Python answers it with its intercept hooks' callables within
+  the run.
+- **Exception stops:** `set_stop_on_exception(vectors)`, a
+  `VectorSet` (`VectorSet::ALL` for any): an exception of one of them
+  the CPU is about to take ends the run before anything is stacked
+  (`End::Exception { vector, pc }`): one an instruction raises, a fault
+  among them, a trace, a hardware breakpoint, and an interrupt once
+  acknowledged, as only the acknowledge gives its vector (the stop
+  withdraws it, `Interrupts::withdrawn`, and the next run acknowledges
+  it again, as a fault stop does).  Not a fault in exception
+  processing (a type IV fault or double bus fault is the processing's
+  own), nor `take_exception`'s, which the host asked for.  It reuses
+  the fault stop's machinery: an instruction's exception is undone
+  (its registers as it began for a fault, its (An)+ and -(An) for
+  another), a trace or breakpoint is left pending, and nothing is
+  charged.  The next host run takes that exception natively once, by
+  the PC, instruction count and vector it stopped at, as
+  `take_natively_once` does by PC, count and the vector the host
+  names, so running on is the default answer, and another exception
+  there (the trap after a trace the host withdrew, a higher interrupt
+  arriving since) is a stop of its own; `take_exception` is the
+  host's own.  Both keys are CPU state a run's outcome depends on, as
+  the trace a stop leaves pending is, so a snapshot holds them: one
+  taken at a stop, restored anywhere, takes that exception once and
+  runs on, and one taken before it stops there again (decided
+  2026-11-24, review round 7).  The exception stop's promise is the
+  stopped exception's: the next exception processed spends it, matching
+  or not, whatever the setting then, so none outlives the run on;
+  turning the setting off or on leaves it, so a snapshot restored
+  before or after turning it on runs on alike, and only reset and a
+  restore replace it.  Precedence, decided 2026-11-23: a fault with
+  `set_stop_on_fault` is a fault stop, its detail the richer; then the
+  intercept hooks, for the vectors they cover, an exception they all
+  decline taken natively with no exception stop, as the host has seen
+  it; then the exception stop.  A general debugging stop (a Unicorn
+  port's `UC_HOOK_INTR` with `emu_stop`), opt-in as faults are.
+  The bare CPU's alone: `CpuControl` does not offer it, so a chip or
+  board host cannot set it; a chip host wants the firmware's handlers
+  to run, as on hardware.  Offering it there later is additive, but
+  first fix the chip's run end: an exception stop at a boundary where
+  the run also syncs ends `Stop::Budget` (`chip.rs`, the `synced` arm),
+  untested (decided 2026-11-26).
 - **Hook context:** memory and invalid access hooks see the
   instruction's address (`pc`) and whether the cycle stacks a frame
   (`stacking`); `Cpu::instruction_registers` holds the registers as
@@ -2470,10 +2932,6 @@ and `mc683xx.Machine` in Python (see Python).
   after one, began while such a hook is installed or faults stop
   the run.  Stacking writes are flagged, not hidden: a host that wants
   them hidden skips them.
-- **Deviations, for parity runs only:** `Deviations { misaligned,
-  untraced }`: odd word and long data accesses run as byte cycles
-  rather than address errors (fetches stay strict), and T1/T0 trace
-  nothing.  Neither is the CPU32's behavior; both are off by default.
 - **Cost:** none of it on a run that does not ask, within the noise
   of the core benchmarks (best of interleaved runs on one pinned core,
   2026-10-23: `nop`, `dbra_self`, `move_indirect` -2 to +1%,
@@ -2506,7 +2964,7 @@ chip lets time pass without the CPU in either (PLAN.md, Determinism).
   The SIM's halt monitor resets only on a halt, so not on this entry:
   HALT driven would make the bypass of 7.2.2.3 pointless, an inference
   the manuals do not state.
-- The chip implements `Cpu32Target` (`mc683xx_mc68331::debug`), its
+- The chip implements `Cpu32Target` (`crates/mc68331/src/debug.rs`), its
   calls between runs, so between instructions.  `reset_halted` is
   `Mc68331::reset_with_breakpoint`: RESET with BKPT low through its
   rising edge enables background mode and enters it before the first
@@ -2755,6 +3213,11 @@ then they stay our choices.
   `Bus` with that FC.  For the chip-select SPACE match, FC 0-3 count
   as user and 4-6 as supervisor, by FC2.  The page tables serve only
   FC 1, 2, 5 and 6.
+- **SFC and DFC before a program writes them**: reset leaves them
+  undefined (CPU32RM 6.2.1 lists what it sets, and they are not
+  among them), so a new CPU (`Registers::default()`) holds code 0
+  (`FunctionCode::Reserved0`) in both, and a reset leaves them as
+  they were.
 - **MOVES second word, bits 10:0** (CPU32RM 4.4, MOVES, prints them
   zero): ignored, as Musashi's 68020 does.
 - **`stop` with S clear in its word**: loaded as given, as STOP's
@@ -3065,7 +3528,10 @@ then they stay our choices.
   where it stopped.
 - **A cycle no DSACK ends** (provisional): a bus error even when BME
   is clear, where the chip would wait forever; with BME set, also one
-  whose DSACK comes after BMT's period.  An address in the module
+  whose DSACK comes after BMT's period.  One whose DSACK comes after
+  more than `MOST_WAIT` (2^32) wait states, BME clear, takes
+  `MOST_WAIT`: a long wait, not a bus error (Decisions, the chip's
+  time).  An address in the module
   space no module acknowledges goes to the external bus.
 - **Port output changes** take the time of the write cycle that
   makes them, its start; a reset's take the reset's time.  The
@@ -3377,8 +3843,11 @@ runs 2 to 10 times faster than one at 16.78 MHz (`docs/performance.md`,
   transcripts are the nearest.
 - Boot of the Z3805A 3543B firmware to the same serial transcript:
   the core and the peripheral interface together.
-- A real 68331 over BDM, once a pod is available: the only check of
-  exception frames and undefined flags against silicon.
+- A real 68331 over BDM, through a pod's `Cpu32Target`: the only check
+  of exception frames and undefined flags against silicon.  Until it
+  is made, the provisional behaviors stay provisional: settled by the
+  manuals, the oracles and the firmware corpus where they can be, and
+  otherwise recorded as our choices.
 
 ## Phases
 
@@ -3393,9 +3862,7 @@ runs 2 to 10 times faster than one at 16.78 MHz (`docs/performance.md`,
 
 Phase 3 is in: hooks, page permissions, tracing, save and restore.
 The QSM and GPT save their registers and timing (the QSM not its
-host's QSPI peripheral, which a restore keeps).  Left: the Python
-bindings bind hooks and state; the Unicorn fault tests' code hook
-checks move onto real code hooks.
+host's QSPI peripheral, which a restore keeps).
 
 ## Decisions
 
@@ -3411,8 +3878,8 @@ checks move onto real code hooks.
 | Manuals kept in the repo, in Git LFS | The specification, beside the code that cites it.  NXP no longer serves them; its terms of use allow reproduction for personal non-commercial use only, a risk accepted for the public repo. |
 | Firmware images by path, not committed | Vendor images are not ours; feature-gated system tests read them from a path in an environment variable, for any board. |
 | Runs named `run_until` and `run_for` | A run to an absolute time is `run_until`, a run for a duration `run_for`, at every layer (the core, the chip, the board, gdb's targets, Python); a bare machine's run to limits is `run_limited`.  No bare `run`, whose meaning a reader must look up (decided 2026-10-24, before 0.1.0). |
-| The modules crate's assembly API sealed and hidden | `Module` and the plumbing only `mc683xx-mc68331` uses to compose the chip (register cycles, decode requests, the SIM's timer and reset handshakes, the serde helpers; from 0.7.0 the modules' blocks, chip-select decode, and the `Qsm` and `Sim` mutators a host cannot reach through the chip's `&Qsm` and `&Sim`) change with the chip; sealing `Module` and `#[doc(hidden)]` with a "Not part of the semver API" note keep them out of semver, so the chip can change them in a minor release, while what a host needs stays public (decided 2026-10-24, before 0.1.0). |
-| The board's chip traits sealed | `Chip`, `ChipBuilder` and `ChipPin` are what the board's run loop needs of a part, and change with it; a new chip (a 68332) is added inside mc683xx, beside `mc683xx_board::mc68331`, not by a host.  Sealing them and `#[doc(hidden)]` on the plumbing only the board calls keep them out of semver, while a host keeps `Board<Mc68331>`, `Board<C: Chip>` and the chip's methods it calls (`cpu`, `now`, `memory`, the resets, `save`).  Opening them later is not breaking (decided 2026-11-21, before 1.0). |
+| The modules crate's assembly API sealed and hidden | `Module` and the plumbing only `mc683xx-mc68331` uses to compose the chip (register cycles, decode requests, the SIM's timer and reset handshakes, the serde helpers; from 0.7.0 the modules' blocks, chip-select decode, and the `Qsm` and `Sim` mutators a host cannot reach through the chip's `&Qsm` and `&Sim`; from 0.9.0 the `module` module, `Lanes`, `Selects`, `ChipSelects::at` and `blocks`, `Termination::clocks` and `external_clocks`, `Sim::freezes_bus_monitor`, and `SystemClock::tick` and `at`) change with the chip; sealing `Module` and `#[doc(hidden)]` with a "Not part of the semver API" note keep them out of semver, so the chip can change them in a minor release, while what a host needs stays public (decided 2026-10-24, before 0.1.0). |
+| The board's chip traits sealed | `Chip`, `ChipBuilder` and `ChipPin` are what the board's run loop needs of a part, and change with it; a new chip (a 68332) is added inside mc683xx, beside `mc683xx_board::mc68331`, not by a host.  Sealing them and `#[doc(hidden)]` on the plumbing only the board calls (and on `mc68331::Section`, the MC68331's `Chip::Section`, from 0.9.0) keep them out of semver, while a host keeps `Board<Mc68331>`, `Board<C: Chip>` and the chip's items it calls (`TYPE`, the name it prints and a board file's `[chip] type` gives; `cpu`, `cpu_control`, `now`, `memory`, the resets, `save`).  Opening them later is not breaking (decided 2026-11-21, before 1.0). |
 | Board time with the SIM | It derives from SYNCR. |
 | Not cycle accurate, not cycle stupid | Firmware timing comes from peripherals, but timing loops and peripheral pacing need table-based estimates with wait states. |
 | Level-sensitive IPL plus IACK | Matches the chip; makes IARB natural. |
@@ -3425,10 +3892,10 @@ checks move onto real code hooks.
 | Block cache and lazy flags deferred | Simpler core; the per-instruction overhead measured first (`docs/performance.md`) is cheaper to cut directly. |
 | Benchmarks with criterion in the `benches/` workspace member | Statistics and saved baselines for before and after; its shared setup is tested by `make ci`, which only compiles the benchmarks. |
 | Python bindings behind a crate feature | The workspace forbids default-members; a `python` feature keeps PyO3, and a Python interpreter, out of `make ci`. |
-| Python mirrors the Rust types it wraps: `Run`, `LimitedRun` and `BoardRun`, `Stop` and `End` a class per variant (a variant's value a field named for it, `stop.hook`, `frame.data`, not `_0`; positional patterns still match), `Machine`, `HookId`, plain enums as enum classes | One name per item across both APIs (AGENTS.md); a host porting between them translates nothing.  A Rust type with `FromStr` crosses as its string; `End::Intercepted` and `End::Steps` have no Python variant, as the run answers an intercept and takes no step limit (decided 2026-10-24, before 0.1.0). |
+| Python mirrors the Rust types it wraps: `Run`, `LimitedRun` and `BoardRun`, `Stop` and `End` a class per variant (a variant's value a field named for it, `stop.hook`, `frame.data`, not `_0`; positional patterns still match), `Machine`, `HookId`, plain enums as enum classes | One name per item across both APIs (AGENTS.md); a host porting between them translates nothing.  A name a host writes when it wires (pin, chip select, net type, direction, register) crosses as its string, a value it matches on (kind, cause, port, channel, function code) as an enum class whatever its traits (amended 2026-11-23: the earlier "a type with `FromStr` crosses as its string" did not describe `Port`, `Channel`, `Input`, `Role`, `Lane` or `ResetCause`, and would have made `FunctionCode` the one value matched as a string); `End::Intercepted` and `End::Steps` have no Python variant, as the run answers an intercept and takes no step limit (decided 2026-10-24, before 0.1.0). |
 | A peripheral's Python exception stops the run after its instruction and is raised when `run_for` returns | The `MappedPeripheral` trait can report only BERR; the chip's `StopRequest` ends the run there, and the exception cannot cross it. |
 | A bare `Machine`'s hooks may write the CPU; their callables run between core runs | Unicorn's harness stubs routines and peripherals from hooks; queuing in the core and calling Python with nothing borrowed needs no `unsafe` and costs only hooks that fire. |
-| A Python hook stops the run on a truthy result; its exception stops it as `Break` and is raised when `run_for` returns | A breakpoint is `return True`; a hook returns `Control`, so it can stop where it is, with no stop request left for the next run. |
+| A Python hook stops the run on `True`, not on `None` or `False`, and raises `TypeError` on anything else; its exception stops it as `Break` and is raised when `run_for` returns | A breakpoint is `return True`; a hook returns `Control`, so it can stop where it is, with no stop request left for the next run. |
 | Hook stops before an instruction skip that instruction's hooks once on resume | A breakpoint must stop before the instruction yet let the next run past it. |
 | A snapshot taken at a hook stop keeps that hook's skip on restore | Restore resumes exactly where the run stopped; no block hook fires again at that instruction (decided 2026-10-23). |
 | GPT clock outputs high in the system clock the tap advances its counter in | GPTRM 5.1 gives no phase; ours lines a compare's pin action up with a rise (decided 2026-10-23). |
@@ -3443,8 +3910,9 @@ checks move onto real code hooks.
 | Host bus cycles take no chip time and drop a peripheral's stop request | They are a debugger's, between runs: no instruction to charge, no run to stop. |
 | A bus stop request (`Bus::stop_requested`) beside hooks | A peripheral has no hook of its own; one question per bus cycle costs nothing on RAM. |
 | Board files in TOML, peripheral types from a registry | The file says what is wired where and how the chip is configured, never what a peripheral does; behavior stays the host's code.  A registry of names leaves room for plugins without a format change.  No dynamic loading yet (decided 2026-10-23). |
+| Board files' version 1 frozen from 1.0.0, not before | Decided 2026-11 (0.9.0).  The freeze was dated from 0.1.0, which kept a lane as a `role` (`role = "upper"`, `"lower"`) for ever beside `lane`; with breaking changes allowed before 1.0 and no compatibility cruft kept, version 1 may change in place in a minor release before 1.0.0, its release notes carrying the migration, and from 1.0.0 a change that makes a version 1 file mean something else, or refuses one, is version 2.  No version 2 is planned. |
 | A bare CPU (`mc683xx_cpu32::flat`, `mc683xx.Machine`) beside the chip, 32 address lines by default | Function-level firmware tests map code and stubs at addresses no 68331 decodes (smartclock's harness uses $31400000); a chip-select decode would only get in the way. |
-| Bare-host stops (faults, intercepts) and parity deviations opt-in, off by default | The default stays the CPU32's behavior; a host porting from Unicorn asks for what it relied on, by name. |
+| Bare-host stops (faults, intercepts) opt-in, off by default | The default stays the CPU32's behavior; a host porting from Unicorn asks for what it relied on, by name. |
 | Published to crates.io and PyPI, one semver version for the workspace from 0.1.0, notes in GitHub releases | Decided 2026-10-24, with the repository public.  One version keeps the crates and the wheel in step; a release is tagged only on a commit that has passed every check (`docs/releasing.md`). |
 | abi3 wheels and the crates published by the `release` workflow, both by trusted publishing | One wheel per platform covers every Python from 3.12; no token is stored.  crates.io's trusted publishing needs the crate to exist first, so only the first release is published by hand (decided 2026-10-24). |
 | A GDB stub on the gdbstub crate, generic over a small `Target` trait, its breakpoints and steps hooks | Decided 2026-10-24; gdbstub is MIT OR Apache-2.0.  Hooks cost nothing until installed and never touch memory; one trait serves the bare CPU, the chip, a board and hosts with run loops of their own. |
@@ -3452,38 +3920,34 @@ checks move onto real code hooks.
 | The public API names no foreign type but serde 1's traits (below) | A dependency's major release must not break ours: board parameters are `registry::ParameterValue`, a syntax error a `SyntaxError`, a snapshot that does not decode a `DecodeError`, each opaque or ours.  `serve` takes the stub's own `connection::Connection` (write, flush, a blocking read and a peek that does not wait), adapted to gdbstub's inside the crate, so gdbstub's major version is not ours (decided 2026-11-21, reversing 2026-10-24's keeping of gdbstub's `ConnectionExt`). |
 | serde 1 in the public API, an accepted exception | The state types derive `Serialize` and `Deserialize` (`mc683xx-target`'s behind its `serde` feature), which is how the snapshot layers encode them; hiding the derives would mean a second set of types to keep in step.  serde 1 is stable, so a host is not broken by our dependency; the snapshot bytes stay outside semver (`docs/releasing.md`, Semver scope) (decided 2026-11-21, before 1.0).  The serde bounds on the board's chip traits (`ChipPin`'s `Serialize` and `DeserializeOwned`, `Chip::Section`'s) are not host API: those traits are sealed (above), so no host type has to meet them. |
 | `Cpu::registers` and `Cpu::memory` stay public fields | The programming model is the host's to read and write as it likes (a test's setup, a harness's comparison); no invariant spans them that a setter would guard, and hosts reach them a thousand times as fields (decided 2026-10-24). |
-| `memory::Page` public but non-exhaustive, built from `Page::BUS`; `MemoryKind` non-exhaustive | Decided 2026-11-21 (0.8.0).  A host that runs a bare `Cpu` on a memory map of its own lays it out with `Memory::map`, so it builds pages (the harness's firmware map and the benches do); the chip builds its own from the chip selects.  So `Page` stays public, its fields readable, but built as `Page::BUS.reading(..).writing(..).timed(port, clocks)`, so a field added after 1.0 gets a default.  `MemoryKind` may gain a kind (a write-once memory), each answering `writable`. |
+| `memory::Page` public but non-exhaustive, built from `Page::BUS`; `MemoryKind` non-exhaustive | Decided 2026-11-21 (0.8.0).  A host that runs a bare `Cpu` on a memory map of its own lays it out with `Memory::map`, so it builds pages (the harness's firmware map and the benches do); the chip builds its own from the chip selects.  So `Page` stays public, its fields readable, but built as `Page::BUS.reading(..).writing(..).timed(port, clocks)`, its clocks read through `clocks()`, so a field added after 1.0 gets a default.  `MemoryKind` may gain a kind (a write-once memory), each answering `writable`. |
 | A fixed memory on no select, emulator-only; a matching select wins | A host's hybrid boot maps rewritten code beside an image it must not change, where the only alternative was patching the reset code to program a select the firmware leaves unused.  A select winning keeps the firmware's decode as on hardware wherever it decodes; fast termination and no DSACK by default, as the chip has nothing to model, a select's internal timing (port, wait states) on request so code runs at its original bus speed; contents survive resets as RAM's unless a reload scope says (decided 2026-10-24). |
 | Pacing host-side, a front end's control taken at sync points | A GUI wants board time at wall speed and a stop and keys from its own thread; sleeping between quanta against the wall clock, outside the board's model, and taking a thread-safe handle's stop and inputs at sync points on the board's thread, keeps the core single-threaded, host time out of the model and the run the same whatever the pacing (decided 2026-10-24). |
+| Machines are not `Send`: built and run on one thread, `BoardControl` the `Send` handle | Decided 2026-11-23 (0.9.0 review).  `Cpu`, `Machine`, `Mc68331`, `Board` and `Registry` hold hook closures, peripherals (`dyn MappedPeripheral`, `dyn Peripheral`, `dyn Observer`) and registry constructors with no `Send` bound, and `Rc` handles (`StopRequest`, `BoardStopRequest`, `SyncRequest`, the wiring's shared state).  A host builds a machine on the thread that runs it; another thread reaches a board only through `BoardControl` (`Send + Sync`), whose stops and inputs the run takes at its sync points.  What a machine is built from (`Description`, `Image`, `Script`, `Memory`, `Pacer`) and the error types are `Send`.  `Send` machines would put a `Send` bound on every peripheral, observer, hook and registry constructor, and `Arc`s in the handles, for a host that builds a board on one thread and moves it to another, which none does.  Stated so 1.0 freezes it: adding the bound later breaks implementers whose peripherals are not `Send`, and dropping it would break hosts that moved a machine. |
 | Front ends outside the repository and the board file; they observe nets and inspect peripherals | Board files describe hardware, which a UI is not; a front end's needs are the host API's: read-only observers on nets, peripherals' state by type, inputs through externals.  Read-only keeps every run deterministic whatever watches it (decided 2026-10-24). |
 | Board nets with their own picosecond time | Peripheral-to-peripheral edges need sub-cycle time (an FPGA interpolator resolves about 0.5 ns against 59.6 ns cycles); integer time keeps it deterministic, and only chip inputs round to a clock (decided 2026-10-23). |
-| `Cpu32Target`: a memory call names its function code; halting reports the entry source; `halted` polls; `step` stops at the next boundary | Decided 2026-10-31 with the BDM pod; `step` 2026-11-01.  A named space leaves no hidden SFC/DFC state between calls for a debugger to forget, and an implementation over READ and WRITE restores the program's SFC and DFC before GO.  ATEMP holds the entry source only until the next command (CPU32RM 7.2.3), so halting returns it.  A poll, not a blocking wait, as `no_std` firmware has no clock to wait on.  `step` runs one instruction, or takes one exception, and stops before any handler's first instruction, so a debugger over it reads RPC rather than assuming one instruction; the pod meets that on silicon by stepping with T1 and pointing VBR, for the step, at a RAM table whose every vector is a BGND stub.  `Error: core::error::Error + From<Unsupported> + 'static` (2026-11-21, with the pod), so a host carries either target's errors as its own, as a `source()` too.  After 1.0 the trait gains a method only with a default body that returns `Err(Unsupported { what }.into())`: an implementation written before it still builds, and that call fails cleanly.  The pod names `reset_running`, `call`, `hold` and `resync` as candidates. |
-| A memory access's arguments in one order: address, size, function code | Decided 2026-11-21 (0.8.0).  `Mc68331::bus_read`, `bus_write` and `peek`, the `BusAccess`, `BusCycle` and `PeripheralAccess` constructors, and `Cpu32Target::read_memory` and `write_memory` all take `(address, size, function_code, ..)`, so a call reads the same whichever layer it reaches and two same-typed neighbors cannot be swapped unnoticed by habit.  The order is a bus cycle's own: where, how wide, then which space, the function code being the qualifier a debugger most often leaves at supervisor data.  gdb's `Target` memory calls take no size (the stub sizes them), so `(address, function_code, ..)` is the same order with size dropped. |
+| `Cpu32Target`: a memory call names its function code; halting reports the entry source; `halted` polls; `step` stops at the next boundary | Decided 2026-10-31 with the BDM pod; `step` 2026-11-01.  A named space leaves no hidden SFC/DFC state between calls for a debugger to forget, and an implementation over READ and WRITE restores the program's SFC and DFC before GO.  ATEMP holds the entry source only until the next command (CPU32RM 7.2.3), so halting returns it.  A poll, not a blocking wait, as `no_std` firmware has no clock to wait on.  `step` runs one instruction, or takes one exception, and stops before any handler's first instruction, so a debugger over it reads RPC rather than assuming one instruction; the pod meets that on silicon by stepping with T1 and pointing VBR, for the step, at a RAM table whose every vector is a BGND stub.  `Error: core::error::Error + From<Unsupported> + 'static` (2026-11-21, with the pod), so a host carries either target's errors as its own, as a `source()` too.  After 1.0 the trait gains a method only with a default body that returns `Err(Unsupported::new(what).into())`: an implementation written before it still builds, and that call fails cleanly.  The pod names `reset_running`, `call`, `hold` and `resync` as candidates. |
+| Every function 64-byte aligned on x86_64 (`.cargo/config.toml`) | Decided 2026-11-26 (0.9.0 audit 3).  Where a hot function starts against the uop cache moved a Python write hook's rate by 3% to 5% from link to link, alpha.8 to alpha.11 losing it to commits that changed host instructions by 0.05%; aligned, every link places alike, the hook loop and the Rust kernels gain 0.6% to 3%, for 3.8% more module (docs/performance.md, Function alignment).  Not wasm32, where it means nothing.  A `RUSTFLAGS` environment variable replaces it and crates.io dependents do not read it, so docs/performance.md tells a native host to add it.  Placement is compared with `scripts/placement-bench.sh`, over builds relinked in shuffled order and the module's eight places, not over `-C metadata` seeds, which barely move the code. |
+| A memory access's arguments in one order: address, size, function code | Decided 2026-11-21 (0.8.0).  `Mc68331::bus_read`, `bus_write` and `peek`, the `BusAccess`, `BusCycle` and `PeripheralAccess` constructors, `Fault::new` after its vector (0.9.0 review), and `Cpu32Target::read_memory` and `write_memory` all take `(address, size, function_code, ..)`, so a call reads the same whichever layer it reaches and two same-typed neighbors cannot be swapped unnoticed by habit.  The order is a bus cycle's own: where, how wide, then which space, the function code being the qualifier a debugger most often leaves at supervisor data.  gdb's `Target` memory calls take no size (the stub sizes them), so `(address, function_code, ..)` is the same order with size dropped. |
 | No `From` between a unit-bearing newtype and its number (`Cycles`, `Time`, `Span`, `Frequency`); named constructors and accessors only | Decided 2026-11-21 (0.8.0, round 5).  `Cycles::from(5)` or `u64::from(span)` reads as a number with no unit, and an `.into()` converts silently where a clock count, a picosecond count and hertz are all `u64`s; `Cycles::from_clocks(5)` and `span.picos()` say which.  Bit-pattern newtypes (`Address`, `Vector`) keep `From` both ways, every value valid. |
-| Unit-bearing newtypes keep private fields; bit-pattern newtypes whose every value is valid have public ones | Decided 2026-11-21 (0.8.0, round 5).  A quantity (`Cycles`, `Frequency`, `Time`, `Span`) is reached through constructors and accessors that name its unit, so its field is private.  A bit pattern (`Address`, `Vector`) is a value read off the lines, with no unit and every value valid, so `Address(0x400)` and `vector.0` read as the hardware does and its field is public.  One with values that are not valid (`FunctionCode`, three bits; `InterruptLevel`, 0 to 7) keeps its field private behind a checked constructor. |
+| Unit-bearing newtypes keep private fields; bit-pattern newtypes whose every value is valid have public ones | Decided 2026-11-21 (0.8.0, round 5).  A quantity (`Cycles`, `Frequency`, `Time`, `Span`) is reached through constructors and accessors that name its unit, so its field is private.  A bit pattern (`Address`, `Vector`, `peripheral::Select`) is a value read off the lines, with no unit and every value valid, so `Address(0x400)` and `vector.0` read as the hardware does and its field is public.  One with values that are not valid (`InterruptLevel`, 0 to 7) keeps its field private behind `TryFrom` (below); `FunctionCode`, eight codes each with a meaning, is an enum (0.9.0). |
+| One conversion for each kind of value: `TryFrom<u8>` and `From<T> for u8` for a checked value, a named pair for an encoding, opaque received ids | Decided 2026-11-23 (0.9.0).  A checked value (`InterruptLevel`, `IrqPin`, `PortGpPin`, `chip_select::Number`, `FunctionCode`) had `new`/`get` and `TryFrom`/`From` both, or only `new`/`get`; now only `TryFrom<u8>` (`No<Type>(u8)`, so `?` carries why) and `From<T> for u8`, and `IrqPin::level()` gives way to `From<IrqPin> for InterruptLevel`.  A wire or field encoding keeps a named pair (`Register::code`/`from_code`, `Size::field`, `Entry::atemp`), as `From` would hide which encoding.  A register-order index is `index`/`from_index` (`ChipSelect`).  An id a host only receives and gives back (`PeripheralId`, `ConditionId`, `ObserverId`, `HookId`) is opaque, `Display` and no `From`, so a host cannot forge one; `PeripheralId`'s number is reachable only through hidden plumbing for the workspace's crates, and `ConditionId` parses from the number it prints, as a debugger's `monitor stop delete N` names one.  A value the host chooses (`ConditionToken`) is one `From` pair.  A `const fn` that needed `get` (`iack_address`, `Sim::interrupt_pin`, `Builder::set_autovector`, `Mc68331::set_interrupt_pin`) is no longer `const`, and no hidden `get` stays for it (review round 2). |
+| One number syntax for what a person types: `mc683xx_target::parse_integer` | Decided 2026-11-22 (0.9.0).  Init scripts, gdb `monitor` commands, the runner's options and the numbers in board-file strings all take decimal, `0x` hexadecimal or `0b` binary, the prefix in lower case, `_` between digits, no sign, no `$`, no decimal leading zero, so a number that works in one works in all and `010` is never octal by surprise.  One `no_std` function in the target crate, generic over the result (`TryFrom<u64>`, so the runner's 64-bit `--cycles` and `--seed` take it too), so a pod's firmware takes the same text; its error is `Invalid` or `TooLarge`, without the text, as the crate has no `alloc`.  A board file's TOML integers keep TOML's own syntax (`0o`, `+`), which the TOML parser reads before the board sees it; gdb packets and S-records keep theirs. |
+| Chip time splits: `Cycle` an instant, `Cycles` a count | Decided 2026-11 (0.9.0).  `Cycles` was both a clock by number and a count of clocks, so `now + budget` and `budget + budget` read alike and a run's deadline and its budget had one type.  `Cycle` (system clocks since power-on) mirrors the board's `Time`: `ZERO`, `MAX`, `from_clocks`/`clocks`, `since`, `since_power_on`; `Cycle + Cycles` and `Cycle - Cycles` saturate at power-on and `MAX`, `Cycle - Cycle` is the `Cycles` between, zero if the second is later; Display `12 clocks`; serde as its `u64`, so snapshots keep their bytes.  `Cycles`, `Span`'s counterpart, keeps its `+` and `-`, gains `-=` and `saturating_add` and `saturating_sub`, and saturates as `Span` does: `+` at `MAX` (0.9.0 review: a peripheral's wait states may be any count, so a cost summed from them must not wrap), `-` at zero (a host's `budget - run.cycles` after a saturated cost neither panics nor wraps).  The core itself does not saturate (0.9.0 audit: five saturating adds an instruction cost +9% host instructions on `core/nop`): wait states beyond `MOST_WAIT` (2^32 clocks) per bus cycle count as `MOST_WAIT`; a run never starts within `HEADROOM` (2^48 clocks) of `Cycle::MAX`, so an instruction's clocks stay far below `Cycles::MAX` and a run's elapsed clocks below `Cycle::MAX`, and the core sums them with plain adds (`Cycles::plain_add`, crate-private; a debug build panics on overflow).  The cap is applied where a host's wait states enter: `Termination::external_clocks` (the chip's and the board's peripherals, Python's among them, each byte of a split word first) and the core's bus cycles and interrupt acknowledge (a bare `Bus`, `Interrupts::acknowledge`).  Decided 2026-11-24, replacing the core's saturation, which had a host's peripheral answering some 2^63 wait states with the bus monitor off move the chip's `now` to `Cycle::MAX`; before that the same input panicked in debug and wrapped time backwards in release; `Cycles::until` went (`Cycle::since`).  Every chip-layer instant is a `Cycle` (`now`, `at`, `next_event`, a run's deadline, a trace record's `cycle`, `TimeBase`'s anchor), every cost, budget and period `Cycles`.  "Cycle" alone means the clock; a bus transaction is a bus cycle, and a field holding its `BusCycleKind` is `kind` (`Fault`, `InvalidAccess`, `FaultStop`; 0.9.0 review). |
+| One set of time words at every layer | Decided 2026-11-23 (0.9.0).  Each layer has an instant and a span: the board `Time` and `Span`, the chip `Cycle` and `Cycles`, the host std's `Instant` and `Duration`.  `now` is always the current instant in the layer's unit, never a bundle; `at` is a given instant other than now; a run's limit is a span `budget` (`run_for`) or an instant `deadline` (`run_until`), as VHDL's `wait for` and `wait until`; `since` is the span back to an earlier instant; `after` counts from one (`edge_after`); `next_event` is when a part next has work.  A conversion is named for its result and takes the instant it converts as `at` (`TimeBase::time(at: Cycle)`, `TimeBase::cycle(at: Time)`, `Clock::phase(at)`); one from a phase takes `phase` (`Clock::time(phase)`).  A board peripheral's call takes its time as a `time::Moment` (board time and the system clock then): from its `Drive`, or as `moment` last where there is none.  A chip-level callback with no cycle struct takes `now: Cycle` last (`Timed::advance`, `SpiPeripheral::set_clock`, `MappedPeripheral::reset`, `set_port_pins`); one with a struct reads its `now` field (`BusCycle`, `QspiTransfer`).  Units follow std's `Duration` (`from_secs`, `secs_f64`); names a person types carry SI symbols (`_ps`, `_us`, `_hz`). |
 | Loading and init scripts in `mc683xx-debug`, over `Cpu32Target` | Decided 2026-11-01 with the BDM pod's maintainer.  One loader for silicon and the emulator, tested on the chip; a crate of its own, on `mc683xx-target` alone, so a pod host links it without the emulator.  Word writes, verify by default, RPC from the entry and no SSP inference, an init script with line-numbered errors; host time in `poll_memory` only. |
-| `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels) stay exhaustive, so a match on one needs no wildcard; the Python bindings' conversions of the others never panic: a run's end or halt they do not know raises `mc683xx.RunError` naming it, any other value (a fault cause among them) `NotImplementedError` naming its kind, but an event is never refused or dropped: one they cannot convert is `Event.Unknown(now, name)`, its Rust `Display`, and an unknown reset cause in a reset is `ResetCause.UNKNOWN`, so `take_events` always takes the whole queue (decided 2026-11-21, round 5); Rust tests (`every_run_end_maps_or_names_itself`, `every_value_maps`) list every variant, so a variant added to one is added there and mapped (decided 2026-11-21). |
+| `#[non_exhaustive]` on the outcome enums, the structs hosts read, and the configuration structs | A field or variant added later is not a breaking change.  Configuration is `X::default()` and set fields; a struct a host must build has a constructor.  Enums the hardware fixes (sizes, selects, ports, channels, reset causes) stay exhaustive, so a match on one needs no wildcard; the Python bindings' conversions of the others never panic: a run's end or halt they do not know raises `mc683xx.RunError` naming it, any other value (a fault cause among them) `NotImplementedError` naming its kind, but an event is never refused or dropped: one they cannot convert is `Event.Unknown(now, name)`, its Rust `Display`, so `take_events` always takes the whole queue (decided 2026-11-21, round 5; `ResetCause`, which RSR fixes, made exhaustive and its `UNKNOWN` dropped in 0.9.0); Rust tests (`every_run_end_maps_or_names_itself`, `every_value_maps`) list every variant, so a variant added to one is added there and mapped (decided 2026-11-21). |
 
 ## Open
 
-- Booting real images: smartclock-emu moves onto `mc683xx-mc68331`,
-  keeping its Unicorn emulator as the differential oracle until the
-  Z3805A 3543B and 58503A 3704 transcripts match (decided 2026-10-23).
-  API gaps it finds come back here.
-- A real 68331 over BDM: no BDM pod is available yet (2026-10-23).
-  Until then the provisional behaviors stay provisional: settled by
-  the manuals, the oracles and
-  the firmware corpus where they can be, and otherwise recorded as our
-  choices.
-- Whether `smartclock-emu` moves off its feature gate once it uses this
-  core.
 - WebAssembly: the target is a browser demo of the demo board
   (`examples/boards/demo.toml`) through JS bindings
   (`wasm32-unknown-unknown`, decided 2026-11-03).  `mc683xx-mc68331`,
   `mc683xx-board`, `mc683xx-peripherals` and `mc683xx-debug` build for
   it with no errors or warnings; their dependencies are pure Rust (no
   `getrandom`, no `RandomState`).  The chip and everything below it use
-  no clock, thread, file or process.  A board runs there as
+  no clock, thread, file or process.  These are release guarantees
+  (`docs/releasing.md`, Dependencies and platforms).  A board runs there as
   `examples/tests/demo_browser.rs` runs the demo board, on the host
   through the same API: the file's text and its image as bytes
   (`Description::parse_with`, its images from the host's `read(path)`),
@@ -3491,7 +3955,10 @@ checks move onto real code hooks.
   for a peripheral's image from the host's `read`), unpaced runs
   (`Pacer` reads no clock unpaced), and paced frames from the host's
   own clock (`Board::run_frame`, the board time due by its reading,
-  bounded by a slice).  Left:
+  bounded by a slice).  The npm package's module is built in its own
+  profile, `wasm-release` (release in two codegen units), smaller than
+  release's and no slower (0.9.0 audit, docs/performance.md); native
+  builds keep release.  Left:
   - Blocking pacing: `Pacer::delay` and `wait` read `Instant::now()`
     when paced, and `BoardControl::sleep` (`control.rs`) blocks on a
     `Condvar`; both panic there, so a browser host never calls them

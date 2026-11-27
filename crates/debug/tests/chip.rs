@@ -2,23 +2,23 @@
 //! background mode as a BDM pod holds silicon.
 
 use mc683xx_cpu32::memory::MemoryKind;
-use mc683xx_debug::image::Image;
-use mc683xx_debug::load::LoadError;
-use mc683xx_debug::load::LoadOptions;
-use mc683xx_debug::load::OddEdges;
-use mc683xx_debug::load::Verification;
+use mc683xx_debug::Image;
+use mc683xx_debug::ImageLoadError;
+use mc683xx_debug::LoadOptions;
+use mc683xx_debug::OddEdges;
+use mc683xx_debug::Verification;
 use mc683xx_debug::script::CommandError;
 use mc683xx_debug::script::Script;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::debug::TargetError;
+use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_mc68331::TargetError;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
-use mc683xx_target::size::Size;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
 
 /// The example demo board's firmware and its ELF (examples/boards).
 const DEMO_BIN: &[u8] = include_bytes!("../../../examples/boards/demo.bin");
@@ -51,7 +51,7 @@ fn chip(boot_kind: MemoryKind) -> Mc68331 {
         .memory(boot, boot_kind, &[ChipSelect::Boot])
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
+        .fixed_memory(vec![0; RAM_BYTES], MemoryKind::Ram, Address(RAM))
         .unwrap();
     let mut chip = builder.build();
     chip.reset_halted().unwrap();
@@ -64,7 +64,7 @@ fn read(chip: &mut Mc68331, address: u32, length: usize) -> Vec<u8> {
     chip.read_memory(
         Address(address),
         Size::Byte,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
         &mut data,
     )
     .unwrap();
@@ -107,7 +107,7 @@ fn srecords_load_into_ram_with_odd_edges_in_bytes() {
     let image = Image::from_srecords("S30900200001DEADBEEF9D\nS70500200100D9\n").unwrap();
     assert!(matches!(
         image.load(&mut chip, &LoadOptions::default()),
-        Err(LoadError::OddEdge { .. })
+        Err(ImageLoadError::OddEdge { .. })
     ));
     let mut options = LoadOptions::default();
     options.odd_edges = OddEdges::Bytes;
@@ -129,7 +129,7 @@ fn a_load_into_rom_fails_verification() {
     assert!(
         matches!(
             error,
-            LoadError::Verify {
+            ImageLoadError::Verify {
                 address: Address(0x100),
                 wrote: 0x4e,
                 read: 0xff,
@@ -149,10 +149,10 @@ fn a_load_where_nothing_answers_fails_its_write() {
     assert!(
         matches!(
             error,
-            LoadError::Write {
+            ImageLoadError::Write {
                 address: Address(0x50_0000),
                 bytes: 4,
-                error: TargetError::Access { .. },
+                error: TargetError::Access(_),
             }
         ),
         "{error}"

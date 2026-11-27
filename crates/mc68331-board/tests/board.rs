@@ -3,9 +3,11 @@
 //! sub-cycle phase survives to a GPT capture.
 
 use std::any::Any;
+use std::any::type_name;
 use std::cell::Cell;
 use std::cell::Ref;
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::ops::ControlFlow;
@@ -15,48 +17,48 @@ use std::rc::Rc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use mc683xx_board::Board;
+use mc683xx_board::BoardRun;
+use mc683xx_board::BoardTracing;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::LoadError;
+use mc683xx_board::LookupError;
+use mc683xx_board::NoPeripheral;
+use mc683xx_board::NoReceiver;
+use mc683xx_board::Options;
+use mc683xx_board::RunError;
+use mc683xx_board::SendError;
+use mc683xx_board::adapter::Driver;
 use mc683xx_board::adapter::MappedAdapter;
 use mc683xx_board::adapter::SpiAdapter;
-use mc683xx_board::board::Board;
-use mc683xx_board::board::BoardRun;
-use mc683xx_board::board::BoardTracing;
 use mc683xx_board::builtin::EdgeCounter;
 use mc683xx_board::builtin::Recorder;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
-use mc683xx_board::error::LoadError;
-use mc683xx_board::error::ReceiveError;
-use mc683xx_board::error::RunError;
-use mc683xx_board::error::SendError;
 use mc683xx_board::peripheral::Drive;
 use mc683xx_board::peripheral::Lane;
 use mc683xx_board::peripheral::Peripheral;
 use mc683xx_board::peripheral::PeripheralAccess;
 use mc683xx_board::peripheral::Transfer;
 use mc683xx_board::registry::Constructed;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::PortSpec;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Direction;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
+use mc683xx_board::time::Moment;
 use mc683xx_board::time::NonZeroSpan;
 use mc683xx_board::time::PICOSECONDS_PER_SECOND;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_board::time::TimeBase;
 use mc683xx_board::trace::Record;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::state::Layer;
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::exception::Vector;
-use mc683xx_cpu32::frequency::Frequency;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::Permissions;
@@ -64,11 +66,16 @@ use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::registers::Registers;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::debug::TargetError;
-use mc683xx_mc68331::event::DsackFault;
-use mc683xx_mc68331::event::Event;
+use mc683xx_cpu32::state::Layer;
+use mc683xx_cpu32::state::Save;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
+use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::DsackFault;
+use mc683xx_mc68331::Event;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_mc68331::TargetError;
 use mc683xx_mc68331::gpt::Gpt;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
@@ -81,9 +88,10 @@ use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::qsm::Qsm;
 use mc683xx_modules::qsm::sci::Frame;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 use snapshot_golden::version_of;
 
 /// `picoseconds` picoseconds.
@@ -200,7 +208,7 @@ fn board(name: &str, text: &str, program: &[u16]) -> Board<Mc68331> {
 
 /// CS`number`.
 fn cs(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).unwrap())
+    ChipSelect::Numbered(Number::try_from(number).unwrap())
 }
 
 /// A program that maps CS1 and writes two words through it, then reads
@@ -233,7 +241,7 @@ fn writes_through_cs1() -> Vec<u16> {
 struct Words([u8; 4]);
 
 impl MappedPeripheral for Words {
-    fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::BusError> {
         let byte = u32::from(self.0[(cycle.address.0 & 3) as usize]);
         Ok(match cycle.size {
             Size::Byte => byte,
@@ -241,7 +249,7 @@ impl MappedPeripheral for Words {
         })
     }
 
-    fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), mc683xx_cpu32::BusError> {
         self.0[(cycle.address.0 & 3) as usize] = match cycle.size {
             Size::Byte => value as u8,
             Size::Word | Size::Long => (value >> 8) as u8,
@@ -284,7 +292,7 @@ parameters = { bytes = 4 }
     let mut chip = builder.build();
     let outcome = board.run_until(Time::from_picos(1_000_000_000)).unwrap();
     assert_eq!(outcome.stop, Stop::Budget);
-    chip.run_for(board.chip().now());
+    chip.run_until(board.chip().now());
     assert_eq!(board.chip().now(), chip.now());
     assert_eq!(board.chip().cpu().registers, chip.cpu().registers);
     assert_eq!(
@@ -323,7 +331,7 @@ attach = [{ select = "CS1", role = "write", lane = "upper", lines = [1, 2] }]
 [[peripheral]]
 name = "lower"
 type = "recorder"
-attach = [{ select = "CS1", role = "lower", lines = [1, 2], offset = 0x10 }]
+attach = [{ select = "CS1", lane = "lower", lines = [1, 2], offset = 0x10 }]
 parameters = { value = 0x5a }
 "#,
         &program,
@@ -358,11 +366,11 @@ parameters = { value = 0x5a }
 struct Silent;
 
 impl Peripheral for Silent {
-    fn wait_states(&mut self, _: PeripheralAccess, _: TimeBase) -> Option<u8> {
+    fn wait_states(&mut self, _: PeripheralAccess, _: Moment) -> Option<Cycles> {
         None
     }
 
-    fn dsack_port(&mut self, _: PeripheralAccess, _: TimeBase) -> Option<PortSize> {
+    fn dsack_port(&mut self, _: PeripheralAccess, _: Moment) -> Option<PortSize> {
         Some(PortSize::Bits16)
     }
 }
@@ -384,17 +392,17 @@ impl Peripheral for WriteLatch {
         access: PeripheralAccess,
         value: u32,
         _: &mut Drive<'_>,
-    ) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    ) -> Result<(), mc683xx_cpu32::BusError> {
         self.writes.push((access.address, value));
         Ok(())
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<u8> {
+    fn wait_states(&mut self, access: PeripheralAccess, _: Moment) -> Option<Cycles> {
         self.asked.push(access.write);
-        Some(1)
+        Some(Cycles::from_clocks(1))
     }
 
-    fn dsack_port(&mut self, access: PeripheralAccess, _: TimeBase) -> Option<PortSize> {
+    fn dsack_port(&mut self, access: PeripheralAccess, _: Moment) -> Option<PortSize> {
         self.asked.push(access.write);
         Some(PortSize::Bits8)
     }
@@ -451,6 +459,115 @@ attach = [{ select = "CS1", role = "write" }]
     let latch = board.peripheral::<WriteLatch>("latch").unwrap();
     assert_eq!(latch.writes, [(CS1_BASE, 0xab), (CS1_BASE + 1, 0xcd)]);
     assert!(!latch.asked.is_empty() && latch.asked.iter().all(|&write| write));
+}
+
+/// Bytes a debugger peeks and pokes with no cycle, on one lane: a
+/// byte at each address.
+#[derive(Debug, Default)]
+struct Cells {
+    /// The bytes poked, by address on the peripheral's lines.
+    held: BTreeMap<u32, u8>,
+    /// Whether a real cycle came.
+    cycled: bool,
+    /// Each peek's and poke's first address and length, in order.
+    calls: RefCell<Vec<(u32, usize)>>,
+}
+
+impl Peripheral for Cells {
+    fn read(
+        &mut self,
+        _: PeripheralAccess,
+        _: &mut Drive<'_>,
+    ) -> Result<u32, mc683xx_cpu32::BusError> {
+        self.cycled = true;
+        Ok(0)
+    }
+
+    fn peek(&self, access: PeripheralAccess, data: &mut [u8], _: Moment) -> bool {
+        assert!(access.size == Size::Byte && !access.write);
+        self.calls.borrow_mut().push((access.address, data.len()));
+        for (address, byte) in (access.address..).zip(data) {
+            *byte = self.held.get(&address).copied().unwrap_or(0);
+        }
+        true
+    }
+
+    fn poke(&mut self, access: PeripheralAccess, data: &[u8], _: Moment) -> bool {
+        assert!(access.write);
+        self.calls.borrow_mut().push((access.address, data.len()));
+        for (address, &byte) in (access.address..).zip(data) {
+            self.held.insert(address, byte);
+        }
+        true
+    }
+}
+
+#[test]
+fn a_peek_and_a_poke_reach_board_peripherals_by_lane() {
+    let program: Vec<u16> = [store(CSBAR1, CS1_BAR), store(CSOR1, CS_FAST)]
+        .concat()
+        .into_iter()
+        .chain([NOP, NOP, NOP])
+        .collect();
+    let directory = directory("peeks", &program);
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[peripheral]]
+name = "high"
+type = "cells"
+attach = [{ select = "CS1", lane = "upper", lines = [1, 2, 3, 4] }]
+[[peripheral]]
+name = "low"
+type = "cells"
+attach = [{ select = "CS1", lane = "lower", lines = [1, 2, 3, 4] }]
+"#;
+    let description = Description::parse(text, &directory, &Options::default()).unwrap();
+    let mut registry = Registry::with_builtins();
+    registry
+        .register("cells", Vec::new(), |_| Ok(Box::new(Cells::default())))
+        .unwrap();
+    let mut board =
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    board.run_until(Time::from_picos(100_000_000)).unwrap();
+    let supervisor = FunctionCode::SupervisorData;
+    let chip = board.chip_mut();
+    chip.poke(Address(CS1_BASE), Size::Long, supervisor, 0x1122_3344)
+        .unwrap();
+    assert_eq!(
+        chip.peek(Address(CS1_BASE), Size::Long, supervisor),
+        Ok(0x1122_3344)
+    );
+    // a range across both lanes: each lane's bytes gathered, one call
+    // for each peripheral
+    let chip = board.chip_mut();
+    chip.poke_bytes(Address(CS1_BASE + 4), supervisor, &[5, 6, 7, 8, 9, 10])
+        .unwrap();
+    let mut back = [0; 6];
+    chip.peek_bytes(Address(CS1_BASE + 4), supervisor, &mut back)
+        .unwrap();
+    assert_eq!(back, [5, 6, 7, 8, 9, 10]);
+    let high = board.peripheral::<Cells>("high").unwrap();
+    assert_eq!(
+        high.held.values().copied().collect::<Vec<_>>(),
+        [0x11, 0x33, 5, 7, 9]
+    );
+    assert_eq!(*high.calls.borrow(), [(0, 2), (0, 2), (2, 3), (2, 3)]);
+    assert!(!high.cycled);
+    drop(high);
+    let low = board.peripheral::<Cells>("low").unwrap();
+    assert_eq!(
+        low.held.values().copied().collect::<Vec<_>>(),
+        [0x22, 0x44, 6, 8, 10]
+    );
+    assert_eq!(*low.calls.borrow(), [(0, 2), (0, 2), (2, 3), (2, 3)]);
 }
 
 #[test]
@@ -607,16 +724,16 @@ fn the_format_matches_its_golden() {
         env!("CARGO_MANIFEST_DIR"),
         "board",
         &[
-            ("board", mc683xx_board::board::VERSION),
+            ("board", mc683xx_board::state::VERSION),
             ("chip", mc683xx_mc68331::state::VERSION),
-            ("cpu", mc683xx_cpu32::cpu::state::VERSION),
+            ("cpu", mc683xx_cpu32::state::VERSION),
             (
                 "qsm",
                 version_of(&Qsm::new(Frequency::from_hz(1)).save().unwrap()),
             ),
-            ("gpt", version_of(&Gpt::new(Cycles::ZERO).save().unwrap())),
+            ("gpt", version_of(&Gpt::new(Cycle::ZERO).save().unwrap())),
             ("builtin", builtin),
-            ("stateless", mc683xx_cpu32::cpu::state::STATELESS_VERSION),
+            ("stateless", mc683xx_cpu32::state::STATELESS_VERSION),
         ],
         &board.save().unwrap(),
     );
@@ -850,10 +967,10 @@ struct ClockWatcher {
 }
 
 impl Peripheral for ClockWatcher {
-    fn next_event(&self, system_clock: TimeBase) -> Option<Time> {
+    fn next_event(&self, moment: Moment) -> Option<Time> {
         let mut asked = self.asked.borrow_mut();
-        if asked.last() != Some(&system_clock) {
-            asked.push(system_clock);
+        if asked.last() != Some(&moment.system_clock()) {
+            asked.push(moment.system_clock());
         }
         self.next
     }
@@ -899,8 +1016,8 @@ type = "watcher"
     let base = board.system_clock();
     assert_eq!(base.frequency().hz(), 16_777_216);
     assert_eq!(
-        base.cycles(base.time(Cycles::from_clocks(12_345))),
-        Cycles::from_clocks(12_345)
+        base.cycle(base.time(Cycle::from_clocks(12_345))),
+        Cycle::from_clocks(12_345)
     );
     let (asked, driven) = board
         .peripheral::<ClockWatcher>("watcher")
@@ -964,10 +1081,33 @@ to = ["lamp.in"]
     board.run_until(Time::from_picos(1_000_000)).unwrap();
     let levels = board
         .peripheral::<Widget>("lamp")
-        .map(|widget| widget.levels.clone());
+        .map(|widget| widget.levels.clone())
+        .ok();
     assert_eq!(levels, Some(vec![true]));
-    assert_eq!(board.peripheral::<Recorder>("lamp").map(|_| ()), None);
-    assert!(board.peripheral::<Widget>("no such").is_none());
+    assert_eq!(
+        board.peripheral::<Recorder>("lamp").err(),
+        Some(LookupError::NotA {
+            name: "lamp".to_owned(),
+            expected: type_name::<Recorder>(),
+        })
+    );
+    assert_eq!(
+        board
+            .peripheral::<Recorder>("lamp")
+            .err()
+            .unwrap()
+            .to_string(),
+        format!("peripheral \"lamp\" is not a {}", type_name::<Recorder>())
+    );
+    let nowhere = LookupError::NoPeripheral(NoPeripheral("no such".to_owned()));
+    assert_eq!(
+        board.peripheral::<Widget>("no such").err(),
+        Some(nowhere.clone())
+    );
+    assert_eq!(
+        board.peripheral_mut::<Widget>("no such").err(),
+        Some(nowhere)
+    );
     board
         .peripheral_mut::<Widget>("lamp")
         .unwrap()
@@ -1028,12 +1168,13 @@ to = ["lamps.{net}"]
     board.run_until(Time::from_picos(1_000_000)).unwrap();
     let levels = board
         .peripheral::<Widget>("lamps")
-        .map(|widget| widget.levels.clone());
+        .map(|widget| widget.levels.clone())
+        .ok();
     assert_eq!(levels, Some(vec![true]));
     assert!(matches!(load(2, "in3"), Err(LoadError::Endpoint { .. })));
     assert!(matches!(
         load(0, "in0"),
-        Err(LoadError::Port { peripheral, port }) if peripheral == "lamps" && port == "in0"
+        Err(LoadError::Port { peripheral, port, .. }) if peripheral == "lamps" && port == "in0"
     ));
 }
 
@@ -1042,7 +1183,7 @@ to = ["lamps.{net}"]
 #[derive(Debug, Default)]
 struct Periodic {
     /// Each advance's time.
-    advanced: Vec<Cycles>,
+    advanced: Vec<Cycle>,
 }
 
 /// `Periodic`'s period.
@@ -1051,23 +1192,23 @@ const PERIOD: Cycles = Cycles::from_clocks(50_000);
 mc683xx_cpu32::unsavable!(Periodic, "a periodic model");
 
 impl MappedPeripheral for Periodic {
-    fn read(&mut self, _: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    fn read(&mut self, _: BusCycle) -> Result<u32, mc683xx_cpu32::BusError> {
         Ok(0)
     }
 
-    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::BusError> {
         Ok(())
     }
 }
 
 impl Timed for Periodic {
-    fn next_event(&self) -> Option<Cycles> {
-        Some(Cycles::from_clocks(
+    fn next_event(&self) -> Option<Cycle> {
+        Some(Cycle::from_clocks(
             PERIOD.clocks() * (self.advanced.len() as u64 + 1),
         ))
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         if now >= self.next_event().unwrap() {
             self.advanced.push(now);
         }
@@ -1121,7 +1262,7 @@ type = "periodic"
     for (index, at) in advanced.iter().enumerate() {
         assert_eq!(
             *at,
-            Cycles::from_clocks(PERIOD.clocks() * (index as u64 + 1))
+            Cycle::from_clocks(PERIOD.clocks() * (index as u64 + 1))
         );
     }
 }
@@ -1144,7 +1285,7 @@ impl Peripheral for Framed {
         0
     }
 
-    fn select(&mut self, attachment: usize, selected: bool, _: &mut Drive<'_>) {
+    fn set_selected(&mut self, attachment: usize, selected: bool, _: &mut Drive<'_>) {
         self.selects.push((attachment, selected));
     }
 }
@@ -1356,8 +1497,140 @@ to = ["external.q"]
     );
     let resets = board
         .peripheral::<PoweredLatch>("latch")
-        .map(|latch| latch.resets);
+        .map(|latch| latch.resets)
+        .ok();
     assert_eq!(resets, Some(0), "no reset reaches it");
+}
+
+/// A strobe's pulse, in system clocks.
+const STROBE_CLOCKS: Cycles = Cycles::from_clocks(100);
+
+/// A chip-level model of a strobe: a write raises its output for
+/// `STROBE_CLOCKS`; a reset lowers it.
+#[derive(Debug, Default)]
+struct Strobe {
+    /// Its output.
+    level: bool,
+    /// When its pulse ends, if one is on.
+    ends: Option<Cycle>,
+    /// The level last driven on its net, if any.
+    driven: Option<bool>,
+}
+
+/// The output onto port 0 when it changes.
+impl Driver for Strobe {
+    fn drive(&mut self, drive: &mut Drive<'_>) {
+        if self.driven != Some(self.level) {
+            self.driven = Some(self.level);
+            drive.drive(0, Signal::Level(self.level));
+        }
+    }
+}
+
+impl MappedPeripheral for Strobe {
+    fn read(&mut self, _: BusCycle) -> Result<u32, mc683xx_cpu32::BusError> {
+        Ok(0)
+    }
+
+    fn write(&mut self, cycle: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::BusError> {
+        self.level = true;
+        self.ends = Some(cycle.now + STROBE_CLOCKS);
+        Ok(())
+    }
+
+    fn reset(&mut self, _: Cycle) {
+        self.level = false;
+        self.ends = None;
+    }
+}
+
+impl Timed for Strobe {
+    fn next_event(&self) -> Option<Cycle> {
+        self.ends
+    }
+
+    fn advance(&mut self, now: Cycle) {
+        if self.ends.is_some_and(|ends| now >= ends) {
+            self.level = false;
+            self.ends = None;
+        }
+    }
+}
+
+mc683xx_cpu32::unsavable!(Strobe, "a strobe");
+
+/// A board whose firmware writes once to a `Strobe` on CS1, its output
+/// on the `pulse` net to `external.pulse`, its adapter `driving` if
+/// `driving`: what the net carried in its first millisecond, and the
+/// board's system clock.
+fn strobed(driving: bool) -> (Vec<(Time, Signal)>, TimeBase) {
+    let program: Vec<u16> = [
+        store(CSBAR1, CS1_BAR),
+        store(CSOR1, CS_FAST),
+        store(CS1_BASE, 1),
+    ]
+    .concat()
+    .into_iter()
+    .chain([BRA_SELF])
+    .collect();
+    let directory = directory("driving", &program);
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[peripheral]]
+name = "strobe"
+type = "strobe"
+attach = [{ select = "CS1" }]
+[[net]]
+name = "pulse"
+type = "logic"
+from = "strobe.out"
+to = ["external.pulse"]
+"#;
+    let description = Description::parse(text, &directory, &Options::default()).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    let mut registry = Registry::with_builtins();
+    registry
+        .register(
+            "strobe",
+            vec![PortSpec::output("out", Kind::Logic)],
+            move |_| {
+                let adapter = MappedAdapter::new(Strobe::default());
+                Ok(Box::new(if driving { adapter.driving() } else { adapter }))
+            },
+        )
+        .unwrap();
+    let mut board =
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
+    board.run_for(Span::from_millis(1)).unwrap();
+    (board.take_received("pulse").unwrap(), board.system_clock())
+}
+
+#[test]
+fn a_driving_adapter_drives_its_nets_from_its_model() {
+    let (received, base) = strobed(true);
+    // low from power-on; high at the write; low again at the pulse's
+    // end, the model's advance
+    let [
+        (Time::ZERO, Signal::Level(false)),
+        (raised, Signal::Level(true)),
+        (lowered, Signal::Level(false)),
+    ] = received[..]
+    else {
+        panic!("{received:?}");
+    };
+    assert_eq!(
+        base.cycle(lowered).since(base.cycle(raised)),
+        STROBE_CLOCKS,
+        "{raised:?} to {lowered:?}"
+    );
+    assert!(strobed(false).0.is_empty(), "no driver, nothing driven");
 }
 
 /// `Words` with time of its own: an event at `EVENT`, and what it saw.
@@ -1366,16 +1639,16 @@ struct TimedWords {
     /// The registers.
     words: Words,
     /// Each cycle's select and start.
-    cycles: Vec<(ChipSelect, Cycles)>,
+    cycles: Vec<(ChipSelect, Cycle)>,
     /// Each advance's time.
-    advanced: Vec<Cycles>,
+    advanced: Vec<Cycle>,
 }
 
 /// `TimedWords`' event.
-const EVENT: Cycles = Cycles::from_clocks(1_000);
+const EVENT: Cycle = Cycle::from_clocks(1_000);
 
 impl MappedPeripheral for TimedWords {
-    fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::BusError> {
         self.cycles.push((
             cycle
                 .select
@@ -1386,7 +1659,7 @@ impl MappedPeripheral for TimedWords {
         self.words.read(cycle)
     }
 
-    fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), mc683xx_cpu32::BusError> {
         self.cycles.push((
             cycle
                 .select
@@ -1401,11 +1674,11 @@ impl MappedPeripheral for TimedWords {
 mc683xx_cpu32::unsavable!(TimedWords, "a timed word latch");
 
 impl Timed for TimedWords {
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         self.advanced.is_empty().then_some(EVENT)
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         if self.advanced.is_empty() && now >= EVENT {
             self.advanced.push(now);
         }
@@ -1447,7 +1720,7 @@ attach = [{ select = "CS1" }]
     let id = builder.peripheral(TimedWords::default(), &[cs(1)]).unwrap();
     let mut chip = builder.build();
     board.run_until(Time::from_picos(1_000_000_000)).unwrap();
-    chip.run_for(board.chip().now());
+    chip.run_until(board.chip().now());
     assert_eq!(board.chip().cpu().registers, chip.cpu().registers);
     assert_eq!(board.chip().cpu().registers.data[0] & 0xffff, 0x1200);
     let (cycles, advanced) = board
@@ -1475,6 +1748,8 @@ struct Dac {
     transfers: Vec<(u8, u8)>,
     /// Each `chip_selects` call's levels.
     levels: Vec<u8>,
+    /// The level last driven on its output, if any.
+    driven: Option<bool>,
 }
 
 mc683xx_cpu32::unsavable!(Dac, "a logging DAC");
@@ -1485,13 +1760,28 @@ impl SpiPeripheral for Dac {
         0
     }
 
-    fn set_chip_selects(&mut self, levels: u8, _: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, _: Cycle) {
         self.levels.push(levels);
     }
 }
 
-#[test]
-fn a_qspi_peripheral_runs_as_a_peripheral_through_the_adapter() {
+/// Its output onto port 0 when it changes: high once it has shifted a
+/// transfer.
+impl Driver for Dac {
+    fn drive(&mut self, drive: &mut Drive<'_>) {
+        let level = !self.transfers.is_empty();
+        if self.driven != Some(level) {
+            self.driven = Some(level);
+            drive.drive(0, Signal::Level(level));
+        }
+    }
+}
+
+/// A board whose firmware runs a QSPI queue of two entries, PCS 0b0101
+/// and 0b1010, once, a `Dac` on 0b1010 its output on the `level` net to
+/// `external.level`, its adapter `driving` if `driving`, run for a
+/// millisecond.
+fn queued(driving: bool) -> Board<Mc68331> {
     let mut program: Vec<u16> = Vec::new();
     program.extend(store(QSM + 0x14, 0x0078));
     program.extend(store(QSM + 0x16, 0x7b7e));
@@ -1499,7 +1789,14 @@ fn a_qspi_peripheral_runs_as_a_peripheral_through_the_adapter() {
     program.extend(store(QSM + 0x1c, 0x0100));
     program.extend(store(QSM + 0x18, 0x8002));
     program.extend(store(QSM + 0x1a, 0x8000));
-    let directory = directory("qspi-adapter", &program);
+    let directory = directory(
+        if driving {
+            "qspi-driving"
+        } else {
+            "qspi-adapter"
+        },
+        &program,
+    );
     let text = r#"
 version = 1
 
@@ -1513,18 +1810,34 @@ attach = [{ select = "CSBOOT" }]
 name = "dac"
 type = "dac"
 attach = [{ qspi = 0b1010 }]
+[[net]]
+name = "level"
+type = "logic"
+from = "dac.out"
+to = ["external.level"]
 "#;
     let description = Description::parse(text, &directory, &Options::default()).unwrap();
     let mut registry = Registry::with_builtins();
     registry
-        .register("dac", Vec::new(), |_| {
-            Ok(Box::new(SpiAdapter::new(Dac::default())))
-        })
+        .register(
+            "dac",
+            vec![PortSpec::output("out", Kind::Logic)],
+            move |_| {
+                let adapter = SpiAdapter::new(Dac::default());
+                Ok(Box::new(if driving { adapter.driving() } else { adapter }))
+            },
+        )
         .unwrap();
     let mut board =
         Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
     fs::remove_dir_all(directory).unwrap();
-    board.run_until(Time::from_picos(1_000_000_000)).unwrap();
+    board.run_for(Span::from_millis(1)).unwrap();
+    board
+}
+
+#[test]
+fn a_qspi_peripheral_runs_as_a_peripheral_through_the_adapter() {
+    let mut board = queued(false);
     let (transfers, levels) = board
         .peripheral::<SpiAdapter<Dac>>("dac")
         .map(|peripheral| {
@@ -1536,6 +1849,24 @@ attach = [{ qspi = 0b1010 }]
         .unwrap();
     assert_eq!(transfers, [(1, 0b1010)], "its own entry only");
     assert_eq!(levels, [SELECTED_LEVELS, RELEASED_LEVELS]);
+    assert!(
+        board.take_received("level").unwrap().is_empty(),
+        "no driver, nothing driven"
+    );
+}
+
+#[test]
+fn a_driving_qspi_adapter_drives_its_nets_from_its_model() {
+    let received = queued(true).take_received("level").unwrap();
+    // low from power-on; high at its transfer
+    let [
+        (Time::ZERO, Signal::Level(false)),
+        (raised, Signal::Level(true)),
+    ] = received[..]
+    else {
+        panic!("{received:?}");
+    };
+    assert!(raised > Time::ZERO);
 }
 
 /// A model that counts its own periods and reads as the count, and
@@ -1545,7 +1876,7 @@ struct Ticker {
     /// The periods past.
     ticks: u32,
     /// The next period's end.
-    next: Cycles,
+    next: Cycle,
 }
 
 /// `Ticker`'s period.
@@ -1554,21 +1885,21 @@ const TICK: Cycles = Cycles::from_clocks(700);
 const TICKER_VERSION: u32 = 1;
 
 impl MappedPeripheral for Ticker {
-    fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    fn read(&mut self, cycle: BusCycle) -> Result<u32, mc683xx_cpu32::BusError> {
         Ok(self.ticks & cycle.size.mask())
     }
 
-    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    fn write(&mut self, _: BusCycle, _: u32) -> Result<(), mc683xx_cpu32::BusError> {
         Ok(())
     }
 }
 
 impl Timed for Ticker {
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         Some(self.next)
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         while self.next <= now {
             self.ticks += 1;
             self.next += TICK;
@@ -1584,7 +1915,7 @@ impl Save for Ticker {
     fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
         let (ticks, next): (u32, u64) = decode(TICKER_VERSION, snapshot)?;
         self.ticks = ticks;
-        self.next = Cycles::from_clocks(next);
+        self.next = Cycle::from_clocks(next);
         Ok(())
     }
 }
@@ -1669,7 +2000,7 @@ attach = [{ select = "CS1" }]
     // a QSPI model saves as a bus model does; a bad snapshot is refused
     let mut peripheral = SpiAdapter::new(Ticker {
         ticks: 5,
-        next: TICK,
+        next: Cycle::ZERO + TICK,
     });
     let saved = peripheral.save().unwrap();
     peripheral.peripheral_mut().ticks = 9;
@@ -1714,12 +2045,9 @@ to = ["external.host"]
     // 8.388608 MHz out of reset: 262144 baud, ten bits a frame
     assert_eq!(serial.baud, Frequency::from_hz(262_144));
     let base = board.system_clock();
-    let start = base.cycles(at);
+    let start = base.cycle(at);
     assert_eq!(base.time(start), at);
-    assert_eq!(
-        base.cycles(serial.end(at)),
-        start + Cycles::from_clocks(320)
-    );
+    assert_eq!(base.cycle(serial.end(at)), start + Cycles::from_clocks(320));
     // the preamble's frame went first, as TE set; this one followed it
     assert!(start.clocks() >= 320, "after the preamble: {start:?}");
 }
@@ -1813,15 +2141,15 @@ to = ["chip.PGP0"]
     // checked alike, sending nothing
     for (name, signal) in [("nobody", frame), ("scope", frame), ("pps", frame)] {
         assert_eq!(
-            board.check_send(name, &signal),
+            board.check_send(name, signal),
             Err(board.send(name, signal).unwrap_err()),
             "{name}"
         );
     }
-    assert_eq!(board.check_send("pps", &Signal::Level(true)), Ok(()));
+    assert_eq!(board.check_send("pps", Signal::Level(true)), Ok(()));
     assert_eq!(
         board.take_received("nobody"),
-        Err(ReceiveError::Endpoint("nobody".to_owned()))
+        Err(NoReceiver("nobody".to_owned()))
     );
     assert_eq!(
         board.take_received("pps").unwrap_err().to_string(),
@@ -2038,7 +2366,7 @@ impl Peripheral for Flash {
         access: PeripheralAccess,
         value: u32,
         drive: &mut Drive<'_>,
-    ) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    ) -> Result<(), mc683xx_cpu32::BusError> {
         let command = (access.address, value & 0xff);
         self.state = match (self.state, command) {
             (FlashState::Read, UNLOCK_FIRST) => FlashState::Unlocked,
@@ -2055,7 +2383,7 @@ impl Peripheral for Flash {
                 FlashState::Busy {
                     offset,
                     data: value,
-                    until: access.now + PROGRAM_PICOSECONDS,
+                    until: drive.now() + PROGRAM_PICOSECONDS,
                 }
             }
             (busy @ FlashState::Busy { .. }, _) => busy,
@@ -2069,7 +2397,7 @@ impl Peripheral for Flash {
         memory: &str,
         _: PeripheralAccess,
         _: &mut Drive<'_>,
-    ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    ) -> Result<u32, mc683xx_cpu32::BusError> {
         assert_eq!(memory, "flash");
         let FlashState::Busy { data, .. } = self.state else {
             panic!("a read while not busy reached the peripheral");
@@ -2079,7 +2407,7 @@ impl Peripheral for Flash {
         Ok(status)
     }
 
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         match self.state {
             FlashState::Busy { until, .. } => Some(until),
             _ => None,
@@ -2183,7 +2511,7 @@ struct Overwriter {
 }
 
 impl Peripheral for Overwriter {
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         (!self.done).then_some(OVERWRITE_AT)
     }
 
@@ -2201,7 +2529,7 @@ impl Peripheral for Overwriter {
         _: &str,
         _: PeripheralAccess,
         _: &mut Drive<'_>,
-    ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    ) -> Result<u32, mc683xx_cpu32::BusError> {
         Ok(0x1234)
     }
 
@@ -2373,7 +2701,7 @@ struct Events {
 const AT: Time = Time::from_picos(1_000_000);
 
 impl Peripheral for Events {
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         (self.events > 0 || !self.moves).then_some(AT)
     }
 
@@ -2443,7 +2771,7 @@ struct Stopper {
 }
 
 impl Peripheral for Stopper {
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         self.timed.then_some(AT)
     }
 
@@ -2457,7 +2785,7 @@ impl Peripheral for Stopper {
         _: PeripheralAccess,
         _: u32,
         drive: &mut Drive<'_>,
-    ) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    ) -> Result<(), mc683xx_cpu32::BusError> {
         drive.stop();
         Ok(())
     }
@@ -2502,6 +2830,69 @@ fn a_stop_asked_between_quanta_stops_one_run_only() {
     assert_eq!(ran.stop, Stop::Budget, "the stop is not left pending");
     assert_eq!(ran.now, AT + Span::from_millis(10));
     assert!(board.chip().instructions() > instructions + 1);
+}
+
+/// A peripheral that asks the run to stop at every reset but power-on's.
+#[derive(Debug, Default)]
+struct ResetStopper {
+    /// The resets it saw.
+    resets: usize,
+}
+
+impl Peripheral for ResetStopper {
+    fn reset(&mut self, drive: &mut Drive<'_>) {
+        self.resets += 1;
+        if self.resets > 1 {
+            drive.stop();
+        }
+    }
+}
+
+#[test]
+fn a_stop_asked_at_a_reset_in_a_run_ends_it_before_the_next_instruction() {
+    // the firmware counts its starts in D1; the watchdog, on out of
+    // reset, times out within the run
+    let directory = directory("stop-reset", &COUNTING);
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+[[peripheral]]
+name = "stopper"
+type = "stopper"
+"#;
+    let description = Description::parse(text, &directory, &Options::default()).unwrap();
+    fs::remove_dir_all(directory).unwrap();
+    let mut registry = Registry::with_builtins();
+    registry
+        .register("stopper", Vec::new(), |_| {
+            Ok(Box::new(ResetStopper::default()))
+        })
+        .unwrap();
+    let mut board =
+        Board::<Mc68331>::load(&description, &registry, &Environment::default()).unwrap();
+    board.take_events();
+    let stopped = board.run_for(Span::from_millis(100)).unwrap();
+    assert_eq!(stopped.stop, Stop::Requested);
+    let events = board.take_events();
+    let [Event::Reset { now, cause, .. }] = events[..] else {
+        panic!("{events:?}");
+    };
+    assert_eq!(cause, ResetCause::Watchdog);
+    assert_eq!(stopped.now, board.system_clock().time(now), "at the reset");
+    assert_eq!(
+        board.chip().cpu().registers.data[1],
+        1,
+        "before the firmware's first instruction after it"
+    );
+    let ran = board.run_for(Span::from_millis(1)).unwrap();
+    assert_eq!(ran.stop, Stop::Budget, "the stop is not left pending");
+    assert_eq!(board.chip().cpu().registers.data[1], 2);
 }
 
 #[test]
@@ -2564,9 +2955,9 @@ fn queue_program(spcr2: u16) -> Vec<u16> {
 #[derive(Debug, Default)]
 struct Logged {
     /// Each transfer's entry, levels and time.
-    transfers: Vec<(u8, u8, Cycles)>,
+    transfers: Vec<(u8, u8, Cycle)>,
     /// Each `chip_selects` call's levels and time.
-    levels: Vec<(u8, Cycles)>,
+    levels: Vec<(u8, Cycle)>,
     /// What `deferrable` returns.
     deferrable: bool,
 }
@@ -2580,7 +2971,7 @@ impl SpiPeripheral for Logged {
         !transfer.out
     }
 
-    fn set_chip_selects(&mut self, levels: u8, now: Cycles) {
+    fn set_chip_selects(&mut self, levels: u8, now: Cycle) {
         self.levels.push((levels, now));
     }
 
@@ -2607,7 +2998,7 @@ impl Peripheral for Probe {
 }
 
 /// A `Logged` model's transfers and levels.
-type Calls = (Vec<(u8, u8, Cycles)>, Vec<(u8, Cycles)>);
+type Calls = (Vec<(u8, u8, Cycle)>, Vec<(u8, Cycle)>);
 
 /// What a run of a queue showed.
 #[derive(Debug, PartialEq)]
@@ -2696,7 +3087,7 @@ irq = 1
         registers: board.chip().cpu().registers.clone(),
         trace: board.take_trace().records,
         first: board.peripheral("first").map(calls).unwrap(),
-        second: board.peripheral("second").map(calls),
+        second: board.peripheral("second").map(calls).ok(),
     };
     let quanta = board
         .peripheral::<Probe>("probe")
@@ -2834,10 +3225,82 @@ attach = [{ select = "CSBOOT" }]
     stop.request();
     let until = Time::from_picos(1_000_000_000);
     assert_eq!(board.run_until(until).unwrap().stop, Stop::Requested);
-    assert!(board.now() < until);
+    assert_eq!(board.now(), Time::ZERO, "at once");
+    assert_eq!(board.chip().instructions(), 0);
     drop(board);
     // Once the board is gone, a request does nothing.
     stop.request();
+}
+
+#[test]
+fn a_stop_asked_where_a_hook_stops_the_board_s_run_stays_pending() {
+    let rom = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+"#;
+    let mut board = board("stop-with-hook", rom, &[NOP; 16]);
+    let stop = board.stop_request();
+    let at = Address(START + 2);
+    let id = board.cpu_control().add_code_hook(at..=at, move |_| {
+        stop.request();
+        ControlFlow::Break(())
+    });
+    let until = Time::from_picos(1_000_000_000);
+    assert_eq!(board.run_until(until).unwrap().stop, Stop::Hook(id));
+    board.cpu_control().remove_hook(id);
+    let (before, now) = (board.chip().instructions(), board.now());
+    assert_eq!(board.run_until(until).unwrap().stop, Stop::Requested);
+    assert_eq!(
+        (board.chip().instructions(), board.now()),
+        (before, now),
+        "at once"
+    );
+    let now = board.now();
+    assert_eq!(board.run_until(until).unwrap().stop, Stop::Budget);
+    assert!(board.now() > now);
+}
+
+#[test]
+fn a_transient_stop_where_a_hook_stops_the_run_is_withdrawn_unless_the_host_asked() {
+    let rom = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+"#;
+    let until = Time::from_picos(1_000_000_000);
+    for host_too in [false, true] {
+        let mut board = board("transient-stop", rom, &[NOP; 16]);
+        let stop = board.stop_request();
+        let asking = stop.clone();
+        let at = Address(START + 2);
+        let id = board.cpu_control().add_code_hook(at..=at, move |_| {
+            asking.request_transient();
+            if host_too {
+                asking.request();
+            }
+            ControlFlow::Break(())
+        });
+        assert_eq!(board.run_until(until).unwrap().stop, Stop::Hook(id));
+        board.cpu_control().remove_hook(id);
+        stop.withdraw_transient();
+        let expected = if host_too {
+            Stop::Requested
+        } else {
+            Stop::Budget
+        };
+        assert_eq!(board.run_until(until).unwrap().stop, expected, "{host_too}");
+    }
 }
 
 /// A latch on a select: Q0 follows bit 0 of each byte written.
@@ -2850,7 +3313,7 @@ impl Peripheral for BitLatch {
         _: PeripheralAccess,
         value: u32,
         drive: &mut Drive<'_>,
-    ) -> Result<(), mc683xx_cpu32::bus::BusError> {
+    ) -> Result<(), mc683xx_cpu32::BusError> {
         drive.drive(0, Signal::Level(value & 1 != 0));
         Ok(())
     }
@@ -3755,6 +4218,10 @@ fn a_host_external_reset_is_reset_driven_on_the_board() {
     host.run_until(at).unwrap();
     host.reset_for(ResetCause::External);
     let host_seen = seen(&mut host, at);
+    let mut bare = reset_board();
+    bare.run_until(at).unwrap();
+    bare.reset();
+    assert_eq!(seen(&mut bare, at), host_seen, "reset is External's");
     assert_eq!(host_seen.reset_status, ResetCause::External.status());
     assert_eq!(host_seen.registers.data[1], 2, "started again");
     let mut driven_seen = seen(&mut driven, at);
@@ -3862,7 +4329,7 @@ fn a_board_in_background_mode_runs_to_its_end_as_time() {
     // past the RESET release the chip drives, a board event
     assert_eq!(
         board.run_until(until).unwrap(),
-        BoardRun::new(Stop::Background(Entry::Breakpoint), until)
+        BoardRun::new(until, Stop::Background(Entry::Breakpoint))
     );
     assert_eq!(board.chip().instructions(), instructions);
     let observed: Vec<Signal> = board
@@ -3893,7 +4360,7 @@ fn run_in_background(board: &mut Board<Mc68331>, until: Time) {
     let instructions = board.chip().instructions();
     assert_eq!(
         board.run_until(until).unwrap(),
-        BoardRun::new(Stop::Background(Entry::Breakpoint), until)
+        BoardRun::new(until, Stop::Background(Entry::Breakpoint))
     );
     assert_eq!(board.chip().instructions(), instructions);
 }
@@ -4005,12 +4472,46 @@ attach = [{ select = "CSBOOT" }]
     // MOVE.W $401,D0: an odd address (CPU32RM 6.2.3)
     let mut board = board("fault-stop", text, &[MOVE_WORD_TO_D0, 0, 0x0401, NOP]);
     board.chip_mut().cpu_control().set_stop_on_fault(true);
-    let run = board.run_until(Time::from_seconds(1)).unwrap();
+    let run = board.run_until(Time::from_secs(1)).unwrap();
     assert_eq!(run.stop, Stop::Fault);
     let fault = board.chip().cpu().fault_stop().expect("a fault stop");
     assert_eq!(fault.address.0, 0x0401);
     assert_eq!(fault.registers.pc.0, START);
-    assert!(run.now < Time::from_seconds(1), "{:?}", run.now);
+    assert!(run.now < Time::from_secs(1), "{:?}", run.now);
+}
+
+#[test]
+fn a_data_watch_through_the_boards_cpu_control_stops_the_run() {
+    let text = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+writable = true
+attach = [{ select = "CSBOOT" }]
+"#;
+    let watched = 0x8000;
+    let program: Vec<u16> = store(watched, 0x1234)
+        .into_iter()
+        .chain([BRA_SELF])
+        .collect();
+    let mut board = board("data-watch", text, &program);
+    let written = Rc::new(Cell::new(None));
+    let seen = Rc::clone(&written);
+    let id =
+        board
+            .cpu_control()
+            .add_write_hook(Address(watched)..=Address(watched), move |access| {
+                seen.set(Some(access.value));
+                ControlFlow::Break(())
+            });
+    let run = board.run_until(Time::from_secs(1)).unwrap();
+    assert_eq!(run.stop, Stop::Hook(id));
+    assert_eq!(written.get(), Some(0x1234));
+    assert_eq!(board.chip().cpu().registers.pc, Address(START + 8));
 }
 
 #[test]
@@ -4053,7 +4554,7 @@ attach = [{ select = "CSBOOT" }]
     let mut tracing = BoardTracing::default();
     tracing.exceptions = true;
     board.set_tracing(tracing);
-    let run = board.run_until(Time::from_seconds(1)).unwrap();
+    let run = board.run_until(Time::from_secs(1)).unwrap();
     assert_eq!(run.stop, Stop::Fault);
     let vectors: Vec<u8> = board
         .take_trace()
@@ -4085,7 +4586,7 @@ struct Ahead {
 }
 
 impl Peripheral for Ahead {
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         (!self.driven).then_some(Time::from_picos(AHEAD_DRIVES_PS))
     }
 
@@ -4103,9 +4604,9 @@ const COMPARE_PS: u64 = 7_812_500_000;
 const TOC2: u32 = GPT + 0x16;
 /// TCTL1: OC2 toggles its pin (GPTRM 3.3.6).
 const OC2_TOGGLES: u16 = 0x0100;
-/// How far ahead of its cycle `Driver` drives.
+/// How far ahead of its cycle `AheadDriver` drives.
 const DRIVER_AHEAD_PS: u64 = 100_000;
-/// The run of a board with a `Driver`.
+/// The run of a board with an `AheadDriver`.
 const DRIVER_RUN_PS: u64 = 1_000_000_000;
 
 /// A peripheral on CS1 that keeps each cycle's time and horizon.
@@ -4123,9 +4624,9 @@ impl Peripheral for Sampled {
     fn read(
         &mut self,
         access: PeripheralAccess,
-        _: &mut Drive<'_>,
-    ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
-        self.cycles.push((access.now, access.horizon));
+        drive: &mut Drive<'_>,
+    ) -> Result<u32, mc683xx_cpu32::BusError> {
+        self.cycles.push((drive.now(), access.horizon));
         Ok(0)
     }
 
@@ -4133,9 +4634,9 @@ impl Peripheral for Sampled {
         &mut self,
         access: PeripheralAccess,
         _: u32,
-        _: &mut Drive<'_>,
-    ) -> Result<(), mc683xx_cpu32::bus::BusError> {
-        self.cycles.push((access.now, access.horizon));
+        drive: &mut Drive<'_>,
+    ) -> Result<(), mc683xx_cpu32::BusError> {
+        self.cycles.push((drive.now(), access.horizon));
         Ok(())
     }
 
@@ -4143,7 +4644,7 @@ impl Peripheral for Sampled {
         self.wants
     }
 
-    fn next_event(&self, _: TimeBase) -> Option<Time> {
+    fn next_event(&self, _: Moment) -> Option<Time> {
         (!self.advanced).then_some(Time::from_picos(SAMPLED_EVENT_PS))
     }
 
@@ -4155,19 +4656,19 @@ impl Peripheral for Sampled {
 /// A peripheral on CS2 whose every read drives an edge `DRIVER_AHEAD_PS`
 /// ahead.
 #[derive(Debug, Default)]
-struct Driver {
+struct AheadDriver {
     /// The level it drove last.
     level: bool,
 }
 
-impl Peripheral for Driver {
+impl Peripheral for AheadDriver {
     fn read(
         &mut self,
-        access: PeripheralAccess,
+        _: PeripheralAccess,
         drive: &mut Drive<'_>,
-    ) -> Result<u32, mc683xx_cpu32::bus::BusError> {
+    ) -> Result<u32, mc683xx_cpu32::BusError> {
         self.level = !self.level;
-        let at = Time::from_picos(access.now.picos() + DRIVER_AHEAD_PS);
+        let at = Time::from_picos(drive.now().picos() + DRIVER_AHEAD_PS);
         drive.drive_at(at, 0, Signal::Level(self.level));
         Ok(0)
     }
@@ -4218,7 +4719,7 @@ attach = [{{ select = "CS1" }}]
         .unwrap();
     registry
         .register("driver", vec![PortSpec::output("out", Kind::Edge)], |_| {
-            Ok(Box::new(Driver::default()))
+            Ok(Box::new(AheadDriver::default()))
         })
         .unwrap();
     registry
@@ -4350,7 +4851,7 @@ fn a_sensed_chip_output_bounds_the_horizon() {
 
 #[test]
 fn a_drive_earlier_in_the_instruction_bounds_the_horizon() {
-    // each MOVE reads `Driver`, which drives ahead, then writes `Sampled`
+    // each MOVE reads `AheadDriver`, which drives ahead, then writes `Sampled`
     let program = [
         MOVE_WORD_ABSOLUTE,
         (CS2_BASE >> 16) as u16,

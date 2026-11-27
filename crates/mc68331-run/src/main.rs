@@ -1,6 +1,6 @@
 //! `mc683xx-run`: runs a board file ([PLAN.md, Boards](https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#boards);
 //! [`docs/board-files.md`](https://github.com/charlieh0tel/mc683xx/blob/main/docs/board-files.md)).
-//! A thin command on `mc683xx_board::board::Board`'s run loop: it loads
+//! A thin command on `mc683xx_board::Board`'s run loop: it loads
 //! the file with the built-in peripheral types and the stock
 //! peripherals (`mc683xx_peripherals`), binds its run-time
 //! endpoints, runs it for a time, traces it ([`docs/tracing.md`](https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md)), and
@@ -30,7 +30,6 @@ use std::fmt::Display;
 use std::fs;
 use std::fs::File;
 use std::io::Write;
-use std::num::ParseIntError;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process;
@@ -42,15 +41,15 @@ use std::sync::atomic::Ordering;
 
 use clap::Parser;
 use clap::ValueEnum;
-use mc683xx_board::board::Board;
-use mc683xx_board::board::BoardRun;
-use mc683xx_board::board::BoardTracing;
-use mc683xx_board::chip::Chip;
-use mc683xx_board::control::BoardControl;
-use mc683xx_board::description::Options;
+use mc683xx_board::Board;
+use mc683xx_board::BoardControl;
+use mc683xx_board::BoardRun;
+use mc683xx_board::BoardTracing;
+use mc683xx_board::Chip;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::pacing::Pacer;
 use mc683xx_board::pacing::Pacing;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
@@ -58,12 +57,13 @@ use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
 use mc683xx_board::trace::Line;
 use mc683xx_board::trace::header;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Stop;
 use mc683xx_gdb::Ending;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
+use mc683xx_target::parse_integer;
 
 use crate::binding::Binding;
 use crate::binding::Escape;
@@ -73,8 +73,6 @@ use crate::error::RunError;
 
 /// The chip the runner runs, which names its trace's lines.
 const CHIP: &str = <Mc68331 as Chip>::TYPE;
-/// The longest turn, in microseconds, that a [`Span`] holds.
-const MAX_TURN_US: u64 = Span::MAX.picos() / Span::from_micros(1).picos();
 /// Exit status: the board or a file could not be used.
 const EXIT_ERROR: u8 = 1;
 /// Exit status: the CPU halted.
@@ -84,10 +82,28 @@ const EXIT_STOPPED: u8 = 4;
 /// Exit status: a second Ctrl-C, the shell's for death by SIGINT
 /// (128 + 2).
 const EXIT_INTERRUPTED: i32 = 130;
+/// The shortest `--turn`: a turn is a sync point with input, output, the
+/// trace and positions, so one every few clocks would be a run that
+/// never gets on.
+const SHORTEST_TURN: Span = Span::from_micros(1);
 /// What `--help` says after the options.
 const AFTER_HELP: &str = "Ctrl-C stops the run at its next sync point: the `stopped` record is \
 written and --save still saves (exit status 4).  A second Ctrl-C ends the process at once, \
 saving nothing (exit status 130).
+
+Bindings: the first stdio or tty on the command line takes standard input, and stdout leaves \
+it to another binding; bindings that share standard output each write to it.  An endpoint that drives no serial net takes no \
+input: stdio (with standard input) and pty are refused there, and stdout, a file or null \
+serves.  Standard input that is not a terminal (a file or a pipe) is read to its end when \
+input first goes in, and fed a byte a turn, so the run is the same each time: the run waits \
+there for the pipe to close.  A terminal's is live.  tty takes the terminal raw, as a serial \
+console: each key goes in as typed, with no echo or line editing, Ctrl-C and Ctrl-Z \
+included, and Ctrl-] ends the run as Ctrl-C would; the terminal is put back as it was when \
+the run ends.  It needs standard input to be a terminal.  Output a pty's buffer cannot take, with nobody reading it, is dropped, as a \
+UART's is with nothing on the line.
+
+Numbers (--cycles, --watch-code, --seed) are decimal, 0x hexadecimal or 0b binary, with _ \
+between digits allowed.
 
 Exit status: 0 the run spent its time; 1 the board or a file could not be used; 2 the \
 command line is wrong; 3 the CPU halted; 4 a hook, a peripheral, a fault (--stop-on-fault), gdb \
@@ -115,61 +131,48 @@ struct Arguments {
     /// The board file.
     board: PathBuf,
     /// Run until the chip has run this many system clocks.
-    #[arg(long, conflicts_with = "seconds")]
+    #[arg(long, value_name = "N", conflicts_with = "seconds", value_parser = parse_integer::<u64>)]
     cycles: Option<u64>,
     /// Run this many seconds of board time; inf, the default, runs
     /// until Ctrl-C, gdb, a halt or a stop ends it.
-    #[arg(long, value_parser = run_seconds)]
+    #[arg(long, value_name = "S", value_parser = run_seconds)]
     seconds: Option<f64>,
     /// The firmware image: replaces each memory image that is one of
     /// the file's `[board] images`.
-    #[arg(long)]
+    #[arg(long, value_name = "PATH")]
     firmware: Option<PathBuf>,
     /// A memory's image, NAME=PATH; may be given more than once.
-    #[arg(long = "image", value_parser = pair::<PathBuf>)]
+    #[arg(long = "image", value_name = "NAME=PATH", value_parser = pair::<PathBuf>)]
     images: Vec<(String, PathBuf)>,
     /// Enable a board option the file declares; may be given more than
     /// once.
-    #[arg(long = "option")]
+    #[arg(long = "option", value_name = "NAME")]
     options: Vec<String>,
     /// Set a peripheral's parameter, PERIPHERAL.KEY=VALUE, the value TOML (a
     /// bare word a string), over the file's; may be given more than
     /// once.
-    #[arg(long = "set")]
+    #[arg(long = "set", value_name = "PERIPHERAL.KEY=VALUE")]
     settings: Vec<String>,
-    /// Bind a run-time endpoint, NAME=stdio|stdout|tty|pty|null|file:PATH
-    /// (tty and pty on Unix only); may be given more than once.  Unbound
-    /// endpoints are null.  stdout writes what stdio writes and reads
-    /// nothing, leaving standard input to another binding; bindings
-    /// that share standard output each write to it, and the first
-    /// stdio on the command line takes standard input.  An endpoint that drives no serial
-    /// net takes no input: stdio (with standard input) and pty are
-    /// refused there, and stdout, a file or null serves.  Output a
-    /// pty's buffer cannot take, with nobody reading it, is dropped, as
-    /// a UART's is with nothing on the line.  With stdio, standard
-    /// input that is not a terminal (a file or a pipe) is read to its
-    /// end when input first goes in, and fed a byte a turn, so the run
-    /// is the same each time: the run waits there for the pipe to
-    /// close.  A terminal's is live.  tty takes the terminal on standard
-    /// input raw, as a serial console: each key goes in as typed, with
-    /// no echo or line editing, Ctrl-C and Ctrl-Z included, and Ctrl-]
-    /// ends the run as Ctrl-C would; the terminal is put back as it was
-    /// when the run ends.  It needs standard input to be a terminal, and
-    /// to itself: the first stdio or tty on the command line takes it.
-    #[arg(long = "bind", value_parser = pair::<How>)]
+    /// Bind a run-time endpoint, NAME=stdio|stdout|tty|pty|null|file:PATH;
+    /// may be given more than once.  Unbound endpoints are null.  stdio:
+    /// standard output, and standard input.  stdout: standard output
+    /// only.  tty: the terminal on standard input, raw.  pty: a new
+    /// pseudo-terminal.  null: nothing.  A file: output written to PATH.
+    /// tty and pty are Unix's.  Bindings, after the options, says more.
+    #[arg(long = "bind", value_name = "NAME=HOW", value_parser = pair::<How>)]
     bindings: Vec<(String, How)>,
     /// What to trace on standard error, comma-separated.
     #[arg(long, value_enum, value_delimiter = ',')]
     trace: Vec<Traced>,
-    /// Trace each time the instruction at this address, hexadecimal,
-    /// runs; may be given more than once.
-    #[arg(long = "watch-code", value_parser = hexadecimal)]
+    /// Trace each time the instruction at this address runs; may be
+    /// given more than once.
+    #[arg(long = "watch-code", value_name = "ADDRESS", value_parser = parse_integer::<u32>)]
     watch_code: Vec<u32>,
     /// Trace where the CPU is every this many seconds of board time.
-    #[arg(long, value_parser = seconds)]
+    #[arg(long, value_name = "S", value_parser = seconds)]
     position: Option<f64>,
     /// The seed every noise model draws from.
-    #[arg(long, default_value_t = 0)]
+    #[arg(long, value_name = "N", default_value_t = 0, value_parser = parse_integer::<u64>)]
     seed: u64,
     /// Stop at a bus or address error instead of taking it as an
     /// exception, and say which (`reason=fault`); the instruction is
@@ -177,27 +180,26 @@ struct Arguments {
     #[arg(long)]
     stop_on_fault: bool,
     /// Where peripherals keep working copies.
-    #[arg(long)]
+    #[arg(long, value_name = "DIR")]
     work_dir: Option<PathBuf>,
     /// Restore this snapshot before running.
-    #[arg(long)]
+    #[arg(long, value_name = "FILE")]
     restore: Option<PathBuf>,
     /// Save a snapshot here after running.  A board with a peripheral
     /// that cannot save, or a file that will not open, is refused before
     /// the run; the file is replaced only at its end, whole: the
     /// snapshot is written beside it and renamed over it.
-    #[arg(long)]
+    #[arg(long, value_name = "FILE")]
     save: Option<PathBuf>,
-    /// Microseconds of board time between the runner's turns, where
-    /// input goes in (one fed byte a turn), output comes out and
-    /// positions are taken.
-    #[arg(long, default_value_t = 1000,
-          value_parser = clap::value_parser!(u64).range(1..=MAX_TURN_US))]
-    turn_us: u64,
+    /// Seconds of board time between the runner's turns, where input
+    /// goes in (one fed byte a turn), output comes out and positions
+    /// are taken; 1e-6 (a microsecond) or more.
+    #[arg(long, value_name = "S", default_value = "0.001", value_parser = turn)]
+    turn: Span,
     /// Seconds of board time before input goes in: a frame that
     /// arrives before the firmware enables its receiver is lost, as on
     /// the board.
-    #[arg(long, default_value_t = 0.0, value_parser = seconds)]
+    #[arg(long, value_name = "S", default_value_t = 0.0, value_parser = seconds)]
     input_after: f64,
     /// Wait at reset for gdb at this address, HOST:PORT (port 0 picks
     /// one, which standard error names), and let it run the board; when
@@ -240,6 +242,20 @@ fn seconds(text: &str) -> Result<f64, String> {
     }
 }
 
+/// `--turn`: as `seconds`, at least [`SHORTEST_TURN`] and no longer
+/// than a [`Span`] holds.
+fn turn(text: &str) -> Result<Span, String> {
+    Span::checked_from_secs_f64(seconds(text)?)
+        .filter(|turn| *turn >= SHORTEST_TURN)
+        .ok_or_else(|| {
+            format!(
+                "{text:?}: give at least {} seconds, and at most {}",
+                SHORTEST_TURN.secs_f64(),
+                Span::MAX.secs_f64()
+            )
+        })
+}
+
 /// `--seconds`: as `seconds`, or inf, a run without end.
 fn run_seconds(text: &str) -> Result<f64, String> {
     if text == "inf" {
@@ -247,11 +263,6 @@ fn run_seconds(text: &str) -> Result<f64, String> {
     } else {
         seconds(text)
     }
-}
-
-/// An address, hexadecimal, `0x` or not.
-fn hexadecimal(text: &str) -> Result<u32, ParseIntError> {
-    u32::from_str_radix(text.trim_start_matches("0x"), 16)
 }
 
 fn main() -> ExitCode {
@@ -370,19 +381,17 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         eprintln!("{}", header(CHIP));
     }
     let end = match (arguments.cycles, arguments.seconds) {
-        (None, Some(seconds)) if seconds.is_finite() => {
-            board.now() + Span::from_seconds_f64(seconds)
-        }
+        (None, Some(seconds)) if seconds.is_finite() => board.now() + Span::from_secs_f64(seconds),
         _ => Time::MAX,
     };
-    let turn = Span::from_micros(arguments.turn_us);
+    let turn = arguments.turn;
     let every = arguments
         .position
-        .map(Span::from_seconds_f64)
+        .map(Span::from_secs_f64)
         .filter(|every| !every.is_zero());
     let mut turns = Turns {
         bindings,
-        input_after: board.now() + Span::from_seconds_f64(arguments.input_after),
+        input_after: board.now() + Span::from_secs_f64(arguments.input_after),
         next_position: every.map(|every| (board.now() + every, every)),
     };
     control.set_pacing(arguments.pace);
@@ -390,7 +399,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         let ending = gdb::serve(&mut board, &mut turns, address, &interrupted)?;
         let killed = ending == Ending::Killed;
         if killed || interrupted.load(Ordering::SeqCst) {
-            let outcome = BoardRun::new(Stop::Requested, board.now());
+            let outcome = BoardRun::new(board.now(), Stop::Requested);
             eprintln!("{}", Line::new(CHIP, &board.stopped_record(outcome)));
             if let Some(saving) = saving.filter(|_| !killed) {
                 saving.save(&board)?;
@@ -407,7 +416,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         // as the clock now runs (a SYNCR write moves it), and a turn
         // always moves time on.
         let until = arguments.cycles.map_or(until, |cycles| {
-            let at = board.system_clock().time(Cycles::from_clocks(cycles));
+            let at = board.system_clock().time(Cycle::from_clocks(cycles));
             until.min(at.max(board.now() + Span::from_picos(1)))
         });
         let outcome = board.run_until(until)?;
@@ -415,7 +424,7 @@ fn run(arguments: &Arguments) -> Result<BoardRun, RunError> {
         let done = board.now() >= end
             || arguments
                 .cycles
-                .is_some_and(|cycles| board.chip().now() >= Cycles::from_clocks(cycles));
+                .is_some_and(|cycles| board.chip().now() >= Cycle::from_clocks(cycles));
         if outcome.stop != Stop::Budget || done {
             break outcome;
         }
@@ -451,7 +460,7 @@ fn interruption(
         }
         control.stop();
     })
-    .map_err(RunError::Interrupt)?;
+    .map_err(|error| RunError::Interrupt { error })?;
     Ok(interrupted)
 }
 
@@ -554,7 +563,9 @@ impl Turns {
             let Ok(received) = board.take_received(&binding.name) else {
                 continue;
             };
-            binding.put_output(&received).map_err(RunError::Output)?;
+            binding
+                .put_output(&received)
+                .map_err(|error| RunError::Output { error })?;
         }
         let trace = board.take_trace();
         for record in &trace.records {
@@ -566,19 +577,31 @@ impl Turns {
         if let Some((at, every)) = self.next_position
             && board.now() >= at
         {
-            eprintln!("{}", Line::new(CHIP, &board.position()));
+            eprintln!("{}", Line::new(CHIP, &board.position_record()));
             self.next_position = Some((at + every, every));
         }
         Ok(())
     }
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use std::fs;
 
+    use super::SHORTEST_TURN;
+    #[cfg(unix)]
     use super::temporary_file;
+    use super::turn;
 
+    #[test]
+    fn a_turn_is_a_microsecond_or_more() {
+        assert_eq!(turn("1e-6"), Ok(SHORTEST_TURN));
+        assert!(turn("9.99e-7").is_err());
+        assert!(turn("0").is_err());
+    }
+
+    #[cfg(unix)]
     #[test]
     fn a_link_at_the_temporary_path_is_not_followed() {
         let directory = std::env::temp_dir().join(format!("mc683xx-run-{}", std::process::id()));

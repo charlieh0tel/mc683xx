@@ -19,10 +19,10 @@ use crate::instructions::Table;
 use crate::instructions::data_movement::low_register;
 use crate::registers::status;
 use crate::timing;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// RESET (CPU32RM 4.4, RESET).
 const RESET: u16 = 0x4e70;
@@ -184,8 +184,8 @@ pub(super) fn lpstop(core: &mut Core<'_>) -> Result<Flow, Exception> {
         return Err(core.privilege_violation());
     }
     core.cpu.registers.set_sr(sr);
-    let mask = u32::from(core.cpu.registers.interrupt_mask().get());
-    core.write(LPSTOP_BROADCAST, Size::Word, FunctionCode::CPU_SPACE, mask)?;
+    let mask = u32::from(core.cpu.registers.interrupt_mask().0);
+    core.write(LPSTOP_BROADCAST, Size::Word, FunctionCode::CpuSpace, mask)?;
     let last_tail = core.last_tail();
     core.adjust(timing::lpstop(last_tail));
     Ok(Flow::Stop)
@@ -324,8 +324,8 @@ fn movec(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
     }
     let registers = &mut core.cpu.registers;
     let value = match code {
-        control::SFC => u32::from(registers.sfc.get()),
-        control::DFC => u32::from(registers.dfc.get()),
+        control::SFC => u32::from(u8::from(registers.sfc)),
+        control::DFC => u32::from(u8::from(registers.dfc)),
         control::USP => registers.usp.0,
         _ => registers.vbr.0,
     };
@@ -375,13 +375,14 @@ fn moves(core: &mut Core<'_>, opcode: u16) -> Result<Flow, Exception> {
 mod tests {
     use super::LPSTOP;
     use super::LPSTOP_EXTENSION;
+    use crate::BusError;
     use crate::bus::Bus;
     use crate::bus::BusAccess;
-    use crate::bus::BusError;
     use crate::bus::LPSTOP_BROADCAST;
     use crate::bus::Read;
     use crate::cpu::Cpu;
     use crate::cpu::Stop;
+    use crate::cycles::Cycle;
     use crate::cycles::Cycles;
     use crate::exception::Exception;
     use crate::exception::Vector;
@@ -392,10 +393,10 @@ mod tests {
     use crate::instructions::tests::poke_long;
     use crate::instructions::tests::step;
     use crate::registers::status;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::entry::Entry;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::Entry;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     /// A stack in the test RAM.
     const STACK: u32 = 0x4000;
@@ -410,7 +411,7 @@ mod tests {
         /// The cycles, with the value of each write.
         cycles: Vec<(BusAccess, Option<u32>)>,
         /// When RESET was asserted.
-        resets: Vec<Cycles>,
+        resets: Vec<Cycle>,
     }
 
     impl Bus for Recorder {
@@ -427,7 +428,7 @@ mod tests {
             Ok(Cycles::ZERO)
         }
 
-        fn reset_instruction(&mut self, now: Cycles) {
+        fn reset_instruction(&mut self, now: Cycle) {
             self.resets.push(now);
         }
     }
@@ -441,7 +442,7 @@ mod tests {
 
     /// One instruction on `bus`.
     fn step_on(cpu: &mut Cpu, bus: &mut Recorder) -> Stop {
-        cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1))
+        cpu.run_for(bus, &mut NoInterrupts, Cycle::ZERO, Cycles::from_clocks(1))
             .stop
     }
 
@@ -528,7 +529,7 @@ mod tests {
         let [(access, value)] = bus.cycles[..] else {
             panic!("one cycle: {:?}", bus.cycles);
         };
-        assert_eq!(access.function_code, FunctionCode::CPU_SPACE);
+        assert_eq!(access.function_code, FunctionCode::CpuSpace);
         assert_eq!(access.address, LPSTOP_BROADCAST);
         assert_eq!(access.size, Size::Word);
         assert_eq!(value, Some(5));
@@ -544,7 +545,7 @@ mod tests {
         let run = cpu.run_for(
             &mut bus,
             &mut NoInterrupts,
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(1),
         );
         assert_eq!(run.cycles, Cycles::from_clocks(25));
@@ -554,7 +555,7 @@ mod tests {
         let run = cpu.run_for(
             &mut bus,
             &mut NoInterrupts,
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(1),
         );
         assert_eq!(run.cycles, Cycles::from_clocks(25 - 3));
@@ -582,7 +583,7 @@ mod tests {
         let before = cpu.registers.clone();
         let mut bus = Recorder::default();
         step_on(&mut cpu, &mut bus);
-        assert_eq!(bus.resets, [Cycles::ZERO]);
+        assert_eq!(bus.resets, [Cycle::ZERO]);
         let mut expected = before;
         expected.pc = Address(CODE + 2);
         assert_eq!(cpu.registers, expected);
@@ -604,8 +605,8 @@ mod tests {
         cpu.registers.set_address(3, 0x0012_3456);
         step(&mut cpu, 8);
         let registers = &cpu.registers;
-        assert_eq!(registers.sfc, FunctionCode::SUPERVISOR_DATA);
-        assert_eq!(registers.dfc, FunctionCode::SUPERVISOR_DATA);
+        assert_eq!(registers.sfc, FunctionCode::SupervisorData);
+        assert_eq!(registers.dfc, FunctionCode::SupervisorData);
         assert_eq!(registers.usp.0, 0x0012_3456);
         assert_eq!(registers.vbr.0, 0xffff_fffd);
         // Unimplemented bits read as zero.
@@ -661,7 +662,7 @@ mod tests {
     fn moves_reads_through_sfc_sign_extending_into_an_address_register() {
         // MOVES.B (A0), A1; MOVES.B (A0), D1
         let mut cpu = supervisor(&[0x0e10, 0x9000, 0x0e10, 0x1000]);
-        cpu.registers.sfc = FunctionCode::CPU_SPACE;
+        cpu.registers.sfc = FunctionCode::CpuSpace;
         cpu.registers.set_address(0, DATA + 1);
         cpu.registers.data[1] = 0x1234_5678;
         let mut bus = Recorder::default();
@@ -673,7 +674,7 @@ mod tests {
         assert!(
             bus.cycles
                 .iter()
-                .all(|(access, _)| access.function_code == FunctionCode::CPU_SPACE)
+                .all(|(access, _)| access.function_code == FunctionCode::CpuSpace)
         );
     }
 
@@ -681,7 +682,7 @@ mod tests {
     fn moves_an_postincrement_stores_the_incremented_an() {
         // MOVES.L A0, (A0)+ (CPU32RM 4.4, MOVES, note)
         let mut cpu = supervisor(&[0x0e98, 0x8800]);
-        cpu.registers.dfc = FunctionCode::SUPERVISOR_DATA;
+        cpu.registers.dfc = FunctionCode::SupervisorData;
         cpu.registers.set_address(0, DATA);
         step(&mut cpu, 1);
         assert_eq!(peek_long(&cpu, DATA), DATA + 4);
@@ -692,8 +693,8 @@ mod tests {
     fn moves_to_memory_costs_more() {
         let cycles = |code: &[u16]| {
             let mut cpu = supervisor(code);
-            cpu.registers.sfc = FunctionCode::SUPERVISOR_DATA;
-            cpu.registers.dfc = FunctionCode::SUPERVISOR_DATA;
+            cpu.registers.sfc = FunctionCode::SupervisorData;
+            cpu.registers.dfc = FunctionCode::SupervisorData;
             cpu.registers.set_address(0, DATA);
             step(&mut cpu, 1).cycles
         };

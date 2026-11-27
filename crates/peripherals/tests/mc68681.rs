@@ -9,18 +9,19 @@ use std::fs;
 use std::path::PathBuf;
 use std::process;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
 
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::frequency::Frequency;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_cpu32::Frequency;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
+use mc683xx_peripherals::Mc68681;
 
 /// The initial stack pointer: the top of the RAM on CS2.
 const STACK: u32 = 0x10_fffe;
@@ -269,4 +270,9 @@ fn the_cpu_transmits_receives_and_takes_the_duarts_vectored_interrupt() {
         "{at:?} from {sent_at:?}"
     );
     assert_eq!(board.chip().cpu().registers.data[0] & 0xff, u32::from(b'x'));
+    // read by type: the vector the program gave it, its crystal
+    let duart = board.peripheral::<Mc68681>("duart").unwrap();
+    assert_eq!(duart.interrupt_vector(), VECTOR);
+    assert_eq!(duart.x1(), Mc68681::X1);
+    assert_ne!(duart.interrupt_mask(), 0);
 }

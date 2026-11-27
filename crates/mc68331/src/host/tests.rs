@@ -1,15 +1,18 @@
 //! The host's cycles and peeks, and runs to a target time.
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycles;
+use std::cell::RefCell;
+
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::Select;
 use mc683xx_cpu32::registers::Registers;
+use mc683xx_cpu32::state::StateError;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::module;
@@ -18,15 +21,15 @@ use mc683xx_modules::module::Module;
 use mc683xx_modules::module::Peek;
 use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::qsm::sci::Frame;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
-use super::AccessError;
+use super::BusCycleError;
 use crate::chip::Builder;
 use crate::chip::Mc68331;
 use crate::chip::MemoryId;
-use mc683xx_cpu32::bus::StopRequest;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::PeripheralId;
 
@@ -84,7 +87,7 @@ const STOP: u16 = 0x4e72;
 /// SR: supervisor, every interrupt level taken.
 const UNMASKED: u16 = 0x2000;
 
-const SUPERVISOR: FunctionCode = FunctionCode::SUPERVISOR_DATA;
+const SUPERVISOR: FunctionCode = FunctionCode::SupervisorData;
 
 /// A peripheral that records its cycles and answers `value`.
 #[derive(Debug, Default)]
@@ -95,6 +98,16 @@ struct Recorder {
     writes: Vec<(BusCycle, u32)>,
     /// What it reads as.
     value: u32,
+    /// Whether it answers peeks and pokes, the word `value`'s bytes.
+    peekable: bool,
+    /// Each peek's and poke's first address and length, in order.
+    looks: RefCell<Vec<(u32, usize)>>,
+}
+
+/// The shift of a byte's lane in a word, for a byte at `address`: the
+/// upper at an even address.
+const fn lane_shift(address: Address) -> u32 {
+    if address.0 & 1 == 0 { 8 } else { 0 }
 }
 
 impl MappedPeripheral for Recorder {
@@ -106,6 +119,27 @@ impl MappedPeripheral for Recorder {
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
         self.writes.push((cycle, value));
         Ok(())
+    }
+
+    fn peek(&self, cycle: BusCycle, data: &mut [u8]) -> bool {
+        assert!(cycle.size == Size::Byte && !cycle.write);
+        self.looks.borrow_mut().push((cycle.address.0, data.len()));
+        for (index, byte) in (0..).zip(data.iter_mut()) {
+            *byte = (self.value >> lane_shift(cycle.address.offset(index))) as u8;
+        }
+        self.peekable
+    }
+
+    fn poke(&mut self, cycle: BusCycle, data: &[u8]) -> bool {
+        assert!(cycle.write && cycle.select.is_some());
+        self.looks.borrow_mut().push((cycle.address.0, data.len()));
+        if self.peekable {
+            for (index, &byte) in (0..).zip(data) {
+                let shift = lane_shift(cycle.address.offset(index));
+                self.value = self.value & !(0xff << shift) | u32::from(byte) << shift;
+            }
+        }
+        self.peekable
     }
 }
 
@@ -138,7 +172,7 @@ struct Ticker {
     /// Its period.
     period: Cycles,
     /// Its time.
-    now: Cycles,
+    now: Cycle,
 }
 
 impl MappedPeripheral for Ticker {
@@ -154,19 +188,19 @@ impl MappedPeripheral for Ticker {
 mc683xx_cpu32::unsavable!(Ticker, "a ticker");
 
 impl Timed for Ticker {
-    fn next_event(&self) -> Option<Cycles> {
-        Some(Cycles::from_clocks(
+    fn next_event(&self) -> Option<Cycle> {
+        Some(Cycle::from_clocks(
             (self.now.clocks() / self.period.clocks() + 1) * self.period.clocks(),
         ))
     }
 
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         self.now = now;
     }
 }
 
 fn cs(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).unwrap())
+    ChipSelect::Numbered(Number::try_from(number).unwrap())
 }
 
 /// CS`number` as a cycle carries it.
@@ -229,7 +263,7 @@ fn board(program: &[u16], ticker: Option<Cycles>) -> Board {
     if let Some(period) = ticker {
         builder.unwired_peripheral(Ticker {
             period,
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
         });
     }
     let mut chip = builder.build();
@@ -260,11 +294,11 @@ fn write(chip: &mut Mc68331, address: u32, size: Size, value: u32) {
         .unwrap();
 }
 
-fn read(chip: &mut Mc68331, address: u32, size: Size) -> Result<u32, AccessError> {
+fn read(chip: &mut Mc68331, address: u32, size: Size) -> Result<u32, BusCycleError> {
     chip.bus_read(Address(address), size, SUPERVISOR)
 }
 
-fn peek(chip: &Mc68331, address: u32, size: Size) -> Result<u32, AccessError> {
+fn peek(chip: &Mc68331, address: u32, size: Size) -> Result<u32, BusCycleError> {
     chip.peek(Address(address), size, SUPERVISOR)
 }
 
@@ -310,7 +344,11 @@ fn a_peripheral_sees_the_hosts_cycles_and_never_its_peeks() {
     write(&mut chip, PERIPHERAL_BASE + 1, Size::Byte, 0x56);
     assert_eq!(
         peek(&chip, PERIPHERAL_BASE, Size::Word),
-        Err(AccessError::Unpeekable)
+        Err(BusCycleError::Unpeekable(Address(PERIPHERAL_BASE)))
+    );
+    assert_eq!(
+        BusCycleError::Unpeekable(Address(PERIPHERAL_BASE)).to_string(),
+        "not peekable at 0x00200000"
     );
     let peripheral = chip.peripheral::<Recorder>(recorder).unwrap();
     assert_eq!(peripheral.reads.len(), 1);
@@ -325,39 +363,174 @@ fn a_peripheral_sees_the_hosts_cycles_and_never_its_peeks() {
 }
 
 #[test]
+fn a_peek_and_a_poke_reach_a_peripheral_that_takes_them_with_no_cycle() {
+    let Board {
+        mut chip, recorder, ..
+    } = board(&[BRANCH_TO_SELF], None);
+    chip.peripheral_mut::<Recorder>(recorder).unwrap().peekable = true;
+    assert_eq!(peek(&chip, PERIPHERAL_BASE, Size::Word), Ok(0x1234));
+    chip.poke(Address(PERIPHERAL_BASE), Size::Word, SUPERVISOR, 0xabcd)
+        .unwrap();
+    assert_eq!(peek(&chip, PERIPHERAL_BASE + 1, Size::Byte), Ok(0xcd));
+    let peripheral = chip.peripheral::<Recorder>(recorder).unwrap();
+    assert_eq!(peripheral.value, 0xabcd);
+    assert!(peripheral.reads.is_empty() && peripheral.writes.is_empty());
+    // one call for each access's bytes
+    assert_eq!(
+        *peripheral.looks.borrow(),
+        [
+            (PERIPHERAL_BASE, 2),
+            (PERIPHERAL_BASE, 2),
+            (PERIPHERAL_BASE + 1, 1)
+        ]
+    );
+    // memory, ROM too; a module's register, a peripheral that declines
+    // and nothing at all are not poked
+    chip.poke(Address(RAM_BASE), Size::Long, SUPERVISOR, 0x1122_3344)
+        .unwrap();
+    assert_eq!(peek(&chip, RAM_BASE, Size::Long), Ok(0x1122_3344));
+    chip.poke(Address(START), Size::Word, SUPERVISOR, u32::from(NOP))
+        .unwrap();
+    assert_eq!(peek(&chip, START, Size::Word), Ok(NOP.into()));
+    let unpeekable = |address| BusCycleError::Unpeekable(Address(address));
+    assert_eq!(
+        chip.poke(Address(SYPCR), Size::Byte, SUPERVISOR, 0),
+        Err(unpeekable(SYPCR))
+    );
+    assert_eq!(
+        chip.poke(Address(FAILING_BASE), Size::Byte, SUPERVISOR, 0),
+        Err(unpeekable(FAILING_BASE))
+    );
+    assert_eq!(
+        peek(&chip, FAILING_BASE, Size::Byte),
+        Err(unpeekable(FAILING_BASE))
+    );
+
+    assert_eq!(
+        chip.poke(Address(RAM_BASE), Size::Byte, SUPERVISOR, 0x100),
+        Err(BusCycleError::Width(0x100))
+    );
+    write(&mut chip, CSBARBT, Size::Word, BLOCK_64K.into());
+    assert_eq!(
+        chip.poke(Address(0x40_0000), Size::Byte, SUPERVISOR, 0),
+        Err(BusCycleError::Unserved(Address(0x40_0000)))
+    );
+}
+
+#[test]
+fn a_range_peek_and_poke_split_at_memory_and_call_a_peripheral_once() {
+    let Board {
+        mut chip,
+        recorder,
+        ram,
+    } = board(&[BRANCH_TO_SELF], None);
+    chip.peripheral_mut::<Recorder>(recorder).unwrap().peekable = true;
+    // CS1's recorder from just past RAM's 64-Kbyte block
+    let ram_end = RAM_BASE + RAM_BYTES as u32;
+    write(
+        &mut chip,
+        CSBAR0 + SELECT_BYTES,
+        Size::Word,
+        (ram_end >> 8) | u32::from(BLOCK_64K),
+    );
+    let image = [1, 2, 3, 4, 5, 6];
+    chip.poke_bytes(Address(ram_end - 2), SUPERVISOR, &image)
+        .unwrap();
+    assert_eq!(chip.memory(ram)[RAM_BYTES - 2..], [1, 2]);
+    let mut back = [0; 6];
+    chip.peek_bytes(Address(ram_end - 2), SUPERVISOR, &mut back)
+        .unwrap();
+    // the recorder holds a word: its last two bytes poked are what it reads
+    assert_eq!(back, [1, 2, 5, 6, 5, 6]);
+    let peripheral = chip.peripheral::<Recorder>(recorder).unwrap();
+    assert_eq!(*peripheral.looks.borrow(), [(ram_end, 4), (ram_end, 4)]);
+    // a run a peripheral declines declines all of it
+    chip.peripheral_mut::<Recorder>(recorder).unwrap().peekable = false;
+    assert_eq!(
+        chip.peek_bytes(Address(ram_end - 2), SUPERVISOR, &mut back),
+        Err(BusCycleError::Unpeekable(Address(ram_end)))
+    );
+    // the first byte declined named, the memory's before it stored
+    assert_eq!(
+        chip.poke_bytes(Address(ram_end - 1), SUPERVISOR, &[7, 8]),
+        Err(BusCycleError::Unpeekable(Address(ram_end)))
+    );
+    assert_eq!(chip.memory(ram)[RAM_BYTES - 1], 7);
+    // a module's registers byte by byte, unpoked
+    let mut sypcr = [0xff; 2];
+    chip.peek_bytes(Address(SYPCR), SUPERVISOR, &mut sypcr)
+        .unwrap();
+    assert_eq!(u16::from_be_bytes(sypcr), 0);
+    assert_eq!(
+        chip.poke_bytes(Address(SYPCR), SUPERVISOR, &[0]),
+        Err(BusCycleError::Unpeekable(Address(SYPCR)))
+    );
+}
+
+#[test]
+fn a_poke_writes_rom_the_core_does_not_serve() {
+    let Board {
+        mut chip, recorder, ..
+    } = board(&[BRANCH_TO_SELF], None);
+    chip.peripheral_mut::<Recorder>(recorder).unwrap().peekable = true;
+    // CS1's recorder over the boot ROM too: the ROM no longer alone on
+    // its addresses, the core serves neither
+    write(
+        &mut chip,
+        CSBAR0 + SELECT_BYTES,
+        Size::Word,
+        BLOCK_64K.into(),
+    );
+    assert!(
+        chip.cpu
+            .memory
+            .read_bytes(Address(START), &mut [0; 2])
+            .is_err()
+    );
+    chip.poke(Address(START), Size::Word, SUPERVISOR, u32::from(NOP))
+        .unwrap();
+    assert_eq!(peek(&chip, START, Size::Word), Ok(NOP.into()));
+    assert_eq!(
+        chip.peripheral::<Recorder>(recorder).unwrap().value,
+        u32::from(NOP),
+        "the recorder poked too"
+    );
+}
+
+#[test]
 fn the_host_sees_errors_by_kind() {
     let Board { mut chip, .. } = board(&[BRANCH_TO_SELF], None);
     assert_eq!(
         read(&mut chip, FAILING_BASE, Size::Word),
-        Err(AccessError::BusError)
+        Err(BusCycleError::BusError(Address(FAILING_BASE)))
     );
     assert_eq!(
         read(&mut chip, RAM_BASE + 1, Size::Word),
-        Err(AccessError::Misaligned)
+        Err(BusCycleError::Misaligned(Address(RAM_BASE + 1)))
     );
     assert_eq!(
         peek(&chip, RAM_BASE + 1, Size::Long),
-        Err(AccessError::Misaligned)
+        Err(BusCycleError::Misaligned(Address(RAM_BASE + 1)))
     );
     assert_eq!(
         chip.bus_write(Address(RAM_BASE), Size::Byte, SUPERVISOR, 0x100),
-        Err(AccessError::Width(0x100))
+        Err(BusCycleError::Width(0x100))
     );
     // CSBOOT down to 64 Kbytes: past it nothing answers
     write(&mut chip, CSBARBT, Size::Word, BLOCK_64K.into());
-    let nowhere = AccessError::Unmapped(Address(0x40_0000));
+    let nowhere = BusCycleError::Unserved(Address(0x40_0000));
     assert_eq!(read(&mut chip, 0x40_0000, Size::Word), Err(nowhere));
     assert_eq!(peek(&chip, 0x40_0000, Size::Byte), Err(nowhere));
-    assert_eq!(nowhere.to_string(), "nothing answers at 0x00400000");
+    assert_eq!(nowhere.to_string(), "no memory at 0x00400000");
     // a long's second word, past the end
     assert_eq!(
         read(&mut chip, 0xfffe, Size::Long),
-        Err(AccessError::Unmapped(Address(0x1_0000)))
+        Err(BusCycleError::Unserved(Address(0x1_0000)))
     );
     // a supervisor-only SIM register from user space goes external,
     // where nothing answers now (QSMRM 3.3; PLAN.md)
-    let user = FunctionCode::USER_DATA;
-    let sypcr = AccessError::Unmapped(Address(SYPCR));
+    let user = FunctionCode::UserData;
+    let sypcr = BusCycleError::Unserved(Address(SYPCR));
     assert_eq!(chip.peek(Address(SYPCR), Size::Word, user), Err(sypcr));
     assert_eq!(chip.bus_read(Address(SYPCR), Size::Word, user), Err(sypcr));
 }
@@ -384,7 +557,7 @@ fn a_peek_of_the_sci_leaves_its_flags_and_a_read_clears_them() {
 #[test]
 fn a_peek_of_a_counter_is_its_read() {
     let Board { mut chip, .. } = board(&[BRANCH_TO_SELF], None);
-    chip.run_until(Cycles::from_clocks(4000));
+    chip.run_until(Cycle::from_clocks(4000));
     let peeked = peek(&chip, TCNT, Size::Word).unwrap();
     assert_ne!(peeked, 0);
     assert_eq!(read(&mut chip, TCNT, Size::Word), Ok(peeked));
@@ -424,11 +597,11 @@ fn a_module_that_cannot_peek_says_so() {
             None
         }
 
-        fn acknowledge(&mut self, _: InterruptLevel, _: Cycles) -> Option<Vector> {
+        fn acknowledge(&mut self, _: InterruptLevel, _: Cycle) -> Option<Vector> {
             None
         }
 
-        fn reset(&mut self, _: Cycles) {}
+        fn reset(&mut self, _: Cycle) {}
 
         fn save(&self) -> Result<Vec<u8>, StateError> {
             Ok(Vec::new())
@@ -444,7 +617,7 @@ fn a_module_that_cannot_peek_says_so() {
     let address = chip.sim().module_base().0 + 0x700;
     assert_eq!(
         peek(&chip, address, Size::Word),
-        Err(AccessError::Unpeekable)
+        Err(BusCycleError::Unpeekable(Address(address)))
     );
     assert_eq!(read(&mut chip, address, Size::Word), Ok(0));
 }
@@ -475,7 +648,7 @@ fn interrupted(ticker: Option<Cycles>) -> Board {
 
 /// What a run leaves: time, instructions, registers, the handler's
 /// count and when the recorder was read.
-fn outcome(board: &Board) -> (Cycles, u64, Registers, Vec<u8>, Vec<Cycles>) {
+fn outcome(board: &Board) -> (Cycle, u64, Registers, Vec<u8>, Vec<Cycle>) {
     let chip = &board.chip;
     let reads = chip
         .peripheral::<Recorder>(board.recorder)
@@ -495,12 +668,12 @@ fn outcome(board: &Board) -> (Cycles, u64, Registers, Vec<u8>, Vec<Cycles>) {
 fn a_run_until_ends_at_the_first_boundary_at_or_after_its_target() {
     let mut board = interrupted(None);
     let chip = &mut board.chip;
-    let run = chip.run_until(Cycles::from_clocks(10_000));
+    let run = chip.run_until(Cycle::from_clocks(10_000));
     assert_eq!(run.stop, Stop::Budget);
-    assert!(chip.now() >= Cycles::from_clocks(10_000) && chip.now() < Cycles::from_clocks(10_100));
-    assert_eq!(run.cycles, chip.now());
+    assert!(chip.now() >= Cycle::from_clocks(10_000) && chip.now() < Cycle::from_clocks(10_100));
+    assert_eq!(run.cycles, chip.now().since_power_on());
     let now = chip.now();
-    let past = chip.run_until(Cycles::from_clocks(5000));
+    let past = chip.run_until(Cycle::from_clocks(5000));
     assert_eq!((past.cycles, past.stop), (Cycles::ZERO, Stop::Budget));
     assert_eq!(chip.now(), now);
     let count = &chip.memory(board.ram)[..2];
@@ -513,14 +686,14 @@ fn a_run_until_ends_at_the_first_boundary_at_or_after_its_target() {
 #[test]
 fn a_stopped_cpu_runs_until_its_target_exactly() {
     let Board { mut chip, .. } = board(&[STOP, UNMASKED], None);
-    let run = chip.run_until(Cycles::from_clocks(7777));
+    let run = chip.run_until(Cycle::from_clocks(7777));
     assert_eq!(run.stop, Stop::Stopped);
-    assert_eq!(chip.now(), Cycles::from_clocks(7777));
+    assert_eq!(chip.now(), Cycle::from_clocks(7777));
 }
 
 #[test]
 fn runs_until_rising_targets_are_one_long_run() {
-    const END: Cycles = Cycles::from_clocks(60_000);
+    const END: Cycle = Cycle::from_clocks(60_000);
     let mut long = interrupted(None);
     long.chip.run_until(END);
     // targets closer than an instruction, irregular, and synced by a
@@ -528,7 +701,7 @@ fn runs_until_rising_targets_are_one_long_run() {
     for ticker in [None, Some(Cycles::from_clocks(333))] {
         let mut short = interrupted(ticker);
         let steps = [1, 7, 100, 13, 1500, 3, 999];
-        let mut target = Cycles::ZERO;
+        let mut target = Cycle::ZERO;
         for step in steps.iter().cycle() {
             target = (target + Cycles::from_clocks(*step)).min(END);
             short.chip.run_until(target);

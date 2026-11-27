@@ -37,17 +37,18 @@ use std::ops::ControlFlow;
 use std::ops::RangeInclusive;
 use std::rc::Rc;
 
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::Run;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::Read;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Run;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::hooks::Instruction;
-use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Vector;
+use mc683xx_cpu32::hooks::Instruction;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::Acknowledged;
 use mc683xx_cpu32::interrupt::InterruptLevel;
@@ -59,14 +60,15 @@ use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_cpu32::registers::status;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
+use mc683xx_target::Register;
 
 /// The address lines of the 68331, ADDR[23:0] (MC68331UM 4.4.1.1).
 const ADDRESS_BITS: u32 = 24;
 /// RAM from zero, in both spaces: the vector table, code and stacks.
 const RAM_BYTES: u32 = 0x10000;
 /// Clocks of a RAM cycle: the fastest (CPU32RM 8.1.5).
-const RAM_CLOCKS: u8 = 2;
+const RAM_CLOCKS: Cycles = Cycles::from_clocks(2);
 /// Where the code starts, as in `unicorn_check.py`.
 const START: u32 = 0x1000;
 /// The supervisor stack's top, as in `unicorn_check.py`.
@@ -157,7 +159,7 @@ impl Interrupts for Request {
         self.0
     }
 
-    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycles) -> Acknowledged {
+    fn acknowledge(&mut self, _level: InterruptLevel, _now: Cycle) -> Acknowledged {
         self.0 = InterruptLevel::NONE;
         Acknowledge::Autovector.into()
     }
@@ -281,7 +283,7 @@ impl Machine {
         self.cpu.run_for(
             &mut NoBus,
             &mut Request(InterruptLevel::NONE),
-            Cycles::ZERO,
+            Cycle::ZERO,
             Cycles::from_clocks(1),
         )
     }
@@ -329,7 +331,7 @@ impl Machine {
                 let run = self.cpu.run_for(
                     &mut NoBus,
                     &mut Request(InterruptLevel::NONE),
-                    Cycles::ZERO,
+                    Cycle::ZERO,
                     BUDGET,
                 );
                 assert_eq!(run.stop, Stop::Hook(id));
@@ -352,7 +354,7 @@ impl Machine {
             });
         let run = self
             .cpu
-            .run_for(&mut NoBus, interrupts, Cycles::ZERO, BUDGET);
+            .run_for(&mut NoBus, interrupts, Cycle::ZERO, BUDGET);
         assert_eq!(run.stop, Stop::Hook(id));
         assert_eq!(self.cpu.registers.pc.0, at);
         seen.take().expect("the hook ran")
@@ -680,7 +682,7 @@ fn a_code_hook_sees_the_system_byte_at_each_instruction() {
             (
                 instruction.pc,
                 registers.sr(),
-                registers.address(7),
+                registers.register(Register::A7),
                 instruction.stack_top,
             )
         })
@@ -705,7 +707,7 @@ fn a_block_hook_sees_the_status_a_trap_enters_with() {
     assert_eq!(
         (
             seen.registers.sr(),
-            seen.registers.address(7),
+            seen.registers.register(Register::A7),
             seen.stack_top
         ),
         (status::S | status::Z, frame, Some(frame_top))
@@ -717,13 +719,13 @@ fn a_block_hook_sees_the_status_a_trap_enters_with() {
 /// before.
 #[test]
 fn a_block_hook_sees_the_mask_an_interrupt_enters_with() {
-    let level = InterruptLevel::new(3).expect("a level");
+    let level = InterruptLevel::try_from(3).expect("a level");
     let mut machine = Machine::new(&[NOP]);
     machine.cpu.registers.set_sr(status::S);
     let seen = machine.block_at(handler(Vector::autovector(level)), &mut Request(level));
     assert_eq!(
         seen.registers.sr(),
-        status::S | u16::from(level.get()) << status::INTERRUPT_SHIFT
+        status::S | u16::from(u8::from(level)) << status::INTERRUPT_SHIFT
     );
     assert_eq!(machine.stacked_sr(), status::S);
 }
@@ -765,7 +767,7 @@ fn fault_4_status_pop_into_user_state_pops_the_supervisor_stack() {
     assert_eq!(machine.cpu.registers.sr(), POPPED);
     assert_eq!(machine.cpu.registers.ssp.0, STACK_TOP);
     assert_eq!(machine.cpu.registers.usp.0, USER_STACK_TOP);
-    assert_eq!(machine.cpu.registers.address(7), USER_STACK_TOP);
+    assert_eq!(machine.cpu.registers.register(Register::A7), USER_STACK_TOP);
     assert_eq!(machine.cpu.registers.pc.0, START + 2);
 }
 
@@ -778,12 +780,12 @@ fn fault_5_stop_waits_for_an_interrupt() {
     const LOADED: u16 = status::S;
     /// A whole run's budget: more than one instruction.
     const BUDGET: Cycles = Cycles::from_clocks(1000);
-    let level = InterruptLevel::new(1).expect("a level");
+    let level = InterruptLevel::try_from(1).expect("a level");
     let mut machine = Machine::new(&[STOP, LOADED, NOP]);
     let run = machine.cpu.run_for(
         &mut NoBus,
         &mut Request(InterruptLevel::NONE),
-        Cycles::ZERO,
+        Cycle::ZERO,
         BUDGET,
     );
     assert_eq!(run.stop, Stop::Stopped);
@@ -792,7 +794,7 @@ fn fault_5_stop_waits_for_an_interrupt() {
     machine.cpu.run_for(
         &mut NoBus,
         &mut Request(level),
-        Cycles::ZERO,
+        Cycle::ZERO,
         Cycles::from_clocks(1),
     );
     assert_eq!(

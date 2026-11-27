@@ -1,9 +1,20 @@
-//! The SIM's chip-select pins, which the host wires its peripherals to.
+//! The SIM's chip-select pins, which the host wires its peripherals to,
+//! how a select ends a cycle and the DSACK pins a peripheral drives.
 
 use std::fmt;
 use std::str::FromStr;
 
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::bus::MOST_WAIT;
 use mc683xx_cpu32::peripheral::Select;
+
+use crate::sim::chip_selects::DSACK_FAST;
+
+/// Clocks in a bus cycle with no wait states and fast termination
+/// (SIMRM 7.5.1, 7.7; MC68331UM 4.5).
+const ZERO_WAIT_CLOCKS: u8 = 3;
+/// Clocks in a fast-termination cycle.
+const FAST_CLOCKS: u8 = 2;
 
 /// One of the SIM's 12 chip-select signals (SIMRM 7; MC68331UM 4.8).
 /// Which address, space and cycle asserts each is the firmware's, in
@@ -27,7 +38,7 @@ impl ChipSelect {
     pub const fn index(self) -> usize {
         match self {
             Self::Boot => 0,
-            Self::Numbered(number) => number.get() as usize + 1,
+            Self::Numbered(number) => number.0 as usize + 1,
         }
     }
 
@@ -106,33 +117,137 @@ impl Number {
     const LAST: u8 = 10;
 
     /// CS`number`, if there is one.
-    #[must_use]
-    pub const fn new(number: u8) -> Option<Self> {
+    const fn new(number: u8) -> Option<Self> {
         if number <= Self::LAST {
             Some(Self(number))
         } else {
             None
         }
     }
+}
 
-    /// Its number.
+impl TryFrom<u8> for Number {
+    type Error = NoChipSelectNumber;
+
+    fn try_from(number: u8) -> Result<Self, NoChipSelectNumber> {
+        Self::new(number).ok_or(NoChipSelectNumber(number))
+    }
+}
+
+impl From<Number> for u8 {
+    fn from(number: Number) -> Self {
+        number.0
+    }
+}
+
+/// A number no chip select has: past CS10.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("no chip select CS{0}")]
+pub struct NoChipSelectNumber(pub u8);
+
+/// How a select would end a cycle it matches (SIMRM 7.5, 7.7).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Termination {
+    /// Internal DSACK after two clocks.
+    Fast,
+    /// Internal DSACK after this many wait states, 0 to 13.
+    WaitStates(u8),
+    /// The peripheral asserts DSACK.
+    External,
+    /// MODE set: the cycle runs on ECLK.
+    Eclk,
+}
+
+impl Termination {
+    /// The most wait states a select encodes, 13: DSACK's values below
+    /// fast termination's (SIMRM 7.7), the most
+    /// [`Termination::WaitStates`] takes.
+    pub const MOST_WAIT_STATES: u8 = DSACK_FAST as u8 - 1;
+
+    /// The cycle's clocks, if the select ends it: ECLK cycles are
+    /// charged an ECLK period and half again, the average wait to
+    /// synchronize being half a period (our choice, [PLAN.md]).
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    ///
+    /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
+    #[doc(hidden)]
     #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
+    pub const fn clocks(self, eclk_divisor: u64) -> Option<Cycles> {
+        match self {
+            Self::Fast => Some(Cycles::from_clocks(FAST_CLOCKS as u64)),
+            Self::WaitStates(wait) => Some(Cycles::from_clocks((ZERO_WAIT_CLOCKS + wait) as u64)),
+            Self::External => None,
+            Self::Eclk => Some(Cycles::from_clocks(eclk_divisor + eclk_divisor / 2)),
+        }
+    }
+
+    /// The clocks of a cycle an external DSACK ends after `wait`
+    /// states, at most [`MOST_WAIT`] of them.
+    ///
+    /// Not part of the semver API: plumbing `mc683xx-mc68331` assembles the chip with.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn external_clocks(wait: Cycles) -> Cycles {
+        let wait = if wait.clocks() > MOST_WAIT.clocks() {
+            MOST_WAIT
+        } else {
+            wait
+        };
+        Cycles::from_clocks(ZERO_WAIT_CLOCKS as u64).saturating_add(wait)
+    }
+}
+
+/// The DSACK pins a peripheral drives on an externally terminated select.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Dsack {
+    /// DSACK0: an 8-bit port (SIMRM Table 5-2).
+    Dsack0,
+    /// DSACK1: a 16-bit port.
+    Dsack1,
+    /// Both: reserved, taken as a 16-bit port.
+    Both,
+}
+
+impl Dsack {
+    /// Whether it drives DSACK0.
+    #[must_use]
+    pub const fn drives_dsack0(self) -> bool {
+        matches!(self, Self::Dsack0 | Self::Both)
+    }
+
+    /// Whether it drives DSACK1.
+    #[must_use]
+    pub const fn drives_dsack1(self) -> bool {
+        matches!(self, Self::Dsack1 | Self::Both)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use mc683xx_cpu32::Cycles;
+    use mc683xx_cpu32::bus::MOST_WAIT;
     use mc683xx_cpu32::peripheral::Select;
 
     use super::ChipSelect;
+    use super::NoChipSelectNumber;
     use super::Number;
+    use super::Termination;
+
+    #[test]
+    fn an_external_cycle_s_wait_states_count_at_most_the_most_wait() {
+        let clocks = |wait| Termination::external_clocks(Cycles::from_clocks(wait)).clocks();
+        let most = MOST_WAIT.clocks();
+        assert_eq!(clocks(5), clocks(0) + 5);
+        assert_eq!(clocks(most), clocks(0) + most);
+        assert_eq!(clocks(most + 1), clocks(most));
+        assert_eq!(clocks(u64::MAX), clocks(most));
+    }
 
     #[test]
     fn eleven_numbered_selects() {
-        assert!(Number::new(10).is_some());
-        assert!(Number::new(11).is_none());
+        assert_eq!(Number::try_from(10).map(u8::from), Ok(10));
+        assert_eq!(Number::try_from(11), Err(NoChipSelectNumber(11)));
     }
 
     #[test]

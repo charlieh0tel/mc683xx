@@ -81,6 +81,10 @@ pub struct PortState {
 impl PortState {
     /// A port's data latch, data direction, pin assignment and the
     /// levels the board drives on its pins.
+    ///
+    /// Not part of the semver API: a host receives a port's state
+    /// (`Mc68331::port`) and reads its fields; the modules build it.
+    #[doc(hidden)]
     #[must_use]
     pub const fn new(latch: u8, direction: u8, assignment: u8, pins: u8) -> Self {
         Self {

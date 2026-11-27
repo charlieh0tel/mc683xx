@@ -14,8 +14,8 @@
 # compiled module its editable install puts in the package, and what
 # its tests leave.
 /.venv
-/crates/cpu32-py/python/mc683xx/*.so
-/crates/cpu32-py/python/mc683xx/*.pyd
+/crates/python/python/mc683xx/*.so
+/crates/python/python/mc683xx/*.pyd
 __pycache__/
 
 # What `make wasm` binds: the JavaScript bindings for Node and the web.

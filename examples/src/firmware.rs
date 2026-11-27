@@ -6,8 +6,8 @@
 //! self-contained.
 
 use mc683xx_cpu32::memory::MemoryKind;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::MemoryId;
+use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::MemoryId;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 
@@ -91,7 +91,7 @@ pub const UNMASKED: u16 = 0x2000;
 /// If there is no such select.
 #[must_use]
 pub fn cs(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).expect("CS0 to CS10"))
+    ChipSelect::Numbered(Number::try_from(number).expect("CS0 to CS10"))
 }
 
 /// A ROM of NOPs: the reset vectors (STACK, START) and `program` at

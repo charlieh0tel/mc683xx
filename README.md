@@ -64,7 +64,7 @@ crates.io.
   ([examples/web](https://github.com/charlieh0tel/mc683xx/blob/main/examples/README.md#web-page)):
   [try it in your browser](https://charlieh0tel.github.io/mc683xx/).
 
-Early: 0.x, and the API may change between minor versions.
+Beta: the API may still change before 1.0.
 
 ## Install
 
@@ -83,11 +83,11 @@ of board time (from the repository's root):
 use std::error::Error;
 use std::path::Path;
 
-use mc683xx_board::board::Board;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Board;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::time::Time;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 fn main() -> Result<(), Box<dyn Error>> {
     let registry = mc683xx_peripherals::registry();
@@ -97,8 +97,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         &registry,
         &Environment::default(),
     )?;
-    let run = board.run_until(Time::from_seconds(1))?;
-    println!("{:?} at {:?}", run.stop, run.now);
+    let run = board.run_until(Time::from_secs(1))?;
+    println!("{} at {}", run.stop, run.now);
     Ok(())
 }
 ```
@@ -107,7 +107,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 (`Registry::with_builtins()`) and the stock ones, and a host registers
 its own peripheral models in a registry with `Registry::register`.  A
 host can also build the chip directly, without a board file, with
-`mc683xx_mc68331::chip::Builder` (the host guide, below).
+`mc683xx_mc68331::Builder` (the host guide, below).
 
 ## Python: a board (`mc683xx`)
 
@@ -142,6 +142,10 @@ serial console: keys go in raw as typed, Ctrl-C included, and Ctrl-]
 ends the run.  `--bind NAME=stdout` writes an endpoint's
 output as `stdio` does and reads nothing, for an endpoint that only
 listens or to leave standard input to another binding.
+Its exit status is 0 when the run spent its time, 1 for a board or
+file error, 2 for a wrong command, 3 when the CPU halted, 4 when a
+hook, a peripheral or a fault (`--stop-on-fault`) stopped the run, gdb
+killed it, or Ctrl-C did, and 130 when a second Ctrl-C ended it at once.
 `mc683xx-run --help` gives the rest; `--firmware` gives a board
 another image.  [examples/README.md](https://github.com/charlieh0tel/mc683xx/blob/main/examples/README.md) describes the example
 boards and their firmware.
@@ -165,6 +169,8 @@ boards and their firmware.
   a recipe: the demo board's C firmware under gdb, source level.
 - [Tracing](https://github.com/charlieh0tel/mc683xx/blob/main/docs/tracing.md):
   the run trace's format.
+- [Init scripts](https://github.com/charlieh0tel/mc683xx/blob/main/docs/init-scripts.md):
+  the language that readies a target for a load.
 - [Performance](https://github.com/charlieh0tel/mc683xx/blob/main/docs/performance.md):
   measurements and the benchmarks.
 - [PLAN.md](https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md):
@@ -182,7 +188,7 @@ The crates above are in `crates/`: `target` (`mc683xx-target`),
 (`mc683xx-debug`) and `mc68331-run`
 (`mc683xx-run`).  The other members are not on crates.io:
 
-- `cpu32-py` (`crates/cpu32-py`): the Python package `mc683xx`, on PyPI.
+- `mc683xx-python` (`crates/python`): the Python package `mc683xx`, on PyPI.
 - `mc683xx-wasm` (`crates/wasm`): JavaScript bindings for boards,
   through WebAssembly, the npm package `mc683xx`
   ([crates/wasm/README.md](https://github.com/charlieh0tel/mc683xx/blob/main/crates/wasm/README.md)).
@@ -199,7 +205,7 @@ The crates above are in `crates/`: `target` (`mc683xx-target`),
 
 ```
 make hooks   # once per clone
-make ci      # fmt check, license copies, commit-msg hook, clippy, tests, rustdoc
+make ci      # fmt check, license copies, commit-msg hook, clippy, feature builds, tests, rustdoc
 make python      # the Python module in .venv, with its tests
 make wasm        # the JavaScript bindings (wasm32, wasm-bindgen), linted, as the npm package
 make npm-test    # the npm package packed and installed, in Node and headless Chrome

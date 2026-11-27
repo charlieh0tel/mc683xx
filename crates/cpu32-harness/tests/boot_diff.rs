@@ -34,20 +34,23 @@ use std::path::PathBuf;
 
 use cpu32_harness::layout;
 use cpu32_harness::layout::FIRMWARE;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::chip::MemoryId;
-use mc683xx_mc68331::event::Event;
+use mc683xx_mc68331::Event;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_mc68331::MemoryId;
+use mc683xx_mc68331::Port as ChipPort;
 use mc683xx_mc68331::gpt::Input;
-use mc683xx_mc68331::port::Port as ChipPort;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
+use mc683xx_modules::pins::PortLevels;
+use mc683xx_target::FunctionCode;
 
 use common::board;
 
@@ -565,7 +568,7 @@ impl Replay {
     }
 
     /// The byte read at `address`.
-    fn read_byte(&mut self, address: u32, now: Cycles) -> u8 {
+    fn read_byte(&mut self, address: u32, now: Cycle) -> u8 {
         if EEPROM.contains(&address) {
             return self.eeprom.read(address - EEPROM.start, now);
         }
@@ -586,7 +589,7 @@ impl Replay {
     }
 
     /// `byte` written at `address`.
-    fn write_byte(&mut self, address: u32, byte: u8, now: Cycles) {
+    fn write_byte(&mut self, address: u32, byte: u8, now: Cycle) {
         if EEPROM.contains(&address) {
             self.eeprom.write(address - EEPROM.start, byte, now);
         }
@@ -619,7 +622,7 @@ struct Eeprom {
     /// Its bytes.
     memory: Vec<u8>,
     /// When the write cycle under way ends.
-    busy_until: Option<Cycles>,
+    busy_until: Option<Cycle>,
     /// The last byte written.
     last_written: u8,
     /// I/O6 as the next read in a write cycle gives it.
@@ -628,7 +631,7 @@ struct Eeprom {
 
 impl Eeprom {
     /// The byte at `offset` read at `now`.
-    fn read(&mut self, offset: u32, now: Cycles) -> u8 {
+    fn read(&mut self, offset: u32, now: Cycle) -> u8 {
         if self.busy_until.is_some_and(|end| now < end) {
             let byte = (!self.last_written & IO7) | if self.toggle { IO6 } else { 0 };
             self.toggle = !self.toggle;
@@ -639,7 +642,7 @@ impl Eeprom {
     }
 
     /// `byte` written at `offset` at `now`.
-    fn write(&mut self, offset: u32, byte: u8, now: Cycles) {
+    fn write(&mut self, offset: u32, byte: u8, now: Cycle) {
         if let Some(cell) = self.memory.get_mut(offset as usize) {
             *cell = byte;
         }
@@ -650,7 +653,7 @@ impl Eeprom {
 
 impl MappedPeripheral for Replay {
     fn read(&mut self, cycle: BusCycle) -> Result<u32, BusError> {
-        if cycle.function_code.is_cpu_space() {
+        if cycle.function_code == FunctionCode::CpuSpace {
             // the DUART's interrupt acknowledge, through CS10
             if self.interrupt_request() {
                 self.interrupts.pop_front();
@@ -666,7 +669,7 @@ impl MappedPeripheral for Replay {
     }
 
     fn write(&mut self, cycle: BusCycle, value: u32) -> Result<(), BusError> {
-        if cycle.function_code.is_cpu_space() {
+        if cycle.function_code == FunctionCode::CpuSpace {
             return Ok(());
         }
         let bytes = cycle.size.bytes();
@@ -747,7 +750,7 @@ struct ReplayQspi {
     unreplayed: u64,
     /// The bytes shifted to the front panel since last taken, with
     /// when.
-    panel: Vec<(Cycles, u8)>,
+    panel: Vec<(Cycle, u8)>,
 }
 
 impl ReplayQspi {
@@ -1028,15 +1031,15 @@ fn run_chip(
     let after_port = run.after_port;
     let (mut builder, id, ram) = board(image, peripheral);
     if let Some(qspi) = qspi {
-        builder.qspi(qspi);
+        builder.set_qspi(qspi);
     }
     builder.set_interrupt(
         id,
-        mc683xx_cpu32::interrupt::IrqPin::new(DUART_LEVEL).expect("a level"),
+        mc683xx_cpu32::interrupt::IrqPin::try_from(DUART_LEVEL).expect("a level"),
     );
     let mut chip = builder.build();
-    let mut tracing = mc683xx_mc68331::event::ChipTracing::default();
-    tracing.accesses = true;
+    let mut tracing = mc683xx_mc68331::ChipTracing::default();
+    tracing.bus_cycles = true;
     tracing.exceptions = true;
     chip.set_tracing(tracing);
     let mut trace = Vec::new();
@@ -1053,7 +1056,7 @@ fn run_chip(
             clippy::cast_precision_loss,
             reason = "seconds of a few clocks' worth"
         )]
-        let budget = (seconds * chip.sim().clock().frequency().hz() as f64) as u64;
+        let budget = (seconds * chip.sim().system_clock().frequency().hz() as f64) as u64;
         if chip.now().clocks() >= budget {
             break format!("the time, {seconds} s, at clock {}", chip.now().clocks());
         }
@@ -1073,7 +1076,7 @@ fn run_chip(
             // takes it (GPTRM 6.1)
             captures.pop_front();
             let level = driven[GP].unwrap_or_default();
-            chip.set_pins(ChipPort::Gp, level | IC1, u8::MAX)
+            chip.set_pins(ChipPort::Gp, PortLevels::new(u8::MAX, level | IC1))
                 .expect("an input port");
             driven[GP] = Some(level);
         }
@@ -1085,8 +1088,11 @@ fn run_chip(
             run
         };
         if capture {
-            chip.set_pins(ChipPort::Gp, driven[GP].unwrap_or_default(), u8::MAX)
-                .expect("an input port");
+            chip.set_pins(
+                ChipPort::Gp,
+                PortLevels::new(u8::MAX, driven[GP].unwrap_or_default()),
+            )
+            .expect("an input port");
         }
         let origin = chip.instructions();
         for event in chip.take_events() {
@@ -1141,7 +1147,7 @@ fn run_chip(
                 clippy::cast_precision_loss,
                 reason = "seconds of a few clocks' worth"
             )]
-            let after = (after_port * chip.sim().clock().frequency().hz() as f64) as u64;
+            let after = (after_port * chip.sim().system_clock().frequency().hz() as f64) as u64;
             stop_at = Some(chip.now().clocks() + after);
             println!(
                 "boot-diff: TBB written as the reference's at clock {}",
@@ -1223,13 +1229,13 @@ fn drive_pins(
         driven[port] = Some(level);
         match port {
             0 => chip
-                .set_pins(ChipPort::E, level, u8::MAX)
+                .set_pins(ChipPort::E, PortLevels::new(u8::MAX, level))
                 .expect("an input port"),
             1 => chip
-                .set_pins(ChipPort::F, level, u8::MAX)
+                .set_pins(ChipPort::F, PortLevels::new(u8::MAX, level))
                 .expect("an input port"),
             GP => chip
-                .set_pins(ChipPort::Gp, level, u8::MAX)
+                .set_pins(ChipPort::Gp, PortLevels::new(u8::MAX, level))
                 .expect("an input port"),
             _ => {
                 chip.set_gpt_input(Input::Pai, level & PACTL_PAIS != 0);
@@ -1247,28 +1253,28 @@ fn peripheral_of(chip: &Mc68331, id: PeripheralId) -> &Replay {
 /// `event`'s record, if the reference would trace it.
 fn chip_record(chip: &Mc68331, ram: MemoryId, pc: u32, event: Event) -> Option<Record> {
     match event {
-        Event::Access {
+        Event::BusCycle {
             address,
             size,
             function_code,
             write,
             value,
             ..
-        } if traced_address(address.0) && !function_code.is_cpu_space() => Some(Record::Access {
-            write,
-            address: address.0,
-            size: size.bytes() as u8,
-            value: value.unwrap_or_default(),
-        }),
+        } if traced_address(address.0) && function_code != FunctionCode::CpuSpace => {
+            Some(Record::Access {
+                write,
+                address: address.0,
+                size: size.bytes() as u8,
+                value,
+            })
+        }
         Event::Exception { entry, .. } => {
             let memory = chip.memory(ram);
             let offset = entry.stack.0 as usize & (memory.len() - 1);
             let sr = memory
                 .get(offset..offset + 2)
                 .map_or(0, |word| u16::from_be_bytes([word[0], word[1]]));
-            let level = entry
-                .level
-                .map(mc683xx_cpu32::interrupt::InterruptLevel::get);
+            let level = entry.level.map(u8::from);
             Some(Record::Exception {
                 vector: entry.vector.0,
                 pc: if level.is_some() { entry.pc.0 } else { pc },

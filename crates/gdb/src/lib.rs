@@ -2,10 +2,10 @@
 //! or a CPU32 under BDM control.
 //!
 //! gdb's remote serial protocol, through the [`gdbstub`] crate, over a
-//! [`target::Target`] ([PLAN.md, Debugger]): [`serve`], on a
+//! [`Target`] ([PLAN.md, Debugger]): [`serve`], on a
 //! [`connection::Connection`].  An emulated target gives the CPU's
 //! controls, so breakpoints, watchpoints and steps are the core's
-//! hooks; [`bdm::Bdm`] makes any
+//! hooks; [`Bdm`] makes any
 //! [`Cpu32Target`](mc683xx_target::Cpu32Target), a BDM pod's on
 //! silicon among them, a target whose breakpoints are BGND planted in
 //! memory.  [`docs/gdb.md`] is its guide, whose Rust block the
@@ -83,19 +83,26 @@
     clippy::missing_panics_doc
 )]
 
+use std::fmt;
 use std::fmt::Display;
 
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use crate::connection::Connection;
-use crate::target::Target;
 
 mod arch;
-pub mod bdm;
+mod bdm;
 pub mod connection;
 mod protocol;
 mod session;
-pub mod target;
+mod target;
+
+pub use bdm::Bdm;
+pub use target::AccessError;
+pub use target::NativeStep;
+pub use target::Target;
+pub use target::TargetReset;
+pub use target::TargetRun;
 
 /// How a session ended.
 ///
@@ -107,7 +114,7 @@ pub mod target;
 /// fn detached(ending: Ending) -> bool {
 ///     match ending {
 ///         Ending::Detached => true,
-///         Ending::Killed => false,
+///         Ending::Killed | Ending::HungUp => false,
 ///     }
 /// }
 /// ```
@@ -118,6 +125,23 @@ pub enum Ending {
     Detached,
     /// gdb killed the target: the host should stop running it.
     Killed,
+    /// gdb hung up: it closed the connection without detaching or
+    /// killing the target, as it does when it exits or its link is
+    /// lost ([`Connection::hung_up`]).  The target is left as a
+    /// session that failed leaves it: an emulated one to its host, one
+    /// under BDM control halted.
+    HungUp,
+}
+
+/// `detached`, `killed` or `hung up`.
+impl fmt::Display for Ending {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Detached => "detached",
+            Self::Killed => "killed",
+            Self::HungUp => "hung up",
+        })
+    }
 }
 
 /// Why a session ended other than as gdb asked.
@@ -145,7 +169,8 @@ pub enum SessionError<E, C> {
         /// The target's error.
         error: E,
     },
-    /// The connection failed, or gdb closed it.
+    /// The connection failed: other than by gdb hanging up, which is
+    /// [`Ending::HungUp`].
     #[error("connection: {error}")]
     Connection {
         /// The connection's error.
@@ -186,34 +211,41 @@ fn listed(addresses: &[Address]) -> String {
         .join(", ")
 }
 
-/// Serves gdb on `connection` over `target` until gdb detaches or
-/// kills it.
+/// Serves gdb on `connection` over `target` until gdb detaches, kills
+/// it or hangs up.
 ///
 /// The target is halted first, so gdb finds it stopped, and stays
 /// where it is until gdb continues or steps it.  When the session
 /// ends, however it ends, every hook the stub installed is removed, and
 /// a target under BDM control is halted and every breakpoint still
 /// planted removed.  Detach resumes a target under BDM control and
-/// leaves an emulated one to its host; kill leaves either halted.
+/// leaves an emulated one to its host; kill leaves either halted, and
+/// so does a hang-up a target under BDM control.
 ///
 /// # Errors
 ///
 /// [`SessionError::Target`] if a call on the target fails,
-/// [`SessionError::Connection`] if the connection fails or gdb closes
-/// it, [`SessionError::Protocol`] if gdb sends what the stub cannot
+/// [`SessionError::Connection`] if the connection fails other than by
+/// gdb hanging up, [`SessionError::Protocol`] if gdb sends what the stub cannot
 /// take, and [`SessionError::Unrestored`] if a breakpoint planted
 /// cannot be put back; then a detach does not resume the target.  A
 /// session that failed and then failed to clean up reports both,
 /// [`SessionError::Uncleaned`].
-pub fn serve<T, C>(
+pub fn serve<T: Target, C: Connection>(
     target: &mut T,
     connection: C,
-) -> Result<Ending, SessionError<T::Error, C::Error>>
-where
-    T: Target,
-    T::Error: Display,
-    C: Connection,
-    C::Error: Display,
-{
+) -> Result<Ending, SessionError<T::Error, C::Error>> {
     session::serve(target, connection)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Ending;
+
+    #[test]
+    fn an_ending_prints_its_name() {
+        assert_eq!(Ending::Detached.to_string(), "detached");
+        assert_eq!(Ending::Killed.to_string(), "killed");
+        assert_eq!(Ending::HungUp.to_string(), "hung up");
+    }
 }

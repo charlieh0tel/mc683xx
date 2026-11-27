@@ -9,7 +9,7 @@ use mc683xx_board::inspect::Inspection;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::cpu::state::StateError;
+use mc683xx_cpu32::state::StateError;
 use mc683xx_modules::qsm::sci::Frame;
 use serde::Deserialize;
 use serde::Serialize;

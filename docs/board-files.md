@@ -6,15 +6,23 @@ written against.  Why it is shaped this way is in `PLAN.md`, Boards.
 The rule: the file says what is wired where and how the chip is
 configured, never what a peripheral does.
 
-Version 1 is frozen from the first release, 0.1.0: a change that
-would make a version 1 file mean something else, or refuse one this
-reference accepts, is version 2.  A minor release may add keys to
-version 1, each marked here as added within it; a file without one
-means what it did, and a file that uses one needs at least the release
-that added it, as an earlier one refuses the key as unknown.  Every
-1.x release reads every version 1 file.  The built-in types below and
-the stock types (`docs/peripherals.md`) are under the same freeze:
-their names, parameters and ports (docs/releasing.md, Semver scope).
+Version 1 is frozen from 1.0.0: from then a change that would make a
+version 1 file mean something else, or refuse one this reference
+accepts, is version 2.  Before 1.0.0 a minor release may still make
+such a change and keep version 1, and its release notes say how to
+convert a file (docs/releasing.md, Semver scope).  A minor release may
+add keys to version 1, each marked here as added within it; a file
+without one means what it did, and a file that uses one needs at least
+the release that added it, as an earlier one refuses the key as
+unknown.  Every 1.x release reads every version 1 file.  The built-in
+types below and the stock types (`docs/peripherals.md`) are under the
+same freeze: their names, parameters and ports.
+
+Version 1 keeps one oddity once frozen, which a version 2, if there is
+one, would drop: two keys for which ADDR lines a part sees (a
+decoder's `address_bits`, which takes tied levels too, and an
+attachment's `lines`), which version 2 would make one.  No version 2
+is planned.
 
 Two words, used one way throughout: a **peripheral** is anything
 outside the chip that the board wires to it (a memory's command
@@ -26,7 +34,13 @@ the QSPI an SPI peripheral.
 Every table refuses keys it does not know, but every table takes a
 `note`, a string the loader ignores, for provenance and confidence: a
 peripheral's `parameters` and a decoder's `alias` too, where it is the
-loader's, never a parameter or a code.  Numbers may be written in hex (`0xff`) or binary (`0b1110`).  Names
+loader's, never a parameter or a code.  Numbers are TOML integers,
+with TOML's own syntax: hex (`0xff`), binary (`0b1110`), octal
+(`0o17`), a sign and `_` between digits.  A number inside a string, as
+a decoder's `alias` codes are, takes the one syntax the command line,
+init scripts and gdb take (`mc683xx_target::parse_integer`):
+decimal, `0x` or `0b`, `_` between digits, no sign, no octal and no
+decimal leading zero.  Names
 (memories, decoders, peripherals, nets) are unique across the file, and
 are not `chip` or `external` and hold no `.`.  Any memory, decoder,
 peripheral, unconnected select or net may carry `option = "name"`, one of
@@ -80,8 +94,8 @@ size = 0x10000
 writable = true
 attach = [
   { select = "CS0", role = "read" },
-  { select = "CS2", role = "upper" },   # a lane: lane = "upper"
-  { select = "CS3", role = "lower" },
+  { select = "CS2", lane = "upper" },
+  { select = "CS3", lane = "lower" },
 ]
 
 [[decoder]]
@@ -341,8 +355,8 @@ and, for a select, a decoder output or a window:
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `role` | `"read-write"` | `"read"`, `"write"`, `"read-write"`, or `"iack"` (acknowledge cycles, CPU space); `"upper"` and `"lower"` are lanes, read and written. |
-| `lane` | `"both"` | `"both"`, `"upper"` (DATA[15:8], even addresses) or `"lower"` (DATA[7:0], odd).  Not with a lane role. |
+| `role` | `"read-write"` | `"read"`, `"write"`, `"read-write"`, or `"iack"` (acknowledge cycles, CPU space). |
+| `lane` | `"both"` | `"both"`, `"upper"` (DATA[15:8], even addresses) or `"lower"` (DATA[7:0], odd). |
 | `lines` | `24` | The ADDR lines wired to the peripheral's address pins: a count, ADDR0 up, or a list of at most 24, the peripheral's A0 first (`[1, 2, 3, 4]`: ADDR1 to the peripheral's A0). |
 | `offset` | `0` | Added to the address the peripheral sees. |
 
@@ -370,7 +384,7 @@ driven.  A peripheral on DATA7-0 of a 16-bit port states `lane = "lower"`.
 | `name` | string | required | Its name. |
 | `type` | `"logic"`, `"edge"`, `"clock"`, `"serial"`, `"analog"`, `"bus"`, `"wired-and"` | required | What it carries: a level whose state matters; a level whose changes' times matter (1 PPS); a clock (frequency and exact phase, re-driven at each change of frequency); UART frames; a value; parallel lines as one word; or an open-drain logic net, pulled up. |
 | `from` | endpoint, or array of endpoints | required | Its driver; several only on a `wired-and` net, whose level is the AND of theirs (a driver not driving is high). |
-| `to` | array of endpoints | required | Its sinks. |
+| `to` | endpoint, or array of endpoints | required | Its sinks. |
 
 A net goes one way: a serial link is two nets, one each way.  On a
 `wired-and` net an `in-out` port, or a chip port pin, may be both a
@@ -388,10 +402,12 @@ Endpoints:
 | `chip.ECLK` | clock | out of the chip: the system clock / 8 or / 16 (SYNCR EDIV), a rising edge at power-on (the manuals give no phase; our choice), retuned when the system clock or EDIV changes.  A peripheral on an ECLK-mode select (CSOR MODE, SIMRM 7.5.2) takes it as its E input and aligns its cycles to it; the chip charges each such cycle an ECLK period and a half. |
 | `chip.RXD` | serial | into the chip |
 | `chip.TXD` | serial | out of the chip |
-| `external.name` | any | either; the runner or host binds it (`--bind name=stdio`).  The runner refuses input (stdio, pty) to one that drives no serial net: `stdout`, `file:PATH` or `null` there |
+| `external.name` | any | either; the runner or host binds it (`--bind name=stdio`).  The runner refuses input (stdio, tty, pty) to one that drives no serial net: `stdout`, `file:PATH` or `null` there |
 
-PGP0 is IC1, PGP1 IC2, PGP2 IC3, PGP3 to PGP6 OC1 to OC4, PGP7
-IC4/OC5 (MC68331UM Figure 7-1).  A peripheral port takes a net of its own
+A chip pin's name is taken in any case (`chip.pe0` is `chip.PE0`, the
+same endpoint, so it drives or senses one net however it is written),
+as a chip select's or a reset cause's.  PGP0 is IC1, PGP1 IC2, PGP2 IC3,
+PGP3 to PGP6 OC1 to OC4, PGP7 IC4/OC5 (MC68331UM Figure 7-1).  A peripheral port takes a net of its own
 kind only (a `wired-and` net is `logic`); a chip pin takes `logic` or
 `edge`.  A strobe that a peripheral samples as a level (a latch enable such
 as the AD569's /LBE) is a `logic` net: its low time matters, and an
@@ -416,7 +432,7 @@ when it drives a net, the host sending; `In` when it is driven;
 whose type carries the value, and fails with `SendError` if it drives
 none.  A frame from a run-time endpoint
 (the runner's input) is untimed: baud and length zero.  An analog sink reads its input when it wants it
-(`Drive::sample`): the driver's `Peripheral::sample` at that time, or else
+(`Drive::sample`): the driver's `Peripheral::analog_output` at that time, or else
 the value last driven.  A peripheral may drive a clock net as often as its
 frequency changes.
 
@@ -451,7 +467,11 @@ parameters the file would refuse: `builtin::Fixed::new(value)`,
 ## The Rust API for peripheral types
 
 The contract a host's peripheral models target (rustdoc in
-`crates/mc68331-board`):
+`crates/mc68331-board`).  A crate of peripheral models depends on
+`mc683xx-board`, `mc683xx-cpu32` (`BusError`, `PortSize`,
+`StateError`), `mc683xx-modules` (`QspiClock`, `Frame`) and
+`mc683xx-target`, every one at the same version, as no crate
+re-exports another's types (`docs/host-guide.md`, Crates).
 
 - `registry::Registry`: `register(name, ports, constructor)` for a
   type with fixed ports, `register_ported(name, constructor)` for one
@@ -466,8 +486,9 @@ The contract a host's peripheral models target (rustdoc in
   parameters, environment)` builds one to test it, and
   `Context::with_read(name, parameters, environment, read)` one whose
   `contents` come from `read`): the peripheral's `name`, its
-  `parameters` (typed getters `integer`, `required_integer`, `boolean`,
-  `float`, `string`, `value`, `table`, the values `registry::ParameterValue`s,
+  `parameters` (typed getters `integer`, `boolean`, `float` and
+  `string`, each with a `required_` one that fails for a key not given,
+  `value`, `table`, the values `registry::ParameterValue`s,
   the board's own type, not the TOML parser's; a key no getter read is an
   unknown-parameter error), `contents(key)` (the bytes of the file a
   path parameter names, relative to the board file: an image, which a
@@ -481,13 +502,13 @@ The contract a host's peripheral models target (rustdoc in
   is the first key no getter read, the load's unknown-parameter error,
   for a host's tests of its constructors, which build their `Parameters`
   with `Parameters::parse(toml_text)` (text that is not a TOML table an
-  `error::SyntaxError`, its `line()` and `column()` from 1, as a board
+  `SyntaxError`, its `line()` and `column()` from 1, as a board
   file's `LoadError::Syntax` carries; boxed, so a `LoadError`, and a
   host's error holding one, stays small).  A host holding TOML that sets
-  a peripheral's parameters (`description::Options::parameters`) takes the
+  a peripheral's parameters (`Options::parameters`) takes the
   table as `Parameters::parse(toml_text)?.into_table()`, and one value
   with `Options::set("PERIPHERAL.KEY=VALUE".parse()?)` (a
-  `description::Setting`, its parse error a `ParseSettingError`,
+  `Setting`, its parse error a `ParseSettingError`,
   printing back as `PERIPHERAL.KEY=VALUE` with the value as TOML writes
   it); the TOML parser's types are
   not in the API, so a host that parsed its own TOML passes the text.
@@ -510,29 +531,49 @@ The contract a host's peripheral models target (rustdoc in
   default, so a peripheral implements only the sides it is on; one with
   only net ports (an OCXO, a GPS engine, an oven) is as first-class
   as one on the bus.  The trait is `Any`: a host reaches its own peripheral's state
-  (a UI's widget) by its type with `Board::peripheral::<T>(name)` (a `Ref`) or
+  (a UI's widget) by its type with `Board::peripheral::<T>(name)` (a `Ref`; a
+  `LookupError`, `NoPeripheral` for a name the board lacks or `NotA` for
+  a peripheral of another type) or
   `peripheral_mut`, and a `Box<dyn Peripheral>` upcasts to `Box<dyn Any>`.
   `inspect()` gives what a front end shows of it, an
   `inspect::Inspection` of named fields (empty by default;
-  `Board::inspect(name)`).  A call that takes a `peripheral::Drive`
-  takes its time from it, `drive.now()`, and no time of its own; one
-  without a drive takes its time as an argument (`sample(port, now)`,
-  `set_qspi_clock(clock, now, system_clock)`) or in its access
-  (`PeripheralAccess::now`, for `wait_states` and `dsack_port`).
+  `Board::inspect(name)`).  A call's time is a `time::Moment`, board
+  time and the chip's system clock then: a call that takes a
+  `peripheral::Drive` takes it from the drive (`drive.moment()`, or
+  `drive.now()` for the time alone, `drive.system_clock()` for the
+  clock), and one without a drive takes it as its last argument,
+  `moment` (`peek`, `poke`, `wait_states`, `dsack_port`,
+  `set_qspi_clock`, `analog_output`, `next_event`).  No call has two
+  times.  A chip-level model (`adapter`) takes `now: Cycle` last
+  instead, as every chip-level callback with no cycle struct does
+  (docs/host-guide.md, Board time).
+  - A debugger's look and poke: `peek(access, data, moment)` fills
+    `data` with what byte reads from `access.address` up, on the
+    peripheral's own addresses, would give, with none of their side
+    effects, and `poke(access, data, moment)` stores the bytes as
+    writes would; each says whether it could, and both decline by
+    default (`false`), which the chip's `peek` and `poke` and gdb's
+    memory access report as unpeekable.  The board calls each
+    peripheral once for each run of its addresses an access reaches,
+    the bytes of one on a lane gathered from every other address.  `MappedAdapter` passes them to its model's
+    `MappedPeripheral::peek` and `poke`.  A lazily advanced model, one
+    that brings its state up to date only inside `read`, declines
+    where catching up could change the answer, as the AT28C64B
+    declines during a write cycle.
   - Stop conditions, for a debugger and the emulator's alone
     ([docs/gdb.md](gdb.md), Stop conditions): `conditions()` lists
     what it offers (`condition::ConditionInfo::new(name, arguments,
     help)`, a `const fn` for a static list; none by default), `arm(condition, arguments)` arms one and gives
-    its own `condition::ConditionToken` (`ConditionToken::new(number)`,
-    `number()` its number, as a `ConditionId`'s; or a `condition::ArmError`),
+    its own `condition::ConditionToken` (`ConditionToken::from(number)`,
+    `u32::from(token)` its number; or a `condition::ArmError`),
     and `disarm(token)` disarms it.  Each time an armed condition
     holds the peripheral calls `drive.fire(token)`, which stops the run
     as `drive.stop()` does and names the condition to the board.  It
     keeps its armed conditions out of `save`, and `restore` leaves them
     armed.
   - Bus: `read(access, drive)`, `write(access, value, drive)`,
-    `wait_states(access, system_clock)` for an external DSACK, and
-    `dsack_port(access, system_clock)`
+    `wait_states(access, moment)` for an external DSACK, and
+    `dsack_port(access, moment)`
     for a peripheral whose DSACK pins differ cycle by cycle (`Some(PortSize)`,
     16 bits on DSACK1, 8 on DSACK0 alone; `None` by default, its `dsack`
     saying), both asked of the peripheral that takes the cycle's
@@ -542,9 +583,9 @@ The contract a host's peripheral models target (rustdoc in
     carries `attachment` (the index in the peripheral's `attach`), its
     `role` and `lane`, `address` (`offset` plus ADDR on its `lines`),
     `size`, `function_code`, `write` (R/W low, set for `wait_states` and
-    `dsack_port` too), `now` in board time (when its instruction
-    started), `select`, the chip select that carried it (the decoder's,
-    through a decoder; `None` on no select), and `horizon`.  A
+    `dsack_port` too), `select`, the chip select that carried it (the
+    decoder's, through a decoder; `None` on no select), and `horizon`;
+    its time is the call's, when its instruction started.  A
     peripheral that samples a cycle at its end rather than at `now` (an
     FPGA's netlist behind wait states) returns true from
     `wants_horizon()`, asked once as the board is built, and its reads
@@ -562,8 +603,8 @@ The contract a host's peripheral models target (rustdoc in
     sample, or the run depends on how it is cut.  `None` for the
     others, which costs the board nothing.
     `PeripheralAccess` is `#[non_exhaustive]`: a host's test builds one with
-    `PeripheralAccess::new(select, address, size, function_code, now)`
-    (`PeripheralAccess::unselected(address, size, function_code, now)`
+    `PeripheralAccess::new(select, address, size, function_code)`
+    (`PeripheralAccess::unselected(address, size, function_code)`
     for a peripheral on no select), a read, and
     `.through(attachment, role, lane)` and `.writing(true)`.  The board layer turns each
     chip `mc683xx_cpu32::peripheral::BusCycle` into a `PeripheralAccess`.  An 8-bit
@@ -592,9 +633,9 @@ The contract a host's peripheral models target (rustdoc in
     word; `.clocked(clock)` another clock, such as
     `QspiClock::at_reset(system_clock)`, SPCR0's out of reset); it ends at the drive's time) returns the bits in, all ones by
     default (`mc683xx_modules::peripheral::floating_miso`),
-    `select(attachment, selected, drive)`, `set_qspi_clock(clock,
-    now, system_clock)`.  Framing: the board decodes PCS[3:0] by each attachment's
-    `qspi` code and `mask`, and a peripheral sees `select` only when its own
+    `set_selected(attachment, selected, drive)`, `set_qspi_clock(clock,
+    moment)`.  Framing: the board decodes PCS[3:0] by each attachment's
+    `qspi` code and `mask`, and a peripheral sees `set_selected` only when its own
     decode changes, true as a frame starts and false as it ends; that
     is the canonical framing for a board peripheral.  Fan-out: a transfer
     reaches every attachment whose decode the PCS levels select, in
@@ -645,8 +686,8 @@ The contract a host's peripheral models target (rustdoc in
     PCS's changes only at its end.  A batch runs where the CPU next sees the QSPI (its
     interrupt, a read or write of the QSM) or at the sync point,
     before `Board::run_until` goes on to the board's events: each
-    `transfer`, `select` and `set_qspi_clock` keeps its order and its own
-    `now`, but the CPU, board time and the other peripherals may be past
+    `transfer`, `set_selected` and `set_qspi_clock` keeps its order and its own
+    time, but the CPU, board time and the other peripherals may be past
     it.  A peripheral may say true only if, in those calls, it drives no net
     and asks for no IRQ, RESET or stop (no `drive`, `drive_at`, `stop`,
     `write_memory`, `take_memory` or `release_memory`, and no change
@@ -661,9 +702,9 @@ The contract a host's peripheral models target (rustdoc in
     model's calls are the model's to vouch for, not the wiring's, so
     it is code only (`SpiAdapter` and Python's `qspi_deferrable`).
   - Nets: `input(port, signal, drive)` for each value arriving on
-    an input; `sample(port, now)` for an analog output a sink reads at
-    its time.  Ports are indices in the declared list.
-  - Time: `next_event(system_clock)`, `advance(drive)`: `advance` must move
+    an input; `analog_output(port, moment)` for an analog output a sink
+    reads at its time (`Drive::sample`).  Ports are indices in the declared list.
+  - Time: `next_event(moment)`, `advance(drive)`: `advance` must move
     `next_event` past the drive's time or to `None`.  A peripheral advanced to one time
     1000 times running without that stalls the board, and `Board::run_until`
     fails with `RunError::Stalled`, naming it, rather than spin; several
@@ -675,14 +716,13 @@ The contract a host's peripheral models target (rustdoc in
     chip by the next instruction, and a run is the same however the
     host quanta `Board::run_until`.  Each such call costs a sync.
   - The chip's system clock on board time (`time::TimeBase`) comes with
-    every call that has a time: in its `Drive` (`Drive::system_clock`),
-    or, in a call without one (`next_event`, `wait_states`,
-    `dsack_port`, `set_qspi_clock`), as its `system_clock` argument.
-    The chip runs at 8.388608 MHz until the firmware writes SYNCR, and
-    the base moves right after the instruction that changes the
-    frequency, so a peripheral keeps no base past a call.  A test
-    builds its drive with one: `Drive::new(now, system_clock)`, or
-    `Drive::with_sampler(now, system_clock, sampler)`.
+    every call, in its moment: `Moment::new(now, system_clock)`, with
+    `now()`, `system_clock()` and `cycle()`, the chip's clock at it
+    rounded up.  The chip runs at 8.388608 MHz until the firmware writes
+    SYNCR, and the base moves right after the instruction that changes
+    the frequency, so a peripheral keeps no base past a call.  A test
+    builds its drive with one: `Drive::new(moment)`, or
+    `Drive::with_sampler(moment, sampler)`.
   - State: `save()`, `restore(bytes)`; by default it cannot, and the
     board's save fails with `StateError::Peripheral`, which names the peripheral
     (`stub: the peripheral cannot save its state`); so does a peripheral that
@@ -701,7 +741,13 @@ The contract a host's peripheral models target (rustdoc in
   `set_chip_selects(0xf)` and each transfer as a
   `QspiTransfer`, its time in system clocks.  `peripheral()` and `peripheral_mut()` give the model
   back (`Board::peripheral::<MappedAdapter<M>>`).  An adapted peripheral drives
-  no nets.  The model implements `mc683xx_cpu32::cpu::state::Save` (`save()
+  no nets, unless its model implements `adapter::Driver` and its adapter
+  is made `.driving()`, as `adapter::Inspect` and `.inspecting()` show
+  its state: then the model's `drive(&mut Drive)` runs after each call
+  that may change the model (power-on, `reset`; a `MappedAdapter`'s
+  `read`, `write`, `advance`; a `SpiAdapter`'s transfer, select and
+  release) and drives the ports the type was registered with from what
+  the model shows (a strobe's level), or stops the run.  The model implements `mc683xx_cpu32::state::Save` (`save()
   -> bytes`, `restore(bytes)`, in its own versioned format), so it is in
   the board's snapshot, its bytes inside the adapter's own versioned
   snapshot; one that cannot save is `mc683xx_cpu32::unsavable!`, and the
@@ -715,8 +761,8 @@ The contract a host's peripheral models target (rustdoc in
   written against `mc683xx_modules::peripheral` alone shows nothing.
 - `peripheral::Drive`, given to each call: `drive(port, signal)` and
   `drive_at(time, port, signal)` (now or later; a commitment);
-  `sample(port)` (an analog input now); `system_clock()`, the
-  `time::TimeBase` now; `write_memory(memory, offset,
+  `sample(port)` (an analog input now); `moment()`, the call's
+  `time::Moment`, and `now()`, its time; `write_memory(memory, offset,
   bytes)` (into a board memory by name, as the instruction ends, or
   between quanta before the next);
   `take_memory(memory)` and `release_memory(memory)` (its cycles to
@@ -730,10 +776,11 @@ The contract a host's peripheral models target (rustdoc in
   bits), timed from its start bit; build one with `Serial::new(frame,
   baud, bits)`, `Serial::timed(frame, baud, length)` or
   `Serial::untimed(frame)`, and `end(start)` gives its end.
-- `time::TimeBase`: the chip's system clock on board time, `cycles(time)`
-  and `time(cycles)`, and `frequency()`.  Toward the chip a time rounds up, to
+- `time::TimeBase`: the chip's system clock on board time, `cycle(at)`
+  (the clock at board time `at`) and `time(at)` (the board time of
+  clock `at`), and `frequency()`.  Toward the chip a time rounds up, to
   the first clock at or after it; toward the board a clock rounds down,
-  to its picosecond or the one before; so `cycles(time(c))` is `c`.  The
+  to its picosecond or the one before; so `cycle(time(c))` is `c`.  The
   board moves its base only where the frequency changes, so one base
   maps all the time between changes without drift.
   `TimeBase::steady(frequency)` is a base on board time alone, clock
@@ -742,21 +789,23 @@ The contract a host's peripheral models target (rustdoc in
   of its own, which on the chip's base would fall behind at each reset.
 - `time::Time` (picoseconds since power-on) and `time::Span` (a span
   of it, picoseconds: `Time + Span`, `Time - Time` a `Span`),
-  `mc683xx_cpu32::frequency::Frequency`
+  `mc683xx_cpu32::Frequency`
   (nanohertz, `from_nanohertz` and `nanohertz`; the chip's clocks too:
   `TimeBase::frequency`),
   `time::Phase` (cycles, 10^21 units each, `from_units` and `units`) and `time::Clock`:
   `new(frequency, edge)`, `with_phase(frequency, at, phase)`,
-  `phase_at(time)` (with `cycles()` and
-  `fraction()`), `edges(from, to)` (rising edges in (from, to]),
-  `edge_after(from, n)`, `edge(number)`, and `retuned(at, frequency)`:
+  `phase(at)` (with `cycles()` and
+  `fraction()`), `time(phase)` (the first picosecond at that phase),
+  `edges(from, to)` (rising edges in (from, to]),
+  `edge_after(from, n)`, `edge(number)`, and `retuned(frequency, at)`:
   a source whose frequency moves (an OCXO following its EFC) drives a
   retuned clock at each change, its phase carried across exactly, and
   a sink counts and times edges across the change with no rounding.
   A sink that queries back across changes keeps a
   `time::ClockHistory` (`new(span)`, `push(clock)` at each input;
-  `Span::from_seconds(64)` of history is plenty): `phase_at`, `edges(from, to)`,
-  `edge(number)`, `edge_after(from, n)` and `to_next_edge(time)`
+  `Span::from_secs(64)` of history is plenty): `phase(at)`,
+  `time(phase)`, `edges(from, to)`,
+  `edge(number)`, `edge_after(from, n)` and `to_next_edge(at)`
   (a `Span` rounded up to a picosecond, and the exact fraction of a
   cycle) integrate
   each segment at its own frequency.  Edge numbers are absolute, so a

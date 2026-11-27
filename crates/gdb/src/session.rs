@@ -10,12 +10,10 @@
 //! its own.  Every hook installed and every breakpoint planted is
 //! removed when the session ends, however it ends.
 
-use std::fmt::Display;
 use std::marker::PhantomData;
 use std::rc::Rc;
 
 use gdbstub::common::Signal;
-use gdbstub::stub::DisconnectReason;
 use gdbstub::stub::GdbStub;
 use gdbstub::stub::SingleThreadStopReason;
 use gdbstub::stub::run_blocking::BlockingEventLoop;
@@ -45,12 +43,12 @@ use gdbstub::target::ext::monitor_cmd::MonitorCmdOps;
 use gdbstub::target::ext::monitor_cmd::outputln;
 use gdbstub::target::ext::target_description_xml_override::TargetDescriptionXmlOverride;
 use gdbstub::target::ext::target_description_xml_override::TargetDescriptionXmlOverrideOps;
-use mc683xx_cpu32::cpu::hooks::HookId;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::SystemRegister;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::hooks::HookId;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::SystemRegister;
 
 use crate::Ending;
 use crate::SessionError;
@@ -63,7 +61,7 @@ use crate::protocol::EFAULT;
 use crate::protocol::EINVAL;
 use crate::protocol::EIO;
 use crate::protocol::description;
-use crate::protocol::failure;
+use crate::protocol::ended;
 use crate::target::AccessError;
 use crate::target::Target;
 use crate::target::TargetReset;
@@ -85,16 +83,10 @@ mod planted;
 const QUANTUM: Cycles = Cycles::from_clocks(100_000);
 
 /// Serves gdb on `connection` over `target`: [`crate::serve`].
-pub(crate) fn serve<T, C>(
+pub(crate) fn serve<T: Target, C: Connection>(
     target: &mut T,
     connection: C,
-) -> Result<Ending, SessionError<T::Error, C::Error>>
-where
-    T: Target,
-    T::Error: Display,
-    C: Connection,
-    C::Error: Display,
-{
+) -> Result<Ending, SessionError<T::Error, C::Error>> {
     target
         .halt()
         .map_err(|error| SessionError::Target { error })?;
@@ -102,7 +94,7 @@ where
     let mut session = Session {
         target,
         emulated,
-        function_code: FunctionCode::SUPERVISOR_DATA,
+        function_code: FunctionCode::SupervisorData,
         hit: Rc::default(),
         hooked: Vec::new(),
         watchpoints: Vec::new(),
@@ -110,18 +102,18 @@ where
         action: Action::Continue,
         going: None,
     };
-    let served =
-        GdbStub::new(Adapted(connection)).run_blocking::<EventLoop<'_, T, C>>(&mut session);
+    let ended = ended::<_, C>(
+        GdbStub::new(Adapted(connection)).run_blocking::<EventLoop<'_, T, C>>(&mut session),
+    );
     let cleaned = session.clean_up();
     // a target left with BGND planted is not resumed
-    let ending = match (served, cleaned) {
-        (Ok(DisconnectReason::Kill), Ok(())) => Ending::Killed,
-        (Ok(_), Ok(())) => Ending::Detached,
+    let ending = match (ended, cleaned) {
+        (Ok(ending), Ok(())) => ending,
         (Ok(_), Err(cleanup)) => return Err(cleanup),
-        (Err(error), Ok(())) => return Err(failure(error)),
+        (Err(error), Ok(())) => return Err(error),
         (Err(error), Err(cleanup)) => {
             return Err(SessionError::Uncleaned {
-                error: Box::new(failure(error)),
+                error: Box::new(error),
                 cleanup: Box::new(cleanup),
             });
         }
@@ -218,13 +210,13 @@ impl<T: Target> Session<'_, T> {
     }
 
     /// Whether a hit in the run that ended `ran` stands: unless a fault
-    /// stop undid the instruction it was in.  A hit stops the run as
+    /// or exception stop undid the instruction it was in.  A hit stops the run as
     /// its instruction ends, so a fault after it in the run is one
     /// stacking that instruction's trace, which keeps the instruction
     /// and leaves the trace pending (PLAN.md, Faults); any other undid
     /// it.
     fn survives(&mut self, ran: TargetRun) -> bool {
-        ran != TargetRun::Fault
+        !matches!(ran, TargetRun::Fault | TargetRun::Exception { .. })
             || self
                 .target
                 .cpu_scope(|cpu| cpu.trace_pending().is_some())
@@ -327,11 +319,16 @@ impl<T: Target> Session<'_, T> {
 }
 
 /// The signal gdb is told for a stop that was none of the stub's
-/// ([docs/gdb.md, Stops](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md#stops)): the host's hook or a stop condition a
-/// trap, a halt or a fault a bus error, a request an interrupt.
+/// ([docs/gdb.md, Stops](https://github.com/charlieh0tel/mc683xx/blob/main/docs/gdb.md#stops)): the host's hook, a stop condition,
+/// an exception stop or a self-loop stop a trap, a halt or a fault a
+/// bus error, a request an interrupt.
 const fn signaled(ran: TargetRun) -> SingleThreadStopReason<u32> {
     SingleThreadStopReason::Signal(match ran {
-        TargetRun::Quantum | TargetRun::Hook | TargetRun::Condition => Signal::SIGTRAP,
+        TargetRun::Quantum
+        | TargetRun::Hook
+        | TargetRun::Condition
+        | TargetRun::Exception { .. }
+        | TargetRun::SelfLoop => Signal::SIGTRAP,
         TargetRun::Background(Entry::DoubleBusFault { .. })
         | TargetRun::Halted
         | TargetRun::Fault => Signal::SIGBUS,
@@ -557,20 +554,25 @@ impl<T: Target> MonitorCmd for Session<'_, T> {
 
 impl<T: Target> Session<'_, T> {
     /// gdb's `monitor` command, in words: `fc` shows the address space
-    /// memory is read and written in and `fc N` sets it; `faults` shows
+    /// memory is read and written in and `fc FC` sets it, by name or
+    /// number; `faults` shows
     /// whether faults stop the run and the last one that did, `faults
     /// stop` and `faults take` set it; `reset` resets the target; `stop`
     /// lists, arms and disarms stop conditions; `help` lists the
     /// commands.
     fn monitor(&mut self, words: &[&str], out: &mut ConsoleOutput<'_>) -> Result<(), T::Error> {
+        // `fc supervisor-data (5)`.
+        let show_fc = |out: &mut ConsoleOutput<'_>, function_code: FunctionCode| {
+            outputln!(out, "fc {function_code} ({})", u8::from(function_code));
+        };
         match words {
-            ["fc"] => outputln!(out, "fc {}", self.function_code.get()),
-            ["fc", code] => match code.parse().ok().and_then(FunctionCode::new) {
-                Some(function_code) => {
+            ["fc"] => show_fc(out, self.function_code),
+            ["fc", code] => match code.parse() {
+                Ok(function_code) => {
                     self.function_code = function_code;
-                    outputln!(out, "fc {function_code}");
+                    show_fc(out, function_code);
                 }
-                None => outputln!(out, "fc takes a function code, 0 to 7"),
+                Err(_) => outputln!(out, "fc takes a function code: a name or 0 to 7"),
             },
             ["faults"] => {
                 let shown = self.target.cpu_scope(|cpu| {
@@ -609,7 +611,10 @@ impl<T: Target> Session<'_, T> {
                 None => outputln!(out, "this target has no stop conditions"),
             },
             ["help"] => {
-                outputln!(out, "fc [N]: show or set the function code memory goes to");
+                outputln!(
+                    out,
+                    "fc [FC]: show or set the function code memory goes to, by name or 0 to 7"
+                );
                 outputln!(
                     out,
                     "faults [stop|take]: show or set whether a bus or address error stops the run"

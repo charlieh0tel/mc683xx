@@ -2,30 +2,35 @@ use std::cell::RefCell;
 use std::ops::ControlFlow;
 use std::rc::Rc;
 
-use super::Deviations;
 use super::End;
 use super::FaultCause;
 use super::Intercepted;
+use super::LimitedRun;
 use super::Limits;
+use super::TakeExceptionError;
+use crate::cpu::Halt;
 use crate::cpu::Stop;
-use crate::cpu::hooks::MemoryAccess;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
-use crate::exception::CycleKind;
+use crate::exception::BusCycleKind;
 use crate::exception::Exception;
 use crate::exception::MICROCODE_REVISION;
 use crate::exception::Vector;
+use crate::exception::VectorSet;
 use crate::exception::format;
 use crate::exception::ssw;
 use crate::flat::Machine;
+use crate::hooks::MemoryAccess;
 use crate::interrupt::InterruptLevel;
 use crate::interrupt::IrqPin;
 use crate::memory::PAGE_BYTES;
 use crate::memory::Permissions;
 use crate::registers::Registers;
 use crate::registers::status;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// RAM from zero.
 const RAM: u32 = 0x1_0000;
@@ -57,11 +62,17 @@ fn machine(code: &[u16]) -> Machine {
     machine.map(Address(0), RAM, &[]).unwrap();
     for vector in 2..=255u32 {
         machine
-            .write(Address(4 * vector), &HANDLER.to_be_bytes())
+            .poke_bytes(
+                Address(4 * vector),
+                FunctionCode::SupervisorData,
+                &HANDLER.to_be_bytes(),
+            )
             .unwrap();
     }
     let code: Vec<u8> = code.iter().flat_map(|word| word.to_be_bytes()).collect();
-    machine.write(Address(CODE), &code).unwrap();
+    machine
+        .poke_bytes(Address(CODE), FunctionCode::SupervisorData, &code)
+        .unwrap();
     machine.cpu.registers.set_sr(status::S);
     machine.cpu.registers.ssp = Address(STACK);
     machine.cpu.registers.pc = Address(CODE);
@@ -87,7 +98,7 @@ fn a_fault_stops_the_run_with_the_registers_as_the_instruction_began() {
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.cycle, CycleKind::Read);
+    assert_eq!(fault.kind, BusCycleKind::Read);
     assert_eq!(fault.cause, FaultCause::BusError);
     assert_eq!(fault.address, Address(NOWHERE));
     assert_eq!(fault.size, Size::Long);
@@ -107,7 +118,7 @@ fn a_fault_stop_is_kept_until_the_next_run() {
     assert_eq!(machine.cpu.fault_stop(), Some(&fault));
     assert_eq!(
         fault.to_string(),
-        "bus error: read of 4 bytes at 0x90000000, fc 5, pc 0x00001000"
+        "bus error: read of 4 bytes at 0x90000000 in supervisor-data, pc 0x00001000"
     );
     assert_eq!(End::Fault(fault.clone()).to_string(), "fault");
     machine.cpu.registers.set_address(0, STACK);
@@ -119,12 +130,13 @@ fn a_fault_stop_is_kept_until_the_next_run() {
     one(&mut machine);
     assert!(machine.cpu.fault_stop().is_some());
     machine
-        .write(
+        .poke_bytes(
             Address(0),
+            FunctionCode::SupervisorData,
             &[STACK.to_be_bytes(), CODE.to_be_bytes()].concat(),
         )
         .unwrap();
-    machine.reset().unwrap();
+    machine.reset();
     assert_eq!(machine.cpu.fault_stop(), None);
 }
 
@@ -155,7 +167,7 @@ fn a_bad_stack_pointer_stops_without_a_halt_and_the_run_goes_on() {
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.cycle, CycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(fault.address, Address(NOWHERE - 2));
     assert_eq!(machine.cpu.registers.pc.0, CODE);
     assert_eq!(machine.cpu.registers.ssp.0, NOWHERE);
@@ -168,7 +180,11 @@ fn a_bad_stack_pointer_stops_without_a_halt_and_the_run_goes_on() {
 #[test]
 fn an_intercepted_trap_stacks_nothing_and_can_be_taken_natively() {
     let mut machine = machine(&[TRAP_0]);
-    machine.cpu.set_intercepted(Vector::trap(0), true);
+    machine
+        .cpu
+        .add_intercept_hook(VectorSet::NONE.with(Vector::trap(0)), |_| {
+            ControlFlow::Break(())
+        });
     assert_eq!(
         one(&mut machine),
         End::Intercepted(Intercepted {
@@ -179,10 +195,73 @@ fn an_intercepted_trap_stacks_nothing_and_can_be_taken_natively() {
     assert_eq!(machine.cpu.registers.pc.0, CODE);
     assert_eq!(machine.cpu.registers.ssp.0, STACK);
     assert_eq!(machine.cpu.instructions(), 0);
-    machine.cpu.take_natively_once();
+    machine.cpu.take_natively_once(Vector::trap(0));
     one(&mut machine);
     assert_eq!(machine.cpu.registers.pc.0, HANDLER);
     assert_eq!(machine.cpu.registers.ssp.0, STACK - 8);
+}
+
+#[test]
+fn intercept_hooks_are_called_in_order_until_one_stops_the_run() {
+    let mut machine = machine(&[TRAP_0, TRAP_0]);
+    let called = Rc::new(RefCell::new(Vec::new()));
+    let hook = |number: u8, stop: bool| {
+        let called = called.clone();
+        move |intercepted: &Intercepted| {
+            called.borrow_mut().push((number, intercepted.vector));
+            if stop {
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        }
+    };
+    let trap = Vector::trap(0);
+    machine
+        .cpu
+        .add_intercept_hook(VectorSet::NONE.with(trap), hook(1, false));
+    let other = machine
+        .cpu
+        .add_intercept_hook(VectorSet::NONE.with(Vector::ZERO_DIVIDE), hook(2, true));
+    let third = machine
+        .cpu
+        .add_intercept_hook(VectorSet::NONE.with(trap), hook(3, true));
+    let fourth = machine
+        .cpu
+        .add_intercept_hook(VectorSet::NONE.with(trap), hook(4, true));
+    assert!(matches!(one(&mut machine), End::Intercepted(_)));
+    assert_eq!(*called.borrow(), [(1, trap), (3, trap)], "4 not called");
+    called.borrow_mut().clear();
+    assert!(machine.cpu.remove_hook(third));
+    assert!(matches!(one(&mut machine), End::Intercepted(_)));
+    assert_eq!(*called.borrow(), [(1, trap), (4, trap)]);
+    // all that cover it declining, it is taken natively
+    called.borrow_mut().clear();
+    assert!(machine.cpu.remove_hook(fourth));
+    assert!(machine.cpu.has_hook(other));
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(*called.borrow(), [(1, trap)]);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
+fn an_intercept_hook_over_the_instruction_set_sees_an_illegal_not_a_fault() {
+    // ILLEGAL; MOVE.W (A0),D0 with A0 odd, an address error
+    let mut machine = machine(&[0x4afc, 0x3010]);
+    machine.cpu.registers.set_address(0, 1);
+    machine
+        .cpu
+        .add_intercept_hook(VectorSet::INSTRUCTION, |_| ControlFlow::Break(()));
+    assert_eq!(
+        one(&mut machine),
+        End::Intercepted(Intercepted {
+            vector: Vector::ILLEGAL_INSTRUCTION,
+            pc: Address(CODE),
+        })
+    );
+    machine.cpu.registers.pc = Address(CODE + 2);
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
 }
 
 #[test]
@@ -193,9 +272,10 @@ fn an_end_prints_its_short_name() {
     });
     let names = [
         (End::Stop(Stop::Budget), "budget"),
-        (End::Until, "until"),
+        (End::Reached, "reached"),
         (End::Instructions, "instructions"),
         (End::Steps, "steps"),
+        (End::SelfLoop { pc: Address(CODE) }, "self-loop"),
         (intercepted, "intercepted"),
     ];
     for (end, name) in names {
@@ -206,44 +286,17 @@ fn an_end_prints_its_short_name() {
 #[test]
 fn an_intercept_undoes_the_instruction_s_postincrement() {
     let mut machine = machine(&[DIVU_POSTINCREMENT]);
-    machine.cpu.set_intercepted(Vector::ZERO_DIVIDE, true);
+    machine
+        .cpu
+        .add_intercept_hook(VectorSet::NONE.with(Vector::ZERO_DIVIDE), |_| {
+            ControlFlow::Break(())
+        });
     machine.cpu.registers.set_address(0, 0x2000);
     let end = one(&mut machine);
     assert!(
         matches!(end, End::Intercepted(Intercepted { vector, .. }) if vector == Vector::ZERO_DIVIDE)
     );
     assert_eq!(machine.cpu.registers.address(0), 0x2000);
-    assert!(machine.cpu.intercepts());
-}
-
-#[test]
-fn the_misaligned_deviation_reads_bytes() {
-    let mut machine = machine(&[MOVE_LONG_A0_TO_D0]);
-    machine
-        .write(Address(0x2001), &[0x12, 0x34, 0x56, 0x78])
-        .unwrap();
-    machine.cpu.registers.set_address(0, 0x2001);
-    machine.cpu.set_deviations(Deviations {
-        misaligned: true,
-        untraced: false,
-    });
-    one(&mut machine);
-    assert_eq!(machine.cpu.registers.data[0], 0x1234_5678);
-}
-
-#[test]
-fn the_untraced_deviation_ignores_t1() {
-    let mut machine = machine(&[NOP, NOP]);
-    machine.cpu.registers.set_sr(status::S | status::T1);
-    machine.cpu.set_deviations(Deviations {
-        misaligned: false,
-        untraced: true,
-    });
-    one(&mut machine);
-    assert_eq!(machine.cpu.registers.pc.0, CODE + 2);
-    machine.cpu.set_deviations(Deviations::default());
-    one(&mut machine);
-    assert_eq!(machine.cpu.registers.pc.0, HANDLER, "traced");
 }
 
 #[test]
@@ -282,7 +335,11 @@ const MOVE_TO_SR_UNMASKED: [u16; 2] = [0x46fc, 0x2000];
 /// Points `vector` at `handler` and returns `handler`.
 fn handle(machine: &mut Machine, vector: Vector, handler: u32) -> u32 {
     machine
-        .write(Address(vector.offset()), &handler.to_be_bytes())
+        .poke_bytes(
+            Address(vector.offset()),
+            FunctionCode::SupervisorData,
+            &handler.to_be_bytes(),
+        )
         .unwrap();
     handler
 }
@@ -291,7 +348,13 @@ fn handle(machine: &mut Machine, vector: Vector, handler: u32) -> u32 {
 /// its format and vector offset (CPU32RM 6.4).
 fn frame(machine: &Machine) -> (u16, u32, u16) {
     let mut bytes = [0; 8];
-    machine.read(machine.cpu.registers.ssp, &mut bytes).unwrap();
+    machine
+        .peek_bytes(
+            machine.cpu.registers.ssp,
+            FunctionCode::SupervisorData,
+            &mut bytes,
+        )
+        .unwrap();
     let word = |at: usize| u16::from_be_bytes([bytes[at], bytes[at + 1]]);
     (
         word(0),
@@ -325,10 +388,10 @@ fn a_step_takes_an_interrupt_pending_at_its_start_or_its_end() {
     let mut first = machine(&[NOP]);
     let level_7 = handle(
         &mut first,
-        Vector::autovector(InterruptLevel::new(7).unwrap()),
+        Vector::autovector(InterruptLevel::try_from(7).unwrap()),
         0x4300,
     );
-    first.request_interrupt(IrqPin::new(7).unwrap(), None);
+    first.request_interrupt(IrqPin::try_from(7).unwrap(), None);
     assert_eq!(step(&mut first), End::Steps);
     assert_eq!(first.cpu.registers.pc.0, level_7);
     assert_eq!(frame(&first).1, CODE, "the NOP not executed");
@@ -342,10 +405,10 @@ fn a_step_takes_an_interrupt_pending_at_its_start_or_its_end() {
         .set_sr(status::S | status::INTERRUPT_MASK);
     let level_3 = handle(
         &mut machine,
-        Vector::autovector(InterruptLevel::new(3).unwrap()),
+        Vector::autovector(InterruptLevel::try_from(3).unwrap()),
         0x4200,
     );
-    machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), None);
     let run = machine.run_limited(Limits {
         steps: Some(1),
         ..Limits::default()
@@ -443,7 +506,7 @@ fn a_fault_stacking_a_pending_breakpoint_keeps_the_instruction_before_it() {
     let End::Fault(fault) = boundary_only(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.cycle, CycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(fault.address, Address(NOWHERE - 2));
     assert_eq!(fault.registers, bad_stack, "the MOVEQ kept");
     assert_eq!(machine.cpu.registers, bad_stack);
@@ -482,20 +545,20 @@ fn a_fault_stacking_a_breakpoint_after_stop_keeps_the_interrupt_before_it() {
     one(&mut machine);
     let level_3 = handle(
         &mut machine,
-        Vector::autovector(InterruptLevel::new(3).unwrap()),
+        Vector::autovector(InterruptLevel::try_from(3).unwrap()),
         0x4200,
     );
     machine.cpu.set_breakpoint_pending(true);
     // room for the interrupt's four words, not the breakpoint's six
     machine.cpu.registers.ssp = Address(8);
-    machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), None);
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.cycle, CycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(fault.registers.pc.0, level_3, "the interrupt kept");
     assert_eq!(fault.registers.ssp.0, 0);
-    assert_eq!(fault.registers.interrupt_mask().get(), 3);
+    assert_eq!(u8::from(fault.registers.interrupt_mask()), 3);
     assert!(machine.cpu.breakpoint_pending(), "left for the next run");
 }
 
@@ -506,7 +569,7 @@ fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_its_breakpoint_pending()
     one(&mut machine);
     machine.cpu.set_breakpoint_pending(true);
     machine.cpu.registers.ssp = Address(NOWHERE);
-    machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), None);
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
@@ -530,7 +593,7 @@ fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_the_cpu_stopped() {
         one(&mut machine);
         let stopped_sr = machine.cpu.registers.sr();
         machine.cpu.registers.ssp = Address(NOWHERE);
-        let pin = IrqPin::new(3).unwrap();
+        let pin = IrqPin::try_from(3).unwrap();
         machine.request_interrupt(pin, None);
         let End::Fault(fault) = one(&mut machine) else {
             panic!("no fault");
@@ -546,7 +609,7 @@ fn a_fault_stacking_the_interrupt_that_ends_stop_leaves_the_cpu_stopped() {
         machine.cpu.registers.ssp = Address(STACK);
         let level_3 = handle(
             &mut machine,
-            Vector::autovector(InterruptLevel::new(3).unwrap()),
+            Vector::autovector(InterruptLevel::try_from(3).unwrap()),
             0x4200,
         );
         machine.request_interrupt(pin, None);
@@ -575,7 +638,7 @@ fn a_fault_stacking_an_interrupt_leaves_the_next_instruction_s_hooks_to_run() {
         });
     one(&mut machine);
     machine.cpu.registers.ssp = Address(NOWHERE);
-    let pin = IrqPin::new(3).unwrap();
+    let pin = IrqPin::try_from(3).unwrap();
     machine.request_interrupt(pin, None);
     assert!(matches!(one(&mut machine), End::Fault(_)));
     assert_eq!(*calls.borrow(), 0, "the NOP not reached");
@@ -593,7 +656,9 @@ const COUNTER: u32 = 0x2000;
 /// The word at `address`.
 fn word_at(machine: &Machine, address: u32) -> u16 {
     let mut bytes = [0; 2];
-    machine.read(Address(address), &mut bytes).unwrap();
+    machine
+        .peek_bytes(Address(address), FunctionCode::SupervisorData, &mut bytes)
+        .unwrap();
     u16::from_be_bytes(bytes)
 }
 
@@ -601,7 +666,11 @@ fn word_at(machine: &Machine, address: u32) -> u16 {
 fn frame_address(machine: &Machine) -> u32 {
     let mut bytes = [0; 4];
     machine
-        .read(machine.cpu.registers.ssp.offset(8), &mut bytes)
+        .peek_bytes(
+            machine.cpu.registers.ssp.offset(8),
+            FunctionCode::SupervisorData,
+            &mut bytes,
+        )
         .unwrap();
     u32::from_be_bytes(bytes)
 }
@@ -623,7 +692,7 @@ fn a_fault_stacking_a_trace_keeps_the_traced_instruction() {
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.cycle, CycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(fault.address, Address(NOWHERE - 2));
     assert_eq!(fault.registers.pc.0, CODE + 2, "the ADDQ kept");
     assert_eq!(fault.registers.sr(), status::S | status::T1);
@@ -694,7 +763,9 @@ fn a_fault_stacking_rte_s_requeued_trace_keeps_the_rte() {
         ssw::TR | ssw::RR | ssw::SIZ_WORD << ssw::SIZ_SHIFT | 5,
     ];
     let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_be_bytes()).collect();
-    machine.write(Address(frame_at), &bytes).unwrap();
+    machine
+        .poke_bytes(Address(frame_at), FunctionCode::SupervisorData, &bytes)
+        .unwrap();
     machine.cpu.registers.ssp = Address(frame_at);
     // the trace's frame goes where RTE's was, read-only
     let page = Address(STACK - PAGE_BYTES);
@@ -704,13 +775,15 @@ fn a_fault_stacking_rte_s_requeued_trace_keeps_the_rte() {
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault");
     };
-    assert_eq!(fault.cycle, CycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(fault.registers.pc.0, CODE + 2, "the RTE kept");
     assert_eq!(fault.registers.ssp.0, STACK);
     assert_eq!(word_at(&machine, COUNTER), 0x1234, "the write rerun");
     assert_eq!(machine.cpu.trace_pending(), Some(Address(CODE)));
     // the run goes on: the trace taken, the write not rerun again
-    machine.write(Address(COUNTER), &[0, 0]).unwrap();
+    machine
+        .poke_bytes(Address(COUNTER), FunctionCode::SupervisorData, &[0, 0])
+        .unwrap();
     machine.protect(page, PAGE_BYTES, Permissions::ALL).unwrap();
     boundary_only(&mut machine);
     assert_eq!(word_at(&machine, COUNTER), 0);
@@ -794,7 +867,7 @@ fn a_fault_stopped_exception_is_charged_once_when_taken() {
             machine.cpu.registers.set_address(0, COUNTER);
             machine.cpu.set_breakpoint_pending(case.breakpoint);
             if case.interrupt {
-                machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+                machine.request_interrupt(IrqPin::try_from(3).unwrap(), None);
             }
             machine
         };
@@ -877,7 +950,9 @@ fn a_fault_rewriting_rte_s_faulted_frame_stops_rather_than_halting() {
         ssw::TP | ssw::RW,
     ];
     let bytes: Vec<u8> = words.iter().flat_map(|word| word.to_be_bytes()).collect();
-    machine.write(Address(frame_at), &bytes).unwrap();
+    machine
+        .poke_bytes(Address(frame_at), FunctionCode::SupervisorData, &bytes)
+        .unwrap();
     machine.cpu.registers.ssp = Address(frame_at);
     machine
         .protect(Address(page), PAGE_BYTES, Permissions::READ)
@@ -885,7 +960,7 @@ fn a_fault_rewriting_rte_s_faulted_frame_stops_rather_than_halting() {
     let End::Fault(fault) = one(&mut machine) else {
         panic!("no fault stop");
     };
-    assert_eq!(fault.cycle, CycleKind::Write);
+    assert_eq!(fault.kind, BusCycleKind::Write);
     assert_eq!(fault.registers.pc.0, CODE, "the RTE undone");
     assert_eq!(fault.registers.ssp.0, frame_at);
     assert_eq!(machine.cpu.halted(), None);
@@ -897,12 +972,13 @@ fn reset_drops_a_pending_trace() {
     one(&mut machine);
     assert!(machine.cpu.trace_pending().is_some());
     machine
-        .write(
+        .poke_bytes(
             Address(0),
+            FunctionCode::SupervisorData,
             &[STACK.to_be_bytes(), CODE.to_be_bytes()].concat(),
         )
         .unwrap();
-    machine.reset().unwrap();
+    machine.reset();
     assert_eq!(machine.cpu.trace_pending(), None);
 }
 
@@ -930,11 +1006,11 @@ fn a_fault_stacking_an_interrupt_is_not_a_step() {
     machine.cpu.set_stop_on_fault(true);
     let level_3 = handle(
         &mut machine,
-        Vector::autovector(InterruptLevel::new(3).unwrap()),
+        Vector::autovector(InterruptLevel::try_from(3).unwrap()),
         0x4200,
     );
     machine.cpu.registers.ssp = Address(NOWHERE);
-    machine.request_interrupt(IrqPin::new(3).unwrap(), None);
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), None);
     let run = machine.run_limited(Limits {
         steps: Some(1),
         ..Limits::default()
@@ -949,4 +1025,643 @@ fn a_fault_stacking_an_interrupt_is_not_a_step() {
     });
     assert_eq!((run.end, run.steps), (End::Steps, 1));
     assert_eq!(machine.cpu.registers.pc.0, level_3);
+}
+
+#[test]
+fn a_host_exception_stacks_a_four_word_frame_and_enters_its_handler() {
+    let mut machine = machine(&[NOP]);
+    let user_sr = status::T1 | status::Z;
+    machine.cpu.registers.set_sr(user_sr);
+    machine.cpu.registers.usp = Address(0x7000);
+    let entries = Rc::new(RefCell::new(Vec::new()));
+    let seen = Rc::clone(&entries);
+    machine.cpu.add_exception_hook(move |entry| {
+        seen.borrow_mut().push(*entry);
+        ControlFlow::Break(())
+    });
+    machine.take_exception(Vector(32), None).unwrap();
+    // CPU32RM 6.1.3: S set, T1 and T0 cleared, the mask as it was
+    let registers = &machine.cpu.registers;
+    assert_eq!(registers.sr(), status::S | status::Z);
+    assert_eq!(registers.pc, Address(HANDLER));
+    let bottom = STACK - 8;
+    assert_eq!(registers.ssp, Address(bottom));
+    assert_eq!(registers.usp, Address(0x7000));
+    // CPU32RM 6.4.1, Figure 6-3: SR, PC, format $0 and the vector offset
+    let frame: Vec<u16> = (0..4)
+        .map(|word| word_at(&machine, bottom + 2 * word))
+        .collect();
+    assert_eq!(frame, [user_sr, 0, CODE as u16, 0x0080]);
+    let entry = entries.borrow()[0];
+    assert_eq!(
+        (
+            entry.vector,
+            entry.pc,
+            entry.handler,
+            entry.stack,
+            entry.level
+        ),
+        (
+            Vector(32),
+            Address(CODE),
+            Address(HANDLER),
+            Address(bottom),
+            None
+        )
+    );
+    assert_eq!(machine.now(), Cycle::ZERO, "no clocks");
+    // the hook's stop had no run to stop
+    assert_eq!(one(&mut machine), End::Instructions);
+}
+
+#[test]
+fn a_host_interrupt_sets_the_mask_whatever_it_was() {
+    let mut machine = machine(&[NOP]);
+    machine
+        .cpu
+        .registers
+        .set_sr(status::S | status::INTERRUPT_MASK);
+    let level = InterruptLevel::try_from(3).unwrap();
+    machine
+        .take_exception(Vector::autovector(level), Some(level))
+        .unwrap();
+    // CPU32RM 6.2.11: the mask takes the level
+    assert_eq!(machine.cpu.registers.interrupt_mask(), level);
+    assert_eq!(word_at(&machine, STACK - 2), 27 * 4, "vector 27, format $0");
+    assert_eq!(
+        word_at(&machine, STACK - 8),
+        status::S | status::INTERRUPT_MASK
+    );
+}
+
+#[test]
+fn a_host_exception_ends_stop() {
+    let mut machine = machine(&STOP_UNMASKED);
+    one(&mut machine);
+    assert!(machine.cpu.stopped());
+    machine.take_exception(Vector(64), None).unwrap();
+    assert!(!machine.cpu.stopped());
+    assert_eq!(machine.cpu.registers.pc, Address(HANDLER));
+}
+
+#[test]
+fn a_halted_cpu_takes_no_host_exception() {
+    let mut machine = Machine::new(crate::flat::ADDRESS_BITS).unwrap();
+    machine.reset();
+    let halted = machine.take_exception(Vector(32), None);
+    assert_eq!(
+        halted,
+        Err(TakeExceptionError::Idle(Stop::Halted(Halt::DoubleBusFault)))
+    );
+    assert_eq!(
+        halted.unwrap_err().to_string(),
+        "the CPU executes nothing: halted"
+    );
+}
+
+#[test]
+fn a_fault_stacking_a_host_exception_stops_with_no_exception_entered() {
+    let mut machine = machine(&[NOP]);
+    machine.cpu.set_stop_on_fault(true);
+    machine.cpu.registers.ssp = Address(NOWHERE);
+    let before = machine.cpu.registers.clone();
+    let Err(TakeExceptionError::Fault(fault)) = machine.take_exception(Vector(32), None) else {
+        panic!("no fault stop");
+    };
+    assert_eq!(fault.cause, FaultCause::BusError);
+    assert_eq!(fault.kind, BusCycleKind::Write);
+    assert_eq!(machine.cpu.registers, before);
+    assert_eq!(machine.cpu.fault_stop(), None, "not a run's");
+    // the instruction at PC runs, its hooks called
+    let hooked = Rc::new(RefCell::new(0));
+    let count = Rc::clone(&hooked);
+    machine
+        .cpu
+        .add_code_hook(Address(CODE)..=Address(CODE), move |_| {
+            *count.borrow_mut() += 1;
+            ControlFlow::Continue(())
+        });
+    machine.cpu.registers.ssp = Address(STACK);
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(*hooked.borrow(), 1);
+}
+
+/// A machine whose stack's first word, the highest, is on a page that
+/// takes no writes, and the rest of the four-word frame and the type IV
+/// frame below it on one that does.
+fn first_stack_write_faults() -> Machine {
+    let mut machine = machine(&[NOP]);
+    let page = STACK;
+    machine
+        .protect(Address(page), PAGE_BYTES, Permissions::READ)
+        .unwrap();
+    machine.cpu.registers.ssp = Address(page + 2);
+    machine
+}
+
+#[test]
+fn a_fault_stacking_a_host_bus_or_address_error_is_a_double_bus_fault() {
+    // CPU32RM 6.2.2: a bus or address error while one is being taken
+    // halts; a fault taking any other exception is a type IV bus
+    // error (6.3.1.4)
+    let mut machine = first_stack_write_faults();
+    machine.take_exception(Vector(32), None).unwrap();
+    assert_eq!(machine.cpu.halted(), None);
+    assert_eq!(machine.cpu.registers.pc, Address(HANDLER));
+    for vector in [Vector::BUS_ERROR, Vector::ADDRESS_ERROR] {
+        let mut machine = first_stack_write_faults();
+        machine.take_exception(vector, None).unwrap();
+        assert_eq!(machine.cpu.halted(), Some(Halt::DoubleBusFault), "{vector}");
+    }
+}
+
+#[test]
+fn a_fault_reading_a_host_bus_or_address_error_s_vector_is_a_double_bus_fault() {
+    for vector in [Vector::BUS_ERROR, Vector::ADDRESS_ERROR] {
+        let mut machine = machine(&[NOP]);
+        // vectors 2 and 3 past the RAM
+        machine.cpu.registers.vbr = Address(RAM - 4);
+        machine.take_exception(vector, None).unwrap();
+        assert_eq!(machine.cpu.halted(), Some(Halt::DoubleBusFault), "{vector}");
+    }
+}
+
+#[test]
+fn a_fault_fetching_a_host_bus_error_s_handler_is_a_double_bus_fault() {
+    // MC68331UM 4.5.5.2: until the handler's first opcode is fetched
+    let mut machine = machine(&[NOP]);
+    machine
+        .poke_bytes(
+            Address(4 * 2),
+            FunctionCode::SupervisorData,
+            &NOWHERE.to_be_bytes(),
+        )
+        .unwrap();
+    machine.take_exception(Vector::BUS_ERROR, None).unwrap();
+    assert_eq!(machine.cpu.halted(), None);
+    one(&mut machine);
+    assert_eq!(machine.cpu.halted(), Some(Halt::DoubleBusFault));
+}
+
+#[test]
+fn a_fault_stop_taking_a_host_bus_error_leaves_no_double_fault_armed() {
+    let mut machine = first_stack_write_faults();
+    machine.cpu.set_stop_on_fault(true);
+    assert!(matches!(
+        machine.take_exception(Vector::BUS_ERROR, None),
+        Err(TakeExceptionError::Fault(_))
+    ));
+    // a fault in the next instruction is its own, not a double fault
+    machine.cpu.set_stop_on_fault(false);
+    machine.cpu.registers.ssp = Address(STACK - 0x100);
+    machine.cpu.registers.pc = Address(NOWHERE);
+    one(&mut machine);
+    assert_eq!(machine.cpu.halted(), None);
+    assert_eq!(machine.cpu.registers.pc, Address(HANDLER));
+}
+
+#[test]
+fn a_fault_stop_reading_a_host_exception_s_vector_keeps_the_frame_written() {
+    let mut machine = machine(&[NOP]);
+    machine.cpu.set_stop_on_fault(true);
+    machine.cpu.registers.vbr = Address(NOWHERE);
+    let before = machine.cpu.registers.clone();
+    assert!(matches!(
+        machine.take_exception(Vector(32), None),
+        Err(TakeExceptionError::Fault(_))
+    ));
+    assert_eq!(machine.cpu.registers, before, "registers rolled back");
+    // the four-word frame was written before the vector read faulted
+    assert_eq!(word_at(&machine, STACK - 2), 0x0080);
+    assert_eq!(word_at(&machine, STACK - 4), CODE as u16);
+}
+
+#[test]
+fn a_fault_reading_a_host_exception_s_vector_is_a_type_iv_bus_error() {
+    let mut machine = machine(&[NOP]);
+    // VBR such that vector 2 is mapped and vector 32 past the RAM
+    let vbr = RAM - 0x40;
+    let bus_error_handler = 0x4400_u32;
+    machine
+        .poke_bytes(
+            Address(vbr + 8),
+            FunctionCode::SupervisorData,
+            &bus_error_handler.to_be_bytes(),
+        )
+        .unwrap();
+    machine.cpu.registers.vbr = Address(vbr);
+    machine.take_exception(Vector(32), None).unwrap();
+    // CPU32RM 6.3.1.4, Figure 6-8: the ten-word frame below the four
+    // words the faulted frame takes, through vector 2
+    let registers = &machine.cpu.registers;
+    assert_eq!(registers.pc, Address(bus_error_handler));
+    let bottom = STACK - 8 - 20;
+    assert_eq!(registers.ssp, Address(bottom));
+    assert_eq!(word_at(&machine, bottom + 6), 0xc008, "format $C, vector 2");
+    assert_eq!(machine.cpu.halted(), None);
+}
+
+/// The exception stop of `vector` at `pc`.
+const fn exception(vector: Vector, pc: u32) -> End {
+    End::Exception {
+        vector,
+        pc: Address(pc),
+    }
+}
+
+#[test]
+fn an_exception_stop_stacks_nothing_and_the_run_on_takes_it() {
+    let mut machine = machine(&[TRAP_0]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    assert_eq!(machine.cpu.stops_on_exception(), VectorSet::ALL);
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
+    assert_eq!(machine.cpu.registers.pc.0, CODE);
+    assert_eq!(machine.cpu.registers.ssp.0, STACK, "nothing stacked");
+    assert_eq!(machine.cpu.instructions(), 0);
+    assert_eq!(exception(Vector::trap(0), CODE).to_string(), "exception");
+    // run on: the trap taken natively, a four-word frame after it
+    one(&mut machine);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(frame(&machine).1, CODE + 2);
+}
+
+#[test]
+fn an_exception_stop_stops_only_the_vectors_set() {
+    let mut machine = machine(&[DIVU_POSTINCREMENT, TRAP_0]);
+    let set: VectorSet = [Vector::trap(0)].into_iter().collect();
+    machine.cpu.set_stop_on_exception(set);
+    machine.cpu.registers.set_address(0, 0x2000);
+    assert_eq!(one(&mut machine), End::Instructions, "the divide, taken");
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    machine.cpu.registers.pc = Address(CODE + 2);
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE + 2));
+}
+
+#[test]
+fn an_empty_set_stops_on_no_exception() {
+    let mut machine = machine(&[TRAP_0]);
+    machine.cpu.set_stop_on_exception(VectorSet::NONE);
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
+fn an_exception_stop_undoes_the_instruction_s_postincrement() {
+    let mut machine = machine(&[DIVU_POSTINCREMENT]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    machine.cpu.registers.set_address(0, 0x2000);
+    assert_eq!(one(&mut machine), exception(Vector::ZERO_DIVIDE, CODE));
+    assert_eq!(machine.cpu.registers.address(0), 0x2000);
+}
+
+#[test]
+fn a_fault_stops_as_an_exception_unless_faults_stop() {
+    let mut machine = machine(&[MOVEQ_1_D1, MOVE_LONG_A0_TO_D0]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    machine.cpu.registers.set_address(0, NOWHERE);
+    one(&mut machine);
+    // stopping on faults, a fault is a fault stop
+    machine.cpu.set_stop_on_fault(true);
+    assert!(matches!(one(&mut machine), End::Fault(_)));
+    machine.cpu.set_stop_on_fault(false);
+    assert_eq!(one(&mut machine), exception(Vector::BUS_ERROR, CODE + 2));
+    assert_eq!(machine.cpu.registers.ssp.0, STACK);
+    assert_eq!(machine.cpu.registers.data[1], 1);
+    assert_eq!(machine.cpu.instructions(), 1);
+    // run on: the bus error taken, a format $C frame (CPU32RM 6.4.3)
+    one(&mut machine);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(format::vector(frame(&machine).2), Vector::BUS_ERROR);
+}
+
+#[test]
+fn an_intercept_hook_sees_an_exception_before_the_exception_stop() {
+    let mut machine = machine(&[TRAP_0, TRAP_0]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    let stopping = machine
+        .cpu
+        .add_intercept_hook(VectorSet::NONE.with(Vector::trap(0)), |_| {
+            ControlFlow::Break(())
+        });
+    assert!(matches!(one(&mut machine), End::Intercepted(_)));
+    // declined by every hook, it is taken natively, no exception stop
+    machine.cpu.remove_hook(stopping);
+    machine
+        .cpu
+        .add_intercept_hook(VectorSet::NONE.with(Vector::trap(0)), |_| {
+            ControlFlow::Continue(())
+        });
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
+fn a_trace_stops_after_its_instruction_and_the_run_on_takes_it() {
+    let mut machine = machine(&[MOVEQ_1_D1, NOP]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    machine.cpu.registers.set_sr(status::S | status::T1);
+    assert_eq!(one(&mut machine), exception(Vector::TRACE, CODE + 2));
+    assert_eq!(machine.cpu.registers.data[1], 1, "the MOVEQ ran");
+    assert_eq!(machine.cpu.instructions(), 1);
+    assert_eq!(machine.cpu.trace_pending(), Some(Address(CODE)));
+    assert_eq!(machine.cpu.registers.ssp.0, STACK);
+    assert_eq!(boundary_only(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(frame_address(&machine), CODE);
+}
+
+#[test]
+fn an_interrupt_stops_with_its_vector_and_the_run_on_takes_it() {
+    let mut machine = machine(&[NOP, NOP]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    let vector = Vector(0x40);
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), Some(vector));
+    assert_eq!(one(&mut machine), exception(vector, CODE));
+    assert_eq!(machine.cpu.registers.ssp.0, STACK);
+    assert_eq!(machine.cpu.registers.sr(), status::S, "the mask as it was");
+    // run on, taking only the interrupts pending
+    let run = machine.run_limited(Limits {
+        steps: Some(0),
+        ..Limits::default()
+    });
+    assert_eq!((run.end, run.steps), (End::Steps, 1));
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert_eq!(frame(&machine).1, CODE, "taken before the NOP");
+}
+
+#[test]
+fn take_exception_is_no_exception_stop() {
+    let mut machine = machine(&[NOP]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    machine.take_exception(Vector::trap(3), None).unwrap();
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
+fn a_hardware_breakpoint_stops_and_is_left_pending() {
+    let mut machine = machine(&[NOP]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    machine.cpu.set_breakpoint_pending(true);
+    let vector = Vector::HARDWARE_BREAKPOINT;
+    assert_eq!(boundary_only(&mut machine), exception(vector, CODE));
+    assert!(machine.cpu.breakpoint_pending());
+    assert_eq!(machine.cpu.registers.ssp.0, STACK);
+    assert_eq!(boundary_only(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+    assert!(!machine.cpu.breakpoint_pending());
+}
+
+#[test]
+fn a_trap_at_the_pc_of_a_withdrawn_trace_stop_stops() {
+    let mut machine = machine(&[MOVEQ_1_D1, TRAP_0]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    machine.cpu.registers.set_sr(status::S | status::T1);
+    assert_eq!(one(&mut machine), exception(Vector::TRACE, CODE + 2));
+    machine.cpu.set_trace_pending(None);
+    machine.cpu.registers.set_sr(status::S);
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE + 2));
+    assert_eq!(machine.cpu.registers.ssp.0, STACK, "nothing stacked");
+}
+
+#[test]
+fn a_trap_at_the_pc_of_a_withdrawn_interrupt_stop_stops() {
+    let mut machine = machine(&[TRAP_0]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    let pin = IrqPin::try_from(3).unwrap();
+    machine.request_interrupt(pin, Some(Vector(0x40)));
+    assert_eq!(one(&mut machine), exception(Vector(0x40), CODE));
+    machine.clear_interrupt(pin);
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
+    assert_eq!(machine.cpu.registers.ssp.0, STACK, "nothing stacked");
+}
+
+#[test]
+fn a_higher_interrupt_arriving_after_an_interrupt_stop_stops() {
+    let mut machine = machine(&[NOP, NOP]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    machine.request_interrupt(IrqPin::try_from(3).unwrap(), Some(Vector(0x40)));
+    assert_eq!(one(&mut machine), exception(Vector(0x40), CODE));
+    machine.request_interrupt(IrqPin::try_from(5).unwrap(), Some(Vector(0x50)));
+    assert_eq!(one(&mut machine), exception(Vector(0x50), CODE));
+    assert_eq!(machine.cpu.registers.ssp.0, STACK, "nothing stacked");
+}
+
+#[test]
+fn a_snapshot_from_before_an_exception_stop_stops_there_again() {
+    let mut machine = machine(&[TRAP_0]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    let before = machine.save().unwrap();
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
+    machine.restore(&before).unwrap();
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
+}
+
+#[test]
+fn a_snapshot_at_an_exception_stop_takes_it_once_and_runs_on() {
+    let mut machine = machine(&[TRAP_0]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
+    let at_stop = machine.save().unwrap();
+    let mut fresh = self::machine(&[TRAP_0]);
+    fresh.cpu.set_stop_on_exception(VectorSet::ALL);
+    fresh.restore(&at_stop).unwrap();
+    assert_eq!(one(&mut fresh), End::Instructions);
+    assert_eq!(fresh.cpu.registers.pc.0, HANDLER);
+    assert_eq!(frame(&fresh).1, CODE + 2);
+}
+
+#[test]
+fn a_snapshot_at_an_exception_stop_restored_before_the_setting_runs_on() {
+    let mut machine = machine(&[TRAP_0]);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
+    let at_stop = machine.save().unwrap();
+    let mut fresh = self::machine(&[TRAP_0]);
+    fresh.restore(&at_stop).unwrap();
+    fresh.cpu.set_stop_on_exception(VectorSet::ALL);
+    assert_eq!(one(&mut fresh), End::Instructions);
+    assert_eq!(fresh.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
+fn a_promise_kept_across_the_setting_off_and_on_is_spent_once() {
+    let mut machine = machine(&[TRAP_0, TRAP_0]);
+    machine
+        .poke_bytes(
+            Address(HANDLER),
+            FunctionCode::SupervisorData,
+            &RTE.to_be_bytes(),
+        )
+        .unwrap();
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE));
+    machine.cpu.set_stop_on_exception(VectorSet::NONE);
+    machine.cpu.set_stop_on_exception(VectorSet::ALL);
+    assert_eq!(one(&mut machine), End::Instructions, "the trap, taken");
+    assert_eq!(one(&mut machine), End::Instructions, "the RTE");
+    assert_eq!(one(&mut machine), exception(Vector::trap(0), CODE + 2));
+}
+
+#[test]
+fn a_snapshot_keeps_take_natively_once() {
+    let mut machine = machine(&[TRAP_0]);
+    machine
+        .cpu
+        .add_intercept_hook(VectorSet::NONE.with(Vector::trap(0)), |_| {
+            ControlFlow::Break(())
+        });
+    assert!(matches!(one(&mut machine), End::Intercepted(_)));
+    let before = machine.save().unwrap();
+    machine.cpu.take_natively_once(Vector::trap(0));
+    let declined = machine.save().unwrap();
+    machine.restore(&before).unwrap();
+    assert!(matches!(one(&mut machine), End::Intercepted(_)));
+    machine.restore(&declined).unwrap();
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
+fn take_natively_once_takes_only_its_vector() {
+    let mut machine = machine(&[TRAP_0]);
+    machine
+        .cpu
+        .add_intercept_hook(VectorSet::NONE.with(Vector::trap(0)), |_| {
+            ControlFlow::Break(())
+        });
+    assert!(matches!(one(&mut machine), End::Intercepted(_)));
+    machine.cpu.take_natively_once(Vector::trap(1));
+    assert!(matches!(one(&mut machine), End::Intercepted(_)));
+    machine.cpu.take_natively_once(Vector::trap(0));
+    assert_eq!(one(&mut machine), End::Instructions);
+    assert_eq!(machine.cpu.registers.pc.0, HANDLER);
+}
+
+/// BRA.S to itself: an 8-bit displacement of -2, from the opcode's
+/// address plus two (CPU32RM 4.4, BRA).
+const BRA_SELF: u16 = 0x60fe;
+
+/// A run of at most `instructions` that ends at a self-loop.
+fn to_self_loop(machine: &mut Machine, instructions: u64) -> LimitedRun {
+    machine.run_limited(Limits {
+        instructions: Some(instructions),
+        self_loop: true,
+        ..Limits::default()
+    })
+}
+
+#[test]
+fn a_branch_or_jump_to_itself_ends_a_run_that_asks_once_it_runs() {
+    let at = CODE + 2;
+    let codes: [&[u16]; 5] = [
+        &[NOP, BRA_SELF],
+        // BRA.W, BRA.L
+        &[NOP, 0x6000, 0xfffe],
+        &[NOP, 0x60ff, 0xffff, 0xfffe],
+        // JMP (xxx).W, JMP (xxx).L (CPU32RM 4.4, JMP)
+        &[NOP, 0x4ef8, at as u16],
+        &[NOP, 0x4ef9, (at >> 16) as u16, at as u16],
+    ];
+    for code in codes {
+        let mut machine = machine(code);
+        let run = to_self_loop(&mut machine, 100);
+        assert_eq!(run.end, End::SelfLoop { pc: Address(at) }, "{code:x?}");
+        assert_eq!(
+            machine.cpu.instructions(),
+            2,
+            "{code:x?}: the loop run once"
+        );
+        assert_eq!(machine.cpu.registers.pc.0, at);
+        // the next run that asks runs it once more
+        let run = to_self_loop(&mut machine, 100);
+        assert_eq!(run.end, End::SelfLoop { pc: Address(at) });
+        assert!(run.cycles > Cycles::ZERO);
+        assert_eq!(machine.cpu.instructions(), 3);
+    }
+}
+
+#[test]
+fn the_self_loop_setting_ends_a_limited_run_and_its_stop_is_its_own() {
+    let mut machine = machine(&[NOP, BRA_SELF]);
+    assert!(!machine.cpu.stops_at_self_loop());
+    machine.cpu.set_stop_at_self_loop(true);
+    assert!(machine.cpu.stops_at_self_loop());
+    let unasked = Limits {
+        instructions: Some(100),
+        ..Limits::default()
+    };
+    let run = machine.run_limited(unasked);
+    assert_eq!(
+        run.end,
+        End::SelfLoop {
+            pc: Address(CODE + 2)
+        }
+    );
+    assert_eq!(machine.cpu.instructions(), 2);
+    // the setting outlives the run; off, the loop runs on
+    assert!(machine.cpu.stops_at_self_loop());
+    machine.cpu.set_stop_at_self_loop(false);
+    assert_eq!(machine.run_limited(unasked).end, End::Instructions);
+    // a run that asks still ends there with the setting off
+    assert_eq!(
+        to_self_loop(&mut machine, 100).end,
+        End::SelfLoop {
+            pc: Address(CODE + 2)
+        }
+    );
+    assert_eq!(Stop::SelfLoop.to_string(), "self-loop");
+}
+
+#[test]
+fn a_self_loop_runs_on_unasked_traced_or_branching_elsewhere() {
+    // not asked
+    let mut unasked = machine(&[BRA_SELF]);
+    let run = unasked.run_limited(Limits {
+        instructions: Some(10),
+        ..Limits::default()
+    });
+    assert_eq!(run.end, End::Instructions);
+    assert_eq!(unasked.cpu.instructions(), 10);
+    // BRA.S to the instruction before it: a loop, not a self-loop
+    let mut elsewhere = machine(&[NOP, 0x60fc]);
+    assert_eq!(to_self_loop(&mut elsewhere, 10).end, End::Instructions);
+    // traced: each time round takes a trace exception
+    let mut traced = machine(&[BRA_SELF]);
+    traced.cpu.registers.set_sr(status::S | status::T1);
+    assert_eq!(to_self_loop(&mut traced, 1).end, End::Instructions);
+    assert_eq!(traced.cpu.registers.pc.0, HANDLER);
+}
+
+#[test]
+fn an_interrupt_due_at_a_self_loop_is_taken_first() {
+    let level_3 = Vector::autovector(InterruptLevel::try_from(3).unwrap());
+    let pin = IrqPin::try_from(3).unwrap();
+    // masked: the CPU stays in its loop
+    let mut masked = machine(&[BRA_SELF]);
+    masked
+        .cpu
+        .registers
+        .set_sr(status::S | status::INTERRUPT_MASK);
+    masked.request_interrupt(pin, None);
+    assert_eq!(
+        to_self_loop(&mut masked, 10).end,
+        End::SelfLoop { pc: Address(CODE) }
+    );
+    // due: taken, and its handler's own self-loop ends the run
+    let mut due = machine(&[BRA_SELF]);
+    let handler = handle(&mut due, level_3, 0x4200);
+    due.poke_bytes(
+        Address(handler),
+        FunctionCode::SupervisorData,
+        &BRA_SELF.to_be_bytes(),
+    )
+    .unwrap();
+    due.request_interrupt(pin, None);
+    assert_eq!(
+        to_self_loop(&mut due, 10).end,
+        End::SelfLoop {
+            pc: Address(handler)
+        }
+    );
+    assert_eq!(frame(&due).1, CODE, "the loop not run before it");
 }

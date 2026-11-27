@@ -9,7 +9,8 @@ license.workspace = true
 repository.workspace = true
 readme.workspace = true
 keywords.workspace = true
-categories.workspace = true
+# The workspace's, and a command's.
+categories = ["emulators", "embedded", "command-line-utilities"]
 # The command and the license texts: the tests take their firmware
 # from the path-only mc683xx-examples, which a package drops
 # (docs/releasing.md).
@@ -37,3 +38,7 @@ nix = { version = "0.31.3", features = ["term", "fs"] }
 
 [dev-dependencies]
 mc683xx-examples = { path = "../../examples" }
+
+# docs.rs documents every feature, as `make docs` does.
+[package.metadata.docs.rs]
+all-features = true

@@ -20,15 +20,12 @@
 //!
 //! [`Bdm`]: crate::bdm::Bdm
 //! [`Cpu32Target`]: mc683xx_target::Cpu32Target
-#![cfg_attr(
-    feature = "mc68331",
-    doc = "[`Mc68331`]: mc683xx_mc68331::chip::Mc68331"
-)]
+#![cfg_attr(feature = "mc68331", doc = "[`Mc68331`]: mc683xx_mc68331::Mc68331")]
 #![cfg_attr(
     not(feature = "mc68331"),
     doc = "[`Mc68331`]: https://docs.rs/mc683xx-mc68331"
 )]
-#![cfg_attr(feature = "board", doc = "[`Board`]: mc683xx_board::board::Board")]
+#![cfg_attr(feature = "board", doc = "[`Board`]: mc683xx_board::Board")]
 #![cfg_attr(
     not(feature = "board"),
     doc = "[`Board`]: https://docs.rs/mc683xx-board"
@@ -38,17 +35,18 @@ use std::convert::Infallible;
 
 #[cfg(feature = "board")]
 use mc683xx_board::condition::Conditions;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::bare::End;
-use mc683xx_cpu32::cpu::bare::Limits;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::End;
+use mc683xx_cpu32::Limits;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::flat::Machine;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::SystemRegister;
 
 use crate::arch::Location;
 use crate::arch::get;
@@ -64,13 +62,14 @@ mod chip;
 /// More ends may come, so a match needs a wildcard arm:
 ///
 /// ```compile_fail
-/// use mc683xx_gdb::target::TargetRun;
+/// use mc683xx_gdb::TargetRun;
 ///
 /// fn ran_on(ran: TargetRun) -> bool {
 ///     match ran {
 ///         TargetRun::Quantum | TargetRun::Hook => true,
 ///         TargetRun::Halted | TargetRun::Requested | TargetRun::Fault => false,
 ///         TargetRun::Condition | TargetRun::Background(_) => false,
+///         TargetRun::SelfLoop => false,
 ///     }
 /// }
 /// ```
@@ -89,17 +88,30 @@ pub enum TargetRun {
     /// The host or a peripheral asked it to stop.
     Requested,
     /// A fault stopped it rather than being taken
-    /// ([`Cpu::set_stop_on_fault`]), or an intercepted exception did
-    /// (the bare CPU's [`Cpu::set_intercepted`]).
+    /// ([`Cpu::set_stop_on_fault`]), or, on the bare CPU, an exception
+    /// its host handles did ([`Cpu::add_intercept_hook`]).
     ///
-    /// [`Cpu::set_stop_on_fault`]: mc683xx_cpu32::cpu::Cpu::set_stop_on_fault
-    /// [`Cpu::set_intercepted`]: mc683xx_cpu32::cpu::Cpu::set_intercepted
+    /// [`Cpu::set_stop_on_fault`]: mc683xx_cpu32::Cpu::set_stop_on_fault
+    /// [`Cpu::add_intercept_hook`]: mc683xx_cpu32::Cpu::add_intercept_hook
     Fault,
+    /// On the bare CPU, an exception it was about to take stopped it
+    /// ([`Cpu::set_stop_on_exception`]).
+    ///
+    /// [`Cpu::set_stop_on_exception`]: mc683xx_cpu32::Cpu::set_stop_on_exception
+    Exception {
+        /// The exception's vector.
+        vector: Vector,
+    },
     /// A stop condition held ([`Target::conditions`]).
     Condition,
     /// A target under BDM control entered background mode, for the
     /// entry given.
     Background(Entry),
+    /// A self-loop ended it, the host having set
+    /// [`Cpu::set_stop_at_self_loop`]: PC at the loop.
+    ///
+    /// [`Cpu::set_stop_at_self_loop`]: mc683xx_cpu32::Cpu::set_stop_at_self_loop
+    SelfLoop,
 }
 
 impl From<Stop> for TargetRun {
@@ -109,6 +121,7 @@ impl From<Stop> for TargetRun {
             Stop::Halted(_) | Stop::Background(_) => Self::Halted,
             Stop::Hook(_) => Self::Hook,
             Stop::Fault => Self::Fault,
+            Stop::SelfLoop => Self::SelfLoop,
             _ => Self::Requested,
         }
     }
@@ -119,7 +132,7 @@ impl From<Stop> for TargetRun {
 /// More answers may come, so a match needs a wildcard arm:
 ///
 /// ```compile_fail
-/// use mc683xx_gdb::target::TargetReset;
+/// use mc683xx_gdb::TargetReset;
 ///
 /// fn reset(answer: TargetReset) -> bool {
 ///     match answer {
@@ -142,7 +155,7 @@ pub enum TargetReset {
 /// More reasons may come, so a match needs a wildcard arm:
 ///
 /// ```compile_fail
-/// use mc683xx_gdb::target::AccessError;
+/// use mc683xx_gdb::AccessError;
 ///
 /// fn target<E>(error: AccessError<E>) -> Option<E> {
 ///     match error {
@@ -156,7 +169,7 @@ pub enum TargetReset {
 pub enum AccessError<E> {
     /// The byte at this address is not memory the target serves, in
     /// the address space asked.
-    #[error("{0} is not memory the target serves")]
+    #[error("no memory at {0}")]
     Unserved(Address),
     /// The target gives no access to its registers: neither its CPU's
     /// controls nor register methods of its own.
@@ -182,7 +195,7 @@ impl<E> AccessError<E> {
 /// A target's own step ([`Target::native_step`]).
 pub trait NativeStep {
     /// The target's error.
-    type Error;
+    type Error: std::error::Error;
 
     /// One step: how it stopped, [`TargetRun::Background`] for a
     /// target under BDM control.
@@ -206,7 +219,7 @@ pub trait NativeStep {
 pub trait Target {
     /// What ends a session: an error a run cannot go on from (a host
     /// peripheral's, a pod's lost link).
-    type Error;
+    type Error: std::error::Error;
 
     /// Calls `call` with the CPU's controls, its registers and hooks to
     /// change and the rest to read: `Some` of what it returns for an
@@ -284,8 +297,12 @@ pub trait Target {
     /// Fills `data` from `address` up, in the address space
     /// `function_code` names, as far as it can: the bytes filled, from
     /// the start.  An emulated target reads with no bus cycle and no
-    /// side effect, a byte only a cycle could tell (a peripheral's)
-    /// ending it; one under BDM control fills all of `data` or fails.
+    /// side effect, a peripheral's bytes by its
+    /// [`MappedPeripheral::peek`], a byte only a cycle could tell (one a
+    /// peripheral declines) ending it; one under BDM control fills all
+    /// of `data` or fails.
+    ///
+    /// [`MappedPeripheral::peek`]: mc683xx_cpu32::peripheral::MappedPeripheral::peek
     ///
     /// # Errors
     ///
@@ -300,13 +317,17 @@ pub trait Target {
     /// Writes `data` at `address` up, in the address space
     /// `function_code` names.  An emulated target writes with no bus
     /// cycle, into memory the core serves, ROM included, whatever its
-    /// permissions.
+    /// permissions, and a peripheral's bytes by its
+    /// [`MappedPeripheral::poke`].
     ///
     /// # Errors
     ///
-    /// [`AccessError::Unserved`] if a byte is not memory the target
-    /// serves in that space, nothing then written; the target's error,
-    /// for one under BDM control.
+    /// [`AccessError::Unserved`] if a byte is neither memory the target
+    /// serves in that space nor a peripheral's that takes it; nothing
+    /// is then written, but for the bytes before one a peripheral
+    /// declined.  The target's error, for one under BDM control.
+    ///
+    /// [`MappedPeripheral::poke`]: mc683xx_cpu32::peripheral::MappedPeripheral::poke
     fn write_memory(
         &mut self,
         address: Address,
@@ -324,7 +345,7 @@ pub trait Target {
         Ok(())
     }
 
-    /// Runs an emulated target for about `cycles` system clocks, or
+    /// Runs an emulated target for about `budget` system clocks, or
     /// until a hook, a halt or a request stops it; or for none, as
     /// [`TargetRun::Quantum`], if the host holds it back (to pace it
     /// against wall time), the stub then looking for gdb's bytes.  `hit` says whether
@@ -339,7 +360,7 @@ pub trait Target {
     /// # Errors
     ///
     /// The target's error, one a run cannot go on from.
-    fn run_for(&mut self, cycles: Cycles, hit: &dyn Fn() -> bool)
+    fn run_for(&mut self, budget: Cycles, hit: &dyn Fn() -> bool)
     -> Result<TargetRun, Self::Error>;
 
     /// Stops a running target, for gdb's Ctrl-C: how it stopped.  The
@@ -386,7 +407,8 @@ pub trait Target {
     }
 }
 
-/// The bare CPU: one address space, whatever the function code.
+/// The bare CPU: one address space for memory, whatever the function
+/// code, which a peripheral's peek or poke sees.
 impl Target for Machine {
     type Error = Infallible;
 
@@ -397,46 +419,46 @@ impl Target for Machine {
     fn read_memory(
         &mut self,
         address: Address,
-        _function_code: FunctionCode,
+        function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<usize, AccessError<Infallible>> {
-        Ok(peek_bytes(data, |at| {
-            let mut byte = [0];
-            self.read(address.offset(at), &mut byte)
-                .ok()
-                .map(|()| byte[0])
-        }))
+        Ok(match self.peek_bytes(address, function_code, data) {
+            Ok(()) => data.len(),
+            Err(error) => error.address().0.wrapping_sub(address.0) as usize,
+        })
     }
 
     fn write_memory(
         &mut self,
         address: Address,
-        _function_code: FunctionCode,
+        function_code: FunctionCode,
         data: &[u8],
     ) -> Result<(), AccessError<Infallible>> {
-        self.write(address, data)
-            .map_err(|unserved| AccessError::Unserved(unserved.0))
+        self.poke_bytes(address, function_code, data)
+            .map_err(|error| AccessError::Unserved(error.address()))
     }
 
     fn run_for(
         &mut self,
-        cycles: Cycles,
+        budget: Cycles,
         _hit: &dyn Fn() -> bool,
     ) -> Result<TargetRun, Infallible> {
         let mut limits = Limits::default();
-        limits.cycles = Some(cycles);
+        limits.cycles = Some(budget);
         let run = Self::run_limited(self, limits);
         Ok(match run.end {
             End::Stop(stop) => stop.into(),
-            End::Until | End::Instructions | End::Steps => TargetRun::Quantum,
+            End::Reached | End::Instructions | End::Steps => TargetRun::Quantum,
             End::Fault(_) | End::Intercepted(_) => TargetRun::Fault,
+            End::Exception { vector, .. } => TargetRun::Exception { vector },
+            End::SelfLoop { .. } => TargetRun::SelfLoop,
             _ => TargetRun::Requested,
         })
     }
 
     fn reset(&mut self) -> Result<TargetReset, Infallible> {
         // A halt reading the vectors is what the next run reports.
-        let _ = Self::reset(self);
+        Self::reset(self);
         Ok(TargetReset::Done)
     }
 }
@@ -445,16 +467,4 @@ impl Target for Machine {
 #[cfg(feature = "board")]
 pub(crate) fn widen<E>(error: AccessError<Infallible>) -> AccessError<E> {
     error.map(|never| match never {})
-}
-
-/// Fills `data` with `byte(offset)` for each offset until one is `None`:
-/// the bytes filled.
-fn peek_bytes(data: &mut [u8], mut byte: impl FnMut(u32) -> Option<u8>) -> usize {
-    for (offset, slot) in data.iter_mut().enumerate() {
-        match byte(offset as u32) {
-            Some(value) => *slot = value,
-            None => return offset,
-        }
-    }
-    data.len()
 }

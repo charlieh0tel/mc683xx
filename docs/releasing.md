@@ -12,10 +12,10 @@ release, step 7).
 | Package | Where | Built by |
 | --- | --- | --- |
 | `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`, `mc683xx-mc68331`, `mc683xx-board`, `mc683xx-gdb`, `mc683xx-debug`, `mc683xx-peripherals`, `mc683xx-run` | crates.io | `cargo publish --workspace`: the first release by hand, then the `release` workflow |
-| `mc683xx` (the Python package, from `crates/cpu32-py`) | PyPI | `.github/workflows/release.yml`, from a `v*` tag |
+| `mc683xx` (the Python package, from `crates/python`) | PyPI | `.github/workflows/release.yml`, from a `v*` tag |
 | `mc683xx` (the npm package, from `crates/wasm`) | npm | `make npm-package`: the first release by hand, then the `release` workflow |
 
-Every other member has `publish = false`: `cpu32-py` (its wheel is its
+Every other member has `publish = false`: `mc683xx-python` (its wheel is its
 release), `mc683xx-wasm` (its npm package is its release),
 `cpu32-harness`, `cpu32-oracle`, `snapshot-golden`,
 `mc683xx-bench` and `mc683xx-examples`.
@@ -27,7 +27,7 @@ tests `mc683xx-examples`, both path-only dev-dependencies that `cargo
 publish` drops, so `cargo test` in an unpacked package fails to
 build.  The tests run from the repository.
 
-Each published crate and `crates/cpu32-py` holds copies of the root's
+Each published crate and `crates/python` holds copies of the root's
 `LICENSE-MIT` and `LICENSE-APACHE`, so its package, the wheels and the
 sdist carry them (`license-files` in `pyproject.toml`).  They are
 copies, not links, for checkouts on Windows; `make licenses`, part of
@@ -39,7 +39,7 @@ manylinux x86_64 and aarch64, macOS x86_64 and arm64, Windows x64, and
 an sdist.  Wheels the runner can load run the Python tests on Python
 3.12 first; the cross-built ones (Linux aarch64, macOS x86_64) are only
 built.  The package is a maturin `python-source` layout
-(`crates/cpu32-py/python/mc683xx`), so the sdist carries the stubs and
+(`crates/python/python/mc683xx`), so the sdist carries the stubs and
 `py.typed`; the `sdist` job builds a wheel from the sdist, as pip does
 where no wheel fits, and checks they are in it.  `mc683xx-run`
 installs on any host; its `nix` dependency, for `--bind NAME=pty`, is
@@ -73,9 +73,23 @@ deploy replaces it.
 
 - Semantic versioning from 0.1.0.  Before 1.0, a breaking change
   (Semver scope) bumps the minor version; anything else the patch.
+  The API is in beta: a 0.x release may still break it, and does so
+  only in its minor version.
+- A release branch that a consumer ports to before its release
+  carries a pre-release version, `X.Y.Z-alpha.N` (the wheel's
+  `X.Y.ZaN`), never the last release's or the coming one's; N goes up
+  with each further break on it, and the release commit sets `X.Y.Z`.
 - CI's `semver` job checks the published crates' APIs against their
   last release (cargo-semver-checks).  Before 1.0 it reports a break
   without failing, since the version is bumped only at release.
+- The 1.0 commit, as "Release 1.0.0", makes these changes beside the
+  version bump (Cutting a release, step 2), and no others: the PyPI
+  classifier becomes `Development Status :: 5 - Production/Stable`
+  (`crates/python/pyproject.toml`); CI's `semver` job loses its
+  `continue-on-error` and blocks (`.github/workflows/ci.yml`); the
+  "Beta" line goes from `README.md` and `crates/wasm/npm/README.md`;
+  and this page's text on releases before 1.0 goes.  Nothing here
+  promises that a release before it does not break the API.
 - A release is an annotated tag `vX.Y.Z` on a commit of `main` that
   has passed every check (AGENTS.md).  Its notes, breaking changes
   first, are the tag message's body, below its "Release X.Y.Z"
@@ -95,7 +109,8 @@ means a change to:
   enum members, the exception classes, their bases and which errors
   raise which, and the methods the module calls on a host's objects
   (a peripheral's, as the protocol classes `MappedPeripheral`,
-  `SpiPeripheral` and `Peripheral` list them; a hook's callable);
+  `SpiPeripheral` and `Peripheral` list them; a hook's callable, the
+  intercept hook's among them);
 - the npm package's JavaScript and TypeScript API, through its
   `exports`, but `InitOutput`, the module's own exports, which is
   opaque;
@@ -105,19 +120,19 @@ means a change to:
 - the runner's flags, their values and its exit statuses;
 - the trace text (`docs/tracing.md`), versioned by its first line;
 - the GDB stub's target description, monitor commands and stop
-  signals (`docs/gdb.md`).
+  signals (`docs/gdb.md`);
+- the init script language (`docs/init-scripts.md`);
+- the `Display` of a type that also implements `FromStr`: the name a
+  host prints and parses back (`supervisor-data`, `CS0`, `IRQ7`), and
+  so the Python `str()` of the value that wraps it.
 
 Not covered, so a minor or patch release may change them:
 
-- the text of messages, `repr` and `Display` (but the trace's);
-- enum integer values;
+- the text of messages, `repr` and `Display` (but the trace's, and a
+  parsed name's, above);
 - Python names that start with `_`, and Rust items that are
   `#[doc(hidden)]` ("Not part of the semver API");
 - npm package files outside its `exports`;
-- the Unicorn-parity Python items, for parity runs against Unicorn
-  only: `Deviations` (with `Machine.set_deviations` and `deviations`),
-  `Intercepted`, `Machine.set_intercepted` and
-  `Machine.set_intercept_callback`, so marked in the stubs;
 - snapshot formats: a snapshot restores only into a build with the
   format versions that saved it (PLAN.md, State), so it is read by the
   release that wrote it.  Any release may bump one, and its notes say
@@ -139,6 +154,19 @@ Dependencies and platforms:
 - The Python package supports Python 3.12 and later (abi3 wheels).
   Dropping a Python or Node release past its end of life is a minor
   release.
+- `mc683xx-target`, `mc683xx-cpu32`, `mc683xx-modules`,
+  `mc683xx-mc68331`, `mc683xx-board` and `mc683xx-peripherals` build
+  for `wasm32-unknown-unknown`, with no build script and no
+  `getrandom` or other source of entropy among their dependencies.
+- The model reads no host clock: an unpaced run (the chip's and the
+  board's `run_for` and `run_until`, `run_until_quantized`, and
+  `run_until_paced` under `Pacing::Unpaced`) and `Board::run_frame`
+  and `run_frame_with`, which take the wall time from the host, never
+  block or read `Instant`.  Only a paced `run_until_paced` and
+  `BoardControl::sleep` do.
+- The bare machine has 32 address lines by default (Rust's
+  `flat::ADDRESS_BITS`, Python's `Machine()`), so no address aliases
+  unless the host asks for 24.
 
 ## Setup
 
@@ -200,8 +228,8 @@ Once, before the first release.
 4. Run every check (AGENTS.md): `make ci`, `python`, `oracle`,
    `singlestep`, `corpus`, `boot-smoke`, `boot-diff` and
    `smartclock-boards`, and `cargo publish --workspace --dry-run`;
-   and `make wasm`, `npm-test` and `npm-types`, which CI's `wasm` job
-   runs too.  CI's `python` job tests a release build of the Python
+   and `make wasm`, `npm-test`, `npm-types` and `pages-test`, which
+   CI's `wasm` job runs too.  CI's `python` job tests a release build of the Python
    package on Linux, macOS and Windows, as the release's wheels are
    tested; `make python` tests a debug build on this host only.
 5. Commit `Cargo.toml` and `Cargo.lock` as "Release X.Y.Z", and merge
@@ -215,7 +243,7 @@ Once, before the first release.
    names `Cargo.toml`'s version, and, through the GitHub API with the
    workflow's token (`actions: read`), that the latest `ci` run of
    that commit's push to `main` completed with success; no run, a run
-   still going, or a failed or cancelled one fails it, and a re-run
+   still going, or a failed or canceled one fails it, and a re-run
    that passes clears it.  Alongside, the wheels, the sdist
    and its wheel's stub check build.  The `pypi` job uploads only once
    `gate` and the builds have passed.  A tag whose `gate` failed for a

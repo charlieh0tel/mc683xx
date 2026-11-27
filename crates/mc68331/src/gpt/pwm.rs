@@ -5,7 +5,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
 
 use super::timer::Counter;
 
@@ -83,10 +83,10 @@ pub struct ParseChannelError(String);
 
 impl Channel {
     /// Both, A first.
-    pub(super) const BOTH: [Self; 2] = [Self::A, Self::B];
+    pub(crate) const BOTH: [Self; 2] = [Self::A, Self::B];
 
     /// Its index, 0 for A.
-    pub(super) const fn index(self) -> usize {
+    pub(crate) const fn index(self) -> usize {
         match self {
             Self::A => 0,
             Self::B => 1,
@@ -108,21 +108,21 @@ impl Channel {
 pub enum Output {
     /// A steady level.
     Level(bool),
-    /// A waveform high for `high` of every `period` PWMCNT counts, from
-    /// the period's start.
+    /// A waveform high for `high_counts` of every `period_counts`
+    /// PWMCNT counts, from the period's start.
     Wave {
         /// Counts in a period: 256 fast, 32768 slow.
-        period: u32,
+        period_counts: u32,
         /// Counts high.
-        high: u32,
+        high_counts: u32,
         /// System clocks a count, or `None` when PCLK clocks PWMCNT.
-        clocks: Option<Cycles>,
+        clocks_per_count: Option<Cycles>,
     },
     /// A counter's clock, high one system clock a count: PWMCNT's on
     /// PWMA (PPROUT), TCNT's on OC1 (CPROUT).
     Clock {
         /// System clocks a count, or `None` for PCLK.
-        clocks: Option<Cycles>,
+        clocks_per_count: Option<Cycles>,
     },
 }
 
@@ -343,12 +343,12 @@ impl Pwm {
 
     /// What `channel`'s pin carries at the prescaler's `count`.
     pub(super) const fn output(&self, channel: Channel, count: u64) -> Output {
-        let clocks = tap_clocks(Self::divisor(self.control));
+        let clocks_per_count = tap_clocks(Self::divisor(self.control));
         if self.forced(channel) {
             return Output::Level(self.control & channel.bit(PWMC_F1A) != 0);
         }
         if self.clock_out(channel) {
-            return Output::Clock { clocks };
+            return Output::Clock { clocks_per_count };
         }
         let (duty, high) = self.effective(channel, self.count(count));
         if high || duty == 0 {
@@ -356,9 +356,9 @@ impl Pwm {
         }
         let unit = 1 << self.shift(channel);
         Output::Wave {
-            period: unit << DUTY_BITS,
-            high: unit * duty as u32,
-            clocks,
+            period_counts: unit << DUTY_BITS,
+            high_counts: unit * duty as u32,
+            clocks_per_count,
         }
     }
 }

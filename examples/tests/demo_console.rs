@@ -14,15 +14,15 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
-use mc683xx_board::board::Board;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Board;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_cpu32::Stop;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
 
 /// What is typed: every command.
@@ -30,14 +30,14 @@ const SCRIPT: &[u8] = b"h\nm\np\nt\nc\nx 0\nf\nt\n";
 /// The console's run-time endpoint.
 const CONSOLE: &str = "console";
 /// Board time between turns, a byte of input a turn: `mc683xx-run`'s
-/// default `--turn-us`, 1 ms.
+/// default `--turn`, 1 ms.
 const TURN: Span = Span::from_millis(1);
 /// Board time before input goes in, past the firmware's enabling its
 /// receiver: 10 ms.
 const INPUT_AFTER: Time = Time::from_picos(Span::from_millis(10).picos());
 /// Board time the run ends at, past the last command's end (about
 /// 2.15 s).
-const END: Time = Time::from_seconds(3);
+const END: Time = Time::from_secs(3);
 /// The variable that asks a run to write the golden.
 const UPDATE: &str = "UPDATE_GOLDEN";
 /// The golden, from the crate's directory.

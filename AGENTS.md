@@ -19,13 +19,13 @@ Crates:
   shared by 683xx parts.
 - `mc683xx-mc68331` (`crates/mc68331`): GPT; composes the core and the
   modules into the chip.
-- `cpu32-py`: PyO3 bindings.
+- `mc683xx-python` (`crates/python`): PyO3 bindings.
 - `mc683xx-wasm` (`crates/wasm`): `wasm-bindgen` bindings, a board
   from JavaScript; `make wasm` lints and builds them, `make npm-test`
   tests them.
 - `mc683xx-board` (`crates/mc68331-board`): board files, peripherals from a
   registry, nets, board time and the run loop, generic over the chip
-  (`chip::Chip`, the MC68331's impl its `mc68331` module).
+  (`Chip`, the MC68331's impl its `mc68331` module).
 - `mc683xx-run` (`crates/mc68331-run`): the runner, a thin command on
   `mc683xx-board`; the one binary.
 - `mc683xx-gdb` (`crates/gdb`): the GDB remote stub, over the bare
@@ -37,7 +37,7 @@ Crates:
   the firmware function corpus, boot smoke and boot diff.
 - `cpu32-oracle`: test-only: the Musashi and Unicorn oracles, behind
   features.
-- `mc683xx-examples` (`examples`): the host guide's and gdb guide's
+- `mc683xx-examples` (`examples`): the host, gdb and init script guides'
   examples as doctests, and the example boards and their firmware.
 - `mc683xx-bench` (`benches`): the criterion benchmarks.
 - `snapshot-golden`: test-only golden checks of the snapshot formats.
@@ -145,8 +145,8 @@ Crates:
   public APIs and list each one precisely when it lands.  Tag a
   release only after `make ci`, `python`, `oracle`, `singlestep`,
   `corpus`, `boot-smoke`, `boot-diff`, `smartclock-boards`, `wasm`,
-  `npm-test`, `npm-types` and `cargo publish --workspace --dry-run`
-  all pass.  A release's notes, its breaking changes first, go in its
+  `npm-test`, `npm-types`, `pages-test` and `cargo publish --workspace
+  --dry-run` all pass.  A release's notes, its breaking changes first, go in its
   GitHub release; `CHANGELOG.md` is a local working file, not tracked.
 
 
@@ -197,8 +197,14 @@ Crates:
 - Prefer `use` statements at module top over inline imports.
 - Avoid mutable variables when possible.  Prefer new bindings or
   shadows.
-- Never re-export.  Use individual use statements where needed instead
-  of `pub use` or `pub(crate) use`.
+- Re-export only to give an item one short public path: a crate may
+  lift an item out of a private module to its root (`mod board;` and
+  `pub use board::Board;`), so a host writes `mc683xx_board::Board`,
+  not `mc683xx_board::board::Board`, or to the private module's public
+  parent (`sim::ResetScope` from a private `sim::reset`).  Every public
+  item keeps exactly one public path: never re-export from a public
+  module, another crate's items or a glob, and never `pub(crate) use`
+  (import where needed instead).
 - Never employ a wildcard `use` statement on an enum when trying to
   shorten match arms.
 - Use the newtype idiom as appropriate (addresses, function codes,
@@ -207,23 +213,53 @@ Crates:
   quantities (time, frequency, clock counts: `Cycles`, `Time`, `Span`,
   `Frequency`), which have named constructors and accessors only
   (`Cycles::from_clocks`, `clocks`), so a bare number never silently
-  takes a unit.
+  takes a unit.  The other conversions, one way each:
+  - a checked value, some numbers not one (`InterruptLevel`, `IrqPin`,
+    `PortGpPin`, `chip_select::Number`, `FunctionCode`), converts by
+    `TryFrom<u8>`, failing with `No<Type>(pub u8)`, and `From<T> for
+    u8`; no public `new` or `get`, hidden or not (a private `const fn`
+    where a const context in its own crate needs one);
+  - a wire or field encoding is a named pair, not `From`
+    (`Register::code`/`from_code`, `Size::field`, `Entry::atemp`);
+  - a register-order index is `index`/`from_index` (`ChipSelect`);
+  - an id a host only receives is opaque: `Display`, no `From`, no
+    public constructor (`PeripheralId`, `ConditionId`, `ObserverId`,
+    `HookId`); a value the host chooses (`ConditionToken`) is one
+    `From` pair.
 - Method names: `with_*` is a constructor (`Registry::with_builtins`);
   a mutator is `set_*`; an accessor is the noun, `_mut` for the
   mutable one (`Board::peripheral`, `peripheral_mut`); a state reads
-  as the state (`halted`).  How a run ended is a `*Run` (`Run`,
+  as the state (`halted`).  A builder's adder is the noun, as std's
+  `Command::arg` and `thread::Builder::name` are (`Builder::memory`,
+  `Builder::peripheral`); a live object's is `add_*`
+  (`Machine::add_peripheral`, `Cpu::add_code_hook`).  How a run ended is a `*Run` (`Run`,
   `LimitedRun`, `BoardRun`); a gdb session is not a run, so how one
   ended is not a `*Run` (`Ending`).  `restore` is a snapshot's alone.
+- Time words (PLAN.md, Decisions): an instant is `Time` on the board,
+  `Cycle` on the chip; a span `Span`, `Cycles`.  `now` is the current
+  instant in the layer's unit, never a bundle; `at` another instant; a
+  run's limit is `budget` (a span, `run_for`) or `deadline` (an
+  instant, `run_until`); `since`, `after`, `next_event`.  A conversion
+  is named for its result and takes the instant as `at`
+  (`TimeBase::cycle(at)`).  A board peripheral call without a `Drive`
+  takes `moment: Moment` last; a chip-level callback with no cycle
+  struct takes `now: Cycle` last.
 - A type with a name or a printed form implements `Display`, and
   `FromStr` if it can be named, not `name()` and `from_name()`; the
-  parse error is `Parse<Type>Error`.
+  parse error is `Parse<Type>Error`.  Its message holds the input
+  where it can, "no <thing> {0:?}" (`no setting "x": give
+  PERIPHERAL.KEY=VALUE`, a hint after a colon); a `no_std` one that
+  holds none says "not a <thing>".
 - Do not use `anyhow` at all; every crate here is a library but
   `mc683xx-run`, which keeps typed errors too.  Use typed
   errors via `thiserror`.
 - An error prints its cause in its message or exposes it as
   `source()`, never both: a wrapper that adds context keeps the cause
   in a field named `error`; one that adds none is
-  `#[error(transparent)]`.  Messages use `Display`, never `{:?}` of a
+  `#[error(transparent)]`.  So a variant's shape follows what it
+  holds: a cause is a named `error` field (`Target { error }`); a lone
+  datum may be positional (`Unserved(Address)`); a transparent wrapper
+  is a tuple (`Target(E)`).  Messages use `Display`, never `{:?}` of a
   type (a quoted string's `{:?}` is fine).
 - Public error enums, and public enums likely to grow, are
   `#[non_exhaustive]`.

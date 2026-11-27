@@ -5,6 +5,8 @@
 //! the answers computed here as it computes them in Python.  Only
 //! routines that touch nothing but their arguments and RAM.
 
+use mc683xx_target::Register;
+
 use crate::firmware::Call;
 use crate::firmware::Firmware;
 use crate::firmware::RAM;
@@ -143,8 +145,8 @@ impl Libc {
         let call: Call = self.firmware.call(entry, sp, |registers| {
             registers.data[0] = given.d0;
             registers.data[1] = given.d1;
-            registers.set_address(0, given.a0);
-            registers.set_address(1, given.a1);
+            registers.set_register(Register::A0, given.a0);
+            registers.set_register(Register::A1, given.a1);
         });
         match call.stopped {
             Stopped::Returned => Ok((call.d0(), call.d1())),

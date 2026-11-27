@@ -1,17 +1,18 @@
 //! `ad569`: Analog Devices' AD569, a 16-bit voltage-output DAC with a
 //! parallel input (AD569 datasheet, Rev. A).
 //!
-//! DB15-DB0, the bus input `db`, pass through a first rank of two byte
+//! DB15-DB0, the bus input `DB`, pass through a first rank of two byte
 //! latches, the 8 MSBs and the 8 LSBs, into the 16-bit DAC register,
-//! which VOUT, the analog output `out`, follows.  Four controls, the
-//! logic inputs `cs`, `hbe`, `lbe` and `ldac`, gate them (Digital
-//! Circuit Connections, Table I): with CS low, HBE low makes the MSB
+//! which the analog output `VOUT` follows.  Four controls, the logic
+//! inputs `CS`, `HBE`, `LBE` and `LDAC`, gate them (Digital Circuit
+//! Connections, Table I): with CS low, HBE low makes the MSB
 //! latch transparent, LBE low the LSB latch, and LDAC low the DAC
 //! register; with CS high nothing changes.  "All four control inputs
 //! latches are level-triggered and active low": a latch follows its
 //! input while enabled and holds from its enable's rise.  All four low
 //! make every latch transparent, DB to VOUT.  Each control takes its
-//! level from its parameter until a net drives it.  The latches power
+//! level from its parameter, the port's name in lowercase (`cs`), until
+//! a net drives it.  The latches power
 //! on holding `initial`, since the datasheet gives no power-on state.
 
 use mc683xx_board::inspect::Inspection;
@@ -24,9 +25,9 @@ use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -54,9 +55,10 @@ const LBE: usize = 3;
 const LDAC: usize = 4;
 const OUT: usize = 5;
 
-/// The controls' names, as ports and as the parameters that tie them
-/// until a net drives them, in port order from `CS`.  Each is high, not
-/// enabled, by default.
+/// The controls' ports, in port order from `CS`.
+const CONTROL_PORTS: [&str; 4] = ["CS", "HBE", "LBE", "LDAC"];
+/// The parameters that tie the controls until a net drives them, in
+/// port order from `CS`.  Each is high, not enabled, by default.
 const CONTROLS: [&str; 4] = ["cs", "hbe", "lbe", "ldac"];
 
 /// The 16-bit word the MSB and LSB latches and the DAC register hold
@@ -70,8 +72,8 @@ const INITIAL: &str = "initial";
 /// zeros (0000H) to +VREF for an input code of all ones").  The
 /// defaults are the specifications' conditions, +VREF +5 V and -VREF
 /// -5 V (Specifications).
-const VREF_NEGATIVE: (&str, Volts) = ("vref_negative", Volts(-5.0));
-const VREF_POSITIVE: (&str, Volts) = ("vref_positive", Volts(5.0));
+const VREF_NEGATIVE: (&str, Volts) = ("vref_negative_volts", Volts(Ad569::VREF_NEGATIVE_VOLTS));
+const VREF_POSITIVE: (&str, Volts) = ("vref_positive_volts", Volts(Ad569::VREF_POSITIVE_VOLTS));
 
 /// The levels on its four controls, high not enabled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,14 +139,15 @@ impl State {
     }
 }
 
-/// The peripheral.  No RESET reaches it: the AD569 has no reset input (its
-/// four control inputs are CS, LBE, HBE and LDAC; Product Description),
-/// so a reset changes nothing.  The datasheet gives no power-on state;
-/// it powers on here with its latches holding `initial` (0 by default,
-/// VOUT at -VREF), then follows whatever its tied controls make
-/// transparent.
+/// The peripheral, `ad569`, as a host reads it by type
+/// (`Board::peripheral::<Ad569>`).  No RESET reaches it: the AD569 has
+/// no reset input (its four control inputs are CS, LBE, HBE and LDAC;
+/// Product Description), so a reset changes nothing.  The datasheet
+/// gives no power-on state; it powers on here with its latches holding
+/// `initial` (0 by default, VOUT at -VREF), then follows whatever its
+/// tied controls make transparent.
 #[derive(Debug)]
-struct Ad569 {
+pub struct Ad569 {
     /// VOUT's span: -VREF to +VREF.
     span: Span,
     /// What it holds.
@@ -152,11 +155,21 @@ struct Ad569 {
 }
 
 impl Ad569 {
-    /// From `initial` (0), `vref_negative`, `vref_positive` and the
-    /// controls' levels.
+    /// `initial`'s default: the latches out of power-on, VOUT at -VREF.
+    pub const INITIAL: u16 = 0;
+    /// `vref_negative_volts`' default, the specifications' -VREF.
+    pub const VREF_NEGATIVE_VOLTS: f64 = -5.0;
+    /// `vref_positive_volts`' default, the specifications' +VREF.
+    pub const VREF_POSITIVE_VOLTS: f64 = 5.0;
+
+    /// From `initial` (0), `vref_negative_volts`, `vref_positive_volts`
+    /// and the controls' levels.
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         let tied = |index: usize| choice(context, CONTROLS[index], LEVELS, true);
-        let initial: u16 = context.parameters.integer(INITIAL)?.unwrap_or(0);
+        let initial: u16 = context
+            .parameters
+            .integer(INITIAL)?
+            .unwrap_or(Self::INITIAL);
         Ok(Self {
             span: Span::from_parameters(context, VREF_NEGATIVE, VREF_POSITIVE)?,
             state: State {
@@ -178,14 +191,38 @@ impl Ad569 {
 
     /// Its ports, by index.
     fn ports() -> Vec<PortSpec> {
-        let controls = CONTROLS
+        let controls = CONTROL_PORTS
             .iter()
             .map(|name| PortSpec::input(*name, Kind::Logic));
-        [PortSpec::input("db", Kind::Bus)]
+        [PortSpec::input("DB", Kind::Bus)]
             .into_iter()
             .chain(controls)
-            .chain([PortSpec::output("out", Kind::Analog)])
+            .chain([PortSpec::output("VOUT", Kind::Analog)])
             .collect()
+    }
+
+    /// The DAC register, which VOUT follows.
+    #[must_use]
+    pub const fn code(&self) -> u16 {
+        self.state.dac
+    }
+
+    /// VOUT, in volts.
+    #[must_use]
+    pub fn volts(&self) -> f64 {
+        self.span.output(self.state.dac, CODE_BITS).0
+    }
+
+    /// The word on the data inputs, DB15-DB0.
+    #[must_use]
+    pub const fn data_inputs(&self) -> u16 {
+        self.state.db
+    }
+
+    /// The first rank's latches: the 8 MSBs', then the 8 LSBs'.
+    #[must_use]
+    pub const fn latches(&self) -> (u8, u8) {
+        (self.state.high, self.state.low)
     }
 
     /// Drives VOUT.
@@ -274,15 +311,16 @@ mod tests {
     use mc683xx_board::peripheral::Drive;
 
     use crate::SYSTEM_CLOCK;
+    use mc683xx_board::Environment;
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::registry::Context;
-    use mc683xx_board::registry::Environment;
     use mc683xx_board::registry::ParameterError;
     use mc683xx_board::registry::Parameters;
     use mc683xx_board::signal::Signal;
+    use mc683xx_board::time::Moment;
     use mc683xx_board::time::Time;
-    use mc683xx_cpu32::cpu::state::StateError;
-    use mc683xx_cpu32::cpu::state::encode;
+    use mc683xx_cpu32::state::StateError;
+    use mc683xx_cpu32::state::encode;
 
     use super::Ad569;
     use super::CS;
@@ -305,7 +343,7 @@ mod tests {
 
     /// What `signal` on `port` drove on VOUT.
     fn input(dac: &mut Ad569, port: usize, signal: Signal) -> Vec<f64> {
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
         dac.input(port, signal, &mut drive);
         drive
             .finish()
@@ -375,13 +413,13 @@ mod tests {
     #[test]
     fn the_references_set_the_span() {
         let mut dac = peripheral(
-            "vref_negative = 0\nvref_positive = -8.0\ncs = \"low\"\n\
+            "vref_negative_volts = 0\nvref_positive_volts = -8.0\ncs = \"low\"\n\
              hbe = \"low\"\nlbe = \"low\"\nldac = \"low\"",
         )
         .unwrap();
         assert_eq!(input(&mut dac, DB, Signal::Bus(0x4000)), [-2.0]);
         assert!(matches!(
-            peripheral("vref_positive = inf"),
+            peripheral("vref_positive_volts = inf"),
             Err(ParameterError::Invalid { .. })
         ));
         assert!(matches!(
@@ -393,7 +431,7 @@ mod tests {
     #[test]
     fn power_on_drives_vout_at_minus_vref() {
         let mut dac = peripheral("").unwrap();
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
         dac.power_on(&mut drive);
         assert_eq!(drive.finish().driven[0].signal, Signal::Analog(-5.0));
     }
@@ -405,12 +443,12 @@ mod tests {
             (dac.state.high, dac.state.low, dac.state.dac),
             (0x80, 0, 0x8000)
         );
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
         dac.power_on(&mut drive);
         assert_eq!(drive.finish().driven[0].signal, Signal::Analog(0.0));
         // LDAC alone takes the latches' word, not DB's
         let mut dac = peripheral("initial = 0xc0a0\ncs = \"low\"").unwrap();
-        dac.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
+        dac.power_on(&mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)));
         assert!(strobe(&mut dac, LDAC).is_empty());
         assert!(strobe(&mut dac, HBE).is_empty());
         assert_eq!(strobe(&mut dac, LDAC), [volts(0x00a0)]);
@@ -445,7 +483,7 @@ mod tests {
         let mut dac = peripheral("cs = \"low\"\nhbe = \"low\"").unwrap();
         input(&mut dac, DB, Signal::Bus(0x1234));
         let before = dac.state;
-        let other = peripheral("vref_positive = 10.0").unwrap();
+        let other = peripheral("vref_positive_volts = 10.0").unwrap();
         assert!(matches!(
             dac.restore(&other.save().unwrap()),
             Err(StateError::Mismatch(_))

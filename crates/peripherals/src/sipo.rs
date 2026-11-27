@@ -32,9 +32,9 @@ use mc683xx_board::signal::Signal;
 use mc683xx_board::spi;
 use mc683xx_board::spi::Edge;
 use mc683xx_board::spi::Edges;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use mc683xx_modules::peripheral::floating_miso;
 use serde::Deserialize;
 use serde::Serialize;
@@ -92,7 +92,7 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), RegistryError> {
 struct State {
     /// Every stage of the chain.
     register: ShiftRegister,
-    /// CLR's level: low clears.
+    /// The level of CLR, the clear input: low clears.
     clr: bool,
 }
 
@@ -131,12 +131,13 @@ impl Configuration {
     }
 }
 
-/// The chain.  The datasheet gives no power-on state: it powers on
-/// here holding `initial`, every stage low by default, and CLR low
-/// clears it.  It has no reset input but CLR, so RESET
-/// changes nothing.
+/// The chain, `74x164`, as a host reads it by type
+/// (`Board::peripheral::<Sipo>`).  The datasheet gives no power-on
+/// state: it powers on here holding `initial`, every stage low by
+/// default, and CLR low clears it.  It has no reset input but CLR, so
+/// RESET changes nothing.
 #[derive(Debug)]
-struct Sipo {
+pub struct Sipo {
     /// Its parameters.
     configuration: Configuration,
     /// What it holds.
@@ -144,10 +145,18 @@ struct Sipo {
 }
 
 impl Sipo {
+    /// `cascade`'s default: one chip.
+    pub const CASCADE: u8 = 1;
+    /// `initial`'s default: every stage low.
+    pub const INITIAL: u32 = 0;
+
     /// From `cascade` (1), `initial` (0), `clr` (`"high"`), `miso`
     /// (`"qh"`) and `clock` (`"rising"`).
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
-        let cascade: u8 = context.parameters.integer(CASCADE)?.unwrap_or(1);
+        let cascade: u8 = context
+            .parameters
+            .integer(CASCADE)?
+            .unwrap_or(Self::CASCADE);
         if !(1..=MOST_CASCADED).contains(&cascade) {
             return Err(ParameterError::Range {
                 key: CASCADE.to_owned(),
@@ -155,7 +164,10 @@ impl Sipo {
             });
         }
         let width = u32::from(cascade) * LINES as u32;
-        let initial: u64 = context.parameters.integer(INITIAL)?.unwrap_or(0);
+        let initial: u64 = context
+            .parameters
+            .integer(INITIAL)?
+            .unwrap_or(Self::INITIAL.into());
         if initial >> width != 0 {
             return Err(ParameterError::invalid(INITIAL, "a stage past the chain's"));
         }
@@ -172,6 +184,26 @@ impl Sipo {
                 clr,
             },
         })
+    }
+
+    /// Its stages, as `Q` carries them: bit 8k + n is chip k's stage n.
+    #[must_use]
+    pub const fn stages(&self) -> u32 {
+        // at most 32 stages, by `cascade`
+        self.state.register.bits() as u32
+    }
+
+    /// The chips chained.
+    #[must_use]
+    pub const fn cascade(&self) -> u8 {
+        // at most four, by `cascade`
+        (self.configuration.width / LINES as u32) as u8
+    }
+
+    /// The level of CLR, the clear input: low clears.
+    #[must_use]
+    pub const fn clear_level(&self) -> bool {
+        self.state.clr
     }
 
     /// Drives `Q` if its stages are not `before`.
@@ -270,15 +302,16 @@ mod tests {
     use mc683xx_board::peripheral::Drive;
 
     use crate::SYSTEM_CLOCK;
+    use mc683xx_board::Environment;
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::registry::Context;
-    use mc683xx_board::registry::Environment;
     use mc683xx_board::registry::ParameterError;
     use mc683xx_board::registry::Parameters;
     use mc683xx_board::signal::Signal;
+    use mc683xx_board::time::Moment;
     use mc683xx_board::time::Time;
-    use mc683xx_cpu32::cpu::state::StateError;
-    use mc683xx_cpu32::cpu::state::encode;
+    use mc683xx_cpu32::state::StateError;
+    use mc683xx_cpu32::state::encode;
 
     use super::CLR;
     use super::Q;
@@ -323,7 +356,7 @@ mod tests {
 
     /// `shift` in SPI mode `mode`.
     fn shift_in(mode: u8, sipo: &mut Sipo, word: u16, bits: u8) -> (u16, Vec<(usize, Signal)>) {
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
         let back = sipo.transfer(spi_mode::transfer(mode).shifting(word, bits), &mut drive);
         let driven = drive
             .finish()
@@ -424,14 +457,14 @@ mod tests {
     fn clr_low_clears_and_holds_every_stage() {
         let mut sipo = peripheral("cascade = 2").unwrap();
         shift(&mut sipo, 0xffff, 16);
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
         sipo.input(CLR, Signal::Level(false), &mut drive);
         assert_eq!(drive.finish().driven[0].signal, Signal::Bus(0));
         assert_eq!(shift(&mut sipo, 0x1234, 16), (0, vec![]));
         sipo.input(
             CLR,
             Signal::Level(true),
-            &mut Drive::new(Time::ZERO, SYSTEM_CLOCK),
+            &mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)),
         );
         assert_eq!(shift(&mut sipo, 0x1234, 16).1, [(Q, Signal::Bus(0x1234))]);
         let mut tied = peripheral("clr = \"low\"").unwrap();

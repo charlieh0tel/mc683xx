@@ -10,14 +10,19 @@ use std::process;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
-use mc683xx_board::board::Board;
+use mc683xx_board::Board;
+use mc683xx_board::NoMemory;
+use mc683xx_board::NoPeripheral;
 
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_peripherals::Ad569;
+use mc683xx_peripherals::Mc144110;
+use mc683xx_peripherals::Sipo;
 
 /// The initial stack pointer and program counter in the image.
 const STACK: u32 = 0x10_fffe;
@@ -193,16 +198,16 @@ parameters = { cs = "low", hbe = "low", ldac = "low" }
 name = "db"
 type = "bus"
 from = "chain.Q"
-to = ["efc.db"]
+to = ["efc.DB"]
 [[net]]
 name = "lbe"
 type = "logic"
 from = "chip.PGP0"
-to = ["efc.lbe"]
+to = ["efc.LBE"]
 [[net]]
 name = "efc-out"
 type = "analog"
-from = "efc.out"
+from = "efc.VOUT"
 to = ["external.efc"]
 "#;
 
@@ -226,7 +231,8 @@ fn board_from(text: &str) -> Board<Mc68331> {
         .map(|channel| {
             format!(
                 "[[net]]\nname = \"hex-{channel}\"\ntype = \"analog\"\n\
-                 from = \"hex.out{channel}\"\nto = [\"external.hex{channel}\"]\n"
+                 from = \"hex.R{}Out\"\nto = [\"external.hex{channel}\"]\n",
+                channel + 1
             )
         })
         .collect();
@@ -275,8 +281,13 @@ fn a_chain_powering_on_mid_scale_starts_the_ad569_at_mid_scale() {
 #[test]
 fn queues_set_the_dacs_and_lbe_completes_the_ad569s_word() {
     let mut board = board();
-    assert_eq!(board.marking("hex"), Some("U12, MC144110P"));
-    assert_eq!(board.marking("chain"), None);
+    assert_eq!(board.marking("hex"), Ok(Some("U12, MC144110P")));
+    assert_eq!(board.marking("chain"), Ok(None));
+    let nowhere = NoPeripheral("nowhere".to_owned());
+    assert_eq!(board.marking("nowhere"), Err(nowhere.clone()));
+    assert_eq!(board.inspect("nowhere").map(|_| ()), Err(nowhere));
+    let memory = board.memory("nowhere").map(|_| ());
+    assert_eq!(memory, Err(NoMemory("nowhere".to_owned())));
     board.run_until(Time::from_picos(10_000_000_000)).unwrap();
     let mut latched = Time::ZERO;
     for (channel, code) in CODES.into_iter().enumerate() {
@@ -296,6 +307,20 @@ fn queues_set_the_dacs_and_lbe_completes_the_ad569s_word() {
     assert_eq!(volts(efc[1].1), vout(WORD & 0xff00));
     assert_eq!(volts(efc[2].1), vout(WORD));
     assert!(latched < efc[1].0 && efc[1].0 < efc[2].0);
+    // the same, read by type
+    let efc = board.peripheral::<Ad569>("efc").unwrap();
+    assert_eq!(efc.code(), WORD);
+    assert_eq!(efc.volts(), vout(WORD));
+    assert_eq!(efc.data_inputs(), WORD);
+    let hex = board.peripheral::<Mc144110>("hex").unwrap();
+    assert_eq!(hex.codes(), CODES.map(|code| code as u8));
+    assert_eq!(hex.volts()[0], 5.0 * f64::from(CODES[0]) / 64.0);
+    let chain = board.peripheral::<Sipo>("chain").unwrap();
+    assert_eq!(
+        (chain.stages(), chain.cascade(), chain.clear_level()),
+        (u32::from(WORD), 2, true)
+    );
+    drop((efc, hex, chain));
     assert_eq!(
         board.chip().cpu().registers.data[0] & 0xffff,
         u32::from(WORD),

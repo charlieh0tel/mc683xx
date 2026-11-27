@@ -5,18 +5,18 @@ use std::env;
 use std::fs;
 use std::process;
 
-use mc683xx_board::board::Board;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
+use mc683xx_board::Board;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::peripheral::Drive;
 use mc683xx_board::peripheral::Peripheral;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::registry::PortSpec;
 use mc683xx_board::registry::Registry;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Time;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 /// The probe's clock port.
 const CLOCK: usize = 0;
@@ -170,7 +170,8 @@ to = ["probe.data"]
     board.run_until(Time::from_picos(100_000_000)).unwrap();
     let sampled = board
         .peripheral::<Probe>("probe")
-        .map(|probe| probe.sampled.clone());
+        .map(|probe| probe.sampled.clone())
+        .ok();
     // the MOVEM's rising edge comes before its fall on PGP0
     assert_eq!(sampled, Some(vec![Some(true), Some(true)]));
 }

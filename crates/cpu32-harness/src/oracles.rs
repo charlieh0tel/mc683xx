@@ -20,7 +20,7 @@ use cpu32_oracle::musashi::Musashi;
 use cpu32_oracle::state::State;
 #[cfg(feature = "unicorn")]
 use cpu32_oracle::unicorn::Unicorn;
-use mc683xx_cpu32::exception::CycleKind;
+use mc683xx_cpu32::exception::BusCycleKind;
 use mc683xx_cpu32::exception::Exception;
 use mc683xx_cpu32::exception::Vector;
 
@@ -274,7 +274,7 @@ fn core_ending(call: &Call, outcome: &Outcome) -> Result<Ending, String> {
             Outcome::Ended(_) | Outcome::Skipped(_),
         ) if fault.vector == Vector::BUS_ERROR => Ok(Ending::Fault(Fault {
             address: fault.address.0 & ADDRESS_MASK,
-            write: fault.cycle == CycleKind::Write,
+            write: fault.kind == BusCycleKind::Write,
         })),
         (Stopped::Exception { pc, .. }, Outcome::Ended(_)) => Ok(Ending::Exception {
             vector: Vector::ZERO_DIVIDE.0,

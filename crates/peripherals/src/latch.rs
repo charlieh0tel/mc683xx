@@ -29,10 +29,10 @@ use mc683xx_board::registry::Registry;
 use mc683xx_board::registry::RegistryError;
 use mc683xx_board::signal::Kind;
 use mc683xx_board::signal::Signal;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -82,9 +82,10 @@ fn register(registry: &mut Registry, name: &str) -> Result<(), RegistryError> {
     })
 }
 
-/// An octal latch.
+/// An octal latch, `74x374` or `74x373`, as a host reads it by type
+/// (`Board::peripheral::<Latch>`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-struct Latch {
+pub struct Latch {
     /// The flip-flops.
     held: u8,
     /// OE's level: high releases Q.
@@ -96,18 +97,38 @@ struct Latch {
 }
 
 impl Latch {
+    /// `initial`'s default: the flip-flops out of power-on.
+    pub const INITIAL: u8 = 0;
+
     /// From `initial` (0), `oe` (`"low"`) and `pull` (`"up"`).
     fn from_parameters(context: &Context<'_>) -> Result<Self, ParameterError> {
         Ok(Self {
-            held: context.parameters.integer(INITIAL)?.unwrap_or(0),
+            held: context
+                .parameters
+                .integer(INITIAL)?
+                .unwrap_or(Self::INITIAL),
             oe: choice(context, OE_LEVEL, LEVELS, false)?,
             pull: choice(context, PULL, PULLS, true)?,
             driven: None,
         })
     }
 
-    /// The levels on Q0 to Q7.
-    const fn outputs(&self) -> u8 {
+    /// The flip-flops, the byte last written.
+    #[must_use]
+    pub const fn latched(&self) -> u8 {
+        self.held
+    }
+
+    /// Whether OE is low, Q driven from the flip-flops.
+    #[must_use]
+    pub const fn output_enabled(&self) -> bool {
+        !self.oe
+    }
+
+    /// The levels on Q0 to Q7: the flip-flops, or the pull's level on
+    /// every Q while OE is high.
+    #[must_use]
+    pub const fn outputs(&self) -> u8 {
         match (self.oe, self.pull) {
             (false, _) => self.held,
             (true, true) => u8::MAX,
@@ -191,9 +212,10 @@ mod tests {
     use crate::SYSTEM_CLOCK;
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::signal::Signal;
+    use mc683xx_board::time::Moment;
     use mc683xx_board::time::Time;
-    use mc683xx_cpu32::cpu::state::StateError;
-    use mc683xx_target::size::Size;
+    use mc683xx_cpu32::state::StateError;
+    use mc683xx_target::Size;
 
     use super::Latch;
     use super::OE;
@@ -214,30 +236,24 @@ mod tests {
     #[test]
     fn power_on_drives_every_q_and_a_write_only_those_that_change() {
         let mut latch = latch(0x0f);
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
         latch.power_on(&mut drive);
         assert_eq!(
             levels(drive),
             (0..8).map(|bit| (bit, bit < 4)).collect::<Vec<_>>()
         );
-        let mut drive = Drive::new(Time::from_picos(5), SYSTEM_CLOCK);
-        latch
-            .write(access(Size::Byte, Time::from_picos(5)), 0x1e, &mut drive)
-            .unwrap();
+        let mut drive = Drive::new(Moment::new(Time::from_picos(5), SYSTEM_CLOCK));
+        latch.write(access(Size::Byte), 0x1e, &mut drive).unwrap();
         assert_eq!(levels(drive), [(0, false), (4, true)]);
     }
 
     #[test]
     fn a_word_writes_its_upper_byte_and_a_read_drives_nothing() {
         let mut latch = latch(0);
-        let mut drive = Drive::new(Time::ZERO, SYSTEM_CLOCK);
-        latch
-            .write(access(Size::Word, Time::ZERO), 0xa55a, &mut drive)
-            .unwrap();
+        let mut drive = Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK));
+        latch.write(access(Size::Word), 0xa55a, &mut drive).unwrap();
         assert_eq!(latch.held, 0xa5);
-        let read = latch
-            .read(access(Size::Byte, Time::ZERO), &mut drive)
-            .unwrap();
+        let read = latch.read(access(Size::Byte), &mut drive).unwrap();
         assert_eq!(read, 0);
         assert_eq!(latch.held, 0xa5, "a read leaves Q alone");
     }
@@ -245,18 +261,18 @@ mod tests {
     #[test]
     fn oe_releases_q_to_its_pull_and_keeps_the_flip_flops() {
         let mut latch = latch(0x81);
-        latch.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
-        let mut drive = Drive::new(Time::from_picos(1), SYSTEM_CLOCK);
+        latch.power_on(&mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)));
+        let mut drive = Drive::new(Moment::new(Time::from_picos(1), SYSTEM_CLOCK));
         latch.input(OE, Signal::Level(true), &mut drive);
         assert_eq!(levels(drive).len(), 6, "the six low bits go high");
         latch
             .write(
-                access(Size::Byte, Time::from_picos(2)),
+                access(Size::Byte),
                 0x42,
-                &mut Drive::new(Time::from_picos(2), SYSTEM_CLOCK),
+                &mut Drive::new(Moment::new(Time::from_picos(2), SYSTEM_CLOCK)),
             )
             .unwrap();
-        let mut drive = Drive::new(Time::from_picos(3), SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::from_picos(3), SYSTEM_CLOCK));
         latch.input(OE, Signal::Level(false), &mut drive);
         assert_eq!(
             levels(drive),
@@ -273,7 +289,7 @@ mod tests {
         latch.input(
             OE,
             Signal::Level(true),
-            &mut Drive::new(Time::from_picos(1), SYSTEM_CLOCK),
+            &mut Drive::new(Moment::new(Time::from_picos(1), SYSTEM_CLOCK)),
         );
         let inspection = latch.inspect();
         assert_eq!(inspection.get("held"), Some(&Value::Integer(0x81)));
@@ -288,7 +304,7 @@ mod tests {
     #[test]
     fn it_restores_what_it_saved() {
         let mut latch = latch(0x5a);
-        latch.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
+        latch.power_on(&mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)));
         let mut restored = Latch {
             held: 0,
             oe: true,
@@ -302,7 +318,7 @@ mod tests {
     #[test]
     fn it_refuses_another_pull_and_outputs_it_did_not_drive() {
         let mut latch = latch(0x5a);
-        latch.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
+        latch.power_on(&mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)));
         let before = latch;
         let other = Latch {
             pull: false,
@@ -326,7 +342,7 @@ mod tests {
     #[test]
     fn the_format_matches_its_golden() {
         let mut latch = latch(0x3c);
-        latch.power_on(&mut Drive::new(Time::ZERO, SYSTEM_CLOCK));
+        latch.power_on(&mut Drive::new(Moment::new(Time::ZERO, SYSTEM_CLOCK)));
         snapshot_golden::check(
             env!("CARGO_MANIFEST_DIR"),
             "74x374",

@@ -7,10 +7,13 @@ use crate::cycles::Cycles;
 use crate::interrupt::InterruptLevel;
 use crate::registers::status;
 use crate::timing;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 use std::fmt;
+
+/// The TRAP vectors, #0 to #15 (CPU32RM 4, TRAP).
+const TRAP_VECTORS: u8 = 16;
 
 /// An exception vector number (CPU32RM 6.1.1, Table 6-1).
 #[derive(
@@ -83,20 +86,156 @@ impl Vector {
     /// The autovector of interrupt level `level`, 25 to 31.
     #[must_use]
     pub const fn autovector(level: InterruptLevel) -> Self {
-        Self(Self::SPURIOUS_INTERRUPT.0 + level.get())
+        Self(Self::SPURIOUS_INTERRUPT.0 + level.0)
     }
 
-    /// TRAP #`number`'s vector, 32 to 47.
+    /// TRAP #`number`'s vector, 32 to 47 for `number` 0 to 15 (CPU32RM
+    /// 4, TRAP; Table 6-1).
+    ///
+    /// # Panics
+    ///
+    /// For a `number` past 15, which names no TRAP but another vector.
     #[must_use]
     pub const fn trap(number: u8) -> Self {
+        assert!(number < TRAP_VECTORS, "TRAP takes 0 to 15");
         Self(Self::TRAP.0 + number)
+    }
+}
+
+/// Vectors a [`VectorSet`] word holds.
+const SET_WORD_BITS: u8 = u64::BITS as u8;
+/// Words in a [`VectorSet`]: one bit for each of the 256 vectors
+/// (CPU32RM Table 6-1).
+const SET_WORDS: usize = (u8::MAX as usize + 1) / SET_WORD_BITS as usize;
+
+/// A set of exception vectors, any of the 256: which exceptions stop a
+/// run ([`Cpu::set_stop_on_exception`]) or an intercept hook covers
+/// ([`Cpu::add_intercept_hook`]).  Built from an iterator of vectors
+/// (`collect`), or as [`ALL`](Self::ALL) or [`NONE`](Self::NONE), its
+/// default.
+///
+/// [`Cpu::set_stop_on_exception`]: crate::Cpu::set_stop_on_exception
+/// [`Cpu::add_intercept_hook`]: crate::Cpu::add_intercept_hook
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub struct VectorSet([u64; SET_WORDS]);
+
+impl VectorSet {
+    /// No vector.
+    pub const NONE: Self = Self([0; SET_WORDS]);
+    /// Every vector.
+    pub const ALL: Self = Self([u64::MAX; SET_WORDS]);
+    /// The vectors of the exceptions an instruction raises, the ones an
+    /// intercept hook can see: CPU32RM Table 6-2's groups 2 and 3, the
+    /// illegal instruction (BKPT's too), zero divide, CHK and CHK2,
+    /// TRAPcc and TRAPV, privilege violation, line A and F, format error
+    /// (RTE's), and TRAP #0 to #15.  Not a fault, a trace, a hardware
+    /// breakpoint or an interrupt.
+    pub const INSTRUCTION: Self = {
+        let mut set = Self::NONE
+            .with(Vector::ILLEGAL_INSTRUCTION)
+            .with(Vector::ZERO_DIVIDE)
+            .with(Vector::CHK)
+            .with(Vector::TRAPCC)
+            .with(Vector::PRIVILEGE_VIOLATION)
+            .with(Vector::LINE_A)
+            .with(Vector::LINE_F)
+            .with(Vector::FORMAT_ERROR);
+        let mut number = 0;
+        while number < TRAP_VECTORS {
+            set = set.with(Vector::trap(number));
+            number += 1;
+        }
+        set
+    };
+
+    /// The word and the bit in it that hold `vector`.
+    const fn place(vector: Vector) -> (usize, u64) {
+        (
+            (vector.0 / SET_WORD_BITS) as usize,
+            1 << (vector.0 % SET_WORD_BITS),
+        )
+    }
+
+    /// Whether `vector` is in it.
+    #[must_use]
+    pub const fn contains(self, vector: Vector) -> bool {
+        let (word, bit) = Self::place(vector);
+        self.0[word] & bit != 0
+    }
+
+    /// Whether it holds no vector.
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        let mut word = 0;
+        while word < SET_WORDS {
+            if self.0[word] != 0 {
+                return false;
+            }
+            word += 1;
+        }
+        true
+    }
+
+    /// It with `vector`.
+    #[must_use]
+    pub const fn with(self, vector: Vector) -> Self {
+        let (word, bit) = Self::place(vector);
+        let mut words = self.0;
+        words[word] |= bit;
+        Self(words)
+    }
+
+    /// It but `vector`.
+    #[must_use]
+    pub const fn without(self, vector: Vector) -> Self {
+        let (word, bit) = Self::place(vector);
+        let mut words = self.0;
+        words[word] &= !bit;
+        Self(words)
+    }
+
+    /// The vectors in it or in `other`.
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        let mut words = self.0;
+        let mut word = 0;
+        while word < SET_WORDS {
+            words[word] |= other.0[word];
+            word += 1;
+        }
+        Self(words)
+    }
+
+    /// The vectors in it but not in `other`.
+    #[must_use]
+    pub const fn difference(self, other: Self) -> Self {
+        let mut words = self.0;
+        let mut word = 0;
+        while word < SET_WORDS {
+            words[word] &= !other.0[word];
+            word += 1;
+        }
+        Self(words)
+    }
+
+    /// Its vectors, in ascending order.
+    pub fn iter(self) -> impl Iterator<Item = Vector> {
+        (0..=u8::MAX)
+            .map(Vector)
+            .filter(move |&vector| self.contains(vector))
+    }
+}
+
+impl FromIterator<Vector> for VectorSet {
+    fn from_iter<I: IntoIterator<Item = Vector>>(vectors: I) -> Self {
+        vectors.into_iter().fold(Self::NONE, Self::with)
     }
 }
 
 /// The kind of bus cycle a fault ended: what the SSW's IN and RW bits
 /// record of it (CPU32RM 6.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum CycleKind {
+pub enum BusCycleKind {
     /// An instruction fetch: IN set, RW set.
     Fetch,
     /// An operand read: IN clear, RW set.
@@ -106,7 +245,7 @@ pub enum CycleKind {
 }
 
 /// `fetch`, `read` or `write`.
-impl fmt::Display for CycleKind {
+impl fmt::Display for BusCycleKind {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str(match self {
             Self::Fetch => "fetch",
@@ -137,7 +276,7 @@ pub struct Fault {
     /// Whether the operand was a long word: the SSW's LG.
     pub long: bool,
     /// The kind of cycle.
-    pub cycle: CycleKind,
+    pub kind: BusCycleKind,
     /// The data a write was to write, right-aligned (the frame's
     /// DBUF); zero for a read.
     pub data: u32,
@@ -147,16 +286,16 @@ pub struct Fault {
 }
 
 impl Fault {
-    /// A fault of `vector` in a `cycle` at `address` in
-    /// `function_code`'s space, `size` of the operand remaining: not of
-    /// a long operand, no data, not read-modify-write.
+    /// A fault of `vector` in a cycle of `kind` at `address`, `size` of
+    /// the operand remaining, in `function_code`'s space: not of a long
+    /// operand, no data, not read-modify-write.
     #[must_use]
     pub const fn new(
         vector: Vector,
         address: Address,
-        function_code: FunctionCode,
         size: Size,
-        cycle: CycleKind,
+        function_code: FunctionCode,
+        kind: BusCycleKind,
     ) -> Self {
         Self {
             vector,
@@ -164,7 +303,7 @@ impl Fault {
             function_code,
             size,
             long: false,
-            cycle,
+            kind,
             data: 0,
             read_modify_write: false,
         }
@@ -491,7 +630,7 @@ const fn operand_bits(fault: &Fault) -> u16 {
         Size::Word => ssw::SIZ_WORD,
     };
     let long = if fault.long { ssw::LG } else { 0 };
-    long | size << ssw::SIZ_SHIFT | fault.function_code.get() as u16 & ssw::FUNC
+    long | size << ssw::SIZ_SHIFT | fault.function_code as u16 & ssw::FUNC
 }
 
 /// The SSW of a double bus fault's second fault, for ATEMP: its
@@ -503,10 +642,10 @@ pub(crate) const fn double_fault_ssw(fault: &Fault) -> u16 {
 
 /// The SSW's IN, RW and RM for `fault` (CPU32RM 6.3.1.2).
 const fn restart_bits(fault: &Fault) -> u16 {
-    let read = match fault.cycle {
-        CycleKind::Fetch => ssw::IN | ssw::RW,
-        CycleKind::Read => ssw::RW,
-        CycleKind::Write => 0,
+    let read = match fault.kind {
+        BusCycleKind::Fetch => ssw::IN | ssw::RW,
+        BusCycleKind::Read => ssw::RW,
+        BusCycleKind::Write => 0,
     };
     let read_modify_write = if fault.read_modify_write { ssw::RM } else { 0 };
     read | read_modify_write
@@ -563,7 +702,7 @@ impl Core<'_> {
         breakpoint: Breakpoint,
     ) -> Option<u16> {
         let address = Address(u32::from(number) << BREAKPOINT_NUMBER_SHIFT | breakpoint.t_bit());
-        self.read(address, Size::Word, FunctionCode::CPU_SPACE)
+        self.read(address, Size::Word, FunctionCode::CpuSpace)
             .ok()
             .map(|word| word as u16)
     }
@@ -585,7 +724,7 @@ impl Core<'_> {
         let state = (sr | status::S) & !(status::T1 | status::T0);
         let state = match level {
             Some(level) => {
-                state & !status::INTERRUPT_MASK | u16::from(level.get()) << status::INTERRUPT_SHIFT
+                state & !status::INTERRUPT_MASK | u16::from(level.0) << status::INTERRUPT_SHIFT
             }
             None => state,
         };
@@ -638,7 +777,7 @@ impl Core<'_> {
             Recovery::Released => (ssw::RR | trace_bit(trace_pending), fault.address, 0),
             Recovery::Restart => (restart_bits(&fault), fault.address, 0),
             Recovery::Movem(movem) => {
-                let rerun = if fault.cycle == CycleKind::Write {
+                let rerun = if fault.kind == BusCycleKind::Write {
                     ssw::RR
                 } else {
                     0
@@ -736,7 +875,7 @@ impl Core<'_> {
                 self.access_write(
                     bottom.offset(2 * index as u32),
                     Size::Word,
-                    FunctionCode::SUPERVISOR_DATA,
+                    FunctionCode::SupervisorData,
                     u32::from(*word),
                 )
             });
@@ -751,8 +890,8 @@ impl Core<'_> {
         self.access_read(
             at,
             Size::Long,
-            FunctionCode::SUPERVISOR_DATA,
-            CycleKind::Read,
+            FunctionCode::SupervisorData,
+            BusCycleKind::Read,
         )
         .map(Address)
     }
@@ -769,9 +908,10 @@ impl Core<'_> {
 mod tests {
     use super::Exception;
     use super::Vector;
+    use super::VectorSet;
     use super::format;
     use crate::interrupt::InterruptLevel;
-    use mc683xx_target::address::Address;
+    use mc683xx_target::Address;
 
     #[test]
     fn vectors_by_number() {
@@ -781,6 +921,69 @@ mod tests {
             format::vector(format::word(format::SIX_WORD, Vector(47))),
             Vector(47)
         );
+    }
+
+    #[test]
+    fn a_vector_set_holds_what_it_is_built_from() {
+        let set: VectorSet = [Vector(0), Vector(63), Vector(64), Vector(255)]
+            .into_iter()
+            .collect();
+        assert!(set.contains(Vector(64)) && set.contains(Vector(255)));
+        assert!(!set.contains(Vector(1)) && !set.contains(Vector(128)));
+        assert_eq!(
+            set.iter().collect::<Vec<_>>(),
+            [Vector(0), Vector(63), Vector(64), Vector(255)]
+        );
+        assert_eq!(set.union(VectorSet::NONE.with(Vector(1))).iter().count(), 5);
+        assert!(VectorSet::NONE.is_empty() && VectorSet::default().is_empty());
+        assert!(!set.is_empty());
+        assert_eq!(VectorSet::ALL.iter().count(), 256);
+        let all_but = VectorSet::ALL.without(Vector(64));
+        assert!(!all_but.contains(Vector(64)) && all_but.contains(Vector(63)));
+        assert_eq!(all_but.iter().count(), 255);
+        assert_eq!(all_but.without(Vector(64)), all_but);
+        let traps: VectorSet = (0..16).map(Vector::trap).collect();
+        let two = VectorSet::NONE.with(Vector::trap(1)).with(Vector::trap(7));
+        let rest = VectorSet::INSTRUCTION.difference(two);
+        assert!(!rest.contains(Vector::trap(1)) && !rest.contains(Vector::trap(7)));
+        assert_eq!(
+            rest.iter().count(),
+            VectorSet::INSTRUCTION.iter().count() - 2
+        );
+        assert_eq!(traps.difference(VectorSet::ALL), VectorSet::NONE);
+        assert_eq!(traps.difference(VectorSet::NONE), traps);
+        assert!(
+            VectorSet::NONE
+                .with(Vector(1))
+                .without(Vector(1))
+                .is_empty()
+        );
+        assert_eq!(
+            (0..=u8::MAX).map(Vector).collect::<VectorSet>(),
+            VectorSet::ALL
+        );
+    }
+
+    #[test]
+    fn an_instruction_raises_groups_2_and_3() {
+        let instruction = VectorSet::INSTRUCTION;
+        assert_eq!(
+            instruction.iter().map(u8::from).collect::<Vec<_>>(),
+            [4, 5, 6, 7, 8, 10, 11, 14]
+                .into_iter()
+                .chain(32..48)
+                .collect::<Vec<_>>()
+        );
+        assert!(!instruction.contains(Vector::BUS_ERROR));
+        assert!(!instruction.contains(Vector::TRACE));
+        assert!(!instruction.contains(Vector::HARDWARE_BREAKPOINT));
+        assert!(!instruction.contains(Vector::SPURIOUS_INTERRUPT));
+    }
+
+    #[test]
+    #[should_panic(expected = "TRAP takes 0 to 15")]
+    fn a_trap_past_15_is_no_trap() {
+        let _ = Vector::trap(16);
     }
 
     #[test]

@@ -13,8 +13,8 @@ use mc683xx_board::spi::Edges;
 use mc683xx_board::spi::Mode;
 use mc683xx_board::spi::Slave;
 use mc683xx_board::spi::exchange;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
 use mc683xx_modules::peripheral::QspiClock;
 
 /// A transfer's bits.
@@ -48,7 +48,7 @@ impl Slave for Register {
 
 /// A transfer in SPI mode `number`.
 fn transfer(number: u8) -> Transfer {
-    let mode = Mode::numbered(number);
+    let mode = Mode::try_from(number).unwrap();
     let clock = QspiClock::new(
         mode.polarity,
         mode.phase,

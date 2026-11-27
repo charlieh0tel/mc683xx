@@ -7,13 +7,13 @@ use std::ops::ControlFlow;
 
 use mc683xx_board::time::Span;
 use mc683xx_board::time::Time;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Halt;
-use mc683xx_cpu32::cpu::Stop;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Halt;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::memory::Memory;
-use mc683xx_peripherals::at28c64b::At28c64b;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
+use mc683xx_peripherals::At28c64b;
+use mc683xx_target::Address;
+use mc683xx_target::Entry;
 
 use crate::board::Board;
 use crate::board::BoardRun;
@@ -178,7 +178,7 @@ fn each_error_is_thrown_as_its_kind() {
         (load, Thrown::Named("LoadError")),
         (
             board.set_pacing("fast").unwrap_err(),
-            Thrown::Named("PacingError"),
+            Thrown::Named("ParsePacingError"),
         ),
         (board.run_frame(f64::NAN, SLICE).unwrap_err(), Thrown::Range),
         (
@@ -187,11 +187,11 @@ fn each_error_is_thrown_as_its_kind() {
         ),
         (
             board.take_received_bytes("nowhere").unwrap_err(),
-            Thrown::Named("ReceiveError"),
+            Thrown::Named("NoReceiver"),
         ),
         (
             board.memory("nowhere").unwrap_err(),
-            Thrown::Named("MemoryError"),
+            Thrown::Named("NoMemory"),
         ),
         (
             board.restore(b"junk").unwrap_err(),
@@ -225,9 +225,10 @@ fn each_kind_of_stop_has_its_name() {
         (Stop::Requested, "requested"),
         (Stop::Background(Entry::Background), "background"),
         (Stop::Fault, "fault"),
+        (Stop::SelfLoop, "self-loop"),
     ];
     for (stop, name) in names {
-        let run = mc683xx_board::board::BoardRun::new(stop, Time::from_picos(0));
+        let run = mc683xx_board::BoardRun::new(Time::from_picos(0), stop);
         assert_eq!(BoardRun::from(run).stop(), name, "{stop:?}");
     }
 }

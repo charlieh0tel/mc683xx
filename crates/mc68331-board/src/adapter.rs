@@ -3,16 +3,20 @@
 //! A [`MappedPeripheral`] and [`Timed`] model (a DUART, an EEPROM written against
 //! [`mc683xx_modules::peripheral`]), or a [`SpiPeripheral`], registers as a
 //! peripheral without hand-mapping, its cycles and times converted
-//! through the board's system clock ([`TimeBase`]).
+//! through the board's system clock ([`TimeBase`](crate::time::TimeBase)).
 //!
 //! What the model sees: a [`BusCycle`] with the attachment's select, the
 //! address the attachment gives (`offset` plus ADDR on its `lines`, so
 //! ADDR itself by default) and its start in system clocks; `now` in
 //! system clocks for its time, reset and QSPI calls.  Its `advance`
 //! runs at the time its `next_event` gave, as a peripheral's does, where the
-//! chip calls a peripheral's at every sync point.  It drives no nets and
-//! writes no memories: a model that does is a [`Peripheral`].  The model
-//! implements [`Save`], so it is in the board's snapshot: one that cannot
+//! chip calls a peripheral's at every sync point.  It drives nets only
+//! if it implements [`Driver`] and its adapter was made `driving`: its
+//! [`Driver::drive`] reads the model and drives the adapter's ports
+//! after each call that may change the model; a model that needs more
+//! of the board is a [`Peripheral`].  It is a `Driver`, not a `Drive`,
+//! as [`Drive`] is what it drives through.
+//! The model implements [`Save`], so it is in the board's snapshot: one that cannot
 //! save is [`unsavable!`](mc683xx_cpu32::unsavable), and the board's save
 //! then fails naming it.  A model that implements
 //! [`Inspect`], its adapter made `inspecting`, shows its state to a front
@@ -20,28 +24,29 @@
 //! model both on the bus and on the QSPI is two peripherals, or a
 //! [`Peripheral`].
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
+use mc683xx_cpu32::state::Save;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use mc683xx_modules::peripheral::QspiClock;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use crate::inspect::Inspection;
 use crate::peripheral::Drive;
 use crate::peripheral::Peripheral;
 use crate::peripheral::PeripheralAccess;
 use crate::peripheral::Transfer;
+use crate::time::Moment;
 use crate::time::Time;
-use crate::time::TimeBase;
 
 /// The PCS levels a [`SpiAdapter`]'s model is told when the board's decode
 /// selects it: all low.
@@ -55,16 +60,16 @@ pub(crate) const RELEASED_LEVELS: u8 = 0b1111;
 
 /// An adapter's snapshot format: the model's bytes, which version
 /// themselves.
-const SNAPSHOT_VERSION: u32 = 1;
+const VERSION: u32 = 1;
 
 /// `peripheral`'s snapshot: its own bytes in the adapter's.
 fn save<D: Save>(peripheral: &D) -> Result<Vec<u8>, StateError> {
-    Ok(encode(SNAPSHOT_VERSION, &peripheral.save()?))
+    Ok(encode(VERSION, &peripheral.save()?))
 }
 
 /// `peripheral` restored from `snapshot`.
 fn restore<D: Save>(peripheral: &mut D, snapshot: &[u8]) -> Result<(), StateError> {
-    let bytes: Vec<u8> = decode(SNAPSHOT_VERSION, snapshot)?;
+    let bytes: Vec<u8> = decode(VERSION, snapshot)?;
     peripheral.restore(&bytes)
 }
 
@@ -87,6 +92,28 @@ fn inspect<D>(inspector: Option<Inspector<D>>, peripheral: &D) -> Inspection {
     inspector.map_or_else(Inspection::default, |inspect| inspect(peripheral))
 }
 
+/// A model's outputs on the board, through its adapter's ports: a model
+/// of [`mc683xx_modules::peripheral`], which knows nothing of the board,
+/// drives nets through this, its adapter made `driving`.
+pub trait Driver {
+    /// Drives the adapter's ports from the model ([`Drive::drive`]), or
+    /// stops the run ([`Drive::stop`]); called after each adapter call
+    /// that may change the model.  By default nothing.
+    fn drive(&mut self, drive: &mut Drive<'_>) {
+        let _ = drive;
+    }
+}
+
+/// A model's [`Driver::drive`], if its adapter was made `driving`.
+type Driving<D> = fn(&mut D, &mut Drive<'_>);
+
+/// `driving` run on `peripheral` and `drive`, if the adapter has one.
+fn drive<D>(driving: Option<Driving<D>>, peripheral: &mut D, drive: &mut Drive<'_>) {
+    if let Some(driving) = driving {
+        driving(peripheral, drive);
+    }
+}
+
 /// A [`MappedPeripheral`] and [`Timed`] model on the bus as a peripheral.
 #[derive(Debug, Default)]
 pub struct MappedAdapter<D> {
@@ -94,6 +121,8 @@ pub struct MappedAdapter<D> {
     peripheral: D,
     /// Its inspection, if it shows one.
     inspector: Option<Inspector<D>>,
+    /// What drives the adapter's nets from the model, if anything.
+    driving: Option<Driving<D>>,
 }
 
 impl<D> MappedAdapter<D> {
@@ -102,6 +131,7 @@ impl<D> MappedAdapter<D> {
         Self {
             peripheral,
             inspector: None,
+            driving: None,
         }
     }
 
@@ -117,6 +147,21 @@ impl<D> MappedAdapter<D> {
         }
     }
 
+    /// It, driving its nets from the model: the model's
+    /// [`Driver::drive`] runs with the call's [`Drive`] after each call
+    /// that may change the model (power-on, `read`, `write`, `reset`,
+    /// `advance`) and drives the ports the adapter was registered with.
+    #[must_use]
+    pub fn driving(self) -> Self
+    where
+        D: Driver,
+    {
+        Self {
+            driving: Some(D::drive),
+            ..self
+        }
+    }
+
     /// The model.
     pub const fn peripheral(&self) -> &D {
         &self.peripheral
@@ -126,21 +171,26 @@ impl<D> MappedAdapter<D> {
     pub const fn peripheral_mut(&mut self) -> &mut D {
         &mut self.peripheral
     }
+
+    /// The model's driver run on `drive`, if it has one.
+    fn drive(&mut self, drive: &mut Drive<'_>) {
+        self::drive(self.driving, &mut self.peripheral, drive);
+    }
 }
 
 /// The time of `drive`'s call in the chip's system clocks.
-fn cycles(drive: &Drive<'_>) -> Cycles {
-    drive.system_clock().cycles(drive.now())
+fn cycle(drive: &Drive<'_>) -> Cycle {
+    drive.moment().cycle()
 }
 
-/// The cycle a model sees for `access`, its time in system clocks on
-/// `base`, through its select if one carried it.
-fn carried(access: PeripheralAccess, base: TimeBase) -> BusCycle {
+/// The cycle a model sees for `access` at `moment`, its time in system
+/// clocks, through its select if one carried it.
+fn carried(access: PeripheralAccess, moment: Moment) -> BusCycle {
     let cycle = BusCycle::new(
         Address(access.address),
         access.size,
         access.function_code,
-        base.cycles(access.now),
+        moment.cycle(),
     )
     .writing(access.write);
     match access.select {
@@ -151,7 +201,9 @@ fn carried(access: PeripheralAccess, base: TimeBase) -> BusCycle {
 
 impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<D> {
     fn read(&mut self, access: PeripheralAccess, drive: &mut Drive<'_>) -> Result<u32, BusError> {
-        self.peripheral.read(carried(access, drive.system_clock()))
+        let read = self.peripheral.read(carried(access, drive.moment()));
+        self.drive(drive);
+        read
     }
 
     fn write(
@@ -160,32 +212,51 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
         value: u32,
         drive: &mut Drive<'_>,
     ) -> Result<(), BusError> {
-        self.peripheral
-            .write(carried(access, drive.system_clock()), value)
+        let written = self
+            .peripheral
+            .write(carried(access, drive.moment()), value);
+        self.drive(drive);
+        written
     }
 
-    fn wait_states(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<u8> {
-        self.peripheral.wait_states(carried(access, system_clock))
+    fn peek(&self, access: PeripheralAccess, data: &mut [u8], moment: Moment) -> bool {
+        self.peripheral.peek(carried(access, moment), data)
     }
 
-    fn dsack_port(&mut self, access: PeripheralAccess, system_clock: TimeBase) -> Option<PortSize> {
-        self.peripheral.dsack_port(carried(access, system_clock))
+    fn poke(&mut self, access: PeripheralAccess, data: &[u8], moment: Moment) -> bool {
+        self.peripheral.poke(carried(access, moment), data)
+    }
+
+    fn wait_states(&mut self, access: PeripheralAccess, moment: Moment) -> Option<Cycles> {
+        self.peripheral.wait_states(carried(access, moment))
+    }
+
+    fn dsack_port(&mut self, access: PeripheralAccess, moment: Moment) -> Option<PortSize> {
+        self.peripheral.dsack_port(carried(access, moment))
     }
 
     fn interrupt_request(&self) -> bool {
         self.peripheral.interrupt_request()
     }
 
-    fn reset(&mut self, drive: &mut Drive<'_>) {
-        self.peripheral.reset(cycles(drive));
+    fn power_on(&mut self, drive: &mut Drive<'_>) {
+        self.drive(drive);
     }
 
-    fn next_event(&self, system_clock: TimeBase) -> Option<Time> {
-        self.peripheral.next_event().map(|at| system_clock.time(at))
+    fn reset(&mut self, drive: &mut Drive<'_>) {
+        self.peripheral.reset(cycle(drive));
+        self.drive(drive);
+    }
+
+    fn next_event(&self, moment: Moment) -> Option<Time> {
+        self.peripheral
+            .next_event()
+            .map(|at| moment.system_clock().time(at))
     }
 
     fn advance(&mut self, drive: &mut Drive<'_>) {
-        self.peripheral.advance(cycles(drive));
+        self.peripheral.advance(cycle(drive));
+        self.drive(drive);
     }
 
     fn inspect(&self) -> Inspection {
@@ -205,7 +276,7 @@ impl<D: MappedPeripheral + Timed + Save + 'static> Peripheral for MappedAdapter<
 ///
 /// The board decodes PCS\[3:0\]: the model's `chip_selects` hears
 /// levels 0b0000 as its attachment's decode selects it and 0b1111, PCS's
-/// idle, as it releases it ([`Peripheral::select`], the board's
+/// idle, as it releases it ([`Peripheral::set_selected`], the board's
 /// framing), and each transfer with the levels on the pins.  Its
 /// `qspi_deferrable` is the model's `deferrable`.
 #[derive(Debug, Default)]
@@ -214,6 +285,8 @@ pub struct SpiAdapter<D> {
     peripheral: D,
     /// Its inspection, if it shows one.
     inspector: Option<Inspector<D>>,
+    /// What drives the adapter's nets from the model, if anything.
+    driving: Option<Driving<D>>,
 }
 
 impl<D> SpiAdapter<D> {
@@ -222,6 +295,7 @@ impl<D> SpiAdapter<D> {
         Self {
             peripheral,
             inspector: None,
+            driving: None,
         }
     }
 
@@ -237,6 +311,22 @@ impl<D> SpiAdapter<D> {
         }
     }
 
+    /// It, driving its nets from the model: the model's
+    /// [`Driver::drive`] runs with the call's [`Drive`] after each call
+    /// that may change the model (power-on, `reset`, `transfer`, a
+    /// select or release) and drives the ports the adapter was
+    /// registered with.
+    #[must_use]
+    pub fn driving(self) -> Self
+    where
+        D: Driver,
+    {
+        Self {
+            driving: Some(D::drive),
+            ..self
+        }
+    }
+
     /// The model.
     pub const fn peripheral(&self) -> &D {
         &self.peripheral
@@ -246,32 +336,45 @@ impl<D> SpiAdapter<D> {
     pub const fn peripheral_mut(&mut self) -> &mut D {
         &mut self.peripheral
     }
+
+    /// The model's driver run on `drive`, if it has one.
+    fn drive(&mut self, drive: &mut Drive<'_>) {
+        self::drive(self.driving, &mut self.peripheral, drive);
+    }
 }
 
 impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
+    fn power_on(&mut self, drive: &mut Drive<'_>) {
+        self.drive(drive);
+    }
+
     fn reset(&mut self, drive: &mut Drive<'_>) {
-        self.peripheral.reset(cycles(drive));
+        self.peripheral.reset(cycle(drive));
+        self.drive(drive);
     }
 
     fn transfer(&mut self, transfer: Transfer, drive: &mut Drive<'_>) -> u16 {
-        self.peripheral.transfer(
-            QspiTransfer::new(transfer.out, transfer.bits, transfer.clock, cycles(drive))
+        let shifted = self.peripheral.transfer(
+            QspiTransfer::new(transfer.out, transfer.bits, transfer.clock, cycle(drive))
                 .at_entry(transfer.entry)
                 .selecting(transfer.chip_selects),
-        )
+        );
+        self.drive(drive);
+        shifted
     }
 
-    fn select(&mut self, _: usize, selected: bool, drive: &mut Drive<'_>) {
+    fn set_selected(&mut self, _: usize, selected: bool, drive: &mut Drive<'_>) {
         let levels = if selected {
             SELECTED_LEVELS
         } else {
             RELEASED_LEVELS
         };
-        self.peripheral.set_chip_selects(levels, cycles(drive));
+        self.peripheral.set_chip_selects(levels, cycle(drive));
+        self.drive(drive);
     }
 
-    fn set_qspi_clock(&mut self, clock: QspiClock, now: Time, system_clock: TimeBase) {
-        self.peripheral.set_clock(clock, system_clock.cycles(now));
+    fn set_qspi_clock(&mut self, clock: QspiClock, moment: Moment) {
+        self.peripheral.set_clock(clock, moment.cycle());
     }
 
     fn qspi_deferrable(&self) -> bool {
@@ -293,20 +396,20 @@ impl<D: SpiPeripheral + Save + 'static> Peripheral for SpiAdapter<D> {
 
 #[cfg(test)]
 mod tests {
-    use mc683xx_cpu32::bus::BusError;
-    use mc683xx_cpu32::cpu::state::Save;
-    use mc683xx_cpu32::cpu::state::StateError;
-    use mc683xx_cpu32::cpu::state::Stateless;
+    use mc683xx_cpu32::BusError;
     use mc683xx_cpu32::peripheral::BusCycle;
     use mc683xx_cpu32::peripheral::MappedPeripheral;
+    use mc683xx_cpu32::state::Save;
+    use mc683xx_cpu32::state::StateError;
+    use mc683xx_cpu32::state::Stateless;
     use mc683xx_modules::peripheral::QspiTransfer;
     use mc683xx_modules::peripheral::SpiPeripheral;
     use mc683xx_modules::peripheral::Timed;
 
     use super::Inspect;
     use super::MappedAdapter;
-    use super::SNAPSHOT_VERSION;
     use super::SpiAdapter;
+    use super::VERSION;
     use super::save;
     use crate::inspect::Inspection;
     use crate::inspect::Value;
@@ -389,7 +492,7 @@ mod tests {
         snapshot_golden::check(
             env!("CARGO_MANIFEST_DIR"),
             "adapter",
-            &[("adapter", SNAPSHOT_VERSION)],
+            &[("adapter", VERSION)],
             &save(&Fixed).unwrap(),
         );
     }

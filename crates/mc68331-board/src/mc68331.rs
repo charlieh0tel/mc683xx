@@ -12,37 +12,40 @@ use std::fmt;
 use std::rc::Rc;
 use std::str::FromStr;
 
-use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Run;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::Run;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::peripheral::PeripheralId;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::Diversion;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_mc68331::chip::MemoryId;
-use mc683xx_mc68331::chip::OutputHorizon;
-use mc683xx_mc68331::chip::OutputStop;
-use mc683xx_mc68331::chip::SyncRequest;
-use mc683xx_mc68331::event::Event;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::Diversion;
+use mc683xx_mc68331::Event;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_mc68331::MemoryId;
+use mc683xx_mc68331::OutputChange;
+use mc683xx_mc68331::OutputHorizon;
+use mc683xx_mc68331::OutputStop;
+use mc683xx_mc68331::Port;
+use mc683xx_mc68331::SyncRequest;
 use mc683xx_mc68331::gpt::Input;
 use mc683xx_mc68331::gpt::PortGpPin;
 use mc683xx_mc68331::gpt::pwm::Channel;
-use mc683xx_mc68331::port::OutputChange;
-use mc683xx_mc68331::port::Port;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::chip_select::Dsack;
+use mc683xx_modules::peripheral::AnyMappedPeripheral;
+use mc683xx_modules::peripheral::AnySpiPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_modules::sim::chip_selects::Dsack;
+use mc683xx_modules::sim::ResetScope;
 use mc683xx_modules::sim::clock::ClockSource;
-use mc683xx_modules::sim::reset::ResetScope;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
@@ -50,15 +53,13 @@ use serde::Serializer;
 use serde::de::Error as _;
 
 use crate::chip;
-use crate::chip::BoardMapped;
-use crate::chip::BoardSpi;
 use crate::chip::ChipBuilder;
 use crate::chip::ChipPin;
 use crate::chip::MemoryPlace;
 use crate::chip::MemoryPlan;
 use crate::chip::Requests;
 use crate::chip::sealed::Sealed;
-use crate::error::LoadError;
+use crate::description::LoadError;
 use crate::signal::Direction;
 use crate::signal::Kind;
 use crate::signal::Serial;
@@ -247,13 +248,14 @@ const IRQ: [&str; 7] = ["IRQ1", "IRQ2", "IRQ3", "IRQ4", "IRQ5", "IRQ6", "IRQ7"];
 #[error("no MC68331 pin {0:?}")]
 pub struct ParsePinError(String);
 
-/// The pin named so, after `chip.`, exactly as `Display` writes it.
+/// The pin named so, after `chip.`, as `Display` writes it, in any
+/// case: `PE0`, `pe0`.
 impl FromStr for Pin {
     type Err = ParsePinError;
 
     fn from_str(name: &str) -> Result<Self, ParsePinError> {
         Self::all()
-            .find(|pin| pin.name() == name)
+            .find(|pin| pin.name().eq_ignore_ascii_case(name))
             .ok_or_else(|| ParsePinError(name.to_owned()))
     }
 }
@@ -288,8 +290,8 @@ impl Pin {
             .flat_map(PortPin::all)
             .map(Self::Port)
             .chain(
-                (1..=InterruptLevel::NONMASKABLE.get())
-                    .filter_map(|level| IrqPin::new(level).map(Self::Irq)),
+                (1..=u8::from(InterruptLevel::NONMASKABLE))
+                    .filter_map(|level| IrqPin::try_from(level).ok().map(Self::Irq)),
             )
             .chain([
                 Self::Pai,
@@ -317,7 +319,7 @@ impl Pin {
             Self::Port(PortPin {
                 port: Port::Gp,
                 bit,
-            }) => PortGpPin::new(bit).map(Input::PortGp),
+            }) => PortGpPin::try_from(bit).ok().map(Input::PortGp),
             Self::Pai => Some(Input::Pai),
             Self::Pclk => Some(Input::Pclk),
             _ => None,
@@ -331,7 +333,7 @@ impl ChipPin for Pin {
     fn name(self) -> &'static str {
         match self {
             Self::Port(pin) => pin.name(),
-            Self::Irq(pin) => IRQ[usize::from(pin.get() - 1)],
+            Self::Irq(pin) => IRQ[usize::from(u8::from(pin) - 1)],
             Self::Pai => "PAI",
             Self::Pclk => "PCLK",
             Self::Reset => "RESET",
@@ -399,6 +401,11 @@ pub(crate) struct Pins {
 }
 
 /// The MC68331's `[chip]` table.
+///
+/// Not part of the semver API: the sealed
+/// [`Chip`](crate::chip::Chip)'s `Section`, which the board reads; a
+/// host names none of it.
+#[doc(hidden)]
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Section {
@@ -453,7 +460,7 @@ impl Requests for Handles {
         }
     }
 
-    fn output_horizon(&self) -> Option<Cycles> {
+    fn output_horizon(&self) -> Option<Cycle> {
         self.horizon.get()
     }
 }
@@ -481,7 +488,7 @@ impl fmt::Debug for Mc68331Builder {
 }
 
 /// `error`, the chip's, as a load's.
-fn built(error: mc683xx_mc68331::chip::BuildError) -> LoadError {
+fn built(error: mc683xx_mc68331::BuildError) -> LoadError {
     LoadError::Build(Box::new(error))
 }
 
@@ -502,7 +509,7 @@ impl ChipBuilder for Mc68331Builder {
         Rc::clone(&self.handles) as Rc<dyn Requests>
     }
 
-    fn memory<R: BoardMapped>(
+    fn memory<R: AnyMappedPeripheral>(
         &mut self,
         plan: MemoryPlan<'_>,
         router: R,
@@ -514,7 +521,7 @@ impl ChipBuilder for Mc68331Builder {
                 termination,
             } => self
                 .builder
-                .fixed_memory(base, plan.bytes, plan.kind)
+                .fixed_memory(plan.bytes, plan.kind, base)
                 .and_then(|id| {
                     self.builder
                         .set_fixed_timing(id, port, termination)
@@ -529,7 +536,7 @@ impl ChipBuilder for Mc68331Builder {
         Ok(id)
     }
 
-    fn peripheral<R: BoardMapped>(
+    fn peripheral<R: AnyMappedPeripheral>(
         &mut self,
         router: R,
         select: ChipSelect,
@@ -542,7 +549,7 @@ impl ChipBuilder for Mc68331Builder {
         Ok(())
     }
 
-    fn bus_peripheral<R: BoardMapped>(
+    fn bus_peripheral<R: AnyMappedPeripheral>(
         &mut self,
         router: R,
         decodes: &[BusDecode],
@@ -554,7 +561,7 @@ impl ChipBuilder for Mc68331Builder {
             .map_err(built)
     }
 
-    fn unwired<R: BoardMapped>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>) {
+    fn unwired<R: AnyMappedPeripheral>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>) {
         let id = self.builder.unwired_peripheral(pins);
         self.builder.set_reset_scope(id, reset);
         if let Some(level) = irq {
@@ -562,8 +569,8 @@ impl ChipBuilder for Mc68331Builder {
         }
     }
 
-    fn qspi<R: BoardSpi>(&mut self, router: R) -> Result<(), LoadError> {
-        self.builder.qspi(router);
+    fn set_qspi<R: AnySpiPeripheral>(&mut self, router: R) -> Result<(), LoadError> {
+        self.builder.set_qspi(router);
         Ok(())
     }
 
@@ -578,7 +585,8 @@ impl ChipBuilder for Mc68331Builder {
             (Port::Gp, pins.gp),
         ] {
             if let Some(levels) = levels {
-                chip.set_pins(port, levels, u8::MAX).expect("an input port");
+                chip.set_pins(port, PortLevels::new(u8::MAX, levels))
+                    .expect("an input port");
             }
         }
         if let Some(pai) = pins.pai {
@@ -626,7 +634,7 @@ impl chip::Chip for Mc68331 {
         let configuration = Configuration::new(section.data.unwrap_or(u16::MAX), clock);
         let mut builder = Builder::new(configuration);
         for &level in &section.autovector {
-            let pin = IrqPin::new(level).ok_or_else(|| LoadError::Level {
+            let pin = IrqPin::try_from(level).map_err(|_| LoadError::Level {
                 owner: "chip".to_owned(),
                 level,
             })?;
@@ -645,7 +653,7 @@ impl chip::Chip for Mc68331 {
         })
     }
 
-    fn now(&self) -> Cycles {
+    fn now(&self) -> Cycle {
         Self::now(self)
     }
 
@@ -684,7 +692,7 @@ impl chip::Chip for Mc68331 {
     }
 
     fn system_frequency(&self) -> Frequency {
-        self.sim().clock().frequency()
+        self.sim().system_clock().frequency()
     }
 
     fn memory(&self, memory: MemoryId) -> &[u8] {
@@ -711,8 +719,8 @@ impl chip::Chip for Mc68331 {
                 continue;
             }
             match pin {
-                Pin::PwmA => stop.pwm_a = true,
-                Pin::PwmB => stop.pwm_b = true,
+                Pin::PwmA => stop.set_pwm(Channel::A, true),
+                Pin::PwmB => stop.set_pwm(Channel::B, true),
                 Pin::Txd => stop.txd = true,
                 Pin::Reset => stop.reset = true,
                 // ECLK changes with the clock, which ends the run itself
@@ -728,7 +736,7 @@ impl chip::Chip for Mc68331 {
         Self::set_publish_output_horizon(self, publish);
     }
 
-    fn input(&mut self, pin: Pin, signal: Signal, at: Cycles) {
+    fn input(&mut self, pin: Pin, signal: Signal, at: Cycle) {
         match (pin, signal) {
             (_, Signal::Level(level)) if pin.gpt_input().is_some() => {
                 let input = pin.gpt_input().expect("a GPT input");
@@ -741,8 +749,11 @@ impl chip::Chip for Mc68331 {
                 }),
                 Signal::Level(level),
             ) => {
-                self.set_pins(port, if level { u8::MAX } else { 0 }, 1 << bit)
-                    .expect("an input port");
+                self.set_pins(
+                    port,
+                    PortLevels::new(1 << bit, if level { u8::MAX } else { 0 }),
+                )
+                .expect("an input port");
             }
             (Pin::Irq(irq), Signal::Level(level)) => self.set_interrupt_pin(irq, !level),
             (Pin::Rxd, Signal::Serial(serial)) => self.sci_receive(serial.frame),
@@ -756,7 +767,7 @@ impl chip::Chip for Mc68331 {
 
     fn clock_output(&self, pin: Pin) -> Option<Frequency> {
         (pin == Pin::Eclk).then(|| {
-            let clock = self.sim().clock();
+            let clock = self.sim().system_clock();
             Frequency::from_nanohertz(clock.frequency().nanohertz() / clock.eclk_divisor())
         })
     }
@@ -780,13 +791,16 @@ impl chip::Chip for Mc68331 {
                     };
                     emit(base.time(change.now), pin, Signal::Level(change.level));
                 }
-                _ => {}
+                // a kind added to the chip's stream reaches no net until
+                // it is wired here
+                other => debug_assert!(false, "an output change no net carries: {other}"),
             }
         }
-        let system_clock = self.sim().clock().frequency();
+        let system_clock = self.sim().system_clock().frequency();
         for sent in self.take_sci_transmitted() {
             let start = base.time(sent.start);
-            let baud = u128::from(system_clock.nanohertz()) / u128::from(sent.bit.clocks());
+            let baud =
+                u128::from(system_clock.nanohertz()) / u128::from(sent.clocks_per_bit.clocks());
             let serial = Serial::timed(
                 sent.frame,
                 Frequency::from_nanohertz(u64::try_from(baud).unwrap_or(u64::MAX)),
@@ -800,7 +814,7 @@ impl chip::Chip for Mc68331 {
         Self::take_events(self)
     }
 
-    fn reset_pulse(event: &Event) -> Option<(Cycles, Cycles)> {
+    fn reset_pulse(event: &Event) -> Option<(Cycle, Cycle)> {
         match *event {
             Event::Reset { now, .. } => Some((now, now + Cycles::from_clocks(RESET_CLOCKS))),
             _ => None,
@@ -834,11 +848,11 @@ mod tests {
         assert_eq!(names, ["PE0", "PE7", "PF0", "PQS0", "PGP0", "PC0"]);
     }
 
-    use mc683xx_cpu32::cpu::state::StateError;
-    use mc683xx_cpu32::cpu::state::decode;
-    use mc683xx_cpu32::cpu::state::encode;
     use mc683xx_cpu32::interrupt::IrqPin;
-    use mc683xx_mc68331::port::Port;
+    use mc683xx_cpu32::state::StateError;
+    use mc683xx_cpu32::state::decode;
+    use mc683xx_cpu32::state::encode;
+    use mc683xx_mc68331::Port;
 
     use super::PORT_C_PINS;
     use super::PORT_PINS;
@@ -861,6 +875,9 @@ mod tests {
             Ok(Pin::Port(PortPin::new(Port::C, 6).unwrap()))
         );
         assert_eq!("IRQ7".parse(), Ok(Pin::Irq(IrqPin::IRQ7)));
+        assert_eq!("irq7".parse(), Ok(Pin::Irq(IrqPin::IRQ7)));
+        assert_eq!("pgp0".parse(), Ok(gp(0)));
+        assert_eq!("Reset".parse(), Ok(Pin::Reset));
         for bad in ["IRQ0", "PC7", "PE8", "PE05", "NMI", ""] {
             assert!(bad.parse::<Pin>().is_err(), "{bad}");
         }

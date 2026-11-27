@@ -12,22 +12,19 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::ops::RangeInclusive;
 
+use crate::BusError;
+use crate::StopRequest;
 use crate::bus::Bus;
 use crate::bus::BusAccess;
-use crate::bus::BusError;
 use crate::bus::LPSTOP_BROADCAST;
-use crate::bus::PortSize;
 use crate::bus::Read;
-use crate::bus::StopRequest;
 use crate::cpu::Cpu;
-use crate::cpu::Halt;
+use crate::cpu::Stop;
+use crate::cpu::bare::End;
 use crate::cpu::bare::LimitedRun;
 use crate::cpu::bare::Limits;
-use crate::cpu::state::Layer;
-use crate::cpu::state::StateError;
-use crate::cpu::state::decode_layer;
-use crate::cpu::state::encode_layer;
-use crate::cpu::state::restore_each;
+use crate::cpu::bare::TakeExceptionError;
+use crate::cycles::Cycle;
 use crate::cycles::Cycles;
 use crate::exception::Vector;
 use crate::interrupt::Acknowledge;
@@ -47,20 +44,23 @@ use crate::memory::Unserved;
 use crate::peripheral::BusCycle;
 use crate::peripheral::MappedPeripheral;
 use crate::peripheral::PeripheralId;
-use mc683xx_target::address::Address;
-use mc683xx_target::size::Size;
+use crate::state::Layer;
+use crate::state::StateError;
+use crate::state::decode_layer;
+use crate::state::encode_layer;
+use crate::state::restore_each;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 #[cfg(test)]
 mod tests;
 
 /// The format of [`Machine::save`]'s bytes.
-pub const VERSION: u32 = 7;
+pub const VERSION: u32 = 8;
 /// The address lines a machine has unless the host says otherwise:
 /// all of the CPU32's (CPU32RM 5.3), so no address aliases.
 pub const ADDRESS_BITS: u32 = 32;
-/// Clocks in a zero-wait bus cycle (CPU32RM 8.1.5): the timing of
-/// mapped memory and of peripherals.
-const FASTEST_CLOCKS: u8 = 2;
 /// The interrupt levels with a request line, 1 to 7.
 const LEVELS: usize = 7;
 /// Both spaces, each mapped alike.
@@ -84,9 +84,46 @@ pub enum MapError {
         /// The memory's.
         length: u32,
     },
-    /// A peripheral range that overlaps another peripheral's, or is empty.
+    /// A peripheral range that overlaps another peripheral's.
     #[error("peripherals overlap at {0}")]
     Overlap(Address),
+    /// A peripheral range that is empty, its end before its start.
+    #[error("empty peripheral range at {0}")]
+    Empty(Address),
+}
+
+/// Why a debugger's access of the bare machine ([`Machine::peek_bytes`],
+/// [`Machine::poke_bytes`]) stopped short.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum PeekError {
+    /// Neither memory nor a peripheral at the address.
+    #[error(transparent)]
+    Unserved(#[from] Unserved),
+    /// The peripheral at the address declined: only a real cycle can
+    /// tell, or take, the byte ([`MappedPeripheral::peek`],
+    /// [`MappedPeripheral::poke`]).
+    #[error("not peekable at {0}")]
+    Unpeekable(Address),
+}
+
+impl PeekError {
+    /// The byte's address.
+    #[must_use]
+    pub const fn address(&self) -> Address {
+        match *self {
+            Self::Unserved(Unserved(address)) | Self::Unpeekable(address) => address,
+        }
+    }
+}
+
+/// What a debugger's access reaches of a run of its bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Span {
+    /// This many, which memory serves.
+    Memory(usize),
+    /// This many of the peripheral at this index in [`FlatBus::peripherals`].
+    Peripheral(usize, usize),
 }
 
 /// A peripheral with the addresses it covers.
@@ -139,7 +176,7 @@ impl FlatBus {
     /// The peripherals' indices in attach order, the order of their ids.
     fn attach_order(&self) -> Vec<usize> {
         let mut order: Vec<usize> = (0..self.peripherals.len()).collect();
-        order.sort_by_key(|&index| u64::from(self.peripherals[index].id));
+        order.sort_by_key(|&index| self.peripherals[index].id);
         order
     }
 
@@ -164,11 +201,11 @@ impl FlatBus {
             .map_err(|error| wired.named(error))
     }
 
-    /// The peripheral that covers every byte of `access`, if one does.  No
-    /// peripheral is in CPU space: its addresses are not memory's (CPU32RM
-    /// 5.3.1).
-    fn peripheral(&mut self, access: &BusAccess) -> Option<(&mut dyn MappedPeripheral, BusCycle)> {
-        if access.function_code.is_cpu_space() {
+    /// The index of the peripheral that covers every byte of `access`, if
+    /// one does.  No peripheral is in CPU space: its addresses are not
+    /// memory's (CPU32RM 5.3.1).
+    fn covering(&self, access: &BusAccess) -> Option<usize> {
+        if access.function_code == FunctionCode::CpuSpace {
             return None;
         }
         let first = access.address.0;
@@ -176,10 +213,15 @@ impl FlatBus {
         let index = self
             .peripherals
             .partition_point(|wired| *wired.range.end() < first);
-        let wired = self.peripherals.get_mut(index)?;
-        if !(wired.range.contains(&first) && wired.range.contains(&last)) {
-            return None;
-        }
+        let wired = self.peripherals.get(index)?;
+        (wired.range.contains(&first) && wired.range.contains(&last)).then_some(index)
+    }
+
+    /// The peripheral that covers every byte of `access`, if one does, and
+    /// its cycle.
+    fn peripheral(&mut self, access: &BusAccess) -> Option<(&mut dyn MappedPeripheral, BusCycle)> {
+        let index = self.covering(access)?;
+        let wired = &mut self.peripherals[index];
         let cycle = BusCycle::new(
             access.address,
             access.size,
@@ -224,18 +266,19 @@ impl Bus for FlatBus {
         Some(self.write(access, value))
     }
 
-    fn stacking(&mut self, stacking: bool) {
+    fn set_stacking(&mut self, stacking: bool) {
         self.stacking = stacking;
     }
 
+    // Left for `Machine::run_limited` to take once the run ends for it.
     fn stop_requested(&mut self) -> bool {
-        self.stop.take()
+        self.stop.pending()
     }
 }
 
 /// Whether `access` is the LPSTOP broadcast (MC68331UM 4.5.4.2).
 fn is_lpstop_broadcast(access: &BusAccess) -> bool {
-    access.function_code.is_cpu_space()
+    access.function_code == FunctionCode::CpuSpace
         && access.address == LPSTOP_BROADCAST
         && access.size == Size::Word
 }
@@ -256,11 +299,11 @@ impl Interrupts for Requests {
             .iter()
             .rposition(Option::is_some)
             .map_or(0, |index| index + 1);
-        InterruptLevel::new(level as u8).unwrap_or(InterruptLevel::NONE)
+        InterruptLevel::try_from(level as u8).unwrap_or(InterruptLevel::NONE)
     }
 
-    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Acknowledged {
-        let line = usize::from(level.get()).checked_sub(1);
+    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycle) -> Acknowledged {
+        let line = usize::from(level.0).checked_sub(1);
         match line.and_then(|line| self.lines[line]) {
             Some(Some(vector)) => Acknowledge::Vector(vector),
             Some(None) => Acknowledge::Autovector,
@@ -276,7 +319,7 @@ struct MachineState {
     /// [`Cpu::save`]'s bytes.
     cpu: Vec<u8>,
     /// The CPU's clock.
-    now: Cycles,
+    now: Cycle,
     /// The interrupt requests.
     requests: Requests,
     /// Each peripheral's snapshot, in attach order.
@@ -291,13 +334,14 @@ struct MachineState {
 /// it, PC and SP set, and the run limited to the function's return.
 ///
 /// ```
-/// use mc683xx_target::address::Address;
-/// use mc683xx_cpu32::cpu::bare::End;
-/// use mc683xx_cpu32::cpu::bare::Limits;
+/// use mc683xx_cpu32::End;
+/// use mc683xx_cpu32::Limits;
 /// use mc683xx_cpu32::flat::ADDRESS_BITS;
 /// use mc683xx_cpu32::flat::Machine;
 /// use mc683xx_cpu32::memory::PAGE_BYTES;
 /// use mc683xx_cpu32::registers::status;
+/// use mc683xx_target::Address;
+/// use mc683xx_target::FunctionCode;
 ///
 /// /// Where the function's caller returns to: nothing runs there.
 /// const RETURN: Address = Address(0x100);
@@ -309,8 +353,9 @@ struct MachineState {
 /// let mut machine = Machine::new(ADDRESS_BITS)?;
 /// machine.map(Address(0), PAGE_BYTES, &[])?;
 /// // ADD.L D1,D0; RTS
-/// machine.write(CODE, &[0xd0, 0x81, 0x4e, 0x75])?;
-/// machine.write(STACK.before(4), &RETURN.0.to_be_bytes())?;
+/// let space = FunctionCode::SupervisorData;
+/// machine.poke_bytes(CODE, space, &[0xd0, 0x81, 0x4e, 0x75])?;
+/// machine.poke_bytes(STACK.before(4), space, &RETURN.0.to_be_bytes())?;
 ///
 /// let registers = &mut machine.cpu.registers;
 /// registers.set_sr(status::S);
@@ -319,9 +364,9 @@ struct MachineState {
 /// registers.data[0] = 40;
 /// registers.data[1] = 2;
 /// let mut limits = Limits::default();
-/// limits.until = Some(RETURN);
+/// limits.reach = Some(RETURN);
 /// let run = machine.run_limited(limits);
-/// assert_eq!(run.end, End::Until);
+/// assert_eq!(run.end, End::Reached);
 /// assert_eq!(machine.cpu.registers.data[0], 42);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -334,7 +379,7 @@ pub struct Machine {
     /// The interrupt requests.
     requests: Requests,
     /// The CPU's clock.
-    now: Cycles,
+    now: Cycle,
     /// The regions [`map`](Self::map) made, each with the address it is
     /// mapped from, its bytes backing its pages in order: the only ones
     /// [`unmap`](Self::unmap) frees or trims.  A region the host added
@@ -358,7 +403,7 @@ impl Machine {
             cpu,
             bus: FlatBus::default(),
             requests: Requests::default(),
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
             maps: BTreeMap::new(),
         })
     }
@@ -382,7 +427,7 @@ impl Machine {
         let pages = (0..length / PAGE_BYTES).map(|page| start.offset(page * PAGE_BYTES));
         if let Some(mapped) = pages
             .clone()
-            .find(|&page| self.cpu.memory.entry(Space::Supervisor, page) != Page::BUS)
+            .find(|&page| self.cpu.memory.page(Space::Supervisor, page) != Page::BUS)
         {
             return Err(MapError::Mapped(mapped));
         }
@@ -400,12 +445,7 @@ impl Machine {
         self.maps.insert(region, start);
         let length = self.cpu.memory.region(region).len() as u32;
         let backing = Some(Backing { region, offset: 0 });
-        let page = Page {
-            read: backing,
-            write: backing,
-            port: PortSize::Bits16,
-            clocks: FASTEST_CLOCKS,
-        };
+        let page = Page::BUS.reading(backing).writing(backing);
         for space in SPACES {
             self.cpu.memory.map(space, start, length, page)?;
         }
@@ -428,7 +468,7 @@ impl Machine {
         // that address: not a page the host mapped from it elsewhere.
         let mut reached: Vec<(RegionId, u64)> = Vec::new();
         for page in (0..length / PAGE_BYTES).map(|page| start.offset(page * PAGE_BYTES)) {
-            if let Some(backing) = self.cpu.memory.entry(Space::Supervisor, page).read
+            if let Some(backing) = self.cpu.memory.page(Space::Supervisor, page).read
                 && let Some(&from) = self.maps.get(&backing.region)
                 && u64::from(from.0) + u64::from(backing.offset) == u64::from(page.0)
                 && reached
@@ -489,26 +529,144 @@ impl Machine {
         Ok(())
     }
 
-    /// Fills `bytes` from mapped memory at `address`, whatever its
-    /// permissions, with no bus cycle ([`Memory::read_bytes`]).
+    /// Fills `bytes` from `address` up with no bus cycle: from mapped
+    /// memory, whatever its permissions ([`Memory::read_bytes`]), and a
+    /// peripheral's bytes from its [`peek`](MappedPeripheral::peek), one
+    /// call for each peripheral's run of them, each run's cycle in
+    /// `function_code`'s space.  Memory is the same in every space.
     ///
     /// # Errors
     ///
-    /// [`Unserved`], with the first address not mapped, if any is not;
-    /// `bytes` is then filled up to it.
-    pub fn read(&self, address: Address, bytes: &mut [u8]) -> Result<(), Unserved> {
-        self.cpu.memory.read_bytes(address, bytes)
+    /// [`PeekError::Unserved`] for the first byte neither memory nor a
+    /// peripheral is at, [`PeekError::Unpeekable`] for the first of a
+    /// run a peripheral declines; `bytes` is then filled up to it.
+    pub fn peek_bytes(
+        &self,
+        address: Address,
+        function_code: FunctionCode,
+        bytes: &mut [u8],
+    ) -> Result<(), PeekError> {
+        let (spans, unserved) = self.spans(address, function_code, bytes.len(), |page| page.read);
+        for (done, span) in spans {
+            let at = address.offset(done as u32);
+            match span {
+                Span::Memory(count) => self
+                    .cpu
+                    .memory
+                    .read_bytes(at, &mut bytes[done..done + count])?,
+                Span::Peripheral(index, count) => {
+                    let cycle = self.debug_cycle(at, function_code);
+                    if !self.bus.peripherals[index]
+                        .peripheral
+                        .peek(cycle, &mut bytes[done..done + count])
+                    {
+                        return Err(PeekError::Unpeekable(at));
+                    }
+                }
+            }
+        }
+        unserved.map_or(Ok(()), |unserved| Err(unserved.into()))
     }
 
-    /// Writes `bytes` to mapped memory at `address`, as
-    /// [`read`](Self::read) reads it ([`Memory::write_bytes`]).  On an
-    /// error nothing is written.
+    /// Stores `bytes` at `address` up with no bus cycle, as
+    /// [`peek_bytes`](Self::peek_bytes) reads them: into mapped memory
+    /// ([`Memory::write_bytes`]), and a peripheral's bytes through its
+    /// [`poke`](MappedPeripheral::poke), one call for each peripheral's
+    /// run of them, each run's cycle in `function_code`'s space.
     ///
     /// # Errors
     ///
-    /// As [`Machine::read`].
-    pub fn write(&mut self, address: Address, bytes: &[u8]) -> Result<(), Unserved> {
-        self.cpu.memory.write_bytes(address, bytes)
+    /// As [`Machine::peek_bytes`].  Nothing is written if a byte is
+    /// neither memory's nor a peripheral's; the bytes before a run a
+    /// peripheral declines stay written.
+    pub fn poke_bytes(
+        &mut self,
+        address: Address,
+        function_code: FunctionCode,
+        bytes: &[u8],
+    ) -> Result<(), PeekError> {
+        let (spans, unserved) = self.spans(address, function_code, bytes.len(), |page| {
+            page.read.or(page.write)
+        });
+        if let Some(unserved) = unserved {
+            return Err(unserved.into());
+        }
+        for (done, span) in spans {
+            let at = address.offset(done as u32);
+            match span {
+                Span::Memory(count) => self
+                    .cpu
+                    .memory
+                    .write_bytes(at, &bytes[done..done + count])?,
+                Span::Peripheral(index, count) => {
+                    let cycle = self.debug_cycle(at, function_code).writing(true);
+                    if !self.bus.peripherals[index]
+                        .peripheral
+                        .poke(cycle, &bytes[done..done + count])
+                    {
+                        return Err(PeekError::Unpeekable(at));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The spans a debugger's access of `length` bytes from `address`
+    /// reaches, each with where it starts in the access, in order: a
+    /// page's bytes where `served` finds memory, and each peripheral's
+    /// run of bytes no memory serves.  They stop at the first byte
+    /// neither reaches, given with them.
+    fn spans(
+        &self,
+        address: Address,
+        function_code: FunctionCode,
+        length: usize,
+        served: fn(&Page) -> Option<Backing>,
+    ) -> (Vec<(usize, Span)>, Option<Unserved>) {
+        let memory = &self.cpu.memory;
+        let serves = |at: Address| served(&memory.page(Space::Supervisor, at)).is_some();
+        let mut spans = Vec::new();
+        let mut done = 0;
+        while done < length {
+            let at = address.offset(done as u32);
+            let left = length - done;
+            let page_left = (PAGE_BYTES - memory.mask(at).0 % PAGE_BYTES) as usize;
+            if serves(at) {
+                let count = page_left.min(left);
+                spans.push((done, Span::Memory(count)));
+                done += count;
+                continue;
+            }
+            let access = BusAccess {
+                address: at,
+                size: Size::Byte,
+                function_code,
+                now: self.now,
+            };
+            let Some(index) = self.bus.covering(&access) else {
+                return (spans, Some(Unserved(at)));
+            };
+            let last = u64::from(*self.bus.peripherals[index].range.end());
+            let mut count = (last - u64::from(at.0) + 1).min(left as u64) as usize;
+            // the pages memory serves past this one are memory's
+            let mut page = page_left;
+            while page < count {
+                if serves(at.offset(page as u32)) {
+                    count = page;
+                }
+                page += PAGE_BYTES as usize;
+            }
+            spans.push((done, Span::Peripheral(index, count)));
+            done += count;
+        }
+        (spans, None)
+    }
+
+    /// A debugger's byte read at `address` in `function_code`'s space,
+    /// as a peripheral sees it, now.
+    const fn debug_cycle(&self, address: Address, function_code: FunctionCode) -> BusCycle {
+        BusCycle::new(address, Size::Byte, function_code, self.now)
     }
 
     /// Puts `peripheral` at `range`, which no other peripheral's overlaps: it
@@ -516,8 +674,8 @@ impl Machine {
     ///
     /// # Errors
     ///
-    /// [`MapError::Overlap`] if `range` is empty or overlaps another
-    /// peripheral's.
+    /// [`MapError::Empty`] if `range` is empty, [`MapError::Overlap`] if
+    /// it overlaps another peripheral's.
     pub fn add_peripheral(
         &mut self,
         range: RangeInclusive<Address>,
@@ -525,7 +683,7 @@ impl Machine {
     ) -> Result<PeripheralId, MapError> {
         let range = range.start().0..=range.end().0;
         if range.is_empty() {
-            return Err(MapError::Overlap(Address(*range.start())));
+            return Err(MapError::Empty(Address(*range.start())));
         }
         let index = self
             .bus
@@ -539,7 +697,7 @@ impl Machine {
             )));
         }
         self.bus.next += 1;
-        let id = PeripheralId::from(self.bus.next);
+        let id = PeripheralId::from_number(self.bus.next);
         self.bus.peripherals.insert(
             index,
             Wired {
@@ -571,41 +729,100 @@ impl Machine {
     /// `vector`, or the autovector if [`None`]; it stays requested, as a
     /// level-sensitive line does, until cleared.
     pub fn request_interrupt(&mut self, pin: IrqPin, vector: Option<Vector>) {
-        self.requests.lines[usize::from(pin.get() - 1)] = Some(vector);
+        self.requests.lines[usize::from(u8::from(pin) - 1)] = Some(vector);
     }
 
     /// Withdraws the request on `pin`.
     pub fn clear_interrupt(&mut self, pin: IrqPin) {
-        self.requests.lines[usize::from(pin.get() - 1)] = None;
+        self.requests.lines[usize::from(u8::from(pin) - 1)] = None;
     }
 
     /// The reset exception (CPU32RM 6.2.1): SSP and PC from the long
-    /// words at zero.
+    /// words at zero; a fault reading them halts the CPU, as
+    /// [`Cpu::reset`] says.
+    /// A stop left pending stays, and one a peripheral asks for in its
+    /// cycles is dropped, with no run to stop.
+    pub fn reset(&mut self) {
+        self.keeping_stop(|machine| machine.cpu.reset(&mut machine.bus, machine.now));
+    }
+
+    /// `call`, which runs no instructions, the stop request left as it
+    /// was: one asked for in its cycles is dropped, one left from before
+    /// kept for the next run.
+    fn keeping_stop<R>(&mut self, call: impl FnOnce(&mut Self) -> R) -> R {
+        let asked = self.bus.stop.pending();
+        let result = call(self);
+        self.bus.stop.withdraw();
+        if asked {
+            self.bus.stop.request();
+        }
+        result
+    }
+
+    /// Takes the exception of `vector` now, the interrupt mask set to
+    /// `level` if given, whatever it was ([`Cpu::take_exception`]): the
+    /// frame stacked, PC at the handler, the clock unmoved.  A stop left
+    /// pending stays, and one a peripheral asks for in its cycles is
+    /// dropped, as [`reset`](Self::reset) leaves them.
     ///
     /// # Errors
     ///
-    /// As [`Cpu::reset`].
-    pub fn reset(&mut self) -> Result<(), Halt> {
-        self.cpu.reset(&mut self.bus, self.now)
+    /// As [`Cpu::take_exception`].
+    pub fn take_exception(
+        &mut self,
+        vector: Vector,
+        level: Option<InterruptLevel>,
+    ) -> Result<(), TakeExceptionError> {
+        self.keeping_stop(|machine| {
+            machine
+                .cpu
+                .take_exception(&mut machine.bus, machine.now, vector, level)
+        })
     }
 
-    /// Runs until `limits` or a stop ([`Cpu::run_limited`]).
+    /// Runs until `limits` or a stop ([`Cpu::run_limited`]).  Only a run
+    /// that ends [`Stop::Requested`] takes the stop request
+    /// ([`stop_request`](Self::stop_request)): one asked where the run
+    /// ends for another reason (a hook's stop, a fault or an exception
+    /// stop in the instruction that asked, its own limits) stays
+    /// pending.  A request pending when a run starts ends it at once,
+    /// before its first instruction, and takes the request: no
+    /// instruction runs and no time passes.
     pub fn run_limited(&mut self, limits: Limits) -> LimitedRun {
+        if self.bus.stop.pending() {
+            return self.stop_left();
+        }
         let run = self
             .cpu
             .run_limited(&mut self.bus, &mut self.requests, self.now, limits);
-        self.now = Cycles::from_clocks(self.now.clocks().saturating_add(run.cycles.clocks()));
+        self.now += run.cycles;
+        if run.end == End::Stop(Stop::Requested) {
+            self.bus.stop.withdraw();
+        }
         run
+    }
+
+    /// A run that a stop request left pending ends at once: the request
+    /// taken, nothing run.
+    #[cold]
+    #[inline(never)]
+    fn stop_left(&mut self) -> LimitedRun {
+        self.bus.stop.withdraw();
+        LimitedRun {
+            cycles: Cycles::ZERO,
+            end: End::Stop(Stop::Requested),
+            steps: 0,
+        }
     }
 
     /// The CPU's clock: the cycles the runs took.
     #[must_use]
-    pub const fn now(&self) -> Cycles {
+    pub const fn now(&self) -> Cycle {
         self.now
     }
 
     /// The machine's state as bytes: the core's, the clock, the
-    /// interrupt requests and each peripheral's ([`Save`](crate::cpu::state::Save)), in the order
+    /// interrupt requests and each peripheral's ([`Save`](crate::state::Save)), in the order
     /// they were added.
     ///
     /// # Errors
@@ -630,7 +847,8 @@ impl Machine {
     /// order.  On an error it is unchanged: each peripheral's snapshot is
     /// checked by restoring it, each peripheral saved first and the ones
     /// restored put back if a later one or the core (restored last)
-    /// refuses ([`restore_each`]).
+    /// refuses ([`restore_each`]).  It withdraws a pending stop request,
+    /// as the state it replaces is gone.
     ///
     /// # Errors
     ///
@@ -658,6 +876,7 @@ impl Machine {
         })?;
         self.now = state.now;
         self.requests = state.requests;
+        self.bus.stop.withdraw();
         Ok(())
     }
 }

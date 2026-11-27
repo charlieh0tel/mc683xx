@@ -15,12 +15,12 @@ use criterion::criterion_group;
 use criterion::criterion_main;
 use mc683xx_bench::kernel::MOVE_WORD_TO_ABSOLUTE;
 use mc683xx_bench::kernel::NOP;
-use mc683xx_board::board::Board;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
-use mc683xx_board::registry::Environment;
+use mc683xx_board::Board;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::time::Span;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 
 /// The supervisor stack and the program's start, as reset reads them.
 const STACK: u32 = 0x10_fffe;

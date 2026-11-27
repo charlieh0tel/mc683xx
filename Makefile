@@ -21,7 +21,7 @@ fmt-check:
 # The license texts in each published crate and the Python package:
 # copies of the root's, not links, so a Windows checkout has them too.
 LICENSE_FILES := LICENSE-MIT LICENSE-APACHE
-LICENSED_CRATES := cpu32 cpu32-py debug gdb mc683xx mc68331 mc68331-board mc68331-run peripherals target
+LICENSED_CRATES := cpu32 python debug gdb mc683xx mc68331 mc68331-board mc68331-run peripherals target
 
 licenses:
 	@for crate in $(LICENSED_CRATES); do \
@@ -36,7 +36,7 @@ clippy:
 # The published crates' rustdoc, as docs.rs builds it, with no warnings.
 PUBLISHED_LIBRARIES := mc683xx-target mc683xx-cpu32 mc683xx-modules mc683xx-mc68331 mc683xx-board mc683xx-gdb mc683xx-debug mc683xx-peripherals
 docs:
-	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps $(addprefix -p ,$(PUBLISHED_LIBRARIES))
+	RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features $(addprefix -p ,$(PUBLISHED_LIBRARIES))
 
 test:
 	cargo test --workspace
@@ -102,14 +102,14 @@ oracle: musashi
 	MUSASHI_DIR=$(EXTERNAL)/musashi \
 		cargo test --release -p cpu32-oracle -p cpu32-harness $(ORACLE_FEATURES) -- --nocapture
 
-# The Python bindings (cpu32-py, PLAN.md Python), built with maturin
+# The Python bindings (mc683xx-python, PLAN.md Python), built with maturin
 # and tested with pytest in the ignored .venv, which the first run
 # creates (it needs the network then, and again when the tools'
 # pins change).  The type stubs are checked against the module with
 # mypy's stubtest, and docs/python.md's examples with mypy.  Not part
 # of `ci`, which needs no Python.
 VENV := $(CURDIR)/.venv
-PYTHON_CRATE := crates/cpu32-py
+PYTHON_CRATE := crates/python
 PYTHON_TOOLS := maturin==1.15.0 pytest==9.1.1 mypy==2.4.0
 # A stamp naming the pins, so a change to them installs them.
 PYTHON_TOOLS_STAMP := $(VENV)/tools-$(subst ==,-,$(subst $() ,_,$(PYTHON_TOOLS)))
@@ -122,8 +122,8 @@ $(PYTHON_TOOLS_STAMP):
 
 python: $(PYTHON_TOOLS_STAMP)
 	PYO3_PYTHON=$(VENV)/bin/python \
-		cargo clippy -p cpu32-py --all-targets --features python -- -D warnings
-	PYO3_PYTHON=$(VENV)/bin/python cargo test -p cpu32-py --features python
+		cargo clippy -p mc683xx-python --all-targets --features python -- -D warnings
+	PYO3_PYTHON=$(VENV)/bin/python cargo test -p mc683xx-python --features python
 	VIRTUAL_ENV=$(VENV) $(VENV)/bin/maturin develop --quiet -m $(PYTHON_CRATE)/Cargo.toml
 	$(VENV)/bin/pytest -q $(PYTHON_CRATE)
 	$(VENV)/bin/python -m mypy.stubtest mc683xx \
@@ -228,7 +228,9 @@ TARGET_DIR = $(eval TARGET_DIR := $$(TARGET_DIR_READ))$(TARGET_DIR)
 # $(1) as one shell word: single-quoted, each ' in it closed, escaped
 # and reopened.
 quote = '$(subst ','\'',$(1))'
-WASM_MODULE = $(TARGET_DIR)/wasm32-unknown-unknown/release/mc683xx_wasm.wasm
+# The profile the npm package's module is built in (Cargo.toml).
+WASM_PROFILE := wasm-release
+WASM_MODULE = $(TARGET_DIR)/wasm32-unknown-unknown/$(WASM_PROFILE)/mc683xx_wasm.wasm
 # The npm package `mc683xx`, ignored: the bindings bound by wasm-bindgen
 # for the web (web/, which examples/web loads), crates/wasm/npm's Node
 # entry, README and package.json (from cargo metadata, the workspace's
@@ -245,7 +247,7 @@ wasm: npm-package
 
 # Built --locked: a release's package is built from its tag's Cargo.lock.
 npm-package:
-	cargo build --locked --release --target wasm32-unknown-unknown -p mc683xx-wasm
+	cargo build --locked --profile $(WASM_PROFILE) --target wasm32-unknown-unknown -p mc683xx-wasm
 	rm -rf $(NPM_PACKAGE)
 	$(WASM_BINDGEN) --target web --remove-name-section --out-name mc683xx \
 		--out-dir $(NPM_PACKAGE)/web $(call quote,$(WASM_MODULE))

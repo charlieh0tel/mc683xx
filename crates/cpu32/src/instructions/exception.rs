@@ -4,7 +4,7 @@
 use crate::cpu::Core;
 use crate::cycles::Cycles;
 use crate::exception::Breakpoint;
-use crate::exception::CycleKind;
+use crate::exception::BusCycleKind;
 use crate::exception::Exception;
 use crate::exception::Fault;
 use crate::exception::MICROCODE_REVISION;
@@ -21,9 +21,9 @@ use crate::instructions::Flow;
 use crate::instructions::Table;
 use crate::instructions::table;
 use crate::timing;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Size;
 
 /// RTE (CPU32RM 4.4, RTE).
 const RTE: u16 = 0x4e73;
@@ -194,7 +194,7 @@ fn replace(
 
 /// A word of the frame at `sp`, at `offset`.
 fn frame_word(core: &mut Core<'_>, sp: Address, offset: u32) -> Result<u16, Exception> {
-    core.read(sp.offset(offset), Size::Word, FunctionCode::SUPERVISOR_DATA)
+    core.read(sp.offset(offset), Size::Word, FunctionCode::SupervisorData)
         .map(|word| word as u16)
 }
 
@@ -211,17 +211,20 @@ fn rte(core: &mut Core<'_>, _opcode: u16) -> Result<Flow, Exception> {
     let pc = Address(core.read(
         sp.offset(frame::PC),
         Size::Long,
-        FunctionCode::SUPERVISOR_DATA,
+        FunctionCode::SupervisorData,
     )?);
     let format_vector = frame_word(core, sp, frame::FORMAT_VECTOR)?;
     let frame_format = format_vector >> format::SHIFT;
+    let vector = format::vector(format_vector);
     core.charge(timing::return_from_exception(frame_format as u8));
-    match frame_format {
-        format::FOUR_WORD => Ok(restore(core, sr, pc, frame::FOUR_WORD_BYTES)),
-        format::SIX_WORD => Ok(restore(core, sr, pc, frame::SIX_WORD_BYTES)),
-        format::BUS_ERROR => rte_bus_error(core, sp, sr, pc),
-        _ => Err(format_error(core)),
-    }
+    let flow = match frame_format {
+        format::FOUR_WORD => restore(core, sr, pc, frame::FOUR_WORD_BYTES),
+        format::SIX_WORD => restore(core, sr, pc, frame::SIX_WORD_BYTES),
+        format::BUS_ERROR => return rte_bus_error(core, sp, sr, pc, vector),
+        _ => return Err(format_error(core)),
+    };
+    core.returned(vector, sp);
+    Ok(flow)
 }
 
 /// Deallocates `bytes` of frame and returns to `pc` with `sr`.
@@ -322,10 +325,15 @@ fn rte_bus_error(
     sp: Address,
     sr: u16,
     return_pc: Address,
+    vector: Vector,
 ) -> Result<Flow, Exception> {
     let layout = layout(core, sp)?;
     core.cpu.untraced = true;
-    match restore_bus_error(core, sp, sr, return_pc, layout) {
+    let restored = restore_bus_error(core, sp, sr, return_pc, layout);
+    if restored.is_ok() && matches!(layout, Layout::Instruction { .. }) {
+        core.returned(vector, sp);
+    }
+    match restored {
         Ok(None) => Ok(Flow::Next),
         Ok(Some(trace)) => Err(trace),
         Err(fault) if core.cpu.bare.stop_on_fault => Err(Exception::Fault(fault)),
@@ -349,8 +357,8 @@ fn restore_bus_error(
         core.access_read(
             sp.offset(offset),
             size,
-            FunctionCode::SUPERVISOR_DATA,
-            CycleKind::Read,
+            FunctionCode::SupervisorData,
+            BusCycleKind::Read,
         )
     };
     let requeue = |status: u16, pc: Address, address: Address| {
@@ -427,7 +435,7 @@ fn rerun(core: &mut Core<'_>, status: u16, address: Address, data: u32) {
     };
     let function_code = FunctionCode::from_low_bits(u32::from(status & ssw::FUNC));
     let result = if status & ssw::RW != 0 {
-        core.access_read(address, size, function_code, CycleKind::Read)
+        core.access_read(address, size, function_code, BusCycleKind::Read)
             .map(|_| ())
     } else {
         core.access_write(address, size, function_code, data)
@@ -441,6 +449,7 @@ fn rerun(core: &mut Core<'_>, status: u16, address: Address, data: u32) {
 mod tests {
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
+    use std::ops::ControlFlow;
 
     use super::BKPT;
     use super::BKPT_CHAIN;
@@ -448,14 +457,15 @@ mod tests {
     use super::RTE;
     use super::TRAP;
     use super::TRAPV;
+    use crate::BusError;
     use crate::bus::Bus;
     use crate::bus::BusAccess;
-    use crate::bus::BusError;
     use crate::bus::Read;
     use crate::cpu::Cpu;
     use crate::cpu::Halt;
     use crate::cpu::Run;
     use crate::cpu::Stop;
+    use crate::cycles::Cycle;
     use crate::cycles::Cycles;
     use crate::exception::MICROCODE_REVISION;
     use crate::exception::Vector;
@@ -466,10 +476,10 @@ mod tests {
     use crate::memory::Space;
     use crate::registers::status;
     use crate::timing;
-    use mc683xx_target::address::Address;
-    use mc683xx_target::entry::Entry;
-    use mc683xx_target::function_code::FunctionCode;
-    use mc683xx_target::size::Size;
+    use mc683xx_target::Address;
+    use mc683xx_target::Entry;
+    use mc683xx_target::FunctionCode;
+    use mc683xx_target::Size;
 
     /// The supervisor stack's top in the tests.
     const STACK: u32 = 0x4000;
@@ -522,7 +532,7 @@ mod tests {
 
     impl Bus for TestBus {
         fn read(&mut self, access: BusAccess) -> Result<Read, BusError> {
-            if access.function_code.is_cpu_space() {
+            if access.function_code == FunctionCode::CpuSpace {
                 self.cpu_space.push(access);
                 let word = self.breakpoint.ok_or(BusError)?;
                 return Ok(Read {
@@ -592,7 +602,7 @@ mod tests {
 
     /// One instruction, with the exceptions it raises, on `bus`.
     fn step_on(cpu: &mut Cpu, bus: &mut TestBus) -> Run {
-        cpu.run_for(bus, &mut NoInterrupts, Cycles::ZERO, Cycles::from_clocks(1))
+        cpu.run_for(bus, &mut NoInterrupts, Cycle::ZERO, Cycles::from_clocks(1))
     }
 
     /// One instruction on a bus with nothing on it.
@@ -967,10 +977,12 @@ mod tests {
         );
         assert_eq!(cpu.registers.ssp.0, base);
         assert_eq!(cpu.registers.pc.0, handler(Vector::BUS_ERROR));
-        // The handler fixes the table; RTE rebuilds the TRAP frame.
+        // The handler fixes the table; RTE rebuilds the TRAP frame,
+        // which returns from nothing (6.3.2.7).
         poke(&mut cpu, handler(Vector::BUS_ERROR), &[RTE]);
         cpu.registers.vbr = Address(0);
-        step(&mut cpu);
+        cpu.add_exception_return_hook(|_| ControlFlow::Break(()));
+        assert_eq!(step(&mut cpu).stop, Stop::Budget);
         assert_eq!(cpu.registers.ssp.0, STACK - 8);
         assert_eq!(cpu.registers.pc.0, handler(Vector::TRAP));
         assert_eq!(peek(&cpu, STACK - 8, 4), [sr, next_high, next_low, 0x0080]);
@@ -1101,7 +1113,7 @@ mod tests {
         assert_eq!(cpu.registers.pc.0, CODE + 2);
         let access = bus.cpu_space[0];
         assert_eq!(access.address, Address(5 << 2));
-        assert_eq!(access.function_code, FunctionCode::CPU_SPACE);
+        assert_eq!(access.function_code, FunctionCode::CpuSpace);
         assert_eq!(access.size, Size::Word);
     }
 

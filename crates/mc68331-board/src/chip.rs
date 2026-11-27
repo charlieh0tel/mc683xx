@@ -13,36 +13,34 @@
 //!
 //! [plan-boards]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md#boards
 
-use std::any::Any;
 use std::fmt;
 use std::rc::Rc;
 use std::str::FromStr;
 
-use mc683xx_cpu32::bus::PortSize;
-use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Run;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::Run;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::interrupt::IrqPin;
 use mc683xx_cpu32::memory::MemoryKind;
-use mc683xx_cpu32::peripheral::MappedPeripheral;
+use mc683xx_cpu32::state::StateError;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::chip_select::Dsack;
+use mc683xx_modules::chip_select::Termination;
+use mc683xx_modules::peripheral::AnyMappedPeripheral;
+use mc683xx_modules::peripheral::AnySpiPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
-use mc683xx_modules::peripheral::SpiPeripheral;
-use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_modules::sim::chip_selects::Dsack;
-use mc683xx_modules::sim::chip_selects::Termination;
-use mc683xx_modules::sim::reset::ResetScope;
-use mc683xx_target::address::Address;
+use mc683xx_modules::sim::ResetScope;
+use mc683xx_target::Address;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
-use crate::error::LoadError;
+use crate::description::LoadError;
 use crate::signal::Direction;
 use crate::signal::Kind;
 use crate::signal::Signal;
@@ -59,13 +57,27 @@ pub(crate) mod sealed {
 }
 
 /// A chip pin a net reaches, `chip.NAME` in a board file: the chip's own
-/// set, each with what it carries and which way it faces.
+/// set, each with what it carries and which way it faces.  It prints
+/// as its name after `chip.` in upper case (`PE0`, `RESET`), and parses
+/// from it in any case.
 ///
 /// Sealed: a host cannot implement it.
 pub trait ChipPin:
-    Copy + Ord + fmt::Debug + FromStr + Serialize + DeserializeOwned + sealed::Sealed + 'static
+    Copy
+    + Ord
+    + fmt::Debug
+    + fmt::Display
+    + FromStr
+    + Serialize
+    + DeserializeOwned
+    + sealed::Sealed
+    + 'static
 {
-    /// Its name after `chip.`: `PE0`, `RESET`.
+    /// Its name after `chip.`, as `Display` writes it, for a record
+    /// that holds it ([`PinRecord::pin`](crate::trace::PinRecord::pin)).
+    ///
+    /// Not part of the semver API: plumbing the board runs the chip with.
+    #[doc(hidden)]
     fn name(self) -> &'static str;
 
     /// What it carries: [`Kind::Logic`] for a level (an `edge` net
@@ -126,7 +138,7 @@ pub trait Requests {
     /// whose change ends the run ([`Chip::stop_at_outputs`]) may change
     /// after the cycle's start, its start if one changed earlier in its
     /// instruction.  [`None`] if none will.
-    fn output_horizon(&self) -> Option<Cycles>;
+    fn output_horizon(&self) -> Option<Cycle>;
 }
 
 /// Where a board memory answers.
@@ -165,23 +177,6 @@ pub struct MemoryPlan<'a> {
     pub reload: ResetScope,
 }
 
-/// A mapped peripheral the board hands the chip: one of the board's
-/// routers.  Every type that is one implements it.
-///
-/// Not part of the semver API: plumbing the board runs the chip with.
-#[doc(hidden)]
-pub trait BoardMapped: MappedPeripheral + Timed + Save + Any {}
-
-impl<T: MappedPeripheral + Timed + Save + Any> BoardMapped for T {}
-
-/// An SPI peripheral the board hands the chip: its PCS decode.
-///
-/// Not part of the semver API: plumbing the board runs the chip with.
-#[doc(hidden)]
-pub trait BoardSpi: SpiPeripheral + Save + Any {}
-
-impl<T: SpiPeripheral + Save + Any> BoardSpi for T {}
-
 /// The chip being wired, before its power-on reset.
 ///
 /// Sealed: a host cannot implement it.  Not part of the semver API:
@@ -208,7 +203,7 @@ pub trait ChipBuilder: sealed::Sealed {
     /// # Errors
     ///
     /// Wiring the chip refuses ([`LoadError::Build`]).
-    fn memory<R: BoardMapped>(
+    fn memory<R: AnyMappedPeripheral>(
         &mut self,
         plan: MemoryPlan<'_>,
         router: R,
@@ -220,7 +215,7 @@ pub trait ChipBuilder: sealed::Sealed {
     /// # Errors
     ///
     /// Wiring the chip refuses ([`LoadError::Build`]).
-    fn peripheral<R: BoardMapped>(
+    fn peripheral<R: AnyMappedPeripheral>(
         &mut self,
         router: R,
         select: ChipSelect,
@@ -233,7 +228,7 @@ pub trait ChipBuilder: sealed::Sealed {
     /// # Errors
     ///
     /// Wiring the chip refuses ([`LoadError::Build`]).
-    fn bus_peripheral<R: BoardMapped>(
+    fn bus_peripheral<R: AnyMappedPeripheral>(
         &mut self,
         router: R,
         decodes: &[BusDecode],
@@ -242,14 +237,14 @@ pub trait ChipBuilder: sealed::Sealed {
 
     /// A peripheral's interrupt output and reset input, on no pin: the
     /// resets that reach it and the IRQ pin its output is wired to.
-    fn unwired<R: BoardMapped>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>);
+    fn unwired<R: AnyMappedPeripheral>(&mut self, pins: R, reset: ResetScope, irq: Option<IrqPin>);
 
     /// `router` on the QSPI.
     ///
     /// # Errors
     ///
     /// A chip with no QSPI ([`LoadError::Build`]).
-    fn qspi<R: BoardSpi>(&mut self, router: R) -> Result<(), LoadError>;
+    fn set_qspi<R: AnySpiPeripheral>(&mut self, router: R) -> Result<(), LoadError>;
 
     /// The chip, through its power-on reset, its pins at the levels its
     /// section gives.  It ends its run after an instruction that
@@ -266,7 +261,7 @@ pub trait ChipBuilder: sealed::Sealed {
 /// its methods, which is all a host needs.  So this does not compile:
 ///
 /// ```compile_fail,E0277
-/// use mc683xx_board::chip::Chip;
+/// use mc683xx_board::Chip;
 ///
 /// struct Mine;
 ///
@@ -309,13 +304,13 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     fn builder(section: &Self::Section) -> Result<Self::Builder, LoadError>;
 
     /// Now, on the system clock.
-    fn now(&self) -> Cycles;
+    fn now(&self) -> Cycle;
 
     /// Runs whole instructions from now for `budget` system clocks, or
     /// until the CPU halts, a hook or a router stops it, or a router
     /// asks it to end early ([`Requests::sync`]) or a watched output
     /// changes ([`stop_at_outputs`](Self::stop_at_outputs)), ending
-    /// [`Stop::Budget`](mc683xx_cpu32::cpu::Stop::Budget) short of the
+    /// [`Stop::Budget`](mc683xx_cpu32::Stop::Budget) short of the
     /// budget.  A run that starts halted spends its budget as time
     /// passes.
     fn run_for(&mut self, budget: Cycles) -> Run;
@@ -356,9 +351,17 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     fn system_frequency(&self) -> Frequency;
 
     /// A memory's bytes.
+    ///
+    /// # Panics
+    ///
+    /// It may, for a memory another chip's build gave.
     fn memory(&self, memory: Self::Memory) -> &[u8];
 
     /// A memory's bytes, to change.
+    ///
+    /// # Panics
+    ///
+    /// As [`memory`](Self::memory).
     fn memory_mut(&mut self, memory: Self::Memory) -> &mut [u8];
 
     /// The output pins on nets, whose changes the chip reports: set
@@ -389,7 +392,7 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     ///
     /// Not part of the semver API: plumbing the board runs the chip with.
     #[doc(hidden)]
-    fn input(&mut self, pin: Self::Pin, signal: Signal, at: Cycles);
+    fn input(&mut self, pin: Self::Pin, signal: Signal, at: Cycle);
 
     /// Withdraws the levels `input` scheduled on [`ChipPin::scheduled`]
     /// pins for after now, those up to now coming first: the board's
@@ -422,7 +425,7 @@ pub trait Chip: Sized + sealed::Sealed + 'static {
     ///
     /// Not part of the semver API: plumbing the board runs the chip with.
     #[doc(hidden)]
-    fn reset_pulse(event: &Self::Event) -> Option<(Cycles, Cycles)>;
+    fn reset_pulse(event: &Self::Event) -> Option<(Cycle, Cycle)>;
 
     /// The chip's state, versioned.
     ///

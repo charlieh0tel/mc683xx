@@ -15,15 +15,15 @@ use js_sys::Object;
 use js_sys::Reflect;
 use js_sys::Symbol;
 use js_sys::Uint8Array;
-use mc683xx_board::description::Description;
-use mc683xx_board::description::Options;
+use mc683xx_board::Description;
+use mc683xx_board::Environment;
+use mc683xx_board::Options;
 use mc683xx_board::pacing::Pacing;
-use mc683xx_board::registry::Environment;
 use mc683xx_board::signal::Serial;
 use mc683xx_board::signal::Signal;
 use mc683xx_board::time::Span;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_cpu32::Stop;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::qsm::sci::Frame;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::JsValue;
@@ -42,7 +42,7 @@ const MILLISECONDS_PER_SECOND: f64 = 1000.0;
 #[derive(Debug)]
 pub struct Board {
     /// The board.
-    board: mc683xx_board::board::Board<Mc68331>,
+    board: mc683xx_board::Board<Mc68331>,
 }
 
 impl Board {
@@ -69,7 +69,7 @@ impl Board {
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))
         };
         let description = Description::parse_with(text, Path::new(""), &options, &read)?;
-        let board = mc683xx_board::board::Board::load_with(
+        let board = mc683xx_board::Board::load_with(
             &description,
             &mc683xx_peripherals::registry(),
             &Environment::default(),
@@ -78,24 +78,24 @@ impl Board {
         Ok(Self { board })
     }
 
-    /// [`runFor`](Self::run_for_js), its time a [`Span`].
+    /// [`runFor`](Self::run_for_js), its budget a [`Span`].
     ///
     /// # Errors
     ///
     /// As [`run_for_js`](Self::run_for_js).
-    pub fn run_for(&mut self, span: Span) -> Result<BoardRun, Error> {
-        Ok(self.board.run_for(span)?.into())
+    pub fn run_for(&mut self, budget: Span) -> Result<BoardRun, Error> {
+        Ok(self.board.run_for(budget)?.into())
     }
 
-    /// [`runFrame`](Self::run_frame_js), its bound a [`Span`].
+    /// [`runFrame`](Self::run_frame_js), its budget a [`Span`].
     ///
     /// # Errors
     ///
     /// As [`run_frame_js`](Self::run_frame_js).
-    pub fn run_frame(&mut self, wall: f64, bound: Span) -> Result<BoardRun, Error> {
+    pub fn run_frame(&mut self, wall: f64, budget: Span) -> Result<BoardRun, Error> {
         let wall = Duration::try_from_secs_f64(wall / MILLISECONDS_PER_SECOND)
             .map_err(|_| Error::Wall(wall))?;
-        Ok(self.board.run_frame(wall, bound)?.into())
+        Ok(self.board.run_frame(wall, budget)?.into())
     }
 
     /// [`sendBytes`](Self::send_bytes_js), its data bytes.
@@ -106,7 +106,7 @@ impl Board {
     pub fn send_bytes(&mut self, name: &str, data: &[u8]) -> Result<(), Error> {
         let serial = |byte: u8| Signal::Serial(Serial::untimed(Frame::Data(byte.into())));
         // the endpoint checked even for no data
-        self.board.check_send(name, &serial(0))?;
+        self.board.check_send(name, serial(0))?;
         for &byte in data {
             self.board.send(name, serial(byte))?;
         }
@@ -124,12 +124,12 @@ impl Board {
 
     /// The board, to reach what the bindings do not.
     #[must_use]
-    pub const fn board(&self) -> &mc683xx_board::board::Board<Mc68331> {
+    pub const fn board(&self) -> &mc683xx_board::Board<Mc68331> {
         &self.board
     }
 
     /// The board, to change.
-    pub const fn board_mut(&mut self) -> &mut mc683xx_board::board::Board<Mc68331> {
+    pub const fn board_mut(&mut self) -> &mut mc683xx_board::Board<Mc68331> {
         &mut self.board
     }
 }
@@ -182,7 +182,7 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// Throws a `PacingError` for text that names no pacing.
+    /// Throws a `ParsePacingError` for text that names no pacing.
     #[wasm_bindgen(js_name = setPacing)]
     pub fn set_pacing(&mut self, pacing: &str) -> Result<(), Error> {
         let pacing: Pacing = pacing.parse()?;
@@ -253,7 +253,7 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// Throws a `ReceiveError` for an endpoint no net drives.
+    /// Throws a `NoReceiver` for an endpoint no net drives.
     #[wasm_bindgen(js_name = takeReceivedBytes)]
     pub fn take_received_bytes(&mut self, name: &str) -> Result<Vec<u8>, Error> {
         Ok(self
@@ -271,12 +271,12 @@ impl Board {
     ///
     /// # Errors
     ///
-    /// Throws a `MemoryError` for a memory the board lacks.
+    /// Throws a `NoMemory` for a memory the board lacks.
     pub fn memory(&self, name: &str) -> Result<Vec<u8>, Error> {
         self.board
             .memory(name)
             .map(<[u8]>::to_vec)
-            .ok_or_else(|| Error::Memory(name.to_owned()))
+            .map_err(Error::from)
     }
 
     /// The board's state, as Rust's `Board::save`.
@@ -351,6 +351,7 @@ export type StopKind =
     | "requested"
     | "background"
     | "fault"
+    | "self-loop"
     | "unknown"
     | (string & {});
 "#;
@@ -368,12 +369,13 @@ const fn stop_name(stop: Stop) -> &'static str {
         Stop::Requested => "requested",
         Stop::Background(_) => "background",
         Stop::Fault => "fault",
+        Stop::SelfLoop => "self-loop",
         _ => "unknown",
     }
 }
 
-impl From<mc683xx_board::board::BoardRun> for BoardRun {
-    fn from(run: mc683xx_board::board::BoardRun) -> Self {
+impl From<mc683xx_board::BoardRun> for BoardRun {
+    fn from(run: mc683xx_board::BoardRun) -> Self {
         Self {
             stop: run.stop,
             now: run.now.picos(),
@@ -511,4 +513,32 @@ fn tag(value: &JsValue) -> Option<String> {
             .strip_suffix(TAG_SUFFIX)?
             .to_owned(),
     )
+}
+
+#[cfg(test)]
+mod stop_tests {
+    use mc683xx_cpu32::Halt;
+    use mc683xx_cpu32::Stop;
+    use mc683xx_target::Entry;
+
+    use super::stop_name;
+
+    /// The bindings' names are their own, but agree with `Stop`'s
+    /// `Display` for every kind they name today but `hook`, whose
+    /// `HookId` a test cannot make.
+    #[test]
+    fn a_stop_s_name_is_its_display() {
+        let stops = [
+            Stop::Budget,
+            Stop::Stopped,
+            Stop::Halted(Halt::DoubleBusFault),
+            Stop::Requested,
+            Stop::Background(Entry::Breakpoint),
+            Stop::Fault,
+            Stop::SelfLoop,
+        ];
+        for stop in stops {
+            assert_eq!(stop_name(stop), stop.to_string());
+        }
+    }
 }

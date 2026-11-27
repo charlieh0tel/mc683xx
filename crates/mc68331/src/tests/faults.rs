@@ -1,18 +1,19 @@
 //! Fault stops on the chip ([`CpuControl::set_stop_on_fault`]).
 //!
-//! [`CpuControl::set_stop_on_fault`]: mc683xx_cpu32::cpu::control::CpuControl::set_stop_on_fault
+//! [`CpuControl::set_stop_on_fault`]: mc683xx_cpu32::CpuControl::set_stop_on_fault
 
 use std::ops::ControlFlow;
 
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::bare::FaultCause;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::exception::CycleKind;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::FaultCause;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::exception::BusCycleKind;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
-use mc683xx_target::address::Address;
-use mc683xx_target::register::SystemRegister;
+use mc683xx_target::SystemRegister;
 
 use super::LPSTOP_MASK_0;
 use super::MOVE_WORD_FROM_ABSOLUTE;
@@ -40,7 +41,7 @@ fn a_fault_stop_ends_the_run_with_the_instruction_undone() {
     let run = chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(run.stop, Stop::Fault);
     let fault = chip.cpu().fault_stop().expect("a fault stop");
-    assert_eq!(fault.cycle, CycleKind::Read);
+    assert_eq!(fault.kind, BusCycleKind::Read);
     assert_eq!(fault.cause, FaultCause::AddressError);
     assert_eq!(fault.address, Address(ODD));
     assert_eq!(fault.registers.pc.0, START);
@@ -53,6 +54,27 @@ fn a_fault_stop_ends_the_run_with_the_instruction_undone() {
     assert_eq!(chip.cpu().fault_stop(), None);
 }
 
+/// BRA.S to itself (CPU32RM 4.4, BRA).
+const BRA_SELF: u16 = 0x60fe;
+
+#[test]
+fn a_chip_s_run_ends_at_a_self_loop_with_the_setting() {
+    let (mut chip, _) = booting(&[NOP, BRA_SELF]);
+    chip.cpu_control().set_stop_at_self_loop(true);
+    let run = chip.run_for(Cycles::from_clocks(100_000));
+    assert_eq!(run.stop, Stop::SelfLoop);
+    assert!(run.cycles < Cycles::from_clocks(100_000));
+    let at = chip.cpu().registers.pc;
+    // each run runs the loop once more, then ends
+    assert_eq!(
+        chip.run_for(Cycles::from_clocks(100_000)).stop,
+        Stop::SelfLoop
+    );
+    assert_eq!(chip.cpu().registers.pc, at);
+    chip.cpu_control().set_stop_at_self_loop(false);
+    assert_eq!(chip.run_for(Cycles::from_clocks(1000)).stop, Stop::Budget);
+}
+
 #[test]
 fn a_bus_monitor_timeout_stops_the_run_rather_than_halting() {
     let (mut chip, _) = booting(&[NOP]);
@@ -62,7 +84,7 @@ fn a_bus_monitor_timeout_stops_the_run_rather_than_halting() {
     let run = chip.run_for(Cycles::from_clocks(1));
     assert_eq!(run.stop, Stop::Fault);
     let fault = chip.cpu().fault_stop().expect("a fault stop");
-    assert_eq!(fault.cycle, CycleKind::Fetch);
+    assert_eq!(fault.kind, BusCycleKind::Fetch);
     assert_eq!(fault.cause, FaultCause::BusError);
     assert_eq!(chip.cpu().halted(), None, "no double bus fault");
 }
@@ -95,7 +117,7 @@ fn sleeping() -> Mc68331 {
         .memory(rom, MemoryKind::Rom, &[ChipSelect::Boot])
         .unwrap();
     builder
-        .fixed_memory(Address(RAM), vec![0; RAM_BYTES], MemoryKind::Ram)
+        .fixed_memory(vec![0; RAM_BYTES], MemoryKind::Ram, Address(RAM))
         .unwrap();
     builder.build()
 }
@@ -109,12 +131,12 @@ fn a_fault_stacking_the_interrupt_that_ends_lpstop_leaves_the_chip_asleep() {
         if run.stop != Stop::Budget && run.stop != Stop::Stopped {
             break run;
         }
-        assert!(chip.now() < Cycles::from_clocks(200_000), "never woke");
+        assert!(chip.now() < Cycle::from_clocks(200_000), "never woke");
     };
     assert_eq!(run.stop, Stop::Fault);
     assert_eq!(
-        chip.cpu().fault_stop().map(|fault| fault.cycle),
-        Some(CycleKind::Write)
+        chip.cpu().fault_stop().map(|fault| fault.kind),
+        Some(BusCycleKind::Write)
     );
     assert!(chip.cpu().stopped(), "LPSTOP not ended (CPU32RM 4.4)");
     assert_eq!(
@@ -163,7 +185,7 @@ fn lpstop_with_an_interrupt_already_pending_stays_asleep_when_it_faults() {
         if run.stop != Stop::Budget && run.stop != Stop::Stopped {
             break run;
         }
-        assert!(chip.now() < Cycles::from_clocks(200_000), "never stopped");
+        assert!(chip.now() < Cycle::from_clocks(200_000), "never stopped");
     };
     assert_eq!(run.stop, Stop::Fault);
     assert!(chip.cpu().stopped());
@@ -195,7 +217,7 @@ fn stop_on_fault_is_the_host_s_setting_not_the_snapshot_s() {
 }
 
 #[test]
-fn a_stop_asked_in_a_faulting_instruction_is_taken_with_the_fault() {
+fn a_stop_asked_in_a_faulting_instruction_stays_pending() {
     // MOVE.W $0000,$0401: the read asks the run to stop, the write faults
     let mut builder = Builder::default();
     builder
@@ -214,14 +236,16 @@ fn a_stop_asked_in_a_faulting_instruction_is_taken_with_the_fault() {
             ControlFlow::Continue(())
         });
     assert_eq!(chip.run_for(Cycles::from_clocks(1000)).stop, Stop::Fault);
-    // past the MOVE: the next run is the host's own
+    // past the MOVE: only a run that ends for the request takes it
     chip.cpu_control().registers_mut().pc = Address(START + 10);
+    let run = chip.run_for(Cycles::from_clocks(1000));
+    assert_eq!(run.stop, Stop::Requested, "{run:?}");
     let run = chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(run.stop, Stop::Budget, "{run:?}");
 }
 
 #[test]
-fn a_stop_asked_with_a_hook_stop_is_taken_with_it() {
+fn a_stop_asked_with_a_hook_stop_stays_pending() {
     // MOVE.W $0000,$2000: the read asks the run to stop, and its hook
     // stops it
     let mut builder = Builder::default();
@@ -244,6 +268,8 @@ fn a_stop_asked_with_a_hook_stop_is_taken_with_it() {
         Stop::Hook(_)
     ));
     chip.cpu_control().registers_mut().pc = Address(START + 10);
+    let run = chip.run_for(Cycles::from_clocks(1000));
+    assert_eq!(run.stop, Stop::Requested, "{run:?}");
     let run = chip.run_for(Cycles::from_clocks(1000));
     assert_eq!(run.stop, Stop::Budget, "{run:?}");
 }

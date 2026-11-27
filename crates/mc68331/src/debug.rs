@@ -9,24 +9,25 @@
 //! command of its own, so one leaves the interface between commands,
 //! dropping a command in progress there.
 
-pub mod serial;
+pub(crate) mod serial;
 
+use mc683xx_target::Address;
 use mc683xx_target::Cpu32Target;
+use mc683xx_target::Entry;
+use mc683xx_target::FunctionCode;
+use mc683xx_target::Register;
+use mc683xx_target::Size;
+use mc683xx_target::SystemRegister;
 use mc683xx_target::Unsupported;
-use mc683xx_target::address::Address;
-use mc683xx_target::entry::Entry;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::register::Register;
-use mc683xx_target::register::SystemRegister;
-use mc683xx_target::size::Size;
 
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::bare::Limits;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Limits;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::registers::BackgroundOnly;
 use mc683xx_cpu32::registers::status;
 
 use crate::chip::Mc68331;
-use crate::host::AccessError;
+use crate::host::BusCycleError;
 
 /// The most system clocks a step runs: far more than any instruction
 /// with its exceptions takes, so a step that ends without stopping (a
@@ -49,14 +50,9 @@ pub enum TargetError {
     /// cannot enter it (CPU32RM 7.2.1).
     #[error("background mode is not enabled")]
     NotEnabled,
-    /// A memory access at `address` failed.
-    #[error("{address}: {error}")]
-    Access {
-        /// The access's address.
-        address: Address,
-        /// Why.
-        error: AccessError,
-    },
+    /// A memory access's bus cycle failed.
+    #[error(transparent)]
+    Access(#[from] BusCycleError),
     /// A memory call's length is not a whole number of its size.
     #[error("{length} bytes are not a whole number of {}-byte accesses", size.bytes())]
     Length {
@@ -84,7 +80,7 @@ impl Mc68331 {
     /// nothing left pending, and this is false: only RESET restarts it
     /// (CPU32RM 6.2.2).
     ///
-    /// [`Cpu::set_breakpoint_pending`]: mc683xx_cpu32::cpu::Cpu::set_breakpoint_pending
+    /// [`Cpu::set_breakpoint_pending`]: mc683xx_cpu32::Cpu::set_breakpoint_pending
     pub fn assert_breakpoint(&mut self) -> bool {
         let entered = self.cpu.assert_breakpoint();
         if entered {
@@ -124,42 +120,19 @@ impl Mc68331 {
         self.sync_freeze();
     }
 
-    /// A data or address register.
-    fn register(&self, register: Register) -> u32 {
-        let number = usize::from(register.code());
-        let registers = &self.cpu.registers;
-        match number {
-            0..8 => registers.data[number],
-            _ => registers.address(number - 8),
-        }
-    }
-
-    /// Sets a data or address register, all 32 bits.
-    fn set_register(&mut self, register: Register, value: u32) {
-        let number = usize::from(register.code());
-        let registers = &mut self.cpu.registers;
-        match number {
-            0..8 => registers.data[number] = value,
-            _ => registers.set_address(number - 8, value),
-        }
-    }
-
-    /// A system register, zero-extended (CPU32RM 7.2.8.6).
+    /// A system register, zero-extended (CPU32RM 7.2.8.6): the
+    /// programming model's, or one of background mode's own (7.2.5).
     fn system_register(&self, register: SystemRegister) -> u32 {
         let cpu = &self.cpu;
-        let registers = &cpu.registers;
-        match register {
-            SystemRegister::Rpc => registers.pc.0,
-            SystemRegister::Pcc => cpu.pcc().0,
-            SystemRegister::Atemp => cpu.atemp(),
-            SystemRegister::Far => cpu.far().0,
-            SystemRegister::Vbr => registers.vbr.0,
-            SystemRegister::Sr => u32::from(registers.sr()),
-            SystemRegister::Usp => registers.usp.0,
-            SystemRegister::Ssp => registers.ssp.0,
-            SystemRegister::Sfc => u32::from(registers.sfc.get()),
-            SystemRegister::Dfc => u32::from(registers.dfc.get()),
-        }
+        cpu.registers
+            .system_register(register)
+            .unwrap_or_else(|| match register {
+                SystemRegister::Pcc => cpu.pcc().0,
+                SystemRegister::Atemp => cpu.atemp(),
+                SystemRegister::Far => cpu.far().0,
+                // RPC, where GO resumes: the PC
+                _ => cpu.registers.pc.0,
+            })
     }
 
     /// Sets a system register as WSREG does: a register narrower than
@@ -167,17 +140,14 @@ impl Mc68331 {
     /// (CPU32RM 7.2.8.7).
     fn set_system_register(&mut self, register: SystemRegister, value: u32) {
         let cpu = &mut self.cpu;
-        match register {
-            SystemRegister::Rpc => cpu.registers.pc = Address(value),
-            SystemRegister::Pcc => cpu.set_pcc(Address(value)),
-            SystemRegister::Atemp => cpu.set_atemp(value),
-            SystemRegister::Far => {}
-            SystemRegister::Vbr => cpu.registers.vbr = Address(value),
-            SystemRegister::Sr => cpu.registers.set_sr(value as u16),
-            SystemRegister::Usp => cpu.registers.usp = Address(value),
-            SystemRegister::Ssp => cpu.registers.ssp = Address(value),
-            SystemRegister::Sfc => cpu.registers.sfc = FunctionCode::from_low_bits(value),
-            SystemRegister::Dfc => cpu.registers.dfc = FunctionCode::from_low_bits(value),
+        if let Err(BackgroundOnly(register)) = cpu.registers.set_system_register(register, value) {
+            match register {
+                SystemRegister::Rpc => cpu.registers.pc = Address(value),
+                SystemRegister::Pcc => cpu.set_pcc(Address(value)),
+                SystemRegister::Atemp => cpu.set_atemp(value),
+                // FAR, read only
+                _ => {}
+            }
         }
     }
 
@@ -208,9 +178,9 @@ impl Mc68331 {
     pub fn call(&mut self, address: Address) -> Result<(), TargetError> {
         let supervisor = self.read_system_register(SystemRegister::Sr)? & u32::from(status::S) != 0;
         let space = if supervisor {
-            FunctionCode::SUPERVISOR_DATA
+            FunctionCode::SupervisorData
         } else {
-            FunctionCode::USER_DATA
+            FunctionCode::UserData
         };
         let sp = self.read_register(Register::A7)?.wrapping_sub(4);
         let rpc = self.read_system_register(SystemRegister::Rpc)?;
@@ -250,26 +220,31 @@ impl Cpu32Target for Mc68331 {
     /// then a breakpoint, as BKPT asserted at the next boundary would
     /// make (CPU32RM 7.2.2.1): PCC the instruction executed, if one was.
     /// A stepped STOP or LPSTOP leaves the CPU running, as T1 does
-    /// (CPU32RM 6.2.10).
+    /// (CPU32RM 6.2.10).  A stop request pending as it starts fails it,
+    /// [`TargetError::Stopped`], at once, taken, nothing run.
     fn step(&mut self) -> Result<Entry, TargetError> {
         self.command()?;
+        // a stop pending as the step starts: nothing runs
+        if self.take_stop_left() {
+            return Err(TargetError::Stopped);
+        }
         self.resume();
         let mut limits = Limits::default();
         limits.steps = Some(1);
         let start = self.now;
-        let (completed, asked) = loop {
+        let completed = loop {
             let ran = self.run(STEP_BUDGET, Some(&mut limits));
             if ran.limited {
-                break (true, ran.asked);
+                break true;
             }
             // a sync ends a run early, the step not done: it goes on
-            if ran.run.stop != Stop::Budget || start.until(self.now) >= STEP_BUDGET {
-                break (false, ran.asked);
+            if ran.run.stop != Stop::Budget || self.now.since(start) >= STEP_BUDGET {
+                break false;
             }
         };
-        // a stop the host asked for in the step's last quantum, taken
-        // with the stop that ended it or still waiting
-        let stopped = asked | self.board.take_stop();
+        // a stop the host asked for in the step's last quantum, left
+        // pending by the stop that ended it or still waiting: the step's
+        let stopped = self.board.take_stop();
         let completed = if completed && self.board.sim.low_power().is_some() {
             // a stepped LPSTOP: the modules awake, then the interrupts
             // pending at its end, unless a hook or a fault stops them
@@ -296,12 +271,12 @@ impl Cpu32Target for Mc68331 {
 
     fn read_register(&mut self, register: Register) -> Result<u32, TargetError> {
         self.command()?;
-        Ok(self.register(register))
+        Ok(self.cpu.registers.register(register))
     }
 
     fn write_register(&mut self, register: Register, value: u32) -> Result<(), TargetError> {
         self.command()?;
-        self.set_register(register, value);
+        self.cpu.registers.set_register(register, value);
         Ok(())
     }
 
@@ -334,7 +309,7 @@ impl Cpu32Target for Mc68331 {
         for (at, offset) in Self::accesses(address, size, data.len())? {
             let value = self
                 .bus_read(at, size, function_code)
-                .map_err(|error| TargetError::Access { address: at, error })?;
+                .map_err(TargetError::Access)?;
             data[offset..offset + bytes].copy_from_slice(&value.to_be_bytes()[4 - bytes..]);
         }
         Ok(())
@@ -354,7 +329,7 @@ impl Cpu32Target for Mc68331 {
                 .iter()
                 .fold(0, |value, &byte| value << 8 | u32::from(byte));
             self.bus_write(at, size, function_code, value)
-                .map_err(|error| TargetError::Access { address: at, error })?;
+                .map_err(TargetError::Access)?;
         }
         Ok(())
     }

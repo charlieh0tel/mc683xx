@@ -9,23 +9,23 @@ use std::fmt;
 use std::mem;
 use std::rc::Rc;
 
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::End;
+use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::Halt;
+use mc683xx_cpu32::Limits;
+use mc683xx_cpu32::PortSize;
+use mc683xx_cpu32::Run;
+use mc683xx_cpu32::Stop;
+use mc683xx_cpu32::StopRequest;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::Read;
-use mc683xx_cpu32::bus::StopRequest;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cpu::Halt;
-use mc683xx_cpu32::cpu::Run;
-use mc683xx_cpu32::cpu::Stop;
-use mc683xx_cpu32::cpu::bare::End;
-use mc683xx_cpu32::cpu::bare::Limits;
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cpu::hooks::ExceptionEntry;
-use mc683xx_cpu32::cpu::state::Save;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_cpu32::frequency::Frequency;
+use mc683xx_cpu32::hooks::ExceptionEntry;
 use mc683xx_cpu32::interrupt::Acknowledged;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::Interrupts;
@@ -35,17 +35,15 @@ use mc683xx_cpu32::memory::MemoryError;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::memory::PAGE_BYTES;
 use mc683xx_cpu32::memory::RegionId;
-use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_modules::chip_select::ChipSelect;
+use mc683xx_modules::peripheral::AnyMappedPeripheral;
+use mc683xx_modules::peripheral::AnySpiPeripheral;
 use mc683xx_modules::peripheral::BusDecode;
-use mc683xx_modules::peripheral::SpiPeripheral;
-use mc683xx_modules::peripheral::Timed;
 use mc683xx_modules::pins::PortLevels;
 use mc683xx_modules::pins::PortState;
 use mc683xx_modules::qsm::Qsm;
-use mc683xx_modules::qsm::qspi::AnySpiPeripheral;
 use mc683xx_modules::qsm::qspi::MOST_BITS;
 use mc683xx_modules::qsm::qspi::Shifted;
 use mc683xx_modules::qsm::sci::Frame;
@@ -53,7 +51,7 @@ use mc683xx_modules::qsm::sci::Transmitted;
 use mc683xx_modules::sim::Configuration;
 use mc683xx_modules::sim::ResetCause;
 use mc683xx_modules::sim::Sim;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use crate::board::ADDRESS_LINES;
 use crate::board::Board;
@@ -76,23 +74,30 @@ use crate::gpt::Input;
 use crate::gpt::PwmChange;
 use crate::gpt::pwm::Channel;
 use crate::gpt::pwm::Output;
-use crate::port::NoInputsError;
+use crate::port::NoInputs;
 use crate::port::OutputChange;
 use crate::port::Port;
 use crate::port::PortChange;
-use mc683xx_modules::sim::chip_selects::Dsack;
-use mc683xx_modules::sim::chip_selects::Termination;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::chip_select::Dsack;
+use mc683xx_modules::chip_select::Termination;
+use mc683xx_modules::sim::ResetScope;
 
 /// The index in the chip's peripherals of `id`, which the chip numbers
 /// from 0 in the order added.
 fn index(id: PeripheralId) -> usize {
-    usize::try_from(u64::from(id)).unwrap_or(usize::MAX)
+    usize::try_from(id.number()).unwrap_or(usize::MAX)
 }
 
 /// Host memory wired into the chip, as [`Builder::memory`] returns it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MemoryId(pub(crate) RegionId);
+
+/// `memory` and its number, its region's: `memory 2`.
+impl fmt::Display for MemoryId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "memory {}", self.0.number())
+    }
+}
 
 /// A handle by which the host's peripherals end the chip's run early.
 ///
@@ -140,18 +145,18 @@ impl SyncRequest {
 /// Not part of the semver API: plumbing `mc683xx-board` runs the chip with.
 #[doc(hidden)]
 #[derive(Debug, Clone, Default)]
-pub struct OutputHorizon(Rc<Cell<Option<Cycles>>>);
+pub struct OutputHorizon(Rc<Cell<Option<Cycle>>>);
 
 impl OutputHorizon {
     /// The earliest a watched output may change, as the cycle running
     /// left it.
     #[must_use]
-    pub fn get(&self) -> Option<Cycles> {
+    pub fn get(&self) -> Option<Cycle> {
         self.0.get()
     }
 
     /// Sets it.
-    pub(crate) fn set(&self, horizon: Option<Cycles>) {
+    pub(crate) fn set(&self, horizon: Option<Cycle>) {
         self.0.set(horizon);
     }
 }
@@ -169,10 +174,9 @@ pub struct OutputStop {
     /// [`Mc68331::take_port_changes`] reports them, port QS's PCS\[3:0\]
     /// and TXD among them as levels.
     ports: [u8; Port::ALL.len()],
-    /// PWMA, while its edges are reported (`set_report_pwm_edges`).
-    pub pwm_a: bool,
-    /// PWMB, likewise.
-    pub pwm_b: bool,
+    /// PWMA and PWMB, by [`Channel`]'s index, each while its edges are
+    /// reported (`set_report_pwm_edges`).
+    pwm: [bool; Channel::BOTH.len()],
     /// A frame's start on TXD (`take_sci_transmitted`).
     pub txd: bool,
     /// A reset the chip drives on RESET: a `reset` instruction's, the
@@ -190,6 +194,22 @@ impl OutputStop {
     /// Watches the pins of `port` in `mask`, and no others of it.
     pub const fn set_port(&mut self, port: Port, mask: u8) {
         self.ports[port.index()] = mask;
+    }
+
+    /// Whether PWM `channel`'s pin is watched.
+    #[must_use]
+    pub const fn pwm(&self, channel: Channel) -> bool {
+        self.pwm[channel.index()]
+    }
+
+    /// Watches PWM `channel`'s pin, or not.
+    pub const fn set_pwm(&mut self, channel: Channel, watched: bool) {
+        self.pwm[channel.index()] = watched;
+    }
+
+    /// The PWM pins watched, a mask: PWMA bit 0, PWMB bit 1.
+    pub(crate) const fn pwm_mask(&self) -> u8 {
+        self.pwm[Channel::A.index()] as u8 | (self.pwm[Channel::B.index()] as u8) << 1
     }
 }
 
@@ -237,9 +257,10 @@ pub enum BuildError {
     #[error("{0} is already wired")]
     Wired(ChipSelect),
     /// Memory that is not a whole number of 2-Kbyte pages, the
-    /// smallest chip-select block (SIMRM Table 7-2).
+    /// smallest chip-select block (SIMRM Table 7-2), its bytes; more
+    /// than a `u32` holds are `u32::MAX`.
     #[error("{0:#x} bytes: not a whole number of pages")]
-    Length(usize),
+    Length(u32),
     /// A fixed memory's base off a page boundary, or the memory past
     /// ADDR\[23:0\] (MC68331UM 4.4.1.1).
     #[error("{base}: a fixed memory of {length:#x} bytes does not fit there")]
@@ -247,7 +268,7 @@ pub enum BuildError {
         /// Its base.
         base: Address,
         /// Its bytes.
-        length: usize,
+        length: u32,
     },
     /// A fixed memory overlapping another.
     #[error("the fixed memory at {base} overlaps the one at {other}")]
@@ -307,8 +328,8 @@ impl Builder {
     /// A board with nothing wired, whose reset reads `configuration`.
     #[must_use]
     pub fn new(configuration: Configuration) -> Self {
-        let sim = Sim::new(configuration, Cycles::ZERO);
-        let system_clock = sim.clock().frequency();
+        let sim = Sim::new(configuration, Cycle::ZERO);
+        let system_clock = sim.system_clock().frequency();
         Self {
             configuration,
             memory: chip_memory(),
@@ -316,7 +337,7 @@ impl Builder {
                 sim,
                 modules: vec![
                     Box::new(Qsm::new(system_clock)),
-                    Box::new(Gpt::new(Cycles::ZERO)),
+                    Box::new(Gpt::new(Cycle::ZERO)),
                 ],
                 peripherals: Vec::new(),
                 reset_scopes: Vec::new(),
@@ -338,7 +359,7 @@ impl Builder {
                 stop_request: StopRequest::default(),
                 stop_taken: false,
                 sync_request: SyncRequest::default(),
-                quantum_end: Cycles::ZERO,
+                quantum_end: Cycle::ZERO,
                 sync: false,
                 clock_stop: false,
                 clock_moved: false,
@@ -371,7 +392,7 @@ impl Builder {
     /// configuration's clock pins give it (MC68331UM 4.3).
     #[must_use]
     pub const fn system_frequency(&self) -> Frequency {
-        self.board.sim.clock().frequency()
+        self.board.sim.system_clock().frequency()
     }
 
     /// The handle by which the host asks the chip's runs to stop, for
@@ -465,15 +486,12 @@ impl Builder {
     /// [`BuildError::Memory`] if the core's memory refuses it.
     pub fn fixed_memory(
         &mut self,
-        base: Address,
         bytes: Vec<u8>,
         kind: MemoryKind,
+        base: Address,
     ) -> Result<MemoryId, BuildError> {
         let length = pages(&bytes)?;
-        let placement = BuildError::Placement {
-            base,
-            length: bytes.len(),
-        };
+        let placement = BuildError::Placement { base, length };
         if !base.0.is_multiple_of(PAGE_BYTES)
             || base
                 .0
@@ -568,23 +586,23 @@ impl Builder {
 
     /// Adds `peripheral`, which every reset reaches until `set_reset_scope`
     /// says otherwise.
-    fn add<D: MappedPeripheral + Timed + Save + Any>(&mut self, peripheral: D) -> PeripheralId {
+    fn add<D: AnyMappedPeripheral>(&mut self, peripheral: D) -> PeripheralId {
         self.board.peripherals.push(Box::new(peripheral));
         self.board.reset_scopes.push(ResetScope::ALL);
         self.board.dsack_pins.push(None);
         self.board.dsack_told.push(0);
-        PeripheralId::from((self.board.peripherals.len() - 1) as u64)
+        PeripheralId::from_number((self.board.peripherals.len() - 1) as u64)
     }
 
     /// A peripheral on `pins`, which it tells apart by
     /// [`BusCycle::select`](mc683xx_cpu32::peripheral::BusCycle::select).
-    /// It says whether it saves ([`Save`]): the chip's snapshot holds
+    /// It says whether it saves ([`Save`](mc683xx_cpu32::state::Save)): the chip's snapshot holds
     /// every peripheral and model, in the order added.
     ///
     /// # Errors
     ///
     /// [`BuildError::Wired`] if one of `pins` is already wired.
-    pub fn peripheral<D: MappedPeripheral + Timed + Save + Any>(
+    pub fn peripheral<D: AnyMappedPeripheral>(
         &mut self,
         peripheral: D,
         pins: &[ChipSelect],
@@ -597,9 +615,9 @@ impl Builder {
     /// A peripheral on no chip select that takes the cycles `decodes`
     /// give by its own decode of the address bus, as board logic does:
     /// an address window, an interrupt acknowledge, or both.  It drives
-    /// DSACK `pins` itself, as a peripheral on an externally terminated
-    /// select does ([`Builder::set_dsack`]): its `wait_states` time each
-    /// cycle, the pins' port sizes it (or its `dsack_port`, cycle by
+    /// the DSACK pins `dsack` itself, as a peripheral on an externally
+    /// terminated select does ([`Builder::set_dsack`]): its `wait_states`
+    /// time each cycle, the pins' port sizes it (or its `dsack_port`, cycle by
     /// cycle), and with none of them assigned as DSACK by PEPAR the bus
     /// monitor ends it ([`DsackFault::BusUnassigned`](crate::event::DsackFault::BusUnassigned)).  It takes a cycle
     /// beside any select that matches, the first DSACK ending it, and
@@ -611,11 +629,11 @@ impl Builder {
     ///
     /// [`BuildError::Window`] for a window that is empty or runs past
     /// ADDR\[23:0\].
-    pub fn bus_peripheral<D: MappedPeripheral + Timed + Save + Any>(
+    pub fn bus_peripheral<D: AnyMappedPeripheral>(
         &mut self,
         peripheral: D,
         decodes: &[BusDecode],
-        pins: Dsack,
+        dsack: Dsack,
     ) -> Result<PeripheralId, BuildError> {
         for &decode in decodes {
             if let BusDecode::Window { base, length } = decode
@@ -630,7 +648,7 @@ impl Builder {
         }
         let id = self.add(peripheral);
         let peripheral = index(id);
-        self.board.dsack_pins[peripheral] = Some(pins);
+        self.board.dsack_pins[peripheral] = Some(dsack);
         self.board.bus.push(BusWiring {
             peripheral,
             decodes: decodes.to_vec(),
@@ -641,14 +659,11 @@ impl Builder {
 
     /// A peripheral on no pin: a model beside the CPU that only keeps time,
     /// or drives an interrupt.  In the snapshot as a peripheral is.
-    pub fn unwired_peripheral<D: MappedPeripheral + Timed + Save + Any>(
-        &mut self,
-        peripheral: D,
-    ) -> PeripheralId {
+    pub fn unwired_peripheral<D: AnyMappedPeripheral>(&mut self, peripheral: D) -> PeripheralId {
         self.add(peripheral)
     }
 
-    /// The resets that reach `peripheral`'s reset input ([`MappedPeripheral::reset`]):
+    /// The resets that reach `peripheral`'s reset input ([`MappedPeripheral::reset`](mc683xx_cpu32::peripheral::MappedPeripheral::reset)):
     /// all by default, as on the RESET pin; a board that wires it
     /// elsewhere says which (SIMRM 8.2).
     pub fn set_reset_scope(&mut self, peripheral: PeripheralId, scope: ResetScope) {
@@ -657,44 +672,46 @@ impl Builder {
 
     /// `peripheral` on the QSPI's pins, replacing any: it sees each
     /// transfer and the levels on PCS\[3:0\] (QSMRM 4).  It says
-    /// whether it saves ([`Save`]), as a peripheral does: the chip's snapshot
+    /// whether it saves ([`Save`](mc683xx_cpu32::state::Save)), as a peripheral does: the chip's snapshot
     /// holds it.
-    pub fn qspi<D: SpiPeripheral + Save + Any>(&mut self, peripheral: D) {
+    pub fn set_qspi<D: AnySpiPeripheral>(&mut self, peripheral: D) {
         self.board
             .module_mut::<Qsm>(QSM)
             .attach(Box::new(peripheral));
     }
 
-    /// The DSACK pins `peripheral` drives on an externally terminated select
-    /// (DSACK %1111, SIMRM 7.10.3).  The chip checks them against PEPAR
+    /// The DSACK pins `dsack` that `peripheral` drives on an externally
+    /// terminated select (DSACK %1111, SIMRM 7.10.3).  The chip checks them against PEPAR
     /// at each such cycle: with none assigned as DSACK, its DSACK cannot
     /// end the cycle and the bus monitor does (SIMRM 9.1, told as
     /// [`Event::Dsack`]); otherwise the port size they encode (SIMRM
     /// Table 5-2: DSACK0 8 bits, DSACK1 or both 16) sizes the cycle,
     /// not the select's port field (SIMRM 5.3.3).  Unstated by default:
     /// unchecked, and the select's field sizes it.
-    pub fn set_dsack(&mut self, peripheral: PeripheralId, pins: Dsack) {
-        self.board.dsack_pins[index(peripheral)] = Some(pins);
+    pub fn set_dsack(&mut self, peripheral: PeripheralId, dsack: Dsack) {
+        self.board.dsack_pins[index(peripheral)] = Some(dsack);
     }
 
     /// The resets that reach the QSPI's peripheral
-    /// ([`SpiPeripheral::reset`]): all by default, as `set_reset_scope` for a
+    /// ([`SpiPeripheral::reset`](mc683xx_modules::peripheral::SpiPeripheral::reset)): all by default, as `set_reset_scope` for a
     /// peripheral.
     pub const fn set_qspi_reset_scope(&mut self, scope: ResetScope) {
         self.board.qspi_reset_scope = scope;
     }
 
-    /// `peripheral`'s interrupt output wired to `pin`.
+    /// `peripheral`'s interrupt output wired to `pin`.  Each call adds a
+    /// wire: a peripheral with two interrupt outputs is wired twice.
     pub fn set_interrupt(&mut self, peripheral: PeripheralId, pin: IrqPin) {
         self.board
             .interrupt_wires
-            .push((index(peripheral), pin.level()));
+            .push((index(peripheral), InterruptLevel::from(pin)));
     }
 
     /// The board asserts AVEC (PE2) at every acknowledge of `pin`'s
-    /// level, as a pin tied low or decode logic does (SIMRM 6.4).
-    pub const fn set_autovector(&mut self, pin: IrqPin) {
-        self.board.autovector_levels |= 1 << pin.get();
+    /// level, as a pin tied low or decode logic does (SIMRM 6.4).  Each
+    /// call adds a level to those already autovectored.
+    pub fn set_autovector(&mut self, pin: IrqPin) {
+        self.board.autovector_levels |= 1 << u8::from(pin);
     }
 
     /// The chip, through its power-on reset.
@@ -703,7 +720,7 @@ impl Builder {
         let mut chip = Mc68331 {
             cpu: Cpu::new(self.memory),
             board: self.board,
-            now: Cycles::ZERO,
+            now: Cycle::ZERO,
             serial: Serial::default(),
         };
         chip.reset_as(ResetCause::PowerOn, false);
@@ -713,11 +730,11 @@ impl Builder {
 
 /// The bytes of a memory of `bytes`: a whole number of pages.
 fn pages(bytes: &[u8]) -> Result<u32, BuildError> {
-    let length = bytes.len();
-    if length == 0 || !length.is_multiple_of(PAGE_BYTES as usize) {
+    let length = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
+    if length == 0 || !length.is_multiple_of(PAGE_BYTES) {
         return Err(BuildError::Length(length));
     }
-    u32::try_from(length).map_err(|_| BuildError::Length(length))
+    Ok(length)
 }
 
 /// How the chip's [`run`](Mc68331::run) ended.
@@ -727,9 +744,6 @@ pub(crate) struct ChipRun {
     pub(crate) run: Run,
     /// Whether a limit ended it.
     pub(crate) limited: bool,
-    /// Whether the host asked it to stop in the instruction a hook, a
-    /// fault or a halt ended it at: the request taken with that stop.
-    pub(crate) asked: bool,
 }
 
 /// The chip.
@@ -740,7 +754,7 @@ pub struct Mc68331 {
     /// Everything else.
     pub(crate) board: Board,
     /// Now, on the system clock.
-    pub(crate) now: Cycles,
+    pub(crate) now: Cycle,
     /// BDM's serial interface.
     pub(crate) serial: Serial,
 }
@@ -760,11 +774,22 @@ impl Mc68331 {
     /// spends its budget as time passes for the SIM, the modules and
     /// the peripherals without the CPU, ending [`Stop::Halted`] unless a
     /// reset, the watchdog's say, restarts the CPU (MC68331UM 4.2.10;
-    /// [PLAN.md], A halted CPU).
+    /// [PLAN.md], A halted CPU).  A stop request pending when the run
+    /// starts ends it at once, before its first instruction, and takes
+    /// the request: no instruction runs and no time passes.
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
     pub fn run_for(&mut self, budget: Cycles) -> Run {
+        if self.take_stop_left() {
+            return Run::new(Cycles::ZERO, Stop::Requested);
+        }
         self.run(budget, None).run
+    }
+
+    /// Whether a stop request was left pending as a run starts, taking
+    /// it: the run ends at once, nothing run and no time passed.
+    pub(crate) fn take_stop_left(&mut self) -> bool {
+        self.board.stop_request.pending() && self.board.take_stop()
     }
 
     /// [`run_for`](Self::run_for), the CPU's quanta limited by `limits`
@@ -774,7 +799,6 @@ impl Mc68331 {
     pub(crate) fn run(&mut self, budget: Cycles, limits: Option<&mut Limits>) -> ChipRun {
         let mut limits = limits;
         let mut limited_end = false;
-        let mut asked = false;
         let start = self.now;
         let end = start + budget;
         let mut stop = Stop::Budget;
@@ -787,22 +811,15 @@ impl Mc68331 {
         self.board.output_moved = false;
         while self.now < end {
             if let Some(cause) = self.board.sim.take_reset() {
-                let frequency = self.board.sim.clock().frequency();
-                self.reset_as(cause, false);
-                stop = self.cpu.idle().unwrap_or(Stop::Budget);
-                // or a peripheral the reset reached asks, or the reset
-                // reaches a watched output
-                let moved = self.board.outputs_moved() | self.board.output_stop.reset;
-                if self.board.clock_stop && self.board.sim.clock().frequency() != frequency
-                    || self.board.sync_request.take()
-                    || moved
-                {
+                let ends;
+                (stop, ends) = self.reset_in_run(cause);
+                if ends {
                     break;
                 }
                 continue;
             }
             let next = self.board.next_event().map_or(end, |next| next.min(end));
-            let quantum = self.now.until(next).max(Cycles::from_clocks(1));
+            let quantum = next.since(self.now).max(Cycles::from_clocks(1));
             if let Some(idle) = self.cpu.idle() {
                 // time passes without the CPU
                 stop = idle;
@@ -839,6 +856,8 @@ impl Mc68331 {
                         match run.end {
                             End::Stop(stop) => (Run::new(run.cycles, stop), false),
                             End::Fault(_) => (Run::new(run.cycles, Stop::Fault), false),
+                            // the setting's, as no chip limit asks for one
+                            End::SelfLoop { .. } => (Run::new(run.cycles, Stop::SelfLoop), false),
                             _ => (Run::new(run.cycles, Stop::Requested), true),
                         }
                     }
@@ -863,7 +882,7 @@ impl Mc68331 {
             // it (one left is taken below)
             let synced = mem::take(&mut self.board.sync) | self.board.sync_request.get();
             stop = match run.stop {
-                Stop::Requested if !mem::take(&mut self.board.stop_taken) && synced => Stop::Budget,
+                Stop::Requested if !self.board.stop_taken && synced => Stop::Budget,
                 other => other,
             };
             if limited {
@@ -874,30 +893,36 @@ impl Mc68331 {
             match stop {
                 Stop::Halted(halt) => {
                     if halt == Halt::DoubleBusFault && self.board.sim.halt_monitor() {
-                        let frequency = self.board.sim.clock().frequency();
-                        self.reset_as(ResetCause::HaltMonitor, false);
-                        stop = self.cpu.idle().unwrap_or(Stop::Budget);
-                        // as the SIM's own resets: a clock the reset
-                        // changes ends the run there
-                        let moved = self.board.outputs_moved() | self.board.output_stop.reset;
-                        if self.board.clock_stop && self.board.sim.clock().frequency() != frequency
-                            || self.board.sync_request.take()
-                            || moved
-                        {
+                        // as the SIM's own resets
+                        let ends;
+                        (stop, ends) = self.reset_in_run(ResetCause::HaltMonitor);
+                        if ends {
                             break;
                         }
                     } else {
                         // the host sees the halt as it comes, and a stop
-                        // asked in the same instruction is taken with it
-                        asked = self.board.take_stop();
+                        // asked in the same instruction stays pending
+                        self.board.keep_stop();
                         break;
                     }
                 }
                 Stop::Budget | Stop::Stopped => {}
-                // a hook, a fault, a request: the host sees it, and a
-                // stop asked in the same instruction is taken with it
+                // an exception stop, which reports as a request: the host
+                // sees it, and its own request stays pending
+                Stop::Requested if self.cpu.ended_itself() => {
+                    self.board.keep_stop();
+                    break;
+                }
+                // a request: the host sees it, and a stop asked in the
+                // same instruction is taken with it
+                Stop::Requested => {
+                    self.board.take_stop();
+                    break;
+                }
+                // a hook, a fault: the host sees it, and a stop asked in
+                // the same instruction stays pending
                 _ => {
-                    asked = self.board.take_stop();
+                    self.board.keep_stop();
                     break;
                 }
             }
@@ -919,19 +944,50 @@ impl Mc68331 {
         ChipRun {
             run: Run::new(self.now - start, stop),
             limited: limited_end,
-            asked,
         }
     }
 
-    /// Runs whole instructions until now is `target` or past it, as
+    /// A reset for `cause` taken in a run: the stop the CPU's state
+    /// after it gives, and whether the run ends there, as it does if
+    /// the reset changes a clock the host stops on, a peripheral it
+    /// reached asks for a sync, or it reaches a watched output.  A
+    /// peripheral it reached that asks the run to stop ends it there,
+    /// [`Stop::Requested`], before the first instruction after it, or,
+    /// if the reset halted the CPU, with the halt, the request left
+    /// pending.  The outputs, the sync request and the clock are looked
+    /// at whatever ends it, so the next run starts from the reset's.
+    fn reset_in_run(&mut self, cause: ResetCause) -> (Stop, bool) {
+        let frequency = self.board.sim.system_clock().frequency();
+        self.reset_as(cause, false);
+        let moved = self.board.outputs_moved() | self.board.output_stop.reset;
+        let synced = self.board.sync_request.take();
+        let clock_moved =
+            self.board.clock_stop && self.board.sim.system_clock().frequency() != frequency;
+        let ends = clock_moved || synced || moved;
+        let asked = self.board.stop_pending();
+        match self.cpu.idle() {
+            Some(idle) => {
+                self.board.keep_stop();
+                (idle, ends || asked)
+            }
+            None if asked => {
+                self.board.take_stop();
+                (Stop::Requested, true)
+            }
+            None => (Stop::Budget, ends),
+        }
+    }
+
+    /// Runs whole instructions until now is `deadline` or past it, as
     /// `run_for` does: it ends at the first instruction boundary at or
-    /// after `target` (at once if now already is; at `target` itself
-    /// if the CPU is stopped), or early for `run_for`'s reasons.  The end depends only on the chip and `target`, so a
-    /// series of `run_until` to rising targets is one long run to the
-    /// last, however the host cuts it; a series of `run_for(budget)` drifts
-    /// by each run's overshoot.
-    pub fn run_until(&mut self, target: Cycles) -> Run {
-        self.run_for(self.now.until(target))
+    /// after `deadline` (at once if now already is; at `deadline` itself
+    /// if the CPU is stopped), or early for `run_for`'s reasons.  The end
+    /// depends only on the chip and `deadline`, so a series of
+    /// `run_until` to rising deadlines is one long run to the last,
+    /// however the host cuts it; a series of `run_for(budget)` drifts by
+    /// each run's overshoot.
+    pub fn run_until(&mut self, deadline: Cycle) -> Run {
+        self.run_for(deadline.since(self.now))
     }
 
     /// RESET driven by the board: an external reset, BKPT high as it
@@ -989,7 +1045,7 @@ impl Mc68331 {
         self.cpu.set_bdm_enabled(breakpoint);
         // a double bus fault fetching the vectors leaves the CPU halted,
         // or in background mode
-        let _ = self.cpu.reset(&mut Connection(&board), now);
+        self.cpu.reset(&mut Connection(&board), now);
         if breakpoint && self.cpu.background().is_none() && self.cpu.assert_breakpoint() {
             // BKPT tags the first fetch: acknowledged before it, PCC
             // where it would have begun (PLAN.md, Background debug mode)
@@ -1034,7 +1090,7 @@ impl Mc68331 {
 
     /// Now, on the system clock.
     #[must_use]
-    pub const fn now(&self) -> Cycles {
+    pub const fn now(&self) -> Cycle {
         self.now
     }
 
@@ -1109,7 +1165,7 @@ impl Mc68331 {
         let mut edge = self.now;
         for bit in (0..bits.min(MOST_BITS)).rev() {
             edge += period;
-            self.run_for(self.now.until(edge));
+            self.run_for(edge.since(self.now));
             let now = self.now;
             let miso = self
                 .board
@@ -1153,7 +1209,7 @@ impl Mc68331 {
     /// a run's quantum ends there ([PLAN.md], Peripherals).
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
-    pub fn schedule_gpt_input(&mut self, at: Cycles, input: Input, level: bool) {
+    pub fn schedule_gpt_input(&mut self, at: Cycle, input: Input, level: bool) {
         self.board
             .module_mut::<Gpt>(GPT)
             .schedule_input(at, input, level);
@@ -1182,6 +1238,13 @@ impl Mc68331 {
     #[must_use]
     pub fn oc1(&self) -> Output {
         self.gpt().oc1(self.now)
+    }
+
+    /// The level on `channel`'s PWM pin now: PWMCNT's clock under
+    /// PPROUT (GPTRM 6.3.1), the PWM output otherwise.
+    #[must_use]
+    pub fn pwm_level(&self, channel: Channel) -> bool {
+        self.gpt().pwm_level(channel, self.now)
     }
 
     /// The PWM pins' edges since the last call, in time order, each at
@@ -1234,17 +1297,17 @@ impl Mc68331 {
         self.board.port(port)
     }
 
-    /// The board drives the pins of `port` in `mask` to their levels in
-    /// `value` now, the others as they were: an input capture on port
-    /// GP takes a selected edge (GPTRM 3.2).
+    /// The board drives `pins`' driven pins of `port` to their levels
+    /// now, the others as they were: an input capture on port GP takes
+    /// a selected edge (GPTRM 3.2).
     ///
     /// # Errors
     ///
-    /// [`NoInputsError`] for port C, which has no inputs, driving
+    /// [`NoInputs`] for port C, which has no inputs, driving
     /// nothing.
-    pub fn set_pins(&mut self, port: Port, value: u8, mask: u8) -> Result<(), NoInputsError> {
+    pub fn set_pins(&mut self, port: Port, pins: PortLevels) -> Result<(), NoInputs> {
         let now = self.now;
-        self.board.set_pins(port, value, mask, now)
+        self.board.set_pins(port, pins.levels(), pins.driven(), now)
     }
 
     /// The changes in what each port drives since the last call, in time
@@ -1274,8 +1337,8 @@ impl Mc68331 {
     }
 
     /// The host asserts or negates `pin`.
-    pub const fn set_interrupt_pin(&mut self, pin: IrqPin, asserted: bool) {
-        let bit = 1 << pin.get();
+    pub fn set_interrupt_pin(&mut self, pin: IrqPin, asserted: bool) {
+        let bit = 1 << u8::from(pin);
         self.board.level_stale = true;
         if asserted {
             self.board.interrupt_pins |= bit;
@@ -1284,7 +1347,10 @@ impl Mc68331 {
         }
     }
 
-    /// A peripheral, if it is a `D`.
+    /// A peripheral, if it is a `D`; [`None`] too for an id another
+    /// builder gave, the one way to miss with an opaque id, so there is
+    /// no error to tell the two apart (a board's `peripheral`, by name,
+    /// has one).
     #[must_use]
     pub fn peripheral<D: Any>(&self, id: PeripheralId) -> Option<&D> {
         let peripheral: &dyn Any = self.board.peripherals.get(index(id))?.as_ref();
@@ -1316,12 +1382,20 @@ impl Mc68331 {
     }
 
     /// A memory's bytes.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is another builder's.
     #[must_use]
     pub fn memory(&self, id: MemoryId) -> &[u8] {
         self.cpu.memory.region(id.0)
     }
 
     /// A memory's bytes, to change.
+    ///
+    /// # Panics
+    ///
+    /// If `id` is another builder's.
     pub fn memory_mut(&mut self, id: MemoryId) -> &mut [u8] {
         self.cpu.memory.region_mut(id.0)
     }
@@ -1394,14 +1468,14 @@ impl Connection<'_, '_> {
             access.now,
             write,
         );
-        if board.tracing.accesses {
-            board.events.push(Event::Access {
+        if board.tracing.bus_cycles {
+            board.events.push(Event::BusCycle {
                 now: access.now,
                 address: access.address,
                 size: access.size,
                 function_code: access.function_code,
                 write: write.is_some(),
-                value: write.or(ended.ok().map(|(value, _)| value)),
+                value: write.or(ended.ok().map(|(value, _)| value)).unwrap_or(0),
                 bus_error: ended.is_err(),
             });
         }
@@ -1440,11 +1514,11 @@ impl Bus for Connection<'_, '_> {
             .map(|(_, stall)| stall)
     }
 
-    fn reset_instruction(&mut self, now: Cycles) {
+    fn reset_instruction(&mut self, now: Cycle) {
         self.0.borrow_mut().reset_instruction(now);
     }
 
-    fn exception_entered(&mut self, entry: &ExceptionEntry, now: Cycles) {
+    fn exception_entered(&mut self, entry: &ExceptionEntry, now: Cycle) {
         let mut board = self.0.borrow_mut();
         if board.tracing.exceptions {
             board.events.push(Event::Exception { now, entry: *entry });
@@ -1465,7 +1539,7 @@ impl Interrupts for Connection<'_, '_> {
         self.0.borrow_mut().level()
     }
 
-    fn acknowledge(&mut self, level: InterruptLevel, now: Cycles) -> Acknowledged {
+    fn acknowledge(&mut self, level: InterruptLevel, now: Cycle) -> Acknowledged {
         self.0.borrow_mut().acknowledge(level, now)
     }
 

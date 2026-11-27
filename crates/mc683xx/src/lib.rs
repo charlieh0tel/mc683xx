@@ -1,5 +1,5 @@
 //! The SIM and QSM shared by the 683xx parts (SIMRM, QSMRM), on the
-//! cpu32 core's bus, and the interface the host's peripherals plug
+//! CPU32 core's bus, and the interface the host's peripherals plug
 //! into.
 //!
 //! # Examples
@@ -9,7 +9,7 @@
 //! how the SIM comes out of reset.
 //!
 //! ```
-//! use mc683xx_cpu32::frequency::Frequency;
+//! use mc683xx_cpu32::Frequency;
 //! use mc683xx_modules::chip_select::ChipSelect;
 //! use mc683xx_modules::sim::Configuration;
 //! use mc683xx_modules::sim::clock::ClockSource;
@@ -33,6 +33,7 @@
 )]
 
 pub mod chip_select;
+#[doc(hidden)]
 pub mod module;
 pub mod peripheral;
 pub mod pins;

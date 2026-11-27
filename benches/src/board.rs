@@ -6,23 +6,24 @@
 //! queue in wraparound if the load wants one, then runs a kernel's sled
 //! from flash.
 
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::cpu::Halt;
-use mc683xx_cpu32::cpu::state::Stateless;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::Halt;
 use mc683xx_cpu32::memory::MemoryKind;
 use mc683xx_cpu32::peripheral::BusCycle;
 use mc683xx_cpu32::peripheral::MappedPeripheral;
 use mc683xx_cpu32::peripheral::PeripheralId;
 use mc683xx_cpu32::registers::status;
-use mc683xx_mc68331::chip::Builder;
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_cpu32::state::Stateless;
+use mc683xx_mc68331::Builder;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::peripheral::QspiTransfer;
 use mc683xx_modules::peripheral::SpiPeripheral;
 use mc683xx_modules::peripheral::Timed;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 
 use crate::kernel::Calibration;
 use crate::kernel::Kernel;
@@ -247,7 +248,7 @@ impl MappedPeripheral for QuantumCounter {
 }
 
 impl Timed for QuantumCounter {
-    fn advance(&mut self, _now: Cycles) {
+    fn advance(&mut self, _now: Cycle) {
         self.quanta += 1;
     }
 }
@@ -269,7 +270,7 @@ pub struct Board {
 
 /// CS`number`.
 fn cs(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).expect("a chip select"))
+    ChipSelect::Numbered(Number::try_from(number).expect("a chip select"))
 }
 
 /// MOVE.W #`value`,(`address`).L.
@@ -347,7 +348,7 @@ impl Board {
         builder
             .peripheral(Latch(0x5a5a), &[cs(5)])
             .expect("CS5 is free");
-        builder.qspi(Echo {
+        builder.set_qspi(Echo {
             transfers: 0,
             deferrable: load == Load::QspiBytesDeferred,
         });

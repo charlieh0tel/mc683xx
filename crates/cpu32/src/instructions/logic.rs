@@ -30,8 +30,8 @@ use crate::instructions::arithmetic::size;
 use crate::instructions::data_movement::FIELD_MASK;
 use crate::registers::Registers;
 use crate::timing::AddressTable;
-use mc683xx_target::address::Address;
-use mc683xx_target::size::Size;
+use mc683xx_target::Address;
+use mc683xx_target::Size;
 
 /// OR: line 1000 (CPU32RM 4.4, OR).
 const OR_LINE: u16 = 0x8000;

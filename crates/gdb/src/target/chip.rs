@@ -2,21 +2,21 @@
 
 use std::convert::Infallible;
 
-use mc683xx_cpu32::cpu::control::CpuControl;
-use mc683xx_cpu32::cycles::Cycles;
-use mc683xx_mc68331::chip::Mc68331;
-use mc683xx_target::address::Address;
-use mc683xx_target::function_code::FunctionCode;
-use mc683xx_target::size::Size;
+use mc683xx_cpu32::CpuControl;
+use mc683xx_cpu32::Cycles;
+use mc683xx_mc68331::Mc68331;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 
 use super::AccessError;
 use super::Target;
 use super::TargetReset;
 use super::TargetRun;
-use super::peek_bytes;
 
 /// The chip reads in the space the function code names, through its
-/// decode; it writes in supervisor space alone, where its pokes go.
+/// decode, a peripheral's bytes by its peek; it writes in supervisor
+/// space alone, into memory, and a peripheral's bytes by its poke: a
+/// call to the peripheral for each run of its bytes.
 impl Target for Mc68331 {
     type Error = Infallible;
 
@@ -30,11 +30,16 @@ impl Target for Mc68331 {
         function_code: FunctionCode,
         data: &mut [u8],
     ) -> Result<usize, AccessError<Infallible>> {
-        Ok(peek_bytes(data, |at| {
-            Self::peek(self, address.offset(at), Size::Byte, function_code)
-                .ok()
-                .map(|byte| byte as u8)
-        }))
+        Ok(match self.peek_bytes(address, function_code, data) {
+            Ok(()) => data.len(),
+            // filled up to the byte it names, on the address lines
+            Err(error) => error.address().map_or(0, |failed| {
+                self.cpu()
+                    .memory
+                    .mask(Address(failed.0.wrapping_sub(address.0)))
+                    .0 as usize
+            }),
+        })
     }
 
     fn write_memory(
@@ -44,23 +49,23 @@ impl Target for Mc68331 {
         data: &[u8],
     ) -> Result<(), AccessError<Infallible>> {
         if ![
-            FunctionCode::SUPERVISOR_DATA,
-            FunctionCode::SUPERVISOR_PROGRAM,
+            FunctionCode::SupervisorData,
+            FunctionCode::SupervisorProgram,
         ]
         .contains(&function_code)
         {
             return Err(AccessError::Unserved(address));
         }
-        Self::write(self, address, data).map_err(|unserved| AccessError::Unserved(unserved.0))
+        self.poke_bytes(address, function_code, data)
+            .map_err(|error| AccessError::Unserved(error.address().unwrap_or(address)))
     }
 
     fn run_for(
         &mut self,
-        cycles: Cycles,
+        budget: Cycles,
         _hit: &dyn Fn() -> bool,
     ) -> Result<TargetRun, Infallible> {
-        let target = self.now() + cycles;
-        Ok(self.run_until(target).stop.into())
+        Ok(self.run_until(self.now() + budget).stop.into())
     }
 
     fn reset(&mut self) -> Result<TargetReset, Infallible> {

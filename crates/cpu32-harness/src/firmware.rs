@@ -15,13 +15,13 @@ use cpu32_oracle::memory::Polled;
 use cpu32_oracle::memory::Region;
 use cpu32_oracle::memory::RegionMemory;
 use cpu32_oracle::state::State;
+use mc683xx_cpu32::BusError;
+use mc683xx_cpu32::Cpu;
+use mc683xx_cpu32::Cycles;
+use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::bus::Bus;
 use mc683xx_cpu32::bus::BusAccess;
-use mc683xx_cpu32::bus::BusError;
-use mc683xx_cpu32::bus::PortSize;
 use mc683xx_cpu32::bus::Read;
-use mc683xx_cpu32::cpu::Cpu;
-use mc683xx_cpu32::cycles::Cycles;
 use mc683xx_cpu32::exception::Exception;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::memory::Backing;
@@ -31,7 +31,8 @@ use mc683xx_cpu32::memory::RegionId;
 use mc683xx_cpu32::memory::Space;
 use mc683xx_cpu32::registers::Registers;
 use mc683xx_cpu32::registers::status;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
+use mc683xx_target::FunctionCode;
 
 use crate::machine;
 use crate::machine::ADDRESS_BITS;
@@ -91,7 +92,7 @@ pub const RTS: u16 = 0x4e75;
 /// those that never return.
 pub const HANDLED_TRAPS: [u8; 2] = [1, 7];
 /// Clocks of a memory cycle: the fastest (CPU32RM 8.1.5).
-const CLOCKS: u8 = 2;
+const CLOCKS: Cycles = Cycles::from_clocks(2);
 
 /// The peripherals' chip selects and the MC68331's own modules, as
 /// smartclock's harness maps them (`harness.py`, `PERIPHERALS`; smartclock
@@ -207,7 +208,7 @@ impl Peripherals {
     /// The addresses of a cycle's bytes, if a peripheral has them all; CPU
     /// space has none.
     fn addresses(&mut self, access: BusAccess) -> Result<Vec<u32>, BusError> {
-        if access.function_code.is_cpu_space() {
+        if access.function_code == FunctionCode::CpuSpace {
             return Err(BusError);
         }
         let addresses: Vec<u32> = (0..access.size.bytes())

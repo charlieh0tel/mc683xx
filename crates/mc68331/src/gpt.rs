@@ -14,12 +14,13 @@ use std::iter;
 use std::mem;
 use std::str::FromStr;
 
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
-use mc683xx_cpu32::cycles::Cycles;
+use mc683xx_cpu32::Cycle;
+use mc683xx_cpu32::Cycles;
 use mc683xx_cpu32::exception::Vector;
 use mc683xx_cpu32::interrupt::InterruptLevel;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use mc683xx_modules::module::Block;
 use mc683xx_modules::module::InterruptRequest;
 use mc683xx_modules::module::Module;
@@ -134,7 +135,7 @@ const IC4_PIN: u8 = 7;
 /// Input captures 1 to 3 on PGP0 to PGP2.
 const CAPTURES: u8 = 3;
 /// The format of the GPT's snapshot ([`Module::save`]).
-const STATE_VERSION: u32 = 7;
+const VERSION: u32 = 7;
 /// Output compares 1 to 4, TOC1 to TOC4; OC5 is TI4/O5.
 const COMPARES: usize = 4;
 /// PACTL PAIS, the PAI pin (GPTRM 4.1.1).
@@ -253,19 +254,12 @@ impl<'de> Deserialize<'de> for PortGpPin {
 
 impl PortGpPin {
     /// PGP`bit`, if there is one.
-    #[must_use]
-    pub const fn new(bit: u8) -> Option<Self> {
+    const fn new(bit: u8) -> Option<Self> {
         if bit < PORT_GP_PINS {
             Some(Self(bit))
         } else {
             None
         }
-    }
-
-    /// Its bit.
-    #[must_use]
-    pub const fn get(self) -> u8 {
-        self.0
     }
 
     /// Its bit in a mask of port GP.
@@ -386,7 +380,7 @@ pub struct ParseInputError(String);
 #[non_exhaustive]
 pub struct PwmChange {
     /// When.
-    pub now: Cycles,
+    pub now: Cycle,
     /// The pin.
     pub channel: Channel,
     /// Its level from then on.
@@ -401,7 +395,7 @@ struct Queued<T> {
     /// that those at one time merge in the order they happened.
     sequence: u64,
     /// When it happened.
-    at: Cycles,
+    at: Cycle,
     /// What changed.
     change: T,
 }
@@ -439,12 +433,12 @@ struct Found {
     /// The prescaler's count then.
     count: u64,
     /// The time.
-    time: Cycles,
+    time: Cycle,
 }
 
 impl Found {
     /// Found up to `time`, the prescaler at `count`.
-    const fn new(count: u64, time: Cycles) -> Self {
+    const fn new(count: u64, time: Cycle) -> Self {
         Self { count, time }
     }
 }
@@ -478,7 +472,7 @@ struct Edges {
 
 impl Edges {
     /// `change`, found now, at `at`, queued in its order.
-    fn queued<T>(&mut self, at: Cycles, change: T) -> Queued<T> {
+    fn queued<T>(&mut self, at: Cycle, change: T) -> Queued<T> {
         let sequence = self.sequence;
         self.sequence += 1;
         Queued {
@@ -619,18 +613,18 @@ pub struct Gpt {
     levels: u8,
     /// When the GPT last saw PCLK rise, the start of the clock outputs'
     /// pulse when PCLK clocks their counter.
-    pclk_rise: Option<Cycles>,
+    pclk_rise: Option<Cycle>,
     /// The output edges for the host.
     edges: Edges,
     /// The input edges the board makes later: when, which pin and its
     /// level, in time order, those at one time in the order given.
-    scheduled: VecDeque<(Cycles, Input, bool)>,
+    scheduled: VecDeque<(Cycle, Input, bool)>,
     /// The time it has been brought to.
-    time: Cycles,
+    time: Cycle,
     /// `next_event`, found when it may have moved; not saved, but found
     /// again on restore.
     #[serde(skip)]
-    next: Option<Cycles>,
+    next: Option<Cycle>,
 }
 
 impl Gpt {
@@ -640,12 +634,12 @@ impl Gpt {
     /// its own is not a host's to build.
     #[doc(hidden)]
     #[must_use]
-    pub const fn new(now: Cycles) -> Self {
+    pub const fn new(now: Cycle) -> Self {
         Self::with_inputs(now, Inputs::HIGH)
     }
 
     /// The GPT out of reset at `now`, the board driving `inputs`.
-    const fn with_inputs(now: Cycles, inputs: Inputs) -> Self {
+    const fn with_inputs(now: Cycle, inputs: Inputs) -> Self {
         Self {
             mcr: GPTMCR_RESET,
             low_power: false,
@@ -702,7 +696,7 @@ impl Gpt {
     /// in `value` at `now`, the others as they were: as the inputs
     /// scheduled up to `now` left them, which it takes first, each edge
     /// at its time (GPTRM 3.2, 3.2.3).
-    pub(crate) fn set_port_pins(&mut self, value: u8, mask: u8, now: Cycles) {
+    pub(crate) fn set_port_pins(&mut self, value: u8, mask: u8, now: Cycle) {
         self.advance(now);
         self.inputs.port = merge_pins(self.inputs.port, value, mask);
         self.input_changed(now);
@@ -710,7 +704,7 @@ impl Gpt {
     }
 
     /// The board drives `input` to `level` at `now`.
-    pub(crate) fn set_input(&mut self, input: Input, level: bool, now: Cycles) {
+    pub(crate) fn set_input(&mut self, input: Input, level: bool, now: Cycle) {
         self.advance(now);
         self.drive(input, level, now);
         self.refresh();
@@ -719,7 +713,7 @@ impl Gpt {
     /// The board will drive `input` to `level` at `at`, or at once if
     /// that is past: the GPT captures, counts and clocks at that time,
     /// and `next_event` ends a quantum there.  A reset keeps it.
-    pub(crate) fn schedule_input(&mut self, at: Cycles, input: Input, level: bool) {
+    pub(crate) fn schedule_input(&mut self, at: Cycle, input: Input, level: bool) {
         let at = at.max(self.time);
         let index = self.scheduled.partition_point(|&(when, _, _)| when <= at);
         self.scheduled.insert(index, (at, input, level));
@@ -729,14 +723,14 @@ impl Gpt {
     /// Withdraws the inputs `schedule_input` scheduled past `now`, those
     /// up to it taking effect first: for a board whose clocks moved
     /// against its own time, to schedule them again at their new clocks.
-    pub(crate) fn unschedule_inputs(&mut self, now: Cycles) {
+    pub(crate) fn unschedule_inputs(&mut self, now: Cycle) {
         self.advance(now);
         self.scheduled.clear();
         self.refresh();
     }
 
     /// The board drives `input` to `level` at `now`.
-    fn drive(&mut self, input: Input, level: bool, now: Cycles) {
+    fn drive(&mut self, input: Input, level: bool, now: Cycle) {
         match input {
             Input::PortGp(pin) => {
                 self.inputs.port =
@@ -752,7 +746,7 @@ impl Gpt {
     /// the output compares' on the pins they have, TCNT's clock on OC1's
     /// under CPROUT, PORTGP's on other outputs (GPTRM 3.3.1, 8.1, Table
     /// B-1).
-    pub(crate) const fn port_outputs(&self, now: Cycles) -> PortLevels {
+    pub(crate) const fn port_outputs(&self, now: Cycle) -> PortLevels {
         self.port_outputs_with(self.compare_clock_out() && self.clock_high(self.counter, now))
     }
 
@@ -802,7 +796,7 @@ impl Gpt {
     /// Whether the clock of `counter`, TCNT or PWMCNT, is high at `now`,
     /// as CPROUT and PPROUT drive it out (GPTRM 5.1): on PCLK, the one
     /// system clock from each rising edge the GPT sees.
-    const fn clock_high(&self, counter: Counter, now: Cycles) -> bool {
+    const fn clock_high(&self, counter: Counter, now: Cycle) -> bool {
         match counter.clock_high(self.prescaler.count(now)) {
             Some(high) => high,
             None => match self.pclk_rise {
@@ -819,8 +813,8 @@ impl Gpt {
         &self,
         counter: Counter,
         from: Found,
-        now: Cycles,
-    ) -> impl Iterator<Item = (Cycles, bool)> + use<> {
+        now: Cycle,
+    ) -> impl Iterator<Item = (Cycle, bool)> + use<> {
         let prescaler = self.prescaler;
         let to = prescaler.count(now);
         let fall = self
@@ -846,7 +840,7 @@ impl Gpt {
     /// ([`OutputHorizon`](crate::chip::OutputHorizon)), as no event
     /// marks them.  A PWM clocked by PCLK changes at its inputs, which
     /// are events.
-    pub(crate) fn next_fast_edge(&self, now: Cycles, pwm: u8, port_gp: u8) -> Option<Cycles> {
+    pub(crate) fn next_fast_edge(&self, now: Cycle, pwm: u8, port_gp: u8) -> Option<Cycle> {
         let count = self.prescaler.count(now);
         let clock_edge = |counter: Counter| {
             let fall = self
@@ -948,7 +942,7 @@ impl Gpt {
     /// Whether `channel`'s PWM edges are reported from `now`, from the
     /// level its pin has then, PPROUT's clock's included.  Off out of
     /// power-on.
-    pub(crate) fn set_report_pwm_edges(&mut self, channel: Channel, report: bool, now: Cycles) {
+    pub(crate) fn set_report_pwm_edges(&mut self, channel: Channel, report: bool, now: Cycle) {
         self.advance(now);
         self.edges.pwm[channel.index()] = report.then(|| self.pwm_level(channel, now));
     }
@@ -956,7 +950,7 @@ impl Gpt {
     /// Whether the edges of TCNT's clock on OC1's pin under CPROUT are
     /// reported from `now`, in port GP's changes; while they are not,
     /// the changes show the pin low.  Off out of power-on.
-    pub(crate) fn set_report_oc1_clock_edges(&mut self, report: bool, now: Cycles) {
+    pub(crate) fn set_report_oc1_clock_edges(&mut self, report: bool, now: Cycle) {
         self.advance(now);
         self.edges.oc1_clock = report.then(|| self.clock_high(self.counter, now));
         self.edges.oc1_found = Found::new(self.prescaler.count(now), now);
@@ -965,7 +959,7 @@ impl Gpt {
 
     /// What `channel`'s PWM pin carries at `now`.
     #[must_use]
-    pub const fn pwm(&self, channel: Channel, now: Cycles) -> Output {
+    pub(crate) const fn pwm(&self, channel: Channel, now: Cycle) -> Output {
         self.pwm.output(channel, self.prescaler.count(now))
     }
 
@@ -973,10 +967,10 @@ impl Gpt {
     /// OC1M3 clear (GPTRM 5.1, Table B-1), otherwise the level PORTGP
     /// reads on it.
     #[must_use]
-    pub const fn oc1(&self, now: Cycles) -> Output {
+    pub(crate) const fn oc1(&self, now: Cycle) -> Output {
         if self.compare_clock_out() {
             Output::Clock {
-                clocks: tap_clocks(self.counter.divisor()),
+                clocks_per_count: tap_clocks(self.counter.divisor()),
             }
         } else {
             Output::Level(self.port_levels(now) & 1 << OC1_PIN != 0)
@@ -986,7 +980,7 @@ impl Gpt {
     /// The level on `channel`'s PWM pin at `now`: PWMCNT's clock under
     /// PPROUT (GPTRM 6.3.1).
     #[must_use]
-    pub const fn pwm_level(&self, channel: Channel, now: Cycles) -> bool {
+    pub(crate) const fn pwm_level(&self, channel: Channel, now: Cycle) -> bool {
         if self.pwm.clock_out(channel) {
             self.clock_high(self.pwm.counter(), now)
         } else {
@@ -996,7 +990,7 @@ impl Gpt {
 
     /// Port GP's pins at `now` as PORTGP reads them: the driven level on
     /// outputs, the board's on inputs (GPTRM 8.1).
-    const fn port_levels(&self, now: Cycles) -> u8 {
+    const fn port_levels(&self, now: Cycle) -> u8 {
         self.port_outputs(now).pin_levels(self.seen.port)
     }
 
@@ -1043,19 +1037,19 @@ impl Gpt {
     /// LPSTOP turns its clock off at `now`, or a wake turns it on: TCNT,
     /// the prescaler and the inputs stop as STOP stops them, and run on
     /// from where they stopped (MC68331UM 4.3.4; PLAN.md, LPSTOP).
-    pub(crate) fn set_low_power(&mut self, low_power: bool, now: Cycles) {
+    pub(crate) fn set_low_power(&mut self, low_power: bool, now: Cycle) {
         self.stop_cause_changed(now, |gpt| gpt.low_power = low_power);
     }
 
     /// FREEZE asserted or negated at `now`: with FRZ0 the prescaler,
     /// the pulse accumulator and the inputs stop, and run on from where
     /// they stopped (MC68331UM 7.3.2).
-    pub(crate) fn set_freeze(&mut self, frozen: bool, now: Cycles) {
+    pub(crate) fn set_freeze(&mut self, frozen: bool, now: Cycle) {
         self.stop_cause_changed(now, |gpt| gpt.frozen = frozen);
     }
 
     /// `change` at `now` to what stops the prescaler and the inputs.
-    fn stop_cause_changed(&mut self, now: Cycles, change: impl FnOnce(&mut Self)) {
+    fn stop_cause_changed(&mut self, now: Cycle, change: impl FnOnce(&mut Self)) {
         self.advance(now);
         let was = self.stopped();
         change(self);
@@ -1066,7 +1060,7 @@ impl Gpt {
 
     /// The board changed an input at `now`: the GPT sees it unless
     /// stopped.
-    fn input_changed(&mut self, now: Cycles) {
+    fn input_changed(&mut self, now: Cycle) {
         self.catch_up(now);
         if !self.stopped() {
             self.synchronize(now);
@@ -1076,7 +1070,7 @@ impl Gpt {
 
     /// The input synchronizers take the board's levels at `now`: PCLK's
     /// rising edges clock, PAI's edges count, port GP's capture.
-    fn synchronize(&mut self, now: Cycles) {
+    fn synchronize(&mut self, now: Cycle) {
         let before = self.seen;
         self.seen = self.inputs;
         if self.seen.pclk && !before.pclk {
@@ -1095,7 +1089,7 @@ impl Gpt {
 
     /// PAI changed from `was` at `now` (GPTRM 4.1): an event counted,
     /// or the end of a gated period.
-    fn pai_edge(&mut self, was: bool, now: Cycles) {
+    fn pai_edge(&mut self, was: bool, now: Cycle) {
         if self.pactl & PACTL_PAEN == 0 {
             return;
         }
@@ -1146,7 +1140,7 @@ impl Gpt {
 
     /// What port GP drives may have changed at `at`: a change if it did,
     /// OC1's clock at its level as last found.
-    fn report_port(&mut self, at: Cycles) {
+    fn report_port(&mut self, at: Cycle) {
         let outputs = self.port_outputs_with(self.edges.oc1_clock == Some(true));
         if outputs != self.edges.port {
             self.edges.port = outputs;
@@ -1157,7 +1151,7 @@ impl Gpt {
 
     /// The reported fast outputs' edges up to `now`: the PWM pins' and
     /// OC1's clock's (PLAN.md, Peripherals).
-    fn find_fast_edges(&mut self, now: Cycles) {
+    fn find_fast_edges(&mut self, now: Cycle) {
         self.find_pwm_edges(now);
         self.find_oc1_clock_edges(now);
     }
@@ -1166,7 +1160,7 @@ impl Gpt {
     /// schedule or PWMA's clock under PPROUT makes, each at its own
     /// time, then a level a change of registers or a PCLK edge made now
     /// (PLAN.md, Peripherals).
-    fn find_pwm_edges(&mut self, now: Cycles) {
+    fn find_pwm_edges(&mut self, now: Cycle) {
         let count = self.prescaler.count(now);
         let from = self.edges.pwm_found;
         for channel in Channel::BOTH {
@@ -1201,7 +1195,7 @@ impl Gpt {
     /// The edges of TCNT's clock on OC1's pin up to `now`, while the
     /// host asks for them, each a port GP change at its own time, then
     /// what a change of registers made now.
-    fn find_oc1_clock_edges(&mut self, now: Cycles) {
+    fn find_oc1_clock_edges(&mut self, now: Cycle) {
         if self.edges.oc1_clock.is_some() {
             if self.compare_clock_out() {
                 for (at, level) in self.clock_edges(self.counter, self.edges.oc1_found, now) {
@@ -1216,7 +1210,7 @@ impl Gpt {
     }
 
     /// `channel`'s pin is at `level` from `at`: an edge if it changed.
-    fn report_pwm_level(&mut self, channel: Channel, level: bool, at: Cycles) {
+    fn report_pwm_level(&mut self, channel: Channel, level: bool, at: Cycle) {
         let reported = &mut self.edges.pwm[channel.index()];
         if *reported != Some(level) {
             *reported = Some(level);
@@ -1229,7 +1223,7 @@ impl Gpt {
     /// on an output, and the input captures see the pins unless
     /// stopped, the input synchronizers not clocked (GPTRM 9.3, 9.4);
     /// they see what changed when clocked again.
-    fn pins_changed(&mut self, now: Cycles) {
+    fn pins_changed(&mut self, now: Cycle) {
         self.report_port(now);
         if !self.stopped() {
             self.capture(now);
@@ -1239,7 +1233,7 @@ impl Gpt {
     /// The input captures see port GP's levels at `now`: a selected edge
     /// on an input capture's pin latches TCNT and sets its flag, even
     /// with the flag set (GPTRM 3.2).
-    fn capture(&mut self, now: Cycles) {
+    fn capture(&mut self, now: Cycle) {
         let levels = self.port_levels(now);
         let changed = levels ^ self.levels;
         self.levels = levels;
@@ -1321,7 +1315,7 @@ impl Gpt {
     }
 
     /// When TCNT reaches `tick`, if the prescaler clocks it.
-    fn time_of(&self, tick: u64) -> Option<Cycles> {
+    fn time_of(&self, tick: u64) -> Option<Cycle> {
         self.prescaler.when(self.counter.count_at(tick)?)
     }
 
@@ -1340,7 +1334,7 @@ impl Gpt {
 
     /// When the gated pulse accumulator next overflows with PAOVI set,
     /// if its clock is the prescaler's.
-    fn overflow_time(&self) -> Option<Cycles> {
+    fn overflow_time(&self) -> Option<Cycle> {
         if !self.gate_open() || self.tmsk & PAOVF == 0 {
             return None;
         }
@@ -1392,7 +1386,7 @@ impl Gpt {
 
     /// The register word at the even `offset` at `now`, without a
     /// read's side effects.
-    fn register_word(&self, offset: u32, now: Cycles) -> u16 {
+    fn register_word(&self, offset: u32, now: Cycle) -> u16 {
         let count = self.prescaler.count(now);
         let pins = |high, low| u16::from_be_bytes([high, low]);
         match offset {
@@ -1432,7 +1426,7 @@ impl Gpt {
     /// GPTMCR written at `now`: STOP and STOPP stop the prescaler and
     /// freeze the inputs; INCP steps it and clocks the synchronizers
     /// once (GPTRM 9.4).
-    fn write_mcr(&mut self, value: u16, now: Cycles) {
+    fn write_mcr(&mut self, value: u16, now: Cycle) {
         let was = self.stopped();
         self.mcr = value & GPTMCR_WRITABLE;
         if was && self.stopped() && value & GPTMCR_INCP != 0 && self.mcr & GPTMCR_STOPP != 0 {
@@ -1446,7 +1440,7 @@ impl Gpt {
     /// Whether the prescaler and the inputs are stopped changed at
     /// `now` from `was`: the prescaler stops or starts, and on a start
     /// the synchronizers take the board's levels.
-    fn stop_changed(&mut self, was: bool, now: Cycles) {
+    fn stop_changed(&mut self, was: bool, now: Cycle) {
         match (was, self.stopped()) {
             (false, true) => self.prescaler.stop(now),
             (true, false) => {
@@ -1459,7 +1453,7 @@ impl Gpt {
 
     /// The forced compares in CFORC's FOC bits take their pin actions
     /// at once, their flags untouched (GPTRM 3.3.4).
-    fn force(&mut self, foc: u8, now: Cycles) {
+    fn force(&mut self, foc: u8, now: Cycle) {
         let matched = foc >> FOC1.trailing_zeros();
         if matched != 0 {
             self.act(matched);
@@ -1495,7 +1489,7 @@ impl Gpt {
     /// PRESCL written with `word` at the prescaler's `count` at `now`:
     /// TCNT, PWMCNT and the gated mode's clock keep their counts, each
     /// clocked next as the new value counts to its tap (PLAN.md, GPT).
-    fn write_prescaler(&mut self, word: u16, count: u64, now: Cycles) {
+    fn write_prescaler(&mut self, word: u16, count: u64, now: Cycle) {
         self.prescaler.set(u64::from(word), now);
         let to = self.prescaler.count(now);
         self.counter.rebase(count, to);
@@ -1577,7 +1571,7 @@ impl Gpt {
 }
 
 impl Timed for Gpt {
-    fn next_event(&self) -> Option<Cycles> {
+    fn next_event(&self) -> Option<Cycle> {
         debug_assert_eq!(self.next, self.find_next_event(), "a stale next event");
         self.next
     }
@@ -1586,7 +1580,7 @@ impl Timed for Gpt {
     /// The next event stays unless `now` reaches it: until then TCNT
     /// passes only compares that do not show, and the gated
     /// accumulator's overflow count holds.
-    fn advance(&mut self, now: Cycles) {
+    fn advance(&mut self, now: Cycle) {
         while let Some(&(at, input, level)) = self.scheduled.front()
             && at <= now
         {
@@ -1659,7 +1653,7 @@ impl Gpt {
 
     /// When it next changes on its own: a compare or overflow that
     /// shows, the gated accumulator's overflow, or a scheduled input.
-    fn find_next_event(&self) -> Option<Cycles> {
+    fn find_next_event(&self) -> Option<Cycle> {
         let mut tick = self.tick;
         // a compare or overflow that shows comes within a TCNT period,
         // six events at most
@@ -1682,7 +1676,7 @@ impl Gpt {
     /// Brings it to `now` with no input edge: each compare match and
     /// overflow in order, at its own count, then the gated accumulator
     /// and the PWM buffers.
-    fn catch_up(&mut self, now: Cycles) {
+    fn catch_up(&mut self, now: Cycle) {
         self.time = self.time.max(now);
         let count = self.prescaler.count(now);
         let target = self.counter.ticks(count);
@@ -1767,7 +1761,7 @@ impl Module for Gpt {
     }
 
     fn request(&self) -> Option<InterruptRequest> {
-        let level = InterruptLevel::new(self.level()).expect("three bits");
+        let level = InterruptLevel::try_from(self.level()).expect("three bits");
         (level != InterruptLevel::NONE && self.pending_source().is_some()).then_some(
             InterruptRequest {
                 level,
@@ -1777,8 +1771,8 @@ impl Module for Gpt {
     }
 
     /// IVBA and the pending source's number, $0 for PAB's (GPTRM 7.1.1).
-    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycles) -> Option<Vector> {
-        if level.get() != self.level() {
+    fn acknowledge(&mut self, level: InterruptLevel, _now: Cycle) -> Option<Vector> {
+        if u8::from(level) != self.level() {
             return None;
         }
         let source = self.pending_source()?;
@@ -1790,7 +1784,7 @@ impl Module for Gpt {
     /// Every register to its reset value (GPTRM 9; PLAN.md, "QSM and
     /// GPT on reset"); the board's pins and scheduled edges stay, and
     /// the output edges for the host, with those the reset makes.
-    fn reset(&mut self, now: Cycles) {
+    fn reset(&mut self, now: Cycle) {
         self.advance(now);
         let edges = mem::take(&mut self.edges);
         let scheduled = mem::take(&mut self.scheduled);
@@ -1808,11 +1802,11 @@ impl Module for Gpt {
 
     /// Its registers, timers, PWM and the pins as last seen.
     fn save(&self) -> Result<Vec<u8>, StateError> {
-        Ok(encode(STATE_VERSION, self))
+        Ok(encode(VERSION, self))
     }
 
     fn restore(&mut self, snapshot: &[u8]) -> Result<(), StateError> {
-        let mut saved: Self = decode(STATE_VERSION, snapshot)?;
+        let mut saved: Self = decode(VERSION, snapshot)?;
         saved.validate()?;
         saved.refresh();
         *self = saved;

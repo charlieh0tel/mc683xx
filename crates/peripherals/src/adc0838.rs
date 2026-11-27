@@ -29,9 +29,9 @@ use mc683xx_board::spi;
 use mc683xx_board::spi::Edge;
 use mc683xx_board::spi::Edges;
 use mc683xx_board::spi::Slave;
-use mc683xx_cpu32::cpu::state::StateError;
-use mc683xx_cpu32::cpu::state::decode;
-use mc683xx_cpu32::cpu::state::encode;
+use mc683xx_cpu32::state::StateError;
+use mc683xx_cpu32::state::decode;
+use mc683xx_cpu32::state::encode;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -51,9 +51,6 @@ const COM: usize = CHANNELS;
 /// The port of /SE.
 const SHIFT_ENABLE: usize = COM + 1;
 
-/// The reference when the board file gives none: VCC's typical 5 V
-/// (SNAS531B, Reference Considerations).
-const DEFAULT_VREF_VOLTS: f64 = 5.0;
 /// The output codes over the reference's span: 1 LSB is VREF / 256
 /// (SNAS531B, Reference Considerations).
 const CODES: f64 = 256.0;
@@ -97,10 +94,10 @@ pub(crate) fn register(registry: &mut Registry) -> Result<(), RegistryError> {
 /// Its ports: the channels in order, COM, then /SE.
 fn ports() -> Vec<PortSpec> {
     (0..CHANNELS)
-        .map(|channel| PortSpec::input(format!("ch{channel}"), Kind::Analog))
+        .map(|channel| PortSpec::input(format!("CH{channel}"), Kind::Analog))
         .chain([
-            PortSpec::input("com", Kind::Analog),
-            PortSpec::input("se", Kind::Logic),
+            PortSpec::input("COM", Kind::Analog),
+            PortSpec::input("SE", Kind::Logic),
         ])
         .collect()
 }
@@ -186,9 +183,10 @@ struct State {
     noise: Noise,
 }
 
-/// The converter.
+/// The converter, `adc0838`, as a host reads it by type
+/// (`Board::peripheral::<Adc0838>`).
 #[derive(Debug)]
-struct Adc0838 {
+pub struct Adc0838 {
     /// Its parameters.
     configuration: Configuration,
     /// Its state.
@@ -196,6 +194,39 @@ struct Adc0838 {
 }
 
 impl Adc0838 {
+    /// `vref_volts`' default: VCC's typical 5 V (SNAS531B, Reference
+    /// Considerations).
+    pub const VREF_VOLTS: f64 = 5.0;
+    /// `noise_volts`' default: none.
+    pub const NOISE_VOLTS: f64 = 0.0;
+
+    /// The reference, in volts: the span of the 256 codes.
+    #[must_use]
+    pub const fn vref_volts(&self) -> f64 {
+        self.configuration.vref_volts
+    }
+
+    /// The input noise's standard deviation, in volts; 0 for none.
+    #[must_use]
+    pub const fn noise_volts(&self) -> f64 {
+        self.configuration.noise_volts
+    }
+
+    /// The result of the frame's conversion, while DO shifts it out.
+    #[must_use]
+    pub const fn result(&self) -> Option<u8> {
+        match self.state.phase {
+            Phase::Output { result, .. } => Some(result),
+            Phase::Idle | Phase::Addressing { .. } => None,
+        }
+    }
+
+    /// /SE's level: high holds D0 on DO.
+    #[must_use]
+    pub const fn shift_enable(&self) -> bool {
+        self.state.shift_enable
+    }
+
     /// The converter with reference `vref_volts`, input noise of
     /// standard deviation `noise_volts`, and its noise from `seed`.
     fn new(vref_volts: f64, noise_volts: f64, seed: u64) -> Self {
@@ -224,13 +255,13 @@ impl Adc0838 {
         };
         let vref_volts = parameter(
             "vref_volts",
-            DEFAULT_VREF_VOLTS,
+            Self::VREF_VOLTS,
             |volts| volts.is_finite() && volts > 0.0,
             "not a positive voltage",
         )?;
         let noise_volts = parameter(
             "noise_volts",
-            0.0,
+            Self::NOISE_VOLTS,
             |volts| volts.is_finite() && volts >= 0.0,
             "not a voltage of zero or more",
         )?;
@@ -361,7 +392,7 @@ impl Peripheral for Adc0838 {
 
     /// CS high clears its registers; CS low starts a frame waiting for
     /// the start bit (SNAS531B, THE DIGITAL INTERFACE steps 1 and 9).
-    fn select(&mut self, _: usize, _: bool, _: &mut Drive<'_>) {
+    fn set_selected(&mut self, _: usize, _: bool, _: &mut Drive<'_>) {
         self.state.phase = Phase::Idle;
     }
 
@@ -426,16 +457,17 @@ mod tests {
     use mc683xx_board::peripheral::Drive;
 
     use crate::SYSTEM_CLOCK;
+    use mc683xx_board::Environment;
     use mc683xx_board::peripheral::Peripheral;
     use mc683xx_board::peripheral::Transfer;
     use mc683xx_board::registry::Context;
-    use mc683xx_board::registry::Environment;
     use mc683xx_board::registry::ParameterError;
     use mc683xx_board::registry::Parameters;
     use mc683xx_board::signal::Signal;
+    use mc683xx_board::time::Moment;
     use mc683xx_board::time::Time;
-    use mc683xx_cpu32::cpu::state::StateError;
-    use mc683xx_cpu32::cpu::state::encode;
+    use mc683xx_cpu32::state::StateError;
+    use mc683xx_cpu32::state::encode;
 
     use super::Adc0838;
     use super::CHANNELS;
@@ -481,6 +513,7 @@ mod tests {
         let inspection = adc.inspect();
         assert_eq!(inspection.get("phase").cloned(), text("output"));
         assert_eq!(inspection.get("result"), Some(&Value::Integer(0x80)));
+        assert_eq!(adc.result(), Some(0x80));
         assert_eq!(inspection.get("do"), Some(&Value::Boolean(true)), "D7");
         assert_eq!(inspection.get("vref"), Some(&Value::Real(5.0)));
     }
@@ -505,14 +538,15 @@ mod tests {
     /// `frame` in SPI mode `mode`.
     fn frame_in(mode: u8, adc: &mut Adc0838, inputs: Inputs, transfers: &[(u16, u8)]) -> Vec<u16> {
         let sampler = move |port: usize, _: Time| inputs.get(port).copied().flatten();
-        let mut drive = Drive::with_sampler(Time::from_picos(0), SYSTEM_CLOCK, &sampler);
-        adc.select(0, true, &mut drive);
+        let mut drive =
+            Drive::with_sampler(Moment::new(Time::from_picos(0), SYSTEM_CLOCK), &sampler);
+        adc.set_selected(0, true, &mut drive);
         let replies = transfers
             .iter()
             .enumerate()
             .map(|(index, &(out, bits))| adc.transfer(transfer(mode, index, out, bits), &mut drive))
             .collect();
-        adc.select(0, false, &mut drive);
+        adc.set_selected(0, false, &mut drive);
         assert!(drive.finish().driven.is_empty(), "it drives nothing");
         replies
     }
@@ -687,11 +721,12 @@ mod tests {
         let mut inputs: Inputs = [None; CHANNELS + 1];
         inputs[1] = Some(code_volts(0b1010_0101));
         let mut adc = adc();
-        let mut drive = Drive::new(Time::from_picos(0), SYSTEM_CLOCK);
+        let mut drive = Drive::new(Moment::new(Time::from_picos(0), SYSTEM_CLOCK));
         adc.input(SHIFT_ENABLE, Signal::Level(true), &mut drive);
         let sampler = move |port: usize, _: Time| inputs.get(port).copied().flatten();
-        let mut drive = Drive::with_sampler(Time::from_picos(0), SYSTEM_CLOCK, &sampler);
-        adc.select(0, true, &mut drive);
+        let mut drive =
+            Drive::with_sampler(Moment::new(Time::from_picos(0), SYSTEM_CLOCK), &sampler);
+        adc.set_selected(0, true, &mut drive);
         // the start bit, channel 1, the leading zero, MSB first
         let first = adc.transfer(transfer(mode, 0, 0b1_1100 << 9, 14), &mut drive);
         assert_eq!(first, 0b1_1111 << 9 | 0b1010_0101);
@@ -768,7 +803,7 @@ mod tests {
     /// then eight more: the replies.
     fn rest(adc: &mut Adc0838, inputs: Inputs, drive: &mut Drive<'_>) -> (u16, Vec<u16>) {
         let tail = adc.transfer(transfer(3, 1, 0, 16), drive);
-        adc.select(0, false, drive);
+        adc.set_selected(0, false, drive);
         let next = (0..8)
             .flat_map(|_| frame(adc, inputs, &[(command(0b1001), 16)]))
             .collect();
@@ -781,16 +816,18 @@ mod tests {
         inputs[2] = Some(1.7);
         let sampler = move |port: usize, _: Time| inputs.get(port).copied().flatten();
         let mut first = built("noise_volts = 0.05", 3).unwrap();
-        let mut drive = Drive::with_sampler(Time::from_picos(0), SYSTEM_CLOCK, &sampler);
+        let mut drive =
+            Drive::with_sampler(Moment::new(Time::from_picos(0), SYSTEM_CLOCK), &sampler);
         for _ in 0..5 {
             frame(&mut first, inputs, &[(command(0b1001), 16)]);
         }
-        first.select(0, true, &mut drive);
+        first.set_selected(0, true, &mut drive);
         first.transfer(transfer(3, 0, 0b1_1001 << 3, 8), &mut drive);
         let snapshot = first.save().unwrap();
         let mut second = built("noise_volts = 0.05", 99).unwrap();
         second.restore(&snapshot).unwrap();
-        let mut drive_second = Drive::with_sampler(Time::from_picos(0), SYSTEM_CLOCK, &sampler);
+        let mut drive_second =
+            Drive::with_sampler(Moment::new(Time::from_picos(0), SYSTEM_CLOCK), &sampler);
         assert_eq!(
             rest(&mut first, inputs, &mut drive),
             rest(&mut second, inputs, &mut drive_second)

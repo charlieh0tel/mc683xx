@@ -1,8 +1,8 @@
-use mc683xx_cpu32::bus::PortSize;
+use mc683xx_cpu32::PortSize;
 use mc683xx_cpu32::interrupt::IrqPin;
+use mc683xx_modules::chip_select::Termination;
 use mc683xx_modules::peripheral::BusDecode;
-use mc683xx_modules::sim::chip_selects::Termination;
-use mc683xx_target::address::Address;
+use mc683xx_target::Address;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -11,26 +11,27 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::process;
 
-use mc683xx_mc68331::chip::Mc68331;
+use mc683xx_mc68331::Mc68331;
 use mc683xx_modules::chip_select::ChipSelect;
 use mc683xx_modules::chip_select::Number;
 use mc683xx_modules::sim::ResetCause;
-use mc683xx_modules::sim::reset::ResetScope;
+use mc683xx_modules::sim::ResetScope;
 
 use super::Description;
+use super::EditError;
+use super::LoadError;
 use super::Options;
+use super::ParseSettingError;
 use super::Setting;
+use super::SyntaxError;
 use super::Target;
 use crate::board::Board;
 use crate::builtin::Fixed;
 use crate::endpoint::Endpoint;
-use crate::error::EditError;
-use crate::error::LoadError;
-use crate::error::ParseSettingError;
+use crate::environment::Environment;
 use crate::peripheral::Lane;
 use crate::peripheral::Role;
 use crate::registry::Constructed;
-use crate::registry::Environment;
 use crate::registry::ParameterValue;
 use crate::registry::PortSpec;
 use crate::registry::Registry;
@@ -86,7 +87,27 @@ fn error(extra: &str) -> String {
 
 /// CS`number`.
 fn cs(number: u8) -> ChipSelect {
-    ChipSelect::Numbered(Number::new(number).unwrap())
+    ChipSelect::Numbered(Number::try_from(number).unwrap())
+}
+
+#[test]
+fn a_nets_sink_may_be_one_endpoint_as_its_driver_may() {
+    let net = |to: &str| {
+        parse(&with(&format!(
+            "[[peripheral]]\nname = \"pps\"\ntype = \"divider\"\n\
+             [[net]]\nname = \"one-pps\"\ntype = \"edge\"\n\
+             from = \"pps.out\"\nto = {to}\n"
+        )))
+        .unwrap()
+        .nets
+        .remove(0)
+        .to
+    };
+    assert_eq!(
+        net("\"chip.PGP0\""),
+        vec![Endpoint::Chip("PGP0".to_owned())]
+    );
+    assert_eq!(net("\"chip.PGP0\""), net("[\"chip.PGP0\"]"));
 }
 
 #[test]
@@ -251,7 +272,7 @@ fn a_run_sets_parameters_over_the_files() {
     options.set("z.value=1".parse().unwrap());
     assert!(matches!(
         Description::parse(text, Path::new("."), &options),
-        Err(LoadError::Peripheral(peripheral)) if peripheral == "z"
+        Err(LoadError::ParametersFor(peripheral)) if peripheral == "z"
     ));
     let setting: Setting = "d.value=0x10".parse().unwrap();
     assert_eq!(setting, Setting::new("d", "value", 0x10));
@@ -277,6 +298,10 @@ fn a_run_sets_parameters_over_the_files() {
             Err(ParseSettingError(setting)) if setting == malformed
         ));
     }
+    assert_eq!(
+        "d.value".parse::<Setting>().unwrap_err().to_string(),
+        "no setting \"d.value\": give PERIPHERAL.KEY=VALUE"
+    );
 }
 
 #[test]
@@ -463,30 +488,22 @@ fn removing_a_peripheral_names_the_nets_that_went_an_external_end_s_among_them()
 }
 
 #[test]
-fn a_lane_role_is_a_lane() {
-    let description = parse(&format!(
-        "{BASE}{}",
-        r#"
-[[peripheral]]
-name = "upper"
-type = "fixed"
-attach = [{ select = "CS2", role = "upper" }]
-
-[[peripheral]]
-name = "lower"
-type = "fixed"
-attach = [{ select = "CS2", lane = "lower" }]
-"#
-    ))
-    .unwrap();
+fn a_lane_is_not_a_role() {
+    let peripheral = |attachment: &str| {
+        parse(&format!(
+            "{BASE}[[peripheral]]\nname = \"latch\"\ntype = \"fixed\"\nattach = [{attachment}]\n"
+        ))
+    };
+    let description = peripheral(r#"{ select = "CS2", lane = "upper" }"#).unwrap();
     let upper = &description.peripherals[0].attachments[0];
     assert_eq!((upper.role, upper.lane), (Role::ReadWrite, Lane::Upper));
+    assert!(peripheral(r#"{ select = "CS2", role = "upper" }"#).is_err());
 }
 
 #[test]
 fn versions_other_than_one_are_refused() {
     assert!(matches!(parse("version = 2"), Err(LoadError::Version(_))));
-    assert!(matches!(parse("[chip]"), Err(LoadError::Version(_))));
+    assert!(matches!(parse("[chip]"), Err(LoadError::NoVersion)));
     assert!(matches!(
         parse("version = 2\nfuture = 1"),
         Err(LoadError::Version(_))
@@ -675,6 +692,14 @@ fn every_mistake_names_what_is_wrong() {
             "already on net a",
         ),
         (
+            "[[net]]\nname = \"a\"\ntype = \"logic\"\nfrom = \"external.a\"\nto = [\"chip.PAI\"]\n[[net]]\nname = \"b\"\ntype = \"logic\"\nfrom = \"external.b\"\nto = [\"chip.pai\"]\n",
+            "chip.PAI is already on net a",
+        ),
+        (
+            "[[net]]\nname = \"a\"\ntype = \"logic\"\nfrom = \"chip.pe0\"\nto = [\"external.a\"]\n[[net]]\nname = \"b\"\ntype = \"logic\"\nfrom = \"chip.PE0\"\nto = [\"external.b\"]\n",
+            "chip.PE0 is already on net a",
+        ),
+        (
             "[[unconnected]]\nselect = \"CS0\"\n",
             "CS0: unconnected and ram",
         ),
@@ -716,7 +741,7 @@ attach = [{ select = "CS4", role = "write", lane = "lower" }]
 fn a_ports_lanes_state_one_width() {
     let lanes = |upper: &str, lower: &str, roles: (&str, &str)| {
         format!(
-            "{BASE}[[peripheral]]\nname = \"high\"\ntype = \"fixed\"\n{upper}attach = [{{ select = \"CS4\", role = \"{}\" }}]\n\n[[peripheral]]\nname = \"low\"\ntype = \"fixed\"\n{lower}attach = [{{ select = \"CS4\", role = \"{}\" }}]\n",
+            "{BASE}[[peripheral]]\nname = \"high\"\ntype = \"fixed\"\n{upper}attach = [{{ select = \"CS4\", {} }}]\n\n[[peripheral]]\nname = \"low\"\ntype = \"fixed\"\n{lower}attach = [{{ select = \"CS4\", {} }}]\n",
             roles.0, roles.1
         )
     };
@@ -724,7 +749,8 @@ fn a_ports_lanes_state_one_width() {
     let dsack1 = "dsack = \"DSACK1\"\n";
     let both = "dsack = \"both\"\n";
     let open = "dsack = \"open\"\n";
-    let message = parse(&lanes(dsack1, dsack0, ("upper", "lower")))
+    let halves = (r#"lane = "upper""#, r#"lane = "lower""#);
+    let message = parse(&lanes(dsack1, dsack0, halves))
         .unwrap_err()
         .to_string();
     assert_eq!(
@@ -732,10 +758,17 @@ fn a_ports_lanes_state_one_width() {
         "CS4: high and low share its lanes but their DSACK pins give different ports"
     );
     for (upper, lower) in [(dsack1, both), (dsack1, open), (open, dsack0), ("", dsack0)] {
-        assert!(parse(&lanes(upper, lower, ("upper", "lower"))).is_ok());
+        assert!(parse(&lanes(upper, lower, halves)).is_ok());
     }
     // a read and a write peripheral may answer with different pins
-    assert!(parse(&lanes(dsack1, dsack0, ("read", "write"))).is_ok());
+    assert!(
+        parse(&lanes(
+            dsack1,
+            dsack0,
+            (r#"role = "read""#, r#"role = "write""#)
+        ))
+        .is_ok()
+    );
 }
 
 #[test]
@@ -914,7 +947,7 @@ fn a_peripheral_on_no_select_takes_a_window_or_an_acknowledge() {
     assert_eq!(io.attachments[0].role, Role::Read);
     assert_eq!(
         io.attachments[1].target,
-        Target::Bus(BusDecode::Acknowledge(IrqPin::new(4).unwrap()))
+        Target::Bus(BusDecode::Acknowledge(IrqPin::try_from(4).unwrap()))
     );
     assert_eq!(io.attachments[1].role, Role::Iack, "an acknowledge's role");
     let peripheral = |dsack: &str, attach: &str| {
@@ -939,6 +972,19 @@ fn a_peripheral_on_no_select_takes_a_window_or_an_acknowledge() {
             "io: attachment 0: its window must be inside ADDR[23:0] and not empty",
         ),
         (
+            // past 32 bits: the attachment's error, as a memory's base
+            peripheral(dsack, "{ base = 0x100000000, size = 0x100 }"),
+            "io: attachment 0: its window must be inside ADDR[23:0] and not empty",
+        ),
+        (
+            peripheral(dsack, "{ base = 0xffffffffffffffff, size = 0x100 }"),
+            "io: attachment 0: its window must be inside ADDR[23:0] and not empty",
+        ),
+        (
+            peripheral("", "{ select = \"CS1\", offset = 0x100000000 }"),
+            "io: attachment 0: its offset must fit 32 bits",
+        ),
+        (
             peripheral(dsack, "{ iack = 0 }"),
             "io: attachment 0: iack is a level, 1 to 7",
         ),
@@ -954,4 +1000,19 @@ fn a_peripheral_on_no_select_takes_a_window_or_an_acknowledge() {
     for (extra, expected) in cases {
         assert_eq!(error(&extra), expected, "{extra}");
     }
+}
+
+/// The most a [`LoadError`] may take, in bytes: its size before
+/// [`SyntaxError`] held a place, well under clippy's
+/// `result_large_err` limit (128) for a host's error that holds one.
+const LOAD_ERROR_BOUND: usize = 88;
+
+#[test]
+fn a_load_error_stays_small() {
+    assert_eq!(size_of::<SyntaxError>(), size_of::<usize>(), "boxed");
+    assert!(
+        size_of::<LoadError>() <= LOAD_ERROR_BOUND,
+        "LoadError is {} bytes",
+        size_of::<LoadError>()
+    );
 }
