@@ -3225,10 +3225,82 @@ attach = [{ select = "CSBOOT" }]
     stop.request();
     let until = Time::from_picos(1_000_000_000);
     assert_eq!(board.run_until(until).unwrap().stop, Stop::Requested);
-    assert!(board.now() < until);
+    assert_eq!(board.now(), Time::ZERO, "at once");
+    assert_eq!(board.chip().instructions(), 0);
     drop(board);
     // Once the board is gone, a request does nothing.
     stop.request();
+}
+
+#[test]
+fn a_stop_asked_where_a_hook_stops_the_board_s_run_stays_pending() {
+    let rom = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+"#;
+    let mut board = board("stop-with-hook", rom, &[NOP; 16]);
+    let stop = board.stop_request();
+    let at = Address(START + 2);
+    let id = board.cpu_control().add_code_hook(at..=at, move |_| {
+        stop.request();
+        ControlFlow::Break(())
+    });
+    let until = Time::from_picos(1_000_000_000);
+    assert_eq!(board.run_until(until).unwrap().stop, Stop::Hook(id));
+    board.cpu_control().remove_hook(id);
+    let (before, now) = (board.chip().instructions(), board.now());
+    assert_eq!(board.run_until(until).unwrap().stop, Stop::Requested);
+    assert_eq!(
+        (board.chip().instructions(), board.now()),
+        (before, now),
+        "at once"
+    );
+    let now = board.now();
+    assert_eq!(board.run_until(until).unwrap().stop, Stop::Budget);
+    assert!(board.now() > now);
+}
+
+#[test]
+fn a_transient_stop_where_a_hook_stops_the_run_is_withdrawn_unless_the_host_asked() {
+    let rom = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+"#;
+    let until = Time::from_picos(1_000_000_000);
+    for host_too in [false, true] {
+        let mut board = board("transient-stop", rom, &[NOP; 16]);
+        let stop = board.stop_request();
+        let asking = stop.clone();
+        let at = Address(START + 2);
+        let id = board.cpu_control().add_code_hook(at..=at, move |_| {
+            asking.request_transient();
+            if host_too {
+                asking.request();
+            }
+            ControlFlow::Break(())
+        });
+        assert_eq!(board.run_until(until).unwrap().stop, Stop::Hook(id));
+        board.cpu_control().remove_hook(id);
+        stop.withdraw_transient();
+        let expected = if host_too {
+            Stop::Requested
+        } else {
+            Stop::Budget
+        };
+        assert_eq!(board.run_until(until).unwrap().stop, expected, "{host_too}");
+    }
 }
 
 /// A latch on a select: Q0 follows bit 0 of each byte written.

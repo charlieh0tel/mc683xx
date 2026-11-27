@@ -337,6 +337,23 @@ fn read_watchpoints_see_reads() {
 }
 
 #[test]
+fn a_stop_pending_ends_a_step_or_a_continue_before_any_instruction() {
+    let mut machine = machine();
+    let stop = machine.stop_request();
+    stop.request();
+    let (ending, replies) = session(&mut machine, vec![packet("s"), packet("D")]);
+    ending.unwrap();
+    assert_eq!(replies[0], "S02");
+    assert_eq!(machine.cpu.instructions(), 0);
+    assert!(!stop.pending());
+    stop.request();
+    let (ending, replies) = session(&mut machine, vec![packet("c"), packet("s"), packet("D")]);
+    ending.unwrap();
+    assert_eq!(replies[..2], ["S02", "S05"]);
+    assert_eq!(machine.cpu.instructions(), 1);
+}
+
+#[test]
 fn ctrl_c_interrupts_a_run() {
     let mut machine = machine();
     let (ending, replies) = session(

@@ -11,6 +11,17 @@ use std::rc::Rc;
 /// ([`Stop::Requested`](crate::cpu::Stop::Requested)).  Clones share
 /// one request, which the stop clears.  The bare machine and the chip
 /// each give one.
+///
+/// Only a run that ends [`Stop::Requested`](crate::cpu::Stop::Requested)
+/// takes the request, on the bare machine and the chip alike.  One the
+/// run does not end for stays pending: one made
+/// between runs, or one made during a run that ends for another reason
+/// at the same boundary (a hook's stop, a fault, a halt, an exception
+/// stop, the run's own limits).  A request pending when a run starts
+/// ends it at once, before its first instruction, and takes the
+/// request.  A host reusing a machine checks
+/// [`pending`](Self::pending) or calls [`withdraw`](Self::withdraw)
+/// before its next run.
 #[derive(Debug, Clone, Default)]
 pub struct StopRequest(Rc<Cell<bool>>);
 
@@ -26,10 +37,37 @@ impl StopRequest {
         self.0.set(false);
     }
 
+    /// Whether a stop is asked for that no run has taken and the host
+    /// has not withdrawn, the request left as it is.
+    #[must_use]
+    pub fn pending(&self) -> bool {
+        self.0.get()
+    }
+
     /// Whether a stop is asked for, clearing the request: for the run
     /// loop that serves it ([`Bus::stop_requested`](crate::bus::Bus::stop_requested)).
     #[must_use = "a stop taken and dropped is lost"]
     pub fn take(&self) -> bool {
         self.0.replace(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StopRequest;
+
+    #[test]
+    fn pending_reads_the_request_and_take_clears_it() {
+        let request = StopRequest::default();
+        let clone = request.clone();
+        assert!(!request.pending());
+        clone.request();
+        assert!(request.pending());
+        assert!(request.pending(), "reading leaves it");
+        assert!(request.take());
+        assert!(!clone.pending());
+        clone.request();
+        request.withdraw();
+        assert!(!clone.pending());
     }
 }

@@ -578,6 +578,28 @@ impl BoardStopRequest {
             shared.request_stop();
         }
     }
+
+    /// Asks the run to stop, as [`request`](Self::request) does, for a
+    /// binding whose peripheral raised: it withdraws the request once
+    /// its call into the board returns
+    /// ([`withdraw_transient`](Self::withdraw_transient)), so only the
+    /// host's survives the run.  Not part of the semver API.
+    #[doc(hidden)]
+    pub fn request_transient(&self) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.request_transient_stop();
+        }
+    }
+
+    /// Withdraws a [`request_transient`](Self::request_transient) the
+    /// run did not take, leaving a [`request`](Self::request) pending.
+    /// Not part of the semver API.
+    #[doc(hidden)]
+    pub fn withdraw_transient(&self) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.withdraw_transient_stop();
+        }
+    }
 }
 
 impl fmt::Debug for BoardStopRequest {
@@ -686,6 +708,7 @@ impl<C: Chip> Board<C> {
             writes: RefCell::default(),
             diverted: Cell::new(false),
             stop: Cell::new(false),
+            transient_stop: Cell::new(false),
             fired: RefCell::default(),
             chip_stop: builder.stop_request(),
             requests: builder.requests(),
@@ -1035,7 +1058,11 @@ impl<C: Chip> Board<C> {
                 _ => {
                     self.catch_up(next);
                     self.settle()?;
-                    self.take_stop();
+                    // only a run that ends for the request takes it: one
+                    // asked where it ends for another reason stays pending
+                    if stop == Stop::Requested {
+                        self.take_stop();
+                    }
                     return Ok(self.outcome(stop));
                 }
             }
@@ -1051,12 +1078,15 @@ impl<C: Chip> Board<C> {
             .or_else(|| cpu.background().map(Stop::Background))
     }
 
-    /// Whether a peripheral or the host asked the run to stop; withdraws the
-    /// request, the chip's with it, so the next run does not stop for
-    /// it again.
+    /// Whether a peripheral or the host asked the run to stop, the
+    /// board's request or the chip's, taking what it serves: the run
+    /// ends [`Stop::Requested`] for either, so the next does not stop
+    /// for it again.
     fn take_stop(&self) -> bool {
-        self.shared.chip_stop.withdraw();
-        self.shared.stop.take()
+        let board = self.shared.stop.take();
+        let transient = self.shared.transient_stop.take();
+        let chip = self.shared.chip_stop.take();
+        board || transient || chip
     }
 
     /// Board time to the chip's, but no later than `next`, where the
@@ -2272,6 +2302,10 @@ impl<C: Chip> Board<C> {
     /// net it observes ([`Observer::restored`]), nets in file order, a
     /// net's observers in the order attached.
     ///
+    /// It withdraws a pending stop request, the board's and one a
+    /// [`BoardControl`] asked from another thread, since it replaces the
+    /// board's state.
+    ///
     /// On an error the board is unchanged, and no observer is told: its
     /// own state is checked first,
     /// then each peripheral's snapshot by restoring it, each peripheral
@@ -2338,6 +2372,8 @@ impl<C: Chip> Board<C> {
         self.shared.writes.borrow_mut().clear();
         self.shared.diverted.set(false);
         self.shared.stop.set(false);
+        self.shared.transient_stop.set(false);
+        self.control.withdraw_stop();
         self.leave_frames();
         self.tell_restored();
         Ok(())

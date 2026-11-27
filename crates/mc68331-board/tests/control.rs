@@ -145,6 +145,23 @@ fn a_direct_send_lands_after_inputs_queued_before_it() {
 }
 
 #[test]
+fn a_restore_withdraws_a_stop_asked_from_another_thread_or_the_board_s() {
+    let mut board = board();
+    let snapshot = board.save().unwrap();
+    let control = board.control();
+    let stop = board.stop_request();
+    thread::spawn(move || control.stop()).join().unwrap();
+    stop.request();
+    board.restore(&snapshot).unwrap();
+    assert!(!board.control().stopping());
+    let outcome = board.run_until(Time::from_picos(MILLISECOND)).unwrap();
+    assert_eq!(
+        (outcome.stop, outcome.now),
+        (Stop::Budget, Time::from_picos(MILLISECOND))
+    );
+}
+
+#[test]
 fn a_stop_asked_between_runs_stops_the_next_at_its_start_once() {
     let mut board = board();
     board.control().stop();

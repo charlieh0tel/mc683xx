@@ -4,6 +4,7 @@ use std::rc::Rc;
 
 use mc683xx_cpu32::Cycle;
 use mc683xx_cpu32::Frequency;
+use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::state::Layer;
 use mc683xx_cpu32::state::StateError;
 use mc683xx_cpu32::state::decode_layer;
@@ -282,4 +283,16 @@ fn a_refusing_peripheral_is_not_rolled_back_and_the_ones_before_it_are() {
     );
     assert_eq!(restores.get(), 1, "asked once, not to take its backup");
     assert_eq!(board.save().unwrap(), before);
+}
+
+#[test]
+fn a_chip_level_stop_request_ends_the_board_s_run() {
+    let mut board = divided();
+    let now = board.now();
+    board.shared.chip_stop.request();
+    let run = board.run_until(Time::from_picos(2_000_000)).unwrap();
+    assert_eq!((run.stop, run.now), (Stop::Requested, now), "at once");
+    assert!(!board.shared.chip_stop.pending(), "taken");
+    let run = board.run_until(Time::from_picos(2_000_000)).unwrap();
+    assert_eq!(run.stop, Stop::Budget);
 }

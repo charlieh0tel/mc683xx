@@ -19,6 +19,8 @@ use crate::bus::BusAccess;
 use crate::bus::LPSTOP_BROADCAST;
 use crate::bus::Read;
 use crate::cpu::Cpu;
+use crate::cpu::Stop;
+use crate::cpu::bare::End;
 use crate::cpu::bare::LimitedRun;
 use crate::cpu::bare::Limits;
 use crate::cpu::bare::TakeExceptionError;
@@ -268,8 +270,9 @@ impl Bus for FlatBus {
         self.stacking = stacking;
     }
 
+    // Left for `Machine::run_limited` to take once the run ends for it.
     fn stop_requested(&mut self) -> bool {
-        self.stop.take()
+        self.stop.pending()
     }
 }
 
@@ -737,13 +740,30 @@ impl Machine {
     /// The reset exception (CPU32RM 6.2.1): SSP and PC from the long
     /// words at zero; a fault reading them halts the CPU, as
     /// [`Cpu::reset`] says.
+    /// A stop left pending stays, and one a peripheral asks for in its
+    /// cycles is dropped, with no run to stop.
     pub fn reset(&mut self) {
-        self.cpu.reset(&mut self.bus, self.now);
+        self.keeping_stop(|machine| machine.cpu.reset(&mut machine.bus, machine.now));
+    }
+
+    /// `call`, which runs no instructions, the stop request left as it
+    /// was: one asked for in its cycles is dropped, one left from before
+    /// kept for the next run.
+    fn keeping_stop<R>(&mut self, call: impl FnOnce(&mut Self) -> R) -> R {
+        let asked = self.bus.stop.pending();
+        let result = call(self);
+        self.bus.stop.withdraw();
+        if asked {
+            self.bus.stop.request();
+        }
+        result
     }
 
     /// Takes the exception of `vector` now, the interrupt mask set to
     /// `level` if given, whatever it was ([`Cpu::take_exception`]): the
-    /// frame stacked, PC at the handler, the clock unmoved.
+    /// frame stacked, PC at the handler, the clock unmoved.  A stop left
+    /// pending stays, and one a peripheral asks for in its cycles is
+    /// dropped, as [`reset`](Self::reset) leaves them.
     ///
     /// # Errors
     ///
@@ -753,17 +773,46 @@ impl Machine {
         vector: Vector,
         level: Option<InterruptLevel>,
     ) -> Result<(), TakeExceptionError> {
-        self.cpu
-            .take_exception(&mut self.bus, self.now, vector, level)
+        self.keeping_stop(|machine| {
+            machine
+                .cpu
+                .take_exception(&mut machine.bus, machine.now, vector, level)
+        })
     }
 
-    /// Runs until `limits` or a stop ([`Cpu::run_limited`]).
+    /// Runs until `limits` or a stop ([`Cpu::run_limited`]).  Only a run
+    /// that ends [`Stop::Requested`] takes the stop request
+    /// ([`stop_request`](Self::stop_request)): one asked where the run
+    /// ends for another reason (a hook's stop, a fault or an exception
+    /// stop in the instruction that asked, its own limits) stays
+    /// pending.  A request pending when a run starts ends it at once,
+    /// before its first instruction, and takes the request: no
+    /// instruction runs and no time passes.
     pub fn run_limited(&mut self, limits: Limits) -> LimitedRun {
+        if self.bus.stop.pending() {
+            return self.stop_left();
+        }
         let run = self
             .cpu
             .run_limited(&mut self.bus, &mut self.requests, self.now, limits);
         self.now += run.cycles;
+        if run.end == End::Stop(Stop::Requested) {
+            self.bus.stop.withdraw();
+        }
         run
+    }
+
+    /// A run that a stop request left pending ends at once: the request
+    /// taken, nothing run.
+    #[cold]
+    #[inline(never)]
+    fn stop_left(&mut self) -> LimitedRun {
+        self.bus.stop.withdraw();
+        LimitedRun {
+            cycles: Cycles::ZERO,
+            end: End::Stop(Stop::Requested),
+            steps: 0,
+        }
     }
 
     /// The CPU's clock: the cycles the runs took.
@@ -798,7 +847,8 @@ impl Machine {
     /// order.  On an error it is unchanged: each peripheral's snapshot is
     /// checked by restoring it, each peripheral saved first and the ones
     /// restored put back if a later one or the core (restored last)
-    /// refuses ([`restore_each`]).
+    /// refuses ([`restore_each`]).  It withdraws a pending stop request,
+    /// as the state it replaces is gone.
     ///
     /// # Errors
     ///
@@ -826,6 +876,7 @@ impl Machine {
         })?;
         self.now = state.now;
         self.requests = state.requests;
+        self.bus.stop.withdraw();
         Ok(())
     }
 }

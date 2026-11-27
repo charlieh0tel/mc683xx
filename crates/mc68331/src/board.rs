@@ -490,6 +490,21 @@ impl Board {
         mem::take(&mut self.stop_taken) | self.stop_request.take()
     }
 
+    /// Whether the host asked the run to stop, taken by the core or not
+    /// yet, the request left as it is.
+    pub(crate) fn stop_pending(&self) -> bool {
+        self.stop_taken || self.stop_request.pending()
+    }
+
+    /// Leaves a stop the core took pending for the next run, as the run
+    /// ends for another reason: only a run that ends
+    /// [`Stop::Requested`](mc683xx_cpu32::Stop::Requested) takes it.
+    pub(crate) fn keep_stop(&mut self) {
+        if mem::take(&mut self.stop_taken) {
+            self.stop_request.request();
+        }
+    }
+
     /// Brings everything to `now`, the SIM first.
     pub(crate) fn advance(&mut self, now: Cycle) {
         self.level_stale = true;

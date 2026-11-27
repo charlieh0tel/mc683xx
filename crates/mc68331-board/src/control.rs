@@ -199,6 +199,12 @@ impl BoardControl {
         &self.0.endpoints
     }
 
+    /// Withdraws a stop asked and not yet taken, as a restore does; the
+    /// inputs queued stay.
+    pub(crate) fn withdraw_stop(&self) {
+        self.state().stop = false;
+    }
+
     /// What waits for the run, taken, if anything does.
     pub(crate) fn take(&self) -> Option<Taken> {
         // a plain load first: nothing waits at almost every sync point

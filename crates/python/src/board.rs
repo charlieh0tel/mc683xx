@@ -959,8 +959,7 @@ impl PythonPeripheral {
             let method = match object.getattr_opt(name) {
                 Ok(method) => method?,
                 Err(error) => {
-                    self.pending.hold(error);
-                    drive.stop();
+                    self.pending.record(error);
                     return Some(Ok(undriven));
                 }
             };
@@ -1007,8 +1006,7 @@ impl PythonPeripheral {
                 if error.is_instance_of::<exceptions::BusError>(py) {
                     return Err(BusError);
                 }
-                self.pending.hold(error);
-                drive.stop();
+                self.pending.record(error);
                 Ok(undriven)
             }))
         })

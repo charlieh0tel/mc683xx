@@ -397,10 +397,213 @@ def test_a_true_hook_or_stop_ends_the_run():
     assert cpu.read_register("PC") == CODE + 4
 
 
-def test_a_stop_requested_between_runs_is_withdrawn():
+def test_pending_reads_a_stop_request_and_withdraw_clears_it():
+    cpu = machine(NOP, RTS)
+    stop = cpu.stop_request()
+    assert not stop.pending
+    stop.request()
+    assert stop.pending and cpu.stop_request().pending
+    assert stop.pending, "reading leaves it"
+    stop.withdraw()
+    assert not stop.pending
+
+
+def ends_at_once(cpu: mc683xx.Machine, **limits) -> None:
+    """The next run ends `Stop.Requested()` at once, before its first
+    instruction, no time passing, the request taken."""
+    before = (cpu.instructions, cpu.read_register("PC"))
+    run = cpu.run_limited(**limits)
+    assert run.end == mc683xx.End.Stop(mc683xx.Stop.Requested()), run.end
+    assert run.cycles == 0
+    assert (cpu.instructions, cpu.read_register("PC")) == before
+    assert not cpu.stop_request().pending
+
+
+def asking_once(cpu: mc683xx.Machine, answer=None):
+    """A callable that asks the run to stop the first time it is called,
+    and returns `answer`."""
+    stop = cpu.stop_request()
+    asked: list[bool] = []
+
+    def ask(*_) -> object:
+        if not asked:
+            asked.append(True)
+            stop.request()
+        return answer
+
+    return ask
+
+
+def test_a_stop_left_between_runs_ends_the_next_at_once():
     cpu = machine(NOP, NOP, RTS)
     cpu.stop_request().request()
+    ends_at_once(cpu, reach=RETURN)
     assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+
+
+def test_a_stop_asked_where_a_hook_stops_the_run_stays_pending():
+    cpu = machine(NOP, NOP, NOP, RTS)
+    hook = cpu.add_code_hook(asking_once(cpu, True), CODE + 2, CODE + 2)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Stop(mc683xx.Stop.Hook(hook))
+    assert cpu.stop_request().pending
+    ends_at_once(cpu, reach=RETURN)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+
+
+def test_a_stop_asked_where_an_in_run_hook_stops_the_run_stays_pending():
+    cpu = machine(MOVE_WORD_A0_TO_D0, NOP, NOP, RTS)
+    cpu.write_register("A0", 0x2000)
+    hook = cpu.add_pre_read_hook(asking_once(cpu, True), 0x2000, 0x2001)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Stop(mc683xx.Stop.Hook(hook))
+    assert cpu.stop_request().pending
+    assert cpu.remove_hook(hook)
+    ends_at_once(cpu, reach=RETURN)
+
+
+def test_a_stop_asked_in_an_instruction_that_faults_stays_pending():
+    cpu = machine(MOVE_LONG_A0_TO_A1, NOP, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("A1", RETURN)
+    cpu.set_stop_on_fault(True)
+    cpu.add_pre_read_hook(asking_once(cpu), 0x2000, 0x2001)
+    assert isinstance(cpu.run_limited(reach=RETURN).end, mc683xx.End.Fault)
+    assert cpu.stop_request().pending
+    ends_at_once(cpu, reach=RETURN)
+
+
+def test_a_stop_asked_in_an_instruction_an_exception_stop_ends_stays_pending():
+    cpu = machine(CHK_WORD_A0_D0, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.write_register("D0", 5)
+    cpu.set_stop_on_exception([CHK])
+    cpu.add_pre_read_hook(asking_once(cpu), 0x2000, 0x2001)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Exception(CHK, CODE)
+    assert cpu.stop_request().pending
+    ends_at_once(cpu)
+
+
+@pytest.mark.parametrize(
+    ("limits", "end"),
+    [
+        ({"reach": CODE + 2}, mc683xx.End.Reached()),
+        ({"instructions": 1}, mc683xx.End.Instructions()),
+    ],
+)
+def test_a_stop_asked_in_a_callable_where_the_run_s_limit_ends_it_stays_pending(limits, end):
+    cpu = machine(MOVE_WORD_D0_TO_A0, NOP, NOP, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.add_write_hook(asking_once(cpu), 0x2000, 0x2001)
+    assert cpu.run_limited(**limits).end == end
+    assert cpu.read_register("PC") == CODE + 2
+    assert cpu.stop_request().pending
+    ends_at_once(cpu, reach=RETURN)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+
+
+def test_a_stop_asked_in_a_callable_mid_run_still_ends_it_at_once():
+    cpu = machine(MOVE_WORD_D0_TO_A0, NOP, NOP, RTS)
+    cpu.write_register("A0", 0x2000)
+    cpu.add_write_hook(asking_once(cpu), 0x2000, 0x2001)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Stop(mc683xx.Stop.Requested())
+    assert cpu.read_register("PC") == CODE + 2
+    assert not cpu.stop_request().pending
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+
+
+class Raising:
+    """A peripheral whose cycles raise."""
+
+    def read(self, cycle):
+        raise KeyError("read")
+
+    def write(self, cycle, value):
+        raise KeyError("write")
+
+
+def test_the_binding_s_own_stops_leave_no_request_for_the_next_run():
+    # a hook's stop, an in-run hook's stop, an intercept answered
+    cpu = machine(MOVE_WORD_A0_TO_D0, trap(1), NOP, NOP, RTS)
+    cpu.write_register("A0", 0x2000)
+    code = cpu.add_code_hook(lambda instruction: True, CODE, CODE)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Stop(mc683xx.Stop.Hook(code))
+    assert cpu.remove_hook(code)
+    pre_read = stopping_pre_read(cpu)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Stop(mc683xx.Stop.Hook(pre_read))
+    assert cpu.remove_hook(pre_read)
+
+    def answer(intercepted: mc683xx.Intercepted) -> bool:
+        cpu.write_register("PC", intercepted.pc + 2)
+        return True
+
+    cpu.add_intercept_hook(answer, [TRAP_0 + 1])
+    assert cpu.run_limited(reach=CODE + 6).end == mc683xx.End.Reached()
+    assert not cpu.stop_request().pending
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+
+
+def faulting_on(cpu: mc683xx.Machine, peripheral: mc683xx.MappedPeripheral) -> None:
+    """MOVE.L (A0),(A1) at CODE: A0 on `peripheral`, A1 where nothing
+    is mapped, a fault stopping the run."""
+    cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 0xFF, peripheral)
+    cpu.write_register("A0", PERIPHERAL)
+    cpu.write_register("A1", RETURN)
+    cpu.set_stop_on_fault(True)
+
+
+def test_a_peripheral_s_exception_where_a_fault_ends_the_run_leaves_no_request():
+    cpu = machine(MOVE_LONG_A0_TO_A1, NOP, RTS)
+    faulting_on(cpu, Raising())
+    with pytest.raises(KeyError):
+        cpu.run_limited(reach=RETURN)
+    assert not cpu.stop_request().pending
+    cpu.write_register("PC", CODE + 2)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+
+
+def test_a_host_s_stop_asked_with_a_peripheral_s_exception_stays_pending():
+    cpu = machine(MOVE_LONG_A0_TO_A1, NOP, RTS)
+    stop = cpu.stop_request()
+
+    class AskingRaising(Raising):
+        def read(self, cycle):
+            stop.request()
+            raise KeyError("read")
+
+    faulting_on(cpu, AskingRaising())
+    with pytest.raises(KeyError):
+        cpu.run_limited(reach=RETURN)
+    assert stop.pending
+    cpu.write_register("PC", CODE + 2)
+    ends_at_once(cpu, reach=RETURN)
+
+
+def test_a_peripheral_s_exception_leaves_no_request_for_the_next_run():
+    cpu = machine(MOVE_WORD_A0_TO_D0, NOP, NOP, RTS)
+    cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 0xFF, Raising())
+    cpu.write_register("A0", PERIPHERAL)
+    with pytest.raises(KeyError):
+        cpu.run_limited(reach=RETURN)
+    assert not cpu.stop_request().pending
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+    # stacked on it: the host's exception raises
+    cpu = machine(NOP, NOP, RTS)
+    cpu.add_peripheral(PERIPHERAL, PERIPHERAL + 0xFF, Raising())
+    cpu.write_register("SSP", PERIPHERAL + 0x80)
+    with pytest.raises(KeyError):
+        cpu.take_exception(TRAP_0)
+    assert not cpu.stop_request().pending
+    cpu.write_register("PC", CODE)
+    cpu.write_register("SSP", STACK - 4)
+    assert cpu.run_limited(reach=RETURN).end == mc683xx.End.Reached()
+
+
+def test_a_host_exception_and_a_reset_keep_a_stop_left_pending():
+    cpu = machine(NOP, NOP, RTS)
+    cpu.stop_request().request()
+    cpu.take_exception(TRAP_0)
+    assert cpu.stop_request().pending
+    cpu.reset()
+    assert cpu.stop_request().pending
 
 
 def test_lpstop_stops_the_bare_cpu():

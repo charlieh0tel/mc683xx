@@ -312,13 +312,25 @@ the run stops once the instruction whose cycle asked ends, between
 quanta if `advance` asked, or at a reset within the run (the
 watchdog's, say) if `reset` asked, before the first instruction after
 it, with `Stop::Requested`.  Any of a peripheral's calls may ask, in
-the run's thread.  The request is
-taken by the stop.  One made between runs (in a `reset` that
-`Mc68331::reset` calls) stays, and ends the next run after its first
-instruction; a host whose own run loop stopped for the same
-reason before the chip ran withdraws it (`withdraw`), so the next run
-does not stop for it.  One made in a host bus cycle (Host bus cycles)
+the run's thread.  One made in a host bus cycle (Host bus cycles)
 is dropped, with no run to stop.
+
+One rule holds on the chip, a board and the bare machine
+(`flat::Machine`): only a run that ends `Stop::Requested` takes a
+request.  One the run does not end for stays pending: one made between
+runs (in a `reset` that `Mc68331::reset` calls, say), or one made
+during a run that ends for another reason at the same boundary (a
+hook's stop, a fault, a halt, an exception stop, the run's own limits).
+A request pending when a run starts ends it at once, before its first
+instruction, and takes the request: the run ends `Stop::Requested`
+with no instruction run and no time passed.  A host reusing a machine
+checks `pending`, which reads the request without taking it, or calls
+`withdraw()` before its next run.  `restore` withdraws a pending
+request, including one asked from another thread
+(`BoardControl::stop`), since it replaces the machine's state.  The
+bare machine's `take_exception` and `reset`, which run nothing, leave
+a pending request as it was and drop one a peripheral asks for in
+their cycles.
 
 ```rust
 use mc683xx_cpu32::BusError;

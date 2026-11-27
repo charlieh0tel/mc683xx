@@ -771,6 +771,56 @@ def test_a_peripheral_s_failed_question_stops_the_run_at_once(tmp_path: Path) ->
     assert peripheral.calls - calls < 100
 
 
+class FailingInterrupt:
+    """A peripheral whose `interrupt_request` raises once, asking the
+    run to stop through `stop` first if it has one."""
+
+    PORTS: list[tuple[str, str, str]] = []
+
+    def __init__(self, **parameters: object) -> None:
+        self.stop: mc683xx.BoardStopRequest | None = None
+        self.raised = False
+
+    def interrupt_request(self) -> bool:
+        if self.raised:
+            return False
+        self.raised = True
+        if self.stop is not None:
+            self.stop.request()
+        raise KeyError("no interrupt")
+
+
+def interrupted_at_a_hook(tmp_path: Path, host_too: bool) -> mc683xx.Board:
+    """A board whose peripheral's `interrupt_request` raises where a
+    code hook stops the run, before the first instruction; the hook
+    removed."""
+    (tmp_path / "rom.bin").write_bytes(rom([]))
+    (tmp_path / "board.toml").write_text(FAILING_BOARD + "irq = 2\n")
+    board = mc683xx.Board(str(tmp_path / "board.toml"), types={"failing": FailingInterrupt})
+    peripheral = board.peripheral("failing")
+    assert isinstance(peripheral, FailingInterrupt)
+    if host_too:
+        peripheral.stop = board.stop_request()
+    hook = board.chip.add_code_hook(lambda instruction: True, START, START)
+    with pytest.raises(KeyError):
+        board.run_for(seconds=0.001)
+    assert peripheral.raised
+    assert board.chip.remove_hook(hook)
+    return board
+
+
+def test_a_peripheral_s_exception_where_a_hook_stops_the_run_leaves_no_stop(tmp_path: Path) -> None:
+    board = interrupted_at_a_hook(tmp_path, host_too=False)
+    assert board.run_for(seconds=0.0001).stop == mc683xx.Stop.Budget()
+
+
+def test_a_host_s_stop_asked_with_a_peripheral_s_exception_stays_pending(tmp_path: Path) -> None:
+    board = interrupted_at_a_hook(tmp_path, host_too=True)
+    now = board.now
+    run = board.run_for(seconds=0.0001)
+    assert (run.stop, board.now) == (mc683xx.Stop.Requested(), now)
+
+
 @pytest.mark.parametrize("seconds", [float("nan"), float("inf"), float("-inf"), -1e-6, 1e300, 2e7])
 def test_a_run_refuses_seconds_not_finite_negative_or_out_of_range(tmp_path: Path, seconds: float) -> None:
     (tmp_path / "rom.bin").write_bytes(rom([]))

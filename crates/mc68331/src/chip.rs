@@ -744,9 +744,6 @@ pub(crate) struct ChipRun {
     pub(crate) run: Run,
     /// Whether a limit ended it.
     pub(crate) limited: bool,
-    /// Whether the host asked it to stop in the instruction a hook, a
-    /// fault or a halt ended it at: the request taken with that stop.
-    pub(crate) asked: bool,
 }
 
 /// The chip.
@@ -777,11 +774,22 @@ impl Mc68331 {
     /// spends its budget as time passes for the SIM, the modules and
     /// the peripherals without the CPU, ending [`Stop::Halted`] unless a
     /// reset, the watchdog's say, restarts the CPU (MC68331UM 4.2.10;
-    /// [PLAN.md], A halted CPU).
+    /// [PLAN.md], A halted CPU).  A stop request pending when the run
+    /// starts ends it at once, before its first instruction, and takes
+    /// the request: no instruction runs and no time passes.
     ///
     /// [PLAN.md]: https://github.com/charlieh0tel/mc683xx/blob/main/PLAN.md
     pub fn run_for(&mut self, budget: Cycles) -> Run {
+        if self.take_stop_left() {
+            return Run::new(Cycles::ZERO, Stop::Requested);
+        }
         self.run(budget, None).run
+    }
+
+    /// Whether a stop request was left pending as a run starts, taking
+    /// it: the run ends at once, nothing run and no time passed.
+    pub(crate) fn take_stop_left(&mut self) -> bool {
+        self.board.stop_request.pending() && self.board.take_stop()
     }
 
     /// [`run_for`](Self::run_for), the CPU's quanta limited by `limits`
@@ -791,7 +799,6 @@ impl Mc68331 {
     pub(crate) fn run(&mut self, budget: Cycles, limits: Option<&mut Limits>) -> ChipRun {
         let mut limits = limits;
         let mut limited_end = false;
-        let mut asked = false;
         let start = self.now;
         let end = start + budget;
         let mut stop = Stop::Budget;
@@ -805,7 +812,7 @@ impl Mc68331 {
         while self.now < end {
             if let Some(cause) = self.board.sim.take_reset() {
                 let ends;
-                (stop, ends, asked) = self.reset_in_run(cause);
+                (stop, ends) = self.reset_in_run(cause);
                 if ends {
                     break;
                 }
@@ -875,7 +882,7 @@ impl Mc68331 {
             // it (one left is taken below)
             let synced = mem::take(&mut self.board.sync) | self.board.sync_request.get();
             stop = match run.stop {
-                Stop::Requested if !mem::take(&mut self.board.stop_taken) && synced => Stop::Budget,
+                Stop::Requested if !self.board.stop_taken && synced => Stop::Budget,
                 other => other,
             };
             if limited {
@@ -888,22 +895,34 @@ impl Mc68331 {
                     if halt == Halt::DoubleBusFault && self.board.sim.halt_monitor() {
                         // as the SIM's own resets
                         let ends;
-                        (stop, ends, asked) = self.reset_in_run(ResetCause::HaltMonitor);
+                        (stop, ends) = self.reset_in_run(ResetCause::HaltMonitor);
                         if ends {
                             break;
                         }
                     } else {
                         // the host sees the halt as it comes, and a stop
-                        // asked in the same instruction is taken with it
-                        asked = self.board.take_stop();
+                        // asked in the same instruction stays pending
+                        self.board.keep_stop();
                         break;
                     }
                 }
                 Stop::Budget | Stop::Stopped => {}
-                // a hook, a fault, a request: the host sees it, and a
-                // stop asked in the same instruction is taken with it
+                // an exception stop, which reports as a request: the host
+                // sees it, and its own request stays pending
+                Stop::Requested if self.cpu.ended_itself() => {
+                    self.board.keep_stop();
+                    break;
+                }
+                // a request: the host sees it, and a stop asked in the
+                // same instruction is taken with it
+                Stop::Requested => {
+                    self.board.take_stop();
+                    break;
+                }
+                // a hook, a fault: the host sees it, and a stop asked in
+                // the same instruction stays pending
                 _ => {
-                    asked = self.board.take_stop();
+                    self.board.keep_stop();
                     break;
                 }
             }
@@ -925,7 +944,6 @@ impl Mc68331 {
         ChipRun {
             run: Run::new(self.now - start, stop),
             limited: limited_end,
-            asked,
         }
     }
 
@@ -935,11 +953,10 @@ impl Mc68331 {
     /// reached asks for a sync, or it reaches a watched output.  A
     /// peripheral it reached that asks the run to stop ends it there,
     /// [`Stop::Requested`], before the first instruction after it, or,
-    /// if the reset halted the CPU, with the halt, the request taken
-    /// with it ([`ChipRun::asked`], the third).  The outputs, the sync
-    /// request and the clock are looked at whatever ends it, so the
-    /// next run starts from the reset's.
-    fn reset_in_run(&mut self, cause: ResetCause) -> (Stop, bool, bool) {
+    /// if the reset halted the CPU, with the halt, the request left
+    /// pending.  The outputs, the sync request and the clock are looked
+    /// at whatever ends it, so the next run starts from the reset's.
+    fn reset_in_run(&mut self, cause: ResetCause) -> (Stop, bool) {
         let frequency = self.board.sim.system_clock().frequency();
         self.reset_as(cause, false);
         let moved = self.board.outputs_moved() | self.board.output_stop.reset;
@@ -947,11 +964,17 @@ impl Mc68331 {
         let clock_moved =
             self.board.clock_stop && self.board.sim.system_clock().frequency() != frequency;
         let ends = clock_moved || synced || moved;
-        let asked = self.board.take_stop();
+        let asked = self.board.stop_pending();
         match self.cpu.idle() {
-            Some(idle) => (idle, ends || asked, asked),
-            None if asked => (Stop::Requested, true, false),
-            None => (Stop::Budget, ends, false),
+            Some(idle) => {
+                self.board.keep_stop();
+                (idle, ends || asked)
+            }
+            None if asked => {
+                self.board.take_stop();
+                (Stop::Requested, true)
+            }
+            None => (Stop::Budget, ends),
         }
     }
 

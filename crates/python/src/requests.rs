@@ -2,6 +2,7 @@
 //! way: Rust's `StopRequest`, as the bare `Machine` and the chip's
 //! `Builder` give it, and the chip's `SyncRequest` and `Diversion`.
 
+use std::cell::Cell;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -20,20 +21,73 @@ use crate::error::Error;
 /// `StopRequest`): `Machine.stop_request`'s or
 /// `Builder.stop_request`'s.  Clones share one request, which the stop
 /// clears.
+///
+/// The binding asks the same request to stop a run for a Python
+/// peripheral's exception, and drops its own once the call it was made
+/// in returns ([`settle`](Self::settle)), so only the host's survives
+/// between runs.
 #[pyclass(name = "StopRequest", module = "mc683xx", unsendable)]
 #[derive(Debug, Clone)]
-pub(crate) struct StopRequestView(pub(crate) StopRequest);
+pub(crate) struct StopRequestView {
+    /// The request the run takes.
+    request: StopRequest,
+    /// Whether the host asked it, through this handle.
+    host: Rc<Cell<bool>>,
+    /// Whether the binding asked it, in the call under way.
+    own: Rc<Cell<bool>>,
+}
+
+impl StopRequestView {
+    /// A handle on `request`, which nobody has asked yet.
+    pub(crate) fn new(request: StopRequest) -> Self {
+        Self {
+            request,
+            host: Rc::default(),
+            own: Rc::default(),
+        }
+    }
+
+    /// The binding asks the run to stop, for a peripheral's exception.
+    pub(crate) fn ask(&self) {
+        self.own.set(true);
+        self.request.request();
+    }
+
+    /// Once a call into the target returns: the binding's own request
+    /// withdrawn unless the host asked too, and the host's forgotten if
+    /// a run took it.
+    pub(crate) fn settle(&self) {
+        if !self.request.pending() {
+            self.host.set(false);
+        } else if !self.host.get() {
+            self.request.withdraw();
+        }
+        self.own.set(false);
+    }
+}
 
 #[pymethods]
 impl StopRequestView {
     /// Asks the run to stop (`Stop.Requested()`).
     fn request(&self) {
-        self.0.request();
+        self.host.set(true);
+        self.request.request();
     }
 
-    /// Withdraws a request the run has not taken.
+    /// Withdraws a request the run has not taken; the binding's own, for
+    /// a peripheral's exception in the call under way, stays.
     fn withdraw(&self) {
-        self.0.withdraw();
+        self.host.set(false);
+        if !self.own.get() {
+            self.request.withdraw();
+        }
+    }
+
+    /// Whether the host asked for a stop that no run has taken and it
+    /// has not withdrawn, the request left as it is.
+    #[getter]
+    fn pending(&self) -> bool {
+        self.host.get() && self.request.pending()
     }
 
     fn __repr__(&self) -> &'static str {

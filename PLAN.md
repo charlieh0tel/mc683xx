@@ -1049,7 +1049,9 @@ chip beside `Mc68331`.
   `run_limited(begin=, reach=, instructions=, cycles=)`,
   `stop_request()` (a `StopRequest`, Rust's `StopRequest`: a
   callable's request ends the run `Stop.Requested()` once the callables have
-  run, one left from before a run is withdrawn as it starts),
+  run, one no run took, made between runs or where the run ends for
+  another reason, stays pending, and ends the next run at once, as
+  every machine's does, decided 2026-11-26),
   `add_intercept_hook(callable, vectors)` (a `HookId`; the hooks
   covering a vector answer in the order installed, until one handles
   it, and none handling, it is taken natively), `set_stop_on_fault` and
@@ -1712,9 +1714,11 @@ hand.  The keys are in `docs/board-files.md`.
   run as a peripheral's `Drive::stop` does: for a peripheral that fails
   in a call with no `Drive` (the Python bindings' peripherals, in
   `next_event` or `interrupt_request`).  The loop looks for a request
-  before each quantum and after asking the peripherals' `next_event`, and
-  withdraws the chip's when it stops for one, so the next run does not
-  stop for it again.  `send` drives the nets the endpoint drives
+  before each quantum and after asking the peripherals' `next_event`,
+  its own or the chip's (one asked of the chip directly ends the board's
+  run too), and takes both when it stops for one, so the next run does
+  not stop for it again; a run that ends for another reason leaves both
+  pending.  `send` drives the nets the endpoint drives
   whose type carries the value, and fails (`SendError`) if there are
   none, so a typo or a value of the wrong type is not silently
   dropped; `take_received` likewise fails (`NoReceiver`) for an
@@ -2597,7 +2601,36 @@ Adversarial review (2026-11-01):
   a peripheral's `advance` asked, or at a reset the run takes (the
   watchdog's, the halt monitor's) if a peripheral's `reset` asked,
   before the first instruction after it.  The Python bindings use it: a peripheral's
-  exception stops the run there.
+  exception stops the run there.  The chip's and the bare machine's
+  bindings track who asked (`StopRequestView`: the host through its
+  handle, the binding for the exception) and, as each call into the
+  target returns (`Pending::check`), withdraw the binding's own unless
+  the host asked too, so the rule below keeps only a host's request.
+  The board's binding asks a transient stop
+  (`BoardStopRequest::request_transient`, hidden), which the board's
+  loop takes as it takes the others and the binding withdraws
+  (`withdraw_transient`) unless the board's own stop is asked too.  One rule on the chip, a board and
+  the bare machine (`flat::Machine`), decided 2026-11-26: only a run
+  that ends `Stop::Requested` takes a request.  One made where the run
+  ends for another reason at the same boundary (a hook's stop, a fault,
+  a halt, an exception stop, the run's own limits) stays pending, so
+  the host sees that end and the request both.  A request pending when
+  a run starts ends it at once, before its first instruction, and takes
+  the request (smartclock's review): a stop asked before the run began
+  means nothing runs, and as the end consumes the request, a host
+  looping on runs cannot livelock.  The check is once per run call, at
+  its start, not per instruction: `iterations` under
+  `perf stat -e instructions:u` counts the same as before the rule
+  (`core nop`, `chip ram_move idle`, `short chip`, `demo mandelbrot`).  The chip keeps the request its core took in the quantum
+  (`stop_taken`) and puts it back as the run ends otherwise, an
+  exception stop included, which its run reports as `Stop::Requested`
+  (r9) but tells from a request by the core's own end
+  (`Cpu::ended_itself`, hidden); the
+  board's loop takes its own only with `Stop::Requested`.  The bare
+  machine's `take_exception` and `reset` leave the request as it was:
+  they have no run to stop.  `restore` withdraws it on every machine,
+  a `BoardControl`'s stop from another thread included: the state it
+  belonged to is gone.
 - Cost when absent (`make bench`'s `core/*`, pinned to one
   performance core, before and after run in turn, on a loaded host
   whose results vary by up to 2x between runs): `nop` +6%,

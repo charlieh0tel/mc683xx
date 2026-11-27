@@ -78,6 +78,12 @@ pub(crate) struct Shared {
     pub(crate) diverted: Cell<bool>,
     /// Whether a peripheral asked the run to stop.
     pub(crate) stop: Cell<bool>,
+    /// Whether a stop was asked that its asker withdraws once its call
+    /// returns, unless another asked too: a binding's, for its
+    /// peripheral's exception ([`BoardStopRequest::request_transient`]).
+    ///
+    /// [`BoardStopRequest::request_transient`]: crate::board::BoardStopRequest::request_transient
+    pub(crate) transient_stop: Cell<bool>,
     /// The conditions that held since the board's run began, in order.
     pub(crate) fired: RefCell<Vec<Firing>>,
     /// The chip's stop request, for a peripheral that asks during a cycle.
@@ -197,6 +203,21 @@ impl Shared {
     pub(crate) fn request_stop(&self) {
         self.stop.set(true);
         self.chip_stop.request();
+    }
+
+    /// Asks the board's run to stop, and the chip's within it, for its
+    /// asker to withdraw once its call returns.
+    pub(crate) fn request_transient_stop(&self) {
+        self.transient_stop.set(true);
+        self.chip_stop.request();
+    }
+
+    /// Withdraws the transient stop, and the chip's unless the board's
+    /// own is asked too.
+    pub(crate) fn withdraw_transient_stop(&self) {
+        if self.transient_stop.take() && !self.stop.get() {
+            self.chip_stop.withdraw();
+        }
     }
 
     /// `peripheral` takes a memory, or releases it, as `claim` says.
