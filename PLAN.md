@@ -2605,7 +2605,11 @@ Adversarial review (2026-11-01):
   bindings track who asked (`StopRequestView`: the host through its
   handle, the binding for the exception) and, as each call into the
   target returns (`Pending::check`), withdraw the binding's own unless
-  the host asked too, so the rule below keeps only a host's request.  One rule on the chip, a board and
+  the host asked too, so the rule below keeps only a host's request.
+  The board's binding asks a transient stop
+  (`BoardStopRequest::request_transient`, hidden), which the board's
+  loop takes as it takes the others and the binding withdraws
+  (`withdraw_transient`) unless the board's own stop is asked too.  One rule on the chip, a board and
   the bare machine (`flat::Machine`), decided 2026-11-26: only a run
   that ends `Stop::Requested` takes a request.  One made where the run
   ends for another reason at the same boundary (a hook's stop, a fault,

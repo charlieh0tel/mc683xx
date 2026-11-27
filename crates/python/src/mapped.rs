@@ -122,7 +122,7 @@ impl Pending {
             Stopper::Core(stop) => stop.ask(),
             Stopper::Board(slot) => {
                 if let Some(stop) = &*slot.borrow() {
-                    stop.request();
+                    stop.request_transient();
                 }
             }
         }
@@ -160,8 +160,13 @@ impl Pending {
     /// the binding asked for it, done with, withdrawn unless the host
     /// asked too.
     pub(crate) fn check(&self) -> PyResult<()> {
-        if let Stopper::Core(stop) = &self.stop {
-            stop.settle();
+        match &self.stop {
+            Stopper::Core(stop) => stop.settle(),
+            Stopper::Board(slot) => {
+                if let Some(stop) = &*slot.borrow() {
+                    stop.withdraw_transient();
+                }
+            }
         }
         let Some(value) = self.error.borrow_mut().take() else {
             return Ok(());

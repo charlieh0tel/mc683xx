@@ -578,6 +578,28 @@ impl BoardStopRequest {
             shared.request_stop();
         }
     }
+
+    /// Asks the run to stop, as [`request`](Self::request) does, for a
+    /// binding whose peripheral raised: it withdraws the request once
+    /// its call into the board returns
+    /// ([`withdraw_transient`](Self::withdraw_transient)), so only the
+    /// host's survives the run.  Not part of the semver API.
+    #[doc(hidden)]
+    pub fn request_transient(&self) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.request_transient_stop();
+        }
+    }
+
+    /// Withdraws a [`request_transient`](Self::request_transient) the
+    /// run did not take, leaving a [`request`](Self::request) pending.
+    /// Not part of the semver API.
+    #[doc(hidden)]
+    pub fn withdraw_transient(&self) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.withdraw_transient_stop();
+        }
+    }
 }
 
 impl fmt::Debug for BoardStopRequest {
@@ -686,6 +708,7 @@ impl<C: Chip> Board<C> {
             writes: RefCell::default(),
             diverted: Cell::new(false),
             stop: Cell::new(false),
+            transient_stop: Cell::new(false),
             fired: RefCell::default(),
             chip_stop: builder.stop_request(),
             requests: builder.requests(),
@@ -1061,8 +1084,9 @@ impl<C: Chip> Board<C> {
     /// for it again.
     fn take_stop(&self) -> bool {
         let board = self.shared.stop.take();
+        let transient = self.shared.transient_stop.take();
         let chip = self.shared.chip_stop.take();
-        board || chip
+        board || transient || chip
     }
 
     /// Board time to the chip's, but no later than `next`, where the
@@ -2348,6 +2372,7 @@ impl<C: Chip> Board<C> {
         self.shared.writes.borrow_mut().clear();
         self.shared.diverted.set(false);
         self.shared.stop.set(false);
+        self.shared.transient_stop.set(false);
         self.control.withdraw_stop();
         self.leave_frames();
         self.tell_restored();

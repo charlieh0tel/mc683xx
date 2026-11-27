@@ -339,9 +339,9 @@ assert chip.memory(ram, 0, 2) == b"\x12\x34"
   taking it, or calls `withdraw()` before its next run.  `restore`
   withdraws a pending request, including one asked from another thread
   (`BoardControl.stop()`), since it replaces the machine's state.  The
-  chip's and the bare `Machine`'s own stops for a peripheral's
-  exception leave no request behind, a host's asked with one stays,
-  and `pending` is the host's alone.
+  bindings' own stops, for a peripheral's or an observer's exception,
+  leave no request behind on any machine, a host's asked with one
+  stays, and `pending` is the host's alone.
 - `build()` spends the builder; a second call raises `RuntimeError`.
 
 Registers are by name: `"D0"`-`"D7"`, `"A0"`-`"A7"`, `"PC"`, `"SR"`,

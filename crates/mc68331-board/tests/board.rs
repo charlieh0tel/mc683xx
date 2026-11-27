@@ -3266,6 +3266,43 @@ attach = [{ select = "CSBOOT" }]
     assert!(board.now() > now);
 }
 
+#[test]
+fn a_transient_stop_where_a_hook_stops_the_run_is_withdrawn_unless_the_host_asked() {
+    let rom = r#"
+version = 1
+
+[chip]
+type = "mc68331"
+[[memory]]
+name = "rom"
+image = "rom.bin"
+attach = [{ select = "CSBOOT" }]
+"#;
+    let until = Time::from_picos(1_000_000_000);
+    for host_too in [false, true] {
+        let mut board = board("transient-stop", rom, &[NOP; 16]);
+        let stop = board.stop_request();
+        let asking = stop.clone();
+        let at = Address(START + 2);
+        let id = board.cpu_control().add_code_hook(at..=at, move |_| {
+            asking.request_transient();
+            if host_too {
+                asking.request();
+            }
+            ControlFlow::Break(())
+        });
+        assert_eq!(board.run_until(until).unwrap().stop, Stop::Hook(id));
+        board.cpu_control().remove_hook(id);
+        stop.withdraw_transient();
+        let expected = if host_too {
+            Stop::Requested
+        } else {
+            Stop::Budget
+        };
+        assert_eq!(board.run_until(until).unwrap().stop, expected, "{host_too}");
+    }
+}
+
 /// A latch on a select: Q0 follows bit 0 of each byte written.
 #[derive(Debug, Default)]
 struct BitLatch;
