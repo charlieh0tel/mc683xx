@@ -420,6 +420,17 @@ impl Cpu {
         }
     }
 
+    /// Whether the last run ended at an end of its own (a fault, an
+    /// exception stop, an intercept, a self-loop, a limit), not for a
+    /// stop a hook or the bus asked: for the chip, whose run reports an
+    /// exception stop as [`Stop::Requested`] as a host's request ends
+    /// one.  Not part of the semver API.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn ended_itself(&self) -> bool {
+        self.bare.end.is_some()
+    }
+
     /// Whether a fault stops a run.
     #[must_use]
     pub const fn stops_on_fault(&self) -> bool {

@@ -2618,7 +2618,10 @@ Adversarial review (2026-11-01):
   its start, not per instruction: `iterations` under
   `perf stat -e instructions:u` counts the same as before the rule
   (`core nop`, `chip ram_move idle`, `short chip`, `demo mandelbrot`).  The chip keeps the request its core took in the quantum
-  (`stop_taken`) and puts it back as the run ends otherwise; the
+  (`stop_taken`) and puts it back as the run ends otherwise, an
+  exception stop included, which its run reports as `Stop::Requested`
+  (r9) but tells from a request by the core's own end
+  (`Cpu::ended_itself`, hidden); the
   board's loop takes its own only with `Stop::Requested`.  The bare
   machine's `take_exception` and `reset` leave the request as it was:
   they have no run to stop.  `restore` withdraws it on every machine,

@@ -16,6 +16,7 @@ use mc683xx_cpu32::Halt;
 use mc683xx_cpu32::Run;
 use mc683xx_cpu32::Stop;
 use mc683xx_cpu32::exception::Vector;
+use mc683xx_cpu32::exception::VectorSet;
 use mc683xx_cpu32::interrupt::Acknowledge;
 use mc683xx_cpu32::interrupt::InterruptLevel;
 use mc683xx_cpu32::interrupt::IrqPin;
@@ -4183,6 +4184,26 @@ fn a_stop_asked_in_an_instruction_that_faults_stays_pending() {
     chip.cpu_control().set_stop_on_fault(true);
     assert_eq!(chip.run_for(Cycles::from_clocks(10_000)).stop, Stop::Fault);
     assert!(stop.pending());
+}
+
+#[test]
+fn a_stop_asked_in_an_instruction_an_exception_stop_ends_stays_pending() {
+    // the address error's exception stops the run, reported as a
+    // request, but not the host's: its request stays
+    let (mut chip, stop) = booting_with_stop(&[ODD_LOAD, [NOP; 3]].concat());
+    let at = Address(START);
+    let asking = stop.clone();
+    chip.cpu_control().add_code_hook(at..=at, move |_| {
+        asking.request();
+        ControlFlow::Continue(())
+    });
+    chip.cpu
+        .set_stop_on_exception(VectorSet::NONE.with(Vector::ADDRESS_ERROR));
+    let run = chip.run_for(Cycles::from_clocks(10_000));
+    assert_eq!(run.stop, Stop::Requested);
+    assert_eq!(chip.cpu().registers.pc.0, START, "nothing stacked");
+    assert!(stop.pending());
+    ends_at_once(&mut chip, &stop);
 }
 
 #[test]

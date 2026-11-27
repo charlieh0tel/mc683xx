@@ -882,7 +882,7 @@ impl Mc68331 {
             // it (one left is taken below)
             let synced = mem::take(&mut self.board.sync) | self.board.sync_request.get();
             stop = match run.stop {
-                Stop::Requested if !mem::take(&mut self.board.stop_taken) && synced => Stop::Budget,
+                Stop::Requested if !self.board.stop_taken && synced => Stop::Budget,
                 other => other,
             };
             if limited {
@@ -907,6 +907,12 @@ impl Mc68331 {
                     }
                 }
                 Stop::Budget | Stop::Stopped => {}
+                // an exception stop, which reports as a request: the host
+                // sees it, and its own request stays pending
+                Stop::Requested if self.cpu.ended_itself() => {
+                    self.board.keep_stop();
+                    break;
+                }
                 // a request: the host sees it, and a stop asked in the
                 // same instruction is taken with it
                 Stop::Requested => {
