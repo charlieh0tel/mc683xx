@@ -13,6 +13,9 @@
 # the message.  A trailer line, an address, or the footer, rather than
 # any mention of them, so a message may describe this check.
 MESSAGE_PATTERN='^[[:space:]]*(co-authored-by|claude-session):|@anthropic\.com|claude\.ai/code|generated with \[?claude'
+# The one co-author allowed: Dependabot, whose commits end with this
+# trailer.
+DEPENDABOT_PATTERN='^[[:space:]]*co-authored-by:[[:space:]]*dependabot\[bot\] <49699333\+dependabot\[bot\]@users\.noreply\.github\.com>[[:space:]]*$'
 # A bot's identity, not a person's: an address at anthropic.com or a
 # subdomain of it; a name that is Claude alone, Claude and a product
 # word (Claude Code, Claude Bot) or claude[bot]; a name naming
@@ -20,7 +23,7 @@ MESSAGE_PATTERN='^[[:space:]]*(co-authored-by|claude-session):|@anthropic\.com|c
 IDENTITY_PATTERN='<[^>]*@([^>@]*\.)?anthropic\.com>|^[[:space:]]*claude([[:space:]]+(code|bot|assistant|agent|ai)([[:space:]][^<]*)?|\[bot\])?[[:space:]]*<|^[^<]*anthropic[^<]*<'
 
 check_message() {
-    if grep -v '^#' "$1" | grep -qiE "$MESSAGE_PATTERN"; then
+    if grep -v '^#' "$1" | grep -viE "$DEPENDABOT_PATTERN" | grep -qiE "$MESSAGE_PATTERN"; then
         echo "commit refused: the message credits an AI assistant, which this project's commits never do (AGENTS.md)" >&2
         exit 1
     fi
