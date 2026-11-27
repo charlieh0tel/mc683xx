@@ -1055,12 +1055,14 @@ impl<C: Chip> Board<C> {
             .or_else(|| cpu.background().map(Stop::Background))
     }
 
-    /// Whether a peripheral or the host asked the run to stop; withdraws the
-    /// request, the chip's with it, so the next run does not stop for
-    /// it again.
+    /// Whether a peripheral or the host asked the run to stop, the
+    /// board's request or the chip's, taking what it serves: the run
+    /// ends [`Stop::Requested`] for either, so the next does not stop
+    /// for it again.
     fn take_stop(&self) -> bool {
-        self.shared.chip_stop.withdraw();
-        self.shared.stop.take()
+        let board = self.shared.stop.take();
+        let chip = self.shared.chip_stop.take();
+        board || chip
     }
 
     /// Board time to the chip's, but no later than `next`, where the

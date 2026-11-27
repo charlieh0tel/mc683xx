@@ -1714,9 +1714,10 @@ hand.  The keys are in `docs/board-files.md`.
   run as a peripheral's `Drive::stop` does: for a peripheral that fails
   in a call with no `Drive` (the Python bindings' peripherals, in
   `next_event` or `interrupt_request`).  The loop looks for a request
-  before each quantum and after asking the peripherals' `next_event`, and
-  withdraws the chip's when it stops for one, so the next run does not
-  stop for it again; a run that ends for another reason leaves both
+  before each quantum and after asking the peripherals' `next_event`,
+  its own or the chip's (one asked of the chip directly ends the board's
+  run too), and takes both when it stops for one, so the next run does
+  not stop for it again; a run that ends for another reason leaves both
   pending.  `send` drives the nets the endpoint drives
   whose type carries the value, and fails (`SendError`) if there are
   none, so a typo or a value of the wrong type is not silently
