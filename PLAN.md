@@ -2421,7 +2421,7 @@ Adversarial review (2026-11-01):
   (a stopped one is recorded when it runs).  Decided: not part of a
   snapshot, as the hooks are not: it is host instrumentation, and a
   restore that rewound it would lose what the runs since showed.
-  Edges (branch pairs) are deferred to 1.x, additively.
+  Edges (branch pairs) are deferred past 0.9.0, additively.
   Read and write kinds record a bit for each byte of
   each cycle a read or write hook over it would see, so the two agree
   by construction: memory's and a peripheral's alike (a peripheral's
@@ -2919,6 +2919,12 @@ and `mc683xx.Machine` in Python (see Python).
   decline taken natively with no exception stop, as the host has seen
   it; then the exception stop.  A general debugging stop (a Unicorn
   port's `UC_HOOK_INTR` with `emu_stop`), opt-in as faults are.
+  The bare CPU's alone: `CpuControl` does not offer it, so a chip or
+  board host cannot set it; a chip host wants the firmware's handlers
+  to run, as on hardware.  Offering it there later is additive, but
+  first fix the chip's run end: an exception stop at a boundary where
+  the run also syncs ends `Stop::Budget` (`chip.rs`, the `synced` arm),
+  untested (decided 2026-11-26).
 - **Hook context:** memory and invalid access hooks see the
   instruction's address (`pc`) and whether the cycle stacks a frame
   (`stacking`); `Cpu::instruction_registers` holds the registers as
